@@ -26,7 +26,7 @@
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/system.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
-#include "iree/hal/drivers/amdgpu/util/executable_target.h"
+#include "iree/hal/executable/amdgpu/executable_target.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 

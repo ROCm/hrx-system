@@ -71,7 +71,7 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_tsan_state_initialize(
     const uint16_t setup = packet->dispatch.setup;
     const iree_hsa_fence_scope_t acquire_scope =
         iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
-            queue, IREE_HSA_FENCE_SCOPE_AGENT);
+            IREE_HSA_FENCE_SCOPE_AGENT);
     const uint16_t header = iree_hal_amdgpu_aql_make_header(
         IREE_HSA_PACKET_TYPE_KERNEL_DISPATCH,
         iree_hal_amdgpu_aql_packet_control_barrier(acquire_scope,

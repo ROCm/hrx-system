@@ -14,9 +14,8 @@
 // The portable notification-to-notification relay tests are in relay_test.cc.
 // The POSIX primitive relay tests (eventfd/pipe) are in relay_posix_test.cc.
 //
-// Synchronization model: relay CQEs are processed synchronously during
-// DrainPending. After DrainPending returns, all relay side effects (SetEvent
-// calls, notification epoch increments) are complete.
+// Synchronization model: expected sink events are explicit wait conditions.
+// Terminal unregistration is joined through its completion callback.
 
 #if defined(_WIN32)
 
@@ -47,6 +46,12 @@ class RelayWindowsTest : public CtsTestBase<> {
   bool IsEventSignaled(HANDLE event) {
     return WaitForSingleObject(event, 0) == WAIT_OBJECT_0;
   }
+
+  // Polls until |event| is signaled and consumes the auto-reset event.
+  void WaitForEvent(HANDLE event) {
+    PollUntilCondition([&] { return IsEventSignaled(event); },
+                       "relay sink event");
+  }
 };
 
 // One-shot NOTIFICATION source triggers SIGNAL_PRIMITIVE sink (Win32 Event).
@@ -68,9 +73,7 @@ TEST_P(RelayWindowsTest, NotificationToPrimitive) {
   ASSERT_NE(relay, nullptr);
 
   iree_async_notification_signal(source_notification, 1);
-  DrainPending();
-
-  EXPECT_TRUE(IsEventSignaled(sink_event));
+  WaitForEvent(sink_event);
 
   CloseHandle(sink_event);
   iree_async_notification_release(source_notification);
@@ -96,18 +99,58 @@ TEST_P(RelayWindowsTest, PersistentNotificationToPrimitive) {
 
   for (int i = 0; i < 3; ++i) {
     iree_async_notification_signal(source_notification, 1);
-    DrainPending();
-
-    EXPECT_TRUE(IsEventSignaled(sink_event))
-        << "Relay failed to fire on iteration " << i;
+    SCOPED_TRACE(i);
+    WaitForEvent(sink_event);
     // Auto-reset event resets after WaitForSingleObject returns WAIT_OBJECT_0
     // (consumed by IsEventSignaled), ready for the next iteration.
   }
 
-  iree_async_proactor_unregister_relay(proactor_, relay);
-  DrainPending();
+  WaitForRelayUnregistration(relay);
 
   CloseHandle(sink_event);
+  iree_async_notification_release(source_notification);
+}
+
+// A persistent relay retains its handle after a terminal sink fault so the
+// caller can join backend cleanup before releasing the source notification.
+TEST_P(RelayWindowsTest, PersistentSinkFaultHasTerminalUnregistration) {
+  iree_async_notification_t* source_notification = nullptr;
+  IREE_ASSERT_OK(iree_async_notification_create(
+      proactor_, IREE_ASYNC_NOTIFICATION_FLAG_NONE, &source_notification));
+
+  HANDLE sink_event = CreateTestEvent();
+  ASSERT_NE(sink_event, static_cast<HANDLE>(NULL));
+
+  struct FaultState {
+    // Set when the relay reports the sink failure.
+    bool called = false;
+    // Status code reported for the sink failure.
+    iree_status_code_t status_code = IREE_STATUS_OK;
+  } fault_state;
+  iree_async_relay_error_callback_t error_callback = {
+      +[](void* user_data, iree_async_relay_t* relay, iree_status_t status) {
+        auto* state = static_cast<FaultState*>(user_data);
+        (void)relay;
+        state->status_code = iree_status_code(status);
+        state->called = true;
+        iree_status_free(status);
+      },
+      &fault_state,
+  };
+
+  iree_async_relay_t* relay = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_register_relay(
+      proactor_, iree_async_relay_source_from_notification(source_notification),
+      iree_async_relay_sink_signal_primitive(
+          iree_async_primitive_from_win32_handle((uintptr_t)sink_event), 1),
+      IREE_ASYNC_RELAY_FLAG_PERSISTENT, error_callback, &relay));
+
+  CloseHandle(sink_event);
+  iree_async_notification_signal(source_notification, 1);
+  PollUntilCondition([&] { return fault_state.called; }, "relay sink fault");
+  EXPECT_NE(fault_state.status_code, IREE_STATUS_OK);
+
+  WaitForRelayUnregistration(relay);
   iree_async_notification_release(source_notification);
 }
 
@@ -137,11 +180,10 @@ TEST_P(RelayWindowsTest, MultipleRelaysToDifferentPrimitives) {
   }
 
   iree_async_notification_signal(source_notification, 1);
-  DrainPending();
 
   for (int i = 0; i < kNumRelays; ++i) {
-    EXPECT_TRUE(IsEventSignaled(sink_events[i]))
-        << "Relay " << i << " failed to fire";
+    SCOPED_TRACE(i);
+    WaitForEvent(sink_events[i]);
     CloseHandle(sink_events[i]);
   }
 
@@ -166,12 +208,10 @@ TEST_P(RelayWindowsTest, UnregisterWhilePending) {
       &relay));
   ASSERT_NE(relay, nullptr);
 
-  iree_async_proactor_unregister_relay(proactor_, relay);
-  DrainPending();
+  WaitForRelayUnregistration(relay);
 
   // Signal after unregister — no relay SQE is watching.
   iree_async_notification_signal(source_notification, 1);
-  DrainPending();
 
   EXPECT_FALSE(IsEventSignaled(sink_event))
       << "Relay should not fire after unregister";

@@ -345,24 +345,23 @@ iree_status_t iree_hal_amdgpu_select_physical_topology_edge(
   return iree_ok_status();
 }
 
-static bool iree_hal_amdgpu_gfxip_is_pre_gfx908(
+static bool iree_hal_amdgpu_gfxip_is_gfx94x(
     iree_hal_amdgpu_gfxip_version_t version) {
-  return version.major < 9 ||
-         (version.major == 9 && version.minor == 0 && version.stepping < 8);
+  return version.major == 9 && version.minor >= 4 && version.stepping <= 2;
 }
 
-static bool iree_hal_amdgpu_gfxip_is_gfx101x(
+static bool iree_hal_amdgpu_gfxip_is_gfx125x(
     iree_hal_amdgpu_gfxip_version_t version) {
-  return version.major == 10 && (version.minor == 0 || version.minor == 1);
+  return version.major == 12 && version.minor >= 5;
 }
 
 bool iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(
     iree_hal_amdgpu_gfxip_version_t version) {
-  // Matches the HDP workaround eligibility in CLR's setKernelArgImpl. Devices
-  // outside this set stay on host kernarg memory unless we add a first-class
-  // readback publication mode.
-  return !iree_hal_amdgpu_gfxip_is_pre_gfx908(version) &&
-         !iree_hal_amdgpu_gfxip_is_gfx101x(version);
+  // Matches the device-kernarg family gate in CLR's setKernelArgImpl. Other
+  // families stay on host kernarg memory until they have a validated device-
+  // local publication path.
+  return iree_hal_amdgpu_gfxip_is_gfx94x(version) ||
+         iree_hal_amdgpu_gfxip_is_gfx125x(version);
 }
 
 iree_status_t iree_hal_amdgpu_select_cpu_visible_device_coarse_memory(

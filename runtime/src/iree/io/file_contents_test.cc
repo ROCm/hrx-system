@@ -179,6 +179,45 @@ TEST(FileContents, ConcurrentReadOpens) {
   iree_io_file_contents_free(read1);
 }
 
+TEST(FileContents, ReadAndMapWhileWriterOpen) {
+  constexpr const char* kUniqueName = "ReadAndMapWhileWriterOpen";
+  iree::testing::TempFilePath path("iree_file_contents_test");
+
+  auto contents = GetUniqueContents(kUniqueName, 4096);
+  IREE_ASSERT_OK(iree_io_file_contents_write(
+      path.path_view(),
+      iree_make_const_byte_span(contents.data(), contents.size()),
+      iree_allocator_system()));
+
+  iree_io_file_handle_t* writer = NULL;
+  IREE_ASSERT_OK(iree_io_file_handle_open(
+      IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_WRITE |
+          IREE_IO_FILE_MODE_RANDOM_ACCESS | IREE_IO_FILE_MODE_SHARE_READ |
+          IREE_IO_FILE_MODE_SHARE_WRITE,
+      path.path_view(), iree_allocator_system(), &writer));
+
+  iree_io_file_contents_t* read_contents = NULL;
+  IREE_ASSERT_OK(iree_io_file_contents_read(
+      path.path_view(), iree_allocator_system(), &read_contents));
+  ASSERT_EQ(contents.size(), read_contents->const_buffer.data_length);
+  EXPECT_EQ(memcmp(contents.data(), read_contents->const_buffer.data,
+                   read_contents->const_buffer.data_length),
+            0);
+  iree_io_file_contents_free(read_contents);
+
+  iree_io_file_contents_t* mapped_contents = NULL;
+  IREE_ASSERT_OK(
+      iree_io_file_contents_map(path.path_view(), IREE_IO_FILE_ACCESS_READ,
+                                iree_allocator_system(), &mapped_contents));
+  ASSERT_EQ(contents.size(), mapped_contents->const_buffer.data_length);
+  EXPECT_EQ(memcmp(contents.data(), mapped_contents->const_buffer.data,
+                   mapped_contents->const_buffer.data_length),
+            0);
+  iree_io_file_contents_free(mapped_contents);
+
+  iree_io_file_handle_release(writer);
+}
+
 #if defined(IREE_PLATFORM_WINDOWS)
 
 TEST(FileContents, ReadWriteLongUtf8Path) {

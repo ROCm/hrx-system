@@ -9,7 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/allocator.h"
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 #include "iree/hal/utils/device_spec_builder.h"
 
 #ifdef __cplusplus

@@ -46,7 +46,8 @@ iree_status_t iree_async_proactor_posix_register_relay(
 // or removes from notification relay_list (notification sources), closes owned
 // fds, releases retained notifications, unlinks from relay list, and frees.
 void iree_async_proactor_posix_unregister_relay(
-    iree_async_proactor_posix_t* proactor, iree_async_relay_t* relay);
+    iree_async_proactor_posix_t* proactor, iree_async_relay_t* relay,
+    iree_async_relay_unregistered_callback_t callback);
 
 // Dispatches a relay whose primitive source fd became ready.
 // Checks ERROR_SENSITIVE flags, fires sink, drains source for persistent

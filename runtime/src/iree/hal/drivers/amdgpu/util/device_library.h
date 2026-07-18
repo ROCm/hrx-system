@@ -30,6 +30,8 @@ typedef struct iree_hal_amdgpu_device_library_t {
   const iree_hal_amdgpu_libhsa_t* libhsa;
   // Loaded and frozen executable for all GPU devices.
   hsa_executable_t executable;
+  // Code-object reader retained until |executable| has been destroyed.
+  hsa_code_object_reader_t code_object_reader;
 } iree_hal_amdgpu_device_library_t;
 
 // Initializes |out_library| by loading the builtin device library for all of

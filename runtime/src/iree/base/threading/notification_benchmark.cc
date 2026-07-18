@@ -132,7 +132,7 @@ void BM_NotificationWakeLatency(benchmark::State& state) {
             auto* ready = static_cast<std::atomic<bool>*>(arg);
             return ready->load(std::memory_order_acquire);
           },
-          &ready, iree_make_timeout_ms(100));
+          &ready, iree_infinite_timeout());
       ready.store(false, std::memory_order_release);
     }
   });

@@ -41,21 +41,16 @@ namespace iree::async::cts {
 //===----------------------------------------------------------------------===//
 
 // Polls the proactor until |sink|'s epoch advances past |observed_epoch|.
-// Returns false on timeout or poll error.
 static bool PollUntilEpochAdvances(iree_async_proactor_t* proactor,
                                    iree_async_notification_t* sink,
                                    uint32_t observed_epoch) {
-  iree_time_t deadline = iree_time_now() + 5000 * 1000000LL;
   while (iree_async_notification_query_epoch(sink) == observed_epoch) {
-    if (iree_time_now() >= deadline) return false;
     iree_status_t status =
-        iree_async_proactor_poll(proactor, iree_make_timeout_ms(100), nullptr);
-    if (!iree_status_is_ok(status) &&
-        !iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
+        iree_async_proactor_poll(proactor, iree_infinite_timeout(), nullptr);
+    if (!iree_status_is_ok(status)) {
+      iree_status_free(status);
       return false;
     }
-    iree_status_ignore(status);
   }
   return true;
 }
@@ -165,10 +160,11 @@ static IdleHandlerContext* CreateIdleHandlerContext(
     return nullptr;
   }
 
-  // Initial poll to ensure the relay is armed.
-  status = iree_async_proactor_poll(ctx->proactor, iree_make_timeout_ms(10),
-                                    nullptr);
-  iree_status_ignore(status);
+  if (!PollOneProgressEvent(ctx->proactor)) {
+    state.SkipWithError("Failed to arm active relay");
+    DestroyIdleHandlerContext(ctx);
+    return nullptr;
+  }
 
   return ctx;
 }
@@ -176,7 +172,7 @@ static IdleHandlerContext* CreateIdleHandlerContext(
 static void DestroyIdleHandlerContext(IdleHandlerContext* ctx) {
   if (!ctx) return;
   if (ctx->active_relay) {
-    iree_async_proactor_unregister_relay(ctx->proactor, ctx->active_relay);
+    WaitForRelayUnregistration(ctx->proactor, ctx->active_relay);
   }
   iree_async_notification_release(ctx->active_sink);
   iree_async_notification_release(ctx->active_source);
@@ -203,7 +199,8 @@ static void BM_DispatchAmongIdleHandlers(::benchmark::State& state,
     iree_async_notification_signal(ctx->active_source, 1);
 
     if (!PollUntilEpochAdvances(ctx->proactor, ctx->active_sink, observed)) {
-      state.SkipWithError("Active relay dispatch timed out");
+      state.SkipWithError(
+          "Proactor polling failed before active relay dispatch");
       DestroyIdleHandlerContext(ctx);
       return;
     }
@@ -288,10 +285,11 @@ static RelayScalabilityContext* CreateRelayScalabilityContext(
     }
   }
 
-  // Initial poll to arm relays.
-  status = iree_async_proactor_poll(ctx->proactor, iree_make_timeout_ms(10),
-                                    nullptr);
-  iree_status_ignore(status);
+  if (!PollOneProgressEvent(ctx->proactor)) {
+    state.SkipWithError("Failed to arm relays");
+    DestroyRelayScalabilityContext(ctx);
+    return nullptr;
+  }
 
   return ctx;
 }
@@ -300,7 +298,7 @@ static void DestroyRelayScalabilityContext(RelayScalabilityContext* ctx) {
   if (!ctx) return;
   for (size_t i = 0; i < ctx->relays.size(); ++i) {
     if (ctx->relays[i]) {
-      iree_async_proactor_unregister_relay(ctx->proactor, ctx->relays[i]);
+      WaitForRelayUnregistration(ctx->proactor, ctx->relays[i]);
     }
   }
   for (size_t i = 0; i < ctx->sources.size(); ++i) {
@@ -328,7 +326,7 @@ static void BM_RelayDispatchScalability(::benchmark::State& state,
     iree_async_notification_signal(ctx->sources[target_index], 1);
 
     if (!PollUntilEpochAdvances(ctx->proactor, ctx->sink, observed)) {
-      state.SkipWithError("Relay dispatch timed out");
+      state.SkipWithError("Proactor polling failed before relay dispatch");
       DestroyRelayScalabilityContext(ctx);
       return;
     }
@@ -414,10 +412,11 @@ static FanOutContext* CreateFanOutContext(const ProactorFactory& factory,
     }
   }
 
-  // Initial poll to arm relays.
-  status = iree_async_proactor_poll(ctx->proactor, iree_make_timeout_ms(10),
-                                    nullptr);
-  iree_status_ignore(status);
+  if (!PollOneProgressEvent(ctx->proactor)) {
+    state.SkipWithError("Failed to arm fan-out relays");
+    DestroyFanOutContext(ctx);
+    return nullptr;
+  }
 
   return ctx;
 }
@@ -426,7 +425,7 @@ static void DestroyFanOutContext(FanOutContext* ctx) {
   if (!ctx) return;
   for (size_t i = 0; i < ctx->relays.size(); ++i) {
     if (ctx->relays[i]) {
-      iree_async_proactor_unregister_relay(ctx->proactor, ctx->relays[i]);
+      WaitForRelayUnregistration(ctx->proactor, ctx->relays[i]);
     }
   }
   for (size_t i = 0; i < ctx->sinks.size(); ++i) {
@@ -456,24 +455,16 @@ static void BM_NotificationRelayFanOut(::benchmark::State& state,
     iree_async_notification_signal(ctx->source, 1);
 
     // Poll until all sink epochs advance.
-    iree_time_t deadline = iree_time_now() + 5000 * 1000000LL;
     bool all_fired = false;
     while (!all_fired) {
-      if (iree_time_now() >= deadline) {
-        state.SkipWithError("Fan-out relay dispatch timed out");
-        DestroyFanOutContext(ctx);
-        return;
-      }
       iree_status_t poll_status = iree_async_proactor_poll(
-          ctx->proactor, iree_make_timeout_ms(100), nullptr);
-      if (!iree_status_is_ok(poll_status) &&
-          !iree_status_is_deadline_exceeded(poll_status)) {
-        iree_status_ignore(poll_status);
+          ctx->proactor, iree_infinite_timeout(), nullptr);
+      if (!iree_status_is_ok(poll_status)) {
+        iree_status_free(poll_status);
         state.SkipWithError("Poll failed during fan-out benchmark");
         DestroyFanOutContext(ctx);
         return;
       }
-      iree_status_ignore(poll_status);
 
       all_fired = true;
       for (size_t i = 0; i < fan_out; ++i) {

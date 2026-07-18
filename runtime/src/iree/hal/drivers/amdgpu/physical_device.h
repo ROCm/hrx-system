@@ -18,7 +18,7 @@
 #include "iree/hal/drivers/amdgpu/util/block_pool.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/signal_pool.h"
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 #include "iree/hal/memory/slab_provider.h"
 #include "iree/hal/memory/tlsf_pool.h"
 #include "iree/hal/pool.h"

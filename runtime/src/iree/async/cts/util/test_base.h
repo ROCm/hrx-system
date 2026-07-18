@@ -13,7 +13,7 @@
 // Key design:
 //   - Fresh proactor per test via SetUp/TearDown (no state leakage)
 //   - Capability-gated GTEST_SKIP instead of external EXCLUDED_TESTS lists
-//   - Time-budgeted polling prevents slow-CI flakiness
+//   - Completion-driven polling leaves hang detection to the test harness
 //   - Link-time composition: test suites + backends linked together
 //
 // For socket tests, use SocketTestBase (in socket_test_base.h) which extends
@@ -50,7 +50,7 @@ namespace iree::async::cts {
 // Example:
 //   CompletionTracker tracker;
 //   // ... submit operation with tracker ...
-//   PollUntil(1, ...);
+//   PollUntil(1);
 //   IREE_EXPECT_OK(tracker.ConsumeStatus());
 //   // or: IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
 //   tracker.ConsumeStatus());
@@ -241,106 +241,55 @@ class CtsTestBase : public BaseType {
   }
 
   void TearDown() override {
-    if (proactor_) {
-      // Drain any in-flight operations before releasing. Without this,
-      // operations referencing stack-local storage (common in tests) would
-      // have dangling pointers when their callbacks fire during proactor
-      // destruction.
-      DrainPending();
-      iree_async_proactor_release(proactor_);
-      proactor_ = nullptr;
-    }
+    iree_async_proactor_release(proactor_);
+    proactor_ = nullptr;
   }
 
-  // Poll until at least |min_completions| callbacks fire or |total_budget|
-  // wall-clock time elapses. Uses a time-budget approach rather than iteration
-  // count: this prevents spurious failures on slow CI (which might need many
-  // poll rounds for kernel scheduling) while still failing fast when something
-  // is genuinely broken.
-  void PollUntil(iree_host_size_t min_completions,
-                 iree_duration_t total_budget) {
+  // Polls until at least |min_completions| callbacks fire. The outer test
+  // harness detects hangs; valid asynchronous work has no local deadline.
+  void PollUntil(iree_host_size_t min_completions) {
     iree_host_size_t total = 0;
-    // Convert to absolute deadline once at entry - no drift from here on.
-    iree_time_t deadline_ns = iree_time_now() + total_budget;
-    iree_timeout_t timeout = iree_make_deadline(deadline_ns);
     while (total < min_completions) {
-      if (iree_time_now() >= deadline_ns) break;
       iree_host_size_t completed = 0;
-      iree_status_t status =
-          iree_async_proactor_poll(proactor_, timeout, &completed);
-      if (!iree_status_is_deadline_exceeded(status)) {
-        IREE_ASSERT_OK(status);
-      } else {
-        iree_status_ignore(status);
-      }
+      IREE_ASSERT_OK(iree_async_proactor_poll(
+          proactor_, iree_infinite_timeout(), &completed));
       total += completed;
     }
-    ASSERT_GE(total, min_completions)
-        << "Expected at least " << min_completions << " completions but got "
-        << total << " within budget of " << total_budget << " ns";
   }
 
-  // Polls until |predicate| returns true. Each iteration blocks in the kernel
-  // (io_uring_enter / WaitForSingleObject / kevent) until at least one CQE
-  // arrives, then re-checks the predicate. No timing assumptions — the test
-  // converges as fast as the kernel delivers completions. The 30s failsafe is
-  // only for detecting genuine deadlocks in broken tests; it should never fire
-  // in a correct test.
+  // Polls until |predicate| returns true. The outer test harness detects hangs;
+  // valid asynchronous work has no local wall-clock deadline.
   template <typename Predicate>
   void PollUntilCondition(Predicate predicate,
                           const char* description = "condition") {
-    iree_time_t deadline_ns = iree_time_now() + 30ll * 1000 * 1000 * 1000;
+    SCOPED_TRACE(description);
     while (!predicate()) {
-      ASSERT_LT(iree_time_now(), deadline_ns)
-          << "PollUntilCondition failsafe timeout: " << description
-          << " was never satisfied";
       iree_host_size_t completed = 0;
-      iree_timeout_t timeout = iree_make_deadline(deadline_ns);
-      iree_status_t status =
-          iree_async_proactor_poll(proactor_, timeout, &completed);
-      if (iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
-      } else {
-        IREE_ASSERT_OK(status);
-      }
+      IREE_ASSERT_OK(iree_async_proactor_poll(
+          proactor_, iree_infinite_timeout(), &completed));
     }
   }
 
-  // Convenience: poll once with a short timeout, draining whatever is ready.
-  void PollOnce() {
+  // Unregisters |relay| and polls until all backend references are gone.
+  void WaitForRelayUnregistration(iree_async_relay_t* relay) {
+    struct CompletionState {
+      bool completed = false;
+    } state;
+    iree_async_relay_unregistered_callback_t callback = {
+        +[](void* user_data) {
+          static_cast<CompletionState*>(user_data)->completed = true;
+        },
+        &state,
+    };
+    iree_async_proactor_unregister_relay(proactor_, relay, callback);
+    PollUntilCondition([&] { return state.completed; }, "relay unregistration");
+  }
+
+  // Polls until the proactor processes one progress event.
+  void PollOneProgressEvent() {
     iree_host_size_t completed = 0;
-    iree_status_t status = iree_async_proactor_poll(
-        proactor_, iree_make_timeout_ms(100), &completed);
-    if (iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
-    } else {
-      IREE_ASSERT_OK(status);
-    }
-  }
-
-  // Drains all pending operations. Call this before releasing the proactor to
-  // avoid dangling callbacks referencing stack operations. This is especially
-  // important for multishot operations that may have completions in flight.
-  //
-  // Uses immediate timeout for each poll. Continues polling while CQEs are
-  // available, stops when DEADLINE_EXCEEDED indicates no work is pending.
-  // The budget limits total drain time for pathological cases.
-  void DrainPending(iree_duration_t budget = 100 * 1000000ll) {  // 100ms max
-    iree_time_t deadline_ns = iree_time_now() + budget;
-    for (;;) {
-      if (iree_time_now() >= deadline_ns) break;
-      iree_host_size_t completed = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          proactor_, iree_immediate_timeout(), &completed);
-      if (iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
-        break;  // Nothing pending (no CQEs ready, no internal ops in-flight).
-      } else if (!iree_status_is_ok(status)) {
-        iree_status_ignore(status);
-        break;  // Unexpected error.
-      }
-      // Continue: OK means CQEs were processed or internal ops are pending.
-    }
+    IREE_ASSERT_OK(iree_async_proactor_poll(proactor_, iree_infinite_timeout(),
+                                            &completed));
   }
 
   iree_async_proactor_t* proactor_ = nullptr;

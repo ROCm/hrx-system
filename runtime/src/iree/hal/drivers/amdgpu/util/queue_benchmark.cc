@@ -29,7 +29,7 @@
 #include "iree/hal/drivers/amdgpu/registration/driver_module.h"
 #include "iree/hal/drivers/amdgpu/semaphore.h"
 #include "iree/hal/drivers/amdgpu/util/benchmark_flags.h"
-#include "iree/hal/drivers/amdgpu/util/executable_target.h"
+#include "iree/hal/executable/amdgpu/executable_target.h"
 #include "iree/hal/memory/tlsf_pool.h"
 #include "iree/io/file_contents.h"
 

@@ -20,9 +20,9 @@
 #include "iree/hal/drivers/amdgpu/util/hsaco_metadata.h"
 #include "iree/hal/drivers/amdgpu/util/kernarg_ring.h"
 #include "iree/hal/drivers/amdgpu/util/loaded_code_object.h"
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/drivers/amdgpu/util/vmem.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 
 //===----------------------------------------------------------------------===//
 // ISA Support
@@ -443,15 +443,16 @@ static iree_status_t iree_hal_amdgpu_executable_select_agent_profile(
   return iree_ok_status();
 }
 
-// Loads an executable ELF from memory for selected agents in |topology| and
-// stores the frozen executable in |out_handle|.
+// Loads an executable ELF from |code_object_reader| for selected agents in
+// |topology| and stores the frozen executable in |out_handle|.
 static iree_status_t iree_hal_amdgpu_executable_load_module(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology,
     const iree_hal_amdgpu_queue_affinity_physical_device_set_t*
         physical_devices,
     const iree_hal_executable_load_params_t* load_params,
-    iree_const_byte_span_t code_object_data, hsa_executable_t* out_handle) {
+    iree_const_byte_span_t code_object_data,
+    hsa_code_object_reader_t code_object_reader, hsa_executable_t* out_handle) {
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_handle = (hsa_executable_t){0};
 
@@ -479,13 +480,6 @@ static iree_status_t iree_hal_amdgpu_executable_load_module(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_amdgpu_executable_preflight_code_object(
               libhsa, topology, physical_devices, &code_object_target_id));
-
-  // Bind a code object reader to the memory sourced from our rodata.
-  hsa_code_object_reader_t code_object_reader;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hsa_code_object_reader_create_from_memory(
-              IREE_LIBHSA(libhsa), (const char*)code_object_data.data,
-              code_object_data.data_length, &code_object_reader));
 
   // Create the executable that will hold all of the loaded code objects.
   hsa_profile_t executable_profile = HSA_PROFILE_BASE;
@@ -518,11 +512,6 @@ static iree_status_t iree_hal_amdgpu_executable_load_module(
   if (iree_status_is_ok(status)) {
     status = iree_hsa_executable_freeze(IREE_LIBHSA(libhsa), handle, options);
   }
-
-  // Release the reader now that the executable has been fully loaded.
-  status =
-      iree_status_join(status, iree_hsa_code_object_reader_destroy(
-                                   IREE_LIBHSA(libhsa), code_object_reader));
 
   if (iree_status_is_ok(status)) {
     *out_handle = handle;
@@ -928,6 +917,13 @@ typedef struct iree_hal_amdgpu_executable_t {
 
   // Borrowed HAL device used for global-buffer placement metadata.
   iree_hal_device_t* device;
+
+  // Executable-owned copy of the exact HSACO bytes backing
+  // |code_object_reader|.
+  iree_byte_span_t code_object_data;
+  // HSA code-object reader retained until all associated executable variants
+  // have been destroyed.
+  hsa_code_object_reader_t code_object_reader;
 
   // Logical-device-local executable identifier assigned at creation.
   uint64_t executable_id;
@@ -1872,13 +1868,13 @@ static iree_status_t iree_hal_amdgpu_executable_load_variant(
     const iree_hal_amdgpu_queue_affinity_physical_device_set_t*
         physical_devices,
     const iree_hal_executable_load_params_t* load_params,
-    iree_const_byte_span_t code_object_data,
     iree_host_size_t physical_queue_ordinal, iree_allocator_t host_allocator,
     iree_hal_amdgpu_executable_load_variant_t* out_load_variant) {
   out_load_variant->physical_queue_ordinal = physical_queue_ordinal;
   iree_status_t status = iree_hal_amdgpu_executable_load_module(
       executable->libhsa, topology, physical_devices, load_params,
-      code_object_data, &out_load_variant->handle);
+      iree_const_cast_byte_span(executable->code_object_data),
+      executable->code_object_reader, &out_load_variant->handle);
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_executable_initialize_variant_global_table(
         executable, out_load_variant, host_allocator);
@@ -1940,10 +1936,27 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
         executable->loaded_code_object_ranges, &executable->source_context);
   }
 
+  // HSA requires the source memory to outlive its code-object reader and the
+  // reader to outlive every executable loaded from it. HAL load inputs are
+  // call-scoped, so retain one exact copy and reader for all load variants.
+  if (iree_status_is_ok(status)) {
+    void* owned_code_object_data = NULL;
+    status = iree_allocator_clone(host_allocator, code_object_data,
+                                  &owned_code_object_data);
+    if (iree_status_is_ok(status)) {
+      executable->code_object_data = iree_make_byte_span(
+          owned_code_object_data, code_object_data.data_length);
+      status = iree_hsa_code_object_reader_create_from_memory(
+          IREE_LIBHSA(libhsa), executable->code_object_data.data,
+          executable->code_object_data.data_length,
+          &executable->code_object_reader);
+    }
+  }
+
   // Load executable and register it with selected GPU agents.
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_executable_load_variant(
-        executable, topology, physical_devices, load_params, code_object_data,
+        executable, topology, physical_devices, load_params,
         /*physical_queue_ordinal=*/0, host_allocator,
         iree_hal_amdgpu_executable_primary_variant(executable));
   }
@@ -1974,7 +1987,7 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
            ++physical_queue_ordinal) {
         status = iree_hal_amdgpu_executable_load_variant(
             executable, topology, physical_devices, load_params,
-            code_object_data, physical_queue_ordinal, host_allocator,
+            physical_queue_ordinal, host_allocator,
             &executable->load_variants[physical_queue_ordinal]);
         if (iree_status_is_ok(status)) {
           executable->load_variant_count = physical_queue_ordinal + 1;
@@ -2273,7 +2286,13 @@ static void iree_hal_amdgpu_executable_destroy(
                                           load_variant->handle));
     }
   }
+  if (executable->code_object_reader.handle) {
+    iree_hal_amdgpu_hsa_cleanup_assert_success(
+        iree_hsa_code_object_reader_destroy_raw(
+            executable->libhsa, executable->code_object_reader));
+  }
   iree_hal_amdgpu_executable_metadata_free(executable->metadata);
+  iree_allocator_free(host_allocator, executable->code_object_data.data);
 
   iree_allocator_free(host_allocator, executable);
 

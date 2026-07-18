@@ -4,23 +4,23 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// CTS tests for send data lifetime during CQE callback processing.
+// CTS tests for send descriptor and data lifetime during CQE processing.
 //
-// Validates that data referenced by send SQEs is read by the kernel before
-// the submitting function's stack frame unwinds. This catches a class of bugs
-// where SQE submission is deferred past the caller's data lifetime.
+// Span descriptor arrays are consumed during submit and may be stack-local.
+// The buffer data they reference remains caller-owned until completion. These
+// tests exercise both sides of that contract by destroying descriptor storage
+// immediately after submit while keeping payload storage alive in the callback
+// context.
 //
 // The test pattern:
 //   - recv callback fires on the poll thread (CQE processing)
-//   - Callback calls a helper function that creates stack-local send data
-//   - Helper submits a send referencing that stack-local data, then returns
-//   - The stack frame with the send data is now dead
+//   - Callback calls a helper function that creates a stack-local span list
+//   - Helper submits a send referencing context-owned data, then returns
+//   - The stack frame with the span descriptors is now dead
 //   - The receiver verifies the data matches the expected pattern
 //
-// Without immediate SQE flushing in submit's Phase 4, the kernel reads from
-// the dead stack frame, producing corrupted data. With the fix, the SQE is
-// flushed during submit (before the helper returns), and the kernel reads the
-// data while it's still alive.
+// Backends must materialize native iovec/WSABUF descriptors during submit so
+// deferred execution never dereferences the expired span list.
 
 #include <cstring>
 
@@ -33,68 +33,64 @@
 namespace iree::async::cts {
 
 // Context passed to the recv callback for the echo-back test.
-// The callback uses this to submit a send operation referencing stack-local
-// data in a nested function call.
 struct EchoBackContext {
+  // Proactor receiving and submitting the socket operations.
   iree_async_proactor_t* proactor;
+  // Connected socket used to send the echo response.
   iree_async_socket_t* socket;
+  // Completion state for the echo send.
   CompletionTracker send_tracker;
+  // Set after the trigger receive callback begins.
   bool recv_callback_fired = false;
+  // Trigger receive completion status owned by the context.
   iree_status_t recv_status = iree_ok_status();
+  // Echo send submission status owned by the context.
+  iree_status_t send_submit_status = iree_ok_status();
 
   // The send operation must outlive the submit call (completion references it).
   // Stored here so it's valid until the send completes.
   iree_async_socket_send_operation_t send_op;
 
   // Pattern byte for the response. The helper function creates stack-local
-  // buffers filled with this byte and submits a send referencing them.
+  // descriptors referencing buffers filled with this byte.
   uint8_t pattern;
 
-  // Size of the response payload.
-  iree_host_size_t response_size;
+  // Header payload retained until the echo send completes.
+  uint8_t header[16];
+
+  // Body payload retained until the echo send completes.
+  uint8_t body[128];
 };
 
-// Helper function called from the recv callback. Creates stack-local buffers,
-// fills them with the pattern, submits a send, and returns — destroying the
-// stack frame. This is the critical scenario: the send SQE references data
-// on this function's stack, which dies when the function returns.
+// Helper function called from the recv callback. Creates a stack-local span
+// list, submits a send, and returns, destroying the descriptor storage. The
+// referenced payload remains alive in |context| until completion.
 //
 // NOINLINE prevents the compiler from inlining this into the callback, which
-// would keep the stack data alive for the callback's lifetime. We need the
-// stack frame to actually die on return to exercise the bug.
+// would keep the descriptor storage alive for the callback's lifetime.
 static IREE_ATTRIBUTE_NOINLINE void submit_echo_response(
     EchoBackContext* context) {
-  // Stack-local header (mimics the mux frame header in TCP stream endpoint).
-  uint8_t header[16];
-  memset(header, context->pattern, sizeof(header));
+  memset(context->header, context->pattern, sizeof(context->header));
+  memset(context->body, context->pattern, sizeof(context->body));
 
-  // Stack-local body (mimics the control frame payload).
-  uint8_t body[128];
-  memset(body, context->pattern, sizeof(body));
-
-  // Build scatter-gather spans referencing the stack-local buffers.
+  // Build stack-local scatter-gather descriptors referencing retained data.
   iree_async_span_t spans[2];
-  spans[0] = iree_async_span_from_ptr(header, sizeof(header));
-  spans[1] = iree_async_span_from_ptr(body, sizeof(body));
+  spans[0] = iree_async_span_from_ptr(context->header, sizeof(context->header));
+  spans[1] = iree_async_span_from_ptr(context->body, sizeof(context->body));
 
   InitSendOperation(&context->send_op, context->socket, spans, 2,
                     IREE_ASYNC_SOCKET_SEND_FLAG_NONE,
                     CompletionTracker::Callback, &context->send_tracker);
 
-  iree_status_t status =
+  context->send_submit_status =
       iree_async_proactor_submit_one(context->proactor, &context->send_op.base);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-  }
 
-  // NOTE: spans[], header[], and body[] die here when this function returns.
-  // The send SQE still references them. If the proactor doesn't flush the
-  // SQE before this return, the kernel will read garbage from the dead stack.
+  // spans[] dies here. The backend-native descriptors materialized during
+  // submit and the context-owned payload remain valid until completion.
 }
 
 // Recv completion callback. Fires on the poll thread during CQE processing.
-// Calls submit_echo_response() which creates stack-local data and submits a
-// send referencing it.
+// Calls submit_echo_response(), which creates stack-local span descriptors.
 static void echo_back_recv_callback(void* user_data,
                                     iree_async_operation_t* operation,
                                     iree_status_t status,
@@ -107,23 +103,19 @@ static void echo_back_recv_callback(void* user_data,
     submit_echo_response(context);
   }
 
-  // submit_echo_response has returned. Its stack-local header[] and body[]
-  // are dead. If the send SQE wasn't flushed during submit, the kernel will
-  // read garbage when the drain loop eventually flushes it.
+  // submit_echo_response has returned and its span list is now dead.
 }
 
-// Tests the inline send path (no backpressure): when the socket buffer has
-// room, inline sends complete during io_uring_enter (or eager writev on POSIX),
-// so stack-local data is consumed before the function returns. See the
-// DataLifetimeBackpressureTest below for the deferred send path (socket buffer
-// full, sends deferred to the poll loop).
+// Tests span descriptor materialization on the normal send path. See
+// DataLifetimeBackpressureTest below for descriptors submitted while the send
+// itself is deferred.
 class DataLifetimeTest : public SocketTestBase<> {
  protected:
   static constexpr iree_host_size_t kResponseSize = 16 + 128;  // header + body
 
   // Runs one iteration of the echo-back test:
   //   1. Client sends a trigger byte to the server.
-  //   2. Server recv callback fires, submits send-back with stack-local data.
+  //   2. Server recv callback submits context data through a stack span list.
   //   3. Client receives the response and verifies the pattern.
   void RunEchoBack(iree_async_socket_t* client, iree_async_socket_t* server,
                    uint8_t pattern) {
@@ -132,7 +124,6 @@ class DataLifetimeTest : public SocketTestBase<> {
     echo_context.proactor = proactor_;
     echo_context.socket = server;
     echo_context.pattern = pattern;
-    echo_context.response_size = kResponseSize;
 
     // Submit server recv with the echo-back callback.
     uint8_t server_recv_buffer[1];
@@ -169,44 +160,41 @@ class DataLifetimeTest : public SocketTestBase<> {
     IREE_ASSERT_OK(
         iree_async_proactor_submit_one(proactor_, &trigger_send_op.base));
 
+    PollUntilCondition([&] { return echo_context.recv_callback_fired; },
+                       "echo trigger receive");
+    IREE_ASSERT_OK(echo_context.recv_status);
+    IREE_ASSERT_OK(echo_context.send_submit_status);
+
     // Poll until the client receives the echo response.
-    // Need at minimum: trigger send completion + server recv completion +
-    // echo send completion + client recv completion = 4 completions.
-    // Use a generous budget since we need the full echo round-trip.
     iree_host_size_t total_received = 0;
-    iree_time_t deadline = iree_time_now() + iree_make_duration_ms(5000);
-    while (total_received < kResponseSize && iree_time_now() < deadline) {
-      iree_host_size_t completed = 0;
-      iree_status_t poll_status = iree_async_proactor_poll(
-          proactor_, iree_make_timeout_ms(100), &completed);
-      if (iree_status_is_deadline_exceeded(poll_status)) {
-        iree_status_ignore(poll_status);
-        continue;
-      }
-      IREE_ASSERT_OK(poll_status);
+    while (total_received < kResponseSize) {
+      PollUntilCondition([&] { return client_recv_tracker.call_count > 0; },
+                         "echo response receive");
+      IREE_ASSERT_OK(client_recv_tracker.ConsumeStatus());
+      ASSERT_GT(client_recv_op.bytes_received, 0u);
+      total_received += client_recv_op.bytes_received;
 
-      // Check if we've received data on the client side.
-      if (client_recv_tracker.call_count > 0) {
-        total_received += client_recv_op.bytes_received;
-
-        // TCP may deliver partial data. If we haven't received everything,
-        // submit another recv for the remainder.
-        if (total_received < kResponseSize) {
-          client_recv_tracker.Reset();
-          iree_async_span_t remaining_span = iree_async_span_from_ptr(
-              response_buffer + total_received, kResponseSize - total_received);
-          InitRecvOperation(&client_recv_op, client, &remaining_span, 1,
-                            CompletionTracker::Callback, &client_recv_tracker);
-          IREE_ASSERT_OK(
-              iree_async_proactor_submit_one(proactor_, &client_recv_op.base));
-        }
+      // TCP may deliver partial data. If we haven't received everything,
+      // submit another recv for the remainder.
+      if (total_received < kResponseSize) {
+        client_recv_tracker.Reset();
+        iree_async_span_t remaining_span = iree_async_span_from_ptr(
+            response_buffer + total_received, kResponseSize - total_received);
+        InitRecvOperation(&client_recv_op, client, &remaining_span, 1,
+                          CompletionTracker::Callback, &client_recv_tracker);
+        IREE_ASSERT_OK(
+            iree_async_proactor_submit_one(proactor_, &client_recv_op.base));
       }
     }
 
-    // Verify the echo-back callback fired.
-    ASSERT_TRUE(echo_context.recv_callback_fired)
-        << "Server recv callback did not fire";
-    IREE_ASSERT_OK(echo_context.recv_status);
+    PollUntilCondition(
+        [&] {
+          return trigger_tracker.call_count > 0 &&
+                 echo_context.send_tracker.call_count > 0;
+        },
+        "echo operation completions");
+    IREE_ASSERT_OK(trigger_tracker.ConsumeStatus());
+    IREE_ASSERT_OK(echo_context.send_tracker.ConsumeStatus());
 
     // Verify we received the full response.
     ASSERT_EQ(total_received, kResponseSize)
@@ -221,14 +209,14 @@ class DataLifetimeTest : public SocketTestBase<> {
           << "Data corruption at byte " << i << ": expected 0x" << std::hex
           << (int)pattern << " but got 0x" << (int)response_buffer[i]
           << std::dec
-          << ". This indicates the send SQE referenced data that was already "
-             "freed (stack-local buffer in submit_echo_response).";
+          << ". This indicates the send used invalid descriptor or payload "
+             "storage.";
     }
   }
 };
 
 // Single echo-back: verifies the basic mechanism works.
-TEST_P(DataLifetimeTest, SendFromRecvCallback_StackLocalData) {
+TEST_P(DataLifetimeTest, SendFromRecvCallback_StackLocalSpanList) {
   iree_async_socket_t* client = nullptr;
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
@@ -251,8 +239,8 @@ TEST_P(DataLifetimeTest, RepeatedSendFromRecvCallback_VaryingPatterns) {
   EstablishConnection(&client, &server, &listener);
 
   // 50 iterations with varying patterns. The stack region used by
-  // submit_echo_response gets overwritten on each iteration (by the next
-  // iteration's recv callback processing), making corruption detectable.
+  // The context payload storage is overwritten on each iteration, making
+  // stale descriptor or payload references detectable.
   for (int i = 0; i < 50; ++i) {
     uint8_t pattern = static_cast<uint8_t>(0x01 + i);
     SCOPED_TRACE(::testing::Message() << "iteration " << i << " pattern=0x"
@@ -270,12 +258,12 @@ CTS_REGISTER_TEST_SUITE(DataLifetimeTest);
 //===----------------------------------------------------------------------===//
 // Backpressure data lifetime tests
 //===----------------------------------------------------------------------===//
-// The inline-path tests above validate that stack-local data survives the
-// submit call. These tests validate the *deferred* send path: when the socket
-// buffer is full, the proactor cannot transmit data inline and must defer to
-// the poll loop (POLLOUT-driven retry on POSIX, kernel-managed on io_uring,
-// inherently async on IOCP). The correct contract is that the caller's buffer
-// must remain valid until the completion callback fires.
+// The normal-path tests above validate stack-local span descriptor
+// materialization. These tests validate the deferred send path: when the
+// socket buffer is full, the proactor cannot transmit data inline and must
+// defer to the poll loop (POLLOUT-driven retry on POSIX, kernel-managed on
+// io_uring, inherently async on IOCP). The caller's buffer remains valid until
+// the completion callback fires.
 //
 // To exercise this, we shrink SO_SNDBUF to the platform minimum (~2KB on
 // Linux) and send 8KB responses — well above what fits in a single writev.
@@ -290,15 +278,25 @@ CTS_REGISTER_TEST_SUITE(DataLifetimeTest);
 // completion callback fires — which may be arbitrarily delayed under
 // backpressure.
 struct BackpressureEchoBackContext {
+  // Proactor receiving and submitting the socket operations.
   iree_async_proactor_t* proactor;
+  // Connected socket used to send the echo response.
   iree_async_socket_t* socket;
+  // Completion state for the echo send.
   CompletionTracker send_tracker;
+  // Set after the trigger receive callback begins.
   bool recv_callback_fired = false;
+  // Trigger receive completion status owned by the context.
   iree_status_t recv_status = iree_ok_status();
+  // Echo send submission status owned by the context.
+  iree_status_t send_submit_status = iree_ok_status();
 
+  // Send operation retained until completion.
   iree_async_socket_send_operation_t send_op;
 
+  // Byte pattern written into the response payload.
   uint8_t pattern;
+  // Number of response bytes to send.
   iree_host_size_t response_size;
 
   // Response data stored in the context — lives until send completion.
@@ -323,11 +321,8 @@ static void submit_backpressure_echo_response(
                     IREE_ASYNC_SOCKET_SEND_FLAG_NONE,
                     CompletionTracker::Callback, &context->send_tracker);
 
-  iree_status_t status =
+  context->send_submit_status =
       iree_async_proactor_submit_one(context->proactor, &context->send_op.base);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-  }
 }
 
 // Recv completion callback for backpressure tests. Fires on the poll thread
@@ -424,43 +419,42 @@ class DataLifetimeBackpressureTest : public SocketTestBase<> {
     IREE_ASSERT_OK(
         iree_async_proactor_submit_one(proactor_, &trigger_send_op.base));
 
+    PollUntilCondition([&] { return echo_context.recv_callback_fired; },
+                       "backpressure echo trigger receive");
+    IREE_ASSERT_OK(echo_context.recv_status);
+    IREE_ASSERT_OK(echo_context.send_submit_status);
+
     // Poll until the client receives the full 8KB response. Backpressure means
-    // the server send is split across multiple POLLOUT-driven retries, so this
-    // takes more poll cycles than the inline-path test. Use 10s timeout.
+    // the server send is split across multiple POLLOUT-driven retries.
     iree_host_size_t total_received = 0;
-    iree_time_t deadline = iree_time_now() + iree_make_duration_ms(10000);
-    while (total_received < kResponseSize && iree_time_now() < deadline) {
-      iree_host_size_t completed = 0;
-      iree_status_t poll_status = iree_async_proactor_poll(
-          proactor_, iree_make_timeout_ms(100), &completed);
-      if (iree_status_is_deadline_exceeded(poll_status)) {
-        iree_status_ignore(poll_status);
-        continue;
-      }
-      IREE_ASSERT_OK(poll_status);
+    while (total_received < kResponseSize) {
+      PollUntilCondition([&] { return client_recv_tracker.call_count > 0; },
+                         "backpressure response receive");
+      IREE_ASSERT_OK(client_recv_tracker.ConsumeStatus());
+      ASSERT_GT(client_recv_op.bytes_received, 0u);
+      total_received += client_recv_op.bytes_received;
 
-      // Check if we've received data on the client side.
-      if (client_recv_tracker.call_count > 0) {
-        total_received += client_recv_op.bytes_received;
-
-        // TCP may deliver partial data. If we haven't received everything,
-        // submit another recv for the remainder.
-        if (total_received < kResponseSize) {
-          client_recv_tracker.Reset();
-          iree_async_span_t remaining_span = iree_async_span_from_ptr(
-              response_buffer + total_received, kResponseSize - total_received);
-          InitRecvOperation(&client_recv_op, client, &remaining_span, 1,
-                            CompletionTracker::Callback, &client_recv_tracker);
-          IREE_ASSERT_OK(
-              iree_async_proactor_submit_one(proactor_, &client_recv_op.base));
-        }
+      // TCP may deliver partial data. If we haven't received everything,
+      // submit another recv for the remainder.
+      if (total_received < kResponseSize) {
+        client_recv_tracker.Reset();
+        iree_async_span_t remaining_span = iree_async_span_from_ptr(
+            response_buffer + total_received, kResponseSize - total_received);
+        InitRecvOperation(&client_recv_op, client, &remaining_span, 1,
+                          CompletionTracker::Callback, &client_recv_tracker);
+        IREE_ASSERT_OK(
+            iree_async_proactor_submit_one(proactor_, &client_recv_op.base));
       }
     }
 
-    // Verify the echo-back callback fired.
-    ASSERT_TRUE(echo_context.recv_callback_fired)
-        << "Server recv callback did not fire";
-    IREE_ASSERT_OK(echo_context.recv_status);
+    PollUntilCondition(
+        [&] {
+          return trigger_tracker.call_count > 0 &&
+                 echo_context.send_tracker.call_count > 0;
+        },
+        "backpressure echo operation completions");
+    IREE_ASSERT_OK(trigger_tracker.ConsumeStatus());
+    IREE_ASSERT_OK(echo_context.send_tracker.ConsumeStatus());
 
     // Verify we received the full response.
     ASSERT_EQ(total_received, kResponseSize)

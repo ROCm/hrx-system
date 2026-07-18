@@ -28,7 +28,7 @@
 #include "iree/hal/drivers/amdgpu/pm4_command_buffer.h"
 #include "iree/hal/drivers/amdgpu/util/benchmark_flags.h"
 #include "iree/hal/drivers/amdgpu/util/benchmark_profile.h"
-#include "iree/hal/drivers/amdgpu/util/executable_target.h"
+#include "iree/hal/executable/amdgpu/executable_target.h"
 
 IREE_FLAG(
     bool, pm4_collect_finalize_timings, false,

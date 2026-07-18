@@ -70,7 +70,7 @@ class PhysicalDeviceCapabilitiesTest : public ::testing::Test {
     iree_hal_amdgpu_cpu_visible_device_coarse_memory_selection_t selection = {};
     selection.device_agent = Agent(10);
     selection.memory_pool = MemoryPool(20);
-    selection.gfxip_version = GfxIp(11, 0, 0);
+    selection.gfxip_version = GfxIp(9, 4, 2);
     selection.cpu.agents = cpu_agents_.data();
     selection.cpu.access = cpu_access_.data();
     selection.cpu.count = cpu_agents_.size();
@@ -184,22 +184,36 @@ TEST_F(PhysicalDeviceCapabilitiesTest, PublicationGatesDisableCoarseMemory) {
 TEST_F(PhysicalDeviceCapabilitiesTest, GfxIpGatesHdpPublication) {
   EXPECT_FALSE(
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(9, 0, 7)));
-  EXPECT_TRUE(
+  EXPECT_FALSE(
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(9, 0, 8)));
+  EXPECT_FALSE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(9, 0, 10)));
+  EXPECT_TRUE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(9, 4, 0)));
+  EXPECT_TRUE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(9, 4, 2)));
+  EXPECT_FALSE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(9, 4, 3)));
+  EXPECT_TRUE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(9, 5, 0)));
   EXPECT_FALSE(
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(10, 0, 0)));
   EXPECT_FALSE(
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(10, 1, 0)));
-  EXPECT_TRUE(
+  EXPECT_FALSE(
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(10, 3, 0)));
-  EXPECT_TRUE(
+  EXPECT_FALSE(
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(11, 0, 0)));
+  EXPECT_FALSE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(12, 0, 0)));
+  EXPECT_TRUE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(12, 5, 0)));
 }
 
 TEST_F(PhysicalDeviceCapabilitiesTest, UnsupportedGfxIpDisablesCoarseMemory) {
   iree_hal_amdgpu_cpu_visible_device_coarse_memory_selection_t selection =
       MakeCoarseMemorySelection();
-  selection.gfxip_version = GfxIp(10, 1, 0);
+  selection.gfxip_version = GfxIp(11, 0, 0);
   iree_hal_amdgpu_cpu_visible_device_coarse_memory_t capability;
   IREE_ASSERT_OK(iree_hal_amdgpu_select_cpu_visible_device_coarse_memory(
       &selection, &capability));

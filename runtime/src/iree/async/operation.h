@@ -56,6 +56,11 @@ enum iree_async_completion_flag_bits_e {
   // to monitor ZC effectiveness for diagnostics or adaptive behavior.
   // Only meaningful for socket send completions; other operations ignore this.
   IREE_ASYNC_COMPLETION_FLAG_ZERO_COPY_ACHIEVED = 1u << 1,
+
+  // The operation completed because cancellation won the race with normal
+  // completion. This is only reported for operations using
+  // IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS; |status| is OK.
+  IREE_ASYNC_COMPLETION_FLAG_CANCELLED = 1u << 2,
 };
 typedef uint32_t iree_async_completion_flags_t;
 
@@ -64,8 +69,10 @@ typedef uint32_t iree_async_completion_flags_t;
 // |user_data| is the value set on the operation at submit time.
 // |operation| is the completed operation (cast to subtype via operation->type).
 // |status| is the result: OK on success, CANCELLED on cancellation, or an
-//   error status describing the failure. Ownership of the status is transferred
-//   to the callback; the callback must consume or ignore it.
+//   error status describing the failure. Operations using
+//   IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS report cancellation as
+//   an OK status with IREE_ASYNC_COMPLETION_FLAG_CANCELLED instead. Ownership
+//   of the status is transferred to the callback; the callback must consume it.
 // |flags| is a bitmask of iree_async_completion_flag_e values.
 //
 // Callbacks fire from within iree_async_proactor_poll() on the polling thread.
@@ -149,6 +156,15 @@ enum iree_async_operation_flag_bits_e {
   //
   // Requires IREE_ASYNC_PROACTOR_CAPABILITY_LINKED_OPERATIONS capability.
   IREE_ASYNC_OPERATION_FLAG_LINKED = 1u << 1,
+
+  // Reports cancellation as a successful terminal completion with
+  // IREE_ASYNC_COMPLETION_FLAG_CANCELLED instead of a CANCELLED status.
+  //
+  // This is intended for operations whose cancellation is an expected control
+  // path, such as cancelling a pending accept while stopping a listener. A
+  // successful completion that races ahead of cancellation remains an ordinary
+  // successful completion without the CANCELLED completion flag.
+  IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS = 1u << 2,
 };
 typedef uint32_t iree_async_operation_flags_t;
 
@@ -376,6 +392,26 @@ static inline void iree_async_operation_set_internal_flags(
 static inline void iree_async_operation_clear_internal_flags(
     iree_async_operation_t* operation) {
   iree_atomic_store(&operation->internal_flags, 0, iree_memory_order_release);
+}
+
+// Resolves the backend completion result immediately before invoking the user
+// callback. Backend failure handling and linked-operation dispatch must inspect
+// the original status before calling this helper.
+//
+// When cancellation is an expected control path, the cancellation status is
+// handled here and represented by IREE_ASYNC_COMPLETION_FLAG_CANCELLED. The
+// returned status and updated flags are then transferred to the callback.
+static inline iree_status_t iree_async_operation_resolve_completion(
+    const iree_async_operation_t* operation, iree_status_t status,
+    iree_async_completion_flags_t* inout_flags) {
+  if (iree_status_is_cancelled(status) &&
+      iree_any_bit_set(operation->flags,
+                       IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS)) {
+    iree_status_free(status);
+    *inout_flags |= IREE_ASYNC_COMPLETION_FLAG_CANCELLED;
+    return iree_ok_status();
+  }
+  return status;
 }
 
 // Creates an operation list from a pointer and count.

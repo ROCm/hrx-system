@@ -187,6 +187,18 @@ static iree_hal_profile_sink_t* NoopProfileSinkAsBase(NoopProfileSink* sink) {
   return reinterpret_cast<iree_hal_profile_sink_t*>(sink);
 }
 
+TEST(HostQueueSubmissionUnitTest, QueueOwnedKernargsRequireSystemAcquire) {
+  EXPECT_EQ(iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
+                IREE_HSA_FENCE_SCOPE_NONE),
+            IREE_HSA_FENCE_SCOPE_SYSTEM);
+  EXPECT_EQ(iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
+                IREE_HSA_FENCE_SCOPE_AGENT),
+            IREE_HSA_FENCE_SCOPE_SYSTEM);
+  EXPECT_EQ(iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
+                IREE_HSA_FENCE_SCOPE_SYSTEM),
+            IREE_HSA_FENCE_SCOPE_SYSTEM);
+}
+
 TEST(HostQueueSubmissionUnitTest, WritesPersistentPm4IbPacketBody) {
   iree_hsa_amd_aql_pm4_ib_packet_t packet = {};
   const uint32_t* ib_dwords = reinterpret_cast<const uint32_t*>(

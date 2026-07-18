@@ -44,18 +44,35 @@ class SemaphoreAsyncTest : public CtsTestBase<> {
 
   // Initializes a SEMAPHORE_WAIT operation for a single semaphore.
   static void InitWaitOp(iree_async_semaphore_wait_operation_t* operation,
-                         iree_async_semaphore_t* semaphore, uint64_t value,
-                         iree_async_wait_mode_t mode,
+                         iree_async_semaphore_t** semaphore_storage,
+                         uint64_t* value_storage, iree_async_wait_mode_t mode,
                          iree_async_completion_fn_t callback, void* user_data) {
     memset(operation, 0, sizeof(*operation));
     operation->base.type = IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT;
     operation->base.completion_fn = callback;
     operation->base.user_data = user_data;
-    operation->semaphores = &semaphore;
-    operation->values = &value;
+    operation->semaphores = semaphore_storage;
+    operation->values = value_storage;
     operation->count = 1;
     operation->mode = mode;
     operation->satisfied_index = 0;
+  }
+};
+
+struct FreeingWaitCompletion {
+  std::atomic<int> call_count{0};
+  std::atomic<int> status_code{IREE_STATUS_UNKNOWN};
+
+  static void Callback(void* user_data, iree_async_operation_t* operation,
+                       iree_status_t status,
+                       iree_async_completion_flags_t flags) {
+    (void)flags;
+    auto* completion = static_cast<FreeingWaitCompletion*>(user_data);
+    completion->status_code.store(iree_status_code(status),
+                                  std::memory_order_relaxed);
+    iree_status_free(status);
+    completion->call_count.fetch_add(1, std::memory_order_release);
+    iree_allocator_free(iree_allocator_system(), operation);
   }
 };
 
@@ -88,8 +105,7 @@ TEST_P(SemaphoreAsyncTest, SignalSingle) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &signal_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -131,8 +147,7 @@ TEST_P(SemaphoreAsyncTest, SignalMultiple) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &signal_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -172,8 +187,7 @@ TEST_P(SemaphoreAsyncTest, SignalNonMonotonicFails) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &signal_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, tracker.ConsumeStatus());
@@ -215,8 +229,7 @@ TEST_P(SemaphoreAsyncTest, SignalWithFrontier) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &signal_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -261,8 +274,7 @@ TEST_P(SemaphoreAsyncTest, WaitSingleAlreadySatisfied) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -294,15 +306,17 @@ TEST_P(SemaphoreAsyncTest, WaitSinglePending) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
 
+  iree_async_proactor_wake(proactor_);
+  PollOneProgressEvent();
+  EXPECT_EQ(tracker.call_count, 0);
+
   // Signal from another thread.
   std::thread signaler([semaphore]() {
-    iree_wait_until(iree_time_now() + iree_make_duration_ms(20));
     iree_status_t status = iree_async_semaphore_signal(semaphore, 10, NULL);
     IREE_CHECK_OK(status);
   });
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   signaler.join();
 
@@ -347,15 +361,16 @@ TEST_P(SemaphoreAsyncTest, WaitAllModePartial) {
   IREE_ASSERT_OK(iree_async_semaphore_signal(sem1, 1, NULL));
   IREE_ASSERT_OK(iree_async_semaphore_signal(sem2, 1, NULL));
 
-  // Poll a bit - should not complete.
-  DrainPending(iree_make_duration_ms(100));
+  // Force one proactor progress pass after the partial signal set. The wait
+  // must remain pending until every timeline value has been reached.
+  iree_async_proactor_wake(proactor_);
+  PollOneProgressEvent();
   EXPECT_EQ(tracker.call_count, 0);
 
   // Signal the third - should complete.
   IREE_ASSERT_OK(iree_async_semaphore_signal(sem3, 1, NULL));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -396,8 +411,7 @@ TEST_P(SemaphoreAsyncTest, WaitAllModeComplete) {
   IREE_ASSERT_OK(iree_async_semaphore_signal(sem1, 5, NULL));
   IREE_ASSERT_OK(iree_async_semaphore_signal(sem2, 10, NULL));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -441,8 +455,7 @@ TEST_P(SemaphoreAsyncTest, WaitAnyMode) {
   // Signal the middle one.
   IREE_ASSERT_OK(iree_async_semaphore_signal(sem2, 1, NULL));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -479,15 +492,17 @@ TEST_P(SemaphoreAsyncTest, WaitSemaphoreFailed) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
 
+  iree_async_proactor_wake(proactor_);
+  PollOneProgressEvent();
+  EXPECT_EQ(tracker.call_count, 0);
+
   // Fail the semaphore from another thread.
   std::thread failure([semaphore]() {
-    iree_wait_until(iree_time_now() + iree_make_duration_ms(20));
     iree_async_semaphore_fail(
         semaphore, iree_make_status(IREE_STATUS_ABORTED, "device lost"));
   });
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   failure.join();
 
@@ -495,6 +510,113 @@ TEST_P(SemaphoreAsyncTest, WaitSemaphoreFailed) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED, tracker.ConsumeStatus());
 
   iree_async_semaphore_release(semaphore);
+}
+
+// Every timepoint detached by one failure must finish before the operation's
+// terminal callback can release shared tracker and operation storage.
+TEST_P(SemaphoreAsyncTest, WaitFailureJoinsDetachedTimepoints) {
+  iree_async_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_async_semaphore_create(
+      proactor_,
+      /*initial_value=*/0, IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY,
+      iree_allocator_system(), &semaphore));
+
+  constexpr iree_host_size_t kTimepointCount = 64;
+  iree_async_semaphore_t* semaphores[kTimepointCount];
+  uint64_t values[kTimepointCount];
+  for (iree_host_size_t i = 0; i < kTimepointCount; ++i) {
+    semaphores[i] = semaphore;
+    values[i] = 1;
+  }
+
+  CompletionTracker tracker;
+  iree_async_semaphore_wait_operation_t wait_op;
+  iree_async_operation_zero(&wait_op.base, sizeof(wait_op));
+  iree_async_operation_initialize(
+      &wait_op.base, IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT,
+      IREE_ASYNC_OPERATION_FLAG_NONE, CompletionTracker::Callback, &tracker);
+  wait_op.semaphores = semaphores;
+  wait_op.values = values;
+  wait_op.count = kTimepointCount;
+  wait_op.mode = IREE_ASYNC_WAIT_MODE_ALL;
+
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
+
+  std::thread failure([semaphore]() {
+    iree_async_semaphore_fail(
+        semaphore, iree_make_status(IREE_STATUS_ABORTED, "device lost"));
+  });
+  PollUntil(/*min_completions=*/1);
+  failure.join();
+
+  EXPECT_EQ(tracker.call_count, 1);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED, tracker.ConsumeStatus());
+
+  iree_async_semaphore_release(semaphore);
+}
+
+// A terminal callback owns the operation and may release it immediately.
+TEST_P(SemaphoreAsyncTest, WaitCompletionMayReleaseOperation) {
+  iree_async_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_async_semaphore_create(
+      proactor_,
+      /*initial_value=*/0, IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY,
+      iree_allocator_system(), &semaphore));
+
+  iree_host_size_t operation_size = 0;
+  IREE_ASSERT_OK(iree_async_semaphore_wait_operation_size(1, &operation_size));
+  iree_async_semaphore_wait_operation_t* wait_op = nullptr;
+  IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(), operation_size,
+                                       reinterpret_cast<void**>(&wait_op)));
+  iree_async_operation_zero(&wait_op->base, operation_size);
+
+  FreeingWaitCompletion completion;
+  iree_async_operation_initialize(&wait_op->base,
+                                  IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT,
+                                  IREE_ASYNC_OPERATION_FLAG_NONE,
+                                  FreeingWaitCompletion::Callback, &completion);
+  iree_async_semaphore_wait_operation_initialize(wait_op, /*count=*/1,
+                                                 IREE_ASYNC_WAIT_MODE_ALL);
+  wait_op->semaphores[0] = semaphore;
+  wait_op->values[0] = 1;
+
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op->base));
+  IREE_ASSERT_OK(iree_async_semaphore_signal(semaphore, 1, nullptr));
+  PollUntil(/*min_completions=*/1);
+
+  EXPECT_EQ(completion.call_count.load(std::memory_order_acquire), 1);
+  EXPECT_EQ(completion.status_code.load(std::memory_order_relaxed),
+            IREE_STATUS_OK);
+
+  iree_async_semaphore_release(semaphore);
+}
+
+// A deferred wait owns its semaphore references until poll-time finalization.
+TEST_P(SemaphoreAsyncTest, WaitRetainsSemaphoreUntilCompletion) {
+  iree_async_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_async_semaphore_create(
+      proactor_,
+      /*initial_value=*/0, IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY,
+      iree_allocator_system(), &semaphore));
+  iree_async_semaphore_retain(semaphore);
+
+  CompletionTracker tracker;
+  iree_async_semaphore_wait_operation_t wait_op;
+  iree_async_semaphore_t* wait_semaphore = semaphore;
+  uint64_t wait_value = 1;
+  InitWaitOp(&wait_op, &wait_semaphore, &wait_value, IREE_ASYNC_WAIT_MODE_ALL,
+             CompletionTracker::Callback, &tracker);
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
+
+  // Leave one caller-owned reference for signaling, then release it before the
+  // poll thread accesses the completed wait tracker.
+  iree_async_semaphore_release(semaphore);
+  IREE_ASSERT_OK(iree_async_semaphore_signal(semaphore, 1, nullptr));
+  iree_async_semaphore_release(semaphore);
+
+  PollUntil(/*min_completions=*/1);
+  EXPECT_EQ(tracker.call_count, 1);
+  IREE_EXPECT_OK(tracker.ConsumeStatus());
 }
 
 // Wait on already-failed semaphore completes immediately with failure.
@@ -525,8 +647,7 @@ TEST_P(SemaphoreAsyncTest, WaitSemaphoreAlreadyFailed) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED, tracker.ConsumeStatus());
@@ -558,17 +679,86 @@ TEST_P(SemaphoreAsyncTest, WaitCancellation) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
 
-  // Give it time to be submitted, then cancel.
-  PollOnce();
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &wait_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, tracker.ConsumeStatus());
 
   iree_async_semaphore_release(semaphore);
+}
+
+// Cancellation may race both terminal satisfaction and poll-thread
+// finalization. The operation remains live until both racing calls return.
+TEST_P(SemaphoreAsyncTest, WaitSignalCancelRace) {
+  constexpr int kIterationCount = 100;
+  for (int iteration = 0; iteration < kIterationCount; ++iteration) {
+    iree_async_semaphore_t* semaphore = nullptr;
+    IREE_ASSERT_OK(iree_async_semaphore_create(
+        proactor_,
+        /*initial_value=*/0, IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY,
+        iree_allocator_system(), &semaphore));
+
+    CompletionTracker tracker;
+    iree_async_semaphore_wait_operation_t wait_op;
+    iree_async_semaphore_t* wait_semaphore = semaphore;
+    uint64_t wait_value = 1;
+    InitWaitOp(&wait_op, &wait_semaphore, &wait_value, IREE_ASYNC_WAIT_MODE_ALL,
+               CompletionTracker::Callback, &tracker);
+    IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
+
+    std::atomic<int> ready_count{0};
+    std::atomic<bool> start{false};
+    std::atomic<int> cancel_status_code{IREE_STATUS_UNKNOWN};
+    std::atomic<int> signal_status_code{IREE_STATUS_UNKNOWN};
+    std::thread cancel_thread([&]() {
+      ready_count.fetch_add(1, std::memory_order_release);
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      iree_status_t status =
+          iree_async_proactor_cancel(proactor_, &wait_op.base);
+      cancel_status_code.store(iree_status_code(status),
+                               std::memory_order_release);
+      iree_status_free(status);
+    });
+    std::thread signal_thread([&]() {
+      ready_count.fetch_add(1, std::memory_order_release);
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      iree_status_t status =
+          iree_async_semaphore_signal(semaphore, /*new_value=*/1, nullptr);
+      signal_status_code.store(iree_status_code(status),
+                               std::memory_order_release);
+      iree_status_free(status);
+    });
+
+    while (ready_count.load(std::memory_order_acquire) != 2) {
+      std::this_thread::yield();
+    }
+    start.store(true, std::memory_order_release);
+    PollUntil(/*min_completions=*/1);
+    cancel_thread.join();
+    signal_thread.join();
+
+    EXPECT_EQ(cancel_status_code.load(std::memory_order_acquire),
+              IREE_STATUS_OK)
+        << "iteration " << iteration;
+    EXPECT_EQ(signal_status_code.load(std::memory_order_acquire),
+              IREE_STATUS_OK)
+        << "iteration " << iteration;
+    EXPECT_EQ(tracker.call_count, 1) << "iteration " << iteration;
+    iree_status_t status = tracker.ConsumeStatus();
+    if (!iree_status_is_ok(status) && !iree_status_is_cancelled(status)) {
+      IREE_EXPECT_OK(status) << "iteration " << iteration;
+    } else {
+      iree_status_free(status);
+    }
+
+    iree_async_semaphore_release(semaphore);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -618,8 +808,7 @@ TEST_P(SemaphoreAsyncTest, SignalWakesPendingWait) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &signal_op.base));
 
   // Both should complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   EXPECT_EQ(wait_tracker.call_count, 1);
   EXPECT_EQ(signal_tracker.call_count, 1);
