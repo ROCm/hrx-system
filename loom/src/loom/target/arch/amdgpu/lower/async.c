@@ -7,6 +7,7 @@
 #include "loom/target/arch/amdgpu/lower/async.h"
 
 #include <stdint.h>
+#include <string.h>
 
 #include "loom/ir/facts.h"
 #include "loom/ops/kernel/ops.h"
@@ -82,6 +83,33 @@ typedef struct loom_amdgpu_async_gather_selection_t {
   // Stable descriptor ref selected for the active descriptor set.
   loom_amdgpu_descriptor_ref_t descriptor_ref;
 } loom_amdgpu_async_gather_selection_t;
+
+typedef uint32_t loom_amdgpu_tensor_load_rejection_flags_t;
+
+#define LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DESCRIPTOR_VALUE ((uint32_t)1u << 0)
+#define LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DGROUP_COUNT ((uint32_t)1u << 1)
+#define LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DESCRIPTOR_MISSING ((uint32_t)1u << 2)
+#define LOOM_AMDGPU_TENSOR_LOAD_REJECTION_CACHE_POLICY ((uint32_t)1u << 3)
+#define LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DGROUP_UNIFORMITY ((uint32_t)1u << 4)
+#define LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DGROUP_MATERIALIZER \
+  ((uint32_t)1u << 5)
+#define LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DGROUP_FACTS ((uint32_t)1u << 6)
+
+typedef struct loom_amdgpu_tensor_load_diagnostic_t {
+  // Target-specific rejection bits for tensor-load selection.
+  loom_amdgpu_tensor_load_rejection_flags_t rejection_bits;
+} loom_amdgpu_tensor_load_diagnostic_t;
+
+typedef struct loom_amdgpu_tensor_load_selection_t {
+  // Stable descriptor ref selected for the d2 or d4 packet form.
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
+  // Source values materialized as packet D0 through D3 SGPR groups.
+  loom_value_id_t dgroups[LOOM_AMDGPU_TENSOR_DGROUP_CAPACITY];
+  // Number of populated D-group source values.
+  uint8_t dgroup_count;
+  // Source cache policy encoded on the tensor-load packet.
+  loom_vector_memory_cache_policy_t cache_policy;
+} loom_amdgpu_tensor_load_selection_t;
 
 static bool loom_amdgpu_async_gather_exact_i64(loom_value_facts_t facts,
                                                int64_t* out_value) {
@@ -384,10 +412,149 @@ iree_status_t loom_amdgpu_select_kernel_async_gather_plan(
   return iree_ok_status();
 }
 
-static bool loom_amdgpu_async_group_packet_count(const loom_module_t* module,
-                                                 const loom_op_t* group_op,
-                                                 uint32_t* out_packet_count) {
-  *out_packet_count = 0;
+static bool loom_amdgpu_tensor_load_select_descriptor(
+    const loom_low_descriptor_set_t* descriptor_set, uint8_t dgroup_count,
+    loom_amdgpu_descriptor_ref_t* out_descriptor_ref) {
+  *out_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+  switch (dgroup_count) {
+    case 2:
+      *out_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_TENSOR_LOAD_TO_LDS_D2;
+      break;
+    case 4:
+      *out_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_TENSOR_LOAD_TO_LDS_D4;
+      break;
+    default:
+      return false;
+  }
+  return loom_amdgpu_descriptor_ref_ordinal(descriptor_set,
+                                            *out_descriptor_ref) !=
+         LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
+}
+
+static bool loom_amdgpu_tensor_load_select(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_low_descriptor_set_t* descriptor_set, const loom_op_t* source_op,
+    loom_amdgpu_tensor_load_selection_t* out_selection,
+    loom_amdgpu_tensor_load_diagnostic_t* out_diagnostic) {
+  *out_selection = (loom_amdgpu_tensor_load_selection_t){
+      .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
+  };
+  *out_diagnostic = (loom_amdgpu_tensor_load_diagnostic_t){0};
+
+  const loom_value_id_t descriptor_id =
+      loom_kernel_async_tensor_load_to_lds_descriptor(source_op);
+  if (descriptor_id >= module->values.count) {
+    out_diagnostic->rejection_bits |=
+        LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DESCRIPTOR_VALUE;
+    return false;
+  }
+  const loom_value_t* descriptor_value =
+      loom_module_value(module, descriptor_id);
+  const loom_op_t* descriptor_op = loom_value_is_block_arg(descriptor_value)
+                                       ? NULL
+                                       : loom_value_def_op(descriptor_value);
+  if (descriptor_op == NULL ||
+      !loom_kernel_tensor_lds_descriptor_isa(descriptor_op)) {
+    out_diagnostic->rejection_bits |=
+        LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DESCRIPTOR_VALUE;
+    return false;
+  }
+
+  const loom_value_slice_t dgroups =
+      loom_kernel_tensor_lds_descriptor_dgroups(descriptor_op);
+  if (dgroups.count != 2 && dgroups.count != 4) {
+    out_diagnostic->rejection_bits |=
+        LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DGROUP_COUNT;
+    return false;
+  }
+  out_selection->dgroup_count = (uint8_t)dgroups.count;
+  for (iree_host_size_t i = 0; i < dgroups.count; ++i) {
+    out_selection->dgroups[i] = loom_value_slice_get(dgroups, i);
+    if (fact_table == NULL || !loom_value_fact_table_has_entry(
+                                  fact_table, out_selection->dgroups[i])) {
+      out_diagnostic->rejection_bits |=
+          LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DGROUP_FACTS;
+      return false;
+    }
+    if (!loom_value_facts_is_subgroup_uniform(loom_value_fact_table_lookup(
+            fact_table, out_selection->dgroups[i]))) {
+      out_diagnostic->rejection_bits |=
+          LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DGROUP_UNIFORMITY;
+      return false;
+    }
+  }
+  if (!loom_amdgpu_tensor_load_select_descriptor(
+          descriptor_set, out_selection->dgroup_count,
+          &out_selection->descriptor_ref)) {
+    out_diagnostic->rejection_bits |=
+        LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DESCRIPTOR_MISSING;
+    return false;
+  }
+  if (loom_amdgpu_descriptor_ref_ordinal(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_READFIRSTLANE_B32) ==
+      LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+    out_diagnostic->rejection_bits |=
+        LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DGROUP_MATERIALIZER;
+    return false;
+  }
+
+  if (source_op->attribute_count < 2 ||
+      !loom_vector_memory_cache_policy_from_attrs(
+          loom_op_attrs(source_op)[0], loom_op_attrs(source_op)[1],
+          &out_selection->cache_policy)) {
+    out_diagnostic->rejection_bits |=
+        LOOM_AMDGPU_TENSOR_LOAD_REJECTION_CACHE_POLICY;
+    return false;
+  }
+  const loom_amdgpu_memory_access_t cache_access = {
+      .source =
+          {
+              .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+              .cache_policy = out_selection->cache_policy,
+          },
+  };
+  if (!loom_amdgpu_memory_cache_policy_can_lower(descriptor_set,
+                                                 &cache_access)) {
+    out_diagnostic->rejection_bits |=
+        LOOM_AMDGPU_TENSOR_LOAD_REJECTION_CACHE_POLICY;
+    return false;
+  }
+  return true;
+}
+
+iree_status_t loom_amdgpu_select_kernel_async_tensor_load_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_tensor_load_plan_t* out_plan, bool* out_selected) {
+  *out_plan = (loom_amdgpu_tensor_load_plan_t){0};
+  *out_selected = false;
+  loom_amdgpu_tensor_load_selection_t selection = {0};
+  loom_amdgpu_tensor_load_diagnostic_t diagnostic = {0};
+  if (!loom_amdgpu_tensor_load_select(
+          loom_low_lower_context_module(context),
+          loom_low_lower_context_fact_table(context),
+          loom_low_lower_context_descriptor_set(context), source_op, &selection,
+          &diagnostic)) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
+      context, selection.descriptor_ref, &out_plan->descriptor));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
+      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_READFIRSTLANE_B32,
+      &out_plan->readfirstlane_descriptor));
+  out_plan->dgroup_count = selection.dgroup_count;
+  out_plan->cache_policy = selection.cache_policy;
+  for (uint8_t i = 0; i < selection.dgroup_count; ++i) {
+    out_plan->dgroups[i] = selection.dgroups[i];
+  }
+  *out_selected = true;
+  return iree_ok_status();
+}
+
+static bool loom_amdgpu_async_group_packet_counts(
+    const loom_module_t* module, const loom_op_t* group_op,
+    uint32_t out_packet_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT]) {
+  memset(out_packet_counts, 0,
+         sizeof(uint32_t) * LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT);
   IREE_ASSERT(loom_kernel_async_group_isa(group_op));
   loom_value_slice_t tokens = loom_kernel_async_group_tokens(group_op);
   for (iree_host_size_t i = 0; i < tokens.count; ++i) {
@@ -400,20 +567,32 @@ static bool loom_amdgpu_async_group_packet_count(const loom_module_t* module,
       return false;
     }
     const loom_op_t* token_op = loom_value_def_op(token);
-    if (token_op == NULL || !loom_kernel_async_gather_isa(token_op)) {
+    uint16_t counter_id = LOOM_AMDGPU_WAIT_COUNTER_NONE;
+    if (token_op != NULL && loom_kernel_async_gather_isa(token_op)) {
+      counter_id = LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD;
+    } else if (token_op != NULL &&
+               loom_kernel_async_tensor_load_to_lds_isa(token_op)) {
+      counter_id = LOOM_AMDGPU_WAIT_COUNTER_TENSOR;
+    } else {
       return false;
     }
-    ++(*out_packet_count);
+    const uint32_t slot = loom_amdgpu_wait_counter_slot_from_id(counter_id);
+    if (out_packet_counts[slot] == UINT32_MAX) {
+      return false;
+    }
+    ++out_packet_counts[slot];
   }
   return true;
 }
 
 static bool loom_amdgpu_async_wait_stream_counts(
     const loom_module_t* module, const loom_op_t* wait_op,
-    uint16_t* out_newer_packet_count, bool* out_needs_wait_packet,
+    uint16_t out_target_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT],
+    uint32_t* out_wait_counter_mask,
     loom_amdgpu_async_wait_diagnostic_t* diagnostic) {
-  *out_newer_packet_count = 0;
-  *out_needs_wait_packet = false;
+  memset(out_target_counts, 0,
+         sizeof(uint16_t) * LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT);
+  *out_wait_counter_mask = 0;
 
   const loom_value_id_t waited_group_id = loom_kernel_async_wait_group(wait_op);
   if (waited_group_id >= module->values.count ||
@@ -473,8 +652,8 @@ static bool loom_amdgpu_async_wait_stream_counts(
     return false;
   }
 
-  uint64_t newer_packet_count = 0;
-  uint64_t packet_count_to_wait = 0;
+  uint64_t newer_packet_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT] = {0};
+  uint64_t waited_packet_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT] = {0};
   iree_host_size_t group_index = 0;
   loom_block_for_each_op(block, op) {
     if (op == wait_op) {
@@ -483,42 +662,62 @@ static bool loom_amdgpu_async_wait_stream_counts(
     if (!loom_kernel_async_group_isa(op)) {
       continue;
     }
-    uint32_t group_packet_count = 0;
-    if (!loom_amdgpu_async_group_packet_count(module, op,
-                                              &group_packet_count)) {
+    uint32_t group_packet_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT] = {0};
+    if (!loom_amdgpu_async_group_packet_counts(module, op,
+                                               group_packet_counts)) {
       diagnostic->rejection_bits |=
           LOOM_AMDGPU_ASYNC_WAIT_REJECTION_GROUP_TOKEN;
       return false;
     }
-    if (group_index >= completed_group_count &&
-        group_index <= waited_group_index) {
-      packet_count_to_wait += group_packet_count;
-    } else if (group_index > waited_group_index) {
-      newer_packet_count += group_packet_count;
+    for (uint32_t slot = 0; slot < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT;
+         ++slot) {
+      if (group_index >= completed_group_count &&
+          group_index <= waited_group_index) {
+        waited_packet_counts[slot] += group_packet_counts[slot];
+      } else if (group_index > waited_group_index) {
+        newer_packet_counts[slot] += group_packet_counts[slot];
+      }
     }
     ++group_index;
   }
 
-  if (newer_packet_count > UINT16_MAX) {
-    diagnostic->rejection_bits |= LOOM_AMDGPU_ASYNC_WAIT_REJECTION_PACKET_COUNT;
-    return false;
+  for (uint32_t slot = 0; slot < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT; ++slot) {
+    if (newer_packet_counts[slot] > UINT16_MAX) {
+      diagnostic->rejection_bits |=
+          LOOM_AMDGPU_ASYNC_WAIT_REJECTION_PACKET_COUNT;
+      return false;
+    }
+    out_target_counts[slot] = (uint16_t)newer_packet_counts[slot];
+    if (waited_packet_counts[slot] != 0) {
+      *out_wait_counter_mask |= loom_amdgpu_wait_counter_mask_from_slot(slot);
+    }
   }
-  *out_newer_packet_count = (uint16_t)newer_packet_count;
-  *out_needs_wait_packet = packet_count_to_wait != 0;
   return true;
 }
 
-static bool loom_amdgpu_async_wait_select_packet(
-    const loom_low_descriptor_set_t* descriptor_set, uint16_t target_count,
-    loom_amdgpu_wait_packet_selection_t* out_selection,
+static bool loom_amdgpu_async_wait_select_packets(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const uint16_t target_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT],
+    uint32_t wait_counter_mask,
+    loom_amdgpu_wait_packet_selection_t
+        out_selections[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT],
+    uint8_t* out_selection_count,
     loom_amdgpu_async_wait_diagnostic_t* diagnostic) {
-  const bool selected = loom_amdgpu_wait_packet_try_select_counter_mask(
-      descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD, target_count,
-      out_selection);
-  if (!selected) {
-    diagnostic->rejection_bits |= LOOM_AMDGPU_ASYNC_WAIT_REJECTION_DESCRIPTOR;
+  *out_selection_count = 0;
+  for (uint32_t slot = 0; slot < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT; ++slot) {
+    const uint32_t counter_mask = loom_amdgpu_wait_counter_mask_from_slot(slot);
+    if (!iree_any_bit_set(wait_counter_mask, counter_mask)) {
+      continue;
+    }
+    if (!loom_amdgpu_wait_packet_try_select_counter_mask(
+            descriptor_set, counter_mask, target_counts[slot],
+            &out_selections[*out_selection_count])) {
+      diagnostic->rejection_bits |= LOOM_AMDGPU_ASYNC_WAIT_REJECTION_DESCRIPTOR;
+      return false;
+    }
+    ++(*out_selection_count);
   }
-  return selected;
+  return true;
 }
 
 iree_status_t loom_amdgpu_select_kernel_async_wait_plan(
@@ -527,36 +726,40 @@ iree_status_t loom_amdgpu_select_kernel_async_wait_plan(
   *out_plan = (loom_amdgpu_async_wait_plan_t){0};
   *out_selected = false;
   const loom_module_t* module = loom_low_lower_context_module(context);
-  uint16_t target_count = 0;
-  bool needs_wait_packet = false;
+  uint16_t target_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT] = {0};
+  uint32_t wait_counter_mask = 0;
   loom_amdgpu_async_wait_diagnostic_t diagnostic = {0};
-  if (!loom_amdgpu_async_wait_stream_counts(module, source_op, &target_count,
-                                            &needs_wait_packet, &diagnostic)) {
-    return iree_ok_status();
-  }
-  if (!needs_wait_packet) {
-    *out_selected = true;
+  if (!loom_amdgpu_async_wait_stream_counts(module, source_op, target_counts,
+                                            &wait_counter_mask, &diagnostic)) {
     return iree_ok_status();
   }
 
-  loom_amdgpu_wait_packet_selection_t selection = {0};
-  if (!loom_amdgpu_async_wait_select_packet(
-          loom_low_lower_context_descriptor_set(context), target_count,
-          &selection, &diagnostic)) {
+  loom_amdgpu_wait_packet_selection_t
+      selections[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT] = {0};
+  uint8_t selection_count = 0;
+  if (!loom_amdgpu_async_wait_select_packets(
+          loom_low_lower_context_descriptor_set(context), target_counts,
+          wait_counter_mask, selections, &selection_count, &diagnostic)) {
     return iree_ok_status();
   }
 
-  loom_amdgpu_async_wait_immediate_t
-      immediates[LOOM_AMDGPU_ASYNC_WAIT_IMMEDIATE_CAPACITY] = {0};
-  for (iree_host_size_t i = 0; i < selection.immediate_count; ++i) {
-    immediates[i] = (loom_amdgpu_async_wait_immediate_t){
-        .name = selection.immediates[i].name,
-        .value = selection.immediates[i].value,
-    };
+  for (uint8_t selection_index = 0; selection_index < selection_count;
+       ++selection_index) {
+    const loom_amdgpu_wait_packet_selection_t* selection =
+        &selections[selection_index];
+    loom_amdgpu_async_wait_immediate_t
+        immediates[LOOM_AMDGPU_ASYNC_WAIT_IMMEDIATE_CAPACITY] = {0};
+    for (iree_host_size_t i = 0; i < selection->immediate_count; ++i) {
+      immediates[i] = (loom_amdgpu_async_wait_immediate_t){
+          .name = selection->immediates[i].name,
+          .value = selection->immediates[i].value,
+      };
+    }
+    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_explicit_packet_row_plan(
+        context, selection->descriptor, immediates, selection->immediate_count,
+        &out_plan->waits[selection_index]));
   }
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_explicit_packet_row_plan(
-      context, selection.descriptor, immediates, selection.immediate_count,
-      &out_plan->wait));
+  out_plan->wait_count = selection_count;
   *out_selected = true;
   return iree_ok_status();
 }
@@ -630,6 +833,93 @@ iree_status_t loom_amdgpu_lower_kernel_async_gather(
                                     loom_kernel_async_gather_token(source_op));
 }
 
+static iree_status_t loom_amdgpu_tensor_load_materialize_dgroup(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* readfirstlane_descriptor,
+    loom_value_id_t source, uint32_t expected_register_count,
+    loom_value_id_t* out_dgroup) {
+  *out_dgroup = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t low_source = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_lookup_value(context, source, &low_source));
+
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  const loom_type_t low_source_type =
+      loom_module_value_type(module, low_source);
+  IREE_ASSERT(loom_low_type_is_register(low_source_type));
+  IREE_ASSERT_EQ(loom_low_register_type_unit_count(low_source_type),
+                 expected_register_count);
+  if (loom_amdgpu_low_type_is_register_class(context, low_source_type,
+                                             LOOM_AMDGPU_REG_CLASS_ID_SGPR)) {
+    *out_dgroup = low_source;
+    return iree_ok_status();
+  }
+  IREE_ASSERT(loom_amdgpu_low_type_is_register_class(
+      context, low_source_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR));
+
+  loom_type_t vgpr_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &vgpr_type));
+  loom_type_t sgpr_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_type(context, &sgpr_type));
+  loom_type_t sgpr_range_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_range_type(
+      context, expected_register_count, &sgpr_range_type));
+
+  loom_value_id_t scalar_lanes[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
+  for (uint32_t i = 0; i < expected_register_count; ++i) {
+    loom_value_id_t vector_lane = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
+        context, source_op, low_source, expected_register_count, i, vgpr_type,
+        &vector_lane));
+    loom_op_t* readfirstlane_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+        context, readfirstlane_descriptor, &vector_lane,
+        /*operand_count=*/1, loom_named_attr_slice_empty(), &sgpr_type,
+        /*result_count=*/1, /*tied_results=*/NULL,
+        /*tied_result_count=*/0, source_op->location, &readfirstlane_op));
+    scalar_lanes[i] =
+        loom_value_slice_get(loom_low_op_results(readfirstlane_op), 0);
+  }
+  return loom_amdgpu_build_low_register_range(context, source_op, scalar_lanes,
+                                              expected_register_count,
+                                              sgpr_range_type, out_dgroup);
+}
+
+iree_status_t loom_amdgpu_lower_kernel_async_tensor_load(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_tensor_load_plan_t* plan) {
+  static const uint8_t kDgroupRegisterCounts[] = {4, 8, 4, 4};
+  static_assert(IREE_ARRAYSIZE(kDgroupRegisterCounts) ==
+                    LOOM_AMDGPU_TENSOR_DGROUP_CAPACITY,
+                "tensor D-group register counts must cover every operand");
+  loom_value_id_t low_dgroups[LOOM_AMDGPU_TENSOR_DGROUP_CAPACITY] = {0};
+  for (uint8_t i = 0; i < plan->dgroup_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_tensor_load_materialize_dgroup(
+        context, source_op, &plan->readfirstlane_descriptor, plan->dgroups[i],
+        kDgroupRegisterCounts[i], &low_dgroups[i]));
+  }
+
+  const loom_amdgpu_memory_access_t cache_access = {
+      .source =
+          {
+              .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+              .cache_policy = plan->cache_policy,
+          },
+  };
+  loom_named_attr_t attrs[3] = {0};
+  iree_host_size_t attr_count = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_memory_cache_attrs(
+      context, &cache_access, attrs, IREE_ARRAYSIZE(attrs), &attr_count));
+  loom_op_t* low_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+      context, &plan->descriptor, low_dgroups, plan->dgroup_count,
+      loom_make_named_attr_slice(attrs, attr_count),
+      /*result_types=*/NULL, /*result_count=*/0, /*tied_results=*/NULL,
+      /*tied_result_count=*/0, source_op->location, &low_op));
+  return loom_low_lower_elide_value(
+      context, loom_kernel_async_tensor_load_to_lds_token(source_op));
+}
+
 void loom_amdgpu_mark_async_gather_plan_storage_demands(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_async_gather_plan_t* plan) {
@@ -638,10 +928,23 @@ void loom_amdgpu_mark_async_gather_plan_storage_demands(
                                                            &plan->source);
 }
 
+void loom_amdgpu_mark_tensor_load_plan_storage_demands(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_tensor_load_plan_t* plan) {
+  (void)source_op;
+  for (uint8_t i = 0; i < plan->dgroup_count; ++i) {
+    loom_low_lower_require_source_value_storage(context, plan->dgroups[i]);
+  }
+}
+
 iree_status_t loom_amdgpu_lower_kernel_async_wait(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_async_wait_plan_t* plan) {
-  return loom_amdgpu_emit_explicit_packet_plan(context, source_op, &plan->wait);
+  for (uint8_t i = 0; i < plan->wait_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_explicit_packet_plan(
+        context, source_op, &plan->waits[i]));
+  }
+  return iree_ok_status();
 }
 
 static iree_string_view_t loom_amdgpu_async_gather_rejection_key(
@@ -694,6 +997,39 @@ static iree_string_view_t loom_amdgpu_async_gather_rejection_key(
     return IREE_SV("async_gather.cache_policy");
   }
   return IREE_SV("async_gather.shape");
+}
+
+static iree_string_view_t loom_amdgpu_tensor_load_rejection_key(
+    const loom_amdgpu_tensor_load_diagnostic_t* diagnostic) {
+  if (iree_any_bit_set(diagnostic->rejection_bits,
+                       LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DESCRIPTOR_VALUE)) {
+    return IREE_SV("tensor_memory.local_descriptor");
+  }
+  if (iree_any_bit_set(diagnostic->rejection_bits,
+                       LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DGROUP_COUNT)) {
+    return IREE_SV("tensor_memory.dgroup_count");
+  }
+  if (iree_any_bit_set(diagnostic->rejection_bits,
+                       LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DGROUP_FACTS)) {
+    return IREE_SV("tensor_memory.dgroup_facts");
+  }
+  if (iree_any_bit_set(diagnostic->rejection_bits,
+                       LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DGROUP_UNIFORMITY)) {
+    return IREE_SV("tensor_memory.dgroup_uniformity");
+  }
+  if (iree_any_bit_set(diagnostic->rejection_bits,
+                       LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DESCRIPTOR_MISSING)) {
+    return IREE_SV("tensor_memory.provider_required");
+  }
+  if (iree_any_bit_set(diagnostic->rejection_bits,
+                       LOOM_AMDGPU_TENSOR_LOAD_REJECTION_DGROUP_MATERIALIZER)) {
+    return IREE_SV("tensor_memory.dgroup_materializer");
+  }
+  if (iree_any_bit_set(diagnostic->rejection_bits,
+                       LOOM_AMDGPU_TENSOR_LOAD_REJECTION_CACHE_POLICY)) {
+    return IREE_SV("tensor_memory.cache_policy");
+  }
+  return IREE_SV("tensor_memory.packet");
 }
 
 static iree_string_view_t loom_amdgpu_async_wait_rejection_key(
@@ -753,6 +1089,36 @@ static iree_status_t loom_amdgpu_low_legality_verify_kernel_async_gather(
       context, op, loom_amdgpu_async_gather_rejection_key(&diagnostic));
 }
 
+static iree_status_t loom_amdgpu_low_legality_verify_kernel_tensor_descriptor(
+    loom_target_low_legality_context_t* context, const loom_op_t* op) {
+  const loom_value_slice_t dgroups =
+      loom_kernel_tensor_lds_descriptor_dgroups(op);
+  loom_amdgpu_descriptor_ref_t descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+  if (dgroups.count > UINT8_MAX ||
+      !loom_amdgpu_tensor_load_select_descriptor(
+          loom_target_low_legality_descriptor_set(context),
+          (uint8_t)dgroups.count, &descriptor_ref)) {
+    return loom_amdgpu_low_legality_reject(
+        context, op, IREE_SV("tensor_memory.provider_required"));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_low_legality_verify_kernel_tensor_load(
+    loom_target_low_legality_context_t* context, const loom_op_t* op) {
+  loom_amdgpu_tensor_load_selection_t selection = {0};
+  loom_amdgpu_tensor_load_diagnostic_t diagnostic = {0};
+  if (loom_amdgpu_tensor_load_select(
+          loom_target_low_legality_module(context),
+          loom_target_low_legality_fact_table(context),
+          loom_target_low_legality_descriptor_set(context), op, &selection,
+          &diagnostic)) {
+    return iree_ok_status();
+  }
+  return loom_amdgpu_low_legality_reject(
+      context, op, loom_amdgpu_tensor_load_rejection_key(&diagnostic));
+}
+
 static iree_status_t loom_amdgpu_low_legality_verify_kernel_async_group(
     loom_target_low_legality_context_t* context, const loom_op_t* op) {
   loom_value_slice_t tokens = loom_kernel_async_group_tokens(op);
@@ -766,9 +1132,11 @@ static iree_status_t loom_amdgpu_low_legality_verify_kernel_async_group(
     const loom_value_t* token = loom_module_value(module, token_id);
     const loom_op_t* defining_op =
         loom_value_is_block_arg(token) ? NULL : loom_value_def_op(token);
-    if (defining_op == NULL || !loom_kernel_async_gather_isa(defining_op)) {
+    if (defining_op == NULL ||
+        (!loom_kernel_async_gather_isa(defining_op) &&
+         !loom_kernel_async_tensor_load_to_lds_isa(defining_op))) {
       return loom_amdgpu_low_legality_reject(
-          context, op, IREE_SV("async_group.local_gather_tokens"));
+          context, op, IREE_SV("async_group.local_transfer_tokens"));
     }
   }
   return iree_ok_status();
@@ -776,22 +1144,21 @@ static iree_status_t loom_amdgpu_low_legality_verify_kernel_async_group(
 
 static iree_status_t loom_amdgpu_low_legality_verify_kernel_async_wait(
     loom_target_low_legality_context_t* context, const loom_op_t* op) {
-  uint16_t target_count = 0;
-  bool needs_wait_packet = false;
+  uint16_t target_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT] = {0};
+  uint32_t wait_counter_mask = 0;
   loom_amdgpu_async_wait_diagnostic_t diagnostic = {0};
   if (!loom_amdgpu_async_wait_stream_counts(
-          loom_target_low_legality_module(context), op, &target_count,
-          &needs_wait_packet, &diagnostic)) {
+          loom_target_low_legality_module(context), op, target_counts,
+          &wait_counter_mask, &diagnostic)) {
     return loom_amdgpu_low_legality_reject(
         context, op, loom_amdgpu_async_wait_rejection_key(&diagnostic));
   }
-  if (!needs_wait_packet) {
-    return iree_ok_status();
-  }
-  loom_amdgpu_wait_packet_selection_t selection = {0};
-  if (loom_amdgpu_async_wait_select_packet(
-          loom_target_low_legality_descriptor_set(context), target_count,
-          &selection, &diagnostic)) {
+  loom_amdgpu_wait_packet_selection_t
+      selections[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT] = {0};
+  uint8_t selection_count = 0;
+  if (loom_amdgpu_async_wait_select_packets(
+          loom_target_low_legality_descriptor_set(context), target_counts,
+          wait_counter_mask, selections, &selection_count, &diagnostic)) {
     return iree_ok_status();
   }
   return loom_amdgpu_low_legality_reject(
@@ -809,18 +1176,22 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_async(
   *out_handled = true;
 
   switch (op->kind) {
+    case LOOM_OP_KERNEL_TENSOR_LDS_DESCRIPTOR:
+      return loom_amdgpu_low_legality_verify_kernel_tensor_descriptor(context,
+                                                                      op);
     case LOOM_OP_KERNEL_ASYNC_GROUP:
       return loom_amdgpu_low_legality_verify_kernel_async_group(context, op);
     case LOOM_OP_KERNEL_ASYNC_WAIT:
       return loom_amdgpu_low_legality_verify_kernel_async_wait(context, op);
     case LOOM_OP_KERNEL_ASYNC_GATHER:
       return loom_amdgpu_low_legality_verify_kernel_async_gather(context, op);
+    case LOOM_OP_KERNEL_ASYNC_TENSOR_LOAD_TO_LDS:
+      return loom_amdgpu_low_legality_verify_kernel_tensor_load(context, op);
     case LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER:
     case LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER_MASK:
     case LOOM_OP_KERNEL_ASYNC_COPY:
     case LOOM_OP_KERNEL_ASYNC_COPY_MASK:
     case LOOM_OP_KERNEL_ASYNC_GATHER_MASK:
-    case LOOM_OP_KERNEL_ASYNC_TENSOR_LOAD_TO_LDS:
     case LOOM_OP_KERNEL_ASYNC_TENSOR_STORE_FROM_LDS:
       return loom_amdgpu_low_legality_reject_async_transfer(context, op);
     default:

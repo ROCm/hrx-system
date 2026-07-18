@@ -22,6 +22,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS,
     _AMDGPU_TRANS_DESCRIPTOR_KEYS,
     _AMDGPU_TRANS_PROXY_LATENCY_CYCLES,
+    _COUNTER_TENSOR,
     _COUNTER_VMEM_LOAD,
     _D16_PARTIAL_REGISTER_ADDRESSABLE_UNIT_COUNT,
     _GFX12_TH_ATOMIC_RETURN_VALUE,
@@ -46,6 +47,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _SOURCE_INLINE_F32_ENCODING_ID,
     _SOURCE_INLINE_U32_ENCODING_ID,
     _VBUFFER_SOFFSET_NULL,
+    _WAIT_COUNTER_TENSOR_ENCODING_ID,
     AMDGPU_ATOMIC_DESCRIPTOR_CATEGORY,
     AMDGPU_COMPARE_SELECT_DESCRIPTOR_CATEGORY,
     AMDGPU_CONTROL_DESCRIPTOR_CATEGORY,
@@ -105,8 +107,14 @@ from loom.target.arch.amdgpu.descriptors.memory import (
     _s_load_dwordx2_overlay,
     _s_load_dwordx4_overlay,
 )
+from loom.target.arch.amdgpu.descriptors.tensor import (
+    _s_wait_tensorcnt_descriptor,
+    _tensor_load_to_lds_descriptor,
+)
 from loom.target.arch.amdgpu.encoding import (
     AMDGPU_ENCODING_FORMAT_IDS,
+    AMDGPU_ENCODING_FORMAT_SOPP,
+    AMDGPU_ENCODING_FORMAT_VIMAGE,
     AMDGPU_ENCODING_FORMAT_VOP1_DPP16,
     AMDGPU_GFX125X_VOP_VGPR_MSB_FORMAT_NAMES,
     AmdgpuVgprMsbSlot,
@@ -1117,6 +1125,76 @@ def test_s_delay_alu_descriptor_is_exposed_on_rdna_families() -> None:
         "rdna4_gfx125x",
     }
     assert "amdgpu.s_delay_alu" in amdgpu_descriptor_ref_keys()
+
+
+@pytest.mark.parametrize(
+    ("dgroup_count", "expected_units", "expected_fields"),
+    [
+        (2, (4, 8), ("VADDR0", "VADDR1")),
+        (4, (4, 8, 4, 4), ("VADDR0", "VADDR1", "VADDR2", "VADDR3")),
+    ],
+)
+def test_gfx125x_tensor_load_descriptors_encode_dgroup_forms(
+    dgroup_count: int,
+    expected_units: tuple[int, ...],
+    expected_fields: tuple[str, ...],
+) -> None:
+    descriptor = _tensor_load_to_lds_descriptor(dgroup_count)
+
+    assert descriptor.key == f"amdgpu.tensor_load_to_lds.d{dgroup_count}"
+    assert descriptor.mnemonic == f"tensor_load_to_lds_d{dgroup_count}"
+    assert descriptor.semantic_tag == "memory.tensor.load.to_lds"
+    assert descriptor.encoding_format_id == AMDGPU_ENCODING_FORMAT_VIMAGE
+    assert descriptor.encoding_id == 0xC4
+    assert descriptor.schedule_class == "amdgpu.tensor.load.lds"
+    assert tuple(operand.unit_count for operand in descriptor.operands) == (
+        expected_units
+    )
+    assert tuple(operand.encoding_field_id for operand in descriptor.operands) == tuple(
+        amdgpu_encoding_field_id(name) for name in expected_fields
+    )
+    assert tuple(
+        (effect.kind, effect.memory_space, effect.counter_id)
+        for effect in descriptor.effects
+    ) == (
+        (EffectKind.READ, MemorySpace.GLOBAL, _COUNTER_TENSOR),
+        (EffectKind.WRITE, MemorySpace.WORKGROUP, _COUNTER_TENSOR),
+    )
+    assert descriptor.asm_forms[0].native_assembly_mnemonic == ("tensor_load_to_lds")
+
+
+def test_gfx125x_tensor_wait_descriptor_uses_independent_counter() -> None:
+    descriptor = _s_wait_tensorcnt_descriptor()
+
+    assert descriptor.key == "amdgpu.s_wait_tensorcnt"
+    assert descriptor.mnemonic == "s_wait_tensorcnt"
+    assert descriptor.encoding_format_id == AMDGPU_ENCODING_FORMAT_SOPP
+    assert descriptor.encoding_id == 0x4B
+    assert descriptor.schedule_class == "amdgpu.wait.tensor"
+    assert len(descriptor.immediates) == 1
+    tensorcnt = descriptor.immediates[0]
+    assert tensorcnt.field_name == "tensorcnt"
+    assert tensorcnt.encoding_id == _WAIT_COUNTER_TENSOR_ENCODING_ID
+    assert tensorcnt.bit_width == 16
+    assert tensorcnt.unsigned_max == 0xFFFF
+    assert descriptor.effects[0].counter_id == _COUNTER_TENSOR
+
+
+def test_tensor_memory_descriptors_are_gfx125x_scoped() -> None:
+    target_descriptor_keys = {
+        target: {descriptor.key for descriptor in builder.extra_descriptors}
+        for target, builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.items()
+    }
+    tensor_keys = {
+        "amdgpu.tensor_load_to_lds.d2",
+        "amdgpu.tensor_load_to_lds.d4",
+        "amdgpu.s_wait_tensorcnt",
+    }
+
+    assert tensor_keys <= target_descriptor_keys["rdna4_gfx125x"]
+    for target, descriptor_keys in target_descriptor_keys.items():
+        if target != "rdna4_gfx125x":
+            assert tensor_keys.isdisjoint(descriptor_keys)
 
 
 def test_gfx125x_vop_operands_use_mode_address_state() -> None:

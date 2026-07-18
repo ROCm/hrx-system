@@ -268,6 +268,8 @@ iree_string_view_t loom_amdgpu_wait_counter_name(uint16_t counter_id) {
       return IREE_SV("smem");
     case LOOM_AMDGPU_WAIT_COUNTER_ALU:
       return IREE_SV("alu");
+    case LOOM_AMDGPU_WAIT_COUNTER_TENSOR:
+      return IREE_SV("tensor");
     case LOOM_AMDGPU_WAIT_COUNTER_NONE:
     default:
       return IREE_SV("unknown");
@@ -287,6 +289,8 @@ iree_string_view_t loom_amdgpu_wait_counter_progress_class_name(
       return IREE_SV("amdgpu.smem");
     case LOOM_AMDGPU_WAIT_COUNTER_ALU:
       return IREE_SV("amdgpu.alu");
+    case LOOM_AMDGPU_WAIT_COUNTER_TENSOR:
+      return IREE_SV("amdgpu.tensor");
     case LOOM_AMDGPU_WAIT_COUNTER_NONE:
     default:
       return IREE_SV("amdgpu.unknown");

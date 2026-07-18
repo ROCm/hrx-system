@@ -1568,6 +1568,15 @@ static iree_status_t loom_amdgpu_append_memory_cache_attrs(
   return iree_ok_status();
 }
 
+iree_status_t loom_amdgpu_make_memory_cache_attrs(
+    loom_low_lower_context_t* context,
+    const loom_amdgpu_memory_access_t* access, loom_named_attr_t* attrs,
+    iree_host_size_t attr_capacity, iree_host_size_t* out_attr_count) {
+  *out_attr_count = 0;
+  return loom_amdgpu_append_memory_cache_attrs(context, access, attrs,
+                                               attr_capacity, out_attr_count);
+}
+
 iree_status_t loom_amdgpu_make_memory_attrs(
     loom_low_lower_context_t* context,
     const loom_amdgpu_memory_access_t* access, loom_named_attr_t* attrs,

@@ -1723,6 +1723,8 @@ typedef enum loom_amdgpu_descriptor_packet_route_flag_bits_e {
   LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_DATA_SHARE_FORMAT = 1u << 7,
   // Descriptor has exactly the two immediates used by s_waitcnt.
   LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_TWO_IMMEDIATES = 1u << 8,
+  // Descriptor's canonical form completely defines its native spelling.
+  LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_NATIVE_FORM = 1u << 9,
 } loom_amdgpu_descriptor_packet_route_flag_bits_t;
 typedef uint16_t loom_amdgpu_descriptor_packet_route_flags_t;
 
@@ -1739,6 +1741,7 @@ typedef enum loom_amdgpu_descriptor_packet_route_kind_e {
   LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_GLOBAL_LOAD,
   LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_GLOBAL_STORE,
   LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_WAITCNT,
+  LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_CANONICAL,
 } loom_amdgpu_descriptor_packet_route_kind_t;
 
 typedef struct loom_amdgpu_descriptor_packet_route_t {
@@ -1806,6 +1809,17 @@ loom_amdgpu_descriptor_packet_route_flags(
   if (descriptor->immediate_count == 2) {
     flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_TWO_IMMEDIATES;
   }
+  if (descriptor->canonical_asm_form_ordinal !=
+      LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
+    IREE_ASSERT_LT(descriptor->canonical_asm_form_ordinal,
+                   descriptor_set->asm_form_count);
+    IREE_ASSERT(descriptor_set->asm_forms != NULL);
+    const loom_low_asm_form_t* form =
+        &descriptor_set->asm_forms[descriptor->canonical_asm_form_ordinal];
+    if (form->native_assembly_value_count > 0) {
+      flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_NATIVE_FORM;
+    }
+  }
   return flags;
 }
 
@@ -1847,6 +1861,8 @@ static iree_status_t loom_amdgpu_append_descriptor_packet_route(
       return loom_amdgpu_append_global_store_packet(context);
     case LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_WAITCNT:
       return loom_amdgpu_append_waitcnt_packet(context);
+    case LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_CANONICAL:
+      return loom_amdgpu_append_canonical_asm_form_packet(context);
     default:
       IREE_ASSERT_UNREACHABLE(
           "AMDGPU assembly descriptor route table must use a known route kind");
@@ -1894,6 +1910,13 @@ static iree_status_t loom_amdgpu_try_append_descriptor_packet_route(
               LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_WRITE_EFFECT |
               LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_DATA_SHARE_FORMAT,
           .route_kind = LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_MEMORY,
+      },
+      {
+          .required_flags =
+              LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_READ_EFFECT |
+              LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_WRITE_EFFECT |
+              LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_NATIVE_FORM,
+          .route_kind = LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_CANONICAL,
       },
       {
           .required_flags =

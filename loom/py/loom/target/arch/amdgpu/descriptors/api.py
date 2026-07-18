@@ -28,6 +28,7 @@ from .categories import *
 from .common import *
 from .control import _s_delay_alu_descriptor
 from .sets import *
+from .tensor import _gfx125x_tensor_descriptors
 
 
 def _descriptor_has_memory_effect(descriptor: Descriptor) -> bool:
@@ -331,6 +332,7 @@ def amdgpu_immediate_encoding_id_items() -> tuple[tuple[str, int], ...]:
         ("wait_counter_lds", _WAIT_COUNTER_LDS_ENCODING_ID),
         ("wait_counter_smem", _WAIT_COUNTER_SMEM_ENCODING_ID),
         ("wait_counter_alu", _WAIT_COUNTER_ALU_ENCODING_ID),
+        ("wait_counter_tensor", _WAIT_COUNTER_TENSOR_ENCODING_ID),
     )
 
 
@@ -583,18 +585,21 @@ _AMDGPU_WAIT_COUNTER_MASKS = {
     _COUNTER_LDS: 1 << 2,
     _COUNTER_SMEM: 1 << 3,
     _COUNTER_ALU: 1 << 4,
+    _COUNTER_TENSOR: 1 << 5,
 }
 
 _AMDGPU_READ_COUNTER_MASK = (
     _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_VMEM_LOAD]
     | _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_LDS]
     | _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_SMEM]
+    | _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_TENSOR]
 )
 
 _AMDGPU_WRITE_COUNTER_MASK = (
     _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_VMEM_STORE]
     | _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_LDS]
     | _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_SMEM]
+    | _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_TENSOR]
 )
 
 _AMDGPU_STORAGE_LEASE_MEMORY_SPACES = frozenset(
@@ -612,6 +617,7 @@ _AMDGPU_WAIT_COUNTER_PROGRESS_CLASS_NAMES = {
     _COUNTER_LDS: "amdgpu.lds",
     _COUNTER_SMEM: "amdgpu.smem",
     _COUNTER_ALU: "amdgpu.alu",
+    _COUNTER_TENSOR: "amdgpu.tensor",
 }
 
 _AMDGPU_WAIT_PLAN_RESIDUAL_ACTION_WAIT_PACKET = 1
@@ -821,13 +827,18 @@ def _amdgpu_descriptor_storage_leases(
                     flags=_AMDGPU_PRESSURE_STORAGE_LEASE_FLAGS,
                 )
             )
-    vmem_read_counter_mask = (
-        read_counter_mask & _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_VMEM_LOAD]
+    memory_source_read_counter_mask = read_counter_mask & (
+        _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_VMEM_LOAD]
+        | _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_TENSOR]
+    )
+    memory_source_write_counter_mask = write_counter_mask & (
+        _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_VMEM_STORE]
+        | _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_TENSOR]
     )
     vmem_write_counter_mask = (
         write_counter_mask & _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_VMEM_STORE]
     )
-    if vmem_read_counter_mask != 0 or vmem_write_counter_mask != 0:
+    if memory_source_read_counter_mask != 0 or memory_source_write_counter_mask != 0:
         packet_operand_index = 0
         for operand in descriptor.operands[_descriptor_result_count(descriptor) :]:
             if not _amdgpu_operand_is_packet_input(operand):
@@ -856,7 +867,7 @@ def _amdgpu_descriptor_storage_leases(
                     storage_leases,
                     operand,
                     current_packet_operand_index,
-                    vmem_read_counter_mask | vmem_write_counter_mask,
+                    memory_source_read_counter_mask | memory_source_write_counter_mask,
                 )
     return tuple(storage_leases)
 
@@ -904,6 +915,10 @@ _AMDGPU_SCHEDULE_INSTRUCTION_CLASSES = {
     _SCHEDULE_LDS_STORE: (InstructionClass.LOCAL_MEMORY,),
     _SCHEDULE_LDS_ATOMIC: (InstructionClass.LOCAL_MEMORY,),
     _SCHEDULE_LDS_CROSSLANE: (InstructionClass.LOCAL_MEMORY,),
+    _SCHEDULE_TENSOR_LOAD_LDS: (
+        InstructionClass.GLOBAL_MEMORY,
+        InstructionClass.LOCAL_MEMORY,
+    ),
     _SCHEDULE_MFMA: (InstructionClass.MFMA,),
     _SCHEDULE_WMMA: (InstructionClass.WMMA,),
     _SCHEDULE_WMMA_SCALE: (InstructionClass.WMMA,),
@@ -980,7 +995,10 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
     "rdna4_gfx125x": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,
         overlay_descriptors=_gfx1250_core_overlay_descriptors,
-        extra_descriptors=(_s_delay_alu_descriptor(),),
+        extra_descriptors=(
+            _s_delay_alu_descriptor(),
+            *_gfx125x_tensor_descriptors(),
+        ),
     ),
 }
 

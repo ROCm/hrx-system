@@ -25,11 +25,13 @@ enum loom_amdgpu_wait_counter_e {
   LOOM_AMDGPU_WAIT_COUNTER_SMEM = 4,
   // ALU dependency counter used by depctr-style wait packets.
   LOOM_AMDGPU_WAIT_COUNTER_ALU = 5,
+  // Gfx125x tensor-memory transfer completion counter.
+  LOOM_AMDGPU_WAIT_COUNTER_TENSOR = 6,
 };
 
 // Number of concrete AMDGPU wait-counter slots. Counter ids are one-based, so
 // slot ids map to counter ids by adding one.
-#define LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT LOOM_AMDGPU_WAIT_COUNTER_ALU
+#define LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT LOOM_AMDGPU_WAIT_COUNTER_TENSOR
 
 // Bit masks for AMDGPU wait counters. These are descriptor-overlay ids, not
 // native instruction bit encodings.
@@ -38,15 +40,18 @@ enum loom_amdgpu_wait_counter_e {
 #define LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS ((uint32_t)1u << 2)
 #define LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM ((uint32_t)1u << 3)
 #define LOOM_AMDGPU_WAIT_COUNTER_MASK_ALU ((uint32_t)1u << 4)
+#define LOOM_AMDGPU_WAIT_COUNTER_MASK_TENSOR ((uint32_t)1u << 5)
 #define LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM   \
   (LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD | \
    LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE)
-#define LOOM_AMDGPU_WAIT_COUNTER_MASK_READ   \
-  (LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD | \
-   LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS | LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM)
-#define LOOM_AMDGPU_WAIT_COUNTER_MASK_WRITE   \
-  (LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE | \
-   LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS | LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM)
+#define LOOM_AMDGPU_WAIT_COUNTER_MASK_READ                                  \
+  (LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD |                                \
+   LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS | LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM | \
+   LOOM_AMDGPU_WAIT_COUNTER_MASK_TENSOR)
+#define LOOM_AMDGPU_WAIT_COUNTER_MASK_WRITE                                 \
+  (LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE |                               \
+   LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS | LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM | \
+   LOOM_AMDGPU_WAIT_COUNTER_MASK_TENSOR)
 #define LOOM_AMDGPU_WAIT_COUNTER_MASK_WORKGROUP \
   LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS
 #define LOOM_AMDGPU_WAIT_COUNTER_MASK_MEMORY \
@@ -57,7 +62,7 @@ enum loom_amdgpu_wait_counter_e {
 // Returns true when |counter_id| names a concrete AMDGPU wait counter.
 static inline bool loom_amdgpu_wait_counter_id_is_valid(uint16_t counter_id) {
   return counter_id >= LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD &&
-         counter_id <= LOOM_AMDGPU_WAIT_COUNTER_ALU;
+         counter_id <= LOOM_AMDGPU_WAIT_COUNTER_TENSOR;
 }
 
 // Converts a concrete one-based counter id into its dense zero-based slot.

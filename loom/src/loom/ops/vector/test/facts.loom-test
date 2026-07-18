@@ -1,5 +1,22 @@
 // RUN: pass canonicalize
 
+// Compile-time vectors have the same value in every workitem even though their
+// logical elements are represented by an extension fact.
+func.def @constant_is_workgroup_uniform() -> (i1, i1) {
+  %value = vector.constant 2 : vector<4xi32>
+  %subgroup = test.fact_subgroup_uniform %value : vector<4xi32> -> i1
+  %workgroup = test.fact_workgroup_uniform %value : vector<4xi32> -> i1
+  func.return %subgroup, %workgroup : i1, i1
+}
+// ----
+func.def @constant_is_workgroup_uniform() -> (i1, i1) {
+  %subgroup = scalar.constant true : i1
+  %workgroup = scalar.constant true : i1
+  func.return %subgroup, %workgroup : i1, i1
+}
+
+// ====
+
 // Uniform vector.constant facts let reductions fold to scalar constants without
 // materializing vector constants.
 func.def @reduce_uniform_constant_addi() -> (i32) {

@@ -726,6 +726,10 @@ static const loom_amdgpu_lower_dispatch_row_t
             LOOM_AMDGPU_LEGALITY_ROW(
                 LOOM_OP_KERNEL_WORKGROUP_VOTE_COUNT,
                 loom_amdgpu_low_legality_verify_kernel_collective),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_TENSOR_LDS_DESCRIPTOR)] =
+            LOOM_AMDGPU_LEGALITY_ROW(
+                LOOM_OP_KERNEL_TENSOR_LDS_DESCRIPTOR,
+                loom_amdgpu_low_legality_verify_kernel_async),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER)] =
             LOOM_AMDGPU_LEGALITY_ROW(
                 LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER,
@@ -758,9 +762,14 @@ static const loom_amdgpu_lower_dispatch_row_t
                 LOOM_OP_KERNEL_ASYNC_GROUP,
                 loom_amdgpu_low_legality_verify_kernel_async),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_ASYNC_TENSOR_LOAD_TO_LDS)] =
-            LOOM_AMDGPU_LEGALITY_ROW(
+            LOOM_AMDGPU_RECIPE_DATA_STORAGE_REPORT_KEY_ROW(
                 LOOM_OP_KERNEL_ASYNC_TENSOR_LOAD_TO_LDS,
-                loom_amdgpu_low_legality_verify_kernel_async),
+                loom_amdgpu_tensor_load_plan_t,
+                loom_amdgpu_select_kernel_async_tensor_load_dispatch,
+                loom_amdgpu_emit_kernel_async_tensor_load_dispatch,
+                loom_amdgpu_low_legality_verify_kernel_async,
+                LOOM_AMDGPU_STORAGE_ASYNC_TENSOR,
+                LOOM_AMDGPU_REPORT_KEY_TENSOR_MEMORY_PACKET),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_ASYNC_TENSOR_STORE_FROM_LDS)] =
             LOOM_AMDGPU_LEGALITY_ROW(
                 LOOM_OP_KERNEL_ASYNC_TENSOR_STORE_FROM_LDS,

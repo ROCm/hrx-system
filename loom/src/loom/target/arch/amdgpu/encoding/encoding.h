@@ -104,6 +104,8 @@ typedef enum loom_amdgpu_encoding_format_e {
   LOOM_AMDGPU_ENCODING_FORMAT_VFLAT = 25,
   // RDNA4 global memory instruction format.
   LOOM_AMDGPU_ENCODING_FORMAT_VGLOBAL = 26,
+  // RDNA4 image/tensor-memory instruction format.
+  LOOM_AMDGPU_ENCODING_FORMAT_VIMAGE = 27,
   // RDNA4 scratch/private-memory instruction format.
   LOOM_AMDGPU_ENCODING_FORMAT_VSCRATCH = 34,
   // Vector one-source 32-bit instruction format.

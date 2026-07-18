@@ -22,6 +22,7 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/target/arch/amdgpu/lower/kinds.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
+#include "loom/target/arch/amdgpu/planning/wait_counters.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/util/numeric_format.h"
 
@@ -1546,6 +1547,21 @@ typedef struct loom_amdgpu_async_gather_plan_t {
   loom_low_lower_resolved_descriptor_t descriptor;
 } loom_amdgpu_async_gather_plan_t;
 
+#define LOOM_AMDGPU_TENSOR_DGROUP_CAPACITY 4
+
+typedef struct loom_amdgpu_tensor_load_plan_t {
+  // Descriptor row selected for the d2 or d4 tensor-load packet.
+  loom_low_lower_resolved_descriptor_t descriptor;
+  // Descriptor row used to move each uniform D-group lane into an SGPR.
+  loom_low_lower_resolved_descriptor_t readfirstlane_descriptor;
+  // Source values materialized as the packet's D0 through D3 SGPR groups.
+  loom_value_id_t dgroups[LOOM_AMDGPU_TENSOR_DGROUP_CAPACITY];
+  // Number of populated D-group source values.
+  uint8_t dgroup_count;
+  // Source cache policy encoded on the tensor-load packet.
+  loom_vector_memory_cache_policy_t cache_policy;
+} loom_amdgpu_tensor_load_plan_t;
+
 #define LOOM_AMDGPU_ASYNC_WAIT_IMMEDIATE_CAPACITY \
   LOOM_AMDGPU_EXPLICIT_PACKET_IMMEDIATE_CAPACITY
 
@@ -1553,8 +1569,10 @@ typedef loom_amdgpu_explicit_packet_immediate_template_t
     loom_amdgpu_async_wait_immediate_t;
 
 typedef struct loom_amdgpu_async_wait_plan_t {
-  // Explicit wait packet selected for the async stream wait.
-  loom_amdgpu_explicit_packet_plan_t wait;
+  // Explicit wait packets selected independently for each async counter.
+  loom_amdgpu_explicit_packet_plan_t waits[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT];
+  // Number of populated wait packets.
+  uint8_t wait_count;
 } loom_amdgpu_async_wait_plan_t;
 
 #ifdef __cplusplus

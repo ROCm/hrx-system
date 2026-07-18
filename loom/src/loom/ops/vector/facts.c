@@ -1790,8 +1790,10 @@ iree_status_t loom_vector_constant_facts(
   loom_type_t result_type = loom_module_value_type(module, result_id);
   loom_value_facts_t element = loom_vector_attr_element_facts(
       loom_vector_constant_value(op), loom_type_element_type(result_type));
-  return loom_value_facts_make_uniform_element(context, element,
-                                               &result_facts[0]);
+  IREE_RETURN_IF_ERROR(loom_value_facts_make_uniform_element(context, element,
+                                                             &result_facts[0]));
+  loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
+  return iree_ok_status();
 }
 
 iree_status_t loom_vector_splat_facts(loom_fact_context_t* context,

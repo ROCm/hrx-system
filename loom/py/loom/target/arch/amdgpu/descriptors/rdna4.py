@@ -541,7 +541,10 @@ _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     key="amdgpu.rdna4.gfx125x.core",
     reg_classes=_gfx125x_reg_classes(),
     register_parts=_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE.register_parts,
-    resources=_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE.resources,
+    resources=(
+        *_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE.resources,
+        Resource(_RESOURCE_TENSOR, capacity_per_cycle=1, kind=ResourceKind.LOAD),
+    ),
     schedule_classes=(
         *_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
         ScheduleClass(
@@ -551,6 +554,24 @@ _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
             issue_uses=(IssueUse(_RESOURCE_WMMA, cycles=1, units=1),),
             hazards=_matrix_hazards(_RESOURCE_WMMA),
             model_quality=ModelQuality.ESTIMATED,
+        ),
+        ScheduleClass(
+            _SCHEDULE_TENSOR_LOAD_LDS,
+            latency_kind=LatencyKind.VARIABLE,
+            latency_cycles=16,
+            issue_uses=(IssueUse(_RESOURCE_TENSOR, cycles=1, units=1),),
+            hazards=_TENSOR_WAIT_HAZARDS,
+            flags=(ScheduleClassFlag.MAY_LOAD, ScheduleClassFlag.MAY_STORE),
+            model_quality=ModelQuality.FALLBACK,
+        ),
+        ScheduleClass(
+            _SCHEDULE_WAIT_TENSOR,
+            latency_kind=LatencyKind.VARIABLE,
+            latency_cycles=1,
+            issue_uses=(IssueUse(_RESOURCE_CONTROL, cycles=1, units=1),),
+            hazards=_TENSOR_WAIT_HAZARDS,
+            flags=(ScheduleClassFlag.CONTROL,),
+            model_quality=ModelQuality.FALLBACK,
         ),
     ),
     descriptors=(

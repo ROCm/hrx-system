@@ -99,6 +99,7 @@ iree_py_library(
         "descriptors/rdna3.py",
         "descriptors/rdna4.py",
         "descriptors/sets.py",
+        "descriptors/tensor.py",
         "descriptors/workgroup.py",
         "target_info.py",
     ],

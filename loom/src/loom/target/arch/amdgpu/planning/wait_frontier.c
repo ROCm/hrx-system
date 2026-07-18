@@ -25,8 +25,9 @@ enum {
 
 static_assert(LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT <= 8,
               "memory-space frontier flags must fit in one byte");
-static_assert(sizeof(loom_amdgpu_wait_memory_state_t) == 10,
-              "memory frontier state must remain compact");
+static_assert(sizeof(loom_amdgpu_wait_memory_state_t) ==
+                  sizeof(uint16_t) * LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT,
+              "memory frontier state must not acquire padding");
 static_assert(LOOM_AMDGPU_VMEM_RESULT_ORDER_CLASS_COUNT - 1 ==
                   LOOM_AMDGPU_WAIT_VMEM_RESULT_BITS_PER_UNIT,
               "VMEM result classes must fit the packed frontier state");
