@@ -482,6 +482,26 @@ kernel.def export("entry") @entry() {
 
 // ====
 
+// Kernel entries export under their symbol name when export(...) is omitted.
+// RUN: pass select-templates{mode=final}
+
+kernel.def @implicit_export() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  kernel.return
+}
+
+// ----
+kernel.def @implicit_export() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
 // RUN: pass select-templates{mode=final}
 
 func.template<demo.workgroup_reduce> @reduce_provider(%value: f32) -> (f32) {

@@ -1002,6 +1002,13 @@ loom_named_attr_slice_t loom_func_like_export_attrs(loom_func_like_t func) {
       loom_op_attrs(func.op)[func.vtable->export_attrs_attr_index]);
 }
 
+bool loom_func_like_is_kernel_entry(loom_func_like_t func) {
+  if (!func.op) return false;
+  const loom_op_kind_t kernel_def = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 0);
+  const loom_op_kind_t low_kernel_def = LOOM_OP_KIND(LOOM_DIALECT_LOW, 1);
+  return func.op->kind == kernel_def || func.op->kind == low_kernel_def;
+}
+
 bool loom_func_like_export_linkage(loom_func_like_t func,
                                    uint8_t* out_linkage) {
   *out_linkage = 0;

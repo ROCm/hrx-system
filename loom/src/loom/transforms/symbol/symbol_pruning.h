@@ -32,7 +32,8 @@ typedef struct loom_symbol_pruning_result_t {
 typedef uint32_t loom_symbol_pruning_flags_t;
 
 typedef enum loom_symbol_pruning_flag_bits_e {
-  // Retain private source-level func/kernel entries with target records.
+  // Retain private source-level func entries with target records. Kernel
+  // entries are always roots because they export by symbol name.
   LOOM_SYMBOL_PRUNING_RETAIN_TARGET_SOURCE_ENTRIES = 1u << 0,
 } loom_symbol_pruning_flag_bits_e;
 

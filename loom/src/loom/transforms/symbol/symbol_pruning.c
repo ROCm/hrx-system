@@ -10,10 +10,10 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 
-static bool loom_symbol_pruning_function_is_source_entry(
+static bool loom_symbol_pruning_function_is_target_source_entry(
     loom_func_like_t function) {
   return loom_symbol_ref_is_valid(loom_func_like_target(function)) &&
-         (loom_func_def_isa(function.op) || loom_kernel_def_isa(function.op));
+         loom_func_def_isa(function.op);
 }
 
 static bool loom_symbol_pruning_retain_target_source_entries(
@@ -40,11 +40,14 @@ static bool loom_symbol_pruning_symbol_is_erasable_with_options(
     if (!loom_func_like_isa(function)) {
       return true;
     }
+    if (loom_func_like_is_kernel_entry(function)) {
+      return false;
+    }
     if (loom_func_like_visibility(function) != 0) {
       return false;
     }
     if (loom_symbol_pruning_retain_target_source_entries(options) &&
-        loom_symbol_pruning_function_is_source_entry(function)) {
+        loom_symbol_pruning_function_is_target_source_entry(function)) {
       return false;
     }
     if (loom_func_like_export_symbol(function) != LOOM_STRING_ID_INVALID ||

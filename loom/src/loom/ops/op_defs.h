@@ -1339,6 +1339,11 @@ loom_string_id_t loom_func_like_export_symbol(loom_func_like_t func);
 // Returns the export payload attrs, or an empty slice if absent.
 loom_named_attr_slice_t loom_func_like_export_attrs(loom_func_like_t func);
 
+// Returns true when |func| is a source-level or target-low kernel entry.
+// Kernel entries are exported by symbol name even without an explicit export
+// symbol attribute.
+bool loom_func_like_is_kernel_entry(loom_func_like_t func);
+
 // Returns true and assigns the export linkage enum value when present.
 bool loom_func_like_export_linkage(loom_func_like_t func, uint8_t* out_linkage);
 
