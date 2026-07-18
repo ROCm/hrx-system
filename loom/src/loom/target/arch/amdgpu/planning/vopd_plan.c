@@ -138,6 +138,8 @@ typedef struct loom_amdgpu_vopd_plan_builder_t {
   const loom_low_allocation_table_t* allocation;
   // Processor facts for architecture-specific packetization hazards.
   const loom_amdgpu_processor_info_t* processor;
+  // Optional address-state transitions that block second-component fusion.
+  const loom_amdgpu_address_state_plan_t* address_state;
   // Optional planned wait packets that block second-component fusion.
   const loom_amdgpu_wait_packet_plan_t* wait_packets;
   // Optional planned wait states that block second-component fusion.
@@ -676,6 +678,14 @@ static iree_status_t loom_amdgpu_vopd_verify_wait_packet_plan(
   return iree_ok_status();
 }
 
+static iree_status_t loom_amdgpu_vopd_verify_address_state_plan(
+    const loom_low_schedule_table_t* schedule,
+    const loom_low_allocation_table_t* allocation,
+    const loom_amdgpu_address_state_plan_t* address_state) {
+  return loom_amdgpu_address_state_plan_verify(schedule, allocation,
+                                               address_state);
+}
+
 static iree_status_t loom_amdgpu_vopd_verify_wait_state_plan(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
@@ -742,6 +752,25 @@ static iree_status_t loom_amdgpu_vopd_packet_index_for_insertion(
                             node_index, packet_node_index);
   }
   *out_packet_index = packet_index;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_vopd_mark_address_state_insertions(
+    loom_amdgpu_vopd_plan_builder_t* builder) {
+  if (builder->address_state == NULL) {
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = 0; i < builder->address_state->transition_count;
+       ++i) {
+    const loom_amdgpu_address_state_transition_t* transition =
+        &builder->address_state->transitions[i];
+    uint32_t packet_index = LOOM_LOW_PACKET_INDEX_NONE;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_packet_index_for_insertion(
+        builder->schedule, transition->block_index, transition->node_index,
+        transition->scheduled_ordinal, &packet_index));
+    builder->packet_flags[packet_index] |=
+        LOOM_AMDGPU_VOPD_PACKET_FLAG_INSERTION_BLOCKED;
+  }
   return iree_ok_status();
 }
 
@@ -922,6 +951,7 @@ static iree_status_t loom_amdgpu_vopd_plan_allocate(
   }
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_vopd_plan_allocate_trans_result_guard(builder));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_mark_address_state_insertions(builder));
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_mark_wait_packet_insertions(builder));
   return loom_amdgpu_vopd_mark_wait_state_insertions(builder);
 }
@@ -2321,6 +2351,7 @@ iree_status_t loom_amdgpu_vopd_plan_format_json(
 iree_status_t loom_amdgpu_vopd_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
+    const loom_amdgpu_address_state_plan_t* address_state,
     const loom_amdgpu_wait_packet_plan_t* wait_packets,
     const loom_amdgpu_wait_state_plan_t* wait_states,
     iree_arena_allocator_t* arena, loom_amdgpu_vopd_plan_t* out_plan) {
@@ -2331,6 +2362,8 @@ iree_status_t loom_amdgpu_vopd_plan_build(
                             "AMDGPU VOPD planning");
   }
   IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_verify_address_state_plan(
+      schedule, allocation, address_state));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_vopd_verify_wait_packet_plan(schedule, wait_packets));
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_verify_wait_state_plan(
@@ -2354,6 +2387,7 @@ iree_status_t loom_amdgpu_vopd_plan_build(
       .allocation = allocation,
       .processor = loom_amdgpu_target_processor_from_resolved_target(
           schedule->module, &schedule->target),
+      .address_state = address_state,
       .wait_packets = wait_packets,
       .wait_states = wait_states,
       .arena = arena,

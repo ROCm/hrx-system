@@ -38,14 +38,20 @@ typedef enum loom_amdgpu_native_asm_immediate_format_e {
 } loom_amdgpu_native_asm_immediate_format_t;
 
 typedef struct loom_amdgpu_assembly_emit_state_t {
+  // Address-state plan consumed in scheduled insertion order.
+  const loom_amdgpu_address_state_plan_t* address_state;
   // Wait-packet plan consumed in scheduled insertion order.
   const loom_amdgpu_wait_packet_plan_t* wait_packets;
   // Wait-state plan consumed in scheduled insertion order.
   const loom_amdgpu_wait_state_plan_t* wait_states;
   // VOPD plan used to replace paired descriptor packets.
   const loom_amdgpu_vopd_plan_t* vopd_plan;
+  // Current scheduled block, or LOOM_LOW_PACKET_INDEX_NONE before emission.
+  uint32_t current_block_index;
   // Low byte of MODE's current VGPR-MSB selector state.
   uint8_t current_vgpr_msb_mode;
+  // Next address-state transition to compare with the scheduled packet.
+  iree_host_size_t next_address_state_index;
   // Next wait-packet row to compare with the current scheduled packet.
   iree_host_size_t next_wait_packet_index;
   // Next wait-state row to compare with the current scheduled packet.
@@ -2034,6 +2040,98 @@ static bool loom_amdgpu_wait_packet_is_before_node(
           wait_packet->scheduled_ordinal < node->scheduled_ordinal);
 }
 
+static bool loom_amdgpu_address_state_is_before_node(
+    const loom_amdgpu_address_state_transition_t* transition,
+    const loom_low_schedule_node_t* node) {
+  return transition->block_index < node->block_index ||
+         (transition->block_index == node->block_index &&
+          transition->scheduled_ordinal < node->scheduled_ordinal);
+}
+
+static iree_status_t loom_amdgpu_prepare_packet(
+    void* user_data, const loom_native_assembly_packet_context_t* context) {
+  loom_amdgpu_assembly_emit_state_t* state =
+      (loom_amdgpu_assembly_emit_state_t*)user_data;
+  const uint32_t block_index = context->packet->node->block_index;
+  if (state->current_block_index == LOOM_LOW_PACKET_INDEX_NONE) {
+    state->current_block_index = block_index;
+    return iree_ok_status();
+  }
+  if (state->current_block_index == block_index) {
+    return iree_ok_status();
+  }
+  if (state->current_vgpr_msb_mode != 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU assembly left VGPR-MSB address state active at the end of "
+        "block %" PRIu32,
+        state->current_block_index);
+  }
+  state->current_block_index = block_index;
+  return iree_ok_status();
+}
+
+static bool loom_amdgpu_address_state_matches_packet(
+    const loom_amdgpu_address_state_transition_t* transition,
+    const loom_low_packet_view_t* packet) {
+  const loom_low_schedule_node_t* node = packet->node;
+  return transition->block_index == node->block_index &&
+         transition->scheduled_ordinal == node->scheduled_ordinal &&
+         transition->node_index == packet->node_index;
+}
+
+static iree_status_t loom_amdgpu_append_address_state_before_packet(
+    void* user_data, const loom_native_assembly_packet_context_t* context) {
+  loom_amdgpu_assembly_emit_state_t* state =
+      (loom_amdgpu_assembly_emit_state_t*)user_data;
+  if (state->address_state == NULL) {
+    return iree_ok_status();
+  }
+  while (state->next_address_state_index <
+         state->address_state->transition_count) {
+    const loom_amdgpu_address_state_transition_t* transition =
+        &state->address_state->transitions[state->next_address_state_index];
+    if (loom_amdgpu_address_state_is_before_node(transition,
+                                                 context->packet->node)) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU address-state plan contains an insertion point before the "
+          "current scheduled packet");
+    }
+    if (!loom_amdgpu_address_state_matches_packet(transition,
+                                                  context->packet)) {
+      return iree_ok_status();
+    }
+    const uint8_t previous_mode = (uint8_t)(transition->mode_immediate >> 8);
+    const uint8_t new_mode = (uint8_t)(transition->mode_immediate & 0xFFu);
+    if (state->current_vgpr_msb_mode != previous_mode) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU address-state transition previous mode does not match the "
+          "assembly stream");
+    }
+    const loom_low_descriptor_t* descriptor =
+        loom_amdgpu_descriptor_ref_descriptor(
+            context->schedule->target.descriptor_set,
+            LOOM_AMDGPU_DESCRIPTOR_REF_S_SET_VGPR_MSB);
+    if (descriptor == NULL) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "AMDGPU address-state plan requires a missing "
+                              "s_set_vgpr_msb descriptor");
+    }
+    iree_string_view_t mnemonic = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
+        context->schedule->target.descriptor_set,
+        descriptor->mnemonic_string_offset, &mnemonic));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        context->builder, "  %.*s %" PRIu16 "\n", (int)mnemonic.size,
+        mnemonic.data, transition->mode_immediate));
+    state->current_vgpr_msb_mode = new_mode;
+    ++state->next_address_state_index;
+  }
+  return iree_ok_status();
+}
+
 static bool loom_amdgpu_wait_packet_matches_packet(
     const loom_amdgpu_wait_packet_t* wait_packet,
     const loom_low_packet_view_t* packet) {
@@ -2178,8 +2276,11 @@ static iree_status_t loom_amdgpu_append_waits_before_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
   loom_amdgpu_assembly_emit_state_t* state =
       (loom_amdgpu_assembly_emit_state_t*)user_data;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_packet(user_data, context));
   state->packet_emitted_delay_alu = false;
   state->packet_delay_alu_immediate = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_append_address_state_before_packet(user_data, context));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_append_wait_packets_before_packet(user_data, context));
   return loom_amdgpu_append_wait_states_before_packet(user_data, context);
@@ -3491,6 +3592,18 @@ static iree_status_t loom_amdgpu_append_stateful_descriptor_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
   loom_amdgpu_assembly_emit_state_t* state =
       (loom_amdgpu_assembly_emit_state_t*)user_data;
+  loom_amdgpu_address_state_requirement_t requirement = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_query_requirement(
+      context->schedule, context->allocation, context->packet->node,
+      &requirement));
+  const uint8_t current_mode = state == NULL ? 0 : state->current_vgpr_msb_mode;
+  if ((current_mode & requirement.mask) !=
+      (requirement.value & requirement.mask)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU descriptor packet reached assembly emission without its "
+        "required address-state transition");
+  }
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_descriptor_packet(NULL, context));
   return loom_amdgpu_update_vgpr_msb_mode_after_descriptor(state, context);
 }
@@ -3686,16 +3799,28 @@ iree_status_t loom_amdgpu_emit_assembly_fragment(
     const loom_low_allocation_table_t* allocation,
     iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
   IREE_RETURN_IF_ERROR(loom_amdgpu_verify_assembly_target(schedule));
-  loom_amdgpu_assembly_emit_state_t emit_state = {0};
+  loom_amdgpu_assembly_emit_state_t emit_state = {
+      .current_block_index = LOOM_LOW_PACKET_INDEX_NONE,
+  };
   const loom_native_assembly_format_options_t options =
       loom_amdgpu_assembly_options(
-          &emit_state, (loom_native_assembly_append_packet_callback_t){0},
+          &emit_state,
+          (loom_native_assembly_append_packet_callback_t){
+              .fn = loom_amdgpu_prepare_packet,
+              .user_data = &emit_state,
+          },
           (loom_native_assembly_append_packet_callback_t){
               .fn = loom_amdgpu_append_stateful_descriptor_packet,
               .user_data = &emit_state,
           });
-  return loom_native_assembly_format_fragment(schedule, allocation, &options,
-                                              builder, scratch_arena);
+  IREE_RETURN_IF_ERROR(loom_native_assembly_format_fragment(
+      schedule, allocation, &options, builder, scratch_arena));
+  if (emit_state.current_vgpr_msb_mode != 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU assembly left VGPR-MSB address state active at function end");
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
@@ -3708,6 +3833,8 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
       options ? options->packet_plan : NULL;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_packet_plan_verify(schedule, allocation, packet_plan));
+  const loom_amdgpu_address_state_plan_t* address_state =
+      packet_plan ? &packet_plan->address_state : NULL;
   const loom_amdgpu_wait_packet_plan_t* wait_packets =
       packet_plan ? &packet_plan->wait_packets : NULL;
   const loom_amdgpu_wait_state_plan_t* wait_states =
@@ -3716,9 +3843,11 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
       packet_plan ? &packet_plan->vopd_plan : NULL;
 
   loom_amdgpu_assembly_emit_state_t emit_state = {
+      .address_state = address_state,
       .wait_packets = wait_packets,
       .wait_states = wait_states,
       .vopd_plan = vopd_plan,
+      .current_block_index = LOOM_LOW_PACKET_INDEX_NONE,
   };
   const loom_native_assembly_format_options_t format_options =
       loom_amdgpu_assembly_options(
@@ -3733,6 +3862,18 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
           });
   IREE_RETURN_IF_ERROR(loom_native_assembly_format_fragment(
       schedule, allocation, &format_options, builder, scratch_arena));
+  if (address_state != NULL &&
+      emit_state.next_address_state_index != address_state->transition_count) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU assembly address-state plan contains an unmatched insertion "
+        "point");
+  }
+  if (emit_state.current_vgpr_msb_mode != 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU assembly left VGPR-MSB address state active at function end");
+  }
   if (wait_packets != NULL &&
       emit_state.next_wait_packet_index != wait_packets->packet_count) {
     return iree_make_status(

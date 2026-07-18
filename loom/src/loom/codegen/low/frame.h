@@ -119,24 +119,6 @@ typedef iree_status_t (*loom_low_emission_frame_lower_spill_traffic_fn_t)(
     iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* arena,
     loom_low_emission_frame_lower_spill_traffic_result_t* out_result);
 
-// Summary from target address-state materialization.
-typedef struct loom_low_emission_frame_materialize_address_state_result_t {
-  // True if the target inserted, removed, or updated packets.
-  bool changed;
-  // Number of user-facing diagnostics emitted while materializing address
-  // state.
-  uint32_t error_count;
-} loom_low_emission_frame_materialize_address_state_result_t;
-
-// Target callback that materializes packet address-selection state exposed by
-// allocated operands with LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE. The
-// callback may rewrite |low_func_op| based on the accepted frame, and any
-// change causes a fresh schedule/allocation round before final validation.
-typedef iree_status_t (*loom_low_emission_frame_materialize_address_state_fn_t)(
-    void* user_data, loom_module_t* module, loom_op_t* low_func_op,
-    const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,
-    loom_low_emission_frame_materialize_address_state_result_t* out_result);
-
 // Target callback that validates the accepted final spill-free frame after
 // target-independent packet addressability has already been checked.
 typedef iree_status_t (*loom_low_emission_frame_validate_fn_t)(
@@ -151,11 +133,6 @@ typedef struct loom_low_emission_frame_spill_free_options_t {
   loom_low_emission_frame_lower_spill_traffic_fn_t lower_spill_traffic;
   // Caller-owned data passed to |lower_spill_traffic|.
   void* lower_spill_traffic_user_data;
-  // Optional target-owned packet address-state materializer.
-  loom_low_emission_frame_materialize_address_state_fn_t
-      materialize_address_state;
-  // Caller-owned data passed to |materialize_address_state|.
-  void* materialize_address_state_user_data;
   // Optional final target validation callback.
   loom_low_emission_frame_validate_fn_t validate_frame;
   // Caller-owned data passed to |validate_frame|.
@@ -177,7 +154,7 @@ iree_status_t loom_low_emission_frame_build(
 // Individual plan traffic is recomputed from the current IR while consuming
 // that batch because earlier spill rewrites can make later allocation-time
 // traffic predictions stale.
-// Materialization, final addressability, and final-frame convergence
+// Materialization, final addressability, and final-frame validation
 // diagnostics follow the normal target-entry convention: if an error diagnostic
 // is emitted, the function returns OK and the caller must check its diagnostic
 // emitter before consuming the frame. Allocation diagnostics may return a

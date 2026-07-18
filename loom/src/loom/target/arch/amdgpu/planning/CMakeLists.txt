@@ -38,16 +38,37 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
-    loom::codegen::low::builder
     loom::codegen::low::descriptors
-    loom::codegen::low::frame
+    loom::codegen::low::packet
     loom::codegen::low::schedule
     loom::ir
     loom::ops::low
-    loom::ops::op_defs
     loom::target::arch::amdgpu::encoding
     loom::target::arch::amdgpu::refs::target_refs
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_test(
+  NAME
+    address_state_test
+  SRCS
+    "address_state_test.cc"
+  DEPS
+    ::address_state
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::allocation
+    loom::codegen::low::descriptors
+    loom::codegen::low::schedule
+    loom::ir
+    loom::target::arch::amdgpu::descriptors::low_registry
+    loom::target::arch::amdgpu::encoding
+    loom::target::arch::amdgpu::refs::target_refs
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
 )
 endif()
 
@@ -587,6 +608,7 @@ loom_cc_library(
   SRCS
     "vopd_plan.c"
   DEPS
+    ::address_state
     ::descriptor_semantics
     ::structural_packet
     ::wait_packets
@@ -634,6 +656,7 @@ loom_cc_library(
   SRCS
     "packet_plan.c"
   DEPS
+    ::address_state
     ::vopd_plan
     ::wait_packets
     ::wait_plan

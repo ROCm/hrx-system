@@ -12,7 +12,6 @@
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
-#include "loom/target/arch/amdgpu/planning/address_state.h"
 #include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
 #include "loom/target/arch/amdgpu/planning/occupancy.h"
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
@@ -295,15 +294,6 @@ static bool loom_amdgpu_loom_check_needs_storage_leases(
   return options->wait_mode == LOOM_AMDGPU_LOOM_CHECK_WAIT_MODE_AUTO;
 }
 
-static iree_status_t loom_amdgpu_loom_check_materialize_address_state(
-    void* user_data, loom_module_t* module, loom_op_t* low_function_op,
-    const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,
-    loom_low_emission_frame_materialize_address_state_result_t* out_result) {
-  (void)user_data;
-  return loom_amdgpu_materialize_address_state(module, low_function_op, frame,
-                                               arena, out_result);
-}
-
 static iree_status_t loom_amdgpu_loom_check_lower_spill_traffic(
     void* user_data, loom_module_t* module, loom_op_t* low_function_op,
     iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* arena,
@@ -389,8 +379,6 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
           },
       .lower_spill_traffic = loom_amdgpu_loom_check_lower_spill_traffic,
       .lower_spill_traffic_user_data = &spill_lowering_context,
-      .materialize_address_state =
-          loom_amdgpu_loom_check_materialize_address_state,
   };
   loom_low_storage_lease_provider_t storage_lease_provider = {0};
   loom_amdgpu_storage_lease_provider(&storage_lease_provider);

@@ -49,10 +49,6 @@ typedef struct loom_low_planning_repair_statistics_t {
   uint64_t pair_replication_rejection_count;
   // Number of spill-materialization batches applied.
   uint64_t spill_materialization_batch_count;
-  // Number of target address-state materialization runs.
-  uint64_t address_state_materialization_count;
-  // Number of address-state materialization runs that changed IR.
-  uint64_t address_state_change_count;
 } loom_low_planning_repair_statistics_t;
 
 // Allocation economics across one target-low planning invocation.

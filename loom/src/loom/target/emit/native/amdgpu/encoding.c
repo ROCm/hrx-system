@@ -71,6 +71,8 @@ typedef struct loom_amdgpu_encode_state_t {
   const loom_string_id_t* immediate_name_ids;
   // Number of entries in immediate_name_ids.
   iree_host_size_t immediate_name_id_count;
+  // Optional planned address-state transitions consumed in scheduled order.
+  const loom_amdgpu_address_state_plan_t* address_state;
   // Optional planned wait packets consumed in scheduled order.
   const loom_amdgpu_wait_packet_plan_t* wait_packets;
   // Optional planned wait states consumed in scheduled order.
@@ -97,6 +99,8 @@ typedef struct loom_amdgpu_encode_state_t {
   iree_host_size_t text_fixup_capacity;
   // Number of text literal fixups planned or written so far.
   iree_host_size_t text_fixup_count;
+  // Next address-state transition to compare with the scheduled packet.
+  iree_host_size_t next_address_state_index;
   // Next wait-packet row to compare with the current scheduled packet.
   iree_host_size_t next_wait_packet_index;
   // Next wait-state row to compare with the current scheduled packet.
@@ -1797,6 +1801,16 @@ static iree_status_t loom_amdgpu_try_encode_special_descriptor_packet(
 
 static iree_status_t loom_amdgpu_prepare_descriptor_packet_encoding(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
+  loom_amdgpu_address_state_requirement_t requirement = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_query_requirement(
+      state->schedule, state->allocation, packet->node, &requirement));
+  if ((state->current_vgpr_msb_mode & requirement.mask) !=
+      (requirement.value & requirement.mask)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU descriptor packet reached native encoding without its "
+        "required address-state transition");
+  }
   if (packet->descriptor->encoding_format_id ==
           LOOM_AMDGPU_ENCODING_FORMAT_FLAT_SCRATCH &&
       loom_amdgpu_descriptor_clobbers_hidden_m0(
@@ -2721,6 +2735,55 @@ static iree_status_t loom_amdgpu_encode_wait_packets_before_packet(
   return iree_ok_status();
 }
 
+static bool loom_amdgpu_address_state_is_before_node(
+    const loom_amdgpu_address_state_transition_t* transition,
+    const loom_low_schedule_node_t* node) {
+  return transition->block_index < node->block_index ||
+         (transition->block_index == node->block_index &&
+          transition->scheduled_ordinal < node->scheduled_ordinal);
+}
+
+static bool loom_amdgpu_address_state_matches_packet(
+    const loom_amdgpu_address_state_transition_t* transition,
+    const loom_low_packet_view_t* packet) {
+  const loom_low_schedule_node_t* node = packet->node;
+  return transition->block_index == node->block_index &&
+         transition->scheduled_ordinal == node->scheduled_ordinal &&
+         transition->node_index == packet->node_index;
+}
+
+static iree_status_t loom_amdgpu_encode_address_state_before_packet(
+    loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
+  if (state->address_state == NULL) {
+    return iree_ok_status();
+  }
+  while (state->next_address_state_index <
+         state->address_state->transition_count) {
+    const loom_amdgpu_address_state_transition_t* transition =
+        &state->address_state->transitions[state->next_address_state_index];
+    if (loom_amdgpu_address_state_is_before_node(transition, packet->node)) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU address-state plan contains an insertion point before the "
+          "current scheduled packet");
+    }
+    if (!loom_amdgpu_address_state_matches_packet(transition, packet)) {
+      return iree_ok_status();
+    }
+    const uint8_t previous_mode = (uint8_t)(transition->mode_immediate >> 8);
+    const uint8_t new_mode = (uint8_t)(transition->mode_immediate & 0xFFu);
+    if (state->current_vgpr_msb_mode != previous_mode) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU address-state transition previous mode does not match the "
+          "native encoding stream");
+    }
+    IREE_RETURN_IF_ERROR(loom_amdgpu_encode_vgpr_msb_mode(state, new_mode));
+    ++state->next_address_state_index;
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_encode_wait_states_before_packet(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
   if (state->wait_states == NULL) {
@@ -2751,6 +2814,8 @@ static iree_status_t loom_amdgpu_encode_packet(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
   state->packet_emitted_delay_alu = false;
   state->packet_delay_alu_immediate = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_encode_address_state_before_packet(state, packet));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_encode_wait_packets_before_packet(state, packet));
   IREE_RETURN_IF_ERROR(
@@ -2847,6 +2912,8 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_into_state(
     loom_amdgpu_encode_state_t* state) {
   state->length = 0;
   state->text_fixup_count = 0;
+  state->current_vgpr_msb_mode = 0;
+  state->next_address_state_index = 0;
   state->next_wait_packet_index = 0;
   state->next_wait_state_index = 0;
   memset(state->pc_registers, 0, sizeof(state->pc_registers));
@@ -2854,7 +2921,6 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_into_state(
        block_index < state->schedule->block_count; ++block_index) {
     const loom_low_schedule_block_t* block =
         &state->schedule->blocks[block_index];
-    state->current_vgpr_msb_mode = 0;
     memset(state->pc_registers, 0, sizeof(state->pc_registers));
     if (state->block_offsets != NULL) {
       state->block_offsets[block_index] = state->length;
@@ -2868,6 +2934,19 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_into_state(
           state->schedule, state->allocation, packet_index, &packet));
       IREE_RETURN_IF_ERROR(loom_amdgpu_encode_packet(state, &packet));
     }
+    if (state->current_vgpr_msb_mode != 0) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU native encoding block left VGPR-MSB address state active");
+    }
+  }
+  if (state->address_state != NULL &&
+      state->next_address_state_index !=
+          state->address_state->transition_count) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU native encoding address-state plan contains an unmatched "
+        "insertion point");
   }
   if (state->wait_packets != NULL &&
       state->next_wait_packet_index != state->wait_packets->packet_count) {
@@ -2899,6 +2978,8 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
       options ? options->packet_plan : NULL;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_packet_plan_verify(schedule, allocation, packet_plan));
+  const loom_amdgpu_address_state_plan_t* address_state =
+      packet_plan ? &packet_plan->address_state : NULL;
   const loom_amdgpu_wait_packet_plan_t* wait_packets =
       packet_plan ? &packet_plan->wait_packets : NULL;
   const loom_amdgpu_wait_state_plan_t* wait_states =
@@ -2950,6 +3031,7 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
       .storage_layout = &storage_layout,
       .immediate_name_ids = immediate_name_ids,
       .immediate_name_id_count = immediate_name_id_count,
+      .address_state = address_state,
       .wait_packets = wait_packets,
       .wait_states = wait_states,
       .vopd_plan = vopd_plan,
@@ -2980,6 +3062,7 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
       .storage_layout = &storage_layout,
       .immediate_name_ids = immediate_name_ids,
       .immediate_name_id_count = immediate_name_id_count,
+      .address_state = address_state,
       .wait_packets = wait_packets,
       .wait_states = wait_states,
       .vopd_plan = vopd_plan,

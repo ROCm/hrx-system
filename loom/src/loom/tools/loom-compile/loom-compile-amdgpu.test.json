@@ -78,6 +78,50 @@
       ]
     },
     {
+      "name": "emits gfx1250 extended VGPR address state after allocation",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx1250_extended_vgpr.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--output={tmp}/gfx1250_extended_vgpr.hal",
+              "--emit-target-artifact={tmp}/gfx1250_extended_vgpr.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
+                "\"target_key\":\"gfx1250\"",
+                "\"frame_build_count\":1,\"allocation_run_count\":1,\"repair\":{\"iteration_count\":0",
+                "\"allocation_spill_count\":0",
+                "\"private_memory_bytes\":0",
+                "\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":296",
+                "\"matrix_count\":33,\"mfma_count\":0,\"smfmac_count\":0,\"wmma_count\":33",
+                "\"unknown_count\":0"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/gfx1250_extended_vgpr.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/gfx1250_extended_vgpr.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "compiles kernels whose kernargs are unused",
       "steps": [
         {

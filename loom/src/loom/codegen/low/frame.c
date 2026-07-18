@@ -22,8 +22,7 @@
 typedef enum loom_low_emission_frame_failure_e {
   LOOM_LOW_EMISSION_FRAME_FAILURE_SPILL_ASSIGNMENTS = 0,
   LOOM_LOW_EMISSION_FRAME_FAILURE_SPILL_ITERATION_LIMIT = 1,
-  LOOM_LOW_EMISSION_FRAME_FAILURE_ADDRESS_STATE_ITERATION_LIMIT = 2,
-  LOOM_LOW_EMISSION_FRAME_FAILURE_SPILL_NO_PROGRESS = 3,
+  LOOM_LOW_EMISSION_FRAME_FAILURE_SPILL_NO_PROGRESS = 2,
 } loom_low_emission_frame_failure_t;
 
 // Emission-frame repairs rebuild whole-function scheduling and allocation.
@@ -352,28 +351,6 @@ static iree_status_t loom_low_emission_frame_lower_spill_traffic(
       frame_options->emitter, arena, out_result);
 }
 
-static iree_status_t loom_low_emission_frame_materialize_address_state(
-    const loom_low_emission_frame_spill_free_options_t* options,
-    loom_module_t* module, loom_op_t* low_func_op,
-    const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,
-    loom_low_planning_statistics_t* statistics,
-    loom_low_emission_frame_materialize_address_state_result_t* out_result) {
-  *out_result = (loom_low_emission_frame_materialize_address_state_result_t){0};
-  if (options->materialize_address_state == NULL) {
-    return iree_ok_status();
-  }
-  if (statistics != NULL) {
-    ++statistics->repair.address_state_materialization_count;
-  }
-  iree_status_t status = options->materialize_address_state(
-      options->materialize_address_state_user_data, module, low_func_op, frame,
-      arena, out_result);
-  if (iree_status_is_ok(status) && out_result->changed && statistics != NULL) {
-    ++statistics->repair.address_state_change_count;
-  }
-  return status;
-}
-
 static iree_status_t loom_low_emission_frame_append_materialized_spill_records(
     const loom_low_allocation_materialized_spill_t* records,
     iree_host_size_t record_count,
@@ -558,8 +535,6 @@ static iree_string_view_t loom_low_emission_frame_failure_code(
       return IREE_SV("remaining-spill-assignments");
     case LOOM_LOW_EMISSION_FRAME_FAILURE_SPILL_ITERATION_LIMIT:
       return IREE_SV("spill-materialization-iteration-limit");
-    case LOOM_LOW_EMISSION_FRAME_FAILURE_ADDRESS_STATE_ITERATION_LIMIT:
-      return IREE_SV("address-state-iteration-limit");
     case LOOM_LOW_EMISSION_FRAME_FAILURE_SPILL_NO_PROGRESS:
       return IREE_SV("spill-materialization-no-progress");
     default:
@@ -811,28 +786,6 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
           restore_frame_before_build = true;
           continue;
         }
-      }
-      loom_low_emission_frame_materialize_address_state_result_t
-          address_state_result = {0};
-      IREE_RETURN_IF_ERROR(loom_low_emission_frame_materialize_address_state(
-          spill_free_options, module, low_func_op, &frame, scratch_arena,
-          statistics, &address_state_result));
-      if (address_state_result.error_count != 0) {
-        return iree_ok_status();
-      }
-      if (address_state_result.changed) {
-        if (repair_iteration_count >=
-            LOOM_LOW_EMISSION_FRAME_MAX_REPAIR_ITERATIONS) {
-          return loom_low_emission_frame_fail_final(
-              frame_options, &frame,
-              LOOM_LOW_EMISSION_FRAME_FAILURE_ADDRESS_STATE_ITERATION_LIMIT,
-              repair_iteration_count,
-              LOOM_LOW_EMISSION_FRAME_MAX_REPAIR_ITERATIONS, out_frame);
-        }
-        loom_low_emission_frame_advance_repair_iteration(
-            &repair_iteration_count, statistics);
-        restore_frame_before_build = true;
-        continue;
       }
       bool accepted = false;
       IREE_RETURN_IF_ERROR(loom_low_emission_frame_validate_final(

@@ -79,17 +79,33 @@ loom_cc_library(
     visibility = _AMDGPU_NATIVE_PLANNING_VISIBILITY,
     deps = [
         "//loom/src/loom/codegen/low:allocation",
-        "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/codegen/low:descriptors",
-        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amdgpu/encoding",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "address_state_test",
+    srcs = ["address_state_test.cc"],
+    deps = [
+        ":address_state",
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/encoding",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -392,6 +408,7 @@ loom_cc_library(
     ],
     visibility = _AMDGPU_NATIVE_PLANNING_VISIBILITY,
     deps = [
+        ":address_state",
         ":descriptor_semantics",
         ":structural_packet",
         ":wait_packets",
@@ -430,6 +447,7 @@ loom_cc_library(
     hdrs = ["packet_plan.h"],
     visibility = _AMDGPU_NATIVE_PLANNING_VISIBILITY,
     deps = [
+        ":address_state",
         ":vopd_plan",
         ":wait_packets",
         ":wait_plan",

@@ -24,11 +24,9 @@ iree_status_t loom_target_compile_report_append_low_planning_text_fields(
       " pair_replication_attempts=%" PRIu64 " pair_replication_edits=%" PRIu64
       " pair_replication_rejections=%" PRIu64
       " spill_materialization_batches=%" PRIu64
-      " address_state_materializations=%" PRIu64
-      " address_state_changes=%" PRIu64 " frame_arena_used_peak=%" PRIu64
-      " frame_arena_owned_peak=%" PRIu64 " repair_arena_used_peak=%" PRIu64
-      " repair_arena_owned_peak=%" PRIu64 " scratch_arena_used_peak=%" PRIu64
-      " scratch_arena_owned_peak=%" PRIu64,
+      " frame_arena_used_peak=%" PRIu64 " frame_arena_owned_peak=%" PRIu64
+      " repair_arena_used_peak=%" PRIu64 " repair_arena_owned_peak=%" PRIu64
+      " scratch_arena_used_peak=%" PRIu64 " scratch_arena_owned_peak=%" PRIu64,
       statistics->frame_build_count, statistics->allocation_run_count,
       repair->iteration_count, repair->diagnostic_replay_count,
       repair->spill_traffic_lowering_count,
@@ -38,8 +36,6 @@ iree_status_t loom_target_compile_report_append_low_planning_text_fields(
       repair->pair_replication_edit_count,
       repair->pair_replication_rejection_count,
       repair->spill_materialization_batch_count,
-      repair->address_state_materialization_count,
-      repair->address_state_change_count,
       memory->frame_arena.used_bytes_high_water,
       memory->frame_arena.owned_bytes_high_water,
       memory->repair_arena.used_bytes_high_water,
@@ -121,12 +117,6 @@ iree_status_t loom_target_compile_report_format_low_planning_json(
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
       &repair_object, IREE_SV("spill_materialization_batch_count"),
       repair->spill_materialization_batch_count));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
-      &repair_object, IREE_SV("address_state_materialization_count"),
-      repair->address_state_materialization_count));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
-      &repair_object, IREE_SV("address_state_change_count"),
-      repair->address_state_change_count));
   IREE_RETURN_IF_ERROR(loom_json_object_end(&repair_object));
 
   IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&root, IREE_SV("memory")));

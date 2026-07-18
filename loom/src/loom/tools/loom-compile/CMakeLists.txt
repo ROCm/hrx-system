@@ -103,6 +103,7 @@ iree_execution_test_suite(
     "loom-compile=::loom-compile"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/amdgpu_unused_kernargs.loom"
+    "gfx1250_extended_vgpr.loom"
     "gfx1250_tied_accumulators.loom"
     "gfx12_wmma_bf16_f32.loom"
     "report_carried_loop_memory_economics_amdgpu.loom"
