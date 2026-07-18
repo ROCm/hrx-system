@@ -12,8 +12,9 @@ on:
       name:
         type: string
         default: Linux / CMake / GPU gfx942
-      runner_label:
+      runner_labels:
         type: string
+        description: "JSON array of labels that must all match the GPU runner."
         required: true
       artifact_run_id:
         type: string
@@ -45,9 +46,9 @@ on:
         type: string
         description: "GitHub Actions run id containing HRX package artifacts. Empty means this workflow run."
         default: ""
-      runner_label:
+      runner_labels:
         type: string
-        description: "GitHub Actions runner label."
+        description: "JSON array of labels that must all match the GPU runner."
         required: true
       device:
         type: string
@@ -85,11 +86,7 @@ permissions:
 jobs:
   test_core_linux_gpu:
     name: ${{ inputs.name || 'Linux / CMake / GPU gfx942' }}
-    runs-on:
-      - self-hosted
-      - Linux
-      - X64
-      - "${{ inputs.runner_label }}"
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
     timeout-minutes: 20
     env:
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/linux-gpu

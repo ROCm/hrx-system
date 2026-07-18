@@ -886,27 +886,34 @@ class CiTest(unittest.TestCase):
                     r"command: iree-bazel-(amdgpu|vulkan)-sanitizers",
                 )
 
-    def test_core_gpu_workflow_routes_gpu_labels_to_linux_runners(self):
+    def test_core_gpu_workflow_routes_exact_gpu_labels(self):
         block = self.workflow_job_block(
             ".github/workflows/ci_core_linux.yml", "gpu_linux"
         )
-        self.assertIn("runner_label: linux-gfx942-1gpu-core42-ossci-rocm", block)
-        self.assertIn("runner_label: gpu_navi4x", block)
+        self.assertIn(
+            "runner_labels: '[\"linux-gfx942-1gpu-ccs-csp-ossci-rocm\"]'",
+            block,
+        )
+        self.assertIn(
+            'runner_labels: \'["self-hosted", "Linux", "X64", "gpu_navi4x"]\'',
+            block,
+        )
 
         reusable_workflow = Path(
             ".github/workflows/test_core_linux_gpu.yml"
         ).read_text()
         self.assertRegex(
             reusable_workflow,
-            r"runner_label:\n\s+type: string\n\s+required: true",
+            r"runner_labels:\n\s+type: string\n\s+description: "
+            r'"JSON array of labels that must all match the GPU runner\."\n'
+            r"\s+required: true",
         )
         reusable_block = self.workflow_job_block(
             ".github/workflows/test_core_linux_gpu.yml", "test_core_linux_gpu"
         )
         self.assertRegex(
             reusable_block,
-            r"runs-on:\n\s+- self-hosted\n\s+- Linux\n\s+- X64\n"
-            r"\s+- \"\$\{\{ inputs\.runner_label \}\}\"",
+            r"(?m)^\s+runs-on: \$\{\{ fromJSON\(inputs\.runner_labels\) \}\}$",
         )
 
     def test_iree_workflows_do_not_trigger_on_libhrx_only_paths(self):
