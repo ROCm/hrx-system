@@ -96,6 +96,9 @@ Tooling and tests:
   RDMA.
 - [`runtime/src/iree/tools/iree-serve-device/transport.c`](runtime/src/iree/tools/iree-serve-device/transport.c):
   server bind URI parsing and transport factory construction.
+- [`runtime/src/iree/tools/iree-remote-check/iree-remote-check-main.c`](runtime/src/iree/tools/iree-remote-check/iree-remote-check-main.c):
+  remote-only client that selects, uploads, dispatches, and verifies an
+  embedded AMDGPU or Vulkan executable without a compiler or VM.
 - [`runtime/src/iree/hal/remote/cts/loopback_adapter.cc`](runtime/src/iree/hal/remote/cts/loopback_adapter.cc):
   HAL CTS adapter that wraps ordinary HAL CTS backends behind a loopback remote
   server/client pair.
@@ -122,25 +125,25 @@ deliberately has no in-protocol cryptography: TCP deployments that need peer
 authentication or encryption must provide it at the network boundary, such as
 with an isolated compute fabric, IPsec, or WireGuard.
 
-### Network Quick Start
+### AMDGPU Quick Start
 
 Run the server and client on machines in the same trusted network. The explicit
 Bazel driver selection makes the recipe independent of an existing local
 configuration:
 
 ```bash
-# Server: expose local-task on all IPv4 interfaces (default).
+# Server: expose AMDGPU device 0 on all IPv4 interfaces (default).
 iree-bazel-run \
-  --//runtime/config/hal:drivers=local-task \
+  --//runtime/config/hal:drivers=amdgpu \
   //tools:iree-serve-device -- \
-  --device=local-task
+  --device=amdgpu://0
 
-# Client: use a module compiled for the served local-task device.
+# Client: upload and dispatch a matching embedded HSACO.
 iree-bazel-run \
   --//runtime/config/hal:drivers=remote \
-  //tools:iree-run-module -- \
-  --device=remote-tcp://server-host:5000 \
-  --module=/path/to/model.vmfb
+  --//runtime/config/hal:executable_artifacts=amdgpu \
+  //tools:iree-remote-check -- \
+  --device=remote-tcp://server-host:5000
 ```
 
 After the listener starts, `iree-serve-device` prints its actual bound address
@@ -150,6 +153,49 @@ interface is reachable from a particular client. Replace that placeholder with
 the server's reachable hostname or address while preserving the printed port.
 An assigned port is included when `--bind=...:0` is used.
 
+`iree-remote-check` is intentionally independent of IREE compiler and VM
+artifacts. Its client binary links the remote HAL implementation and executable
+target-selection utilities, but no AMDGPU, HIP, or Vulkan HAL driver. The
+server is the only process that loads the native driver. The check reads the
+immutable executable targets delivered during session bootstrap, selects a
+compatible embedded artifact, performs real host-to-device and device-to-host
+transfers, submits a queue dispatch, waits on its HAL semaphore, and verifies
+the exact result.
+
+CMake builds select the same client payloads with
+`IREE_HAL_EXECUTABLE_ARTIFACT_AMDGPU=ON` or
+`IREE_HAL_EXECUTABLE_ARTIFACT_VULKAN=ON`. These options embed an executable in
+supporting tools without enabling the corresponding native HAL driver; server
+driver selection remains independent through `IREE_HAL_DRIVER_AMDGPU` or
+`IREE_HAL_DRIVER_VULKAN`.
+
+The AMDGPU artifacts follow
+`//runtime/src/iree/hal/drivers/amdgpu:targets`. The default selector set covers
+the normal generic gfx9, gfx10, gfx11, and gfx12 families. If the connected
+device reports a target not covered by the client binary, the check prints the
+server's target table and fails before upload; rebuild it with an exact or
+generic selector matching one of those rows.
+
+### Vulkan Quick Start
+
+The same client also embeds a separately assembled Vulkan 1.3 BDA SPIR-V
+module. Only the server links the Vulkan HAL driver:
+
+```bash
+# Server: expose the default Vulkan device.
+iree-bazel-run \
+  --//runtime/config/hal:drivers=vulkan \
+  //tools:iree-serve-device -- \
+  --device=vulkan://
+
+# Client: select and dispatch the embedded SPIR-V module remotely.
+iree-bazel-run \
+  --//runtime/config/hal:drivers=remote \
+  --//runtime/config/hal:executable_artifacts=vulkan \
+  //tools:iree-remote-check -- \
+  --device=remote-tcp://server-host:5000
+```
+
 ### Same-Host Development
 
 The wildcard TCP default also accepts same-host clients at `127.0.0.1:5000`.
@@ -157,12 +203,11 @@ An explicit loopback bind restricts the listener to same-host development:
 
 ```bash
 iree-serve-device \
-  --device=local-task \
+  --device=amdgpu://0 \
   --bind=tcp://127.0.0.1:5000
 
-iree-run-module \
-  --device=remote-tcp://127.0.0.1:5000 \
-  --module=/path/to/model.vmfb
+iree-remote-check \
+  --device=remote-tcp://127.0.0.1:5000
 ```
 
 The shared-memory transport provides a same-host IPC path whose endpoint access
@@ -173,12 +218,10 @@ is governed by operating-system permissions.
 Clients use a remote driver name whose suffix selects the transport factory:
 
 ```bash
-iree-run-module \
-  --device=remote-shm:///dev/shm/iree-gpu \
-  --module=model.vmfb
-iree-run-module \
-  --device='remote-rdma://192.0.2.10:7471?rdma=true' \
-  --module=model.vmfb
+iree-remote-check \
+  --device=remote-shm:///dev/shm/iree-gpu
+iree-remote-check \
+  --device='remote-rdma://192.0.2.10:7471?rdma=true'
 ```
 
 The client registration module enables TCP by default. Shared-memory and RDMA
@@ -203,8 +246,8 @@ builds an explicit logical namespace from repeated allow-list flags:
 
 ```bash
 iree-serve-device \
-  --device=hip://0 \
-  --remote_file_allow=model=/srv/models/model.vmfb \
+  --device=amdgpu://0 \
+  --remote_file_allow=weights=/srv/models/weights.bin \
   --remote_file_allow_write=scratch=/srv/iree-scratch
 ```
 
@@ -437,10 +480,10 @@ lifetime, and the carrier CTS.
 The server readiness block is the source of truth for the listener and client
 URI. It is printed only after the listener has started successfully.
 
-- Connection refused from another machine: the default listener is
-  `tcp://127.0.0.1:5000`, so remote machines cannot reach it. Restart the server
-  with `--bind=tcp://<server-host>:5000` on a trusted network and copy the
-  printed client flag.
+- Connection refused: confirm that the trusted-network boundary admits TCP port
+  5000 and that the client URI names an interface or hostname reachable from
+  the client. An explicitly configured `127.0.0.1` or `[::1]` listener only
+  accepts same-host clients.
 - Wildcard listener: `0.0.0.0` and `[::]` are bind addresses, not client
   destinations. Replace the printed `<server-host>` placeholder with a
   reachable hostname or interface address while preserving the printed port.
@@ -450,9 +493,12 @@ URI. It is printed only after the listener has started successfully.
 - Server starts but bootstrap fails: use client and server binaries from the
   same revision. The experimental protocol deliberately rejects version
   mismatches.
-- Module load fails after connection: compile the module for a target advertised
-  by the served device. A successful connection does not make a VMFB built for
-  another device family compatible.
+- Executable selection fails after connection: the client has no artifact for
+  a target advertised by the served device. For `iree-remote-check`, rebuild
+  with `--//runtime/config/hal:executable_artifacts=amdgpu` and an AMDGPU
+  selector matching one of the printed target rows, or use
+  `--//runtime/config/hal:executable_artifacts=vulkan` with a server advertising
+  `spirv / vulkan1.3+bda`.
 
 ## Debugging Map
 
@@ -522,7 +568,8 @@ iree-bazel-test --config=presubmit \
 Fresh execution of the remote HAL and net tests:
 
 ```bash
-bazel test --config=presubmit --test_output=errors --nocache_test_results \
+iree-bazel-test --config=presubmit --test_output=errors \
+  --nocache_test_results \
   //runtime/src/iree/hal/remote/... \
   //runtime/src/iree/net/...
 ```
@@ -536,17 +583,16 @@ python dev.py bazel presubmit
 RDMA-focused build and CTS coverage:
 
 ```bash
-bazel test --//runtime/config/net:transports=rdma \
+iree-bazel-test --//runtime/config/net:transports=rdma \
   //runtime/src/iree/net/carrier/rdma:all \
   //runtime/src/iree/net/carrier/rdma/cts:all
 
-cmake -S . -B /tmp/iree-rdma -GNinja \
+iree-cmake-configure \
   -DIREE_BUILD_TESTS=ON \
   -DIREE_BUILD_BENCHMARKS=ON \
-  -DIREE_MODULE_VMVX=ON \
   -DIREE_NET_TRANSPORT_RDMA=ON
 
-cmake --build /tmp/iree-rdma --target \
+iree-cmake-build \
   iree_net_carrier_rdma_factory \
   iree_tools_iree-serve-device_transport_test \
   iree_hal_remote_client_registration_registration

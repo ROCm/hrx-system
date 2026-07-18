@@ -48,6 +48,9 @@ _COMPILER_CMAKE_OPTIONS = {
     "//build_tools/bazel:cc_compiler_clang": (
         'CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT MSVC'
     ),
+    "//build_tools/bazel:cc_compiler_clang_linux": (
+        'CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_SYSTEM_NAME STREQUAL "Linux"'
+    ),
     "//build_tools/bazel:cc_compiler_clang_cl": (
         'CMAKE_C_COMPILER_ID MATCHES "Clang" AND MSVC'
     ),
@@ -65,6 +68,8 @@ _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
     "//runtime/config/hal:driver_remote": "IREE_HAL_DRIVER_REMOTE",
     "//runtime/config/hal:driver_vulkan": "IREE_HAL_DRIVER_VULKAN",
     "//runtime/config/hal:driver_webgpu": "IREE_HAL_DRIVER_WEBGPU",
+    "//runtime/config/hal:executable_artifact_amdgpu": "IREE_HAL_EXECUTABLE_ARTIFACT_AMDGPU",
+    "//runtime/config/hal:executable_artifact_vulkan": "IREE_HAL_EXECUTABLE_ARTIFACT_VULKAN",
     "//runtime/config/hal:executable_loader_embedded_elf": "IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF",
     "//runtime/config/hal:executable_loader_system_library": "IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY",
     "//runtime/config/hal:executable_loader_vmvx_module": "IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE",
@@ -1646,6 +1651,9 @@ class BuildFileFunctions(object):
 
     def iree_select(self, selector):
         return self.select(selector)
+
+    def iree_spirv_tool_target_compatible_with(self):
+        return _SPIRV_TOOL_TARGET_COMPATIBLE_WITH
 
     def defaulting_select(self, selector):
         """Defined in build_defs.oss.bzl as a scoped alternative to select."""

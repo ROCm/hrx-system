@@ -7,12 +7,11 @@
 // iree-serve-device: Exposes local HAL devices to remote clients.
 //
 // Usage:
-//   iree-serve-device --device=local-task
-//   iree-serve-device --device=hip://0
+//   iree-serve-device --device=amdgpu://0
+//   iree-serve-device --device=vulkan://
 //
-// Clients connect using the remote HAL driver:
-//   iree-run-module --device=remote-tcp://server-host:5000 \
-//     --module=model.vmfb
+// Verify native executable dispatch from a remote-only client:
+//   iree-remote-check --device=remote-tcp://server-host:5000
 
 #include "iree/async/address.h"
 #include "iree/async/frontier_tracker.h"
@@ -36,14 +35,15 @@
 #if defined(IREE_HAVE_NET_RDMA_TRANSPORT)
 #define IREE_SERVE_DEVICE_RDMA_BIND_HELP \
   "  rdma://address       RDMA CM (Linux)\n"
-#define IREE_SERVE_DEVICE_RDMA_USAGE_EXAMPLE                             \
-  "\n"                                                                   \
-  "  # Serve over RDMA\n"                                                \
-  "  iree-serve-device --device=hip://0 --bind=rdma://192.0.2.10:7471\n" \
-  "\n"                                                                   \
-  "  # Connect over RDMA\n"                                              \
-  "  iree-run-module --device=remote-rdma://192.0.2.10:7471 "            \
-  "--module=model.vmfb\n"
+#define IREE_SERVE_DEVICE_RDMA_USAGE_EXAMPLE \
+  "\n"                                       \
+  "  # Serve over RDMA\n"                    \
+  "  iree-serve-device --device=amdgpu://0 " \
+  "--bind=rdma://192.0.2.10:7471 --rdma\n"   \
+  "\n"                                       \
+  "  # Connect over RDMA\n"                  \
+  "  iree-remote-check "                     \
+  "--device='remote-rdma://192.0.2.10:7471?rdma=true'\n"
 #else
 #define IREE_SERVE_DEVICE_RDMA_BIND_HELP ""
 #define IREE_SERVE_DEVICE_RDMA_USAGE_EXAMPLE ""
@@ -611,20 +611,19 @@ int main(int argc, char** argv) {
       "and transport protection to the surrounding network.\n"
       "\n"
       "Quick start (server and client machines):\n"
-      "  # Serve a local-task device on all IPv4 interfaces (default)\n"
-      "  iree-serve-device --device=local-task\n"
+      "  # Serve an AMDGPU device on all IPv4 interfaces (default)\n"
+      "  iree-serve-device --device=amdgpu://0\n"
       "\n"
-      "  # Client; replace model.vmfb with a module for the served device\n"
-      "  iree-run-module --device=remote-tcp://server-host:5000 "
-      "--module=model.vmfb\n"
+      "  # Upload and dispatch a matching embedded native executable\n"
+      "  iree-remote-check --device=remote-tcp://server-host:5000\n"
       "\n"
       "  # Restrict TCP to same-host development\n"
-      "  iree-serve-device --device=local-task "
+      "  iree-serve-device --device=amdgpu://0 "
       "--bind=tcp://127.0.0.1:5000\n"
       "\n"
       "  # Serve over shared memory (same-host IPC)\n"
-      "  iree-serve-device --device=hip://0 --bind=shm:///dev/shm/iree-gpu\n"
-      IREE_SERVE_DEVICE_RDMA_USAGE_EXAMPLE);
+      "  iree-serve-device --device=amdgpu://0 "
+      "--bind=shm:///dev/shm/iree-gpu\n" IREE_SERVE_DEVICE_RDMA_USAGE_EXAMPLE);
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
 
   iree_status_t status = iree_serve_device_run();

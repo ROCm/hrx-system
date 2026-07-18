@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:select.bzl", "iree_select")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
@@ -12,6 +13,36 @@ package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_library(
+    name = "transport_factory",
+    srcs = ["transport_factory.c"],
+    hdrs = ["transport_factory.h"],
+    defines = iree_select({
+        "//runtime/config/net:transport_tcp": ["IREE_HAVE_NET_TCP_TRANSPORT=1"],
+        "//conditions:default": [],
+    }) + iree_select({
+        "//runtime/config/net:transport_shm": ["IREE_HAVE_NET_SHM_TRANSPORT=1"],
+        "//conditions:default": [],
+    }) + iree_select({
+        "//runtime/config/net:transport_rdma": ["IREE_HAVE_NET_RDMA_TRANSPORT=1"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/remote/protocol:common",
+        "//runtime/src/iree/net:transport_factory",
+    ] + iree_select({
+        "//runtime/config/net:transport_tcp": ["//runtime/src/iree/net/carrier/tcp:factory"],
+        "//conditions:default": [],
+    }) + iree_select({
+        "//runtime/config/net:transport_shm": ["//runtime/src/iree/net/carrier/shm:factory"],
+        "//conditions:default": [],
+    }) + iree_select({
+        "//runtime/config/net:transport_rdma": ["//runtime/src/iree/net/carrier/rdma:factory"],
+        "//conditions:default": [],
+    }),
 )
 
 iree_runtime_cc_library(

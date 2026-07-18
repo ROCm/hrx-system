@@ -10,30 +10,6 @@ if(NOT IREE_HAL_DRIVER_REMOTE)
   return()
 endif()
 
-set(_DEFINES "IREE_HAVE_HAL_REMOTE_CLIENT_DRIVER_MODULE=1")
-set(_DEPS
-  iree::base
-  iree::hal
-  iree::hal::remote::client
-  iree::hal::remote::protocol::common
-  iree::net::transport_factory
-)
-
-if(IREE_NET_TRANSPORT_TCP)
-  list(APPEND _DEFINES "IREE_HAVE_NET_TCP_TRANSPORT=1")
-  list(APPEND _DEPS iree::net::carrier::tcp::factory)
-endif()
-
-if(IREE_NET_TRANSPORT_SHM)
-  list(APPEND _DEFINES "IREE_HAVE_NET_SHM_TRANSPORT=1")
-  list(APPEND _DEPS iree::net::carrier::shm::factory)
-endif()
-
-if(IREE_NET_TRANSPORT_RDMA)
-  list(APPEND _DEFINES "IREE_HAVE_NET_RDMA_TRANSPORT=1")
-  list(APPEND _DEPS iree::net::carrier::rdma::factory)
-endif()
-
 iree_cc_library(
   NAME
     registration
@@ -42,8 +18,12 @@ iree_cc_library(
   SRCS
     "driver_module.c"
   DEPS
-    ${_DEPS}
+    iree::base
+    iree::hal
+    iree::hal::remote::client
+    iree::hal::remote::client::transport_factory
+    iree::net::transport_factory
   DEFINES
-    ${_DEFINES}
+    "IREE_HAVE_HAL_REMOTE_CLIENT_DRIVER_MODULE=1"
   PUBLIC
 )

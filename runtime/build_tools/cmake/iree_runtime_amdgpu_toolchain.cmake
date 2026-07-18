@@ -5,7 +5,8 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 function(iree_runtime_configure_amdgpu_toolchain)
-  if(NOT IREE_HAL_DRIVER_AMDGPU)
+  cmake_parse_arguments(_RULE "REQUIRED" "" "" ${ARGN})
+  if(NOT IREE_HAL_DRIVER_AMDGPU AND NOT _RULE_REQUIRED)
     return()
   endif()
   if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")

@@ -153,6 +153,15 @@ if(IREE_HAL_DRIVER_HIP_RCCL AND NOT IREE_HAL_DRIVER_HIP)
     "IREE_HAL_DRIVER_HIP_RCCL=ON requires IREE_HAL_DRIVER_HIP=ON.")
 endif()
 
+option(IREE_HAL_EXECUTABLE_ARTIFACT_DEFAULTS
+  "Sets the default value for embedded runtime HAL executable artifacts." OFF)
+option(IREE_HAL_EXECUTABLE_ARTIFACT_AMDGPU
+  "Embeds AMDGPU executable artifacts in supporting runtime tools."
+  ${IREE_HAL_EXECUTABLE_ARTIFACT_DEFAULTS})
+option(IREE_HAL_EXECUTABLE_ARTIFACT_VULKAN
+  "Embeds Vulkan executable artifacts in supporting runtime tools."
+  ${IREE_HAL_EXECUTABLE_ARTIFACT_DEFAULTS})
+
 option(IREE_HAL_EXECUTABLE_LOADER_DEFAULTS
   "Sets the default value for all runtime HAL executable loaders." ON)
 set(IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF_DEFAULT

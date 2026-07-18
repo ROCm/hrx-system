@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 
 package(default_visibility = ["//visibility:public"])
@@ -46,6 +47,19 @@ config_setting(
     flag_values = {
         "@rules_cc//cc/compiler:compiler": "clang",
     },
+)
+
+config_setting(
+    name = "os_linux",
+    constraint_values = ["@platforms//os:linux"],
+)
+
+selects.config_setting_group(
+    name = "cc_compiler_clang_linux",
+    match_all = [
+        ":cc_compiler_clang",
+        ":os_linux",
+    ],
 )
 
 config_setting(

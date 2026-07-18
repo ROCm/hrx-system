@@ -30,6 +30,16 @@ SUPPORTED_DRIVERS = [
     "webgpu",
 ]
 
+# Executable artifacts are precompiled device binaries embedded in runtime
+# tools. They are independent of HAL driver registration: a remote-only client
+# can carry an AMDGPU or Vulkan artifact without linking either native driver.
+DEFAULT_EXECUTABLE_ARTIFACTS = []
+
+SUPPORTED_EXECUTABLE_ARTIFACTS = [
+    "amdgpu",
+    "vulkan",
+]
+
 # Executable loader registration defaults to binary formats that do not depend
 # on compiler fallback paths. The VMVX bytecode loader is explicit opt-in
 # because it depends on the compiler-oriented fallback module stack.
@@ -69,6 +79,21 @@ string_list_flag(
         },
     )
     for driver in SUPPORTED_DRIVERS
+]
+
+string_list_flag(
+    name = "executable_artifacts",
+    build_setting_default = DEFAULT_EXECUTABLE_ARTIFACTS,
+)
+
+[
+    config_setting(
+        name = "executable_artifact_{}".format(artifact.replace("-", "_")),
+        flag_values = {
+            ":executable_artifacts": artifact,
+        },
+    )
+    for artifact in SUPPORTED_EXECUTABLE_ARTIFACTS
 ]
 
 string_list_flag(

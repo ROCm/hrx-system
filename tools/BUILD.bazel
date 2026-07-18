@@ -42,6 +42,11 @@ alias(
 )
 
 alias(
+    name = "iree-remote-check",
+    actual = "//runtime/src/iree/tools/iree-remote-check",
+)
+
+alias(
     name = "iree-serve-device",
     actual = "//runtime/src/iree/tools/iree-serve-device",
 )

@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:select.bzl", "iree_select")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 
 package(
@@ -19,30 +18,12 @@ iree_runtime_cc_library(
     hdrs = ["driver_module.h"],
     defines = [
         "IREE_HAVE_HAL_REMOTE_CLIENT_DRIVER_MODULE=1",
-    ] + iree_select({
-        "//runtime/config/net:transport_tcp": ["IREE_HAVE_NET_TCP_TRANSPORT=1"],
-        "//conditions:default": [],
-    }) + iree_select({
-        "//runtime/config/net:transport_shm": ["IREE_HAVE_NET_SHM_TRANSPORT=1"],
-        "//conditions:default": [],
-    }) + iree_select({
-        "//runtime/config/net:transport_rdma": ["IREE_HAVE_NET_RDMA_TRANSPORT=1"],
-        "//conditions:default": [],
-    }),
+    ],
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/remote/client",
-        "//runtime/src/iree/hal/remote/protocol:common",
+        "//runtime/src/iree/hal/remote/client:transport_factory",
         "//runtime/src/iree/net:transport_factory",
-    ] + iree_select({
-        "//runtime/config/net:transport_tcp": ["//runtime/src/iree/net/carrier/tcp:factory"],
-        "//conditions:default": [],
-    }) + iree_select({
-        "//runtime/config/net:transport_shm": ["//runtime/src/iree/net/carrier/shm:factory"],
-        "//conditions:default": [],
-    }) + iree_select({
-        "//runtime/config/net:transport_rdma": ["//runtime/src/iree/net/carrier/rdma:factory"],
-        "//conditions:default": [],
-    }),
+    ],
 )

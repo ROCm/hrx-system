@@ -397,6 +397,18 @@ loom_link_module(
         )
         self.assertEqual(
             functions._convert_select_condition(
+                "//runtime/config/hal:executable_artifact_amdgpu"
+            ),
+            "IREE_HAL_EXECUTABLE_ARTIFACT_AMDGPU",
+        )
+        self.assertEqual(
+            functions._convert_select_condition(
+                "//runtime/config/hal:executable_artifact_vulkan"
+            ),
+            "IREE_HAL_EXECUTABLE_ARTIFACT_VULKAN",
+        )
+        self.assertEqual(
+            functions._convert_select_condition(
                 "//build_tools/bazel:cc_compiler_clang"
             ),
             'CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT MSVC',
@@ -406,6 +418,13 @@ loom_link_module(
                 "//build_tools/bazel:cc_compiler_clang_cl"
             ),
             'CMAKE_C_COMPILER_ID MATCHES "Clang" AND MSVC',
+        )
+        self.assertEqual(
+            functions._convert_select_condition(
+                "//build_tools/bazel:cc_compiler_clang_linux"
+            ),
+            'CMAKE_C_COMPILER_ID STREQUAL "Clang" AND '
+            'CMAKE_SYSTEM_NAME STREQUAL "Linux"',
         )
         self.assertEqual(
             functions._convert_select_condition("//build_tools/bazel:cc_compiler_gcc"),
@@ -473,6 +492,19 @@ loom_link_module(
         self.assertEqual(
             functions._target_compatible_condition(target_compatible_with),
             'IREE_HAL_DRIVER_WEBGPU AND IREE_ARCH STREQUAL "wasm_32"',
+        )
+
+    def test_spirv_tool_target_compatible_with_helper(self):
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=SimpleNamespace(body=""),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="",
+        )
+
+        target_compatible_with = functions.iree_spirv_tool_target_compatible_with()
+        self.assertEqual(
+            functions._target_compatible_condition(target_compatible_with),
+            "LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN",
         )
 
     def test_cc_binary_linkshared_emits_shared_library(self):

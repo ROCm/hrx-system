@@ -9,6 +9,43 @@
 
 iree_add_all_subdirs()
 
+set(_transport_factory_platform_defines "")
+if(IREE_NET_TRANSPORT_TCP)
+  list(APPEND _transport_factory_platform_defines "IREE_HAVE_NET_TCP_TRANSPORT=1")
+endif()
+if(IREE_NET_TRANSPORT_SHM)
+  list(APPEND _transport_factory_platform_defines "IREE_HAVE_NET_SHM_TRANSPORT=1")
+endif()
+if(IREE_NET_TRANSPORT_RDMA)
+  list(APPEND _transport_factory_platform_defines "IREE_HAVE_NET_RDMA_TRANSPORT=1")
+endif()
+set(_transport_factory_platform_deps "")
+if(IREE_NET_TRANSPORT_TCP)
+  list(APPEND _transport_factory_platform_deps iree::net::carrier::tcp::factory)
+endif()
+if(IREE_NET_TRANSPORT_SHM)
+  list(APPEND _transport_factory_platform_deps iree::net::carrier::shm::factory)
+endif()
+if(IREE_NET_TRANSPORT_RDMA)
+  list(APPEND _transport_factory_platform_deps iree::net::carrier::rdma::factory)
+endif()
+iree_cc_library(
+  NAME
+    transport_factory
+  HDRS
+    "transport_factory.h"
+  SRCS
+    "transport_factory.c"
+  DEPS
+    iree::base
+    iree::hal::remote::protocol::common
+    iree::net::transport_factory
+    ${_transport_factory_platform_deps}
+  DEFINES
+    ${_transport_factory_platform_defines}
+  PUBLIC
+)
+
 iree_cc_library(
   NAME
     client

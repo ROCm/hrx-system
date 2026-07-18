@@ -8,20 +8,8 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/remote/client/api.h"
-#include "iree/hal/remote/protocol/common.h"
+#include "iree/hal/remote/client/transport_factory.h"
 #include "iree/net/transport_factory.h"
-
-#if defined(IREE_HAVE_NET_TCP_TRANSPORT)
-#include "iree/net/carrier/tcp/factory.h"
-#endif  // IREE_HAVE_NET_TCP_TRANSPORT
-
-#if defined(IREE_HAVE_NET_SHM_TRANSPORT)
-#include "iree/net/carrier/shm/factory.h"
-#endif  // IREE_HAVE_NET_SHM_TRANSPORT
-
-#if defined(IREE_HAVE_NET_RDMA_TRANSPORT)
-#include "iree/net/carrier/rdma/factory.h"
-#endif  // IREE_HAVE_NET_RDMA_TRANSPORT
 
 // Remote HAL drivers organized by transport name.
 // Each transport uses the same URI scheme (host:port or path) but different
@@ -34,9 +22,6 @@
 // Available transports depend on what has been compiled in via the
 // IREE_HAVE_NET_*_TRANSPORT defines, controlled by //runtime/config/net
 // transport settings.
-
-static const iree_string_view_t IREE_HAL_REMOTE_DRIVER_PREFIX =
-    iree_string_view_literal("remote-");
 
 static const iree_hal_driver_info_t iree_hal_remote_driver_infos[] = {
 #if defined(IREE_HAVE_NET_TCP_TRANSPORT)
@@ -67,84 +52,13 @@ static iree_status_t iree_hal_remote_client_driver_factory_enumerate(
   return iree_ok_status();
 }
 
-// Extracts the transport name from a driver name like "remote-tcp" -> "tcp".
-// Returns UNAVAILABLE if the driver name does not have the "remote-" prefix.
-static iree_status_t iree_hal_remote_client_parse_transport_name(
-    iree_string_view_t driver_name, iree_string_view_t* out_transport_name) {
-  if (!iree_string_view_starts_with(driver_name,
-                                    IREE_HAL_REMOTE_DRIVER_PREFIX)) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "no driver '%.*s' is provided by this factory",
-                            (int)driver_name.size, driver_name.data);
-  }
-  *out_transport_name = iree_string_view_substr(
-      driver_name, IREE_HAL_REMOTE_DRIVER_PREFIX.size,
-      driver_name.size - IREE_HAL_REMOTE_DRIVER_PREFIX.size);
-  if (iree_string_view_is_empty(*out_transport_name)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "driver name '%.*s' has no transport suffix after 'remote-'",
-        (int)driver_name.size, driver_name.data);
-  }
-  return iree_ok_status();
-}
-
-// Creates a transport factory for the given transport name.
-// Returns UNAVAILABLE if the transport is not compiled in.
-static iree_status_t iree_hal_remote_client_create_transport_factory(
-    iree_string_view_t transport_name, iree_allocator_t host_allocator,
-    iree_net_transport_factory_t** out_factory) {
-  *out_factory = NULL;
-
-#if defined(IREE_HAVE_NET_TCP_TRANSPORT)
-  if (iree_string_view_equal(transport_name, IREE_SV("tcp"))) {
-    iree_net_tcp_carrier_options_t tcp_options =
-        iree_net_tcp_carrier_options_default();
-    // HAL remote requires control, queue, and bulk endpoints per connection.
-    tcp_options.max_endpoint_count = IREE_HAL_REMOTE_REQUIRED_ENDPOINT_COUNT;
-    return iree_net_tcp_factory_create(tcp_options, host_allocator,
-                                       out_factory);
-  }
-#endif  // IREE_HAVE_NET_TCP_TRANSPORT
-
-#if defined(IREE_HAVE_NET_SHM_TRANSPORT)
-  if (iree_string_view_equal(transport_name, IREE_SV("shm"))) {
-    return iree_net_shm_factory_create(iree_net_shm_carrier_options_default(),
-                                       host_allocator, out_factory);
-  }
-#endif  // IREE_HAVE_NET_SHM_TRANSPORT
-
-#if defined(IREE_HAVE_NET_RDMA_TRANSPORT)
-  if (iree_string_view_equal(transport_name, IREE_SV("rdma"))) {
-    iree_net_rdma_factory_options_t rdma_options =
-        iree_net_rdma_factory_options_default();
-    // HAL remote requires control, queue, and bulk endpoints per connection.
-    rdma_options.max_endpoint_count = IREE_HAL_REMOTE_REQUIRED_ENDPOINT_COUNT;
-    return iree_net_rdma_factory_create(rdma_options, host_allocator,
-                                        out_factory);
-  }
-#endif  // IREE_HAVE_NET_RDMA_TRANSPORT
-
-  return iree_make_status(
-      IREE_STATUS_UNAVAILABLE,
-      "transport '%.*s' is not compiled into this remote HAL client; enable "
-      "it through //runtime/config/net:transports for Bazel or "
-      "IREE_NET_TRANSPORT_* for CMake",
-      (int)transport_name.size, transport_name.data);
-}
-
 static iree_status_t iree_hal_remote_client_driver_factory_try_create(
     void* self, iree_string_view_t driver_name, iree_allocator_t host_allocator,
     iree_hal_driver_t** out_driver) {
-  // Extract the transport name from the driver name suffix.
-  iree_string_view_t transport_name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(iree_hal_remote_client_parse_transport_name(
-      driver_name, &transport_name));
-
   // Create the transport factory for this transport type.
   iree_net_transport_factory_t* factory = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_remote_client_create_transport_factory(
-      transport_name, host_allocator, &factory));
+  IREE_RETURN_IF_ERROR(iree_hal_remote_client_transport_factory_create(
+      driver_name, host_allocator, &factory));
 
   // Set up driver options with the factory. The recv_pool is resolved from
   // create_params->proactor_pool during create_device_by_path.

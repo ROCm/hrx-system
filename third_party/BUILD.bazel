@@ -217,6 +217,7 @@ alias(
     actual = selects.with_or({
         (
             "//loom/config/target:spirv_artifacts",
+            "//runtime/config/hal:executable_artifact_vulkan",
             "//runtime/config/hal:driver_vulkan",
         ): "@spirv_tools//:spirv-as",
         "//conditions:default": ":empty_spirv_tool",
@@ -234,6 +235,7 @@ alias(
     actual = selects.with_or({
         (
             "//loom/config/target:spirv_artifacts",
+            "//runtime/config/hal:executable_artifact_vulkan",
             "//runtime/config/hal:driver_vulkan",
         ): "@spirv_tools//:spirv-dis",
         "//conditions:default": ":empty_spirv_tool",
@@ -251,6 +253,7 @@ alias(
     actual = selects.with_or({
         (
             "//loom/config/target:spirv_artifacts",
+            "//runtime/config/hal:executable_artifact_vulkan",
             "//runtime/config/hal:driver_vulkan",
         ): "@spirv_tools//:spirv-val",
         "//conditions:default": ":empty_spirv_tool",

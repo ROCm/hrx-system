@@ -1,0 +1,174 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/amdgpu:binary.bzl", "iree_amdgpu_binary_variants_embed_data")
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//build_tools/bazel:select.bzl", "iree_select")
+load("//build_tools/spirv:asm_module.bzl", "iree_spirv_asm_module")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_AMDGPU_ARTIFACT_COMPATIBLE_WITH = iree_select({
+    "//runtime/config/hal:executable_artifact_amdgpu": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+}) + iree_select({
+    "//build_tools/bazel:cc_compiler_clang_linux": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+_AMDGPU_ARTIFACT_DEFINES = iree_select({
+    "//runtime/config/hal:executable_artifact_amdgpu": ["IREE_REMOTE_CHECK_HAVE_AMDGPU_ARTIFACT=1"],
+    "//conditions:default": [],
+})
+
+_AMDGPU_ARTIFACT_DEPS = iree_select({
+    "//runtime/config/hal:executable_artifact_amdgpu": [":amdgpu_artifact"],
+    "//conditions:default": [],
+})
+
+_VULKAN_ARTIFACT_COMPATIBLE_WITH = iree_select({
+    "//runtime/config/hal:executable_artifact_vulkan": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+_VULKAN_ARTIFACT_DEFINES = iree_select({
+    "//runtime/config/hal:executable_artifact_vulkan": ["IREE_REMOTE_CHECK_HAVE_VULKAN_ARTIFACT=1"],
+    "//conditions:default": [],
+})
+
+_VULKAN_ARTIFACT_DEPS = iree_select({
+    "//runtime/config/hal:executable_artifact_vulkan": [":vulkan_artifact"],
+    "//conditions:default": [],
+})
+
+_ARTIFACT_DEPS = _AMDGPU_ARTIFACT_DEPS + _VULKAN_ARTIFACT_DEPS
+
+iree_cmake_extra_content(
+    content = """
+if(IREE_HAL_EXECUTABLE_ARTIFACT_AMDGPU)
+  if(NOT CMAKE_C_COMPILER_ID STREQUAL "Clang" OR
+     NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR
+      "IREE_HAL_EXECUTABLE_ARTIFACT_AMDGPU=ON requires Clang on Linux.")
+  endif()
+  iree_runtime_configure_amdgpu_toolchain(REQUIRED)
+endif()
+""",
+    inline = True,
+)
+
+iree_amdgpu_binary_variants_embed_data(
+    name = "amdgpu_artifacts",
+    srcs = ["amdgpu_kernel.c"],
+    binary_name_prefix = "iree_remote_check_kernel",
+    c_file_output = "amdgpu_artifacts.c",
+    h_file_output = "amdgpu_artifacts.h",
+    identifier = "iree_remote_check_amdgpu_artifacts",
+    tags = ["manual"],
+    target = "amdgcn-amd-amdhsa",
+    target_compatible_with = _AMDGPU_ARTIFACT_COMPATIBLE_WITH,
+    target_selectors_flag = "//runtime/src/iree/hal/drivers/amdgpu:targets",
+)
+
+iree_spirv_asm_module(
+    name = "vulkan_kernel_artifact",
+    src = "vulkan_kernel.spvasm",
+    c_identifier = "iree_remote_check_vulkan_kernel_artifact",
+    tags = ["manual"],
+    target_compatible_with = _VULKAN_ARTIFACT_COMPATIBLE_WITH,
+    target_env = "vulkan1.3",
+)
+
+iree_runtime_cc_library(
+    name = "artifact_types",
+    hdrs = ["artifact_types.h"],
+    tags = ["manual"],
+    deps = ["//runtime/src/iree/hal"],
+)
+
+iree_runtime_cc_library(
+    name = "amdgpu_artifact",
+    srcs = ["amdgpu_artifact.c"],
+    hdrs = ["amdgpu_artifact.h"],
+    tags = ["manual"],
+    target_compatible_with = _AMDGPU_ARTIFACT_COMPATIBLE_WITH,
+    deps = [
+        ":amdgpu_artifacts",
+        ":artifact_types",
+        "//build_tools/amdgpu:target_map_h",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/executable/amdgpu:executable_target",
+        "//runtime/src/iree/hal/executable/amdgpu:target_id",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "vulkan_artifact",
+    srcs = ["vulkan_artifact.c"],
+    hdrs = ["vulkan_artifact.h"],
+    tags = ["manual"],
+    target_compatible_with = _VULKAN_ARTIFACT_COMPATIBLE_WITH,
+    deps = [
+        ":artifact_types",
+        ":vulkan_kernel_artifact_c",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "artifact",
+    srcs = ["artifact.c"],
+    hdrs = ["artifact.h"],
+    defines = _AMDGPU_ARTIFACT_DEFINES + _VULKAN_ARTIFACT_DEFINES,
+    tags = ["manual"],
+    deps = [
+        ":artifact_types",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ] + _ARTIFACT_DEPS,
+)
+
+iree_runtime_cc_test(
+    name = "artifact_test",
+    srcs = ["artifact_test.cc"],
+    tags = ["manual"],
+    deps = [
+        ":artifact",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_binary(
+    name = "iree-remote-check",
+    srcs = ["iree-remote-check-main.c"],
+    tags = ["manual"],
+    visibility = ["//tools:__pkg__"],
+    deps = [
+        ":artifact",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/remote/client",
+        "//runtime/src/iree/hal/remote/client:transport_factory",
+        "//runtime/src/iree/net:transport_factory",
+    ],
+)
