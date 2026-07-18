@@ -499,6 +499,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::planning::storage_lease
     loom::target::arch::amdgpu::planning::vopd_plan
     loom::target::arch::amdgpu::provider
+    loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_info
     loom::target::entry_selection
     loom::target::function_contract

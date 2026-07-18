@@ -61,12 +61,6 @@ iree_status_t loom_amdgpu_packet_plan_verify(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_packet_plan_t* plan);
 
-// Returns the final native instruction count implied by |schedule| and |plan|.
-// A NULL plan means no target-owned packet insertions or pair replacements.
-uint64_t loom_amdgpu_packet_plan_instruction_count(
-    const loom_low_schedule_table_t* schedule,
-    const loom_amdgpu_packet_plan_t* plan);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif

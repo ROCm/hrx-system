@@ -6,6 +6,7 @@
 
 #include "loom/target/emit/native/amdgpu/hal_kernel_library.h"
 
+#include <inttypes.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -36,6 +37,7 @@
 #include "loom/target/arch/amdgpu/planning/storage_lease.h"
 #include "loom/target/arch/amdgpu/planning/vopd_plan.h"
 #include "loom/target/arch/amdgpu/provider.h"
+#include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/kernel_assembly.h"
 #include "loom/target/emit/native/amdgpu/kernel_hsaco.h"
@@ -46,6 +48,8 @@
 #include "loom/target/function_contract.h"
 #include "loom/target/provider.h"
 #include "loom/target/reporting/low.h"
+#include "loom/target/reporting/low_mix.h"
+#include "loom/target/reporting/low_names.h"
 
 #define LOOM_AMDGPU_HAL_KERNEL_LIBRARY_DEFAULT_MAX_ERRORS 20u
 
@@ -720,6 +724,100 @@ static iree_status_t loom_amdgpu_hal_kernel_library_record_wait_plan(
   return iree_ok_status();
 }
 
+static iree_status_t loom_amdgpu_hal_kernel_library_record_target_insertions(
+    loom_target_compile_report_t* report,
+    const loom_low_emission_frame_t* frame,
+    const loom_amdgpu_kernel_hsaco_contribution_t* contribution) {
+  if (report == NULL || contribution->native_insertion_count == 0) {
+    return iree_ok_status();
+  }
+
+  const loom_low_descriptor_set_t* descriptor_set =
+      frame->schedule.target.descriptor_set;
+  const loom_low_descriptor_t* packet_descriptor =
+      loom_amdgpu_descriptor_ref_descriptor(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_S_SET_VGPR_MSB);
+  if (packet_descriptor == NULL) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU address-state insertions require the s_set_vgpr_msb "
+        "descriptor");
+  }
+  const iree_string_view_t packet_key = loom_low_descriptor_set_string(
+      descriptor_set, packet_descriptor->key_string_offset);
+
+  loom_target_compile_report_low_dynamic_context_t dynamic_context = {0};
+  iree_status_t status =
+      loom_target_compile_report_low_dynamic_context_initialize(
+          frame, &dynamic_context);
+  for (iree_host_size_t i = 0;
+       i < contribution->native_insertion_count && iree_status_is_ok(status);
+       ++i) {
+    const loom_amdgpu_native_insertion_t* insertion =
+        &contribution->native_insertions[i];
+    if (insertion->kind != LOOM_AMDGPU_NATIVE_INSERTION_ADDRESS_STATE) {
+      status =
+          iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                           "AMDGPU native insertion has unsupported kind %u",
+                           (unsigned)insertion->kind);
+      break;
+    }
+    if (insertion->reserved != 0 ||
+        insertion->block_index >= frame->schedule.block_count ||
+        insertion->node_index >= frame->schedule.node_count) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU native insertion %" PRIhsz " has invalid provenance", i);
+      break;
+    }
+    const loom_low_schedule_node_t* node =
+        &frame->schedule.nodes[insertion->node_index];
+    const loom_low_schedule_block_t* block =
+        &frame->schedule.blocks[insertion->block_index];
+    if (node->block_index != insertion->block_index ||
+        node->scheduled_ordinal != insertion->scheduled_ordinal) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "AMDGPU native insertion %" PRIhsz
+                                " does not match its owning scheduled node",
+                                i);
+      break;
+    }
+    iree_string_view_t boundary_descriptor_key = iree_string_view_empty();
+    if (node->descriptor != NULL) {
+      boundary_descriptor_key = loom_low_descriptor_set_string(
+          descriptor_set, node->descriptor->key_string_offset);
+    }
+    loom_target_compile_report_target_insertion_row_t row = {
+        .function_name = report->function_name,
+        .insertion_kind = LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_STATE,
+        .packet_key = packet_key,
+        .block_name =
+            loom_target_compile_report_block_name(frame->module, block->block),
+        .block_index = insertion->block_index,
+        .node_index = insertion->node_index,
+        .scheduled_ordinal = insertion->scheduled_ordinal,
+        .boundary_operation_name = node->op != NULL
+                                       ? loom_op_name(frame->module, node->op)
+                                       : iree_string_view_empty(),
+        .boundary_descriptor_key = boundary_descriptor_key,
+        .static_packet_count = 1,
+    };
+    uint64_t execution_multiplier = 0;
+    if (dynamic_context.exact &&
+        loom_target_compile_report_low_node_execution_multiplier(
+            frame->module, &dynamic_context.fact_table,
+            dynamic_context.block_multipliers, node, &execution_multiplier)) {
+      row.flags =
+          LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_DYNAMIC_PACKET_COUNT;
+      row.dynamic_packet_count = execution_multiplier;
+    }
+    status =
+        loom_target_compile_report_record_target_insertion_row(report, &row);
+  }
+  loom_target_compile_report_low_dynamic_context_deinitialize(&dynamic_context);
+  return status;
+}
+
 static iree_status_t loom_amdgpu_hal_kernel_library_build_hsaco_contribution(
     const loom_low_emission_frame_t* frame,
     const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout,
@@ -752,9 +850,11 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_hsaco_contribution(
       .preflight = preflight,
       .packet_plan = &packet_plan,
   };
-  return loom_amdgpu_build_kernel_hsaco_contribution(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_build_kernel_hsaco_contribution(
       &frame->schedule, &frame->allocation, &hsaco_options, out_contribution,
-      table_arena);
+      table_arena));
+  return loom_amdgpu_hal_kernel_library_record_target_insertions(
+      report, frame, out_contribution);
 }
 
 static loom_target_compile_report_target_resources_t

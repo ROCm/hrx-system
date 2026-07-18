@@ -233,6 +233,8 @@ TEST_F(AmdgpuEncodingTest, EmitsDataSymbolRel32TextFixups) {
   loom_amdgpu_encoded_instruction_stream_t stream = {};
   IREE_ASSERT_OK(EncodeFunction(kFunctionSource, arena.arena(), &stream));
 
+  EXPECT_EQ(stream.instruction_count, 4u);
+  EXPECT_EQ(stream.native_insertion_count, 0u);
   ASSERT_EQ(stream.text_fixup_count, 2u);
   ASSERT_GE(stream.text.data_length, 4u);
 

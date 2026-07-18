@@ -113,6 +113,7 @@ iree_execution_test_suite(
     "report_loop_memory_economics_amdgpu.loom"
     "report_materialized_fragment_spills_amdgpu.loom"
     "report_private_memory_mix_amdgpu.loom"
+    "report_target_insertions_uncountable_amdgpu.loom"
     "selected_root_amdgpu.loom"
     "target_family_template_provider_amdgpu.loom"
   LABELS

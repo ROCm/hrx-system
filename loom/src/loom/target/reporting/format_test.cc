@@ -289,5 +289,188 @@ TEST(CompileReportFormatTest, FormatsEntryReportsAndTargetCapabilities) {
   loom_target_compile_report_deinitialize(&report);
 }
 
+TEST(CompileReportFormatTest, FormatsTargetInsertedPacketEconomics) {
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  report.requested_detail_flags =
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS;
+
+  loom_target_compile_report_t entry = {};
+  loom_target_compile_report_initialize(&entry, iree_allocator_system());
+  entry.requested_detail_flags = report.requested_detail_flags;
+  entry.function_name = IREE_SVL("extended_vgpr_loop");
+  loom_target_compile_report_target_insertion_row_t insertion = {
+      /*.flags=*/
+      LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_DYNAMIC_PACKET_COUNT,
+      /*.function_name=*/entry.function_name,
+      /*.insertion_kind=*/
+      LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_STATE,
+      /*.packet_key=*/IREE_SVL("amdgpu.s_set_vgpr_msb"),
+      /*.block_name=*/IREE_SVL("^loop_body"),
+      /*.block_index=*/1,
+      /*.node_index=*/7,
+      /*.scheduled_ordinal=*/3,
+      /*.boundary_operation_name=*/IREE_SVL("low.op"),
+      /*.boundary_descriptor_key=*/IREE_SVL("amdgpu.v_wmma_f32_16x16x32_bf16"),
+      /*.static_packet_count=*/1,
+      /*.dynamic_packet_count=*/4,
+  };
+  IREE_ASSERT_OK(loom_target_compile_report_record_target_insertion_row(
+      &entry, &insertion));
+  IREE_ASSERT_OK(
+      loom_target_compile_report_record_entry_report(&report, &entry));
+  loom_target_compile_report_deinitialize(&entry);
+
+  loom_target_compile_report_initialize(&entry, iree_allocator_system());
+  entry.requested_detail_flags = report.requested_detail_flags;
+  entry.function_name = IREE_SVL("uncountable_loop");
+  insertion.flags = LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_NONE;
+  insertion.function_name = entry.function_name;
+  insertion.block_name = IREE_SVL("^uncountable");
+  insertion.block_index = 2;
+  insertion.node_index = 11;
+  insertion.scheduled_ordinal = 5;
+  insertion.boundary_operation_name = IREE_SVL("low.return");
+  insertion.boundary_descriptor_key = iree_string_view_empty();
+  insertion.dynamic_packet_count = 0;
+  IREE_ASSERT_OK(loom_target_compile_report_record_target_insertion_row(
+      &entry, &insertion));
+  IREE_ASSERT_OK(
+      loom_target_compile_report_record_entry_report(&report, &entry));
+  loom_target_compile_report_deinitialize(&entry);
+
+  EXPECT_EQ(report.target_insertion_summary.static_packet_count, 2u);
+  EXPECT_EQ(report.target_insertion_summary.exact_dynamic_packet_count, 1u);
+  EXPECT_EQ(report.target_insertion_summary.unknown_dynamic_packet_count, 1u);
+  EXPECT_EQ(report.target_insertion_summary.dynamic_packet_count, 4u);
+  EXPECT_EQ(report.target_insertion_rows.count, 2u);
+
+  loom_target_compile_report_t clone = {};
+  IREE_ASSERT_OK(loom_target_compile_report_clone(
+      &report, iree_allocator_system(), &clone));
+  EXPECT_EQ(clone.target_insertion_summary.static_packet_count, 2u);
+  EXPECT_EQ(clone.target_insertion_rows.count, 2u);
+
+  const loom_target_compile_report_format_options_t options = {
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+  };
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(
+      loom_target_compile_report_format_text(&clone, &options, &builder));
+  const iree_string_view_t text = iree_string_builder_view(&builder);
+  EXPECT_NE(iree_string_view_find(
+                text,
+                IREE_SV("target_insertions static_packets=2 "
+                        "exact_dynamic_packets=1 unknown_dynamic_packets=1 "
+                        "dynamic_packets=unavailable rows=2"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(text,
+                                  IREE_SV("target_insertion[0] function="
+                                          "extended_vgpr_loop kind=state "
+                                          "packet=amdgpu.s_set_vgpr_msb"),
+                                  0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(text,
+                                  IREE_SV("target_insertion[1] function="
+                                          "uncountable_loop kind=state"),
+                                  0),
+            IREE_STRING_VIEW_NPOS);
+  iree_string_builder_deinitialize(&builder);
+
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+  IREE_ASSERT_OK(
+      loom_target_compile_report_format_json(&clone, &options, &stream));
+  const iree_string_view_t root =
+      ParseJsonDocument(iree_string_builder_view(&builder));
+  const iree_string_view_t target_insertions =
+      LookupObject(root, IREE_SV("target_insertions"));
+  ExpectObjectUint64Equals(target_insertions, IREE_SV("static_packet_count"),
+                           2);
+  ExpectObjectUint64Equals(target_insertions,
+                           IREE_SV("exact_dynamic_packet_count"), 1);
+  ExpectObjectUint64Equals(target_insertions,
+                           IREE_SV("unknown_dynamic_packet_count"), 1);
+  ExpectObjectValueEquals(target_insertions, IREE_SV("dynamic_packet_count"),
+                          IREE_SV("null"));
+  ExpectObjectUint64Equals(target_insertions, IREE_SV("row_count"), 2);
+  const iree_string_view_t rows =
+      LookupObject(target_insertions, IREE_SV("rows"));
+  const iree_string_view_t exact_row = LookupArrayElement(rows, 0);
+  ExpectObjectValueEquals(exact_row, IREE_SV("kind"), IREE_SV("state"));
+  ExpectObjectValueEquals(exact_row, IREE_SV("packet_key"),
+                          IREE_SV("amdgpu.s_set_vgpr_msb"));
+  ExpectObjectUint64Equals(exact_row, IREE_SV("dynamic_packet_count"), 4);
+  const iree_string_view_t unknown_row = LookupArrayElement(rows, 1);
+  ExpectObjectValueEquals(unknown_row, IREE_SV("dynamic_packet_count"),
+                          IREE_SV("null"));
+
+  const iree_string_view_t entries = LookupObject(root, IREE_SV("entries"));
+  const iree_string_view_t entry_row =
+      LookupArrayElement(LookupObject(entries, IREE_SV("rows")), 0);
+  const iree_string_view_t entry_target_insertions =
+      LookupObject(entry_row, IREE_SV("target_insertions"));
+  ExpectObjectUint64Equals(entry_target_insertions,
+                           IREE_SV("static_packet_count"), 1);
+  ExpectObjectUint64Equals(entry_target_insertions, IREE_SV("row_count"), 1);
+
+  iree_string_builder_deinitialize(&builder);
+  loom_target_compile_report_deinitialize(&clone);
+  loom_target_compile_report_deinitialize(&report);
+}
+
+TEST(CompileReportFormatTest, SummarizesTargetInsertionsWithoutDetailRows) {
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  const loom_target_compile_report_target_insertion_row_t insertion = {
+      /*.flags=*/
+      LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_DYNAMIC_PACKET_COUNT,
+      /*.function_name=*/IREE_SVL("summary_only"),
+      /*.insertion_kind=*/
+      LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_STATE,
+      /*.packet_key=*/IREE_SVL("amdgpu.s_set_vgpr_msb"),
+      /*.block_name=*/IREE_SVL("^entry"),
+      /*.block_index=*/0,
+      /*.node_index=*/2,
+      /*.scheduled_ordinal=*/1,
+      /*.boundary_operation_name=*/IREE_SVL("low.op"),
+      /*.boundary_descriptor_key=*/IREE_SVL("amdgpu.v_wmma"),
+      /*.static_packet_count=*/1,
+      /*.dynamic_packet_count=*/8,
+  };
+  IREE_ASSERT_OK(loom_target_compile_report_record_target_insertion_row(
+      &report, &insertion));
+
+  EXPECT_TRUE(iree_any_bit_set(
+      report.detail_flags,
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS));
+  EXPECT_EQ(report.target_insertion_summary.static_packet_count, 1u);
+  EXPECT_EQ(report.target_insertion_summary.exact_dynamic_packet_count, 1u);
+  EXPECT_EQ(report.target_insertion_summary.unknown_dynamic_packet_count, 0u);
+  EXPECT_EQ(report.target_insertion_summary.dynamic_packet_count, 8u);
+  EXPECT_EQ(report.target_insertion_rows.count, 0u);
+
+  const loom_target_compile_report_format_options_t options = {
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+  };
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(
+      loom_target_compile_report_format_text(&report, &options, &builder));
+  EXPECT_NE(iree_string_view_find(
+                iree_string_builder_view(&builder),
+                IREE_SV("target_insertions static_packets=1 "
+                        "exact_dynamic_packets=1 unknown_dynamic_packets=0 "
+                        "dynamic_packets=8 rows=0"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  iree_string_builder_deinitialize(&builder);
+
+  loom_target_compile_report_deinitialize(&report);
+}
+
 }  // namespace
 }  // namespace loom

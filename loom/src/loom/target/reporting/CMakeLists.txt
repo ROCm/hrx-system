@@ -49,12 +49,14 @@ loom_cc_library(
     report
   HDRS
     "report.h"
+    "target_insertion.h"
   SRCS
     "memory_summary.c"
     "memory_summary.h"
     "report.c"
     "row_list.c"
     "row_list.h"
+    "target_insertion.c"
   DEPS
     iree::base
     iree::base::internal
@@ -112,14 +114,14 @@ loom_cc_library(
     low
   HDRS
     "low.h"
+    "low_mix.h"
+    "low_names.h"
   SRCS
     "low.c"
     "low_allocation.c"
     "low_allocation.h"
     "low_mix.c"
-    "low_mix.h"
     "low_names.c"
-    "low_names.h"
   DEPS
     ::report
     iree::base

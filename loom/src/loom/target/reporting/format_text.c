@@ -33,6 +33,80 @@ iree_status_t loom_target_compile_report_text_append_string_field(
                                            (int)value.size, value.data);
 }
 
+static iree_status_t
+loom_target_compile_report_append_target_insertion_summary_fields(
+    iree_string_builder_t* builder,
+    const loom_target_compile_report_target_insertion_summary_t* summary) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      " static_packets=%" PRIu64 " exact_dynamic_packets=%" PRIu64
+      " unknown_dynamic_packets=%" PRIu64,
+      summary->static_packet_count, summary->exact_dynamic_packet_count,
+      summary->unknown_dynamic_packet_count));
+  if (summary->unknown_dynamic_packet_count != 0) {
+    return iree_string_builder_append_cstring(builder,
+                                              " dynamic_packets=unavailable");
+  }
+  return iree_string_builder_append_format(builder, " dynamic_packets=%" PRIu64,
+                                           summary->dynamic_packet_count);
+}
+
+static iree_status_t loom_target_compile_report_format_target_insertion_rows(
+    const loom_target_compile_report_t* report,
+    iree_string_builder_t* builder) {
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->target_insertion_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_target_insertion_row_t* rows =
+        (const loom_target_compile_report_target_insertion_row_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      const loom_target_compile_report_target_insertion_row_t* row = &rows[i];
+      const iree_string_view_t function_name =
+          loom_target_compile_report_text_non_empty(row->function_name);
+      const iree_string_view_t kind =
+          loom_target_compile_report_target_insertion_kind_name(
+              row->insertion_kind);
+      const iree_string_view_t packet_key =
+          loom_target_compile_report_text_non_empty(row->packet_key);
+      const iree_string_view_t block_name =
+          loom_target_compile_report_text_non_empty(row->block_name);
+      const iree_string_view_t operation_name =
+          loom_target_compile_report_text_non_empty(
+              row->boundary_operation_name);
+      const iree_string_view_t descriptor_key =
+          loom_target_compile_report_text_non_empty(
+              row->boundary_descriptor_key);
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "COMPILE-REPORT: target_insertion[%" PRIhsz
+          "] function=%.*s kind=%.*s packet=%.*s block=%.*s"
+          " block_index=%" PRIu32 " node_index=%" PRIu32
+          " scheduled_ordinal=%" PRIu32
+          " boundary_operation=%.*s"
+          " boundary_descriptor=%.*s static_packets=%" PRIu64,
+          row_index, (int)function_name.size, function_name.data,
+          (int)kind.size, kind.data, (int)packet_key.size, packet_key.data,
+          (int)block_name.size, block_name.data, row->block_index,
+          row->node_index, row->scheduled_ordinal, (int)operation_name.size,
+          operation_name.data, (int)descriptor_key.size, descriptor_key.data,
+          row->static_packet_count));
+      if (iree_any_bit_set(
+              row->flags,
+              LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_DYNAMIC_PACKET_COUNT)) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " dynamic_packets=%" PRIu64 "\n",
+            row->dynamic_packet_count));
+      } else {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+            builder, " dynamic_packets=unavailable\n"));
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_target_compile_report_append_workload_fields(
     iree_string_builder_t* builder,
     const loom_target_compile_report_workload_t* workload) {
@@ -367,6 +441,18 @@ static iree_status_t loom_target_compile_report_format_summary(
 
   if (iree_any_bit_set(
           report->detail_flags,
+          LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+        builder, "COMPILE-REPORT: target_insertions"));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_append_target_insertion_summary_fields(
+            builder, &report->target_insertion_summary));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, " rows=%" PRIhsz "\n", report->target_insertion_rows.count));
+  }
+
+  if (iree_any_bit_set(
+          report->detail_flags,
           LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_CAPABILITY_ROWS)) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "COMPILE-REPORT: target_capability_rows count=%" PRIhsz "\n",
@@ -629,18 +715,27 @@ static iree_status_t loom_target_compile_report_format_entry_rows(
         IREE_RETURN_IF_ERROR(loom_target_compile_report_append_workload_fields(
             builder, &row->workload));
       }
+      if (iree_any_bit_set(
+              row->detail_flags,
+              LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS)) {
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_append_target_insertion_summary_fields(
+                builder, &row->target_insertion_summary));
+      }
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           " pressure_rows=%" PRIhsz " pressure_origin_rows=%" PRIhsz
           " schedule_band_rows=%" PRIhsz " schedule_band_summary_rows=%" PRIhsz
           " spill_rows=%" PRIhsz " allocation_high_water_rows=%" PRIhsz
           " wait_counter_rows=%" PRIhsz " wait_reason_summary_rows=%" PRIhsz
-          " wait_action_rows=%" PRIhsz " target_capability_rows=%" PRIhsz "\n",
+          " wait_action_rows=%" PRIhsz " target_capability_rows=%" PRIhsz
+          " target_insertion_rows=%" PRIhsz "\n",
           row->pressure_row_count, row->pressure_origin_row_count,
           row->schedule_band_row_count, row->schedule_band_summary_row_count,
           row->spill_row_count, row->allocation_high_water_row_count,
           row->wait_counter_row_count, row->wait_reason_summary_row_count,
-          row->wait_action_row_count, row->target_capability_row_count));
+          row->wait_action_row_count, row->target_capability_row_count,
+          row->target_insertion_row_count));
       if (iree_any_bit_set(row->detail_flags,
                            LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING)) {
         IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -671,6 +766,13 @@ iree_status_t loom_target_compile_report_format_text(
         loom_target_compile_report_format_entry_rows(report, builder));
   }
   if (options->mode == LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS) {
+    if (iree_any_bit_set(
+            report->detail_flags,
+            LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS)) {
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_format_target_insertion_rows(report,
+                                                                  builder));
+    }
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_format_text_planning_details(report,
                                                                 builder));

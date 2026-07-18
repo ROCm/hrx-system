@@ -127,21 +127,3 @@ iree_status_t loom_amdgpu_packet_plan_verify(
       &plan->vopd_plan, &plan->wait_packets, &plan->wait_states));
   return loom_amdgpu_packet_plan_verify_address_state_vopd(plan);
 }
-
-uint64_t loom_amdgpu_packet_plan_instruction_count(
-    const loom_low_schedule_table_t* schedule,
-    const loom_amdgpu_packet_plan_t* plan) {
-  if (schedule == NULL) {
-    return 0;
-  }
-  if (plan == NULL) {
-    return schedule->scheduled_node_count;
-  }
-  const uint64_t wait_packet_count = plan->wait_packets.packet_count;
-  const uint64_t address_state_count = plan->address_state.transition_count;
-  const uint64_t wait_state_instruction_count =
-      loom_amdgpu_wait_state_plan_instruction_count(&plan->wait_states);
-  const uint64_t vopd_pair_count = plan->vopd_plan.pair_count;
-  return schedule->scheduled_node_count + address_state_count +
-         wait_packet_count + wait_state_instruction_count - vopd_pair_count;
-}

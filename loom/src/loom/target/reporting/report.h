@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "loom/codegen/low/planning_statistics.h"
+#include "loom/target/reporting/target_insertion.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -84,6 +85,8 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_DETAIL_CONFIG_BINDING_ROWS = 1u << 23,
   // Coarse target-low planning work and memory statistics were recorded.
   LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING = 1u << 24,
+  // Target-inserted native packet rows were recorded or counted.
+  LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS = 1u << 25,
 };
 
 typedef enum loom_target_compile_report_move_cause_e {
@@ -615,6 +618,9 @@ typedef struct loom_target_compile_report_entry_t {
   loom_target_compile_report_workload_t workload;
   // Coarse target-low planning work and memory statistics for this entry.
   loom_low_planning_statistics_t low_planning;
+  // Target-inserted native packet counts for this entry.
+  loom_target_compile_report_target_insertion_summary_t
+      target_insertion_summary;
   // Number of detailed register-pressure rows copied for this entry.
   iree_host_size_t pressure_row_count;
   // Number of detailed pressure-origin rows copied for this entry.
@@ -635,6 +641,8 @@ typedef struct loom_target_compile_report_entry_t {
   iree_host_size_t wait_action_row_count;
   // Number of selected-target capability rows copied for this entry.
   iree_host_size_t target_capability_row_count;
+  // Number of target-inserted native packet rows copied for this entry.
+  iree_host_size_t target_insertion_row_count;
 } loom_target_compile_report_entry_t;
 
 // One register-pressure peak row in a compile report.
@@ -1716,6 +1724,9 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_workload_t workload;
   // Coarse target-low planning work and memory statistics across entries.
   loom_low_planning_statistics_t low_planning;
+  // Target-inserted native packet counts across entries.
+  loom_target_compile_report_target_insertion_summary_t
+      target_insertion_summary;
   // Owned emitted artifact entry summary rows.
   loom_target_compile_report_row_list_t entry_rows;
   // Owned register-class pressure summaries used by target resources.
@@ -1740,6 +1751,8 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_row_list_t wait_reason_summary_rows;
   // Owned target wait-action rows.
   loom_target_compile_report_row_list_t wait_action_rows;
+  // Owned target-inserted native packet rows.
+  loom_target_compile_report_row_list_t target_insertion_rows;
   // Owned invocation config bindings materialized before compilation.
   loom_target_compile_report_row_list_t config_binding_rows;
   // Owned source-to-low selection rows.
