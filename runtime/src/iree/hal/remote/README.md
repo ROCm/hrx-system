@@ -106,26 +106,83 @@ Tooling and tests:
 
 ## Running It
 
-`iree-serve-device` exposes a local HAL device:
+### Deployment Boundary
+
+Remote HAL is designed for devices served inside a trusted private network or
+compute fabric. The protocol currently provides no peer authentication, client
+authorization, confidentiality, or integrity protection; admission and
+transport protection belong to the surrounding network. Any peer admitted by
+that boundary can submit HAL work to the exposed device. Direct exposure to an
+untrusted network is outside the deployment contract.
+
+The server defaults to `tcp://0.0.0.0:5000` so clients on the trusted network
+can connect without extra server configuration. Bind a specific interface when
+the host participates in networks with different trust domains. Remote HAL
+deliberately has no in-protocol cryptography: TCP deployments that need peer
+authentication or encryption must provide it at the network boundary, such as
+with an isolated compute fabric, IPsec, or WireGuard.
+
+### Network Quick Start
+
+Run the server and client on machines in the same trusted network. The explicit
+Bazel driver selection makes the recipe independent of an existing local
+configuration:
 
 ```bash
-iree-serve-device --device=local-task --bind=tcp://0.0.0.0:5000
-iree-serve-device --device=hip://0 --bind=tcp://0.0.0.0:5000
-iree-serve-device --device=hip://0 --bind=shm:///dev/shm/iree-gpu
-iree-serve-device --device=hip://0 --bind=rdma://192.0.2.10:7471 --rdma
+# Server: expose local-task on all IPv4 interfaces (default).
+iree-bazel-run \
+  --//runtime/config/hal:drivers=local-task \
+  //tools:iree-serve-device -- \
+  --device=local-task
+
+# Client: use a module compiled for the served local-task device.
+iree-bazel-run \
+  --//runtime/config/hal:drivers=remote \
+  //tools:iree-run-module -- \
+  --device=remote-tcp://server-host:5000 \
+  --module=/path/to/model.vmfb
 ```
+
+After the listener starts, `iree-serve-device` prints its actual bound address
+and a client device flag. A wildcard listener is reported with a
+`<server-host>` placeholder because the server cannot choose which hostname or
+interface is reachable from a particular client. Replace that placeholder with
+the server's reachable hostname or address while preserving the printed port.
+An assigned port is included when `--bind=...:0` is used.
+
+### Same-Host Development
+
+The wildcard TCP default also accepts same-host clients at `127.0.0.1:5000`.
+An explicit loopback bind restricts the listener to same-host development:
+
+```bash
+iree-serve-device \
+  --device=local-task \
+  --bind=tcp://127.0.0.1:5000
+
+iree-run-module \
+  --device=remote-tcp://127.0.0.1:5000 \
+  --module=/path/to/model.vmfb
+```
+
+The shared-memory transport provides a same-host IPC path whose endpoint access
+is governed by operating-system permissions.
+
+### Other Transports
 
 Clients use a remote driver name whose suffix selects the transport factory:
 
 ```bash
-iree-run-module --device=remote-tcp://server:5000 --module=model.vmfb
-iree-run-module --device=remote-shm:///dev/shm/iree-gpu --module=model.vmfb
-iree-run-module --device='remote-rdma://192.0.2.10:7471?rdma=true' \
+iree-run-module \
+  --device=remote-shm:///dev/shm/iree-gpu \
+  --module=model.vmfb
+iree-run-module \
+  --device='remote-rdma://192.0.2.10:7471?rdma=true' \
   --module=model.vmfb
 ```
 
 The client registration module enables TCP by default. Shared-memory and RDMA
-transports are opt-in in both build systems; RDMA is Linux-only:
+client transports are opt-in in both build systems; RDMA is Linux-only:
 
 ```bash
 # Bazel: the string-list flag replaces the default list.
@@ -139,13 +196,14 @@ transports are opt-in in both build systems; RDMA is Linux-only:
 parameter and `iree-serve-device --rdma` flag require RDMA-capable bulk
 transfer during session bootstrap; they are not downgrade preferences.
 
+### Server Files
+
 Server-side files are not implicitly exposed to clients. `iree-serve-device`
 builds an explicit logical namespace from repeated allow-list flags:
 
 ```bash
 iree-serve-device \
   --device=hip://0 \
-  --bind=tcp://0.0.0.0:5000 \
   --remote_file_allow=model=/srv/models/model.vmfb \
   --remote_file_allow_write=scratch=/srv/iree-scratch
 ```
@@ -153,7 +211,9 @@ iree-serve-device \
 The client then opens logical names through
 `iree_hal_remote_client_device_open_file`; server path validation and final
 open happen on the server, and failures are reported through the affected queue
-signal semaphores.
+signal semaphores. The allow-list restricts the logical file namespace visible
+through `FILE_OPEN`; it does not authenticate clients or restrict their use of
+the exposed HAL device.
 
 ## Protocol Compatibility
 
@@ -371,6 +431,28 @@ fails instead of silently falling back to message bulk transfer. Review of RDMA
 behavior should start below the HAL layer: transport factory setup, carrier
 capabilities, registered regions, direct write/read budget, memory-window
 lifetime, and the carrier CTS.
+
+## First Connection Checks
+
+The server readiness block is the source of truth for the listener and client
+URI. It is printed only after the listener has started successfully.
+
+- Connection refused from another machine: the default listener is
+  `tcp://127.0.0.1:5000`, so remote machines cannot reach it. Restart the server
+  with `--bind=tcp://<server-host>:5000` on a trusted network and copy the
+  printed client flag.
+- Wildcard listener: `0.0.0.0` and `[::]` are bind addresses, not client
+  destinations. Replace the printed `<server-host>` placeholder with a
+  reachable hostname or interface address while preserving the printed port.
+- `transport '...' is not compiled`: TCP is the default. Add optional Bazel
+  transports with `--//runtime/config/net:transports=tcp,shm,rdma`, or enable
+  `IREE_NET_TRANSPORT_SHM`/`IREE_NET_TRANSPORT_RDMA` in CMake.
+- Server starts but bootstrap fails: use client and server binaries from the
+  same revision. The experimental protocol deliberately rejects version
+  mismatches.
+- Module load fails after connection: compile the module for a target advertised
+  by the served device. A successful connection does not make a VMFB built for
+  another device family compatible.
 
 ## Debugging Map
 

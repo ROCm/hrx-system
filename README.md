@@ -245,28 +245,36 @@ through the existing GPU driver setting so HRX, the HIP compatibility layer, and
 CTS still use the normal `hrx_gpu_initialize()` and `hrx_gpu_device_get(0)`
 path.
 
-A local smoke run can use `local-task` behind `iree-serve-device`:
+A cross-machine smoke run serves an AMDGPU device through the default
+trusted-network listener. HRX requires an AMDGPU-compatible executable target,
+so a `local-task` server is not a valid substitute for this path:
 
 ```bash
-# Terminal 1: serve a local device.
+# Server: serve an AMDGPU device on all IPv4 interfaces (default).
 iree-bazel-run \
-  --//runtime/config/hal:drivers=local-sync,local-task,null,remote \
-  //runtime/src/iree/tools/iree-serve-device:iree-serve-device -- \
-  --device=local-task \
-  --bind=tcp://127.0.0.1:5000
+  --//runtime/config/hal:drivers=amdgpu \
+  //tools:iree-serve-device -- \
+  --device=amdgpu://0
 
-# Terminal 2: run HRX through the remote HAL client.
+# Client: run HRX through the remote HAL client.
 iree-bazel-run \
-  --//runtime/config/hal:drivers=local-sync,local-task,null,remote \
+  --//runtime/config/hal:drivers=remote \
   //libhrx/tools:hrx-info -- \
-  --device=remote-tcp://127.0.0.1:5000
+  --device=remote-tcp://server-host:5000
 ```
+
+Server startup prints the actual listener and a client device flag. For the
+wildcard default, replace its `<server-host>` placeholder with a hostname or
+interface address reachable from the client. Remote HAL assumes that the
+surrounding network admits trusted clients; the deployment boundary is detailed
+in `runtime/src/iree/hal/remote/README.md`. A same-host client can use
+`remote-tcp://127.0.0.1:5000` against the same default listener.
 
 For preloaded HIP applications the same selection is just an environment
 change:
 
 ```bash
-export HRX_GPU_DRIVER=remote-tcp://127.0.0.1:5000
+export HRX_GPU_DRIVER=remote-tcp://server-host:5000
 LD_PRELOAD="${HRX_ROOT}/lib/libamdhip64.so" ./my_hip_application
 ```
 

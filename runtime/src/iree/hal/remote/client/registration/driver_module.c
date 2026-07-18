@@ -125,9 +125,12 @@ static iree_status_t iree_hal_remote_client_create_transport_factory(
   }
 #endif  // IREE_HAVE_NET_RDMA_TRANSPORT
 
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "transport '%.*s' not compiled in",
-                          (int)transport_name.size, transport_name.data);
+  return iree_make_status(
+      IREE_STATUS_UNAVAILABLE,
+      "transport '%.*s' is not compiled into this remote HAL client; enable "
+      "it through //runtime/config/net:transports for Bazel or "
+      "IREE_NET_TRANSPORT_* for CMake",
+      (int)transport_name.size, transport_name.data);
 }
 
 static iree_status_t iree_hal_remote_client_driver_factory_try_create(

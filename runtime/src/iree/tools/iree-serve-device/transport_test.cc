@@ -49,6 +49,45 @@ TEST(ServeDeviceTransportTest, RejectsBindUriWithoutKnownTransport) {
       iree_serve_device_parse_bind_uri(IREE_SV("udp://0.0.0.0:5000"), &bind));
 }
 
+TEST(ServeDeviceTransportTest, ClassifiesLocalOnlyListeners) {
+  EXPECT_EQ(iree_serve_device_classify_bind_visibility(
+                IREE_SV("tcp"), IREE_SV("127.0.0.1:5000")),
+            IREE_SERVE_DEVICE_BIND_VISIBILITY_LOCAL_ONLY);
+  EXPECT_EQ(iree_serve_device_classify_bind_visibility(
+                IREE_SV("tcp"), IREE_SV("127.42.0.1:5000")),
+            IREE_SERVE_DEVICE_BIND_VISIBILITY_LOCAL_ONLY);
+  EXPECT_EQ(iree_serve_device_classify_bind_visibility(IREE_SV("tcp"),
+                                                       IREE_SV("[::1]:5000")),
+            IREE_SERVE_DEVICE_BIND_VISIBILITY_LOCAL_ONLY);
+  EXPECT_EQ(iree_serve_device_classify_bind_visibility(
+                IREE_SV("shm"), IREE_SV("/dev/shm/iree-gpu")),
+            IREE_SERVE_DEVICE_BIND_VISIBILITY_LOCAL_ONLY);
+}
+
+TEST(ServeDeviceTransportTest, ClassifiesNetworkListeners) {
+  EXPECT_EQ(iree_serve_device_classify_bind_visibility(
+                IREE_SV("tcp"), IREE_SV("192.0.2.10:5000")),
+            IREE_SERVE_DEVICE_BIND_VISIBILITY_NETWORK);
+  EXPECT_EQ(iree_serve_device_classify_bind_visibility(
+                IREE_SV("rdma"), IREE_SV("192.0.2.10:7471")),
+            IREE_SERVE_DEVICE_BIND_VISIBILITY_NETWORK);
+  EXPECT_EQ(iree_serve_device_classify_bind_visibility(IREE_SV("unknown"),
+                                                       IREE_SV("endpoint")),
+            IREE_SERVE_DEVICE_BIND_VISIBILITY_NETWORK);
+}
+
+TEST(ServeDeviceTransportTest, ClassifiesWildcardListeners) {
+  EXPECT_EQ(iree_serve_device_classify_bind_visibility(IREE_SV("tcp"),
+                                                       IREE_SV("0.0.0.0:5000")),
+            IREE_SERVE_DEVICE_BIND_VISIBILITY_NETWORK_WILDCARD);
+  EXPECT_EQ(iree_serve_device_classify_bind_visibility(IREE_SV("tcp"),
+                                                       IREE_SV("[::]:5000")),
+            IREE_SERVE_DEVICE_BIND_VISIBILITY_NETWORK_WILDCARD);
+  EXPECT_EQ(iree_serve_device_classify_bind_visibility(IREE_SV("rdma"),
+                                                       IREE_SV("0.0.0.0:7471")),
+            IREE_SERVE_DEVICE_BIND_VISIBILITY_NETWORK_WILDCARD);
+}
+
 TEST(ServeDeviceTransportTest, CreatesTcpTransportFactory) {
   iree_net_transport_factory_t* factory = nullptr;
   IREE_ASSERT_OK(iree_serve_device_create_transport_factory(

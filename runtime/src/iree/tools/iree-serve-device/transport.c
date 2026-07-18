@@ -45,6 +45,30 @@ iree_status_t iree_serve_device_parse_bind_uri(
       expected_prefixes, (int)bind_uri.size, bind_uri.data);
 }
 
+iree_serve_device_bind_visibility_t iree_serve_device_classify_bind_visibility(
+    iree_string_view_t transport_name, iree_string_view_t bound_address) {
+  if (iree_string_view_equal(transport_name, IREE_SV("shm"))) {
+    return IREE_SERVE_DEVICE_BIND_VISIBILITY_LOCAL_ONLY;
+  }
+
+  const bool is_network_transport =
+      iree_string_view_equal(transport_name, IREE_SV("tcp")) ||
+      iree_string_view_equal(transport_name, IREE_SV("rdma"));
+  if (is_network_transport &&
+      (iree_string_view_starts_with(bound_address, IREE_SV("0.0.0.0:")) ||
+       iree_string_view_starts_with(bound_address, IREE_SV("[::]:")))) {
+    return IREE_SERVE_DEVICE_BIND_VISIBILITY_NETWORK_WILDCARD;
+  }
+
+  if (iree_string_view_equal(transport_name, IREE_SV("tcp")) &&
+      (iree_string_view_starts_with(bound_address, IREE_SV("127.")) ||
+       iree_string_view_starts_with(bound_address, IREE_SV("[::1]:")))) {
+    return IREE_SERVE_DEVICE_BIND_VISIBILITY_LOCAL_ONLY;
+  }
+
+  return IREE_SERVE_DEVICE_BIND_VISIBILITY_NETWORK;
+}
+
 iree_status_t iree_serve_device_create_transport_factory(
     iree_string_view_t transport_name, iree_allocator_t host_allocator,
     iree_net_transport_factory_t** out_factory) {

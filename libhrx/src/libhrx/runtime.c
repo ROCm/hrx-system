@@ -698,8 +698,13 @@ static iree_status_t hrx_connect_remote_hal_device(
 
   iree_notification_deinitialize(&connect_state.notification);
   if (!iree_status_is_ok(status)) {
-    status = iree_status_annotate_f(status, "connecting remote device '%.*s'",
-                                    (int)device_uri.size, device_uri.data);
+    status = iree_status_annotate_f(
+        status,
+        "connecting remote device '%.*s'; verify iree-serve-device is "
+        "running and its --bind address is reachable from this client "
+        "(the default is tcp://0.0.0.0:5000; use the server's reachable "
+        "host address in the client URI)",
+        (int)device_uri.size, device_uri.data);
   }
   return status;
 }

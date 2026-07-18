@@ -7,12 +7,14 @@
 // iree-serve-device: Exposes local HAL devices to remote clients.
 //
 // Usage:
-//   iree-serve-device --device=local-task --bind=tcp://0.0.0.0:5000
-//   iree-serve-device --device=hip://0 --bind=tcp://[::]:5000
+//   iree-serve-device --device=local-task
+//   iree-serve-device --device=hip://0
 //
 // Clients connect using the remote HAL driver:
-//   iree-run-module --device=remote-tcp://server:5000 --module=model.vmfb
+//   iree-run-module --device=remote-tcp://server-host:5000 \
+//     --module=model.vmfb
 
+#include "iree/async/address.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/proactor.h"
 #include "iree/async/proactor_platform.h"
@@ -49,6 +51,9 @@
 
 IREE_FLAG(string, bind, "tcp://0.0.0.0:5000",
           "Address to bind the server to.\n"
+          "The default listens on all IPv4 interfaces for trusted-network "
+          "use. Remote HAL delegates peer admission and transport protection "
+          "to the surrounding network.\n"
           "Transport prefixes:\n"
           "  tcp://host:port       TCP sockets (default)\n"
           "  shm:///path           Shared memory (local "
@@ -57,7 +62,8 @@ IREE_FLAG(string, bind, "tcp://0.0.0.0:5000",
 IREE_FLAG(int32_t, max_connections, 16,
           "Maximum number of concurrent client connections.");
 
-IREE_FLAG(bool, rdma, false, "Require RDMA for bulk transfers.");
+IREE_FLAG(bool, rdma, false,
+          "Require an RDMA-capable transport and peer for bulk transfers.");
 
 IREE_FLAG_LIST(
     string, remote_file_allow,
@@ -392,6 +398,75 @@ static iree_status_t iree_serve_device_create_and_start_server(
   return iree_ok_status();
 }
 
+static iree_string_view_t iree_serve_device_extract_bound_port(
+    iree_string_view_t bound_address) {
+  iree_host_size_t separator = iree_string_view_find_last_of(
+      bound_address, IREE_SV(":"), IREE_STRING_VIEW_NPOS);
+  if (separator == IREE_STRING_VIEW_NPOS ||
+      separator + 1 >= bound_address.size) {
+    return iree_string_view_empty();
+  }
+  return iree_string_view_substr(bound_address, separator + 1,
+                                 bound_address.size - separator - 1);
+}
+
+// Reports the actual listener and a client device flag or wildcard template.
+static iree_status_t iree_serve_device_report_ready(
+    iree_serve_device_state_t* state, iree_string_view_t transport_name) {
+  char bound_address_buffer[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
+  iree_string_view_t bound_address = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(iree_hal_remote_server_query_bound_address(
+      state->server, sizeof(bound_address_buffer), bound_address_buffer,
+      &bound_address));
+
+  iree_string_view_t device_id = iree_hal_device_id(state->device);
+  iree_serve_device_bind_visibility_t visibility =
+      iree_serve_device_classify_bind_visibility(transport_name, bound_address);
+  const char* client_query = FLAG_rdma ? "?rdma=true" : "";
+
+  fprintf(stdout,
+          "\nRemote HAL server ready.\n"
+          "  Device: %.*s\n"
+          "  Listener: %.*s://%.*s\n",
+          (int)device_id.size, device_id.data, (int)transport_name.size,
+          transport_name.data, (int)bound_address.size, bound_address.data);
+  if (visibility == IREE_SERVE_DEVICE_BIND_VISIBILITY_NETWORK_WILDCARD) {
+    iree_string_view_t port =
+        iree_serve_device_extract_bound_port(bound_address);
+    if (!iree_string_view_is_empty(port)) {
+      fprintf(stdout,
+              "  Client: --device='remote-%.*s://<server-host>:%.*s%s'\n",
+              (int)transport_name.size, transport_name.data, (int)port.size,
+              port.data, client_query);
+    } else {
+      fprintf(stdout,
+              "  Client: --device='remote-%.*s://<reachable-address>%s'\n",
+              (int)transport_name.size, transport_name.data, client_query);
+    }
+  } else {
+    fprintf(stdout, "  Client: --device='remote-%.*s://%.*s%s'\n",
+            (int)transport_name.size, transport_name.data,
+            (int)bound_address.size, bound_address.data, client_query);
+  }
+
+  if (visibility == IREE_SERVE_DEVICE_BIND_VISIBILITY_LOCAL_ONLY &&
+      iree_string_view_equal(transport_name, IREE_SV("tcp"))) {
+    fprintf(stdout, "  Access: same-host only.\n");
+  } else if (visibility == IREE_SERVE_DEVICE_BIND_VISIBILITY_LOCAL_ONLY) {
+    fprintf(stdout,
+            "  Access: same-host IPC; operating-system endpoint permissions "
+            "control access.\n");
+  } else {
+    fprintf(stdout,
+            "  Trust: peers admitted by the surrounding network; no "
+            "protocol-level authentication or encryption.\n");
+  }
+  fprintf(stdout, "  Press Ctrl+C to stop.\n");
+  fflush(stdout);
+
+  return iree_ok_status();
+}
+
 static iree_status_t iree_serve_device_teardown(
     iree_serve_device_state_t* state) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -460,8 +535,6 @@ static iree_status_t iree_serve_device_run(void) {
 
   iree_serve_device_bind_t bind = {0};
   if (iree_status_is_ok(status)) {
-    iree_string_view_t device_id = iree_hal_device_id(state.device);
-    fprintf(stdout, "Device: %.*s\n", (int)device_id.size, device_id.data);
     status = iree_serve_device_parse_bind_uri(iree_make_cstring_view(FLAG_bind),
                                               &bind);
   }
@@ -510,12 +583,11 @@ static iree_status_t iree_serve_device_run(void) {
     status = iree_serve_device_create_file_index_from_flags(&state);
   }
   if (iree_status_is_ok(status)) {
-    fprintf(stdout, "Serving on %.*s://%.*s (Ctrl+C to stop)\n",
-            (int)bind.transport_name.size, bind.transport_name.data,
-            (int)bind.bind_address.size, bind.bind_address.data);
-    fflush(stdout);
     status =
         iree_serve_device_create_and_start_server(&state, bind.bind_address);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_serve_device_report_ready(&state, bind.transport_name);
   }
   if (iree_status_is_ok(status)) {
     status = iree_serve_device_wait_for_shutdown_signal(&state);
@@ -533,25 +605,26 @@ int main(int argc, char** argv) {
 
   iree_flags_set_usage(
       "iree-serve-device",
-      "Exposes local HAL devices to remote clients over the network.\n"
+      "Exposes local HAL devices to remote HAL clients.\n"
+      "Remote HAL is designed for trusted networks and delegates peer "
+      "admission\n"
+      "and transport protection to the surrounding network.\n"
       "\n"
-      "Examples:\n"
-      "  # Serve a local-task device on port 5000 over TCP\n"
-      "  iree-serve-device --device=local-task --bind=tcp://0.0.0.0:5000\n"
+      "Quick start (server and client machines):\n"
+      "  # Serve a local-task device on all IPv4 interfaces (default)\n"
+      "  iree-serve-device --device=local-task\n"
       "\n"
-      "  # Serve a HIP GPU over TCP\n"
-      "  iree-serve-device --device=hip://0 --bind=tcp://0.0.0.0:5000\n"
-      "\n"
-      "  # Serve over shared memory (local IPC)\n"
-      "  iree-serve-device --device=hip://0 --bind=shm:///dev/shm/iree-gpu\n"
-      "\n"
-      "  # Connect from another machine\n"
-      "  iree-run-module --device=remote-tcp://server:5000 "
+      "  # Client; replace model.vmfb with a module for the served device\n"
+      "  iree-run-module --device=remote-tcp://server-host:5000 "
       "--module=model.vmfb\n"
       "\n"
-      "  # Connect via shared memory\n"
-      "  iree-run-module --device=remote-shm:///dev/shm/iree-gpu "
-      "--module=model.vmfb\n" IREE_SERVE_DEVICE_RDMA_USAGE_EXAMPLE);
+      "  # Restrict TCP to same-host development\n"
+      "  iree-serve-device --device=local-task "
+      "--bind=tcp://127.0.0.1:5000\n"
+      "\n"
+      "  # Serve over shared memory (same-host IPC)\n"
+      "  iree-serve-device --device=hip://0 --bind=shm:///dev/shm/iree-gpu\n"
+      IREE_SERVE_DEVICE_RDMA_USAGE_EXAMPLE);
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
 
   iree_status_t status = iree_serve_device_run();
