@@ -116,8 +116,8 @@ static void iree_hal_passthrough_pool_reservation_state_release_reservation(
       iree_hal_asan_pool_options_is_enabled(&pool->asan_options)
           ? reservation_state->asan_layout.user_offset
           : 0;
-  iree_hal_memory_trace_free(&pool->trace,
-                             reservation_state->slab.base_ptr + user_offset);
+  iree_hal_memory_trace_free(&pool->trace, reservation_state->slab.base_ptr,
+                             user_offset);
   if (iree_hal_asan_pool_options_is_enabled(&pool->asan_options)) {
     iree_hal_slab_provider_advise_asan_range(
         pool->slab_provider, &reservation_state->slab,
@@ -309,9 +309,9 @@ static iree_status_t iree_hal_passthrough_pool_acquire_reservation(
   iree_atomic_fetch_add(&pool->slab_count, 1, iree_memory_order_relaxed);
   iree_atomic_fetch_add(&pool->reserve_count, 1, iree_memory_order_relaxed);
 
-  iree_hal_memory_trace_alloc(
-      &pool->trace, reservation_state->slab.base_ptr + out_reservation->offset,
-      out_reservation->byte_length);
+  iree_hal_memory_trace_alloc(&pool->trace, reservation_state->slab.base_ptr,
+                              out_reservation->offset,
+                              out_reservation->byte_length);
 
   memset(out_info, 0, sizeof(*out_info));
   *out_result = IREE_HAL_POOL_ACQUIRE_OK_FRESH;

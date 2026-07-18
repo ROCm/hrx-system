@@ -240,7 +240,7 @@ static iree_status_t iree_hal_vulkan_slab_provider_acquire_slab(
     out_slab->length = iree_hal_buffer_allocation_size(buffer);
     out_slab->provider_handle = (uint64_t)(uintptr_t)buffer;
     iree_hal_memory_trace_alloc(&provider->trace, out_slab->base_ptr,
-                                out_slab->length);
+                                /*byte_offset=*/0, out_slab->length);
     iree_atomic_fetch_add(&provider->total_acquired, 1,
                           iree_memory_order_relaxed);
   } else {
@@ -258,7 +258,8 @@ static void iree_hal_vulkan_slab_provider_release_slab(
       iree_hal_vulkan_slab_provider_cast(base_provider);
   IREE_TRACE_ZONE_BEGIN(z0);
   if (slab->provider_handle) {
-    iree_hal_memory_trace_free(&provider->trace, slab->base_ptr);
+    iree_hal_memory_trace_free(&provider->trace, slab->base_ptr,
+                               /*byte_offset=*/0);
     iree_hal_buffer_t* buffer =
         (iree_hal_buffer_t*)(uintptr_t)slab->provider_handle;
     iree_hal_buffer_release(buffer);

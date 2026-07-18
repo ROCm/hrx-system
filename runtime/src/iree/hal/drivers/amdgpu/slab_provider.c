@@ -658,7 +658,8 @@ static iree_status_t iree_hal_amdgpu_slab_provider_acquire_slab(
     // would incorrectly inflate HAL buffer byte lengths in pass-through pools.
     out_slab->length = min_length;
     out_slab->provider_handle = (uint64_t)(uintptr_t)slab_handle;
-    iree_hal_memory_trace_alloc(&provider->trace, base_ptr, allocation_size);
+    iree_hal_memory_trace_alloc(&provider->trace, base_ptr, /*byte_offset=*/0,
+                                allocation_size);
     iree_atomic_fetch_add(&provider->total_acquired, 1,
                           iree_memory_order_relaxed);
     iree_hal_amdgpu_slab_provider_record_memory_event(
@@ -689,7 +690,8 @@ static void iree_hal_amdgpu_slab_provider_release_slab(
     iree_hal_amdgpu_slab_provider_record_memory_event(
         provider, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_SLAB_RELEASE, slab_handle,
         slab->base_ptr);
-    iree_hal_memory_trace_free(&provider->trace, slab->base_ptr);
+    iree_hal_memory_trace_free(&provider->trace, slab->base_ptr,
+                               /*byte_offset=*/0);
     if (iree_hal_amdgpu_slab_provider_uses_asan_shadow(provider) &&
         slab_handle->has_asan_advice) {
       iree_hal_amdgpu_asan_quarantine_release_fn_t release_fn =

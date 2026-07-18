@@ -657,9 +657,9 @@ static iree_status_t iree_hal_tlsf_pool_return_allocation(
         pool->slab_provider, &slab->slab, allocation->offset,
         IREE_HAL_ASAN_RANGE_ADVICE_FLAG_ALLOCATED, asan_layout);
   }
-  iree_hal_memory_trace_alloc(
-      &pool->trace, (uint8_t*)slab->slab.base_ptr + out_reservation->offset,
-      out_reservation->byte_length);
+  iree_hal_memory_trace_alloc(&pool->trace, slab->slab.base_ptr,
+                              out_reservation->offset,
+                              out_reservation->byte_length);
   *out_result = result;
   return iree_ok_status();
 }
@@ -1027,8 +1027,8 @@ static void iree_hal_tlsf_pool_release_reservation(
     iree_async_frontier_initialize(release_frontier, 0);
   }
 
-  iree_hal_memory_trace_free(
-      &pool->trace, (uint8_t*)slab->slab.base_ptr + reservation->offset);
+  iree_hal_memory_trace_free(&pool->trace, slab->slab.base_ptr,
+                             reservation->offset);
   if (iree_hal_asan_pool_options_is_enabled(&pool->asan_options)) {
     iree_hal_slab_provider_advise_asan_range(
         pool->slab_provider, &slab->slab, release_node->backing_offset,

@@ -52,28 +52,37 @@ static inline void iree_hal_memory_trace_deinitialize(
   (void)trace;
 }
 
+// Records an allocation at |byte_offset| from |base_ptr|. Providers with
+// opaque allocation addresses pass NULL and the event is not recorded.
 static inline void iree_hal_memory_trace_alloc(
-    const iree_hal_memory_trace_t* trace, void* ptr,
-    iree_device_size_t byte_length) {
+    const iree_hal_memory_trace_t* trace, void* base_ptr,
+    iree_device_size_t byte_offset, iree_device_size_t byte_length) {
 #if IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_ALLOCATION_TRACKING
-  if (ptr && trace->memory_id) {
-    IREE_TRACE_ALLOC_NAMED(trace->memory_id, ptr,
+  if (base_ptr && trace->memory_id) {
+    IREE_TRACE_ALLOC_NAMED(trace->memory_id, (uint8_t*)base_ptr + byte_offset,
                            (iree_host_size_t)byte_length);
   }
 #else
   (void)trace;
-  (void)ptr;
+  (void)base_ptr;
+  (void)byte_offset;
   (void)byte_length;
 #endif  // IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_ALLOCATION_TRACKING
 }
 
+// Records a free at |byte_offset| from |base_ptr|. Providers with opaque
+// allocation addresses pass NULL and the event is not recorded.
 static inline void iree_hal_memory_trace_free(
-    const iree_hal_memory_trace_t* trace, void* ptr) {
+    const iree_hal_memory_trace_t* trace, void* base_ptr,
+    iree_device_size_t byte_offset) {
 #if IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_ALLOCATION_TRACKING
-  if (ptr && trace->memory_id) IREE_TRACE_FREE_NAMED(trace->memory_id, ptr);
+  if (base_ptr && trace->memory_id) {
+    IREE_TRACE_FREE_NAMED(trace->memory_id, (uint8_t*)base_ptr + byte_offset);
+  }
 #else
   (void)trace;
-  (void)ptr;
+  (void)base_ptr;
+  (void)byte_offset;
 #endif  // IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_ALLOCATION_TRACKING
 }
 

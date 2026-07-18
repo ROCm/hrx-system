@@ -153,7 +153,7 @@ static iree_status_t iree_hal_amdgpu_block_pool_grow(
     block_pool->allocations_head = block_allocation;
 
     iree_hal_memory_trace_alloc(
-        &block_pool->trace, base_ptr,
+        &block_pool->trace, base_ptr, /*byte_offset=*/0,
         block_pool->blocks_per_allocation * block_pool->block_size);
 
     // Setup all blocks to point at their relevant memory.
@@ -219,7 +219,8 @@ void iree_hal_amdgpu_block_pool_trim(iree_hal_amdgpu_block_pool_t* block_pool) {
     iree_hal_amdgpu_block_allocation_t* next_allocation = allocation->next;
     if (allocation->used_count == 0) {
       // No blocks outstanding - can free and remove from the allocation list.
-      iree_hal_memory_trace_free(&block_pool->trace, allocation->base_ptr);
+      iree_hal_memory_trace_free(&block_pool->trace, allocation->base_ptr,
+                                 /*byte_offset=*/0);
       iree_hal_amdgpu_hsa_cleanup_assert_success(
           iree_hsa_amd_memory_pool_free_raw(block_pool->libhsa,
                                             allocation->base_ptr));

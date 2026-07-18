@@ -126,7 +126,7 @@ static iree_status_t iree_hal_test_opaque_slab_provider_acquire_slab(
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(
       provider->host_allocator, min_length, IREE_HAL_HEAP_BUFFER_ALIGNMENT,
       /*offset=*/0, &backing));
-  out_slab->base_ptr = (uint8_t*)(uintptr_t)1;
+  out_slab->base_ptr = NULL;
   out_slab->length = min_length;
   out_slab->provider_handle = (uint64_t)(uintptr_t)backing;
   return iree_ok_status();
