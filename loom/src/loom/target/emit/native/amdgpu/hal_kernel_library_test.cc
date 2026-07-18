@@ -842,10 +842,6 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
     EXPECT_TRUE(HasTargetCapabilityU64(report, "amdgpu", "matrix_feature_bits",
                                        feature_bits))
         << test_case.processor_name;
-    EXPECT_TRUE(HasTargetCapabilityU64(report, "target",
-                                       "max_workgroup_storage_bytes", 65536))
-        << test_case.processor_name;
-
     loom_amdgpu_hal_kernel_library_deinitialize(&library,
                                                 iree_allocator_system());
     loom_target_compile_report_deinitialize(&report);

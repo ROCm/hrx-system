@@ -51,4 +51,19 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_test(
+  NAME
+    target_records_test
+  SRCS
+    "target_records_test.cc"
+  DEPS
+    ::target_records
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
