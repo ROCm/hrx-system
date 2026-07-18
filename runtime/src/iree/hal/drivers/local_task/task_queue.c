@@ -863,6 +863,16 @@ static iree_status_t iree_hal_task_queue_make_shutdown_status(void) {
   return iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
 }
 
+// Publishes an operation to the ready list and wakes the queue process. A
+// worker may drain and destroy the operation as soon as it is pushed, so this
+// captures all queue state before publication and consumes the operation.
+static void iree_hal_task_queue_schedule_ready(
+    iree_hal_task_queue_op_t* operation) {
+  iree_hal_task_queue_t* queue = operation->queue;
+  iree_hal_task_queue_op_slist_push(&queue->ready_list, operation);
+  iree_task_executor_schedule_process(queue->executor, &queue->process);
+}
+
 // Callback fired when a semaphore timepoint is resolved (value reached or
 // semaphore failed). Decrements the operation's wait_count and, if this was
 // the last outstanding wait, either pushes the operation to the ready list
@@ -873,7 +883,6 @@ static void iree_hal_task_queue_wait_resolved(
   iree_hal_task_queue_wait_entry_t* entry =
       (iree_hal_task_queue_wait_entry_t*)user_data;
   iree_hal_task_queue_op_t* operation = entry->operation;
-  iree_hal_task_queue_t* queue = operation->queue;
   iree_hal_semaphore_t* semaphore = entry->semaphore;
 
   // Record the first failure via CAS.
@@ -907,8 +916,7 @@ static void iree_hal_task_queue_wait_resolved(
     } else {
       // All waits satisfied. Push to ready list and wake queue.
       iree_hal_task_queue_profile_record_ready(operation);
-      iree_hal_task_queue_op_slist_push(&queue->ready_list, operation);
-      iree_task_executor_schedule_process(queue->executor, &queue->process);
+      iree_hal_task_queue_schedule_ready(operation);
     }
   }
 
@@ -959,9 +967,7 @@ static iree_status_t iree_hal_task_queue_enqueue_waits(
 
     // All waits already satisfied — push directly.
     iree_hal_task_queue_profile_record_ready(operation);
-    iree_hal_task_queue_op_slist_push(&operation->queue->ready_list, operation);
-    iree_task_executor_schedule_process(operation->queue->executor,
-                                        &operation->queue->process);
+    iree_hal_task_queue_schedule_ready(operation);
     return iree_ok_status();
   }
 
@@ -1129,9 +1135,7 @@ static void iree_hal_task_queue_alloca_memory_wait_resolved(
       wait->kind == IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_POOL_NOTIFICATION) {
     wait->kind = IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_NONE;
   }
-  iree_hal_task_queue_op_slist_push(&operation->queue->ready_list, operation);
-  iree_task_executor_schedule_process(operation->queue->executor,
-                                      &operation->queue->process);
+  iree_hal_task_queue_schedule_ready(operation);
 }
 
 static void iree_hal_task_queue_alloca_frontier_wait_resolved(
