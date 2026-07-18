@@ -13,8 +13,8 @@
 #include "iree/hal/drivers/amdgpu/util/kernarg_ring.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_capabilities.h"
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 
 #ifdef __cplusplus
 extern "C" {

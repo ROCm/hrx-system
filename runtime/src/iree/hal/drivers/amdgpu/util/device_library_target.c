@@ -6,7 +6,7 @@
 
 #include "iree/hal/drivers/amdgpu/util/device_library_target.h"
 
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 
 bool iree_hal_amdgpu_device_library_target_matches_file_arch(
     iree_string_view_t file_arch, iree_string_view_t target) {

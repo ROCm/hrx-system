@@ -20,9 +20,9 @@
 #include "iree/hal/drivers/amdgpu/util/hsaco_metadata.h"
 #include "iree/hal/drivers/amdgpu/util/kernarg_ring.h"
 #include "iree/hal/drivers/amdgpu/util/loaded_code_object.h"
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/drivers/amdgpu/util/vmem.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 
 //===----------------------------------------------------------------------===//
 // ISA Support

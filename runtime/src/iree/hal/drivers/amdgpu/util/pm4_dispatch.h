@@ -17,7 +17,7 @@
 #include "iree/base/api.h"
 #include "iree/hal/drivers/amdgpu/abi/kernel_descriptor.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_emitter.h"
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -30,7 +30,7 @@ iree_cc_library(
     iree::hal
     iree::hal::cts::util::registry
     iree::hal::drivers::amdgpu
-    iree::hal::drivers::amdgpu::util::executable_target
+    iree::hal::executable::amdgpu::executable_target
   TESTONLY
   PUBLIC
 )

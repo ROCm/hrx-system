@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 
 typedef enum iree_hal_amdgpu_target_feature_support_bits_e {
   IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_NONE = 0u,
@@ -27,7 +27,7 @@ typedef struct iree_hal_amdgpu_target_id_mapping_t {
 
 static const iree_hal_amdgpu_target_id_mapping_t
     iree_hal_amdgpu_target_id_mappings[] = {
-#include "iree/hal/drivers/amdgpu/util/target_id_map.inl"
+#include "iree/hal/executable/amdgpu/target_id_map.inl"
 };
 
 static bool iree_hal_amdgpu_parse_decimal_digit(char c, uint32_t* out_value) {
