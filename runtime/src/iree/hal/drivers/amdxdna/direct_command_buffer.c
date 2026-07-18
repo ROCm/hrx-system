@@ -41,10 +41,9 @@ typedef struct iree_hal_amdxdna_direct_command_buffer {
 
   iree_hal_amdxdna_device* device;
 
-  // Dispatches that can be lowered through the host-patched partial-ELF path
-  // accumulate here until end(). A single child is submitted directly; two or
-  // more children, or a multi-control-code/reconfiguration artifact, flush as
-  // ERT_CMD_CHAIN(s).
+  // Dispatches lowered through the host-patched path accumulate here until end().
+  // A single child is submitted directly. Multi-child groups flush as
+  // ERT_CMD_CHAIN(s) when supported, or as direct child submissions otherwise.
   iree_hal_amdxdna_chain_accum_t chain_accum;
   // Optional batch installed by queue execution. When present and native caps
   // support async submit, native commands are issued without waiting here; the
@@ -1559,11 +1558,6 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
       ctrl_code_buffer = NULL;
       command = NULL;
       submit_command = single_cache_entry->command;
-    } else if (iree_status_is_ok(status)) {
-      submit_command = command;
-      status =
-          iree_hal_amdxdna_direct_command_buffer_defer_native_command_and_buffer_destroy(
-              command_buffer, &command, &ctrl_code_buffer);
     }
   }
   if (single_cache_locked) {
@@ -1584,19 +1578,64 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
   return status;
 }
 
+static iree_status_t
+iree_hal_amdxdna_direct_command_buffer_materialize_accumulated_child(
+    iree_hal_amdxdna_direct_command_buffer* command_buffer,
+    iree_hal_amdxdna_chain_cmd_t* cmd) {
+  if (cmd->built) return iree_ok_status();
+  if (!cmd->src_asm_inst || !cmd->src_patches) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "serial dispatch fallback is missing recorded control-code descriptors");
+  }
+  return iree_hal_amdxdna_make_npu_cmd(
+      command_buffer, cmd->src_cu_idx, cmd->src_asm_inst, cmd->src_patches,
+      cmd->binding_device_addrs, cmd->binding_buffers, cmd->binding_offsets,
+      cmd->binding_lengths, cmd->binding_count,
+      iree_make_const_byte_span(cmd->src_constants, cmd->src_constant_count),
+      cmd->src_constant_patches, cmd->src_use_native_partial_elf,
+      /*retain_signature=*/true, cmd);
+}
+
+static iree_status_t
+iree_hal_amdxdna_direct_command_buffer_submit_accumulated_children_serially(
+    iree_hal_amdxdna_direct_command_buffer* command_buffer,
+    iree_hal_amdxdna_chain_group_t* group) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < group->cmd_count && iree_status_is_ok(status); ++i) {
+    iree_hal_amdxdna_chain_cmd_t* cmd = &group->cmds[i];
+    status =
+        iree_hal_amdxdna_direct_command_buffer_materialize_accumulated_child(
+            command_buffer, cmd);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amdxdna_direct_command_buffer_submit(
+          command_buffer, group->queue, cmd->command, IREE_SV("dispatch"));
+    }
+  }
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 // Flush all accumulated groups. Single-child groups submit directly; groups
-// with multiple children become native ERT chains chunked to the backend slot
-// limit. Groups are submitted in recorded order so producer/consumer
-// dependencies across groups are honored by the device's in-order completion.
+// with multiple children become native ERT chains when supported, or serial
+// direct child submissions otherwise. Groups are submitted in recorded order so
+// producer/consumer dependencies across groups are honored by the device's
+// in-order completion.
 static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
     iree_hal_amdxdna_direct_command_buffer* command_buffer) {
   iree_hal_amdxdna_chain_accum_t* accum = &command_buffer->chain_accum;
   if (accum->group_count == 0) return iree_ok_status();
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  const bool device_supports_command_chain =
+      (command_buffer->device->native_caps.dispatch_models &
+       IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_COMMAND_CHAIN) != 0;
   bool has_parent_chain_group = false;
   for (iree_host_size_t i = 0; i < accum->group_count; ++i) {
-    if (iree_hal_amdxdna_chain_group_requires_parent_chain(&accum->groups[i])) {
+    if (device_supports_command_chain &&
+        iree_hal_amdxdna_chain_group_requires_parent_chain(&accum->groups[i])) {
       has_parent_chain_group = true;
       break;
     }
@@ -1637,11 +1676,17 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
        group_index < accum->group_count && iree_status_is_ok(status);
        ++group_index) {
     iree_hal_amdxdna_chain_group_t* group = &accum->groups[group_index];
-    const bool submit_as_chain =
+    const bool group_requires_parent_chain =
         iree_hal_amdxdna_chain_group_requires_parent_chain(group);
+    const bool submit_as_chain =
+        device_supports_command_chain && group_requires_parent_chain;
     if (!submit_as_chain) {
-      status = iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
-          command_buffer, group);
+      status =
+          group_requires_parent_chain
+              ? iree_hal_amdxdna_direct_command_buffer_submit_accumulated_children_serially(
+                    command_buffer, group)
+              : iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
+                    command_buffer, group);
     } else {
       iree_hal_amdxdna_chain_command_cache_entry_t* chain_cache = NULL;
       {
@@ -2469,22 +2514,11 @@ iree_status_t iree_hal_amdxdna_dispatch_plan_initialize(
   out_plan->multi_control_code_or_pdi = kernel_params->n_pdi_loads > 1 ||
                                         out_plan->control_code_count > 1 ||
                                         out_plan->data_payload_count != 0;
-  // Accumulate dispatches into an ERT_CMD_CHAIN whenever the device can chain.
-  // Besides the PARTIAL_ELF and multi-control-code/PDI artifacts that always
-  // chained, this also covers single-control-code PDI dispatches on backends
-  // that advertise COMMAND_CHAIN (e.g. Linux KMQ): those used to fall through
-  // to an individual EXEC_CMD + wait per dispatch, so a recorded chain
-  // degenerated into N serial submit/wait pairs. accumulate_chained eagerly
-  // builds the non-partial-ELF children; a single-dispatch command buffer still
-  // collapses to one direct submit at flush. Still gated on the host patch
-  // table, which the chained path needs to patch I/O addresses.
-  const bool device_supports_command_chain =
-      (native_caps->dispatch_models &
-       IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_COMMAND_CHAIN) != 0;
-  out_plan->use_chain_accumulation_policy =
-      out_plan->has_host_patch_table &&
-      (out_plan->use_native_partial_elf_context ||
-       out_plan->multi_control_code_or_pdi || device_supports_command_chain);
+  // Accumulate every host-patch-table dispatch. The accumulator is the common
+  // host-patched native START_NPU/PARTIAL_ELF path; end() decides whether a
+  // multi-child group can become a parent ERT_CMD_CHAIN or must fall back to
+  // direct child submissions based on native caps.
+  out_plan->use_chain_accumulation_policy = out_plan->has_host_patch_table;
   return iree_ok_status();
 }
 

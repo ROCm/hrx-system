@@ -23,6 +23,8 @@ option(LIBHRX_BUILD_CUDA_BINDING
   "Build libhrx CUDA runtime/driver API compatibility binding." OFF)
 option(LIBHRX_BUILD_CTS
   "Build libhrx conformance tests." ${IREE_BUILD_TESTS})
+option(LIBHRX_BUILD_TESTS
+  "Build focused libhrx unit tests." OFF)
 option(HRX_INSTALL_TESTS
   "Install a relocatable CTest tree and test artifacts." ${IREE_BUILD_TESTS})
 set(HRX_PUBLIC_DIST_COMPONENT "HrxPublicDist" CACHE STRING

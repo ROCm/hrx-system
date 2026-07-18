@@ -81,6 +81,11 @@ enum class McdmAbi {
   compact,
 };
 
+enum class CommandApertureWritePublishMode {
+  cpu_cache_flush,
+  kmt_invalidate,
+};
+
 struct McdmAbiInfo {
   uint32_t status_private_type;
   uint32_t status_policy;
@@ -94,9 +99,16 @@ struct McdmAbiInfo {
   bool status_has_gpu_va;
   bool sync_has_allocation_handle;
   uint64_t command_aperture_code_slot_size;
+  CommandApertureWritePublishMode command_aperture_write_publish_mode;
   uint64_t command_aperture_code_publish_granularity;
   bool command_aperture_residency_after_bootstrap;
   bool command_aperture_remap_after_write;
+  // Exact D3DDDICB_DESTROYALLOCATION2FLAGS::Value required when destroying a
+  // shared resource. Zero retains the legacy per-object teardown behavior.
+  uint32_t shared_resource_destroy_flags;
+  // Whether teardown explicitly releases mapped GPU VAs before destroying
+  // their allocations. WDDM allocation destruction also owns its mapped VA.
+  bool explicit_gpu_va_free_on_destroy;
 };
 
 McdmAbiInfo GetMcdmAbiInfo(McdmAbi abi);
@@ -155,6 +167,9 @@ struct Device {
   D3DKMT_HANDLE paging_queue = 0;
   D3DKMT_HANDLE paging_sync_object = 0;
   void* paging_fence_cpu = nullptr;
+  // Highest paging-queue fence returned by Map/MakeResident. XRT drains this
+  // device-wide watermark before every HW-queue submit.
+  mutable volatile LONG64 pending_paging_fence_value = 0;
   McdmAbi mcdm_abi = McdmAbi::legacy;
 };
 
@@ -314,6 +329,16 @@ bool CreateContext(const KmtApi& api, const Device& device,
 
 void DestroyContext(const KmtApi& api, const Device& device, Context* context);
 
+// Tears down a context and its command aperture in the ABI-defined ownership
+// order. Compact MCDM has separate instruction and queue-status allocations;
+// the instruction allocation is released before the HW queue and the status
+// allocation after it. Legacy MCDM retains its established one-phase aperture
+// teardown before context destruction.
+void DestroyContextWithCommandAperture(const KmtApi& api,
+                                       const Device& device,
+                                       Context* context,
+                                       CommandAperture* aperture);
+
 bool CreateCommandAperture(const KmtApi& api, const Device& device,
                            const Context& context,
                            CommandAperture* out_aperture, Error* out_error);
@@ -340,11 +365,13 @@ bool SubmitPathBApertureSync(const KmtApi& api, const Device& device,
                              Error* out_error);
 
 // Code ranges have an ABI-owned lifetime independent of CPU write
-// publication. Compact MCDM acquires/releases 0x8000-byte code slots with
-// opcode 9 and publishes writes with CPU cache-line flushes. Legacy MCDM uses
-// cache invalidation followed by opcode-9 publication and retains its final
-// synchronous close marker. Keeping those details here lets the native layer
-// use one acquire/write/publish/release sequence for both ABIs.
+// publication. Acquisition validates the mapped range. Compact MCDM publishes
+// writes by flushing every cache line in each complete 0x8000-byte slot;
+// legacy MCDM uses KMT invalidation. Both profiles then submit opcode-9 end
+// markers so the later state-3 command observes the published image in queue
+// order. After execution, start-boundary markers release the slots and the
+// final release retires before teardown. Keeping those details here lets the
+// native layer use one acquire/write/publish/release sequence for both ABIs.
 bool AcquirePathBCodeRange(const KmtApi& api, const Device& device,
                            Context* context,
                            const CommandAperture& aperture, uint64_t offset,

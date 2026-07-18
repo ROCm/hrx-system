@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstring>
+#include <tuple>
 
 #include "iree/testing/gtest.h"
 
@@ -25,6 +26,15 @@ bool g_query_data_was_zero[2] = {};
 size_t g_query_count = 0;
 enum class SetupCall { submit, make_resident, lock, unlock, invalidate, wait };
 SetupCall g_setup_calls[16] = {};
+enum class TeardownCall {
+  unlock,
+  destroy_allocation,
+  destroy_hw_queue,
+  destroy_context,
+};
+TeardownCall g_teardown_calls[8] = {};
+size_t g_teardown_call_count = 0;
+bool g_record_teardown = false;
 uint32_t g_submit_opcodes[8] = {};
 uint64_t g_submit_fences[8] = {};
 uint64_t g_submit_offsets[8] = {};
@@ -36,6 +46,18 @@ size_t g_gpu_wait_count = 0;
 size_t g_setup_call_count = 0;
 size_t g_submit_count = 0;
 size_t g_wait_count = 0;
+uint8_t g_invalidate_first_bytes[4] = {};
+size_t g_invalidate_count = 0;
+uint32_t* g_complete_on_wait = nullptr;
+struct DestroyCall {
+  D3DKMT_HANDLE resource = 0;
+  D3DKMT_HANDLE allocation = 0;
+  uint32_t allocation_count = 0;
+  uint32_t flags = 0;
+};
+DestroyCall g_destroy_calls[4] = {};
+size_t g_destroy_call_count = 0;
+size_t g_free_gpu_va_count = 0;
 std::array<uint8_t, 0x40000> g_locked_aperture = {};
 
 void ResetFakes() {
@@ -49,6 +71,9 @@ void ResetFakes() {
   std::memset(g_query_data_was_zero, 0, sizeof(g_query_data_was_zero));
   g_query_count = 0;
   std::memset(g_setup_calls, 0, sizeof(g_setup_calls));
+  std::memset(g_teardown_calls, 0, sizeof(g_teardown_calls));
+  g_teardown_call_count = 0;
+  g_record_teardown = false;
   std::memset(g_submit_opcodes, 0, sizeof(g_submit_opcodes));
   std::memset(g_submit_fences, 0, sizeof(g_submit_fences));
   std::memset(g_submit_offsets, 0, sizeof(g_submit_offsets));
@@ -60,6 +85,13 @@ void ResetFakes() {
   g_setup_call_count = 0;
   g_submit_count = 0;
   g_wait_count = 0;
+  std::memset(g_invalidate_first_bytes, 0,
+              sizeof(g_invalidate_first_bytes));
+  g_invalidate_count = 0;
+  g_complete_on_wait = nullptr;
+  std::memset(g_destroy_calls, 0, sizeof(g_destroy_calls));
+  g_destroy_call_count = 0;
+  g_free_gpu_va_count = 0;
   g_locked_aperture.fill(0);
 }
 
@@ -264,11 +296,55 @@ NTSTATUS APIENTRY FakeLock2(D3DKMT_LOCK2* args) {
 
 NTSTATUS APIENTRY FakeUnlock2(CONST D3DKMT_UNLOCK2* args) {
   (void)args;
-  g_setup_calls[g_setup_call_count++] = SetupCall::unlock;
+  if (g_record_teardown) {
+    g_teardown_calls[g_teardown_call_count++] = TeardownCall::unlock;
+  } else {
+    g_setup_calls[g_setup_call_count++] = SetupCall::unlock;
+  }
+  return 0;
+}
+
+NTSTATUS APIENTRY FakeDestroyAllocation2(
+    CONST D3DKMT_DESTROYALLOCATION2* args) {
+  if (g_record_teardown) {
+    g_teardown_calls[g_teardown_call_count++] =
+        TeardownCall::destroy_allocation;
+  }
+  DestroyCall& call = g_destroy_calls[g_destroy_call_count++];
+  call.resource = args->hResource;
+  call.allocation_count = args->AllocationCount;
+  call.flags = args->Flags.Value;
+  if (args->AllocationCount && args->phAllocationList) {
+    call.allocation = args->phAllocationList[0];
+  }
+  return 0;
+}
+
+NTSTATUS APIENTRY FakeDestroyHwQueue(CONST D3DKMT_DESTROYHWQUEUE* args) {
+  (void)args;
+  g_teardown_calls[g_teardown_call_count++] =
+      TeardownCall::destroy_hw_queue;
+  return 0;
+}
+
+NTSTATUS APIENTRY FakeDestroyContext(CONST D3DKMT_DESTROYCONTEXT* args) {
+  (void)args;
+  g_teardown_calls[g_teardown_call_count++] = TeardownCall::destroy_context;
+  return 0;
+}
+
+NTSTATUS APIENTRY FakeFreeGpuVirtualAddress(
+    CONST D3DKMT_FREEGPUVIRTUALADDRESS* args) {
+  (void)args;
+  ++g_free_gpu_va_count;
   return 0;
 }
 
 NTSTATUS APIENTRY FakeInvalidateCache(CONST D3DKMT_INVALIDATECACHE* args) {
+  if (g_invalidate_count < std::size(g_invalidate_first_bytes)) {
+    g_invalidate_first_bytes[g_invalidate_count] = g_locked_aperture[0];
+  }
+  ++g_invalidate_count;
   g_setup_calls[g_setup_call_count++] = SetupCall::invalidate;
   return 0;
 }
@@ -277,6 +353,7 @@ NTSTATUS APIENTRY FakeWaitFromCpu(
     CONST D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU* args) {
   g_setup_calls[g_setup_call_count++] = SetupCall::wait;
   g_wait_fences[g_wait_count++] = args->FenceValueArray[0];
+  if (g_complete_on_wait) *g_complete_on_wait = 1;
   return 0;
 }
 
@@ -308,9 +385,13 @@ TEST(KmtApiTest, LegacyAbiMatchesOriginalSubmitLayout) {
   EXPECT_FALSE(abi.status_has_gpu_va);
   EXPECT_TRUE(abi.sync_has_allocation_handle);
   EXPECT_EQ(abi.command_aperture_code_slot_size, 0x8000u);
+  EXPECT_EQ(abi.command_aperture_write_publish_mode,
+            CommandApertureWritePublishMode::kmt_invalidate);
   EXPECT_EQ(abi.command_aperture_code_publish_granularity, 0u);
   EXPECT_FALSE(abi.command_aperture_residency_after_bootstrap);
   EXPECT_TRUE(abi.command_aperture_remap_after_write);
+  EXPECT_EQ(abi.shared_resource_destroy_flags, 0u);
+  EXPECT_TRUE(abi.explicit_gpu_va_free_on_destroy);
 }
 
 TEST(KmtApiTest, CompactAbiMatchesXrt221SubmitLayout) {
@@ -327,9 +408,106 @@ TEST(KmtApiTest, CompactAbiMatchesXrt221SubmitLayout) {
   EXPECT_TRUE(abi.status_has_gpu_va);
   EXPECT_FALSE(abi.sync_has_allocation_handle);
   EXPECT_EQ(abi.command_aperture_code_slot_size, 0x8000u);
+  EXPECT_EQ(abi.command_aperture_write_publish_mode,
+            CommandApertureWritePublishMode::cpu_cache_flush);
   EXPECT_EQ(abi.command_aperture_code_publish_granularity, 0x8000u);
   EXPECT_TRUE(abi.command_aperture_residency_after_bootstrap);
   EXPECT_FALSE(abi.command_aperture_remap_after_write);
+  EXPECT_EQ(abi.shared_resource_destroy_flags, 0x3u);
+  EXPECT_FALSE(abi.explicit_gpu_va_free_on_destroy);
+}
+
+TEST(KmtApiTest, SharedResourceDestroyFlagsMatchNegotiatedAbi) {
+  for (const auto [mcdm_abi, expected_buffer_flags,
+                   expected_aperture_flags] :
+       {std::tuple{McdmAbi::legacy, 0x1u, 0x2u},
+        std::tuple{McdmAbi::compact, 0x3u, 0x3u}}) {
+    ResetFakes();
+    KmtApi api = {};
+    api.destroy_allocation2 = FakeDestroyAllocation2;
+    api.free_gpu_virtual_address = FakeFreeGpuVirtualAddress;
+    Device device = {};
+    device.device = 0x10;
+    device.mcdm_abi = mcdm_abi;
+
+    Buffer buffer = {};
+    buffer.allocation = 0x20;
+    buffer.resource = 0x21;
+    buffer.gpu_va = 0x10000;
+    buffer.mapped_size = 0x1000;
+    DestroyBuffer(api, device, &buffer);
+
+    CommandAperture aperture = {};
+    aperture.resource = 0x31;
+    aperture.gpu_va = 0x20000;
+    aperture.gpu_va_size = 0x1000;
+    aperture.status_gpu_va = 0x30000;
+    DestroyCommandAperture(api, device, &aperture);
+
+    ASSERT_EQ(g_destroy_call_count, 2u);
+    EXPECT_EQ(g_destroy_calls[0].resource, 0x21u);
+    EXPECT_EQ(g_destroy_calls[0].allocation_count, 0u);
+    EXPECT_EQ(g_destroy_calls[0].flags, expected_buffer_flags);
+    EXPECT_EQ(g_destroy_calls[1].resource, 0x31u);
+    EXPECT_EQ(g_destroy_calls[1].allocation_count, 0u);
+    EXPECT_EQ(g_destroy_calls[1].flags, expected_aperture_flags);
+    EXPECT_EQ(g_free_gpu_va_count,
+              mcdm_abi == McdmAbi::legacy ? 3u : 0u);
+  }
+}
+
+TEST(KmtApiTest, CompactContextTeardownMatchesXrtOwnershipOrder) {
+  ResetFakes();
+  g_record_teardown = true;
+
+  KmtApi api = {};
+  api.unlock2 = FakeUnlock2;
+  api.destroy_allocation2 = FakeDestroyAllocation2;
+  api.destroy_hw_queue = FakeDestroyHwQueue;
+  api.destroy_context = FakeDestroyContext;
+  Device device = {};
+  device.device = 0x10;
+  device.mcdm_abi = McdmAbi::compact;
+
+  CommandAperture aperture = {};
+  aperture.gpu_allocation = 0x20;
+  aperture.gpu_cpu_ptr = reinterpret_cast<void*>(0x1000);
+  aperture.gpu_va = 0x04000000;
+  aperture.gpu_va_size = 0x04000000;
+  aperture.allocation = 0x21;
+  aperture.resource = 0x22;
+  aperture.cpu_ptr = reinterpret_cast<void*>(0x2000);
+
+  Context context = {};
+  context.hw_queue = 0x30;
+  context.context = 0x31;
+  context.context_private_buffer.allocation = 0x40;
+  context.context_private_buffer.resource = 0x41;
+  context.context_private_buffer.cpu_ptr = reinterpret_cast<void*>(0x3000);
+
+  DestroyContextWithCommandAperture(api, device, &context, &aperture);
+
+  const std::array expected = {
+      TeardownCall::unlock,
+      TeardownCall::destroy_allocation,
+      TeardownCall::destroy_hw_queue,
+      TeardownCall::unlock,
+      TeardownCall::destroy_allocation,
+      TeardownCall::unlock,
+      TeardownCall::destroy_allocation,
+      TeardownCall::destroy_context,
+  };
+  ASSERT_EQ(g_teardown_call_count, expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(g_teardown_calls[i], expected[i]);
+  }
+  ASSERT_EQ(g_destroy_call_count, 3u);
+  EXPECT_EQ(g_destroy_calls[0].allocation, 0x20u);
+  EXPECT_EQ(g_destroy_calls[0].flags, 0x3u);
+  EXPECT_EQ(g_destroy_calls[1].resource, 0x22u);
+  EXPECT_EQ(g_destroy_calls[1].flags, 0x3u);
+  EXPECT_EQ(g_destroy_calls[2].resource, 0x41u);
+  EXPECT_EQ(g_destroy_calls[2].flags, 0x3u);
 }
 
 TEST(KmtApiTest, CodeRangeFollowsSetupPayloadAllocatorForBothAbis) {
@@ -419,49 +597,55 @@ TEST(KmtApiTest, CompactChainChildHandleMatchesXrt221BoPrefix) {
             0);
 }
 
-TEST(KmtApiTest, NegotiatesLegacyAbiFromTwoDwordQuery) {
-  ResetFakes();
-  g_query_statuses[0] = 0;
-  g_query_outputs[0][1] = 2;
-  KmtApi api = {};
-  api.query_adapter_info = FakeQueryAdapterInfo;
-  McdmAbi abi = McdmAbi::compact;
-  Error error = {};
-
-  ASSERT_TRUE(QueryMcdmAbi(api, 0x1234, &abi, &error))
-      << ErrorMessage(&error);
-  EXPECT_EQ(abi, McdmAbi::legacy);
-  ASSERT_EQ(g_query_count, 1u);
-  EXPECT_EQ(g_query_sizes[0], 2u * sizeof(uint32_t));
-  EXPECT_EQ(g_query_adapters[0], 0x1234u);
-  EXPECT_EQ(g_query_types[0], KMTQAITYPE_UMDRIVERPRIVATE);
-  EXPECT_TRUE(g_query_data_was_zero[0]);
-}
-
-TEST(KmtApiTest, NegotiatesLegacyV3AbiFromTwoDwordQuery) {
-  ResetFakes();
-  g_query_statuses[0] = 0;
-  g_query_outputs[0][1] = 3;
-  KmtApi api = {};
-  api.query_adapter_info = FakeQueryAdapterInfo;
-  McdmAbi abi = McdmAbi::compact;
-  Error error = {};
-
-  ASSERT_TRUE(QueryMcdmAbi(api, 0x1234, &abi, &error))
-      << ErrorMessage(&error);
-  EXPECT_EQ(abi, McdmAbi::legacy);
-  ASSERT_EQ(g_query_count, 1u);
-  EXPECT_EQ(g_query_sizes[0], 2u * sizeof(uint32_t));
-  EXPECT_EQ(g_query_adapters[0], 0x1234u);
-  EXPECT_EQ(g_query_types[0], KMTQAITYPE_UMDRIVERPRIVATE);
-  EXPECT_TRUE(g_query_data_was_zero[0]);
-}
-
-TEST(KmtApiTest, NegotiatesCompactAbiAfterLegacyShapeIsTooSmall) {
+TEST(KmtApiTest, NegotiatesLegacyAbiAfterCompactShapeIsRejected) {
   ResetFakes();
   g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
-  g_query_statuses[1] = 0;
   g_query_outputs[1][1] = 2;
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbi abi = McdmAbi::compact;
+  Error error = {};
+
+  ASSERT_TRUE(QueryMcdmAbi(api, 0x1234, &abi, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(abi, McdmAbi::legacy);
+  ASSERT_EQ(g_query_count, 2u);
+  EXPECT_EQ(g_query_sizes[0], 3u * sizeof(uint32_t));
+  EXPECT_EQ(g_query_sizes[1], 2u * sizeof(uint32_t));
+  EXPECT_EQ(g_query_adapters[0], 0x1234u);
+  EXPECT_EQ(g_query_adapters[1], 0x1234u);
+  EXPECT_EQ(g_query_types[0], KMTQAITYPE_UMDRIVERPRIVATE);
+  EXPECT_EQ(g_query_types[1], KMTQAITYPE_UMDRIVERPRIVATE);
+  EXPECT_TRUE(g_query_data_was_zero[0]);
+  EXPECT_TRUE(g_query_data_was_zero[1]);
+}
+
+TEST(KmtApiTest, NegotiatesLegacyV3AbiAfterCompactShapeIsRejected) {
+  ResetFakes();
+  g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
+  g_query_outputs[1][1] = 3;
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbi abi = McdmAbi::compact;
+  Error error = {};
+
+  ASSERT_TRUE(QueryMcdmAbi(api, 0x1234, &abi, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(abi, McdmAbi::legacy);
+  ASSERT_EQ(g_query_count, 2u);
+  EXPECT_EQ(g_query_sizes[0], 3u * sizeof(uint32_t));
+  EXPECT_EQ(g_query_sizes[1], 2u * sizeof(uint32_t));
+  EXPECT_EQ(g_query_adapters[0], 0x1234u);
+  EXPECT_EQ(g_query_adapters[1], 0x1234u);
+  EXPECT_EQ(g_query_types[0], KMTQAITYPE_UMDRIVERPRIVATE);
+  EXPECT_EQ(g_query_types[1], KMTQAITYPE_UMDRIVERPRIVATE);
+  EXPECT_TRUE(g_query_data_was_zero[0]);
+  EXPECT_TRUE(g_query_data_was_zero[1]);
+}
+
+TEST(KmtApiTest, NegotiatesCompactAbiWithOneXrtCompatibleQuery) {
+  ResetFakes();
+  g_query_outputs[0][1] = 2;
   KmtApi api = {};
   api.query_adapter_info = FakeQueryAdapterInfo;
   McdmAbi abi = McdmAbi::legacy;
@@ -470,80 +654,68 @@ TEST(KmtApiTest, NegotiatesCompactAbiAfterLegacyShapeIsTooSmall) {
   ASSERT_TRUE(QueryMcdmAbi(api, 0x5678, &abi, &error))
       << ErrorMessage(&error);
   EXPECT_EQ(abi, McdmAbi::compact);
-  ASSERT_EQ(g_query_count, 2u);
-  EXPECT_EQ(g_query_sizes[0], 2u * sizeof(uint32_t));
-  EXPECT_EQ(g_query_sizes[1], 3u * sizeof(uint32_t));
+  ASSERT_EQ(g_query_count, 1u);
+  EXPECT_EQ(g_query_sizes[0], 3u * sizeof(uint32_t));
   EXPECT_EQ(g_query_adapters[0], 0x5678u);
-  EXPECT_EQ(g_query_adapters[1], 0x5678u);
   EXPECT_EQ(g_query_types[0], KMTQAITYPE_UMDRIVERPRIVATE);
-  EXPECT_EQ(g_query_types[1], KMTQAITYPE_UMDRIVERPRIVATE);
   EXPECT_TRUE(g_query_data_was_zero[0]);
-  EXPECT_TRUE(g_query_data_was_zero[1]);
 }
 
-TEST(KmtApiTest, NegotiatesCompactV3AbiAfterLegacyShapeIsTooSmall) {
+TEST(KmtApiTest, NegotiatesCompactV3AbiWithOneXrtCompatibleQuery) {
+  ResetFakes();
+  g_query_outputs[0][1] = 3;
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbi abi = McdmAbi::legacy;
+  Error error = {};
+
+  ASSERT_TRUE(QueryMcdmAbi(api, 0x5678, &abi, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(abi, McdmAbi::compact);
+  ASSERT_EQ(g_query_count, 1u);
+  EXPECT_EQ(g_query_sizes[0], 3u * sizeof(uint32_t));
+  EXPECT_EQ(g_query_adapters[0], 0x5678u);
+  EXPECT_EQ(g_query_types[0], KMTQAITYPE_UMDRIVERPRIVATE);
+  EXPECT_TRUE(g_query_data_was_zero[0]);
+}
+
+TEST(KmtApiTest, RejectsUnknownTwoDwordAbiIdentity) {
   ResetFakes();
   g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
-  g_query_statuses[1] = 0;
+  g_query_outputs[1][1] = 4;
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbi abi = McdmAbi::legacy;
+  Error error = {};
+
+  EXPECT_FALSE(QueryMcdmAbi(api, 0x1234, &abi, &error));
+  EXPECT_NE(std::strstr(ErrorMessage(&error),
+                        "unsupported two-dword MCDM identity"),
+            nullptr);
+  EXPECT_EQ(g_query_count, 2u);
+}
+
+TEST(KmtApiTest, RejectsUnknownTwoDwordAbiMajor) {
+  ResetFakes();
+  g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
+  g_query_outputs[1][0] = 1;
   g_query_outputs[1][1] = 3;
   KmtApi api = {};
   api.query_adapter_info = FakeQueryAdapterInfo;
   McdmAbi abi = McdmAbi::legacy;
   Error error = {};
 
-  ASSERT_TRUE(QueryMcdmAbi(api, 0x5678, &abi, &error))
-      << ErrorMessage(&error);
-  EXPECT_EQ(abi, McdmAbi::compact);
-  ASSERT_EQ(g_query_count, 2u);
-  EXPECT_EQ(g_query_sizes[0], 2u * sizeof(uint32_t));
-  EXPECT_EQ(g_query_sizes[1], 3u * sizeof(uint32_t));
-  EXPECT_EQ(g_query_adapters[0], 0x5678u);
-  EXPECT_EQ(g_query_adapters[1], 0x5678u);
-  EXPECT_EQ(g_query_types[0], KMTQAITYPE_UMDRIVERPRIVATE);
-  EXPECT_EQ(g_query_types[1], KMTQAITYPE_UMDRIVERPRIVATE);
-  EXPECT_TRUE(g_query_data_was_zero[0]);
-  EXPECT_TRUE(g_query_data_was_zero[1]);
-}
-
-TEST(KmtApiTest, RejectsUnknownTwoDwordAbiIdentity) {
-  ResetFakes();
-  g_query_statuses[0] = 0;
-  g_query_outputs[0][1] = 4;
-  KmtApi api = {};
-  api.query_adapter_info = FakeQueryAdapterInfo;
-  McdmAbi abi = McdmAbi::legacy;
-  Error error = {};
-
   EXPECT_FALSE(QueryMcdmAbi(api, 0x1234, &abi, &error));
   EXPECT_NE(std::strstr(ErrorMessage(&error),
                         "unsupported two-dword MCDM identity"),
             nullptr);
-  EXPECT_EQ(g_query_count, 1u);
-}
-
-TEST(KmtApiTest, RejectsUnknownTwoDwordAbiMajor) {
-  ResetFakes();
-  g_query_statuses[0] = 0;
-  g_query_outputs[0][0] = 1;
-  g_query_outputs[0][1] = 3;
-  KmtApi api = {};
-  api.query_adapter_info = FakeQueryAdapterInfo;
-  McdmAbi abi = McdmAbi::legacy;
-  Error error = {};
-
-  EXPECT_FALSE(QueryMcdmAbi(api, 0x1234, &abi, &error));
-  EXPECT_NE(std::strstr(ErrorMessage(&error),
-                        "unsupported two-dword MCDM identity"),
-            nullptr);
-  EXPECT_EQ(g_query_count, 1u);
+  EXPECT_EQ(g_query_count, 2u);
 }
 
 TEST(KmtApiTest, RejectsUnknownThreeDwordAbiIdentity) {
   ResetFakes();
-  g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
-  g_query_statuses[1] = 0;
-  g_query_outputs[1][1] = 2;
-  g_query_outputs[1][2] = 1;
+  g_query_outputs[0][1] = 2;
+  g_query_outputs[0][2] = 1;
   KmtApi api = {};
   api.query_adapter_info = FakeQueryAdapterInfo;
   McdmAbi abi = McdmAbi::legacy;
@@ -553,7 +725,7 @@ TEST(KmtApiTest, RejectsUnknownThreeDwordAbiIdentity) {
   EXPECT_NE(std::strstr(ErrorMessage(&error),
                         "unsupported three-dword MCDM identity"),
             nullptr);
-  EXPECT_EQ(g_query_count, 2u);
+  EXPECT_EQ(g_query_count, 1u);
 }
 
 TEST(KmtApiTest, RejectsUnknownAbiQueryFailure) {
@@ -565,7 +737,7 @@ TEST(KmtApiTest, RejectsUnknownAbiQueryFailure) {
   Error error = {};
 
   EXPECT_FALSE(QueryMcdmAbi(api, 0x9ABC, &abi, &error));
-  EXPECT_NE(std::strstr(ErrorMessage(&error), "UMDRIVERPRIVATE legacy"),
+  EXPECT_NE(std::strstr(ErrorMessage(&error), "UMDRIVERPRIVATE compact"),
             nullptr);
   EXPECT_EQ(g_query_count, 1u);
 }
@@ -600,7 +772,9 @@ TEST(KmtApiTest, CompactPathBSetupMakesApertureResidentAfterBootstrap) {
   aperture.gpu_allocation = 0x50;
   aperture.gpu_va = 0x100000;
   aperture.gpu_va_size = g_locked_aperture.size();
-  aperture.cpu_ptr = reinterpret_cast<void*>(0x60);
+  uint32_t setup_completion = 0xffffffffu;
+  aperture.cpu_ptr = &setup_completion;
+  g_complete_on_wait = &setup_completion;
   std::array<uint8_t, 107600> setup_payload;
   setup_payload.fill(0x5a);
   Error error = {};
@@ -611,7 +785,8 @@ TEST(KmtApiTest, CompactPathBSetupMakesApertureResidentAfterBootstrap) {
       << ErrorMessage(&error);
   const SetupCall expected_calls[] = {
       SetupCall::submit, SetupCall::make_resident, SetupCall::lock,
-      SetupCall::invalidate, SetupCall::submit, SetupCall::wait};
+      SetupCall::invalidate, SetupCall::wait, SetupCall::submit,
+      SetupCall::wait};
   ASSERT_EQ(g_setup_call_count, std::size(expected_calls));
   for (size_t i = 0; i < std::size(expected_calls); ++i) {
     EXPECT_EQ(g_setup_calls[i], expected_calls[i]);
@@ -621,14 +796,61 @@ TEST(KmtApiTest, CompactPathBSetupMakesApertureResidentAfterBootstrap) {
   EXPECT_EQ(g_submit_opcodes[1], 5u);
   EXPECT_EQ(g_submit_fences[0], 7u);
   EXPECT_EQ(g_submit_fences[1], 8u);
-  ASSERT_EQ(g_wait_count, 1u);
-  EXPECT_EQ(g_wait_fences[0], 8u);
+  ASSERT_EQ(g_wait_count, 2u);
+  EXPECT_EQ(g_wait_fences[0], 11u);
+  EXPECT_EQ(g_wait_fences[1], 8u);
   EXPECT_EQ(context.next_fence_id, 9u);
   EXPECT_EQ(aperture.gpu_cpu_ptr, g_locked_aperture.data());
   EXPECT_EQ(aperture.code_offset, 0x20000u);
   EXPECT_EQ(aperture.code_gpu_va, 0x120000u);
   EXPECT_EQ(aperture.code_cpu_ptr, g_locked_aperture.data() + 0x20000);
   EXPECT_EQ(aperture.code_size, 0x20000u);
+  EXPECT_EQ(std::memcmp(g_locked_aperture.data(), setup_payload.data(),
+                        setup_payload.size()),
+            0);
+}
+
+TEST(KmtApiTest, LegacyPathBSetupPublishesPayloadAfterFinalWrite) {
+  ResetFakes();
+  KmtApi api = {};
+  api.submit_command_to_hw_queue = FakeSubmitCommandToHwQueue;
+  api.lock2 = FakeLock2;
+  api.invalidate_cache = FakeInvalidateCache;
+  api.wait_from_cpu = FakeWaitFromCpu;
+
+  Device device = {};
+  device.device = 0x10;
+  device.mcdm_abi = McdmAbi::legacy;
+  Context context = {};
+  context.hw_queue = 0x20;
+  context.progress_fence = 0x30;
+  context.next_fence_id = 7;
+  CommandAperture aperture = {};
+  aperture.allocation = 0x40;
+  aperture.gpu_allocation = 0x50;
+  aperture.gpu_va = 0x100000;
+  aperture.gpu_va_size = g_locked_aperture.size();
+  uint32_t setup_completion = 0xffffffffu;
+  aperture.cpu_ptr = &setup_completion;
+  g_complete_on_wait = &setup_completion;
+  std::array<uint8_t, 9952> setup_payload;
+  setup_payload.fill(0x5a);
+  Error error = {};
+
+  ASSERT_TRUE(SubmitAndWaitPathBSetup(api, device, &context, &aperture,
+                                      setup_payload.data(),
+                                      setup_payload.size(), &error))
+      << ErrorMessage(&error);
+  const SetupCall expected_calls[] = {
+      SetupCall::submit, SetupCall::lock, SetupCall::invalidate,
+      SetupCall::invalidate, SetupCall::submit, SetupCall::wait};
+  ASSERT_EQ(g_setup_call_count, std::size(expected_calls));
+  for (size_t i = 0; i < std::size(expected_calls); ++i) {
+    EXPECT_EQ(g_setup_calls[i], expected_calls[i]);
+  }
+  ASSERT_EQ(g_invalidate_count, 2u);
+  EXPECT_EQ(g_invalidate_first_bytes[0], 0u);
+  EXPECT_EQ(g_invalidate_first_bytes[1], 0x5au);
   EXPECT_EQ(std::memcmp(g_locked_aperture.data(), setup_payload.data(),
                         setup_payload.size()),
             0);
@@ -659,12 +881,13 @@ TEST(KmtApiTest, CreateBufferPreservesPendingResidencyFenceForBothAbis) {
   }
 }
 
-TEST(KmtApiTest, BufferResidencyAddsGpuContextDependency) {
+TEST(KmtApiTest, BufferResidencyUsesNegotiatedPagingModel) {
   ResetFakes();
   KmtApi api = {};
   api.wait_from_gpu = FakeWaitFromGpu;
   Device device = {};
   device.paging_sync_object = 0x20;
+  device.mcdm_abi = McdmAbi::legacy;
   Context context = {};
   context.context = 0x30;
   Buffer buffer = {};
@@ -678,6 +901,12 @@ TEST(KmtApiTest, BufferResidencyAddsGpuContextDependency) {
   EXPECT_EQ(g_gpu_wait_context, context.context);
   EXPECT_EQ(g_gpu_wait_object, device.paging_sync_object);
   EXPECT_EQ(g_gpu_wait_fence, buffer.paging_fence_value);
+
+  device.mcdm_abi = McdmAbi::compact;
+  ASSERT_TRUE(WaitForBufferResidency(api, device, context, buffer, "test",
+                                     &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(g_gpu_wait_count, 1u);
 
   buffer.paging_fence_value = 0;
   ASSERT_TRUE(WaitForBufferResidency(api, device, context, buffer, "test",
@@ -712,11 +941,14 @@ TEST(KmtApiTest, CodeRangeLifecycleMatchesNegotiatedAbi) {
     ASSERT_TRUE(AcquirePathBCodeRange(
         api, device, &context, aperture, aperture.code_offset, 0x10000,
         &error));
+    EXPECT_EQ(g_submit_count, 0u);
     ASSERT_TRUE(CommitPathBCodeWrite(api, device, aperture,
                                      aperture.code_offset, 0x10000, &error));
+    EXPECT_EQ(g_submit_count, 0u);
     ASSERT_TRUE(PublishPathBCodeWrite(
         api, device, &context, aperture, aperture.code_offset, 0x10000,
         &error));
+    EXPECT_EQ(g_submit_count, 2u);
     ASSERT_TRUE(ReleasePathBCodeRange(
         api, device, &context, aperture, aperture.code_offset, 0x10000,
         &error));
@@ -724,8 +956,8 @@ TEST(KmtApiTest, CodeRangeLifecycleMatchesNegotiatedAbi) {
 
   run(McdmAbi::compact, 9952);
   const SetupCall compact_calls[] = {
-      SetupCall::submit, SetupCall::submit, SetupCall::wait,
-      SetupCall::submit, SetupCall::submit};
+      SetupCall::submit, SetupCall::submit, SetupCall::submit,
+      SetupCall::submit, SetupCall::wait};
   ASSERT_EQ(g_setup_call_count, std::size(compact_calls));
   size_t compact_submit_index = 0;
   for (size_t i = 0; i < std::size(compact_calls); ++i) {
@@ -739,8 +971,8 @@ TEST(KmtApiTest, CodeRangeLifecycleMatchesNegotiatedAbi) {
   EXPECT_EQ(g_submit_offsets[1], 0x18000u);
   EXPECT_EQ(g_submit_offsets[2], 0x10000u);
   EXPECT_EQ(g_submit_offsets[3], 0x8000u);
-  ASSERT_EQ(g_wait_count, 1u);
-  EXPECT_EQ(g_wait_fences[0], 8u);
+  EXPECT_EQ(g_wait_count, 1u);
+  EXPECT_EQ(g_wait_fences[0], 10u);
 
   run(McdmAbi::compact, 107600);
   ASSERT_EQ(g_setup_call_count, std::size(compact_calls));
@@ -749,8 +981,8 @@ TEST(KmtApiTest, CodeRangeLifecycleMatchesNegotiatedAbi) {
   EXPECT_EQ(g_submit_offsets[1], 0x30000u);
   EXPECT_EQ(g_submit_offsets[2], 0x28000u);
   EXPECT_EQ(g_submit_offsets[3], 0x20000u);
-  ASSERT_EQ(g_wait_count, 1u);
-  EXPECT_EQ(g_wait_fences[0], 8u);
+  EXPECT_EQ(g_wait_count, 1u);
+  EXPECT_EQ(g_wait_fences[0], 10u);
 
   run(McdmAbi::legacy, 107600);
   ASSERT_EQ(g_setup_call_count, 5u);

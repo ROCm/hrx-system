@@ -116,3 +116,19 @@ hrx_cc_shared_library(
     includes = HRX_INCLUDES,
     deps = HRX_DEPS,
 )
+
+cc_test(
+    name = "amdxdna_executable_test",
+    srcs = ["amdxdna_executable_test.cc"],
+    tags = ["driver=amdxdna"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base/internal/flatcc:parsing",
+        "//runtime/src/iree/schemas:amdxdna_xclbin_executable_def_c_fbs",
+    ],
+)

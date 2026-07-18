@@ -1,11 +1,12 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include "hrx_amdxdna.h"
-
 #include <limits.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
+#include "hrx_amdxdna.h"
 #include "hrx_internal.h"
 
 #if defined(HRX_HAS_IREE_AMDXDNA_DRIVER)
@@ -17,10 +18,35 @@ static bool hrx_amdxdna_span_is_valid(hrx_const_byte_span_t span) {
   return span.data_length == 0 || span.data != NULL;
 }
 
-static const hrx_amdxdna_executable_entry_point_t*
-hrx_amdxdna_next_entry(const hrx_amdxdna_executable_entry_point_t* entry) {
-  return (const hrx_amdxdna_executable_entry_point_t*)(
-      (const uint8_t*)entry + entry->record_length);
+#define HRX_AMDXDNA_V0_RECORD_LENGTH(type, last_field) \
+  (offsetof(type, last_field) + sizeof(((type*)0)->last_field))
+
+static const size_t hrx_amdxdna_run_v0_record_length =
+    HRX_AMDXDNA_V0_RECORD_LENGTH(hrx_amdxdna_executable_run_t, data_payload);
+static const size_t hrx_amdxdna_entry_point_v0_record_length =
+    HRX_AMDXDNA_V0_RECORD_LENGTH(hrx_amdxdna_executable_entry_point_t,
+                                 run_count);
+static const size_t hrx_amdxdna_create_params_v0_record_length =
+    HRX_AMDXDNA_V0_RECORD_LENGTH(hrx_amdxdna_executable_create_params_t,
+                                 entry_point_count);
+static const size_t hrx_amdxdna_abi_header_length =
+    offsetof(hrx_amdxdna_executable_run_t, abi_version) + sizeof(uint32_t);
+
+static bool hrx_amdxdna_record_stride_is_valid(const void* record,
+                                               uint32_t record_length,
+                                               size_t min_record_length,
+                                               size_t record_alignment) {
+  const uintptr_t address = (uintptr_t)record;
+  return record && address % record_alignment == 0 &&
+         record_length >= min_record_length &&
+         record_length % record_alignment == 0 &&
+         address <= UINTPTR_MAX - record_length;
+}
+
+static const hrx_amdxdna_executable_entry_point_t* hrx_amdxdna_next_entry(
+    const hrx_amdxdna_executable_entry_point_t* entry) {
+  return (const hrx_amdxdna_executable_entry_point_t*)((const uint8_t*)entry +
+                                                       entry->record_length);
 }
 
 static const hrx_amdxdna_executable_run_t* hrx_amdxdna_next_run(
@@ -30,49 +56,89 @@ static const hrx_amdxdna_executable_run_t* hrx_amdxdna_next_run(
 }
 
 static hrx_status_t hrx_amdxdna_validate_executable_create(
-    hrx_device_t device,
-    const hrx_amdxdna_executable_create_params_t* params,
-    hrx_executable_t* executable) {
-  if (!device || !params || !executable) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "device, params, or executable is NULL");
+    const hrx_amdxdna_executable_create_params_t* params) {
+  if (!params) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "params is NULL");
   }
-  *executable = NULL;
-  if (params->record_length < sizeof(*params) ||
-      params->abi_version != HRX_AMDXDNA_EXECUTABLE_CREATE_ABI_VERSION_0) {
+  if ((uintptr_t)params % _Alignof(hrx_amdxdna_executable_create_params_t) !=
+      0) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "amdxdna executable parameter record is misaligned");
+  }
+  if (params->record_length < hrx_amdxdna_abi_header_length) {
+    return hrx_make_status(
+        HRX_STATUS_INVALID_ARGUMENT,
+        "amdxdna executable parameter ABI header is truncated");
+  }
+  if (params->abi_version !=
+      HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_0) {
     return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
                            "unsupported amdxdna executable parameter ABI");
+  }
+  if (params->record_length < hrx_amdxdna_create_params_v0_record_length) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "amdxdna executable parameter record is truncated");
   }
   if (params->flags != 0 || params->reserved != 0) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                            "amdxdna executable reserved fields must be zero");
   }
-  if (!params->xclbins || params->xclbin_count == 0 ||
-      !params->entry_points || params->entry_point_count == 0) {
+  if (!params->xclbins || params->xclbin_count == 0 || !params->entry_points ||
+      params->entry_point_count == 0) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                            "xclbins and entry points are required");
+  }
+  if (params->xclbin_count > INT32_MAX ||
+      params->entry_point_count > UINT32_MAX) {
+    return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                           "amdxdna executable record count is too large");
   }
   for (size_t i = 0; i < params->xclbin_count; ++i) {
     if (!params->xclbins[i].data || params->xclbins[i].data_length == 0) {
       return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                              "xclbin data is empty");
     }
+    if (params->xclbins[i].data_length > UINT32_MAX) {
+      return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                             "xclbin data is too large");
+    }
   }
 
   const hrx_amdxdna_executable_entry_point_t* entry = params->entry_points;
   for (size_t i = 0; i < params->entry_point_count; ++i) {
-    if (entry->record_length < sizeof(*entry) ||
-        entry->abi_version != HRX_AMDXDNA_EXECUTABLE_CREATE_ABI_VERSION_0) {
+    if ((uintptr_t)entry % _Alignof(hrx_amdxdna_executable_entry_point_t) !=
+        0) {
+      return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                             "amdxdna entry-point record is misaligned");
+    }
+    if (entry->record_length < hrx_amdxdna_abi_header_length) {
+      return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                             "amdxdna entry-point ABI header is truncated");
+    }
+    if (entry->abi_version !=
+        HRX_AMDXDNA_EXECUTABLE_ENTRY_POINT_ABI_VERSION_0) {
       return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
                              "unsupported amdxdna entry-point record ABI");
     }
+    if (!hrx_amdxdna_record_stride_is_valid(
+            entry, entry->record_length,
+            hrx_amdxdna_entry_point_v0_record_length,
+            _Alignof(hrx_amdxdna_executable_entry_point_t))) {
+      return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                             "amdxdna entry-point record stride is invalid");
+    }
     if (!entry->name.data || entry->name.size == 0 || !entry->runs ||
-        entry->run_count == 0 || !hrx_amdxdna_span_is_valid(
-                                     (hrx_const_byte_span_t){
-                                         (const uint8_t*)entry->source_file.data,
-                                         entry->source_file.size})) {
+        entry->run_count == 0 ||
+        !hrx_amdxdna_span_is_valid(
+            (hrx_const_byte_span_t){(const uint8_t*)entry->source_file.data,
+                                    entry->source_file.size})) {
       return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                              "amdxdna entry-point description is invalid");
+    }
+    if (entry->name.size > UINT32_MAX || entry->source_file.size > UINT32_MAX ||
+        entry->run_count > UINT32_MAX) {
+      return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                             "amdxdna entry-point data is too large");
     }
     if (entry->source_line > INT32_MAX) {
       return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
@@ -97,10 +163,23 @@ static hrx_status_t hrx_amdxdna_validate_executable_create(
 
     const hrx_amdxdna_executable_run_t* run = entry->runs;
     for (size_t j = 0; j < entry->run_count; ++j) {
-      if (run->record_length < sizeof(*run) ||
-          run->abi_version != HRX_AMDXDNA_EXECUTABLE_CREATE_ABI_VERSION_0) {
+      if ((uintptr_t)run % _Alignof(hrx_amdxdna_executable_run_t) != 0) {
+        return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                               "amdxdna run record is misaligned");
+      }
+      if (run->record_length < hrx_amdxdna_abi_header_length) {
+        return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                               "amdxdna run ABI header is truncated");
+      }
+      if (run->abi_version != HRX_AMDXDNA_EXECUTABLE_RUN_ABI_VERSION_0) {
         return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
                                "unsupported amdxdna run record ABI");
+      }
+      if (!hrx_amdxdna_record_stride_is_valid(
+              run, run->record_length, hrx_amdxdna_run_v0_record_length,
+              _Alignof(hrx_amdxdna_executable_run_t))) {
+        return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                               "amdxdna run record stride is invalid");
       }
       if (!run->transaction.data || run->transaction.data_length == 0 ||
           run->transaction.data_length % sizeof(uint32_t) != 0 ||
@@ -108,6 +187,11 @@ static hrx_status_t hrx_amdxdna_validate_executable_create(
           run->data_payload.data_length % sizeof(uint32_t) != 0) {
         return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                                "amdxdna run description is invalid");
+      }
+      if (run->transaction.data_length > UINT32_MAX ||
+          run->data_payload.data_length > UINT32_MAX) {
+        return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                               "amdxdna run data is too large");
       }
       run = hrx_amdxdna_next_run(run);
     }
@@ -128,43 +212,73 @@ static hrx_status_t hrx_amdxdna_allocate_ref_array(size_t count,
     return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                            "amdxdna executable definition is too large");
   }
-  return hrx_host_allocator_malloc_uninitialized(
-      hrx_host_allocator_system(), allocation_size, out_ptr);
+  return hrx_host_allocator_malloc_uninitialized(hrx_host_allocator_system(),
+                                                 allocation_size, out_ptr);
 }
 
 static hrx_status_t hrx_amdxdna_create_u32_vec(
     flatbuffers_builder_t* builder, hrx_const_byte_span_t span,
     flatbuffers_uint32_vec_ref_t* out_ref) {
   *out_ref = 0;
-  uint32_t* words = NULL;
-  if (span.data_length != 0) {
-    hrx_status_t status = hrx_host_allocator_malloc_uninitialized(
-        hrx_host_allocator_system(), span.data_length, (void**)&words);
-    if (!hrx_status_is_ok(status)) return status;
-    memcpy(words, span.data, span.data_length);
+  if (span.data_length == 0) {
+    *out_ref = flatbuffers_uint32_vec_create(builder, NULL, 0);
+    return *out_ref ? hrx_ok_status()
+                    : hrx_amdxdna_builder_failure(
+                          "failed to add empty uint32 vector to executable "
+                          "package");
   }
-  *out_ref = flatbuffers_uint32_vec_create(
-      builder, words, span.data_length / sizeof(uint32_t));
+  uint32_t* words = NULL;
+  hrx_status_t status = hrx_host_allocator_malloc_uninitialized(
+      hrx_host_allocator_system(), span.data_length, (void**)&words);
+  if (!hrx_status_is_ok(status)) return status;
+  memcpy(words, span.data, span.data_length);
+  *out_ref = flatbuffers_uint32_vec_create(builder, words,
+                                           span.data_length / sizeof(uint32_t));
   hrx_host_allocator_free(hrx_host_allocator_system(), words);
   return *out_ref ? hrx_ok_status()
                   : hrx_amdxdna_builder_failure(
                         "failed to add uint32 vector to executable package");
 }
+
+static iree_hal_amdxdna_xclbin_EntryPointDef_ref_t
+hrx_amdxdna_create_entry_point(
+    flatbuffers_builder_t* builder, flatbuffers_string_ref_t name_ref,
+    int32_t pdi_index, int32_t xclbin_index,
+    iree_hal_amdxdna_xclbin_RunDef_vec_ref_t runs_ref,
+    iree_hal_amdxdna_xclbin_FileLineLocDef_ref_t source_ref) {
+  if (source_ref) {
+    return iree_hal_amdxdna_xclbin_EntryPointDef_create(
+        builder, name_ref, pdi_index, xclbin_index, runs_ref, source_ref);
+  }
+  if (iree_hal_amdxdna_xclbin_EntryPointDef_start(builder) ||
+      iree_hal_amdxdna_xclbin_EntryPointDef_name_add(builder, name_ref) ||
+      iree_hal_amdxdna_xclbin_EntryPointDef_pdi_index_add(builder, pdi_index) ||
+      iree_hal_amdxdna_xclbin_EntryPointDef_xclbin_index_add(builder,
+                                                             xclbin_index) ||
+      iree_hal_amdxdna_xclbin_EntryPointDef_runs_add(builder, runs_ref)) {
+    return 0;
+  }
+  return iree_hal_amdxdna_xclbin_EntryPointDef_end(builder);
+}
 #endif  // HRX_HAS_IREE_AMDXDNA_DRIVER
 
-hrx_status_t hrx_amdxdna_executable_create(
-    hrx_device_t device,
+hrx_status_t hrx_amdxdna_xadx_serialize(
     const hrx_amdxdna_executable_create_params_t* params,
-    hrx_executable_t* executable) {
+    hrx_host_allocator_t host_allocator, uint8_t** out_data,
+    size_t* out_data_length) {
+  if (!out_data || !out_data_length) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "out_data or out_data_length is NULL");
+  }
+  *out_data = NULL;
+  *out_data_length = 0;
 #if !defined(HRX_HAS_IREE_AMDXDNA_DRIVER)
-  (void)device;
   (void)params;
-  if (executable) *executable = NULL;
+  (void)host_allocator;
   return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
                          "HRX was built without the amdxdna driver");
 #else
-  hrx_status_t status =
-      hrx_amdxdna_validate_executable_create(device, params, executable);
+  hrx_status_t status = hrx_amdxdna_validate_executable_create(params);
   if (!hrx_status_is_ok(status)) return status;
 
   flatbuffers_builder_t builder;
@@ -206,8 +320,8 @@ hrx_status_t hrx_amdxdna_executable_create(
   const hrx_amdxdna_executable_entry_point_t* entry = params->entry_points;
   for (size_t i = 0; i < params->entry_point_count; ++i) {
     iree_hal_amdxdna_xclbin_RunDef_ref_t* run_refs = NULL;
-    status = hrx_amdxdna_allocate_ref_array(
-        entry->run_count, sizeof(*run_refs), (void**)&run_refs);
+    status = hrx_amdxdna_allocate_ref_array(entry->run_count, sizeof(*run_refs),
+                                            (void**)&run_refs);
     if (!hrx_status_is_ok(status)) goto cleanup;
 
     const hrx_amdxdna_executable_run_t* run = entry->runs;
@@ -231,10 +345,16 @@ hrx_status_t hrx_amdxdna_executable_create(
                                             &payload_ref);
       }
       if (hrx_status_is_ok(status)) {
-        hrx_const_byte_span_t patch_span = {
-            (const uint8_t*)patch_table.data,
-            patch_table.count * sizeof(uint32_t)};
-        status = hrx_amdxdna_create_u32_vec(&builder, patch_span, &patch_ref);
+        iree_host_size_t patch_byte_length = 0;
+        if (!iree_host_size_checked_mul(patch_table.count, sizeof(uint32_t),
+                                        &patch_byte_length)) {
+          status = hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                                   "amdxdna host patch table is too large");
+        } else {
+          hrx_const_byte_span_t patch_span = {(const uint8_t*)patch_table.data,
+                                              patch_byte_length};
+          status = hrx_amdxdna_create_u32_vec(&builder, patch_span, &patch_ref);
+        }
       }
       iree_hal_amdxdna_host_patch_table_deinitialize(iree_allocator_system(),
                                                      &patch_table);
@@ -253,14 +373,18 @@ hrx_status_t hrx_amdxdna_executable_create(
       flatbuffers_string_ref_t name_ref = flatbuffers_string_create(
           &builder, entry->name.data, entry->name.size);
       iree_hal_amdxdna_xclbin_RunDef_vec_ref_t runs_ref =
-          iree_hal_amdxdna_xclbin_RunDef_vec_create(
-              &builder, run_refs, entry->run_count);
+          iree_hal_amdxdna_xclbin_RunDef_vec_create(&builder, run_refs,
+                                                    entry->run_count);
       iree_hal_amdxdna_xclbin_FileLineLocDef_ref_t source_ref = 0;
       if (entry->source_file.size != 0) {
         flatbuffers_string_ref_t filename_ref = flatbuffers_string_create(
             &builder, entry->source_file.data, entry->source_file.size);
         source_ref = iree_hal_amdxdna_xclbin_FileLineLocDef_create(
             &builder, filename_ref, (int32_t)entry->source_line);
+        if (!filename_ref || !source_ref) {
+          status = hrx_amdxdna_builder_failure(
+              "failed to add source location to amdxdna executable package");
+        }
       }
       const int32_t xclbin_index =
           entry->context_mode == HRX_AMDXDNA_CONTEXT_MODE_CREATE
@@ -270,11 +394,13 @@ hrx_status_t hrx_amdxdna_executable_create(
           entry->context_mode == HRX_AMDXDNA_CONTEXT_MODE_CREATE
               ? (int32_t)entry->pdi_ordinal
               : -1;
-      entry_refs[i] = iree_hal_amdxdna_xclbin_EntryPointDef_create(
-          &builder, name_ref, pdi_index, xclbin_index, runs_ref, source_ref);
-      if (!name_ref || !runs_ref || !entry_refs[i]) {
-        status = hrx_amdxdna_builder_failure(
-            "failed to add entry point to amdxdna executable package");
+      if (hrx_status_is_ok(status)) {
+        entry_refs[i] = hrx_amdxdna_create_entry_point(
+            &builder, name_ref, pdi_index, xclbin_index, runs_ref, source_ref);
+        if (!name_ref || !runs_ref || !entry_refs[i]) {
+          status = hrx_amdxdna_builder_failure(
+              "failed to add entry point to amdxdna executable package");
+        }
       }
     }
     hrx_host_allocator_free(hrx_host_allocator_system(), run_refs);
@@ -284,15 +410,14 @@ hrx_status_t hrx_amdxdna_executable_create(
 
   {
     iree_hal_amdxdna_xclbin_XclbinDef_vec_ref_t xclbins_ref =
-        iree_hal_amdxdna_xclbin_XclbinDef_vec_create(
-            &builder, xclbin_refs, params->xclbin_count);
+        iree_hal_amdxdna_xclbin_XclbinDef_vec_create(&builder, xclbin_refs,
+                                                     params->xclbin_count);
     iree_hal_amdxdna_xclbin_EntryPointDef_vec_ref_t entries_ref =
         iree_hal_amdxdna_xclbin_EntryPointDef_vec_create(
             &builder, entry_refs, params->entry_point_count);
     if (!xclbins_ref || !entries_ref ||
-        flatbuffers_failed(
-            iree_hal_amdxdna_xclbin_ExecutableDef_xclbins_add(
-                &builder, xclbins_ref)) ||
+        flatbuffers_failed(iree_hal_amdxdna_xclbin_ExecutableDef_xclbins_add(
+            &builder, xclbins_ref)) ||
         flatbuffers_failed(
             iree_hal_amdxdna_xclbin_ExecutableDef_entry_points_add(
                 &builder, entries_ref)) ||
@@ -303,16 +428,16 @@ hrx_status_t hrx_amdxdna_executable_create(
     }
   }
 
-  executable_data = flatcc_builder_finalize_aligned_buffer(
-      &builder, &executable_data_size);
+  executable_data =
+      flatcc_builder_finalize_aligned_buffer(&builder, &executable_data_size);
   if (!executable_data || executable_data_size == 0) {
     status = hrx_amdxdna_builder_failure(
         "failed to finalize amdxdna executable package");
     goto cleanup;
   }
-  status = hrx_executable_load_data(
-      device, executable_data, executable_data_size, "amdxdna-xclbin-fb",
-      executable);
+  status = hrx_host_allocator_clone(host_allocator, executable_data,
+                                    executable_data_size, (void**)out_data);
+  if (hrx_status_is_ok(status)) *out_data_length = executable_data_size;
 
 cleanup:
   flatcc_builder_aligned_free(executable_data);
@@ -321,4 +446,26 @@ cleanup:
   flatcc_builder_clear(&builder);
   return status;
 #endif  // HRX_HAS_IREE_AMDXDNA_DRIVER
+}
+
+hrx_status_t hrx_amdxdna_executable_create(
+    hrx_device_t device, const hrx_amdxdna_executable_create_params_t* params,
+    hrx_executable_t* executable) {
+  if (!device || !executable) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "device or executable is NULL");
+  }
+  *executable = NULL;
+  hrx_host_allocator_t host_allocator = hrx_host_allocator_system();
+  uint8_t* executable_data = NULL;
+  size_t executable_data_size = 0;
+  hrx_status_t status = hrx_amdxdna_xadx_serialize(
+      params, host_allocator, &executable_data, &executable_data_size);
+  if (hrx_status_is_ok(status)) {
+    status =
+        hrx_executable_load_data(device, executable_data, executable_data_size,
+                                 "amdxdna-xclbin-fb", executable);
+  }
+  hrx_host_allocator_free(host_allocator, executable_data);
+  return status;
 }

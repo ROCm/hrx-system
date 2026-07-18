@@ -129,6 +129,11 @@ bool FlushCpuCacheRange(void* mapping, uint64_t mapping_size, uint64_t offset,
     _mm_clflush(reinterpret_cast<void const*>(line));
     line += kCpuCacheLineSize;
   }
+  // XRT reaches HW-queue submission through a locked submit mutex after its
+  // clflush loop, which provides a full publication barrier. Keep that
+  // ordering contract local to this DDI boundary instead of relying on an
+  // incidental lock in the caller.
+  _mm_mfence();
   return true;
 }
 
@@ -139,22 +144,7 @@ uint32_t Flags32(const D3DKMT_CREATEALLOCATIONFLAGS& flags) {
   return value;
 }
 
-bool TrustFenceCompletionEnabled() { return false; }
-
-bool CcccCompletionSlotEnabled() { return false; }
-
-bool XrtLockTouchEnabled() {
-  // TODO(hrx-mcdm): Revisit once the exact XRT rationale is documented. A
-  // disabled probe passed numerics and the full benchmark on 2026-06-12, but
-  // XRT touches the exec BO around path-B submit, so keep parity for now.
-  return true;
-}
-
 void InitializeCompletionSlot(uint8_t* slot_cpu) {
-  if (CcccCompletionSlotEnabled()) {
-    std::memset(slot_cpu, 0xCC, kQhdlCompletionSlotSize);
-    return;
-  }
   std::memset(slot_cpu, 0, kQhdlCompletionSlotSize);
 }
 
@@ -345,49 +335,53 @@ bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
   query.hAdapter = adapter;
   query.Type = KMTQAITYPE_UMDRIVERPRIVATE;
   query.pPrivateDriverData = private_data;
-  query.PrivateDriverDataSize = 2 * sizeof(uint32_t);
+  // Probe the newest known contract first. XRT 2.21 issues exactly one
+  // three-DWORD query on compact drivers; starting with the legacy shape makes
+  // those drivers process a failed query before any device/context is created.
+  // Fall back only when the driver explicitly rejects the larger shape.
+  query.PrivateDriverDataSize = sizeof(private_data);
   NTSTATUS status = api.query_adapter_info(&query);
   if (status == 0) {
-    const bool is_legacy_v2 =
-        std::memcmp(private_data, kLegacyV2Identity,
-                    sizeof(kLegacyV2Identity)) == 0;
-    const bool is_legacy_v3 =
-        std::memcmp(private_data, kLegacyV3Identity,
-                    sizeof(kLegacyV3Identity)) == 0;
-    if (!is_legacy_v2 && !is_legacy_v3) {
+    const bool is_compact_v2 =
+        std::memcmp(private_data, kCompactIdentity,
+                    sizeof(kCompactIdentity)) == 0;
+    const bool is_compact_v3 =
+        std::memcmp(private_data, kCompactV3Identity,
+                    sizeof(kCompactV3Identity)) == 0;
+    if (!is_compact_v2 && !is_compact_v3) {
       SetErrorFormat(out_error,
-                     "unsupported two-dword MCDM identity {%u, %u}",
-                     private_data[0], private_data[1]);
+                     "unsupported three-dword MCDM identity {%u, %u, %u}",
+                     private_data[0], private_data[1], private_data[2]);
       return false;
     }
-    *out_abi = McdmAbi::legacy;
+    *out_abi = McdmAbi::compact;
     return true;
   }
   if (status != kStatusBufferTooSmall) {
-    return CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE legacy)",
+    return CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE compact)",
                        status, out_error);
   }
 
   std::memset(private_data, 0, sizeof(private_data));
-  query.PrivateDriverDataSize = sizeof(private_data);
+  query.PrivateDriverDataSize = 2 * sizeof(uint32_t);
   status = api.query_adapter_info(&query);
-  if (!CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE compact)", status,
+  if (!CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE legacy)", status,
                    out_error)) {
     return false;
   }
-  const bool is_compact_v2 =
-      std::memcmp(private_data, kCompactIdentity, sizeof(kCompactIdentity)) ==
-      0;
-  const bool is_compact_v3 =
-      std::memcmp(private_data, kCompactV3Identity,
-                  sizeof(kCompactV3Identity)) == 0;
-  if (!is_compact_v2 && !is_compact_v3) {
+  const bool is_legacy_v2 =
+      std::memcmp(private_data, kLegacyV2Identity,
+                  sizeof(kLegacyV2Identity)) == 0;
+  const bool is_legacy_v3 =
+      std::memcmp(private_data, kLegacyV3Identity,
+                  sizeof(kLegacyV3Identity)) == 0;
+  if (!is_legacy_v2 && !is_legacy_v3) {
     SetErrorFormat(out_error,
-                   "unsupported three-dword MCDM identity {%u, %u, %u}",
-                   private_data[0], private_data[1], private_data[2]);
+                   "unsupported two-dword MCDM identity {%u, %u}",
+                   private_data[0], private_data[1]);
     return false;
   }
-  *out_abi = McdmAbi::compact;
+  *out_abi = McdmAbi::legacy;
   return true;
 }
 
@@ -405,9 +399,16 @@ McdmAbiInfo GetMcdmAbiInfo(McdmAbi abi) {
             /*status_has_gpu_va=*/true,
             /*sync_has_allocation_handle=*/false,
             /*command_aperture_code_slot_size=*/0x8000,
+            /*command_aperture_write_publish_mode=*/
+                CommandApertureWritePublishMode::cpu_cache_flush,
             /*command_aperture_code_publish_granularity=*/0x8000,
             /*command_aperture_residency_after_bootstrap=*/true,
-            /*command_aperture_remap_after_write=*/false};
+            /*command_aperture_remap_after_write=*/false,
+            // XRT 2.21 destroys both compact-ABI shared resources only after
+            // they are no longer in use and waits for destruction to finish.
+            /*shared_resource_destroy_flags=*/0x3,
+            // Compact XRT leaves mapped VA ownership with the allocation.
+            /*explicit_gpu_va_free_on_destroy=*/false};
   }
   return {/*status_private_type=*/0x332b,
           /*status_policy=*/0,
@@ -421,9 +422,13 @@ McdmAbiInfo GetMcdmAbiInfo(McdmAbi abi) {
           /*status_has_gpu_va=*/false,
           /*sync_has_allocation_handle=*/true,
           /*command_aperture_code_slot_size=*/0x8000,
+          /*command_aperture_write_publish_mode=*/
+              CommandApertureWritePublishMode::kmt_invalidate,
           /*command_aperture_code_publish_granularity=*/0,
           /*command_aperture_residency_after_bootstrap=*/false,
-          /*command_aperture_remap_after_write=*/true};
+          /*command_aperture_remap_after_write=*/true,
+          /*shared_resource_destroy_flags=*/0,
+          /*explicit_gpu_va_free_on_destroy=*/true};
 }
 
 McdmPrivateData BuildPathBSetupPrivateData(
@@ -756,7 +761,8 @@ void DestroyDevice(const KmtApi& api, Device* device) {
 // has actually completed. The async D3DKMT paging calls return STATUS_PENDING;
 // without this wait a subsequent SubmitCommandToHwQueue can be rejected with
 // 0xc01e0200 (STATUS_GRAPHICS_ALLOCATION_BUSY) because the allocation is still
-// being paged in. XRT's xrt::bo residency is synchronous; this mirrors it.
+// being paged in. XRT tracks the maximum pending paging fence per device and
+// drains it at lifecycle boundaries; this is the corresponding primitive.
 bool WaitForPagingFenceCpu(const KmtApi& api, const Device& device,
                            UINT64 fence_value) {
   if (fence_value == 0) return true;
@@ -770,6 +776,51 @@ bool WaitForPagingFenceCpu(const KmtApi& api, const Device& device,
   wait.hAsyncEvent = nullptr;
   NTSTATUS status = api.wait_from_cpu(&wait);
   return status == 0;
+}
+
+void RecordPendingPagingFence(const Device& device, UINT64 fence_value) {
+  if (fence_value == 0) return;
+  auto* const watermark = &device.pending_paging_fence_value;
+  LONG64 observed = InterlockedCompareExchange64(watermark, 0, 0);
+  const LONG64 requested = static_cast<LONG64>(fence_value);
+  while (observed < requested) {
+    const LONG64 prior =
+        InterlockedCompareExchange64(watermark, requested, observed);
+    if (prior == observed) break;
+    observed = prior;
+  }
+}
+
+bool WaitForPendingPagingBeforeSubmit(const KmtApi& api,
+                                      const Device& device,
+                                      Error* out_error) {
+  const UINT64 fence_value = static_cast<UINT64>(InterlockedCompareExchange64(
+      &device.pending_paging_fence_value, 0, 0));
+  if (fence_value == 0) return true;
+
+  // Match XRT's submit wrapper: read the paging queue's shared completion
+  // value first and enter KMT only while the device-wide watermark is pending.
+  if (device.paging_fence_cpu) {
+    const auto* const completed =
+        static_cast<const volatile UINT64*>(device.paging_fence_cpu);
+    if (*completed >= fence_value) return true;
+  }
+  if (WaitForPagingFenceCpu(api, device, fence_value)) return true;
+  SetErrorFormat(
+      out_error,
+      "D3DKMTWaitForSynchronizationObjectFromCpu(pending paging before "
+      "submit) failed for fence 0x%llx",
+      static_cast<unsigned long long>(fence_value));
+  return false;
+}
+
+bool SubmitCommandToHwQueueAfterPaging(
+    const KmtApi& api, const Device& device,
+    D3DKMT_SUBMITCOMMANDTOHWQUEUE* submit, const char* label,
+    Error* out_error) {
+  if (!WaitForPendingPagingBeforeSubmit(api, device, out_error)) return false;
+  const NTSTATUS status = api.submit_command_to_hw_queue(submit);
+  return CheckStatus(label, status, out_error);
 }
 
 bool CreateBuffer(const KmtApi& api, const Device& device, BufferKind kind,
@@ -837,6 +888,7 @@ bool CreateBuffer(const KmtApi& api, const Device& device, BufferKind kind,
     DestroyBuffer(api, device, &buffer);
     return false;
   }
+  RecordPendingPagingFence(device, map.PagingFenceValue);
   buffer.gpu_va = map.VirtualAddress;
 
   D3DKMT_HANDLE resident_allocs[1] = {buffer.allocation};
@@ -851,6 +903,7 @@ bool CreateBuffer(const KmtApi& api, const Device& device, BufferKind kind,
     DestroyBuffer(api, device, &buffer);
     return false;
   }
+  RecordPendingPagingFence(device, resident.PagingFenceValue);
   // Keep residency asynchronous, but preserve the paging fence so the target
   // GPU context can depend on it before consuming this BO. Dropping the fence
   // makes the first dispatch race STATUS_PENDING Map/MakeResident operations.
@@ -1031,6 +1084,12 @@ bool WaitForBufferResidency(const KmtApi& api, const Device& device,
                             const Context& context, const Buffer& buffer,
                             const char* label, Error* out_error) {
   if (buffer.paging_fence_value == 0) return true;
+  if (device.mcdm_abi == McdmAbi::compact) {
+    // Compact XRT tracks all Map/MakeResident fences in one device-wide
+    // watermark and drains it in the HW-queue submit wrapper. Adding per-BO
+    // GPU waits changes the first-submit lifecycle and is not part of that ABI.
+    return true;
+  }
 
   D3DKMT_HANDLE wait_objects[1] = {device.paging_sync_object};
   UINT64 wait_values[1] = {buffer.paging_fence_value};
@@ -1057,14 +1116,15 @@ void DestroyBuffer(const KmtApi& api, const Device& device, Buffer* buffer) {
     api.unlock2(&unlock);
     buffer->cpu_ptr = nullptr;
   }
-  if (buffer->gpu_va) {
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
+  if (buffer->gpu_va && abi.explicit_gpu_va_free_on_destroy) {
     D3DKMT_FREEGPUVIRTUALADDRESS free_va = {};
     free_va.hAdapter = device.adapter;
     free_va.BaseAddress = buffer->gpu_va;
     free_va.Size = buffer->mapped_size ? buffer->mapped_size : buffer->size;
     api.free_gpu_virtual_address(&free_va);
-    buffer->gpu_va = 0;
   }
+  buffer->gpu_va = 0;
   D3DKMT_DESTROYALLOCATION2 destroy = {};
   destroy.hDevice = device.device;
   destroy.Flags.AssumeNotInUse = 1;
@@ -1072,6 +1132,8 @@ void DestroyBuffer(const KmtApi& api, const Device& device, Buffer* buffer) {
   if (buffer->resource) {
     // CreateShared buffers are owned by their resource; destroy that.
     destroy.hResource = buffer->resource;
+    const uint32_t resource_flags = abi.shared_resource_destroy_flags;
+    if (resource_flags) destroy.Flags.Value = resource_flags;
   } else {
     destroy.AllocationCount = 1;
     destroy.phAllocationList = allocs;
@@ -1154,18 +1216,21 @@ bool CreateContext(const KmtApi& api, const Device& device,
   return true;
 }
 
-void DestroyContext(const KmtApi& api, const Device& device, Context* context) {
-  if (!context) return;
-  // The status ring is a context-owned KMT allocation created lazily by the
-  // path-B submit path. Tear it down before destroying the HW queue/context
-  // handles it was bound to.
-  DestroyStatusRing(api, device, context);
+static void DestroyContextHwQueue(const KmtApi& api, Context* context) {
   if (context->hw_queue) {
     D3DKMT_DESTROYHWQUEUE destroy_queue = {};
     destroy_queue.hHwQueue = context->hw_queue;
     api.destroy_hw_queue(&destroy_queue);
     context->hw_queue = 0;
   }
+}
+
+static void DestroyContextAfterHwQueue(const KmtApi& api,
+                                       const Device& device,
+                                       Context* context) {
+  // The HW queue can retain the status allocation until queue destruction has
+  // completed. Release a context-owned ring only after its final queue user.
+  DestroyStatusRing(api, device, context);
   DestroyBuffer(api, device, &context->context_private_buffer);
   if (context->context) {
     D3DKMT_DESTROYCONTEXT destroy_context = {};
@@ -1177,6 +1242,12 @@ void DestroyContext(const KmtApi& api, const Device& device, Context* context) {
   context->progress_fence_cpu = nullptr;
   context->progress_fence_gpu = 0;
   context->next_fence_id = 1;
+}
+
+void DestroyContext(const KmtApi& api, const Device& device, Context* context) {
+  if (!context) return;
+  DestroyContextHwQueue(api, context);
+  DestroyContextAfterHwQueue(api, device, context);
 }
 
 bool CreateCommandAperture(const KmtApi& api, const Device& device,
@@ -1249,6 +1320,7 @@ bool CreateCommandAperture(const KmtApi& api, const Device& device,
       DestroyCommandAperture(api, device, &aperture);
       return false;
     }
+    RecordPendingPagingFence(device, status_map.PagingFenceValue);
     aperture.status_gpu_va = status_map.VirtualAddress;
 
     D3DKMT_HANDLE status_allocations[1] = {aperture.allocation};
@@ -1264,6 +1336,7 @@ bool CreateCommandAperture(const KmtApi& api, const Device& device,
       DestroyCommandAperture(api, device, &aperture);
       return false;
     }
+    RecordPendingPagingFence(device, status_resident.PagingFenceValue);
   }
 
   // XRT creates the 64 MiB command aperture as a separate cacheable allocation
@@ -1298,7 +1371,6 @@ bool CreateCommandAperture(const KmtApi& api, const Device& device,
 
   D3DDDI_MAPGPUVIRTUALADDRESS map = {};
   map.hPagingQueue = device.paging_queue;
-  map.BaseAddress = kCommandApertureGpuVaBase;
   map.hAllocation = aperture.gpu_allocation;
   map.SizeInPages = kCommandApertureGpuVaSize / kPageSize;
   map.Protection.Write = 1;
@@ -1316,19 +1388,21 @@ bool CreateCommandAperture(const KmtApi& api, const Device& device,
     DestroyCommandAperture(api, device, &aperture);
     return false;
   }
+  RecordPendingPagingFence(device, map.PagingFenceValue);
 
   aperture.gpu_va = map.VirtualAddress;
+  if (aperture.gpu_va != kCommandApertureGpuVaBase) {
+    SetErrorFormat(
+        out_error,
+        "command aperture mapped at unexpected allocator-selected VA "
+        "0x%llx; MCDM protocol requires 0x%llx",
+        static_cast<unsigned long long>(aperture.gpu_va),
+        static_cast<unsigned long long>(kCommandApertureGpuVaBase));
+    DestroyCommandAperture(api, device, &aperture);
+    return false;
+  }
 
   if (!abi.command_aperture_residency_after_bootstrap) {
-    if (!WaitForPagingFenceCpu(api, device, map.PagingFenceValue)) {
-      SetError(
-          out_error,
-          "D3DKMTWaitForSynchronizationObjectFromCpu(command aperture map) "
-          "failed");
-      DestroyCommandAperture(api, device, &aperture);
-      return false;
-    }
-
     D3DKMT_HANDLE resident_allocs[1] = {aperture.gpu_allocation};
     D3DDDI_MAKERESIDENT resident = {};
     resident.hPagingQueue = device.paging_queue;
@@ -1342,6 +1416,7 @@ bool CreateCommandAperture(const KmtApi& api, const Device& device,
       DestroyCommandAperture(api, device, &aperture);
       return false;
     }
+    RecordPendingPagingFence(device, resident.PagingFenceValue);
     if (!WaitForPagingFenceCpu(api, device, resident.PagingFenceValue)) {
       SetError(out_error,
                "D3DKMTWaitForSynchronizationObjectFromCpu(command aperture "
@@ -1449,7 +1524,6 @@ bool EnsureCommandApertureGpuMapping(const KmtApi& api, const Device& device,
 
   D3DDDI_MAPGPUVIRTUALADDRESS map = {};
   map.hPagingQueue = device.paging_queue;
-  map.BaseAddress = kCommandApertureGpuVaBase;
   map.hAllocation = aperture->gpu_allocation;
   map.SizeInPages = kCommandApertureGpuVaSize / kPageSize;
   map.Protection.Write = 1;
@@ -1462,6 +1536,7 @@ bool EnsureCommandApertureGpuMapping(const KmtApi& api, const Device& device,
                    static_cast<unsigned long long>(map.SizeInPages));
     return false;
   }
+  RecordPendingPagingFence(device, map.PagingFenceValue);
   if (!WaitForPagingFenceCpu(api, device, map.PagingFenceValue)) {
     SetError(out_error,
              "D3DKMTWaitForSynchronizationObjectFromCpu(command aperture remap) failed");
@@ -1490,6 +1565,7 @@ bool EnsureCommandApertureGpuMapping(const KmtApi& api, const Device& device,
     ReleaseCommandApertureGpuMapping(api, device, aperture, out_error);
     return false;
   }
+  RecordPendingPagingFence(device, resident.PagingFenceValue);
   if (!WaitForPagingFenceCpu(api, device, resident.PagingFenceValue)) {
     SetError(out_error,
              "D3DKMTWaitForSynchronizationObjectFromCpu(command aperture remap resident) failed");
@@ -1565,8 +1641,8 @@ bool SubmitAndWaitCommandAperture(const KmtApi& api, const Device& device,
   submit.CommandLength = static_cast<UINT>(aperture->gpu_va_size);
   submit.PrivateDriverDataSize = abi.submit_private_prefix_size;
   submit.pPrivateDriverData = submit_private.data();
-  NTSTATUS status = api.submit_command_to_hw_queue(&submit);
-  if (!CheckStatus("D3DKMTSubmitCommandToHwQueue", status, out_error)) {
+  if (!SubmitCommandToHwQueueAfterPaging(
+          api, device, &submit, "D3DKMTSubmitCommandToHwQueue", out_error)) {
     return false;
   }
 
@@ -1619,11 +1695,12 @@ bool SubmitAndWaitPathBSetup(const KmtApi& api, const Device& device,
   submit.CommandLength = static_cast<UINT>(aperture->gpu_va_size);
   submit.PrivateDriverDataSize = abi.submit_private_prefix_size;
   submit.pPrivateDriverData = bootstrap_private.data();
-  NTSTATUS status = api.submit_command_to_hw_queue(&submit);
-  if (!CheckStatus("D3DKMTSubmitCommandToHwQueue(pathb bootstrap)", status,
-                   out_error)) {
+  if (!SubmitCommandToHwQueueAfterPaging(
+          api, device, &submit,
+          "D3DKMTSubmitCommandToHwQueue(pathb bootstrap)", out_error)) {
     return false;
   }
+  NTSTATUS status = 0;
   D3DKMT_HANDLE resident_allocs[1] = {};
   D3DDDI_MAKERESIDENT resident = {};
   if (abi.command_aperture_residency_after_bootstrap) {
@@ -1639,6 +1716,7 @@ bool SubmitAndWaitPathBSetup(const KmtApi& api, const Device& device,
             out_error)) {
       return false;
     }
+    RecordPendingPagingFence(device, resident.PagingFenceValue);
   }
   if (!LockCommandApertureGpuAfterBootstrap(api, device, aperture, out_error)) {
     return false;
@@ -1661,12 +1739,24 @@ bool SubmitAndWaitPathBSetup(const KmtApi& api, const Device& device,
       return false;
     }
     std::memcpy(aperture->gpu_cpu_ptr, aperture_payload, aperture_payload_size);
-    std::atomic_thread_fence(std::memory_order_seq_cst);
-    FlushProcessWriteBuffers();
+    // Publish the setup PDI after the final CPU write using the negotiated
+    // aperture policy. A process write barrier orders stores but does not make
+    // dirty lines in this cacheable Lock2 mapping visible to the NPU.
+    if (!CommitPathBCodeWrite(api, device, *aperture, /*offset=*/0,
+                              aperture_payload_size, out_error)) {
+      return false;
+    }
   }
 
   McdmPrivateData setup_private =
       BuildPathBSetupPrivateData(device.mcdm_abi, *aperture);
+
+  // The setup command owns status slot 0. XRT initializes that qhdl record
+  // before submit and consumes it after the queue fence is reached; doing the
+  // same prevents a later command from observing an incompletely retired
+  // context setup.
+  uint8_t* setup_slot = static_cast<uint8_t*>(aperture->cpu_ptr);
+  InitializeCompletionSlot(setup_slot);
 
   fence_id = context->next_fence_id++;
   submit = {};
@@ -1676,14 +1766,28 @@ bool SubmitAndWaitPathBSetup(const KmtApi& api, const Device& device,
   submit.CommandLength = 0;
   submit.PrivateDriverDataSize = setup_private.size;
   submit.pPrivateDriverData = setup_private.data;
-  status = api.submit_command_to_hw_queue(&submit);
-  if (!CheckStatus("D3DKMTSubmitCommandToHwQueue(pathb setup5)", status,
-                   out_error)) {
+  if (!SubmitCommandToHwQueueAfterPaging(
+          api, device, &submit,
+          "D3DKMTSubmitCommandToHwQueue(pathb setup5)", out_error)) {
     return false;
   }
-  return WaitForHwQueueFenceCpu(
-      api, device, *context, fence_id,
-      "D3DKMTWaitForSynchronizationObjectFromCpu(pathb setup5)", out_error);
+  if (!WaitForHwQueueFenceCpu(
+          api, device, *context, fence_id,
+          "D3DKMTWaitForSynchronizationObjectFromCpu(pathb setup5)",
+          out_error)) {
+    return false;
+  }
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+  uint32_t setup_state = 0;
+  std::memcpy(&setup_state, setup_slot, sizeof(setup_state));
+  if (device.mcdm_abi == McdmAbi::compact && setup_state != 1) {
+    SetErrorFormat(out_error,
+                   "pathb setup did not complete after fence wait: "
+                   "expected compact setup record 1, got 0x%08x",
+                   setup_state);
+    return false;
+  }
+  return true;
 }
 
 bool SubmitPathBApertureSync(const KmtApi& api, const Device& device,
@@ -1705,9 +1809,9 @@ bool SubmitPathBApertureSync(const KmtApi& api, const Device& device,
   submit.CommandLength = 0;
   submit.PrivateDriverDataSize = sync_private.size;
   submit.pPrivateDriverData = sync_private.data;
-  NTSTATUS status = api.submit_command_to_hw_queue(&submit);
-  if (!CheckStatus("D3DKMTSubmitCommandToHwQueue(pathb sync9)", status,
-                   out_error)) {
+  if (!SubmitCommandToHwQueueAfterPaging(
+          api, device, &submit,
+          "D3DKMTSubmitCommandToHwQueue(pathb sync9)", out_error)) {
     return false;
   }
   if (!wait_for_cpu) return true;
@@ -1756,43 +1860,31 @@ bool AcquirePathBCodeRange(const KmtApi& api, const Device& device,
                            Context* context,
                            const CommandAperture& aperture, uint64_t offset,
                            uint64_t length, Error* out_error) {
-  if (device.mcdm_abi != McdmAbi::compact) return true;
   const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
   if (!ValidatePathBCodeRange(abi, aperture, offset, length, out_error)) {
     return false;
   }
-  const uint64_t slot_size = abi.command_aperture_code_slot_size;
-  const uint64_t marker_end = offset + length;
-  uint64_t boundary = (offset + slot_size) & ~(slot_size - 1);
-  const uint64_t final_boundary =
-      (marker_end + slot_size - 1) & ~(slot_size - 1);
-  for (; boundary <= final_boundary; boundary += slot_size) {
-    // The final marker transfers all touched slots to the host. Do not write
-    // cacheable aperture memory until that ownership transfer has completed.
-    if (!SubmitPathBApertureSync(api, device, context, aperture, boundary,
-                                 /*wait_for_cpu=*/boundary == final_boundary,
-                                 out_error)) {
-      return false;
-    }
-  }
+  // Acquiring a host-visible code range is a validation-only operation. The
+  // mapped bytes must be written and made device-visible before opcode 9
+  // publishes the touched aperture slots to the HW queue.
   return true;
 }
 
 bool CommitPathBCodeWrite(const KmtApi& api, const Device& device,
                           const CommandAperture& aperture, uint64_t offset,
                           uint64_t length, Error* out_error) {
-  // Compact MCDM exposes instruction storage as cacheable 0x8000-byte slots.
-  // XRT publishes a write by flushing every CPU cache line in each touched
-  // slot after its pre-write marker. Legacy MCDM instead uses KMT cache
-  // invalidation before its post-write marker.
   const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
-  if (abi.command_aperture_code_publish_granularity) {
-    return FlushCpuCacheRange(
-        aperture.gpu_cpu_ptr, aperture.gpu_va_size, offset, length,
-        abi.command_aperture_code_publish_granularity, out_error);
+  switch (abi.command_aperture_write_publish_mode) {
+    case CommandApertureWritePublishMode::cpu_cache_flush:
+      return FlushCpuCacheRange(
+          aperture.gpu_cpu_ptr, aperture.gpu_va_size, offset, length,
+          abi.command_aperture_code_publish_granularity, out_error);
+    case CommandApertureWritePublishMode::kmt_invalidate:
+      return SyncCommandApertureCode(api, device, aperture, offset, length,
+                                     out_error);
   }
-  return SyncCommandApertureCode(api, device, aperture, offset, length,
-                                 out_error);
+  SetError(out_error, "unknown command-aperture write publication mode");
+  return false;
 }
 
 bool RefreshPathBSingleCodeMappingAfterWrite(
@@ -1807,7 +1899,10 @@ bool PublishPathBCodeWrite(const KmtApi& api, const Device& device,
                            Context* context,
                            const CommandAperture& aperture, uint64_t offset,
                            uint64_t length, Error* out_error) {
-  if (device.mcdm_abi != McdmAbi::legacy) return true;
+  // Both MCDM profiles publish device-visible code with opcode-9 end markers.
+  // Compact writes use CPU cache-line flushes while legacy writes use KMT
+  // invalidation; in either case the marker is submitted after publication so
+  // the later state-3 command observes the completed image in queue order.
   return SubmitPathBCodeRangeEndMarkers(api, device, context, aperture, offset,
                                         length, out_error);
 }
@@ -1833,7 +1928,8 @@ bool ReleasePathBCodeRange(const KmtApi& api, const Device& device,
                         ((relative_begin + length - 1) & ~(slot_size - 1));
   for (;;) {
     if (!SubmitPathBApertureSync(api, device, context, aperture, slot_start,
-                                 /*wait_for_cpu=*/false, out_error)) {
+                                 /*wait_for_cpu=*/slot_start <= first_slot,
+                                 out_error)) {
       return false;
     }
     if (slot_start <= first_slot) break;
@@ -1902,6 +1998,7 @@ bool EnsureStatusRing(const KmtApi& api, const Device& device, Context* context,
       DestroyBuffer(api, device, &ring);
       return false;
     }
+    RecordPendingPagingFence(device, map.PagingFenceValue);
     ring.gpu_va = map.VirtualAddress;
 
     D3DKMT_HANDLE resident_allocs[1] = {ring.allocation};
@@ -1917,6 +2014,7 @@ bool EnsureStatusRing(const KmtApi& api, const Device& device, Context* context,
       DestroyBuffer(api, device, &ring);
       return false;
     }
+    RecordPendingPagingFence(device, resident.PagingFenceValue);
     D3DKMT_HANDLE wait_objects[1] = {device.paging_sync_object};
     UINT64 wait_values[1] = {resident.PagingFenceValue};
     D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU wait = {};
@@ -2008,9 +2106,8 @@ bool SubmitAndWaitPathBImpl(const KmtApi& api, const Device& device,
     return false;
   }
 
-  const bool xrt_lock_touch = XrtLockTouchEnabled();
-  if (xrt_lock_touch && !TouchBufferCpuMapping(api, device, exec_buffer,
-                                               "pre-submit", out_error)) {
+  if (!TouchBufferCpuMapping(api, device, exec_buffer, "pre-submit",
+                             out_error)) {
     return false;
   }
 
@@ -2023,12 +2120,13 @@ bool SubmitAndWaitPathBImpl(const KmtApi& api, const Device& device,
       static_cast<UINT>(exec_buffer.size + abi.pathb_packet_offset);
   submit.PrivateDriverDataSize = private_data.size;
   submit.pPrivateDriverData = private_data.data;
-  NTSTATUS status = api.submit_command_to_hw_queue(&submit);
-  if (!CheckStatus("D3DKMTSubmitCommandToHwQueue(pathb)", status, out_error)) {
+  if (!SubmitCommandToHwQueueAfterPaging(
+          api, device, &submit, "D3DKMTSubmitCommandToHwQueue(pathb)",
+          out_error)) {
     return false;
   }
-  if (xrt_lock_touch && !TouchBufferCpuMapping(api, device, exec_buffer,
-                                               "post-submit", out_error)) {
+  if (!TouchBufferCpuMapping(api, device, exec_buffer, "post-submit",
+                             out_error)) {
     return false;
   }
 
@@ -2044,17 +2142,7 @@ bool SubmitAndWaitPathBImpl(const KmtApi& api, const Device& device,
   volatile uint32_t* const volatile_packet_header = packet_header;
   uint32_t slot_state = 0;
   uint32_t packet_state = volatile_packet_header ? *volatile_packet_header : 0;
-  const bool trust_fence_completion = TrustFenceCompletionEnabled();
   auto read_completion_once = [&]() -> bool {
-    if (trust_fence_completion) {
-      // WaitForHwQueueFenceCpu above is the GPU->CPU ordering point. The
-      // volatile read prevents the compiler from reusing a stale packet header
-      // value while the fast path trusts the post-fence host mapping.
-      std::atomic_thread_fence(std::memory_order_seq_cst);
-      packet_state = volatile_packet_header ? *volatile_packet_header : 0;
-      std::memcpy(&slot_state, slot_cpu, sizeof(slot_state));
-      return true;
-    }
     Error command_sync_err;
     if (!SyncBuffer(api, device, exec_buffer, 0, exec_buffer.size,
                     &command_sync_err)) {
@@ -2156,9 +2244,8 @@ bool SubmitPathBImplNoWait(const KmtApi& api, const Device& device,
     return false;
   }
 
-  const bool xrt_lock_touch = XrtLockTouchEnabled();
-  if (xrt_lock_touch && !TouchBufferCpuMapping(api, device, exec_buffer,
-                                               "pre-submit", out_error)) {
+  if (!TouchBufferCpuMapping(api, device, exec_buffer, "pre-submit",
+                             out_error)) {
     return false;
   }
 
@@ -2171,13 +2258,13 @@ bool SubmitPathBImplNoWait(const KmtApi& api, const Device& device,
       static_cast<UINT>(exec_buffer.size + abi.pathb_packet_offset);
   submit.PrivateDriverDataSize = private_data.size;
   submit.pPrivateDriverData = private_data.data;
-  NTSTATUS status = api.submit_command_to_hw_queue(&submit);
-  if (!CheckStatus("D3DKMTSubmitCommandToHwQueue(pathb nowait)", status,
-                   out_error)) {
+  if (!SubmitCommandToHwQueueAfterPaging(
+          api, device, &submit,
+          "D3DKMTSubmitCommandToHwQueue(pathb nowait)", out_error)) {
     return false;
   }
-  if (xrt_lock_touch && !TouchBufferCpuMapping(api, device, exec_buffer,
-                                               "post-submit", out_error)) {
+  if (!TouchBufferCpuMapping(api, device, exec_buffer, "post-submit",
+                             out_error)) {
     return false;
   }
 
@@ -2224,42 +2311,31 @@ bool WaitForPathBSubmits(const KmtApi& api, const Device& device,
           out_error)) {
     return false;
   }
-
-  const bool trust_fence_completion = TrustFenceCompletionEnabled();
   for (size_t i = 0; i < pending_count; ++i) {
     PathBPendingSubmit& p = pending[i];
     volatile uint32_t* const packet_header = p.packet_header;
     uint32_t slot_state = 0;
     uint32_t packet_state = packet_header ? *packet_header : 0;
-    if (trust_fence_completion) {
-      // WaitForHwQueueFenceCpu above is the GPU->CPU ordering point for all
-      // parent chunks. Keep command-packet header reads volatile while the fast
-      // path trusts the post-fence host mapping.
-      std::atomic_thread_fence(std::memory_order_seq_cst);
-      packet_state = packet_header ? *packet_header : 0;
-      std::memcpy(&slot_state, p.slot_cpu, sizeof(slot_state));
-    } else {
-      Error command_sync_err;
-      if (!SyncBuffer(api, device, p.exec_buffer, 0, p.exec_buffer.size,
-                      &command_sync_err)) {
-        SetErrorFormat(out_error,
-                       "pathb batch command buffer invalidate failed: %s",
-                       ErrorMessage(&command_sync_err));
-        return false;
-      }
-      std::atomic_thread_fence(std::memory_order_seq_cst);
-      packet_state = packet_header ? *packet_header : 0;
-
-      Error ring_sync_err;
-      if (!SyncBuffer(api, device, p.ring, 0, p.ring.size, &ring_sync_err)) {
-        SetErrorFormat(out_error,
-                       "pathb batch completion ring invalidate failed: %s",
-                       ErrorMessage(&ring_sync_err));
-        return false;
-      }
-      std::atomic_thread_fence(std::memory_order_seq_cst);
-      std::memcpy(&slot_state, p.slot_cpu, sizeof(slot_state));
+    Error command_sync_err;
+    if (!SyncBuffer(api, device, p.exec_buffer, 0, p.exec_buffer.size,
+                    &command_sync_err)) {
+      SetErrorFormat(out_error,
+                     "pathb batch command buffer invalidate failed: %s",
+                     ErrorMessage(&command_sync_err));
+      return false;
     }
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+    packet_state = packet_header ? *packet_header : 0;
+
+    Error ring_sync_err;
+    if (!SyncBuffer(api, device, p.ring, 0, p.ring.size, &ring_sync_err)) {
+      SetErrorFormat(out_error,
+                     "pathb batch completion ring invalidate failed: %s",
+                     ErrorMessage(&ring_sync_err));
+      return false;
+    }
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+    std::memcpy(&slot_state, p.slot_cpu, sizeof(slot_state));
 
     if (packet_header) {
       const uint32_t completion_state =
@@ -2321,6 +2397,83 @@ bool SubmitPathB(const KmtApi& api, const Device& device, Context* context,
                                packet_header, out_pending, out_error);
 }
 
+static void BeginDestroyCommandAperture(const KmtApi& api,
+                                        const Device& device,
+                                        CommandAperture* aperture) {
+  if (!aperture) return;
+  const bool owns_separate_gpu_allocation =
+      aperture->gpu_allocation &&
+      aperture->gpu_allocation != aperture->allocation;
+  if (!owns_separate_gpu_allocation) {
+    // Legacy MCDM has one aperture allocation and retains its established
+    // one-phase teardown before the context is destroyed.
+    DestroyCommandAperture(api, device, aperture);
+    return;
+  }
+
+  // Compact MCDM has separate instruction and status allocations. XRT
+  // destroys instruction storage synchronously before the HW queue, but keeps
+  // the status allocation alive until after queue destruction.
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
+  if (aperture->gpu_va && abi.explicit_gpu_va_free_on_destroy) {
+    D3DKMT_FREEGPUVIRTUALADDRESS free_va = {};
+    free_va.hAdapter = device.adapter;
+    free_va.BaseAddress = aperture->gpu_va;
+    free_va.Size = aperture->gpu_va_size;
+    api.free_gpu_virtual_address(&free_va);
+  }
+  if (aperture->gpu_cpu_ptr) {
+    D3DKMT_UNLOCK2 unlock = {};
+    unlock.hDevice = device.device;
+    unlock.hAllocation = aperture->gpu_allocation;
+    api.unlock2(&unlock);
+  }
+
+  D3DKMT_DESTROYALLOCATION2 destroy_gpu = {};
+  D3DKMT_HANDLE gpu_allocs[1] = {aperture->gpu_allocation};
+  destroy_gpu.hDevice = device.device;
+  destroy_gpu.Flags.AssumeNotInUse = 1;
+  destroy_gpu.Flags.SynchronousDestroy = 1;
+  if (aperture->gpu_resource) {
+    destroy_gpu.hResource = aperture->gpu_resource;
+  } else {
+    destroy_gpu.AllocationCount = 1;
+    destroy_gpu.phAllocationList = gpu_allocs;
+  }
+  api.destroy_allocation2(&destroy_gpu);
+
+  aperture->gpu_allocation = 0;
+  aperture->gpu_resource = 0;
+  aperture->gpu_va = 0;
+  aperture->gpu_va_size = 0;
+  aperture->gpu_cpu_ptr = nullptr;
+  aperture->code_allocation = 0;
+  aperture->code_resource = 0;
+  aperture->code_gpu_va = 0;
+  aperture->code_cpu_ptr = nullptr;
+  aperture->code_offset = 0;
+  aperture->code_size = 0;
+}
+
+void DestroyContextWithCommandAperture(const KmtApi& api,
+                                       const Device& device,
+                                       Context* context,
+                                       CommandAperture* aperture) {
+  if (!context) {
+    DestroyCommandAperture(api, device, aperture);
+    return;
+  }
+
+  // XRT's compact-MCDM lifecycle releases instruction storage before the HW
+  // queue, then releases the queue-owned status resource before context-private
+  // storage and the context handle. Keep that protocol ordering wholly inside
+  // the Windows DDI layer.
+  BeginDestroyCommandAperture(api, device, aperture);
+  DestroyContextHwQueue(api, context);
+  DestroyCommandAperture(api, device, aperture);
+  DestroyContextAfterHwQueue(api, device, context);
+}
+
 void DestroyCommandAperture(const KmtApi& api, const Device& device,
                             CommandAperture* aperture) {
   if (!aperture || (!aperture->allocation && !aperture->resource &&
@@ -2328,7 +2481,8 @@ void DestroyCommandAperture(const KmtApi& api, const Device& device,
                     !aperture->cleanup_allocation)) {
     return;
   }
-  if (aperture->gpu_va) {
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
+  if (aperture->gpu_va && abi.explicit_gpu_va_free_on_destroy) {
     D3DKMT_FREEGPUVIRTUALADDRESS free_va = {};
     free_va.hAdapter = device.adapter;
     free_va.BaseAddress = aperture->gpu_va;
@@ -2336,7 +2490,7 @@ void DestroyCommandAperture(const KmtApi& api, const Device& device,
     api.free_gpu_virtual_address(&free_va);
     aperture->gpu_va = 0;
   }
-  if (aperture->status_gpu_va) {
+  if (aperture->status_gpu_va && abi.explicit_gpu_va_free_on_destroy) {
     D3DKMT_FREEGPUVIRTUALADDRESS free_va = {};
     free_va.hAdapter = device.adapter;
     free_va.BaseAddress = aperture->status_gpu_va;
@@ -2398,6 +2552,8 @@ void DestroyCommandAperture(const KmtApi& api, const Device& device,
       destroy_command.phAllocationList = command_allocs;
     } else if (aperture->resource) {
       destroy_command.hResource = aperture->resource;
+      const uint32_t resource_flags = abi.shared_resource_destroy_flags;
+      if (resource_flags) destroy_command.Flags.Value = resource_flags;
     } else if (aperture->allocation) {
       destroy_command.Flags.AssumeNotInUse = 1;
       destroy_command.AllocationCount = 1;

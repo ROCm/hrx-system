@@ -8,9 +8,12 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cinttypes>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -20,6 +23,7 @@
 
 #include "iree/base/internal/atomics.h"
 #include "iree/hal/drivers/amdxdna/native.h"
+#include "iree/hal/drivers/amdxdna/shim/linux/kmq/amdxdna_accel.h"
 #include "iree/hal/drivers/amdxdna/shim/linux/kmq/bo.h"
 #include "iree/hal/drivers/amdxdna/shim/linux/kmq/device.h"
 #include "iree/hal/drivers/amdxdna/shim/linux/kmq/hwctx.h"
@@ -30,13 +34,23 @@
 struct iree_hal_amdxdna_native_device_t {
   iree_allocator_t host_allocator;
   std::unique_ptr<shim_xdna::device> shim_device;
+  std::filesystem::path device_path;
+  std::string driver_version_storage;
+  std::string driver_srcversion_storage;
+  iree_hal_amdxdna_native_c_driver_stack_t driver_stack = {};
+  iree_hal_amdxdna_native_c_command_chain_status_t command_chain_status =
+      IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT;
+  bool supports_command_chain = true;
   std::mutex command_pool_mutex;
   std::vector<std::unique_ptr<shim_xdna::kernel>> start_npu_command_pool;
 
   iree_hal_amdxdna_native_device_t(
       iree_allocator_t host_allocator,
-      std::unique_ptr<shim_xdna::device> shim_device)
-      : host_allocator(host_allocator), shim_device(std::move(shim_device)) {}
+      std::unique_ptr<shim_xdna::device> shim_device,
+      std::filesystem::path device_path)
+      : host_allocator(host_allocator),
+        shim_device(std::move(shim_device)),
+        device_path(std::move(device_path)) {}
 };
 
 struct iree_hal_amdxdna_native_buffer_t {
@@ -102,6 +116,14 @@ constexpr size_t kMaxExecBoSize = 4096;
 // XRT's 24+4 split.
 constexpr uint32_t kKmqDefaultChainSlots = 24;
 
+constexpr const char* kKnownBadUbuntu617Srcversion =
+    "2DBDA75956CAFA9D029EA89";
+
+constexpr uint32_t kCommandChainFirmwareMinMajor = 1;
+constexpr uint32_t kCommandChainFirmwareMinMinor = 1;
+constexpr uint32_t kCommandChainFirmwareMinPatch = 0;
+constexpr uint32_t kCommandChainFirmwareMinBuild = 0;
+
 // START_NPU commands are used as KMQ chain children with register-map
 // arguments on Linux. Reusing only this opcode avoids stale BO binding-table
 // state while removing per-dispatch exec-BO create/destroy churn. The pool is
@@ -109,6 +131,199 @@ constexpr uint32_t kKmqDefaultChainSlots = 24;
 // runlist can span multiple 24-child parent chains while still needing cached
 // child START_NPU commands for the whole group.
 constexpr size_t kMaxStartNpuCommandPoolSize = 64;
+
+struct firmware_version_t {
+  uint32_t major = 0;
+  uint32_t minor = 0;
+  uint32_t patch = 0;
+  uint32_t build = 0;
+  bool valid = false;
+};
+
+struct driver_stack_info_t {
+  std::string module_version;
+  std::string module_srcversion;
+  firmware_version_t firmware;
+  uint32_t vendor = 0;
+  uint32_t device = 0;
+  uint32_t revision = 0;
+  bool has_vendor = false;
+  bool has_device = false;
+  bool has_revision = false;
+};
+
+bool env_flag_enabled(const char* name) {
+  const char* raw_value = std::getenv(name);
+  if (!raw_value || raw_value[0] == '\0') return false;
+  std::string value(raw_value);
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char c) { return (char)std::tolower(c); });
+  return value != "0" && value != "false" && value != "off" &&
+         value != "no";
+}
+
+std::string read_first_line(const std::filesystem::path& path) {
+  std::ifstream file(path);
+  std::string line;
+  if (file.is_open()) std::getline(file, line);
+  return line;
+}
+
+bool parse_sysfs_u32(const std::string& value, uint32_t* out_value) {
+  if (value.empty()) return false;
+  char* end = nullptr;
+  errno = 0;
+  unsigned long parsed = std::strtoul(value.c_str(), &end, 0);
+  if (errno != 0 || end == value.c_str() ||
+      parsed > std::numeric_limits<uint32_t>::max()) {
+    return false;
+  }
+  *out_value = static_cast<uint32_t>(parsed);
+  return true;
+}
+
+std::filesystem::path sysfs_device_path_for_accel_node(
+    const std::filesystem::path& device_path) {
+  const std::filesystem::path filename = device_path.filename();
+  if (filename.empty()) return {};
+  std::filesystem::path sysfs_path =
+      std::filesystem::path("/sys/class/accel") / filename / "device";
+  std::error_code ec;
+  if (std::filesystem::exists(sysfs_path, ec) && !ec) return sysfs_path;
+  return {};
+}
+
+int firmware_compare(const firmware_version_t& lhs, uint32_t major,
+                     uint32_t minor, uint32_t patch, uint32_t build) {
+  if (lhs.major != major) return lhs.major < major ? -1 : 1;
+  if (lhs.minor != minor) return lhs.minor < minor ? -1 : 1;
+  if (lhs.patch != patch) return lhs.patch < patch ? -1 : 1;
+  if (lhs.build != build) return lhs.build < build ? -1 : 1;
+  return 0;
+}
+
+bool is_xdna2_pci_revision(const driver_stack_info_t& info) {
+  if (!info.has_vendor || !info.has_device || !info.has_revision) return false;
+  if (info.vendor != 0x1022) return false;
+  switch (info.device) {
+    case 0x17f0:
+      return info.revision == 0x10 || info.revision == 0x11 ||
+             info.revision == 0x20;
+    case 0x1502:
+      return info.revision == 0x00;
+    default:
+      return false;
+  }
+}
+
+firmware_version_t query_firmware_version(const shim_xdna::pdev& pdev) {
+  amdxdna_drm_query_firmware_version firmware = {};
+  amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_FIRMWARE_VERSION,
+      .buffer_size = sizeof(firmware),
+      .buffer = reinterpret_cast<uintptr_t>(&firmware),
+  };
+  firmware_version_t result = {};
+  if (pdev.try_ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg) != 0) {
+    return result;
+  }
+  result.major = firmware.major;
+  result.minor = firmware.minor;
+  result.patch = firmware.patch;
+  result.build = firmware.build;
+  result.valid = true;
+  return result;
+}
+
+driver_stack_info_t query_driver_stack_info(
+    iree_hal_amdxdna_native_device_t* device) {
+  driver_stack_info_t info = {};
+  info.module_version = read_first_line("/sys/module/amdxdna/version");
+  info.module_srcversion = read_first_line("/sys/module/amdxdna/srcversion");
+  info.firmware = query_firmware_version(device->shim_device->get_pdev());
+
+  const std::filesystem::path sysfs_device_path =
+      sysfs_device_path_for_accel_node(device->device_path);
+  if (!sysfs_device_path.empty()) {
+    info.has_vendor =
+        parse_sysfs_u32(read_first_line(sysfs_device_path / "vendor"),
+                        &info.vendor);
+    info.has_device =
+        parse_sysfs_u32(read_first_line(sysfs_device_path / "device"),
+                        &info.device);
+    info.has_revision =
+        parse_sysfs_u32(read_first_line(sysfs_device_path / "revision"),
+                        &info.revision);
+  }
+  return info;
+}
+
+bool has_known_bad_amdxdna_srcversion(const driver_stack_info_t& info) {
+  return info.module_srcversion == kKnownBadUbuntu617Srcversion;
+}
+
+iree_hal_amdxdna_native_c_command_chain_status_t select_command_chain_status(
+    const driver_stack_info_t& info) {
+  if (env_flag_enabled("IREE_HAL_AMDXDNA_DISABLE_COMMAND_CHAIN")) {
+    return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_BY_USER;
+  }
+  if (env_flag_enabled("IREE_HAL_AMDXDNA_ENABLE_COMMAND_CHAIN")) {
+    return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_USER;
+  }
+
+  if (has_known_bad_amdxdna_srcversion(info)) {
+    return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_KNOWN_BAD_STACK;
+  }
+
+  // There is no ordered kernel-module srcversion. Firmware is the ordered local
+  // signal; only enable native parent chains by default once firmware reaches
+  // the command-chain-capable floor. Older 1.0.x stock firmware has now failed
+  // on multiple Ubuntu amdxdna stacks.
+  if (is_xdna2_pci_revision(info)) {
+    if (info.firmware.valid) {
+      if (firmware_compare(info.firmware, kCommandChainFirmwareMinMajor,
+                           kCommandChainFirmwareMinMinor,
+                           kCommandChainFirmwareMinPatch,
+                           kCommandChainFirmwareMinBuild) < 0) {
+        return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_OLD_FIRMWARE;
+      }
+    } else if (info.module_version.empty()) {
+      return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_UNIDENTIFIED_STACK;
+    }
+  }
+  return IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT;
+}
+
+bool command_chain_enabled(
+    iree_hal_amdxdna_native_c_command_chain_status_t status) {
+  return status ==
+             IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT ||
+         status ==
+             IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_USER;
+}
+
+void record_driver_stack_info(iree_hal_amdxdna_native_device_t* device,
+                              const driver_stack_info_t& info) {
+  device->driver_version_storage = info.module_version;
+  device->driver_srcversion_storage = info.module_srcversion;
+  device->driver_stack = {};
+  device->driver_stack.driver_version =
+      iree_make_string_view(device->driver_version_storage.data(),
+                            device->driver_version_storage.size());
+  device->driver_stack.driver_srcversion =
+      iree_make_string_view(device->driver_srcversion_storage.data(),
+                            device->driver_srcversion_storage.size());
+  device->driver_stack.has_firmware_version = info.firmware.valid;
+  device->driver_stack.firmware_major = info.firmware.major;
+  device->driver_stack.firmware_minor = info.firmware.minor;
+  device->driver_stack.firmware_patch = info.firmware.patch;
+  device->driver_stack.firmware_build = info.firmware.build;
+  device->driver_stack.has_pci_ids =
+      info.has_vendor && info.has_device && info.has_revision;
+  device->driver_stack.pci_vendor_id = info.vendor;
+  device->driver_stack.pci_device_id = info.device;
+  device->driver_stack.pci_revision_id = info.revision;
+}
 
 std::unique_ptr<shim_xdna::kernel> acquire_start_npu_command_from_pool(
     iree_hal_amdxdna_native_device_t* device) {
@@ -314,10 +529,14 @@ iree_status_t iree_hal_amdxdna_native_device_create(
   if (!iree_string_view_is_empty(options->device_path)) {
     device_path = string_view_to_string(options->device_path);
   }
+  const std::filesystem::path resolved_device_path =
+      device_path.empty() ? shim_xdna::find_default_accel_device_path()
+                          : device_path;
   std::unique_ptr<shim_xdna::device> shim_device;
   const int err = shim_xdna::device::create(
       static_cast<uint32_t>(options->n_core_rows),
-      static_cast<uint32_t>(options->n_core_cols), device_path, &shim_device);
+      static_cast<uint32_t>(options->n_core_cols), resolved_device_path,
+      &shim_device);
   if (err != 0) {
     return iree_make_status(
         iree_status_code_from_errno(err),
@@ -331,7 +550,14 @@ iree_status_t iree_hal_amdxdna_native_device_create(
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       host_allocator, sizeof(*device), reinterpret_cast<void**>(&device)));
   device = new (device)
-      iree_hal_amdxdna_native_device_t(host_allocator, std::move(shim_device));
+      iree_hal_amdxdna_native_device_t(host_allocator, std::move(shim_device),
+                                       resolved_device_path);
+  const driver_stack_info_t driver_stack_info = query_driver_stack_info(device);
+  record_driver_stack_info(device, driver_stack_info);
+  device->command_chain_status =
+      select_command_chain_status(driver_stack_info);
+  device->supports_command_chain =
+      command_chain_enabled(device->command_chain_status);
   *out_device = device;
   return iree_ok_status();
 }
@@ -402,11 +628,14 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
     iree_hal_amdxdna_native_c_device_caps_t* out_caps) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(out_caps);
-  iree_hal_amdxdna_native_c_device_caps_t caps;
+  iree_hal_amdxdna_native_c_device_caps_t caps = {};
   caps.ddi_version = 1;
   caps.max_effective_queues = 1;
   caps.max_command_chain_slots =
-      std::min(chain_slot_capacity(kMaxExecBoSize), kKmqDefaultChainSlots);
+      device->supports_command_chain
+          ? std::min(chain_slot_capacity(kMaxExecBoSize),
+                     kKmqDefaultChainSlots)
+          : 0;
   caps.context_image_models = IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_PDI;
   // START_NPU is used for command-chain children and is correct on Linux KMQ.
   // Do not advertise PARTIAL_ELF here: its resident-instruction path currently
@@ -415,21 +644,26 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
   // BO mutations; they do not make the PARTIAL_ELF resident-instruction model
   // correct on Linux.
   caps.dispatch_models = IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_CU |
-                         IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_NPU |
-                         IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_COMMAND_CHAIN;
+                         IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_NPU;
+  if (device->supports_command_chain) {
+    caps.dispatch_models |=
+        IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_COMMAND_CHAIN;
+  }
   caps.buffer_sync_model =
       IREE_HAL_AMDXDNA_NATIVE_C_BUFFER_SYNC_MODEL_CALLER_SYNCS_BINDINGS;
   caps.completion_models =
       IREE_HAL_AMDXDNA_NATIVE_C_COMPLETION_MODEL_SYNCHRONOUS_WAIT |
       IREE_HAL_AMDXDNA_NATIVE_C_COMPLETION_MODEL_NATIVE_FENCE;
-  caps.supports_command_chain = true;
-  caps.supports_submit_many = true;
+  caps.supports_command_chain = device->supports_command_chain;
+  caps.supports_submit_many = device->supports_command_chain;
   caps.supports_async_submit = true;
   caps.supports_external_buffer_import = false;
   caps.supports_external_buffer_export = false;
   caps.supports_real_multi_queue = false;
   caps.default_dispatch_opcode =
       IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_CU;
+  caps.command_chain_status = device->command_chain_status;
+  caps.driver_stack = device->driver_stack;
   *out_caps = caps;
   return iree_ok_status();
 }
@@ -636,6 +870,14 @@ iree_status_t iree_hal_amdxdna_native_command_create(
         IREE_STATUS_FAILED_PRECONDITION,
         "amdxdna Linux KMQ does not support START_NPU_PARTIAL_ELF; "
         "PARTIAL_ELF dispatch is not advertised");
+  }
+  if (opcode == IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_COMMAND_CHAIN &&
+      !device->supports_command_chain) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna Linux KMQ command chains disabled by driver-stack policy "
+        "(status=%d)",
+        static_cast<int>(device->command_chain_status));
   }
 
   const bool poolable_start_npu =

@@ -2035,6 +2035,12 @@ iree_status_t materialize_deferred_buffer(
         static_cast<uint64_t>(buffer->deferred_storage_size));
     std::memcpy(real_buffer.cpu_ptr, buffer->deferred_storage,
                 static_cast<size_t>(copy_size));
+    // A sync issued while this buffer was deferred could only order writes to
+    // the temporary host storage. Publish the copy into the real KMT mapping
+    // before any command can make the new device address visible to firmware.
+    sync_host_mapped_range_like_xrt(real_buffer.cpu_ptr, /*offset=*/0,
+                                    copy_size);
+    flush_host_writes_to_mcdm();
   }
   const bool transfer_deferred_storage_to_mirror =
       buffer->host_mirror &&
@@ -2203,6 +2209,8 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
   caps.supports_real_multi_queue = false;
   caps.default_dispatch_opcode =
       IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU;
+  caps.command_chain_status =
+      IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT;
   *out_caps = caps;
   return iree_ok_status();
 }
@@ -2309,9 +2317,8 @@ iree_status_t iree_hal_amdxdna_native_device_create_context(
   if (!mcdm::SubmitAndWaitPathBSetup(device->api, device->device, &context,
                                      &command_aperture, pdi.data,
                                      pdi.data_length, &error)) {
-    mcdm::DestroyCommandAperture(device->api, device->device,
-                                 &command_aperture);
-    mcdm::DestroyContext(device->api, device->device, &context);
+    mcdm::DestroyContextWithCommandAperture(
+        device->api, device->device, &context, &command_aperture);
     mcdm::ContextBlobInfoDeinitialize(&info);
     return status_from_mcdm_error("amdxdna Windows MCDM pathb setup failed",
                                   error);
@@ -2323,9 +2330,8 @@ iree_status_t iree_hal_amdxdna_native_device_create_context(
       iree_allocator_malloc(device->host_allocator, sizeof(*native_context),
                             reinterpret_cast<void**>(&native_context));
   if (!iree_status_is_ok(status)) {
-    mcdm::DestroyCommandAperture(device->api, device->device,
-                                 &command_aperture);
-    mcdm::DestroyContext(device->api, device->device, &context);
+    mcdm::DestroyContextWithCommandAperture(
+        device->api, device->device, &context, &command_aperture);
     mcdm::ContextBlobInfoDeinitialize(&info);
     return status;
   }
@@ -2351,11 +2357,13 @@ void iree_hal_amdxdna_native_context_destroy(
   iree_status_ignore(close_pathb_single_aperture_session(&context->queue));
   clear_pathb_active_context_if_matches(context);
   if (context->has_command_aperture) {
-    mcdm::DestroyCommandAperture(context->device->api, context->device->device,
-                                 &context->command_aperture);
+    mcdm::DestroyContextWithCommandAperture(
+        context->device->api, context->device->device, &context->context,
+        &context->command_aperture);
+  } else {
+    mcdm::DestroyContext(context->device->api, context->device->device,
+                         &context->context);
   }
-  mcdm::DestroyContext(context->device->api, context->device->device,
-                       &context->context);
   mcdm::ContextBlobInfoDeinitialize(&context->info);
   iree_allocator_t host_allocator = context->device->host_allocator;
   context->~iree_hal_amdxdna_native_context_t();
@@ -2482,6 +2490,12 @@ iree_status_t iree_hal_amdxdna_native_buffer_sync(
     return iree_ok_status();
   }
   if (direction == IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE) {
+    // Cacheable and instruction BOs are written through their Lock2 mapping.
+    // Publish the requested range after all packet and BO-table updates, just
+    // as XRT's host-only BO sync does before run.start(). A process write
+    // barrier alone does not evict dirty cache lines from that mapping.
+    sync_host_mapped_range_like_xrt(buffer->buffer.cpu_ptr, sync_offset,
+                                    sync_size);
     flush_host_writes_to_mcdm();
     return iree_ok_status();
   }
@@ -3405,9 +3419,12 @@ static iree_status_t iree_hal_amdxdna_native_submit_wait(
                                     error);
     }
   }
-  const bool skip_non_chain_postsync =
-      !s->is_pathb_chain && s->is_pathb_partial_elf;
-  if (!skip_non_chain_postsync) {
+  if (s->is_pathb_partial_elf) {
+    // A partial-ELF dispatch acquires its command-aperture code range before
+    // state-3 submission. Release that range after completion so each dispatch
+    // has an explicit acquire/execute/release ownership interval.
+    IREE_RETURN_IF_ERROR(close_pathb_single_aperture_session(queue));
+  } else {
     if (!mcdm::SubmitPathBApertureSync(
             command->device->api, command->device->device,
             &queue->context->context, queue->context->command_aperture,
@@ -3416,12 +3433,7 @@ static iree_status_t iree_hal_amdxdna_native_submit_wait(
       return status_from_mcdm_error(
           "amdxdna Windows MCDM pathb post-dispatch sync failed", error);
     }
-    }
-  // For a state-3 partial-ELF submit, keep the already-open aperture session
-  // alive after the output D2H sync. XRT module reuse opens the module once and
-  // issues many run.start()/wait() calls against it; close only when switching
-  // to a different command-stream shape, staging different code, or destroying
-  // the context.
+  }
   {
     queue->exec_command_count++;
     if (packet->state == ERT_CMD_STATE_COMPLETED) {

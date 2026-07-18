@@ -75,6 +75,17 @@ iree_cc_library(
   PUBLIC
 )
 
+if(IREE_HAL_DRIVER_AMDXDNA AND LIBHRX_BUILD_TESTS)
+  add_executable(hrx_amdxdna_executable_test amdxdna_executable_test.cc)
+  target_link_libraries(hrx_amdxdna_executable_test PRIVATE
+    hrx::hrx
+    iree::base::internal::flatcc::parsing
+    iree::schemas::amdxdna_xclbin_executable_def_c_fbs
+  )
+  add_test(NAME hrx_amdxdna_executable_test
+    COMMAND hrx_amdxdna_executable_test)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
 if(IREE_HAL_DRIVER_AMDGPU)

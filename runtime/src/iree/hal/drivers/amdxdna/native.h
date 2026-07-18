@@ -92,6 +92,30 @@ enum iree_hal_amdxdna_native_c_completion_model_bits_t {
   IREE_HAL_AMDXDNA_NATIVE_C_COMPLETION_MODEL_COMPLETION_SLOT = 1u << 3,
 };
 
+typedef enum iree_hal_amdxdna_native_c_command_chain_status_t {
+  IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_UNKNOWN = 0,
+  IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT = 1,
+  IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_USER = 2,
+  IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_BY_USER = 3,
+  IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_KNOWN_BAD_STACK = 4,
+  IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_OLD_FIRMWARE = 5,
+  IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_UNIDENTIFIED_STACK = 6,
+} iree_hal_amdxdna_native_c_command_chain_status_t;
+
+typedef struct iree_hal_amdxdna_native_c_driver_stack_t {
+  iree_string_view_t driver_version;
+  iree_string_view_t driver_srcversion;
+  bool has_firmware_version;
+  uint32_t firmware_major;
+  uint32_t firmware_minor;
+  uint32_t firmware_patch;
+  uint32_t firmware_build;
+  bool has_pci_ids;
+  uint32_t pci_vendor_id;
+  uint32_t pci_device_id;
+  uint32_t pci_revision_id;
+} iree_hal_amdxdna_native_c_driver_stack_t;
+
 typedef struct iree_hal_amdxdna_native_c_device_caps_t {
   uint32_t ddi_version;
   uint32_t max_effective_queues;
@@ -107,6 +131,8 @@ typedef struct iree_hal_amdxdna_native_c_device_caps_t {
   bool supports_external_buffer_export;
   bool supports_real_multi_queue;
   iree_hal_amdxdna_native_c_command_opcode_t default_dispatch_opcode;
+  iree_hal_amdxdna_native_c_command_chain_status_t command_chain_status;
+  iree_hal_amdxdna_native_c_driver_stack_t driver_stack;
 } iree_hal_amdxdna_native_c_device_caps_t;
 
 typedef struct iree_hal_amdxdna_native_c_context_image_t {

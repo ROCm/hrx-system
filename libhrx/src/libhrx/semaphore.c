@@ -78,6 +78,22 @@ hrx_status_t hrx_semaphore_wait(hrx_semaphore_t semaphore, uint64_t value,
   iree_status_t status =
       iree_hal_semaphore_wait(semaphore->hal_semaphore, value, timeout,
                               /*flags=*/0);
+  if (!iree_status_is_ok(status)) {
+    // iree_async_semaphore_multi_wait reports failures as
+    // iree_status_from_code(code), dropping the annotation; the semaphore still
+    // owns the original. Query it so callers see the producer's message (e.g.
+    // "amdxdna ... did not complete: ert state N (error_index M)") instead of a
+    // bare code. Keep the wait status if the semaphore has nothing better.
+    uint64_t current_value = 0;
+    iree_status_t detail =
+        iree_hal_semaphore_query(semaphore->hal_semaphore, &current_value);
+    if (!iree_status_is_ok(detail)) {
+      iree_status_ignore(status);
+      status = detail;
+    } else {
+      iree_status_ignore(detail);
+    }
+  }
   return hrx_status_from_iree(status);
 }
 
