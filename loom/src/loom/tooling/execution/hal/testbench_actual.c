@@ -13,6 +13,7 @@
 #include "loom/ir/facts.h"
 #include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
+#include "loom/link/linker.h"
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/special_values.h"
@@ -582,6 +583,36 @@ static iree_status_t loom_run_hal_testbench_materialize_config_set(
       provider->report, provider->compile_module.module, provider->config_set);
 }
 
+static iree_status_t loom_run_hal_testbench_select_compile_root(
+    loom_run_hal_testbench_actual_provider_t* provider,
+    iree_string_view_t entry_symbol) {
+  loom_run_module_t* compile_module = &provider->compile_module;
+  const loom_module_t* const source_modules[] = {compile_module->module};
+  iree_string_view_t module_name = iree_string_view_empty();
+  if (compile_module->module->name_id < compile_module->module->strings.count) {
+    module_name = compile_module->module->strings
+                      .entries[compile_module->module->name_id];
+  }
+  const iree_string_view_t root_symbols[] = {entry_symbol};
+  loom_module_t* linked_module = NULL;
+  IREE_RETURN_IF_ERROR(loom_link_materialized_modules(
+      source_modules, IREE_ARRAYSIZE(source_modules),
+      &(loom_link_options_t){
+          .module_name = module_name,
+          .root_symbols =
+              {
+                  .count = IREE_ARRAYSIZE(root_symbols),
+                  .values = root_symbols,
+              },
+      },
+      loom_run_session_block_pool(provider->session),
+      provider->context->host_allocator, &linked_module));
+
+  loom_module_free(compile_module->module);
+  compile_module->module = linked_module;
+  return iree_ok_status();
+}
+
 static void loom_run_hal_testbench_record_compile_rejection(
     loom_run_hal_testbench_actual_provider_t* provider,
     iree_string_view_t stage, iree_string_view_t kind,
@@ -689,6 +720,8 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_materialize_config_set(provider));
   IREE_RETURN_IF_ERROR(
       loom_run_hal_testbench_apply_case_constants(provider, entry_symbol));
+  IREE_RETURN_IF_ERROR(
+      loom_run_hal_testbench_select_compile_root(provider, entry_symbol));
 
   loom_func_like_t entry_func = {0};
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_resolve_compile_func(

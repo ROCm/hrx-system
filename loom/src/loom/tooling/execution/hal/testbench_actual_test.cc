@@ -146,6 +146,13 @@ static const loom_run_hal_artifact_provider_t kFakeHalArtifactProvider = {
     /*.select_device_target=*/FakeHalSelectDeviceTarget,
 };
 
+static bool ModuleHasSymbol(const loom_module_t* module,
+                            iree_string_view_t name) {
+  const loom_string_id_t name_id = loom_module_lookup_string(module, name);
+  return name_id != LOOM_STRING_ID_INVALID &&
+         loom_module_find_symbol(module, name_id) != LOOM_SYMBOL_ID_INVALID;
+}
+
 TEST_F(HalTestbenchActualTest, RequiresExplicitDeviceWhenHalProviderExists) {
   const loom_run_hal_artifact_provider_t* artifact_providers[] = {
       &kFakeHalArtifactProvider,
@@ -311,6 +318,68 @@ check.case @dynamic_workgroups_case {
   EXPECT_TRUE(iree_string_view_find(provider.compile_failure_message,
                                     IREE_SV("bind launch config values"),
                                     0) != IREE_STRING_VIEW_NPOS);
+
+  loom_run_hal_testbench_actual_provider_deinitialize(&provider);
+  loom_run_module_deinitialize(&run_module);
+}
+
+TEST_F(HalTestbenchActualTest, CompileModuleContainsOnlySelectedEntry) {
+  static constexpr char kSource[] = R"(
+kernel.def @selected(%element_count: index) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%element_count, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%element_count: index) {
+  kernel.return
+}
+
+kernel.def @uncalled() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+  kernel.return
+}
+
+check.case @selected_case {
+  %element_count = check.param.choice values([31, 32]) name("element_count") : index
+  func.call @selected(%element_count) : (index)
+  check.return
+}
+)";
+  loom_run_module_t run_module = {};
+  loom_testbench_module_plan_t module_plan = {};
+  ParseAndPlan(IREE_SV(kSource), &run_module, &module_plan);
+  ASSERT_EQ(module_plan.case_count, 1u);
+  const loom_testbench_case_plan_t* case_plan = &module_plan.cases[0];
+  const loom_testbench_invocation_plan_t* actual_invocation = nullptr;
+  IREE_ASSERT_OK(loom_run_hal_testbench_select_actual_invocation(
+      case_plan, &actual_invocation));
+
+  loom_run_hal_testbench_context_t context = {};
+  context.artifact_provider = &kFakeHalArtifactProvider;
+  // Provider compile only needs target selection before the dynamic launch
+  // rejects this source; avoid requiring a real HAL device for a rooted-link
+  // contract test.
+  context.runtime_initialized = true;
+  context.host_allocator = iree_allocator_system();
+
+  loom_run_hal_testbench_actual_provider_options_t options = {};
+  options.context = &context;
+  options.session = &session_;
+  options.filename = IREE_SV("hal_testbench_actual_test.loom");
+  options.source = IREE_SV(kSource);
+  options.test_module = run_module.module;
+  options.actual_invocation = actual_invocation;
+
+  loom_run_hal_testbench_actual_provider_t provider = {};
+  loom_run_hal_testbench_actual_provider_initialize(&options, &provider);
+  IREE_ASSERT_OK(loom_run_hal_testbench_actual_provider_compile(&provider));
+  ASSERT_TRUE(provider.compile_rejected);
+  EXPECT_TRUE(
+      ModuleHasSymbol(provider.compile_module.module, IREE_SV("selected")));
+  EXPECT_FALSE(
+      ModuleHasSymbol(provider.compile_module.module, IREE_SV("uncalled")));
+  EXPECT_FALSE(ModuleHasSymbol(provider.compile_module.module,
+                               IREE_SV("selected_case")));
 
   loom_run_hal_testbench_actual_provider_deinitialize(&provider);
   loom_run_module_deinitialize(&run_module);
