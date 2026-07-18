@@ -71,6 +71,15 @@ loom_symbol_ref_t loom_target_effective_target_ref(
     loom_symbol_ref_t authored_target_ref,
     const loom_target_pass_capability_t* capability);
 
+// Returns true when |effective_target_ref| is the invocation-materialized
+// target carried by |capability| and that invocation can refine
+// |authored_target_bundle|. Explicitly authored effective targets are not
+// interchangeable even when their bundles are compatible.
+bool loom_target_pass_capability_can_refine_target_bundle(
+    const loom_target_pass_capability_t* capability,
+    loom_symbol_ref_t effective_target_ref,
+    const loom_target_bundle_t* authored_target_bundle);
+
 // Resolves the effective target bundle for |function| under |environment|.
 //
 // Authored function target records win over the invocation target ref carried

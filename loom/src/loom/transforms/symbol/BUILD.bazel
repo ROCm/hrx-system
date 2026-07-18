@@ -27,6 +27,7 @@ loom_cc_library(
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/target",
         "//loom/src/loom/pass:pipeline",
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/pass:report",

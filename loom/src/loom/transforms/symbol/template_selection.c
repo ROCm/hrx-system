@@ -19,6 +19,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/target/facts.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
 #include "loom/pass/report.h"
@@ -412,17 +413,36 @@ static loom_symbol_ref_t loom_template_selection_apply_target(
       loom_func_like_target(source_function), target_capability);
 }
 
-static bool loom_template_selection_provider_applies_to_target(
-    loom_symbol_ref_t apply_target,
-    const loom_func_provider_summary_t* provider) {
+static iree_status_t loom_template_selection_provider_applies_to_target(
+    loom_template_selection_state_t* state, loom_symbol_ref_t apply_target,
+    const loom_func_provider_summary_t* provider, bool* out_applies) {
+  *out_applies = false;
   if (!loom_symbol_ref_is_valid(provider->target_symbol)) {
-    return true;
+    *out_applies = true;
+    return iree_ok_status();
   }
   if (!loom_symbol_ref_is_valid(apply_target)) {
-    return false;
+    return iree_ok_status();
   }
-  return loom_template_selection_symbol_refs_equal(apply_target,
-                                                   provider->target_symbol);
+  if (loom_template_selection_symbol_refs_equal(apply_target,
+                                                provider->target_symbol)) {
+    *out_applies = true;
+    return iree_ok_status();
+  }
+
+  const loom_symbol_facts_base_t* provider_target_base_facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
+      &state->fact_table, state->module, provider->target_symbol,
+      &provider_target_base_facts));
+  const loom_target_symbol_facts_t* provider_target_facts =
+      loom_target_symbol_facts_cast(provider_target_base_facts);
+  if (!provider_target_facts) return iree_ok_status();
+
+  const loom_target_pass_capability_t* target_capability =
+      loom_target_pass_capability_from_pass(state->pass);
+  *out_applies = loom_target_pass_capability_can_refine_target_bundle(
+      target_capability, apply_target, &provider_target_facts->storage.bundle);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_template_selection_append_report_detail(
@@ -1019,10 +1039,10 @@ static iree_status_t loom_template_selection_mark_exact_priority(
       loom_template_selection_apply_target(state, context);
   for (iree_host_size_t i = 0; i < providers.count; ++i) {
     const loom_func_provider_summary_t* provider = &providers.providers[i];
-    if (!loom_template_selection_provider_applies_to_target(apply_target,
-                                                            provider)) {
-      continue;
-    }
+    bool applies_to_target = false;
+    IREE_RETURN_IF_ERROR(loom_template_selection_provider_applies_to_target(
+        state, apply_target, provider, &applies_to_target));
+    if (!applies_to_target) continue;
     loom_template_provider_feasibility_t feasibility =
         LOOM_TEMPLATE_PROVIDER_REJECT;
     IREE_RETURN_IF_ERROR(loom_template_selection_classify_provider(
@@ -1046,10 +1066,10 @@ static iree_status_t loom_template_selection_mark_missing_fact_candidates(
       loom_template_selection_apply_target(state, context);
   for (iree_host_size_t i = 0; i < providers.count; ++i) {
     const loom_func_provider_summary_t* provider = &providers.providers[i];
-    if (!loom_template_selection_provider_applies_to_target(apply_target,
-                                                            provider)) {
-      continue;
-    }
+    bool applies_to_target = false;
+    IREE_RETURN_IF_ERROR(loom_template_selection_provider_applies_to_target(
+        state, apply_target, provider, &applies_to_target));
+    if (!applies_to_target) continue;
     loom_template_provider_feasibility_t feasibility =
         LOOM_TEMPLATE_PROVIDER_REJECT;
     IREE_RETURN_IF_ERROR(loom_template_selection_classify_provider(
@@ -1120,10 +1140,10 @@ static iree_status_t loom_template_selection_analyze_apply(
     if (provider->priority > highest_provider_priority) {
       highest_provider_priority = provider->priority;
     }
-    if (!loom_template_selection_provider_applies_to_target(apply_target,
-                                                            provider)) {
-      continue;
-    }
+    bool applies_to_target = false;
+    IREE_RETURN_IF_ERROR(loom_template_selection_provider_applies_to_target(
+        state, apply_target, provider, &applies_to_target));
+    if (!applies_to_target) continue;
     ++target_applicable_count;
     loom_template_provider_feasibility_t feasibility =
         LOOM_TEMPLATE_PROVIDER_REJECT;

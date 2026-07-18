@@ -77,5 +77,64 @@ TEST(TargetSelectionTest, EnvironmentCarriesInvocationTargetSelection) {
   EXPECT_EQ(effective_target_ref.symbol_id, authored_target_ref.symbol_id);
 }
 
+TEST(TargetSelectionTest, InvocationRefinesOnlyCompatibleTargetFamily) {
+  static const loom_target_snapshot_t kSnapshot = {
+      /*.name=*/IREE_SVL("snapshot"),
+      /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
+      /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+  };
+  static const loom_target_config_t kSelectedConfig = {
+      /*.name=*/IREE_SVL("selected-config"),
+      /*.contract_set_key=*/IREE_SVL("target.family.a"),
+  };
+  static const loom_target_config_t kCompatibleConfig = {
+      /*.name=*/IREE_SVL("compatible-config"),
+      /*.contract_set_key=*/IREE_SVL("target.family.a"),
+  };
+  static const loom_target_config_t kIncompatibleConfig = {
+      /*.name=*/IREE_SVL("incompatible-config"),
+      /*.contract_set_key=*/IREE_SVL("target.family.b"),
+  };
+  static const loom_target_bundle_t kSelectedBundle = {
+      /*.name=*/IREE_SVL("selected-target"),
+      /*.snapshot=*/&kSnapshot,
+      /*.export_plan=*/nullptr,
+      /*.config=*/&kSelectedConfig,
+  };
+  static const loom_target_bundle_t kCompatibleBundle = {
+      /*.name=*/IREE_SVL("compatible-target"),
+      /*.snapshot=*/&kSnapshot,
+      /*.export_plan=*/nullptr,
+      /*.config=*/&kCompatibleConfig,
+  };
+  static const loom_target_bundle_t kIncompatibleBundle = {
+      /*.name=*/IREE_SVL("incompatible-target"),
+      /*.snapshot=*/&kSnapshot,
+      /*.export_plan=*/nullptr,
+      /*.config=*/&kIncompatibleConfig,
+  };
+  const loom_symbol_ref_t invocation_target_ref = {
+      /*.module_id=*/0,
+      /*.symbol_id=*/7,
+  };
+  const loom_symbol_ref_t authored_target_ref = {
+      /*.module_id=*/0,
+      /*.symbol_id=*/5,
+  };
+  const loom_target_pass_capability_t target_capability =
+      loom_target_pass_capability_make(
+          {/*.bundle=*/&kSelectedBundle, /*.data=*/nullptr},
+          invocation_target_ref);
+
+  EXPECT_TRUE(loom_target_pass_capability_can_refine_target_bundle(
+      &target_capability, invocation_target_ref, &kCompatibleBundle));
+  EXPECT_FALSE(loom_target_pass_capability_can_refine_target_bundle(
+      &target_capability, invocation_target_ref, &kIncompatibleBundle));
+  EXPECT_FALSE(loom_target_pass_capability_can_refine_target_bundle(
+      &target_capability, authored_target_ref, &kCompatibleBundle));
+  EXPECT_FALSE(loom_target_pass_capability_can_refine_target_bundle(
+      nullptr, invocation_target_ref, &kCompatibleBundle));
+}
+
 }  // namespace
 }  // namespace loom

@@ -149,6 +149,7 @@ iree_execution_test_suite(
         "report_materialized_fragment_spills_amdgpu.loom",
         "report_private_memory_mix_amdgpu.loom",
         "selected_root_amdgpu.loom",
+        "target_family_template_provider_amdgpu.loom",
         "//loom/src/loom/tools/iree-test-loom:testdata/amdgpu_unused_kernargs.loom",
     ],
     manifests = ["loom-compile-amdgpu.test.json"],

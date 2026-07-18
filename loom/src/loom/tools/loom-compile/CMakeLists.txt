@@ -113,6 +113,7 @@ iree_execution_test_suite(
     "report_materialized_fragment_spills_amdgpu.loom"
     "report_private_memory_mix_amdgpu.loom"
     "selected_root_amdgpu.loom"
+    "target_family_template_provider_amdgpu.loom"
   LABELS
     "hostonly"
 )

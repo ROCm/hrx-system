@@ -129,6 +129,79 @@
       ]
     },
     {
+      "name": "selects invocation-compatible AMDGPU template families",
+      "steps": [
+        {
+          "name": "compile-gfx1100-exact",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/target_family_template_provider_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1100",
+              "--output={tmp}/target_family_gfx1100.hal",
+              "--emit-target-artifact={tmp}/target_family_gfx1100.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/target_family_gfx1100.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1251-through-gfx125x-family",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/target_family_template_provider_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1251",
+              "--output={tmp}/target_family_gfx1251.hal",
+              "--emit-target-artifact={tmp}/target_family_gfx1251.hsaco",
+              "--compile-report=summary"
+            ]
+          },
+          "stderr": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1251\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/target_family_gfx1251.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "reject-incompatible-gfx1200-family",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/target_family_template_provider_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1200",
+              "--output={tmp}/target_family_gfx1200.hal"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "error [LOWERING/045]",
+              "target_mismatch"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "uses invocation AMDGPU targets for HAL root without target attr",
       "steps": [
         {
