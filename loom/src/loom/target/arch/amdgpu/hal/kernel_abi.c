@@ -1525,6 +1525,7 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_low(
     }
   }
   iree_host_size_t resource_count = 0;
+  bool resource_used = false;
   if (body != NULL) {
     for (uint16_t block_index = 0; block_index < body->block_count;
          ++block_index) {
@@ -1535,6 +1536,10 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_low(
           continue;
         }
         ++resource_count;
+        const loom_value_id_t result = loom_low_resource_result(resource_op);
+        const loom_value_t* result_value = loom_module_value(module, result);
+        resource_used |= result_value->use_count != 0 ||
+                         loom_module_value_has_type_uses(module, result);
       }
     }
   }
@@ -1631,7 +1636,7 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_low(
       .kernarg_segment_size = (uint32_t)kernarg_segment_size,
       .kernarg_segment_alignment =
           LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT,
-      .uses_kernarg_segment_ptr = resource_count != 0 || direct_arg_used,
+      .uses_kernarg_segment_ptr = resource_used || direct_arg_used,
       .constant_count = (uint32_t)constant_count,
       .resources = resources,
       .resource_count = resource_count,

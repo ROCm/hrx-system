@@ -78,6 +78,57 @@
       ]
     },
     {
+      "name": "compiles kernels whose kernargs are unused",
+      "steps": [
+        {
+          "name": "compile-gfx1100",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/../iree-test-loom/testdata/amdgpu_unused_kernargs.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1100",
+              "--output={tmp}/amdgpu_unused_kernargs_gfx1100.hal",
+              "--emit-target-artifact={tmp}/amdgpu_unused_kernargs_gfx1100.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx1100.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx1100.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1250",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/../iree-test-loom/testdata/amdgpu_unused_kernargs.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--output={tmp}/amdgpu_unused_kernargs_gfx1250.hal",
+              "--emit-target-artifact={tmp}/amdgpu_unused_kernargs_gfx1250.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx1250.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx1250.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "uses invocation AMDGPU targets for HAL root without target attr",
       "steps": [
         {

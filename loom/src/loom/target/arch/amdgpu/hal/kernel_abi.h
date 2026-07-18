@@ -203,7 +203,9 @@ typedef struct loom_amdgpu_hal_kernel_abi_layout_t {
   uint32_t kernarg_segment_size;
   // Required kernarg segment alignment in bytes.
   uint32_t kernarg_segment_alignment;
-  // True when the kernel descriptor must request the kernarg segment pointer.
+  // True when surviving parameter uses require the kernarg segment pointer.
+  // Source lowering may initialize this conservatively; HAL ABI materialization
+  // refines it after low-level dead-code elimination.
   bool uses_kernarg_segment_ptr;
   // HAL dispatch constant word count consumed by direct arguments.
   uint32_t constant_count;

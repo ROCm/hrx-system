@@ -540,6 +540,26 @@ static bool loom_amdgpu_hal_binding_direct_arg_is_used(
          loom_module_value_has_type_uses(module, direct_arg->arg_id);
 }
 
+static bool loom_amdgpu_hal_binding_layout_uses_kernarg_segment_ptr(
+    const loom_module_t* module,
+    const loom_amdgpu_hal_kernel_abi_layout_t* layout) {
+  for (iree_host_size_t i = 0; i < layout->resource_count; ++i) {
+    const loom_amdgpu_hal_kernarg_resource_t* resource = &layout->resources[i];
+    if (resource->resource_op != NULL &&
+        !iree_any_bit_set(resource->resource_op->flags, LOOM_OP_FLAG_DEAD) &&
+        loom_amdgpu_hal_binding_resource_is_used(module, resource)) {
+      return true;
+    }
+  }
+  for (iree_host_size_t i = 0; i < layout->direct_arg_count; ++i) {
+    if (loom_amdgpu_hal_binding_direct_arg_is_used(module,
+                                                   &layout->direct_args[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool loom_amdgpu_hal_binding_direct_arg_unit_count(
     const loom_amdgpu_hal_kernarg_direct_arg_t* direct_arg,
     loom_type_t sgpr_type, loom_type_t sgpr_x2_type, uint32_t* out_unit_count) {
@@ -757,6 +777,7 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_direct_args(
     }
     IREE_RETURN_IF_ERROR(loom_block_remove_arg(rewriter->module, entry_block,
                                                direct_arg->argument_index));
+    rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
   }
   return iree_ok_status();
 }
@@ -992,6 +1013,8 @@ iree_status_t loom_amdgpu_hal_binding_materialize(
   loom_amdgpu_hal_kernel_abi_layout_t layout = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_layout_from_low(
       module, function_op, &layout, scratch_arena));
+  layout.uses_kernarg_segment_ptr =
+      loom_amdgpu_hal_binding_layout_uses_kernarg_segment_ptr(module, &layout);
   out_result->abi_layout = layout;
 
   loom_type_t sgpr_type = loom_type_none();
@@ -1049,6 +1072,9 @@ iree_status_t loom_amdgpu_hal_binding_materialize(
         sgpr_x2_type, &out_result->materialized_descriptor_count);
   }
 
+  out_result->changed =
+      rewriter.created_op_count != 0 || rewriter.erased_op_count != 0 ||
+      iree_any_bit_set(rewriter.flags, LOOM_REWRITER_FLAG_CHANGED);
   out_result->inserted_kernarg_segment_ptr_live_in = inserted_live_in;
   loom_rewriter_deinitialize(&rewriter);
   return status;
