@@ -28,11 +28,15 @@
 #include "iree/testing/gtest.h"
 
 int main(int argc, char** argv) {
+  IREE_TRACE_APP_ENTER();
+
   // Instantiate all test suites for all registered backends BEFORE gtest init.
   // This must happen before InitGoogleTest() because gtest caches test
   // enumeration state during initialization.
   iree::async::cts::CtsRegistry::InstantiateAll();
 
   ::testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
+  const int result = RUN_ALL_TESTS();
+  IREE_TRACE_APP_EXIT(result);
+  return result;
 }

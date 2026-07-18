@@ -25,14 +25,20 @@
 #include "iree/async/cts/util/registry.h"
 
 int main(int argc, char** argv) {
+  IREE_TRACE_APP_ENTER();
+
   // Instantiate benchmark suites for all registered backends.
   // This must happen before benchmark::Initialize() so that benchmarks
   // are registered before the framework parses command-line filters.
   ::iree::async::cts::CtsRegistry::InstantiateAll();
 
   ::benchmark::Initialize(&argc, argv);
-  if (::benchmark::ReportUnrecognizedArguments(argc, argv)) return 1;
+  if (::benchmark::ReportUnrecognizedArguments(argc, argv)) {
+    IREE_TRACE_APP_EXIT(1);
+    return 1;
+  }
   ::benchmark::RunSpecifiedBenchmarks();
   ::benchmark::Shutdown();
+  IREE_TRACE_APP_EXIT(0);
   return 0;
 }

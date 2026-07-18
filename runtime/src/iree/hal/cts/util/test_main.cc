@@ -36,6 +36,8 @@
 #endif  // IREE_PLATFORM_APPLE
 
 int main(int argc, char** argv) {
+  IREE_TRACE_APP_ENTER();
+
 #if defined(IREE_PLATFORM_APPLE)
   // macOS defaults to a soft limit of 256 file descriptors per process, which
   // is too low for CTS tests that create multiple HAL devices (each device
@@ -68,5 +70,7 @@ int main(int argc, char** argv) {
   ::testing::AddGlobalTestEnvironment(
       new iree::hal::cts::CtsBackendCacheEnvironment);
 
-  return RUN_ALL_TESTS();
+  const int result = RUN_ALL_TESTS();
+  IREE_TRACE_APP_EXIT(result);
+  return result;
 }
