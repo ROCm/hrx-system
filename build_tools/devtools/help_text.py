@@ -202,13 +202,14 @@ With no explicit target, this builds //runtime/... and //libhrx/....""",
             epilog="""Examples:
   python dev.py cmake build hrx
   python dev.py cmake build hrx::hrx
+  python dev.py cmake build iree-serve-device
   python dev.py cmake build hrx --parallel 8
   python dev.py cmake build --parallel 8
 
 Positional arguments are target names and become cmake --build ... --target
-<name>. Configured CMake aliases such as iree::base and hrx::hrx are translated
-to their concrete generator targets. Option-looking arguments are forwarded to
-CMake.""",
+<name>. Configured CMake aliases such as iree::base and hrx::hrx, plus unique
+executable output names such as iree-serve-device, are translated to their
+concrete generator targets. Option-looking arguments are forwarded to CMake.""",
         )
     if command == "test":
         if lane == "bazel":

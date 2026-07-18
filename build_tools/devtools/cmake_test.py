@@ -98,10 +98,21 @@ class CMakeTest(unittest.TestCase):
             )
 
     def test_build_args_translate_target_shorthand(self):
-        self.assertEqual(
-            cmake_dev.build_args(["hrx", "iree-run-module", "--parallel", "8"]),
-            ["--target", "hrx", "--target", "iree-run-module", "--parallel", "8"],
-        )
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            self.assertEqual(
+                cmake_dev.build_args(
+                    ["hrx", "iree-run-module", "--parallel", "8"],
+                    configured_build_dir=Path(temporary_dir),
+                ),
+                [
+                    "--target",
+                    "hrx",
+                    "--target",
+                    "iree-run-module",
+                    "--parallel",
+                    "8",
+                ],
+            )
 
     def test_default_fuzz_cache_dir_uses_platform_cache_roots(self):
         self.assertEqual(
@@ -161,6 +172,76 @@ class CMakeTest(unittest.TestCase):
                     configured_build_dir=build_dir,
                 ),
                 ["--target", "runtime_src_tools_iree-run-module", "--parallel", "8"],
+            )
+
+    def test_build_args_translate_executable_output_name(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir)
+            reply_dir = build_dir / ".cmake/api/v1/reply"
+            reply_dir.mkdir(parents=True)
+            (reply_dir / "index-1.json").write_text(
+                json.dumps(
+                    {
+                        "objects": [
+                            {
+                                "kind": "codemodel",
+                                "jsonFile": "codemodel-v2.json",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (reply_dir / "codemodel-v2.json").write_text(
+                json.dumps(
+                    {
+                        "configurations": [
+                            {
+                                "targets": [
+                                    {
+                                        "name": (
+                                            "iree_tools_iree-serve-device_"
+                                            "iree-serve-device"
+                                        ),
+                                        "jsonFile": "target-serve-device.json",
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (reply_dir / "target-serve-device.json").write_text(
+                json.dumps(
+                    {
+                        "name": "iree-serve-device",
+                        "nameOnDisk": "iree-serve-device",
+                        "type": "EXECUTABLE",
+                        "artifacts": [
+                            {
+                                "path": (
+                                    "runtime/src/iree/tools/iree-serve-device/"
+                                    "iree-serve-device"
+                                )
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                cmake_dev.build_args(
+                    ["iree-serve-device", "--parallel", "8"],
+                    configured_build_dir=build_dir,
+                ),
+                [
+                    "--target",
+                    "iree_tools_iree-serve-device_iree-serve-device",
+                    "--parallel",
+                    "8",
+                ],
             )
 
     def test_configure_build_and_test_plans_use_selected_build_dir(self):
