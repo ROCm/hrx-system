@@ -363,17 +363,51 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
         ParseSource(iree_make_cstring_view(kSource), out_module));
   }
 
-  void ParseGfx11OverBudgetWorkgroupStorageKernel(loom_module_t** out_module) {
-    static const char kSource[] =
-        "amdgpu.target<gfx1100> @gfx_target\n"
+  void ParseWorkgroupStorageKernel(iree_string_view_t target_config,
+                                   iree_string_view_t processor_name,
+                                   uint64_t byte_length,
+                                   loom_module_t** out_module) {
+    std::string source = "amdgpu.target<";
+    source.append(target_config.data, target_config.size);
+    source += "> @gfx_target {processor = \"";
+    source.append(processor_name.data, processor_name.size);
+    source +=
+        "\"}\n"
         "low.kernel.def target(@gfx_target) workgroup_size(1, 1, 1) "
         "@loom_kernel() {\n"
-        "  %storage = low.storage.reserve {byte_alignment = 4, "
-        "byte_length = 65540} : low.storage<workgroup>\n"
+        "  %storage = low.storage.reserve {byte_alignment = 16, "
+        "byte_length = ";
+    source += std::to_string(byte_length);
+    source +=
+        "} : low.storage<workgroup>\n"
         "  low.return\n"
         "}\n";
-    ASSERT_NO_FATAL_FAILURE(
-        ParseSource(iree_make_cstring_view(kSource), out_module));
+    ASSERT_NO_FATAL_FAILURE(ParseSource(
+        iree_make_string_view(source.data(), source.size()), out_module));
+  }
+
+  void EmitWorkgroupStorageKernel(
+      iree_string_view_t target_config, iree_string_view_t processor_name,
+      uint64_t byte_length, DiagnosticCapture* capture, bool* out_emitted,
+      loom_amdgpu_hal_kernel_library_t* out_library) {
+    loom_module_t* module = nullptr;
+    ASSERT_NO_FATAL_FAILURE(ParseWorkgroupStorageKernel(
+        target_config, processor_name, byte_length, &module));
+
+    loom_amdgpu_hal_kernel_library_options_t options = {
+        /*.processor=*/{},
+        /*.target_selection=*/{},
+        /*.runtime_globals=*/{},
+        /*.data_symbols=*/{},
+        /*.data_symbol_count=*/{},
+        /*.diagnostic_sink=*/capture->sink(),
+        /*.source_resolver=*/{},
+        /*.max_errors=*/20,
+    };
+    iree_status_t status = loom_amdgpu_emit_hal_kernel_library(
+        module, &options, iree_allocator_system(), out_emitted, out_library);
+    loom_module_free(module);
+    IREE_ASSERT_OK(status);
   }
 
   void ParseGfx11KernelWithArguments(loom_module_t** out_module) {
@@ -663,25 +697,13 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsDynamicLocalSizeKernel) {
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest,
-       RejectsFinalWorkgroupStorageAboveTargetLimit) {
-  loom_module_t* module = nullptr;
-  ASSERT_NO_FATAL_FAILURE(ParseGfx11OverBudgetWorkgroupStorageKernel(&module));
-
+       RejectsGfx11FinalWorkgroupStorageAboveTargetLimit) {
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
-  loom_amdgpu_hal_kernel_library_options_t options = {
-      /*.processor=*/{},
-      /*.target_selection=*/{},
-      /*.runtime_globals=*/{},
-      /*.data_symbols=*/{},
-      /*.data_symbol_count=*/{},
-      /*.diagnostic_sink=*/capture.sink(),
-      /*.source_resolver=*/{},
-      /*.max_errors=*/20,
-  };
   bool emitted = true;
-  IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
-      module, &options, iree_allocator_system(), &emitted, &library));
+  ASSERT_NO_FATAL_FAILURE(
+      EmitWorkgroupStorageKernel(IREE_SV("gfx1100"), IREE_SV("gfx1100"), 65540,
+                                 &capture, &emitted, &library));
 
   EXPECT_FALSE(emitted);
   ASSERT_EQ(capture.diagnostics.size(), 1u) << DiagnosticSummary(capture);
@@ -698,7 +720,59 @@ TEST_F(AmdgpuHalKernelLibraryTest,
 
   loom_amdgpu_hal_kernel_library_deinitialize(&library,
                                               iree_allocator_system());
-  loom_module_free(module);
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest, AcceptsGfx125xLargeWorkgroupStorage) {
+  static constexpr const char* kProcessors[] = {"gfx1250", "gfx1251"};
+  for (const char* processor_name : kProcessors) {
+    SCOPED_TRACE(processor_name);
+    DiagnosticCapture capture;
+    loom_amdgpu_hal_kernel_library_t library = {};
+    bool emitted = false;
+    ASSERT_NO_FATAL_FAILURE(EmitWorkgroupStorageKernel(
+        IREE_SV("gfx1250"), iree_make_cstring_view(processor_name), 114688,
+        &capture, &emitted, &library));
+
+    EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
+    EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
+    EXPECT_NE(library.hsaco_data, nullptr);
+    EXPECT_NE(iree_string_view_find(library.target_key,
+                                    iree_make_cstring_view(processor_name), 0),
+              IREE_STRING_VIEW_NPOS);
+
+    loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                                iree_allocator_system());
+  }
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest,
+       RejectsGfx125xWorkgroupStorageAboveTargetLimit) {
+  static constexpr const char* kProcessors[] = {"gfx1250", "gfx1251"};
+  for (const char* processor_name : kProcessors) {
+    SCOPED_TRACE(processor_name);
+    DiagnosticCapture capture;
+    loom_amdgpu_hal_kernel_library_t library = {};
+    bool emitted = true;
+    ASSERT_NO_FATAL_FAILURE(EmitWorkgroupStorageKernel(
+        IREE_SV("gfx1250"), iree_make_cstring_view(processor_name), 327681,
+        &capture, &emitted, &library));
+
+    EXPECT_FALSE(emitted);
+    ASSERT_EQ(capture.diagnostics.size(), 1u) << DiagnosticSummary(capture);
+    const CapturedDiagnostic* diagnostic =
+        FindDiagnostic(capture, LOOM_ERR_TARGET_051);
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_EQ(GetStringParam(*diagnostic, 0), "loom_kernel");
+    EXPECT_EQ(GetStringParam(*diagnostic, 1), "gfx_target");
+    ASSERT_EQ(diagnostic->params.size(), 4u);
+    ASSERT_EQ(diagnostic->params[2].kind, LOOM_PARAM_U64);
+    EXPECT_EQ(diagnostic->params[2].u64, 327681u);
+    ASSERT_EQ(diagnostic->params[3].kind, LOOM_PARAM_U64);
+    EXPECT_EQ(diagnostic->params[3].u64, 327680u);
+
+    loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                                iree_allocator_system());
+  }
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedSupportedProcessor) {

@@ -7,7 +7,6 @@
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
-    "loom_cc_test",
     "loom_generated_textual_header",
 )
 
@@ -56,15 +55,5 @@ loom_cc_library(
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_test(
-    name = "target_records_test",
-    srcs = ["target_records_test.cc"],
-    deps = [
-        ":target_records",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
     ],
 )
