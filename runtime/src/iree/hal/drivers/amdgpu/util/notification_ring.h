@@ -150,8 +150,8 @@ typedef struct iree_hal_amdgpu_reclaim_entry_t iree_hal_amdgpu_reclaim_entry_t;
 // buffer commit/decommit. |status| is OK for normal GPU completion and a
 // borrowed queue/device failure status when the queue fails outstanding work.
 // Any object referenced by |user_data| must also be retained in the reclaim
-// entry's post-signal |resources| array if its lifetime must extend past
-// callback execution.
+// entry's operation resources if its lifetime must extend through callback
+// execution.
 typedef void(IREE_API_PTR* iree_hal_amdgpu_reclaim_action_fn_t)(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
     const iree_status_t status);
@@ -200,7 +200,7 @@ struct iree_hal_amdgpu_reclaim_entry_t {
   // Pointer to the retained-resource pointer array. Points to inline_resources
   // when count <= INLINE_CAPACITY, otherwise to a block-pool-allocated array.
   iree_hal_resource_t** resources;
-  // Optional resource set released with this entry after user signals publish.
+  // Optional operation resource set released before user signals publish.
   iree_hal_resource_set_t* resource_set;
   // One bounded pre-signal action for this epoch. Executed before any
   // user-visible signal publication for the epoch when drain observes normal
@@ -225,10 +225,13 @@ struct iree_hal_amdgpu_reclaim_entry_t {
   uint32_t profile_event_count;
   // Number of queue device profiling events reserved by this epoch.
   uint32_t queue_device_event_count;
-  // Number of retained resources stored in |resources|.
+  // Number of retained resources stored in |resources|. Signal semaphores
+  // occupy the first |signal_semaphore_count| entries and operation resources
+  // occupy the remainder.
   uint16_t count;
-  // Reserved padding for stable layout.
-  uint16_t reserved[1];
+  // Number of leading |resources| entries retaining signal semaphores until
+  // their notifications have been published.
+  uint16_t signal_semaphore_count;
   // Inline retained-resource storage for common small submissions.
   iree_hal_resource_t*
       inline_resources[IREE_HAL_AMDGPU_RECLAIM_INLINE_CAPACITY];
@@ -244,8 +247,8 @@ iree_status_t iree_hal_amdgpu_reclaim_entry_prepare(
     iree_hal_amdgpu_reclaim_entry_t* entry, iree_arena_block_pool_t* block_pool,
     uint16_t count, iree_hal_resource_t*** out_resources);
 
-// Releases all resources in the entry and returns any overflow block to
-// the pool. Zeros entry->count.
+// Releases all remaining resources in the entry and returns any overflow block
+// to the pool. Zeros entry->count and entry->signal_semaphore_count.
 void iree_hal_amdgpu_reclaim_entry_release(
     iree_hal_amdgpu_reclaim_entry_t* entry,
     iree_arena_block_pool_t* block_pool);

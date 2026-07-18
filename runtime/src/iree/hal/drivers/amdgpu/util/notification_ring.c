@@ -58,6 +58,7 @@ iree_status_t iree_hal_amdgpu_reclaim_entry_prepare(
   entry->kernarg_write_position = 0;
   entry->queue_upload_write_position = 0;
   entry->count = 0;
+  entry->signal_semaphore_count = 0;
   if (count <= IREE_HAL_AMDGPU_RECLAIM_INLINE_CAPACITY) {
     entry->resources = entry->inline_resources;
   } else {
@@ -85,6 +86,21 @@ iree_status_t iree_hal_amdgpu_reclaim_entry_prepare(
   return iree_ok_status();
 }
 
+// Releases operation resources while preserving the leading signal semaphore
+// references required by notification publication.
+static void iree_hal_amdgpu_reclaim_entry_release_operation_resources(
+    iree_hal_amdgpu_reclaim_entry_t* entry) {
+  IREE_ASSERT(entry->signal_semaphore_count <= entry->count,
+              "signal semaphore count %u exceeds resource count %u",
+              entry->signal_semaphore_count, entry->count);
+  for (uint16_t i = entry->signal_semaphore_count; i < entry->count; ++i) {
+    iree_hal_resource_release(entry->resources[i]);
+  }
+  iree_hal_resource_set_free(entry->resource_set);
+  entry->resource_set = NULL;
+  entry->count = entry->signal_semaphore_count;
+}
+
 void iree_hal_amdgpu_reclaim_entry_release(
     iree_hal_amdgpu_reclaim_entry_t* entry,
     iree_arena_block_pool_t* block_pool) {
@@ -110,6 +126,7 @@ void iree_hal_amdgpu_reclaim_entry_release(
   entry->kernarg_write_position = 0;
   entry->queue_upload_write_position = 0;
   entry->count = 0;
+  entry->signal_semaphore_count = 0;
 }
 
 static inline void iree_hal_amdgpu_reclaim_entry_execute_pre_signal_action(
@@ -583,7 +600,7 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
 
   // Execute all pre-signal completion actions first so wrapper-visible state
   // transitions happen-before any semaphore publication for the completed
-  // epochs. This is intentionally a separate pass from post-signal resource
+  // epochs. This is intentionally a separate pass from operation resource
   // release to keep queue retire ordering explicit.
   for (uint64_t epoch = previous_drained; epoch < current_epoch; ++epoch) {
     uint32_t reclaim_index = (uint32_t)(epoch & (ring->capacity - 1));
@@ -596,6 +613,26 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
       retire_fn(&ring->reclaim_entries[reclaim_index], epoch + 1,
                 IREE_HAL_AMDGPU_RECLAIM_RETIRE_FLAG_NONE, retire_user_data);
     }
+  }
+
+  // Capture queue-owned positions and release all operation resources before
+  // publishing user-visible completion. Signal semaphore references remain in
+  // each entry until after publication so notification pointers stay live.
+  uint64_t highest_kernarg_position = 0;
+  uint64_t highest_queue_upload_position = 0;
+  for (uint64_t epoch = previous_drained; epoch < current_epoch; ++epoch) {
+    uint32_t reclaim_index = (uint32_t)(epoch & (ring->capacity - 1));
+    iree_hal_amdgpu_reclaim_entry_t* reclaim_entry =
+        &ring->reclaim_entries[reclaim_index];
+    if (reclaim_entry->kernarg_write_position > highest_kernarg_position) {
+      highest_kernarg_position = reclaim_entry->kernarg_write_position;
+    }
+    if (reclaim_entry->queue_upload_write_position >
+        highest_queue_upload_position) {
+      highest_queue_upload_position =
+          reclaim_entry->queue_upload_write_position;
+    }
+    iree_hal_amdgpu_reclaim_entry_release_operation_resources(reclaim_entry);
   }
 
   // Single-slot coalescing: accumulate consecutive same-semaphore entries
@@ -663,21 +700,10 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
     }
   }
 
-  // Release retained resources for all completed epochs.
-  uint64_t highest_kernarg_position = 0;
-  uint64_t highest_queue_upload_position = 0;
+  // Release the signal semaphore references preserved through publication and
+  // reset all completed reclaim entries.
   for (uint64_t epoch = previous_drained; epoch < current_epoch; ++epoch) {
     uint32_t reclaim_index = (uint32_t)(epoch & (ring->capacity - 1));
-    uint64_t kernarg_write_position =
-        ring->reclaim_entries[reclaim_index].kernarg_write_position;
-    if (kernarg_write_position > highest_kernarg_position) {
-      highest_kernarg_position = kernarg_write_position;
-    }
-    uint64_t queue_upload_write_position =
-        ring->reclaim_entries[reclaim_index].queue_upload_write_position;
-    if (queue_upload_write_position > highest_queue_upload_position) {
-      highest_queue_upload_position = queue_upload_write_position;
-    }
     iree_hal_amdgpu_reclaim_entry_release(&ring->reclaim_entries[reclaim_index],
                                           ring->block_pool);
   }
@@ -738,6 +764,26 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_fail_all_reclaim_positions(
     }
   }
 
+  // Capture queue-owned positions and release operation resources before
+  // making queue failure visible. Failed signal semaphore references remain
+  // retained until their failure has been published.
+  uint64_t highest_kernarg_position = 0;
+  uint64_t highest_queue_upload_position = 0;
+  for (uint64_t epoch = last_drained; epoch < last_published; ++epoch) {
+    uint32_t reclaim_index = (uint32_t)(epoch & (ring->capacity - 1));
+    iree_hal_amdgpu_reclaim_entry_t* reclaim_entry =
+        &ring->reclaim_entries[reclaim_index];
+    if (reclaim_entry->kernarg_write_position > highest_kernarg_position) {
+      highest_kernarg_position = reclaim_entry->kernarg_write_position;
+    }
+    if (reclaim_entry->queue_upload_write_position >
+        highest_queue_upload_position) {
+      highest_queue_upload_position =
+          reclaim_entry->queue_upload_write_position;
+    }
+    iree_hal_amdgpu_reclaim_entry_release_operation_resources(reclaim_entry);
+  }
+
   iree_host_size_t failed_count = 0;
   uint64_t read = iree_hal_amdgpu_notification_ring_load_position(
       &ring->read, iree_memory_order_relaxed);
@@ -764,21 +810,10 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_fail_all_reclaim_positions(
     ++failed_count;
   }
 
-  // Release retained resources for all epochs.
-  uint64_t highest_kernarg_position = 0;
-  uint64_t highest_queue_upload_position = 0;
+  // Release the signal semaphore references preserved through failure
+  // publication and reset all reclaim entries.
   for (uint64_t epoch = last_drained; epoch < last_published; ++epoch) {
     uint32_t reclaim_index = (uint32_t)(epoch & (ring->capacity - 1));
-    uint64_t kernarg_write_position =
-        ring->reclaim_entries[reclaim_index].kernarg_write_position;
-    if (kernarg_write_position > highest_kernarg_position) {
-      highest_kernarg_position = kernarg_write_position;
-    }
-    uint64_t queue_upload_write_position =
-        ring->reclaim_entries[reclaim_index].queue_upload_write_position;
-    if (queue_upload_write_position > highest_queue_upload_position) {
-      highest_queue_upload_position = queue_upload_write_position;
-    }
     iree_hal_amdgpu_reclaim_entry_release(&ring->reclaim_entries[reclaim_index],
                                           ring->block_pool);
   }
