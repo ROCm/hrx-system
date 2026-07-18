@@ -440,8 +440,8 @@ bool WaitForPathBSubmits(const KmtApi& api, const Device& device,
 bool IsPathBSubmitComplete(const Context& context,
                            const PathBPendingSubmit& pending);
 
-// Stale probe path retained for diagnostics only. The working XRT IREE matmul
-// capture uses opcode 2/5/9 setup packets, not opcode 10.
+// Releases command-aperture allocations. Context owners should prefer
+// DestroyContextWithCommandAperture so ABI-specific ownership order is kept.
 void DestroyCommandAperture(const KmtApi& api, const Device& device,
                             CommandAperture* aperture);
 

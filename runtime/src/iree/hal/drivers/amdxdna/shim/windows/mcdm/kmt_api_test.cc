@@ -6,6 +6,7 @@
 
 #include "kmt_api.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <tuple>
@@ -878,6 +879,9 @@ TEST(KmtApiTest, CreateBufferPreservesPendingResidencyFenceForBothAbis) {
     EXPECT_EQ(buffer.allocation, 0x40u);
     EXPECT_EQ(buffer.gpu_va, 0x10000u);
     EXPECT_EQ(buffer.paging_fence_value, 11u);
+    EXPECT_TRUE(std::all_of(g_locked_aperture.begin(),
+                            g_locked_aperture.end(),
+                            [](uint8_t value) { return value == 0; }));
   }
 }
 

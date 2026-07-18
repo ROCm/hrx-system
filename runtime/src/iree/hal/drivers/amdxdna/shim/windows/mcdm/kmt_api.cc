@@ -919,14 +919,6 @@ bool CreateBuffer(const KmtApi& api, const Device& device, BufferKind kind,
   }
   buffer.cpu_ptr = lock.pData;
 
-  // Exercise a minimal write to prove the mapping is CPU-accessible. The probe
-  // syncs the range before teardown.
-  if (kind != BufferKind::context_private && buffer.cpu_ptr &&
-      buffer.size >= sizeof(uint32_t)) {
-    uint32_t pattern = 0xa11e0000u | kind_info.private_type;
-    std::memcpy(buffer.cpu_ptr, &pattern, sizeof(pattern));
-  }
-
   *out_buffer = buffer;
   return true;
 }
@@ -1061,23 +1053,6 @@ bool RefreshBufferCpuMapping(const KmtApi& api, const Device& device,
   }
   buffer->cpu_ptr = lock.pData;
   return true;
-}
-
-bool TouchBufferCpuMapping(const KmtApi& api, const Device& device,
-                           const Buffer& buffer, const char* label,
-                           Error* out_error) {
-  if (!buffer.allocation) return true;
-
-  D3DKMT_LOCK2 lock = {};
-  lock.hDevice = device.device;
-  lock.hAllocation = buffer.allocation;
-  NTSTATUS status = api.lock2(&lock);
-  char call_name[128] = "D3DKMTLock2(lock-touch)";
-  if (label && label[0]) {
-    std::snprintf(call_name, sizeof(call_name), "D3DKMTLock2(lock-touch:%s)",
-                  label);
-  }
-  return CheckStatus(call_name, status, out_error);
 }
 
 bool WaitForBufferResidency(const KmtApi& api, const Device& device,
@@ -2106,11 +2081,6 @@ bool SubmitAndWaitPathBImpl(const KmtApi& api, const Device& device,
     return false;
   }
 
-  if (!TouchBufferCpuMapping(api, device, exec_buffer, "pre-submit",
-                             out_error)) {
-    return false;
-  }
-
   uint64_t fence_id = context->next_fence_id++;
   D3DKMT_SUBMITCOMMANDTOHWQUEUE submit = {};
   submit.hHwQueue = context->hw_queue;
@@ -2125,11 +2095,6 @@ bool SubmitAndWaitPathBImpl(const KmtApi& api, const Device& device,
           out_error)) {
     return false;
   }
-  if (!TouchBufferCpuMapping(api, device, exec_buffer, "post-submit",
-                             out_error)) {
-    return false;
-  }
-
   if (!WaitForHwQueueFenceCpu(
           api, device, *context, fence_id,
           "D3DKMTWaitForSynchronizationObjectFromCpu(pathb)", out_error)) {
@@ -2244,11 +2209,6 @@ bool SubmitPathBImplNoWait(const KmtApi& api, const Device& device,
     return false;
   }
 
-  if (!TouchBufferCpuMapping(api, device, exec_buffer, "pre-submit",
-                             out_error)) {
-    return false;
-  }
-
   uint64_t fence_id = context->next_fence_id++;
   D3DKMT_SUBMITCOMMANDTOHWQUEUE submit = {};
   submit.hHwQueue = context->hw_queue;
@@ -2263,11 +2223,6 @@ bool SubmitPathBImplNoWait(const KmtApi& api, const Device& device,
           "D3DKMTSubmitCommandToHwQueue(pathb nowait)", out_error)) {
     return false;
   }
-  if (!TouchBufferCpuMapping(api, device, exec_buffer, "post-submit",
-                             out_error)) {
-    return false;
-  }
-
   out_pending->fence_id = fence_id;
   out_pending->slot_cpu = slot_cpu;
   out_pending->slot_offset = slot_offset;
