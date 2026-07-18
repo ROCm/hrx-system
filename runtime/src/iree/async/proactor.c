@@ -22,7 +22,9 @@ IREE_API_EXPORT void iree_async_proactor_initialize(
   IREE_TRACE({
     iree_host_size_t copy_length =
         iree_min(debug_name.size, sizeof(out_proactor->debug_name) - 1);
-    memcpy(out_proactor->debug_name, debug_name.data, copy_length);
+    if (copy_length > 0) {
+      memcpy(out_proactor->debug_name, debug_name.data, copy_length);
+    }
     out_proactor->debug_name[copy_length] = '\0';
   });
 }
