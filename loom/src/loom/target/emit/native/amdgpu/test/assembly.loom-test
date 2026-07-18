@@ -2009,6 +2009,57 @@ low.func.def target(@gfx1250_target) @gfx1250_vgpr_msb_copy_assembly(%source: re
 
 // ====
 
+// RUN: emit amdgpu-assembly @gfx1250_vgpr_msb_dpp waits=none strategy=source fixed=%source:physical_register:263:1 fixed=%shifted:physical_register:264:1
+amdgpu.target<gfx1250> @gfx1250_target
+low.func.def target(@gfx1250_target) @gfx1250_vgpr_msb_dpp(%source: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %shifted = v_mov_b32_dpp16 %source {dpp_ctrl = 177}
+  return
+}
+
+// ----
+  s_set_vgpr_msb 65
+  v_mov_b32_dpp v8, v7, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_set_vgpr_msb 16640
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_vgpr_msb_reschedule_repair waits=none strategy=resource-stall fixed=%high_lhs:physical_register:512:1 fixed=%high_rhs:physical_register:768:1 fixed=%high0:physical_register:513:1 fixed=%high1:physical_register:514:1 fixed=%low_lhs:physical_register:0:1 fixed=%low_rhs:physical_register:1:1 fixed=%low:physical_register:2:1
+amdgpu.target<gfx1250> @gfx1250_target
+low.func.def target(@gfx1250_target) @gfx1250_vgpr_msb_reschedule_repair(%high_lhs: reg<amdgpu.vgpr>, %high_rhs: reg<amdgpu.vgpr>, %low_lhs: reg<amdgpu.vgpr>, %low_rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %high0 = v_add_u32 %high_lhs, %high_rhs
+  %high1 = v_add_u32 %high0, %high_rhs
+  %low = v_add_u32 %low_lhs, %low_rhs
+  return
+}
+
+// ----
+  s_set_vgpr_msb 142
+  v_add_u32 v1, v0, v0
+  v_add_u32 v2, v1, v0
+  s_set_vgpr_msb 36352
+  v_add_u32 v2, v0, v1
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_vgpr_msb_canonical_state_stream waits=none strategy=resource-stall fixed=%lhs:physical_register:512:1 fixed=%rhs:physical_register:768:1 fixed=%sum:physical_register:513:1
+amdgpu.target<gfx1250> @gfx1250_target
+low.func.def target(@gfx1250_target) @gfx1250_vgpr_msb_canonical_state_stream(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  s_set_vgpr_msb 65535
+  %sum = v_add_u32 %lhs, %rhs
+  s_set_vgpr_msb 0
+  return
+}
+
+// ----
+  s_set_vgpr_msb 142
+  v_add_u32 v1, v0, v0
+  s_set_vgpr_msb 36352
+  s_endpgm
+
+// ====
+
 // RUN: emit amdgpu-assembly @gfx11_branch_arg_cycle waits=none
 amdgpu.target<gfx1100> @gfx11_target
 low.func.def target(@gfx11_target) @gfx11_branch_arg_cycle(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {

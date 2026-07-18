@@ -39,6 +39,37 @@ typedef struct loom_amdgpu_address_state_context_t {
   loom_builder_t builder;
 } loom_amdgpu_address_state_context_t;
 
+typedef struct loom_amdgpu_vgpr_msb_desired_transition_t {
+  // Operation before which the transition is inserted, or NULL to append.
+  const loom_op_t* before_op;
+  // Block receiving an appended transition when |before_op| is NULL.
+  loom_block_t* block;
+  // Packed previous/new S_SET_VGPR_MSB mode immediate.
+  uint16_t mode_immediate;
+  // Source location assigned to the materialized transition.
+  loom_location_id_t location;
+} loom_amdgpu_vgpr_msb_desired_transition_t;
+
+typedef struct loom_amdgpu_vgpr_msb_existing_transition_t {
+  // Existing S_SET_VGPR_MSB operation.
+  const loom_op_t* op;
+  // Packed previous/new S_SET_VGPR_MSB mode immediate.
+  uint16_t mode_immediate;
+} loom_amdgpu_vgpr_msb_existing_transition_t;
+
+typedef struct loom_amdgpu_vgpr_msb_block_plan_t {
+  // Canonical transitions required by the accepted allocation.
+  loom_amdgpu_vgpr_msb_desired_transition_t* desired_transitions;
+  // Number of entries in |desired_transitions|.
+  iree_host_size_t desired_transition_count;
+  // Scheduled transitions already present in the block.
+  loom_amdgpu_vgpr_msb_existing_transition_t* existing_transitions;
+  // Number of entries in |existing_transitions|.
+  iree_host_size_t existing_transition_count;
+  // True when the existing stream satisfies every scheduled state read.
+  bool existing_stream_valid;
+} loom_amdgpu_vgpr_msb_block_plan_t;
+
 static bool loom_amdgpu_descriptor_is_s_set_vgpr_msb(
     const loom_amdgpu_address_state_context_t* context,
     const loom_low_descriptor_t* descriptor) {
@@ -192,10 +223,10 @@ static iree_status_t loom_amdgpu_collect_vgpr_msb_mode_requirement(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_read_s_set_vgpr_msb_mode(
+static iree_status_t loom_amdgpu_read_s_set_vgpr_msb_mode_immediate(
     const loom_amdgpu_address_state_context_t* context,
-    const loom_low_schedule_node_t* node, uint8_t* out_mode) {
-  *out_mode = 0;
+    const loom_low_schedule_node_t* node, uint16_t* out_mode_immediate) {
+  *out_mode_immediate = 0;
   const loom_op_t* op = node->op;
   if (!loom_low_op_isa(op)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -220,7 +251,7 @@ static iree_status_t loom_amdgpu_read_s_set_vgpr_msb_mode(
                             " is not a u16",
                             attr->value.i64);
   }
-  *out_mode = (uint8_t)((uint16_t)attr->value.i64 & 0xFFu);
+  *out_mode_immediate = (uint16_t)attr->value.i64;
   return iree_ok_status();
 }
 
@@ -247,12 +278,79 @@ static iree_status_t loom_amdgpu_build_s_set_vgpr_msb(
       location, &op);
 }
 
-static iree_status_t loom_amdgpu_materialize_vgpr_msb_for_block(
-    loom_amdgpu_address_state_context_t* context,
+static void loom_amdgpu_append_desired_vgpr_msb_transition(
+    loom_amdgpu_vgpr_msb_block_plan_t* plan, const loom_op_t* before_op,
+    loom_block_t* block, uint8_t previous_mode, uint8_t new_mode,
+    loom_location_id_t location) {
+  plan->desired_transitions[plan->desired_transition_count++] =
+      (loom_amdgpu_vgpr_msb_desired_transition_t){
+          .before_op = before_op,
+          .block = block,
+          .mode_immediate =
+              (uint16_t)(((uint16_t)previous_mode << 8) | new_mode),
+          .location = location,
+      };
+}
+
+static iree_status_t loom_amdgpu_plan_vgpr_msb_for_block(
+    const loom_amdgpu_address_state_context_t* context,
     const loom_low_emission_frame_t* frame,
-    const loom_low_schedule_block_t* block,
-    loom_low_emission_frame_materialize_address_state_result_t* result) {
-  uint8_t current_mode = 0;
+    const loom_low_schedule_block_t* block, iree_arena_allocator_t* arena,
+    loom_amdgpu_vgpr_msb_block_plan_t* out_plan) {
+  *out_plan = (loom_amdgpu_vgpr_msb_block_plan_t){
+      .existing_stream_valid = true,
+  };
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, (iree_host_size_t)block->node_count + 1,
+                                sizeof(*out_plan->desired_transitions),
+                                (void**)&out_plan->desired_transitions));
+  if (block->scheduled_node_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(arena, block->scheduled_node_count,
+                                  sizeof(*out_plan->existing_transitions),
+                                  (void**)&out_plan->existing_transitions));
+  }
+
+  // Build the desired stream in the source order that the rewrite can
+  // represent. State dependencies then constrain the scheduler to keep each
+  // affected packet inside the source interval established by these writes.
+  uint8_t desired_mode = 0;
+  for (uint32_t i = 0; i < block->node_count; ++i) {
+    const uint32_t node_index = block->node_start + i;
+    if (node_index >= frame->schedule.node_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "AMDGPU address-state block references node "
+                              "%" PRIu32 " but schedule has %" PRIhsz " nodes",
+                              node_index, frame->schedule.node_count);
+    }
+    const loom_low_schedule_node_t* node = &frame->schedule.nodes[node_index];
+    if (node->kind != LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR) {
+      continue;
+    }
+    if (loom_amdgpu_descriptor_is_s_set_vgpr_msb(context, node->descriptor)) {
+      continue;
+    }
+
+    loom_amdgpu_vgpr_msb_mode_requirement_t requirement = {0};
+    IREE_RETURN_IF_ERROR(loom_amdgpu_collect_vgpr_msb_mode_requirement(
+        frame, node, &requirement));
+    if (requirement.mask == 0 || (desired_mode & requirement.mask) ==
+                                     (requirement.value & requirement.mask)) {
+      continue;
+    }
+
+    const uint8_t new_mode = (uint8_t)((desired_mode & ~requirement.mask) |
+                                       (requirement.value & requirement.mask));
+    loom_amdgpu_append_desired_vgpr_msb_transition(
+        out_plan, node->op, /*block=*/NULL, desired_mode, new_mode,
+        node->op->location);
+    desired_mode = new_mode;
+  }
+
+  // Validate the existing stream in the order packets will be emitted. An
+  // identical immediate sequence is insufficient: a scheduler defect or a
+  // malformed authored stream may place the right transition after its read.
+  uint8_t existing_mode = 0;
   for (uint32_t i = 0; i < block->scheduled_node_count; ++i) {
     const uint32_t node_index =
         frame->schedule
@@ -268,45 +366,80 @@ static iree_status_t loom_amdgpu_materialize_vgpr_msb_for_block(
       continue;
     }
     if (loom_amdgpu_descriptor_is_s_set_vgpr_msb(context, node->descriptor)) {
-      IREE_RETURN_IF_ERROR(
-          loom_amdgpu_read_s_set_vgpr_msb_mode(context, node, &current_mode));
+      uint16_t mode_immediate = 0;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_read_s_set_vgpr_msb_mode_immediate(
+          context, node, &mode_immediate));
+      out_plan->existing_transitions[out_plan->existing_transition_count++] =
+          (loom_amdgpu_vgpr_msb_existing_transition_t){
+              .op = node->op,
+              .mode_immediate = mode_immediate,
+          };
+      if ((uint8_t)(mode_immediate >> 8) != existing_mode) {
+        out_plan->existing_stream_valid = false;
+      }
+      existing_mode = (uint8_t)(mode_immediate & 0xFFu);
       continue;
     }
 
     loom_amdgpu_vgpr_msb_mode_requirement_t requirement = {0};
     IREE_RETURN_IF_ERROR(loom_amdgpu_collect_vgpr_msb_mode_requirement(
         frame, node, &requirement));
-    if (requirement.mask == 0 || (current_mode & requirement.mask) ==
+    if (requirement.mask != 0 && (existing_mode & requirement.mask) !=
                                      (requirement.value & requirement.mask)) {
-      continue;
+      out_plan->existing_stream_valid = false;
     }
+  }
 
-    const uint8_t new_mode = (uint8_t)((current_mode & ~requirement.mask) |
-                                       (requirement.value & requirement.mask));
-    const uint16_t mode_immediate =
-        (uint16_t)(((uint16_t)current_mode << 8) | new_mode);
+  if (existing_mode != 0) {
+    out_plan->existing_stream_valid = false;
+  }
+  if (desired_mode != 0) {
+    const loom_block_t* const_block = block->block;
+    loom_block_t* mutable_block = (loom_block_t*)const_block;
+    const loom_op_t* before_op = NULL;
+    loom_location_id_t location = LOOM_LOCATION_UNKNOWN;
+    if (const_block != NULL && const_block->last_op != NULL &&
+        iree_all_bits_set(const_block->last_op->traits,
+                          LOOM_TRAIT_TERMINATOR)) {
+      before_op = const_block->last_op;
+      location = const_block->last_op->location;
+    }
+    loom_amdgpu_append_desired_vgpr_msb_transition(out_plan, before_op,
+                                                   mutable_block, desired_mode,
+                                                   /*new_mode=*/0, location);
+  }
+  return iree_ok_status();
+}
+
+static bool loom_amdgpu_vgpr_msb_block_plan_matches(
+    const loom_amdgpu_vgpr_msb_block_plan_t* plan) {
+  if (!plan->existing_stream_valid ||
+      plan->existing_transition_count != plan->desired_transition_count) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < plan->desired_transition_count; ++i) {
+    if (plan->existing_transitions[i].mode_immediate !=
+        plan->desired_transitions[i].mode_immediate) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static iree_status_t loom_amdgpu_apply_vgpr_msb_block_plan(
+    loom_amdgpu_address_state_context_t* context,
+    const loom_amdgpu_vgpr_msb_block_plan_t* plan) {
+  for (iree_host_size_t i = 0; i < plan->existing_transition_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_op_erase(
+        context->module, (loom_op_t*)plan->existing_transitions[i].op));
+  }
+  for (iree_host_size_t i = 0; i < plan->desired_transition_count; ++i) {
+    const loom_amdgpu_vgpr_msb_desired_transition_t* transition =
+        &plan->desired_transitions[i];
     IREE_RETURN_IF_ERROR(loom_amdgpu_build_s_set_vgpr_msb(
-        context, node->op, NULL, mode_immediate, node->op->location));
-    current_mode = new_mode;
-    result->changed = true;
+        context, transition->before_op, transition->block,
+        transition->mode_immediate, transition->location));
   }
-
-  if (current_mode == 0) {
-    return iree_ok_status();
-  }
-  const loom_block_t* const_block = block->block;
-  loom_block_t* mutable_block = (loom_block_t*)const_block;
-  const loom_op_t* before_op = NULL;
-  loom_location_id_t location = LOOM_LOCATION_UNKNOWN;
-  if (const_block != NULL && const_block->last_op != NULL &&
-      iree_all_bits_set(const_block->last_op->traits, LOOM_TRAIT_TERMINATOR)) {
-    before_op = const_block->last_op;
-    location = const_block->last_op->location;
-  }
-  const uint16_t mode_immediate = (uint16_t)((uint16_t)current_mode << 8);
-  IREE_RETURN_IF_ERROR(loom_amdgpu_build_s_set_vgpr_msb(
-      context, before_op, mutable_block, mode_immediate, location));
-  result->changed = true;
   return iree_ok_status();
 }
 
@@ -321,7 +454,6 @@ iree_status_t loom_amdgpu_materialize_address_state(
   IREE_ASSERT_ARGUMENT(out_result);
   *out_result = (loom_low_emission_frame_materialize_address_state_result_t){0};
   (void)function_op;
-  (void)arena;
 
   const loom_low_descriptor_set_t* descriptor_set =
       frame->schedule.target.descriptor_set;
@@ -332,9 +464,22 @@ iree_status_t loom_amdgpu_materialize_address_state(
     return iree_ok_status();
   }
 
+  loom_amdgpu_vgpr_msb_block_plan_t* plans = NULL;
+  if (frame->schedule.block_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, frame->schedule.block_count, sizeof(*plans), (void**)&plans));
+  }
   for (iree_host_size_t i = 0; i < frame->schedule.block_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_vgpr_msb_for_block(
-        &context, frame, &frame->schedule.blocks[i], out_result));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_plan_vgpr_msb_for_block(
+        &context, frame, &frame->schedule.blocks[i], arena, &plans[i]));
+  }
+  for (iree_host_size_t i = 0; i < frame->schedule.block_count; ++i) {
+    if (loom_amdgpu_vgpr_msb_block_plan_matches(&plans[i])) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_apply_vgpr_msb_block_plan(&context, &plans[i]));
+    out_result->changed = true;
   }
   return iree_ok_status();
 }
