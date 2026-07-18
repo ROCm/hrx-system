@@ -1243,6 +1243,156 @@ static iree_status_t loom_low_allocation_coalescing_concat_ignored_sources(
   return iree_ok_status();
 }
 
+// Returns whether all concat sources are produced in one compact assembly
+// window immediately before the result. Reserving a long-lived result for an
+// early source carries its transient pressure through unrelated packets; a
+// compact source cluster instead has no useful placement lifetime of its own.
+static bool loom_low_allocation_coalescing_concat_sources_form_compact_assembly(
+    const loom_low_allocation_coalescing_context_t* context,
+    const loom_liveness_interval_t* result_interval,
+    const loom_low_placement_relation_range_t* result_range) {
+  uint32_t source_count = 0;
+  uint32_t earliest_source_start = result_interval->start_point;
+  for (uint32_t i = 0; i < result_range->count; ++i) {
+    const loom_low_placement_relation_t* relation =
+        &context->placement->relations[result_range->start + i];
+    if (relation->cause != LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT) {
+      continue;
+    }
+    const loom_liveness_interval_t* source_interval =
+        loom_liveness_interval_for_value_ordinal(context->liveness,
+                                                 relation->source_ordinal);
+    if (source_interval == NULL ||
+        source_interval->end_point != result_interval->start_point) {
+      return false;
+    }
+    earliest_source_start =
+        iree_min(earliest_source_start, source_interval->start_point);
+    ++source_count;
+  }
+  return source_count != 0 &&
+         result_interval->start_point - earliest_source_start <= source_count;
+}
+
+// Returns whether any source has already committed to a location. Result
+// reservations are anticipatory: once allocation has begun assembling the
+// sources, sibling coalescing or the materialized-concat path owns the
+// remaining placement decision.
+static bool loom_low_allocation_coalescing_concat_has_assigned_source(
+    const loom_low_allocation_coalescing_context_t* context,
+    const loom_low_placement_relation_range_t* result_range) {
+  for (uint32_t i = 0; i < result_range->count; ++i) {
+    const loom_low_placement_relation_t* relation =
+        &context->placement->relations[result_range->start + i];
+    if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT &&
+        loom_low_allocation_coalescing_current_assignment_for_value_ordinal(
+            context, relation->source_ordinal) != NULL) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Returns whether normal placement of the current source can be extended to
+// every sibling source without a materialized concat. This predicts the same
+// locations that sibling coalescing will request later; reserving the result
+// when they are all available would only perturb an already-valid allocation.
+static iree_status_t
+loom_low_allocation_coalescing_default_concat_source_assembles_result(
+    loom_low_allocation_coalescing_context_t* context,
+    const loom_liveness_interval_t* source_interval,
+    const loom_low_placement_relation_t* relation,
+    const loom_liveness_interval_t* result_interval,
+    loom_low_allocation_class_capacity_t result_capacity,
+    const loom_low_placement_relation_range_t* result_range,
+    bool* out_assembles_result) {
+  *out_assembles_result = false;
+
+  loom_low_allocation_class_capacity_t source_capacity = {0};
+  IREE_RETURN_IF_ERROR(loom_low_allocation_target_constraints_interval_capacity(
+      context->target_constraints, source_interval, &source_capacity));
+  uint32_t source_location_base = 0;
+  if (!loom_low_allocation_search_find_free_location(
+          context->search_context, source_interval, source_capacity,
+          &source_location_base) ||
+      source_location_base > UINT32_MAX - relation->source_unit_offset) {
+    return iree_ok_status();
+  }
+  const uint32_t source_unit_location =
+      source_location_base + relation->source_unit_offset;
+  if (source_unit_location < relation->result_unit_offset) {
+    return iree_ok_status();
+  }
+  const uint32_t result_location_base =
+      source_unit_location - relation->result_unit_offset;
+  const uint32_t result_alignment =
+      loom_low_allocation_live_range_interval_alignment(result_interval);
+  if (result_location_base % result_alignment != 0 ||
+      !loom_low_allocation_storage_reg_classes_share(
+          context->search_context->descriptor_set,
+          source_capacity.descriptor_reg_class_id,
+          result_capacity.descriptor_reg_class_id) ||
+      !loom_low_allocation_target_constraints_location_range_fits_capacity(
+          &result_capacity, source_capacity.location_kind, result_location_base,
+          result_interval->unit_count)) {
+    return iree_ok_status();
+  }
+
+  for (uint32_t i = 0; i < result_range->count; ++i) {
+    const loom_low_placement_relation_t* sibling_relation =
+        &context->placement->relations[result_range->start + i];
+    if (sibling_relation->cause != LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT) {
+      continue;
+    }
+    const loom_liveness_interval_t* sibling_interval =
+        loom_liveness_interval_for_value_ordinal(
+            context->liveness, sibling_relation->source_ordinal);
+    if (sibling_interval == NULL ||
+        !loom_liveness_value_class_equal(source_interval->value_class,
+                                         sibling_interval->value_class) ||
+        result_location_base >
+            UINT32_MAX - sibling_relation->result_unit_offset) {
+      return iree_ok_status();
+    }
+    const uint32_t sibling_unit_location =
+        result_location_base + sibling_relation->result_unit_offset;
+    if (sibling_unit_location < sibling_relation->source_unit_offset) {
+      return iree_ok_status();
+    }
+    const uint32_t sibling_location_base =
+        sibling_unit_location - sibling_relation->source_unit_offset;
+    loom_low_allocation_class_capacity_t sibling_capacity = {0};
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_target_constraints_interval_capacity(
+            context->target_constraints, sibling_interval, &sibling_capacity));
+    const uint32_t sibling_alignment =
+        loom_low_allocation_live_range_interval_alignment(sibling_interval);
+    if (!loom_low_allocation_storage_reg_classes_share(
+            context->search_context->descriptor_set,
+            source_capacity.descriptor_reg_class_id,
+            sibling_capacity.descriptor_reg_class_id) ||
+        !loom_low_allocation_target_constraints_location_range_fits_capacity(
+            &sibling_capacity, source_capacity.location_kind,
+            sibling_location_base, sibling_interval->unit_count) ||
+        sibling_location_base % sibling_alignment != 0 ||
+        loom_low_allocation_search_location_conflicts(
+            context->search_context, sibling_interval,
+            sibling_capacity.descriptor_reg_class_id,
+            source_capacity.location_kind, sibling_location_base,
+            sibling_interval->unit_count,
+            /*ignored_value_ids=*/NULL,
+            /*ignored_value_count=*/0,
+            /*ignored_storage_lease_value_ids=*/NULL,
+            /*ignored_storage_lease_value_count=*/0,
+            LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED)) {
+      return iree_ok_status();
+    }
+  }
+
+  *out_assembles_result = true;
+  return iree_ok_status();
+}
+
 // Chooses a concat result span that can also accept the current source slice.
 // Scheduled allocation may see scalar concat sources long before the concat op,
 // so selecting only for the future result interval can reserve a span that the
@@ -1333,16 +1483,8 @@ loom_low_allocation_coalescing_assign_concat_result_reservation(
     const loom_low_placement_relation_range_t* result_range,
     bool* out_assigned) {
   *out_assigned = false;
-  // Scalar slices benefit from reserving the aggregate span even when the
-  // assembled value remains live. Wider slices only reserve packet-local
-  // aggregates: holding the full span across intervening packets can increase
-  // pressure substantially, while delaying a packet-local reservation leaves
-  // independently assigned slices unable to satisfy contiguous packet inputs.
   const uint32_t result_lifetime =
       result_interval->end_point - result_interval->start_point;
-  if (source_interval->unit_count != 1 && result_lifetime != 1) {
-    return iree_ok_status();
-  }
   loom_low_allocation_class_capacity_t capacity = {0};
   IREE_RETURN_IF_ERROR(loom_low_allocation_target_constraints_interval_capacity(
       context->target_constraints, result_interval, &capacity));
@@ -1356,6 +1498,29 @@ loom_low_allocation_coalescing_assign_concat_result_reservation(
       &ignored_value_count));
   if (ignored_value_count == 0) {
     return iree_ok_status();
+  }
+
+  // Scalar sources can cheaply reserve a future aggregate, and packet-local
+  // results must reserve before independently allocated sources fragment their
+  // required span. Wider sources only reserve for a compact producer cluster
+  // when normal placement cannot assemble its siblings contiguously.
+  if (source_interval->unit_count != 1 && result_lifetime != 1) {
+    if (!loom_low_allocation_coalescing_concat_sources_form_compact_assembly(
+            context, result_interval, result_range)) {
+      return iree_ok_status();
+    }
+    if (loom_low_allocation_coalescing_concat_has_assigned_source(
+            context, result_range)) {
+      return iree_ok_status();
+    }
+    bool default_source_assembles_result = false;
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_coalescing_default_concat_source_assembles_result(
+            context, source_interval, relation, result_interval, capacity,
+            result_range, &default_source_assembles_result));
+    if (default_source_assembles_result) {
+      return iree_ok_status();
+    }
   }
 
   uint32_t result_location_base = 0;

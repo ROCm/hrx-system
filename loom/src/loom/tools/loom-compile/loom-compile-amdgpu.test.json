@@ -100,7 +100,7 @@
               "unordered": [
                 "\"status\":{\"code\":0,\"name\":\"OK\"}",
                 "\"target_key\":\"gfx1250\"",
-                "\"instruction_count\":750",
+                "\"instruction_count\":741",
                 "\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":296",
                 "\"target_insertions\":{\"static_packet_count\":37,\"exact_dynamic_packet_count\":37,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":37,\"row_count\":37",
                 "\"packet_key\":\"amdgpu.s_set_vgpr_msb\"",
@@ -138,9 +138,9 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx1250\"",
-                "\"instruction_count\":520",
+                "\"instruction_count\":509",
                 "\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":352",
-                "\"target_insertions\":{\"static_packet_count\":16,\"exact_dynamic_packet_count\":16,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":52,\"row_count\":16",
+                "\"target_insertions\":{\"static_packet_count\":14,\"exact_dynamic_packet_count\":14,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":44,\"row_count\":14",
                 "\"dynamic_instruction_mix\":{\"descriptor_count\":",
                 "\"matrix_count\":132,\"mfma_count\":0,\"smfmac_count\":0,\"wmma_count\":132"
               ]
@@ -172,7 +172,7 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx1251\"",
-                "\"instruction_count\":750",
+                "\"instruction_count\":741",
                 "\"target_insertions\":{\"static_packet_count\":37,\"exact_dynamic_packet_count\":37,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":37,\"row_count\":37"
               ]
             }
@@ -203,8 +203,8 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx1251\"",
-                "\"instruction_count\":520",
-                "\"target_insertions\":{\"static_packet_count\":16,\"exact_dynamic_packet_count\":16,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":52,\"row_count\":16"
+                "\"instruction_count\":509",
+                "\"target_insertions\":{\"static_packet_count\":14,\"exact_dynamic_packet_count\":14,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":44,\"row_count\":14"
               ]
             }
           },
