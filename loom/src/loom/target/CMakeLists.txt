@@ -21,6 +21,33 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    residency
+  HDRS
+    "residency.h"
+  SRCS
+    "residency.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::internal::arena
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    residency_test
+  SRCS
+    "residency_test.cc"
+  DEPS
+    ::residency
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
     registers
   HDRS
     "registers.h"
