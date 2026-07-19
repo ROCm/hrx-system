@@ -20,6 +20,38 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Per-axis and flat limits for one three-dimensional dispatch quantity.
+typedef struct iree_hal_amdgpu_dispatch_dimension_limits_t {
+  // Maximum value in the X dimension.
+  uint64_t x;
+  // Maximum value in the Y dimension.
+  uint64_t y;
+  // Maximum value in the Z dimension.
+  uint64_t z;
+  // Maximum product across all three dimensions.
+  uint64_t total;
+} iree_hal_amdgpu_dispatch_dimension_limits_t;
+
+// Physical-device limits for clustered kernel dispatches.
+typedef struct iree_hal_amdgpu_workgroup_cluster_capabilities_t {
+  // True when the agent supports nontrivial workgroup clusters.
+  uint32_t supported : 1;
+  // Maximum cluster count in one kernel dispatch.
+  iree_hal_amdgpu_dispatch_dimension_limits_t cluster_count;
+  // Maximum workgroup count in one cluster.
+  iree_hal_amdgpu_dispatch_dimension_limits_t workgroups_per_cluster;
+} iree_hal_amdgpu_workgroup_cluster_capabilities_t;
+
+// Queries and validates clustered-dispatch limits for |device_agent|.
+//
+// An older HSA runtime that recognizes none of the four cluster attributes and
+// an agent that reports a 1x1x1 workgroup-per-cluster ceiling both produce a
+// zeroed unsupported capability. Partial query support and malformed limits
+// fail instead of inventing architecture-derived limits.
+iree_status_t iree_hal_amdgpu_query_workgroup_cluster_capabilities(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
+    iree_hal_amdgpu_workgroup_cluster_capabilities_t* out_capabilities);
+
 typedef enum iree_hal_amdgpu_cpu_visible_device_coarse_memory_flag_bits_e {
   IREE_HAL_AMDGPU_CPU_VISIBLE_DEVICE_COARSE_MEMORY_FLAG_NONE = 0u,
   // All CPU agents can access the GPU coarse-grained memory pool and the

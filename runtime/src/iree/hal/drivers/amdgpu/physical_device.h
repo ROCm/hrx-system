@@ -230,6 +230,8 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   iree_hal_amdgpu_host_memory_pools_t host_memory_pools;
   // Cold memory-system facts used to derive conservative topology flags.
   iree_hal_amdgpu_memory_system_capabilities_t memory_system;
+  // Clustered-dispatch limits reported for this GPU agent.
+  iree_hal_amdgpu_workgroup_cluster_capabilities_t workgroup_cluster;
   // CPU-visible coarse-grained device-memory capability for this GPU.
   iree_hal_amdgpu_cpu_visible_device_coarse_memory_t
       cpu_visible_device_coarse_memory;

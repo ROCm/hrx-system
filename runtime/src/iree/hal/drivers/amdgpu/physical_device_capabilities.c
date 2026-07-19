@@ -76,6 +76,147 @@ static bool iree_hal_amdgpu_gfxip_version_range_contains(
                                                version.stepping);
 }
 
+// Public HSA AMD agent attributes introduced with clustered dispatch support.
+// These local names keep this driver buildable against older HSA SDK headers;
+// hsa_agent_get_info accepts the numeric ABI values at runtime.
+enum iree_hal_amdgpu_workgroup_cluster_agent_info_e {
+  IREE_HAL_AMDGPU_AGENT_INFO_KERNEL_CLUSTER_MAX_DIM = 0xA11E,
+  IREE_HAL_AMDGPU_AGENT_INFO_KERNEL_CLUSTER_MAX_SIZE = 0xA11F,
+  IREE_HAL_AMDGPU_AGENT_INFO_CLUSTER_MAX_DIM = 0xA120,
+  IREE_HAL_AMDGPU_AGENT_INFO_CLUSTER_MAX_SIZE = 0xA121,
+};
+
+// Raw ABI layout returned by the HSA per-dimension cluster attributes.
+typedef struct iree_hal_amdgpu_hsa_dimension_limits_t {
+  uint64_t x;
+  uint64_t y;
+  uint64_t z;
+} iree_hal_amdgpu_hsa_dimension_limits_t;
+
+static iree_status_t iree_hal_amdgpu_validate_dispatch_dimension_limits(
+    iree_string_view_t name,
+    const iree_hal_amdgpu_dispatch_dimension_limits_t* limits) {
+  if (IREE_UNLIKELY(limits->x == 0 || limits->y == 0 || limits->z == 0 ||
+                    limits->total == 0)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "%.*s limits contain zero: dimensions=%" PRIu64
+                            "x%" PRIu64 "x%" PRIu64 ", total=%" PRIu64,
+                            (int)name.size, name.data, limits->x, limits->y,
+                            limits->z, limits->total);
+  }
+  const uint64_t maximum_axis =
+      iree_max(limits->x, iree_max(limits->y, limits->z));
+  if (IREE_UNLIKELY(limits->total < maximum_axis)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "%.*s flat limit %" PRIu64 " is smaller than per-axis maximum %" PRIu64,
+        (int)name.size, name.data, limits->total, maximum_axis);
+  }
+  uint64_t xy = 0;
+  uint64_t xyz = 0;
+  if (iree_checked_mul_u64(limits->x, limits->y, &xy) &&
+      iree_checked_mul_u64(xy, limits->z, &xyz) &&
+      IREE_UNLIKELY(limits->total > xyz)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "%.*s flat limit %" PRIu64
+                            " exceeds per-axis product %" PRIu64,
+                            (int)name.size, name.data, limits->total, xyz);
+  }
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amdgpu_query_workgroup_cluster_capabilities(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
+    iree_hal_amdgpu_workgroup_cluster_capabilities_t* out_capabilities) {
+  IREE_ASSERT_ARGUMENT(libhsa);
+  IREE_ASSERT_ARGUMENT(out_capabilities);
+  memset(out_capabilities, 0, sizeof(*out_capabilities));
+
+  iree_hal_amdgpu_hsa_dimension_limits_t cluster_count_dimensions = {0};
+  uint64_t cluster_count_total = 0;
+  iree_hal_amdgpu_hsa_dimension_limits_t workgroups_per_cluster_dimensions = {
+      0};
+  uint64_t workgroups_per_cluster_total = 0;
+  const hsa_status_t query_statuses[] = {
+      iree_hsa_agent_get_info_raw(
+          libhsa, device_agent,
+          (hsa_agent_info_t)IREE_HAL_AMDGPU_AGENT_INFO_KERNEL_CLUSTER_MAX_DIM,
+          &cluster_count_dimensions),
+      iree_hsa_agent_get_info_raw(
+          libhsa, device_agent,
+          (hsa_agent_info_t)IREE_HAL_AMDGPU_AGENT_INFO_KERNEL_CLUSTER_MAX_SIZE,
+          &cluster_count_total),
+      iree_hsa_agent_get_info_raw(
+          libhsa, device_agent,
+          (hsa_agent_info_t)IREE_HAL_AMDGPU_AGENT_INFO_CLUSTER_MAX_DIM,
+          &workgroups_per_cluster_dimensions),
+      iree_hsa_agent_get_info_raw(
+          libhsa, device_agent,
+          (hsa_agent_info_t)IREE_HAL_AMDGPU_AGENT_INFO_CLUSTER_MAX_SIZE,
+          &workgroups_per_cluster_total),
+  };
+
+  iree_host_size_t success_count = 0;
+  iree_host_size_t unsupported_count = 0;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(query_statuses); ++i) {
+    success_count += query_statuses[i] == HSA_STATUS_SUCCESS ? 1 : 0;
+    unsupported_count +=
+        query_statuses[i] == HSA_STATUS_ERROR_INVALID_ARGUMENT ? 1 : 0;
+  }
+  if (unsupported_count == IREE_ARRAYSIZE(query_statuses)) {
+    return iree_ok_status();
+  }
+  if (success_count != IREE_ARRAYSIZE(query_statuses)) {
+    if (success_count + unsupported_count == IREE_ARRAYSIZE(query_statuses)) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "HSA runtime exposes only %zu of 4 workgroup-cluster attributes",
+          success_count);
+    }
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(query_statuses); ++i) {
+      if (query_statuses[i] != HSA_STATUS_SUCCESS &&
+          query_statuses[i] != HSA_STATUS_ERROR_INVALID_ARGUMENT) {
+        return iree_status_from_hsa_status(
+            __FILE__, __LINE__, query_statuses[i], "hsa_agent_get_info",
+            "querying workgroup-cluster limits");
+      }
+    }
+  }
+
+  const iree_hal_amdgpu_workgroup_cluster_capabilities_t capabilities = {
+      .supported = 1,
+      .cluster_count =
+          {
+              .x = cluster_count_dimensions.x,
+              .y = cluster_count_dimensions.y,
+              .z = cluster_count_dimensions.z,
+              .total = cluster_count_total,
+          },
+      .workgroups_per_cluster =
+          {
+              .x = workgroups_per_cluster_dimensions.x,
+              .y = workgroups_per_cluster_dimensions.y,
+              .z = workgroups_per_cluster_dimensions.z,
+              .total = workgroups_per_cluster_total,
+          },
+  };
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_validate_dispatch_dimension_limits(
+      iree_make_cstring_view("kernel cluster-count"),
+      &capabilities.cluster_count));
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_validate_dispatch_dimension_limits(
+      iree_make_cstring_view("workgroups-per-cluster"),
+      &capabilities.workgroups_per_cluster));
+
+  if (capabilities.workgroups_per_cluster.x == 1 &&
+      capabilities.workgroups_per_cluster.y == 1 &&
+      capabilities.workgroups_per_cluster.z == 1 &&
+      capabilities.workgroups_per_cluster.total == 1) {
+    return iree_ok_status();
+  }
+  *out_capabilities = capabilities;
+  return iree_ok_status();
+}
+
 bool iree_hal_amdgpu_cpu_visible_device_coarse_memory_is_available(
     const iree_hal_amdgpu_cpu_visible_device_coarse_memory_t* memory) {
   return iree_any_bit_set(
