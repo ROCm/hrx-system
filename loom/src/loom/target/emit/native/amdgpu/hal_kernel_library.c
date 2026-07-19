@@ -36,6 +36,7 @@
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
 #include "loom/target/arch/amdgpu/planning/storage_lease.h"
 #include "loom/target/arch/amdgpu/planning/vopd_plan.h"
+#include "loom/target/arch/amdgpu/planning/wait_counters.h"
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info.h"
@@ -619,15 +620,14 @@ static iree_status_t loom_amdgpu_hal_kernel_library_record_wait_plan(
                       [LOOM_AMDGPU_WAIT_PLAN_REASON_COUNT] = {0};
   for (iree_host_size_t i = 0; i < wait_plan->action_count; ++i) {
     const loom_amdgpu_wait_plan_action_t* action = &wait_plan->actions[i];
-    IREE_ASSERT(action->counter_id > LOOM_AMDGPU_WAIT_COUNTER_NONE &&
-                    action->counter_id <= LOOM_AMDGPU_WAIT_COUNTER_ALU,
+    IREE_ASSERT(loom_amdgpu_wait_counter_id_is_valid(action->counter_id),
                 "wait plan action must name a concrete counter");
     IREE_ASSERT(action->reason < LOOM_AMDGPU_WAIT_PLAN_REASON_COUNT,
                 "wait plan action must name a concrete reason");
     loom_amdgpu_hal_kernel_library_accumulate_wait_action(&summary, action);
-    if (action->counter_id > LOOM_AMDGPU_WAIT_COUNTER_NONE &&
-        action->counter_id <= LOOM_AMDGPU_WAIT_COUNTER_ALU) {
-      const uint32_t counter_index = action->counter_id - 1;
+    if (loom_amdgpu_wait_counter_id_is_valid(action->counter_id)) {
+      const uint32_t counter_index =
+          loom_amdgpu_wait_counter_slot_from_id(action->counter_id);
       loom_amdgpu_hal_kernel_library_accumulate_wait_action(
           &counter_summaries[counter_index], action);
       if (action->reason < LOOM_AMDGPU_WAIT_PLAN_REASON_COUNT) {

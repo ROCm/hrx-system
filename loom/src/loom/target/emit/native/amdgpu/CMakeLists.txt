@@ -498,6 +498,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::planning::packet_plan
     loom::target::arch::amdgpu::planning::storage_lease
     loom::target::arch::amdgpu::planning::vopd_plan
+    loom::target::arch::amdgpu::planning::wait_counters
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_info
@@ -536,6 +537,7 @@ loom_cc_test(
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::error_defs
     loom::target::arch::amdgpu::matrix::contract
+    loom::target::arch::amdgpu::planning::wait_counters
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info

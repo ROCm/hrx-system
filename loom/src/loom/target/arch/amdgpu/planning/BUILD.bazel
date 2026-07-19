@@ -188,7 +188,11 @@ loom_cc_library(
 loom_cc_library(
     name = "wait_counters",
     hdrs = ["wait_counters.h"],
-    visibility = _AMDGPU_ROOT_VISIBILITY + _AMDGPU_LOWER_VISIBILITY,
+    visibility = (
+        _AMDGPU_ROOT_VISIBILITY +
+        _AMDGPU_LOWER_VISIBILITY +
+        _AMDGPU_NATIVE_VISIBILITY
+    ),
     deps = [
         "//runtime/src/iree/base",
     ],

@@ -23,6 +23,7 @@
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
+#include "loom/target/arch/amdgpu/planning/wait_counters.h"
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
@@ -119,6 +120,27 @@ bool HasTargetCapabilityU64(const loom_target_compile_report_t& report,
           iree_string_view_equal(row.namespace_name, expected_namespace) &&
           iree_string_view_equal(row.key, expected_key) &&
           row.value_u64 == value) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool HasWaitCounter(const loom_target_compile_report_t& report,
+                    uint32_t counter_id, const char* counter_name) {
+  const iree_string_view_t expected_name = iree_make_cstring_view(counter_name);
+  for (const loom_target_compile_report_vec_t* vec =
+           report.wait_counter_rows.head;
+       vec != nullptr; vec = vec->next) {
+    const loom_target_compile_report_wait_counter_row_t* rows =
+        static_cast<const loom_target_compile_report_wait_counter_row_t*>(
+            loom_target_compile_report_vec_const_rows(vec));
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      const loom_target_compile_report_wait_counter_row_t& row = rows[i];
+      if (row.counter_id == counter_id &&
+          iree_string_view_equal(row.counter_name, expected_name) &&
+          row.summary.action_count > 0) {
         return true;
       }
     }
@@ -427,6 +449,42 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
         "  %view = low.op<amdgpu.s_load_dwordx2_offset_only>(%kernarg) "
         "{offset = 0} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>\n"
         "  low.return\n"
+        "}\n";
+    ASSERT_NO_FATAL_FAILURE(
+        ParseSource(iree_make_cstring_view(kSource), out_module));
+  }
+
+  void ParseGfx1250TensorLoadKernel(loom_module_t** out_module) {
+    static const char kSource[] =
+        "amdgpu.target<gfx1250> @gfx_target\n"
+        "kernel.def target(@gfx_target) @tensor_load() {\n"
+        "  %one = index.constant 1 : index\n"
+        "  %size = index.constant 64 : index\n"
+        "  kernel.launch.config workgroups(%one, %one, %one) "
+        "workgroup_size(%size, %one, %one) : index\n"
+        "} launch(%input: buffer) {\n"
+        "  %zero = index.constant 0 : offset\n"
+        "  %bytes = index.constant 16384 : offset\n"
+        "  %d0 = vector.constant 0 : vector<4xi32>\n"
+        "  %d1 = vector.constant 0 : vector<8xi32>\n"
+        "  %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : "
+        "vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor\n"
+        "  %global = buffer.assume.memory_space<global> %input : buffer\n"
+        "  %source = buffer.view %global[%zero] : buffer -> "
+        "view<64x64xf32, #dense>\n"
+        "  %scratch = buffer.alloca %bytes {base_alignment = 256, "
+        "memory_space = workgroup} : buffer\n"
+        "  %dest = buffer.view %scratch[%zero] : buffer -> "
+        "view<64x64xf32, #dense>\n"
+        "  %copy = kernel.async.tensor.load.to.lds %source to %dest using "
+        "%descriptor {cache_scope = cu, cache_temporal = regular} : "
+        "view<64x64xf32, #dense> to view<64x64xf32, #dense>, "
+        "kernel.tensor.lds.descriptor -> kernel.async.token\n"
+        "  %group = kernel.async.group %copy : kernel.async.token -> "
+        "kernel.async.group\n"
+        "  kernel.async.wait %group {newer_groups = 0} : "
+        "kernel.async.group\n"
+        "  kernel.return\n"
         "}\n";
     ASSERT_NO_FATAL_FAILURE(
         ParseSource(iree_make_cstring_view(kSource), out_module));
@@ -922,6 +980,46 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
     loom_module_free(module);
   }
   EXPECT_GE(checked_count, 1u);
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest, RecordsTensorWaitCounter) {
+  if (!IsDescriptorSetLinked(IREE_SV("amdgpu.rdna4.gfx125x.core"))) {
+    GTEST_SKIP() << "amdgpu.rdna4.gfx125x.core is not linked in this build";
+  }
+
+  loom_module_t* module = nullptr;
+  ASSERT_NO_FATAL_FAILURE(ParseGfx1250TensorLoadKernel(&module));
+  DiagnosticCapture capture;
+  ASSERT_NO_FATAL_FAILURE(RunPreparedLowPipeline(module, &capture));
+
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  report.requested_detail_flags = LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN;
+  loom_amdgpu_hal_kernel_library_t library = {};
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      /*.processor=*/{},
+      /*.target_selection=*/{},
+      /*.runtime_globals=*/{},
+      /*.data_symbols=*/{},
+      /*.data_symbol_count=*/{},
+      /*.diagnostic_sink=*/capture.sink(),
+      /*.source_resolver=*/{},
+      /*.max_errors=*/20,
+      /*.report=*/&report,
+  };
+  bool emitted = false;
+  IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
+      module, &options, iree_allocator_system(), &emitted, &library));
+
+  EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
+  EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
+  EXPECT_TRUE(
+      HasWaitCounter(report, LOOM_AMDGPU_WAIT_COUNTER_TENSOR, "tensor"));
+
+  loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                              iree_allocator_system());
+  loom_target_compile_report_deinitialize(&report);
+  loom_module_free(module);
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest, CapturesCompleteGfx11KernelDirectives) {
