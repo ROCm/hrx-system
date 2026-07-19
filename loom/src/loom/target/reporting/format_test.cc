@@ -214,6 +214,111 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   loom_target_compile_report_deinitialize(&report);
 }
 
+TEST(CompileReportFormatTest, ClonesAndFormatsArtifactAnalysis) {
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  const loom_target_compile_report_artifact_analysis_t analysis = {
+      /*.analyzer_name=*/IREE_SVL("rocjitsu-waitcheck"),
+      /*.analyzer_abi_version=*/1,
+      /*.outcome=*/
+      LOOM_TARGET_COMPILE_REPORT_ARTIFACT_ANALYSIS_OUTCOME_REJECTED,
+      /*.artifact_target=*/IREE_SVL("gfx1250"),
+      /*.instruction_count=*/354,
+      /*.memory_event_count=*/61,
+      /*.function_count=*/3,
+      /*.analyzed_function_count=*/2,
+      /*.finding_count=*/7,
+      /*.reported_finding_count=*/4,
+      /*.findings_truncated=*/true,
+      /*.stopped_early=*/true,
+      /*.complete=*/false,
+      /*.passed=*/false,
+  };
+  loom_target_compile_report_record_artifact_analysis(&report, &analysis);
+
+  loom_target_compile_report_t clone = {};
+  IREE_ASSERT_OK(loom_target_compile_report_clone(
+      &report, iree_allocator_system(), &clone));
+  loom_target_compile_report_deinitialize(&report);
+  EXPECT_TRUE(iree_any_bit_set(
+      clone.detail_flags, LOOM_TARGET_COMPILE_REPORT_DETAIL_ARTIFACT_ANALYSIS));
+  EXPECT_TRUE(iree_string_view_equal(clone.artifact_analysis.analyzer_name,
+                                     IREE_SV("rocjitsu-waitcheck")));
+  EXPECT_EQ(clone.artifact_analysis.analyzer_abi_version, 1u);
+  EXPECT_EQ(clone.artifact_analysis.outcome,
+            LOOM_TARGET_COMPILE_REPORT_ARTIFACT_ANALYSIS_OUTCOME_REJECTED);
+  EXPECT_TRUE(iree_string_view_equal(clone.artifact_analysis.artifact_target,
+                                     IREE_SV("gfx1250")));
+  EXPECT_EQ(clone.artifact_analysis.instruction_count, 354u);
+  EXPECT_EQ(clone.artifact_analysis.memory_event_count, 61u);
+  EXPECT_EQ(clone.artifact_analysis.function_count, 3u);
+  EXPECT_EQ(clone.artifact_analysis.analyzed_function_count, 2u);
+  EXPECT_EQ(clone.artifact_analysis.finding_count, 7u);
+  EXPECT_EQ(clone.artifact_analysis.reported_finding_count, 4u);
+  EXPECT_TRUE(clone.artifact_analysis.findings_truncated);
+  EXPECT_TRUE(clone.artifact_analysis.stopped_early);
+  EXPECT_FALSE(clone.artifact_analysis.complete);
+  EXPECT_FALSE(clone.artifact_analysis.passed);
+
+  const loom_target_compile_report_format_options_t options = {
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+  };
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(
+      loom_target_compile_report_format_text(&clone, &options, &builder));
+  const iree_string_view_t text = iree_string_builder_view(&builder);
+  EXPECT_NE(
+      iree_string_view_find(
+          text,
+          IREE_SV("artifact_analysis analyzer=rocjitsu-waitcheck "
+                  "abi_version=1 outcome=rejected artifact_target=gfx1250 "
+                  "instructions_analyzed=354 memory_events_tracked=61 "
+                  "functions_discovered=3 functions_analyzed=2 "
+                  "findings_observed=7 findings_reported=4 "
+                  "findings_truncated=true stopped_early=true "
+                  "complete=false passed=false"),
+          0),
+      IREE_STRING_VIEW_NPOS);
+  iree_string_builder_deinitialize(&builder);
+
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+  IREE_ASSERT_OK(
+      loom_target_compile_report_format_json(&clone, &options, &stream));
+  const iree_string_view_t root =
+      ParseJsonDocument(iree_string_builder_view(&builder));
+  const iree_string_view_t artifact_analysis =
+      LookupObject(root, IREE_SV("artifact_analysis"));
+  ExpectObjectValueEquals(artifact_analysis, IREE_SV("analyzer"),
+                          IREE_SV("rocjitsu-waitcheck"));
+  ExpectObjectUint64Equals(artifact_analysis, IREE_SV("abi_version"), 1);
+  ExpectObjectValueEquals(artifact_analysis, IREE_SV("outcome"),
+                          IREE_SV("rejected"));
+  ExpectObjectValueEquals(artifact_analysis, IREE_SV("artifact_target"),
+                          IREE_SV("gfx1250"));
+  ExpectObjectUint64Equals(artifact_analysis, IREE_SV("instructions_analyzed"),
+                           354);
+  ExpectObjectUint64Equals(artifact_analysis, IREE_SV("memory_events_tracked"),
+                           61);
+  ExpectObjectUint64Equals(artifact_analysis, IREE_SV("functions_discovered"),
+                           3);
+  ExpectObjectUint64Equals(artifact_analysis, IREE_SV("functions_analyzed"), 2);
+  ExpectObjectUint64Equals(artifact_analysis, IREE_SV("findings_observed"), 7);
+  ExpectObjectUint64Equals(artifact_analysis, IREE_SV("findings_reported"), 4);
+  ExpectObjectValueEquals(artifact_analysis, IREE_SV("findings_truncated"),
+                          IREE_SV("true"));
+  ExpectObjectValueEquals(artifact_analysis, IREE_SV("stopped_early"),
+                          IREE_SV("true"));
+  ExpectObjectValueEquals(artifact_analysis, IREE_SV("complete"),
+                          IREE_SV("false"));
+  ExpectObjectValueEquals(artifact_analysis, IREE_SV("passed"),
+                          IREE_SV("false"));
+  iree_string_builder_deinitialize(&builder);
+  loom_target_compile_report_deinitialize(&clone);
+}
+
 TEST(CompileReportFormatTest, FormatsEntryReportsAndTargetCapabilities) {
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());

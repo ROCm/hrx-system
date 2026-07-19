@@ -47,6 +47,45 @@ iree_status_t loom_target_compile_report_json_write_optional_u32_field(
   return loom_json_object_write_uint32_field(object, name, value);
 }
 
+static iree_status_t loom_target_compile_report_format_artifact_analysis_json(
+    const loom_target_compile_report_artifact_analysis_t* analysis,
+    loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("analyzer"), analysis->analyzer_name));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("abi_version"), analysis->analyzer_abi_version));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("outcome"),
+      loom_target_compile_report_artifact_analysis_outcome_name(
+          analysis->outcome)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("artifact_target"), analysis->artifact_target));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("instructions_analyzed"), analysis->instruction_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("memory_events_tracked"), analysis->memory_event_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("functions_discovered"), analysis->function_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("functions_analyzed"),
+      analysis->analyzed_function_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("findings_observed"), analysis->finding_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("findings_reported"), analysis->reported_finding_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("findings_truncated"), analysis->findings_truncated));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("stopped_early"), analysis->stopped_early));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("complete"), analysis->complete));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("passed"), analysis->passed));
+  return loom_json_object_end(&object);
+}
+
 static iree_status_t loom_target_compile_report_format_schedule_json(
     const loom_target_compile_report_t* report, loom_output_stream_t* stream) {
   loom_json_object_writer_t object;
@@ -1437,6 +1476,14 @@ iree_status_t loom_target_compile_report_format_json(
                        LOOM_TARGET_COMPILE_REPORT_DETAIL_ARTIFACT_SIZE)) {
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
         &object, IREE_SV("artifact_size"), report->artifact_size));
+  }
+  if (iree_any_bit_set(report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_ARTIFACT_ANALYSIS)) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("artifact_analysis")));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_format_artifact_analysis_json(
+            &report->artifact_analysis, stream));
   }
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&object, IREE_SV("entries")));

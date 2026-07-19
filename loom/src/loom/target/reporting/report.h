@@ -31,6 +31,18 @@ typedef enum loom_target_compile_artifact_kind_e {
   LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT = 4,
 } loom_target_compile_artifact_kind_t;
 
+// Terminal outcome of final target-artifact analysis.
+typedef enum loom_target_compile_report_artifact_analysis_outcome_e {
+  // No artifact analysis was requested or completed.
+  LOOM_TARGET_COMPILE_REPORT_ARTIFACT_ANALYSIS_OUTCOME_NONE = 0,
+  // Analysis completed over the full artifact and found no hazards.
+  LOOM_TARGET_COMPILE_REPORT_ARTIFACT_ANALYSIS_OUTCOME_CLEAN = 1,
+  // Analysis completed and rejected the artifact due to one or more findings.
+  LOOM_TARGET_COMPILE_REPORT_ARTIFACT_ANALYSIS_OUTCOME_REJECTED = 2,
+  // Analysis could not produce an authoritative verdict.
+  LOOM_TARGET_COMPILE_REPORT_ARTIFACT_ANALYSIS_OUTCOME_ERROR = 3,
+} loom_target_compile_report_artifact_analysis_outcome_t;
+
 typedef uint32_t loom_target_compile_report_detail_flags_t;
 enum {
   // No optional report details are populated.
@@ -87,7 +99,46 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING = 1u << 24,
   // Target-inserted native packet rows were recorded or counted.
   LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS = 1u << 25,
+  // Final target-artifact analysis summary was recorded.
+  LOOM_TARGET_COMPILE_REPORT_DETAIL_ARTIFACT_ANALYSIS = 1u << 26,
 };
+
+// Target-neutral summary of one final target-artifact analysis.
+//
+// |analyzer_name| and |artifact_target| borrow storage with the same lifetime
+// as the report's other string views. Analyzer adapters must map callback-only
+// strings to Loom-owned stable names before recording this summary.
+typedef struct loom_target_compile_report_artifact_analysis_t {
+  // Stable Loom-facing analyzer identity.
+  iree_string_view_t analyzer_name;
+  // Analyzer ABI version used for this analysis.
+  uint32_t analyzer_abi_version;
+  // Terminal analysis outcome.
+  loom_target_compile_report_artifact_analysis_outcome_t outcome;
+  // Target identity independently inferred from the final artifact.
+  iree_string_view_t artifact_target;
+  // Final native instructions decoded and analyzed.
+  uint64_t instruction_count;
+  // Memory events tracked while analyzing decoded instructions.
+  uint64_t memory_event_count;
+  // Artifact functions or kernels discovered.
+  uint64_t function_count;
+  // Discovered functions or kernels analyzed.
+  uint64_t analyzed_function_count;
+  // Findings observed regardless of reporting limits.
+  uint64_t finding_count;
+  // Findings published through the analyzer diagnostic callback.
+  uint64_t reported_finding_count;
+  // True when |finding_count| is only a lower bound because reporting was
+  // disabled, limited, or stopped early.
+  bool findings_truncated;
+  // True when analysis intentionally stopped after an observed finding.
+  bool stopped_early;
+  // True when the entire artifact received an authoritative analysis.
+  bool complete;
+  // Analyzer pass state reported for the artifact.
+  bool passed;
+} loom_target_compile_report_artifact_analysis_t;
 
 typedef enum loom_target_compile_report_move_cause_e {
   // No residual target move cause was recorded.
@@ -1637,6 +1688,8 @@ typedef struct loom_target_compile_report_t {
   iree_string_view_t artifact_format;
   // Number of bytes in the produced artifact.
   uint64_t artifact_size;
+  // Final target-artifact analysis summary.
+  loom_target_compile_report_artifact_analysis_t artifact_analysis;
   // Number of low schedule nodes before target emission.
   uint64_t schedule_node_count;
   // Number of low schedule nodes in scheduled order.
@@ -1838,6 +1891,11 @@ void loom_target_compile_report_record_target_bundle(
 // Records the produced artifact byte size in |report|.
 void loom_target_compile_report_record_artifact_size(
     loom_target_compile_report_t* report, uint64_t artifact_size);
+
+// Records a final target-artifact analysis summary in |report|.
+void loom_target_compile_report_record_artifact_analysis(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_artifact_analysis_t* analysis);
 
 // Records target-low schedule summary counts in |report|.
 void loom_target_compile_report_record_schedule(

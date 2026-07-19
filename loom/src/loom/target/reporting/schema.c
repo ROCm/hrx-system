@@ -29,6 +29,21 @@ iree_string_view_t loom_target_compile_report_artifact_kind_name(
   }
 }
 
+iree_string_view_t loom_target_compile_report_artifact_analysis_outcome_name(
+    loom_target_compile_report_artifact_analysis_outcome_t outcome) {
+  switch (outcome) {
+    case LOOM_TARGET_COMPILE_REPORT_ARTIFACT_ANALYSIS_OUTCOME_CLEAN:
+      return IREE_SV("clean");
+    case LOOM_TARGET_COMPILE_REPORT_ARTIFACT_ANALYSIS_OUTCOME_REJECTED:
+      return IREE_SV("rejected");
+    case LOOM_TARGET_COMPILE_REPORT_ARTIFACT_ANALYSIS_OUTCOME_ERROR:
+      return IREE_SV("error");
+    case LOOM_TARGET_COMPILE_REPORT_ARTIFACT_ANALYSIS_OUTCOME_NONE:
+    default:
+      return IREE_SV("none");
+  }
+}
+
 iree_string_view_t loom_target_compile_report_source_low_selection_name(
     loom_target_compile_report_source_low_selection_kind_t kind) {
   switch (kind) {

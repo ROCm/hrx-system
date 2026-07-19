@@ -381,6 +381,13 @@ void loom_target_compile_report_record_artifact_size(
   report->artifact_size = artifact_size;
 }
 
+void loom_target_compile_report_record_artifact_analysis(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_artifact_analysis_t* analysis) {
+  report->artifact_analysis = *analysis;
+  report->detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_ARTIFACT_ANALYSIS;
+}
+
 void loom_target_compile_report_record_schedule(
     loom_target_compile_report_t* report, uint64_t node_count,
     uint64_t scheduled_node_count, uint64_t dependency_count,

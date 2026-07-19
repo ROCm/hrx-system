@@ -53,6 +53,8 @@ extern const loom_target_compile_report_move_cause_descriptor_t
 
 iree_string_view_t loom_target_compile_report_artifact_kind_name(
     loom_target_compile_artifact_kind_t kind);
+iree_string_view_t loom_target_compile_report_artifact_analysis_outcome_name(
+    loom_target_compile_report_artifact_analysis_outcome_t outcome);
 iree_string_view_t loom_target_compile_report_source_low_selection_name(
     loom_target_compile_report_source_low_selection_kind_t kind);
 

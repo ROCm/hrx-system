@@ -316,6 +316,36 @@ static iree_status_t loom_target_compile_report_format_summary(
       iree_string_builder_append_string(builder, IREE_SV("\n")));
 
   if (iree_any_bit_set(report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_ARTIFACT_ANALYSIS)) {
+    const loom_target_compile_report_artifact_analysis_t* analysis =
+        &report->artifact_analysis;
+    const iree_string_view_t analyzer =
+        loom_target_compile_report_text_non_empty(analysis->analyzer_name);
+    const iree_string_view_t outcome =
+        loom_target_compile_report_artifact_analysis_outcome_name(
+            analysis->outcome);
+    const iree_string_view_t target =
+        loom_target_compile_report_text_non_empty(analysis->artifact_target);
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        "COMPILE-REPORT: artifact_analysis analyzer=%.*s abi_version=%" PRIu32
+        " outcome=%.*s artifact_target=%.*s instructions_analyzed=%" PRIu64
+        " memory_events_tracked=%" PRIu64 " functions_discovered=%" PRIu64
+        " functions_analyzed=%" PRIu64 " findings_observed=%" PRIu64
+        " findings_reported=%" PRIu64
+        " findings_truncated=%s stopped_early=%s complete=%s passed=%s\n",
+        (int)analyzer.size, analyzer.data, analysis->analyzer_abi_version,
+        (int)outcome.size, outcome.data, (int)target.size, target.data,
+        analysis->instruction_count, analysis->memory_event_count,
+        analysis->function_count, analysis->analyzed_function_count,
+        analysis->finding_count, analysis->reported_finding_count,
+        analysis->findings_truncated ? "true" : "false",
+        analysis->stopped_early ? "true" : "false",
+        analysis->complete ? "true" : "false",
+        analysis->passed ? "true" : "false"));
+  }
+
+  if (iree_any_bit_set(report->detail_flags,
                        LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE)) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
