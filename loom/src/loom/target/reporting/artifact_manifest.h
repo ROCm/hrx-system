@@ -217,6 +217,8 @@ enum loom_target_artifact_manifest_execution_flag_bits_e {
   LOOM_TARGET_ARTIFACT_MANIFEST_EXECUTION_FLAG_WORKGROUP_SIZE = 1u << 0,
   // Indicates that subgroup_size carries a static subgroup or wavefront size.
   LOOM_TARGET_ARTIFACT_MANIFEST_EXECUTION_FLAG_SUBGROUP_SIZE = 1u << 1,
+  // Indicates that cluster_size carries a static x/y/z workgroup-cluster size.
+  LOOM_TARGET_ARTIFACT_MANIFEST_EXECUTION_FLAG_CLUSTER_SIZE = 1u << 2,
 };
 
 typedef struct loom_target_artifact_manifest_execution_t {
@@ -226,6 +228,8 @@ typedef struct loom_target_artifact_manifest_execution_t {
   uint32_t workgroup_size[3];
   // Static subgroup or wavefront size when SUBGROUP_SIZE is set.
   uint32_t subgroup_size;
+  // Static workgroup-cluster size when CLUSTER_SIZE is set.
+  uint32_t cluster_size[3];
 } loom_target_artifact_manifest_execution_t;
 
 typedef struct loom_target_artifact_manifest_function_t {

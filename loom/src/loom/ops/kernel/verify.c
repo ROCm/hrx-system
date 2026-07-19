@@ -99,6 +99,29 @@ static iree_status_t loom_kernel_verify_def_contract(
   return iree_ok_status();
 }
 
+iree_status_t loom_kernel_launch_config_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  (void)module;
+  const uint32_t cluster_dimension_count =
+      (uint32_t)loom_kernel_launch_config_workgroup_cluster_size_x_is_present(
+          op) +
+      (uint32_t)loom_kernel_launch_config_workgroup_cluster_size_y_is_present(
+          op) +
+      (uint32_t)loom_kernel_launch_config_workgroup_cluster_size_z_is_present(
+          op);
+  if (cluster_dimension_count == 0 || cluster_dimension_count == 3) {
+    return iree_ok_status();
+  }
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(IREE_SV("kernel.launch.config")),
+      loom_param_u32(op->operand_count),
+      loom_param_u32(9),
+  };
+  return loom_kernel_emit(emitter, op, LOOM_ERR_STRUCTURE_001, params,
+                          IREE_ARRAYSIZE(params));
+}
+
 static iree_status_t loom_kernel_emit_operand_constraint(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
     iree_string_view_t operand_name, loom_type_t actual_type,

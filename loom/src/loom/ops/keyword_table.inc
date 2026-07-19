@@ -80,3 +80,4 @@
     [LOOM_KW_NAME] = (const uint8_t*)"\x04" "name",
     [LOOM_KW_ALIGN] = (const uint8_t*)"\x05" "align",
     [LOOM_KW_BLOCKS] = (const uint8_t*)"\x06" "blocks",
+    [LOOM_KW_CLUSTER_SIZE] = (const uint8_t*)"\x0c" "cluster_size",

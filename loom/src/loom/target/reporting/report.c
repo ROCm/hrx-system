@@ -618,6 +618,12 @@ static bool loom_target_compile_report_workgroup_counts_equal(
   return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
 }
 
+static bool loom_target_compile_report_workgroup_cluster_sizes_equal(
+    loom_target_workgroup_cluster_size_t lhs,
+    loom_target_workgroup_cluster_size_t rhs) {
+  return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
+}
+
 static bool loom_target_compile_report_checked_mul3_u32(uint32_t x, uint32_t y,
                                                         uint32_t z,
                                                         uint64_t* out_result) {
@@ -688,6 +694,37 @@ void loom_target_compile_report_record_workload(
               merged.workgroup_count.z, &merged.dispatch_workgroup_count)) {
         merged.flags |=
             LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT;
+      }
+    }
+
+    bool has_workgroup_cluster_size = iree_any_bit_set(
+        report->workload.flags,
+        LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE);
+    if (iree_any_bit_set(
+            workload->flags,
+            LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE)) {
+      if (!has_workgroup_cluster_size) {
+        merged.workgroup_cluster_size = workload->workgroup_cluster_size;
+        has_workgroup_cluster_size = true;
+      } else if (loom_target_compile_report_workgroup_cluster_sizes_equal(
+                     report->workload.workgroup_cluster_size,
+                     workload->workgroup_cluster_size)) {
+        merged.workgroup_cluster_size = report->workload.workgroup_cluster_size;
+      } else {
+        has_workgroup_cluster_size = false;
+      }
+    } else if (has_workgroup_cluster_size) {
+      merged.workgroup_cluster_size = report->workload.workgroup_cluster_size;
+    }
+    if (has_workgroup_cluster_size) {
+      merged.flags |=
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE;
+      if (loom_target_compile_report_checked_mul3_u32(
+              merged.workgroup_cluster_size.x, merged.workgroup_cluster_size.y,
+              merged.workgroup_cluster_size.z,
+              &merged.flat_workgroup_cluster_size)) {
+        merged.flags |=
+            LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_CLUSTER_SIZE;
       }
     }
 
@@ -809,6 +846,12 @@ static void loom_target_compile_report_merge_workload(
     flags &= ~LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT;
   }
   if (iree_any_bit_set(
+          flags, LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE) &&
+      !loom_target_compile_report_workgroup_cluster_sizes_equal(
+          target->workgroup_cluster_size, source->workgroup_cluster_size)) {
+    flags &= ~LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE;
+  }
+  if (iree_any_bit_set(
           flags, LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE) &&
       target->flat_workgroup_size != source->flat_workgroup_size) {
     flags &= ~LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE;
@@ -824,6 +867,13 @@ static void loom_target_compile_report_merge_workload(
       target->dispatch_workitem_count != source->dispatch_workitem_count) {
     flags &= ~LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT;
   }
+  if (iree_any_bit_set(
+          flags,
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_CLUSTER_SIZE) &&
+      target->flat_workgroup_cluster_size !=
+          source->flat_workgroup_cluster_size) {
+    flags &= ~LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_CLUSTER_SIZE;
+  }
   target->flags = flags;
   if (!iree_any_bit_set(flags,
                         LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE)) {
@@ -832,6 +882,10 @@ static void loom_target_compile_report_merge_workload(
   if (!iree_any_bit_set(flags,
                         LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT)) {
     target->workgroup_count = (loom_target_dispatch_workgroup_count_t){0};
+  }
+  if (!iree_any_bit_set(
+          flags, LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE)) {
+    target->workgroup_cluster_size = (loom_target_workgroup_cluster_size_t){0};
   }
   if (!iree_any_bit_set(
           flags, LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE)) {
@@ -845,6 +899,11 @@ static void loom_target_compile_report_merge_workload(
   if (!iree_any_bit_set(
           flags, LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT)) {
     target->dispatch_workitem_count = 0;
+  }
+  if (!iree_any_bit_set(
+          flags,
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_CLUSTER_SIZE)) {
+    target->flat_workgroup_cluster_size = 0;
   }
 }
 

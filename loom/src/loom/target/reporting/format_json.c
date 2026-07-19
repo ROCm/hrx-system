@@ -758,6 +758,20 @@ static iree_status_t loom_target_compile_report_format_workload_json(
   }
   if (iree_any_bit_set(
           workload->flags,
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE)) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("cluster_size")));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_format_dimension3_json(
+        workload->workgroup_cluster_size.x, workload->workgroup_cluster_size.y,
+        workload->workgroup_cluster_size.z,
+        workload->flat_workgroup_cluster_size,
+        iree_any_bit_set(
+            workload->flags,
+            LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_CLUSTER_SIZE),
+        stream));
+  }
+  if (iree_any_bit_set(
+          workload->flags,
           LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT)) {
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
         &object, IREE_SV("dispatch_workitem_count"),

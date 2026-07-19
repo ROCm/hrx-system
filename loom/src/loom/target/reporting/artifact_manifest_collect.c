@@ -193,6 +193,15 @@ static void loom_target_artifact_manifest_set_workgroup_size(
   execution->workgroup_size[2] = workgroup_size.z;
 }
 
+static void loom_target_artifact_manifest_set_cluster_size(
+    loom_target_artifact_manifest_execution_t* execution,
+    loom_target_workgroup_cluster_size_t cluster_size) {
+  execution->flags |= LOOM_TARGET_ARTIFACT_MANIFEST_EXECUTION_FLAG_CLUSTER_SIZE;
+  execution->cluster_size[0] = cluster_size.x;
+  execution->cluster_size[1] = cluster_size.y;
+  execution->cluster_size[2] = cluster_size.z;
+}
+
 static bool loom_target_artifact_manifest_workgroup_size_is_concrete(
     loom_target_workgroup_size_t size) {
   return size.x != 0 && size.y != 0 && size.z != 0;
@@ -382,6 +391,14 @@ static void loom_target_artifact_manifest_collect_execution(
                                                   &low_workgroup_size)) {
       loom_target_artifact_manifest_set_workgroup_size(out_execution,
                                                        low_workgroup_size);
+    }
+  }
+  if (loom_low_kernel_def_isa(entry->func.op)) {
+    loom_target_workgroup_cluster_size_t low_cluster_size = {0};
+    if (loom_low_kernel_def_static_workgroup_cluster_size(entry->func.op,
+                                                          &low_cluster_size)) {
+      loom_target_artifact_manifest_set_cluster_size(out_execution,
+                                                     low_cluster_size);
     }
   }
   if (entry->bundle_storage.snapshot.subgroup_size != 0) {

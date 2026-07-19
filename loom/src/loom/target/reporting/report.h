@@ -510,6 +510,10 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT = 1u << 3,
   // |dispatch_workitem_count| is populated.
   LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT = 1u << 4,
+  // |workgroup_cluster_size| is populated.
+  LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE = 1u << 5,
+  // |flat_workgroup_cluster_size| is populated.
+  LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_CLUSTER_SIZE = 1u << 6,
 };
 
 // Static launch workload facts proven for a compiled entry or shared by every
@@ -521,10 +525,14 @@ typedef struct loom_target_compile_report_workload_t {
   loom_target_workgroup_size_t workgroup_size;
   // Static dispatch workgroup count.
   loom_target_dispatch_workgroup_count_t workgroup_count;
+  // Static nontrivial workgroup-cluster size.
+  loom_target_workgroup_cluster_size_t workgroup_cluster_size;
   // Product of workgroup_size x/y/z.
   uint64_t flat_workgroup_size;
   // Product of workgroup_count x/y/z.
   uint64_t dispatch_workgroup_count;
+  // Product of workgroup_cluster_size x/y/z.
+  uint64_t flat_workgroup_cluster_size;
   // Product of flat workgroup size and dispatch workgroup count.
   uint64_t dispatch_workitem_count;
 } loom_target_compile_report_workload_t;

@@ -748,6 +748,9 @@ enum {
   LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_SIZE = 1u << 0,
   // |static_workgroup_count| was proven from the source launch config.
   LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_COUNT = 1u << 1,
+  // |static_workgroup_cluster_size| was proven from a nontrivial source
+  // workgroup-cluster launch config.
+  LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_CLUSTER_SIZE = 1u << 2,
 };
 
 typedef struct loom_low_lower_result_t {
@@ -772,6 +775,8 @@ typedef struct loom_low_lower_result_t {
   loom_target_workgroup_size_t static_workgroup_size;
   // Proven dispatch workgroup count from the source kernel launch config.
   loom_target_dispatch_workgroup_count_t static_workgroup_count;
+  // Proven nontrivial workgroup-cluster size from the source launch config.
+  loom_target_workgroup_cluster_size_t static_workgroup_cluster_size;
   // Allocator used for owned source-low report rows.
   iree_allocator_t report_allocator;
   // Allocator used for owned source-memory packet report row storage.

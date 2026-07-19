@@ -55,4 +55,17 @@ loom_generated_cc_library(
     loom::util::walk
 )
 
+loom_cc_test(
+  NAME
+    launch_config_test
+  SRCS
+    "launch_config_test.cc"
+  DEPS
+    ::kernel
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::error::error_defs
+    loom::testing::diagnostic_matchers
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

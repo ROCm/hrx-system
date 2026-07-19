@@ -340,7 +340,7 @@ kernel_launch_config = Op(
     "kernel.launch.config",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
-    doc=("Terminate a kernel launch configuration region with the computed workgroup grid and required workgroup size."),
+    doc=("Terminate a kernel launch configuration region with the computed workgroup grid, required workgroup size, and optional static workgroup-cluster size."),
     operands=[
         Operand(
             "workgroup_count_x",
@@ -372,8 +372,27 @@ kernel_launch_config = Op(
             INDEX,
             doc="Required workgroup size in the z dimension.",
         ),
+        Operand(
+            "workgroup_cluster_size_x",
+            INDEX,
+            optional=True,
+            doc="Static workgroup-cluster size in the x dimension.",
+        ),
+        Operand(
+            "workgroup_cluster_size_y",
+            INDEX,
+            optional=True,
+            doc="Static workgroup-cluster size in the y dimension.",
+        ),
+        Operand(
+            "workgroup_cluster_size_z",
+            INDEX,
+            optional=True,
+            doc="Static workgroup-cluster size in the z dimension.",
+        ),
     ],
     traits=[TERMINATOR, HasParent("kernel.def")],
+    verify="loom_kernel_launch_config_verify",
     format=[
         kw("workgroups"),
         GLUE,
@@ -395,11 +414,27 @@ kernel_launch_config = Op(
         Ref("workgroup_size_z"),
         GLUE,
         RPAREN,
+        OptionalGroup(
+            [
+                kw("cluster_size"),
+                GLUE,
+                LPAREN,
+                Ref("workgroup_cluster_size_x"),
+                COMMA,
+                Ref("workgroup_cluster_size_y"),
+                COMMA,
+                Ref("workgroup_cluster_size_z"),
+                GLUE,
+                RPAREN,
+            ],
+            anchor="workgroup_cluster_size_x",
+        ),
         COLON,
         TypeOf("workgroup_count_x"),
     ],
     examples=[
         "kernel.launch.config workgroups(%gx, %gy, %gz) workgroup_size(%sx, %sy, %sz) : index",
+        "kernel.launch.config workgroups(%gx, %gy, %gz) workgroup_size(%sx, %sy, %sz) cluster_size(%cx, %cy, %cz) : index",
     ],
 )
 

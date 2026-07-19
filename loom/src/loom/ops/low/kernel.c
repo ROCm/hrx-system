@@ -45,3 +45,19 @@ bool loom_low_kernel_def_static_workgroup_count(
   };
   return true;
 }
+
+bool loom_low_kernel_def_static_workgroup_cluster_size(
+    const loom_op_t* op, loom_target_workgroup_cluster_size_t* out_size) {
+  *out_size = (loom_target_workgroup_cluster_size_t){0};
+  if (!loom_low_kernel_def_isa(op) ||
+      !loom_low_optional_attr_is_present(
+          op, loom_low_kernel_def_workgroup_cluster_size_x_ATTR_INDEX)) {
+    return false;
+  }
+  *out_size = (loom_target_workgroup_cluster_size_t){
+      .x = (uint32_t)loom_low_kernel_def_workgroup_cluster_size_x(op),
+      .y = (uint32_t)loom_low_kernel_def_workgroup_cluster_size_y(op),
+      .z = (uint32_t)loom_low_kernel_def_workgroup_cluster_size_z(op),
+  };
+  return true;
+}

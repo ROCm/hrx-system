@@ -140,6 +140,21 @@ static iree_status_t loom_target_compile_report_append_workload_fields(
   }
   if (iree_any_bit_set(
           workload->flags,
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, " cluster_size=%" PRIu32 "x%" PRIu32 "x%" PRIu32,
+        workload->workgroup_cluster_size.x, workload->workgroup_cluster_size.y,
+        workload->workgroup_cluster_size.z));
+  }
+  if (iree_any_bit_set(
+          workload->flags,
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_CLUSTER_SIZE)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, " flat_cluster_size=%" PRIu64,
+        workload->flat_workgroup_cluster_size));
+  }
+  if (iree_any_bit_set(
+          workload->flags,
           LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT)) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, " dispatch_workitem_count=%" PRIu64,

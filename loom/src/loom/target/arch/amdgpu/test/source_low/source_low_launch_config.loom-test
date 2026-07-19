@@ -18,6 +18,85 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @static_cluster_size_uses_facts() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c32 = index.constant 32 : index
+  %cluster_y = index.mul %c1, %c2 : index
+  kernel.launch.config workgroups(%c4, %c4, %c1) workgroup_size(%c32, %c1, %c1) cluster_size(%c1, %cluster_y, %c1) : index
+} launch() {
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(4, 4, 1) cluster_size(1, 2, 1) @static_cluster_size_uses_facts() asm<amdgpu.rdna4.gfx125x.core> {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @trivial_cluster_size_canonicalizes() {
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) cluster_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @trivial_cluster_size_canonicalizes() asm<amdgpu.rdna3.core> {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @dynamic_cluster_size_rejected(%cluster_y: index) {
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c32 = index.constant 32 : index
+  // ERROR@+1: TARGET/062
+  kernel.launch.config workgroups(%c4, %c4, %c1) workgroup_size(%c32, %c1, %c1) cluster_size(%c1, %cluster_y, %c1) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @overflowing_cluster_size_rejected() {
+  %c1 = index.constant 1 : index
+  %c65536 = index.constant 65536 : index
+  // ERROR@+1: TARGET/063 {cluster_size_x="65536", cluster_size_y="65536", cluster_size_z="65536"}
+  kernel.launch.config workgroups(%c65536, %c65536, %c1) workgroup_size(%c1, %c1, %c1) cluster_size(%c65536, %c65536, %c65536) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @partial_cluster_grid_rejected() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  // ERROR@+1: TARGET/064 {axis="y", workgroup_count="3", cluster_size="2"}
+  kernel.launch.config workgroups(%c4, %c3, %c1) workgroup_size(%c1, %c1, %c1) cluster_size(%c1, %c2, %c1) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
 amdgpu.target<gfx1100> @target
 
 kernel.def target(@target) @exact_workgroup_count_uses_facts() {

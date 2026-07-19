@@ -170,7 +170,7 @@ iree_status_t loom_kernel_def_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_KERNEL_LAUNCH_CONFIG: Terminate a kernel launch configuration region with the computed workgroup grid and required workgroup size.
+// LOOM_OP_KERNEL_LAUNCH_CONFIG: Terminate a kernel launch configuration region with the computed workgroup grid, required workgroup size, and optional static workgroup-cluster size.
 // kernel.launch.config workgroups(%gx, %gy, %gz) workgroup_size(%sx, %sy, %sz) : index
 LOOM_DEFINE_ISA(loom_kernel_launch_config_isa, LOOM_OP_KERNEL_LAUNCH_CONFIG)
 LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_count_x, 0)
@@ -179,16 +179,32 @@ LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_count_z, 2)
 LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_size_x, 3)
 LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_size_y, 4)
 LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_size_z, 5)
+LOOM_DEFINE_OPTIONAL_OPERAND(loom_kernel_launch_config_workgroup_cluster_size_x, 6)
+LOOM_DEFINE_OPTIONAL_OPERAND(loom_kernel_launch_config_workgroup_cluster_size_y, 7)
+LOOM_DEFINE_OPTIONAL_OPERAND(loom_kernel_launch_config_workgroup_cluster_size_z, 8)
+enum loom_kernel_launch_config_build_flag_bits_e {
+  LOOM_KERNEL_LAUNCH_CONFIG_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_X = 1u << 0,
+  LOOM_KERNEL_LAUNCH_CONFIG_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Y = 1u << 1,
+  LOOM_KERNEL_LAUNCH_CONFIG_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Z = 1u << 2,
+};
+typedef uint32_t loom_kernel_launch_config_build_flags_t;
 iree_status_t loom_kernel_launch_config_build(
     loom_builder_t* builder,
+    loom_kernel_launch_config_build_flags_t build_flags,
     loom_value_id_t workgroup_count_x,
     loom_value_id_t workgroup_count_y,
     loom_value_id_t workgroup_count_z,
     loom_value_id_t workgroup_size_x,
     loom_value_id_t workgroup_size_y,
     loom_value_id_t workgroup_size_z,
+    loom_optional loom_value_id_t workgroup_cluster_size_x,
+    loom_optional loom_value_id_t workgroup_cluster_size_y,
+    loom_optional loom_value_id_t workgroup_cluster_size_z,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_kernel_launch_config_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_KERNEL_RETURN: Return from a dispatchable kernel entry.
 // kernel.return

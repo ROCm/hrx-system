@@ -33,6 +33,17 @@ loom_value_id_t loom_kernel_launch_config_workgroup_count_operand(
 loom_value_id_t loom_kernel_launch_config_workgroup_size_operand(
     const loom_op_t* launch_config, loom_kernel_dimension_t dimension);
 
+// Returns true when |launch_config| carries an explicit workgroup-cluster
+// size. Verified launch configs carry either all three dimensions or none.
+bool loom_kernel_launch_config_has_workgroup_cluster_size(
+    const loom_op_t* launch_config);
+
+// Returns the workgroup-cluster size operand for |dimension| from a launch
+// config terminator, or LOOM_VALUE_ID_INVALID when the cluster size is absent,
+// |launch_config| is not a launch config terminator, or |dimension| is invalid.
+loom_value_id_t loom_kernel_launch_config_workgroup_cluster_size_operand(
+    const loom_op_t* launch_config, loom_kernel_dimension_t dimension);
+
 // Resolves a fully static required workgroup size from |kernel_op|'s launch
 // config terminator. Dynamic dimensions are represented by returning false;
 // callers that need a static target contract must emit their own diagnostic at
@@ -62,6 +73,21 @@ bool loom_kernel_def_static_workgroup_count_from_facts(
     const loom_module_t* module, const loom_op_t* kernel_op,
     const loom_value_fact_table_t* facts,
     loom_target_dispatch_workgroup_count_t* out_count);
+
+// Resolves a fully static positive workgroup-cluster size from |kernel_op|'s
+// launch config terminator. Returns false when the cluster size is absent or
+// any dimension is dynamic, zero, or outside the u32 range.
+bool loom_kernel_def_static_workgroup_cluster_size(
+    const loom_module_t* module, const loom_op_t* kernel_op,
+    loom_target_workgroup_cluster_size_t* out_size);
+
+// Resolves a fully static positive workgroup-cluster size using exact facts
+// for the launch config operands. Falls back to direct constant inspection
+// when facts are unavailable.
+bool loom_kernel_def_static_workgroup_cluster_size_from_facts(
+    const loom_module_t* module, const loom_op_t* kernel_op,
+    const loom_value_fact_table_t* facts,
+    loom_target_workgroup_cluster_size_t* out_size);
 
 #ifdef __cplusplus
 }  // extern "C"

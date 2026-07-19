@@ -104,16 +104,22 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
       LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT |
       LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE |
       LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT |
-      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT;
+      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT |
+      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE |
+      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_CLUSTER_SIZE;
   workload.workgroup_size.x = 64;
   workload.workgroup_size.y = 2;
   workload.workgroup_size.z = 1;
   workload.workgroup_count.x = 8;
   workload.workgroup_count.y = 4;
   workload.workgroup_count.z = 1;
+  workload.workgroup_cluster_size.x = 1;
+  workload.workgroup_cluster_size.y = 2;
+  workload.workgroup_cluster_size.z = 1;
   workload.flat_workgroup_size = 128;
   workload.dispatch_workgroup_count = 32;
   workload.dispatch_workitem_count = 4096;
+  workload.flat_workgroup_cluster_size = 2;
   loom_target_compile_report_record_workload(&report, &workload);
 
   loom_target_compile_report_target_resources_t resources = {};
@@ -145,6 +151,9 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   EXPECT_NE(
       iree_string_view_find(text, IREE_SV("workload workgroup_size=64x2x1"), 0),
       IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                text, IREE_SV("cluster_size=1x2x1 flat_cluster_size=2"), 0),
+            IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
       iree_string_view_find(
           text, IREE_SV("target_resources scalar_register_class=amdgpu.sgpr"),
@@ -177,6 +186,12 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
       LookupObject(workload_json, IREE_SV("workgroup_size"));
   ExpectObjectUint64Equals(workgroup_size, IREE_SV("x"), 64);
   ExpectObjectUint64Equals(workgroup_size, IREE_SV("flat"), 128);
+  const iree_string_view_t cluster_size =
+      LookupObject(workload_json, IREE_SV("cluster_size"));
+  ExpectObjectUint64Equals(cluster_size, IREE_SV("x"), 1);
+  ExpectObjectUint64Equals(cluster_size, IREE_SV("y"), 2);
+  ExpectObjectUint64Equals(cluster_size, IREE_SV("z"), 1);
+  ExpectObjectUint64Equals(cluster_size, IREE_SV("flat"), 2);
   ExpectObjectUint64Equals(workload_json, IREE_SV("dispatch_workitem_count"),
                            4096);
   const iree_string_view_t mix =
