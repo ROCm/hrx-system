@@ -541,6 +541,7 @@ iree_runtime_cc_test(
     srcs = ["aql_ring_test.cc"],
     deps = [
         ":libhsa",
+        ":packet",
         ":queue_primitives",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal/drivers/amdgpu/abi",

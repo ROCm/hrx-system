@@ -131,6 +131,127 @@ static inline uint16_t iree_hal_amdgpu_aql_emit_dispatch(
                                          packet_control);
 }
 
+// Inputs for one AMD extended kernel dispatch packet.
+typedef struct iree_hal_amdgpu_aql_extended_dispatch_params_t {
+  // Kernel object handle returned by the HSA executable loader.
+  uint64_t kernel_object;
+  // Kernel argument storage, which must remain live through completion.
+  const void* kernarg_address;
+  // Workgroup size in work-items. Every dimension must be nonzero.
+  uint16_t workgroup_size[3];
+  // Direct dispatch size in workgroups. Every dimension must be nonzero.
+  uint32_t workgroup_count[3];
+  // Workgroup cluster shape. Values must be positive u8-compatible and the
+  // complete shape must be nontrivial.
+  uint32_t cluster_size[3];
+  // Private segment byte size per work-item.
+  uint32_t private_segment_size;
+  // Group segment byte size per workgroup.
+  uint32_t group_segment_size;
+  // Header barrier and fence policy.
+  iree_hal_amdgpu_aql_packet_control_t packet_control;
+  // Optional signal decremented when the dispatch completes.
+  iree_hsa_signal_t completion_signal;
+} iree_hal_amdgpu_aql_extended_dispatch_params_t;
+
+// Validates and populates an AMD extended kernel dispatch packet body.
+//
+// Workgroup counts must divide exactly by the cluster shape. The resulting Y
+// and Z cluster counts must fit their 16-bit packet fields; X has a 32-bit
+// field. The full work-item grid in every dimension must remain u32-compatible
+// with the ordinary HAL dispatch contract.
+//
+// The explicit dependency signal and performance hints are zero because HAL
+// queue sequencing supplies dependencies with preceding AQL packets. The first
+// packet dword remains untouched until the caller passes |out_header| and
+// |out_setup| to iree_hal_amdgpu_aql_ring_commit(). The upper commit halfword
+// in |out_setup| contains both the AMD format byte and the dispatch setup byte.
+// On failure the packet body is unchanged and both commit outputs are zero.
+static inline iree_status_t iree_hal_amdgpu_aql_emit_extended_dispatch(
+    iree_hsa_amd_ext_kernel_dispatch_packet_t* packet,
+    const iree_hal_amdgpu_aql_extended_dispatch_params_t* params,
+    uint16_t* out_header, uint16_t* out_setup) {
+  *out_header = 0;
+  *out_setup = 0;
+
+  uint32_t cluster_count[3] = {0};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(cluster_count); ++i) {
+    if (IREE_UNLIKELY(params->workgroup_size[i] == 0)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "extended dispatch workgroup size dimension %u must be nonzero",
+          (unsigned)i);
+    }
+    if (IREE_UNLIKELY(params->workgroup_count[i] == 0)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "extended dispatch workgroup count dimension %u must be nonzero",
+          (unsigned)i);
+    }
+    if (IREE_UNLIKELY(params->cluster_size[i] == 0 ||
+                      params->cluster_size[i] > UINT8_MAX)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "extended dispatch cluster size dimension %u must be a positive u8 "
+          "value; got %u",
+          (unsigned)i, (unsigned)params->cluster_size[i]);
+    }
+    if (IREE_UNLIKELY(params->workgroup_count[i] >
+                      UINT32_MAX / params->workgroup_size[i])) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "extended dispatch work-item grid dimension %u exceeds u32",
+          (unsigned)i);
+    }
+    if (IREE_UNLIKELY(params->workgroup_count[i] % params->cluster_size[i] !=
+                      0)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "extended dispatch workgroup count dimension %u is not divisible "
+          "by its cluster size",
+          (unsigned)i);
+    }
+    cluster_count[i] = params->workgroup_count[i] / params->cluster_size[i];
+    if (IREE_UNLIKELY(i != 0 && cluster_count[i] > UINT16_MAX)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "extended dispatch cluster count dimension %u exceeds u16",
+          (unsigned)i);
+    }
+  }
+  if (IREE_UNLIKELY(params->cluster_size[0] == 1 &&
+                    params->cluster_size[1] == 1 &&
+                    params->cluster_size[2] == 1)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "extended dispatch requires a nontrivial workgroup cluster shape");
+  }
+
+  packet->workgroup_size[0] = params->workgroup_size[0];
+  packet->workgroup_size[1] = params->workgroup_size[1];
+  packet->workgroup_size[2] = params->workgroup_size[2];
+  packet->reserved0 = 0;
+  packet->cluster_count_x = cluster_count[0];
+  packet->cluster_count_y = (uint16_t)cluster_count[1];
+  packet->cluster_count_z = (uint16_t)cluster_count[2];
+  packet->cluster_size[0] = (uint8_t)params->cluster_size[0];
+  packet->cluster_size[1] = (uint8_t)params->cluster_size[1];
+  packet->cluster_size[2] = (uint8_t)params->cluster_size[2];
+  packet->perf_hint = 0;
+  packet->private_segment_size = params->private_segment_size;
+  packet->group_segment_size = params->group_segment_size;
+  packet->kernel_object = params->kernel_object;
+  packet->kernarg_address = (void*)params->kernarg_address;
+  packet->dep_signal = iree_hsa_signal_null();
+  packet->completion_signal = params->completion_signal;
+
+  *out_header = iree_hal_amdgpu_aql_make_header(
+      IREE_HSA_PACKET_TYPE_VENDOR_SPECIFIC, params->packet_control);
+  *out_setup =
+      (uint16_t)IREE_HSA_AMD_AQL_FORMAT_EXT_KERNEL_DISPATCH | (3u << 8);
+  return iree_ok_status();
+}
+
 // Populates an AMD barrier-value packet and returns the 16-bit AQL header.
 // The vendor packet's upper 16 commit bits carry AmdFormat/reserved instead of
 // the normal dispatch setup field and are returned in |out_setup|.

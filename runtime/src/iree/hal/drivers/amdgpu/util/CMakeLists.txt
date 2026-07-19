@@ -756,6 +756,7 @@ iree_cc_test(
     "aql_ring_test.cc"
   DEPS
     ::libhsa
+    ::packet
     ::queue_primitives
     iree::base
     iree::hal::drivers::amdgpu::abi
