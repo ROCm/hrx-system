@@ -42,6 +42,7 @@ loom_generated_cc_library(
     loom::ops::buffer
     loom::ops::cache
     loom::ops::combining
+    loom::ops::func
     loom::ops::func_symbol_facts
     loom::ops::index
     loom::ops::op_defs

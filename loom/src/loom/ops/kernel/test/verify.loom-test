@@ -816,6 +816,19 @@ func.def @async_wait_rejects_large_newer_group_count(%group: kernel.async.group)
 
 test.target<low_core> @test_target
 
+func.decl noinline @runtime_group() -> (kernel.async.group)
+
+func.def @async_wait_rejects_runtime_call_group() {
+  %group = func.call @runtime_group() : () -> (kernel.async.group)
+  // ERROR@+1: DOMINANCE/010 "group" "func.call" "kernel.async.group result"
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 func.def @async_group_rejects_group_operand_as_token() {
   %empty = kernel.async.group -> kernel.async.group
   // ERROR@+1: TYPE/003 "tokens" "kernel.async.group" "kernel.async.token"
