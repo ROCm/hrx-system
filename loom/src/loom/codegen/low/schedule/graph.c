@@ -1400,28 +1400,11 @@ static iree_status_t loom_low_schedule_effect_frontier_note_ordered(
   return iree_ok_status();
 }
 
-static uint16_t loom_low_schedule_descriptor_dependency_memory_effect_count(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor) {
-  uint16_t count = 0;
-  for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
-    const loom_low_effect_t* effect =
-        &descriptor_set->effects[descriptor->effect_start + i];
-    if (!iree_any_bit_set(effect->flags, LOOM_LOW_EFFECT_FLAG_DEPENDENCY)) {
-      continue;
-    }
-    if (effect->kind == LOOM_LOW_EFFECT_KIND_READ ||
-        effect->kind == LOOM_LOW_EFFECT_KIND_WRITE) {
-      ++count;
-    }
-  }
-  return count;
-}
-
 static const loom_low_memory_access_summary_t*
 loom_low_schedule_lookup_memory_access_summary(
     loom_low_schedule_build_state_t* state, uint32_t node_index,
-    const loom_low_descriptor_t* descriptor) {
+    const loom_low_descriptor_t* descriptor,
+    const loom_low_effect_t* selected_effect) {
   const uint32_t record_index =
       state->nodes[node_index].memory_access_record_index;
   if (record_index == LOOM_LOW_SCHEDULE_MEMORY_ACCESS_RECORD_NONE) {
@@ -1430,13 +1413,46 @@ loom_low_schedule_lookup_memory_access_summary(
   if (record_index >= state->memory_access_record_count) {
     return NULL;
   }
-  if (loom_low_schedule_descriptor_dependency_memory_effect_count(
-          state->target.descriptor_set, descriptor) != 1) {
-    return NULL;
-  }
   const loom_low_memory_access_record_t* record =
       &state->memory_access_records[record_index];
-  return &record->summary;
+  const loom_low_memory_access_summary_t* summary = &record->summary;
+
+  // A single dependency memory effect is unambiguous regardless of whether
+  // its descriptor space is generic. Multi-effect descriptors may refine the
+  // unique effect in the same concrete memory space as the source record.
+  // Ambiguous same-space effects remain conservative because a record does not
+  // yet identify an individual descriptor effect ordinal.
+  uint16_t dependency_memory_effect_count = 0;
+  uint16_t matching_memory_space_effect_count = 0;
+  const loom_low_memory_space_t summary_space =
+      loom_low_memory_access_normalize_space(summary->memory_space);
+  const loom_low_memory_space_t selected_space =
+      loom_low_memory_access_normalize_space(selected_effect->memory_space);
+  const loom_low_descriptor_set_t* descriptor_set =
+      state->target.descriptor_set;
+  for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
+    const loom_low_effect_t* effect =
+        &descriptor_set->effects[descriptor->effect_start + i];
+    if (!iree_any_bit_set(effect->flags, LOOM_LOW_EFFECT_FLAG_DEPENDENCY) ||
+        (effect->kind != LOOM_LOW_EFFECT_KIND_READ &&
+         effect->kind != LOOM_LOW_EFFECT_KIND_WRITE)) {
+      continue;
+    }
+    ++dependency_memory_effect_count;
+    if (summary_space != LOOM_LOW_MEMORY_SPACE_GENERIC &&
+        loom_low_memory_access_normalize_space(effect->memory_space) ==
+            summary_space) {
+      ++matching_memory_space_effect_count;
+    }
+  }
+  if (dependency_memory_effect_count == 1) {
+    return summary;
+  }
+  return summary_space != LOOM_LOW_MEMORY_SPACE_GENERIC &&
+                 selected_space == summary_space &&
+                 matching_memory_space_effect_count == 1
+             ? summary
+             : NULL;
 }
 
 static iree_status_t loom_low_schedule_note_descriptor_effects(
@@ -1446,9 +1462,6 @@ static iree_status_t loom_low_schedule_note_descriptor_effects(
   if (descriptor->effect_count == 0) {
     return iree_ok_status();
   }
-  const loom_low_memory_access_summary_t* source_summary =
-      loom_low_schedule_lookup_memory_access_summary(state, node_index,
-                                                     descriptor);
   const loom_low_descriptor_set_t* descriptor_set =
       state->target.descriptor_set;
   for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
@@ -1465,6 +1478,9 @@ static iree_status_t loom_low_schedule_note_descriptor_effects(
     if (!iree_any_bit_set(effect->flags, LOOM_LOW_EFFECT_FLAG_DEPENDENCY)) {
       continue;
     }
+    const loom_low_memory_access_summary_t* source_summary =
+        loom_low_schedule_lookup_memory_access_summary(state, node_index,
+                                                       descriptor, effect);
     switch (effect->kind) {
       case LOOM_LOW_EFFECT_KIND_READ: {
         loom_low_memory_access_summary_t summary =
