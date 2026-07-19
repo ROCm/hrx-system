@@ -12,6 +12,7 @@
 #include "iree/base/bitfield.h"
 #include "iree/base/internal/math.h"
 #include "loom/codegen/low/allocation.h"
+#include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/packet_hazard_plan_json.h"
 #include "loom/ir/ir.h"
@@ -685,6 +686,48 @@ static bool loom_amdgpu_wait_plan_node_has_wait_consuming_operands(
   return node->op == NULL || !loom_low_br_isa(node->op);
 }
 
+static const loom_low_allocation_edge_copy_group_t*
+loom_amdgpu_wait_plan_edge_copy_group(
+    const loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
+  if (builder->allocation == NULL ||
+      node_index >= builder->schedule->node_count) {
+    return NULL;
+  }
+  const loom_low_schedule_node_t* node = &builder->schedule->nodes[node_index];
+  if (node->op == NULL || !loom_low_br_isa(node->op)) {
+    return NULL;
+  }
+  return loom_low_allocation_find_edge_copy_group_by_source_ordinal(
+      builder->allocation, node->source_ordinal);
+}
+
+static bool loom_amdgpu_wait_plan_edge_copy_materializes(
+    const loom_amdgpu_wait_plan_builder_t* builder,
+    const loom_low_allocation_edge_copy_t* edge_copy) {
+  const loom_low_allocation_table_t* allocation = builder->allocation;
+  IREE_ASSERT_NE(allocation, NULL);
+  IREE_ASSERT_LT(edge_copy->source_assignment_index,
+                 allocation->assignment_count);
+  IREE_ASSERT_LT(edge_copy->destination_assignment_index,
+                 allocation->assignment_count);
+  const loom_low_allocation_assignment_t* source_assignment =
+      &allocation->assignments[edge_copy->source_assignment_index];
+  const loom_low_allocation_assignment_t* destination_assignment =
+      &allocation->assignments[edge_copy->destination_assignment_index];
+  IREE_ASSERT_LE(edge_copy->source_unit_offset,
+                 source_assignment->location_count);
+  IREE_ASSERT_LE(edge_copy->unit_count, source_assignment->location_count -
+                                            edge_copy->source_unit_offset);
+  IREE_ASSERT_LE(edge_copy->destination_unit_offset,
+                 destination_assignment->location_count);
+  IREE_ASSERT_LE(edge_copy->unit_count, destination_assignment->location_count -
+                                            edge_copy->destination_unit_offset);
+  return !loom_low_allocation_storage_assignment_subranges_equal(
+      builder->schedule->target.descriptor_set, source_assignment,
+      edge_copy->source_unit_offset, destination_assignment,
+      edge_copy->destination_unit_offset, edge_copy->unit_count);
+}
+
 static void loom_amdgpu_wait_plan_count_block_arg_sources(
     const loom_low_schedule_table_t* schedule,
     iree_host_size_t* out_block_arg_count, iree_host_size_t* out_source_count) {
@@ -955,6 +998,53 @@ static iree_status_t loom_amdgpu_wait_plan_visit_dependency_links(
     }
     loom_amdgpu_wait_plan_reverse_dependency_visit_range(
         builder->dependency_visit_worklist, range_begin, worklist_count);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_wait_plan_build_edge_copy_dependency_links(
+    loom_amdgpu_wait_plan_builder_t* builder, const uint32_t* producer_nodes,
+    iree_host_size_t value_count, uint32_t consumer_node) {
+  const loom_low_allocation_edge_copy_group_t* group =
+      loom_amdgpu_wait_plan_edge_copy_group(builder, consumer_node);
+  if (group == NULL) {
+    const loom_low_schedule_node_t* node =
+        &builder->schedule->nodes[consumer_node];
+    if (node->op != NULL && loom_low_br_isa(node->op) &&
+        loom_low_br_args(node->op).count != 0) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU wait planning requires allocation edge copies for low.br "
+          "payloads");
+    }
+    return iree_ok_status();
+  }
+  const loom_low_allocation_table_t* allocation = builder->allocation;
+  IREE_ASSERT_LE(group->copy_start, allocation->edge_copy_count);
+  IREE_ASSERT_LE(group->copy_count,
+                 allocation->edge_copy_count - group->copy_start);
+  for (uint32_t i = 0; i < group->copy_count; ++i) {
+    const loom_low_allocation_edge_copy_t* edge_copy =
+        &allocation->edge_copies[group->copy_start + i];
+    if (!loom_amdgpu_wait_plan_edge_copy_materializes(builder, edge_copy)) {
+      continue;
+    }
+    const loom_value_ordinal_t source_ordinal =
+        loom_module_value_ordinal_scratch_lookup(builder->schedule->module,
+                                                 edge_copy->source_value_id);
+    if (source_ordinal == LOOM_VALUE_ORDINAL_INVALID ||
+        source_ordinal >= value_count ||
+        builder->schedule->value_ids[source_ordinal] !=
+            edge_copy->source_value_id) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU edge-copy source is outside the scheduled value domain");
+    }
+    const uint32_t visit_epoch =
+        loom_amdgpu_wait_plan_begin_dependency_visit(builder);
+    IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_visit_dependency_links(
+        builder, producer_nodes, value_count, source_ordinal, consumer_node,
+        visit_epoch));
   }
   return iree_ok_status();
 }
@@ -1602,6 +1692,12 @@ static iree_status_t loom_amdgpu_wait_plan_build_dependency_links(
       continue;
     }
     const loom_low_schedule_node_t* node = &schedule->nodes[consumer_node];
+    if (node->op != NULL && loom_low_br_isa(node->op)) {
+      IREE_RETURN_IF_ERROR(
+          loom_amdgpu_wait_plan_build_edge_copy_dependency_links(
+              builder, producer_nodes, value_count, consumer_node));
+      continue;
+    }
     if (!loom_amdgpu_wait_plan_node_has_wait_consuming_operands(node)) {
       continue;
     }
