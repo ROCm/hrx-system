@@ -121,8 +121,10 @@ enum loom_amdgpu_storage_policy_e {
   LOOM_AMDGPU_STORAGE_VECTOR_CONSTRUCT_PLAN = 12,
   // Tensor-memory plans own their explicit D-group source values.
   LOOM_AMDGPU_STORAGE_ASYNC_TENSOR = 13,
+  // Cluster gather plans own both independently materialized addresses.
+  LOOM_AMDGPU_STORAGE_ASYNC_CLUSTER = 14,
   // Maximum storage-policy value accepted by dispatch row policy bits.
-  LOOM_AMDGPU_STORAGE_MAX = LOOM_AMDGPU_STORAGE_ASYNC_TENSOR,
+  LOOM_AMDGPU_STORAGE_MAX = LOOM_AMDGPU_STORAGE_ASYNC_CLUSTER,
 };
 
 enum loom_amdgpu_preselect_policy_e {
@@ -490,6 +492,16 @@ LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_kernel_async_gather_dispatch,
 LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_kernel_async_gather_dispatch,
                              loom_amdgpu_async_gather_plan_t,
                              loom_amdgpu_lower_kernel_async_gather)
+
+LOOM_AMDGPU_DEFINE_DATA_SELECT(
+    loom_amdgpu_select_kernel_async_cluster_gather_dispatch,
+    loom_amdgpu_cluster_gather_plan_t,
+    loom_amdgpu_select_kernel_async_cluster_gather_plan)
+
+LOOM_AMDGPU_DEFINE_DATA_EMIT(
+    loom_amdgpu_emit_kernel_async_cluster_gather_dispatch,
+    loom_amdgpu_cluster_gather_plan_t,
+    loom_amdgpu_lower_kernel_async_cluster_gather)
 
 LOOM_AMDGPU_DEFINE_DATA_SELECT(
     loom_amdgpu_select_kernel_async_tensor_load_dispatch,
@@ -1265,6 +1277,11 @@ static void loom_amdgpu_mark_plan_storage_demands(
       loom_amdgpu_mark_async_gather_plan_storage_demands(
           context, source_op,
           (const loom_amdgpu_async_gather_plan_t*)plan.target_data);
+      return;
+    case LOOM_AMDGPU_STORAGE_ASYNC_CLUSTER:
+      loom_amdgpu_mark_cluster_gather_plan_storage_demands(
+          context, source_op,
+          (const loom_amdgpu_cluster_gather_plan_t*)plan.target_data);
       return;
     case LOOM_AMDGPU_STORAGE_ASYNC_TENSOR:
       loom_amdgpu_mark_tensor_load_plan_storage_demands(

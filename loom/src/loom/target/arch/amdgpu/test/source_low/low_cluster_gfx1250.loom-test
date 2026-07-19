@@ -1,0 +1,35 @@
+// RUN: emit amdgpu-assembly @cluster_widths_and_wait waits=none fixed=%lds:physical_register:0:1 fixed=%addr:physical_register:1:1 fixed=%saddr:physical_register:4:2
+
+amdgpu.target<gfx1250> @target
+low.func.def target(@target) @cluster_widths_and_wait(%lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
+  %m0 = s_mov_b32_m0_imm 3
+  cluster_load_async_to_lds_b8 %lds, %addr, %saddr, %m0
+  cluster_load_async_to_lds_b32 %lds, %addr, %saddr, %m0 {scope = 1}
+  cluster_load_async_to_lds_b64 %lds, %addr, %saddr, %m0 {nv = 1, scope = 2, th = 2}
+  cluster_load_async_to_lds_b128 %lds, %addr, %saddr, %m0 {scope = 3, th = 3}
+  s_wait_asynccnt {asynccnt = 0}
+  return
+}
+
+// ----
+  s_mov_b32 m0, 3
+  cluster_load_async_to_lds_b8 v0, v1, s[4:5]
+  cluster_load_async_to_lds_b32 v0, v1, s[4:5] scope:SCOPE_SE
+  cluster_load_async_to_lds_b64 v0, v1, s[4:5] nv scope:SCOPE_DEV th:TH_LOAD_HT
+  cluster_load_async_to_lds_b128 v0, v1, s[4:5] scope:SCOPE_SYS th:TH_LOAD_BYPASS
+  s_wait_asynccnt 0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @cluster_counter_progress strategy=source
+
+amdgpu.target<gfx1250> @target
+low.func.def target(@target) @cluster_counter_progress(%lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
+  %m0 = s_mov_b32_m0_imm 3
+  cluster_load_async_to_lds_b128 %lds, %addr, %saddr, %m0
+  s_wait_asynccnt {asynccnt = 0}
+  return
+}
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"cluster_counter_progress","target":"target","descriptor_set":"amdgpu.rdna4.gfx125x.core","progress_count":2,"hazard_count":0,"progress":[{"index":0,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":7,"class_name":"amdgpu.async","action":"advance","units":1},{"index":1,"packet":2,"node":2,"block":0,"scheduled_ordinal":2,"class_id":7,"class_name":"amdgpu.async","action":"reset","units":0}],"hazards":[]}

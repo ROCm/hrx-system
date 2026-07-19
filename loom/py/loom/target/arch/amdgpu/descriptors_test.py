@@ -62,6 +62,8 @@ from loom.target.arch.amdgpu.descriptors import (
     AMDGPU_ENCODING_FORMAT_VOP3PX2,
     AMDGPU_MEMORY_DESCRIPTOR_CATEGORY,
     AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU,
+    AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL,
+    AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE,
     AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST,
     AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG,
     AMDGPU_VECTOR_DESCRIPTOR_CATEGORY,
@@ -1256,6 +1258,18 @@ def test_gfx125x_cluster_load_descriptors_encode_transfer_widths(
     ) == (
         (EffectKind.READ, MemorySpace.GLOBAL, _COUNTER_ASYNC, width_bits),
         (EffectKind.WRITE, MemorySpace.WORKGROUP, _COUNTER_ASYNC, width_bits),
+    )
+    native_values = descriptor.asm_forms[0].native_assembly_values
+    assert tuple(value.field_name for value in native_values[:3]) == (
+        "lds_addr",
+        "addr",
+        "saddr",
+    )
+    assert native_values[5].target_format_id == (
+        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE
+    )
+    assert native_values[6].target_format_id == (
+        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL
     )
 
 

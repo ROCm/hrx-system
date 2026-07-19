@@ -135,10 +135,12 @@ class AmdgpuEncodingTest : public ::testing::Test {
     return iree_ok_status();
   }
 
-  iree_status_t BuildFrame(const std::string& function_source,
+  iree_status_t BuildFrame(const std::string& target_architecture,
+                           const std::string& function_source,
                            iree_arena_allocator_t* arena,
                            loom_low_emission_frame_t* out_frame) {
-    std::string source = "amdgpu.target<gfx1100> @gfx_target\n";
+    std::string source =
+        "amdgpu.target<" + target_architecture + "> @gfx_target\n";
     source += function_source;
     IREE_RETURN_IF_ERROR(ParseSource(source));
 
@@ -179,10 +181,12 @@ class AmdgpuEncodingTest : public ::testing::Test {
   }
 
   iree_status_t EncodeFunction(
+      const std::string& target_architecture,
       const std::string& function_source, iree_arena_allocator_t* arena,
       loom_amdgpu_encoded_instruction_stream_t* out_stream) {
     loom_low_emission_frame_t frame = {};
-    IREE_RETURN_IF_ERROR(BuildFrame(function_source, arena, &frame));
+    IREE_RETURN_IF_ERROR(
+        BuildFrame(target_architecture, function_source, arena, &frame));
     loom_amdgpu_packet_plan_t packet_plan = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
         &frame.schedule, &frame.allocation, arena, &packet_plan));
@@ -231,7 +235,8 @@ TEST_F(AmdgpuEncodingTest, EmitsDataSymbolRel32TextFixups) {
 
   TestArena arena;
   loom_amdgpu_encoded_instruction_stream_t stream = {};
-  IREE_ASSERT_OK(EncodeFunction(kFunctionSource, arena.arena(), &stream));
+  IREE_ASSERT_OK(
+      EncodeFunction("gfx1100", kFunctionSource, arena.arena(), &stream));
 
   EXPECT_EQ(stream.instruction_count, 4u);
   EXPECT_EQ(stream.native_insertion_count, 0u);
@@ -271,11 +276,42 @@ TEST_F(AmdgpuEncodingTest, RejectsRel32AddWithoutPcBase) {
   TestArena arena;
   loom_amdgpu_encoded_instruction_stream_t stream = {};
   iree_status_t status =
-      EncodeFunction(kFunctionSource, arena.arena(), &stream);
+      EncodeFunction("gfx1100", kFunctionSource, arena.arena(), &stream);
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_FAILED_PRECONDITION);
   const std::string message = StatusToStringAndFree(status);
   EXPECT_NE(message.find("does not hold an s_getpc_b64 component"),
             std::string::npos);
+}
+
+TEST_F(AmdgpuEncodingTest, EncodesGfx1250ClusterAsyncPacket) {
+  static const char kFunctionSource[] =
+      "low.func.def target(@gfx_target) @cluster("
+      "%lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, "
+      "%saddr: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {\n"
+      "  %m0 = s_mov_b32_m0_imm 3\n"
+      "  cluster_load_async_to_lds_b64 %lds, %addr, %saddr, %m0 "
+      "{nv = 1, scope = 2, th = 2}\n"
+      "  s_wait_asynccnt {asynccnt = 0}\n"
+      "  return\n"
+      "}\n";
+
+  TestArena arena;
+  loom_amdgpu_encoded_instruction_stream_t stream = {};
+  IREE_ASSERT_OK(
+      EncodeFunction("gfx1250", kFunctionSource, arena.arena(), &stream));
+
+  static const uint32_t kExpectedWords[] = {
+      0xbefd0083u, 0xee1b0080u, 0x00280000u,
+      0x00000001u, 0xbfca0000u, 0xbfb00000u,
+  };
+  EXPECT_EQ(stream.instruction_count, 4u);
+  EXPECT_EQ(stream.native_insertion_count, 0u);
+  ASSERT_EQ(stream.text.data_length, sizeof(kExpectedWords));
+  for (size_t i = 0; i < IREE_ARRAYSIZE(kExpectedWords); ++i) {
+    EXPECT_EQ(LoadLeU32(stream.text.data, i * sizeof(uint32_t)),
+              kExpectedWords[i])
+        << "word " << i;
+  }
 }
 
 }  // namespace

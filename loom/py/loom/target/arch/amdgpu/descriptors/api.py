@@ -233,6 +233,8 @@ _NAMED_NATIVE_ASM_IMMEDIATE_FORMAT_IDS = frozenset(
         AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST,
         AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG,
         AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64,
+        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE,
+        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL,
     )
 )
 
@@ -836,12 +838,10 @@ def _amdgpu_descriptor_storage_leases(
     memory_source_read_counter_mask = read_counter_mask & (
         _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_VMEM_LOAD]
         | _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_TENSOR]
-        | _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_ASYNC]
     )
     memory_source_write_counter_mask = write_counter_mask & (
         _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_VMEM_STORE]
         | _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_TENSOR]
-        | _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_ASYNC]
     )
     vmem_write_counter_mask = (
         write_counter_mask & _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_VMEM_STORE]

@@ -432,7 +432,7 @@ static bool loom_amdgpu_memory_dynamic_term_select_preferred_kind(
   return false;
 }
 
-static void loom_amdgpu_mark_source_memory_plan_dynamic_storage_demands(
+void loom_amdgpu_mark_source_memory_plan_dynamic_storage_demands(
     loom_low_lower_context_t* context,
     const loom_low_source_memory_access_plan_t* source) {
   for (uint8_t i = 0; i < source->dynamic_term_count; ++i) {

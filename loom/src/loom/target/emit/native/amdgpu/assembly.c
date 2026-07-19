@@ -35,6 +35,10 @@ typedef enum loom_amdgpu_native_asm_immediate_format_e {
   LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64 = 6,
   // Target-format ID for an omitted-at-default named presence modifier.
   LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG = 7,
+  // Target-format ID for a GFX12 SCOPE symbolic modifier.
+  LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE = 8,
+  // Target-format ID for a GFX12 load TH symbolic modifier.
+  LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL = 9,
 } loom_amdgpu_native_asm_immediate_format_t;
 
 typedef struct loom_amdgpu_assembly_emit_state_t {
@@ -513,6 +517,31 @@ static iree_status_t loom_amdgpu_read_packet_immediate_by_index_i64(
   return loom_amdgpu_read_packet_immediate_i64(context, immediate, out_value);
 }
 
+static iree_status_t loom_amdgpu_read_packet_immediate_by_name_i64(
+    const loom_native_assembly_packet_context_t* context,
+    iree_string_view_t field_name, int64_t* out_value) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      context->schedule->target.descriptor_set;
+  const loom_low_descriptor_t* descriptor = context->packet->descriptor;
+  for (uint16_t i = 0; i < descriptor->immediate_count; ++i) {
+    const uint32_t immediate_index = descriptor->immediate_start + i;
+    IREE_ASSERT_LT(immediate_index, descriptor_set->immediate_count);
+    IREE_ASSERT(descriptor_set->immediates != NULL);
+    const loom_low_immediate_t* immediate =
+        &descriptor_set->immediates[immediate_index];
+    iree_string_view_t name = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
+        descriptor_set, immediate->field_name_string_offset, &name));
+    if (iree_string_view_equal(name, field_name)) {
+      return loom_amdgpu_read_packet_immediate_i64(context, immediate,
+                                                   out_value);
+    }
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "AMDGPU assembly descriptor has no '%.*s' immediate",
+                          (int)field_name.size, field_name.data);
+}
+
 static iree_status_t loom_amdgpu_append_packet_immediate_unsigned_hex(
     const loom_native_assembly_packet_context_t* context,
     uint16_t descriptor_immediate_index, uint8_t bit_width) {
@@ -637,9 +666,16 @@ static iree_status_t loom_amdgpu_append_packet_immediate_scale_sel(
 
 static bool loom_amdgpu_native_asm_format_is_named_modifier(
     uint8_t target_format_id) {
-  return target_format_id >=
-             LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST &&
-         target_format_id <= LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG;
+  switch (target_format_id) {
+    case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST:
+    case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64:
+    case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG:
+    case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE:
+    case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL:
+      return true;
+    default:
+      return false;
+  }
 }
 
 static iree_status_t loom_amdgpu_append_packet_immediate_named_modifier(
@@ -695,6 +731,73 @@ static iree_status_t loom_amdgpu_append_packet_immediate_named_modifier(
       IREE_ASSERT_UNREACHABLE("not a named AMDGPU assembly modifier");
       return iree_ok_status();
   }
+}
+
+static iree_status_t loom_amdgpu_append_packet_immediate_gfx12_scope(
+    const loom_native_assembly_packet_context_t* context,
+    uint16_t descriptor_immediate_index) {
+  static const char* const kScopeNames[] = {"SCOPE_CU", "SCOPE_SE", "SCOPE_DEV",
+                                            "SCOPE_SYS"};
+  int64_t scope = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_read_packet_immediate_by_index_i64(
+      context, descriptor_immediate_index, &scope));
+  if (scope == 0) {
+    return iree_ok_status();
+  }
+  if (scope < 0 || (uint64_t)scope >= IREE_ARRAYSIZE(kScopeNames)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AMDGPU GFX12 SCOPE value %" PRId64 " is not in [0, 3]", scope);
+  }
+  return iree_string_builder_append_format(context->builder, " scope:%s",
+                                           kScopeNames[scope]);
+}
+
+static iree_status_t loom_amdgpu_append_packet_immediate_gfx12_load_temporal(
+    const loom_native_assembly_packet_context_t* context,
+    uint16_t descriptor_immediate_index) {
+  int64_t temporal = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_read_packet_immediate_by_index_i64(
+      context, descriptor_immediate_index, &temporal));
+  if (temporal == 0) {
+    return iree_ok_status();
+  }
+
+  int64_t scope = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_read_packet_immediate_by_name_i64(
+      context, IREE_SV("scope"), &scope));
+  if (scope < 0 || scope > 3) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AMDGPU GFX12 SCOPE value %" PRId64 " is not in [0, 3]", scope);
+  }
+
+  const char* name = NULL;
+  switch (temporal) {
+    case 1:
+      name = "TH_LOAD_NT";
+      break;
+    case 2:
+      name = "TH_LOAD_HT";
+      break;
+    case 3:
+      name = scope == 3 ? "TH_LOAD_BYPASS" : "TH_LOAD_LU";
+      break;
+    case 4:
+      name = "TH_LOAD_NT_RT";
+      break;
+    case 5:
+      name = "TH_LOAD_RT_NT";
+      break;
+    case 6:
+      name = "TH_LOAD_NT_HT";
+      break;
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU GFX12 load TH value %" PRId64 " is reserved", temporal);
+  }
+  return iree_string_builder_append_format(context->builder, " th:%s", name);
 }
 
 static iree_status_t loom_amdgpu_append_dpp_control(
@@ -1175,6 +1278,12 @@ static iree_status_t loom_amdgpu_append_native_asm_form_value(
         case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG:
           return loom_amdgpu_append_packet_immediate_named_modifier(context,
                                                                     value);
+        case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE:
+          return loom_amdgpu_append_packet_immediate_gfx12_scope(context,
+                                                                 value->index);
+        case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL:
+          return loom_amdgpu_append_packet_immediate_gfx12_load_temporal(
+              context, value->index);
         default:
           return iree_make_status(
               IREE_STATUS_FAILED_PRECONDITION,
@@ -1315,9 +1424,30 @@ static iree_status_t loom_amdgpu_append_memory_immediate_suffixes(
   return iree_ok_status();
 }
 
+static bool loom_amdgpu_native_asm_form_owns_immediate_syntax(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_asm_form_t* form) {
+  for (uint16_t i = 0; i < form->native_assembly_value_count; ++i) {
+    const uint32_t value_index = form->native_assembly_value_start + i;
+    IREE_ASSERT_LT(value_index, descriptor_set->native_asm_value_count);
+    IREE_ASSERT(descriptor_set->native_asm_values != NULL);
+    switch (descriptor_set->native_asm_values[value_index].kind) {
+      case LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_I64:
+      case LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_UNSIGNED_HEX:
+      case LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_TARGET_FORMAT:
+        return true;
+      default:
+        break;
+    }
+  }
+  return false;
+}
+
 static iree_status_t loom_amdgpu_try_append_native_memory_packet(
     const loom_native_assembly_packet_context_t* context, bool* out_matched) {
   *out_matched = false;
+  const loom_low_descriptor_set_t* descriptor_set =
+      context->schedule->target.descriptor_set;
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
   if (descriptor->canonical_asm_form_ordinal ==
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
@@ -1337,6 +1467,11 @@ static iree_status_t loom_amdgpu_try_append_native_memory_packet(
   bool in_list = false;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_append_native_asm_form_values(context, form, &in_list));
+  // A native value list containing immediates owns their complete spelling.
+  // Forms that only reorder operands retain the generic memory suffixes.
+  if (loom_amdgpu_native_asm_form_owns_immediate_syntax(descriptor_set, form)) {
+    return iree_ok_status();
+  }
   return loom_amdgpu_append_memory_immediate_suffixes(context);
 }
 
@@ -1506,6 +1641,12 @@ static iree_host_size_t loom_amdgpu_explicit_packet_operand_count(
 
 static iree_status_t loom_amdgpu_append_mubuf_load_lds_packet(
     const loom_native_assembly_packet_context_t* context) {
+  bool matched = false;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_try_append_native_memory_packet(context, &matched));
+  if (matched) {
+    return iree_ok_status();
+  }
   const iree_host_size_t explicit_operand_count =
       loom_amdgpu_explicit_packet_operand_count(context);
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_mnemonic(context));
@@ -1612,6 +1753,12 @@ static iree_status_t loom_amdgpu_append_global_load_packet(
 
 static iree_status_t loom_amdgpu_append_global_load_lds_packet(
     const loom_native_assembly_packet_context_t* context) {
+  bool matched = false;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_try_append_native_memory_packet(context, &matched));
+  if (matched) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_mnemonic(context));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, " "));

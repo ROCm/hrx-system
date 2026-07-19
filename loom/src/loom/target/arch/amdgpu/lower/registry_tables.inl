@@ -592,8 +592,7 @@ static const loom_amdgpu_lower_dispatch_row_t
                 LOOM_AMDGPU_STORAGE_NONE),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_CLUSTER_ID)] =
             LOOM_AMDGPU_STRUCTURAL_DIRECT_STORAGE_ROW(
-                LOOM_OP_KERNEL_CLUSTER_ID,
-                loom_amdgpu_select_preamble_dispatch,
+                LOOM_OP_KERNEL_CLUSTER_ID, loom_amdgpu_select_preamble_dispatch,
                 loom_amdgpu_emit_preamble_dispatch,
                 loom_amdgpu_low_legality_verify_kernel_preamble,
                 LOOM_AMDGPU_STORAGE_NONE),
@@ -766,9 +765,13 @@ static const loom_amdgpu_lower_dispatch_row_t
                 LOOM_OP_KERNEL_TENSOR_LDS_DESCRIPTOR,
                 loom_amdgpu_low_legality_verify_kernel_async),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER)] =
-            LOOM_AMDGPU_LEGALITY_ROW(
+            LOOM_AMDGPU_RECIPE_DATA_STORAGE_ROW(
                 LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER,
-                loom_amdgpu_low_legality_verify_kernel_async),
+                loom_amdgpu_cluster_gather_plan_t,
+                loom_amdgpu_select_kernel_async_cluster_gather_dispatch,
+                loom_amdgpu_emit_kernel_async_cluster_gather_dispatch,
+                loom_amdgpu_low_legality_verify_kernel_async,
+                LOOM_AMDGPU_STORAGE_ASYNC_CLUSTER),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER_MASK)] =
             LOOM_AMDGPU_LEGALITY_ROW(
                 LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER_MASK,

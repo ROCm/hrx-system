@@ -1547,6 +1547,20 @@ typedef struct loom_amdgpu_async_gather_plan_t {
   loom_low_lower_resolved_descriptor_t descriptor;
 } loom_amdgpu_async_gather_plan_t;
 
+typedef struct loom_amdgpu_cluster_gather_plan_t {
+  // Exact u32 global byte offset materialized into the packet VADDR operand.
+  loom_amdgpu_memory_access_t source_address;
+  // Exact u32 workgroup-relative byte offset materialized into the LDS address
+  // operand, including target-assigned alloca layout.
+  loom_amdgpu_memory_access_t dest_address;
+  // Exact low 16-bit set of participating flat cluster workgroup ranks.
+  uint32_t participant_mask;
+  // Number of bytes moved by the selected cluster transfer packet.
+  uint32_t packet_byte_count;
+  // Descriptor row selected for the active descriptor set.
+  loom_low_lower_resolved_descriptor_t descriptor;
+} loom_amdgpu_cluster_gather_plan_t;
+
 #define LOOM_AMDGPU_TENSOR_DGROUP_CAPACITY 4
 
 typedef struct loom_amdgpu_tensor_load_plan_t {

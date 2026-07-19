@@ -129,6 +129,8 @@ AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK = 4
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST = 5
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64 = 6
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG = 7
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE = 8
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL = 9
 
 _REG_SGPR = "amdgpu.sgpr"
 _REG_VGPR = "amdgpu.vgpr"
@@ -1011,6 +1013,26 @@ def _native_amdgpu_named_flag_immediate(
         field_name=field_name,
         literal=name or field_name,
         target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG,
+    )
+
+
+def _native_amdgpu_gfx12_scope_immediate(field_name: str) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal="scope",
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE,
+    )
+
+
+def _native_amdgpu_gfx12_load_temporal_immediate(
+    field_name: str,
+) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal="th",
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL,
     )
 
 
@@ -2872,6 +2894,8 @@ __all__ = (
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64",
@@ -3240,6 +3264,8 @@ __all__ = (
     "_mubuf_vaddr_operand",
     "_native_amdgpu_dpp_ctrl_immediate",
     "_native_amdgpu_dpp_bank_mask_immediate",
+    "_native_amdgpu_gfx12_load_temporal_immediate",
+    "_native_amdgpu_gfx12_scope_immediate",
     "_native_amdgpu_named_bit_list_immediate",
     "_native_amdgpu_named_flag_immediate",
     "_native_amdgpu_named_i64_immediate",
