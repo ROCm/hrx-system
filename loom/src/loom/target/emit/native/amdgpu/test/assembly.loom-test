@@ -2144,6 +2144,29 @@ low.func.def target(@gfx11_target) @gfx11_scc_selects_with_interleaved_producers
 
 // ====
 
+// RUN: emit amdgpu-assembly @gfx1250_scc_select_precedes_first_clobber waits=none strategy=source
+amdgpu.target<gfx1250> @gfx1250_target
+low.func.def target(@gfx1250_target) @gfx1250_scc_select_precedes_first_clobber(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %offset: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.sgpr>, %false_value: reg<amdgpu.sgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %condition = s_cmp_lg_i32 %lhs, %rhs
+  %first_clobber = s_add_u32 %lhs, %offset
+  %second_clobber = s_add_u32 %first_clobber, %offset
+  %selected = s_cselect_b32 %true_value, %false_value, %condition
+  %packed = v_mov_b32_copy %selected
+  buffer_store_dword %packed, %resource, %vaddr, %second_clobber
+  return
+}
+
+// ----
+  s_cmp_lg_i32 s3, s0
+  s_cselect_b32 s0, s1, s2
+  s_add_u32 s1, s3, s4
+  s_add_u32 s1, s1, s4
+  v_mov_b32_copy v1, s0
+  buffer_store_dword v1, v0, s[8:11], s1 offen offset:0
+  s_endpgm
+
+// ====
+
 // RUN: emit amdgpu-assembly @gfx11_guarded_scalar_exec_mask waits=none
 amdgpu.target<gfx1100> @gfx11_target
 low.func.def target(@gfx11_target) @gfx11_guarded_scalar_exec_mask(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %x: reg<amdgpu.sgpr>, %y: reg<amdgpu.sgpr>, %payload: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {

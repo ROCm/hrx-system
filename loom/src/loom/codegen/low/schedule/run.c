@@ -72,6 +72,7 @@ static iree_status_t loom_low_schedule_initialize_value_records(
     *value = (loom_low_schedule_value_record_t){
         .value_id = value_id,
         .producer_node = LOOM_LOW_SCHEDULE_NODE_NONE,
+        .state_next_write_node = LOOM_LOW_SCHEDULE_NODE_NONE,
         .register_class_id = LOOM_LOW_REG_CLASS_NONE,
     };
     const loom_type_t type = loom_module_value_type(state->module, value_id);
@@ -481,6 +482,9 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, reg_class_count, sizeof(*state->state_last_write_nodes),
         (void**)&state->state_last_write_nodes));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, reg_class_count, sizeof(*state->state_first_write_nodes),
+        (void**)&state->state_first_write_nodes));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, reg_class_count,
         sizeof(*state->state_ordering_frontier_nodes),

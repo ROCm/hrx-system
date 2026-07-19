@@ -135,6 +135,8 @@ typedef struct loom_low_schedule_value_record_t {
   loom_value_id_t value_id;
   // Same-block producer node index, or NONE for block arguments/external defs.
   uint32_t producer_node;
+  // First same-class state writer after the producer, or NONE.
+  uint32_t state_next_write_node;
   // Register units contributed to the pressure model.
   uint32_t unit_count;
   // Live units currently charged to this value in the pressure model.
@@ -233,6 +235,9 @@ typedef struct loom_low_schedule_build_state_t {
   } pressure_limits;
   // Most recent architectural-state writer node, dense by register class.
   uint32_t* state_last_write_nodes;
+  // First architectural-state writer in the current block, dense by register
+  // class.
+  uint32_t* state_first_write_nodes;
   // Most recent non-writing state-ordering node, dense by register class.
   uint32_t* state_ordering_frontier_nodes;
   // Most recent state-edge consumer indexed by producer schedule node.
