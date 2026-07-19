@@ -84,6 +84,33 @@ func.def @dynamic_unroll_linear_schedule(%lo: index, %hi: index, %step: index, %
 
 // ====
 
+// scf.for with the categorical authored-placement residency policy.
+func.def @preserve_residency_policy(%lo: index, %hi: index, %step: index) {
+  scf.for %iv = [%lo to %hi step %step] residency(preserve) {
+  }
+  func.return
+}
+
+// ====
+
+// scf.for with an SSA minimum in the selected target's residency domain.
+func.def @minimum_residency_policy(%lo: index, %hi: index, %step: index, %minimum: index) {
+  scf.for %iv = [%lo to %hi step %step] residency(%minimum) {
+  }
+  func.return
+}
+
+// ====
+
+// Residency and unroll policies are orthogonal and retain canonical order.
+func.def @residency_with_unroll(%lo: index, %hi: index, %step: index, %factor: index, %minimum: index) {
+  scf.for %iv = [%lo to %hi step %step] unroll(%factor) schedule(interleaved) residency(%minimum) {
+  }
+  func.return
+}
+
+// ====
+
 // scf.for also accepts grouped iter_arg type lists, then prints the canonical
 // per-binding type form.
 func.def @multi_vector_iter_grouped_types(%lo: index, %hi: index, %step: index, %gate_zero: vector<1xf32>, %up_zero: vector<1xf32>) -> (vector<1xf32>, vector<1xf32>) {

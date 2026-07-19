@@ -1323,3 +1323,19 @@ func.def @bare_unroll_dynamic_trip_count_rejected(%end: index) {
   }
   func.return
 }
+
+// ====
+
+// Unrolling cannot erase a placement policy that has not made its decision.
+func.def @unroll_rejects_unconsumed_residency_minimum() {
+  %start = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  %minimum = index.constant 2 : index
+  // ERROR@+1: LOWERING/048 {op_name="scf.for", phase_name="unroll-scf-for"}
+  scf.for %i = [%start to %end step %step] unroll(%factor) residency(%minimum) {
+    test.use %i : index
+  }
+  func.return
+}

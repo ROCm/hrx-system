@@ -74,6 +74,26 @@ func.def @for_unroll_schedule_requires_unroll(%lo: index, %hi: index, %step: ind
 
 // ====
 
+// Preserve and an SSA minimum are mutually exclusive residency policies.
+func.def @for_residency_policy_is_exclusive(%lo: index, %hi: index, %step: index, %minimum: index) {
+  // ERROR@+1: STRUCTURE/014 {attr_name="residency", actual_value="2", expected_constraint="either preserve or an SSA minimum, not both"}
+  scf.for %iv = [%lo to %hi step %step] residency(%minimum) residency(preserve) {
+  }
+  func.return
+}
+
+// ====
+
+// An SSA minimum is part of the target residency domain and therefore index-typed.
+func.def @for_residency_minimum_requires_index(%lo: index, %hi: index, %step: index, %minimum: i32) {
+  // ERROR@+1: TYPE/003 "residency_minimum" "i32" "index"
+  scf.for %iv = [%lo to %hi step %step] residency(%minimum) {
+  }
+  func.return
+}
+
+// ====
+
 // Yield/result type matching remaps parent result references to the values
 // yielded by each region. This keeps co-result-shaped types valid without
 // forcing branch-local layouts to escape their region.

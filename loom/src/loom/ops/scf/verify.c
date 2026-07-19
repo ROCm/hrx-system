@@ -198,6 +198,9 @@ iree_status_t loom_scf_for_verify(const loom_module_t* module,
       loom_op_attrs(op)[loom_scf_for_unroll_policy_ATTR_INDEX]);
   bool has_unroll_schedule = !loom_attr_is_absent(
       loom_op_attrs(op)[loom_scf_for_unroll_schedule_ATTR_INDEX]);
+  bool has_residency_minimum = loom_scf_for_residency_minimum_is_present(op);
+  bool has_residency_policy = !loom_attr_is_absent(
+      loom_op_attrs(op)[loom_scf_for_residency_policy_ATTR_INDEX]);
   if (has_unroll_factor && has_unroll_policy) {
     return loom_scf_emit_attribute_value_constraint(
         emitter, op, IREE_SV("unroll"), 2,
@@ -207,6 +210,11 @@ iree_status_t loom_scf_for_verify(const loom_module_t* module,
     return loom_scf_emit_attribute_value_constraint(
         emitter, op, IREE_SV("schedule"), 0,
         IREE_SV("paired with bare unroll or unroll factor"));
+  }
+  if (has_residency_minimum && has_residency_policy) {
+    return loom_scf_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("residency"), 2,
+        IREE_SV("either preserve or an SSA minimum, not both"));
   }
   return iree_ok_status();
 }

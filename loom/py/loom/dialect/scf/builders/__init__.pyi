@@ -22,6 +22,8 @@ class ScfBuilder(DialectBuilder):
         unroll_factor: ValueRef | None = ...,
         unroll_policy: str | None = ...,
         unroll_schedule: str | None = ...,
+        residency_minimum: ValueRef | None = ...,
+        residency_policy: str | None = ...,
         body: Region | None = ...,
         name: str | None = ...,
         names: Sequence[str] | None = ...,

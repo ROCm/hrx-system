@@ -230,6 +230,21 @@ static iree_status_t loom_scf_unroll_emit_policy_error(
   return iree_diagnostic_emit(context->pass->diagnostic_emitter, &emission);
 }
 
+static iree_status_t loom_scf_unroll_emit_unconsumed_residency_policy(
+    const loom_scf_unroll_context_t* context, loom_op_t* op) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_name(context->module, op)),
+      loom_param_string(context->pass->info->name),
+  };
+  loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_LOWERING_048,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(context->pass->diagnostic_emitter, &emission);
+}
+
 static loom_scf_unroll_trip_count_state_t loom_scf_unroll_resolve_trip_count(
     const loom_scf_unroll_context_t* context, loom_op_t* op,
     loom_scf_unroll_trip_count_t* out_trip_count) {
@@ -886,7 +901,9 @@ static iree_status_t loom_scf_unroll_clear_policy(
       loom_scf_for_lower_bound(op), loom_scf_for_upper_bound(op),
       loom_scf_for_step(op), iter_args.values, iter_args.count, result_types,
       op->result_count, tied_results, tied_result_count, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, /*unroll_schedule=*/0, op->location, &new_loop));
+      /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      /*residency_minimum=*/LOOM_VALUE_ID_INVALID, /*residency_policy=*/0,
+      op->location, &new_loop));
 
   loom_region_t* old_body = loom_scf_for_body(op);
   loom_block_t* old_block = loom_region_entry_block(old_body);
@@ -988,7 +1005,9 @@ static iree_status_t loom_scf_unroll_partial_unroll(
       loom_scf_for_lower_bound(op), loom_scf_for_upper_bound(op), scaled_step,
       iter_args.values, iter_args.count, result_types, op->result_count,
       tied_results, tied_result_count, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, /*unroll_schedule=*/0, op->location, &new_loop));
+      /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      /*residency_minimum=*/LOOM_VALUE_ID_INVALID, /*residency_policy=*/0,
+      op->location, &new_loop));
 
   loom_region_t* old_body = loom_scf_for_body(op);
   loom_block_t* old_block = loom_region_entry_block(old_body);
@@ -2325,7 +2344,9 @@ static iree_status_t loom_scf_unroll_partial_unroll_interleaved_with_arena(
       loom_scf_for_lower_bound(op), main_upper, scaled_step, iter_args.values,
       iter_args.count, result_types, op->result_count, tied_results,
       tied_result_count, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0,
-      /*unroll_schedule=*/0, op->location, &main_loop));
+      /*unroll_schedule=*/0,
+      /*residency_minimum=*/LOOM_VALUE_ID_INVALID, /*residency_policy=*/0,
+      op->location, &main_loop));
 
   loom_region_t* old_body = loom_scf_for_body(op);
   loom_block_t* old_block = loom_region_entry_block(old_body);
@@ -2394,7 +2415,9 @@ static iree_status_t loom_scf_unroll_partial_unroll_interleaved_with_arena(
         loom_scf_for_upper_bound(op), tail_step, tail_iter_args.values,
         tail_iter_args.count, result_types, op->result_count, tied_results,
         tied_result_count, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0,
-        /*unroll_schedule=*/0, op->location, &tail_loop));
+        /*unroll_schedule=*/0,
+        /*residency_minimum=*/LOOM_VALUE_ID_INVALID, /*residency_policy=*/0,
+        op->location, &tail_loop));
     loom_region_t* tail_body = loom_scf_for_body(tail_loop);
     saved_ip = loom_builder_enter_region(&context->rewriter->builder, tail_loop,
                                          tail_body);
@@ -2444,6 +2467,11 @@ static iree_status_t loom_scf_unroll_try_unroll(
   }
   if (!loom_scf_unroll_policy_present(op)) {
     return loom_scf_unroll_append_policy_absent_report_detail(context, op);
+  }
+  if (loom_scf_for_residency_minimum_is_present(op) ||
+      !loom_attr_is_absent(
+          loom_op_attrs(op)[loom_scf_for_residency_policy_ATTR_INDEX])) {
+    return loom_scf_unroll_emit_unconsumed_residency_policy(context, op);
   }
 
   bool has_unroll_factor = loom_scf_for_unroll_factor_is_present(op);

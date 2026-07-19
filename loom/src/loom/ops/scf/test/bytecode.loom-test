@@ -1,0 +1,29 @@
+// RUN: format bytecode
+
+// The absent policy remains the automatic placement mode.
+func.def @automatic_residency_bytecode(%lo: index, %hi: index, %step: index) {
+  scf.for %iv = [%lo to %hi step %step] {
+    test.use %iv : index
+  }
+  func.return
+}
+
+// ====
+
+// The categorical policy survives the bytecode attribute table.
+func.def @preserve_residency_bytecode(%lo: index, %hi: index, %step: index) {
+  scf.for %iv = [%lo to %hi step %step] residency(preserve) {
+    test.use %iv : index
+  }
+  func.return
+}
+
+// ====
+
+// The exact minimum survives as an optional segmented operand.
+func.def @minimum_residency_bytecode(%lo: index, %hi: index, %step: index, %minimum: index) {
+  scf.for %iv = [%lo to %hi step %step] residency(%minimum) {
+    test.use %iv : index
+  }
+  func.return
+}

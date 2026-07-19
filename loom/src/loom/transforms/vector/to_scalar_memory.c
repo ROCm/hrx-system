@@ -253,7 +253,9 @@ static iree_status_t loom_vector_to_scalar_build_dynamic_active_prefix(
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, lane_index,
       step, &lower_bound, 1, &index_type, 1, NULL, 0, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
+      /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      /*residency_minimum=*/LOOM_VALUE_ID_INVALID, /*residency_policy=*/0,
+      state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(
@@ -646,7 +648,9 @@ static iree_status_t loom_vector_to_scalar_lower_memory_store_loop_axis(
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
       step, NULL, 0, NULL, 0, NULL, 0, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
+      /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      /*residency_minimum=*/LOOM_VALUE_ID_INVALID, /*residency_policy=*/0,
+      state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(
@@ -860,7 +864,9 @@ static iree_status_t loom_vector_to_scalar_lower_fragment_store_columns(
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
       step, NULL, 0, NULL, 0, NULL, 0, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
+      /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      /*residency_minimum=*/LOOM_VALUE_ID_INVALID, /*residency_policy=*/0,
+      state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(
@@ -899,7 +905,9 @@ static iree_status_t loom_vector_to_scalar_lower_fragment_store_rows(
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
       step, NULL, 0, NULL, 0, NULL, 0, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
+      /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      /*residency_minimum=*/LOOM_VALUE_ID_INVALID, /*residency_policy=*/0,
+      state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(
@@ -942,7 +950,9 @@ iree_status_t loom_vector_to_scalar_lower_fragment_store(
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
       step, NULL, 0, NULL, 0, NULL, 0, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
+      /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      /*residency_minimum=*/LOOM_VALUE_ID_INVALID, /*residency_policy=*/0,
+      state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(
@@ -1172,7 +1182,9 @@ loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_ops(
       &rewriter->builder, LOOM_SCF_FOR_BUILD_FLAG_HAS_UNROLL_POLICY, zero,
       upper_bound, step, NULL, 0, NULL, 0, NULL, 0, LOOM_VALUE_ID_INVALID,
       LOOM_SCF_FOR_UNROLL_POLICY_UNROLL,
-      /*unroll_schedule=*/0, first_op->location, &loop));
+      /*unroll_schedule=*/0,
+      /*residency_minimum=*/LOOM_VALUE_ID_INVALID, /*residency_policy=*/0,
+      first_op->location, &loop));
   loom_vector_to_scalar_record_loop_created(&state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(&rewriter->builder, loop,
@@ -1243,7 +1255,9 @@ static iree_status_t loom_vector_to_scalar_lower_dynamic_store_compress(
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
       step, NULL, 0, NULL, 0, NULL, 0, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
+      /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      /*residency_minimum=*/LOOM_VALUE_ID_INVALID, /*residency_policy=*/0,
+      state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(
@@ -1428,7 +1442,9 @@ static iree_status_t loom_vector_to_scalar_lower_atomic_reduce_loop_axis(
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
       step, NULL, 0, NULL, 0, NULL, 0, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
+      /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      /*residency_minimum=*/LOOM_VALUE_ID_INVALID, /*residency_policy=*/0,
+      state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(
@@ -1672,6 +1688,7 @@ static iree_status_t loom_vector_to_scalar_atomic_rmw_loop_axis(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
       step, &current_aggregate, 1, &state->vector_type, 1, NULL, 0,
       LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      /*residency_minimum=*/LOOM_VALUE_ID_INVALID, /*residency_policy=*/0,
       state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
@@ -1832,6 +1849,7 @@ static iree_status_t loom_vector_to_scalar_atomic_cmpxchg_loop_axis(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
       step, &current_aggregate, 1, &state->vector_type, 1, NULL, 0,
       LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      /*residency_minimum=*/LOOM_VALUE_ID_INVALID, /*residency_policy=*/0,
       state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
