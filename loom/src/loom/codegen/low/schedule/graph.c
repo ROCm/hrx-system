@@ -254,29 +254,26 @@ static bool loom_low_schedule_reg_class_is_state(
          state->reg_class_state_flags[reg_class_id] != 0;
 }
 
-static iree_status_t loom_low_schedule_lookup_descriptor_packet_operand(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, uint16_t packet_operand_index,
-    uint16_t* out_descriptor_operand_index,
-    const loom_low_operand_t** out_operand) {
-  const uint16_t descriptor_operand_index =
-      loom_low_descriptor_packet_operand_descriptor_index(
-          descriptor_set, descriptor, packet_operand_index);
-  if (descriptor_operand_index == LOOM_LOW_ID_NONE) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "low schedule descriptor operand count is less than packet operand "
-        "count");
-  }
-  if (out_descriptor_operand_index != NULL) {
-    *out_descriptor_operand_index = descriptor_operand_index;
-  }
-  if (out_operand != NULL) {
-    *out_operand =
-        &descriptor_set
+static const uint16_t* loom_low_schedule_index_descriptor_operands(
+    loom_low_schedule_build_state_t* state,
+    const loom_low_descriptor_t* descriptor, uint16_t operand_count) {
+  if (descriptor == NULL) return NULL;
+  IREE_ASSERT_LE(operand_count, state->descriptor_operands.capacity);
+  uint16_t indexed_operand_count = 0;
+  for (uint16_t descriptor_operand_index = descriptor->result_count;
+       descriptor_operand_index < descriptor->operand_count;
+       ++descriptor_operand_index) {
+    const loom_low_operand_t* operand =
+        &state->target.descriptor_set
              ->operands[descriptor->operand_start + descriptor_operand_index];
+    if (!loom_low_operand_role_is_packet_operand(operand->role)) continue;
+    IREE_ASSERT_LT(operand->source_value_index, operand_count);
+    state->descriptor_operands.indices[operand->source_value_index] =
+        descriptor_operand_index;
+    ++indexed_operand_count;
   }
-  return iree_ok_status();
+  IREE_ASSERT_EQ(indexed_operand_count, operand_count);
+  return state->descriptor_operands.indices;
 }
 
 static iree_status_t loom_low_schedule_add_state_read(
@@ -404,14 +401,9 @@ static bool loom_low_schedule_unit_ranges_overlap(uint32_t lhs_offset,
 static loom_low_register_part_mask_t
 loom_low_schedule_descriptor_operand_storage_mask(
     const loom_low_schedule_build_state_t* state,
-    const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index,
-    loom_value_ordinal_t value_ordinal) {
-  IREE_ASSERT_LT(descriptor_operand_index, descriptor->operand_count);
+    const loom_low_operand_t* operand, loom_value_ordinal_t value_ordinal) {
   const loom_low_descriptor_set_t* descriptor_set =
       state->target.descriptor_set;
-  const loom_low_operand_t* operand =
-      &descriptor_set
-           ->operands[descriptor->operand_start + descriptor_operand_index];
   if (operand->register_part_id == LOOM_LOW_REGISTER_PART_NONE) {
     return loom_low_schedule_value_full_storage_mask(state, value_ordinal);
   }
@@ -731,7 +723,9 @@ static iree_status_t loom_low_schedule_note_tied_storage_writes(
     if (node->descriptor != NULL &&
         tied.result_index < node->descriptor->result_count) {
       write_mask = loom_low_schedule_descriptor_operand_storage_mask(
-          state, node->descriptor, tied.result_index,
+          state,
+          &state->target.descriptor_set
+               ->operands[node->descriptor->operand_start + tied.result_index],
           result_ordinals[tied.result_index]);
     }
     IREE_RETURN_IF_ERROR(loom_low_schedule_add_storage_write_dependencies(
@@ -744,31 +738,25 @@ static iree_status_t loom_low_schedule_note_tied_storage_writes(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_schedule_operand_storage_read_mask(
+static loom_low_register_part_mask_t
+loom_low_schedule_operand_storage_read_mask(
     loom_low_schedule_build_state_t* state, uint32_t node_index,
-    const loom_low_descriptor_t* descriptor, uint16_t operand_index,
-    loom_low_register_part_mask_t* out_read_mask) {
+    const loom_low_operand_t* descriptor_operand, uint16_t operand_index) {
   const loom_low_schedule_node_t* node = &state->nodes[node_index];
   IREE_ASSERT_LT(operand_index, node->operand_count);
   const loom_value_ordinal_t value_ordinal =
       loom_low_schedule_node_const_operand_ordinals(node)[operand_index];
-  if (descriptor == NULL) {
-    *out_read_mask =
-        loom_low_schedule_value_full_storage_mask(state, value_ordinal);
-    return iree_ok_status();
+  if (descriptor_operand == NULL) {
+    return loom_low_schedule_value_full_storage_mask(state, value_ordinal);
   }
-  uint16_t descriptor_operand_index = LOOM_LOW_ID_NONE;
-  IREE_RETURN_IF_ERROR(loom_low_schedule_lookup_descriptor_packet_operand(
-      state->target.descriptor_set, descriptor, operand_index,
-      &descriptor_operand_index, NULL));
-  *out_read_mask = loom_low_schedule_descriptor_operand_storage_mask(
-      state, descriptor, descriptor_operand_index, value_ordinal);
-  return iree_ok_status();
+  return loom_low_schedule_descriptor_operand_storage_mask(
+      state, descriptor_operand, value_ordinal);
 }
 
 static iree_status_t loom_low_schedule_note_storage_reads(
     loom_low_schedule_build_state_t* state, uint32_t node_index,
-    const loom_low_descriptor_t* descriptor) {
+    const loom_low_descriptor_t* descriptor,
+    const uint16_t* descriptor_operand_indices) {
   if (state->storage_reads.heads == NULL) {
     return iree_ok_status();
   }
@@ -797,9 +785,16 @@ static iree_status_t loom_low_schedule_note_storage_reads(
     IREE_ASSERT_LT(operand_index, node->operand_count);
     const loom_value_ordinal_t value_ordinal = operand_ordinals[operand_index];
     IREE_ASSERT_EQ(value_ordinal, relation->source_ordinal);
-    loom_low_register_part_mask_t read_mask = 0;
-    IREE_RETURN_IF_ERROR(loom_low_schedule_operand_storage_read_mask(
-        state, node_index, descriptor, operand_index, &read_mask));
+    const loom_low_operand_t* descriptor_operand = NULL;
+    if (descriptor != NULL) {
+      descriptor_operand =
+          &state->target.descriptor_set
+               ->operands[descriptor->operand_start +
+                          descriptor_operand_indices[operand_index]];
+    }
+    const loom_low_register_part_mask_t read_mask =
+        loom_low_schedule_operand_storage_read_mask(
+            state, node_index, descriptor_operand, operand_index);
     IREE_RETURN_IF_ERROR(loom_low_schedule_add_storage_read(
         state, node_index, value_ordinal, relation->source_unit_offset,
         relation->unit_count, read_mask));
@@ -812,9 +807,16 @@ static iree_status_t loom_low_schedule_note_storage_reads(
       continue;
     }
     const loom_value_ordinal_t value_ordinal = operand_ordinals[operand_index];
-    loom_low_register_part_mask_t read_mask = 0;
-    IREE_RETURN_IF_ERROR(loom_low_schedule_operand_storage_read_mask(
-        state, node_index, descriptor, operand_index, &read_mask));
+    const loom_low_operand_t* descriptor_operand = NULL;
+    if (descriptor != NULL) {
+      descriptor_operand =
+          &state->target.descriptor_set
+               ->operands[descriptor->operand_start +
+                          descriptor_operand_indices[operand_index]];
+    }
+    const loom_low_register_part_mask_t read_mask =
+        loom_low_schedule_operand_storage_read_mask(
+            state, node_index, descriptor_operand, operand_index);
     IREE_RETURN_IF_ERROR(loom_low_schedule_add_storage_read(
         state, node_index, value_ordinal, /*unit_offset=*/0,
         state->values[value_ordinal].unit_count, read_mask));
@@ -1580,6 +1582,9 @@ iree_status_t loom_low_schedule_build_dependencies(
           loom_low_schedule_note_edge_storage_writes(state, node_index));
 
       const loom_low_descriptor_t* descriptor = node->descriptor;
+      const uint16_t* descriptor_operand_indices =
+          loom_low_schedule_index_descriptor_operands(state, descriptor,
+                                                      node->operand_count);
       const loom_value_ordinal_t* operand_ordinals =
           loom_low_schedule_node_const_operand_ordinals(node);
       for (uint16_t operand_index = 0; operand_index < node->operand_count;
@@ -1599,11 +1604,10 @@ iree_status_t loom_low_schedule_build_dependencies(
         }
         bool reads_descriptor_state = false;
         if (descriptor != NULL) {
-          const loom_low_operand_t* operand = NULL;
-          IREE_RETURN_IF_ERROR(
-              loom_low_schedule_lookup_descriptor_packet_operand(
-                  state->target.descriptor_set, descriptor, operand_index, NULL,
-                  &operand));
+          const loom_low_operand_t* operand =
+              &state->target.descriptor_set
+                   ->operands[descriptor->operand_start +
+                              descriptor_operand_indices[operand_index]];
           reads_descriptor_state = iree_any_bit_set(
               operand->flags, LOOM_LOW_OPERAND_FLAG_STATE_READ);
         }
@@ -1613,8 +1617,8 @@ iree_status_t loom_low_schedule_build_dependencies(
         }
       }
 
-      IREE_RETURN_IF_ERROR(
-          loom_low_schedule_note_storage_reads(state, node_index, descriptor));
+      IREE_RETURN_IF_ERROR(loom_low_schedule_note_storage_reads(
+          state, node_index, descriptor, descriptor_operand_indices));
       IREE_RETURN_IF_ERROR(loom_low_schedule_note_descriptor_state_accesses(
           state, node_index, descriptor));
       IREE_RETURN_IF_ERROR(

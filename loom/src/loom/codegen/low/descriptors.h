@@ -514,6 +514,9 @@ typedef struct loom_low_operand_t {
   // Target-owned encoding field identifier, or zero when this operand does not
   // directly populate a binary encoding field.
   uint16_t encoding_field_id;
+  // Result or packet operand index supplying this value, or LOOM_LOW_ID_NONE
+  // for target-owned implicit state.
+  uint16_t source_value_index;
   // Semantic role this operand row plays.
   loom_low_operand_role_t role;
   // Operand flags used by verifier, allocator, and emitter.
@@ -541,6 +544,13 @@ typedef struct loom_low_operand_t {
   // Scheduling stage where the operand result becomes ready.
   uint16_t ready_stage;
 } loom_low_operand_t;
+
+static_assert(sizeof(loom_low_operand_t) == 36,
+              "low descriptor operand rows must remain compact");
+static_assert(offsetof(loom_low_operand_t, source_value_index) == 6,
+              "source value index must occupy the existing layout padding");
+static_assert(offsetof(loom_low_operand_t, role) == 8,
+              "source value index must not move following descriptor fields");
 
 typedef struct loom_low_immediate_t {
   // String-table offset for the immediate field name.
@@ -1174,12 +1184,6 @@ bool loom_low_descriptor_operand_maps_to_packet_operand(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index);
 
-// Returns true if |descriptor_operand_index| names a low packet operand that is
-// not flagged IMPLICIT.
-bool loom_low_descriptor_operand_maps_to_explicit_packet_operand(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index);
-
 // Returns the first low packet resource operand omitted from target assembly,
 // or NULL when |descriptor| has no implicit resource operand.
 const loom_low_operand_t* loom_low_descriptor_implicit_resource_operand(
@@ -1191,13 +1195,6 @@ const loom_low_operand_t* loom_low_descriptor_implicit_resource_operand(
 uint16_t loom_low_descriptor_operand_packet_index(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index);
-
-// Returns the descriptor operand index for |packet_operand_index|, or
-// LOOM_LOW_ID_NONE when no explicit descriptor operand maps to that packet
-// operand.
-uint16_t loom_low_descriptor_packet_operand_descriptor_index(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, uint16_t packet_operand_index);
 
 // Returns the stable diagnostic spelling for an operand address map.
 iree_string_view_t loom_low_operand_address_map_kind_name(

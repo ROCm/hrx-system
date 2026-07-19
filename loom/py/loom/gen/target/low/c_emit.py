@@ -433,6 +433,7 @@ def emit_source_for_views(
         [
             [
                 f".field_name_string_offset = {pool.ref(f'field_{operand.field_name}')},",
+                ".source_value_index = " + ("LOOM_LOW_ID_NONE" if compiled.operand_source_value_indices[i] is None else str(compiled.operand_source_value_indices[i])) + ",",
                 f".role = {operand.role.c_name},",
                 f".flags = {_operand_flag_expr(operand, compiled.operand_rematerializable[i])},",
                 f".reg_class_alt_start = {compiled.operand_alt_starts[i]},",

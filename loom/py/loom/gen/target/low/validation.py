@@ -596,6 +596,10 @@ def hazard_reference_count(hazard: Hazard) -> int:
 
 
 def validate_descriptor_operands(descriptor: Descriptor) -> int:
+    validate_u16(
+        len(descriptor.operands),
+        f"descriptor '{descriptor.key}' operand count",
+    )
     result_count = 0
     seen_non_result = False
     for operand in descriptor.operands:
@@ -620,8 +624,8 @@ def validate_descriptor_operands(descriptor: Descriptor) -> int:
             operand.address_state_slot,
             f"descriptor '{descriptor.key}' operand '{operand.field_name}' address state slot",
         )
-        is_explicit_packet_value = operand_role_is_packet_input(operand.role) and OperandFlag.IMPLICIT not in operand.flags
-        has_addressable_assignment = is_result or is_explicit_packet_value
+        is_packet_value = operand_role_is_packet_input(operand.role)
+        has_addressable_assignment = is_result or is_packet_value
         if operand.address_map_kind is OperandAddressMapKind.DIRECT:
             if operand.addressable_unit_count != 0:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' direct address map must not set an addressable unit count")
@@ -629,7 +633,7 @@ def validate_descriptor_operands(descriptor: Descriptor) -> int:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' direct address map must not set an address state slot")
         elif operand.address_map_kind in (OperandAddressMapKind.LOW_SUBSET, OperandAddressMapKind.TARGET_STATE):
             if not has_addressable_assignment:
-                raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' bounded address map must apply to an explicit value operand")
+                raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' bounded address map must apply to an SSA value operand")
             if operand.addressable_unit_count == 0:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' bounded address map must set an addressable unit count")
             if operand.addressable_unit_count < operand.unit_count:
@@ -691,6 +695,34 @@ def operand_role_is_packet_input(role: OperandRole) -> bool:
         OperandRole.PREDICATE,
         OperandRole.RESOURCE,
     )
+
+
+def descriptor_operand_source_value_indices(
+    descriptor: Descriptor,
+    result_count: int,
+) -> tuple[int | None, ...]:
+    """Derives and validates the source value coordinate for every operand row."""
+    result_index = 0
+    packet_operand_index = 0
+    source_value_indices: list[int | None] = []
+    for operand in descriptor.operands:
+        if operand.role is OperandRole.RESULT:
+            source_value_index = result_index
+            result_index += 1
+        elif operand_role_is_packet_input(operand.role):
+            source_value_index = packet_operand_index
+            packet_operand_index += 1
+        elif operand.role is OperandRole.IMPLICIT:
+            source_value_indices.append(None)
+            continue
+        else:
+            raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' role {operand.role.name} has no source value coordinate")
+        if source_value_index >= 0xFFFF:
+            raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' source value index {source_value_index} collides with the absent-index sentinel")
+        source_value_indices.append(source_value_index)
+    if result_index != result_count:
+        raise ValueError(f"descriptor '{descriptor.key}' derived {result_index} source result indices for {result_count} results")
+    return tuple(source_value_indices)
 
 
 def _validate_binary_constraint(
@@ -866,7 +898,7 @@ def asm_form_mnemonic(descriptor: Descriptor, asm_form: AsmForm) -> str:
 
 
 def descriptor_packet_operand_indices(descriptor: Descriptor) -> tuple[int, ...]:
-    return tuple(i for i, operand in enumerate(descriptor.operands) if operand_role_is_packet_input(operand.role) and OperandFlag.IMPLICIT not in operand.flags)
+    return tuple(i for i, operand in enumerate(descriptor.operands) if operand_role_is_packet_input(operand.role))
 
 
 def validate_storage_lease_name(value: str, description: str) -> None:

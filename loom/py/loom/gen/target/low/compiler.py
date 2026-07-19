@@ -751,8 +751,14 @@ def compile_descriptor_set(
 
     result_counts_by_descriptor: dict[str, int] = {}
     rematerializable_results_by_descriptor: dict[str, tuple[int, ...]] = {}
+    source_value_indices_by_descriptor: dict[str, tuple[int | None, ...]] = {}
     for descriptor in spec.descriptors:
-        result_counts_by_descriptor[descriptor.key] = validation.validate_descriptor_operands(descriptor)
+        result_count = validation.validate_descriptor_operands(descriptor)
+        result_counts_by_descriptor[descriptor.key] = result_count
+        source_value_indices_by_descriptor[descriptor.key] = validation.descriptor_operand_source_value_indices(
+            descriptor,
+            result_count,
+        )
         rematerializable_results_by_descriptor[descriptor.key] = validation.validate_descriptor_constraints(descriptor)
     validation.validate_physical_descriptor_set(spec)
 
@@ -1012,6 +1018,7 @@ def compile_descriptor_set(
     effect_group_starts: dict[tuple[Effect, ...], int] = {}
     storage_lease_group_starts: dict[tuple[StorageLease, ...], int] = {}
     operands: list[Operand] = []
+    operand_source_value_indices: list[int | None] = []
     operand_alt_starts: list[int] = []
     operand_rematerializable: list[bool] = []
     immediates: list[Immediate] = []
@@ -1067,6 +1074,7 @@ def compile_descriptor_set(
     for descriptor in selected_descriptors:
         operand_start = len(operands)
         rematerializable_result_set = set(rematerializable_results_by_descriptor[descriptor.key])
+        operand_source_value_indices.extend(source_value_indices_by_descriptor[descriptor.key])
         for operand_index, operand in enumerate(descriptor.operands):
             alt_group: tuple[tuple[int | None, tuple[RegClassAltFlag, ...]], ...] = tuple(
                 (
@@ -1138,7 +1146,7 @@ def compile_descriptor_set(
             {
                 "operand_start": operand_start,
                 "operand_count": len(descriptor.operands),
-                "result_count": validation.validate_descriptor_operands(descriptor),
+                "result_count": result_counts_by_descriptor[descriptor.key],
                 "immediate_start": immediate_start,
                 "immediate_count": len(descriptor.immediates),
                 "effect_start": effect_start,
@@ -1182,6 +1190,7 @@ def compile_descriptor_set(
         string_pool=string_pool,
         reg_class_alts=reg_class_alts,
         operands=operands,
+        operand_source_value_indices=operand_source_value_indices,
         operand_alt_starts=operand_alt_starts,
         operand_rematerializable=operand_rematerializable,
         immediates=immediates,

@@ -538,28 +538,21 @@ static iree_status_t loom_amdgpu_packet_descriptor_operand_assignment(
 
   const loom_low_descriptor_set_t* descriptor_set =
       state->schedule->target.descriptor_set;
-  const loom_low_operand_t* operands =
-      &descriptor_set->operands[packet->descriptor->operand_start];
-  uint16_t packet_operand_index = 0;
-  for (uint16_t i = packet->descriptor->result_count;
-       i < packet->descriptor->operand_count; ++i) {
-    const loom_low_operand_t* operand = &operands[i];
-    if (!loom_low_operand_role_is_packet_operand(operand->role)) {
-      continue;
+  const loom_low_operand_t* operand =
+      &descriptor_set->operands[packet->descriptor->operand_start +
+                                descriptor_operand_index];
+  if (loom_low_operand_role_is_packet_operand(operand->role)) {
+    const uint16_t packet_operand_index = operand->source_value_index;
+    if (packet_operand_index >= op->operand_count) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "AMDGPU native encoding descriptor operand %" PRIu16
+          " has no matching SSA operand",
+          descriptor_operand_index);
     }
-    if (i == descriptor_operand_index) {
-      if (packet_operand_index >= op->operand_count) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "AMDGPU native encoding descriptor operand %" PRIu16
-            " has no matching SSA operand",
-            descriptor_operand_index);
-      }
-      *out_assignment = loom_amdgpu_map_assignment(
-          state->allocation, loom_op_const_operands(op)[packet_operand_index]);
-      return iree_ok_status();
-    }
-    ++packet_operand_index;
+    *out_assignment = loom_amdgpu_map_assignment(
+        state->allocation, loom_op_const_operands(op)[packet_operand_index]);
+    return iree_ok_status();
   }
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "AMDGPU native encoding descriptor operand %" PRIu16

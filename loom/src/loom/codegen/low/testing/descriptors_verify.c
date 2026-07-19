@@ -851,8 +851,7 @@ static uint16_t loom_low_descriptor_packet_operand_count(
   const loom_low_operand_t* operands =
       &descriptor_set->operands[descriptor->operand_start];
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    if (loom_low_operand_role_is_packet_operand(operands[i].role) &&
-        !iree_any_bit_set(operands[i].flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
+    if (loom_low_operand_role_is_packet_operand(operands[i].role)) {
       ++count;
     }
   }
@@ -904,13 +903,11 @@ static iree_status_t loom_low_verify_descriptor_operand_forms(
       const loom_low_operand_t* source_operand =
           &descriptor_set->operands[descriptor->operand_start +
                                     match->source_operand_index];
-      if (!loom_low_operand_role_is_packet_operand(source_operand->role) ||
-          iree_any_bit_set(source_operand->flags,
-                           LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
+      if (!loom_low_operand_role_is_packet_operand(source_operand->role)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "low descriptor %" PRIu32 " operand form %" PRIu32 " match %" PRIu16
-            " source operand %" PRIu16 " is not an explicit packet operand",
+            " source operand %" PRIu16 " is not a packet operand",
             descriptor_index, form_index, match_index,
             match->source_operand_index);
       }
@@ -922,6 +919,17 @@ static iree_status_t loom_low_verify_descriptor_operand_forms(
             " but descriptor has only %" PRIu16 " packet operands",
             descriptor_index, form_index, match_index,
             match->source_packet_operand_index, source_packet_operand_count);
+      }
+      if (match->source_packet_operand_index !=
+          source_operand->source_value_index) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "low descriptor %" PRIu32
+                                " operand form %" PRIu32 " match %" PRIu16
+                                " source coordinate %" PRIu16
+                                " does not match operand coordinate %" PRIu16,
+                                descriptor_index, form_index, match_index,
+                                match->source_packet_operand_index,
+                                source_operand->source_value_index);
       }
       if (!loom_low_operand_form_match_kind_is_valid(match->match_kind)) {
         return iree_make_status(
@@ -1452,6 +1460,7 @@ static iree_status_t loom_low_verify_descriptor_canonical_asm_form(
 static iree_status_t loom_low_verify_descriptor_operand_roles(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint32_t descriptor_index) {
+  uint16_t packet_operand_index = 0;
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const uint32_t operand_index = descriptor->operand_start + i;
     const loom_low_operand_t* operand =
@@ -1471,6 +1480,13 @@ static iree_status_t loom_low_verify_descriptor_operand_roles(
                                 " has non-result role %u",
                                 descriptor_index, i, (unsigned)operand->role);
       }
+      if (operand->source_value_index != i) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "low descriptor %" PRIu32 " result row %" PRIu16
+                                " has source value index %" PRIu16,
+                                descriptor_index, i,
+                                operand->source_value_index);
+      }
       continue;
     }
     if (operand->role == LOOM_LOW_OPERAND_ROLE_RESULT) {
@@ -1487,6 +1503,25 @@ static iree_status_t loom_low_verify_descriptor_operand_roles(
                               " implicit operand row %" PRIu16
                               " must set LOOM_LOW_OPERAND_FLAG_IMPLICIT",
                               descriptor_index, i);
+    }
+    if (operand->role == LOOM_LOW_OPERAND_ROLE_IMPLICIT) {
+      if (operand->source_value_index != LOOM_LOW_ID_NONE) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "low descriptor %" PRIu32 " implicit operand row %" PRIu16
+            " has source value index %" PRIu16,
+            descriptor_index, i, operand->source_value_index);
+      }
+    } else if (loom_low_operand_role_is_packet_operand(operand->role)) {
+      if (operand->source_value_index != packet_operand_index) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "low descriptor %" PRIu32 " packet operand row %" PRIu16
+            " has source value index %" PRIu16 " instead of %" PRIu16,
+            descriptor_index, i, operand->source_value_index,
+            packet_operand_index);
+      }
+      ++packet_operand_index;
     }
   }
   return iree_ok_status();
@@ -1581,7 +1616,7 @@ static iree_status_t loom_low_verify_storage_lease_attachment_unit_count(
     return iree_ok_status();
   }
 
-  uint16_t packet_operand_index = 0;
+  uint16_t packet_operand_count = 0;
   for (uint16_t operand_index = descriptor->result_count;
        operand_index < descriptor->operand_count; ++operand_index) {
     const loom_low_operand_t* operand =
@@ -1589,18 +1624,18 @@ static iree_status_t loom_low_verify_storage_lease_attachment_unit_count(
     if (!loom_low_operand_role_is_packet_operand(operand->role)) {
       continue;
     }
-    if (packet_operand_index == lease->attachment_index) {
+    ++packet_operand_count;
+    if (operand->source_value_index == lease->attachment_index) {
       *out_unit_count = operand->unit_count;
       return iree_ok_status();
     }
-    ++packet_operand_index;
   }
   return iree_make_status(
       IREE_STATUS_OUT_OF_RANGE,
       "low descriptor %" PRIu32
       " storage lease references packet operand %" PRIu16
       " but descriptor has only %" PRIu16 " packet operands",
-      descriptor_index, lease->attachment_index, packet_operand_index);
+      descriptor_index, lease->attachment_index, packet_operand_count);
 }
 
 static iree_status_t loom_low_verify_storage_lease(
@@ -1852,15 +1887,14 @@ static iree_status_t loom_low_verify_operand(
   }
   const bool has_addressable_assignment =
       operand->role == LOOM_LOW_OPERAND_ROLE_RESULT ||
-      (loom_low_operand_role_is_packet_operand(operand->role) &&
-       !iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT));
+      loom_low_operand_role_is_packet_operand(operand->role);
   if (loom_low_operand_address_map_kind_has_low_window(
           operand->address_map_kind) &&
       !has_addressable_assignment) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "low operand %" PRIu32
-        " has a bounded address map without an explicit value operand",
+        " has a bounded address map without an SSA value operand",
         operand_index);
   }
   if (loom_low_operand_address_map_kind_has_low_window(

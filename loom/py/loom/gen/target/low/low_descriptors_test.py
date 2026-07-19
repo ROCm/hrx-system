@@ -65,6 +65,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_MUL_I32_DESCRIPTOR,
     TEST_LOW_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,
+    TEST_LOW_WRITE_LOW16_I32_DESCRIPTOR,
 )
 
 
@@ -772,6 +773,47 @@ def test_allowlist_closes_over_operand_form_replacements() -> None:
     assert ".match_kind = LOOM_LOW_OPERAND_FORM_MATCH_ALL_EQUAL_I64" in generated.source
 
 
+def test_operand_forms_preserve_assembly_implicit_packet_sources() -> None:
+    base_descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
+    hidden_lhs = replace(base_descriptor.operands[1], flags=(OperandFlag.IMPLICIT,))
+    replacement_descriptor = replace(
+        base_descriptor,
+        key="test.add.i32.hidden_lhs",
+        mnemonic="test.add.i32.hidden_lhs",
+        operands=(base_descriptor.operands[0], hidden_lhs),
+        asm_forms=(AsmForm(results=("dst",), operands=("lhs",)),),
+    )
+    source_descriptor = replace(
+        base_descriptor,
+        operands=(
+            base_descriptor.operands[0],
+            hidden_lhs,
+            base_descriptor.operands[2],
+        ),
+        operand_forms=(
+            OperandForm(
+                replacement_descriptor=replacement_descriptor.key,
+                matches=(
+                    OperandFormMatch(
+                        source_operand="rhs",
+                        match_kind=OperandFormMatchKind.ALL_EQUAL_I64,
+                        match_i64=0,
+                    ),
+                ),
+            ),
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(source_descriptor, replacement_descriptor),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    assert compiled.operand_form_matches[0].source_packet_operand_index == 1
+    assert compiled.operand_form_operand_indices == [0]
+
+
 def test_shared_source_emits_one_storage_table_with_multiple_views() -> None:
     base_view = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -1100,6 +1142,55 @@ def test_generator_accepts_asm_form_implicit_packet_operand() -> None:
 
     assert "LOOM_LOW_OPERAND_FLAG_IMPLICIT" in generated.source
     assert ".operand_index_count = 2," in generated.source
+
+
+def test_compiler_indexes_every_descriptor_source_value_role() -> None:
+    base_descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
+    source_descriptor = replace(
+        base_descriptor,
+        key="test.source.coordinates",
+        mnemonic="test.source.coordinates",
+        semantic_tag="test.source.coordinates",
+        operands=(
+            replace(base_descriptor.operands[0], field_name="dst0"),
+            replace(base_descriptor.operands[0], field_name="dst1"),
+            replace(base_descriptor.operands[1], field_name="value"),
+            replace(
+                TEST_LOW_COND_BR_I32_DESCRIPTOR.operands[0],
+                field_name="predicate",
+            ),
+            replace(
+                TEST_LOW_WRITE_LOW16_I32_DESCRIPTOR.operands[1],
+                field_name="hidden_resource",
+                flags=(OperandFlag.IMPLICIT,),
+            ),
+            replace(
+                TEST_LOW_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR.operands[-1],
+                field_name="target_state",
+            ),
+        ),
+        constraints=(
+            Constraint(ConstraintKind.TIED, 0, 2),
+            Constraint(ConstraintKind.EARLY_CLOBBER, 1),
+        ),
+        asm_forms=(
+            AsmForm(
+                results=("dst0", "dst1"),
+                operands=("value", "predicate", "hidden_resource"),
+            ),
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(source_descriptor,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert compiled.operand_source_value_indices == [0, 1, 0, 1, 2, None]
+    assert ".source_value_index = 2," in generated.source
+    assert ".source_value_index = LOOM_LOW_ID_NONE," in generated.source
 
 
 def test_generator_rejects_ambiguous_asm_mnemonics() -> None:
@@ -1821,7 +1912,7 @@ def test_generator_rejects_bounded_address_map_on_implicit_operand() -> None:
 
     with pytest.raises(
         ValueError,
-        match=re.escape("descriptor 'test.add.i32' operand 'lhs' bounded address map must apply to an explicit value operand"),
+        match=re.escape("descriptor 'test.add.i32' operand 'lhs' bounded address map must apply to an SSA value operand"),
     ):
         generate_descriptor_set(descriptor_set)
 

@@ -771,7 +771,7 @@ def _amdgpu_storage_lease(
 
 
 def _amdgpu_operand_is_packet_input(operand: Operand) -> bool:
-    return OperandFlag.IMPLICIT not in operand.flags and operand.role in (
+    return operand.role in (
         OperandRole.OPERAND,
         OperandRole.PREDICATE,
         OperandRole.RESOURCE,

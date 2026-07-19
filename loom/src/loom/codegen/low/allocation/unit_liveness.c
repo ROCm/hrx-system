@@ -260,14 +260,15 @@ loom_low_allocation_unit_liveness_note_early_clobber_operand_uses(
     const loom_low_descriptor_t* descriptor,
     uint16_t early_clobber_result_index, uint32_t clobber_point) {
   const loom_value_id_t* operands = loom_op_const_operands(op);
-  uint16_t packet_operand_index = 0;
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
-    if (!loom_low_descriptor_operand_maps_to_explicit_packet_operand(
-            descriptor_set, descriptor, i)) {
+    if (!loom_low_descriptor_operand_maps_to_packet_operand(descriptor_set,
+                                                            descriptor, i)) {
       continue;
     }
-    const uint16_t operand_index = packet_operand_index++;
+    const loom_low_operand_t* descriptor_operand =
+        &descriptor_set->operands[descriptor->operand_start + i];
+    const uint16_t operand_index = descriptor_operand->source_value_index;
     if (operand_index >= op->operand_count) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,

@@ -261,6 +261,13 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_schedule_preferred_pair_node_t* preferred_pair_nodes;
   // Concrete placement-sensitive pair opportunities in scheduled order.
   loom_low_placement_pair_use_t* placement_pair_uses;
+  // Reusable descriptor-row projection for one packet's operands.
+  struct {
+    // Descriptor-local row indices keyed by packet operand index.
+    uint16_t* indices;
+    // Allocated entries in |indices|.
+    iree_host_size_t capacity;
+  } descriptor_operands;
   // Per-block readers of values whose storage may be consumed by tied ops.
   struct {
     // Outstanding read lists, dense by local value ordinal.
