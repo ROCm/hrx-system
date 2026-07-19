@@ -3143,12 +3143,13 @@ static iree_status_t loom_low_lower_rule_bind_aliases(
 static iree_status_t loom_low_lower_rule_record_source_memory(
     loom_low_lower_context_t* context, const loom_low_lower_emit_t* emit,
     const loom_low_source_memory_access_plan_t* source_memory_access,
-    const loom_op_t* low_op) {
+    loom_op_t* low_op) {
   if (emit->source_memory_ordinal == 0) {
     return iree_ok_status();
   }
   return loom_low_lower_record_source_memory_access(context, low_op,
-                                                    source_memory_access);
+                                                    source_memory_access,
+                                                    /*flags=*/0);
 }
 
 static iree_status_t loom_low_lower_rule_emit_descriptor_const(
