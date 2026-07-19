@@ -1027,6 +1027,49 @@ ERR_AMDGPU_044 = ErrorDef(
     ),
 )
 
+# ERR_AMDGPU_045: AMDGPU final artifact has an insufficient wait.
+ERR_AMDGPU_045 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=45,
+    severity=Severity.ERROR,
+    summary="AMDGPU final artifact has an insufficient wait.",
+    message=(
+        "AMDGPU final-artifact wait hazard '{diagnostic_code}' for kernel "
+        "'{kernel_name}' (present={has_kernel}, entry .text+{kernel_entry_offset}) "
+        "at {section_name}+{consumer_section_offset} "
+        "(file+{consumer_file_offset}): instruction '{consumer_instruction}' "
+        "has {access_kind} conflict on "
+        "{register_class}[{register_index}:{register_width}] with producer at "
+        "section+{producer_section_offset} (file+{producer_file_offset}) "
+        "instruction '{producer_instruction}'; counter {counter_name} requires "
+        "count {required_count}: {explanation}"
+    ),
+    params=(
+        ErrorParam("diagnostic_code", ParamKind.STRING),
+        ErrorParam("has_kernel", ParamKind.BOOL),
+        ErrorParam("kernel_name", ParamKind.STRING),
+        ErrorParam("kernel_entry_offset", ParamKind.U64),
+        ErrorParam("counter_name", ParamKind.STRING),
+        ErrorParam("access_kind", ParamKind.STRING),
+        ErrorParam("register_class", ParamKind.STRING),
+        ErrorParam("register_index", ParamKind.U32),
+        ErrorParam("register_width", ParamKind.U32),
+        ErrorParam("section_name", ParamKind.STRING),
+        ErrorParam("consumer_section_offset", ParamKind.U64),
+        ErrorParam("consumer_file_offset", ParamKind.U64),
+        ErrorParam("consumer_instruction", ParamKind.STRING),
+        ErrorParam("producer_section_offset", ParamKind.U64),
+        ErrorParam("producer_file_offset", ParamKind.U64),
+        ErrorParam("producer_instruction", ParamKind.STRING),
+        ErrorParam("required_count", ParamKind.U32),
+        ErrorParam("explanation", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Strengthen or insert the required AMDGPU wait before the reported "
+        "consumer instruction"
+    ),
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_003,
@@ -1071,4 +1114,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_042,
     ERR_AMDGPU_043,
     ERR_AMDGPU_044,
+    ERR_AMDGPU_045,
 )

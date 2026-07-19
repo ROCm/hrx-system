@@ -26,4 +26,38 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    wait_hazard
+  HDRS
+    "wait_hazard.h"
+  SRCS
+    "wait_hazard.c"
+  DEPS
+    iree::base
+    loom::error::diagnostic
+    loom::target::arch::amdgpu::error_defs
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_test(
+  NAME
+    wait_hazard_test
+  SRCS
+    "wait_hazard_test.cc"
+  DEPS
+    ::wait_hazard
+    iree::base::internal::json
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::error::json_sink
+    loom::util::stream
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

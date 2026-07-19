@@ -7,6 +7,7 @@
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
+    "loom_cc_test",
 )
 
 package(
@@ -25,5 +26,30 @@ loom_cc_library(
         "//loom/src/loom/target:low_packet_diagnostics",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "wait_hazard",
+    srcs = ["wait_hazard.c"],
+    hdrs = ["wait_hazard.h"],
+    visibility = ["//loom/src/loom/tooling/target/amdgpu:__subpackages__"],
+    deps = [
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "wait_hazard_test",
+    srcs = ["wait_hazard_test.cc"],
+    deps = [
+        ":wait_hazard",
+        "//loom/src/loom/error:json_sink",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )

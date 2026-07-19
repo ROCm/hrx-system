@@ -25,6 +25,8 @@ package(
 
 _AMDGPU_CHECK_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/check:__pkg__"]
 
+_AMDGPU_DIAGNOSTICS_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/diagnostics:__pkg__"]
+
 _AMDGPU_ENCODING_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/encoding:__pkg__"]
 
 _AMDGPU_HAL_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/hal:__pkg__"]
@@ -77,6 +79,7 @@ loom_generated_cc_library(
     generator = "//loom/py/loom/gen/error:c_errors",
     source = "error_catalog.c",
     visibility = (
+        _AMDGPU_DIAGNOSTICS_VISIBILITY +
         _AMDGPU_HAL_VISIBILITY +
         _AMDGPU_LOWER_VISIBILITY +
         _AMDGPU_NATIVE_VISIBILITY +
