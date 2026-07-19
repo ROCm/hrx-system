@@ -106,6 +106,8 @@ loom_amdgpu_metadata_kernel_t MinimalKernel() {
       /*.max_flat_workgroup_size=*/64,
       /*.required_workgroup_size=*/{/*.x=*/64, /*.y=*/1, /*.z=*/1},
       /*.has_required_workgroup_size=*/true,
+      /*.workgroup_cluster_size=*/{},
+      /*.has_workgroup_cluster_size=*/false,
       /*.arguments=*/nullptr,
       /*.argument_count=*/0,
   };
@@ -145,6 +147,7 @@ TEST(AmdgpuMetadataTest, AppendsAssemblyMetadataForNoArgumentKernel) {
   EXPECT_TRUE(Contains(text, "      .vgpr_count: 0\n")) << text;
   EXPECT_TRUE(Contains(text, "      .max_flat_workgroup_size: 64\n")) << text;
   EXPECT_TRUE(Contains(text, "      .reqd_workgroup_size:\n")) << text;
+  EXPECT_FALSE(Contains(text, "      .cluster_dims:\n")) << text;
   EXPECT_TRUE(Contains(text, "      .args: []\n")) << text;
   EXPECT_TRUE(Contains(text, ".end_amdgpu_metadata\n")) << text;
 }
@@ -174,6 +177,68 @@ TEST(AmdgpuMetadataTest, OmitsOptionalRequiredWorkgroupSize) {
 
   EXPECT_TRUE(Contains(bytes, ".max_flat_workgroup_size"));
   EXPECT_FALSE(Contains(bytes, ".reqd_workgroup_size"));
+  EXPECT_FALSE(Contains(bytes, ".cluster_dims"));
+}
+
+TEST(AmdgpuMetadataTest, AppendsWorkgroupClusterDimensions) {
+  loom_amdgpu_metadata_kernel_t kernel = MinimalKernel();
+  kernel.workgroup_cluster_size = {/*.x=*/1, /*.y=*/2, /*.z=*/1};
+  kernel.has_workgroup_cluster_size = true;
+  loom_amdgpu_code_object_metadata_t metadata = MetadataForKernel(&kernel);
+  metadata.target = IREE_SV("amdgcn-amd-amdhsa--gfx1250");
+
+  iree_string_builder_t text_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &text_builder);
+  IREE_ASSERT_OK(
+      loom_amdgpu_metadata_append_assembly(&metadata, &text_builder));
+  std::string text = BuilderString(text_builder);
+  iree_string_builder_deinitialize(&text_builder);
+
+  EXPECT_TRUE(Contains(text,
+                       "      .cluster_dims:\n"
+                       "        - 1\n"
+                       "        - 2\n"
+                       "        - 1\n"))
+      << text;
+
+  iree_string_builder_t msgpack_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &msgpack_builder);
+  IREE_ASSERT_OK(
+      loom_amdgpu_metadata_append_msgpack(&metadata, &msgpack_builder));
+  std::string bytes = BuilderString(msgpack_builder);
+  iree_string_builder_deinitialize(&msgpack_builder);
+
+  std::string encoded_cluster_dims = ".cluster_dims";
+  encoded_cluster_dims.append("\x93\x01\x02\x01", 4);
+  EXPECT_NE(bytes.find(encoded_cluster_dims), std::string::npos);
+}
+
+TEST(AmdgpuMetadataTest, RejectsInvalidWorkgroupClusterDimensions) {
+  struct ClusterDimensionsCase {
+    // Cluster dimensions supplied to the metadata writer.
+    loom_target_workgroup_cluster_size_t size;
+    // Presence marker supplied to the metadata writer.
+    bool is_present;
+  };
+  const ClusterDimensionsCase cases[] = {
+      {/*.size=*/{/*.x=*/1, /*.y=*/2, /*.z=*/1}, /*.is_present=*/false},
+      {/*.size=*/{/*.x=*/0, /*.y=*/2, /*.z=*/1}, /*.is_present=*/true},
+      {/*.size=*/{/*.x=*/1, /*.y=*/256, /*.z=*/1}, /*.is_present=*/true},
+      {/*.size=*/{/*.x=*/1, /*.y=*/1, /*.z=*/1}, /*.is_present=*/true},
+  };
+  for (const ClusterDimensionsCase& test_case : cases) {
+    loom_amdgpu_metadata_kernel_t kernel = MinimalKernel();
+    kernel.workgroup_cluster_size = test_case.size;
+    kernel.has_workgroup_cluster_size = test_case.is_present;
+    loom_amdgpu_code_object_metadata_t metadata = MetadataForKernel(&kernel);
+
+    iree_string_builder_t builder;
+    iree_string_builder_initialize(iree_allocator_system(), &builder);
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_amdgpu_metadata_append_msgpack(&metadata, &builder));
+    iree_string_builder_deinitialize(&builder);
+  }
 }
 
 TEST(AmdgpuMetadataTest, AppendsMsgpackMetadataForNoArgumentKernel) {

@@ -102,6 +102,28 @@ static iree_status_t loom_amdgpu_metadata_validate_kernel(
         IREE_STATUS_INVALID_ARGUMENT,
         "AMDGPU metadata wavefront size must be either 32 or 64");
   }
+  const loom_target_workgroup_cluster_size_t cluster_size =
+      kernel->workgroup_cluster_size;
+  if (!kernel->has_workgroup_cluster_size) {
+    if (cluster_size.x != 0 || cluster_size.y != 0 || cluster_size.z != 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU metadata cluster dimensions require explicit presence");
+    }
+  } else {
+    if (cluster_size.x == 0 || cluster_size.x > UINT8_MAX ||
+        cluster_size.y == 0 || cluster_size.y > UINT8_MAX ||
+        cluster_size.z == 0 || cluster_size.z > UINT8_MAX) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU metadata cluster dimensions must be positive u8 values");
+    }
+    if (cluster_size.x == 1 && cluster_size.y == 1 && cluster_size.z == 1) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU metadata must omit the trivial 1x1x1 cluster shape");
+    }
+  }
   iree_host_size_t previous_argument_end = 0;
   for (iree_host_size_t i = 0; i < kernel->argument_count; ++i) {
     const loom_amdgpu_metadata_argument_t* argument = &kernel->arguments[i];
@@ -233,6 +255,17 @@ static iree_status_t loom_amdgpu_metadata_append_kernel_assembly(
                                           kernel->required_workgroup_size.x,
                                           kernel->required_workgroup_size.y,
                                           kernel->required_workgroup_size.z));
+  }
+  if (kernel->has_workgroup_cluster_size) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_format(builder,
+                                          "      .cluster_dims:\n"
+                                          "        - %" PRIu32 "\n"
+                                          "        - %" PRIu32 "\n"
+                                          "        - %" PRIu32 "\n",
+                                          kernel->workgroup_cluster_size.x,
+                                          kernel->workgroup_cluster_size.y,
+                                          kernel->workgroup_cluster_size.z));
   }
   if (kernel->argument_count == 0) {
     return iree_string_builder_append_cstring(builder, "      .args: []\n");
@@ -445,7 +478,8 @@ static iree_status_t loom_amdgpu_metadata_append_kernel_msgpack(
     const loom_amdgpu_metadata_kernel_t* kernel,
     iree_string_builder_t* builder) {
   const iree_host_size_t field_count =
-      11 + (kernel->has_required_workgroup_size ? 1 : 0);
+      11 + (kernel->has_required_workgroup_size ? 1 : 0) +
+      (kernel->has_workgroup_cluster_size ? 1 : 0);
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_map(builder, field_count));
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
       builder, IREE_SV(".name"), kernel->name));
@@ -481,6 +515,17 @@ static iree_status_t loom_amdgpu_metadata_append_kernel_msgpack(
         builder, kernel->required_workgroup_size.y));
     IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
         builder, kernel->required_workgroup_size.z));
+  }
+  if (kernel->has_workgroup_cluster_size) {
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_msgpack_append_string(builder, IREE_SV(".cluster_dims")));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_array(builder, 3));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
+        builder, kernel->workgroup_cluster_size.x));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
+        builder, kernel->workgroup_cluster_size.y));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
+        builder, kernel->workgroup_cluster_size.z));
   }
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_msgpack_append_string(builder, IREE_SV(".args")));

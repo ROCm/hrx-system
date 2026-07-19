@@ -385,6 +385,17 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
         ParseSource(iree_make_cstring_view(kSource), out_module));
   }
 
+  void ParseGfx1250ClusteredKernel(loom_module_t** out_module) {
+    static const char kSource[] =
+        "amdgpu.target<gfx1250> @gfx_target\n"
+        "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
+        "cluster_size(1, 2, 1) @loom_kernel() {\n"
+        "  low.return\n"
+        "}\n";
+    ASSERT_NO_FATAL_FAILURE(
+        ParseSource(iree_make_cstring_view(kSource), out_module));
+  }
+
   void ParseWorkgroupStorageKernel(iree_string_view_t target_config,
                                    iree_string_view_t processor_name,
                                    uint64_t byte_length,
@@ -738,6 +749,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsDynamicLocalSizeKernel) {
   EXPECT_NE(hsaco.find("loom_kernel.kd"), std::string::npos);
   EXPECT_NE(hsaco.find(".max_flat_workgroup_size"), std::string::npos);
   EXPECT_EQ(hsaco.find(".reqd_workgroup_size"), std::string::npos);
+  EXPECT_EQ(hsaco.find(".cluster_dims"), std::string::npos);
 
   ASSERT_NE(library.artifact_manifest.contents.data, nullptr);
   std::string manifest(
@@ -748,6 +760,67 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsDynamicLocalSizeKernel) {
   EXPECT_NE(manifest.find("\"subgroup_size\":32"), std::string::npos)
       << manifest;
   EXPECT_EQ(manifest.find("\"workgroup_size\""), std::string::npos) << manifest;
+
+  loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                              iree_allocator_system());
+  loom_module_free(module);
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest, EmitsWorkgroupClusterDimensions) {
+  loom_module_t* module = nullptr;
+  ASSERT_NO_FATAL_FAILURE(ParseGfx1250ClusteredKernel(&module));
+
+  loom_target_artifact_manifest_collect_options_t artifact_manifest_options;
+  loom_target_artifact_manifest_collect_options_initialize(
+      &artifact_manifest_options);
+  artifact_manifest_options.mode = LOOM_TARGET_ARTIFACT_MANIFEST_MODE_SUMMARY;
+
+  DiagnosticCapture capture;
+  loom_amdgpu_hal_kernel_library_t library = {};
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      /*.processor=*/{},
+      /*.target_selection=*/{},
+      /*.runtime_globals=*/{},
+      /*.data_symbols=*/{},
+      /*.data_symbol_count=*/{},
+      /*.diagnostic_sink=*/capture.sink(),
+      /*.source_resolver=*/{},
+      /*.max_errors=*/20,
+      /*.report=*/nullptr,
+      /*.capture_target_listing=*/true,
+      /*.artifact_name=*/{},
+      /*.artifact_manifest_identifier=*/{},
+      /*.artifact_manifest=*/artifact_manifest_options,
+  };
+  bool emitted = false;
+  IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
+      module, &options, iree_allocator_system(), &emitted, &library));
+
+  EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
+  EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
+  ASSERT_NE(library.hsaco_data, nullptr);
+  std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
+                    library.hsaco_data_length);
+  EXPECT_NE(hsaco.find(".cluster_dims"), std::string::npos);
+
+  ASSERT_NE(library.target_listing_data, nullptr);
+  const std::string listing(library.target_listing_data,
+                            library.target_listing_data_length);
+  EXPECT_NE(listing.find(".amdhsa_code_object_version 6\n"), std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("      .cluster_dims:\n"
+                         "        - 1\n"
+                         "        - 2\n"
+                         "        - 1\n"),
+            std::string::npos)
+      << listing;
+
+  ASSERT_NE(library.artifact_manifest.contents.data, nullptr);
+  const std::string manifest(
+      reinterpret_cast<const char*>(library.artifact_manifest.contents.data),
+      library.artifact_manifest.contents.data_length);
+  EXPECT_NE(manifest.find("\"cluster_size\":[1,2,1]"), std::string::npos)
+      << manifest;
 
   loom_amdgpu_hal_kernel_library_deinitialize(&library,
                                               iree_allocator_system());

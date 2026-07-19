@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amdgpu/util/hsaco_metadata.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 //===----------------------------------------------------------------------===//
@@ -630,6 +631,7 @@ typedef struct iree_hal_amdgpu_hsaco_metadata_kernel_fields_t {
   bool has_group_segment_fixed_size;
   bool has_private_segment_fixed_size;
   bool has_required_workgroup_size;
+  bool has_workgroup_cluster_size;
   bool has_args;
 } iree_hal_amdgpu_hsaco_metadata_kernel_fields_t;
 
@@ -779,6 +781,37 @@ static iree_status_t iree_hal_amdgpu_hsaco_metadata_parse_workgroup_size(
   for (iree_host_size_t i = 0; i < 3; ++i) {
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_msgpack_read_uint32(reader, &out_value[i]));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+iree_hal_amdgpu_hsaco_metadata_parse_workgroup_cluster_size(
+    iree_hal_amdgpu_msgpack_reader_t* reader, uint8_t out_value[3]) {
+  uint32_t value_count = 0;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_msgpack_read_array_count(reader, &value_count));
+  if (value_count != 3) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU cluster dimensions metadata must have "
+                            "three elements");
+  }
+  uint32_t dimensions[3] = {0};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(dimensions); ++i) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_msgpack_read_uint32(reader, &dimensions[i]));
+    if (dimensions[i] == 0 || dimensions[i] > UINT8_MAX) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "AMDGPU cluster dimension %" PRIhsz
+                              " must be a positive u8 value; got %" PRIu32,
+                              i, dimensions[i]);
+    }
+    out_value[i] = (uint8_t)dimensions[i];
+  }
+  if (dimensions[0] == 1 && dimensions[1] == 1 && dimensions[2] == 1) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU metadata must omit the trivial 1x1x1 cluster shape");
   }
   return iree_ok_status();
 }
@@ -1002,6 +1035,15 @@ static iree_status_t iree_hal_amdgpu_hsaco_metadata_parse_kernel(
           reader, out_kernel->required_workgroup_size));
       out_kernel->has_required_workgroup_size = true;
       fields.has_required_workgroup_size = true;
+    } else if (iree_string_view_equal(key, IREE_SV(".cluster_dims"))) {
+      if (fields.has_workgroup_cluster_size) {
+        return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);
+      }
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_hsaco_metadata_parse_workgroup_cluster_size(
+              reader, out_kernel->workgroup_cluster_size));
+      out_kernel->has_workgroup_cluster_size = true;
+      fields.has_workgroup_cluster_size = true;
     } else if (iree_string_view_equal(key, IREE_SV(".args"))) {
       if (fields.has_args) {
         return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);

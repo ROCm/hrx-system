@@ -124,6 +124,8 @@ static iree_hal_amdgpu_hsaco_metadata_kernel_t MakeKernel(
       /*.private_segment_fixed_size=*/32,
       /*.required_workgroup_size=*/{},
       /*.has_required_workgroup_size=*/{},
+      /*.workgroup_cluster_size=*/{},
+      /*.has_workgroup_cluster_size=*/{},
       /*.arg_count=*/args.size(),
       /*.args=*/args.data(),
   };

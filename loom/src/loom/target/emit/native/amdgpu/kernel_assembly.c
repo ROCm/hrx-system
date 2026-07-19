@@ -12,7 +12,7 @@
 #include "loom/target/emit/native/amdgpu/kernel_record.h"
 #include "loom/target/emit/native/amdgpu/metadata.h"
 
-#define LOOM_AMDGPU_KERNEL_ASSEMBLY_CODE_OBJECT_VERSION 5u
+#define LOOM_AMDGPU_KERNEL_ASSEMBLY_CODE_OBJECT_VERSION 6u
 
 static iree_status_t loom_amdgpu_kernel_assembly_accum_offset(
     uint32_t vgpr_count, uint32_t* out_accum_offset) {
