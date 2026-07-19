@@ -2489,11 +2489,38 @@ class Parser:
             case Keyword(text=text):
                 result = tok.at(TokenKind.BARE_IDENT, text)
                 return result
-            case Clause(name=name):
-                return (
+            case Clause(name=name, elements=payload):
+                if not (
                     tok.at(TokenKind.BARE_IDENT, name)
                     and tok.peek_n(1).kind == TokenKind.LPAREN
+                ):
+                    return False
+                # Clauses can intentionally share a name while carrying
+                # different field kinds, such as residency(%minimum) and
+                # residency(preserve). Refine the probe with the first payload
+                # element so the earlier optional group does not steal syntax
+                # belonging to the later one.
+                first_payload = next(
+                    (element for element in payload if not isinstance(element, Glue)),
+                    None,
                 )
+                payload_token = tok.peek_n(2)
+                match first_payload:
+                    case Ref() | Refs():
+                        return payload_token.kind == TokenKind.SSA_VALUE
+                    case Attr(field=attr_name) if op_decl is not None:
+                        attr_def = op_decl.attr(attr_name)
+                        if (
+                            attr_def is not None
+                            and attr_def.attr_type == "enum"
+                            and attr_def.enum_def is not None
+                        ):
+                            return (
+                                payload_token.kind
+                                in (TokenKind.BARE_IDENT, TokenKind.OP_NAME)
+                                and payload_token.text in attr_def.enum_def.keywords
+                            )
+                return True
             case RegionFmt():
                 result = tok.at(TokenKind.LBRACE)
                 return result
