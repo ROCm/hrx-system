@@ -784,8 +784,7 @@ iree_status_t loom_low_allocation_edge_copy_plan_build(
 
   loom_low_allocation_op_point_index_t op_points = {0};
   IREE_RETURN_IF_ERROR(loom_low_allocation_op_point_index_initialize(
-      context->assignment_map.liveness, context->liveness_order, arena,
-      &op_points));
+      context->assignment_map.liveness, arena, &op_points));
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_edge_copy_record_groups(context, &plan, &op_points));
   IREE_RETURN_IF_ERROR(

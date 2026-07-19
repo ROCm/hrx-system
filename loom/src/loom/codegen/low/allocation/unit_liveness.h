@@ -41,9 +41,7 @@ typedef struct loom_low_allocation_unit_liveness_t {
 // target allocation units for low.slice, descriptor early-clobber hazards, and
 // structured loop backedges.
 iree_status_t loom_low_allocation_unit_liveness_initialize(
-    const loom_module_t* module, loom_region_t* body,
-    const loom_low_resolved_target_t* target,
-    loom_liveness_order_t liveness_order,
+    const loom_module_t* module, const loom_low_resolved_target_t* target,
     const loom_low_placement_table_t* placement,
     const loom_local_value_domain_t* value_domain,
     const loom_liveness_analysis_t* liveness, iree_arena_allocator_t* arena,

@@ -505,6 +505,7 @@ loom_cc_library(
     loom::target::registers
     loom::util::adaptive_sort
     loom::util::cfg_graph
+    loom::util::segmented_storage
   PUBLIC
 )
 

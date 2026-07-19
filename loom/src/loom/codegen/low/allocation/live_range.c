@@ -12,10 +12,8 @@
 #include "loom/target/registers.h"
 
 struct loom_low_allocation_op_point_entry_t {
-  // Operation represented by this entry.
-  const loom_op_t* op;
-  // Liveness program point assigned to |op|.
-  uint32_t program_point;
+  // Index of the operation row represented by this entry.
+  uint32_t operation_index;
   // Next entry in the hashed operation bucket.
   uint32_t next_entry;
 };
@@ -47,187 +45,32 @@ static uint32_t loom_low_allocation_op_point_hash(const loom_op_t* op) {
 
 static bool loom_low_allocation_op_point_index_is_empty(
     const loom_low_allocation_op_point_index_t* index) {
-  return index->bucket_heads == NULL || index->bucket_count == 0 ||
-         index->entries == NULL;
+  return index->liveness == NULL || index->bucket_heads == NULL ||
+         index->bucket_count == 0 || index->entries == NULL;
 }
 
-static bool loom_low_allocation_add_span(uint32_t* inout_point, uint32_t span) {
-  if (*inout_point > UINT32_MAX - span) {
-    return false;
-  }
-  *inout_point += span;
-  return true;
-}
-
-static iree_status_t loom_low_allocation_op_point_index_count_region_ops(
-    const loom_liveness_analysis_t* liveness, const loom_region_t* region,
-    iree_host_size_t* inout_count) {
-  if (region == NULL) {
-    return iree_ok_status();
-  }
-  const bool include_region_tree =
-      loom_liveness_analysis_includes_region_tree(liveness);
-  const loom_block_t* block = NULL;
-  loom_region_for_each_block(region, block) {
-    const loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      if (*inout_count == IREE_HOST_SIZE_MAX) {
-        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "low operation point index exceeds host size");
-      }
-      ++*inout_count;
-      if (!include_region_tree) {
-        continue;
-      }
-      loom_region_t* const* regions = loom_op_regions(op);
-      for (uint8_t i = 0; i < op->region_count; ++i) {
-        IREE_RETURN_IF_ERROR(
-            loom_low_allocation_op_point_index_count_region_ops(
-                liveness, regions[i], inout_count));
-      }
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_allocation_op_point_index_insert(
-    loom_low_allocation_op_point_index_t* index, const loom_op_t* op,
-    uint32_t program_point) {
-  if (index->entry_count >= UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low operation point index exceeds u32 range");
-  }
+static void loom_low_allocation_op_point_index_insert(
+    loom_low_allocation_op_point_index_t* index, uint32_t operation_index) {
+  const loom_liveness_operation_point_t* operation_point =
+      &index->liveness->operation_points[operation_index];
   const uint32_t bucket_index =
-      loom_low_allocation_op_point_hash(op) & (index->bucket_count - 1u);
-  const uint32_t entry_index = (uint32_t)index->entry_count++;
+      loom_low_allocation_op_point_hash(operation_point->op) &
+      (index->bucket_count - 1u);
+  const uint32_t entry_index = index->entry_count++;
   loom_low_allocation_op_point_entry_t* entry = &index->entries[entry_index];
   *entry = (loom_low_allocation_op_point_entry_t){
-      .op = op,
-      .program_point = program_point,
+      .operation_index = operation_index,
       .next_entry = index->bucket_heads[bucket_index],
   };
   index->bucket_heads[bucket_index] = entry_index;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_allocation_op_point_index_source_region(
-    const loom_liveness_analysis_t* liveness,
-    loom_low_allocation_op_point_index_t* index, const loom_region_t* region,
-    uint32_t start_point);
-
-static iree_status_t loom_low_allocation_op_point_index_nested_regions(
-    const loom_liveness_analysis_t* liveness,
-    loom_low_allocation_op_point_index_t* index, const loom_op_t* op,
-    uint32_t program_point) {
-  if (!loom_liveness_analysis_includes_region_tree(liveness)) {
-    return iree_ok_status();
-  }
-  uint32_t nested_point = program_point;
-  if (!loom_low_allocation_add_span(&nested_point, 1u)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "low operation point index nested region exceeds u32 range");
-  }
-  loom_region_t* const* regions = loom_op_regions(op);
-  for (uint8_t i = 0; i < op->region_count; ++i) {
-    uint32_t region_span = 0;
-    IREE_RETURN_IF_ERROR(loom_liveness_analysis_region_point_span(
-        liveness, regions[i], &region_span));
-    if (region_span == 0) {
-      continue;
-    }
-    IREE_RETURN_IF_ERROR(loom_low_allocation_op_point_index_source_region(
-        liveness, index, regions[i], nested_point));
-    if (!loom_low_allocation_add_span(&nested_point, region_span) ||
-        !loom_low_allocation_add_span(&nested_point, 1u)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "low operation point index nested region exceeds u32 range");
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_allocation_op_point_index_source_block(
-    const loom_liveness_analysis_t* liveness,
-    loom_low_allocation_op_point_index_t* index, const loom_block_t* block,
-    uint32_t start_point, uint32_t* out_end_point) {
-  uint32_t point = start_point;
-  const loom_op_t* op = NULL;
-  loom_block_for_each_op(block, op) {
-    IREE_RETURN_IF_ERROR(
-        loom_low_allocation_op_point_index_insert(index, op, point));
-    IREE_RETURN_IF_ERROR(loom_low_allocation_op_point_index_nested_regions(
-        liveness, index, op, point));
-    uint32_t op_span = 0;
-    IREE_RETURN_IF_ERROR(
-        loom_liveness_analysis_op_point_span(liveness, op, &op_span));
-    if (!loom_low_allocation_add_span(&point, op_span)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "low operation point index operation exceeds u32 range");
-    }
-  }
-  *out_end_point = point;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_allocation_op_point_index_source_region(
-    const loom_liveness_analysis_t* liveness,
-    loom_low_allocation_op_point_index_t* index, const loom_region_t* region,
-    uint32_t start_point) {
-  if (region == NULL) {
-    return iree_ok_status();
-  }
-  uint32_t point = start_point;
-  for (uint16_t block_index = 0; block_index < region->block_count;
-       ++block_index) {
-    if (block_index != 0 && !loom_low_allocation_add_span(&point, 1u)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "low operation point index block gap exceeds u32 range");
-    }
-    IREE_RETURN_IF_ERROR(loom_low_allocation_op_point_index_source_block(
-        liveness, index, loom_region_const_block(region, block_index), point,
-        &point));
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_allocation_op_point_index_ordered_block(
-    const loom_liveness_analysis_t* liveness,
-    loom_low_allocation_op_point_index_t* index,
-    const loom_liveness_block_order_t* block_order, uint32_t start_point,
-    uint32_t* out_end_point) {
-  uint32_t point = start_point;
-  for (iree_host_size_t i = 0; i < block_order->op_count; ++i) {
-    const loom_op_t* op = block_order->ops[i];
-    IREE_RETURN_IF_ERROR(
-        loom_low_allocation_op_point_index_insert(index, op, point));
-    IREE_RETURN_IF_ERROR(loom_low_allocation_op_point_index_nested_regions(
-        liveness, index, op, point));
-    uint32_t op_span = 0;
-    IREE_RETURN_IF_ERROR(
-        loom_liveness_analysis_op_point_span(liveness, op, &op_span));
-    if (!loom_low_allocation_add_span(&point, op_span)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "low operation point index operation exceeds u32 range");
-    }
-  }
-  *out_end_point = point;
-  return iree_ok_status();
 }
 
 iree_status_t loom_low_allocation_op_point_index_initialize(
-    const loom_liveness_analysis_t* liveness,
-    loom_liveness_order_t liveness_order, iree_arena_allocator_t* arena,
+    const loom_liveness_analysis_t* liveness, iree_arena_allocator_t* arena,
     loom_low_allocation_op_point_index_t* out_index) {
   *out_index = (loom_low_allocation_op_point_index_t){0};
 
-  iree_host_size_t entry_capacity = 0;
-  IREE_RETURN_IF_ERROR(loom_low_allocation_op_point_index_count_region_ops(
-      liveness, liveness->region, &entry_capacity));
+  const iree_host_size_t entry_capacity = liveness->operation_count;
   if (entry_capacity == 0) {
     return iree_ok_status();
   }
@@ -243,6 +86,7 @@ iree_status_t loom_low_allocation_op_point_index_initialize(
                             "low operation point bucket count exceeds u32");
   }
 
+  out_index->liveness = liveness;
   out_index->bucket_count = bucket_count;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, bucket_count, sizeof(*out_index->bucket_heads),
@@ -253,27 +97,9 @@ iree_status_t loom_low_allocation_op_point_index_initialize(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, entry_capacity,
                                                  sizeof(*out_index->entries),
                                                  (void**)&out_index->entries));
-
-  const bool has_order = !loom_liveness_order_is_empty(liveness_order);
-  for (iree_host_size_t block_index = 0; block_index < liveness->block_count;
-       ++block_index) {
-    const loom_liveness_block_info_t* block_info =
-        &liveness->blocks[block_index];
-    uint32_t end_point = block_info->start_point;
-    if (has_order) {
-      IREE_RETURN_IF_ERROR(loom_low_allocation_op_point_index_ordered_block(
-          liveness, out_index, &liveness_order.blocks[block_index],
-          block_info->start_point, &end_point));
-    } else {
-      IREE_RETURN_IF_ERROR(loom_low_allocation_op_point_index_source_block(
-          liveness, out_index, block_info->block, block_info->start_point,
-          &end_point));
-    }
-    if (end_point != block_info->end_point) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "low operation point index disagrees with liveness block span");
-    }
+  for (uint32_t operation_index = 0;
+       operation_index < liveness->operation_count; ++operation_index) {
+    loom_low_allocation_op_point_index_insert(out_index, operation_index);
   }
   return iree_ok_status();
 }
@@ -291,8 +117,10 @@ bool loom_low_allocation_op_point_index_try_lookup(
   while (entry_index != UINT32_MAX) {
     const loom_low_allocation_op_point_entry_t* entry =
         &index->entries[entry_index];
-    if (entry->op == op) {
-      *out_program_point = entry->program_point;
+    const loom_liveness_operation_point_t* operation_point =
+        &index->liveness->operation_points[entry->operation_index];
+    if (operation_point->op == op) {
+      *out_program_point = operation_point->start_point;
       return true;
     }
     entry_index = entry->next_entry;
@@ -444,86 +272,6 @@ bool loom_low_allocation_live_range_values_overlap(
     }
   }
   return false;
-}
-
-iree_status_t loom_low_allocation_live_range_op_program_point(
-    const loom_liveness_analysis_t* liveness, const loom_op_t* op,
-    uint32_t* out_program_point) {
-  IREE_ASSERT_ARGUMENT(liveness);
-  IREE_ASSERT_ARGUMENT(op);
-  IREE_ASSERT_ARGUMENT(out_program_point);
-  if (loom_liveness_analysis_includes_region_tree(liveness)) {
-    return loom_liveness_op_program_point(liveness, loom_liveness_order_empty(),
-                                          op, out_program_point);
-  }
-  *out_program_point = UINT32_MAX;
-  const loom_liveness_block_info_t* block_info =
-      loom_liveness_block_info_for_block(liveness, op->parent_block);
-  if (!block_info) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "low allocation cannot find liveness block for low operation");
-  }
-  uint32_t program_point = block_info->start_point;
-  const loom_op_t* block_op = op->parent_block->first_op;
-  while (block_op && block_op != op) {
-    ++program_point;
-    block_op = block_op->next_op;
-  }
-  if (block_op != op) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "low operation is not linked in its parent block");
-  }
-  *out_program_point = program_point;
-  return iree_ok_status();
-}
-
-iree_status_t loom_low_allocation_live_range_ordered_op_program_point(
-    const loom_liveness_analysis_t* liveness, const loom_region_t* body,
-    loom_liveness_order_t liveness_order, const loom_op_t* op,
-    uint32_t* out_program_point) {
-  IREE_ASSERT_ARGUMENT(liveness);
-  IREE_ASSERT_ARGUMENT(body);
-  IREE_ASSERT_ARGUMENT(op);
-  IREE_ASSERT_ARGUMENT(out_program_point);
-  if (loom_liveness_analysis_includes_region_tree(liveness)) {
-    return loom_liveness_op_program_point(liveness, liveness_order, op,
-                                          out_program_point);
-  }
-  if (loom_liveness_order_is_empty(liveness_order)) {
-    return loom_low_allocation_live_range_op_program_point(liveness, op,
-                                                           out_program_point);
-  }
-  uint16_t block_index = 0;
-  if (!loom_region_try_block_index(body, op->parent_block, &block_index) ||
-      block_index >= liveness_order.block_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "low allocation cannot find ordered block for low operation");
-  }
-  const loom_liveness_block_info_t* block_info =
-      loom_liveness_block_info_for_block(liveness, op->parent_block);
-  if (!block_info) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "low allocation cannot find ordered liveness block for low operation");
-  }
-  const loom_liveness_block_order_t* block_order =
-      &liveness_order.blocks[block_index];
-  for (iree_host_size_t i = 0; i < block_order->op_count; ++i) {
-    if (block_order->ops[i] != op) {
-      continue;
-    }
-    if (i > UINT32_MAX - block_info->start_point) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "ordered low operation program point exceeds uint32_t");
-    }
-    *out_program_point = block_info->start_point + (uint32_t)i;
-    return iree_ok_status();
-  }
-  return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                          "ordered low operation has no operation order entry");
 }
 
 bool loom_low_allocation_live_range_assignments_conflict(
