@@ -499,6 +499,26 @@ ERR_LOWERING_047 = ErrorDef(
     ),
 )
 
+# ERR_LOWERING_048: Loop residency policy reached an incompatible transform.
+ERR_LOWERING_048 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=48,
+    severity=Severity.ERROR,
+    summary="Loop residency policy reached an incompatible transform.",
+    message=(
+        "{phase_name} cannot transform {op_name} while its residency placement "
+        "policy remains unconsumed"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("phase_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Run the target-informed loop-invariant placement pass before a "
+        "transform that erases or restructures the loop"
+    ),
+)
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -524,4 +544,5 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_045,
     ERR_LOWERING_046,
     ERR_LOWERING_047,
+    ERR_LOWERING_048,
 )
