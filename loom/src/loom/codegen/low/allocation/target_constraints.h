@@ -224,6 +224,13 @@ void loom_low_allocation_target_constraints_record_assignment_location_end(
     loom_low_allocation_target_constraints_t* constraints,
     const loom_low_allocation_assignment_t* assignment);
 
+// Rebuilds the per-class assignment bounds from |assignments| after their
+// concrete locations change.
+void loom_low_allocation_target_constraints_rebuild_assignment_location_ends(
+    loom_low_allocation_target_constraints_t* constraints,
+    const loom_low_allocation_assignment_t* assignments,
+    iree_host_size_t assignment_count);
+
 // Returns the exclusive upper search bound implied by assigned, fixed, and
 // reserved storage for |reg_class_id| and |location_kind|.
 uint32_t loom_low_allocation_target_constraints_assigned_location_search_limit(

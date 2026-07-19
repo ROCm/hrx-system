@@ -295,6 +295,7 @@ loom_cc_library(
     loom::codegen::low::allocation::interval_assignment
     loom::codegen::low::allocation::interval_order
     loom::codegen::low::allocation::live_range
+    loom::codegen::low::allocation::loop_edge_relocation
     loom::codegen::low::allocation::move_topology
     loom::codegen::low::allocation::packet_move
     loom::codegen::low::allocation::search
@@ -661,6 +662,7 @@ loom_cc_library(
     loom::ir
     loom::ir::facts
     loom::ops::buffer
+    loom::ops::index
     loom::ops::kernel
     loom::ops::vector
     loom::ops::view

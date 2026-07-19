@@ -1032,6 +1032,23 @@ void loom_low_allocation_target_constraints_record_assignment_location_end(
   }
 }
 
+void loom_low_allocation_target_constraints_rebuild_assignment_location_ends(
+    loom_low_allocation_target_constraints_t* constraints,
+    const loom_low_allocation_assignment_t* assignments,
+    iree_host_size_t assignment_count) {
+  const iree_host_size_t reg_class_count =
+      constraints->target->descriptor_set->reg_class_count;
+  if (reg_class_count != 0) {
+    memset(constraints->max_assigned_location_end_by_reg_class, 0,
+           reg_class_count *
+               sizeof(*constraints->max_assigned_location_end_by_reg_class));
+  }
+  for (iree_host_size_t i = 0; i < assignment_count; ++i) {
+    loom_low_allocation_target_constraints_record_assignment_location_end(
+        constraints, &assignments[i]);
+  }
+}
+
 uint32_t loom_low_allocation_target_constraints_assigned_location_search_limit(
     const loom_low_allocation_target_constraints_t* constraints,
     uint16_t reg_class_id, loom_low_allocation_location_kind_t location_kind) {
