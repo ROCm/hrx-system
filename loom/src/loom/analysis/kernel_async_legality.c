@@ -6,10 +6,12 @@
 
 #include "loom/analysis/kernel_async_legality.h"
 
+#include "loom/analysis/control_uniformity.h"
 #include "loom/analysis/movement.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 
@@ -35,6 +37,9 @@ typedef struct loom_kernel_async_legality_state_t {
 
   // Target-independent movement analysis for async token producers.
   loom_movement_analysis_t movement_analysis;
+
+  // Scope-aware control analysis for cluster collectives.
+  loom_control_uniformity_info_t control_uniformity;
 
   // True once fact_table and movement_analysis have been initialized.
   bool movement_analysis_ready;
@@ -244,6 +249,148 @@ static iree_status_t loom_kernel_async_legality_ensure_movement_analysis(
   return iree_ok_status();
 }
 
+static bool loom_kernel_async_legality_exact_value(
+    const loom_kernel_async_legality_state_t* state, loom_value_id_t value_id,
+    int64_t expected_value) {
+  if (value_id == LOOM_VALUE_ID_INVALID) return false;
+  int64_t actual_value = 0;
+  return loom_value_facts_as_exact_i64(
+             loom_value_fact_table_lookup(state->fact_table, value_id),
+             &actual_value) &&
+         actual_value == expected_value;
+}
+
+static bool loom_kernel_async_legality_cluster_shape(
+    const loom_kernel_async_legality_state_t* state,
+    loom_target_workgroup_cluster_size_t* out_size, uint32_t* out_volume) {
+  *out_size = (loom_target_workgroup_cluster_size_t){0};
+  *out_volume = 0;
+  if (!loom_kernel_def_isa(state->function.op) ||
+      !loom_kernel_def_static_workgroup_cluster_size_from_facts(
+          state->module, state->function.op, state->fact_table, out_size)) {
+    return false;
+  }
+
+  // gfx1250 encodes at most sixteen participant ranks in the semantic set.
+  // Reject each dimension before multiplication so malformed large extents
+  // cannot overflow while proving the bounded product.
+  if (out_size->x > 16 || out_size->y > 16 || out_size->z > 16) return false;
+  const uint32_t volume = out_size->x * out_size->y * out_size->z;
+  if (volume <= 1 || volume > 16) return false;
+  *out_volume = volume;
+  return true;
+}
+
+static uint32_t loom_kernel_async_legality_cluster_axis_extent(
+    const loom_target_workgroup_cluster_size_t* size,
+    loom_value_fact_topology_axis_t axis) {
+  switch (axis) {
+    case LOOM_VALUE_FACT_TOPOLOGY_AXIS_X:
+      return size->x;
+    case LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y:
+      return size->y;
+    case LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z:
+      return size->z;
+    case LOOM_VALUE_FACT_TOPOLOGY_AXIS_LANE:
+    case LOOM_VALUE_FACT_TOPOLOGY_AXIS_COUNT_:
+      return 0;
+  }
+  return 0;
+}
+
+static bool loom_kernel_async_legality_cluster_expression_agrees(
+    const loom_kernel_async_legality_state_t* state,
+    const loom_target_workgroup_cluster_size_t* cluster_size,
+    const loom_symbolic_expr_t* expression) {
+  if (!loom_symbolic_expr_is_linear(expression)) return false;
+  for (iree_host_size_t i = 0; i < expression->term_count; ++i) {
+    const loom_symbolic_term_t* term = &expression->terms[i];
+    const loom_value_id_t relation_value_id =
+        term->relation_value_id != LOOM_VALUE_ID_INVALID
+            ? term->relation_value_id
+            : term->value_id;
+    const loom_value_facts_t facts =
+        loom_value_fact_table_lookup(state->fact_table, relation_value_id);
+    if (loom_value_facts_is_uniform_at_scope(
+            facts, LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER)) {
+      continue;
+    }
+
+    const loom_value_fact_topology_domain_t* topology =
+        loom_value_facts_topology_domain(facts);
+    if (!topology) return false;
+    switch (topology->value_kind) {
+      case LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID:
+      case LOOM_VALUE_FACT_TOPOLOGY_VALUE_SUBGROUP_LANE_ID:
+        // Corresponding lanes have the same local coordinates in every
+        // participating workgroup.
+        continue;
+      case LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID:
+      case LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_WORKGROUP_ID:
+        // A workgroup coordinate agrees only on an unclustered axis.
+        if (loom_kernel_async_legality_cluster_axis_extent(
+                cluster_size, topology->axis) == 1) {
+          continue;
+        }
+        return false;
+      case LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_ID:
+      case LOOM_VALUE_FACT_TOPOLOGY_VALUE_NONE:
+      case LOOM_VALUE_FACT_TOPOLOGY_VALUE_COUNT_:
+        return false;
+    }
+  }
+  return true;
+}
+
+static iree_status_t loom_kernel_async_legality_check_cluster_request(
+    loom_kernel_async_legality_state_t* state, const loom_op_t* producer_op,
+    const loom_movement_request_t* request) {
+  if (request->layout_kind != LOOM_MOVEMENT_LAYOUT_CLUSTER_GATHER) {
+    return iree_ok_status();
+  }
+
+  loom_target_workgroup_cluster_size_t cluster_size = {0};
+  uint32_t cluster_volume = 0;
+  if (!loom_kernel_async_legality_cluster_shape(state, &cluster_size,
+                                                &cluster_volume)) {
+    return loom_kernel_async_legality_fail_movement_rejection(
+        state, producer_op, LOOM_MOVEMENT_REJECTION_CLUSTER_SHAPE);
+  }
+
+  const uint32_t expected_participants = (UINT32_C(1) << cluster_volume) - 1;
+  if (!loom_kernel_async_legality_exact_value(
+          state, request->cluster_mask_value_id, expected_participants)) {
+    return loom_kernel_async_legality_fail_movement_rejection(
+        state, producer_op, LOOM_MOVEMENT_REJECTION_CLUSTER_PARTICIPANTS);
+  }
+  if (iree_any_bit_set(request->flags, LOOM_MOVEMENT_REQUEST_MASKED) &&
+      !loom_kernel_async_legality_exact_value(state, request->mask_value_id,
+                                              1)) {
+    return loom_kernel_async_legality_fail_movement_rejection(
+        state, producer_op, LOOM_MOVEMENT_REJECTION_CLUSTER_PREDICATE);
+  }
+
+  bool cluster_uniform_execution = false;
+  IREE_RETURN_IF_ERROR(loom_control_uniformity_prove_execution(
+      &state->control_uniformity, producer_op,
+      LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER, NULL, &cluster_uniform_execution));
+  if (!cluster_uniform_execution) {
+    return loom_kernel_async_legality_fail_movement_rejection(
+        state, producer_op, LOOM_MOVEMENT_REJECTION_CLUSTER_CONTROL);
+  }
+  if (!loom_kernel_async_legality_cluster_expression_agrees(
+          state, &cluster_size, &request->source.begin_byte_offset)) {
+    return loom_kernel_async_legality_fail_movement_rejection(
+        state, producer_op, LOOM_MOVEMENT_REJECTION_CLUSTER_SOURCE_AGREEMENT);
+  }
+  if (!loom_kernel_async_legality_cluster_expression_agrees(
+          state, &cluster_size, &request->dest.begin_byte_offset)) {
+    return loom_kernel_async_legality_fail_movement_rejection(
+        state, producer_op, LOOM_MOVEMENT_REJECTION_CLUSTER_DEST_AGREEMENT);
+  }
+  return iree_ok_status();
+}
+
 static const loom_op_t* loom_kernel_async_legality_token_producer(
     loom_kernel_async_legality_state_t* state, loom_value_id_t token_id) {
   if (token_id >= state->module->values.count) {
@@ -399,6 +546,9 @@ static iree_status_t loom_kernel_async_legality_append_endpoint(
     return loom_kernel_async_legality_fail(state, group_op,
                                            LOOM_ERR_LOWERING_025);
   }
+  IREE_RETURN_IF_ERROR(loom_kernel_async_legality_check_cluster_request(
+      state, producer_op, &request));
+  if (state->failed) return iree_ok_status();
 
   loom_view_region_t dest_region = {0};
   loom_kernel_async_legality_endpoint_region(&request.dest, &dest_region);
@@ -655,5 +805,7 @@ iree_status_t loom_kernel_async_legality_verify_function(
       .result = out_result,
       .fact_table = options->fact_table,
   };
+  loom_control_uniformity_info_initialize(
+      module, options->fact_table, options->arena, &state.control_uniformity);
   return loom_kernel_async_legality_check_regions(&state, body);
 }

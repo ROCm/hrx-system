@@ -1503,7 +1503,7 @@ kernel_async_gather_mask = Op(
 )
 
 # ============================================================================
-# kernel.async.cluster.gather — AMDGPU cluster broadcast into LDS
+# kernel.async.cluster.gather — workgroup-cluster gather into shared memory
 # ============================================================================
 
 kernel_async_cluster_gather = Op(
@@ -1511,22 +1511,22 @@ kernel_async_cluster_gather = Op(
     group=kernel_ops,
     contracts=[ContractFamily.KERNEL_ASYNC],
     doc=(
-        "Initiate an AMDGPU gfx1250+ cluster asynchronous load from a "
-        "global-like source view into a workgroup/LDS destination view. The "
-        "required i32 cluster_mask is the hardware workgroup broadcast mask "
-        "loaded through M0. Source and destination must have the same static "
+        "Initiate a workgroup-cluster asynchronous load from a global-like "
+        "source view into a workgroup/shared-memory destination view. The "
+        "required i32 cluster_mask is a semantic participant set: bit N names "
+        "flat cluster rank N, with x as the minor dimension. Source and "
+        "destination must have the same static "
         "byte footprint, and that footprint must be exactly 1, 4, 8, or 16 "
-        "bytes; target lowering maps those widths to "
-        "llvm.amdgcn.cluster.load.async.to.lds.b8/b32/b64/b128. The LLVM "
-        "offset and cache-policy immediate operands are lowering choices "
-        "derived from the view address and cache attributes, not separate Loom "
-        "semantics. The returned token must be committed to exactly one "
-        "kernel.async.group."
+        "bytes. Every named participant must execute the operation in the same "
+        "dynamic order with corresponding lane-local source and destination "
+        "addresses. Target lowering maps the participant set, addresses, and "
+        "cache policy to the selected machine protocol. The returned token "
+        "must be committed to exactly one kernel.async.group."
     ),
     operands=[
         Operand("source", VIEW, doc="Global-like source fragment broadcast across the cluster."),
         Operand("dest", VIEW, doc="Workgroup/LDS destination fragment for this workgroup."),
-        Operand("cluster_mask", INTEGER, doc="i32 workgroup-cluster broadcast mask consumed by the target M0 operand."),
+        Operand("cluster_mask", INTEGER, doc="i32 set of participating flat workgroup-cluster ranks."),
     ],
     results=[
         Result("token", ANY, doc="Opaque async-copy token for the cluster gather."),
@@ -1556,7 +1556,7 @@ kernel_async_cluster_gather = Op(
 )
 
 # ============================================================================
-# kernel.async.cluster.gather.mask — predicated AMDGPU cluster gather
+# kernel.async.cluster.gather.mask — predicated workgroup-cluster gather
 # ============================================================================
 
 kernel_async_cluster_gather_mask = Op(
@@ -1568,13 +1568,13 @@ kernel_async_cluster_gather_mask = Op(
         "perform no source or destination access for the current invocation "
         "but still produce a completed token, preserving a uniform async group "
         "shape for tails and guarded tiles. The cluster_mask remains the "
-        "target workgroup broadcast mask and is distinct from the scalar i1 "
+        "semantic participant set and is distinct from the scalar i1 "
         "predicate."
     ),
     operands=[
         Operand("source", VIEW, doc="Global-like source fragment broadcast across the cluster."),
         Operand("dest", VIEW, doc="Workgroup/LDS destination fragment for this workgroup."),
-        Operand("cluster_mask", INTEGER, doc="i32 workgroup-cluster broadcast mask consumed by the target M0 operand."),
+        Operand("cluster_mask", INTEGER, doc="i32 set of participating flat workgroup-cluster ranks."),
         Operand("predicate", I1, doc="Scalar predicate controlling this invocation's cluster gather."),
     ],
     results=[

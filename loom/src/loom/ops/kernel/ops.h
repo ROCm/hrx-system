@@ -438,7 +438,7 @@ iree_status_t loom_kernel_async_tensor_store_from_lds_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER: Initiate an AMDGPU gfx1250+ cluster asynchronous load from a global-like source view into a workgroup/LDS destination view. The required i32 cluster_mask is the hardware workgroup broadcast mask loaded through M0. Source and destination must have the same static byte footprint, and that footprint must be exactly 1, 4, 8, or 16 bytes; target lowering maps those widths to llvm.amdgcn.cluster.load.async.to.lds.b8/b32/b64/b128. The LLVM offset and cache-policy immediate operands are lowering choices derived from the view address and cache attributes, not separate Loom semantics. The returned token must be committed to exactly one kernel.async.group.
+// LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER: Initiate a workgroup-cluster asynchronous load from a global-like source view into a workgroup/shared-memory destination view. The required i32 cluster_mask is a semantic participant set: bit N names flat cluster rank N, with x as the minor dimension. Source and destination must have the same static byte footprint, and that footprint must be exactly 1, 4, 8, or 16 bytes. Every named participant must execute the operation in the same dynamic order with corresponding lane-local source and destination addresses. Target lowering maps the participant set, addresses, and cache policy to the selected machine protocol. The returned token must be committed to exactly one kernel.async.group.
 // %copy = kernel.async.cluster.gather %src to %lds using %mask {cache_scope = se, cache_temporal = high_temporal} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
 LOOM_DEFINE_ISA(loom_kernel_async_cluster_gather_isa, LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER)
 LOOM_DEFINE_OPERAND(loom_kernel_async_cluster_gather_source, 0)
@@ -461,7 +461,7 @@ iree_status_t loom_kernel_async_cluster_gather_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER_MASK: Predicated form of kernel.async.cluster.gather. False predicates perform no source or destination access for the current invocation but still produce a completed token, preserving a uniform async group shape for tails and guarded tiles. The cluster_mask remains the target workgroup broadcast mask and is distinct from the scalar i1 predicate.
+// LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER_MASK: Predicated form of kernel.async.cluster.gather. False predicates perform no source or destination access for the current invocation but still produce a completed token, preserving a uniform async group shape for tails and guarded tiles. The cluster_mask remains the semantic participant set and is distinct from the scalar i1 predicate.
 // %copy = kernel.async.cluster.gather.mask %src to %lds using %mask, %in_bounds {cache_scope = cu, cache_temporal = regular} : view<4xi8> to view<4xi8>, i32, i1 -> kernel.async.token
 LOOM_DEFINE_ISA(loom_kernel_async_cluster_gather_mask_isa, LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER_MASK)
 LOOM_DEFINE_OPERAND(loom_kernel_async_cluster_gather_mask_source, 0)

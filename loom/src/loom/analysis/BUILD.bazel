@@ -239,6 +239,7 @@ loom_cc_library(
     srcs = ["kernel_async_legality.c"],
     hdrs = ["kernel_async_legality.h"],
     deps = [
+        ":control_uniformity",
         ":movement",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
