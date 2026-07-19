@@ -59,6 +59,15 @@ iree_status_t iree_hal_amdgpu_validate_workgroup_cluster_size(
     iree_host_size_t physical_device_ordinal,
     const iree_hal_amdgpu_workgroup_cluster_capabilities_t* capabilities);
 
+// Validates a direct dispatch workgroup count against one physical device's
+// clustered-dispatch limits. |cluster_size| must already have passed
+// iree_hal_amdgpu_validate_workgroup_cluster_size. An all-zero cluster size
+// denotes ordinary dispatch and is always accepted.
+iree_status_t iree_hal_amdgpu_validate_workgroup_cluster_dispatch(
+    const uint8_t cluster_size[3], const uint32_t workgroup_count[3],
+    iree_host_size_t physical_device_ordinal,
+    const iree_hal_amdgpu_dispatch_dimension_limits_t* cluster_count_limits);
+
 typedef enum iree_hal_amdgpu_cpu_visible_device_coarse_memory_flag_bits_e {
   IREE_HAL_AMDGPU_CPU_VISIBLE_DEVICE_COARSE_MEMORY_FLAG_NONE = 0u,
   // All CPU agents can access the GPU coarse-grained memory pool and the

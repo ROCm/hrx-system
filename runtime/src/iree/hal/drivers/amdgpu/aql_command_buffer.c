@@ -17,6 +17,7 @@
 #include "iree/hal/drivers/amdgpu/executable.h"
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/transient_buffer.h"
+#include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
 #include "iree/hal/drivers/amdgpu/util/kernarg_ring.h"
 #include "iree/hal/utils/resource_set.h"
 
@@ -1473,6 +1474,46 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_validate_dispatch_shape(
   return iree_ok_status();
 }
 
+static iree_status_t
+iree_hal_amdgpu_aql_command_buffer_validate_clustered_dispatch(
+    const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor,
+    const iree_hal_dispatch_config_t config, iree_hal_dispatch_flags_t flags) {
+  const uint8_t* cluster_size = descriptor->kernel_args.workgroup_cluster_size;
+  const bool uses_workgroup_clusters =
+      cluster_size[0] != 0 || cluster_size[1] != 0 || cluster_size[2] != 0;
+  if (!uses_workgroup_clusters) return iree_ok_status();
+  if (iree_hal_dispatch_uses_indirect_parameters(flags)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "clustered AMDGPU dispatch does not support indirect workgroup counts");
+  }
+
+  const bool has_workgroup_size_override =
+      iree_hal_amdgpu_dispatch_config_has_workgroup_size_override(config);
+  iree_hal_amdgpu_aql_dispatch_params_t params = {0};
+  for (iree_host_size_t i = 0; i < 3; ++i) {
+    if (has_workgroup_size_override &&
+        IREE_UNLIKELY(config.workgroup_size[i] == 0 ||
+                      config.workgroup_size[i] > UINT16_MAX)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "clustered dispatch workgroup size override dimension %" PRIhsz
+          " must be a positive u16 value; got %u",
+          i, config.workgroup_size[i]);
+    }
+    params.workgroup_size[i] = has_workgroup_size_override
+                                   ? (uint16_t)config.workgroup_size[i]
+                                   : descriptor->kernel_args.workgroup_size[i];
+    params.workgroup_count[i] = config.workgroup_count[i];
+    params.workgroup_cluster_size[i] = cluster_size[i];
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_aql_validate_dispatch_params(&params, NULL));
+  return iree_hal_amdgpu_validate_workgroup_cluster_dispatch(
+      cluster_size, config.workgroup_count, descriptor->physical_device_ordinal,
+      &descriptor->workgroup_cluster_count_limits);
+}
+
 static bool iree_hal_amdgpu_aql_command_buffer_should_defer_static_buffer_ref(
     const iree_hal_amdgpu_aql_command_buffer_t* command_buffer,
     const iree_hal_buffer_ref_t* buffer_ref) {
@@ -2166,6 +2207,9 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_prepare_dispatch_plan(
             command_buffer->device_ordinal, &out_plan->descriptor));
   }
 
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_aql_command_buffer_validate_clustered_dispatch(
+          out_plan->descriptor, inputs->config, inputs->flags));
   if (validates) {
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_aql_command_buffer_validate_dispatch_shape(
@@ -2442,7 +2486,18 @@ static void iree_hal_amdgpu_aql_command_buffer_initialize_dispatch_command(
     dispatch_command->dispatch_flags |=
         IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_QUEUE_SCOPED_KERNEL_OBJECT;
   }
-  dispatch_command->setup = plan->kernel_args->setup;
+  const bool uses_workgroup_clusters =
+      plan->kernel_args->workgroup_cluster_size[0] != 0 ||
+      plan->kernel_args->workgroup_cluster_size[1] != 0 ||
+      plan->kernel_args->workgroup_cluster_size[2] != 0;
+  if (uses_workgroup_clusters) {
+    dispatch_command->dispatch_flags |=
+        IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_WORKGROUP_CLUSTER;
+  }
+  memcpy(dispatch_command->workgroup_cluster_size,
+         plan->kernel_args->workgroup_cluster_size,
+         sizeof(dispatch_command->workgroup_cluster_size));
+  dispatch_command->reserved1 = 0;
   dispatch_command->export_ordinal =
       iree_hal_executable_function_index(inputs->export_ordinal);
   dispatch_command->workgroup_size[0] = plan->kernel_args->workgroup_size[0];
@@ -2450,18 +2505,12 @@ static void iree_hal_amdgpu_aql_command_buffer_initialize_dispatch_command(
   dispatch_command->workgroup_size[2] = plan->kernel_args->workgroup_size[2];
   dispatch_command->implicit_args_offset_qwords =
       layout->kernarg.implicit_args_offset_qwords;
-  dispatch_command->grid_size[0] =
-      uses_indirect_parameters ? 0
-                               : inputs->config.workgroup_count[0] *
-                                     plan->kernel_args->workgroup_size[0];
-  dispatch_command->grid_size[1] =
-      uses_indirect_parameters ? 0
-                               : inputs->config.workgroup_count[1] *
-                                     plan->kernel_args->workgroup_size[1];
-  dispatch_command->grid_size[2] =
-      uses_indirect_parameters ? 0
-                               : inputs->config.workgroup_count[2] *
-                                     plan->kernel_args->workgroup_size[2];
+  dispatch_command->workgroup_count[0] =
+      uses_indirect_parameters ? 0 : inputs->config.workgroup_count[0];
+  dispatch_command->workgroup_count[1] =
+      uses_indirect_parameters ? 0 : inputs->config.workgroup_count[1];
+  dispatch_command->workgroup_count[2] =
+      uses_indirect_parameters ? 0 : inputs->config.workgroup_count[2];
   dispatch_command->private_segment_size =
       plan->kernel_args->private_segment_size;
   dispatch_command->group_segment_size =
@@ -2535,9 +2584,8 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_record_dispatch_summary(
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(summary->workgroup.size);
        ++i) {
     summary->workgroup.size[i] = dispatch_command->workgroup_size[i];
-    if (!uses_indirect_parameters && dispatch_command->workgroup_size[i] != 0) {
-      summary->workgroup.count[i] =
-          dispatch_command->grid_size[i] / dispatch_command->workgroup_size[i];
+    if (!uses_indirect_parameters) {
+      summary->workgroup.count[i] = dispatch_command->workgroup_count[i];
     }
   }
 

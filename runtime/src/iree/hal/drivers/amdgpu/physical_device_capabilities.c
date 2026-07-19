@@ -278,6 +278,78 @@ iree_status_t iree_hal_amdgpu_validate_workgroup_cluster_size(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_amdgpu_validate_workgroup_cluster_dispatch(
+    const uint8_t cluster_size[3], const uint32_t workgroup_count[3],
+    iree_host_size_t physical_device_ordinal,
+    const iree_hal_amdgpu_dispatch_dimension_limits_t* cluster_count_limits) {
+  IREE_ASSERT_ARGUMENT(cluster_size);
+  IREE_ASSERT_ARGUMENT(workgroup_count);
+  IREE_ASSERT_ARGUMENT(cluster_count_limits);
+
+  if (cluster_size[0] == 0 && cluster_size[1] == 0 && cluster_size[2] == 0) {
+    return iree_ok_status();
+  }
+
+  uint64_t cluster_count[3] = {0};
+  const uint64_t axis_limits[3] = {
+      iree_min(cluster_count_limits->x, (uint64_t)UINT32_MAX),
+      iree_min(cluster_count_limits->y, (uint64_t)UINT16_MAX),
+      iree_min(cluster_count_limits->z, (uint64_t)UINT16_MAX),
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(cluster_count); ++i) {
+    if (IREE_UNLIKELY(cluster_size[i] == 0)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "clustered dispatch has partial cluster size %ux%ux%u",
+          cluster_size[0], cluster_size[1], cluster_size[2]);
+    }
+    if (IREE_UNLIKELY(workgroup_count[i] == 0 ||
+                      workgroup_count[i] % cluster_size[i] != 0)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "clustered dispatch workgroup count %ux%ux%u is not a positive "
+          "multiple of cluster size %ux%ux%u",
+          workgroup_count[0], workgroup_count[1], workgroup_count[2],
+          cluster_size[0], cluster_size[1], cluster_size[2]);
+    }
+    cluster_count[i] = workgroup_count[i] / cluster_size[i];
+  }
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(cluster_count); ++i) {
+    if (IREE_UNLIKELY(cluster_count[i] > axis_limits[i])) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "clustered dispatch requests cluster count %" PRIu64 "x%" PRIu64
+          "x%" PRIu64 " on physical device[%" PRIhsz "] with maximum %" PRIu64
+          "x%" PRIu64 "x%" PRIu64,
+          cluster_count[0], cluster_count[1], cluster_count[2],
+          physical_device_ordinal, axis_limits[0], axis_limits[1],
+          axis_limits[2]);
+    }
+  }
+
+  uint64_t total = cluster_count[0];
+  if (IREE_UNLIKELY(cluster_count[1] != 0 &&
+                    total > UINT64_MAX / cluster_count[1])) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "clustered dispatch cluster count overflows u64");
+  }
+  total *= cluster_count[1];
+  if (IREE_UNLIKELY(cluster_count[2] != 0 &&
+                    total > UINT64_MAX / cluster_count[2])) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "clustered dispatch cluster count overflows u64");
+  }
+  total *= cluster_count[2];
+  if (IREE_UNLIKELY(total > cluster_count_limits->total)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "clustered dispatch requests %" PRIu64
+        " total clusters on physical device[%" PRIhsz "] with maximum %" PRIu64,
+        total, physical_device_ordinal, cluster_count_limits->total);
+  }
+  return iree_ok_status();
+}
+
 bool iree_hal_amdgpu_cpu_visible_device_coarse_memory_is_available(
     const iree_hal_amdgpu_cpu_visible_device_coarse_memory_t* memory) {
   return iree_any_bit_set(

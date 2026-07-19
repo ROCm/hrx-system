@@ -21,9 +21,8 @@ static iree_hsa_signal_t MakeSignal(uint64_t handle) {
   return signal;
 }
 
-static iree_hal_amdgpu_aql_extended_dispatch_params_t
-MakeExtendedDispatchParams() {
-  iree_hal_amdgpu_aql_extended_dispatch_params_t params = {};
+static iree_hal_amdgpu_aql_dispatch_params_t MakeExtendedDispatchParams() {
+  iree_hal_amdgpu_aql_dispatch_params_t params = {};
   params.kernel_object = 0x0102030405060708ull;
   params.kernarg_address = reinterpret_cast<const void*>(
       static_cast<uintptr_t>(0x1112131415161718ull));
@@ -33,9 +32,9 @@ MakeExtendedDispatchParams() {
   params.workgroup_count[0] = 10;
   params.workgroup_count[1] = 21;
   params.workgroup_count[2] = 36;
-  params.cluster_size[0] = 2;
-  params.cluster_size[1] = 3;
-  params.cluster_size[2] = 4;
+  params.workgroup_cluster_size[0] = 2;
+  params.workgroup_cluster_size[1] = 3;
+  params.workgroup_cluster_size[2] = 4;
   params.private_segment_size = 0x11223344u;
   params.group_segment_size = 0x55667788u;
   params.packet_control = iree_hal_amdgpu_aql_packet_control_barrier(
@@ -79,7 +78,7 @@ TEST(AQLEmitterTest, OrdinaryDispatchGoldenBytesRemainStable) {
 TEST(AQLEmitterTest, EmitsExtendedDispatchPacketBody) {
   iree_hsa_amd_ext_kernel_dispatch_packet_t packet;
   std::memset(&packet, 0xCC, sizeof(packet));
-  const iree_hal_amdgpu_aql_extended_dispatch_params_t params =
+  const iree_hal_amdgpu_aql_dispatch_params_t params =
       MakeExtendedDispatchParams();
 
   uint16_t header = 0;
@@ -123,6 +122,84 @@ TEST(AQLEmitterTest, EmitsExtendedDispatchPacketBody) {
   EXPECT_EQ(std::memcmp(&packet, expected.data(), expected.size()), 0);
 }
 
+TEST(AQLEmitterTest, SelectsOrdinaryDispatchWithoutChangingPacketBytes) {
+  iree_hal_amdgpu_aql_dispatch_params_t params = MakeExtendedDispatchParams();
+  params.workgroup_cluster_size[0] = 0;
+  params.workgroup_cluster_size[1] = 0;
+  params.workgroup_cluster_size[2] = 0;
+
+  union {
+    iree_hsa_kernel_dispatch_packet_t ordinary;
+    iree_hsa_amd_ext_kernel_dispatch_packet_t extended;
+  } selected_packet;
+  std::memset(&selected_packet, 0xCC, sizeof(selected_packet));
+  uint16_t selected_header = 0;
+  uint16_t selected_setup = 0;
+  IREE_ASSERT_OK(iree_hal_amdgpu_aql_emit_dispatch_packet(
+      &selected_packet.ordinary, &selected_packet.extended, &params,
+      &selected_header, &selected_setup));
+
+  iree_hsa_kernel_dispatch_packet_t direct_packet;
+  std::memset(&direct_packet, 0xCC, sizeof(direct_packet));
+  const uint32_t grid_size[3] = {
+      params.workgroup_count[0] * params.workgroup_size[0],
+      params.workgroup_count[1] * params.workgroup_size[1],
+      params.workgroup_count[2] * params.workgroup_size[2],
+  };
+  uint16_t direct_setup = 0;
+  const uint16_t direct_header = iree_hal_amdgpu_aql_emit_dispatch(
+      &direct_packet, params.kernel_object, params.kernarg_address,
+      params.workgroup_size, grid_size, params.private_segment_size,
+      params.group_segment_size, params.packet_control,
+      params.completion_signal, &direct_setup);
+
+  EXPECT_EQ(selected_header, direct_header);
+  EXPECT_EQ(selected_setup, direct_setup);
+  EXPECT_EQ(std::memcmp(&selected_packet.ordinary, &direct_packet,
+                        sizeof(direct_packet)),
+            0);
+}
+
+TEST(AQLEmitterTest, SelectsExtendedDispatchWithoutChangingPacketBytes) {
+  const iree_hal_amdgpu_aql_dispatch_params_t params =
+      MakeExtendedDispatchParams();
+  union {
+    iree_hsa_kernel_dispatch_packet_t ordinary;
+    iree_hsa_amd_ext_kernel_dispatch_packet_t extended;
+  } selected_packet;
+  std::memset(&selected_packet, 0xCC, sizeof(selected_packet));
+  uint16_t selected_header = 0;
+  uint16_t selected_setup = 0;
+  IREE_ASSERT_OK(iree_hal_amdgpu_aql_emit_dispatch_packet(
+      &selected_packet.ordinary, &selected_packet.extended, &params,
+      &selected_header, &selected_setup));
+
+  iree_hsa_amd_ext_kernel_dispatch_packet_t direct_packet;
+  std::memset(&direct_packet, 0xCC, sizeof(direct_packet));
+  uint16_t direct_header = 0;
+  uint16_t direct_setup = 0;
+  IREE_ASSERT_OK(iree_hal_amdgpu_aql_emit_extended_dispatch(
+      &direct_packet, &params, &direct_header, &direct_setup));
+
+  EXPECT_EQ(selected_header, direct_header);
+  EXPECT_EQ(selected_setup, direct_setup);
+  EXPECT_EQ(std::memcmp(&selected_packet.extended, &direct_packet,
+                        sizeof(direct_packet)),
+            0);
+}
+
+TEST(AQLEmitterTest, OrdinaryNoopDispatchRemainsValid) {
+  iree_hal_amdgpu_aql_dispatch_params_t params = MakeExtendedDispatchParams();
+  params.workgroup_count[0] = 0;
+  params.workgroup_count[1] = 0;
+  params.workgroup_count[2] = 0;
+  params.workgroup_cluster_size[0] = 0;
+  params.workgroup_cluster_size[1] = 0;
+  params.workgroup_cluster_size[2] = 0;
+  IREE_EXPECT_OK(
+      iree_hal_amdgpu_aql_validate_dispatch_params(&params, nullptr));
+}
+
 enum class InvalidExtendedDispatchVariant {
   kZeroWorkgroupSize,
   kZeroWorkgroupCount,
@@ -148,8 +225,7 @@ TEST(AQLEmitterTest, RejectsInvalidExtendedDispatchGeometryBeforeMutation) {
       InvalidExtendedDispatchVariant::kWideWorkItemGrid,
   };
   for (const InvalidExtendedDispatchVariant variant : variants) {
-    iree_hal_amdgpu_aql_extended_dispatch_params_t params =
-        MakeExtendedDispatchParams();
+    iree_hal_amdgpu_aql_dispatch_params_t params = MakeExtendedDispatchParams();
     iree_status_code_t expected_code = IREE_STATUS_INVALID_ARGUMENT;
     switch (variant) {
       case InvalidExtendedDispatchVariant::kZeroWorkgroupSize:
@@ -159,16 +235,16 @@ TEST(AQLEmitterTest, RejectsInvalidExtendedDispatchGeometryBeforeMutation) {
         params.workgroup_count[0] = 0;
         break;
       case InvalidExtendedDispatchVariant::kZeroClusterSize:
-        params.cluster_size[0] = 0;
+        params.workgroup_cluster_size[0] = 0;
         break;
       case InvalidExtendedDispatchVariant::kWideClusterSize:
-        params.cluster_size[0] = 256;
+        params.workgroup_cluster_size[0] = 256;
         params.workgroup_count[0] = 512;
         break;
       case InvalidExtendedDispatchVariant::kTrivialClusterSize:
-        params.cluster_size[0] = 1;
-        params.cluster_size[1] = 1;
-        params.cluster_size[2] = 1;
+        params.workgroup_cluster_size[0] = 1;
+        params.workgroup_cluster_size[1] = 1;
+        params.workgroup_cluster_size[2] = 1;
         break;
       case InvalidExtendedDispatchVariant::kNondivisibleWorkgroupCount:
         params.workgroup_count[0] = 11;

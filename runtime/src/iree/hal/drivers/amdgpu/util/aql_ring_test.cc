@@ -31,7 +31,7 @@ TEST(AqlRingTest, CommitsExtendedDispatchFormatAndSetupAtomically) {
   iree_hal_amdgpu_aql_packet_t packet;
   std::memset(&packet, 0xCC, sizeof(packet));
 
-  iree_hal_amdgpu_aql_extended_dispatch_params_t params = {};
+  iree_hal_amdgpu_aql_dispatch_params_t params = {};
   params.kernel_object = 0x1234;
   params.workgroup_size[0] = 64;
   params.workgroup_size[1] = 1;
@@ -39,9 +39,9 @@ TEST(AqlRingTest, CommitsExtendedDispatchFormatAndSetupAtomically) {
   params.workgroup_count[0] = 2;
   params.workgroup_count[1] = 1;
   params.workgroup_count[2] = 1;
-  params.cluster_size[0] = 2;
-  params.cluster_size[1] = 1;
-  params.cluster_size[2] = 1;
+  params.workgroup_cluster_size[0] = 2;
+  params.workgroup_cluster_size[1] = 1;
+  params.workgroup_cluster_size[2] = 1;
   params.packet_control = iree_hal_amdgpu_aql_packet_control_barrier_system();
 
   uint16_t header = 0;

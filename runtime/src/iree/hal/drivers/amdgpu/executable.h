@@ -12,6 +12,7 @@
 #include "iree/hal/drivers/amdgpu/abi/kernel_args.h"
 #include "iree/hal/drivers/amdgpu/device/dispatch.h"
 #include "iree/hal/drivers/amdgpu/kernarg_layout.h"
+#include "iree/hal/drivers/amdgpu/physical_device_capabilities.h"
 #include "iree/hal/drivers/amdgpu/profile_metadata.h"
 #include "iree/hal/drivers/amdgpu/queue_scope.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
@@ -80,6 +81,10 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
   uint32_t custom_kernarg_block_count;
   // Maximum static workgroup count accepted for each dimension.
   uint32_t max_workgroup_count[3];
+  // Cluster-count limits for this descriptor's physical device.
+  iree_hal_amdgpu_dispatch_dimension_limits_t workgroup_cluster_count_limits;
+  // Physical device ordinal owning |workgroup_cluster_count_limits|.
+  iree_host_size_t physical_device_ordinal;
   // Maximum dynamic group-memory byte count accepted for this export.
   uint32_t max_dynamic_workgroup_local_memory;
   // PM4 launch state for the default executable workgroup size.

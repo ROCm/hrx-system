@@ -776,6 +776,8 @@ iree_hal_amdgpu_executable_query_kernel_descriptor_host_ptr(
 static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     iree_hal_amdgpu_gfxip_version_t gfxip_version,
+    iree_host_size_t physical_device_ordinal,
+    const iree_hal_amdgpu_workgroup_cluster_capabilities_t* workgroup_cluster,
     const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
     const iree_hal_amdgpu_kernarg_layout_t* kernarg_layout,
     iree_host_size_t custom_explicit_kernarg_size,
@@ -801,6 +803,9 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
   }
 
   out_descriptor->kernel_args = *kernel_args;
+  out_descriptor->workgroup_cluster_count_limits =
+      workgroup_cluster->cluster_count;
+  out_descriptor->physical_device_ordinal = physical_device_ordinal;
   out_descriptor->kernarg_layout = kernarg_layout;
   if (kernarg_layout) {
     IREE_RETURN_IF_ERROR(
@@ -864,7 +869,12 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
           libhsa, kernel_object, &amdhsa_descriptor));
   out_descriptor->pm4_group_segment_fixed_size =
       amdhsa_descriptor->group_segment_fixed_size;
+  const bool uses_workgroup_clusters =
+      kernel_args->workgroup_cluster_size[0] != 0 ||
+      kernel_args->workgroup_cluster_size[1] != 0 ||
+      kernel_args->workgroup_cluster_size[2] != 0;
   out_descriptor->pm4_launch_state_valid =
+      !uses_workgroup_clusters &&
       iree_hal_amdgpu_pm4_dispatch_launch_state_is_supported(
           gfxip_version, amdhsa_descriptor, kernel_object,
           kernel_args->workgroup_size,
@@ -1550,6 +1560,7 @@ iree_hal_amdgpu_executable_initialize_dispatch_descriptors_for_device(
     iree_hal_amdgpu_executable_t* executable,
     iree_hal_amdgpu_gfxip_version_t gfxip_version,
     iree_host_size_t variant_ordinal, iree_host_size_t device_ordinal,
+    const iree_hal_amdgpu_workgroup_cluster_capabilities_t* workgroup_cluster,
     const iree_hal_amdgpu_executable_metadata_t* dispatch_metadata,
     const iree_host_size_t* custom_explicit_kernarg_sizes,
     const uint16_t* custom_implicit_args_offsets) {
@@ -1578,9 +1589,10 @@ iree_hal_amdgpu_executable_initialize_dispatch_descriptors_for_device(
     }
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
-            executable->libhsa, gfxip_version,
-            &executable->host_kernel_args[kernel_ordinal], kernarg_layout,
-            custom_explicit_kernarg_size, custom_implicit_args_offset,
+            executable->libhsa, gfxip_version, device_ordinal,
+            workgroup_cluster, &executable->host_kernel_args[kernel_ordinal],
+            kernarg_layout, custom_explicit_kernarg_size,
+            custom_implicit_args_offset,
             &executable->host_dispatch_descriptors[descriptor_ordinal]),
         "initializing dispatch descriptor for device %" PRIhsz
         " export %" PRIhsz,
@@ -2138,6 +2150,7 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
           status =
               iree_hal_amdgpu_executable_initialize_dispatch_descriptors_for_device(
                   executable, gfxip_version, variant_ordinal, device_ordinal,
+                  &physical_device_list[device_ordinal]->workgroup_cluster,
                   executable->metadata, custom_explicit_kernarg_sizes,
                   custom_implicit_args_offsets);
         }
