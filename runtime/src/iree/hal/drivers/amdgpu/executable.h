@@ -20,6 +20,8 @@
 typedef struct iree_hal_amdgpu_asan_state_t iree_hal_amdgpu_asan_state_t;
 typedef struct iree_hal_amdgpu_feedback_state_t
     iree_hal_amdgpu_feedback_state_t;
+typedef struct iree_hal_amdgpu_physical_device_t
+    iree_hal_amdgpu_physical_device_t;
 typedef struct iree_hal_amdgpu_topology_t iree_hal_amdgpu_topology_t;
 typedef struct iree_hal_amdgpu_tsan_state_t iree_hal_amdgpu_tsan_state_t;
 
@@ -126,6 +128,10 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
 // variant per physical queue ordinal and publish per-queue config without
 // mutating state on each dispatch.
 //
+// |physical_device_list| contains |physical_device_count| devices in topology
+// ordinal order. It is used only during creation to validate metadata against
+// every selected device's immutable capabilities.
+//
 // Exact code-object image bytes and loader load ranges are retained in profile
 // metadata for offline trace/disassembly workflows. Executable trace profiling
 // may begin after executable preparation, so this cold-path metadata is always
@@ -139,6 +145,8 @@ iree_status_t iree_hal_amdgpu_executable_create(
     uint64_t executable_id, iree_hal_amdgpu_feedback_state_t* feedback_state,
     iree_hal_amdgpu_asan_state_t* asan_state,
     iree_hal_amdgpu_tsan_state_t* tsan_state,
+    iree_host_size_t physical_device_count,
+    iree_hal_amdgpu_physical_device_t* const* physical_device_list,
     iree_host_size_t queue_scope_count,
     const iree_hal_amdgpu_queue_scope_t* queue_scopes,
     iree_hal_amdgpu_profile_metadata_registry_t* profile_metadata,

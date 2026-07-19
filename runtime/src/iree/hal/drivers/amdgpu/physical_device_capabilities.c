@@ -217,6 +217,67 @@ iree_status_t iree_hal_amdgpu_query_workgroup_cluster_capabilities(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_amdgpu_validate_workgroup_cluster_size(
+    iree_string_view_t kernel_name, const uint8_t cluster_size[3],
+    iree_host_size_t physical_device_ordinal,
+    const iree_hal_amdgpu_workgroup_cluster_capabilities_t* capabilities) {
+  IREE_ASSERT_ARGUMENT(cluster_size);
+  IREE_ASSERT_ARGUMENT(capabilities);
+
+  if (cluster_size[0] == 0 && cluster_size[1] == 0 && cluster_size[2] == 0) {
+    return iree_ok_status();
+  }
+  if (IREE_UNLIKELY(cluster_size[0] == 0 || cluster_size[1] == 0 ||
+                    cluster_size[2] == 0)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU kernel '%.*s' has partial workgroup cluster size %ux%ux%u",
+        (int)kernel_name.size, kernel_name.data, cluster_size[0],
+        cluster_size[1], cluster_size[2]);
+  }
+  if (IREE_UNLIKELY(cluster_size[0] == 1 && cluster_size[1] == 1 &&
+                    cluster_size[2] == 1)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU kernel '%.*s' must omit trivial workgroup cluster size 1x1x1",
+        (int)kernel_name.size, kernel_name.data);
+  }
+  if (IREE_UNLIKELY(!capabilities->supported)) {
+    return iree_make_status(
+        IREE_STATUS_INCOMPATIBLE,
+        "AMDGPU kernel '%.*s' requires workgroup cluster size %ux%ux%u but "
+        "physical device[%" PRIhsz "] does not support clustered dispatch",
+        (int)kernel_name.size, kernel_name.data, cluster_size[0],
+        cluster_size[1], cluster_size[2], physical_device_ordinal);
+  }
+
+  const iree_hal_amdgpu_dispatch_dimension_limits_t* limits =
+      &capabilities->workgroups_per_cluster;
+  if (IREE_UNLIKELY(cluster_size[0] > limits->x ||
+                    cluster_size[1] > limits->y ||
+                    cluster_size[2] > limits->z)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU kernel '%.*s' workgroup cluster size %ux%ux%u exceeds "
+        "physical device[%" PRIhsz "] maximum %" PRIu64 "x%" PRIu64 "x%" PRIu64,
+        (int)kernel_name.size, kernel_name.data, cluster_size[0],
+        cluster_size[1], cluster_size[2], physical_device_ordinal, limits->x,
+        limits->y, limits->z);
+  }
+  const uint64_t total =
+      (uint64_t)cluster_size[0] * cluster_size[1] * cluster_size[2];
+  if (IREE_UNLIKELY(total > limits->total)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU kernel '%.*s' workgroup cluster size %ux%ux%u has total "
+        "%" PRIu64 " exceeding physical device[%" PRIhsz "] maximum %" PRIu64,
+        (int)kernel_name.size, kernel_name.data, cluster_size[0],
+        cluster_size[1], cluster_size[2], total, physical_device_ordinal,
+        limits->total);
+  }
+  return iree_ok_status();
+}
+
 bool iree_hal_amdgpu_cpu_visible_device_coarse_memory_is_available(
     const iree_hal_amdgpu_cpu_visible_device_coarse_memory_t* memory) {
   return iree_any_bit_set(

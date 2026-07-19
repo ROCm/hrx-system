@@ -12,6 +12,7 @@
 #include "iree/hal/drivers/amdgpu/executable_global_resolver.h"
 #include "iree/hal/drivers/amdgpu/executable_metadata_hsaco.h"
 #include "iree/hal/drivers/amdgpu/feedback_state.h"
+#include "iree/hal/drivers/amdgpu/physical_device.h"
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/source_context.h"
 #include "iree/hal/drivers/amdgpu/tsan_state.h"
@@ -599,6 +600,7 @@ static iree_status_t iree_hal_amdgpu_executable_resolve_kernel_args_from_symbol(
     iree_hal_amdgpu_device_kernel_args_t* out_kernel_args) {
   IREE_ASSERT_ARGUMENT(out_kernel_args);
   IREE_TRACE_ZONE_BEGIN(z0);
+  memset(out_kernel_args, 0, sizeof(*out_kernel_args));
 
   // All of our kernels assume 3 dimensions.
   out_kernel_args->setup = 3 << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
@@ -1735,6 +1737,42 @@ static iree_status_t iree_hal_amdgpu_executable_validate_workgroup_size(
   return iree_ok_status();
 }
 
+static iree_status_t
+iree_hal_amdgpu_executable_validate_workgroup_cluster_sizes(
+    const iree_hal_amdgpu_executable_metadata_t* metadata,
+    const iree_hal_amdgpu_queue_affinity_physical_device_set_t*
+        selected_devices,
+    iree_host_size_t physical_device_count,
+    iree_hal_amdgpu_physical_device_t* const* physical_device_list) {
+  for (iree_host_size_t export_ordinal = 0;
+       export_ordinal < metadata->export_count; ++export_ordinal) {
+    const iree_hal_amdgpu_executable_export_t* metadata_export =
+        &metadata->exports[export_ordinal];
+    const iree_string_view_t symbol_name =
+        metadata->reflection[export_ordinal].symbol_name;
+    for (iree_host_size_t device_ordinal = 0;
+         device_ordinal < physical_device_count; ++device_ordinal) {
+      if (!iree_hal_amdgpu_physical_device_mask_contains(
+              selected_devices->physical_device_mask, device_ordinal)) {
+        continue;
+      }
+      const iree_hal_amdgpu_physical_device_t* physical_device =
+          physical_device_list[device_ordinal];
+      if (IREE_UNLIKELY(!physical_device ||
+                        physical_device->device_ordinal != device_ordinal)) {
+        return iree_make_status(IREE_STATUS_INTERNAL,
+                                "AMDGPU physical device list entry %" PRIhsz
+                                " does not match its topology ordinal",
+                                device_ordinal);
+      }
+      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_validate_workgroup_cluster_size(
+          symbol_name, metadata_export->workgroup_cluster_size, device_ordinal,
+          &physical_device->workgroup_cluster));
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_amdgpu_executable_initialize_export_infos(
     const iree_hal_amdgpu_executable_metadata_t* metadata,
     const iree_hal_amdgpu_device_limits_t* limits,
@@ -1839,6 +1877,9 @@ static iree_status_t iree_hal_amdgpu_executable_resolve_metadata_kernel_args(
     out_host_kernel_args->kernarg_alignment = iree_max(
         out_host_kernel_args->kernarg_alignment, layout->kernarg_alignment);
   }
+  memcpy(out_host_kernel_args->workgroup_cluster_size,
+         metadata_export->workgroup_cluster_size,
+         sizeof(out_host_kernel_args->workgroup_cluster_size));
   return iree_ok_status();
 }
 
@@ -1892,6 +1933,8 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
     const iree_hal_amdgpu_feedback_state_t* feedback_state,
     const iree_hal_amdgpu_asan_state_t* asan_state,
     const iree_hal_amdgpu_tsan_state_t* tsan_state,
+    iree_host_size_t physical_device_count,
+    iree_hal_amdgpu_physical_device_t* const* physical_device_list,
     iree_host_size_t queue_scope_count,
     const iree_hal_amdgpu_queue_scope_t* queue_scopes,
     hsa_agent_t any_device_agent, iree_hal_amdgpu_gfxip_version_t gfxip_version,
@@ -2023,6 +2066,11 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
         &executable->metadata);
   }
   if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_executable_validate_workgroup_cluster_sizes(
+        executable->metadata, physical_devices, physical_device_count,
+        physical_device_list);
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_executable_initialize_export_infos(
         executable->metadata, limits, executable);
   }
@@ -2127,6 +2175,8 @@ iree_status_t iree_hal_amdgpu_executable_create(
     uint64_t executable_id, iree_hal_amdgpu_feedback_state_t* feedback_state,
     iree_hal_amdgpu_asan_state_t* asan_state,
     iree_hal_amdgpu_tsan_state_t* tsan_state,
+    iree_host_size_t physical_device_count,
+    iree_hal_amdgpu_physical_device_t* const* physical_device_list,
     iree_host_size_t queue_scope_count,
     const iree_hal_amdgpu_queue_scope_t* queue_scopes,
     iree_hal_amdgpu_profile_metadata_registry_t* profile_metadata,
@@ -2147,6 +2197,14 @@ iree_status_t iree_hal_amdgpu_executable_create(
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                              "topology must have at least one GPU device"));
+  }
+  if (IREE_UNLIKELY(physical_device_count != topology->gpu_agent_count ||
+                    !physical_device_list)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "physical device list count %" PRIhsz
+                             " must match topology GPU agent count %" PRIhsz,
+                             physical_device_count, topology->gpu_agent_count));
   }
   if (IREE_UNLIKELY(queue_scope_count != 0 && !queue_scopes)) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -2235,9 +2293,9 @@ iree_status_t iree_hal_amdgpu_executable_create(
 
   iree_status_t status = iree_hal_amdgpu_executable_create_from_raw_hsaco(
       device, libhsa, topology, &physical_devices, load_params, executable_id,
-      &limits, feedback_state, asan_state, tsan_state, queue_scope_count,
-      queue_scopes, any_device_agent, gfxip_version, profile_metadata,
-      host_allocator, out_executable);
+      &limits, feedback_state, asan_state, tsan_state, physical_device_count,
+      physical_device_list, queue_scope_count, queue_scopes, any_device_agent,
+      gfxip_version, profile_metadata, host_allocator, out_executable);
   if (!iree_status_is_ok(status)) {
     iree_hal_executable_release(*out_executable);
     *out_executable = NULL;

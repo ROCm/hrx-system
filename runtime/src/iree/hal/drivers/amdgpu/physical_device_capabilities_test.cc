@@ -159,6 +159,16 @@ static void ExpectAllClusterAttributesQueriedOnce(
   EXPECT_EQ(agent_info.query_counts, (std::array<uint32_t, 4>{1u, 1u, 1u, 1u}));
 }
 
+static iree_hal_amdgpu_workgroup_cluster_capabilities_t
+SupportedClusterCapabilities(uint64_t x, uint64_t y, uint64_t z,
+                             uint64_t total) {
+  iree_hal_amdgpu_workgroup_cluster_capabilities_t capabilities = {};
+  capabilities.supported = 1;
+  capabilities.cluster_count = {1024, 64, 64, 4096};
+  capabilities.workgroups_per_cluster = {x, y, z, total};
+  return capabilities;
+}
+
 class PhysicalDeviceCapabilitiesTest : public ::testing::Test {
  protected:
   iree_hal_amdgpu_cpu_visible_device_coarse_memory_selection_t
@@ -349,6 +359,71 @@ TEST_F(PhysicalDeviceCapabilitiesTest,
   EXPECT_EQ(second_capabilities.cluster_count.total, 8192u);
   ExpectAllClusterAttributesQueriedOnce(first_agent_info);
   ExpectAllClusterAttributesQueriedOnce(second_agent_info);
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest, ValidatesMetadataWorkgroupClusterSize) {
+  const auto capabilities = SupportedClusterCapabilities(4, 3, 2, 8);
+  const uint8_t ordinary_size[3] = {0, 0, 0};
+  IREE_EXPECT_OK(iree_hal_amdgpu_validate_workgroup_cluster_size(
+      IREE_SV("ordinary.kd"), ordinary_size, 0, &capabilities));
+  const uint8_t clustered_size[3] = {1, 2, 1};
+  IREE_EXPECT_OK(iree_hal_amdgpu_validate_workgroup_cluster_size(
+      IREE_SV("clustered.kd"), clustered_size, 7, &capabilities));
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       RejectsMalformedMetadataWorkgroupClusterSize) {
+  const auto capabilities = SupportedClusterCapabilities(4, 3, 2, 8);
+  const uint8_t partial_size[3] = {1, 0, 2};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amdgpu_validate_workgroup_cluster_size(
+          IREE_SV("partial.kd"), partial_size, 0, &capabilities));
+  const uint8_t trivial_size[3] = {1, 1, 1};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amdgpu_validate_workgroup_cluster_size(
+          IREE_SV("trivial.kd"), trivial_size, 0, &capabilities));
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       RejectsUnsupportedMetadataWorkgroupClusterSize) {
+  const iree_hal_amdgpu_workgroup_cluster_capabilities_t unsupported = {};
+  const uint8_t clustered_size[3] = {1, 2, 1};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INCOMPATIBLE,
+      iree_hal_amdgpu_validate_workgroup_cluster_size(
+          IREE_SV("clustered.kd"), clustered_size, 3, &unsupported));
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       RejectsEachExceededMetadataWorkgroupClusterLimit) {
+  const auto capabilities = SupportedClusterCapabilities(4, 3, 2, 8);
+  const uint8_t exceeded_sizes[][3] = {
+      {5, 1, 1},
+      {1, 4, 1},
+      {1, 1, 3},
+      {4, 3, 2},
+  };
+  for (const auto& exceeded_size : exceeded_sizes) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_hal_amdgpu_validate_workgroup_cluster_size(
+            IREE_SV("oversized.kd"), exceeded_size, 2, &capabilities));
+  }
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       HeterogeneousDevicesValidateWorkgroupClustersIndependently) {
+  const auto supported = SupportedClusterCapabilities(4, 4, 4, 8);
+  const auto too_small = SupportedClusterCapabilities(4, 1, 4, 4);
+  const uint8_t clustered_size[3] = {1, 2, 1};
+  IREE_EXPECT_OK(iree_hal_amdgpu_validate_workgroup_cluster_size(
+      IREE_SV("heterogeneous.kd"), clustered_size, 0, &supported));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amdgpu_validate_workgroup_cluster_size(
+          IREE_SV("heterogeneous.kd"), clustered_size, 1, &too_small));
 }
 
 TEST_F(PhysicalDeviceCapabilitiesTest, SelectsAvailableCoarseMemory) {

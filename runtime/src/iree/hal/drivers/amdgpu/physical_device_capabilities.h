@@ -52,6 +52,13 @@ iree_status_t iree_hal_amdgpu_query_workgroup_cluster_capabilities(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
     iree_hal_amdgpu_workgroup_cluster_capabilities_t* out_capabilities);
 
+// Validates a metadata-declared workgroup cluster size against one physical
+// device. An all-zero size denotes ordinary dispatch and is always accepted.
+iree_status_t iree_hal_amdgpu_validate_workgroup_cluster_size(
+    iree_string_view_t kernel_name, const uint8_t cluster_size[3],
+    iree_host_size_t physical_device_ordinal,
+    const iree_hal_amdgpu_workgroup_cluster_capabilities_t* capabilities);
+
 typedef enum iree_hal_amdgpu_cpu_visible_device_coarse_memory_flag_bits_e {
   IREE_HAL_AMDGPU_CPU_VISIBLE_DEVICE_COARSE_MEMORY_FLAG_NONE = 0u,
   // All CPU agents can access the GPU coarse-grained memory pool and the
