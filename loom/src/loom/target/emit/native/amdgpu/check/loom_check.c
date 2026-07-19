@@ -317,7 +317,7 @@ static iree_status_t loom_amdgpu_loom_check_lower_spill_traffic(
 static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
     const loom_check_emit_provider_request_t* request,
     iree_string_view_t function_symbol_name,
-    const loom_low_pressure_model_t** out_pressure_model,
+    const loom_target_residency_model_t** out_pressure_model,
     loom_low_schedule_pair_affinity_list_t* out_affinities,
     loom_low_schedule_structural_state_read_list_t* out_state_reads) {
   *out_pressure_model = NULL;
@@ -387,7 +387,7 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
                                                   &options)
           ? &storage_lease_provider
           : NULL;
-  const loom_low_pressure_model_t* pressure_model = NULL;
+  const loom_target_residency_model_t* pressure_model = NULL;
   loom_low_schedule_pair_affinity_list_t schedule_pair_affinities =
       loom_low_schedule_pair_affinity_list_empty();
   loom_low_schedule_structural_state_read_list_t schedule_state_reads =

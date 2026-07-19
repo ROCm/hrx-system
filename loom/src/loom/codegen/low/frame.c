@@ -432,20 +432,20 @@ static iree_status_t loom_low_emission_frame_validate_final(
   return iree_ok_status();
 }
 
-static uint64_t loom_low_emission_frame_pressure_resource_units(
-    const loom_low_pressure_resource_table_t* resource_table,
+static uint64_t loom_low_emission_frame_residency_resource_units(
+    const loom_target_residency_derived_resource_table_t* resource_table,
     uint16_t resource_id, const uint32_t* units_by_reg_class,
     iree_host_size_t reg_class_count) {
-  const loom_low_pressure_resource_t* resource =
+  const loom_target_residency_derived_resource_t* resource =
       &resource_table->resources[resource_id];
   uint64_t resource_units = 0;
   for (uint16_t i = 0; i < resource->member_count; ++i) {
-    const loom_low_pressure_resource_member_t* member =
+    const loom_target_residency_derived_member_t* member =
         &resource_table->members[resource->member_start + i];
     IREE_ASSERT_EQ(member->resource_id, resource_id);
-    IREE_ASSERT_LT(member->descriptor_reg_class_id, reg_class_count);
-    const uint64_t contribution = loom_low_pressure_round_resource_units(
-        units_by_reg_class[member->descriptor_reg_class_id],
+    IREE_ASSERT_LT(member->direct_resource_id, reg_class_count);
+    const uint64_t contribution = loom_target_residency_round_resource_units(
+        units_by_reg_class[member->direct_resource_id],
         member->contribution_granularity);
     if (resource_units > UINT64_MAX - contribution) return UINT64_MAX;
     resource_units += contribution;
@@ -454,50 +454,60 @@ static uint64_t loom_low_emission_frame_pressure_resource_units(
 }
 
 static bool loom_low_emission_frame_crosses_new_pressure_cliff(
-    const loom_low_pressure_model_t* pressure_model,
+    const loom_target_residency_model_t* pressure_model,
     const uint32_t* baseline_units_by_reg_class,
     const loom_low_allocation_table_t* allocation) {
-  if (loom_low_pressure_model_is_empty(pressure_model)) return false;
-  const loom_low_pressure_cliff_table_t* pressure_cliffs =
-      &pressure_model->register_class_cliffs;
-  for (iree_host_size_t i = 0; i < pressure_cliffs->count; ++i) {
-    const loom_low_pressure_cliff_t* cliff = &pressure_cliffs->values[i];
-    const uint16_t reg_class_id = cliff->pressure_source_id;
-    if (baseline_units_by_reg_class[reg_class_id] >= cliff->cliff_units) {
-      continue;
-    }
-    const uint32_t allocated_units =
-        allocation->assigned_extents.ends_by_reg_class[reg_class_id];
-    if (allocated_units >= cliff->cliff_units) {
-      return true;
-    }
+  if (loom_target_residency_model_is_empty(pressure_model)) return false;
+  const loom_target_residency_direct_resource_table_t* direct_resources =
+      &pressure_model->direct_resources;
+  IREE_ASSERT_EQ(direct_resources->resource_count,
+                 allocation->assigned_extents.count);
+  for (uint16_t resource_id = 0; resource_id < direct_resources->resource_count;
+       ++resource_id) {
+    const loom_target_residency_cliff_range_t range =
+        loom_target_residency_direct_resource_cliff_range(direct_resources,
+                                                          resource_id);
+    const loom_target_residency_cliff_t* cliffs =
+        range.count == 0 ? NULL : &direct_resources->cliffs[range.start];
+    loom_target_residency_cliff_evaluation_t baseline_evaluation;
+    loom_target_residency_evaluate_cliffs(
+        cliffs, range.count, pressure_model->best_tier,
+        baseline_units_by_reg_class[resource_id], &baseline_evaluation);
+    loom_target_residency_cliff_evaluation_t allocated_evaluation;
+    loom_target_residency_evaluate_cliffs(
+        cliffs, range.count, pressure_model->best_tier,
+        allocation->assigned_extents.ends_by_reg_class[resource_id],
+        &allocated_evaluation);
+    if (allocated_evaluation.tier < baseline_evaluation.tier) return true;
   }
-  const loom_low_pressure_resource_table_t* resource_table =
-      &pressure_model->resources;
+  const loom_target_residency_derived_resource_table_t* resource_table =
+      &pressure_model->derived_resources;
   for (uint16_t resource_id = 0; resource_id < resource_table->resource_count;
        ++resource_id) {
-    const loom_low_pressure_resource_t* resource =
+    const loom_target_residency_derived_resource_t* resource =
         &resource_table->resources[resource_id];
     const uint64_t baseline_resource_units =
-        loom_low_emission_frame_pressure_resource_units(
+        loom_low_emission_frame_residency_resource_units(
             resource_table, resource_id, baseline_units_by_reg_class,
             allocation->assigned_extents.count);
     const uint64_t allocated_resource_units =
-        loom_low_emission_frame_pressure_resource_units(
+        loom_low_emission_frame_residency_resource_units(
             resource_table, resource_id,
             allocation->assigned_extents.ends_by_reg_class,
             allocation->assigned_extents.count);
-    const uint16_t cliff_end = resource->cliff_start + resource->cliff_count;
-    for (uint16_t cliff_index = resource->cliff_start; cliff_index < cliff_end;
-         ++cliff_index) {
-      const loom_low_pressure_cliff_t* cliff =
-          &resource_table->cliffs[cliff_index];
-      IREE_ASSERT_EQ(cliff->pressure_source_id, resource_id);
-      if (baseline_resource_units < cliff->cliff_units &&
-          allocated_resource_units >= cliff->cliff_units) {
-        return true;
-      }
-    }
+    const loom_target_residency_cliff_t* cliffs =
+        resource->cliff_count == 0
+            ? NULL
+            : &resource_table->cliffs[resource->cliff_start];
+    loom_target_residency_cliff_evaluation_t baseline_evaluation;
+    loom_target_residency_evaluate_cliffs(
+        cliffs, resource->cliff_count, pressure_model->best_tier,
+        baseline_resource_units, &baseline_evaluation);
+    loom_target_residency_cliff_evaluation_t allocated_evaluation;
+    loom_target_residency_evaluate_cliffs(
+        cliffs, resource->cliff_count, pressure_model->best_tier,
+        allocated_resource_units, &allocated_evaluation);
+    if (allocated_evaluation.tier < baseline_evaluation.tier) return true;
   }
   return false;
 }
@@ -632,7 +642,7 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
         "spill-free low emission frame construction requires spill-free "
         "options");
   }
-  const loom_low_pressure_model_t* pressure_model =
+  const loom_target_residency_model_t* pressure_model =
       frame_options->pressure_model;
 
   loom_low_emission_frame_lower_spill_traffic_result_t spill_lowering_result = {
@@ -769,7 +779,7 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
           IREE_RETURN_IF_ERROR(loom_low_emission_frame_copy_pair_uses(
               frame.schedule.placement_pair_uses, repair_arena,
               &pair_replication_preferred_pairs));
-          if (!loom_low_pressure_model_is_empty(pressure_model)) {
+          if (!loom_target_residency_model_is_empty(pressure_model)) {
             IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
                 repair_arena, frame.allocation.assigned_extents.count,
                 sizeof(*pair_replication_baseline_units_by_reg_class),

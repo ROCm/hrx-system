@@ -151,7 +151,7 @@ static iree_status_t loom_amdgpu_occupancy_check_parse_emit_options(
 static iree_status_t loom_amdgpu_occupancy_check_resolve_pressure_model(
     const loom_check_emit_provider_request_t* request,
     iree_string_view_t function_symbol_name,
-    const loom_low_pressure_model_t** out_pressure_model) {
+    const loom_target_residency_model_t** out_pressure_model) {
   *out_pressure_model = NULL;
   loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
       .diagnostic_collector = request->diagnostic_collector,
@@ -197,7 +197,7 @@ static iree_status_t loom_amdgpu_occupancy_check_emit_provider_execute(
   loom_low_emission_frame_t frame = {0};
   loom_low_storage_lease_provider_t storage_lease_provider = {0};
   loom_amdgpu_storage_lease_provider(&storage_lease_provider);
-  const loom_low_pressure_model_t* pressure_model = NULL;
+  const loom_target_residency_model_t* pressure_model = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_check_resolve_pressure_model(
       request, options.function_symbol_name, &pressure_model));
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(

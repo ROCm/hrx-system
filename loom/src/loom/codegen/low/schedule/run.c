@@ -1216,13 +1216,14 @@ iree_status_t loom_low_schedule_function(
       .module = model->module,
       .options = options,
       .pressure_cliffs = options->pressure_model != NULL
-                             ? &options->pressure_model->register_class_cliffs
+                             ? &options->pressure_model->direct_resources
                              : NULL,
-      .pressure_resources = options->pressure_model != NULL &&
-                                    !loom_low_pressure_resource_table_is_empty(
-                                        &options->pressure_model->resources)
-                                ? &options->pressure_model->resources
-                                : NULL,
+      .pressure_resources =
+          options->pressure_model != NULL &&
+                  !loom_target_residency_derived_resource_table_is_empty(
+                      &options->pressure_model->derived_resources)
+              ? &options->pressure_model->derived_resources
+              : NULL,
       .arena = arena,
       .function_op = model->function_op,
       .body = model->body,

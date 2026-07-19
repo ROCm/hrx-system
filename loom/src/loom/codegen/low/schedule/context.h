@@ -162,9 +162,9 @@ typedef struct loom_low_schedule_build_state_t {
   // Scheduler options provided by the caller.
   const loom_low_schedule_options_t* options;
   // Direct register-class pressure cliffs from |options|, or NULL.
-  const loom_low_pressure_cliff_table_t* pressure_cliffs;
+  const loom_target_residency_direct_resource_table_t* pressure_cliffs;
   // Derived target pressure resources from |options|, or NULL.
-  const loom_low_pressure_resource_table_t* pressure_resources;
+  const loom_target_residency_derived_resource_table_t* pressure_resources;
   // Arena owning all table storage produced by this schedule.
   iree_arena_allocator_t* arena;
   // Low function definition operation being scheduled.
