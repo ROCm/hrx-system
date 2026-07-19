@@ -23,12 +23,28 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    artifact_analyzer
+  HDRS
+    "artifact_analyzer.h"
+  SRCS
+    "artifact_analyzer.c"
+  DEPS
+    iree::base
+    loom::error::diagnostic
+    loom::target::reporting::report
+    loom::target::types
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     compile_options
   HDRS
     "compile_options.h"
   SRCS
     "compile_options.c"
   DEPS
+    ::artifact_analyzer
     iree::base
     loom::error::diagnostic
     loom::target::pipeline_options

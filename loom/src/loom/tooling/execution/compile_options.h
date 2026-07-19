@@ -13,6 +13,7 @@
 #include "loom/target/pipeline_options.h"
 #include "loom/target/reporting/artifact_manifest.h"
 #include "loom/target/reporting/report.h"
+#include "loom/tooling/execution/artifact_analyzer.h"
 #include "loom/verify/verify.h"
 
 #ifdef __cplusplus
@@ -59,6 +60,9 @@ typedef struct loom_run_candidate_compile_options_t {
   uint32_t max_errors;
   // Optional caller-owned structured compile report to populate.
   loom_target_compile_report_t* report;
+  // Optional borrowed analyzer for final target-native artifact bytes.
+  // Analysis is synchronous and completes before the candidate is published.
+  const loom_run_artifact_analyzer_t* artifact_analyzer;
   // Optional one-shot report capture receiving emitted diagnostics for report
   // output adapters.
   loom_run_compile_report_capture_t* report_capture;

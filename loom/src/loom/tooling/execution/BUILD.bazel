@@ -26,10 +26,23 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "artifact_analyzer",
+    srcs = ["artifact_analyzer.c"],
+    hdrs = ["artifact_analyzer.h"],
+    deps = [
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/reporting:report",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "compile_options",
     srcs = ["compile_options.c"],
     hdrs = ["compile_options.h"],
     deps = [
+        ":artifact_analyzer",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/target:pipeline_options",
         "//loom/src/loom/target/reporting:artifact_manifest",
