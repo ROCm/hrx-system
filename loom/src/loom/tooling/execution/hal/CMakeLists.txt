@@ -60,6 +60,7 @@ loom_cc_library(
     ::runtime
     iree::base
     loom::target::reporting::report
+    loom::tooling::execution::artifact_analyzer
     loom::tooling::execution::compile_options
     loom::tooling::execution::session
     loom::verify

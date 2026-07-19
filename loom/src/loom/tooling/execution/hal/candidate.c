@@ -90,6 +90,20 @@ static iree_status_t loom_run_hal_candidate_emit_selected_target(
       candidate->artifact.target_bundle == NULL) {
     candidate->artifact.target_bundle = candidate->device_target.target_bundle;
   }
+  if (iree_status_is_ok(status) && candidate->compiled &&
+      options->artifact_analyzer != NULL) {
+    const loom_run_artifact_analysis_request_t request = {
+        .artifact_format = candidate->artifact.target_artifact_format,
+        .artifact_data = candidate->artifact.target_artifact_data,
+        .target_key = candidate->artifact.target_key,
+        .target_bundle = candidate->artifact.target_bundle,
+        .diagnostic_sink = options->diagnostic_sink,
+        .max_errors = options->max_errors,
+        .report = report,
+    };
+    status = loom_run_artifact_analyzer_analyze(options->artifact_analyzer,
+                                                &request);
+  }
   return status;
 }
 

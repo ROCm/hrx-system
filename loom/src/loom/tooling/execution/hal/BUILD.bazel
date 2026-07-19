@@ -57,6 +57,7 @@ loom_cc_library(
         ":artifact",
         ":runtime",
         "//loom/src/loom/target/reporting:report",
+        "//loom/src/loom/tooling/execution:artifact_analyzer",
         "//loom/src/loom/tooling/execution:compile_options",
         "//loom/src/loom/tooling/execution:session",
         "//loom/src/loom/verify",
