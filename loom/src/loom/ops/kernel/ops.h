@@ -66,7 +66,12 @@ enum {
   LOOM_OP_KERNEL_WORKGROUP_VOTE_ALL = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 39),
   LOOM_OP_KERNEL_WORKGROUP_VOTE_COUNT = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 40),
   LOOM_OP_KERNEL_ASSERT = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 41),
-  LOOM_OP_KERNEL_COUNT_ = 42,
+  LOOM_OP_KERNEL_CLUSTER_ID = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 42),
+  LOOM_OP_KERNEL_CLUSTER_WORKGROUP_ID = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 43),
+  LOOM_OP_KERNEL_CLUSTER_WORKGROUP_FLAT_ID = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 44),
+  LOOM_OP_KERNEL_CLUSTER_SIZE = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 45),
+  LOOM_OP_KERNEL_CLUSTER_COUNT = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 46),
+  LOOM_OP_KERNEL_COUNT_ = 47,
 };
 
 // Required async copy direction.
@@ -991,6 +996,94 @@ iree_status_t loom_kernel_assert_build(
     loom_optional loom_string_id_t message,
     loom_location_id_t location,
     loom_op_t** out_op);
+
+// LOOM_OP_KERNEL_CLUSTER_ID: Read one coordinate of the current workgroup cluster within the dispatch cluster grid. The global workgroup coordinate in a dimension is cluster.id * cluster.size + cluster.workgroup.id.
+// %cluster = kernel.cluster.id<x> : index
+LOOM_DEFINE_ISA(loom_kernel_cluster_id_isa, LOOM_OP_KERNEL_CLUSTER_ID)
+LOOM_DEFINE_RESULT(loom_kernel_cluster_id_result, 0)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_cluster_id_dimension, 0, loom_kernel_dimension_t)
+iree_status_t loom_kernel_cluster_id_build(
+    loom_builder_t* builder,
+    loom_kernel_dimension_t dimension,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_cluster_id_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_kernel_cluster_id_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
+// LOOM_OP_KERNEL_CLUSTER_WORKGROUP_ID: Read one coordinate of the current workgroup within its workgroup cluster. The coordinate is zero for an ordinary non-clustered launch.
+// %local_cluster_id = kernel.cluster.workgroup.id<y> : index
+LOOM_DEFINE_ISA(loom_kernel_cluster_workgroup_id_isa, LOOM_OP_KERNEL_CLUSTER_WORKGROUP_ID)
+LOOM_DEFINE_RESULT(loom_kernel_cluster_workgroup_id_result, 0)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_cluster_workgroup_id_dimension, 0, loom_kernel_dimension_t)
+iree_status_t loom_kernel_cluster_workgroup_id_build(
+    loom_builder_t* builder,
+    loom_kernel_dimension_t dimension,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_cluster_workgroup_id_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_kernel_cluster_workgroup_id_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
+// LOOM_OP_KERNEL_CLUSTER_WORKGROUP_FLAT_ID: Read the row-major flat coordinate of the current workgroup within its workgroup cluster, with x as the minor dimension.
+// %local_cluster_rank = kernel.cluster.workgroup.flat_id : index
+LOOM_DEFINE_ISA(loom_kernel_cluster_workgroup_flat_id_isa, LOOM_OP_KERNEL_CLUSTER_WORKGROUP_FLAT_ID)
+LOOM_DEFINE_RESULT(loom_kernel_cluster_workgroup_flat_id_result, 0)
+iree_status_t loom_kernel_cluster_workgroup_flat_id_build(
+    loom_builder_t* builder,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_cluster_workgroup_flat_id_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_kernel_cluster_workgroup_flat_id_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
+// LOOM_OP_KERNEL_CLUSTER_SIZE: Read the selected workgroup-cluster extent. An ordinary non-clustered launch has extent one in every dimension.
+// %cluster_size = kernel.cluster.size<y> : index
+LOOM_DEFINE_ISA(loom_kernel_cluster_size_isa, LOOM_OP_KERNEL_CLUSTER_SIZE)
+LOOM_DEFINE_RESULT(loom_kernel_cluster_size_result, 0)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_cluster_size_dimension, 0, loom_kernel_dimension_t)
+iree_status_t loom_kernel_cluster_size_build(
+    loom_builder_t* builder,
+    loom_kernel_dimension_t dimension,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_cluster_size_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_kernel_cluster_size_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
+// LOOM_OP_KERNEL_CLUSTER_COUNT: Read the number of workgroup clusters in one dispatch dimension. This is the exact quotient of workgroup.count by cluster.size.
+// %cluster_count = kernel.cluster.count<y> : index
+LOOM_DEFINE_ISA(loom_kernel_cluster_count_isa, LOOM_OP_KERNEL_CLUSTER_COUNT)
+LOOM_DEFINE_RESULT(loom_kernel_cluster_count_result, 0)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_cluster_count_dimension, 0, loom_kernel_dimension_t)
+iree_status_t loom_kernel_cluster_count_build(
+    loom_builder_t* builder,
+    loom_kernel_dimension_t dimension,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_cluster_count_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_kernel_cluster_count_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // Returns the vtable array for the kernel dialect.
 const loom_op_vtable_t* const* loom_kernel_dialect_vtables(

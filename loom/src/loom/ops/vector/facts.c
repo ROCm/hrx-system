@@ -1792,7 +1792,7 @@ iree_status_t loom_vector_constant_facts(
       loom_vector_constant_value(op), loom_type_element_type(result_type));
   IREE_RETURN_IF_ERROR(loom_value_facts_make_uniform_element(context, element,
                                                              &result_facts[0]));
-  loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
+  loom_value_facts_mark_cluster_uniform(&result_facts[0]);
   return iree_ok_status();
 }
 

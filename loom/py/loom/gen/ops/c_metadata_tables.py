@@ -411,9 +411,12 @@ def generate_tables_c(
                     region_flags.append("LOOM_REGION_GLOBAL_BUFFER_ARGS")
                 arg_uniform_scope = region_def.arg_uniform_scope
                 if arg_uniform_scope is not None:
-                    if arg_uniform_scope != "workgroup":
+                    if arg_uniform_scope == "workgroup":
+                        region_flags.append("LOOM_REGION_WORKGROUP_UNIFORM_ARGS")
+                    elif arg_uniform_scope == "cluster":
+                        region_flags.append("LOOM_REGION_CLUSTER_UNIFORM_ARGS")
+                    else:
                         raise ValueError(f"Op '{op.name}' region '{region_def.name}' has unsupported arg_uniform_scope '{arg_uniform_scope}'")
-                    region_flags.append("LOOM_REGION_WORKGROUP_UNIFORM_ARGS")
                 flags = " | ".join(region_flags) if region_flags else "0"
                 terminator = c_traits.region_terminator_kind(op, region_def, ops_by_name)
                 lines.append(f"    {{{terminator}, {implicit_terminator}, {flags}}},")

@@ -803,6 +803,9 @@ enum loom_region_flag_bits_e {
   // Scalar entry block arguments are identical across the workgroup. This is
   // a region signature contract and does not apply to nested region arguments.
   LOOM_REGION_WORKGROUP_UNIFORM_ARGS = 1u << 4,
+  // Scalar entry block arguments are identical across every workgroup in a
+  // workgroup cluster. This implies workgroup uniformity.
+  LOOM_REGION_CLUSTER_UNIFORM_ARGS = 1u << 5,
 };
 typedef uint8_t loom_region_flags_t;
 

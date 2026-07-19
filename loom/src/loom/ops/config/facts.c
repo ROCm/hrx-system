@@ -150,6 +150,6 @@ iree_status_t loom_config_get_facts(loom_fact_context_t* context,
   }
   // Compile-time configuration is constant across every workitem even while
   // its numerical value remains unresolved until specialization.
-  loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
+  loom_value_facts_mark_cluster_uniform(&result_facts[0]);
   return iree_ok_status();
 }

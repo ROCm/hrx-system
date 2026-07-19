@@ -306,7 +306,7 @@ kernel_def = Op(
             doc="Kernel body.",
             terminator="kernel.return",
             buffer_arg_memory_space="global",
-            arg_uniform_scope="workgroup",
+            arg_uniform_scope="cluster",
         ),
     ],
     interfaces=[
@@ -658,6 +658,139 @@ kernel_workgroup_count = Op(
     facts="loom_kernel_workgroup_count_facts",
     format=[TemplateParam("dimension"), COLON, ResultType("result")],
     examples=["%count = kernel.workgroup.count<x> : index"],
+)
+
+
+# ============================================================================
+# Kernel workgroup-cluster query ops
+# ============================================================================
+
+kernel_cluster_id = Op(
+    name="kernel.cluster.id",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Read one coordinate of the current workgroup cluster within the dispatch cluster grid. The global workgroup coordinate in a dimension is cluster.id * cluster.size + cluster.workgroup.id."),
+    results=[
+        Result(
+            "result",
+            INDEX,
+            doc="Current workgroup-cluster coordinate in the selected dimension.",
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "dimension",
+            ATTR_TYPE_ENUM,
+            enum_def=KernelDimension,
+            doc="Coordinate axis to read.",
+        ),
+    ],
+    traits=[PURE, HasAncestor("kernel.def")],
+    facts="loom_kernel_cluster_id_facts",
+    canonicalize="loom_kernel_cluster_id_canonicalize",
+    format=[TemplateParam("dimension"), COLON, ResultType("result")],
+    examples=["%cluster = kernel.cluster.id<x> : index"],
+)
+
+kernel_cluster_workgroup_id = Op(
+    name="kernel.cluster.workgroup.id",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Read one coordinate of the current workgroup within its workgroup cluster. The coordinate is zero for an ordinary non-clustered launch."),
+    results=[
+        Result(
+            "result",
+            INDEX,
+            doc="Current workgroup coordinate within its cluster.",
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "dimension",
+            ATTR_TYPE_ENUM,
+            enum_def=KernelDimension,
+            doc="Coordinate axis to read.",
+        ),
+    ],
+    traits=[PURE, HasAncestor("kernel.def")],
+    facts="loom_kernel_cluster_workgroup_id_facts",
+    canonicalize="loom_kernel_cluster_workgroup_id_canonicalize",
+    format=[TemplateParam("dimension"), COLON, ResultType("result")],
+    examples=["%local_cluster_id = kernel.cluster.workgroup.id<y> : index"],
+)
+
+kernel_cluster_workgroup_flat_id = Op(
+    name="kernel.cluster.workgroup.flat_id",
+    group=kernel_ops,
+    builder_name="cluster_workgroup_flat_id",
+    phase=OpPhase.EXECUTABLE,
+    doc=("Read the row-major flat coordinate of the current workgroup within its workgroup cluster, with x as the minor dimension."),
+    results=[
+        Result(
+            "result",
+            INDEX,
+            doc="Flat current-workgroup coordinate within its cluster.",
+        ),
+    ],
+    traits=[PURE, HasAncestor("kernel.def")],
+    facts="loom_kernel_cluster_workgroup_flat_id_facts",
+    canonicalize="loom_kernel_cluster_workgroup_flat_id_canonicalize",
+    format=[COLON, ResultType("result")],
+    examples=["%local_cluster_rank = kernel.cluster.workgroup.flat_id : index"],
+)
+
+kernel_cluster_size = Op(
+    name="kernel.cluster.size",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Read the selected workgroup-cluster extent. An ordinary non-clustered launch has extent one in every dimension."),
+    results=[
+        Result(
+            "result",
+            INDEX,
+            doc="Workgroup-cluster extent in the selected dimension.",
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "dimension",
+            ATTR_TYPE_ENUM,
+            enum_def=KernelDimension,
+            doc="Coordinate axis to read.",
+        ),
+    ],
+    traits=[PURE, HasAncestor("kernel.def")],
+    facts="loom_kernel_cluster_size_facts",
+    canonicalize="loom_kernel_cluster_size_canonicalize",
+    format=[TemplateParam("dimension"), COLON, ResultType("result")],
+    examples=["%cluster_size = kernel.cluster.size<y> : index"],
+)
+
+kernel_cluster_count = Op(
+    name="kernel.cluster.count",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Read the number of workgroup clusters in one dispatch dimension. This is the exact quotient of workgroup.count by cluster.size."),
+    results=[
+        Result(
+            "result",
+            INDEX,
+            doc="Dispatched workgroup-cluster count in the selected dimension.",
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "dimension",
+            ATTR_TYPE_ENUM,
+            enum_def=KernelDimension,
+            doc="Coordinate axis to read.",
+        ),
+    ],
+    traits=[PURE, HasAncestor("kernel.def")],
+    facts="loom_kernel_cluster_count_facts",
+    canonicalize="loom_kernel_cluster_count_canonicalize",
+    format=[TemplateParam("dimension"), COLON, ResultType("result")],
+    examples=["%cluster_count = kernel.cluster.count<y> : index"],
 )
 
 kernel_workitem_dispatch_id = Op(
@@ -1713,4 +1846,9 @@ ALL_KERNEL_OPS: tuple[Op, ...] = (
     kernel_workgroup_vote_all,
     kernel_workgroup_vote_count,
     kernel_assert,
+    kernel_cluster_id,
+    kernel_cluster_workgroup_id,
+    kernel_cluster_workgroup_flat_id,
+    kernel_cluster_size,
+    kernel_cluster_count,
 )

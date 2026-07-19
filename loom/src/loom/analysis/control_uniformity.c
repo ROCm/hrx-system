@@ -714,6 +714,7 @@ iree_string_view_t loom_control_uniformity_scope_name(
       [LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE] = IREE_SVL("unknown"),
       [LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP] = IREE_SVL("subgroup"),
       [LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP] = IREE_SVL("workgroup"),
+      [LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER] = IREE_SVL("cluster"),
   };
   IREE_ASSERT_LT((uint32_t)scope, IREE_ARRAYSIZE(names));
   return names[scope];

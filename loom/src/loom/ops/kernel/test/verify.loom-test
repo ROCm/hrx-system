@@ -73,6 +73,24 @@ func.def @workgroup_size_requires_kernel_def() {
 
 test.target<low_core> @test_target
 
+func.def @cluster_queries_require_kernel_def() {
+  // ERROR@+1: STRUCTURE/029 "kernel.cluster.id" "required" "kernel.def" "func.def"
+  %cluster = kernel.cluster.id<x> : index
+  // ERROR@+1: STRUCTURE/029 "kernel.cluster.workgroup.id" "required" "kernel.def" "func.def"
+  %local = kernel.cluster.workgroup.id<y> : index
+  // ERROR@+1: STRUCTURE/029 "kernel.cluster.workgroup.flat_id" "required" "kernel.def" "func.def"
+  %flat = kernel.cluster.workgroup.flat_id : index
+  // ERROR@+1: STRUCTURE/029 "kernel.cluster.size" "required" "kernel.def" "func.def"
+  %size = kernel.cluster.size<z> : index
+  // ERROR@+1: STRUCTURE/029 "kernel.cluster.count" "required" "kernel.def" "func.def"
+  %count = kernel.cluster.count<x> : index
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 func.def @subgroup_collective_requires_kernel_def(%value: f32) {
   // ERROR@+1: STRUCTURE/029 "kernel.subgroup.reduce" "required" "kernel.def" "func.def"
   %sum = kernel.subgroup.reduce<addf> %value : f32

@@ -24,6 +24,19 @@ kernel.def @clustered_kernel() {
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c4, %c4, %c1) workgroup_size(%c64, %c1, %c1) cluster_size(%c1, %c2, %c1) : index
 } launch() {
+  %cluster_x = kernel.cluster.id<x> : index
+  %cluster_y = kernel.cluster.id<y> : index
+  %cluster_z = kernel.cluster.id<z> : index
+  %local_x = kernel.cluster.workgroup.id<x> : index
+  %local_y = kernel.cluster.workgroup.id<y> : index
+  %local_z = kernel.cluster.workgroup.id<z> : index
+  %local_flat = kernel.cluster.workgroup.flat_id : index
+  %cluster_size_x = kernel.cluster.size<x> : index
+  %cluster_size_y = kernel.cluster.size<y> : index
+  %cluster_size_z = kernel.cluster.size<z> : index
+  %cluster_count_x = kernel.cluster.count<x> : index
+  %cluster_count_y = kernel.cluster.count<y> : index
+  %cluster_count_z = kernel.cluster.count<z> : index
   kernel.return
 }
 
@@ -35,6 +48,19 @@ kernel.def @clustered_kernel() {
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c4, %c4, %c1) workgroup_size(%c64, %c1, %c1) cluster_size(%c1, %c2, %c1) : index
 } launch() {
+  %cluster_x = kernel.cluster.id<x> : index
+  %cluster_y = kernel.cluster.id<y> : index
+  %cluster_z = kernel.cluster.id<z> : index
+  %local_x = kernel.cluster.workgroup.id<x> : index
+  %local_y = kernel.cluster.workgroup.id<y> : index
+  %local_z = kernel.cluster.workgroup.id<z> : index
+  %local_flat = kernel.cluster.workgroup.flat_id : index
+  %cluster_size_x = kernel.cluster.size<x> : index
+  %cluster_size_y = kernel.cluster.size<y> : index
+  %cluster_size_z = kernel.cluster.size<z> : index
+  %cluster_count_x = kernel.cluster.count<x> : index
+  %cluster_count_y = kernel.cluster.count<y> : index
+  %cluster_count_z = kernel.cluster.count<z> : index
   kernel.return
 }
 

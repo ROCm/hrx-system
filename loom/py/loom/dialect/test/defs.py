@@ -552,6 +552,18 @@ test_fact_workgroup_uniform = Op(
     examples=["%uniform = test.fact_workgroup_uniform %x : index -> i1"],
 )
 
+test_fact_cluster_uniform = Op(
+    "test.fact_cluster_uniform",
+    group=test_ops,
+    doc=("Returns 1 if the input is provably uniform across every workgroup in a workgroup cluster, 0 otherwise."),
+    operands=[Operand("value", ANY)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    facts="loom_test_fact_cluster_uniform_facts",
+    format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
+    examples=["%uniform = test.fact_cluster_uniform %x : index -> i1"],
+)
+
 test_fact_lane_varying = Op(
     "test.fact_lane_varying",
     group=test_ops,
@@ -2497,4 +2509,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_template_param_symbol_flags,
     test_fact_finite,
     test_fact_not_subnormal,
+    test_fact_cluster_uniform,
 )
