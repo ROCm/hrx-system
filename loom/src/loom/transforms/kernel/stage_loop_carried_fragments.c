@@ -681,6 +681,17 @@ static iree_status_t loom_stage_loop_carried_fragments_rewrite(
     build_flags |= LOOM_SCF_FOR_BUILD_FLAG_HAS_UNROLL_SCHEDULE;
     unroll_schedule = loom_scf_for_unroll_schedule(op);
   }
+  loom_value_id_t residency_minimum = LOOM_VALUE_ID_INVALID;
+  if (loom_scf_for_residency_minimum_is_present(op)) {
+    build_flags |= LOOM_SCF_FOR_BUILD_FLAG_HAS_RESIDENCY_MINIMUM;
+    residency_minimum = loom_scf_for_residency_minimum(op);
+  }
+  loom_scf_for_residency_policy_t residency_policy = 0;
+  if (!loom_attr_is_absent(
+          loom_op_attrs(op)[loom_scf_for_residency_policy_ATTR_INDEX])) {
+    build_flags |= LOOM_SCF_FOR_BUILD_FLAG_HAS_RESIDENCY_POLICY;
+    residency_policy = loom_scf_for_residency_policy(op);
+  }
 
   loom_builder_set_before(&context->rewriter->builder, op);
   loom_value_id_t value_checkpoint =
@@ -794,7 +805,7 @@ static iree_status_t loom_stage_loop_carried_fragments_rewrite(
       loom_scf_for_upper_bound(op), loom_scf_for_step(op), kept_iter_args,
       kept_count, kept_result_types, kept_count, /*tied_results=*/NULL,
       /*tied_result_count=*/0, unroll_factor, unroll_policy, unroll_schedule,
-      op->location, &new_loop));
+      residency_minimum, residency_policy, op->location, &new_loop));
 
   loom_region_t* new_body = loom_scf_for_body(new_loop);
   loom_builder_ip_t saved_ip = loom_builder_enter_region(

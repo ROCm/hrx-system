@@ -1124,6 +1124,50 @@ func.def @for_forwards_one_of_two_results(%lo: index, %hi: index, %init: f32, %a
 
 // ====
 
+// Rebuilding loop-carried state preserves the categorical placement contract.
+func.def @for_forward_preserves_residency_policy(%lo: index, %hi: index, %init: f32, %acc: f32) -> (f32, f32) {
+  %step = index.constant 1 : index
+  %same, %sum = scf.for %iv = [%lo to %hi step %step](%same_arg = %init : f32, %acc_arg = %acc : f32) -> (f32, f32) residency(preserve) {
+    %next = scalar.addf %acc_arg, %acc_arg : f32
+    scf.yield %same_arg, %next : f32, f32
+  }
+  func.return %same, %sum : f32, f32
+}
+
+// ----
+func.def @for_forward_preserves_residency_policy(%lo: index, %hi: index, %init: f32, %acc: f32) -> (f32, f32) {
+  %step = index.constant 1 : index
+  %sum = scf.for %iv = [%lo to %hi step %step](%acc_arg = %acc : f32) -> (f32) residency(preserve) {
+    %next = scalar.addf %acc_arg, %acc_arg : f32
+    scf.yield %next : f32
+  }
+  func.return %init, %sum : f32, f32
+}
+
+// ====
+
+// Rebuilding loop-carried state also preserves the SSA minimum operand.
+func.def @for_forward_preserves_residency_minimum(%lo: index, %hi: index, %minimum: index, %init: f32, %acc: f32) -> (f32, f32) {
+  %step = index.constant 1 : index
+  %same, %sum = scf.for %iv = [%lo to %hi step %step](%same_arg = %init : f32, %acc_arg = %acc : f32) -> (f32, f32) residency(%minimum) {
+    %next = scalar.addf %acc_arg, %acc_arg : f32
+    scf.yield %same_arg, %next : f32, f32
+  }
+  func.return %same, %sum : f32, f32
+}
+
+// ----
+func.def @for_forward_preserves_residency_minimum(%lo: index, %hi: index, %minimum: index, %init: f32, %acc: f32) -> (f32, f32) {
+  %step = index.constant 1 : index
+  %sum = scf.for %iv = [%lo to %hi step %step](%acc_arg = %acc : f32) -> (f32) residency(%minimum) {
+    %next = scalar.addf %acc_arg, %acc_arg : f32
+    scf.yield %next : f32
+  }
+  func.return %init, %sum : f32, f32
+}
+
+// ====
+
 // Forwarding does not discard side effects. The forwarded carried value becomes
 // a direct capture of the original iter_arg inside the compacted loop body.
 func.def @for_forwards_mixed_effectful_result(%buffer: buffer, %offset: offset, %lo: index, %hi: index, %init: f32, %acc: f32) -> (f32, f32) {

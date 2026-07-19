@@ -860,7 +860,9 @@ static iree_status_t loom_vector_bank_sroa_rewrite_loop(
       loom_scf_for_upper_bound(loop), loom_scf_for_step(loop), new_iter_args,
       plan->expanded_count, new_result_types, plan->expanded_count,
       /*tied_results=*/NULL, /*tied_result_count=*/0, unroll_factor,
-      unroll_policy, unroll_schedule, loop->location, &new_loop));
+      unroll_policy, unroll_schedule,
+      /*residency_minimum=*/LOOM_VALUE_ID_INVALID, /*residency_policy=*/0,
+      loop->location, &new_loop));
 
   loom_builder_ip_t saved_ip = loom_builder_enter_region(
       &context->rewriter->builder, new_loop, loom_scf_for_body(new_loop));

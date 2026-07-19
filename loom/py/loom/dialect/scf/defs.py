@@ -112,6 +112,18 @@ ScfForUnrollSchedule = EnumDef(
     doc="Local scf.for unroll body ordering.",
 )
 
+ScfForResidencyPolicy = EnumDef(
+    "ScfForResidencyPolicy",
+    [
+        EnumCase(
+            "preserve",
+            1,
+            doc="Protect the target source-pressure model's authored-placement tier, falling back to the exact authored tier after a projection miss.",
+        ),
+    ],
+    doc="Target-informed scf.for loop-invariant placement policy.",
+)
+
 # ============================================================================
 # scf.yield — variadic region terminator
 # ============================================================================
@@ -307,6 +319,12 @@ scf_for = Op(
             optional=True,
             doc="Optional SSA unroll factor policy consumed by unroll transforms. The factor bounds body cloning and does not require the loop trip count to be static.",
         ),
+        Operand(
+            "residency_minimum",
+            INDEX,
+            optional=True,
+            doc="Optional exact compile-time minimum in the selected target's ordered residency domain.",
+        ),
     ],
     attrs=[
         AttrDef(
@@ -322,6 +340,13 @@ scf_for = Op(
             enum_def=ScfForUnrollSchedule,
             optional=True,
             doc="Optional schedule used when materializing unrolled loop body copies.",
+        ),
+        AttrDef(
+            "residency_policy",
+            ATTR_TYPE_ENUM,
+            enum_def=ScfForResidencyPolicy,
+            optional=True,
+            doc="Optional categorical target-informed loop-invariant placement policy.",
         ),
     ],
     results=[Result("results", ANY, variadic=True)],
@@ -380,6 +405,14 @@ scf_for = Op(
             [Clause("schedule", Attr("unroll_schedule"))],
             anchor="unroll_schedule",
         ),
+        OptionalGroup(
+            [Clause("residency", Ref("residency_minimum"))],
+            anchor="residency_minimum",
+        ),
+        OptionalGroup(
+            [Clause("residency", Attr("residency_policy"))],
+            anchor="residency_policy",
+        ),
         Region("body"),
     ],
     examples=[
@@ -387,6 +420,8 @@ scf_for = Op(
         "%result = scf.for %iv = [%c0 to %n step %c1](%acc = %init : f32) -> (f32) {\n  %next = scalar.addf %acc, %acc : f32\n  scf.yield %next : f32\n}",
         "scf.for %iv = [%c0 to %n step %c1] unroll(%factor) {\n  scf.yield\n}",
         "scf.for %iv = [%c0 to %n step %c1] unroll(%factor) schedule(interleaved) {\n  scf.yield\n}",
+        "scf.for %iv = [%c0 to %n step %c1] residency(preserve) {\n  scf.yield\n}",
+        "scf.for %iv = [%c0 to %n step %c1] residency(%minimum) {\n  scf.yield\n}",
     ],
 )
 

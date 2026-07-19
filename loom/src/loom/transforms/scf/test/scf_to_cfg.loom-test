@@ -289,3 +289,17 @@ func.def @rejects_unknown_for_step(%n: index, %step: index) {
   }
   func.return
 }
+
+// ====
+
+// Source placement policy must be consumed while the loop is still structured.
+func.def @rejects_unconsumed_residency_policy() {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  // ERROR@+1: LOWERING/048 {op_name="scf.for", phase_name="scf-to-cfg"}
+  scf.for %i = [%zero to %four step %one] residency(preserve) {
+    test.use %i : index
+  }
+  func.return
+}
