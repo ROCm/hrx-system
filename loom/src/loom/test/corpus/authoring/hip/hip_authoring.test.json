@@ -715,6 +715,64 @@
       ]
     },
     {
+      "name": "plans gfx1250 cluster b128 multicast recipe",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/cluster_b128_multicast.loom",
+          "--dry-run"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "bench_cluster_b128_multicast",
+          "case_cluster_b128_multicast"
+        ]
+      }
+    },
+    {
+      "name": "compiles gfx1250 cluster b128 multicast recipe",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/cluster_b128_multicast.loom",
+          "--backend=amdgpu-hal",
+          "--target=gfx1250",
+          "--output={tmp}/cluster_b128_multicast.vmfb",
+          "--emit-target-artifact={tmp}/cluster_b128_multicast.hsaco",
+          "--artifact-manifest=summary",
+          "--compile-report=summary"
+        ]
+      },
+      "stderr": {
+        "contains": {
+          "unordered": [
+            "\"target_key\":\"gfx1250\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
+            "\"cluster_size\":{\"x\":1,\"y\":2,\"z\":1,\"flat\":2}",
+            "\"local_memory_bytes\":512",
+            "\"explicit_action_count\":1",
+            "\"barrier_count\":2"
+          ]
+        }
+      },
+      "files": [
+        {
+          "path": "{tmp}/cluster_b128_multicast.vmfb",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/cluster_b128_multicast.hsaco",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/cluster_b128_multicast.hsaco.manifest.json",
+          "non_empty": true
+        }
+      ]
+    },
+    {
       "name": "reports unresolved hip shaped dynamic lower bound unroll",
       "run": {
         "tool": "loom-opt",

@@ -15,6 +15,7 @@ package(
 )
 
 exports_files([
+    "cluster_b128_multicast.loom",
     "lane_distribution.loom",
     "packed_field_contracts.loom",
     "q8_block_unroll.loom",
@@ -40,6 +41,7 @@ _AMDGPU_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
 iree_execution_test_suite(
     name = "execution_test",
     data = [
+        "cluster_b128_multicast.loom",
         "lane_distribution.loom",
         "packed_field_contracts.loom",
         "q8_block_unroll.loom",
