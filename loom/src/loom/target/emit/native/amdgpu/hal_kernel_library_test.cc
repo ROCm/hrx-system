@@ -388,9 +388,36 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
   void ParseGfx1250ClusteredKernel(loom_module_t** out_module) {
     static const char kSource[] =
         "amdgpu.target<gfx1250> @gfx_target\n"
-        "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
-        "cluster_size(1, 2, 1) @loom_kernel() {\n"
-        "  low.return\n"
+        "kernel.def target(@gfx_target) @loom_kernel() {\n"
+        "  %c1 = index.constant 1 : index\n"
+        "  %c2 = index.constant 2 : index\n"
+        "  %c4 = index.constant 4 : index\n"
+        "  %c64 = index.constant 64 : index\n"
+        "  kernel.launch.config workgroups(%c4, %c4, %c4) "
+        "workgroup_size(%c64, %c1, %c1) cluster_size(%c2, %c2, %c2) : "
+        "index\n"
+        "} launch(%output: buffer) {\n"
+        "  %workgroup_x = kernel.workgroup.id<x> : index\n"
+        "  %workgroup_y = kernel.workgroup.id<y> : index\n"
+        "  %workgroup_z = kernel.workgroup.id<z> : index\n"
+        "  %cluster_x = kernel.cluster.id<x> : index\n"
+        "  %cluster_y = kernel.cluster.id<y> : index\n"
+        "  %cluster_z = kernel.cluster.id<z> : index\n"
+        "  %flat_local = kernel.cluster.workgroup.flat_id : index\n"
+        "  %sum0 = index.add %workgroup_x, %workgroup_y : index\n"
+        "  %sum1 = index.add %sum0, %workgroup_z : index\n"
+        "  %sum2 = index.add %sum1, %cluster_x : index\n"
+        "  %sum3 = index.add %sum2, %cluster_y : index\n"
+        "  %sum4 = index.add %sum3, %cluster_z : index\n"
+        "  %sum = index.add %sum4, %flat_local : index\n"
+        "  %value = index.cast %sum : index to i32\n"
+        "  %result = vector.from_elements %value : vector<1xi32>\n"
+        "  %zero = index.constant 0 : offset\n"
+        "  %output_view = buffer.view %output[%zero] : buffer -> "
+        "view<1xi32, #dense>\n"
+        "  vector.store %result, %output_view[0] : vector<1xi32>, "
+        "view<1xi32, #dense>\n"
+        "  kernel.return\n"
         "}\n";
     ASSERT_NO_FATAL_FAILURE(
         ParseSource(iree_make_cstring_view(kSource), out_module));
@@ -770,12 +797,14 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsWorkgroupClusterDimensions) {
   loom_module_t* module = nullptr;
   ASSERT_NO_FATAL_FAILURE(ParseGfx1250ClusteredKernel(&module));
 
+  DiagnosticCapture capture;
+  ASSERT_NO_FATAL_FAILURE(RunPreparedLowPipeline(module, &capture));
+
   loom_target_artifact_manifest_collect_options_t artifact_manifest_options;
   loom_target_artifact_manifest_collect_options_initialize(
       &artifact_manifest_options);
   artifact_manifest_options.mode = LOOM_TARGET_ARTIFACT_MANIFEST_MODE_SUMMARY;
 
-  DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
       /*.processor=*/{},
@@ -809,17 +838,39 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsWorkgroupClusterDimensions) {
   EXPECT_NE(listing.find(".amdhsa_code_object_version 6\n"), std::string::npos)
       << listing;
   EXPECT_NE(listing.find("      .cluster_dims:\n"
-                         "        - 1\n"
                          "        - 2\n"
-                         "        - 1\n"),
+                         "        - 2\n"
+                         "        - 2\n"),
             std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("s_and_b32_rhs_inline s2, ttmp6, 15\n"),
+            std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("s_lshl1_add_u32 s2, ttmp9, s2\n"), std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("s_and_b32 s3, 65535, ttmp7\n"), std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("s_getreg_b32 s3, "
+                         "hwreg(HW_REG_IB_STS2, 21, 4)\n"),
+            std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("  .amdhsa_system_sgpr_workgroup_id_x 0\n"),
+            std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("  .amdhsa_system_sgpr_workgroup_id_y 0\n"),
+            std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("  .amdhsa_system_sgpr_workgroup_id_z 0\n"),
+            std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("  .amdhsa_next_free_sgpr 7\n"), std::string::npos)
       << listing;
 
   ASSERT_NE(library.artifact_manifest.contents.data, nullptr);
   const std::string manifest(
       reinterpret_cast<const char*>(library.artifact_manifest.contents.data),
       library.artifact_manifest.contents.data_length);
-  EXPECT_NE(manifest.find("\"cluster_size\":[1,2,1]"), std::string::npos)
+  EXPECT_NE(manifest.find("\"cluster_size\":[2,2,2]"), std::string::npos)
       << manifest;
 
   loom_amdgpu_hal_kernel_library_deinitialize(&library,

@@ -136,11 +136,24 @@ static iree_status_t loom_amdgpu_append_register_range_units(
       last_register);
 }
 
+static iree_status_t loom_amdgpu_append_sgpr_range_units(
+    const loom_native_assembly_packet_context_t* context,
+    uint32_t base_register, uint32_t register_count) {
+  if (loom_amdgpu_sgpr_location_range_is_ttmp(base_register, register_count)) {
+    return loom_amdgpu_append_register_range_units(
+        context, "ttmp", base_register - LOOM_AMDGPU_TTMP_SGPR_LOCATION_BASE,
+        register_count);
+  }
+  return loom_amdgpu_append_register_range_units(context, "s", base_register,
+                                                 register_count);
+}
+
 static iree_status_t loom_amdgpu_append_assignment(
     const loom_native_assembly_packet_context_t* context,
     const loom_low_allocation_assignment_t* assignment) {
   if (assignment->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
-    return loom_amdgpu_append_register_range(context, "s", assignment);
+    return loom_amdgpu_append_sgpr_range_units(
+        context, assignment->location_base, assignment->location_count);
   }
   if (assignment->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
     return loom_amdgpu_append_register_range(context, "v", assignment);
@@ -307,8 +320,8 @@ static iree_status_t loom_amdgpu_append_move_location(
     const loom_native_assembly_packet_context_t* context,
     const loom_low_move_location_t* location) {
   if (location->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
-    return iree_string_builder_append_format(context->builder, "s%" PRIu32,
-                                             location->location);
+    return loom_amdgpu_append_sgpr_range_units(context, location->location,
+                                               /*register_count=*/1);
   }
   if (location->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
     return iree_string_builder_append_format(context->builder, "v%" PRIu32,

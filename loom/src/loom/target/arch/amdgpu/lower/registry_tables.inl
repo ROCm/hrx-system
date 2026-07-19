@@ -590,6 +590,41 @@ static const loom_amdgpu_lower_dispatch_row_t
                 loom_amdgpu_emit_preamble_dispatch,
                 loom_amdgpu_low_legality_verify_kernel_preamble,
                 LOOM_AMDGPU_STORAGE_NONE),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_CLUSTER_ID)] =
+            LOOM_AMDGPU_STRUCTURAL_DIRECT_STORAGE_ROW(
+                LOOM_OP_KERNEL_CLUSTER_ID,
+                loom_amdgpu_select_preamble_dispatch,
+                loom_amdgpu_emit_preamble_dispatch,
+                loom_amdgpu_low_legality_verify_kernel_preamble,
+                LOOM_AMDGPU_STORAGE_NONE),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_CLUSTER_WORKGROUP_ID)] =
+            LOOM_AMDGPU_STRUCTURAL_DIRECT_STORAGE_ROW(
+                LOOM_OP_KERNEL_CLUSTER_WORKGROUP_ID,
+                loom_amdgpu_select_preamble_dispatch,
+                loom_amdgpu_emit_preamble_dispatch,
+                loom_amdgpu_low_legality_verify_kernel_preamble,
+                LOOM_AMDGPU_STORAGE_NONE),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_CLUSTER_WORKGROUP_FLAT_ID)] =
+            LOOM_AMDGPU_STRUCTURAL_DIRECT_STORAGE_ROW(
+                LOOM_OP_KERNEL_CLUSTER_WORKGROUP_FLAT_ID,
+                loom_amdgpu_select_preamble_dispatch,
+                loom_amdgpu_emit_preamble_dispatch,
+                loom_amdgpu_low_legality_verify_kernel_preamble,
+                LOOM_AMDGPU_STORAGE_NONE),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_CLUSTER_SIZE)] =
+            LOOM_AMDGPU_STRUCTURAL_DIRECT_STORAGE_ROW(
+                LOOM_OP_KERNEL_CLUSTER_SIZE,
+                loom_amdgpu_select_preamble_dispatch,
+                loom_amdgpu_emit_preamble_dispatch,
+                loom_amdgpu_low_legality_verify_kernel_preamble,
+                LOOM_AMDGPU_STORAGE_NONE),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_CLUSTER_COUNT)] =
+            LOOM_AMDGPU_STRUCTURAL_DIRECT_STORAGE_ROW(
+                LOOM_OP_KERNEL_CLUSTER_COUNT,
+                loom_amdgpu_select_preamble_dispatch,
+                loom_amdgpu_emit_preamble_dispatch,
+                loom_amdgpu_low_legality_verify_kernel_preamble,
+                LOOM_AMDGPU_STORAGE_NONE),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_WORKITEM_DISPATCH_ID)] =
             LOOM_AMDGPU_STRUCTURAL_DIRECT_STORAGE_ROW(
                 LOOM_OP_KERNEL_WORKITEM_DISPATCH_ID,

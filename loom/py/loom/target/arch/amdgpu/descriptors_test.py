@@ -1127,6 +1127,27 @@ def test_s_delay_alu_descriptor_is_exposed_on_rdna_families() -> None:
     assert "amdgpu.s_delay_alu" in amdgpu_descriptor_ref_keys()
 
 
+def test_gfx1250_cluster_flat_rank_descriptor_matches_compiler_abi() -> None:
+    overlays = {overlay.descriptor_key: overlay for overlay in _gfx1250_core_overlays()}
+    descriptor = overlays["amdgpu.s_getreg_b32.cluster_workgroup_flat_id"]
+
+    assert descriptor.instruction_name == "S_GETREG_B32"
+    assert descriptor.encoding_name == "ENC_SOPK"
+    assert descriptor.schedule_class == _SCHEDULE_SALU
+    assert descriptor.ignored_operands[0].xml_field_name == "SIMM16"
+    assert descriptor.ignored_operands[0].fixed_encoding_value == 0x1D5C
+    assert descriptor.asm_forms[0].native_assembly_values == (
+        NativeAsmValue(NativeAsmValueKind.RESULT, field_name="dst"),
+        NativeAsmValue(
+            NativeAsmValueKind.LITERAL,
+            literal="hwreg(HW_REG_IB_STS2, 21, 4)",
+        ),
+    )
+    assert (
+        "amdgpu.s_getreg_b32.cluster_workgroup_flat_id" in amdgpu_descriptor_ref_keys()
+    )
+
+
 @pytest.mark.parametrize(
     ("dgroup_count", "expected_units", "expected_fields"),
     [

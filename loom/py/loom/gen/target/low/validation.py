@@ -83,6 +83,14 @@ def validate_register_classes(
             f"{description} allocatable count",
         )
         validate_u16(
+            register_class.fixed_location_base,
+            f"{description} fixed-location base",
+        )
+        validate_u16(
+            register_class.fixed_location_count,
+            f"{description} fixed-location count",
+        )
+        validate_u16(
             register_class.alias_set_id,
             f"{description} alias-set ID",
         )
@@ -90,6 +98,15 @@ def validate_register_classes(
             raise ValueError(f"{description} cannot be both physical and virtual-only")
         if register_class.allocatable_count != 0 and RegClassFlag.VIRTUAL_ONLY in register_class.flags:
             raise ValueError(f"{description} has a physical allocation capacity but is virtual-only")
+        if (register_class.fixed_location_base != 0 or register_class.fixed_location_count != 0) and RegClassFlag.VIRTUAL_ONLY in register_class.flags:
+            raise ValueError(f"{description} has fixed physical locations but is virtual-only")
+        if register_class.fixed_location_count == 0 and register_class.fixed_location_base != 0:
+            raise ValueError(f"{description} has a fixed-location base without a count")
+        fixed_location_end = register_class.fixed_location_base + register_class.fixed_location_count
+        if fixed_location_end > 0x10000:
+            raise ValueError(f"{description} fixed-location range exceeds the u16 location namespace")
+        if register_class.fixed_location_count != 0 and register_class.fixed_location_base < register_class.allocatable_count:
+            raise ValueError(f"{description} fixed-location range overlaps its allocatable locations")
         if register_class.alias_set_id != 0:
             alias_sets.setdefault(register_class.alias_set_id, []).append(register_class)
 
@@ -109,6 +126,8 @@ def validate_register_classes(
                 raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} classes '{reference.name}' and '{member.name}' use different target banks")
             if member.allocatable_count != reference.allocatable_count:
                 raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} classes '{reference.name}' and '{member.name}' have different allocatable counts")
+            if (member.fixed_location_base, member.fixed_location_count) != (reference.fixed_location_base, reference.fixed_location_count):
+                raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} classes '{reference.name}' and '{member.name}' have different fixed-location ranges")
 
 
 def _descriptor_asm_surface_description(

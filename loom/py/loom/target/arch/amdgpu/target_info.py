@@ -37,7 +37,11 @@ AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12 = "wmma_gfx12"
 AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250 = "wmma_gfx1250"
 
 AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION = 1 << 0
-AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS = AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
+AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE = 1 << 1
+AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS = (
+    AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
+    | AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE
+)
 AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES = 64 * 1024
 AMDGPU_GFX125X_MAX_WORKGROUP_STORAGE_BYTES = 320 * 1024
 
@@ -523,10 +527,11 @@ def gfx125x_processor_info(
     elf_machine_flags: int,
     *,
     elf_feature_flags: int = 0,
+    processor_flags: int = 0,
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor=processor,
-        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION | processor_flags,
         descriptor_set_key="amdgpu.rdna4.gfx125x.core",
         elf_machine_flags=elf_machine_flags,
         elf_feature_flags=elf_feature_flags,
@@ -725,6 +730,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         "gfx1250",
         0x049,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
+        processor_flags=AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
     ),
     gfx125x_processor_info(
         "gfx1251",

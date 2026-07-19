@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 27u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 28u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -461,6 +461,11 @@ typedef struct loom_low_reg_class_t {
   uint16_t alloc_unit_bits;
   // Allocatable units in this class, or zero when virtual/unbounded.
   uint16_t allocatable_count;
+  // First non-allocatable physical location available only to ABI-fixed values.
+  uint16_t fixed_location_base;
+  // Number of contiguous ABI-fixed physical locations at
+  // |fixed_location_base|, or zero when none exist.
+  uint16_t fixed_location_count;
   // Dense one-based alias-set identifier shared by overlapping register
   // classes, or zero when this class has a disjoint storage namespace.
   uint16_t alias_set_id;
@@ -471,6 +476,19 @@ typedef struct loom_low_reg_class_t {
   // Storage space used when values from this class are spilled.
   uint8_t spill_slot_space;
 } loom_low_reg_class_t;
+
+// Returns true when the non-empty physical range is wholly contained in the
+// register class's non-allocatable ABI-fixed location window.
+static inline bool loom_low_reg_class_fixed_location_range_contains(
+    const loom_low_reg_class_t* reg_class, uint32_t location_base,
+    uint32_t location_count) {
+  const uint64_t fixed_location_end = (uint64_t)reg_class->fixed_location_base +
+                                      reg_class->fixed_location_count;
+  const uint64_t location_end = (uint64_t)location_base + location_count;
+  return location_count != 0 && reg_class->fixed_location_count != 0 &&
+         location_base >= reg_class->fixed_location_base &&
+         location_end <= fixed_location_end;
+}
 
 typedef struct loom_low_register_part_t {
   // String-table offset for the stable register-part name.

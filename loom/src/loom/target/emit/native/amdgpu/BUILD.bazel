@@ -105,6 +105,7 @@ loom_check_test_suite(
     srcs = [
         "test/allocation_json.loom-test",
         "test/assembly.loom-test",
+        "test/assembly_cluster.loom-test",
         "test/assembly_q8.loom-test",
         "test/assembly_wmma.loom-test",
         "test/packet.loom-test",
@@ -310,6 +311,7 @@ loom_cc_test(
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amdgpu:error_defs",
         "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/testing:diagnostic_matchers",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",

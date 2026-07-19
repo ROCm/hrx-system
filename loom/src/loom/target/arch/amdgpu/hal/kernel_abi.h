@@ -85,6 +85,29 @@ extern "C" {
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_WORKGROUP_ID_Z_SOURCE_ID \
   UINT64_C(0x64E1C6EA699CE029)
 
+// Stable low.live_in source spelling for the packed cluster-local workgroup
+// coordinates and cluster extent in gfx1250 TTMP6.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_SOURCE \
+  "amdgpu.cluster_workgroup_info"
+
+// Stable low.live_in source ID for the packed cluster workgroup information.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_SOURCE_ID \
+  UINT64_C(0x7A5A999A4B91578F)
+
+// Stable low.live_in source spelling for cluster_id.y/z in gfx1250 TTMP7.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_YZ_SOURCE "amdgpu.cluster_id_yz"
+
+// Stable low.live_in source ID for packed cluster_id.y/z.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_YZ_SOURCE_ID \
+  UINT64_C(0x5CC9CA25D8E49D3B)
+
+// Stable low.live_in source spelling for cluster_id.x in gfx1250 TTMP9.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_X_SOURCE "amdgpu.cluster_id_x"
+
+// Stable low.live_in source ID for cluster_id.x.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_X_SOURCE_ID \
+  UINT64_C(0x68A4B8A3B10CE070)
+
 // Stable low.live_in source spelling for workitem_id.x in v0.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_X_SOURCE "amdgpu.workitem_id.x"
 
@@ -147,6 +170,9 @@ typedef enum loom_amdgpu_hal_kernel_abi_source_kind_e {
   LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_PACKED_XY = 10,
   LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_PACKED_XYZ = 11,
   LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_M0 = 12,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_WORKGROUP_INFO = 13,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_ID_YZ = 14,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_ID_X = 15,
 } loom_amdgpu_hal_kernel_abi_source_kind_t;
 
 // Returns the stable low.live_in source spelling for |source_kind|, or an

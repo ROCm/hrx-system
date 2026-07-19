@@ -1080,6 +1080,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             SpillSlotSpace.STACK,
             flags=(RegClassFlag.PHYSICAL,),
             allocatable_count=32,
+            fixed_location_base=32,
+            fixed_location_count=8,
         ),
         RegClass(
             _REG_SPECIAL,

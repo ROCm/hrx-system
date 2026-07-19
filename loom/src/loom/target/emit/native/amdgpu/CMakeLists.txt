@@ -88,6 +88,7 @@ loom_check_test_suite(
   SRCS
     "test/allocation_json.loom-test"
     "test/assembly.loom-test"
+    "test/assembly_cluster.loom-test"
     "test/assembly_q8.loom-test"
     "test/assembly_wmma.loom-test"
     "test/packet.loom-test"
@@ -356,6 +357,7 @@ loom_cc_test(
     loom::ops::low
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::error_defs
+    loom::target::arch::amdgpu::refs::target_refs
     loom::testing::diagnostic_matchers
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"

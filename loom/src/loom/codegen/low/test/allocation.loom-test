@@ -332,11 +332,11 @@ low.func.def target(@test_target) @slice_uses_source_subrange(%wide: reg<test.i3
 
 // ====
 
-// RUN: emit low-allocation-json @fixed_physical_span_exceeds_capacity fixed=%value:physical_register:32:1 output=none
+// RUN: emit low-allocation-json @fixed_physical_span_exceeds_capacity fixed=%value:physical_register:40:1 output=none
 
 test.target<low_core> @test_target
 
-// ERROR@+1: BACKEND/022 {function_name="fixed_physical_span_exceeds_capacity", request_kind="fixed_value", register_class="test.phys", location_base="32", location_count="1", location_end="33", allocation_capacity="32"}
+// ERROR@+1: BACKEND/022 {function_name="fixed_physical_span_exceeds_capacity", request_kind="fixed_value", register_class="test.phys", location_base="40", location_count="1", location_end="41", allocation_capacity="32"}
 low.func.def target(@test_target) @fixed_physical_span_exceeds_capacity(%value: reg<test.phys>) -> (reg<test.phys>) asm<test.low.core> {
   return %value
 }

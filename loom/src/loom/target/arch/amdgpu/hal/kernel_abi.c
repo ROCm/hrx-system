@@ -21,7 +21,7 @@
 
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_COORDINATE_DIMENSION_COUNT 3u
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_MAX_FIXED_VALUE_COUNT \
-  (5u + 2u * LOOM_AMDGPU_HAL_KERNEL_ABI_COORDINATE_DIMENSION_COUNT)
+  (8u + 2u * LOOM_AMDGPU_HAL_KERNEL_ABI_COORDINATE_DIMENSION_COUNT)
 // ABI layout snapshots store resource arrays as uint16_t-counted attributes.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_MAX_RESOURCE_COUNT UINT16_MAX
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_ARG_MAX_UNIT_COUNT 2u
@@ -40,6 +40,7 @@ typedef enum loom_amdgpu_hal_kernel_abi_source_role_e {
   LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_ROLE_WORKITEM_ID = 3,
   LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_ROLE_PACKED_WORKITEM_ID = 4,
   LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_ROLE_M0 = 5,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_ROLE_FIXED_SGPR = 6,
 } loom_amdgpu_hal_kernel_abi_source_role_t;
 
 typedef struct loom_amdgpu_hal_kernel_abi_source_info_t {
@@ -55,6 +56,8 @@ typedef struct loom_amdgpu_hal_kernel_abi_source_info_t {
   uint8_t unit_count;
   // Coordinate dimension for workgroup/workitem roles, or NO_DIMENSION.
   uint8_t dimension;
+  // Fixed SGPR location for FIXED_SGPR sources, or UINT16_MAX.
+  uint16_t fixed_location;
 } loom_amdgpu_hal_kernel_abi_source_info_t;
 
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(                               \
@@ -66,6 +69,18 @@ typedef struct loom_amdgpu_hal_kernel_abi_source_info_t {
       .reg_class = LOOM_AMDGPU_HAL_KERNEL_ABI_REG_CLASS_##source_reg_class,   \
       .unit_count = source_unit_count,                                        \
       .dimension = source_dimension,                                          \
+      .fixed_location = UINT16_MAX,                                           \
+  }
+
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(kind, location) \
+  [LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_##kind] = {                          \
+      .stable_id = LOOM_AMDGPU_HAL_KERNEL_ABI_##kind##_SOURCE_ID,         \
+      .name = IREE_SVL(LOOM_AMDGPU_HAL_KERNEL_ABI_##kind##_SOURCE),       \
+      .role = LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_ROLE_FIXED_SGPR,          \
+      .reg_class = LOOM_AMDGPU_HAL_KERNEL_ABI_REG_CLASS_SGPR,             \
+      .unit_count = 1,                                                    \
+      .dimension = LOOM_AMDGPU_HAL_KERNEL_ABI_NO_DIMENSION,               \
+      .fixed_location = location,                                         \
   }
 
 static const loom_amdgpu_hal_kernel_abi_source_info_t
@@ -99,8 +114,13 @@ static const loom_amdgpu_hal_kernel_abi_source_info_t
             LOOM_AMDGPU_HAL_KERNEL_ABI_NO_DIMENSION),
         LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(
             M0, M0, NONE, 1, LOOM_AMDGPU_HAL_KERNEL_ABI_NO_DIMENSION),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(
+            CLUSTER_WORKGROUP_INFO, 114),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(CLUSTER_ID_YZ, 115),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(CLUSTER_ID_X, 117),
 };
 
+#undef LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO
 #undef LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO
 
 static const loom_amdgpu_hal_kernel_abi_source_info_t*
@@ -2177,6 +2197,21 @@ iree_status_t loom_amdgpu_hal_kernel_abi_fixed_values_from_low(
     loom_amdgpu_hal_kernel_abi_append_fixed_value(
         local_fixed_values, &local_fixed_value_count, live_in_values[i],
         workgroup_id_sgpr++, source_info->unit_count);
+  }
+  for (iree_host_size_t i = 1;
+       i < IREE_ARRAYSIZE(kLoomAmdgpuHalKernelAbiSourceInfos); ++i) {
+    const loom_amdgpu_hal_kernel_abi_source_info_t* source_info =
+        &kLoomAmdgpuHalKernelAbiSourceInfos[i];
+    if (source_info->role !=
+            LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_ROLE_FIXED_SGPR ||
+        live_in_values[i] == LOOM_VALUE_ID_INVALID) {
+      continue;
+    }
+    IREE_ASSERT_NE(source_info->fixed_location, UINT16_MAX,
+                   "verified AMDGPU HAL ABI fixed SGPR location");
+    loom_amdgpu_hal_kernel_abi_append_fixed_value(
+        local_fixed_values, &local_fixed_value_count, live_in_values[i],
+        source_info->fixed_location, source_info->unit_count);
   }
   for (iree_host_size_t i = 1;
        i < IREE_ARRAYSIZE(kLoomAmdgpuHalKernelAbiSourceInfos); ++i) {

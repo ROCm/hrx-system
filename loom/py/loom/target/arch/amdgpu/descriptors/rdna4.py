@@ -14,6 +14,35 @@ from __future__ import annotations
 from .common import *
 from .control import *
 
+
+def _s_getreg_b32_cluster_workgroup_flat_id_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.s_getreg_b32.cluster_workgroup_flat_id",
+        instruction_name="S_GETREG_B32",
+        mnemonic="s_getreg_b32_cluster_workgroup_flat_id",
+        encoding_name="ENC_SOPK",
+        semantic_tag="kernel.cluster.workgroup.flat_id",
+        schedule_class=_SCHEDULE_SALU,
+        operands=(AmdgpuOperandOverlay("SDST", _sgpr_result()),),
+        ignored_operands=(
+            AmdgpuIgnoredOperandOverlay(
+                "SIMM16",
+                ignore_reason="fixed-gfx1250-cluster-local-rank-hwreg",
+                fixed_encoding_value=0x1D5C,
+            ),
+        ),
+        asm_forms=_asm(
+            results=("dst",),
+            native_assembly_mnemonic="s_getreg_b32",
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_literal("hwreg(HW_REG_IB_STS2, 21, 4)"),
+            ),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     key="amdgpu.rdna4.core",
     reg_classes=(
@@ -23,6 +52,8 @@ _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
             SpillSlotSpace.SCRATCH,
             flags=(RegClassFlag.PHYSICAL,),
             allocatable_count=106,
+            fixed_location_base=108,
+            fixed_location_count=16,
             full_register_part_mask=_REG_PART_SGPR_FULL32_MASK,
         ),
         RegClass(
@@ -587,4 +618,5 @@ __all__ = (
     "_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE",
     "_gfx125x_reg_classes",
+    "_s_getreg_b32_cluster_workgroup_flat_id_overlay",
 )
