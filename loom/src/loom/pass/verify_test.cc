@@ -24,6 +24,9 @@ TEST_F(PassVerifyTest, VerifiesModuleAndFuncPipelines) {
       "  test.module-noop\n"
       "  for func {\n"
       "    test.noop\n"
+      "    if changed {\n"
+      "      test.noop\n"
+      "    }\n"
       "    repeat fixed(count = 2) {\n"
       "      test.options(count = 3, mode = beta, string = \"payload\")\n"
       "    }\n"
@@ -237,6 +240,15 @@ TEST_F(PassVerifyTest, RejectsRepeatUntilConvergedWithCount) {
   ExpectVerifyStatus(IREE_STATUS_INVALID_ARGUMENT,
                      IREE_SV("pass.pipeline<func> @pipeline pipeline {\n"
                              "  repeat until_converged(count = 2) {\n"
+                             "    test.noop\n"
+                             "  }\n"
+                             "}\n"));
+}
+
+TEST_F(PassVerifyTest, RejectsIfChangedWithoutPrecedingSibling) {
+  ExpectVerifyStatus(IREE_STATUS_INVALID_ARGUMENT,
+                     IREE_SV("pass.pipeline<func> @pipeline pipeline {\n"
+                             "  if changed {\n"
                              "    test.noop\n"
                              "  }\n"
                              "}\n"));

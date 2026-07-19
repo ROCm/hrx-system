@@ -436,6 +436,30 @@ static iree_status_t loom_parse_pipeline_statement(loom_parser_t* parser) {
         loom_op_regions(op)[0]);
   }
 
+  if (loom_pipeline_token_is_keyword(start_token, IREE_SV("if"))) {
+    loom_tokenizer_next(&parser->tokenizer);
+    loom_token_t condition_token = loom_token_none();
+    IREE_RETURN_IF_ERROR(loom_parse_pipeline_name(
+        parser, IREE_SV("pipeline condition"), &condition_token));
+    if (!iree_string_view_equal(condition_token.text, IREE_SV("changed"))) {
+      IREE_RETURN_IF_ERROR(loom_parser_emit_unexpected_token(
+          parser, condition_token, IREE_SV("'changed'")));
+    }
+    if (parser->error_count > errors_before) return iree_ok_status();
+
+    loom_op_t* op = NULL;
+    const loom_op_vtable_t* vtable = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_pipeline_alloc_op(parser, IREE_SV("pass.if_changed"), start_token,
+                               location, &op, &vtable));
+    if (parser->error_count > errors_before) return iree_ok_status();
+    IREE_RETURN_IF_ERROR(
+        loom_pipeline_finalize_statement(parser, op, comments, comment_count));
+    return loom_parse_pipeline_nested_region(
+        parser, loom_pipeline_body_region_descriptor(vtable), op,
+        loom_op_regions(op)[0]);
+  }
+
   if (loom_pipeline_token_is_keyword(start_token, IREE_SV("call"))) {
     loom_tokenizer_next(&parser->tokenizer);
     loom_attribute_t callee_attr = {0};

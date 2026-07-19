@@ -853,10 +853,30 @@ static iree_status_t loom_pass_interpreter_execute_repeat(
       repeat->max_iterations);
 }
 
+static iree_status_t loom_pass_interpreter_execute_nested_body(
+    loom_pass_interpreter_state_t* state,
+    const loom_pass_interpreter_frame_t* frame,
+    const loom_pass_program_nested_body_t* nested_body, bool* out_changed) {
+  return loom_pass_interpreter_execute_range(
+      state, frame, nested_body->body_start, nested_body->body_end,
+      out_changed);
+}
+
+static iree_status_t loom_pass_interpreter_execute_if_changed(
+    loom_pass_interpreter_state_t* state,
+    const loom_pass_interpreter_frame_t* frame,
+    const loom_pass_program_instruction_t* instruction,
+    bool preceding_instruction_changed, bool* out_changed) {
+  if (!preceding_instruction_changed) return iree_ok_status();
+  return loom_pass_interpreter_execute_nested_body(
+      state, frame, &instruction->if_changed, out_changed);
+}
+
 static iree_status_t loom_pass_interpreter_execute_range(
     loom_pass_interpreter_state_t* state,
     const loom_pass_interpreter_frame_t* frame, iree_host_size_t start,
     iree_host_size_t end, bool* out_changed) {
+  bool preceding_instruction_changed = false;
   for (iree_host_size_t pc = start;
        pc < end && !loom_pass_interpreter_has_errors(state); ++pc) {
     const loom_pass_program_instruction_t* instruction =
@@ -866,28 +886,42 @@ static iree_status_t loom_pass_interpreter_execute_range(
           IREE_STATUS_INVALID_ARGUMENT,
           "pass program anchor mismatch at instruction %" PRIhsz, pc);
     }
+    bool instruction_changed = false;
     switch (instruction->kind) {
       case LOOM_PASS_PROGRAM_INSTRUCTION_INVOKE: {
         IREE_RETURN_IF_ERROR(loom_pass_interpreter_invoke(
-            state, frame, instruction, pc, out_changed));
+            state, frame, instruction, pc, &instruction_changed));
         break;
       }
       case LOOM_PASS_PROGRAM_INSTRUCTION_FOR_EACH_SYMBOL: {
         IREE_RETURN_IF_ERROR(loom_pass_interpreter_execute_for(
-            state, frame, instruction, out_changed));
+            state, frame, instruction, &instruction_changed));
         pc = instruction->for_each_symbol.body_end - 1;
         break;
       }
       case LOOM_PASS_PROGRAM_INSTRUCTION_WHERE: {
         IREE_RETURN_IF_ERROR(loom_pass_interpreter_execute_where(
-            state, frame, instruction, out_changed));
+            state, frame, instruction, &instruction_changed));
         pc = instruction->where.body_end - 1;
         break;
       }
       case LOOM_PASS_PROGRAM_INSTRUCTION_REPEAT: {
         IREE_RETURN_IF_ERROR(loom_pass_interpreter_execute_repeat(
-            state, frame, instruction, out_changed));
+            state, frame, instruction, &instruction_changed));
         pc = instruction->repeat.body_end - 1;
+        break;
+      }
+      case LOOM_PASS_PROGRAM_INSTRUCTION_CALL: {
+        IREE_RETURN_IF_ERROR(loom_pass_interpreter_execute_nested_body(
+            state, frame, &instruction->call, &instruction_changed));
+        pc = instruction->call.body_end - 1;
+        break;
+      }
+      case LOOM_PASS_PROGRAM_INSTRUCTION_IF_CHANGED: {
+        IREE_RETURN_IF_ERROR(loom_pass_interpreter_execute_if_changed(
+            state, frame, instruction, preceding_instruction_changed,
+            &instruction_changed));
+        pc = instruction->if_changed.body_end - 1;
         break;
       }
       case LOOM_PASS_PROGRAM_INSTRUCTION_FAIL:
@@ -902,6 +936,8 @@ static iree_status_t loom_pass_interpreter_execute_range(
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "unsupported pass program instruction");
     }
+    *out_changed |= instruction_changed;
+    preceding_instruction_changed = instruction_changed;
   }
   return iree_ok_status();
 }

@@ -28,7 +28,8 @@ enum {
   LOOM_OP_PASS_FAIL = LOOM_OP_KIND(LOOM_DIALECT_PASS, 6),
   LOOM_OP_PASS_HALT = LOOM_OP_KIND(LOOM_DIALECT_PASS, 7),
   LOOM_OP_PASS_YIELD = LOOM_OP_KIND(LOOM_DIALECT_PASS, 8),
-  LOOM_OP_PASS_COUNT_ = 9,
+  LOOM_OP_PASS_IF_CHANGED = LOOM_OP_KIND(LOOM_DIALECT_PASS, 9),
+  LOOM_OP_PASS_COUNT_ = 10,
 };
 
 // Pass pipeline execution anchor.
@@ -108,6 +109,17 @@ iree_status_t loom_pass_repeat_build(
     loom_pass_repeat_mode_t mode,
     loom_optional int64_t count,
     loom_optional int64_t max_iterations,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_PASS_IF_CHANGED: Conditionally run a body after a mutation.
+// pass.if_changed pipeline {
+//   canonicalize
+// }
+LOOM_DEFINE_ISA(loom_pass_if_changed_isa, LOOM_OP_PASS_IF_CHANGED)
+LOOM_DEFINE_REGION(loom_pass_if_changed_body, 0)
+iree_status_t loom_pass_if_changed_build(
+    loom_builder_t* builder,
     loom_location_id_t location,
     loom_op_t** out_op);
 

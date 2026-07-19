@@ -936,6 +936,14 @@ class Printer:
                         op.regions[0], module, implicit_terminator_name
                     )
                 )
+            case "pass.if_changed":
+                return (
+                    not op.attributes
+                    and len(op.regions) == 1
+                    and self._can_print_pipeline_region(
+                        op.regions[0], module, implicit_terminator_name
+                    )
+                )
             case "pass.call":
                 return _is_pipeline_printable_name(
                     op.attributes.get("callee"), allow_dot=False
@@ -1028,6 +1036,16 @@ class Printer:
                     CanonicalAttrDict(repeat_attrs)
                 )
                 self._emit(f"repeat {mode}{suffix} {{")
+                self._indent += 1
+                self._print_pipeline_region_body(
+                    op.regions[0],
+                    module,
+                    implicit_terminator_name=implicit_terminator_name,
+                )
+                self._indent -= 1
+                self._emit("}")
+            case "pass.if_changed":
+                self._emit("if changed {")
                 self._indent += 1
                 self._print_pipeline_region_body(
                     op.regions[0],
