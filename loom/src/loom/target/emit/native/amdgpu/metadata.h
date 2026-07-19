@@ -103,6 +103,10 @@ iree_status_t loom_amdgpu_metadata_append_assembly(
 
 // Appends the MessagePack payload for the AMDGPU ELF metadata note.
 //
+// Map keys use the same lexicographic order produced by the ROCr loader. This
+// preserves string virtual addresses when ROCr canonicalizes the metadata into
+// the loaded code-object allocation.
+//
 // The returned bytes are not a complete ELF note. Direct object emitters must
 // wrap the payload in an `AMDGPU` note with type NT_AMDGPU_METADATA.
 iree_status_t loom_amdgpu_metadata_append_msgpack(

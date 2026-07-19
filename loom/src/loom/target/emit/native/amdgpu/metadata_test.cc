@@ -6,6 +6,8 @@
 
 #include "loom/target/emit/native/amdgpu/metadata.h"
 
+#include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <string>
 
@@ -25,6 +27,19 @@ std::string BuilderString(const iree_string_builder_t& builder) {
 
 bool Contains(const std::string& value, const char* substring) {
   return value.find(substring) != std::string::npos;
+}
+
+void ExpectOrderedSubstrings(
+    const std::string& value,
+    std::initializer_list<const char*> ordered_substrings) {
+  size_t offset = 0;
+  for (const char* substring : ordered_substrings) {
+    const size_t position = value.find(substring, offset);
+    ASSERT_NE(position, std::string::npos)
+        << "missing ordered substring after byte " << offset << ": "
+        << substring;
+    offset = position + strlen(substring);
+  }
 }
 
 using StreamPtr =
@@ -261,6 +276,60 @@ TEST(AmdgpuMetadataTest, AppendsMsgpackMetadataForNoArgumentKernel) {
   EXPECT_TRUE(Contains(bytes, ".wavefront_size"));
   EXPECT_TRUE(Contains(bytes, ".args"));
   EXPECT_FALSE(Contains(bytes, ".amdgpu_metadata"));
+}
+
+TEST(AmdgpuMetadataTest, AppendsCanonicalMsgpackMapOrder) {
+  const loom_amdgpu_metadata_argument_t arguments[] = {{
+      /*.name=*/IREE_SV("input"),
+      /*.offset=*/0,
+      /*.size=*/8,
+      /*.alignment=*/8,
+      /*.kind=*/LOOM_AMDGPU_METADATA_ARGUMENT_GLOBAL_BUFFER,
+      /*.address_space=*/IREE_SV("global"),
+      /*.access=*/IREE_SV("read_write"),
+      /*.actual_access=*/IREE_SV("read_only"),
+  }};
+  loom_amdgpu_metadata_kernel_t kernel = MinimalKernel();
+  kernel.kernarg_segment_size = 8;
+  kernel.workgroup_cluster_size = {/*.x=*/1, /*.y=*/2, /*.z=*/1};
+  kernel.has_workgroup_cluster_size = true;
+  kernel.arguments = arguments;
+  kernel.argument_count = IREE_ARRAYSIZE(arguments);
+  loom_amdgpu_code_object_metadata_t metadata = MetadataForKernel(&kernel);
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(loom_amdgpu_metadata_append_msgpack(&metadata, &builder));
+  std::string bytes = BuilderString(builder);
+  iree_string_builder_deinitialize(&builder);
+
+  // ROCr's loaded metadata uses this lexicographic map-key order. Matching it
+  // keeps every string at the same ELF virtual address across loader
+  // canonicalization so runtime metadata can safely borrow loaded bytes.
+  ExpectOrderedSubstrings(bytes, {"amdhsa.kernels",
+                                  ".args",
+                                  ".access",
+                                  ".actual_access",
+                                  ".address_space",
+                                  ".align",
+                                  ".name",
+                                  ".offset",
+                                  ".size",
+                                  ".value_kind",
+                                  ".cluster_dims",
+                                  ".group_segment_fixed_size",
+                                  ".kernarg_segment_align",
+                                  ".kernarg_segment_size",
+                                  ".max_flat_workgroup_size",
+                                  ".name",
+                                  ".private_segment_fixed_size",
+                                  ".reqd_workgroup_size",
+                                  ".sgpr_count",
+                                  ".symbol",
+                                  ".vgpr_count",
+                                  ".wavefront_size",
+                                  "amdhsa.target",
+                                  "amdhsa.version"});
 }
 
 TEST(AmdgpuMetadataTest, AppendsElfNoteMetadata) {

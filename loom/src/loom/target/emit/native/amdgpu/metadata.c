@@ -444,6 +444,25 @@ static iree_status_t loom_amdgpu_metadata_append_argument_msgpack(
   }
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_map(builder, field_count));
+  // ROCr canonicalizes loaded AMDHSA metadata maps into lexicographic key
+  // order. Match that order so strings retain their source ELF virtual
+  // addresses when metadata is projected into the loaded code object.
+  if (!iree_string_view_is_empty(argument->access)) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
+        builder, IREE_SV(".access"), argument->access));
+  }
+  if (!iree_string_view_is_empty(argument->actual_access)) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
+        builder, IREE_SV(".actual_access"), argument->actual_access));
+  }
+  if (!iree_string_view_is_empty(argument->address_space)) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
+        builder, IREE_SV(".address_space"), argument->address_space));
+  }
+  if (argument->alignment != 0) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
+        builder, IREE_SV(".align"), argument->alignment));
+  }
   if (!iree_string_view_is_empty(argument->name)) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
         builder, IREE_SV(".name"), argument->name));
@@ -455,22 +474,6 @@ static iree_status_t loom_amdgpu_metadata_append_argument_msgpack(
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
       builder, IREE_SV(".value_kind"),
       loom_amdgpu_metadata_argument_value_kind(argument->kind)));
-  if (argument->alignment != 0) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
-        builder, IREE_SV(".align"), argument->alignment));
-  }
-  if (!iree_string_view_is_empty(argument->address_space)) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
-        builder, IREE_SV(".address_space"), argument->address_space));
-  }
-  if (!iree_string_view_is_empty(argument->access)) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
-        builder, IREE_SV(".access"), argument->access));
-  }
-  if (!iree_string_view_is_empty(argument->actual_access)) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
-        builder, IREE_SV(".actual_access"), argument->actual_access));
-  }
   return iree_ok_status();
 }
 
@@ -481,40 +484,13 @@ static iree_status_t loom_amdgpu_metadata_append_kernel_msgpack(
       11 + (kernel->has_required_workgroup_size ? 1 : 0) +
       (kernel->has_workgroup_cluster_size ? 1 : 0);
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_map(builder, field_count));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
-      builder, IREE_SV(".name"), kernel->name));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
-      builder, IREE_SV(".symbol"), kernel->descriptor_symbol));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
-      builder, IREE_SV(".kernarg_segment_size"), kernel->kernarg_segment_size));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
-      builder, IREE_SV(".group_segment_fixed_size"),
-      kernel->group_segment_fixed_size));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
-      builder, IREE_SV(".private_segment_fixed_size"),
-      kernel->private_segment_fixed_size));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
-      builder, IREE_SV(".kernarg_segment_align"),
-      kernel->kernarg_segment_alignment));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
-      builder, IREE_SV(".wavefront_size"), kernel->wavefront_size));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
-      builder, IREE_SV(".sgpr_count"), kernel->sgpr_count));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
-      builder, IREE_SV(".vgpr_count"), kernel->vgpr_count));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
-      builder, IREE_SV(".max_flat_workgroup_size"),
-      kernel->max_flat_workgroup_size));
-  if (kernel->has_required_workgroup_size) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string(
-        builder, IREE_SV(".reqd_workgroup_size")));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_array(builder, 3));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
-        builder, kernel->required_workgroup_size.x));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
-        builder, kernel->required_workgroup_size.y));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
-        builder, kernel->required_workgroup_size.z));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_msgpack_append_string(builder, IREE_SV(".args")));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_msgpack_append_array(builder, kernel->argument_count));
+  for (iree_host_size_t i = 0; i < kernel->argument_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_metadata_append_argument_msgpack(
+        &kernel->arguments[i], builder));
   }
   if (kernel->has_workgroup_cluster_size) {
     IREE_RETURN_IF_ERROR(
@@ -527,14 +503,41 @@ static iree_status_t loom_amdgpu_metadata_append_kernel_msgpack(
     IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
         builder, kernel->workgroup_cluster_size.z));
   }
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_msgpack_append_string(builder, IREE_SV(".args")));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_msgpack_append_array(builder, kernel->argument_count));
-  for (iree_host_size_t i = 0; i < kernel->argument_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_metadata_append_argument_msgpack(
-        &kernel->arguments[i], builder));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
+      builder, IREE_SV(".group_segment_fixed_size"),
+      kernel->group_segment_fixed_size));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
+      builder, IREE_SV(".kernarg_segment_align"),
+      kernel->kernarg_segment_alignment));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
+      builder, IREE_SV(".kernarg_segment_size"), kernel->kernarg_segment_size));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
+      builder, IREE_SV(".max_flat_workgroup_size"),
+      kernel->max_flat_workgroup_size));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
+      builder, IREE_SV(".name"), kernel->name));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
+      builder, IREE_SV(".private_segment_fixed_size"),
+      kernel->private_segment_fixed_size));
+  if (kernel->has_required_workgroup_size) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string(
+        builder, IREE_SV(".reqd_workgroup_size")));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_array(builder, 3));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
+        builder, kernel->required_workgroup_size.x));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
+        builder, kernel->required_workgroup_size.y));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
+        builder, kernel->required_workgroup_size.z));
   }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
+      builder, IREE_SV(".sgpr_count"), kernel->sgpr_count));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
+      builder, IREE_SV(".symbol"), kernel->descriptor_symbol));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
+      builder, IREE_SV(".vgpr_count"), kernel->vgpr_count));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
+      builder, IREE_SV(".wavefront_size"), kernel->wavefront_size));
   return iree_ok_status();
 }
 
@@ -544,15 +547,6 @@ iree_status_t loom_amdgpu_metadata_append_msgpack(
   IREE_RETURN_IF_ERROR(loom_amdgpu_metadata_validate(metadata));
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_map(builder, 3));
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_msgpack_append_string(builder, IREE_SV("amdhsa.version")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_array(builder, 2));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
-      builder, LOOM_AMDGPU_METADATA_VERSION_MAJOR));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
-      builder, LOOM_AMDGPU_METADATA_VERSION_MINOR));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
-      builder, IREE_SV("amdhsa.target"), metadata->target));
-  IREE_RETURN_IF_ERROR(
       loom_amdgpu_msgpack_append_string(builder, IREE_SV("amdhsa.kernels")));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_msgpack_append_array(builder, metadata->kernel_count));
@@ -560,6 +554,15 @@ iree_status_t loom_amdgpu_metadata_append_msgpack(
     IREE_RETURN_IF_ERROR(loom_amdgpu_metadata_append_kernel_msgpack(
         &metadata->kernels[i], builder));
   }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
+      builder, IREE_SV("amdhsa.target"), metadata->target));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_msgpack_append_string(builder, IREE_SV("amdhsa.version")));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_array(builder, 2));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
+      builder, LOOM_AMDGPU_METADATA_VERSION_MAJOR));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
+      builder, LOOM_AMDGPU_METADATA_VERSION_MINOR));
   return iree_ok_status();
 }
 
