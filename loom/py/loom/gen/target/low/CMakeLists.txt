@@ -112,6 +112,7 @@ iree_py_test(
   ARGS
     "loom.gen.target.low.low_descriptor_shard_test"
     "loom.gen.target.low.low_descriptors_test"
+    "loom.gen.target.low.physical_validation_test"
   DEPS
     loom::py::loom::gen::target::low::low_descriptor_shard
     loom::py::loom::gen::target::low::low_descriptors

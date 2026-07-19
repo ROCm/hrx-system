@@ -1673,52 +1673,6 @@ static iree_status_t loom_amdgpu_append_mubuf_load_lds_packet(
   return iree_string_builder_append_cstring(context->builder, " lds");
 }
 
-static bool loom_amdgpu_descriptor_operand_uses_m0(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_operand_t* operand) {
-  for (uint16_t i = 0; i < operand->reg_class_alt_count; ++i) {
-    const uint32_t alt_index = operand->reg_class_alt_start + i;
-    if (alt_index >= descriptor_set->reg_class_alt_count) {
-      return false;
-    }
-    const loom_low_reg_class_alt_t* alt =
-        &descriptor_set->reg_class_alts[alt_index];
-    if (iree_any_bit_set(alt->flags, LOOM_LOW_REG_CLASS_ALT_FLAG_IMMEDIATE)) {
-      continue;
-    }
-    if (loom_amdgpu_register_class_is_m0(descriptor_set, alt->reg_class_id)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool loom_amdgpu_descriptor_clobbers_hidden_m0(
-    const loom_native_assembly_packet_context_t* context) {
-  const loom_low_descriptor_t* descriptor = context->packet->descriptor;
-  const loom_low_descriptor_set_t* descriptor_set =
-      context->schedule->target.descriptor_set;
-  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + (uint32_t)i];
-    if (operand->role != LOOM_LOW_OPERAND_ROLE_IMPLICIT ||
-        !loom_amdgpu_descriptor_operand_uses_m0(descriptor_set, operand)) {
-      continue;
-    }
-    return true;
-  }
-  return false;
-}
-
-static iree_status_t loom_amdgpu_append_hidden_m0_zero_if_required(
-    const loom_native_assembly_packet_context_t* context) {
-  if (!loom_amdgpu_descriptor_clobbers_hidden_m0(context)) {
-    return iree_ok_status();
-  }
-  return iree_string_builder_append_cstring(context->builder,
-                                            "s_mov_b32_m0_imm m0, 0\n  ");
-}
-
 static bool loom_amdgpu_descriptor_uses_global_scalar_base_format(
     const loom_native_assembly_packet_context_t* context) {
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
@@ -1801,7 +1755,6 @@ static iree_status_t loom_amdgpu_append_scratch_load_packet(
                             "AMDGPU scratch load packet has unexpected "
                             "operand shape");
   }
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_hidden_m0_zero_if_required(context));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_mnemonic(context));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, " "));
@@ -1830,7 +1783,6 @@ static iree_status_t loom_amdgpu_append_scratch_store_packet(
                             "AMDGPU scratch store packet has unexpected "
                             "operand shape");
   }
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_hidden_m0_zero_if_required(context));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_mnemonic(context));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, " "));

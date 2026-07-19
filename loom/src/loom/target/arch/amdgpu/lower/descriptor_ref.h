@@ -68,13 +68,6 @@ iree_status_t loom_amdgpu_lookup_descriptor_ref(
     const loom_low_descriptor_t** out_descriptor,
     loom_string_id_t* out_opcode_id);
 
-// Builds the register type for the implicit resource operand carried by
-// |descriptor|. Descriptor rows that use M0 publish it as an implicit resource
-// operand.
-iree_status_t loom_amdgpu_make_descriptor_implicit_resource_type(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, loom_type_t* out_type);
-
 // Returns whether |descriptor| declares an immediate named |name|.
 bool loom_amdgpu_descriptor_has_immediate(
     const loom_low_descriptor_set_t* descriptor_set,

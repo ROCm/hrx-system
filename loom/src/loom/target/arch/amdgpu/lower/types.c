@@ -535,15 +535,6 @@ iree_status_t loom_amdgpu_make_vgpr_range_type(
       context, LOOM_AMDGPU_REG_CLASS_ID_VGPR, unit_count, out_type);
 }
 
-iree_status_t loom_amdgpu_make_descriptor_row_implicit_resource_type(
-    loom_low_lower_context_t* context, const loom_low_descriptor_t* descriptor,
-    loom_type_t* out_type) {
-  const loom_low_descriptor_set_t* descriptor_set =
-      loom_low_lower_context_descriptor_set(context);
-  return loom_amdgpu_make_descriptor_implicit_resource_type(
-      descriptor_set, descriptor, out_type);
-}
-
 bool loom_amdgpu_low_type_is_register_class(loom_low_lower_context_t* context,
                                             loom_type_t type,
                                             uint16_t reg_class_id) {

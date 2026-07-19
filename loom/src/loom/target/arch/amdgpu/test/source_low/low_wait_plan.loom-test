@@ -699,6 +699,31 @@ low.func.def target(@target) @exec_state_packets_preserve_scratch_store_wait(%sa
   s_endpgm
 
 // ====
+// RUN: emit amdgpu-assembly @cdna_scratch_packets_read_m0_state strategy=source
+
+amdgpu.target<gfx942> @target
+low.func.def target(@target) @cdna_scratch_packets_read_m0_state(%value: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) {
+  %m0 = low.const<amdgpu.s_mov_b32_m0.imm> {imm32 = 0} : reg<amdgpu.m0>
+  low.op<amdgpu.scratch_store_b32_offset_only>(%value, %m0) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.m0>)
+  %loaded = low.op<amdgpu.scratch_load_b32_offset_only>(%m0) {offset = 0} : (reg<amdgpu.m0>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.global_store_b32_saddr>(%addr, %loaded, %output, %m0) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  low.return
+}
+
+// CDNA scratch packets read M0 as implicit architectural state. The state
+// dependency must survive scheduling and allocation even though native scratch
+// syntax does not spell M0 as an operand.
+// ----
+  s_mov_b32 m0, 0
+  scratch_store_b32 off, v0, off offset:0 nt:0 sc0:0 sc1:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  scratch_load_b32 v2, off, off offset:0 nt:0 sc0:0 sc1:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_store_dword v1, v2, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+
+// ====
 // RUN: emit amdgpu-wait-counter-plan-json @smem_load_address_dependency strategy=source
 
 amdgpu.target<gfx1100> @target

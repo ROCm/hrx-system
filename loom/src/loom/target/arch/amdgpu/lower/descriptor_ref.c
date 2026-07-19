@@ -92,34 +92,6 @@ iree_status_t loom_amdgpu_lookup_descriptor_ref(
   return iree_ok_status();
 }
 
-iree_status_t loom_amdgpu_make_descriptor_implicit_resource_type(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, loom_type_t* out_type) {
-  *out_type = loom_type_none();
-  const loom_low_operand_t* operands =
-      &descriptor_set->operands[descriptor->operand_start];
-  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    const loom_low_operand_t* operand = &operands[i];
-    if (operand->role != LOOM_LOW_OPERAND_ROLE_RESOURCE ||
-        !iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
-      continue;
-    }
-    for (uint16_t j = 0; j < operand->reg_class_alt_count; ++j) {
-      const uint32_t alt_index = operand->reg_class_alt_start + j;
-      const loom_low_reg_class_alt_t* alt =
-          &descriptor_set->reg_class_alts[alt_index];
-      if (iree_any_bit_set(alt->flags, LOOM_LOW_REG_CLASS_ALT_FLAG_IMMEDIATE)) {
-        continue;
-      }
-      return loom_low_build_register_type(descriptor_set, alt->reg_class_id,
-                                          operand->unit_count, out_type);
-    }
-  }
-  IREE_ASSERT_UNREACHABLE(
-      "selected AMDGPU descriptor has no implicit resource operand");
-  IREE_BUILTIN_UNREACHABLE();
-}
-
 bool loom_amdgpu_descriptor_has_immediate(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, iree_string_view_t name) {

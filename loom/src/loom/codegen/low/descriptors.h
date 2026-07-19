@@ -1180,6 +1180,12 @@ bool loom_low_descriptor_operand_maps_to_explicit_packet_operand(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index);
 
+// Returns the first low packet resource operand omitted from target assembly,
+// or NULL when |descriptor| has no implicit resource operand.
+const loom_low_operand_t* loom_low_descriptor_implicit_resource_operand(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor);
+
 // Returns the low packet operand index for |descriptor_operand_index|. The
 // descriptor operand must map to a low packet operand.
 uint16_t loom_low_descriptor_operand_packet_index(

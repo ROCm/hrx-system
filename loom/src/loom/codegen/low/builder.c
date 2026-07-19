@@ -32,6 +32,31 @@ iree_status_t loom_low_build_register_type(
   return iree_ok_status();
 }
 
+iree_status_t loom_low_build_descriptor_implicit_resource_type(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor, loom_type_t* out_type) {
+  *out_type = loom_type_none();
+  const loom_low_operand_t* operand =
+      loom_low_descriptor_implicit_resource_operand(descriptor_set, descriptor);
+  IREE_ASSERT(operand != NULL,
+              "low descriptor must provide an implicit resource operand");
+  for (uint16_t i = 0; i < operand->reg_class_alt_count; ++i) {
+    const loom_low_reg_class_alt_t* alternative =
+        &descriptor_set
+             ->reg_class_alts[operand->reg_class_alt_start + (uint32_t)i];
+    if (iree_any_bit_set(alternative->flags,
+                         LOOM_LOW_REG_CLASS_ALT_FLAG_IMMEDIATE)) {
+      continue;
+    }
+    return loom_low_build_register_type(descriptor_set,
+                                        alternative->reg_class_id,
+                                        operand->unit_count, out_type);
+  }
+  IREE_ASSERT_UNREACHABLE(
+      "low descriptor implicit resource has no register-class form");
+  IREE_BUILTIN_UNREACHABLE();
+}
+
 static iree_status_t loom_low_build_resolved_descriptor_opcode_id(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, loom_string_id_t* out_opcode_id) {

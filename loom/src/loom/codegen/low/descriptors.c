@@ -91,6 +91,22 @@ bool loom_low_descriptor_operand_maps_to_explicit_packet_operand(
   return !iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT);
 }
 
+const loom_low_operand_t* loom_low_descriptor_implicit_resource_operand(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  const loom_low_operand_t* operands =
+      &descriptor_set->operands[descriptor->operand_start];
+  for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
+       ++i) {
+    const loom_low_operand_t* operand = &operands[i];
+    if (operand->role == LOOM_LOW_OPERAND_ROLE_RESOURCE &&
+        iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
+      return operand;
+    }
+  }
+  return NULL;
+}
+
 uint16_t loom_low_descriptor_operand_packet_index(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor,

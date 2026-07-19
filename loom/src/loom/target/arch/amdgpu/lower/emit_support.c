@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "loom/codegen/low/builder.h"
 #include "loom/ir/context.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
@@ -890,26 +891,6 @@ iree_status_t loom_amdgpu_resolve_descriptor_ref(
   return iree_ok_status();
 }
 
-bool loom_amdgpu_descriptor_has_implicit_resource_operand(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor) {
-  IREE_ASSERT(descriptor_set != NULL);
-  IREE_ASSERT(descriptor != NULL);
-  IREE_ASSERT((uint64_t)descriptor->operand_start +
-                  (uint64_t)descriptor->operand_count <=
-              descriptor_set->operand_count);
-  const loom_low_operand_t* operands =
-      &descriptor_set->operands[descriptor->operand_start];
-  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    const loom_low_operand_t* operand = &operands[i];
-    if (operand->role == LOOM_LOW_OPERAND_ROLE_RESOURCE &&
-        iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 static iree_status_t loom_amdgpu_populate_explicit_packet_plan(
     loom_low_lower_context_t* context,
     const loom_low_lower_resolved_descriptor_t* descriptor,
@@ -1157,8 +1138,9 @@ iree_status_t loom_amdgpu_emit_m0_u32(
   IREE_ASSERT(consumer_descriptor->descriptor != NULL);
   *out_value_id = LOOM_VALUE_ID_INVALID;
   loom_type_t m0_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_make_descriptor_row_implicit_resource_type(
-      context, consumer_descriptor->descriptor, &m0_type));
+  IREE_RETURN_IF_ERROR(loom_low_build_descriptor_implicit_resource_type(
+      loom_low_lower_context_descriptor_set(context),
+      consumer_descriptor->descriptor, &m0_type));
   return loom_amdgpu_emit_const_u32(context, source_op,
                                     LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32_M0_IMM,
                                     value, m0_type, out_value_id);

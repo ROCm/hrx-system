@@ -749,6 +749,13 @@ def compile_descriptor_set(
     enum_domain_inputs = _dedupe_by_name(spec.enum_domains, lambda item: item.name)
     _dedupe_by_name(spec.descriptors, lambda item: item.key)
 
+    result_counts_by_descriptor: dict[str, int] = {}
+    rematerializable_results_by_descriptor: dict[str, tuple[int, ...]] = {}
+    for descriptor in spec.descriptors:
+        result_counts_by_descriptor[descriptor.key] = validation.validate_descriptor_operands(descriptor)
+        rematerializable_results_by_descriptor[descriptor.key] = validation.validate_descriptor_constraints(descriptor)
+    validation.validate_physical_descriptor_set(spec)
+
     selected_descriptors = [_derive_descriptor_flags(descriptor) for descriptor in _select_descriptors(spec, allowlist)]
     if not selected_descriptors:
         raise ValueError(f"descriptor set '{spec.key}' selected no descriptors")
@@ -768,11 +775,8 @@ def compile_descriptor_set(
     used_resource_names: set[str] = set()
     used_schedule_names: set[str] = set()
     used_enum_domain_names: set[str] = set()
-    rematerializable_results_by_descriptor: dict[str, tuple[int, ...]] = {}
-
     for descriptor in selected_descriptors:
-        result_count = validation.validate_descriptor_operands(descriptor)
-        rematerializable_results_by_descriptor[descriptor.key] = validation.validate_descriptor_constraints(descriptor)
+        result_count = result_counts_by_descriptor[descriptor.key]
         validation.validate_descriptor_encoding_fields(descriptor)
         validation.validate_descriptor_storage_leases(descriptor, result_count)
         if descriptor.encoding_id < 0 or descriptor.encoding_id > LOW_DESCRIPTOR_ENCODING_ID_NONE:

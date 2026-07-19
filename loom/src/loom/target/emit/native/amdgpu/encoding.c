@@ -774,58 +774,6 @@ static iree_status_t loom_amdgpu_descriptor_single_fixed_encoding_field_u16(
   return iree_ok_status();
 }
 
-static bool loom_amdgpu_descriptor_operand_uses_m0(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_operand_t* operand) {
-  for (uint16_t i = 0; i < operand->reg_class_alt_count; ++i) {
-    const uint32_t alt_index = operand->reg_class_alt_start + i;
-    if (alt_index >= descriptor_set->reg_class_alt_count) {
-      return false;
-    }
-    const loom_low_reg_class_alt_t* alt =
-        &descriptor_set->reg_class_alts[alt_index];
-    if (iree_any_bit_set(alt->flags, LOOM_LOW_REG_CLASS_ALT_FLAG_IMMEDIATE)) {
-      continue;
-    }
-    if (loom_amdgpu_register_class_is_m0(descriptor_set, alt->reg_class_id)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool loom_amdgpu_descriptor_clobbers_hidden_m0(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor) {
-  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + (uint32_t)i];
-    if (operand->role != LOOM_LOW_OPERAND_ROLE_IMPLICIT ||
-        !loom_amdgpu_descriptor_operand_uses_m0(descriptor_set, operand)) {
-      continue;
-    }
-    return true;
-  }
-  return false;
-}
-
-static iree_status_t loom_amdgpu_encode_s_mov_b32_m0_zero(
-    loom_amdgpu_encode_state_t* state) {
-  const loom_low_descriptor_t* descriptor = state->descriptors.s_mov_b32_m0_imm;
-  if (descriptor == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU packet clobbers hidden m0, but "
-                            "target has no s_mov_b32_m0_imm descriptor");
-  }
-  uint16_t sdst = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_single_fixed_encoding_field_u16(
-      state, descriptor, &sdst));
-  loom_amdgpu_encoding_packet_t encoded_packet;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_mov_b32_u32(
-      state->encoding_table, sdst, 0, &encoded_packet));
-  return loom_amdgpu_append_encoding_packet(state, &encoded_packet);
-}
-
 static iree_status_t loom_amdgpu_descriptor_operand_field_already_encoded(
     const loom_amdgpu_encode_state_t* state,
     const loom_low_packet_view_t* packet, uint16_t operand_index,
@@ -1859,12 +1807,6 @@ static iree_status_t loom_amdgpu_prepare_descriptor_packet_encoding(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU descriptor packet reached native encoding without its "
         "required address-state transition");
-  }
-  if (packet->descriptor->encoding_format_id ==
-          LOOM_AMDGPU_ENCODING_FORMAT_FLAT_SCRATCH &&
-      loom_amdgpu_descriptor_clobbers_hidden_m0(
-          state->schedule->target.descriptor_set, packet->descriptor)) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_encode_s_mov_b32_m0_zero(state));
   }
   return iree_ok_status();
 }

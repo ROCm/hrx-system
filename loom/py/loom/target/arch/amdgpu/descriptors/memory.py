@@ -2993,7 +2993,7 @@ def _scratch_load_overlay(
     if implicit_flat_scratch:
         implicit_operands = (*implicit_operands, _IGNORE_FLAT_SCRATCH_INPUT)
     if implicit_m0:
-        implicit_operands = (*implicit_operands, _implicit_m0_clobber())
+        implicit_operands = (*implicit_operands, _implicit_m0_input())
     fixed_encoding_fields: tuple[tuple[str, AmdgpuFixedEncodingValue], ...] = (
         ("SVE", 1 if fixed_vaddr is None else 0),
     )
@@ -3078,7 +3078,7 @@ def _scratch_store_overlay(
     if implicit_flat_scratch:
         implicit_operands = (*implicit_operands, _IGNORE_FLAT_SCRATCH_INPUT)
     if implicit_m0:
-        implicit_operands = (*implicit_operands, _implicit_m0_clobber())
+        implicit_operands = (*implicit_operands, _implicit_m0_input())
     fixed_encoding_fields: tuple[tuple[str, AmdgpuFixedEncodingValue], ...] = (
         ("SVE", 1 if fixed_vaddr is None else 0),
     )

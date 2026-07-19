@@ -64,7 +64,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_MUL_I32_DESCRIPTOR,
-    TEST_LOW_STATE_ADD_SPECIAL_DESCRIPTOR,
+    TEST_LOW_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,
 )
 
 
@@ -718,7 +718,7 @@ def test_compiler_rejects_effectful_rematerializable_result() -> None:
 
 def test_compiler_rejects_rematerialization_across_target_state() -> None:
     descriptor = replace(
-        TEST_LOW_STATE_ADD_SPECIAL_DESCRIPTOR,
+        TEST_LOW_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,
         constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
     )
     descriptor_set = replace(
@@ -728,7 +728,7 @@ def test_compiler_rejects_rematerialization_across_target_state() -> None:
 
     with pytest.raises(
         ValueError,
-        match=re.escape("descriptor 'test.state.add.special' rematerializable result 0 cannot replay target state operand 'state_out'"),
+        match=re.escape("descriptor 'test.state.add.schedule_state' rematerializable result 0 cannot replay target state operand 'state_out'"),
     ):
         compiler.compile_descriptor_set(descriptor_set)
 
