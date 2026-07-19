@@ -22,6 +22,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS,
     _AMDGPU_TRANS_DESCRIPTOR_KEYS,
     _AMDGPU_TRANS_PROXY_LATENCY_CYCLES,
+    _COUNTER_ASYNC,
     _COUNTER_TENSOR,
     _COUNTER_VMEM_LOAD,
     _D16_PARTIAL_REGISTER_ADDRESSABLE_UNIT_COUNT,
@@ -47,6 +48,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _SOURCE_INLINE_F32_ENCODING_ID,
     _SOURCE_INLINE_U32_ENCODING_ID,
     _VBUFFER_SOFFSET_NULL,
+    _WAIT_COUNTER_ASYNC_ENCODING_ID,
     _WAIT_COUNTER_TENSOR_ENCODING_ID,
     AMDGPU_ATOMIC_DESCRIPTOR_CATEGORY,
     AMDGPU_COMPARE_SELECT_DESCRIPTOR_CATEGORY,
@@ -96,6 +98,10 @@ from loom.target.arch.amdgpu.descriptors import (
     amdgpu_encoding_field_id,
 )
 from loom.target.arch.amdgpu.descriptors.api import _with_instruction_classes
+from loom.target.arch.amdgpu.descriptors.cluster import (
+    _cluster_load_async_to_lds_descriptor,
+    _s_wait_asynccnt_descriptor,
+)
 from loom.target.arch.amdgpu.descriptors.control import (
     _s_delay_alu_descriptor,
     _s_set_vgpr_msb_descriptor,
@@ -114,6 +120,7 @@ from loom.target.arch.amdgpu.descriptors.tensor import (
 from loom.target.arch.amdgpu.encoding import (
     AMDGPU_ENCODING_FORMAT_IDS,
     AMDGPU_ENCODING_FORMAT_SOPP,
+    AMDGPU_ENCODING_FORMAT_VGLOBAL,
     AMDGPU_ENCODING_FORMAT_VIMAGE,
     AMDGPU_ENCODING_FORMAT_VOP1_DPP16,
     AMDGPU_GFX125X_VOP_VGPR_MSB_FORMAT_NAMES,
@@ -1216,6 +1223,76 @@ def test_tensor_memory_descriptors_are_gfx125x_scoped() -> None:
     for target, descriptor_keys in target_descriptor_keys.items():
         if target != "rdna4_gfx125x":
             assert tensor_keys.isdisjoint(descriptor_keys)
+
+
+@pytest.mark.parametrize(
+    ("width_bits", "encoding_id"),
+    [(8, 0x6A), (32, 0x6B), (64, 0x6C), (128, 0x6D)],
+)
+def test_gfx125x_cluster_load_descriptors_encode_transfer_widths(
+    width_bits: int, encoding_id: int
+) -> None:
+    descriptor = _cluster_load_async_to_lds_descriptor(width_bits, encoding_id)
+
+    assert descriptor.key == f"amdgpu.cluster_load_async_to_lds_b{width_bits}"
+    assert descriptor.mnemonic == f"cluster_load_async_to_lds_b{width_bits}"
+    assert descriptor.semantic_tag == f"memory.cluster.load.to_lds.u{width_bits}"
+    assert descriptor.encoding_format_id == AMDGPU_ENCODING_FORMAT_VGLOBAL
+    assert descriptor.encoding_id == encoding_id
+    assert descriptor.schedule_class == "amdgpu.cluster.load.lds"
+    assert tuple(operand.unit_count for operand in descriptor.operands) == (1, 1, 2, 1)
+    assert tuple(
+        operand.encoding_field_id for operand in descriptor.operands[:3]
+    ) == tuple(
+        amdgpu_encoding_field_id(field_name)
+        for field_name in ("VDST", "VADDR", "SADDR")
+    )
+    assert descriptor.operands[3].field_name == "m0"
+    assert OperandFlag.IMPLICIT in descriptor.operands[3].flags
+    assert OperandFlag.STATE_READ in descriptor.operands[3].flags
+    assert tuple(
+        (effect.kind, effect.memory_space, effect.counter_id, effect.width_bits)
+        for effect in descriptor.effects
+    ) == (
+        (EffectKind.READ, MemorySpace.GLOBAL, _COUNTER_ASYNC, width_bits),
+        (EffectKind.WRITE, MemorySpace.WORKGROUP, _COUNTER_ASYNC, width_bits),
+    )
+
+
+def test_gfx125x_cluster_wait_descriptor_uses_independent_counter() -> None:
+    descriptor = _s_wait_asynccnt_descriptor()
+
+    assert descriptor.key == "amdgpu.s_wait_asynccnt"
+    assert descriptor.mnemonic == "s_wait_asynccnt"
+    assert descriptor.encoding_format_id == AMDGPU_ENCODING_FORMAT_SOPP
+    assert descriptor.encoding_id == 0x4A
+    assert descriptor.schedule_class == "amdgpu.wait.async"
+    assert len(descriptor.immediates) == 1
+    asynccnt = descriptor.immediates[0]
+    assert asynccnt.field_name == "asynccnt"
+    assert asynccnt.encoding_id == _WAIT_COUNTER_ASYNC_ENCODING_ID
+    assert asynccnt.bit_width == 16
+    assert asynccnt.unsigned_max == 0xFFFF
+    assert descriptor.effects[0].counter_id == _COUNTER_ASYNC
+
+
+def test_cluster_memory_descriptors_are_gfx125x_scoped() -> None:
+    target_descriptor_keys = {
+        target: {descriptor.key for descriptor in builder.extra_descriptors}
+        for target, builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.items()
+    }
+    cluster_keys = {
+        "amdgpu.cluster_load_async_to_lds_b8",
+        "amdgpu.cluster_load_async_to_lds_b32",
+        "amdgpu.cluster_load_async_to_lds_b64",
+        "amdgpu.cluster_load_async_to_lds_b128",
+        "amdgpu.s_wait_asynccnt",
+    }
+
+    assert cluster_keys <= target_descriptor_keys["rdna4_gfx125x"]
+    for target, descriptor_keys in target_descriptor_keys.items():
+        if target != "rdna4_gfx125x":
+            assert cluster_keys.isdisjoint(descriptor_keys)
 
 
 def test_gfx125x_vop_operands_use_mode_address_state() -> None:

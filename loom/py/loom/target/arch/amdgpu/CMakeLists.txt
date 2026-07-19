@@ -101,6 +101,7 @@ iree_py_library(
     "descriptors/candidates.py"
     "descriptors/categories.py"
     "descriptors/cdna.py"
+    "descriptors/cluster.py"
     "descriptors/common.py"
     "descriptors/contracts.py"
     "descriptors/control.py"

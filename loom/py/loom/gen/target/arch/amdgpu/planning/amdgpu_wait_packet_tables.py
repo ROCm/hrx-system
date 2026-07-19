@@ -28,12 +28,14 @@ from loom.gen.support.c import c_string_arg as _c_string_arg  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     _COUNTER_ALU,
+    _COUNTER_ASYNC,
     _COUNTER_LDS,
     _COUNTER_SMEM,
     _COUNTER_TENSOR,
     _COUNTER_VMEM_LOAD,
     _COUNTER_VMEM_STORE,
     _WAIT_COUNTER_ALU_ENCODING_ID,
+    _WAIT_COUNTER_ASYNC_ENCODING_ID,
     _WAIT_COUNTER_LDS_ENCODING_ID,
     _WAIT_COUNTER_LGKM_ENCODING_ID,
     _WAIT_COUNTER_SMEM_ENCODING_ID,
@@ -72,7 +74,7 @@ from loom.target.low_descriptors import (  # noqa: E402
 
 _UINT16_MAX = 0xFFFF
 _WAIT_PACKET_IMMEDIATE_CAPACITY = 4
-_WAIT_COUNTER_MASK_COUNT = 1 << _COUNTER_TENSOR
+_WAIT_COUNTER_MASK_COUNT = 1 << _COUNTER_ASYNC
 _WAIT_COUNTER_ALU_SCHEDULING_BITS = AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR | AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR
 _DEPENDENCY_MEMORY_SPACES = frozenset(
     (
@@ -161,13 +163,13 @@ def _descriptor_ref_constant_name(key: str) -> str:
 
 
 def _counter_mask(counter_id: int) -> int:
-    if counter_id < _COUNTER_VMEM_LOAD or counter_id > _COUNTER_TENSOR:
+    if counter_id < _COUNTER_VMEM_LOAD or counter_id > _COUNTER_ASYNC:
         raise ValueError(f"unknown AMDGPU wait counter id {counter_id}")
     return 1 << (counter_id - 1)
 
 
-_WAIT_COUNTER_READ_MASK = _counter_mask(_COUNTER_VMEM_LOAD) | _counter_mask(_COUNTER_LDS) | _counter_mask(_COUNTER_SMEM) | _counter_mask(_COUNTER_TENSOR)
-_WAIT_COUNTER_WRITE_MASK = _counter_mask(_COUNTER_VMEM_STORE) | _counter_mask(_COUNTER_LDS) | _counter_mask(_COUNTER_SMEM) | _counter_mask(_COUNTER_TENSOR)
+_WAIT_COUNTER_READ_MASK = _counter_mask(_COUNTER_VMEM_LOAD) | _counter_mask(_COUNTER_LDS) | _counter_mask(_COUNTER_SMEM) | _counter_mask(_COUNTER_TENSOR) | _counter_mask(_COUNTER_ASYNC)
+_WAIT_COUNTER_WRITE_MASK = _counter_mask(_COUNTER_VMEM_STORE) | _counter_mask(_COUNTER_LDS) | _counter_mask(_COUNTER_SMEM) | _counter_mask(_COUNTER_TENSOR) | _counter_mask(_COUNTER_ASYNC)
 
 
 _IMMEDIATE_COUNTER_MASKS = {
@@ -179,6 +181,7 @@ _IMMEDIATE_COUNTER_MASKS = {
     _WAIT_COUNTER_SMEM_ENCODING_ID: _counter_mask(_COUNTER_SMEM),
     _WAIT_COUNTER_ALU_ENCODING_ID: _counter_mask(_COUNTER_ALU),
     _WAIT_COUNTER_TENSOR_ENCODING_ID: _counter_mask(_COUNTER_TENSOR),
+    _WAIT_COUNTER_ASYNC_ENCODING_ID: _counter_mask(_COUNTER_ASYNC),
 }
 
 _COUNTER_MASK_EXPR_TERMS = (
@@ -191,6 +194,7 @@ _COUNTER_MASK_EXPR_TERMS = (
     (_counter_mask(_COUNTER_SMEM), "LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM"),
     (_counter_mask(_COUNTER_ALU), "LOOM_AMDGPU_WAIT_COUNTER_MASK_ALU"),
     (_counter_mask(_COUNTER_TENSOR), "LOOM_AMDGPU_WAIT_COUNTER_MASK_TENSOR"),
+    (_counter_mask(_COUNTER_ASYNC), "LOOM_AMDGPU_WAIT_COUNTER_MASK_ASYNC"),
 )
 
 
