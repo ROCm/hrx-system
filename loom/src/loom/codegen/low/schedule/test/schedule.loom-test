@@ -10,6 +10,42 @@ low.func.def target(@test_target) @schedule(%value: reg<test.i32>) -> (reg<test.
 {"format":"loom.low.schedule.v0","function":"schedule","target":"test_target","descriptor_set":"test.low.core","block_count":1,"node_count":1,"dependency_count":0,"dependency_group_count":0,"unlock_summary_publication_count":0,"candidate_decision_count":0,"resource_use_count":0,"effect_use_count":0,"hazard_use_count":0,"hazard_gap_count":0,"model_summary_count":0,"resource_summary_count":0,"blocks":[{"index":0,"node_start":0,"node_count":1,"scheduled_node_start":0,"scheduled_node_count":1}],"source_order_boundaries":[0],"nodes":[{"index":0,"block":0,"source_ordinal":0,"scheduled_ordinal":0,"kind":"terminator","op":"low.return","descriptor":null,"schedule_class":null,"latency_cycles":0,"latency_kind":0,"latency_kind_name":"unknown","model_quality":0,"model_quality_name":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0}],"scheduled_node_indices":[0],"dependencies":[],"liveness":{"format":"loom.liveness.v0","is_cfg":false,"block_count":1,"value_count":1,"blocks":[{"index":0,"label":null,"start_point":0,"end_point":1,"live_in":[],"live_out":[]}],"intervals":[{"value":{"id":0,"name":"value","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":0,"end_point":1,"unit_count":1}],"pressure_summaries":[{"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_descriptor_set":2548000952762826130,"register_class_id":0},"peak_live_units":1,"peak_live_values":1,"peak_block":0,"peak_op":0,"peak_point":0}]}}
 
 // ====
+// RUN: emit low-schedule-json @mixed_early_clobber_pressure strategy=resource-stall diagnostics=candidates test.i32=24 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @mixed_early_clobber_pressure(
+    %early_src: reg<test.i32 x4>, %normal_src: reg<test.i32 x4>,
+    %lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>) ->
+    (reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) {
+  %early, %normal =
+      low.op<test.mixed_early_clobber.v4i32>(%early_src, %normal_src) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) ->
+      reg<test.i32 x4>, reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="test.add.v4i32", rejected_packet="test.mixed_early_clobber.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="0"}
+  %sum = low.op<test.add.v4i32>(%lhs, %rhs) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  low.return %early, %normal, %sum :
+      reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>
+}
+
+// ====
+// RUN: emit low-schedule-json @early_tied_pressure_reuses_storage strategy=resource-stall diagnostics=candidates test.i32=16 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @early_tied_pressure_reuses_storage(
+    %src: reg<test.i32 x4>, %lhs: reg<test.i32 x4>,
+    %rhs: reg<test.i32 x4>) -> (reg<test.i32 x4>, reg<test.i32 x4>) {
+  %tied = low.op<test.early_tied.v4i32>(%src) :
+      (reg<test.i32 x4>) -> %src as reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="test.add.v4i32", rejected_packet="test.early_tied.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="0"}
+  %sum = low.op<test.add.v4i32>(%lhs, %rhs) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  low.return %tied, %sum : reg<test.i32 x4>, reg<test.i32 x4>
+}
+
+// ====
 // RUN: emit low-schedule-json @branch_edge_storage_antidependency strategy=resource-stall
 
 test.target<low_core> @test_target

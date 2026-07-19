@@ -74,8 +74,8 @@ struct loom_low_schedule_pressure_state_t {
   loom_value_ordinal_t* candidate_operand_ordinals;
   // Scratch live-unit delta by descriptor register-class ID.
   int64_t* candidate_delta_units_by_reg_class;
-  // Candidate-only early-clobber units by descriptor register-class ID.
-  uint64_t* candidate_transient_units_by_reg_class;
+  // Units created during the Early phase by descriptor register-class ID.
+  uint64_t* candidate_early_added_units_by_reg_class;
   // True when a register class has candidate delta state to reset.
   uint8_t* candidate_delta_touched_flags;
   // Register-class IDs touched in candidate_delta_units_by_reg_class.

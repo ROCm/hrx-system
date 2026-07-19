@@ -541,6 +541,52 @@ def test_compiler_derives_early_clobber_descriptor_flag() -> None:
     compiled = compiler.compile_descriptor_set(descriptor_set)
 
     assert DescriptorFlag.EARLY_CLOBBER in compiled.descriptors[0].flags
+    assert OperandFlag.EARLY_CLOBBER in compiled.descriptors[0].operands[0].flags
+
+
+def test_compiler_derives_tied_operand_projection_flags() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        constraints=(Constraint(ConstraintKind.TIED, 0, 1),),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    assert OperandFlag.TIED in compiled.descriptors[0].operands[0].flags
+    assert OperandFlag.TIED in compiled.descriptors[0].operands[1].flags
+    assert OperandFlag.TIED not in compiled.descriptors[0].operands[2].flags
+
+
+@pytest.mark.parametrize(
+    "projection_flag",
+    [OperandFlag.TIED, OperandFlag.EARLY_CLOBBER],
+)
+def test_compiler_rejects_authored_operand_projection_flags(
+    projection_flag: OperandFlag,
+) -> None:
+    operands = list(TEST_LOW_ADD_I32_DESCRIPTOR.operands)
+    operands[0] = replace(
+        operands[0],
+        flags=(*operands[0].flags, projection_flag),
+    )
+    descriptor = replace(TEST_LOW_ADD_I32_DESCRIPTOR, operands=tuple(operands))
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor, TEST_LOW_MUL_I32_DESCRIPTOR),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape(f"descriptor 'test.add.i32' operand 'dst' authors derived projection flag(s): {projection_flag.name.lower()}"),
+    ):
+        compiler.compile_descriptor_set(
+            descriptor_set,
+            DescriptorAllowlist(keys=(TEST_LOW_MUL_I32_DESCRIPTOR.key,)),
+        )
 
 
 def test_compiler_derives_instruction_classes_from_structured_metadata() -> None:
@@ -892,6 +938,24 @@ def test_shared_source_emits_prefix_view_local_asm_forms() -> None:
     assert "static const loom_low_asm_form_t kTestLowViewCoreAsmForms[]" in source
     assert ".descriptors = kTestLowViewCoreDescriptors," in source
     assert ".asm_forms = kTestLowViewCoreAsmForms," in source
+
+
+def test_shared_source_compares_derived_descriptor_projections() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        constraints=(Constraint(ConstraintKind.EARLY_CLOBBER, 0),),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    source = generate_descriptor_set_shared_source(
+        descriptor_set,
+        (descriptor_set,),
+    )
+
+    assert ".flags = LOOM_LOW_OPERAND_FLAG_EARLY_CLOBBER," in source
 
 
 def test_shared_source_requires_view_canonical_asm_for_authorable_surface() -> None:

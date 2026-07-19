@@ -96,9 +96,12 @@ def _validate_view_descriptors_match_storage(
 ) -> None:
     for view_descriptor, storage_descriptor_ordinal in zip(view_spec.descriptors, descriptor_ordinals, strict=True):
         storage_descriptor = compiled.descriptors[storage_descriptor_ordinal]
+        validation.validate_descriptor_operands(view_descriptor)
+        validation.validate_descriptor_constraints(view_descriptor)
+        projected_view_descriptor = compiler.derive_descriptor_projections(view_descriptor)
         if (
             replace(
-                view_descriptor,
+                projected_view_descriptor,
                 asm_forms=storage_descriptor.asm_forms,
                 asm_surface=storage_descriptor.asm_surface,
                 asm_surface_reason=storage_descriptor.asm_surface_reason,

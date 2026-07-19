@@ -200,22 +200,26 @@ static void loom_low_schedule_score_candidate_pressure_cliffs(
 static void loom_low_schedule_score_candidate_pressure_limit(
     loom_low_schedule_candidate_score_t* score, uint16_t reg_class_id,
     uint32_t limit_units, uint64_t current_live_units, int64_t delta_units,
-    uint64_t transient_units, uint32_t packing_reserve_units) {
+    uint64_t early_added_units, uint32_t packing_reserve_units) {
   if (limit_units == UINT32_MAX) {
     return;
   }
-  if (current_live_units == 0 && delta_units == 0 && transient_units == 0) {
+  if (current_live_units == 0 && delta_units == 0 && early_added_units == 0) {
     return;
   }
   const uint64_t projected_live_units =
       loom_low_schedule_project_live_units(current_live_units, delta_units);
   const uint64_t activation_units =
       delta_units > 0 ? score->activation_reserve_units : 0;
-  const uint64_t temporary_units = iree_max(transient_units, activation_units);
   uint64_t required_live_units =
-      iree_math_saturating_add_u64(projected_live_units, packing_reserve_units);
+      iree_math_saturating_add_u64(projected_live_units, activation_units);
+  if (early_added_units != 0) {
+    const uint64_t early_live_units =
+        iree_math_saturating_add_u64(current_live_units, early_added_units);
+    required_live_units = iree_max(required_live_units, early_live_units);
+  }
   required_live_units =
-      iree_math_saturating_add_u64(required_live_units, temporary_units);
+      iree_math_saturating_add_u64(required_live_units, packing_reserve_units);
   if (projected_live_units >= limit_units) {
     const uint64_t persistent_limit_debt =
         projected_live_units - limit_units + 1;
@@ -262,14 +266,15 @@ static void loom_low_schedule_score_candidate_pressure_limit_for_class(
       pressure_state->candidate_delta_touched_flags[reg_class_id]
           ? pressure_state->candidate_delta_units_by_reg_class[reg_class_id]
           : 0;
-  const uint64_t transient_units =
+  const uint64_t early_added_units =
       pressure_state->candidate_delta_touched_flags[reg_class_id]
-          ? pressure_state->candidate_transient_units_by_reg_class[reg_class_id]
+          ? pressure_state
+                ->candidate_early_added_units_by_reg_class[reg_class_id]
           : 0;
   loom_low_schedule_score_candidate_pressure_limit(
       score, reg_class_id, state->pressure_limits.by_reg_class[reg_class_id],
       pressure_state->current_live_units_by_reg_class[reg_class_id],
-      delta_units, transient_units,
+      delta_units, early_added_units,
       pressure_state->packing_reserve_units_by_reg_class[reg_class_id]);
 }
 
@@ -285,7 +290,7 @@ static void loom_low_schedule_score_candidate_pressure_limit_for_alias_set(
           .representative_reg_class_id,
       state->pressure_limits.alias_sets[alias_set_id].live_unit_limit,
       record->current_live_units, record->candidate_delta_units,
-      record->candidate_transient_units, record->packing_reserve_units);
+      record->candidate_early_added_units, record->packing_reserve_units);
 }
 
 static void loom_low_schedule_score_candidate_pressure_limits(

@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 28u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 29u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -92,9 +92,9 @@ typedef uint16_t loom_low_operand_flags_t;
 // Operand is omitted from the target assembly spelling but participates in low
 // semantics. Rows with role IMPLICIT are also omitted from low packet operands.
 #define LOOM_LOW_OPERAND_FLAG_IMPLICIT ((uint16_t)1u << 0)
-// Operand is tied to another operand by a constraint row.
+// Operand shares packet storage identity with another operand through a tie.
 #define LOOM_LOW_OPERAND_FLAG_TIED ((uint16_t)1u << 1)
-// Operand must be considered early-clobbered by allocation.
+// Result storage begins in the packet Pre phase before untied input reads end.
 #define LOOM_LOW_OPERAND_FLAG_EARLY_CLOBBER ((uint16_t)1u << 2)
 // Operand is optional for some descriptor forms.
 #define LOOM_LOW_OPERAND_FLAG_OPTIONAL ((uint16_t)1u << 3)
@@ -261,7 +261,7 @@ typedef enum loom_low_constraint_kind_e {
   LOOM_LOW_CONSTRAINT_KIND_COMMUTABLE = 2,
   // Operand is destructively updated.
   LOOM_LOW_CONSTRAINT_KIND_DESTRUCTIVE = 3,
-  // Operand or result has early-clobber allocation semantics.
+  // Result storage begins before the packet has consumed all untied inputs.
   LOOM_LOW_CONSTRAINT_KIND_EARLY_CLOBBER = 4,
   // Descriptor may be rematerialized instead of spilled.
   LOOM_LOW_CONSTRAINT_KIND_REMATERIALIZABLE = 5,
@@ -389,7 +389,8 @@ typedef uint16_t loom_low_descriptor_flags_t;
 #define LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO ((uint16_t)1u << 3)
 // Descriptor carries a barrier effect and fences source-order scheduling.
 #define LOOM_LOW_DESCRIPTOR_FLAG_BARRIER ((uint16_t)1u << 4)
-// Descriptor has at least one result that clobbers inputs before reading them.
+// Descriptor has at least one result whose storage begins in the packet Pre
+// phase before untied input reads end.
 #define LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER ((uint16_t)1u << 5)
 
 // Target-neutral semantic classes attached to generated low descriptors.

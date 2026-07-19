@@ -44,6 +44,7 @@ from loom.target.low_descriptors import (
     NativeAsmValue,
     NativeAsmValueKind,
     Operand,
+    OperandFlag,
     OperandForm,
     OperandFormImmediateAction,
     OperandRole,
@@ -105,6 +106,8 @@ _MEMORY_INSTRUCTION_CLASSES = frozenset(
         InstructionClass.GENERIC_MEMORY,
     }
 )
+
+_DERIVED_OPERAND_FLAGS = frozenset((OperandFlag.TIED, OperandFlag.EARLY_CLOBBER))
 
 _INSTRUCTION_CLASS_IMPLICATIONS = {
     InstructionClass.SMFMAC: (InstructionClass.MFMA,),
@@ -203,7 +206,9 @@ def _derive_instruction_classes(
     return tuple(instruction_class for instruction_class in InstructionClass if instruction_class in classes)
 
 
-def _derive_descriptor_flags(descriptor: Descriptor) -> Descriptor:
+def derive_descriptor_projections(descriptor: Descriptor) -> Descriptor:
+    """Projects validated descriptor constraints onto compact runtime flags."""
+
     has_barrier_effect = any(effect.kind is EffectKind.BARRIER for effect in descriptor.effects)
     has_barrier_flag = DescriptorFlag.BARRIER in descriptor.flags
     if has_barrier_flag and not has_barrier_effect:
@@ -218,7 +223,41 @@ def _derive_descriptor_flags(descriptor: Descriptor) -> Descriptor:
         derived_flags.append(DescriptorFlag.BARRIER)
     if has_early_clobber_constraint and not has_early_clobber_flag:
         derived_flags.append(DescriptorFlag.EARLY_CLOBBER)
-    return replace(descriptor, flags=tuple(derived_flags))
+
+    operand_flags: list[list[OperandFlag]] = []
+    for operand in descriptor.operands:
+        authored_projection_flags = _DERIVED_OPERAND_FLAGS.intersection(operand.flags)
+        if authored_projection_flags:
+            names = ", ".join(sorted(flag.name.lower() for flag in authored_projection_flags))
+            raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' authors derived projection flag(s): {names}")
+        operand_flags.append(list(operand.flags))
+
+    for constraint in descriptor.constraints:
+        if constraint.kind is ConstraintKind.TIED:
+            for operand_index in (
+                constraint.lhs_operand_index,
+                constraint.rhs_operand_index,
+            ):
+                assert operand_index is not None
+                if OperandFlag.TIED not in operand_flags[operand_index]:
+                    operand_flags[operand_index].append(OperandFlag.TIED)
+        elif constraint.kind is ConstraintKind.EARLY_CLOBBER:
+            flags = operand_flags[constraint.lhs_operand_index]
+            if OperandFlag.EARLY_CLOBBER not in flags:
+                flags.append(OperandFlag.EARLY_CLOBBER)
+
+    return replace(
+        descriptor,
+        flags=tuple(derived_flags),
+        operands=tuple(
+            replace(operand, flags=tuple(flags))
+            for operand, flags in zip(
+                descriptor.operands,
+                operand_flags,
+                strict=True,
+            )
+        ),
+    )
 
 
 def _dedupe_by_name[T](items: Sequence[T], get_name: Callable[[T], str]) -> dict[str, T]:
@@ -752,6 +791,7 @@ def compile_descriptor_set(
     result_counts_by_descriptor: dict[str, int] = {}
     rematerializable_results_by_descriptor: dict[str, tuple[int, ...]] = {}
     source_value_indices_by_descriptor: dict[str, tuple[int | None, ...]] = {}
+    projected_descriptors_by_key: dict[str, Descriptor] = {}
     for descriptor in spec.descriptors:
         result_count = validation.validate_descriptor_operands(descriptor)
         result_counts_by_descriptor[descriptor.key] = result_count
@@ -760,9 +800,10 @@ def compile_descriptor_set(
             result_count,
         )
         rematerializable_results_by_descriptor[descriptor.key] = validation.validate_descriptor_constraints(descriptor)
+        projected_descriptors_by_key[descriptor.key] = derive_descriptor_projections(descriptor)
     validation.validate_physical_descriptor_set(spec)
 
-    selected_descriptors = [_derive_descriptor_flags(descriptor) for descriptor in _select_descriptors(spec, allowlist)]
+    selected_descriptors = [projected_descriptors_by_key[descriptor.key] for descriptor in _select_descriptors(spec, allowlist)]
     if not selected_descriptors:
         raise ValueError(f"descriptor set '{spec.key}' selected no descriptors")
     validation.validate_descriptor_asm_surface(spec, selected_descriptors)
