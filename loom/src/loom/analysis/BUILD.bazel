@@ -537,6 +537,7 @@ loom_cc_test(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

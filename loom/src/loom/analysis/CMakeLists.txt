@@ -629,6 +629,7 @@ loom_cc_test(
     loom::ops::kernel
     loom::ops::test
     loom::ops::vector
+    loom::ops::view
     loom::util::fact_table
 )
 
