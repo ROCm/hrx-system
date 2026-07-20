@@ -444,8 +444,9 @@ iree_status_t loom_branch_sink_run(loom_pass_t* pass, loom_module_t* module,
   iree_status_t status = loom_branch_sink_region_stack_initialize(
       pass->arena, &context.region_stack);
   if (iree_status_is_ok(status)) {
-    status =
-        loom_motion_analysis_initialize(module, pass->arena, &context.motion);
+    status = loom_motion_analysis_initialize(module, /*fact_table=*/NULL,
+                                             /*value_domain=*/NULL, pass->arena,
+                                             &context.motion);
   }
 
   bool changed = true;
