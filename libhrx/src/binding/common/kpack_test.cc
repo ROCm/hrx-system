@@ -330,14 +330,14 @@ std::string JoinPathList(const std::vector<std::string>& paths) {
 
 std::vector<std::string> ExpandTargets(const char* isa) {
   std::vector<std::string> result;
-  iree_hal_streaming_kpack_for_each_compatible_target(
+  IREE_EXPECT_OK(iree_hal_streaming_kpack_for_each_compatible_target(
       iree_make_cstring_view(isa),
       [](iree_string_view_t t, void* ud) -> bool {
         static_cast<std::vector<std::string>*>(ud)->emplace_back(t.data,
                                                                  t.size);
         return false;  // collect all
       },
-      &result);
+      &result));
   return result;
 }
 
@@ -522,18 +522,16 @@ TEST(KpackTargetMatch, EmptyString) { EXPECT_EQ(ExpandTargets(""), Vec{}); }
 
 TEST(KpackTargetMatch, EarlyTerminationStopsAtFirstMatch) {
   std::vector<std::string> seen;
-  struct Ctx {
-    std::vector<std::string>* seen;
-  } ctx{&seen};
-  bool found = iree_hal_streaming_kpack_for_each_compatible_target(
+  IREE_EXPECT_OK(iree_hal_streaming_kpack_for_each_compatible_target(
       iree_make_cstring_view("gfx942:sramecc+:xnack-"),
       [](iree_string_view_t t, void* ud) -> bool {
-        auto* c = static_cast<Ctx*>(ud);
-        c->seen->emplace_back(t.data, t.size);
+        auto* s = static_cast<std::vector<std::string>*>(ud);
+        s->emplace_back(t.data, t.size);
         return std::string(t.data, t.size) == "gfx942:xnack-";  // third
       },
-      &ctx);
-  EXPECT_TRUE(found);
+      &seen));
+  // Iteration stopped at the third candidate instead of emitting the fourth
+  // ("gfx942"), which is how a callback returning true is observed.
   EXPECT_EQ(seen, (Vec{"gfx942:sramecc+:xnack-", "gfx942:sramecc+",
                        "gfx942:xnack-"}));
 }
@@ -546,6 +544,58 @@ TEST(KpackTargetMatch, FeatureSubsetNeverFlipsSign) {
   EXPECT_EQ(expanded, (Vec{"gfx942:xnack-", "gfx942"}));
   EXPECT_EQ(std::find(expanded.begin(), expanded.end(), "gfx942:xnack+"),
             expanded.end());
+}
+
+// Collects every emitted candidate into a std::vector<std::string> passed as
+// user data. Whether the target was representable is read from
+// for_each_compatible_target's returned status, not from this callback.
+bool CollectCandidate(iree_string_view_t target, void* user_data) {
+  static_cast<std::vector<std::string>*>(user_data)->emplace_back(target.data,
+                                                                  target.size);
+  return false;
+}
+
+// A target carrying more subsettable features than the expansion holds is
+// rejected, not silently truncated to the first few. Real AMDGPU target IDs
+// subset on two features, so no valid target reaches this; expanding a partial
+// feature set would generate the wrong candidates and miss the archive keyed on
+// a dropped feature, a miss with no diagnostic.
+TEST(KpackTargetMatch, RejectsTooManyFeatures) {
+  std::vector<std::string> seen;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_for_each_compatible_target(
+                  iree_make_cstring_view("gfx942:a+:b+:c+:d+:e+"),  // five
+                  CollectCandidate, &seen)),
+              StatusIs(iree::StatusCode::kOutOfRange));
+  // The rejection lands before any candidate is emitted.
+  EXPECT_TRUE(seen.empty());
+}
+
+// The processor prefixes every candidate, so a processor that cannot fit the
+// target buffer leaves no candidate representable and is rejected rather than
+// silently yielding nothing.
+TEST(KpackTargetMatch, RejectsOverlongProcessor) {
+  const std::string isa(IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY + 8, 'x');
+  std::vector<std::string> seen;
+  EXPECT_THAT(
+      iree::Status(iree_hal_streaming_kpack_for_each_compatible_target(
+          iree_make_cstring_view(isa.c_str()), CollectCandidate, &seen)),
+      StatusIs(iree::StatusCode::kOutOfRange));
+  EXPECT_TRUE(seen.empty());
+}
+
+// The over-long-processor rejection fires ahead of the feature-expansion branch
+// too: a feature-bearing target whose processor alone overruns the buffer is
+// rejected before any candidate is built.
+TEST(KpackTargetMatch, RejectsOverlongProcessorWithFeatures) {
+  const std::string isa =
+      std::string(IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY + 8, 'x') +
+      ":xnack+";
+  std::vector<std::string> seen;
+  EXPECT_THAT(
+      iree::Status(iree_hal_streaming_kpack_for_each_compatible_target(
+          iree_make_cstring_view(isa.c_str()), CollectCandidate, &seen)),
+      StatusIs(iree::StatusCode::kOutOfRange));
+  EXPECT_TRUE(seen.empty());
 }
 
 //===----------------------------------------------------------------------===//
@@ -1590,6 +1640,115 @@ TEST(KpackResolve, EveryRejectedCandidateIsLogged) {
               StatusIs(iree::StatusCode::kInvalidArgument));
   EXPECT_THAT(log, ::testing::HasSubstr(first));
   EXPECT_THAT(log, ::testing::HasSubstr(second));
+}
+
+// A target the expansion cannot represent fails the whole resolve with
+// OUT_OF_RANGE rather than searching a truncated candidate set and reporting an
+// unexplained miss. This exercises the rejection end-to-end, including its
+// propagation out of the candidate-collection stage.
+TEST(KpackResolve, TooManyFeaturesRejected) {
+  auto metadata = MakeMetadata("lib/x.so", {"/nonexistent/none.kpack"});
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree::Status status(
+      Resolve(metadata, 0, {"gfx942:a+:b+:c+:d+:e+"}, &out, &out_size));
+  EXPECT_EQ(status.code(), iree::StatusCode::kOutOfRange);
+  EXPECT_EQ(out, nullptr);
+}
+
+// More compatible target candidates than the ranked list holds keep the
+// highest-ranked ones and record that the rest were dropped. The list is ranked
+// most-specific-first, so a match on a kept candidate still resolves; when
+// nothing matches, the recorded truncation surfaces instead of an unexplained
+// not-found. Each distinct bare processor expands to one candidate, so 65 of
+// them overrun the list's capacity of 64, and the single unreachable search
+// path leaves the truncation as the sole explanation for the miss.
+TEST(KpackResolve, TooManyCandidatesReportsTruncationOnMiss) {
+  std::vector<std::string> targets;
+  for (int i = 0; i < 65; ++i)
+    targets.push_back("gfx" + std::to_string(9000 + i));
+  auto metadata = MakeMetadata("lib/x.so", {"/nonexistent/none.kpack"});
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree::Status status(Resolve(metadata, 0, targets, &out, &out_size));
+  EXPECT_EQ(status.code(), iree::StatusCode::kResourceExhausted);
+  EXPECT_THAT(status.ToString(),
+              ::testing::HasSubstr("compatible target candidates"));
+  EXPECT_EQ(out, nullptr);
+}
+
+// The candidate cap defends the ranked search, not the resolve: overflowing it
+// records a deferred truncation cause but must not fail a resolve that a kept,
+// higher-ranked candidate still satisfies. Here 65 distinct processors overrun
+// the list of 64, dropping the lowest-ranked fallback and recording the
+// truncation, while an archive keyed on the highest-ranked candidate matches.
+// The resolve returns that code object and the pending truncation is discarded,
+// never promoted to a terminal RESOURCE_EXHAUSTED.
+TEST(KpackResolve, CandidateOverflowStillResolvesWhenKeptCandidateMatches) {
+  std::vector<std::string> targets;
+  for (int i = 0; i < 65; ++i)
+    targets.push_back("gfx" + std::to_string(9000 + i));
+  auto elf = MakeMinimalAmdgpuElf();
+  // The first target expands to the highest-ranked candidate, which is kept;
+  // keying the archive on it lands the match on a kept slot, not a dropped one.
+  auto archive = KpackBuilder(false).Add("lib/x.so#0", "gfx9000", elf).Build();
+  std::string path = WriteTempFile("overflow_hit.kpack", archive);
+  auto metadata = MakeMetadata("lib/x.so", {path});
+
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  IREE_ASSERT_OK(Resolve(metadata, 0, targets, &out, &out_size));
+  ASSERT_EQ(out_size, elf.size());
+  EXPECT_EQ(0, memcmp(out, elf.data(), elf.size()));
+  FreeBuffer(out);
+}
+
+// When the candidate list overflows and archives are opened but none holds a
+// matching code object, the search still runs to completion, so the miss is a
+// target mismatch reported as NOT_FOUND. The recorded truncation is joined onto
+// it as context rather than displacing it or being lost, so a caller sees both
+// that the search found nothing and that the lowest-ranked candidates past the
+// cap were never searched.
+TEST(KpackResolve, CandidateOverflowTruncationJoinsMissWhenArchivesSearched) {
+  std::vector<std::string> targets;
+  for (int i = 0; i < 65; ++i)
+    targets.push_back("gfx" + std::to_string(9000 + i));
+  // The archive opens and is searched, but holds no arch any candidate asks
+  // for.
+  auto archive = KpackBuilder(false)
+                     .Add("lib/x.so#0", "gfx1100", MakeMinimalAmdgpuElf())
+                     .Build();
+  std::string path = WriteTempFile("overflow_miss.kpack", archive);
+  auto metadata = MakeMetadata("lib/x.so", {path});
+
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree::Status status(Resolve(metadata, 0, targets, &out, &out_size));
+  EXPECT_EQ(status.code(), iree::StatusCode::kNotFound);
+  EXPECT_THAT(status.ToString(),
+              ::testing::HasSubstr("compatible target candidates"));
+  EXPECT_EQ(out, nullptr);
+}
+
+// A deferred truncation cause is only ever a fallback explanation for a miss; a
+// requested target that fails the resolve outright outranks it. Overflowing the
+// candidate list records the truncation, then a later target carrying more
+// subsettable features than the expansion holds fails collection with
+// OUT_OF_RANGE. That terminal failure is what the caller sees, and the recorded
+// truncation is discarded rather than surfaced in its place.
+TEST(KpackResolve,
+     CandidateOverflowTruncationDiscardedWhenLaterTargetRejected) {
+  std::vector<std::string> targets;
+  for (int i = 0; i < 65; ++i)
+    targets.push_back("gfx" + std::to_string(9000 + i));
+  targets.push_back("gfx942:a+:b+:c+:d+:e+");  // five features: over the cap
+  auto metadata = MakeMetadata("lib/x.so", {"/nonexistent/none.kpack"});
+
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  iree::Status status(Resolve(metadata, 0, targets, &out, &out_size));
+  EXPECT_EQ(status.code(), iree::StatusCode::kOutOfRange);
+  EXPECT_EQ(out, nullptr);
 }
 
 // A path that simply holds no file is not a member of the search space, so it

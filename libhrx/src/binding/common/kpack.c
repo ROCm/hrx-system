@@ -17,29 +17,48 @@
 
 // Fixed bounds. These are generous relative to real kpack metadata (a kernel
 // name plus a handful of search paths) and real archive TOCs. Exceeding the
-// depth, path, or lookup-key bound is rejected rather than silently truncated;
-// exceeding the feature or arch-candidate bound instead drops the excess and
-// continues with what fit.
+// depth, path, lookup-key, feature, or processor-length bound is rejected
+// rather than silently truncated. Exceeding the arch-candidate bound keeps the
+// highest-ranked candidates that fit and records why the rest were dropped, so
+// a resulting miss carries the reason instead of an unexplained not-found.
 enum {
-  KPACK_MP_MAX_DEPTH = 32,  // msgpack nesting guard
-  // ISA features subset into a target ID (today sramecc, xnack), with headroom.
-  // Features past this many are dropped from a target before it is expanded.
+  // msgpack nesting guard. The reference kpack runtime parses through a msgpack
+  // library that bounds nesting itself; HRX's hand-rolled reader recurses per
+  // container level, so it caps depth to fail closed on a crafted archive
+  // rather than overflow the stack, set well above the format's handful of
+  // levels.
+  KPACK_MP_MAX_DEPTH = 32,
+  // Subsettable ISA feature flags expanded from one target ID. The AMDGPU
+  // target ID subsets on two features (sramecc, xnack), which this keeps
+  // headroom above. A target carrying more is rejected: expanding a truncated
+  // feature set would silently generate the wrong candidates and miss the
+  // archive keyed on the dropped feature.
   KPACK_MAX_FEATURES = 4,
-  KPACK_PATH_MAX = 4096,        // filesystem path buffer
-  KPACK_MAX_LOOKUP_KEY = 1024,  // "<kernel_name>#<co_index>"
+  // Filesystem path buffer. This is the OS PATH_MAX, so a path that does not
+  // fit could not be opened regardless of the buffer.
+  KPACK_PATH_MAX = 4096,
+  // Archive lookup key "<kernel_name>#<co_index>". kernel_name is the owning
+  // binary's install-relative path, whose length the format does not bound;
+  // real keys run to tens of bytes, so this buffers well beyond them and
+  // rejects a key that would not fit.
+  KPACK_MAX_LOOKUP_KEY = 1024,
   // Distinct compatible arch strings ranked in one resolve. Every requested
   // target expands into this one list, each contributing up to
   // 2^KPACK_MAX_FEATURES candidates, so the ceiling scales with how many
-  // targets the caller asks for rather than with any single one. Candidates
-  // past the cap are dropped, costing the lowest-ranked fallbacks; the binding
-  // asks for a device's exact target plus a generic fallback, leaving two
-  // expansions to share this list.
+  // targets the caller asks for rather than with any single one. The list is
+  // ranked most-specific-first and searched in that order, so candidates past
+  // the cap are the lowest-ranked fallbacks: dropping them can only miss, never
+  // select a lower-ranked target over a higher-ranked one. The drop is recorded
+  // so a resulting miss carries the reason. The binding asks for a device's
+  // exact target plus a generic fallback, leaving two expansions to share this
+  // list.
   KPACK_MAX_ARCH_CANDIDATES = 64,
 };
 
-// Upper bound on a single resolved code object. Real AMDGPU code objects are
-// far smaller, so this rejects an implausible (corrupt) size before allocating
-// it.
+// Upper bound on a single resolved (decompressed) code object. The format does
+// not bound a decompressed code object; the reference kpack runtime caps only
+// the compressed zstd blob (at 4 GiB). Real AMDGPU code objects are far
+// smaller, so this rejects an implausible (corrupt) size before allocating it.
 #define KPACK_MAX_CODE_OBJECT_BYTES (256ULL * 1024 * 1024)
 
 //===----------------------------------------------------------------------===//
@@ -352,12 +371,12 @@ iree_string_view_t iree_hal_streaming_kpack_strip_target_prefix(
   return isa;
 }
 
-bool iree_hal_streaming_kpack_for_each_compatible_target(
+iree_status_t iree_hal_streaming_kpack_for_each_compatible_target(
     iree_string_view_t agent_isa,
     iree_hal_streaming_kpack_target_callback_t callback, void* user_data) {
   iree_string_view_t isa =
       iree_hal_streaming_kpack_strip_target_prefix(agent_isa);
-  if (isa.size == 0) return false;
+  if (isa.size == 0) return iree_ok_status();  // no candidates
 
   // Split "<processor>[:<feature>]*" on ':'.
   iree_string_view_t processor = isa;
@@ -370,7 +389,14 @@ bool iree_hal_streaming_kpack_for_each_compatible_target(
       iree_host_size_t start = i + 1;
       for (iree_host_size_t j = start; j <= isa.size; ++j) {
         if (j == isa.size || isa.data[j] == ':') {
-          if (j > start && feature_count < KPACK_MAX_FEATURES) {
+          if (j > start) {
+            if (feature_count >= KPACK_MAX_FEATURES) {
+              return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                      "kpack ISA target '%.*s' carries more "
+                                      "than %d subsettable feature flags",
+                                      (int)agent_isa.size, agent_isa.data,
+                                      KPACK_MAX_FEATURES);
+            }
             features[feature_count++] =
                 iree_make_string_view(isa.data + start, j - start);
           }
@@ -380,14 +406,26 @@ bool iree_hal_streaming_kpack_for_each_compatible_target(
       break;
     }
   }
-  if (processor.size == 0) return false;
+  if (processor.size == 0) return iree_ok_status();  // no candidates
+
+  // The processor prefixes every candidate, so a processor that does not fit
+  // the target buffer leaves no candidate representable at all.
+  if (processor.size >= IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "kpack ISA target processor '%.*s' does not fit the "
+        "%d-byte target candidate buffer",
+        (int)processor.size, processor.data,
+        IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY);
+  }
 
   const iree_host_size_t n = feature_count;
   if (n == 0) {
     char buf[IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY];
-    if (processor.size >= sizeof(buf)) return false;
     memcpy(buf, processor.data, processor.size);
-    return callback(iree_make_string_view(buf, processor.size), user_data);
+    // One candidate, so there is no later iteration for an early stop to skip.
+    (void)callback(iree_make_string_view(buf, processor.size), user_data);
+    return iree_ok_status();
   }
 
   // Power set of features, descending mask (most specific first). Bit
@@ -396,29 +434,30 @@ bool iree_hal_streaming_kpack_for_each_compatible_target(
   const uint32_t full_mask = (1u << n) - 1;
   for (uint32_t mask = full_mask;; --mask) {
     char buf[IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY];
-    iree_host_size_t len = 0;
-    bool overflow = processor.size >= sizeof(buf);
-    if (!overflow) {
-      memcpy(buf, processor.data, processor.size);
-      len = processor.size;
-      for (iree_host_size_t i = 0; i < n; ++i) {
-        if (mask & (1u << (n - 1 - i))) {
-          if (len + 1 + features[i].size >= sizeof(buf)) {
-            overflow = true;
-            break;
-          }
-          buf[len++] = ':';
-          memcpy(buf + len, features[i].data, features[i].size);
-          len += features[i].size;
+    memcpy(buf, processor.data, processor.size);
+    iree_host_size_t len = processor.size;
+    bool overflow = false;
+    for (iree_host_size_t i = 0; i < n; ++i) {
+      if (mask & (1u << (n - 1 - i))) {
+        if (len + 1 + features[i].size >= sizeof(buf)) {
+          // A single over-long candidate is skipped rather than failed: a
+          // shorter subset of the same target still resolves.
+          overflow = true;
+          break;
         }
+        buf[len++] = ':';
+        memcpy(buf + len, features[i].data, features[i].size);
+        len += features[i].size;
       }
     }
     if (!overflow) {
-      if (callback(iree_make_string_view(buf, len), user_data)) return true;
+      if (callback(iree_make_string_view(buf, len), user_data)) {
+        return iree_ok_status();
+      }
     }
     if (mask == 0) break;
   }
-  return false;
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -1165,12 +1204,11 @@ static void kpack_note_search_error(kpack_resolve_state_t* state,
 }
 
 // Appends |target| to the ranked arch candidate list if not already present.
+// |target| comes from for_each_compatible_target, which yields a nonempty
+// string shorter than IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY, so it always
+// fits an arch[] slot.
 static bool kpack_arch_collect_cb(iree_string_view_t target, void* user_data) {
   kpack_resolve_state_t* state = (kpack_resolve_state_t*)user_data;
-  if (target.size == 0 ||
-      target.size >= IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY) {
-    return false;
-  }
   for (iree_host_size_t i = 0; i < state->arch_count; ++i) {
     if (iree_string_view_equal(
             iree_make_string_view(state->arch[i], strlen(state->arch[i])),
@@ -1178,7 +1216,21 @@ static bool kpack_arch_collect_cb(iree_string_view_t target, void* user_data) {
       return false;  // already present
     }
   }
-  if (state->arch_count >= KPACK_MAX_ARCH_CANDIDATES) return false;
+  if (state->arch_count >= KPACK_MAX_ARCH_CANDIDATES) {
+    // The list holds the highest-ranked candidates; this one and any after it
+    // are lower-ranked fallbacks. The search runs highest-first over what is
+    // kept, so dropping these can only miss, never select a lower-ranked target
+    // over a higher-ranked one. Record why rather than fail: a match on a kept
+    // candidate still succeeds, and a miss then carries the reason instead of
+    // surfacing as an unexplained not-found.
+    kpack_note_search_error(
+        state, iree_make_status(
+                   IREE_STATUS_RESOURCE_EXHAUSTED,
+                   "kpack ranked more than %d compatible target candidates; "
+                   "the lowest-ranked fallbacks past the cap were not searched",
+                   KPACK_MAX_ARCH_CANDIDATES));
+    return false;
+  }
   memcpy(state->arch[state->arch_count], target.data, target.size);
   state->arch[state->arch_count][target.size] = '\0';
   ++state->arch_count;
@@ -1368,25 +1420,37 @@ iree_status_t iree_hal_streaming_kpack_resolve_code_object(
             lookup_key, (int)metadata.search_path_count, target_arch_count);
 
   // 4. Build the ranked, de-duplicated architecture candidate list across all
-  // requested targets (priority order, then feature-subset specificity).
+  // requested targets (priority order, then feature-subset specificity). A
+  // target the expansion cannot represent (too many subsettable features, or an
+  // over-long processor) fails the resolve rather than contributing a silently
+  // wrong candidate set.
   kpack_resolve_state_t state;
   memset(&state, 0, sizeof(state));
   state.host_allocator = host_allocator;
-  for (iree_host_size_t i = 0; i < target_arch_count; ++i) {
-    iree_hal_streaming_kpack_for_each_compatible_target(
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       iree_status_is_ok(status) && i < target_arch_count; ++i) {
+    status = iree_hal_streaming_kpack_for_each_compatible_target(
         target_archs[i], kpack_arch_collect_cb, &state);
   }
-  if (state.arch_count == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "kpack resolve: no usable target architectures");
+  if (iree_status_is_ok(status) && state.arch_count == 0) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "kpack resolve: no usable target architectures");
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_status_ignore(state.deferred_error);
+    return status;
   }
 
   state.open = NULL;
-  iree_status_t status = iree_allocator_malloc(
+  status = iree_allocator_malloc(
       host_allocator,
       IREE_HAL_STREAMING_KPACK_MAX_OPEN_ARCHIVES * sizeof(kpack_open_archive_t),
       (void**)&state.open);
-  if (!iree_status_is_ok(status)) return status;
+  if (!iree_status_is_ok(status)) {
+    iree_status_ignore(state.deferred_error);
+    return status;
+  }
 
   // 5. Open candidate archives. ROCM_KPACK_PATH overrides the embedded search
   // paths entirely; otherwise ROCM_KPACK_PATH_PREFIX entries are prepended and

@@ -36,23 +36,29 @@ enum {
   // Maximum candidate ISA target string length (e.g.
   // "gfx942:sramecc+:xnack-"), including the NUL terminator.
   IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY = 64,
-  // Maximum kpack search paths parsed out of a single HIPK metadata blob.
+  // Maximum kpack search paths parsed out of a single HIPK metadata blob. The
+  // format does not bound the count and the reference kpack packager emits one;
+  // this buffers a generous ceiling and rejects a blob that lists more.
   IREE_HAL_STREAMING_KPACK_MAX_SEARCH_PATHS = 32,
-  // Upper bound on metadata blob size walked by the msgpack reader. The HIP ABI
-  // carries no length for the wrapper's binary pointer, so what makes the walk
-  // memory-safe is the extent of the mapping holding the blob (see
-  // iree_hal_streaming_kpack_query_mapping); this is a plausibility cap on top
-  // of that extent, clamping the span handed to the reader so that a blob in a
-  // large mapping is still walked no further than real metadata ever reaches.
-  // It bounds what the reader can see rather than validating a size: a value
-  // the parse needs that lies past the clamp is invisible and fails as a
+  // Upper bound on metadata blob size walked by the msgpack reader. The
+  // reference kpack runtime reads the HIPK metadata through a 64 KiB window and
+  // lets the msgpack parse self-terminate at the end of the real data; HRX
+  // matches that window. The HIP ABI carries no length for the wrapper's binary
+  // pointer, so what makes the walk memory-safe is the extent of the mapping
+  // holding the blob (see iree_hal_streaming_kpack_query_mapping); this cap
+  // sits on top of that extent, clamping the span handed to the reader so a
+  // blob in a large mapping is still walked no further than real metadata ever
+  // reaches. It bounds what the reader can see rather than validating a size: a
+  // value the parse needs that lies past the clamp is invisible and fails as a
   // missing or truncated field, while bytes the parse never reaches are never
   // examined.
   IREE_HAL_STREAMING_KPACK_MAX_METADATA_SIZE = 64 * 1024,
-  // Maximum archives opened while resolving one code object. The search ranks
-  // targets across every opened archive, so truncating the archive set could
-  // silently select a compatible but lower-ranked code object; exceeding this
-  // is reported as IREE_STATUS_RESOURCE_EXHAUSTED instead.
+  // Maximum archives opened while resolving one code object. The reference
+  // kpack runtime searches candidate archives without a count bound; HRX bounds
+  // the ranked set because the search ranks targets across every opened
+  // archive, so truncating it could silently select a compatible but
+  // lower-ranked code object. Exceeding this is reported as
+  // IREE_STATUS_RESOURCE_EXHAUSTED instead.
   IREE_HAL_STREAMING_KPACK_MAX_OPEN_ARCHIVES = 64,
 };
 
@@ -91,10 +97,17 @@ typedef bool (*iree_hal_streaming_kpack_target_callback_t)(
 // most-specific first: the full feature set, then every feature subset in
 // descending feature-bitmask order (each feature maps to a bit, earlier-listed
 // features to higher bits, so higher-priority features are retained longest),
-// then the bare processor. Stops early and returns true if a callback returns
-// true; returns false otherwise (including empty input). Targets longer than
-// IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY are skipped.
-bool iree_hal_streaming_kpack_for_each_compatible_target(
+// then the bare processor. A callback returning true stops iteration early.
+// Empty input yields no candidates and succeeds.
+//
+// Fails with IREE_STATUS_OUT_OF_RANGE when |agent_isa| carries more subsettable
+// feature flags than the expansion holds, or a processor that does not fit
+// IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY: neither can be represented, and
+// silently expanding a truncated feature set or dropping a whole target would
+// produce a wrong candidate set rather than a diagnosable failure. A single
+// feature-bearing candidate that would not fit the capacity is skipped instead,
+// since a shorter subset of the same target still resolves.
+iree_status_t iree_hal_streaming_kpack_for_each_compatible_target(
     iree_string_view_t agent_isa,
     iree_hal_streaming_kpack_target_callback_t callback, void* user_data);
 
@@ -276,9 +289,11 @@ iree_status_t iree_hal_streaming_kpack_query_mapping(
 // Fails with:
 //   IREE_STATUS_INVALID_ARGUMENT on a null argument, metadata that is not the
 //     expected shape, or no usable |target_archs|.
-//   IREE_STATUS_OUT_OF_RANGE when a value does not fit the buffer holding it: a
+//   IREE_STATUS_OUT_OF_RANGE when a value exceeds the bound holding it: a
 //     lookup key formed from an over-long kernel name, metadata listing more
-//     than IREE_HAL_STREAMING_KPACK_MAX_SEARCH_PATHS paths, a backing path
+//     than IREE_HAL_STREAMING_KPACK_MAX_SEARCH_PATHS paths, a requested target
+//     that carries more subsettable ISA feature flags than the expansion holds
+//     or whose processor does not fit a target candidate buffer, a backing path
 //     longer than the resolver's path buffer, or a search path that overruns
 //     that buffer or its component limit once formed and expanded.
 //   IREE_STATUS_UNAVAILABLE when ROCM_KPACK_DISABLE is set.
@@ -291,7 +306,10 @@ iree_status_t iree_hal_streaming_kpack_query_mapping(
 //   IREE_STATUS_RESOURCE_EXHAUSTED when more than
 //     IREE_HAL_STREAMING_KPACK_MAX_OPEN_ARCHIVES archives match, as the ranked
 //     search cannot be completed and truncating it could silently select a
-//     lower-ranked code object.
+//     lower-ranked code object. It is also the retained cause when more
+//     compatible target candidates are produced than the ranked candidate list
+//     holds: the lowest-ranked fallbacks past the cap are not searched, so a
+//     miss reports the truncation rather than an unexplained not-found.
 //   IREE_STATUS_UNIMPLEMENTED on platforms without a mapping query, since the
 //     blob cannot be bounded and so cannot be parsed safely (see
 //     iree_hal_streaming_kpack_query_mapping).
