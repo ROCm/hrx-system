@@ -1,0 +1,25 @@
+// A targetless residency-policy kernel compiled against distinct AMDGPU target
+// models by the execution manifest.
+kernel.def export("residency_cross_target") @residency_cross_target() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %input_noalias, %output_noalias = buffer.assume.noalias %input_global, %output_global : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<16xf32, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<16xf32, #dense>
+  %initial = vector.constant 0.0 : vector<16xf32>
+  %result = scf.for %stage = [%zero to %two step %one](%acc = %initial : vector<16xf32>) -> (vector<16xf32>) residency(preserve) {
+    %invariant = vector.load %input_view[0] : view<16xf32, #dense> -> vector<16xf32>
+    %next = vector.addf %acc, %invariant : vector<16xf32>
+    scf.yield %next : vector<16xf32>
+  }
+  vector.store %result, %output_view[0] : vector<16xf32>, view<16xf32, #dense>
+  kernel.return
+}

@@ -14,7 +14,7 @@ kernel.def target(@target) export("configured_fragment_bank") @configured_fragme
   %one = index.constant 1 : index
   %workgroup_size = config.get @test.fragment_bank.workgroup_size : index
   kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
-} launch(%output: buffer) {
+} launch(%scale_buffer: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -33,21 +33,25 @@ kernel.def target(@target) export("configured_fragment_bank") @configured_fragme
   %scratch_bytes_index = index.mul %scratch_elements, %four : index
   %scratch_bytes = index.cast %scratch_bytes_index : index to offset
   %lane = kernel.workitem.id<x> : index
+  %scale_global = buffer.assume.memory_space<global> %scale_buffer : buffer
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%base] : buffer -> view<[%m_extent]x[%n_extent]xf32, #dense>
+  %scale_noalias, %output_noalias = buffer.assume.noalias %scale_global, %output_global : buffer, buffer
+  %scale_view = buffer.view %scale_noalias[%base] : buffer -> view<16xf32, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%m_extent]x[%n_extent]xf32, #dense>
   %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<[%scratch_elements]xi32, #dense>
   %marker = vector.constant 0 : vector<1xi32>
   vector.store %marker, %scratch_view[%lane] : vector<1xi32>, view<[%scratch_elements]xi32, #dense>
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-  %lhs_payload = vector.constant 1.0 : vector<16xbf16>
-  %rhs_payload = vector.constant 1.0 : vector<16xbf16>
-  %lhs = vector.fragment<lhs> %lhs_payload shape [%matrix_m, %matrix_k] : vector<16xbf16>
-  %rhs = vector.fragment<rhs> %rhs_payload shape [%matrix_k, %matrix_n] : vector<16xbf16>
   %zero_payload = vector.constant 0.0 : vector<8xf32>
   %zero_fragment = vector.fragment<init> %zero_payload shape [%matrix_m, %matrix_n] : vector<8xf32>
   %initial_bank = vector.broadcast %zero_fragment : vector<8xf32> -> vector<[%m_fragments]x[%n_fragments]x8xf32>
-  %result_bank = scf.for %stage = [%zero to %two step %one](%stage_bank = %initial_bank : vector<[%m_fragments]x[%n_fragments]x8xf32>) -> (vector<[%m_fragments]x[%n_fragments]x8xf32>) {
+  %result_bank = scf.for %stage = [%zero to %two step %one](%stage_bank = %initial_bank : vector<[%m_fragments]x[%n_fragments]x8xf32>) -> (vector<[%m_fragments]x[%n_fragments]x8xf32>) residency(preserve) {
+    %lhs_wide = vector.load %scale_view[0] : view<16xf32, #dense> -> vector<16xf32>
+    %lhs_payload = vector.fptrunc %lhs_wide : vector<16xf32> to vector<16xbf16>
+    %rhs_payload = vector.constant 1.0 : vector<16xbf16>
+    %lhs = vector.fragment<lhs> %lhs_payload shape [%matrix_m, %matrix_k] : vector<16xbf16>
+    %rhs = vector.fragment<rhs> %rhs_payload shape [%matrix_k, %matrix_n] : vector<16xbf16>
     %after_k = scf.for %k_fragment = [%zero to %k_fragments step %one](%k_bank = %stage_bank : vector<[%m_fragments]x[%n_fragments]x8xf32>) -> (vector<[%m_fragments]x[%n_fragments]x8xf32>) unroll {
       %after_m = scf.for %m_fragment = [%zero to %m_fragments step %one](%m_bank = %k_bank : vector<[%m_fragments]x[%n_fragments]x8xf32>) -> (vector<[%m_fragments]x[%n_fragments]x8xf32>) unroll {
         %after_n = scf.for %n_fragment = [%zero to %n_fragments step %one](%n_bank = %m_bank : vector<[%m_fragments]x[%n_fragments]x8xf32>) -> (vector<[%m_fragments]x[%n_fragments]x8xf32>) unroll {

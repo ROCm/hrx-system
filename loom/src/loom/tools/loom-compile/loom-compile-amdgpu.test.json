@@ -180,19 +180,145 @@
           "stdout": {
             "contains": {
               "unordered": [
+                "\"schema_version\":1",
                 "\"key\":\"test.fragment_bank.m_fragments\",\"value\":\"8\"",
                 "\"key\":\"test.fragment_bank.n_fragments\",\"value\":\"4\"",
                 "\"key\":\"test.fragment_bank.k_fragments\",\"value\":\"2\"",
                 "\"wmma_count\":64",
                 "\"wmma_count\":128",
                 "\"private_memory_bytes\":0",
-                "\"allocation_spill_count\":0"
+                "\"allocation_spill_count\":0",
+                "\"policy\":\"preserve\"",
+                "\"stage\":\"exact\",\"outcome\":\"restored\"",
+                "\"projection_miss_count\":1",
+                "\"maximum_projected_required_tier\":16",
+                "\"minimum_observed_allocated_tier\":3",
+                "\"maximum_observed_tier_shortfall\":13",
+                "\"maximum_required_tier\":3",
+                "\"resource\":\"amdgpu.vgpr\",\"resource_kind\":\"direct\",\"resource_id\":1,\"units\":288,\"tier\":3",
+                "\"reduction_units_to_next_better_tier\":32,\"limiting\":true",
+                "\"occupancy_percent\":18"
               ]
             }
           },
           "files": [
             {
               "path": "{tmp}/configured_fragment_bank_8x4x2.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "plans one targetless residency contract across distinct AMDGPU models",
+      "steps": [
+        {
+          "name": "compile-gfx942",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/residency_cross_target_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx942",
+              "--output={tmp}/residency_cross_target_gfx942.hal",
+              "--emit-target-artifact={tmp}/residency_cross_target_gfx942.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx942\"",
+                "\"policy\":\"preserve\",\"outcome\":\"selected\",\"reason\":\"dynamic_work_removed\"",
+                "\"residency_resources\":{\"count\":24",
+                "\"resource\":\"amdgpu.agpr\"",
+                "\"resource\":\"amdgpu.vgpr_agpr\",\"resource_kind\":\"derived\"",
+                "\"source_op\":\"vector.load\"",
+                "\"stage\":\"exact\",\"outcome\":\"not_attempted\"",
+                "\"projection_miss_count\":0",
+                "\"minimum_allocated_tier\":10",
+                "\"subgroup_size\":64",
+                "\"occupancy_percent\":62"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/residency_cross_target_gfx942.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1100",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/residency_cross_target_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1100",
+              "--output={tmp}/residency_cross_target_gfx1100.hal",
+              "--emit-target-artifact={tmp}/residency_cross_target_gfx1100.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1100\"",
+                "\"policy\":\"preserve\",\"outcome\":\"selected\",\"reason\":\"dynamic_work_removed\"",
+                "\"residency_resources\":{\"count\":18",
+                "\"source_op\":\"vector.load\"",
+                "\"stage\":\"exact\",\"outcome\":\"not_attempted\"",
+                "\"projection_miss_count\":0",
+                "\"minimum_allocated_tier\":16"
+              ]
+            },
+            "not_contains": [
+              "\"resource\":\"amdgpu.mode\""
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/residency_cross_target_gfx1100.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1250",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/residency_cross_target_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--output={tmp}/residency_cross_target_gfx1250.hal",
+              "--emit-target-artifact={tmp}/residency_cross_target_gfx1250.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1250\"",
+                "\"policy\":\"preserve\",\"outcome\":\"selected\",\"reason\":\"dynamic_work_removed\"",
+                "\"residency_resources\":{\"count\":21",
+                "\"resource\":\"amdgpu.mode\"",
+                "\"source_op\":\"vector.load\"",
+                "\"stage\":\"exact\",\"outcome\":\"not_attempted\"",
+                "\"projection_miss_count\":0",
+                "\"minimum_allocated_tier\":16"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/residency_cross_target_gfx1250.hsaco",
               "non_empty": true
             }
           ]
