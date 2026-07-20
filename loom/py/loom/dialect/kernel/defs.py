@@ -47,6 +47,7 @@ from loom.dsl import (
     INDEX,
     INTEGER,
     ISOLATED_FROM_ABOVE,
+    MEMORY_FENCE,
     PURE,
     SCALAR,
     SYMBOL_DEFINE,
@@ -1294,7 +1295,7 @@ kernel_barrier = Op(
             doc="Execution scope synchronized by the barrier.",
         ),
     ],
-    traits=[UNKNOWN_EFFECTS, CONVERGENT],
+    traits=[MEMORY_FENCE, CONVERGENT],
     verify="loom_kernel_barrier_verify",
     format=[TemplateParam("memory_space"), AttrDict()],
     examples=[

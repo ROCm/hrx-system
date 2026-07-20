@@ -127,6 +127,11 @@ static bool loom_verify_trait_conflict(loom_trait_flags_t traits,
     *out_trait_b = IREE_SV("UNKNOWN_EFFECTS");
     return true;
   }
+  if (iree_all_bits_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_MEMORY_FENCE)) {
+    *out_trait_a = IREE_SV("HINT");
+    *out_trait_b = IREE_SV("MEMORY_FENCE");
+    return true;
+  }
   if (iree_all_bits_set(traits,
                         LOOM_TRAIT_HINT | LOOM_TRAIT_NON_DETERMINISTIC)) {
     *out_trait_a = IREE_SV("HINT");
@@ -157,6 +162,11 @@ static bool loom_verify_trait_conflict(loom_trait_flags_t traits,
   if (iree_all_bits_set(traits, LOOM_TRAIT_PURE | LOOM_TRAIT_UNKNOWN_EFFECTS)) {
     *out_trait_a = IREE_SV("PURE");
     *out_trait_b = IREE_SV("UNKNOWN_EFFECTS");
+    return true;
+  }
+  if (iree_all_bits_set(traits, LOOM_TRAIT_PURE | LOOM_TRAIT_MEMORY_FENCE)) {
+    *out_trait_a = IREE_SV("PURE");
+    *out_trait_b = IREE_SV("MEMORY_FENCE");
     return true;
   }
   if (iree_all_bits_set(traits, LOOM_TRAIT_PURE | LOOM_TRAIT_UNIQUE_IDENTITY)) {
@@ -190,6 +200,12 @@ static bool loom_verify_trait_conflict(loom_trait_flags_t traits,
           traits, LOOM_TRAIT_SAFE_TO_SPECULATE | LOOM_TRAIT_UNKNOWN_EFFECTS)) {
     *out_trait_a = IREE_SV("SAFE_TO_SPECULATE");
     *out_trait_b = IREE_SV("UNKNOWN_EFFECTS");
+    return true;
+  }
+  if (iree_all_bits_set(
+          traits, LOOM_TRAIT_SAFE_TO_SPECULATE | LOOM_TRAIT_MEMORY_FENCE)) {
+    *out_trait_a = IREE_SV("SAFE_TO_SPECULATE");
+    *out_trait_b = IREE_SV("MEMORY_FENCE");
     return true;
   }
   if (iree_all_bits_set(traits, LOOM_TRAIT_SAFE_TO_SPECULATE |

@@ -144,6 +144,7 @@ def trait_flags(op: Op) -> str:
     explicit_pure = any(trait.name == "Pure" for trait in op.traits)
     has_non_deterministic = any(trait.name == "NonDeterministic" for trait in op.traits)
     has_unknown_effects = any(trait.name == "UnknownEffects" for trait in op.traits)
+    has_memory_fence = any(trait.name == "MemoryFence" for trait in op.traits)
     has_hint = any(trait.name == "Hint" for trait in op.traits)
     if (
         not explicit_pure
@@ -151,6 +152,7 @@ def trait_flags(op: Op) -> str:
         and not op.ownership_effects
         and not has_non_deterministic
         and not has_unknown_effects
+        and not has_memory_fence
         and not has_hint
         and not has_allocating_result
         and not has_explicit_unique_identity

@@ -525,6 +525,39 @@ TEST(VerifyTraitConsistencyTest, RejectsDeclaredSpeculatableConvergentTraits) {
                            "SAFE_TO_SPECULATE", "CONVERGENT");
 }
 
+TEST(VerifyTraitConsistencyTest, RejectsDeclaredPureMemoryFenceTraits) {
+  static const uint8_t kBadFenceName[] = {
+      9, 3, 'b', 'a', 'd', '.', 'f', 'e', 'n', 'c', 'e', '\0',
+  };
+  static const loom_op_vtable_t kBadFenceVtable = {
+      /*.traits=*/LOOM_TRAIT_PURE | LOOM_TRAIT_MEMORY_FENCE,
+      /*.fixed_operand_count=*/{},
+      /*.fixed_result_count=*/{},
+      /*.attribute_count=*/{},
+      /*.region_count=*/{},
+      /*.vtable_flags=*/{},
+      /*.symbol_kind=*/{},
+      /*.constraint_count=*/{},
+      /*.operand_descriptor_count=*/{},
+      /*.control_flow_flags=*/{},
+      /*.control_flow_reserved=*/{},
+      /*.successor_selector_operand_index=*/{},
+      /*.canonicalize=*/{},
+      /*.infer_facts=*/{},
+      /*.effective_traits=*/{},
+      /*.attr_descriptors=*/{},
+      /*.operand_descriptors=*/{},
+      /*.type_transfer=*/{},
+      /*.result_descriptors=*/{},
+      /*.region_descriptors=*/{},
+      /*.constraints=*/{},
+      /*.verify=*/{},
+      /*.name=*/kBadFenceName,
+  };
+  ExpectBadTraitDiagnostic(&kBadFenceVtable, "bad.fence", "PURE",
+                           "MEMORY_FENCE");
+}
+
 //===----------------------------------------------------------------------===//
 // Structural checks
 //===----------------------------------------------------------------------===//

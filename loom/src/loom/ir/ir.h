@@ -709,31 +709,45 @@ enum loom_trait_bits_e {
   // hot-path guard before asking a dialect-owned helper for exact source/result
   // ranges.
   LOOM_TRAIT_STORAGE_RELATION = 1u << 23,
+  // Op orders memory accesses without directly reading or writing a resource.
+  // Generic effect queries treat fences as read/write barriers so existing
+  // transforms preserve their ordering. Exact memory analyses may distinguish
+  // the ordering effect from storage-root interference.
+  LOOM_TRAIT_MEMORY_FENCE = 1u << 24,
 };
 typedef uint32_t loom_trait_flags_t;
 
-// Returns true if the trait flags indicate the op may write to memory
-// or has unknown effects. Works on raw bitfields to avoid redundant
+// Returns true if the trait flags indicate the op may write to memory, order
+// memory, or has unknown effects. Works on raw bitfields to avoid redundant
 // vtable lookups when the vtable is already resolved.
 static inline bool loom_traits_may_write(loom_trait_flags_t traits) {
-  return (traits & (LOOM_TRAIT_WRITES_MEMORY | LOOM_TRAIT_UNKNOWN_EFFECTS)) !=
-         0;
+  return (traits & (LOOM_TRAIT_WRITES_MEMORY | LOOM_TRAIT_UNKNOWN_EFFECTS |
+                    LOOM_TRAIT_MEMORY_FENCE)) != 0;
 }
 
 // Returns true if the trait flags indicate the op may observe memory or
 // external state in a way that prevents pure/deterministic reasoning.
 // NON_DETERMINISTIC is counted with read-like effects because CSE and purity
 // checks must treat it as an observation even when it does not read memory.
+// MEMORY_FENCE is counted so generic transforms preserve memory ordering.
 static inline bool loom_traits_may_read(loom_trait_flags_t traits) {
   return (traits & (LOOM_TRAIT_READS_MEMORY | LOOM_TRAIT_UNKNOWN_EFFECTS |
-                    LOOM_TRAIT_NON_DETERMINISTIC)) != 0;
+                    LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_MEMORY_FENCE)) !=
+         0;
 }
 
 // Returns true if the trait flags indicate the op may produce different
-// results for identical inputs, writes memory, or has unknown effects.
+// results for identical inputs, write memory, order memory, or have unknown
+// effects.
 static inline bool loom_traits_has_side_effects(loom_trait_flags_t traits) {
   return (traits & (LOOM_TRAIT_WRITES_MEMORY | LOOM_TRAIT_UNKNOWN_EFFECTS |
-                    LOOM_TRAIT_NON_DETERMINISTIC)) != 0;
+                    LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_MEMORY_FENCE)) !=
+         0;
+}
+
+// Returns true when the op carries an explicit memory ordering effect.
+static inline bool loom_traits_order_memory(loom_trait_flags_t traits) {
+  return (traits & LOOM_TRAIT_MEMORY_FENCE) != 0;
 }
 
 // Returns true if the trait flags indicate the op's regions cannot
