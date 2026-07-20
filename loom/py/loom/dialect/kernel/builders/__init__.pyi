@@ -35,6 +35,9 @@ class KernelBuilder(DialectBuilder):
         workgroup_size_x: ValueRef,
         workgroup_size_y: ValueRef,
         workgroup_size_z: ValueRef,
+        workgroup_cluster_size_x: ValueRef | None = ...,
+        workgroup_cluster_size_y: ValueRef | None = ...,
+        workgroup_cluster_size_z: ValueRef | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
     def return_(
@@ -465,3 +468,52 @@ class KernelBuilder(DialectBuilder):
         message: str | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def cluster_id(
+        self,
+        *,
+        dimension: str,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def cluster_workgroup_id(
+        self,
+        *,
+        dimension: str,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def cluster_workgroup_flat_id(
+        self,
+        *,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def cluster_size(
+        self,
+        *,
+        dimension: str,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def cluster_count(
+        self,
+        *,
+        dimension: str,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

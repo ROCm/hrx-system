@@ -18,6 +18,21 @@
 extern "C" {
 #endif
 
+// Scalar operand-encoding locations reserved for TTMP0 through TTMP15.
+#define LOOM_AMDGPU_TTMP_SGPR_LOCATION_BASE 108u
+#define LOOM_AMDGPU_TTMP_SGPR_LOCATION_COUNT 16u
+
+// Returns true when the non-empty SGPR location range is wholly within the
+// architectural TTMP encoding window.
+static inline bool loom_amdgpu_sgpr_location_range_is_ttmp(
+    uint32_t location_base, uint32_t location_count) {
+  const uint64_t location_end = (uint64_t)location_base + location_count;
+  return location_count != 0 &&
+         location_base >= LOOM_AMDGPU_TTMP_SGPR_LOCATION_BASE &&
+         location_end <= LOOM_AMDGPU_TTMP_SGPR_LOCATION_BASE +
+                             LOOM_AMDGPU_TTMP_SGPR_LOCATION_COUNT;
+}
+
 // Returns true when |reg_class_id| names the accumulator register file in
 // |descriptor_set|. Register-class IDs are descriptor-set-local; RDNA sets use
 // the same numeric ID for M0 that CDNA4 uses for AGPR.

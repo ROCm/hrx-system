@@ -2,13 +2,424 @@
   "version": 1,
   "cases": [
     {
+      "name": "gates legacy gfx12 WMMA off gfx1250",
+      "steps": [
+        {
+          "name": "compile-gfx1200-control",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx12_wmma_bf16_f32.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1200",
+              "--output={tmp}/gfx12_wmma_bf16_f32_gfx1200.hal",
+              "--emit-target-artifact={tmp}/gfx12_wmma_bf16_f32_gfx1200.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/gfx12_wmma_bf16_f32_gfx1200.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1250",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx12_wmma_bf16_f32.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--output={tmp}/gfx12_wmma_bf16_f32_gfx1250.hal",
+              "--emit-target-artifact={tmp}/gfx12_wmma_bf16_f32_gfx1250.hsaco"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": {
+              "unordered": [
+                "error [AMDGPU/021]",
+                "matrix constraint 'processor_features' is not satisfied"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "allocates overlapping gfx1250 tied accumulators independently",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx1250_tied_accumulators.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--output={tmp}/gfx1250_tied_accumulators.hal",
+              "--emit-target-artifact={tmp}/gfx1250_tied_accumulators.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/gfx1250_tied_accumulators.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/gfx1250_tied_accumulators.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports gfx125x target-inserted address-state economics",
+      "steps": [
+        {
+          "name": "compile-gfx1250-straight-line",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx1250_extended_vgpr.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--config=test.extended_vgpr_trip_count=1",
+              "--output={tmp}/gfx1250_extended_vgpr_straight.hal",
+              "--emit-target-artifact={tmp}/gfx1250_extended_vgpr_straight.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"status\":{\"code\":0,\"name\":\"OK\"}",
+                "\"target_key\":\"gfx1250\"",
+                "\"instruction_count\":741",
+                "\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":296",
+                "\"target_insertions\":{\"static_packet_count\":37,\"exact_dynamic_packet_count\":37,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":37,\"row_count\":37",
+                "\"packet_key\":\"amdgpu.s_set_vgpr_msb\"",
+                "\"boundary_operation\":\"low.copy\",\"boundary_descriptor_key\":null"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/gfx1250_extended_vgpr_straight.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/gfx1250_extended_vgpr_straight.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1250-counted-loop",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx1250_extended_vgpr.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--config=test.extended_vgpr_trip_count=4",
+              "--output={tmp}/gfx1250_extended_vgpr_loop.hal",
+              "--emit-target-artifact={tmp}/gfx1250_extended_vgpr_loop.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1250\"",
+                "\"instruction_count\":509",
+                "\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":352",
+                "\"target_insertions\":{\"static_packet_count\":14,\"exact_dynamic_packet_count\":14,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":44,\"row_count\":14",
+                "\"dynamic_instruction_mix\":{\"descriptor_count\":",
+                "\"matrix_count\":132,\"mfma_count\":0,\"smfmac_count\":0,\"wmma_count\":132"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/gfx1250_extended_vgpr_loop.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1251-straight-line",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx1250_extended_vgpr.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1251",
+              "--config=test.extended_vgpr_trip_count=1",
+              "--output={tmp}/gfx1251_extended_vgpr_straight.hal",
+              "--emit-target-artifact={tmp}/gfx1251_extended_vgpr_straight.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1251\"",
+                "\"instruction_count\":741",
+                "\"target_insertions\":{\"static_packet_count\":37,\"exact_dynamic_packet_count\":37,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":37,\"row_count\":37"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/gfx1251_extended_vgpr_straight.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1251-counted-loop",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx1250_extended_vgpr.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1251",
+              "--config=test.extended_vgpr_trip_count=4",
+              "--output={tmp}/gfx1251_extended_vgpr_loop.hal",
+              "--emit-target-artifact={tmp}/gfx1251_extended_vgpr_loop.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1251\"",
+                "\"instruction_count\":509",
+                "\"target_insertions\":{\"static_packet_count\":14,\"exact_dynamic_packet_count\":14,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":44,\"row_count\":14"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/gfx1251_extended_vgpr_loop.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports unknown dynamic target insertions for runtime CFG",
+      "steps": [
+        {
+          "name": "compile-gfx1250",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_target_insertions_uncountable_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--output={tmp}/target_insertions_uncountable_gfx1250.hal",
+              "--emit-target-artifact={tmp}/target_insertions_uncountable_gfx1250.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1250\"",
+                "\"instruction_count\":685",
+                "\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":264",
+                "\"target_insertions\":{\"static_packet_count\":6,\"exact_dynamic_packet_count\":0,\"unknown_dynamic_packet_count\":6,\"dynamic_packet_count\":null,\"row_count\":6",
+                "\"packet_key\":\"amdgpu.s_set_vgpr_msb\"",
+                "\"dynamic_packet_count\":null"
+              ]
+            },
+            "not_contains": [
+              "\"dynamic_instruction_mix\""
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/target_insertions_uncountable_gfx1250.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1251",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_target_insertions_uncountable_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1251",
+              "--output={tmp}/target_insertions_uncountable_gfx1251.hal",
+              "--emit-target-artifact={tmp}/target_insertions_uncountable_gfx1251.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1251\"",
+                "\"instruction_count\":685",
+                "\"target_insertions\":{\"static_packet_count\":6,\"exact_dynamic_packet_count\":0,\"unknown_dynamic_packet_count\":6,\"dynamic_packet_count\":null,\"row_count\":6"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/target_insertions_uncountable_gfx1251.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "compiles kernels whose kernargs are unused",
+      "steps": [
+        {
+          "name": "compile-gfx1100",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/../iree-test-loom/testdata/amdgpu_unused_kernargs.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1100",
+              "--output={tmp}/amdgpu_unused_kernargs_gfx1100.hal",
+              "--emit-target-artifact={tmp}/amdgpu_unused_kernargs_gfx1100.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx1100.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx1100.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1250",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/../iree-test-loom/testdata/amdgpu_unused_kernargs.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--output={tmp}/amdgpu_unused_kernargs_gfx1250.hal",
+              "--emit-target-artifact={tmp}/amdgpu_unused_kernargs_gfx1250.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx1250.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx1250.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "selects invocation-compatible AMDGPU template families",
+      "steps": [
+        {
+          "name": "compile-gfx1100-exact",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/target_family_template_provider_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1100",
+              "--output={tmp}/target_family_gfx1100.hal",
+              "--emit-target-artifact={tmp}/target_family_gfx1100.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/target_family_gfx1100.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1251-through-gfx125x-family",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/target_family_template_provider_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1251",
+              "--output={tmp}/target_family_gfx1251.hal",
+              "--emit-target-artifact={tmp}/target_family_gfx1251.hsaco",
+              "--compile-report=summary"
+            ]
+          },
+          "stderr": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1251\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/target_family_gfx1251.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "reject-incompatible-gfx1200-family",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/target_family_template_provider_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1200",
+              "--output={tmp}/target_family_gfx1200.hal"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "error [LOWERING/045]",
+              "target_mismatch"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "uses invocation AMDGPU targets for HAL root without target attr",
       "steps": [
         {
           "name": "write-source",
           "write": {
             "path": "{tmp}/targetless_amdgpu.loom",
-            "text": "amdgpu.target<gfx1100> @nearby_wave64 {subgroup_size = 64}\n\nkernel.def export(\"targetless_store_i32\") @targetless_store_i32() {\n  %unit = index.constant 1 : index\n  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index\n} launch(%output: buffer) {\n  %zero_offset = index.constant 0 : offset\n  %zero_index = index.constant 0 : index\n  %value = scalar.constant 42 : i32\n  %global = buffer.assume.memory_space<global> %output : buffer\n  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>\n  view.store %value, %view[%zero_index] : i32, view<1xi32, #dense>\n  kernel.return\n}\n"
+            "text": "amdgpu.target<gfx1100> @nearby_wave64 {subgroup_size = 64}\n\nkernel.def @targetless_store_i32() {\n  %unit = index.constant 1 : index\n  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index\n} launch(%output: buffer) {\n  %zero_offset = index.constant 0 : offset\n  %zero_index = index.constant 0 : index\n  %value = scalar.constant 42 : i32\n  %global = buffer.assume.memory_space<global> %output : buffer\n  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>\n  view.store %value, %view[%zero_index] : i32, view<1xi32, #dense>\n  kernel.return\n}\n"
           }
         },
         {

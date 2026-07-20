@@ -94,7 +94,7 @@ iree_status_t loom_amdgpu_fragment_memory_packet_resource(
 
 static iree_status_t loom_amdgpu_record_fragment_memory_packet(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_op_t* low_op, const loom_amdgpu_matrix_fragment_layout_t* layout,
+    loom_op_t* low_op, const loom_amdgpu_matrix_fragment_layout_t* layout,
     const loom_amdgpu_fragment_memory_plan_t* plan,
     const loom_amdgpu_fragment_memory_packet_plan_t* packet,
     uint16_t element_index, uint32_t vector_lane_count) {
@@ -111,8 +111,16 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
     summary.alias_root_id = plan->source.alias_scope_id;
     summary.precision_flags |= LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT;
   }
-  IREE_RETURN_IF_ERROR(
-      loom_low_lower_record_memory_access_summary(context, low_op, &summary));
+  // Workgroup allocations have compiler-owned identities that remain comparable
+  // after source lowering. Preserve those summaries so final packet scheduling
+  // can distinguish disjoint LDS allocations from real async-memory hazards.
+  const bool preserve_memory_access =
+      plan->source.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP &&
+      plan->source.alias_scope_id != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
+  const loom_low_lower_memory_access_record_flags_t record_flags =
+      preserve_memory_access ? LOOM_LOW_LOWER_MEMORY_ACCESS_RECORD_PRESERVE : 0;
+  IREE_RETURN_IF_ERROR(loom_low_lower_record_memory_access_summary(
+      context, low_op, &summary, record_flags));
   if (!loom_low_lower_context_wants_report_rows(context)) {
     return iree_ok_status();
   }

@@ -352,6 +352,7 @@ iree_cc_library(
   HDRS
     "api.h"
     "aql_block_processor.h"
+    "aql_block_processor_profile.h"
     "aql_block_processor_timestamp.h"
     "aql_command_buffer.h"
     "aql_command_buffer_profile.h"

@@ -232,6 +232,13 @@ iree_status_t loom_amdgpu_make_memory_attrs(
     const loom_amdgpu_memory_access_t* access, loom_named_attr_t* attrs,
     iree_host_size_t attr_capacity, iree_host_size_t* out_attr_count);
 
+// Builds only the descriptor cache-policy attrs for a memory-like packet that
+// has no address offset immediate.
+iree_status_t loom_amdgpu_make_memory_cache_attrs(
+    loom_low_lower_context_t* context,
+    const loom_amdgpu_memory_access_t* access, loom_named_attr_t* attrs,
+    iree_host_size_t attr_capacity, iree_host_size_t* out_attr_count);
+
 // Returns true when an access carries an explicit cache policy.
 bool loom_amdgpu_memory_cache_policy_is_present(
     const loom_vector_memory_cache_policy_t* policy);
@@ -375,6 +382,12 @@ void loom_amdgpu_mark_source_memory_plan_storage_demands(
 // Marks the storage root and dynamic address terms required by a selected
 // source memory access plan.
 void loom_amdgpu_mark_source_memory_plan_root_storage_demands(
+    loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source);
+
+// Marks only dynamic address terms required by a source memory access plan.
+// This is used when target-assigned static layout replaces the source root.
+void loom_amdgpu_mark_source_memory_plan_dynamic_storage_demands(
     loom_low_lower_context_t* context,
     const loom_low_source_memory_access_plan_t* source);
 

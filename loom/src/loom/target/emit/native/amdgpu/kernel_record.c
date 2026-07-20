@@ -11,6 +11,7 @@
 
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/packet.h"
+#include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/emit/native/amdgpu/preflight.h"
@@ -721,6 +722,10 @@ iree_status_t loom_amdgpu_kernel_record_build(
   const bool has_required_workgroup_size =
       loom_target_workgroup_size_is_concrete(
           &hal_kernel->required_workgroup_size);
+  loom_target_workgroup_cluster_size_t workgroup_cluster_size = {0};
+  const bool has_workgroup_cluster_size =
+      loom_low_kernel_def_static_workgroup_cluster_size(
+          schedule->function_op, &workgroup_cluster_size);
   uint32_t max_flat_workgroup_size = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_max_flat_workgroup_size(
       &schedule->target.bundle_storage.snapshot, hal_kernel,
@@ -749,6 +754,8 @@ iree_status_t loom_amdgpu_kernel_record_build(
               .max_flat_workgroup_size = max_flat_workgroup_size,
               .required_workgroup_size = hal_kernel->required_workgroup_size,
               .has_required_workgroup_size = has_required_workgroup_size,
+              .workgroup_cluster_size = workgroup_cluster_size,
+              .has_workgroup_cluster_size = has_workgroup_cluster_size,
               .arguments = arguments,
               .argument_count = abi_layout->parameter_count,
           },

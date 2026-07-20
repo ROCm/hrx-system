@@ -125,11 +125,31 @@ enum loom_value_fact_flag_bits_e {
   // The value is known to be identical for every invocation in a workgroup.
   // This implies SUBGROUP_UNIFORM and both bits are set together.
   LOOM_VALUE_FACT_WORKGROUP_UNIFORM = 1u << 24,
+  // The value is the full x-dimension workgroup-cluster id domain for a
+  // kernel launch.
+  LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_X = 1u << 25,
+  // The value is the full y-dimension workgroup-cluster id domain for a
+  // kernel launch.
+  LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_Y = 1u << 26,
+  // The value is the full z-dimension workgroup-cluster id domain for a
+  // kernel launch.
+  LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_Z = 1u << 27,
+  // The value is the full x-dimension within-cluster workgroup id domain.
+  LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_X = 1u << 28,
+  // The value is the full y-dimension within-cluster workgroup id domain.
+  LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_Y = 1u << 29,
+  // The value is the full z-dimension within-cluster workgroup id domain.
+  LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_Z = 1u << 30,
+  // The value is known to be identical for every invocation in every
+  // workgroup of a workgroup cluster. This implies WORKGROUP_UNIFORM and
+  // SUBGROUP_UNIFORM, and all three bits are set together.
+  LOOM_VALUE_FACT_CLUSTER_UNIFORM = 1u << 31,
 };
 typedef uint32_t loom_value_fact_flags_t;
 
-#define LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK \
-  (LOOM_VALUE_FACT_SUBGROUP_UNIFORM | LOOM_VALUE_FACT_WORKGROUP_UNIFORM)
+#define LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK                                \
+  (LOOM_VALUE_FACT_SUBGROUP_UNIFORM | LOOM_VALUE_FACT_WORKGROUP_UNIFORM | \
+   LOOM_VALUE_FACT_CLUSTER_UNIFORM)
 
 #define LOOM_VALUE_FACT_DISTRIBUTION_MASK \
   (LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK | LOOM_VALUE_FACT_LANE_VARYING)
@@ -140,6 +160,7 @@ typedef enum loom_value_fact_uniform_scope_e {
   LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE = 0,
   LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP = 1,
   LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP = 2,
+  LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER = 3,
 } loom_value_fact_uniform_scope_t;
 
 #define LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK                                   \
@@ -147,7 +168,11 @@ typedef enum loom_value_fact_uniform_scope_e {
    LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_Z |                                       \
    LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_X |                                      \
    LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Y |                                      \
-   LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Z |                                      \
+   LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Z | LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_X | \
+   LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_Y | LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_Z |   \
+   LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_X |                              \
+   LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_Y |                              \
+   LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_Z |                              \
    LOOM_VALUE_FACT_TOPOLOGY_SUBGROUP_LANE)
 
 // Floating-point semantic predicate facts. These may describe scalar values or
@@ -188,10 +213,20 @@ typedef enum loom_value_fact_topology_value_kind_e {
   // Per-workitem coordinate within the current workgroup.
   LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID = 1,
   // Per-workgroup coordinate within the current dispatch grid.
+  // For clustered launches and a selected axis, this is reconstructed as
+  // cluster.id * cluster.size + cluster.workgroup.id.
   LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID = 2,
   // Per-subgroup-lane coordinate within the current subgroup.
   LOOM_VALUE_FACT_TOPOLOGY_VALUE_SUBGROUP_LANE_ID = 3,
-  LOOM_VALUE_FACT_TOPOLOGY_VALUE_COUNT_ = 4,
+  // Per-cluster coordinate within the dispatch cluster grid. Together with a
+  // same-axis CLUSTER_WORKGROUP_ID, this decomposes WORKGROUP_ID according to
+  // the selected static cluster size.
+  LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_ID = 4,
+  // Per-workgroup coordinate within the current workgroup cluster. Together
+  // with a same-axis CLUSTER_ID, this decomposes WORKGROUP_ID according to the
+  // selected static cluster size.
+  LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_WORKGROUP_ID = 5,
+  LOOM_VALUE_FACT_TOPOLOGY_VALUE_COUNT_ = 6,
 } loom_value_fact_topology_value_kind_t;
 
 // Target-independent topology coordinate axis.
@@ -410,6 +445,9 @@ static inline bool loom_value_facts_is_not_subnormal(loom_value_facts_t facts) {
 
 static inline loom_value_fact_uniform_scope_t loom_value_facts_uniform_scope(
     loom_value_facts_t facts) {
+  if (iree_all_bits_set(facts.flags, LOOM_VALUE_FACT_CLUSTER_UNIFORM)) {
+    return LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER;
+  }
   if (iree_all_bits_set(facts.flags, LOOM_VALUE_FACT_WORKGROUP_UNIFORM)) {
     return LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP;
   }
@@ -436,6 +474,12 @@ static inline bool loom_value_facts_is_workgroup_uniform(
       facts, LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP);
 }
 
+static inline bool loom_value_facts_is_cluster_uniform(
+    loom_value_facts_t facts) {
+  return loom_value_facts_is_uniform_at_scope(
+      facts, LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER);
+}
+
 static inline bool loom_value_facts_is_lane_varying(loom_value_facts_t facts) {
   return (facts.flags & LOOM_VALUE_FACT_LANE_VARYING) != 0;
 }
@@ -460,6 +504,9 @@ static inline void loom_value_facts_mark_uniform_at_scope(
   if (scope >= LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP) {
     facts->flags |= LOOM_VALUE_FACT_WORKGROUP_UNIFORM;
   }
+  if (scope >= LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER) {
+    facts->flags |= LOOM_VALUE_FACT_CLUSTER_UNIFORM;
+  }
 }
 
 static inline void loom_value_facts_mark_subgroup_uniform(
@@ -472,6 +519,12 @@ static inline void loom_value_facts_mark_workgroup_uniform(
     loom_value_facts_t* facts) {
   loom_value_facts_mark_uniform_at_scope(
       facts, LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP);
+}
+
+static inline void loom_value_facts_mark_cluster_uniform(
+    loom_value_facts_t* facts) {
+  loom_value_facts_mark_uniform_at_scope(facts,
+                                         LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER);
 }
 
 static inline void loom_value_facts_mark_lane_varying(
@@ -496,7 +549,7 @@ static inline void loom_value_facts_mark_subgroup_lane_mask(
 }
 
 // Applies the conservative execution-distribution transfer for a unary op. An
-// exact result is workgroup-uniform; otherwise lane-varying inputs produce
+// exact result is cluster-uniform; otherwise lane-varying inputs produce
 // lane-varying results and uniform inputs preserve their uniform scope.
 void loom_value_facts_propagate_unary_distribution(loom_value_facts_t input,
                                                    loom_value_facts_t* out);
@@ -626,7 +679,7 @@ static inline void loom_value_facts_meet(
       }
     }
     if (loom_value_facts_is_exact(*out)) {
-      loom_value_facts_mark_workgroup_uniform(out);
+      loom_value_facts_mark_cluster_uniform(out);
     } else if (loom_value_facts_is_lane_varying(*a) ||
                loom_value_facts_is_lane_varying(*b)) {
       loom_value_facts_mark_lane_varying(out);

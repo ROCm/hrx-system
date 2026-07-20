@@ -775,6 +775,17 @@ def test_generate_tables_encodes_region_argument_uniform_scope() -> None:
 
     assert "LOOM_REGION_WORKGROUP_UNIFORM_ARGS" in tables_c
 
+    cluster_op = Op(
+        "test.cluster_kernel_region",
+        group=Dialect("test"),
+        regions=[RegionDef("body", arg_uniform_scope="cluster")],
+        format=[Region("body")],
+    )
+
+    cluster_tables_c = generate_tables_c("test", 0, [cluster_op])
+
+    assert "LOOM_REGION_CLUSTER_UNIFORM_ARGS" in cluster_tables_c
+
 
 def test_generate_tables_rejects_unknown_region_argument_uniform_scope() -> None:
     op = Op(

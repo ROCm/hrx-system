@@ -164,6 +164,15 @@ typedef struct loom_target_workgroup_size_t {
   uint32_t z;
 } loom_target_workgroup_size_t;
 
+typedef struct loom_target_workgroup_cluster_size_t {
+  // Number of workgroups in a cluster along the x dimension.
+  uint32_t x;
+  // Number of workgroups in a cluster along the y dimension.
+  uint32_t y;
+  // Number of workgroups in a cluster along the z dimension.
+  uint32_t z;
+} loom_target_workgroup_cluster_size_t;
+
 typedef struct loom_target_grid_size_t {
   // Maximum dispatched grid size along the x dimension.
   uint32_t x;

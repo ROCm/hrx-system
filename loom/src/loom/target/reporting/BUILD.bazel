@@ -53,8 +53,12 @@ loom_cc_library(
         "report.c",
         "row_list.c",
         "row_list.h",
+        "target_insertion.c",
     ],
-    hdrs = ["report.h"],
+    hdrs = [
+        "report.h",
+        "target_insertion.h",
+    ],
     deps = [
         "//loom/src/loom/codegen/low:planning_statistics",
         "//loom/src/loom/target:types",
@@ -110,11 +114,13 @@ loom_cc_library(
         "low_allocation.c",
         "low_allocation.h",
         "low_mix.c",
-        "low_mix.h",
         "low_names.c",
+    ],
+    hdrs = [
+        "low.h",
+        "low_mix.h",
         "low_names.h",
     ],
-    hdrs = ["low.h"],
     deps = [
         ":report",
         "//loom/src/loom/analysis:liveness",

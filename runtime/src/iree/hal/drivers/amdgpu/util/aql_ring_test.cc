@@ -7,9 +7,12 @@
 #include "iree/hal/drivers/amdgpu/util/aql_ring.h"
 
 #include <cstdint>
+#include <cstring>
 
+#include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
 
 namespace {
 
@@ -22,6 +25,43 @@ static void ConfigureQueue(iree_hal_amdgpu_aql_packet_t* base, uint32_t size,
   out_queue->hsa_queue.base_address = base;
   out_queue->hsa_queue.size = size;
   out_queue->hsa_queue.doorbell_signal.handle = (uint64_t)doorbell_signal;
+}
+
+TEST(AqlRingTest, CommitsExtendedDispatchFormatAndSetupAtomically) {
+  iree_hal_amdgpu_aql_packet_t packet;
+  std::memset(&packet, 0xCC, sizeof(packet));
+
+  iree_hal_amdgpu_aql_dispatch_params_t params = {};
+  params.kernel_object = 0x1234;
+  params.workgroup_size[0] = 64;
+  params.workgroup_size[1] = 1;
+  params.workgroup_size[2] = 1;
+  params.workgroup_count[0] = 2;
+  params.workgroup_count[1] = 1;
+  params.workgroup_count[2] = 1;
+  params.workgroup_cluster_size[0] = 2;
+  params.workgroup_cluster_size[1] = 1;
+  params.workgroup_cluster_size[2] = 1;
+  params.packet_control = iree_hal_amdgpu_aql_packet_control_barrier_system();
+
+  uint16_t header = 0;
+  uint16_t setup = 0;
+  IREE_ASSERT_OK(iree_hal_amdgpu_aql_emit_extended_dispatch(
+      &packet.extended_dispatch, &params, &header, &setup));
+
+  uint32_t first_dword = 0;
+  std::memcpy(&first_dword, &packet, sizeof(first_dword));
+  EXPECT_EQ(first_dword, 0xCCCCCCCCu);
+
+  iree_hal_amdgpu_aql_ring_commit(&packet, header, setup);
+
+  std::memcpy(&first_dword, &packet, sizeof(first_dword));
+  EXPECT_EQ(first_dword, static_cast<uint32_t>(header) |
+                             (static_cast<uint32_t>(setup) << 16));
+  EXPECT_EQ(packet.extended_dispatch.header, header);
+  EXPECT_EQ(packet.extended_dispatch.amd_format,
+            IREE_HSA_AMD_AQL_FORMAT_EXT_KERNEL_DISPATCH);
+  EXPECT_EQ(packet.extended_dispatch.setup, 3u);
 }
 
 // A DOORBELL-kind signal exposes an MMIO register pointer in the union, so

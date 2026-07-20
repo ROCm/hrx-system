@@ -6,9 +6,9 @@
 
 #include "loom/codegen/low/allocation/coalescing.h"
 
+#include "loom/codegen/low/allocation/edge_alias.h"
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/storage.h"
-#include "loom/codegen/low/storage_relation.h"
 
 static bool loom_low_allocation_coalescing_value_ordinal_for_value(
     const loom_low_allocation_coalescing_context_t* context,
@@ -80,8 +80,8 @@ static bool loom_low_allocation_coalescing_unit_ranges_overlap(
   return true;
 }
 
-// Returns true when any unit in |unit_offset, unit_count| remains semantically
-// live across |program_point| in the scheduled allocation order.
+// Returns true when any unit in |unit_offset, unit_count| retains concrete
+// storage across |program_point| in the scheduled allocation order.
 static bool loom_low_allocation_coalescing_value_units_live_at_point(
     const loom_low_allocation_coalescing_context_t* context,
     loom_value_ordinal_t value_ordinal, uint32_t unit_offset,
@@ -96,12 +96,16 @@ static bool loom_low_allocation_coalescing_value_units_live_at_point(
   IREE_ASSERT_LE(unit_count, interval->unit_count - unit_offset);
 
   bool value_live_at_point = false;
+  const loom_low_allocation_unit_liveness_t* unit_liveness =
+      context->search_context->unit_liveness;
   const loom_liveness_segment_range_t segments =
-      loom_liveness_segment_range_for_value_ordinal(context->liveness,
-                                                    value_ordinal);
+      loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
+          unit_liveness, context->liveness, value_ordinal);
   if (segments.count == 0) {
-    value_live_at_point = interval->start_point <= program_point &&
-                          program_point < interval->end_point;
+    // Empty storage segments require the conservative linear check below. The
+    // per-unit end points include storage continuation through tied results
+    // and decomposed edge payloads that semantic SSA segments do not encode.
+    value_live_at_point = interval->start_point <= program_point;
   } else {
     IREE_ASSERT_LE((uint64_t)segments.start + segments.count,
                    context->liveness->segment_count);
@@ -118,177 +122,60 @@ static bool loom_low_allocation_coalescing_value_units_live_at_point(
       }
     }
   }
-  if (!value_live_at_point) {
-    return false;
-  }
-
-  const loom_low_allocation_unit_liveness_t* unit_liveness =
-      context->search_context->unit_liveness;
-  const uint32_t end_point_start =
-      loom_low_allocation_unit_liveness_end_point_start_for_value_ordinal(
-          unit_liveness, context->liveness, value_ordinal);
-  IREE_ASSERT_NE(end_point_start, UINT32_MAX);
-  IREE_ASSERT_LE((uint64_t)end_point_start + unit_offset + unit_count,
-                 unit_liveness->end_point_count);
-  for (uint32_t i = 0; i < unit_count; ++i) {
-    if (unit_liveness->end_points[end_point_start + unit_offset + i] >
-        program_point) {
-      return true;
+  if (value_live_at_point) {
+    const uint32_t end_point_start =
+        loom_low_allocation_unit_liveness_end_point_start_for_value_ordinal(
+            unit_liveness, context->liveness, value_ordinal);
+    IREE_ASSERT_NE(end_point_start, UINT32_MAX);
+    IREE_ASSERT_LE((uint64_t)end_point_start + unit_offset + unit_count,
+                   unit_liveness->end_point_count);
+    for (uint32_t i = 0; i < unit_count; ++i) {
+      if (unit_liveness->end_points[end_point_start + unit_offset + i] >
+          program_point) {
+        return true;
+      }
     }
   }
-  return false;
-}
 
-static bool
-loom_low_allocation_coalescing_edge_destination_range_has_distinct_source(
-    const loom_low_allocation_coalescing_context_t* context,
-    const loom_low_placement_relation_t* relation,
-    uint32_t destination_unit_offset, uint32_t destination_unit_count) {
-  const loom_low_placement_relation_range_t range =
-      loom_low_placement_relation_range_for_value_ordinal(
-          context->placement, relation->result_ordinal);
-  for (uint32_t i = 0; i < range.count; ++i) {
-    const loom_low_placement_relation_t* other_relation =
-        &context->placement->relations[range.start + i];
-    if (other_relation == relation ||
-        other_relation->kind != LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE ||
-        !loom_low_placement_cause_is_edge(other_relation->cause)) {
+  // A tied result continues to own its operand's concrete units after the
+  // operand SSA value is consumed. Follow those unit mappings so copy and
+  // structural coalescing cannot classify continued storage as a dead alias.
+  // Tied-result relations point from an operand definition to its newer SSA
+  // result definition, making this recursive traversal acyclic.
+  const loom_low_placement_relation_range_t tied_range =
+      loom_low_placement_relation_range_for_source_value_ordinal(
+          context->placement, value_ordinal);
+  for (uint32_t i = 0; i < tied_range.count; ++i) {
+    const uint32_t relation_index =
+        context->placement
+            ->relation_indices_by_source_ordinal[tied_range.start + i];
+    const loom_low_placement_relation_t* relation =
+        &context->placement->relations[relation_index];
+    if (relation->cause != LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT) {
       continue;
     }
     uint32_t overlap_offset = 0;
     if (!loom_low_allocation_coalescing_unit_ranges_overlap(
-            destination_unit_offset, destination_unit_count,
-            other_relation->result_unit_offset, other_relation->unit_count,
-            &overlap_offset)) {
+            unit_offset, unit_count, relation->source_unit_offset,
+            relation->unit_count, &overlap_offset)) {
       continue;
     }
-    const uint32_t relation_source_unit =
-        relation->source_unit_offset +
-        (overlap_offset - relation->result_unit_offset);
-    const uint32_t other_source_unit =
-        other_relation->source_unit_offset +
-        (overlap_offset - other_relation->result_unit_offset);
-    if (other_relation->source_ordinal != relation->source_ordinal ||
-        other_source_unit != relation_source_unit) {
+    const uint64_t query_end = (uint64_t)unit_offset + unit_count;
+    const uint64_t relation_end =
+        (uint64_t)relation->source_unit_offset + relation->unit_count;
+    const uint32_t overlap_count =
+        (uint32_t)((query_end < relation_end ? query_end : relation_end) -
+                   overlap_offset);
+    const uint32_t result_unit_offset =
+        relation->result_unit_offset +
+        (overlap_offset - relation->source_unit_offset);
+    if (loom_low_allocation_coalescing_value_units_live_at_point(
+            context, relation->result_ordinal, result_unit_offset,
+            overlap_count, program_point)) {
       return true;
     }
   }
   return false;
-}
-
-static iree_status_t loom_low_allocation_coalescing_value_unit_range_used_after(
-    loom_low_allocation_coalescing_context_t* context,
-    const loom_op_t* consuming_op, loom_value_id_t value_id,
-    uint32_t unit_offset, uint32_t unit_count, bool* out_used_after) {
-  *out_used_after = false;
-  loom_consumption_region_query_t* region_query = NULL;
-  IREE_RETURN_IF_ERROR(context->consumption_query(
-      context->user_data, consuming_op->parent_block->parent_region,
-      &region_query));
-  loom_consumption_use_after_query_t use_after_query = {0};
-  IREE_RETURN_IF_ERROR(loom_consumption_use_after_query_prepare(
-      region_query, consuming_op, value_id, &use_after_query));
-  const loom_value_t* value =
-      loom_module_value(context->placement->module, value_id);
-  const loom_use_t* use = NULL;
-  loom_value_for_each_use(value, use) {
-    const loom_op_t* use_op = loom_use_user_op(*use);
-    const uint16_t operand_index = loom_use_operand_index(*use);
-    if (!loom_low_storage_operand_may_read_unit_range(
-            context->placement->module, use_op, operand_index, unit_offset,
-            unit_count) ||
-        !loom_consumption_use_after_query_contains(&use_after_query, *use)) {
-      continue;
-    }
-    *out_used_after = true;
-    return iree_ok_status();
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t
-loom_low_allocation_coalescing_edge_destination_range_used_after_candidate_definition(
-    loom_low_allocation_coalescing_context_t* context,
-    const loom_liveness_interval_t* interval,
-    const loom_low_placement_relation_t* relation,
-    const loom_low_allocation_assignment_t* counterpart,
-    uint32_t destination_unit_offset, uint32_t destination_unit_count,
-    bool* out_used_after) {
-  *out_used_after = false;
-  const loom_value_id_t destination_value_id =
-      loom_low_placement_value_id(context->placement, relation->result_ordinal);
-  const loom_value_t* destination_value =
-      loom_module_value(context->placement->module, destination_value_id);
-  if (!loom_value_is_block_arg(destination_value)) {
-    return iree_ok_status();
-  }
-  const loom_value_id_t candidate_value_id =
-      interval->value_id == destination_value_id ? counterpart->value_id
-                                                 : interval->value_id;
-  const loom_value_t* candidate_value =
-      loom_module_value(context->placement->module, candidate_value_id);
-  if (loom_value_is_block_arg(candidate_value)) {
-    return iree_ok_status();
-  }
-  const loom_op_t* candidate_op = loom_value_def_op(candidate_value);
-  if (candidate_op == NULL || candidate_op->parent_block == NULL) {
-    return iree_ok_status();
-  }
-  return loom_low_allocation_coalescing_value_unit_range_used_after(
-      context, candidate_op, destination_value_id, destination_unit_offset,
-      destination_unit_count, out_used_after);
-}
-
-static iree_status_t
-loom_low_allocation_coalescing_edge_allows_counterpart_overlap(
-    loom_low_allocation_coalescing_context_t* context,
-    const loom_liveness_interval_t* interval,
-    const loom_low_placement_relation_t* relation,
-    const loom_low_allocation_assignment_t* counterpart,
-    uint32_t destination_unit_offset, uint32_t destination_unit_count,
-    bool* out_allows_overlap) {
-  *out_allows_overlap = false;
-  if (relation->kind != LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE ||
-      !loom_low_placement_cause_is_edge(relation->cause)) {
-    return iree_ok_status();
-  }
-  bool destination_used_after_candidate_definition = false;
-  IREE_RETURN_IF_ERROR(
-      loom_low_allocation_coalescing_edge_destination_range_used_after_candidate_definition(
-          context, interval, relation, counterpart, destination_unit_offset,
-          destination_unit_count,
-          &destination_used_after_candidate_definition));
-  if (destination_used_after_candidate_definition) {
-    return iree_ok_status();
-  }
-  switch (relation->cause) {
-    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD:
-      *out_allows_overlap = true;
-      return iree_ok_status();
-    case LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH:
-    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR: {
-      if (!loom_low_allocation_coalescing_edge_destination_range_has_distinct_source(
-              context, relation, destination_unit_offset,
-              destination_unit_count)) {
-        *out_allows_overlap = true;
-        return iree_ok_status();
-      }
-      bool used_after = false;
-      const loom_value_id_t source_value_id = loom_low_placement_value_id(
-          context->placement, relation->source_ordinal);
-      const uint32_t source_unit_offset =
-          relation->source_unit_offset +
-          (destination_unit_offset - relation->result_unit_offset);
-      IREE_RETURN_IF_ERROR(
-          loom_low_allocation_coalescing_value_unit_range_used_after(
-              context, relation->op, source_value_id, source_unit_offset,
-              destination_unit_count, &used_after));
-      *out_allows_overlap = !used_after;
-      return iree_ok_status();
-    }
-    default:
-      return iree_ok_status();
-  }
 }
 
 // Edge placement may make counterpart values overlap in the linear interval
@@ -310,11 +197,17 @@ loom_low_allocation_coalescing_can_ignore_relation_counterpart_conflict(
                                                                    interval)) {
     return iree_ok_status();
   }
+  const loom_low_allocation_edge_alias_context_t edge_alias_context = {
+      .placement = context->placement,
+      .consumption_query = context->consumption_query,
+      .user_data = context->user_data,
+  };
   bool edge_allows_overlap = false;
   IREE_RETURN_IF_ERROR(
-      loom_low_allocation_coalescing_edge_allows_counterpart_overlap(
-          context, interval, relation, counterpart, destination_unit_offset,
-          destination_unit_count, &edge_allows_overlap));
+      loom_low_allocation_edge_alias_allows_counterpart_overlap(
+          &edge_alias_context, interval, relation, counterpart,
+          destination_unit_offset, destination_unit_count,
+          &edge_allows_overlap));
   if (edge_allows_overlap) {
     *out_can_ignore = true;
     return iree_ok_status();
@@ -1204,6 +1097,156 @@ static iree_status_t loom_low_allocation_coalescing_concat_ignored_sources(
   return iree_ok_status();
 }
 
+// Returns whether all concat sources are produced in one compact assembly
+// window immediately before the result. Reserving a long-lived result for an
+// early source carries its transient pressure through unrelated packets; a
+// compact source cluster instead has no useful placement lifetime of its own.
+static bool loom_low_allocation_coalescing_concat_sources_form_compact_assembly(
+    const loom_low_allocation_coalescing_context_t* context,
+    const loom_liveness_interval_t* result_interval,
+    const loom_low_placement_relation_range_t* result_range) {
+  uint32_t source_count = 0;
+  uint32_t earliest_source_start = result_interval->start_point;
+  for (uint32_t i = 0; i < result_range->count; ++i) {
+    const loom_low_placement_relation_t* relation =
+        &context->placement->relations[result_range->start + i];
+    if (relation->cause != LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT) {
+      continue;
+    }
+    const loom_liveness_interval_t* source_interval =
+        loom_liveness_interval_for_value_ordinal(context->liveness,
+                                                 relation->source_ordinal);
+    if (source_interval == NULL ||
+        source_interval->end_point != result_interval->start_point) {
+      return false;
+    }
+    earliest_source_start =
+        iree_min(earliest_source_start, source_interval->start_point);
+    ++source_count;
+  }
+  return source_count != 0 &&
+         result_interval->start_point - earliest_source_start <= source_count;
+}
+
+// Returns whether any source has already committed to a location. Result
+// reservations are anticipatory: once allocation has begun assembling the
+// sources, sibling coalescing or the materialized-concat path owns the
+// remaining placement decision.
+static bool loom_low_allocation_coalescing_concat_has_assigned_source(
+    const loom_low_allocation_coalescing_context_t* context,
+    const loom_low_placement_relation_range_t* result_range) {
+  for (uint32_t i = 0; i < result_range->count; ++i) {
+    const loom_low_placement_relation_t* relation =
+        &context->placement->relations[result_range->start + i];
+    if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT &&
+        loom_low_allocation_coalescing_current_assignment_for_value_ordinal(
+            context, relation->source_ordinal) != NULL) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Returns whether normal placement of the current source can be extended to
+// every sibling source without a materialized concat. This predicts the same
+// locations that sibling coalescing will request later; reserving the result
+// when they are all available would only perturb an already-valid allocation.
+static iree_status_t
+loom_low_allocation_coalescing_default_concat_source_assembles_result(
+    loom_low_allocation_coalescing_context_t* context,
+    const loom_liveness_interval_t* source_interval,
+    const loom_low_placement_relation_t* relation,
+    const loom_liveness_interval_t* result_interval,
+    loom_low_allocation_class_capacity_t result_capacity,
+    const loom_low_placement_relation_range_t* result_range,
+    bool* out_assembles_result) {
+  *out_assembles_result = false;
+
+  loom_low_allocation_class_capacity_t source_capacity = {0};
+  IREE_RETURN_IF_ERROR(loom_low_allocation_target_constraints_interval_capacity(
+      context->target_constraints, source_interval, &source_capacity));
+  uint32_t source_location_base = 0;
+  if (!loom_low_allocation_search_find_free_location(
+          context->search_context, source_interval, source_capacity,
+          &source_location_base) ||
+      source_location_base > UINT32_MAX - relation->source_unit_offset) {
+    return iree_ok_status();
+  }
+  const uint32_t source_unit_location =
+      source_location_base + relation->source_unit_offset;
+  if (source_unit_location < relation->result_unit_offset) {
+    return iree_ok_status();
+  }
+  const uint32_t result_location_base =
+      source_unit_location - relation->result_unit_offset;
+  const uint32_t result_alignment =
+      loom_low_allocation_live_range_interval_alignment(result_interval);
+  if (result_location_base % result_alignment != 0 ||
+      !loom_low_allocation_storage_reg_classes_share(
+          context->search_context->descriptor_set,
+          source_capacity.descriptor_reg_class_id,
+          result_capacity.descriptor_reg_class_id) ||
+      !loom_low_allocation_target_constraints_location_range_fits_capacity(
+          &result_capacity, source_capacity.location_kind, result_location_base,
+          result_interval->unit_count)) {
+    return iree_ok_status();
+  }
+
+  for (uint32_t i = 0; i < result_range->count; ++i) {
+    const loom_low_placement_relation_t* sibling_relation =
+        &context->placement->relations[result_range->start + i];
+    if (sibling_relation->cause != LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT) {
+      continue;
+    }
+    const loom_liveness_interval_t* sibling_interval =
+        loom_liveness_interval_for_value_ordinal(
+            context->liveness, sibling_relation->source_ordinal);
+    if (sibling_interval == NULL ||
+        !loom_liveness_value_class_equal(source_interval->value_class,
+                                         sibling_interval->value_class) ||
+        result_location_base >
+            UINT32_MAX - sibling_relation->result_unit_offset) {
+      return iree_ok_status();
+    }
+    const uint32_t sibling_unit_location =
+        result_location_base + sibling_relation->result_unit_offset;
+    if (sibling_unit_location < sibling_relation->source_unit_offset) {
+      return iree_ok_status();
+    }
+    const uint32_t sibling_location_base =
+        sibling_unit_location - sibling_relation->source_unit_offset;
+    loom_low_allocation_class_capacity_t sibling_capacity = {0};
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_target_constraints_interval_capacity(
+            context->target_constraints, sibling_interval, &sibling_capacity));
+    const uint32_t sibling_alignment =
+        loom_low_allocation_live_range_interval_alignment(sibling_interval);
+    if (!loom_low_allocation_storage_reg_classes_share(
+            context->search_context->descriptor_set,
+            source_capacity.descriptor_reg_class_id,
+            sibling_capacity.descriptor_reg_class_id) ||
+        !loom_low_allocation_target_constraints_location_range_fits_capacity(
+            &sibling_capacity, source_capacity.location_kind,
+            sibling_location_base, sibling_interval->unit_count) ||
+        sibling_location_base % sibling_alignment != 0 ||
+        loom_low_allocation_search_location_conflicts(
+            context->search_context, sibling_interval,
+            sibling_capacity.descriptor_reg_class_id,
+            source_capacity.location_kind, sibling_location_base,
+            sibling_interval->unit_count,
+            /*ignored_value_ids=*/NULL,
+            /*ignored_value_count=*/0,
+            /*ignored_storage_lease_value_ids=*/NULL,
+            /*ignored_storage_lease_value_count=*/0,
+            LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED)) {
+      return iree_ok_status();
+    }
+  }
+
+  *out_assembles_result = true;
+  return iree_ok_status();
+}
+
 // Chooses a concat result span that can also accept the current source slice.
 // Scheduled allocation may see scalar concat sources long before the concat op,
 // so selecting only for the future result interval can reserve a span that the
@@ -1294,16 +1337,8 @@ loom_low_allocation_coalescing_assign_concat_result_reservation(
     const loom_low_placement_relation_range_t* result_range,
     bool* out_assigned) {
   *out_assigned = false;
-  // Scalar slices benefit from reserving the aggregate span even when the
-  // assembled value remains live. Wider slices only reserve packet-local
-  // aggregates: holding the full span across intervening packets can increase
-  // pressure substantially, while delaying a packet-local reservation leaves
-  // independently assigned slices unable to satisfy contiguous packet inputs.
   const uint32_t result_lifetime =
       result_interval->end_point - result_interval->start_point;
-  if (source_interval->unit_count != 1 && result_lifetime != 1) {
-    return iree_ok_status();
-  }
   loom_low_allocation_class_capacity_t capacity = {0};
   IREE_RETURN_IF_ERROR(loom_low_allocation_target_constraints_interval_capacity(
       context->target_constraints, result_interval, &capacity));
@@ -1317,6 +1352,29 @@ loom_low_allocation_coalescing_assign_concat_result_reservation(
       &ignored_value_count));
   if (ignored_value_count == 0) {
     return iree_ok_status();
+  }
+
+  // Scalar sources can cheaply reserve a future aggregate, and packet-local
+  // results must reserve before independently allocated sources fragment their
+  // required span. Wider sources only reserve for a compact producer cluster
+  // when normal placement cannot assemble its siblings contiguously.
+  if (source_interval->unit_count != 1 && result_lifetime != 1) {
+    if (!loom_low_allocation_coalescing_concat_sources_form_compact_assembly(
+            context, result_interval, result_range)) {
+      return iree_ok_status();
+    }
+    if (loom_low_allocation_coalescing_concat_has_assigned_source(
+            context, result_range)) {
+      return iree_ok_status();
+    }
+    bool default_source_assembles_result = false;
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_coalescing_default_concat_source_assembles_result(
+            context, source_interval, relation, result_interval, capacity,
+            result_range, &default_source_assembles_result));
+    if (default_source_assembles_result) {
+      return iree_ok_status();
+    }
   }
 
   uint32_t result_location_base = 0;

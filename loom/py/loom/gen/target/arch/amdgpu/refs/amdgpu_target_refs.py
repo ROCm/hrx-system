@@ -121,6 +121,16 @@ _READFIRSTLANE_DESCRIPTOR_KEYS = frozenset(
     )
 )
 
+_XCNT_IMPLICIT_DRAIN_DESCRIPTOR_KEYS = frozenset(("amdgpu.s_trap",))
+
+_XCNT_IMPLICIT_DRAIN_DESCRIPTOR_KEY_PREFIXES = (
+    "amdgpu.s_getreg_b32",
+    "amdgpu.s_setreg",
+    "amdgpu.s_sendmsg",
+    "amdgpu.s_barrier_wait",
+    "amdgpu.s_barrier_signal",
+)
+
 _DST_SEL_ENCODING_FIELD_ID = AMDGPU_ENCODING_FIELD_IDS["DST_SEL"]
 _LITERAL_ENCODING_FIELD_ID = AMDGPU_ENCODING_FIELD_IDS["LITERAL"]
 
@@ -301,6 +311,8 @@ def _descriptor_trait_names(
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_READFIRSTLANE")
     if descriptor.encoding_format_id == AMDGPU_ENCODING_FORMAT_VOP1_SDWA:
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_SDWA")
+    if descriptor.key in _XCNT_IMPLICIT_DRAIN_DESCRIPTOR_KEYS or descriptor.key.startswith(_XCNT_IMPLICIT_DRAIN_DESCRIPTOR_KEY_PREFIXES):
+        trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_XCNT_IMPLICIT_DRAIN")
     return tuple(trait_names)
 
 

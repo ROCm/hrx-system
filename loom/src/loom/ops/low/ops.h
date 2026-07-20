@@ -192,10 +192,13 @@ LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_size_z, 7)
 LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_count_x, 8)
 LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_count_y, 9)
 LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_count_z, 10)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_kernel_def_allocation, 11, loom_low_allocation_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_kernel_def_schedule, 12, loom_low_schedule_t)
-LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_kernel_def_predicates, 13)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_kernel_def_retain, 14, loom_low_retain_t)
+LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_cluster_size_x, 11)
+LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_cluster_size_y, 12)
+LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_cluster_size_z, 13)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_kernel_def_allocation, 14, loom_low_allocation_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_kernel_def_schedule, 15, loom_low_schedule_t)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_kernel_def_predicates, 16)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_kernel_def_retain, 17, loom_low_retain_t)
 LOOM_DEFINE_REGION(loom_low_kernel_def_body, 0)
 enum loom_low_kernel_def_build_flag_bits_e {
   LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_RETAIN = 1u << 0,
@@ -209,6 +212,9 @@ enum loom_low_kernel_def_build_flag_bits_e {
   LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_COUNT_X = 1u << 8,
   LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_COUNT_Y = 1u << 9,
   LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_COUNT_Z = 1u << 10,
+  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_X = 1u << 11,
+  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Y = 1u << 12,
+  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Z = 1u << 13,
 };
 typedef uint32_t loom_low_kernel_def_build_flags_t;
 iree_status_t loom_low_kernel_def_build(
@@ -227,6 +233,9 @@ iree_status_t loom_low_kernel_def_build(
     loom_optional int64_t workgroup_count_x,
     loom_optional int64_t workgroup_count_y,
     loom_optional int64_t workgroup_count_z,
+    loom_optional int64_t workgroup_cluster_size_x,
+    loom_optional int64_t workgroup_cluster_size_y,
+    loom_optional int64_t workgroup_cluster_size_z,
     loom_symbol_ref_t callee,
     const loom_type_t* arg_types,
     iree_host_size_t arg_types_count,
@@ -352,12 +361,15 @@ LOOM_DEFINE_VARIADIC_RESULTS(loom_low_op_results, 0)
 LOOM_DEFINE_ATTR_STRING(loom_low_op_opcode, 0)
 LOOM_DEFINE_ATTR_I64(loom_low_op_descriptor_ordinal, 1)
 LOOM_DEFINE_ATTR_DICT(loom_low_op_attrs, 2)
+LOOM_DEFINE_ATTR_I64_ARRAY(loom_low_op_memory_access, 3)
 iree_status_t loom_low_op_build(
     loom_builder_t* builder,
     loom_string_id_t opcode,
     loom_may_consume const loom_value_id_t* operands,
     iree_host_size_t operands_count,
     loom_optional loom_named_attr_slice_t attrs,
+    loom_optional const int64_t* memory_access,
+    iree_host_size_t memory_access_count,
     const loom_type_t* result_types,
     iree_host_size_t result_count,
     const loom_tied_result_t* tied_results,

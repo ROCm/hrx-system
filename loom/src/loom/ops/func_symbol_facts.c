@@ -108,12 +108,6 @@ static iree_status_t loom_func_symbol_apply_direct_export_attrs(
   return iree_ok_status();
 }
 
-static bool loom_func_symbol_is_kernel_entry(loom_func_like_t func) {
-  const loom_op_kind_t kernel_def = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 0);
-  const loom_op_kind_t low_kernel_def = LOOM_OP_KIND(LOOM_DIALECT_LOW, 1);
-  return func.op->kind == kernel_def || func.op->kind == low_kernel_def;
-}
-
 static iree_status_t loom_func_symbol_apply_imports(
     const loom_module_t* module, loom_func_like_t func,
     loom_func_symbol_facts_t* facts) {
@@ -189,7 +183,7 @@ static iree_status_t loom_func_symbol_fact_compute(
   if (has_abi_attr) {
     facts->has_abi = true;
     facts->abi_kind = (loom_target_abi_kind_t)loom_func_like_abi(func);
-  } else if (loom_func_symbol_is_kernel_entry(func)) {
+  } else if (loom_func_like_is_kernel_entry(func)) {
     facts->has_abi = true;
     facts->abi_kind = LOOM_TARGET_ABI_HAL_KERNEL;
   }
@@ -206,7 +200,7 @@ static iree_status_t loom_func_symbol_fact_compute(
   IREE_RETURN_IF_ERROR(
       loom_func_symbol_apply_export_attrs(module, export_attrs, facts));
   IREE_RETURN_IF_ERROR(loom_func_symbol_apply_direct_export_attrs(func, facts));
-  if (export_attrs.count > 0 || loom_func_symbol_is_kernel_entry(func)) {
+  if (export_attrs.count > 0 || loom_func_like_is_kernel_entry(func)) {
     facts->exports = true;
   }
 

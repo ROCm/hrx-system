@@ -139,18 +139,18 @@ loom_target_artifact_manifest_json_write_optional_source_name(
                                              source_name);
 }
 
-static iree_status_t loom_target_artifact_manifest_json_write_workgroup_size(
-    loom_json_object_writer_t* object, const uint32_t workgroup_size[3]) {
-  IREE_RETURN_IF_ERROR(
-      loom_json_object_begin_field(object, IREE_SV("workgroup_size")));
+static iree_status_t loom_target_artifact_manifest_json_write_dimension3(
+    loom_json_object_writer_t* object, iree_string_view_t field_name,
+    const uint32_t dimensions[3]) {
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(object, field_name));
   loom_json_array_writer_t array;
   IREE_RETURN_IF_ERROR(loom_json_array_begin(object->stream, &array));
   IREE_RETURN_IF_ERROR(
-      loom_json_array_write_uint32_element(&array, workgroup_size[0]));
+      loom_json_array_write_uint32_element(&array, dimensions[0]));
   IREE_RETURN_IF_ERROR(
-      loom_json_array_write_uint32_element(&array, workgroup_size[1]));
+      loom_json_array_write_uint32_element(&array, dimensions[1]));
   IREE_RETURN_IF_ERROR(
-      loom_json_array_write_uint32_element(&array, workgroup_size[2]));
+      loom_json_array_write_uint32_element(&array, dimensions[2]));
   return loom_json_array_end(&array);
 }
 
@@ -592,15 +592,20 @@ static iree_status_t loom_target_artifact_manifest_format_execution_json(
   if (iree_any_bit_set(
           execution->flags,
           LOOM_TARGET_ARTIFACT_MANIFEST_EXECUTION_FLAG_WORKGROUP_SIZE)) {
-    IREE_RETURN_IF_ERROR(
-        loom_target_artifact_manifest_json_write_workgroup_size(
-            &object, execution->workgroup_size));
+    IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_json_write_dimension3(
+        &object, IREE_SV("workgroup_size"), execution->workgroup_size));
   }
   if (iree_any_bit_set(
           execution->flags,
           LOOM_TARGET_ARTIFACT_MANIFEST_EXECUTION_FLAG_SUBGROUP_SIZE)) {
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
         &object, IREE_SV("subgroup_size"), execution->subgroup_size));
+  }
+  if (iree_any_bit_set(
+          execution->flags,
+          LOOM_TARGET_ARTIFACT_MANIFEST_EXECUTION_FLAG_CLUSTER_SIZE)) {
+    IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_json_write_dimension3(
+        &object, IREE_SV("cluster_size"), execution->cluster_size));
   }
   return loom_json_object_end(&object);
 }

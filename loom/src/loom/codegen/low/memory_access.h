@@ -72,8 +72,21 @@ typedef enum loom_low_memory_access_precision_bits_e {
   LOOM_LOW_MEMORY_ACCESS_PRECISION_INTERVAL = 1u << 3,
   // A later lane-set summary exactly describes the accessed lanes.
   LOOM_LOW_MEMORY_ACCESS_PRECISION_EXACT_LANES = 1u << 4,
+  // strided_interval exactly describes one repeated byte interval per stride.
+  LOOM_LOW_MEMORY_ACCESS_PRECISION_STRIDED_INTERVAL = 1u << 5,
 } loom_low_memory_access_precision_bits_t;
 typedef uint32_t loom_low_memory_access_precision_flags_t;
+
+// One non-wrapping byte interval repeated at a fixed positive stride relative
+// to an alias root. The interval is half-open within [0, stride_bytes).
+typedef struct loom_low_strided_byte_interval_t {
+  // Positive byte stride between repeated interval instances.
+  uint64_t stride_bytes;
+  // Inclusive byte residue where each interval begins.
+  uint64_t begin_bytes;
+  // Exclusive byte residue where each interval ends.
+  uint64_t end_bytes;
+} loom_low_strided_byte_interval_t;
 
 typedef struct loom_low_memory_access_summary_t {
   // Normalized target-low memory space touched by this summary.
@@ -84,6 +97,8 @@ typedef struct loom_low_memory_access_summary_t {
   uint32_t alias_group_id;
   // Bitset of loom_low_memory_access_precision_bits_t values.
   loom_low_memory_access_precision_flags_t precision_flags;
+  // Optional exact repeated byte interval relative to alias_root_id.
+  loom_low_strided_byte_interval_t strided_interval;
   // Optional conservative byte interval touched by this access.
   const loom_low_byte_interval_t* byte_interval;
 } loom_low_memory_access_summary_t;

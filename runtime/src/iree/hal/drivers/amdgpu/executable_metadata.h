@@ -92,6 +92,10 @@ typedef struct iree_hal_amdgpu_executable_export_t {
   iree_hal_amdgpu_executable_export_flags_t flags;
   // Fixed XYZ workgroup size, or zeroes when dispatch config must provide it.
   uint32_t workgroup_size[3];
+  // Fixed workgroup cluster size, or zeroes for ordinary dispatch.
+  uint8_t workgroup_cluster_size[3];
+  // Reserved to preserve natural alignment. Must be zero.
+  uint8_t reserved;
   // Fixed group segment byte size reported by executable metadata.
   uint32_t fixed_group_segment_size;
   // Fixed private segment byte size reported by executable metadata.

@@ -35,6 +35,8 @@ typedef struct iree_hal_amdgpu_host_queue_dispatch_plan_t {
   uint32_t kernarg_block_count;
   // Number of operation resources retained until dispatch completion.
   iree_host_size_t operation_resource_count;
+  // Validated extended-packet cluster count, or zeroes for ordinary dispatch.
+  uint32_t workgroup_cluster_count[3];
   // True when workgroup counts are read from a device buffer before dispatch.
   bool uses_indirect_parameters;
 } iree_hal_amdgpu_host_queue_dispatch_plan_t;
@@ -111,7 +113,9 @@ static iree_status_t iree_hal_amdgpu_host_queue_select_dispatch_kernel_args(
 static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_shape(
     const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor,
     const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
-    const iree_hal_dispatch_config_t config, iree_hal_dispatch_flags_t flags) {
+    const iree_hal_dispatch_config_t config, iree_hal_dispatch_flags_t flags,
+    uint32_t out_cluster_count[3]) {
+  memset(out_cluster_count, 0, sizeof(uint32_t[3]));
   const bool uses_indirect_parameters =
       iree_hal_dispatch_uses_indirect_parameters(flags);
   const bool has_workgroup_size_override =
@@ -154,6 +158,28 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_shape(
                             "(static=%u, dynamic=%u)",
                             kernel_args->group_segment_size,
                             config.dynamic_workgroup_local_memory);
+  }
+  const uint8_t* cluster_size = kernel_args->workgroup_cluster_size;
+  const bool uses_workgroup_clusters =
+      cluster_size[0] != 0 || cluster_size[1] != 0 || cluster_size[2] != 0;
+  if (uses_workgroup_clusters && uses_indirect_parameters) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "clustered AMDGPU dispatch does not support indirect workgroup counts");
+  }
+  if (uses_workgroup_clusters) {
+    iree_hal_amdgpu_aql_dispatch_params_t params = {0};
+    for (iree_host_size_t i = 0; i < 3; ++i) {
+      params.workgroup_size[i] = kernel_args->workgroup_size[i];
+      params.workgroup_count[i] = config.workgroup_count[i];
+      params.workgroup_cluster_size[i] = cluster_size[i];
+    }
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_aql_validate_dispatch_params(
+        &params, out_cluster_count));
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_validate_workgroup_cluster_dispatch(
+        cluster_size, config.workgroup_count,
+        descriptor->physical_device_ordinal,
+        &descriptor->workgroup_cluster_count_limits));
   }
   return iree_ok_status();
 }
@@ -361,7 +387,8 @@ static iree_status_t iree_hal_amdgpu_host_queue_prepare_dispatch_plan(
       out_plan->descriptor, config, &out_plan->override_kernel_args,
       &out_plan->kernel_args));
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_validate_dispatch_shape(
-      out_plan->descriptor, out_plan->kernel_args, config, flags));
+      out_plan->descriptor, out_plan->kernel_args, config, flags,
+      out_plan->workgroup_cluster_count));
   out_plan->uses_indirect_parameters =
       iree_hal_dispatch_uses_indirect_parameters(flags);
 
@@ -739,10 +766,6 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_dispatch_packets(
       plan, target_workgroup_count, config.dynamic_workgroup_local_memory,
       constants, binding_ptrs, uses_custom_direct_arguments,
       dispatch_kernarg_data);
-  iree_hal_amdgpu_device_dispatch_emplace_packet(
-      plan->kernel_args, target_workgroup_count,
-      config.dynamic_workgroup_local_memory, &dispatch_packet->dispatch,
-      dispatch_kernarg_data);
   iree_hsa_signal_t dispatch_completion_signal =
       profile_queue_device_event
           ? iree_hsa_signal_null()
@@ -753,8 +776,6 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_dispatch_packets(
         iree_hal_amdgpu_host_queue_profiling_completion_signal(
             queue, profile_events.first_event_position);
   }
-  dispatch_packet->dispatch.completion_signal = dispatch_completion_signal;
-
   iree_amdgpu_kernel_implicit_args_t* implicit_args =
       uses_custom_direct_arguments
           ? (plan->custom_layout->has_implicit_args
@@ -764,7 +785,6 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_dispatch_packets(
                  : NULL)
           : iree_hal_amdgpu_host_queue_native_implicit_args(
                 plan->kernarg_layout, dispatch_kernarg_data);
-  const uint16_t dispatch_setup = dispatch_packet->dispatch.setup;
   const iree_hsa_fence_scope_t dispatch_acquire_scope =
       iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
           IREE_HSA_FENCE_SCOPE_AGENT);
@@ -780,8 +800,27 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_dispatch_packets(
                     dispatch_acquire_scope, resolution->inline_acquire_scope),
                 iree_hal_amdgpu_host_queue_signal_list_release_scope(
                     queue, signal_semaphore_list));
-  const uint16_t dispatch_header = iree_hal_amdgpu_aql_make_header(
-      IREE_HSA_PACKET_TYPE_KERNEL_DISPATCH, dispatch_packet_control);
+  iree_hal_amdgpu_aql_dispatch_params_t dispatch_params = {
+      .kernel_object = plan->kernel_args->kernel_object,
+      .kernarg_address = dispatch_kernarg_data,
+      .private_segment_size = plan->kernel_args->private_segment_size,
+      .group_segment_size = plan->kernel_args->group_segment_size +
+                            config.dynamic_workgroup_local_memory,
+      .packet_control = dispatch_packet_control,
+      .completion_signal = dispatch_completion_signal,
+  };
+  for (iree_host_size_t i = 0; i < 3; ++i) {
+    dispatch_params.workgroup_size[i] = plan->kernel_args->workgroup_size[i];
+    dispatch_params.workgroup_count[i] = target_workgroup_count[i];
+    dispatch_params.workgroup_cluster_size[i] =
+        plan->kernel_args->workgroup_cluster_size[i];
+  }
+  uint16_t dispatch_header = 0;
+  uint16_t dispatch_setup = 0;
+  iree_hal_amdgpu_aql_emplace_dispatch_packet(
+      &dispatch_packet->dispatch, &dispatch_packet->extended_dispatch,
+      &dispatch_params, plan->workgroup_cluster_count, &dispatch_header,
+      &dispatch_setup);
   uint16_t pre_dispatch_header = 0;
   uint16_t pre_dispatch_setup = 0;
   if (needs_pre_dispatch_packet) {

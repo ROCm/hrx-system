@@ -29,6 +29,42 @@ low.kernel.def target(@test_target) workgroup_count(0, 1, 1) @kernel_rejects_zer
 
 test.target<low_core> @test_target
 
+// ERROR@+1: STRUCTURE/014 {attr_name="workgroup_cluster_size_x", actual_value="0", expected_constraint="positive u32"}
+low.kernel.def target(@test_target) cluster_size(0, 1, 1) @kernel_rejects_zero_cluster_size() {
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// ERROR@+1: STRUCTURE/014 {attr_name="workgroup_cluster_size_x", actual_value="1", expected_constraint="omitted when the complete cluster shape is 1x1x1"}
+low.kernel.def target(@test_target) cluster_size(1, 1, 1) @kernel_rejects_trivial_cluster_size() {
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// ERROR@+1: STRUCTURE/014 {attr_name="workgroup_cluster_size_z", actual_value="65536", expected_constraint="a value whose product with the x and y dimensions fits u32"}
+low.kernel.def target(@test_target) cluster_size(65536, 65536, 65536) @kernel_rejects_overflowing_cluster_size() {
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// ERROR@+1: STRUCTURE/014 {attr_name="workgroup_count_y", actual_value="3", expected_constraint="a positive multiple of workgroup_cluster_size_y"}
+low.kernel.def target(@test_target) workgroup_count(4, 3, 1) cluster_size(1, 2, 1) @kernel_rejects_partial_cluster_grid() {
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 low.kernel.def target(@test_target) @kernel_return_rejects_values(%value: reg<test.i32>) {
   // ERROR@+1: STRUCTURE/001 {op_name="low.return", actual_count="1", expected_count="0"}
   low.return %value : reg<test.i32>

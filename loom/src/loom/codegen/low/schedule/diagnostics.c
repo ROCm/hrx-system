@@ -234,20 +234,21 @@ static bool loom_low_schedule_interval_contains_point(
 
 static bool loom_low_schedule_first_pressure_cliff_for_reg_class(
     const loom_low_schedule_build_state_t* state, uint16_t reg_class_id,
-    const loom_low_pressure_cliff_t** out_cliff) {
+    const loom_target_residency_cliff_t** out_cliff) {
   *out_cliff = NULL;
   if (state->pressure_cliffs == NULL ||
-      loom_low_pressure_cliff_table_is_empty(*state->pressure_cliffs) ||
+      state->pressure_cliffs->cliff_count == 0 ||
       reg_class_id == LOOM_LOW_REG_CLASS_NONE ||
       reg_class_id >= state->target.descriptor_set->reg_class_count) {
     return false;
   }
-  const loom_low_pressure_cliff_range_t range =
-      loom_low_pressure_cliff_table_range(state->pressure_cliffs, reg_class_id);
+  const loom_target_residency_cliff_range_t range =
+      loom_target_residency_direct_resource_cliff_range(state->pressure_cliffs,
+                                                        reg_class_id);
   if (range.count == 0) {
     return false;
   }
-  *out_cliff = &state->pressure_cliffs->values[range.start];
+  *out_cliff = &state->pressure_cliffs->cliffs[range.start];
   return true;
 }
 
@@ -280,7 +281,7 @@ static iree_status_t loom_low_schedule_pressure_budget_for_class(
       return iree_ok_status();
     }
   }
-  const loom_low_pressure_cliff_t* first_cliff = NULL;
+  const loom_target_residency_cliff_t* first_cliff = NULL;
   if (loom_low_schedule_first_pressure_cliff_for_reg_class(state, reg_class_id,
                                                            &first_cliff)) {
     *out_budget = first_cliff->cliff_units;

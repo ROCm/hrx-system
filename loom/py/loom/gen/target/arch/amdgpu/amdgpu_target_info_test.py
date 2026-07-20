@@ -18,6 +18,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID,
     AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11,
+    AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
     AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
     AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
     AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER,
@@ -142,6 +143,7 @@ def test_target_info_flag_expressions_validate_known_bits() -> None:
     assert amdgpu_target_info._descriptor_set_info_flags_expr(AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING) == "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING"
     assert amdgpu_target_info._descriptor_set_info_flags_expr(AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION) == "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION"
     assert amdgpu_target_info._processor_info_flags_expr(AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION) == "LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION"
+    assert amdgpu_target_info._processor_info_flags_expr(AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE) == "LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE"
     assert amdgpu_target_info._wavefront_size_flags_expr(AMDGPU_WAVEFRONT_SIZE_FLAG_32) == "LOOM_AMDGPU_WAVEFRONT_SIZE_FLAG_32"
     assert amdgpu_target_info._kernel_descriptor_abi_flags_expr(AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID) == "LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID"
     assert amdgpu_target_info._processor_scheduling_bits_expr(AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU) == "LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU"
@@ -178,6 +180,14 @@ def test_vmem_result_write_ordering_matches_processor_families() -> None:
         assert processors[processor].features.scheduling & AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER
     for processor in unordered_processors:
         assert not processors[processor].features.scheduling & AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER
+
+
+def test_cluster_launch_state_is_scoped_to_gfx1250() -> None:
+    processors = {info.processor: info for info in amdgpu_target_info_data.AMDGPU_PROCESSOR_INFOS}
+
+    assert processors["gfx1250"].flags & AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE
+    assert not processors["gfx1251"].flags & AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE
+    assert not processors["gfx12-5-generic"].flags & AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE
 
 
 def test_target_info_flag_expressions_reject_unknown_bits() -> None:

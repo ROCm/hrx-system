@@ -12,8 +12,8 @@
 #include <stdint.h>
 
 #include "iree/base/api.h"
-#include "loom/codegen/low/pressure.h"
 #include "loom/target/arch/amdgpu/target_info.h"
+#include "loom/target/residency.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,8 +37,8 @@ typedef struct loom_amdgpu_occupancy_model_t {
   uint32_t wave_size;
   // Maximum resident waves per SIMD.
   uint32_t max_waves_per_simd;
-  // Target pressure policy shared by scheduling and final occupancy.
-  loom_low_pressure_model_t pressure_model;
+  // Target residency policy shared by scheduling and final occupancy.
+  loom_target_residency_model_t residency_model;
   // Register-class occupancy models in diagnostic order.
   const loom_amdgpu_occupancy_register_class_model_t* register_classes;
   // Number of entries in register_classes.

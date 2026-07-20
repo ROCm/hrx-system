@@ -20,6 +20,10 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+exports_files([
+    "testdata/amdgpu_unused_kernargs.loom",
+])
+
 _AMDGPU_TARGET_COPTS = iree_select({
     "//loom/config/target:amdgpu_artifacts": [
         "-DIREE_TEST_LOOM_HAVE_AMDGPU=1",
@@ -150,6 +154,7 @@ iree_execution_test_suite(
     data = [
         "testdata/amdgpu_compile_rejection.loom",
         "testdata/amdgpu_hal_actual.loom",
+        "testdata/amdgpu_unused_kernargs.loom",
         "testdata/generated_tensor_cases.loom",
     ],
     manifests = ["iree-test-loom_amdgpu.test.json"],

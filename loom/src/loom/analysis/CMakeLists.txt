@@ -272,6 +272,7 @@ loom_cc_library(
   SRCS
     "kernel_async_legality.c"
   DEPS
+    ::control_uniformity
     ::movement
     iree::base
     iree::base::internal::arena

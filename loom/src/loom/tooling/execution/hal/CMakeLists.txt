@@ -102,6 +102,7 @@ loom_cc_library(
     loom::error::diagnostic
     loom::ir
     loom::ir::facts
+    loom::link::linker
     loom::ops::kernel
     loom::ops::special_values
     loom::pass::types

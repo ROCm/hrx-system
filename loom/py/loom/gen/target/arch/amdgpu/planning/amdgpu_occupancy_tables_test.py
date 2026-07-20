@@ -28,16 +28,21 @@ def test_occupancy_generator_emits_data_source_only() -> None:
     assert "\nif " not in source
     assert "\nreturn " not in source
     assert "loom_amdgpu_occupancy_model_for_descriptor_set_ordinal" not in source
-    assert "loom_low_pressure_cliff_t" in source
-    assert "loom_low_pressure_cliff_range_t" in source
-    assert "loom_low_pressure_resource_t" in source
-    assert "loom_low_pressure_resource_member_t" in source
-    assert ".pressure_model =" in source
-    assert ".register_class_cliffs =" in source
-    assert ".ranges =" in source
+    assert "loom_target_residency_cliff_t" in source
+    assert "loom_target_residency_cliff_range_t" in source
+    assert "loom_target_residency_derived_resource_t" in source
+    assert "loom_target_residency_derived_member_t" in source
+    assert ".residency_model =" in source
+    assert ".best_tier =" in source
+    assert ".direct_resources =" in source
+    assert ".names =" in source
+    assert ".cliff_ranges =" in source
+    assert ".derived_resources =" in source
+    assert ".member_count =" in source
+    assert ".cliff_count =" in source
     assert "PressureResourceMemberIndicesByRegClass" in source
-    assert ".member_indices_by_reg_class =" in source
-    assert ".member_ranges_by_reg_class =" in source
+    assert ".member_indices_by_direct_resource =" in source
+    assert ".member_ranges_by_direct_resource =" in source
     assert "RegisterClassIndexByDescriptorRegClassId" in source
     assert ".register_class_indices_by_descriptor_reg_class_id =" in source
     assert ".descriptor_reg_class_count =" in source

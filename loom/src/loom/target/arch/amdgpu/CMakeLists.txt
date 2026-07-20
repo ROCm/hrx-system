@@ -121,12 +121,14 @@ loom_cc_test(
     "registers_test.cc"
   DEPS
     ::target_info
+    iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
     loom::codegen::low::descriptors
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::planning::occupancy_model
     loom::target::arch::amdgpu::refs::target_refs
+    loom::target::residency
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
 )

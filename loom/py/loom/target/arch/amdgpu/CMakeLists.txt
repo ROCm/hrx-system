@@ -101,6 +101,7 @@ iree_py_library(
     "descriptors/candidates.py"
     "descriptors/categories.py"
     "descriptors/cdna.py"
+    "descriptors/cluster.py"
     "descriptors/common.py"
     "descriptors/contracts.py"
     "descriptors/control.py"
@@ -109,6 +110,7 @@ iree_py_library(
     "descriptors/rdna3.py"
     "descriptors/rdna4.py"
     "descriptors/sets.py"
+    "descriptors/tensor.py"
     "descriptors/workgroup.py"
     "target_info.py"
   DEPS

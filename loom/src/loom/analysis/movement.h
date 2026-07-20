@@ -124,6 +124,12 @@ typedef uint32_t loom_movement_rejection_flags_t;
 #define LOOM_MOVEMENT_REJECTION_LANE_COUNT ((uint32_t)1u << 5)
 #define LOOM_MOVEMENT_REJECTION_FOOTPRINT ((uint32_t)1u << 6)
 #define LOOM_MOVEMENT_REJECTION_CACHE_POLICY ((uint32_t)1u << 7)
+#define LOOM_MOVEMENT_REJECTION_CLUSTER_SHAPE ((uint32_t)1u << 8)
+#define LOOM_MOVEMENT_REJECTION_CLUSTER_PARTICIPANTS ((uint32_t)1u << 9)
+#define LOOM_MOVEMENT_REJECTION_CLUSTER_CONTROL ((uint32_t)1u << 10)
+#define LOOM_MOVEMENT_REJECTION_CLUSTER_SOURCE_AGREEMENT ((uint32_t)1u << 11)
+#define LOOM_MOVEMENT_REJECTION_CLUSTER_DEST_AGREEMENT ((uint32_t)1u << 12)
+#define LOOM_MOVEMENT_REJECTION_CLUSTER_PREDICATE ((uint32_t)1u << 13)
 
 // Diagnostic summary for request construction.
 typedef struct loom_movement_diagnostic_t {

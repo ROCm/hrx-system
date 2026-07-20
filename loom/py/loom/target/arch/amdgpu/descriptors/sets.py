@@ -1803,6 +1803,7 @@ def _gfx12_core_overlay_descriptors(
 def _gfx1250_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *_rdna4_core_overlays(),
+        _s_getreg_b32_cluster_workgroup_flat_id_overlay(),
         *_v_cvt_pk_f16_packed8_overlays("ocp"),
         *_v_cvt_scale_pk8_overlays(),
         _v_cvt_pk_bf16_f32_overlay(),

@@ -218,6 +218,9 @@ low.func.def target(@target) @gfx1250_fp8_materialized_bf16_two_k_block_schedule
   return
 }
 
+// Gfx125x load-counter progress does not release address VGPRs retained by
+// XCNT translation. Keep both address offsets live and use dead payload VGPRs
+// for conversion temporaries rather than serializing the schedule on XCNT.
 // ----
   v_mov_b32 v8, 0
   v_and_b32 v1, 15, v0
@@ -257,72 +260,72 @@ low.func.def target(@target) @gfx1250_fp8_materialized_bf16_two_k_block_schedule
   v_mov_b32 v22, v26
   v_mov_b32 v23, v27
   s_wait_loadcnt loadcnt(1)
-  v_lshrrev_b32 v1, 16, v28
-  v_cvt_pk_f32_fp8 v[2:3], v28
+  v_lshrrev_b32 v3, 16, v28
+  v_cvt_pk_f32_fp8 v[4:5], v28
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_f32_fp8 v[4:5], v1
+  v_cvt_pk_f32_fp8 v[6:7], v3
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v24, v2, v3
+  v_cvt_pk_bf16_f32 v24, v4, v5
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v25, v4, v5
-  v_lshrrev_b32 v1, 16, v29
-  v_cvt_pk_f32_fp8 v[2:3], v29
+  v_cvt_pk_bf16_f32 v25, v6, v7
+  v_lshrrev_b32 v3, 16, v29
+  v_cvt_pk_f32_fp8 v[4:5], v29
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_f32_fp8 v[4:5], v1
+  v_cvt_pk_f32_fp8 v[6:7], v3
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v26, v2, v3
+  v_cvt_pk_bf16_f32 v26, v4, v5
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v27, v4, v5
-  v_lshrrev_b32 v1, 16, v30
-  v_cvt_pk_f32_fp8 v[2:3], v30
+  v_cvt_pk_bf16_f32 v27, v6, v7
+  v_lshrrev_b32 v3, 16, v30
+  v_cvt_pk_f32_fp8 v[4:5], v30
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_f32_fp8 v[4:5], v1
+  v_cvt_pk_f32_fp8 v[6:7], v3
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v28, v2, v3
+  v_cvt_pk_bf16_f32 v28, v4, v5
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v29, v4, v5
-  v_lshrrev_b32 v1, 16, v31
-  v_cvt_pk_f32_fp8 v[2:3], v31
+  v_cvt_pk_bf16_f32 v29, v6, v7
+  v_lshrrev_b32 v3, 16, v31
+  v_cvt_pk_f32_fp8 v[4:5], v31
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_f32_fp8 v[4:5], v1
+  v_cvt_pk_f32_fp8 v[6:7], v3
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v30, v2, v3
+  v_cvt_pk_bf16_f32 v30, v4, v5
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v31, v4, v5
+  v_cvt_pk_bf16_f32 v31, v6, v7
   v_wmma_f32_16x16x32_bf16 v[8:15], v[40:47], v[24:31], v[8:15]
   s_wait_loadcnt loadcnt(0)
-  v_lshrrev_b32 v1, 16, v32
-  v_cvt_pk_f32_fp8 v[2:3], v32
+  v_lshrrev_b32 v3, 16, v32
+  v_cvt_pk_f32_fp8 v[4:5], v32
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_f32_fp8 v[4:5], v1
+  v_cvt_pk_f32_fp8 v[6:7], v3
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v24, v2, v3
+  v_cvt_pk_bf16_f32 v24, v4, v5
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v25, v4, v5
-  v_lshrrev_b32 v1, 16, v33
-  v_cvt_pk_f32_fp8 v[2:3], v33
+  v_cvt_pk_bf16_f32 v25, v6, v7
+  v_lshrrev_b32 v3, 16, v33
+  v_cvt_pk_f32_fp8 v[4:5], v33
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_f32_fp8 v[4:5], v1
+  v_cvt_pk_f32_fp8 v[6:7], v3
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v26, v2, v3
+  v_cvt_pk_bf16_f32 v26, v4, v5
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v27, v4, v5
-  v_lshrrev_b32 v1, 16, v34
-  v_cvt_pk_f32_fp8 v[2:3], v34
+  v_cvt_pk_bf16_f32 v27, v6, v7
+  v_lshrrev_b32 v3, 16, v34
+  v_cvt_pk_f32_fp8 v[4:5], v34
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_f32_fp8 v[4:5], v1
+  v_cvt_pk_f32_fp8 v[6:7], v3
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v28, v2, v3
+  v_cvt_pk_bf16_f32 v28, v4, v5
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v29, v4, v5
-  v_lshrrev_b32 v1, 16, v35
-  v_cvt_pk_f32_fp8 v[2:3], v35
+  v_cvt_pk_bf16_f32 v29, v6, v7
+  v_lshrrev_b32 v3, 16, v35
+  v_cvt_pk_f32_fp8 v[4:5], v35
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_f32_fp8 v[4:5], v1
+  v_cvt_pk_f32_fp8 v[6:7], v3
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v30, v2, v3
+  v_cvt_pk_bf16_f32 v30, v4, v5
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v31, v4, v5
+  v_cvt_pk_bf16_f32 v31, v6, v7
   v_wmma_f32_16x16x32_bf16 v[8:15], v[16:23], v[24:31], v[8:15]
   global_store_b32 v0, v8, s[4:5] offset:0
   s_wait_storecnt storecnt(0)

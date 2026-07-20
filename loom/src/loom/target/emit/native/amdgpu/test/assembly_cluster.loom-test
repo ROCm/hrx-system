@@ -1,0 +1,36 @@
+// RUN: emit amdgpu-assembly @cluster_identity_abi strategy=source fixed=%packed_local:physical_register:114:1 fixed=%packed_cluster_yz:physical_register:115:1 fixed=%cluster_x:physical_register:117:1
+
+amdgpu.target<gfx1250> @target
+low.kernel.def target(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @cluster_identity_abi() asm<amdgpu.rdna4.gfx125x.core> {
+  %packed_local = live_in<amdgpu.cluster_workgroup_info> : reg<amdgpu.sgpr>
+  %packed_cluster_yz = live_in<amdgpu.cluster_id_yz> : reg<amdgpu.sgpr>
+  %cluster_x = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
+  %local_x = s_and_b32_rhs_inline %packed_local, 15
+  %workgroup_x = s_lshl1_add_u32 %cluster_x, %local_x
+  %cluster_y = s_and_b32_lit %packed_cluster_yz, 65535
+  %local_y = s_bfe_u32_lit %packed_local, 262148
+  %workgroup_y = s_lshl1_add_u32 %cluster_y, %local_y
+  %cluster_z = s_lshr_b32_rhs_inline %packed_cluster_yz, 16
+  %local_z = s_bfe_u32_lit %packed_local, 262152
+  %workgroup_z = s_lshl1_add_u32 %cluster_z, %local_z
+  %flat_local = s_getreg_b32_cluster_workgroup_flat_id
+  %sum0 = s_add_u32 %workgroup_x, %workgroup_y
+  %sum1 = s_add_u32 %sum0, %workgroup_z
+  %sum = s_add_u32 %sum1, %flat_local
+  return
+}
+
+// ----
+  s_and_b32_rhs_inline s0, ttmp6, 15
+  s_lshl1_add_u32 s0, ttmp9, s0
+  s_and_b32 s1, 65535, ttmp7
+  s_bfe_u32 s2, 262148, ttmp6
+  s_lshl1_add_u32 s1, s1, s2
+  s_lshr_b32_rhs_inline s2, ttmp7, 16
+  s_bfe_u32 s3, 262152, ttmp6
+  s_lshl1_add_u32 s2, s2, s3
+  s_getreg_b32 s3, hwreg(HW_REG_IB_STS2, 21, 4)
+  s_add_u32 s0, s0, s1
+  s_add_u32 s0, s0, s2
+  s_add_u32 s0, s0, s3
+  s_endpgm

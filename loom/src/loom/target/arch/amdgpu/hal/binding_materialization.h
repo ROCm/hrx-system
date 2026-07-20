@@ -30,6 +30,8 @@ extern "C" {
 typedef struct loom_amdgpu_hal_binding_materialization_result_t {
   // ABI layout captured before low.resource ops are rewritten.
   loom_amdgpu_hal_kernel_abi_layout_t abi_layout;
+  // True when materialization changed the function IR.
+  bool changed;
   // Number of low.resource<hal_binding> ops expanded into pointer loads.
   iree_host_size_t materialized_binding_count;
   // Number of direct entry block arguments expanded into scalar loads.

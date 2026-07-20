@@ -79,6 +79,8 @@ typedef enum iree_hal_amdgpu_command_buffer_dispatch_flag_bits_e {
   // object. Used when executable globals are queue scoped.
   IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_QUEUE_SCOPED_KERNEL_OBJECT =
       1u << 1,
+  // The dispatch uses the AMD extended packet with |workgroup_cluster_size|.
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_WORKGROUP_CLUSTER = 1u << 2,
 } iree_hal_amdgpu_command_buffer_dispatch_flag_bits_t;
 
 // Kernarg storage mode for a dispatch command.
@@ -302,16 +304,18 @@ typedef struct IREE_AMDGPU_ALIGNAS(8)
   uint8_t kernarg_storage_mode;
   // Dispatch flags from iree_hal_amdgpu_command_buffer_dispatch_flag_bits_t.
   uint8_t dispatch_flags;
-  // AQL dispatch packet setup field.
-  uint16_t setup;
+  // Immutable workgroup cluster size, or zeroes for ordinary dispatch.
+  uint8_t workgroup_cluster_size[3];
+  // Reserved byte that must be zero in version 0.
+  uint8_t reserved1;
   // Executable export ordinal used for profiling and diagnostics.
   uint32_t export_ordinal;
   // AQL dispatch packet workgroup size fields.
   uint16_t workgroup_size[3];
   // Kernarg qword offset of implicit args, or UINT16_MAX when absent.
   uint16_t implicit_args_offset_qwords;
-  // AQL dispatch packet grid size fields.
-  uint32_t grid_size[3];
+  // Direct dispatch size in workgroups.
+  uint32_t workgroup_count[3];
   // AQL dispatch packet private segment size field.
   uint32_t private_segment_size;
   // AQL dispatch packet group segment size field.

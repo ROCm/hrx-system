@@ -699,14 +699,9 @@ TEST(CompileReportFormatTest, FormatsSourceLowMemorySummaryEconomics) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
 
-  const loom_target_compile_report_workload_t workload = {
-      /*.flags=*/LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT,
-      /*.workgroup_size=*/{},
-      /*.workgroup_count=*/{},
-      /*.flat_workgroup_size=*/{},
-      /*.dispatch_workgroup_count=*/{},
-      /*.dispatch_workitem_count=*/16,
-  };
+  loom_target_compile_report_workload_t workload = {};
+  workload.flags = LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT;
+  workload.dispatch_workitem_count = 16;
   loom_target_compile_report_record_workload(&report, &workload);
 
   const loom_target_compile_report_source_low_memory_row_t load_row =

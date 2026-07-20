@@ -157,6 +157,24 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    edge_alias
+  HDRS
+    "edge_alias.h"
+  SRCS
+    "edge_alias.c"
+  DEPS
+    ::assignment
+    iree::base
+    loom::analysis::consumption
+    loom::analysis::liveness
+    loom::codegen::low::placement
+    loom::codegen::low::storage_relation
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     coalescing
   HDRS
     "coalescing.h"
@@ -165,6 +183,7 @@ loom_cc_library(
   DEPS
     ::assignment
     ::assignment_map
+    ::edge_alias
     ::live_range
     ::search
     ::storage
@@ -175,7 +194,6 @@ loom_cc_library(
     loom::analysis::liveness
     loom::codegen::low::descriptors
     loom::codegen::low::placement
-    loom::codegen::low::storage_relation
     loom::ir
   PUBLIC
 )
@@ -424,6 +442,34 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
+    loop_edge_relocation
+  HDRS
+    "loop_edge_relocation.h"
+  SRCS
+    "loop_edge_relocation.c"
+  DEPS
+    ::assignment
+    ::assignment_map
+    ::edge_alias
+    ::live_range
+    ::storage
+    ::storage_lease
+    ::target_constraints
+    ::unit_liveness
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::consumption
+    loom::analysis::liveness
+    loom::codegen::low::descriptors
+    loom::codegen::low::placement
+    loom::ir
+    loom::ops::low
+    loom::util::cfg_graph
+  PUBLIC
 )
 
 loom_cc_library(

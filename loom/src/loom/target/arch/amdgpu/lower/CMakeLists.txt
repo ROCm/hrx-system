@@ -187,6 +187,7 @@ loom_cc_library(
     "async.h"
     "bitpack.h"
     "buffer.h"
+    "cluster_preamble.h"
     "collective_combine.h"
     "collective_payload.h"
     "constants.h"
@@ -258,6 +259,7 @@ loom_cc_library(
     "atomic.c"
     "bitpack.c"
     "buffer.c"
+    "cluster_preamble.c"
     "collective_combine.c"
     "collective_payload.c"
     "collective_reduce.c"
@@ -370,6 +372,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::lower::candidates::compare_candidates
     loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::matrix::projection
+    loom::target::arch::amdgpu::planning::wait_counters
     loom::target::arch::amdgpu::planning::wait_packets
     loom::target::arch::amdgpu::planning::wait_plan
     loom::target::arch::amdgpu::records::target_records_tables

@@ -495,19 +495,24 @@ static iree_status_t loom_control_uniformity_cfg_region_initialize(
   iree_arena_checkpoint_restore(&scratch_checkpoint);
   IREE_RETURN_IF_ERROR(status);
 
+  // Reachable CFG blocks begin cluster-uniform and are weakened by each
+  // selector scope below. This ceiling lets the same summary answer subgroup,
+  // workgroup, and cluster collective queries without special-case walks.
   for (uint32_t block_index = 0; block_index < summary->exit_node;
        ++block_index) {
     if (loom_cfg_graph_block_is_reachable(summary->graph,
                                           (uint16_t)block_index) &&
         summary->nodes[block_index].dfs_number != 0) {
       summary->nodes[block_index].execution_scope =
-          LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP;
+          LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER;
     }
   }
   loom_control_uniformity_cfg_assign_control_scope(
       info, summary, LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE);
   loom_control_uniformity_cfg_assign_control_scope(
       info, summary, LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP);
+  loom_control_uniformity_cfg_assign_control_scope(
+      info, summary, LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP);
   return iree_ok_status();
 }
 
@@ -631,7 +636,8 @@ iree_status_t loom_control_uniformity_prove_execution(
   IREE_ASSERT_ARGUMENT(op);
   IREE_ASSERT_ARGUMENT(out_proven);
   IREE_ASSERT(required_scope == LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP ||
-              required_scope == LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP);
+              required_scope == LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP ||
+              required_scope == LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER);
   *out_proven = false;
   if (out_failure) {
     *out_failure = (loom_control_uniformity_failure_t){
@@ -714,6 +720,7 @@ iree_string_view_t loom_control_uniformity_scope_name(
       [LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE] = IREE_SVL("unknown"),
       [LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP] = IREE_SVL("subgroup"),
       [LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP] = IREE_SVL("workgroup"),
+      [LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER] = IREE_SVL("cluster"),
   };
   IREE_ASSERT_LT((uint32_t)scope, IREE_ARRAYSIZE(names));
   return names[scope];

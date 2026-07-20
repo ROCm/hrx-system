@@ -80,3 +80,5 @@
   LOOM_KW_NAME = 71,  // "name"
   LOOM_KW_ALIGN = 72,  // "align"
   LOOM_KW_BLOCKS = 73,  // "blocks"
+  LOOM_KW_CLUSTER_SIZE = 74,  // "cluster_size"
+  LOOM_KW_MEMORY_ACCESS = 75,  // "memory_access"

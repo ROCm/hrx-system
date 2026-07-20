@@ -124,6 +124,8 @@ static iree_hal_amdgpu_hsaco_metadata_kernel_t MakeKernel(
       /*.private_segment_fixed_size=*/32,
       /*.required_workgroup_size=*/{},
       /*.has_required_workgroup_size=*/{},
+      /*.workgroup_cluster_size=*/{},
+      /*.has_workgroup_cluster_size=*/{},
       /*.arg_count=*/args.size(),
       /*.args=*/args.data(),
   };
@@ -170,6 +172,10 @@ TEST(ExecutableMetadataHsacoTest, PopulatesSparseInterleavedKernelLayout) {
   kernel.required_workgroup_size[0] = 4;
   kernel.required_workgroup_size[1] = 2;
   kernel.required_workgroup_size[2] = 1;
+  kernel.has_workgroup_cluster_size = true;
+  kernel.workgroup_cluster_size[0] = 1;
+  kernel.workgroup_cluster_size[1] = 2;
+  kernel.workgroup_cluster_size[2] = 1;
   iree_hal_amdgpu_hsaco_metadata_t hsaco_metadata = {
       /*.host_allocator=*/{},
       /*.elf_data=*/source_code_object_data,
@@ -206,6 +212,9 @@ TEST(ExecutableMetadataHsacoTest, PopulatesSparseInterleavedKernelLayout) {
   EXPECT_EQ(export_info.workgroup_size[0], 4);
   EXPECT_EQ(export_info.workgroup_size[1], 2);
   EXPECT_EQ(export_info.workgroup_size[2], 1);
+  EXPECT_EQ(export_info.workgroup_cluster_size[0], 1);
+  EXPECT_EQ(export_info.workgroup_cluster_size[1], 2);
+  EXPECT_EQ(export_info.workgroup_cluster_size[2], 1);
   EXPECT_EQ(export_info.fixed_group_segment_size, 16);
   EXPECT_EQ(export_info.fixed_private_segment_size, 32);
 
@@ -374,6 +383,9 @@ TEST(ExecutableMetadataHsacoTest, PopulatesElfOnlyCustomDirectExport) {
       metadata->exports[0].flags,
       IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_CUSTOM_DIRECT_ONLY |
           IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_REQUIRES_DISPATCH_WORKGROUP_SIZE));
+  EXPECT_EQ(metadata->exports[0].workgroup_cluster_size[0], 0);
+  EXPECT_EQ(metadata->exports[0].workgroup_cluster_size[1], 0);
+  EXPECT_EQ(metadata->exports[0].workgroup_cluster_size[2], 0);
   EXPECT_FALSE(iree_hal_amdgpu_kernarg_layout_ref_is_valid(
       metadata->exports[0].kernarg_layout));
 

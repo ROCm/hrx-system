@@ -168,7 +168,7 @@ iree_status_t loom_low_schedule_pressure_initialize(
         sizeof(*out_pressure_state->candidate_delta_touched_reg_class_ids),
         (void**)&out_pressure_state->candidate_delta_touched_reg_class_ids));
     if (state->pressure_cliffs != NULL &&
-        !loom_low_pressure_cliff_table_is_empty(*state->pressure_cliffs)) {
+        state->pressure_cliffs->cliff_count != 0) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
           state->arena, reg_class_count,
           sizeof(*out_pressure_state->first_actionable_pressure_cliff_indices),
@@ -176,9 +176,9 @@ iree_status_t loom_low_schedule_pressure_initialize(
               ->first_actionable_pressure_cliff_indices));
       for (uint16_t reg_class_id = 0; reg_class_id < reg_class_count;
            ++reg_class_id) {
-        const loom_low_pressure_cliff_range_t range =
-            loom_low_pressure_cliff_table_range(state->pressure_cliffs,
-                                                reg_class_id);
+        const loom_target_residency_cliff_range_t range =
+            loom_target_residency_direct_resource_cliff_range(
+                state->pressure_cliffs, reg_class_id);
         out_pressure_state
             ->first_actionable_pressure_cliff_indices[reg_class_id] =
             range.start;
@@ -327,13 +327,13 @@ static void loom_low_schedule_advance_resource_cliffs(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state, uint16_t resource_id,
     loom_low_schedule_resource_high_water_mode_t mode) {
-  const loom_low_pressure_resource_t* resource =
+  const loom_target_residency_derived_resource_t* resource =
       &state->pressure_resources->resources[resource_id];
   loom_low_schedule_resource_pressure_record_t* record =
       &pressure_state->resources.records[resource_id];
   const uint16_t cliff_end = resource->cliff_start + resource->cliff_count;
   while (record->next_cliff_index < cliff_end) {
-    const loom_low_pressure_cliff_t* cliff =
+    const loom_target_residency_cliff_t* cliff =
         &state->pressure_resources->cliffs[record->next_cliff_index];
     if (cliff->cliff_units > record->current_peak_units) break;
     if (mode == LOOM_LOW_SCHEDULE_RESOURCE_HIGH_WATER_SCHEDULED) {
@@ -360,20 +360,21 @@ static void loom_low_schedule_note_resource_high_water(
   if (current_live_units <= *peak_live_units) return;
   const uint64_t previous_peak_live_units = *peak_live_units;
   *peak_live_units = current_live_units;
-  const loom_low_pressure_resource_member_range_t range =
-      loom_low_pressure_resource_table_member_range(state->pressure_resources,
-                                                    reg_class_id);
+  const loom_target_residency_derived_member_range_t range =
+      loom_target_residency_derived_resource_member_range(
+          state->pressure_resources, reg_class_id);
   for (uint16_t i = 0; i < range.count; ++i) {
     const uint16_t member_index =
-        state->pressure_resources->member_indices_by_reg_class[range.start + i];
-    const loom_low_pressure_resource_member_t* member =
+        state->pressure_resources
+            ->member_indices_by_direct_resource[range.start + i];
+    const loom_target_residency_derived_member_t* member =
         &state->pressure_resources->members[member_index];
-    IREE_ASSERT_EQ(member->descriptor_reg_class_id, reg_class_id);
+    IREE_ASSERT_EQ(member->direct_resource_id, reg_class_id);
     const uint64_t previous_contribution =
-        loom_low_pressure_round_resource_units(
+        loom_target_residency_round_resource_units(
             previous_peak_live_units, member->contribution_granularity);
     const uint64_t current_contribution =
-        loom_low_pressure_round_resource_units(
+        loom_target_residency_round_resource_units(
             current_live_units, member->contribution_granularity);
     loom_low_schedule_resource_pressure_record_t* record =
         &pressure_state->resources.records[member->resource_id];
@@ -411,15 +412,16 @@ static void loom_low_schedule_advance_source_pressure_cliff_floor(
   if (pressure_state->first_actionable_pressure_cliff_indices == NULL) {
     return;
   }
-  const loom_low_pressure_cliff_range_t range =
-      loom_low_pressure_cliff_table_range(state->pressure_cliffs, reg_class_id);
+  const loom_target_residency_cliff_range_t range =
+      loom_target_residency_direct_resource_cliff_range(state->pressure_cliffs,
+                                                        reg_class_id);
   const uint32_t range_end = range.start + range.count;
   uint32_t* first_actionable_cliff =
       &pressure_state->first_actionable_pressure_cliff_indices[reg_class_id];
   const uint64_t source_live_units =
       pressure_state->current_live_units_by_reg_class[reg_class_id];
   while (*first_actionable_cliff < range_end &&
-         state->pressure_cliffs->values[*first_actionable_cliff].cliff_units <=
+         state->pressure_cliffs->cliffs[*first_actionable_cliff].cliff_units <=
              source_live_units) {
     ++*first_actionable_cliff;
   }

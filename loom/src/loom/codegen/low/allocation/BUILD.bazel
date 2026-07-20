@@ -145,12 +145,28 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "edge_alias",
+    srcs = ["edge_alias.c"],
+    hdrs = ["edge_alias.h"],
+    deps = [
+        ":assignment",
+        "//loom/src/loom/analysis:consumption",
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/codegen/low:placement",
+        "//loom/src/loom/codegen/low:storage_relation",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "coalescing",
     srcs = ["coalescing.c"],
     hdrs = ["coalescing.h"],
     deps = [
         ":assignment",
         ":assignment_map",
+        ":edge_alias",
         ":live_range",
         ":search",
         ":storage",
@@ -159,7 +175,6 @@ loom_cc_library(
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:placement",
-        "//loom/src/loom/codegen/low:storage_relation",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -377,6 +392,31 @@ loom_cc_test(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "loop_edge_relocation",
+    srcs = ["loop_edge_relocation.c"],
+    hdrs = ["loop_edge_relocation.h"],
+    deps = [
+        ":assignment",
+        ":assignment_map",
+        ":edge_alias",
+        ":live_range",
+        ":storage",
+        ":storage_lease",
+        ":target_constraints",
+        ":unit_liveness",
+        "//loom/src/loom/analysis:consumption",
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:placement",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/util:cfg_graph",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 

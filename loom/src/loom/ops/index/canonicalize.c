@@ -371,6 +371,30 @@ static bool loom_index_match_madd_with_exact_positive_factor(
   return loom_index_query_exact_i64(rewriter, *out_addend, out_addend_value);
 }
 
+static bool loom_index_match_add_with_exact_non_negative_offset(
+    loom_rewriter_t* rewriter, loom_op_t* add_op, loom_value_id_t* out_value,
+    int64_t* out_offset) {
+  if (!add_op || !loom_index_add_isa(add_op)) return false;
+
+  loom_value_id_t lhs = loom_index_add_lhs(add_op);
+  loom_value_id_t rhs = loom_index_add_rhs(add_op);
+  int64_t lhs_offset = 0;
+  if (loom_index_query_exact_i64(rewriter, lhs, &lhs_offset) &&
+      lhs_offset >= 0) {
+    *out_value = rhs;
+    *out_offset = lhs_offset;
+    return true;
+  }
+  int64_t rhs_offset = 0;
+  if (loom_index_query_exact_i64(rewriter, rhs, &rhs_offset) &&
+      rhs_offset >= 0) {
+    *out_value = lhs;
+    *out_offset = rhs_offset;
+    return true;
+  }
+  return false;
+}
+
 typedef enum loom_index_radix_term_kind_e {
   LOOM_INDEX_RADIX_TERM_QUOTIENT,
   LOOM_INDEX_RADIX_TERM_REMAINDER,
@@ -937,6 +961,35 @@ iree_status_t loom_index_rem_canonicalize(loom_op_t* op,
         loom_value_facts_divisible_by(lhs_facts, divisor)) {
       return loom_index_replace_single_result_with_index_constant(
           op, rewriter, result_type, 0);
+    }
+    if (!loom_value_facts_is_float(lhs_facts) &&
+        loom_value_facts_is_non_negative(lhs_facts) &&
+        lhs_facts.range_hi < divisor) {
+      return loom_index_replace_single_result_with_value(op, rewriter, lhs);
+    }
+
+    loom_value_id_t offset_value = LOOM_VALUE_ID_INVALID;
+    int64_t offset = 0;
+    loom_op_t* lhs_def = loom_index_defining_op(rewriter, lhs);
+    if (loom_index_match_add_with_exact_non_negative_offset(
+            rewriter, lhs_def, &offset_value, &offset)) {
+      const int64_t residual_offset = offset % divisor;
+      loom_value_facts_t value_facts =
+          loom_rewriter_value_facts(rewriter, offset_value);
+      int64_t residual_range_hi = 0;
+      if (!loom_value_facts_is_float(value_facts) &&
+          loom_value_facts_is_non_negative(value_facts) &&
+          iree_checked_add_i64(value_facts.range_hi, residual_offset,
+                               &residual_range_hi) &&
+          residual_range_hi < divisor) {
+        if (residual_offset == 0) {
+          return loom_index_replace_single_result_with_value(op, rewriter,
+                                                             offset_value);
+        }
+        return loom_index_replace_single_result_with_binary_constant_op(
+            op, rewriter, LOOM_OP_INDEX_ADD, offset_value, residual_offset,
+            LOOM_VALUE_ID_INVALID);
+      }
     }
   }
   if (loom_index_value_facts_are_exact_i64(rewriter, loom_index_rem_rhs(op),

@@ -27,16 +27,6 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    pressure
-  HDRS
-    "pressure.h"
-  DEPS
-    iree::base
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
     descriptor_traits
   HDRS
     "descriptor_traits.h"
@@ -224,6 +214,55 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    memory_access_ir
+  HDRS
+    "memory_access_ir.h"
+  SRCS
+    "memory_access_ir.c"
+  DEPS
+    ::function
+    ::memory_access
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::low
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    memory_access_test
+  SRCS
+    "memory_access_test.cc"
+  DEPS
+    ::memory_access
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    memory_access_ir_test
+  SRCS
+    "memory_access_ir_test.cc"
+  DEPS
+    ::function
+    ::memory_access_ir
+    ::text_asm
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::error::diagnostic
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::ops::test
+    loom::target::test::descriptors
+    loom::testing::module_ptr
+)
+
+loom_cc_library(
+  NAME
     storage_relation
   HDRS
     "storage_relation.h"
@@ -295,6 +334,7 @@ loom_cc_library(
     loom::codegen::low::allocation::interval_assignment
     loom::codegen::low::allocation::interval_order
     loom::codegen::low::allocation::live_range
+    loom::codegen::low::allocation::loop_edge_relocation
     loom::codegen::low::allocation::move_topology
     loom::codegen::low::allocation::packet_move
     loom::codegen::low::allocation::search
@@ -608,6 +648,7 @@ loom_cc_library(
     ::function
     ::function_model
     ::memory_access
+    ::memory_access_ir
     ::packet
     ::planning_statistics
     ::storage_lease
@@ -618,6 +659,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::low
+    loom::target::residency
   PUBLIC
 )
 
@@ -661,6 +703,7 @@ loom_cc_library(
     loom::ir
     loom::ir::facts
     loom::ops::buffer
+    loom::ops::index
     loom::ops::kernel
     loom::ops::vector
     loom::ops::view

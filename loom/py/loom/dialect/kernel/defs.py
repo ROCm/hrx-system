@@ -306,7 +306,7 @@ kernel_def = Op(
             doc="Kernel body.",
             terminator="kernel.return",
             buffer_arg_memory_space="global",
-            arg_uniform_scope="workgroup",
+            arg_uniform_scope="cluster",
         ),
     ],
     interfaces=[
@@ -340,7 +340,7 @@ kernel_launch_config = Op(
     "kernel.launch.config",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
-    doc=("Terminate a kernel launch configuration region with the computed workgroup grid and required workgroup size."),
+    doc=("Terminate a kernel launch configuration region with the computed workgroup grid, required workgroup size, and optional static workgroup-cluster size."),
     operands=[
         Operand(
             "workgroup_count_x",
@@ -372,8 +372,27 @@ kernel_launch_config = Op(
             INDEX,
             doc="Required workgroup size in the z dimension.",
         ),
+        Operand(
+            "workgroup_cluster_size_x",
+            INDEX,
+            optional=True,
+            doc="Static workgroup-cluster size in the x dimension.",
+        ),
+        Operand(
+            "workgroup_cluster_size_y",
+            INDEX,
+            optional=True,
+            doc="Static workgroup-cluster size in the y dimension.",
+        ),
+        Operand(
+            "workgroup_cluster_size_z",
+            INDEX,
+            optional=True,
+            doc="Static workgroup-cluster size in the z dimension.",
+        ),
     ],
     traits=[TERMINATOR, HasParent("kernel.def")],
+    verify="loom_kernel_launch_config_verify",
     format=[
         kw("workgroups"),
         GLUE,
@@ -395,11 +414,27 @@ kernel_launch_config = Op(
         Ref("workgroup_size_z"),
         GLUE,
         RPAREN,
+        OptionalGroup(
+            [
+                kw("cluster_size"),
+                GLUE,
+                LPAREN,
+                Ref("workgroup_cluster_size_x"),
+                COMMA,
+                Ref("workgroup_cluster_size_y"),
+                COMMA,
+                Ref("workgroup_cluster_size_z"),
+                GLUE,
+                RPAREN,
+            ],
+            anchor="workgroup_cluster_size_x",
+        ),
         COLON,
         TypeOf("workgroup_count_x"),
     ],
     examples=[
         "kernel.launch.config workgroups(%gx, %gy, %gz) workgroup_size(%sx, %sy, %sz) : index",
+        "kernel.launch.config workgroups(%gx, %gy, %gz) workgroup_size(%sx, %sy, %sz) cluster_size(%cx, %cy, %cz) : index",
     ],
 )
 
@@ -623,6 +658,139 @@ kernel_workgroup_count = Op(
     facts="loom_kernel_workgroup_count_facts",
     format=[TemplateParam("dimension"), COLON, ResultType("result")],
     examples=["%count = kernel.workgroup.count<x> : index"],
+)
+
+
+# ============================================================================
+# Kernel workgroup-cluster query ops
+# ============================================================================
+
+kernel_cluster_id = Op(
+    name="kernel.cluster.id",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Read one coordinate of the current workgroup cluster within the dispatch cluster grid. The global workgroup coordinate in a dimension is cluster.id * cluster.size + cluster.workgroup.id."),
+    results=[
+        Result(
+            "result",
+            INDEX,
+            doc="Current workgroup-cluster coordinate in the selected dimension.",
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "dimension",
+            ATTR_TYPE_ENUM,
+            enum_def=KernelDimension,
+            doc="Coordinate axis to read.",
+        ),
+    ],
+    traits=[PURE, HasAncestor("kernel.def")],
+    facts="loom_kernel_cluster_id_facts",
+    canonicalize="loom_kernel_cluster_id_canonicalize",
+    format=[TemplateParam("dimension"), COLON, ResultType("result")],
+    examples=["%cluster = kernel.cluster.id<x> : index"],
+)
+
+kernel_cluster_workgroup_id = Op(
+    name="kernel.cluster.workgroup.id",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Read one coordinate of the current workgroup within its workgroup cluster. The coordinate is zero for an ordinary non-clustered launch."),
+    results=[
+        Result(
+            "result",
+            INDEX,
+            doc="Current workgroup coordinate within its cluster.",
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "dimension",
+            ATTR_TYPE_ENUM,
+            enum_def=KernelDimension,
+            doc="Coordinate axis to read.",
+        ),
+    ],
+    traits=[PURE, HasAncestor("kernel.def")],
+    facts="loom_kernel_cluster_workgroup_id_facts",
+    canonicalize="loom_kernel_cluster_workgroup_id_canonicalize",
+    format=[TemplateParam("dimension"), COLON, ResultType("result")],
+    examples=["%local_cluster_id = kernel.cluster.workgroup.id<y> : index"],
+)
+
+kernel_cluster_workgroup_flat_id = Op(
+    name="kernel.cluster.workgroup.flat_id",
+    group=kernel_ops,
+    builder_name="cluster_workgroup_flat_id",
+    phase=OpPhase.EXECUTABLE,
+    doc=("Read the row-major flat coordinate of the current workgroup within its workgroup cluster, with x as the minor dimension."),
+    results=[
+        Result(
+            "result",
+            INDEX,
+            doc="Flat current-workgroup coordinate within its cluster.",
+        ),
+    ],
+    traits=[PURE, HasAncestor("kernel.def")],
+    facts="loom_kernel_cluster_workgroup_flat_id_facts",
+    canonicalize="loom_kernel_cluster_workgroup_flat_id_canonicalize",
+    format=[COLON, ResultType("result")],
+    examples=["%local_cluster_rank = kernel.cluster.workgroup.flat_id : index"],
+)
+
+kernel_cluster_size = Op(
+    name="kernel.cluster.size",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Read the selected workgroup-cluster extent. An ordinary non-clustered launch has extent one in every dimension."),
+    results=[
+        Result(
+            "result",
+            INDEX,
+            doc="Workgroup-cluster extent in the selected dimension.",
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "dimension",
+            ATTR_TYPE_ENUM,
+            enum_def=KernelDimension,
+            doc="Coordinate axis to read.",
+        ),
+    ],
+    traits=[PURE, HasAncestor("kernel.def")],
+    facts="loom_kernel_cluster_size_facts",
+    canonicalize="loom_kernel_cluster_size_canonicalize",
+    format=[TemplateParam("dimension"), COLON, ResultType("result")],
+    examples=["%cluster_size = kernel.cluster.size<y> : index"],
+)
+
+kernel_cluster_count = Op(
+    name="kernel.cluster.count",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Read the number of workgroup clusters in one dispatch dimension. This is the exact quotient of workgroup.count by cluster.size."),
+    results=[
+        Result(
+            "result",
+            INDEX,
+            doc="Dispatched workgroup-cluster count in the selected dimension.",
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "dimension",
+            ATTR_TYPE_ENUM,
+            enum_def=KernelDimension,
+            doc="Coordinate axis to read.",
+        ),
+    ],
+    traits=[PURE, HasAncestor("kernel.def")],
+    facts="loom_kernel_cluster_count_facts",
+    canonicalize="loom_kernel_cluster_count_canonicalize",
+    format=[TemplateParam("dimension"), COLON, ResultType("result")],
+    examples=["%cluster_count = kernel.cluster.count<y> : index"],
 )
 
 kernel_workitem_dispatch_id = Op(
@@ -1335,7 +1503,7 @@ kernel_async_gather_mask = Op(
 )
 
 # ============================================================================
-# kernel.async.cluster.gather — AMDGPU cluster broadcast into LDS
+# kernel.async.cluster.gather — workgroup-cluster gather into shared memory
 # ============================================================================
 
 kernel_async_cluster_gather = Op(
@@ -1343,22 +1511,22 @@ kernel_async_cluster_gather = Op(
     group=kernel_ops,
     contracts=[ContractFamily.KERNEL_ASYNC],
     doc=(
-        "Initiate an AMDGPU gfx1250+ cluster asynchronous load from a "
-        "global-like source view into a workgroup/LDS destination view. The "
-        "required i32 cluster_mask is the hardware workgroup broadcast mask "
-        "loaded through M0. Source and destination must have the same static "
+        "Initiate a workgroup-cluster asynchronous load from a global-like "
+        "source view into a workgroup/shared-memory destination view. The "
+        "required i32 cluster_mask is a semantic participant set: bit N names "
+        "flat cluster rank N, with x as the minor dimension. Source and "
+        "destination must have the same static "
         "byte footprint, and that footprint must be exactly 1, 4, 8, or 16 "
-        "bytes; target lowering maps those widths to "
-        "llvm.amdgcn.cluster.load.async.to.lds.b8/b32/b64/b128. The LLVM "
-        "offset and cache-policy immediate operands are lowering choices "
-        "derived from the view address and cache attributes, not separate Loom "
-        "semantics. The returned token must be committed to exactly one "
-        "kernel.async.group."
+        "bytes. Every named participant must execute the operation in the same "
+        "dynamic order with corresponding lane-local source and destination "
+        "addresses. Target lowering maps the participant set, addresses, and "
+        "cache policy to the selected machine protocol. The returned token "
+        "must be committed to exactly one kernel.async.group."
     ),
     operands=[
         Operand("source", VIEW, doc="Global-like source fragment broadcast across the cluster."),
         Operand("dest", VIEW, doc="Workgroup/LDS destination fragment for this workgroup."),
-        Operand("cluster_mask", INTEGER, doc="i32 workgroup-cluster broadcast mask consumed by the target M0 operand."),
+        Operand("cluster_mask", INTEGER, doc="i32 set of participating flat workgroup-cluster ranks."),
     ],
     results=[
         Result("token", ANY, doc="Opaque async-copy token for the cluster gather."),
@@ -1388,7 +1556,7 @@ kernel_async_cluster_gather = Op(
 )
 
 # ============================================================================
-# kernel.async.cluster.gather.mask — predicated AMDGPU cluster gather
+# kernel.async.cluster.gather.mask — predicated workgroup-cluster gather
 # ============================================================================
 
 kernel_async_cluster_gather_mask = Op(
@@ -1400,13 +1568,13 @@ kernel_async_cluster_gather_mask = Op(
         "perform no source or destination access for the current invocation "
         "but still produce a completed token, preserving a uniform async group "
         "shape for tails and guarded tiles. The cluster_mask remains the "
-        "target workgroup broadcast mask and is distinct from the scalar i1 "
+        "semantic participant set and is distinct from the scalar i1 "
         "predicate."
     ),
     operands=[
         Operand("source", VIEW, doc="Global-like source fragment broadcast across the cluster."),
         Operand("dest", VIEW, doc="Workgroup/LDS destination fragment for this workgroup."),
-        Operand("cluster_mask", INTEGER, doc="i32 workgroup-cluster broadcast mask consumed by the target M0 operand."),
+        Operand("cluster_mask", INTEGER, doc="i32 set of participating flat workgroup-cluster ranks."),
         Operand("predicate", I1, doc="Scalar predicate controlling this invocation's cluster gather."),
     ],
     results=[
@@ -1678,4 +1846,9 @@ ALL_KERNEL_OPS: tuple[Op, ...] = (
     kernel_workgroup_vote_all,
     kernel_workgroup_vote_count,
     kernel_assert,
+    kernel_cluster_id,
+    kernel_cluster_workgroup_id,
+    kernel_cluster_workgroup_flat_id,
+    kernel_cluster_size,
+    kernel_cluster_count,
 )

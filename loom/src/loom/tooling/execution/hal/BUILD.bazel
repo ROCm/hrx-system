@@ -91,6 +91,7 @@ loom_cc_library(
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
+        "//loom/src/loom/link:linker",
         "//loom/src/loom/ops:special_values",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/pass:types",

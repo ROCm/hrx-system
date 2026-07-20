@@ -58,12 +58,6 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "pressure",
-    hdrs = ["pressure.h"],
-    deps = ["//runtime/src/iree/base"],
-)
-
-loom_cc_library(
     name = "descriptor_traits",
     srcs = ["descriptor_traits.c"],
     hdrs = ["descriptor_traits.h"],
@@ -225,6 +219,50 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "memory_access_ir",
+    srcs = ["memory_access_ir.c"],
+    hdrs = ["memory_access_ir.h"],
+    deps = [
+        ":function",
+        ":memory_access",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "memory_access_test",
+    srcs = ["memory_access_test.cc"],
+    deps = [
+        ":memory_access",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "memory_access_ir_test",
+    srcs = ["memory_access_ir_test.cc"],
+    deps = [
+        ":function",
+        ":memory_access_ir",
+        ":text_asm",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target/test:descriptors",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "storage_relation",
     srcs = ["storage_relation.c"],
     hdrs = ["storage_relation.h"],
@@ -285,6 +323,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/allocation:interval_assignment",
         "//loom/src/loom/codegen/low/allocation:interval_order",
         "//loom/src/loom/codegen/low/allocation:live_range",
+        "//loom/src/loom/codegen/low/allocation:loop_edge_relocation",
         "//loom/src/loom/codegen/low/allocation:move_topology",
         "//loom/src/loom/codegen/low/allocation:packet_move",
         "//loom/src/loom/codegen/low/allocation:search",
@@ -556,6 +595,7 @@ loom_cc_library(
         ":function",
         ":function_model",
         ":memory_access",
+        ":memory_access_ir",
         ":packet",
         ":planning_statistics",
         ":storage_lease",
@@ -564,6 +604,7 @@ loom_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:residency",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -601,6 +642,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/ops/view",

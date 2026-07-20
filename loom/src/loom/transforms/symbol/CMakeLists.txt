@@ -29,6 +29,7 @@ loom_cc_library(
     loom::ir::facts
     loom::ops::func
     loom::ops::op_defs
+    loom::ops::target
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::report

@@ -119,8 +119,12 @@ enum loom_amdgpu_storage_policy_e {
   LOOM_AMDGPU_STORAGE_SANITIZER_ACCESS = 11,
   // Vector-construction plans own their exact source-value demand policy.
   LOOM_AMDGPU_STORAGE_VECTOR_CONSTRUCT_PLAN = 12,
+  // Tensor-memory plans own their explicit D-group source values.
+  LOOM_AMDGPU_STORAGE_ASYNC_TENSOR = 13,
+  // Cluster gather plans own both independently materialized addresses.
+  LOOM_AMDGPU_STORAGE_ASYNC_CLUSTER = 14,
   // Maximum storage-policy value accepted by dispatch row policy bits.
-  LOOM_AMDGPU_STORAGE_MAX = LOOM_AMDGPU_STORAGE_VECTOR_CONSTRUCT_PLAN,
+  LOOM_AMDGPU_STORAGE_MAX = LOOM_AMDGPU_STORAGE_ASYNC_CLUSTER,
 };
 
 enum loom_amdgpu_preselect_policy_e {
@@ -152,9 +156,10 @@ enum loom_amdgpu_report_key_kind_e {
   LOOM_AMDGPU_REPORT_KEY_FRAGMENT_MEMORY_STRATEGY = 5,
   // Report the 16-bit/narrow-float vector conversion strategy.
   LOOM_AMDGPU_REPORT_KEY_VECTOR_16BIT_FLOAT_CONVERSION_STRATEGY = 6,
+  // Report the concrete gfx125x tensor-memory packet form.
+  LOOM_AMDGPU_REPORT_KEY_TENSOR_MEMORY_PACKET = 7,
   // Maximum report-key kind accepted by dispatch rows.
-  LOOM_AMDGPU_REPORT_KEY_MAX =
-      LOOM_AMDGPU_REPORT_KEY_VECTOR_16BIT_FLOAT_CONVERSION_STRATEGY,
+  LOOM_AMDGPU_REPORT_KEY_MAX = LOOM_AMDGPU_REPORT_KEY_TENSOR_MEMORY_PACKET,
 };
 
 // Packing constants bridge the storage and preselection enum domains into the
@@ -487,6 +492,25 @@ LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_kernel_async_gather_dispatch,
 LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_kernel_async_gather_dispatch,
                              loom_amdgpu_async_gather_plan_t,
                              loom_amdgpu_lower_kernel_async_gather)
+
+LOOM_AMDGPU_DEFINE_DATA_SELECT(
+    loom_amdgpu_select_kernel_async_cluster_gather_dispatch,
+    loom_amdgpu_cluster_gather_plan_t,
+    loom_amdgpu_select_kernel_async_cluster_gather_plan)
+
+LOOM_AMDGPU_DEFINE_DATA_EMIT(
+    loom_amdgpu_emit_kernel_async_cluster_gather_dispatch,
+    loom_amdgpu_cluster_gather_plan_t,
+    loom_amdgpu_lower_kernel_async_cluster_gather)
+
+LOOM_AMDGPU_DEFINE_DATA_SELECT(
+    loom_amdgpu_select_kernel_async_tensor_load_dispatch,
+    loom_amdgpu_tensor_load_plan_t,
+    loom_amdgpu_select_kernel_async_tensor_load_plan)
+
+LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_kernel_async_tensor_load_dispatch,
+                             loom_amdgpu_tensor_load_plan_t,
+                             loom_amdgpu_lower_kernel_async_tensor_load)
 
 LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_kernel_async_wait_dispatch,
                                loom_amdgpu_async_wait_plan_t,
@@ -1254,6 +1278,16 @@ static void loom_amdgpu_mark_plan_storage_demands(
           context, source_op,
           (const loom_amdgpu_async_gather_plan_t*)plan.target_data);
       return;
+    case LOOM_AMDGPU_STORAGE_ASYNC_CLUSTER:
+      loom_amdgpu_mark_cluster_gather_plan_storage_demands(
+          context, source_op,
+          (const loom_amdgpu_cluster_gather_plan_t*)plan.target_data);
+      return;
+    case LOOM_AMDGPU_STORAGE_ASYNC_TENSOR:
+      loom_amdgpu_mark_tensor_load_plan_storage_demands(
+          context, source_op,
+          (const loom_amdgpu_tensor_load_plan_t*)plan.target_data);
+      return;
     case LOOM_AMDGPU_STORAGE_MEMORY_PLAN:
       loom_amdgpu_mark_memory_access_plan_storage_demands(
           context, source_op,
@@ -1359,6 +1393,17 @@ static iree_string_view_t loom_amdgpu_table_lookup_plan_key(
   }
 }
 
+static iree_string_view_t loom_amdgpu_tensor_memory_plan_key(
+    loom_low_lower_context_t* context,
+    const loom_amdgpu_tensor_load_plan_t* plan) {
+  if (plan->descriptor.descriptor == NULL) {
+    return iree_string_view_empty();
+  }
+  return loom_low_descriptor_set_string(
+      loom_low_lower_context_descriptor_set(context),
+      plan->descriptor.descriptor->key_string_offset);
+}
+
 static iree_string_view_t loom_amdgpu_plan_key(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_op, loom_low_lower_plan_t plan) {
@@ -1405,6 +1450,12 @@ static iree_string_view_t loom_amdgpu_plan_key(
       return loom_amdgpu_vector_16bit_float_conversion_plan_key(
           context, (const loom_amdgpu_vector_16bit_float_conversion_plan_t*)
                        plan.target_data);
+    case LOOM_AMDGPU_REPORT_KEY_TENSOR_MEMORY_PACKET:
+      if (plan.target_data == NULL) {
+        return iree_string_view_empty();
+      }
+      return loom_amdgpu_tensor_memory_plan_key(
+          context, (const loom_amdgpu_tensor_load_plan_t*)plan.target_data);
     default:
       return iree_string_view_empty();
   }

@@ -12,6 +12,7 @@
 #include "iree/hal/drivers/amdgpu/abi/kernel_args.h"
 #include "iree/hal/drivers/amdgpu/device/dispatch.h"
 #include "iree/hal/drivers/amdgpu/kernarg_layout.h"
+#include "iree/hal/drivers/amdgpu/physical_device_capabilities.h"
 #include "iree/hal/drivers/amdgpu/profile_metadata.h"
 #include "iree/hal/drivers/amdgpu/queue_scope.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
@@ -20,6 +21,8 @@
 typedef struct iree_hal_amdgpu_asan_state_t iree_hal_amdgpu_asan_state_t;
 typedef struct iree_hal_amdgpu_feedback_state_t
     iree_hal_amdgpu_feedback_state_t;
+typedef struct iree_hal_amdgpu_physical_device_t
+    iree_hal_amdgpu_physical_device_t;
 typedef struct iree_hal_amdgpu_topology_t iree_hal_amdgpu_topology_t;
 typedef struct iree_hal_amdgpu_tsan_state_t iree_hal_amdgpu_tsan_state_t;
 
@@ -78,6 +81,10 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
   uint32_t custom_kernarg_block_count;
   // Maximum static workgroup count accepted for each dimension.
   uint32_t max_workgroup_count[3];
+  // Cluster-count limits for this descriptor's physical device.
+  iree_hal_amdgpu_dispatch_dimension_limits_t workgroup_cluster_count_limits;
+  // Physical device ordinal owning |workgroup_cluster_count_limits|.
+  iree_host_size_t physical_device_ordinal;
   // Maximum dynamic group-memory byte count accepted for this export.
   uint32_t max_dynamic_workgroup_local_memory;
   // PM4 launch state for the default executable workgroup size.
@@ -126,6 +133,10 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
 // variant per physical queue ordinal and publish per-queue config without
 // mutating state on each dispatch.
 //
+// |physical_device_list| contains |physical_device_count| devices in topology
+// ordinal order. It is used only during creation to validate metadata against
+// every selected device's immutable capabilities.
+//
 // Exact code-object image bytes and loader load ranges are retained in profile
 // metadata for offline trace/disassembly workflows. Executable trace profiling
 // may begin after executable preparation, so this cold-path metadata is always
@@ -139,6 +150,8 @@ iree_status_t iree_hal_amdgpu_executable_create(
     uint64_t executable_id, iree_hal_amdgpu_feedback_state_t* feedback_state,
     iree_hal_amdgpu_asan_state_t* asan_state,
     iree_hal_amdgpu_tsan_state_t* tsan_state,
+    iree_host_size_t physical_device_count,
+    iree_hal_amdgpu_physical_device_t* const* physical_device_list,
     iree_host_size_t queue_scope_count,
     const iree_hal_amdgpu_queue_scope_t* queue_scopes,
     iree_hal_amdgpu_profile_metadata_registry_t* profile_metadata,

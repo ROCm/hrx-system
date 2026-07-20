@@ -272,6 +272,13 @@ iree_status_t loom_amdgpu_emit_sgpr_scale_u32(loom_low_lower_context_t* context,
                                               loom_type_t lane_type,
                                               loom_value_id_t* out_value);
 
+// Emits |value * scale + addend| into a one-unit SGPR, using a fused scalar
+// shift-add descriptor when the target provides the exact power-of-two form.
+iree_status_t loom_amdgpu_emit_sgpr_scaled_add_u32(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value, uint32_t scale, loom_value_id_t addend,
+    loom_type_t lane_type, loom_value_id_t* out_value);
+
 // Emits an SGPR x2 value zero-extending the supplied one-unit SGPR.
 iree_status_t loom_amdgpu_emit_sgpr64_from_u32(
     loom_low_lower_context_t* context, const loom_op_t* source_op,

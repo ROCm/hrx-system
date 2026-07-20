@@ -949,5 +949,32 @@ iree_string_view_t loom_movement_rejection_detail(
   if (iree_any_bit_set(rejection_bits, LOOM_MOVEMENT_REJECTION_CACHE_POLICY)) {
     return IREE_SV("movement cache policy is malformed");
   }
+  if (iree_any_bit_set(rejection_bits, LOOM_MOVEMENT_REJECTION_CLUSTER_SHAPE)) {
+    return IREE_SV(
+        "cluster movement requires a supported static cluster shape");
+  }
+  if (iree_any_bit_set(rejection_bits,
+                       LOOM_MOVEMENT_REJECTION_CLUSTER_PARTICIPANTS)) {
+    return IREE_SV("cluster participant set does not match the proven shape");
+  }
+  if (iree_any_bit_set(rejection_bits,
+                       LOOM_MOVEMENT_REJECTION_CLUSTER_CONTROL)) {
+    return IREE_SV(
+        "cluster movement does not execute under cluster-uniform control");
+  }
+  if (iree_any_bit_set(rejection_bits,
+                       LOOM_MOVEMENT_REJECTION_CLUSTER_SOURCE_AGREEMENT)) {
+    return IREE_SV(
+        "cluster movement source addresses may differ between participants");
+  }
+  if (iree_any_bit_set(rejection_bits,
+                       LOOM_MOVEMENT_REJECTION_CLUSTER_DEST_AGREEMENT)) {
+    return IREE_SV(
+        "cluster movement LDS addresses may differ between participants");
+  }
+  if (iree_any_bit_set(rejection_bits,
+                       LOOM_MOVEMENT_REJECTION_CLUSTER_PREDICATE)) {
+    return IREE_SV("cluster movement predicate is not statically true");
+  }
   return IREE_SV("movement request is not representable");
 }

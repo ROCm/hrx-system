@@ -110,3 +110,55 @@ kernel.def @true_exit_inlines_body() {
   test.use %value : i32
   kernel.return
 }
+
+// ====
+
+kernel.def @ordinary_cluster_queries_canonicalize(%workgroups: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %cluster = kernel.cluster.id<x> : index
+  %local = kernel.cluster.workgroup.id<x> : index
+  %flat = kernel.cluster.workgroup.flat_id : index
+  %size = kernel.cluster.size<x> : index
+  %cluster_count = kernel.cluster.count<x> : index
+  test.use %cluster, %local, %flat, %size, %cluster_count : index, index, index, index, index
+  kernel.return
+}
+
+// ----
+kernel.def @ordinary_cluster_queries_canonicalize(%workgroups: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %cluster = kernel.workgroup.id<x> : index
+  %local = index.constant 0 : index
+  %flat = index.constant 0 : index
+  %size = index.constant 1 : index
+  %cluster_count = kernel.workgroup.count<x> : index
+  test.use %cluster, %local, %flat, %size, %cluster_count : index, index, index, index, index
+  kernel.return
+}
+
+// ====
+
+kernel.def @trivial_cluster_queries_canonicalize(%workgroups: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroups, %c1, %c1) workgroup_size(%c1, %c1, %c1) cluster_size(%c1, %c1, %c1) : index
+} launch() {
+  %cluster = kernel.cluster.id<x> : index
+  %cluster_count = kernel.cluster.count<x> : index
+  test.use %cluster, %cluster_count : index, index
+  kernel.return
+}
+
+// ----
+kernel.def @trivial_cluster_queries_canonicalize(%workgroups: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroups, %c1, %c1) workgroup_size(%c1, %c1, %c1) cluster_size(%c1, %c1, %c1) : index
+} launch() {
+  %cluster = kernel.workgroup.id<x> : index
+  %cluster_count = kernel.workgroup.count<x> : index
+  test.use %cluster, %cluster_count : index, index
+  kernel.return
+}

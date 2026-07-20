@@ -42,6 +42,7 @@ loom_generated_cc_library(
     loom::ops::buffer
     loom::ops::cache
     loom::ops::combining
+    loom::ops::func
     loom::ops::func_symbol_facts
     loom::ops::index
     loom::ops::op_defs
@@ -53,6 +54,19 @@ loom_generated_cc_library(
     loom::target::types
     loom::util::fact_table
     loom::util::walk
+)
+
+loom_cc_test(
+  NAME
+    launch_config_test
+  SRCS
+    "launch_config_test.cc"
+  DEPS
+    ::kernel
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::error::error_defs
+    loom::testing::diagnostic_matchers
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -509,8 +509,8 @@ low.kernel.def target(@target) workgroup_size(1, 64, 1) workgroup_count(1, 1, 1)
   %15 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %value = v_mov_b32 7
   %18 = v_lshlrev_b32_src0_inline %row, 2
-  ds_write_b32 %18, %value
-  %loaded = ds_read_b32 %18
+  low.op<amdgpu.ds_write_b32>(%18, %value) {offset = 0} memory_access([0, 3, 6, -1, 43, 4, 0, 4, 3, 0, 252, 4, 256]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded = low.op<amdgpu.ds_read_b32>(%18) {offset = 0} memory_access([0, 3, 6, -1, 43, 4, 0, 4, 3, 0, 252, 4, 256]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
   global_store_b32_saddr %18, %loaded, %output_view
   return
 }

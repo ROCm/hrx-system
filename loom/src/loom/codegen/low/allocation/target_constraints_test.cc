@@ -103,6 +103,68 @@ TEST_F(LowAllocationTargetConstraintsTest, AppliesBudgetToUnboundedClass) {
 }
 
 TEST_F(LowAllocationTargetConstraintsTest,
+       ValidatesAllocatableAndFixedLocationWindowsSeparately) {
+  loom_low_allocation_budget_t budget = {};
+  budget.register_class = IREE_SV("test.phys");
+  budget.max_units = 16;
+
+  DiagnosticCapture capture = {};
+  const iree_diagnostic_emitter_t emitter = {
+      /*.fn=*/CaptureDiagnostic,
+      /*.user_data=*/&capture,
+  };
+  loom_low_allocation_target_constraints_t constraints = {};
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
+      &module_, &function_op_, &target_, &budget, /*budget_count=*/1,
+      /*reserved_ranges=*/nullptr, /*reserved_range_count=*/0, emitter, &arena_,
+      &constraints));
+
+  const uint16_t reg_class_id = RegisterClassId(IREE_SV("test.phys"));
+  bool valid = false;
+  IREE_ASSERT_OK(
+      loom_low_allocation_target_constraints_validate_register_location_capacity(
+          &constraints, reg_class_id,
+          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          /*location_base=*/15, /*location_count=*/1, IREE_SV("test"),
+          &function_op_, &valid));
+  EXPECT_TRUE(valid);
+
+  IREE_ASSERT_OK(
+      loom_low_allocation_target_constraints_validate_register_location_capacity(
+          &constraints, reg_class_id,
+          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          /*location_base=*/20, /*location_count=*/1, IREE_SV("test"),
+          &function_op_, &valid));
+  EXPECT_FALSE(valid);
+
+  IREE_ASSERT_OK(
+      loom_low_allocation_target_constraints_validate_register_location_capacity(
+          &constraints, reg_class_id,
+          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          /*location_base=*/32, /*location_count=*/8, IREE_SV("test"),
+          &function_op_, &valid));
+  EXPECT_TRUE(valid);
+
+  IREE_ASSERT_OK(
+      loom_low_allocation_target_constraints_validate_register_location_capacity(
+          &constraints, reg_class_id,
+          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          /*location_base=*/31, /*location_count=*/2, IREE_SV("test"),
+          &function_op_, &valid));
+  EXPECT_FALSE(valid);
+
+  IREE_ASSERT_OK(
+      loom_low_allocation_target_constraints_validate_register_location_capacity(
+          &constraints, reg_class_id,
+          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          /*location_base=*/40, /*location_count=*/1, IREE_SV("test"),
+          &function_op_, &valid));
+  EXPECT_FALSE(valid);
+  EXPECT_EQ(capture.count, 3u);
+  EXPECT_EQ(constraints.error_count, 3u);
+}
+
+TEST_F(LowAllocationTargetConstraintsTest,
        ReportsOverlappingReservedRangesAsDiagnostic) {
   loom_low_allocation_reserved_range_t reserved_ranges[2] = {};
   reserved_ranges[0].register_class = IREE_SV("test.phys");
@@ -160,6 +222,38 @@ TEST_F(LowAllocationTargetConstraintsTest,
           &constraints, phys_reg_class_id,
           LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER),
       12u);
+}
+
+TEST_F(LowAllocationTargetConstraintsTest,
+       AssignmentExtentsExcludeAbiFixedLocationWindow) {
+  loom_low_allocation_target_constraints_t constraints = {};
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
+      &module_, &function_op_, &target_, /*budgets=*/nullptr,
+      /*budget_count=*/0, /*reserved_ranges=*/nullptr,
+      /*reserved_range_count=*/0, /*emitter=*/iree_diagnostic_emitter_t{},
+      &arena_, &constraints));
+
+  const uint16_t reg_class_id = RegisterClassId(IREE_SV("test.phys"));
+  loom_low_allocation_assignment_t ordinary_assignment = {};
+  ordinary_assignment.descriptor_reg_class_id = reg_class_id;
+  ordinary_assignment.location_kind =
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
+  ordinary_assignment.location_base = 5;
+  ordinary_assignment.location_count = 1;
+  loom_low_allocation_target_constraints_record_assignment_location_end(
+      &constraints, &ordinary_assignment);
+
+  loom_low_allocation_assignment_t fixed_assignment = ordinary_assignment;
+  fixed_assignment.location_base = 32;
+  fixed_assignment.location_count = 8;
+  loom_low_allocation_target_constraints_record_assignment_location_end(
+      &constraints, &fixed_assignment);
+
+  EXPECT_EQ(
+      loom_low_allocation_target_constraints_assigned_location_search_limit(
+          &constraints, reg_class_id,
+          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER),
+      6u);
 }
 
 TEST_F(LowAllocationTargetConstraintsTest,

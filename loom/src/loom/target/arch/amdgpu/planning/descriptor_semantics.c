@@ -62,6 +62,14 @@ bool loom_amdgpu_descriptor_is_sdwa(
       LOOM_AMDGPU_DESCRIPTOR_TRAIT_SDWA);
 }
 
+bool loom_amdgpu_descriptor_implicitly_drains_xcnt(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  return iree_any_bit_set(
+      loom_amdgpu_descriptor_traits(descriptor_set, descriptor),
+      LOOM_AMDGPU_DESCRIPTOR_TRAIT_XCNT_IMPLICIT_DRAIN);
+}
+
 iree_status_t loom_amdgpu_descriptor_build_structural_state_reads(
     const loom_low_descriptor_set_t* descriptor_set,
     iree_arena_allocator_t* arena,

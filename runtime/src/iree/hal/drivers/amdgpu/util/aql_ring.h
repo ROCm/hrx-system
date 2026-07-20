@@ -48,6 +48,7 @@ extern "C" {
 // packet is cache-line aligned at every access point.
 typedef union iree_alignas(64) iree_hal_amdgpu_aql_packet_t {
   iree_hsa_kernel_dispatch_packet_t dispatch;
+  iree_hsa_amd_ext_kernel_dispatch_packet_t extended_dispatch;
   iree_hsa_barrier_and_packet_t barrier_and;
   iree_hsa_barrier_or_packet_t barrier_or;
   iree_hsa_amd_aql_pm4_ib_packet_t pm4_ib;

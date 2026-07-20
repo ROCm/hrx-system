@@ -460,6 +460,14 @@ static void iree_hal_amdgpu_hsaco_load_plan_populate_workgroup_size(
   }
 }
 
+static void iree_hal_amdgpu_hsaco_load_plan_populate_workgroup_cluster_size(
+    const iree_hal_amdgpu_hsaco_metadata_kernel_t* kernel,
+    iree_hal_amdgpu_executable_export_t* out_export) {
+  if (!kernel->has_workgroup_cluster_size) return;
+  memcpy(out_export->workgroup_cluster_size, kernel->workgroup_cluster_size,
+         sizeof(out_export->workgroup_cluster_size));
+}
+
 iree_status_t iree_hal_amdgpu_executable_metadata_populate_from_hsaco(
     const iree_hal_amdgpu_hsaco_metadata_t* hsaco_metadata,
     iree_const_byte_span_t loaded_code_object_data,
@@ -531,6 +539,8 @@ iree_status_t iree_hal_amdgpu_executable_metadata_populate_from_hsaco(
         UINT32_MAX - kernel->group_segment_fixed_size;
     iree_hal_amdgpu_hsaco_load_plan_populate_workgroup_size(kernel,
                                                             export_info);
+    iree_hal_amdgpu_hsaco_load_plan_populate_workgroup_cluster_size(
+        kernel, export_info);
 
     iree_byte_span_t layout_storage = iree_byte_span_empty();
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_metadata_append_layout(

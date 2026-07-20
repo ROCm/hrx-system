@@ -352,7 +352,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   %second_view = storage_address %14 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   %17 = v_mov_b32 1
   %18 = v_mov_b32 0
-  ds_write_b32 %18, %17
+  low.op<amdgpu.ds_write_b32>(%18, %17) {offset = 0} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   ds_add_u32 %second_view, %17
   %old = ds_add_rtn_u32 %second_view, %17
   return

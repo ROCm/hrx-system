@@ -977,6 +977,10 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
       system, options, host_ordinal, host_memory_pools, device_ordinal,
       out_physical_device);
   if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_query_workgroup_cluster_capabilities(
+        libhsa, device_agent, &out_physical_device->workgroup_cluster);
+  }
+  if (iree_status_is_ok(status)) {
     out_physical_device->hdp_flush =
         iree_hal_amdgpu_physical_device_query_hdp_flush_registers(libhsa,
                                                                   device_agent);

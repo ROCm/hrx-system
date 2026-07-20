@@ -457,6 +457,51 @@ def test_compiler_rejects_register_alias_set_capacity_mismatch() -> None:
         compiler.compile_descriptor_set(descriptor_set)
 
 
+def test_compiler_rejects_virtual_register_fixed_locations() -> None:
+    register_classes = tuple(replace(register_class, fixed_location_count=1) if register_class.name == "test.i32" else register_class for register_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes)
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        reg_classes=register_classes,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' register class 'test.i32' has fixed physical locations but is virtual-only"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_register_fixed_location_overlap() -> None:
+    register_classes = tuple(replace(register_class, fixed_location_base=31) if register_class.name == "test.phys" else register_class for register_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes)
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        reg_classes=register_classes,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' register class 'test.phys' fixed-location range overlaps its allocatable locations"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_register_alias_set_fixed_location_mismatch() -> None:
+    register_classes = tuple(
+        replace(register_class, fixed_location_base=1, fixed_location_count=1) if register_class.name == "test.alias64" else register_class
+        for register_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        reg_classes=register_classes,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' alias set 1 classes 'test.alias32' and 'test.alias64' have different fixed-location ranges"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
 def test_compiler_derives_barrier_descriptor_flag() -> None:
     descriptor_set = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,

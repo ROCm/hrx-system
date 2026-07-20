@@ -2203,11 +2203,44 @@ static iree_status_t loom_low_verify_reg_class(
                             " has non-zero allocatable count %" PRIu16,
                             reg_class_index, reg_class->allocatable_count);
   }
+  if (is_virtual_only && (reg_class->fixed_location_base != 0 ||
+                          reg_class->fixed_location_count != 0)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low virtual register class %" PRIu32
+                            " has a non-empty fixed-location window",
+                            reg_class_index);
+  }
   if (is_physical && reg_class->allocatable_count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low physical register class %" PRIu32
                             " has zero allocatable count",
                             reg_class_index);
+  }
+  if (reg_class->fixed_location_count == 0 &&
+      reg_class->fixed_location_base != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low physical register class %" PRIu32
+                            " has fixed-location base %" PRIu16
+                            " without a count",
+                            reg_class_index, reg_class->fixed_location_base);
+  }
+  const uint32_t fixed_location_end = (uint32_t)reg_class->fixed_location_base +
+                                      reg_class->fixed_location_count;
+  if (fixed_location_end > UINT16_MAX + UINT32_C(1)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low physical register class %" PRIu32 " fixed-location range [%" PRIu16
+        ", %" PRIu32 ") exceeds the u16 location namespace",
+        reg_class_index, reg_class->fixed_location_base, fixed_location_end);
+  }
+  if (reg_class->fixed_location_count != 0 &&
+      reg_class->fixed_location_base < reg_class->allocatable_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low physical register class %" PRIu32
+                            " fixed-location range begins at %" PRIu16
+                            " inside its %" PRIu16 " allocatable locations",
+                            reg_class_index, reg_class->fixed_location_base,
+                            reg_class->allocatable_count);
   }
   if (reg_class->spill_class_id != LOOM_LOW_REG_CLASS_NONE &&
       reg_class->spill_class_id >= descriptor_set->reg_class_count) {

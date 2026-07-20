@@ -167,6 +167,8 @@ loom_amdgpu_metadata_kernel_t MinimalKernel(iree_string_view_t name,
       /*.max_flat_workgroup_size=*/64,
       /*.required_workgroup_size=*/{/*.x=*/64, /*.y=*/1, /*.z=*/1},
       /*.has_required_workgroup_size=*/true,
+      /*.workgroup_cluster_size=*/{},
+      /*.has_workgroup_cluster_size=*/false,
       /*.arguments=*/nullptr,
       /*.argument_count=*/0,
   };
@@ -184,6 +186,8 @@ loom_amdgpu_kernel_hsaco_contribution_t Contribution(
           /*.descriptor_options=*/{},
           /*.text=*/text,
       },
+      /*.native_insertions=*/nullptr,
+      /*.native_insertion_count=*/0,
       /*.summary=*/
       {
           /*.instruction_count=*/1,

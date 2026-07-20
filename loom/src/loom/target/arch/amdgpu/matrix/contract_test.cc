@@ -2810,11 +2810,32 @@ TEST(MatrixContractTest, ProcessorFeatureBitsUseTargetInfoAliases) {
   loom_amdgpu_matrix_feature_bits_t gfx1251_features = 0;
   IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
       IREE_SV("gfx1251"), &gfx1251_features));
-  EXPECT_NE(gfx1251_features & LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250,
-            UINT64_C(0));
-  EXPECT_NE(
-      gfx1251_features & LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250_SCALE_F8F6F4,
-      UINT64_C(0));
+  EXPECT_EQ(gfx1251_features,
+            LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250 |
+                LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250_SCALE_F8F6F4 |
+                LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250);
+}
+
+TEST(MatrixContractTest, Gfx1250RejectsLegacyWmmaDescriptors) {
+  loom_amdgpu_matrix_feature_bits_t gfx1250_features = 0;
+  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
+      IREE_SV("gfx1250"), &gfx1250_features));
+
+  const loom_amdgpu_matrix_contract_descriptor_t* gfx11 =
+      FindDescriptor("wmma.f32.16x16x16.bf16");
+  const loom_amdgpu_matrix_contract_descriptor_t* gfx12 =
+      FindDescriptor("wmma.f32.16x16x16.bf16.gfx12");
+  const loom_amdgpu_matrix_contract_descriptor_t* gfx1250 =
+      FindDescriptor("wmma.f32.16x16x32.bf16");
+  ASSERT_NE(gfx11, nullptr);
+  ASSERT_NE(gfx12, nullptr);
+  ASSERT_NE(gfx1250, nullptr);
+  EXPECT_FALSE(
+      loom_amdgpu_matrix_contract_is_available(gfx11, gfx1250_features, 32));
+  EXPECT_FALSE(
+      loom_amdgpu_matrix_contract_is_available(gfx12, gfx1250_features, 32));
+  EXPECT_TRUE(
+      loom_amdgpu_matrix_contract_is_available(gfx1250, gfx1250_features, 32));
 }
 
 TEST(MatrixContractTest, NamesAreStable) {

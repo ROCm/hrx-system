@@ -64,14 +64,6 @@ static bool loom_amdgpu_materialize_hal_kernel_abi_matches(
          loom_amdgpu_target_isa(target->target_op);
 }
 
-static bool loom_amdgpu_hal_binding_materialization_changed(
-    const loom_amdgpu_hal_binding_materialization_result_t* result) {
-  return result->materialized_binding_count != 0 ||
-         result->materialized_direct_arg_count != 0 ||
-         result->materialized_descriptor_count != 0 ||
-         result->inserted_kernarg_segment_ptr_live_in;
-}
-
 iree_status_t loom_amdgpu_materialize_hal_kernel_abi_run(
     loom_pass_t* pass, loom_module_t* module, loom_func_like_t function) {
   if (!loom_low_function_def_isa(function.op)) {
@@ -113,7 +105,7 @@ iree_status_t loom_amdgpu_materialize_hal_kernel_abi_run(
   statistics->bindings += materialization.materialized_binding_count;
   statistics->direct_args += materialization.materialized_direct_arg_count;
   statistics->descriptors += materialization.materialized_descriptor_count;
-  if (loom_amdgpu_hal_binding_materialization_changed(&materialization)) {
+  if (materialization.changed) {
     loom_pass_mark_changed(pass);
   }
   return iree_ok_status();

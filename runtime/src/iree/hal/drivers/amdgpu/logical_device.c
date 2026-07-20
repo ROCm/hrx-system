@@ -2782,7 +2782,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_load_executable(
       base_device, &logical_device->system->libhsa,
       &logical_device->system->topology, queue_affinity, target, load_params,
       executable_id, &logical_device->feedback, &logical_device->asan,
-      &logical_device->tsan, queue_scope_count, queue_scopes,
+      &logical_device->tsan, logical_device->physical_device_count,
+      logical_device->physical_devices, queue_scope_count, queue_scopes,
       &logical_device->profile_metadata,
       iree_hal_device_host_allocator(base_device), out_executable);
 }

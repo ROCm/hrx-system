@@ -29,6 +29,8 @@ loom_amdgpu_metadata_kernel_t MinimalMetadataKernel() {
       /*.max_flat_workgroup_size=*/64,
       /*.required_workgroup_size=*/{},
       /*.has_required_workgroup_size=*/false,
+      /*.workgroup_cluster_size=*/{},
+      /*.has_workgroup_cluster_size=*/false,
   };
 }
 

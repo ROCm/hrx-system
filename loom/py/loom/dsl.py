@@ -737,9 +737,10 @@ class RegionDef:
     buffer_arg_memory_space: Optional target-independent memory-space fact to
         seed for buffer entry block arguments in this region. This refines
         region boundary facts without parameterizing the buffer type itself.
-    arg_uniform_scope: Optional execution scope over which scalar entry block
-        arguments are identical. This is a region boundary contract rather
-        than a property inferred from argument types.
+    arg_uniform_scope: Optional execution scope (currently "workgroup" or
+        "cluster") over which scalar entry block arguments are identical.
+        This is a region boundary contract rather than a property inferred
+        from argument types.
     """
 
     name: str
