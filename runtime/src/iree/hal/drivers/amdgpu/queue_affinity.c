@@ -161,6 +161,48 @@ bool iree_hal_amdgpu_queue_affinity_try_resolve(
   return true;
 }
 
+iree_status_t iree_hal_amdgpu_queue_affinity_make_axis(
+    iree_hal_amdgpu_queue_affinity_domain_t domain, iree_async_axis_t base_axis,
+    iree_host_size_t queue_ordinal,
+    iree_hal_amdgpu_queue_affinity_resolved_t* out_resolved,
+    iree_async_axis_t* out_axis) {
+  *out_axis = 0;
+
+  if (IREE_UNLIKELY(iree_async_axis_domain(base_axis) !=
+                    IREE_ASYNC_CAUSAL_DOMAIN_QUEUE)) {
+    memset(out_resolved, 0, sizeof(*out_resolved));
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU base axis is not in the queue domain");
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_resolve_ordinal(
+      domain, queue_ordinal, out_resolved));
+
+  *out_axis = iree_async_axis_make_queue(
+      iree_async_axis_session(base_axis), iree_async_axis_machine(base_axis),
+      iree_async_axis_device_index(base_axis), (uint8_t)queue_ordinal);
+  return iree_ok_status();
+}
+
+bool iree_hal_amdgpu_queue_affinity_try_resolve_axis(
+    iree_hal_amdgpu_queue_affinity_domain_t domain,
+    iree_async_axis_t local_axis, iree_async_axis_t candidate_axis,
+    iree_hal_amdgpu_queue_affinity_resolved_t* out_resolved) {
+  memset(out_resolved, 0, sizeof(*out_resolved));
+  if (iree_async_axis_domain(local_axis) != IREE_ASYNC_CAUSAL_DOMAIN_QUEUE ||
+      iree_async_axis_domain(candidate_axis) !=
+          IREE_ASYNC_CAUSAL_DOMAIN_QUEUE ||
+      iree_async_axis_session(local_axis) !=
+          iree_async_axis_session(candidate_axis) ||
+      iree_async_axis_machine(local_axis) !=
+          iree_async_axis_machine(candidate_axis) ||
+      iree_async_axis_device_index(local_axis) !=
+          iree_async_axis_device_index(candidate_axis)) {
+    return false;
+  }
+  return iree_hal_amdgpu_queue_affinity_try_resolve_ordinal(
+      domain, iree_async_axis_queue_index(candidate_axis), out_resolved);
+}
+
 iree_status_t iree_hal_amdgpu_queue_affinity_for_physical_device(
     iree_hal_amdgpu_queue_affinity_domain_t domain,
     iree_host_size_t physical_device_ordinal,

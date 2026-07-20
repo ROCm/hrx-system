@@ -1186,8 +1186,6 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_amdgpu_libhsa_t* libhsa = &system->libhsa;
-  const uint8_t session_epoch = iree_async_axis_session(base_axis);
-  const uint8_t machine_index = iree_async_axis_machine(base_axis);
   iree_status_t status = iree_hal_amdgpu_physical_device_create_default_pools(
       physical_device, epoch_signal_table, host_allocator);
   const iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain = {
@@ -1235,12 +1233,11 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
         physical_device->device_ordinal * physical_device->host_queue_capacity +
         queue_ordinal;
     iree_hal_amdgpu_queue_affinity_resolved_t resolved;
-    status = iree_hal_amdgpu_queue_affinity_resolve_ordinal(
-        queue_affinity_domain, logical_queue_ordinal, &resolved);
+    iree_async_axis_t queue_axis = 0;
+    status = iree_hal_amdgpu_queue_affinity_make_axis(
+        queue_affinity_domain, base_axis, logical_queue_ordinal, &resolved,
+        &queue_axis);
     if (!iree_status_is_ok(status)) break;
-    iree_async_axis_t queue_axis = iree_async_axis_make_queue(
-        session_epoch, machine_index, (uint8_t)physical_device->device_ordinal,
-        (uint8_t)queue_ordinal);
     iree_thread_affinity_t completion_thread_affinity;
     iree_thread_affinity_set_group_any(physical_device->host_numa_node,
                                        &completion_thread_affinity);

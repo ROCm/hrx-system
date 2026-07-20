@@ -674,7 +674,8 @@ iree_status_t iree_hal_amdgpu_host_queue_write_profile_events(
     iree_hal_profile_chunk_metadata_t metadata =
         iree_hal_profile_chunk_metadata_default();
     const uint32_t physical_device_ordinal = (uint32_t)queue->device_ordinal;
-    const uint32_t queue_ordinal = iree_async_axis_queue_index(queue->axis);
+    const uint32_t queue_ordinal =
+        iree_hal_amdgpu_host_queue_profile_queue_ordinal(queue);
     metadata.content_type = IREE_HAL_PROFILE_CONTENT_TYPE_DISPATCH_EVENTS;
     metadata.name = iree_make_cstring_view("amdgpu.dispatch");
     metadata.session_id = session_id;

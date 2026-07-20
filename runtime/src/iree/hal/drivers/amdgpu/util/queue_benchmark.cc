@@ -466,20 +466,28 @@ class QueueBenchmark : public benchmark::Fixture {
 
     auto* logical_device =
         reinterpret_cast<iree_hal_amdgpu_logical_device_t*>(device_);
-    const uint8_t device_index = iree_async_axis_device_index(axis);
-    if (IREE_UNLIKELY(device_index >= logical_device->physical_device_count)) {
+    const iree_hal_amdgpu_queue_affinity_domain_t domain = {
+        /*.supported_affinity=*/logical_device->queue_affinity_mask,
+        /*.physical_device_count=*/logical_device->physical_device_count,
+        /*.queue_count_per_physical_device=*/
+        logical_device->system->topology.gpu_agent_queue_count,
+    };
+    iree_hal_amdgpu_queue_affinity_resolved_t resolved;
+    if (IREE_UNLIKELY(!iree_hal_amdgpu_queue_affinity_try_resolve_axis(
+            domain, logical_device->axis, axis, &resolved))) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "producer axis has no physical device");
+                              "producer axis is not local to this device");
     }
     iree_hal_amdgpu_physical_device_t* physical_device =
-        logical_device->physical_devices[device_index];
-    const uint8_t queue_index = iree_async_axis_queue_index(axis);
-    if (IREE_UNLIKELY(queue_index >= physical_device->host_queue_count)) {
+        logical_device->physical_devices[resolved.physical_device_ordinal];
+    if (IREE_UNLIKELY(resolved.physical_queue_ordinal >=
+                      physical_device->host_queue_count)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "producer axis has no initialized host queue");
     }
 
-    *out_host_queue = &physical_device->host_queues[queue_index];
+    *out_host_queue =
+        &physical_device->host_queues[resolved.physical_queue_ordinal];
     return iree_ok_status();
   }
 

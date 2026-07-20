@@ -942,8 +942,7 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
   // creates the epoch signal) and before any submissions.
   if (iree_status_is_ok(status)) {
     iree_hal_amdgpu_epoch_signal_table_register(
-        epoch_table, iree_async_axis_device_index(axis),
-        iree_async_axis_queue_index(axis),
+        epoch_table, iree_async_axis_queue_index(axis),
         iree_hal_amdgpu_notification_ring_epoch_signal(
             &out_queue->notification_ring));
     out_queue->epoch_table = epoch_table;
@@ -1038,8 +1037,7 @@ void iree_hal_amdgpu_host_queue_deinitialize(
   // handle partial initialization (init failed before registration).
   if (queue->epoch_table) {
     iree_hal_amdgpu_epoch_signal_table_deregister(
-        queue->epoch_table, iree_async_axis_device_index(queue->axis),
-        iree_async_axis_queue_index(queue->axis));
+        queue->epoch_table, iree_async_axis_queue_index(queue->axis));
     queue->epoch_table = NULL;
   }
 

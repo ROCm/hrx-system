@@ -562,7 +562,8 @@ static bool iree_hal_amdgpu_host_queue_should_profile_dispatch(
   const uint32_t physical_device_ordinal = queue->device_ordinal <= UINT32_MAX
                                                ? (uint32_t)queue->device_ordinal
                                                : UINT32_MAX;
-  const uint32_t queue_ordinal = iree_async_axis_queue_index(queue->axis);
+  const uint32_t queue_ordinal =
+      iree_hal_amdgpu_host_queue_profile_queue_ordinal(queue);
   return iree_hal_amdgpu_logical_device_should_profile_dispatch(
       logical_device, executable_id,
       iree_hal_executable_function_index(function),
