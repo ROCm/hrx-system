@@ -13,6 +13,21 @@ package(
 )
 
 loom_cc_library(
+    name = "control_uniformity",
+    srcs = ["control_uniformity.c"],
+    hdrs = ["control_uniformity.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "availability",
     srcs = ["availability.c"],
     hdrs = ["availability.h"],
@@ -111,6 +126,8 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -126,6 +143,7 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",
@@ -221,6 +239,7 @@ loom_cc_library(
     srcs = ["kernel_async_legality.c"],
     hdrs = ["kernel_async_legality.h"],
     deps = [
+        ":control_uniformity",
         ":movement",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
@@ -288,8 +307,8 @@ loom_cc_library(
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:dominance",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -335,6 +354,7 @@ loom_cc_library(
         ":contract",
         "//loom/src/loom/ops/encoding",
         "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:numeric_format",
         "//runtime/src/iree/base",
     ],
 )
@@ -411,6 +431,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/ir",
         "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:cfg_graph",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
@@ -498,8 +519,8 @@ loom_cc_library(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -516,6 +537,7 @@ loom_cc_test(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -530,6 +552,8 @@ loom_cc_library(
     hdrs = ["motion.h"],
     deps = [
         ":availability",
+        ":loop_domain",
+        ":movement",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
@@ -675,9 +699,10 @@ loom_cc_library(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
+        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -701,6 +726,7 @@ loom_cc_test(
     deps = [
         ":type_refinement",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
         "//loom/src/loom/ir:type_refinement",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base/internal:arena",
@@ -722,8 +748,8 @@ loom_cc_library(
         "//loom/src/loom/ops/encoding",
         "//loom/src/loom/ops/view",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )

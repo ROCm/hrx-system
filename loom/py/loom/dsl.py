@@ -86,6 +86,7 @@ __all__ = [
     # Type constraint helpers.
     "type_constraint_name",
     # Field descriptors.
+    "OperandRole",
     "Operand",
     "Result",
     "TiedResult",
@@ -127,6 +128,7 @@ __all__ = [
     "ISOLATED_FROM_ABOVE",
     "NON_DETERMINISTIC",
     "UNKNOWN_EFFECTS",
+    "MEMORY_FENCE",
     "CONVERGENT",
     "HINT",
     "SAFE_TO_SPECULATE",
@@ -229,6 +231,7 @@ __all__ = [
     "FuncLikeInterface",
     "LoopLikeInterface",
     "MemoryAccessInterface",
+    "MemoryAccessOperationKind",
     "RegionBranchInterface",
     "TargetLikeInterface",
     # Op declaration.
@@ -386,6 +389,19 @@ def type_constraint_name(constraint: TypeConstraint) -> str:
 # ============================================================================
 
 
+@unique
+class OperandRole(Enum):
+    """Semantic role of an operand field independent of its display name."""
+
+    NONE = "none"
+    CONTROL_CONDITION = "control_condition"
+    SELECT_CONDITION = "select_condition"
+    SELECT_PAYLOAD = "select_payload"
+    BROADCAST_SOURCE = "broadcast_source"
+    COMPOSITE_ELEMENT = "composite_element"
+    FLOAT_EXTENSION_SOURCE = "float_extension_source"
+
+
 @dataclass(frozen=True, slots=True)
 class Operand:
     """An SSA value operand (input to the op at runtime).
@@ -395,6 +411,7 @@ class Operand:
     doc: Human-readable description.
     variadic: If True, this is zero-or-more values (list[Value]).
     optional: If True, this operand may be absent.
+    role: Semantic role consumed by generic analyses.
     """
 
     name: str
@@ -402,6 +419,7 @@ class Operand:
     doc: str = ""
     variadic: bool = False
     optional: bool = False
+    role: OperandRole = OperandRole.NONE
 
 
 @dataclass(frozen=True, slots=True)
@@ -720,6 +738,10 @@ class RegionDef:
     buffer_arg_memory_space: Optional target-independent memory-space fact to
         seed for buffer entry block arguments in this region. This refines
         region boundary facts without parameterizing the buffer type itself.
+    arg_uniform_scope: Optional execution scope (currently "workgroup" or
+        "cluster") over which scalar entry block arguments are identical.
+        This is a region boundary contract rather than a property inferred
+        from argument types.
     """
 
     name: str
@@ -731,6 +753,7 @@ class RegionDef:
     implicit_args: tuple[tuple[str, str], ...] = ()
     arg_source: str | None = None
     buffer_arg_memory_space: str | None = None
+    arg_uniform_scope: str | None = None
 
 
 # ============================================================================
@@ -867,6 +890,11 @@ NON_DETERMINISTIC = Trait("NonDeterministic")
 # Effects depend on runtime state (e.g., func.call depends on the callee).
 # Passes treat this conservatively as both READS_MEMORY and WRITES_MEMORY.
 UNKNOWN_EFFECTS = Trait("UnknownEffects")
+# Op orders memory accesses without directly reading or writing a resource.
+# Fences are observable side effects but do not alias every memory operand;
+# analyses preserve their ordering contract independently from footprint
+# interference.
+MEMORY_FENCE = Trait("MemoryFence")
 # Execution depends on the dynamic set of participating invocations. This is
 # independent of memory effects: a convergent op may still be pure, read/write
 # memory, or have unknown effects, but generic optimizers must not erase,
@@ -3206,6 +3234,11 @@ def _validate_no_effect_conflicts(
             f"Op '{op_name}': declares both PURE and UNKNOWN_EFFECTS. "
             f"A pure op has no effects."
         )
+    if "Pure" in trait_names and "MemoryFence" in trait_names:
+        raise ValueError(
+            f"Op '{op_name}': declares both PURE and MEMORY_FENCE. "
+            f"A memory fence is an observable ordering effect."
+        )
     if "Pure" in trait_names and "UniqueIdentity" in trait_names:
         raise ValueError(
             f"Op '{op_name}': declares both PURE and UNIQUE_IDENTITY. "
@@ -3221,6 +3254,11 @@ def _validate_no_effect_conflicts(
         raise ValueError(
             f"Op '{op_name}': declares both HINT and UNKNOWN_EFFECTS. "
             f"Hints are not semantic effects."
+        )
+    if "Hint" in trait_names and "MemoryFence" in trait_names:
+        raise ValueError(
+            f"Op '{op_name}': declares both HINT and MEMORY_FENCE. "
+            f"A memory fence is semantic, not a compiler hint."
         )
     if "Hint" in trait_names and "NonDeterministic" in trait_names:
         raise ValueError(
@@ -3242,6 +3280,11 @@ def _validate_no_effect_conflicts(
         raise ValueError(
             f"Op '{op_name}': declares both SAFE_TO_SPECULATE and UNKNOWN_EFFECTS. "
             f"Unknown effects cannot be executed on additional control paths."
+        )
+    if "SafeToSpeculate" in trait_names and "MemoryFence" in trait_names:
+        raise ValueError(
+            f"Op '{op_name}': declares both SAFE_TO_SPECULATE and MEMORY_FENCE. "
+            f"Speculation must not add memory-ordering effects."
         )
     if "SafeToSpeculate" in trait_names and "NonDeterministic" in trait_names:
         raise ValueError(
@@ -3454,6 +3497,18 @@ class RegionBranchInterface(NamedTuple):
 _DEFAULT_INTERFACE_FIELD = object()
 
 
+@unique
+class MemoryAccessOperationKind(Enum):
+    """Operation family represented by a MemoryAccess op shape."""
+
+    LOAD = "load"
+    STORE = "store"
+    PREFETCH = "prefetch"
+    ATOMIC_REDUCE = "atomic_reduce"
+    ATOMIC_RMW = "atomic_rmw"
+    ATOMIC_CMPXCHG = "atomic_cmpxchg"
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class MemoryAccessInterface:
     """Interface for ops that access memory through a view-like operand.
@@ -3499,6 +3554,8 @@ class MemoryAccessInterface:
     atomic_failure_ordering: str | None = None
     # Atomic synchronization scope attr.
     atomic_scope: str | None = None
+    # Operation family represented by this op shape.
+    operation_kind: MemoryAccessOperationKind | None = None
     # Fields explicitly supplied by the op declaration author.
     _explicit_fields: frozenset[str] = frozenset()
 
@@ -3521,6 +3578,7 @@ class MemoryAccessInterface:
         atomic_success_ordering: str | None | object = _DEFAULT_INTERFACE_FIELD,
         atomic_failure_ordering: str | None | object = _DEFAULT_INTERFACE_FIELD,
         atomic_scope: str | None | object = _DEFAULT_INTERFACE_FIELD,
+        operation_kind: MemoryAccessOperationKind | None = None,
     ) -> None:
         explicit_fields: set[str] = set()
 
@@ -3603,6 +3661,14 @@ class MemoryAccessInterface:
             "atomic_scope",
             _resolve("atomic_scope", atomic_scope, "scope"),
         )
+        if operation_kind is not None and not isinstance(
+            operation_kind, MemoryAccessOperationKind
+        ):
+            raise TypeError(
+                "MemoryAccessInterface field 'operation_kind': expected "
+                f"MemoryAccessOperationKind or None, got {operation_kind!r}"
+            )
+        object.__setattr__(self, "operation_kind", operation_kind)
         object.__setattr__(self, "_explicit_fields", frozenset(explicit_fields))
 
 
@@ -3984,7 +4050,8 @@ class Op:
 
         An op is pure if it explicitly declares traits=[PURE], or if it
         has no effects, no ownership effects, no ALLOCATES results, and no HINT,
-        NON_DETERMINISTIC, UNKNOWN_EFFECTS, or UNIQUE_IDENTITY traits.
+        NON_DETERMINISTIC, UNKNOWN_EFFECTS, MEMORY_FENCE, or UNIQUE_IDENTITY
+        traits.
         """
         if self.has_trait("Pure"):
             return True
@@ -3998,7 +4065,11 @@ class Op:
             return False
         if self.has_trait("Hint"):
             return False
-        if self.has_trait("NonDeterministic") or self.has_trait("UnknownEffects"):
+        if (
+            self.has_trait("NonDeterministic")
+            or self.has_trait("UnknownEffects")
+            or self.has_trait("MemoryFence")
+        ):
             return False
         return True
 
@@ -4135,6 +4206,7 @@ def cast_op(
     from_constraint: TypeConstraint,
     to_constraint: TypeConstraint,
     doc: str,
+    input_role: OperandRole = OperandRole.NONE,
     traits: list[Trait] | None = None,
     **kwargs: Any,
 ) -> Op:
@@ -4152,7 +4224,7 @@ def cast_op(
         name=name,
         group=group,
         doc=doc,
-        operands=[Operand("input", from_constraint)],
+        operands=[Operand("input", from_constraint, role=input_role)],
         results=[Result("result", to_constraint)],
         traits=op_traits,
         format=[

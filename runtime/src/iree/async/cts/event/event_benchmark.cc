@@ -106,22 +106,16 @@ class EventBenchmarkContext {
     last_status_code = IREE_STATUS_OK;
   }
 
-  // Poll until expected completions, with timeout.
-  bool PollUntilComplete(int expected,
-                         iree_duration_t budget_ns = 5000000000LL) {
-    iree_time_t deadline = iree_time_now() + budget_ns;
+  // Poll until expected completions arrive.
+  bool PollUntilComplete(int expected) {
     while (completions.load(std::memory_order_acquire) < expected) {
-      if (iree_time_now() >= deadline) return false;
       iree_host_size_t count = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          proactor_, iree_make_timeout_ms(100), &count);
-      // DEADLINE_EXCEEDED is expected when nothing is ready yet.
-      if (!iree_status_is_ok(status) &&
-          !iree_status_is_deadline_exceeded(status)) {
+      iree_status_t status =
+          iree_async_proactor_poll(proactor_, iree_infinite_timeout(), &count);
+      if (!iree_status_is_ok(status)) {
         iree_status_free(status);
         return false;
       }
-      iree_status_free(status);
     }
     return last_status_code == IREE_STATUS_OK;
   }
@@ -239,7 +233,7 @@ static void BM_EventWaitPreSignaled(::benchmark::State& state,
 
     // Poll until complete. The linked POLL_ADD->READ auto-drains the eventfd.
     if (!ctx->PollUntilComplete(1)) {
-      state.SkipWithError("Wait timeout");
+      state.SkipWithError("Wait failed");
       break;
     }
   }
@@ -286,7 +280,7 @@ static void BM_EventSignalWait(::benchmark::State& state,
 
     // Poll until complete.
     if (!ctx->PollUntilComplete(1)) {
-      state.SkipWithError("Wait timeout");
+      state.SkipWithError("Wait failed");
       break;
     }
   }
@@ -360,7 +354,7 @@ static void BM_EventBatchSignalWait(::benchmark::State& state,
 
     // Poll until all complete.
     if (!ctx->PollUntilComplete(static_cast<int>(batch_size))) {
-      state.SkipWithError("Batch wait timeout");
+      state.SkipWithError("Batch wait failed");
       error_occurred = true;
     }
   }
@@ -458,7 +452,7 @@ static void BM_EventCrossThreadSignal(::benchmark::State& state,
 
     // Poll until complete.
     if (!ctx->PollUntilComplete(1)) {
-      state.SkipWithError("Cross-thread wait timeout");
+      state.SkipWithError("Cross-thread wait failed");
       break;
     }
   }

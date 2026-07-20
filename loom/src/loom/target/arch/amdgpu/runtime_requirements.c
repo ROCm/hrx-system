@@ -8,16 +8,6 @@
 
 #include "loom/sanitizer/options.h"
 
-iree_status_t loom_amdgpu_runtime_requirements_validate(
-    loom_amdgpu_runtime_requirements_t requirements) {
-  if ((requirements & ~LOOM_AMDGPU_RUNTIME_REQUIREMENTS_KNOWN) != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU target runtime requirements contain unknown bits");
-  }
-  return iree_ok_status();
-}
-
 loom_amdgpu_runtime_requirements_t
 loom_amdgpu_runtime_requirements_from_target_pipeline_options(
     const loom_target_pipeline_options_t* options) {

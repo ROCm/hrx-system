@@ -42,7 +42,7 @@ iree_status_t loom_amdgpu_lookup_current_dispatch_ptr(
 iree_status_t loom_amdgpu_lookup_current_dispatch_id(
     loom_low_lower_context_t* context, loom_value_id_t* out_low_value_id);
 
-// Looks up the current workgroup id live-in for |dimension|.
+// Looks up the current global workgroup coordinate for |dimension|.
 iree_status_t loom_amdgpu_lookup_current_workgroup_id(
     loom_low_lower_context_t* context, loom_kernel_dimension_t dimension,
     loom_value_id_t* out_low_value_id);

@@ -154,39 +154,39 @@ struct HsaApi {
   // Loaded HSA runtime shared library.
   iree_dynamic_library_t* library = nullptr;
   // `hsa_init` entry point.
-  decltype(&hsa_init) hsa_init = nullptr;
+  decltype(&::hsa_init) hsa_init = nullptr;
   // `hsa_shut_down` entry point.
-  decltype(&hsa_shut_down) hsa_shut_down = nullptr;
+  decltype(&::hsa_shut_down) hsa_shut_down = nullptr;
   // `hsa_status_string` entry point.
-  decltype(&hsa_status_string) hsa_status_string = nullptr;
+  decltype(&::hsa_status_string) hsa_status_string = nullptr;
   // `hsa_iterate_agents` entry point.
-  decltype(&hsa_iterate_agents) hsa_iterate_agents = nullptr;
+  decltype(&::hsa_iterate_agents) hsa_iterate_agents = nullptr;
   // `hsa_agent_get_info` entry point.
-  decltype(&hsa_agent_get_info) hsa_agent_get_info = nullptr;
+  decltype(&::hsa_agent_get_info) hsa_agent_get_info = nullptr;
   // `hsa_agent_iterate_isas` entry point.
-  decltype(&hsa_agent_iterate_isas) hsa_agent_iterate_isas = nullptr;
+  decltype(&::hsa_agent_iterate_isas) hsa_agent_iterate_isas = nullptr;
   // `hsa_isa_get_info_alt` entry point.
-  decltype(&hsa_isa_get_info_alt) hsa_isa_get_info_alt = nullptr;
+  decltype(&::hsa_isa_get_info_alt) hsa_isa_get_info_alt = nullptr;
   // `hsa_code_object_reader_create_from_memory` entry point.
-  decltype(&hsa_code_object_reader_create_from_memory)
+  decltype(&::hsa_code_object_reader_create_from_memory)
       hsa_code_object_reader_create_from_memory = nullptr;
   // `hsa_code_object_reader_destroy` entry point.
-  decltype(&hsa_code_object_reader_destroy) hsa_code_object_reader_destroy =
+  decltype(&::hsa_code_object_reader_destroy) hsa_code_object_reader_destroy =
       nullptr;
   // `hsa_executable_create_alt` entry point.
-  decltype(&hsa_executable_create_alt) hsa_executable_create_alt = nullptr;
+  decltype(&::hsa_executable_create_alt) hsa_executable_create_alt = nullptr;
   // `hsa_executable_destroy` entry point.
-  decltype(&hsa_executable_destroy) hsa_executable_destroy = nullptr;
+  decltype(&::hsa_executable_destroy) hsa_executable_destroy = nullptr;
   // `hsa_executable_load_agent_code_object` entry point.
-  decltype(&hsa_executable_load_agent_code_object)
+  decltype(&::hsa_executable_load_agent_code_object)
       hsa_executable_load_agent_code_object = nullptr;
   // `hsa_executable_freeze` entry point.
-  decltype(&hsa_executable_freeze) hsa_executable_freeze = nullptr;
+  decltype(&::hsa_executable_freeze) hsa_executable_freeze = nullptr;
   // `hsa_executable_get_symbol_by_name` entry point.
-  decltype(&hsa_executable_get_symbol_by_name)
+  decltype(&::hsa_executable_get_symbol_by_name)
       hsa_executable_get_symbol_by_name = nullptr;
   // `hsa_executable_symbol_get_info` entry point.
-  decltype(&hsa_executable_symbol_get_info) hsa_executable_symbol_get_info =
+  decltype(&::hsa_executable_symbol_get_info) hsa_executable_symbol_get_info =
       nullptr;
 };
 
@@ -802,7 +802,7 @@ class LowKernelEmitter {
         /*.descriptor_registry=*/&target_registry_.registry,
         /*.target_selection=*/{},
         /*.memory_access_table=*/{},
-        /*.schedule_pressure_cliffs=*/{},
+        /*.pressure_cliffs=*/{},
         /*.schedule_pair_affinities=*/{},
         /*.schedule_structural_state_reads=*/{},
         /*.schedule_strategy=*/{},
@@ -882,10 +882,7 @@ iree_status_t PrepareTargetProcessorForLowHsaco(
   IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_lookup_processor(
       iree_make_string_view(target.processor.data(), target.processor.size()),
       &processor));
-  bool hsaco_supported = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_processor_supports_hsaco(
-      processor, &hsaco_supported));
-  if (!hsaco_supported) {
+  if (!loom_amdgpu_processor_supports_hsaco(processor)) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "AMDGPU processor '%s' does not have native "
                             "HSACO support",
@@ -1013,6 +1010,8 @@ loom_amdgpu_metadata_kernel_t MinimalKernel(iree_string_view_t name,
       /*.max_flat_workgroup_size=*/64,
       /*.required_workgroup_size=*/{/*.x=*/64, /*.y=*/1, /*.z=*/1},
       /*.has_required_workgroup_size=*/true,
+      /*.workgroup_cluster_size=*/{},
+      /*.has_workgroup_cluster_size=*/false,
       /*.arguments=*/nullptr,
       /*.argument_count=*/0,
   };

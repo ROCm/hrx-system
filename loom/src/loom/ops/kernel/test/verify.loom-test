@@ -73,10 +73,47 @@ func.def @workgroup_size_requires_kernel_def() {
 
 test.target<low_core> @test_target
 
+func.def @cluster_queries_require_kernel_def() {
+  // ERROR@+1: STRUCTURE/029 "kernel.cluster.id" "required" "kernel.def" "func.def"
+  %cluster = kernel.cluster.id<x> : index
+  // ERROR@+1: STRUCTURE/029 "kernel.cluster.workgroup.id" "required" "kernel.def" "func.def"
+  %local = kernel.cluster.workgroup.id<y> : index
+  // ERROR@+1: STRUCTURE/029 "kernel.cluster.workgroup.flat_id" "required" "kernel.def" "func.def"
+  %flat = kernel.cluster.workgroup.flat_id : index
+  // ERROR@+1: STRUCTURE/029 "kernel.cluster.size" "required" "kernel.def" "func.def"
+  %size = kernel.cluster.size<z> : index
+  // ERROR@+1: STRUCTURE/029 "kernel.cluster.count" "required" "kernel.def" "func.def"
+  %count = kernel.cluster.count<x> : index
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 func.def @subgroup_collective_requires_kernel_def(%value: f32) {
   // ERROR@+1: STRUCTURE/029 "kernel.subgroup.reduce" "required" "kernel.def" "func.def"
   %sum = kernel.subgroup.reduce<addf> %value : f32
   func.return
+}
+
+// ====
+
+func.template<demo.workgroup_reduce> @workgroup_reduce_provider(%value: f32) -> (f32) {
+  %sum = kernel.workgroup.reduce<addf> %value : f32
+  func.return %sum : f32
+}
+
+// ====
+
+func.template<demo.isolated_workgroup_reduce> @isolated_workgroup_reduce_provider() -> (f32) {
+  %result = test.isolated_region -> (f32) {
+    %value = test.constant 1.0 : f32
+    // ERROR@+1: STRUCTURE/029 "kernel.workgroup.reduce" "required" "kernel.def" "test.isolated_region"
+    %sum = kernel.workgroup.reduce<addf> %value : f32
+    test.yield %sum : f32
+  }
+  func.return %result : f32
 }
 
 // ====
@@ -270,7 +307,7 @@ kernel.def @workgroup_barrier_rejects_lane_predicated_branch() {
   %lane = kernel.workitem.id<x> : index
   %active = index.cmp ult, %lane, %limit : index
   scf.if %active {
-    // ERROR@+1: STRUCTURE/038 "kernel.barrier" "region selector" "active" "scf.if"
+    // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="region_selector", control_value="active", control_op_name="scf.if", control_distribution="lane_predicate"}
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
     scf.yield
   }
@@ -290,9 +327,300 @@ kernel.def @workgroup_barrier_rejects_lane_varying_counted_loop_bound() {
   %one = index.constant 1 : index
   %lane = kernel.workitem.id<x> : index
   scf.for %i = [%zero to %lane step %one] {
-    // ERROR@+1: STRUCTURE/038 "kernel.barrier" "loop upper bound" "lane" "scf.for"
+    // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="loop_upper_bound", control_value="lane", control_op_name="scf.for", control_distribution="lane_varying"}
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   }
+  kernel.return
+}
+
+// ====
+
+config.decl @runtime.valid_token_count : %value: index where [range(%value, 1, 131072)]
+
+test.target<low_core> @test_target
+
+kernel.def target(@test_target) @workgroup_barrier_accepts_config_derived_loop_bound() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %fifteen = index.constant 15 : index
+  %sixteen = index.constant 16 : index
+  %valid_token_count = config.get @runtime.valid_token_count : index
+  %rounded_token_count = index.add %valid_token_count, %fifteen : index
+  %tile_count = index.div %rounded_token_count, %sixteen : index
+  scf.for %tile = [%zero to %tile_count step %one] {
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  }
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @workgroup_barrier_accepts_kernel_argument_control(%enabled: i1) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%enabled: i1) {
+  scf.if %enabled {
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    scf.yield
+  }
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @barrier_scope_distinguishes_subgroup_control() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %zero = index.constant 0 : index
+  %subgroup = kernel.subgroup.id : index
+  %is_first_subgroup = index.cmp eq, %subgroup, %zero : index
+  scf.if %is_first_subgroup {
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+    // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="region_selector", control_value="is_first_subgroup", control_op_name="scf.if", control_distribution="subgroup"}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    scf.yield
+  }
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@test_target) @workgroup_barrier_accepts_exact_single_subgroup_control() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %zero = index.constant 0 : index
+  %subgroup = kernel.subgroup.id : index
+  %is_first_subgroup = index.cmp eq, %subgroup, %zero : index
+  scf.if %is_first_subgroup {
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    scf.yield
+  }
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @barrier_scope_distinguishes_collective_results() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %zero = index.constant 0 : index
+  %lane = kernel.workitem.id<x> : index
+  %is_first_lane = index.cmp eq, %lane, %zero : index
+  %subgroup_any = kernel.subgroup.vote.any %is_first_lane : i1
+  scf.if %subgroup_any {
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+    // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="region_selector", control_value="subgroup_any", control_op_name="scf.if", control_distribution="subgroup"}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    scf.yield
+  }
+  %workgroup_any = kernel.workgroup.vote.any %is_first_lane : i1
+  scf.if %workgroup_any {
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    scf.yield
+  }
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @workgroup_barrier_rejects_scan_control() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %zero = scalar.constant 0 : i32
+  %lane = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane : index to i32
+  %prefix = kernel.workgroup.scan<addi> %lane_i32 {mode = inclusive, direction = forward} : i32
+  %is_first_prefix = scalar.cmpi eq, %prefix, %zero : i32
+  scf.if %is_first_prefix {
+    // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="region_selector", control_value="is_first_prefix", control_op_name="scf.if", control_distribution="lane_predicate"}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    scf.yield
+  }
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @workgroup_barrier_rejects_unknown_control(%arg: i32) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%arg: i32) {
+  // test.cast intentionally has no fact transfer and models an unsupported
+  // producer whose execution distribution is unknown.
+  %unknown = test.cast %arg : i32 to f32
+  %zero = scalar.constant 0.0 : f32
+  %condition = scalar.cmpf ogt, %unknown, %zero : f32
+  scf.if %condition {
+    // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="region_selector", control_value="condition", control_op_name="scf.if", control_distribution="unknown"}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    scf.yield
+  }
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @workgroup_barrier_rejects_lane_divergent_cfg_arm() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %limit = index.constant 32 : index
+  %lane = kernel.workitem.id<x> : index
+  %active = index.cmp ult, %lane, %limit : index
+  cfg.cond_br %active, ^active_arm, ^inactive_arm
+^active_arm:
+  // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="cfg_selector", control_value="active", control_op_name="cfg.cond_br", control_distribution="lane_predicate"}
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  cfg.br ^join
+^inactive_arm:
+  cfg.br ^join
+^join:
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @workgroup_barrier_rejects_nested_cfg_control(%enabled: i1) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%enabled: i1) {
+  %limit = index.constant 32 : index
+  %lane = kernel.workitem.id<x> : index
+  %active = index.cmp ult, %lane, %limit : index
+  cfg.cond_br %active, ^active_arm, ^inactive_arm
+^active_arm:
+  scf.if %enabled {
+    // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="cfg_selector", control_value="active", control_op_name="cfg.cond_br", control_distribution="lane_predicate"}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    scf.yield
+  }
+  cfg.br ^join
+^inactive_arm:
+  cfg.br ^join
+^join:
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// Explicit CFG reconvergence restores workgroup-uniform execution even when
+// the predecessor arms were selected independently by each invocation.
+kernel.def @workgroup_barrier_accepts_reconverged_cfg_join() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %limit = index.constant 32 : index
+  %lane = kernel.workitem.id<x> : index
+  %active = index.cmp ult, %lane, %limit : index
+  cfg.cond_br %active, ^active_arm, ^inactive_arm
+^active_arm:
+  cfg.br ^join
+^inactive_arm:
+  cfg.br ^join
+^join:
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @cfg_barrier_scope_distinguishes_subgroup_control() {
+  %c1 = index.constant 1 : index
+  %c128 = index.constant 128 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c128, %c1, %c1) : index
+} launch() {
+  %zero = index.constant 0 : index
+  %subgroup = kernel.subgroup.id : index
+  %is_first_subgroup = index.cmp eq, %subgroup, %zero : index
+  cfg.cond_br %is_first_subgroup, ^first_subgroup, ^other_subgroups
+^first_subgroup:
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="cfg_selector", control_value="is_first_subgroup", control_op_name="cfg.cond_br", control_distribution="subgroup"}
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  cfg.br ^join
+^other_subgroups:
+  cfg.br ^join
+^join:
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// A loop header is reached uniformly once, but a varying continuation makes
+// later dynamic executions non-uniform and therefore cannot contain a barrier.
+kernel.def @workgroup_barrier_rejects_lane_divergent_cfg_loop() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %limit = index.constant 32 : index
+  %lane = kernel.workitem.id<x> : index
+  %active = index.cmp ult, %lane, %limit : index
+  cfg.br ^header
+^header:
+  // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="cfg_selector", control_value="active", control_op_name="cfg.cond_br", control_distribution="lane_predicate"}
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  cfg.cond_br %active, ^header, ^exit
+^exit:
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @workgroup_barrier_accepts_workgroup_uniform_cfg_control(%enabled: i1) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%enabled: i1) {
+  cfg.cond_br %enabled, ^enabled_arm, ^disabled_arm
+^enabled_arm:
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  cfg.br ^join
+^disabled_arm:
+  cfg.br ^join
+^join:
   kernel.return
 }
 
@@ -481,6 +809,19 @@ test.target<low_core> @test_target
 func.def @async_wait_rejects_large_newer_group_count(%group: kernel.async.group) {
   // ERROR@+1: STRUCTURE/014 "newer_groups" "65536" "nonnegative i16 wait count"
   kernel.async.wait %group {newer_groups = 65536} : kernel.async.group
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.decl noinline @runtime_group() -> (kernel.async.group)
+
+func.def @async_wait_rejects_runtime_call_group() {
+  %group = func.call @runtime_group() : () -> (kernel.async.group)
+  // ERROR@+1: DOMINANCE/010 "group" "func.call" "kernel.async.group result"
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   func.return
 }
 

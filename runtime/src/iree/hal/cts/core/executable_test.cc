@@ -23,18 +23,12 @@ class ExecutableTest : public CtsTestBase<> {
     CtsTestBase::SetUp();
     if (HasFatalFailure() || IsSkipped()) return;
 
-    IREE_ASSERT_OK(iree_hal_executable_cache_create(
-        device_, iree_make_cstring_view("default"), &executable_cache_));
-
-    PrepareExecutableOrSkipUnsupported(executable_cache_, "executable_test.bin",
-                                       &executable_);
+    LoadExecutableOrSkipUnsupported("executable_test.bin", &executable_);
   }
 
   void TearDown() override {
     iree_hal_executable_release(executable_);
     executable_ = nullptr;
-    iree_hal_executable_cache_release(executable_cache_);
-    executable_cache_ = nullptr;
     CtsTestBase::TearDown();
   }
 
@@ -52,7 +46,6 @@ class ExecutableTest : public CtsTestBase<> {
     return info.parameter_count != 0;
   }
 
-  iree_hal_executable_cache_t* executable_cache_ = nullptr;
   iree_hal_executable_t* executable_ = nullptr;
 };
 

@@ -153,18 +153,6 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "executable_test",
-    srcs = ["executable_test.cc"],
-    deps = [
-        ":headers",
-        ":vulkan",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-iree_runtime_cc_test(
     name = "physical_device_selection_test",
     srcs = ["physical_device_selection_test.cc"],
     deps = [
@@ -210,8 +198,6 @@ iree_runtime_cc_library(
         "driver.h",
         "executable.c",
         "executable.h",
-        "executable_cache.c",
-        "executable_cache.h",
         "logical_device.c",
         "logical_device.h",
         "physical_device.c",

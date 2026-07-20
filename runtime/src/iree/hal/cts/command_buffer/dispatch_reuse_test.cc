@@ -38,19 +38,15 @@ class DispatchReuseTest : public CtsTestBase<> {
     CtsTestBase::SetUp();
     if (HasFatalFailure() || IsSkipped()) return;
 
-    IREE_ASSERT_OK(iree_hal_executable_cache_create(
-        device_, iree_make_cstring_view("default"), &executable_cache_));
-
     // Load the workgroup-ID kernel: writes workgroup_id[0] to buffer[wg_id].
-    PrepareExecutableOrSkipUnsupported(
-        executable_cache_, "command_buffer_dispatch_multi_workgroup_test.bin",
+    LoadExecutableOrSkipUnsupported(
+        "command_buffer_dispatch_multi_workgroup_test.bin",
         &workgroup_id_executable_);
     if (HasFatalFailure() || IsSkipped()) return;
 
     // Load the absf kernel: output[i] = abs(input[i]).
-    PrepareExecutableOrSkipUnsupported(executable_cache_,
-                                       "command_buffer_dispatch_test.bin",
-                                       &absf_executable_);
+    LoadExecutableOrSkipUnsupported("command_buffer_dispatch_test.bin",
+                                    &absf_executable_);
   }
 
   void TearDown() override {
@@ -58,8 +54,6 @@ class DispatchReuseTest : public CtsTestBase<> {
     absf_executable_ = nullptr;
     iree_hal_executable_release(workgroup_id_executable_);
     workgroup_id_executable_ = nullptr;
-    iree_hal_executable_cache_release(executable_cache_);
-    executable_cache_ = nullptr;
     CtsTestBase::TearDown();
   }
 
@@ -170,7 +164,6 @@ class DispatchReuseTest : public CtsTestBase<> {
                                                 IREE_ASYNC_WAIT_FLAG_NONE));
   }
 
-  iree_hal_executable_cache_t* executable_cache_ = nullptr;
   iree_hal_executable_t* workgroup_id_executable_ = nullptr;
   iree_hal_executable_t* absf_executable_ = nullptr;
 };

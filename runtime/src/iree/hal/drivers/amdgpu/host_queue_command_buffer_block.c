@@ -134,6 +134,17 @@ iree_status_t iree_hal_amdgpu_host_queue_resolve_command_buffer_binding_ptrs(
 
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0; i < binding_count && iree_status_is_ok(status); ++i) {
+    if (!binding_table.bindings[i].buffer) {
+      if (IREE_UNLIKELY(binding_table.bindings[i].offset != 0 ||
+                        binding_table.bindings[i].length != 0)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "queue_execute binding table slot %" PRIu32
+                                " is a NULL binding with non-zero range",
+                                i);
+      }
+      out_binding_ptrs[i] = 0;
+      continue;
+    }
     status = iree_hal_amdgpu_host_queue_resolve_binding_base_ptr(
         &binding_table.bindings[i], &out_binding_ptrs[i]);
     if (!iree_status_is_ok(status)) {
@@ -198,11 +209,10 @@ static bool iree_hal_amdgpu_host_queue_command_buffer_packet_has_barrier(
 
 static iree_hsa_fence_scope_t
 iree_hal_amdgpu_host_queue_command_buffer_block_payload_acquire_scope(
-    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_amdgpu_command_buffer_block_header_t* block) {
   if (block->kernarg_length == 0) return IREE_HSA_FENCE_SCOPE_NONE;
   return iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
-      queue, IREE_HSA_FENCE_SCOPE_NONE);
+      IREE_HSA_FENCE_SCOPE_NONE);
 }
 
 static uint32_t
@@ -253,7 +263,7 @@ static iree_status_t iree_hal_amdgpu_host_queue_write_command_buffer_block(
         profile_dispatches) {
   const iree_hsa_fence_scope_t payload_acquire_scope =
       iree_hal_amdgpu_host_queue_command_buffer_block_payload_acquire_scope(
-          queue, block);
+          block);
   const bool use_base_processor = profile_events.event_count == 0 &&
                                   profile_counter_set_count == 0 &&
                                   profile_trace_packet_count == 0;
@@ -521,7 +531,7 @@ static uint64_t iree_hal_amdgpu_host_queue_finish_command_buffer_block(
                                  &queue->notification_ring);
     const iree_hsa_fence_scope_t profile_harvest_acquire_scope =
         iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
-            queue, IREE_HSA_FENCE_SCOPE_AGENT);
+            IREE_HSA_FENCE_SCOPE_AGENT);
     profile_harvest_header = iree_hal_amdgpu_aql_make_header(
         IREE_HSA_PACKET_TYPE_KERNEL_DISPATCH,
         iree_hal_amdgpu_aql_packet_control_barrier(

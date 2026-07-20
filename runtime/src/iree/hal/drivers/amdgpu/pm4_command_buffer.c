@@ -3246,6 +3246,13 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_record_dispatch(
       iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_device(
           executable, export_ordinal, command_buffer->device_ordinal,
           &descriptor));
+  if (IREE_UNLIKELY(descriptor->kernel_args.workgroup_cluster_size[0] != 0 ||
+                    descriptor->kernel_args.workgroup_cluster_size[1] != 0 ||
+                    descriptor->kernel_args.workgroup_cluster_size[2] != 0)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "clustered AMDGPU dispatch requires an AQL command buffer");
+  }
   if (IREE_UNLIKELY(!descriptor->pm4_launch_state_valid)) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,

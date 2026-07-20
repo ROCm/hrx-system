@@ -19,7 +19,7 @@ kernel.def target(@target) @cache_system_bypass_load_device_writeback_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @cache_system_bypass_load_device_writeback_store() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @cache_system_bypass_load_device_writeback_store() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %loaded = load.v4i32 %input_view, 0 {cache_scope = 3, cache_temporal = 9}

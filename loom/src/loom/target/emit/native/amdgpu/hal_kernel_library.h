@@ -16,10 +16,10 @@
 #include "iree/base/api.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/ir.h"
-#include "loom/target/artifact_manifest_collect.h"
-#include "loom/target/compile_report.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
 #include "loom/target/provider.h"
+#include "loom/target/reporting/artifact_manifest_collect.h"
+#include "loom/target/reporting/report.h"
 #include "loom/target/types.h"
 #include "loom/verify/verify.h"
 
@@ -65,8 +65,8 @@ typedef struct loom_amdgpu_hal_kernel_library_options_t {
 
 // Allocator-owned AMDGPU HSACO kernel-library artifact.
 typedef struct loom_amdgpu_hal_kernel_library_t {
-  // Allocator-owned target id used by the AMDGPU loader.
-  iree_string_view_t executable_format;
+  // Allocator-owned AMDGPU target key used to emit the artifact.
+  iree_string_view_t target_key;
   // Allocator-owned HSACO ELF image bytes.
   uint8_t* hsaco_data;
   // Number of bytes in |hsaco_data|.

@@ -8,10 +8,12 @@
 //
 // These tests verify the cancel() API behavior:
 // - Cancelled operations receive CANCELLED status in their callback
+// - Control-flow cancellation receives OK with a CANCELLED completion flag
 // - The callback ALWAYS fires (never lost) after cancel returns
 // - Double-cancel is harmless (second cancel silently succeeds)
 // - Cancel of already-completed operation is harmless
 
+#include <future>
 #include <thread>
 
 #include "iree/async/cts/util/registry.h"
@@ -36,8 +38,7 @@ TEST_P(CancellationTest, CancelPendingTimer) {
   memset(&timer, 0, sizeof(timer));
   timer.base.type = IREE_ASYNC_OPERATION_TYPE_TIMER;
 
-  // Set deadline far in the future so we have time to cancel.
-  timer.deadline_ns = iree_time_now() + iree_make_duration_ms(10000);  // 10s
+  timer.deadline_ns = IREE_TIME_INFINITE_FUTURE;
 
   CompletionTracker tracker;
   timer.base.completion_fn = CompletionTracker::Callback;
@@ -49,12 +50,35 @@ TEST_P(CancellationTest, CancelPendingTimer) {
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &timer.base));
 
   // Poll to receive the cancellation callback.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
   // The callback must have fired with CANCELLED status.
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, tracker.ConsumeStatus());
+}
+
+// Cancel a timer whose cancellation is an expected control-flow outcome.
+TEST_P(CancellationTest, CancelPendingTimerAsControlFlow) {
+  iree_async_timer_operation_t timer;
+  memset(&timer, 0, sizeof(timer));
+  timer.base.type = IREE_ASYNC_OPERATION_TYPE_TIMER;
+  timer.base.flags = IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS;
+  timer.deadline_ns = IREE_TIME_INFINITE_FUTURE;
+
+  CompletionTracker tracker;
+  timer.base.completion_fn = CompletionTracker::Callback;
+  timer.base.user_data = &tracker;
+
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &timer.base));
+  IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &timer.base));
+  PollUntil(/*min_completions=*/1);
+
+  EXPECT_EQ(tracker.call_count, 1);
+  IREE_EXPECT_OK(tracker.ConsumeStatus());
+  EXPECT_TRUE(iree_any_bit_set(tracker.last_flags,
+                               IREE_ASYNC_COMPLETION_FLAG_CANCELLED));
+  EXPECT_FALSE(
+      iree_any_bit_set(tracker.last_flags, IREE_ASYNC_COMPLETION_FLAG_MORE));
 }
 
 // Cancel an already-completed timer is harmless.
@@ -73,7 +97,7 @@ TEST_P(CancellationTest, CancelCompletedTimer) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &timer.base));
 
   // Wait for completion.
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
   ASSERT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
 
@@ -81,9 +105,6 @@ TEST_P(CancellationTest, CancelCompletedTimer) {
   // The cancel targets by user_data, but the operation is no longer pending,
   // so the kernel returns -ENOENT which we silently handle.
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &timer.base));
-
-  // Drain any pending CQEs (the cancel CQE itself).
-  DrainPending(iree_make_duration_ms(100));
 
   // No additional callbacks should have occurred.
   EXPECT_EQ(tracker.call_count, 1);
@@ -95,8 +116,7 @@ TEST_P(CancellationTest, DoubleCancelTimer) {
   memset(&timer, 0, sizeof(timer));
   timer.base.type = IREE_ASYNC_OPERATION_TYPE_TIMER;
 
-  // Far future deadline.
-  timer.deadline_ns = iree_time_now() + iree_make_duration_ms(10000);  // 10s
+  timer.deadline_ns = IREE_TIME_INFINITE_FUTURE;
 
   CompletionTracker tracker;
   timer.base.completion_fn = CompletionTracker::Callback;
@@ -111,11 +131,7 @@ TEST_P(CancellationTest, DoubleCancelTimer) {
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &timer.base));
 
   // Poll to receive the cancellation callback.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
-
-  // Drain any remaining CQEs.
-  DrainPending(iree_make_duration_ms(100));
+  PollUntil(/*min_completions=*/1);
 
   // Exactly one callback should have fired.
   EXPECT_EQ(tracker.call_count, 1);
@@ -146,8 +162,7 @@ TEST_P(CancellationTest, CancelPendingEventWait) {
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &wait_op.base));
 
   // Poll to receive the cancellation callback.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, tracker.ConsumeStatus());
@@ -175,15 +190,12 @@ TEST_P(CancellationTest, CancelCompletedEventWait) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
 
   // Wait for completion.
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
   ASSERT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
 
   // Cancel after completion — should be harmless.
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &wait_op.base));
-
-  // Drain any pending CQEs from the cancel.
-  DrainPending(iree_make_duration_ms(100));
 
   // No additional callbacks should have occurred.
   EXPECT_EQ(tracker.call_count, 1);
@@ -214,11 +226,7 @@ TEST_P(CancellationTest, DoubleCancelEventWait) {
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &wait_op.base));
 
   // Poll to receive the cancellation callback.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
-
-  // Drain any remaining CQEs.
-  DrainPending(iree_make_duration_ms(100));
+  PollUntil(/*min_completions=*/1);
 
   // Exactly one callback should have fired.
   EXPECT_EQ(tracker.call_count, 1);
@@ -246,8 +254,7 @@ TEST_P(CancellationTest, CancelEventWaitEventStillUsable) {
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
     IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &wait_op.base));
 
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/1);
     ASSERT_EQ(tracker.call_count, 1);
     IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, tracker.ConsumeStatus());
   }
@@ -266,8 +273,7 @@ TEST_P(CancellationTest, CancelEventWaitEventStillUsable) {
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
     IREE_ASSERT_OK(iree_async_event_set(event));
 
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(500));
+    PollUntil(/*min_completions=*/1);
     EXPECT_EQ(tracker.call_count, 1);
     IREE_EXPECT_OK(tracker.ConsumeStatus());
   }
@@ -298,9 +304,7 @@ TEST_P(CancellationTest, CancelEventWaitRacesWithSignal) {
     IREE_ASSERT_OK(iree_async_event_set(event));
     IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &wait_op.base));
 
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(500));
-    DrainPending(iree_make_duration_ms(100));
+    PollUntil(/*min_completions=*/1);
 
     // Exactly one callback, either CANCELLED or OK.
     EXPECT_EQ(tracker.call_count, 1) << "Iteration " << iter;
@@ -308,8 +312,11 @@ TEST_P(CancellationTest, CancelEventWaitRacesWithSignal) {
       iree_status_t status = tracker.ConsumeStatus();
       if (!iree_status_is_ok(status) && !iree_status_is_cancelled(status)) {
         IREE_EXPECT_OK(status) << "Iteration " << iter;
+      } else if (iree_status_is_cancelled(status)) {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, status)
+            << "Iteration " << iter;
       } else {
-        iree_status_ignore(status);
+        IREE_EXPECT_OK(status) << "Iteration " << iter;
       }
     }
 
@@ -317,9 +324,9 @@ TEST_P(CancellationTest, CancelEventWaitRacesWithSignal) {
   }
 }
 
-// Cancel from a background thread while the main thread is polling.
-// This tests that cancel() wakes a blocking poll() and that the cancelled
-// operation callback fires promptly.
+// Race cancellation from a background thread against polling on the main
+// thread. This verifies that the cross-thread wake cannot be lost on either
+// side of the poll boundary and that cancellation has one terminal callback.
 TEST_P(CancellationTest, CancelEventWaitFromBackgroundThread) {
   iree_async_event_t* event = nullptr;
   IREE_ASSERT_OK(iree_async_event_create(proactor_, &event));
@@ -335,21 +342,25 @@ TEST_P(CancellationTest, CancelEventWaitFromBackgroundThread) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
 
-  // Poll once to register the wait (drain the pending queue).
-  PollOnce();
-
-  // Cancel from a background thread while the main thread polls.
-  std::thread canceler([this, &wait_op]() {
-    // Brief delay to let the main thread enter poll().
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    iree_status_ignore(iree_async_proactor_cancel(proactor_, &wait_op.base));
+  std::promise<void> may_cancel;
+  std::future<void> may_cancel_future = may_cancel.get_future();
+  iree_status_code_t cancel_status_code = IREE_STATUS_UNKNOWN;
+  std::thread canceler([this, &wait_op, &cancel_status_code,
+                        may_cancel_future =
+                            std::move(may_cancel_future)]() mutable {
+    may_cancel_future.wait();
+    iree_status_t status = iree_async_proactor_cancel(proactor_, &wait_op.base);
+    cancel_status_code = iree_status_code(status);
+    iree_status_free(status);
   });
 
-  // This will block until the background cancel wakes us.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(2000));
+  // Admit cancellation immediately before polling. Cancellation may race just
+  // before or during poll; both paths must observe the same terminal callback.
+  may_cancel.set_value();
+  PollUntil(/*min_completions=*/1);
 
   canceler.join();
+  EXPECT_EQ(cancel_status_code, IREE_STATUS_OK);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, tracker.ConsumeStatus());
@@ -383,8 +394,7 @@ TEST_P(CancellationTest, CancelPendingRecv) {
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &recv_op.base));
 
   // Poll for the cancellation callback.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(recv_tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, recv_tracker.ConsumeStatus());
@@ -416,8 +426,7 @@ TEST_P(CancellationTest, CancelRecvSocketStillUsable) {
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &recv_op.base));
 
   // Wait for cancellation.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
   ASSERT_EQ(recv_tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, recv_tracker.ConsumeStatus());
 
@@ -442,8 +451,7 @@ TEST_P(CancellationTest, CancelRecvSocketStillUsable) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op2.base));
 
   // Poll for both send and recv.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(2000));
+  PollUntil(/*min_completions=*/2);
 
   EXPECT_EQ(send_tracker.call_count, 1);
   IREE_EXPECT_OK(send_tracker.ConsumeStatus());
@@ -478,11 +486,36 @@ TEST_P(CancellationTest, CancelPendingAccept) {
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &accept_op.base));
 
   // Poll for cancellation callback.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(accept_tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, accept_tracker.ConsumeStatus());
+  EXPECT_EQ(accept_op.accepted_socket, nullptr);
+
+  iree_async_socket_release(listener);
+}
+
+// Cancel an accept as part of an orderly listener shutdown.
+TEST_P(CancellationTest, CancelPendingAcceptAsControlFlow) {
+  iree_async_address_t listen_address;
+  iree_async_socket_t* listener = CreateListener(&listen_address);
+
+  iree_async_socket_accept_operation_t accept_op;
+  CompletionTracker accept_tracker;
+  InitAcceptOperation(&accept_op, listener, CompletionTracker::Callback,
+                      &accept_tracker);
+  accept_op.base.flags |= IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS;
+
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &accept_op.base));
+  IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &accept_op.base));
+  PollUntil(/*min_completions=*/1);
+
+  EXPECT_EQ(accept_tracker.call_count, 1);
+  IREE_EXPECT_OK(accept_tracker.ConsumeStatus());
+  EXPECT_TRUE(iree_any_bit_set(accept_tracker.last_flags,
+                               IREE_ASYNC_COMPLETION_FLAG_CANCELLED));
+  EXPECT_FALSE(iree_any_bit_set(accept_tracker.last_flags,
+                                IREE_ASYNC_COMPLETION_FLAG_MORE));
   EXPECT_EQ(accept_op.accepted_socket, nullptr);
 
   iree_async_socket_release(listener);
@@ -504,8 +537,7 @@ TEST_P(CancellationTest, CancelAcceptListenerStillUsable) {
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &accept_op.base));
 
   // Wait for cancellation.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
   ASSERT_EQ(accept_tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, accept_tracker.ConsumeStatus());
 
@@ -529,8 +561,7 @@ TEST_P(CancellationTest, CancelAcceptListenerStillUsable) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
   // Poll for both accept and connect.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(2000));
+  PollUntil(/*min_completions=*/2);
 
   EXPECT_EQ(accept_tracker2.call_count, 1);
   IREE_EXPECT_OK(accept_tracker2.ConsumeStatus());
@@ -572,8 +603,7 @@ TEST_P(CancellationTest, CancelPendingConnect) {
 
   // Poll for callback. Due to TCP handshake timing, the connect might complete
   // before the cancel takes effect. Either outcome is valid.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(2000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(connect_tracker.call_count, 1);
   // Accept either CANCELLED (cancel won) or OK (connect completed first).
@@ -581,8 +611,10 @@ TEST_P(CancellationTest, CancelPendingConnect) {
     iree_status_t status = connect_tracker.ConsumeStatus();
     if (!iree_status_is_ok(status) && !iree_status_is_cancelled(status)) {
       IREE_EXPECT_OK(status);
+    } else if (iree_status_is_cancelled(status)) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, status);
     } else {
-      iree_status_ignore(status);
+      IREE_EXPECT_OK(status);
     }
   }
 
@@ -607,8 +639,7 @@ TEST_P(CancellationTest, CallbackAlwaysFires) {
   for (int i = 0; i < kNumOperations; ++i) {
     memset(&timers[i], 0, sizeof(timers[i]));
     timers[i].base.type = IREE_ASYNC_OPERATION_TYPE_TIMER;
-    timers[i].deadline_ns =
-        iree_time_now() + iree_make_duration_ms(10000);  // 10s
+    timers[i].deadline_ns = IREE_TIME_INFINITE_FUTURE;
     timers[i].base.completion_fn = CompletionTracker::Callback;
     timers[i].base.user_data = &trackers[i];
   }
@@ -624,11 +655,7 @@ TEST_P(CancellationTest, CallbackAlwaysFires) {
   }
 
   // Poll until all callbacks fire.
-  PollUntil(/*min_completions=*/kNumOperations,
-            /*total_budget=*/iree_make_duration_ms(2000));
-
-  // Drain any remaining.
-  DrainPending(iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/kNumOperations);
 
   // Verify each callback fired exactly once.
   for (int i = 0; i < kNumOperations; ++i) {
@@ -663,11 +690,7 @@ TEST_P(CancellationTest, CancelRacesWithCompletion) {
     IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &timer.base));
 
     // Poll for the callback.
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(500));
-
-    // Drain any additional CQEs.
-    DrainPending(iree_make_duration_ms(100));
+    PollUntil(/*min_completions=*/1);
 
     // Must have exactly one callback.
     EXPECT_EQ(tracker.call_count, 1) << "Iteration " << iter;
@@ -677,8 +700,11 @@ TEST_P(CancellationTest, CancelRacesWithCompletion) {
       iree_status_t status = tracker.ConsumeStatus();
       if (!iree_status_is_ok(status) && !iree_status_is_cancelled(status)) {
         IREE_EXPECT_OK(status) << "Iteration " << iter;
+      } else if (iree_status_is_cancelled(status)) {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, status)
+            << "Iteration " << iter;
       } else {
-        iree_status_ignore(status);
+        IREE_EXPECT_OK(status) << "Iteration " << iter;
       }
     }
   }

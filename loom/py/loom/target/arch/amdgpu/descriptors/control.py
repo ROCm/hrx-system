@@ -194,6 +194,37 @@ def _s_delay_alu_descriptor() -> Descriptor:
     )
 
 
+def _s_wait_xcnt_descriptor() -> Descriptor:
+    return Descriptor(
+        key="amdgpu.s_wait_xcnt",
+        mnemonic="s_wait_xcnt",
+        semantic_tag="control.waitcnt.translation",
+        operands=(),
+        immediates=(
+            Immediate(
+                "xcnt",
+                ImmediateKind.UNSIGNED,
+                bit_width=16,
+                encoding_id=_WAIT_COUNTER_X_ENCODING_ID,
+                encoding_field_id=amdgpu_encoding_field_id("SIMM16"),
+                unsigned_max=(2**16) - 1,
+            ),
+        ),
+        asm_forms=_asm(
+            immediates=("xcnt",),
+            named_immediates=True,
+            native_assembly_values=(_native_i64_immediate("xcnt"),),
+        ),
+        effects=(_X_WAIT_EFFECT,),
+        schedule_class=_SCHEDULE_WAIT_X,
+        encoding_format_id=AMDGPU_ENCODING_FORMAT_SOPP,
+        # The SOPP OP field excludes the format's fixed high encoding bit.
+        # OP=0x45 combines with ENC_SOPP to produce 0xBFC50000.
+        encoding_id=0x45,
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
+    )
+
+
 def _s_sendmsg_overlay() -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
         descriptor_key="amdgpu.s_sendmsg",
@@ -655,6 +686,7 @@ __all__ = (
     "_s_wait_alu_overlay",
     "_s_wait_dscnt_overlay",
     "_s_wait_idle_overlay",
+    "_s_wait_xcnt_descriptor",
     "_s_wait_kmcnt_overlay",
     "_s_wait_loadcnt_overlay",
     "_s_wait_storecnt_overlay",

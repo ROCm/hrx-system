@@ -304,6 +304,36 @@ static iree_status_t loom_low_verify_positive_u32_attr(
                                         IREE_SV("positive u32"), emitter);
 }
 
+static iree_status_t loom_low_verify_optional_positive_u32_triple(
+    const loom_op_t* op, uint16_t x_attr_index, iree_string_view_t x_attr_name,
+    iree_string_view_t x_expected_constraint, uint16_t y_attr_index,
+    iree_string_view_t y_attr_name, iree_string_view_t y_expected_constraint,
+    uint16_t z_attr_index, iree_string_view_t z_attr_name,
+    iree_string_view_t z_expected_constraint,
+    iree_diagnostic_emitter_t emitter) {
+  const bool has_x = loom_low_optional_attr_is_present(op, x_attr_index);
+  const bool has_y = loom_low_optional_attr_is_present(op, y_attr_index);
+  const bool has_z = loom_low_optional_attr_is_present(op, z_attr_index);
+  if (!has_x && !has_y && !has_z) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_low_verify_function_attr_present(
+      op, x_attr_index, x_attr_name, x_expected_constraint, emitter));
+  IREE_RETURN_IF_ERROR(loom_low_verify_function_attr_present(
+      op, y_attr_index, y_attr_name, y_expected_constraint, emitter));
+  IREE_RETURN_IF_ERROR(loom_low_verify_function_attr_present(
+      op, z_attr_index, z_attr_name, z_expected_constraint, emitter));
+  IREE_RETURN_IF_ERROR(loom_low_verify_positive_u32_attr(
+      op, x_attr_index, loom_attr_as_i64(loom_op_attrs(op)[x_attr_index]),
+      x_attr_name, emitter));
+  IREE_RETURN_IF_ERROR(loom_low_verify_positive_u32_attr(
+      op, y_attr_index, loom_attr_as_i64(loom_op_attrs(op)[y_attr_index]),
+      y_attr_name, emitter));
+  return loom_low_verify_positive_u32_attr(
+      op, z_attr_index, loom_attr_as_i64(loom_op_attrs(op)[z_attr_index]),
+      z_attr_name, emitter);
+}
+
 static iree_status_t loom_low_verify_kernel_contract(
     const loom_op_t* op, iree_diagnostic_emitter_t emitter) {
   const bool has_export_symbol = loom_low_optional_attr_is_present(
@@ -316,40 +346,135 @@ static iree_status_t loom_low_verify_kernel_contract(
         IREE_SV("present when linkage is present"), emitter);
   }
 
-  const bool has_workgroup_size_x = loom_low_optional_attr_is_present(
-      op, loom_low_kernel_def_workgroup_size_x_ATTR_INDEX);
-  const bool has_workgroup_size_y = loom_low_optional_attr_is_present(
-      op, loom_low_kernel_def_workgroup_size_y_ATTR_INDEX);
-  const bool has_workgroup_size_z = loom_low_optional_attr_is_present(
-      op, loom_low_kernel_def_workgroup_size_z_ATTR_INDEX);
-  if (has_workgroup_size_x || has_workgroup_size_y || has_workgroup_size_z) {
-    IREE_RETURN_IF_ERROR(loom_low_verify_function_attr_present(
-        op, loom_low_kernel_def_workgroup_size_x_ATTR_INDEX,
-        IREE_SV("workgroup_size_x"),
-        IREE_SV("present when workgroup_size_y or workgroup_size_z is present"),
-        emitter));
-    IREE_RETURN_IF_ERROR(loom_low_verify_function_attr_present(
-        op, loom_low_kernel_def_workgroup_size_y_ATTR_INDEX,
-        IREE_SV("workgroup_size_y"),
-        IREE_SV("present when workgroup_size_x or workgroup_size_z is present"),
-        emitter));
-    IREE_RETURN_IF_ERROR(loom_low_verify_function_attr_present(
-        op, loom_low_kernel_def_workgroup_size_z_ATTR_INDEX,
-        IREE_SV("workgroup_size_z"),
-        IREE_SV("present when workgroup_size_x or workgroup_size_y is present"),
-        emitter));
-    IREE_RETURN_IF_ERROR(loom_low_verify_positive_u32_attr(
-        op, loom_low_kernel_def_workgroup_size_x_ATTR_INDEX,
-        loom_low_kernel_def_workgroup_size_x(op), IREE_SV("workgroup_size_x"),
-        emitter));
-    IREE_RETURN_IF_ERROR(loom_low_verify_positive_u32_attr(
-        op, loom_low_kernel_def_workgroup_size_y_ATTR_INDEX,
-        loom_low_kernel_def_workgroup_size_y(op), IREE_SV("workgroup_size_y"),
-        emitter));
-    IREE_RETURN_IF_ERROR(loom_low_verify_positive_u32_attr(
-        op, loom_low_kernel_def_workgroup_size_z_ATTR_INDEX,
-        loom_low_kernel_def_workgroup_size_z(op), IREE_SV("workgroup_size_z"),
-        emitter));
+  IREE_RETURN_IF_ERROR(loom_low_verify_optional_positive_u32_triple(
+      op, loom_low_kernel_def_workgroup_size_x_ATTR_INDEX,
+      IREE_SV("workgroup_size_x"),
+      IREE_SV("present when workgroup_size_y or workgroup_size_z is present"),
+      loom_low_kernel_def_workgroup_size_y_ATTR_INDEX,
+      IREE_SV("workgroup_size_y"),
+      IREE_SV("present when workgroup_size_x or workgroup_size_z is present"),
+      loom_low_kernel_def_workgroup_size_z_ATTR_INDEX,
+      IREE_SV("workgroup_size_z"),
+      IREE_SV("present when workgroup_size_x or workgroup_size_y is present"),
+      emitter));
+  IREE_RETURN_IF_ERROR(loom_low_verify_optional_positive_u32_triple(
+      op, loom_low_kernel_def_workgroup_count_x_ATTR_INDEX,
+      IREE_SV("workgroup_count_x"),
+      IREE_SV("present when workgroup_count_y or workgroup_count_z is present"),
+      loom_low_kernel_def_workgroup_count_y_ATTR_INDEX,
+      IREE_SV("workgroup_count_y"),
+      IREE_SV("present when workgroup_count_x or workgroup_count_z is present"),
+      loom_low_kernel_def_workgroup_count_z_ATTR_INDEX,
+      IREE_SV("workgroup_count_z"),
+      IREE_SV("present when workgroup_count_x or workgroup_count_y is present"),
+      emitter));
+  IREE_RETURN_IF_ERROR(loom_low_verify_optional_positive_u32_triple(
+      op, loom_low_kernel_def_workgroup_cluster_size_x_ATTR_INDEX,
+      IREE_SV("workgroup_cluster_size_x"),
+      IREE_SV("present when another cluster dimension is present"),
+      loom_low_kernel_def_workgroup_cluster_size_y_ATTR_INDEX,
+      IREE_SV("workgroup_cluster_size_y"),
+      IREE_SV("present when another cluster dimension is present"),
+      loom_low_kernel_def_workgroup_cluster_size_z_ATTR_INDEX,
+      IREE_SV("workgroup_cluster_size_z"),
+      IREE_SV("present when another cluster dimension is present"), emitter));
+
+  const bool has_cluster_size_x = loom_low_optional_attr_is_present(
+      op, loom_low_kernel_def_workgroup_cluster_size_x_ATTR_INDEX);
+  const bool has_cluster_size_y = loom_low_optional_attr_is_present(
+      op, loom_low_kernel_def_workgroup_cluster_size_y_ATTR_INDEX);
+  const bool has_cluster_size_z = loom_low_optional_attr_is_present(
+      op, loom_low_kernel_def_workgroup_cluster_size_z_ATTR_INDEX);
+  if (!has_cluster_size_x && !has_cluster_size_y && !has_cluster_size_z) {
+    return iree_ok_status();
+  }
+  if (!has_cluster_size_x || !has_cluster_size_y || !has_cluster_size_z) {
+    return iree_ok_status();
+  }
+
+  const int64_t cluster_size_x_i64 =
+      loom_low_kernel_def_workgroup_cluster_size_x(op);
+  const int64_t cluster_size_y_i64 =
+      loom_low_kernel_def_workgroup_cluster_size_y(op);
+  const int64_t cluster_size_z_i64 =
+      loom_low_kernel_def_workgroup_cluster_size_z(op);
+  if (cluster_size_x_i64 <= 0 || cluster_size_x_i64 > UINT32_MAX ||
+      cluster_size_y_i64 <= 0 || cluster_size_y_i64 > UINT32_MAX ||
+      cluster_size_z_i64 <= 0 || cluster_size_z_i64 > UINT32_MAX) {
+    return iree_ok_status();
+  }
+  const uint32_t cluster_size_x = (uint32_t)cluster_size_x_i64;
+  const uint32_t cluster_size_y = (uint32_t)cluster_size_y_i64;
+  const uint32_t cluster_size_z = (uint32_t)cluster_size_z_i64;
+  if (cluster_size_x == 1 && cluster_size_y == 1 && cluster_size_z == 1) {
+    return loom_low_emit_attr_value_error(
+        op, loom_low_kernel_def_workgroup_cluster_size_x_ATTR_INDEX,
+        IREE_SV("workgroup_cluster_size_x"), cluster_size_x,
+        IREE_SV("omitted when the complete cluster shape is 1x1x1"), emitter);
+  }
+  const uint64_t cluster_size_xy =
+      (uint64_t)cluster_size_x * (uint64_t)cluster_size_y;
+  if (cluster_size_xy > UINT32_MAX ||
+      cluster_size_z > UINT32_MAX / cluster_size_xy) {
+    return loom_low_emit_attr_value_error(
+        op, loom_low_kernel_def_workgroup_cluster_size_z_ATTR_INDEX,
+        IREE_SV("workgroup_cluster_size_z"), cluster_size_z,
+        IREE_SV("a value whose product with the x and y dimensions fits u32"),
+        emitter);
+  }
+
+  const bool has_workgroup_count_x = loom_low_optional_attr_is_present(
+      op, loom_low_kernel_def_workgroup_count_x_ATTR_INDEX);
+  const bool has_workgroup_count_y = loom_low_optional_attr_is_present(
+      op, loom_low_kernel_def_workgroup_count_y_ATTR_INDEX);
+  const bool has_workgroup_count_z = loom_low_optional_attr_is_present(
+      op, loom_low_kernel_def_workgroup_count_z_ATTR_INDEX);
+  if (!has_workgroup_count_x || !has_workgroup_count_y ||
+      !has_workgroup_count_z) {
+    return iree_ok_status();
+  }
+  const int64_t workgroup_count_x_i64 =
+      loom_low_kernel_def_workgroup_count_x(op);
+  const int64_t workgroup_count_y_i64 =
+      loom_low_kernel_def_workgroup_count_y(op);
+  const int64_t workgroup_count_z_i64 =
+      loom_low_kernel_def_workgroup_count_z(op);
+  if (workgroup_count_x_i64 <= 0 || workgroup_count_x_i64 > UINT32_MAX ||
+      workgroup_count_y_i64 <= 0 || workgroup_count_y_i64 > UINT32_MAX ||
+      workgroup_count_z_i64 <= 0 || workgroup_count_z_i64 > UINT32_MAX) {
+    return iree_ok_status();
+  }
+  const uint32_t workgroup_counts[] = {
+      (uint32_t)workgroup_count_x_i64,
+      (uint32_t)workgroup_count_y_i64,
+      (uint32_t)workgroup_count_z_i64,
+  };
+  const uint32_t cluster_sizes[] = {
+      cluster_size_x,
+      cluster_size_y,
+      cluster_size_z,
+  };
+  const uint16_t workgroup_count_attr_indices[] = {
+      loom_low_kernel_def_workgroup_count_x_ATTR_INDEX,
+      loom_low_kernel_def_workgroup_count_y_ATTR_INDEX,
+      loom_low_kernel_def_workgroup_count_z_ATTR_INDEX,
+  };
+  const iree_string_view_t workgroup_count_attr_names[] = {
+      IREE_SV("workgroup_count_x"),
+      IREE_SV("workgroup_count_y"),
+      IREE_SV("workgroup_count_z"),
+  };
+  const iree_string_view_t expected_constraints[] = {
+      IREE_SV("a positive multiple of workgroup_cluster_size_x"),
+      IREE_SV("a positive multiple of workgroup_cluster_size_y"),
+      IREE_SV("a positive multiple of workgroup_cluster_size_z"),
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(workgroup_counts); ++i) {
+    if (workgroup_counts[i] % cluster_sizes[i] != 0) {
+      return loom_low_emit_attr_value_error(
+          op, workgroup_count_attr_indices[i], workgroup_count_attr_names[i],
+          workgroup_counts[i], expected_constraints[i], emitter);
+    }
   }
   return iree_ok_status();
 }

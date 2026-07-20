@@ -164,9 +164,11 @@ loom_cc_test(
     deps = [
         ":target_info",
         "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target:residency",
         "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
         "//loom/src/loom/target/arch/amdgpu/planning:occupancy_model",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -176,8 +178,12 @@ loom_cc_library(
     name = "math_policy",
     srcs = ["math_policy.c"],
     hdrs = ["math_policy.h"],
+    textual_hdrs = [
+        "//loom/src/loom/target/arch/amdgpu/records:target_records_tables.inl",
+    ],
     deps = [
         "//loom/src/loom/target:math_policy",
+        "//loom/src/loom/target/arch/amdgpu/lower:kinds",
         "//runtime/src/iree/base",
     ],
 )
@@ -211,6 +217,7 @@ loom_cc_library(
     hdrs = ["legalization.h"],
     deps = [
         "//loom/src/loom/analysis:symbolic_expr",
+        "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
@@ -223,6 +230,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/lower",
         "//loom/src/loom/target/arch/amdgpu/lower:kinds",
         "//loom/src/loom/target/arch/amdgpu/matrix:contract",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/transforms/vector:to_scalar",
         "//runtime/src/iree/base",
     ],
@@ -258,8 +266,10 @@ loom_cc_library(
         ":error_defs",
         ":low_aliases",
         "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/target/arch/amdgpu/encoding",
         "//loom/src/loom/target/arch/amdgpu/ops",
         "//runtime/src/iree/base",
     ],

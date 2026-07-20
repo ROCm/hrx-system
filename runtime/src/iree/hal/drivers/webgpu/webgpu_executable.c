@@ -188,26 +188,17 @@ static iree_status_t iree_hal_webgpu_executable_initialize_export(
 
 iree_status_t iree_hal_webgpu_executable_create(
     iree_hal_webgpu_handle_t device_handle,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
-  IREE_ASSERT_ARGUMENT(executable_params);
+  IREE_ASSERT_ARGUMENT(load_params);
   IREE_ASSERT_ARGUMENT(out_executable);
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_executable = NULL;
 
-  if (!iree_string_view_equal(executable_params->executable_format,
-                              IREE_SV("webgpu-wgsl-fb"))) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_INCOMPATIBLE,
-                            "unsupported WebGPU executable format '%.*s'",
-                            (int)executable_params->executable_format.size,
-                            executable_params->executable_format.data);
-  }
-
   iree_const_byte_span_t flatbuffer_data = iree_const_byte_span_empty();
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_read_executable_flatbuffer_header(
-              executable_params->executable_data,
+              load_params->executable_data,
               /*unsafe_infer_size=*/false,
               iree_hal_webgpu_ExecutableDef_file_identifier, &flatbuffer_data));
 

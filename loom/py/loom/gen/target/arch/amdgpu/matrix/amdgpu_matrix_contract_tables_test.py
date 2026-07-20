@@ -8,12 +8,18 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from loom.gen.target.arch.amdgpu.matrix import amdgpu_matrix_contract_tables
 from loom.target.arch.amdgpu.matrix_contracts import (
     AMDGPU_MATRIX_CONTRACTS,
     AmdgpuMatrixContract,
     payload,
 )
+from loom.target.arch.amdgpu.matrix_fragment_layouts import (
+    AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
+)
+from loom.target.low_descriptors import Immediate, ImmediateKind
 
 
 def _contract(name: str) -> AmdgpuMatrixContract:
@@ -37,6 +43,48 @@ def _is_rdna4_contract(contract: AmdgpuMatrixContract) -> bool:
     )
 
 
+def _is_cdna_dense_mfma_16x16x32_f32_contract(
+    contract: AmdgpuMatrixContract,
+) -> bool:
+    return (
+        contract.family == "mfma"
+        and any(feature in {"mfma_gfx940_fp8", "mfma_gfx950"} for feature in contract.features)
+        and contract.tile_shape == (16, 16, 32)
+        and not contract.flags
+        and contract.accumulator.numeric_type == "f32"
+        and contract.result.numeric_type == "f32"
+        and contract.lhs.numeric_type in {"f16", "bf16", "fp8", "bf8"}
+        and contract.rhs.numeric_type in {"f16", "bf16", "fp8", "bf8"}
+    )
+
+
+def _is_cdna_dense_mfma_32x32x16_f32_contract(
+    contract: AmdgpuMatrixContract,
+) -> bool:
+    return (
+        contract.family == "mfma"
+        and any(feature in {"mfma_gfx940_fp8", "mfma_gfx950"} for feature in contract.features)
+        and contract.tile_shape == (32, 32, 16)
+        and not contract.flags
+        and contract.accumulator.numeric_type == "f32"
+        and contract.result.numeric_type == "f32"
+        and contract.lhs.numeric_type in {"f16", "bf16", "fp8", "bf8"}
+        and contract.rhs.numeric_type in {"f16", "bf16", "fp8", "bf8"}
+    )
+
+
+def _is_cdna_dense_mfma_f32_contract(
+    contract: AmdgpuMatrixContract,
+) -> bool:
+    return (
+        contract.family,
+        contract.flags,
+        contract.scale_kind,
+        contract.accumulator.numeric_type,
+        contract.result.numeric_type,
+    ) == ("mfma", (), "none", "f32", "f32")
+
+
 def _payload_numeric_types(contract: AmdgpuMatrixContract) -> tuple[str, ...]:
     return (
         contract.lhs.numeric_type,
@@ -51,6 +99,7 @@ def _contract_initializer(contract: AmdgpuMatrixContract) -> str:
         contract,
         keys_by_semantic_tag=(amdgpu_matrix_contract_tables._matrix_descriptor_keys_by_semantic_tag()),
         descriptor_shapes_by_key=(amdgpu_matrix_contract_tables._matrix_descriptor_shapes_by_key()),
+        descriptor_immediates_by_key=(amdgpu_matrix_contract_tables._matrix_descriptor_immediates_by_key()),
     )
 
 
@@ -73,14 +122,24 @@ def test_generation_resolves_gfx1250_supplemental_matrix_descriptors() -> None:
 
     assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_F32_16X16X128_FP8_BF8" in wmma
     assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_F16_16X16X128_BF8_FP8" in swmmac
-    assert ".source_requirement_flags = LOOM_AMDGPU_MATRIX_CONTRACT_SOURCE_REQUIREMENT_FRAGMENT_LAYOUT" in swmmac
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX1250_SWMMAC_16BIT_16X16X128_PACKED8" in swmmac
     assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_SCALE16_F32_32X16X128_F4" in scaled_f4
 
 
-def test_generation_emits_source_requirement_flags() -> None:
-    initializer = _contract_initializer(_contract("swmmac.f32.16x16x32.f16"))
+def test_generation_emits_gfx950_implicit_scale_format_masks() -> None:
+    initializer = _contract_initializer(_contract("mfma.scale.f32.16x16x128.f8f6f4"))
 
-    assert ".source_requirement_flags = LOOM_AMDGPU_MATRIX_CONTRACT_SOURCE_REQUIREMENT_FRAGMENT_LAYOUT" in initializer
+    assert (".implicit_scale_format_selector_bits = (loom_amdgpu_matrix_scale_format_selector_bits_t)((1u << LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_E8M0))") in initializer
+
+
+def test_generation_resolves_sparse_fragment_layouts() -> None:
+    rdna = _contract_initializer(_contract("swmmac.f32.16x16x32.f16"))
+    cdna = _contract_initializer(_contract("smfmac.f32.16x16x32.f16"))
+
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_SWMMAC_32BIT_16X16X32_PACKED16" in rdna
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_SMFMAC_32BIT_16X16X32_PACKED16" in cdna
+    assert ".source_requirement_flags = 0" in rdna
+    assert ".source_requirement_flags = 0" in cdna
 
 
 def test_generation_uses_static_aggregate_initializers() -> None:
@@ -110,6 +169,65 @@ def test_generation_resolves_gfx1250_wmma_f32_fragment_layouts() -> None:
     assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X4_F32" in f32
     assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X32_F16" in f16
     assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X32_BF16" in bf16
+
+
+def test_generation_resolves_gfx950_mfma_f32_fragment_layouts() -> None:
+    f16_16x16 = _contract_initializer(_contract("mfma.f32.16x16x32.f16"))
+    bf16_16x16 = _contract_initializer(_contract("mfma.f32.16x16x32.bf16"))
+    f16_32x32 = _contract_initializer(_contract("mfma.f32.32x32x16.f16"))
+    bf16_32x32 = _contract_initializer(_contract("mfma.f32.32x32x16.bf16"))
+    fp8_bf8_32x32 = _contract_initializer(_contract("mfma.f32.32x32x16.fp8.bf8"))
+
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X32_F16" in f16_16x16
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X32_BF16" in bf16_16x16
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_F16" in f16_32x32
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_BF16" in bf16_32x32
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_PACKED8" in fp8_bf8_32x32
+
+
+def test_generation_emits_blocked_mfma_tile_shapes() -> None:
+    f32 = _contract_initializer(_contract("mfma.f32.16x16x4.f16"))
+    f64 = _contract_initializer(_contract("mfma.f64.4x4x4.f64"))
+    i32 = _contract_initializer(_contract("mfma.i32.4x4x4.i8"))
+    single_block = _contract_initializer(_contract("mfma.f32.16x16x16.f16"))
+
+    assert ".block_count = 4" in f32
+    assert ".block_count = 4" in f64
+    assert ".block_count = 16" in i32
+    assert ".block_count = 1" in single_block
+
+
+def test_generation_rejects_invalid_block_count() -> None:
+    contract = replace(_contract("mfma.f32.16x16x4.f16"), block_count=0)
+
+    with pytest.raises(ValueError, match="invalid tile shape"):
+        _contract_initializer(contract)
+
+
+def test_generation_audits_cdna_dense_mfma_16x16x32_f32_layout_surface() -> None:
+    missing = tuple(contract.name for contract in AMDGPU_MATRIX_CONTRACTS if _is_cdna_dense_mfma_16x16x32_f32_contract(contract) and contract.fragment_layout is None)
+
+    assert missing == ()
+
+
+def test_generation_audits_cdna_dense_mfma_32x32x16_f32_layout_surface() -> None:
+    missing = tuple(contract.name for contract in AMDGPU_MATRIX_CONTRACTS if _is_cdna_dense_mfma_32x32x16_f32_contract(contract) and contract.fragment_layout is None)
+
+    assert missing == ()
+
+
+def test_generation_audits_cdna_dense_mfma_f32_layout_surface() -> None:
+    missing = tuple(contract.name for contract in AMDGPU_MATRIX_CONTRACTS if _is_cdna_dense_mfma_f32_contract(contract) and contract.fragment_layout is None)
+
+    assert missing == ()
+
+
+def test_generation_validates_every_referenced_fragment_layout() -> None:
+    referenced_layouts = {contract.fragment_layout for contract in AMDGPU_MATRIX_CONTRACTS if contract.fragment_layout is not None}
+
+    assert referenced_layouts == set(AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY)
+    for contract in AMDGPU_MATRIX_CONTRACTS:
+        amdgpu_matrix_contract_tables._validate_contract_fragment_layout(contract)
 
 
 def test_generation_audits_rdna4_float_fragment_layout_surface() -> None:
@@ -149,16 +267,16 @@ def test_generation_resolves_gfx11_wmma_wave64_abi_shape_variants() -> None:
 
 
 def test_generation_rejects_low_descriptor_payload_shape_drift() -> None:
-    contract = _contract("swmmac.f32.16x16x32.f16")
-    drifted_contract = replace(contract, lhs=payload("f16", 0, 0))
+    contract = _contract("wmma.i32.16x16x32.iu4")
+    drifted_contract = replace(contract, lhs=payload("iu4", 0, 0))
 
     try:
         _contract_initializer(drifted_contract)
     except ValueError as exc:
         message = str(exc)
-        assert "AMDGPU matrix contract 'swmmac.f32.16x16x32.f16'" in message
+        assert "AMDGPU matrix contract 'wmma.i32.16x16x32.iu4'" in message
         assert "payload shape" in message
-        assert "descriptor key(s) amdgpu.v_swmmac_f32_16x16x32_f16" in message
+        assert "descriptor key(s) amdgpu.v_wmma_i32_16x16x32_iu4" in message
     else:
         raise AssertionError("expected payload shape validation to fail")
 
@@ -187,3 +305,84 @@ def test_generation_rejects_ambiguous_shape_matched_descriptor_keys() -> None:
         assert "ambiguously matches descriptor key(s) amdgpu.first, amdgpu.second" in message
     else:
         raise AssertionError("expected ambiguous descriptor resolution to fail")
+
+
+def test_generation_rejects_unmapped_matrix_descriptor_immediates() -> None:
+    contract = _contract("swmmac.f32.16x16x32.f16")
+
+    try:
+        amdgpu_matrix_contract_tables._validate_contract_descriptor_immediates(
+            contract,
+            "amdgpu.v_swmmac_f32_16x16x32_f16",
+            descriptor_immediates_by_key={
+                "amdgpu.v_swmmac_f32_16x16x32_f16": (Immediate("surprise", ImmediateKind.UNSIGNED),),
+            },
+        )
+    except ValueError as exc:
+        message = str(exc)
+        assert "AMDGPU matrix contract 'swmmac.f32.16x16x32.f16'" in message
+        assert "unmapped immediate 'surprise'" in message
+    else:
+        raise AssertionError("expected unmapped immediate validation to fail")
+
+
+def test_generation_requires_integer_matrix_control_immediates() -> None:
+    contract = _contract("swmmac.i32.16x16x32.iu8")
+
+    with pytest.raises(ValueError, match=r"required immediate field.*clamp"):
+        amdgpu_matrix_contract_tables._validate_contract_descriptor_immediates(
+            contract,
+            "amdgpu.v_swmmac_i32_16x16x32_iu8",
+            descriptor_immediates_by_key={
+                "amdgpu.v_swmmac_i32_16x16x32_iu8": (Immediate("neg_lo", ImmediateKind.UNSIGNED),),
+            },
+        )
+
+
+def test_generation_rejects_unsupported_wait_state_result_payload_count() -> None:
+    contract = replace(
+        _contract("mfma.f32.16x16x16.f16"),
+        result=payload("f32", 3, 3),
+    )
+
+    try:
+        _contract_initializer(contract)
+    except ValueError as exc:
+        message = str(exc)
+        assert "AMDGPU matrix contract 'mfma.f32.16x16x16.f16'" in message
+        assert "unsupported wait-state result payload register count 3" in message
+        assert "expected one of 2, 4, 8, 16, 32" in message
+    else:
+        raise AssertionError("expected wait-state result payload validation to fail")
+
+
+def test_generation_rejects_selector_and_implicit_scale_format_overlap() -> None:
+    contract = replace(
+        _contract("wmma.scale.f32.16x16x128.f8f6f4"),
+        implicit_scale_formats=("e8m0",),
+    )
+
+    try:
+        _contract_initializer(contract)
+    except ValueError as exc:
+        message = str(exc)
+        assert "AMDGPU matrix contract 'wmma.scale.f32.16x16x128.f8f6f4'" in message
+        assert "scale-format selector operands and implicit scale formats" in message
+    else:
+        raise AssertionError("expected selector/implicit scale validation to fail")
+
+
+def test_generation_rejects_scaled_contract_without_scale_format_policy() -> None:
+    contract = replace(
+        _contract("mfma.scale.f32.16x16x128.f8f6f4"),
+        implicit_scale_formats=(),
+    )
+
+    try:
+        _contract_initializer(contract)
+    except ValueError as exc:
+        message = str(exc)
+        assert "AMDGPU matrix contract 'mfma.scale.f32.16x16x128.f8f6f4'" in message
+        assert "selector operands or implicit scale formats" in message
+    else:
+        raise AssertionError("expected scale format policy validation to fail")

@@ -13,6 +13,8 @@
 namespace loom {
 namespace {
 
+constexpr loom_liveness_analysis_t kEmptyLiveness = {};
+
 loom_low_allocation_assignment_t Assignment(loom_value_id_t value_id,
                                             uint32_t start_point,
                                             uint32_t end_point,
@@ -59,7 +61,8 @@ TEST(LowAllocationActiveSetTest, OrdersExpiresAndRemovesIndexedUnits) {
 
   loom_low_allocation_active_set_t active_set = {};
   IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
-      IREE_ARRAYSIZE(assignments), /*unit_capacity=*/32, &arena, &active_set));
+      &kEmptyLiveness, IREE_ARRAYSIZE(assignments),
+      /*unit_capacity=*/32, &arena, &active_set));
   loom_low_allocation_active_set_insert(
       &active_set, &descriptor_set, assignments, IREE_ARRAYSIZE(assignments),
       /*assignment_index=*/0);

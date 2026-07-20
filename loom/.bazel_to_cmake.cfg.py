@@ -175,6 +175,69 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def loom_config_compatible_with(self, config_labels):
         return list(config_labels)
 
+    def loom_link_module(
+        self,
+        name,
+        srcs,
+        libraries=None,
+        roots=None,
+        configs=None,
+        mode="archive",
+        output=None,
+        output_format="text",
+        include_exported_roots=False,
+        strip_check=False,
+        require_resolved_config=False,
+        tags=None,
+        target_compatible_with=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+        output = output or (name + (".loombc" if output_format == "bc" else ".loom"))
+        self._target_file_paths[self._current_target_label(name)] = (
+            f"${{CMAKE_CURRENT_BINARY_DIR}}/{output}"
+        )
+        name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        srcs_block = self._convert_string_list_block("SRCS", srcs, sort=False)
+        libraries_block = self._convert_string_list_block(
+            "LIBRARIES", libraries, sort=False
+        )
+        roots_block = self._convert_string_list_block("ROOTS", roots, sort=False)
+        configs_block = self._convert_string_list_block("CONFIGS", configs, sort=False)
+        mode_block = self._convert_string_arg_block("MODE", mode)
+        output_block = self._convert_string_arg_block("OUTPUT", output)
+        output_format_block = self._convert_string_arg_block(
+            "OUTPUT_FORMAT", output_format
+        )
+        include_exported_roots_block = self._convert_option_block(
+            "INCLUDE_EXPORTED_ROOTS", include_exported_roots
+        )
+        strip_check_block = self._convert_option_block("STRIP_CHECK", strip_check)
+        require_resolved_config_block = self._convert_option_block(
+            "REQUIRE_RESOLVED_CONFIG", require_resolved_config
+        )
+        self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += (
+            f"loom_link_module(\n"
+            f"{name_block}"
+            f"{srcs_block}"
+            f"{libraries_block}"
+            f"{roots_block}"
+            f"{configs_block}"
+            f"{mode_block}"
+            f"{output_block}"
+            f"{output_format_block}"
+            f"{include_exported_roots_block}"
+            f"{strip_check_block}"
+            f"{require_resolved_config_block}"
+            f")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
     def loom_amdgpu_target_selectors_flag(self, **kwargs):
         return None
 
@@ -484,6 +547,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         generator,
         source=None,
         srcs=None,
+        textual_hdrs=None,
         generated_src_flags=None,
         generated_srcs=None,
         hdrs=None,
@@ -510,6 +574,9 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         generator_block = self._convert_single_target_block("GENERATOR", generator)
         source_block = self._convert_string_arg_block("SOURCE", source)
         srcs_block = self._convert_srcs_block(srcs, block_name="SRCS")
+        textual_hdrs_block = self._convert_srcs_block(
+            textual_hdrs, block_name="TEXTUAL_HDRS"
+        )
         generated_src_flags_block = self._convert_string_list_block(
             "GENERATED_SRC_FLAGS", generated_src_flags or None, sort=False
         )
@@ -555,6 +622,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             f"{generator_block}"
             f"{source_block}"
             f"{srcs_block}"
+            f"{textual_hdrs_block}"
             f"{generated_src_flags_block}"
             f"{generated_srcs_block}"
             f"{hdrs_block}"

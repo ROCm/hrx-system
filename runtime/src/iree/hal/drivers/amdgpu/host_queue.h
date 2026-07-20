@@ -437,9 +437,10 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   // waits onto the software path instead of under-barriering.
   bool can_publish_frontier;
 
-  // This queue's axis in the causal graph. Constructed from the system's
-  // session epoch + machine index and this queue's device/queue ordinals.
-  // Used to identify this queue in frontier entries and epoch signal lookups.
+  // This queue's axis in the causal graph. The device index is assigned by the
+  // HAL device-group topology and the queue index is the flattened logical
+  // queue ordinal, preserving uniqueness for both separate logical devices and
+  // composite devices. Used in frontier entries and epoch signal lookups.
   // Immutable after initialization.
   iree_async_axis_t axis;
 
@@ -463,13 +464,12 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   // Queue ordinal relative to |device_ordinal|.
   iree_host_size_t physical_queue_ordinal;
 
-  // Shared epoch signal table for cross-queue barrier emission (tier 2 wait
-  // resolution). Maps (device_index, queue_index) to hsa_signal_t for each
-  // queue's epoch signal. Used to look up peer queues' epoch signals when
-  // emitting AQL barrier-value packets for multi-axis dependencies (e.g.,
-  // TP collective joins needing barriers on 7 peer queues).
+  // Logical-device epoch signal table for cross-queue barrier emission (tier 2
+  // wait resolution). Maps flattened queue indices to hsa_signal_t values for
+  // queues in this logical device. Used to look up peer queues' epoch signals
+  // when emitting AQL barrier-value packets for multi-axis dependencies.
   //
-  // Borrowed from the device/system — valid for the lifetime of the queue.
+  // Borrowed from the logical device and valid for the lifetime of the queue.
   // This queue's own epoch signal is registered at init and deregistered at
   // deinit. Read-only during normal operation.
   iree_hal_amdgpu_epoch_signal_table_t* epoch_table;
@@ -615,13 +615,13 @@ void iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
 // it, allocates a kernarg ring from |kernarg_memory|, creates the epoch signal
 // and notification ring, and starts the completion thread.
 //
-// |axis| is this queue's identity in the causal graph, constructed by the
-// caller from the system's session/machine identifiers and this queue's
-// device/queue ordinals via iree_async_axis_make_queue().
+// |axis| is this queue's identity in the causal graph. Its device index is the
+// topology-assigned HAL logical device index and its queue index is the
+// flattened logical queue ordinal within that device.
 //
-// |epoch_table| is the shared epoch signal table for cross-queue barrier
-// emission. This queue registers its epoch signal in the table at init and
-// deregisters at deinit. The table must outlive the queue.
+// |epoch_table| is the logical-device epoch signal table for cross-queue
+// barrier emission. This queue registers its epoch signal in the table at init
+// and deregisters at deinit. The table must outlive the queue.
 //
 // |feedback_state| is borrowed from the logical device. When enabled, queue
 // retirement drains the physical-device feedback channel before releasing

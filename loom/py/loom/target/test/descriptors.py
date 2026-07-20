@@ -26,6 +26,7 @@ from loom.target.low_descriptors import (
     Immediate,
     ImmediateFlag,
     ImmediateKind,
+    InstructionClass,
     IssueUse,
     LatencyKind,
     MemorySpace,
@@ -56,6 +57,8 @@ _REG_PHYS = "test.phys"
 _REG_SPECIAL = "test.special"
 _REG_ALIAS32 = "test.alias32"
 _REG_ALIAS64 = "test.alias64"
+_REG_PRESSURE_ALIAS32 = "test.pressure.alias32"
+_REG_PRESSURE_ALIAS64 = "test.pressure.alias64"
 
 _REG_PART_I32_LOW16 = "test.i32.low16"
 _REG_PART_I32_HIGH16 = "test.i32.high16"
@@ -83,6 +86,7 @@ _I32_I64_ALT = (RegClassAlt(_REG_I32), RegClassAlt(_REG_I64))
 _PTR_ALT = (RegClassAlt(_REG_PTR),)
 _PHYS_ALT = (RegClassAlt(_REG_PHYS),)
 _SPECIAL_ALT = (RegClassAlt(_REG_SPECIAL),)
+_PRESSURE_ALIAS32_ALT = (RegClassAlt(_REG_PRESSURE_ALIAS32),)
 
 
 def _asm(
@@ -105,12 +109,12 @@ def _asm(
     )
 
 
-def _i32_result(field_name: str = "dst") -> Operand:
-    return Operand(field_name, OperandRole.RESULT, _I32_ALT)
+def _i32_result(field_name: str = "dst", *, unit_count: int = 1) -> Operand:
+    return Operand(field_name, OperandRole.RESULT, _I32_ALT, unit_count=unit_count)
 
 
-def _i32_operand(field_name: str) -> Operand:
-    return Operand(field_name, OperandRole.OPERAND, _I32_ALT)
+def _i32_operand(field_name: str, *, unit_count: int = 1) -> Operand:
+    return Operand(field_name, OperandRole.OPERAND, _I32_ALT, unit_count=unit_count)
 
 
 def _i32_low16_result(field_name: str = "dst") -> Operand:
@@ -183,6 +187,26 @@ def _special_result(field_name: str = "dst") -> Operand:
 
 def _special_operand(field_name: str) -> Operand:
     return Operand(field_name, OperandRole.OPERAND, _SPECIAL_ALT)
+
+
+def _pressure_alias32_result(
+    field_name: str = "dst", *, unit_count: int = 1
+) -> Operand:
+    return Operand(
+        field_name,
+        OperandRole.RESULT,
+        _PRESSURE_ALIAS32_ALT,
+        unit_count=unit_count,
+    )
+
+
+def _pressure_alias32_operand(field_name: str, *, unit_count: int = 1) -> Operand:
+    return Operand(
+        field_name,
+        OperandRole.OPERAND,
+        _PRESSURE_ALIAS32_ALT,
+        unit_count=unit_count,
+    )
 
 
 def _special_state_operand(field_name: str) -> Operand:
@@ -295,6 +319,12 @@ _CALL_EFFECT = Effect(
     flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
 )
 
+_BARRIER_EFFECT = Effect(
+    EffectKind.BARRIER,
+    memory_space=MemorySpace.GENERIC,
+    flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
+)
+
 _CONTROL_EFFECT = Effect(
     EffectKind.CONTROL,
     flags=(EffectFlag.ORDERED,),
@@ -316,8 +346,21 @@ TEST_LOW_CONST_I32_DESCRIPTOR = Descriptor(
     semantic_tag="integer.const.i32",
     operands=(_i32_result(),),
     immediates=(_I32_VALUE_IMMEDIATE,),
+    constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
     asm_forms=_asm(results=("dst",), immediates=("i32_value",)),
     schedule_class=_SCHEDULE_CONST,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    instruction_classes=(InstructionClass.OTHER,),
+)
+
+TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR = Descriptor(
+    key="test.rematerialize.i32",
+    mnemonic="test.rematerialize.i32",
+    semantic_tag="test.rematerialize.i32",
+    operands=(_i32_result(), _i32_operand("src")),
+    constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
+    asm_forms=_asm(results=("dst",), operands=("src",)),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
@@ -420,6 +463,20 @@ TEST_LOW_ADD_V4I32_DESCRIPTOR = Descriptor(
         _v4i32_operand("rhs"),
     ),
     asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_VECTOR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_EARLY_CLOBBER_V4I32_DESCRIPTOR = Descriptor(
+    key="test.early_clobber.v4i32",
+    mnemonic="test.early_clobber.v4i32",
+    semantic_tag="test.early_clobber.v4i32",
+    operands=(
+        _v4i32_result(),
+        _v4i32_operand("src"),
+    ),
+    constraints=(Constraint(ConstraintKind.EARLY_CLOBBER, 0),),
+    asm_forms=_asm(results=("dst",), operands=("src",)),
     schedule_class=_SCHEDULE_VECTOR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
@@ -650,6 +707,29 @@ TEST_LOW_ADD_PHYS_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_MOVE_TO_PRESSURE_ALIAS32_DESCRIPTOR = Descriptor(
+    key="test.move.to.pressure.alias32",
+    mnemonic="test.move.to.pressure.alias32",
+    semantic_tag="test.move.to.pressure.alias32",
+    operands=(_pressure_alias32_result(), _i32_operand("src")),
+    asm_forms=_asm(results=("dst",), operands=("src",)),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_MOVE_FROM_PRESSURE_ALIAS32_X5_DESCRIPTOR = Descriptor(
+    key="test.move.from.pressure.alias32.x5",
+    mnemonic="test.move.from.pressure.alias32.x5",
+    semantic_tag="test.move.from.pressure.alias32.x5",
+    operands=(
+        _i32_result(unit_count=5),
+        _pressure_alias32_operand("src", unit_count=5),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("src",)),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
 TEST_LOW_ADD_SPECIAL_DESCRIPTOR = Descriptor(
     key="test.add.special",
     mnemonic="test.add.special",
@@ -692,6 +772,20 @@ TEST_LOW_EXPLICIT_STATE_ADD_SPECIAL_DESCRIPTOR = Descriptor(
     asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
     schedule_class=_SCHEDULE_SCALAR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_CONVERGENT_EXPLICIT_STATE_READ_I32_DESCRIPTOR = Descriptor(
+    key="test.convergent.explicit.state.read.i32",
+    mnemonic="test.convergent.explicit.state.read.i32",
+    semantic_tag="test.convergent.explicit.state.read.i32",
+    operands=(
+        _i32_result(),
+        _i32_operand("value"),
+        _special_state_operand("state"),
+    ),
+    effects=(_CONVERGENT_EFFECT,),
+    asm_forms=_asm(results=("dst",), operands=("value", "state")),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
 )
 
 TEST_LOW_STATE_ADD_I32_DESCRIPTOR = Descriptor(
@@ -869,6 +963,17 @@ TEST_LOW_CALL_I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.SIDE_EFFECTING,),
 )
 
+TEST_LOW_BARRIER_DESCRIPTOR = Descriptor(
+    key="test.barrier",
+    mnemonic="test.barrier",
+    semantic_tag="control.barrier",
+    operands=(),
+    asm_forms=_asm(),
+    effects=(_BARRIER_EFFECT,),
+    schedule_class=_SCHEDULE_CONTROL,
+    flags=(DescriptorFlag.SIDE_EFFECTING,),
+)
+
 TEST_LOW_BR_DESCRIPTOR = Descriptor(
     key="test.br",
     mnemonic="test.br",
@@ -924,6 +1029,7 @@ TEST_LOW_ALT_CONST_I32_DESCRIPTOR = Descriptor(
     asm_forms=_asm(results=("dst",), immediates=("i32_value",)),
     schedule_class=_SCHEDULE_CONST,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    instruction_classes=(InstructionClass.OTHER,),
 )
 
 TEST_LOW_ALT_NEG_I32_DESCRIPTOR = Descriptor(
@@ -974,6 +1080,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             SpillSlotSpace.STACK,
             flags=(RegClassFlag.PHYSICAL,),
             allocatable_count=32,
+            fixed_location_base=32,
+            fixed_location_count=8,
         ),
         RegClass(
             _REG_SPECIAL,
@@ -997,6 +1105,22 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             flags=(RegClassFlag.PHYSICAL,),
             allocatable_count=1,
             alias_set_id=1,
+        ),
+        RegClass(
+            _REG_PRESSURE_ALIAS32,
+            32,
+            SpillSlotSpace.STACK,
+            flags=(RegClassFlag.PHYSICAL,),
+            allocatable_count=8,
+            alias_set_id=2,
+        ),
+        RegClass(
+            _REG_PRESSURE_ALIAS64,
+            64,
+            SpillSlotSpace.STACK,
+            flags=(RegClassFlag.PHYSICAL,),
+            allocatable_count=8,
+            alias_set_id=2,
         ),
     ),
     register_parts=(
@@ -1082,6 +1206,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
     ),
     descriptors=(
         TEST_LOW_CONST_I32_DESCRIPTOR,
+        TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
         TEST_LOW_ADD_I32_DESCRIPTOR,
         TEST_LOW_CONVERGENT_I32_DESCRIPTOR,
         TEST_LOW_MUL_I32_DESCRIPTOR,
@@ -1100,6 +1225,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_CMP_EQ_I32_DESCRIPTOR,
         TEST_LOW_SELECT_I32_DESCRIPTOR,
         TEST_LOW_ADD_V4I32_DESCRIPTOR,
+        TEST_LOW_EARLY_CLOBBER_V4I32_DESCRIPTOR,
         TEST_LOW_DOT4I_S8S8_DESCRIPTOR,
         TEST_LOW_MMA_I32_2X2X2_DESCRIPTOR,
         TEST_LOW_SHUFFLE_V4I32_DESCRIPTOR,
@@ -1108,9 +1234,12 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_EXTRACT_LANE_I32_DESCRIPTOR,
         TEST_LOW_SHUFFLE_BYTES_DESCRIPTOR,
         TEST_LOW_ADD_PHYS_DESCRIPTOR,
+        TEST_LOW_MOVE_TO_PRESSURE_ALIAS32_DESCRIPTOR,
+        TEST_LOW_MOVE_FROM_PRESSURE_ALIAS32_X5_DESCRIPTOR,
         TEST_LOW_ADD_SPECIAL_DESCRIPTOR,
         TEST_LOW_STATE_ADD_SPECIAL_DESCRIPTOR,
         TEST_LOW_EXPLICIT_STATE_ADD_SPECIAL_DESCRIPTOR,
+        TEST_LOW_CONVERGENT_EXPLICIT_STATE_READ_I32_DESCRIPTOR,
         TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
         TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
         TEST_LOW_LOAD_V4I32_DESCRIPTOR,
@@ -1122,6 +1251,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_STORE_INDEX_V4I32_DESCRIPTOR,
         TEST_LOW_STORE_INDEX_V4F32_DESCRIPTOR,
         TEST_LOW_CALL_I32_DESCRIPTOR,
+        TEST_LOW_BARRIER_DESCRIPTOR,
         TEST_LOW_BR_DESCRIPTOR,
         TEST_LOW_COND_BR_I32_DESCRIPTOR,
         TEST_LOW_RETURN_I32_DESCRIPTOR,

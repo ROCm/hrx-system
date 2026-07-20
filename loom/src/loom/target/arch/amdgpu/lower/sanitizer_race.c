@@ -178,20 +178,20 @@ static iree_status_t loom_amdgpu_sanitizer_race_lower_state(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_sanitizer_race_packet_operand_count(
+static iree_host_size_t loom_amdgpu_sanitizer_race_packet_operand_count(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, iree_host_size_t* out_count) {
-  *out_count = 0;
+    const loom_low_descriptor_t* descriptor) {
+  iree_host_size_t count = 0;
   const loom_low_operand_t* operands =
       &descriptor_set->operands[descriptor->operand_start];
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
     const loom_low_operand_t* operand = &operands[i];
     if (loom_low_operand_role_is_packet_operand(operand->role)) {
-      ++(*out_count);
+      ++count;
     }
   }
-  return iree_ok_status();
+  return count;
 }
 
 static iree_status_t loom_amdgpu_sanitizer_race_build_descriptor_op(
@@ -252,19 +252,16 @@ static iree_status_t loom_amdgpu_sanitizer_race_append_optional_m0(
     const loom_low_descriptor_t* descriptor, loom_location_id_t location,
     loom_value_id_t* operands, iree_host_size_t operand_capacity,
     iree_host_size_t* inout_operand_count) {
-  iree_host_size_t packet_operand_count = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_packet_operand_count(
-      descriptor_set, descriptor, &packet_operand_count));
+  const iree_host_size_t packet_operand_count =
+      loom_amdgpu_sanitizer_race_packet_operand_count(descriptor_set,
+                                                      descriptor);
   if (packet_operand_count == *inout_operand_count) {
     return iree_ok_status();
   }
-  if (packet_operand_count != *inout_operand_count + 1 ||
-      *inout_operand_count >= operand_capacity) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU sanitizer race descriptor has an unsupported packet operand "
-        "count");
-  }
+  IREE_ASSERT_EQ(packet_operand_count, *inout_operand_count + 1,
+                 "AMDGPU sanitizer race descriptor has an unsupported packet "
+                 "operand count");
+  IREE_ASSERT_LT(*inout_operand_count, operand_capacity);
   return loom_amdgpu_sanitizer_race_build_m0_const_u32(
       builder, descriptor_set, descriptor, 0, location,
       &operands[(*inout_operand_count)++]);
@@ -554,11 +551,8 @@ static iree_status_t loom_amdgpu_sanitizer_race_get_config_values(
   *out_config = (loom_amdgpu_sanitizer_race_config_values_t){0};
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_config_values) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN config values were not materialized in entry setup");
-  }
+  IREE_ASSERT(state->has_config_values,
+              "AMDGPU TSAN config values were not materialized in entry setup");
   *out_config = state->config_values;
   return iree_ok_status();
 }
@@ -568,11 +562,9 @@ static iree_status_t loom_amdgpu_sanitizer_race_get_workgroup_shadow_offset(
   *out_offset = LOOM_VALUE_ID_INVALID;
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_topology_values) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN topology values were not materialized in entry setup");
-  }
+  IREE_ASSERT(
+      state->has_topology_values,
+      "AMDGPU TSAN topology values were not materialized in entry setup");
   *out_offset = state->workgroup_shadow_offset;
   return iree_ok_status();
 }
@@ -601,11 +593,9 @@ static iree_status_t loom_amdgpu_sanitizer_race_get_workitem_linear_id(
   *out_linear_id = LOOM_VALUE_ID_INVALID;
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_topology_values) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN topology values were not materialized in entry setup");
-  }
+  IREE_ASSERT(
+      state->has_topology_values,
+      "AMDGPU TSAN topology values were not materialized in entry setup");
   *out_linear_id = state->workitem_linear_id;
   return iree_ok_status();
 }
@@ -615,12 +605,9 @@ static iree_status_t loom_amdgpu_sanitizer_race_get_dispatch_ptr(
   *out_dispatch_ptr = LOOM_VALUE_ID_INVALID;
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_dispatch_values) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN dispatch slot values were not materialized in entry "
-        "setup");
-  }
+  IREE_ASSERT(
+      state->has_dispatch_values,
+      "AMDGPU TSAN dispatch slot values were not materialized in entry setup");
   *out_dispatch_ptr = state->dispatch_ptr;
   return iree_ok_status();
 }
@@ -630,12 +617,9 @@ static iree_status_t loom_amdgpu_sanitizer_race_get_instrumentation_flags(
   *out_flags = LOOM_VALUE_ID_INVALID;
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_instrumentation_flags) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN instrumentation flags were not materialized in entry "
-        "setup");
-  }
+  IREE_ASSERT(
+      state->has_instrumentation_flags,
+      "AMDGPU TSAN instrumentation flags were not materialized in entry setup");
   *out_flags = state->instrumentation_flags;
   return iree_ok_status();
 }
@@ -646,11 +630,9 @@ loom_amdgpu_sanitizer_race_get_workgroup_shadow_record_offset(
   *out_offset = LOOM_VALUE_ID_INVALID;
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_workgroup_shadow_record_offset) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU TSAN workgroup shadow record offset was "
-                            "not materialized in entry setup");
-  }
+  IREE_ASSERT(state->has_workgroup_shadow_record_offset,
+              "AMDGPU TSAN workgroup shadow record offset was not "
+              "materialized in entry setup");
   *out_offset = state->workgroup_shadow_record_offset;
   return iree_ok_status();
 }
@@ -661,11 +643,9 @@ static iree_status_t loom_amdgpu_sanitizer_race_get_shadow_entry_base(
   *out_base = NULL;
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_shadow_entry_base) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN shadow entry base was not materialized in entry setup");
-  }
+  IREE_ASSERT(
+      state->has_shadow_entry_base,
+      "AMDGPU TSAN shadow entry base was not materialized in entry setup");
   *out_base = &state->shadow_entry_base;
   return iree_ok_status();
 }
@@ -741,12 +721,9 @@ static iree_status_t loom_amdgpu_sanitizer_race_build_required_config_scc(
 
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_config_values) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN config guard values were not materialized in entry "
-        "setup");
-  }
+  IREE_ASSERT(state->has_config_values,
+              "AMDGPU TSAN config guard values were not materialized in entry "
+              "setup");
 
   loom_type_t scc_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_scc_type(context, &scc_type));
@@ -771,12 +748,9 @@ static iree_status_t loom_amdgpu_sanitizer_race_build_runtime_active_scc(
       context, &instrumentation_flags));
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_config_values) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN runtime guard values were not materialized in entry "
-        "setup");
-  }
+  IREE_ASSERT(state->has_config_values,
+              "AMDGPU TSAN runtime guard values were not materialized in entry "
+              "setup");
 
   loom_type_t scc_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_scc_type(context, &scc_type));
@@ -797,12 +771,10 @@ static iree_status_t loom_amdgpu_sanitizer_race_split_enabled_block(
     loom_block_t** out_continuation_block) {
   *out_enabled_block = NULL;
   *out_continuation_block = NULL;
-  if (builder->ip.before_op != NULL ||
-      builder->ip.block->parent_region == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU sanitizer race lowering requires the end of a low block");
-  }
+  IREE_ASSERT(
+      builder->ip.before_op == NULL && builder->ip.block->parent_region != NULL,
+      "AMDGPU sanitizer race lowering requires block-end insertion in a low "
+      "region");
   loom_block_t* config_block = builder->ip.block;
   loom_block_t* enabled_block = NULL;
   IREE_RETURN_IF_ERROR(loom_region_insert_block(
@@ -866,12 +838,10 @@ static iree_status_t loom_amdgpu_sanitizer_race_split_entry_guard_blocks(
   if (out_disabled_block != NULL) {
     *out_disabled_block = NULL;
   }
-  if (builder->ip.before_op != NULL ||
-      builder->ip.block->parent_region == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU sanitizer race entry setup requires the end of a low block");
-  }
+  IREE_ASSERT(
+      builder->ip.before_op == NULL && builder->ip.block->parent_region != NULL,
+      "AMDGPU sanitizer race entry setup requires block-end insertion in a low "
+      "region");
   loom_block_t* setup_block = builder->ip.block;
   loom_block_t* enabled_block = NULL;
   IREE_RETURN_IF_ERROR(loom_region_insert_block(
@@ -1004,10 +974,9 @@ static bool loom_amdgpu_sanitizer_race_required_descriptors_present(
       LOOM_AMDGPU_DESCRIPTOR_REF_V_SUB_CO_CI_U32,
       LOOM_AMDGPU_DESCRIPTOR_REF_V_XOR_B32,
   };
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(required_refs); ++i) {
-    if (!loom_amdgpu_descriptor_set_has_ref(descriptor_set, required_refs[i])) {
-      return false;
-    }
+  if (!loom_amdgpu_descriptor_set_has_all_refs(descriptor_set, required_refs,
+                                               IREE_ARRAYSIZE(required_refs))) {
+    return false;
   }
   return loom_amdgpu_descriptor_set_has_ref(
              descriptor_set,
@@ -1592,8 +1561,8 @@ static iree_status_t loom_amdgpu_sanitizer_race_reject_memory_selection(
 static bool loom_amdgpu_sanitizer_race_access_plan_build(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
-    loom_func_like_t source_function, const loom_op_t* op,
-    loom_amdgpu_sanitizer_race_access_plan_t* out_plan,
+    const loom_amdgpu_source_alloca_layout_t* alloca_layout,
+    const loom_op_t* op, loom_amdgpu_sanitizer_race_access_plan_t* out_plan,
     loom_low_source_memory_access_diagnostic_t* out_source_diagnostic,
     loom_amdgpu_memory_access_diagnostic_t* out_memory_diagnostic) {
   *out_plan = (loom_amdgpu_sanitizer_race_access_plan_t){0};
@@ -1635,7 +1604,7 @@ static bool loom_amdgpu_sanitizer_race_access_plan_build(
   access.source = source;
   out_plan->address.source = source;
   if (!loom_amdgpu_memory_access_select_u32_vaddr_byte_offset(
-          module, fact_table, view_regions, source_function, &source, &access,
+          module, fact_table, view_regions, alloca_layout, &source, &access,
           out_memory_diagnostic)) {
     return false;
   }
@@ -1668,13 +1637,15 @@ static iree_status_t loom_amdgpu_sanitizer_race_verify_access_address(
   const loom_view_region_table_t* view_regions = NULL;
   IREE_RETURN_IF_ERROR(
       loom_target_low_legality_view_regions(context, &view_regions));
+  const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_low_legality(
+      context, &alloca_layout));
   loom_amdgpu_sanitizer_race_access_plan_t plan = {0};
   loom_low_source_memory_access_diagnostic_t source_diagnostic = {0};
   loom_amdgpu_memory_access_diagnostic_t memory_diagnostic = {0};
   if (!loom_amdgpu_sanitizer_race_access_plan_build(
           module, loom_target_low_legality_fact_table(context), view_regions,
-          loom_target_low_legality_function(context), op, &plan,
-          &source_diagnostic, &memory_diagnostic)) {
+          alloca_layout, op, &plan, &source_diagnostic, &memory_diagnostic)) {
     if (source_diagnostic.rejection_bits != 0) {
       if (iree_any_bit_set(source_diagnostic.rejection_bits,
                            LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_LAYOUT)) {
@@ -1737,17 +1708,23 @@ iree_status_t loom_amdgpu_select_sanitizer_race_access_plan(
   const loom_view_region_table_t* view_regions = NULL;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_context_view_regions(context, &view_regions));
+  const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_lower_context(
+      context, &alloca_layout));
   loom_low_source_memory_access_diagnostic_t source_diagnostic = {0};
   loom_amdgpu_memory_access_diagnostic_t memory_diagnostic = {0};
   if (!loom_amdgpu_sanitizer_race_access_plan_build(
           loom_low_lower_context_module(context),
           loom_low_lower_context_fact_table(context), view_regions,
-          loom_low_lower_context_source_function(context), source_op, out_plan,
-          &source_diagnostic, &memory_diagnostic)) {
+          alloca_layout, source_op, out_plan, &source_diagnostic,
+          &memory_diagnostic)) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_site_id_for_op(
       context, source_op, &out_plan->site_id));
+  if (out_plan->site_id == LOOM_SANITIZER_SITE_ID_INVALID) {
+    return iree_ok_status();
+  }
   *out_selected = true;
   return iree_ok_status();
 }
@@ -1898,9 +1875,8 @@ static iree_status_t loom_amdgpu_sanitizer_race_build_failure_mask(
         context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B64, failure_mask,
         conflict_kind, &raw_failure_mask));
   }
-  uint32_t wavefront_size = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_wavefront_size(
-      loom_low_lower_context_bundle(context), &wavefront_size));
+  const uint32_t wavefront_size =
+      loom_amdgpu_target_wavefront_size(loom_low_lower_context_bundle(context));
   return loom_amdgpu_build_feedback_canonical_exec_mask(
       loom_low_lower_context_builder(context),
       loom_low_lower_context_descriptor_set(context), raw_failure_mask,
@@ -2103,8 +2079,8 @@ iree_status_t loom_amdgpu_lower_sanitizer_race_access(
       break;
     }
     default:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unsupported AMDGPU sanitizer reporting mode");
+      IREE_ASSERT_UNREACHABLE("unsupported AMDGPU sanitizer reporting mode");
+      IREE_BUILTIN_UNREACHABLE();
   }
 
   return loom_amdgpu_sanitizer_race_branch_to_continuation(
@@ -2123,12 +2099,6 @@ iree_status_t loom_amdgpu_select_sanitizer_race_sync_plan(
           loom_low_lower_context_descriptor_set(context))) {
     return iree_ok_status();
   }
-  bool barrier_selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_select_workgroup_barrier_plan(
-      context, &out_plan->barrier, &barrier_selected));
-  if (!barrier_selected) {
-    return iree_ok_status();
-  }
   if (loom_sanitizer_race_sync_memory_space(source_op) !=
           LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP ||
       loom_sanitizer_race_sync_scope(source_op) !=
@@ -2145,6 +2115,11 @@ iree_status_t loom_amdgpu_select_sanitizer_race_sync_plan(
           loom_low_lower_context_module(context),
           loom_low_lower_context_source_function(context),
           loom_low_lower_context_bundle(context))) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_select_workgroup_barrier_plan(context, &out_plan->barrier));
+  if (out_plan->barrier.kind == LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_NONE) {
     return iree_ok_status();
   }
   *out_selected = true;

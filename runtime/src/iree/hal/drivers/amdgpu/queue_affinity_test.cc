@@ -74,6 +74,38 @@ TEST(QueueAffinityTest, TryResolveReturnsFalseForInvalidAffinity) {
                                                           0x10ull, &resolved));
 }
 
+TEST(QueueAffinityTest, AxisPreservesLogicalDeviceAndMapsCompositeQueue) {
+  const iree_async_axis_t base_axis = iree_async_axis_make_queue(
+      /*session_epoch=*/3, /*machine_index=*/5, /*device_index=*/7,
+      /*queue_index=*/0);
+  iree_hal_amdgpu_queue_affinity_resolved_t resolved;
+  iree_async_axis_t axis = 0;
+  IREE_ASSERT_OK(iree_hal_amdgpu_queue_affinity_make_axis(
+      TwoDeviceDomain(), base_axis, /*queue_ordinal=*/3, &resolved, &axis));
+
+  EXPECT_EQ(iree_async_axis_session(axis), 3);
+  EXPECT_EQ(iree_async_axis_machine(axis), 5);
+  EXPECT_EQ(iree_async_axis_device_index(axis), 7);
+  EXPECT_EQ(iree_async_axis_queue_index(axis), 3);
+  EXPECT_EQ(resolved.physical_device_ordinal, 1);
+  EXPECT_EQ(resolved.physical_queue_ordinal, 1);
+
+  iree_hal_amdgpu_queue_affinity_resolved_t decoded;
+  ASSERT_TRUE(iree_hal_amdgpu_queue_affinity_try_resolve_axis(
+      TwoDeviceDomain(), base_axis, axis, &decoded));
+  EXPECT_EQ(decoded.queue_ordinal, resolved.queue_ordinal);
+  EXPECT_EQ(decoded.physical_device_ordinal, resolved.physical_device_ordinal);
+  EXPECT_EQ(decoded.physical_queue_ordinal, resolved.physical_queue_ordinal);
+}
+
+TEST(QueueAffinityTest, AxisResolutionRejectsForeignLogicalDevice) {
+  const iree_async_axis_t local_axis = iree_async_axis_make_queue(2, 4, 6, 0);
+  const iree_async_axis_t foreign_axis = iree_async_axis_make_queue(2, 4, 7, 0);
+  iree_hal_amdgpu_queue_affinity_resolved_t resolved;
+  EXPECT_FALSE(iree_hal_amdgpu_queue_affinity_try_resolve_axis(
+      TwoDeviceDomain(), local_axis, foreign_axis, &resolved));
+}
+
 TEST(QueueAffinityTest, PhysicalDeviceAffinityBuildsQueueRange) {
   iree_hal_queue_affinity_t queue_affinity = 0;
   IREE_ASSERT_OK(iree_hal_amdgpu_queue_affinity_for_physical_device(

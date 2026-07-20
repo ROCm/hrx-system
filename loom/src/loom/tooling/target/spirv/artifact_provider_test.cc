@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include <vector>
+
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/vulkan/device_spec.h"
 #include "iree/hal/drivers/vulkan/spirv.h"
@@ -37,28 +39,10 @@ typedef struct fake_hal_device_t {
   const iree_hal_device_spec_t* device_spec;
 } fake_hal_device_t;
 
-typedef struct fake_executable_cache_t {
-  // HAL resource header used by executable-cache vtable dispatch.
-  iree_hal_resource_t resource;
-  // Whether this cache accepts the raw Vulkan BDA executable format.
-  bool raw_bda_supported;
-} fake_executable_cache_t;
-
 static const iree_hal_device_spec_t* fake_hal_device_spec(
     iree_hal_device_t* base_device) {
   fake_hal_device_t* device = (fake_hal_device_t*)base_device;
   return device->device_spec;
-}
-
-static bool fake_executable_cache_can_prepare_format(
-    iree_hal_executable_cache_t* base_executable_cache,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_string_view_t executable_format) {
-  (void)caching_mode;
-  fake_executable_cache_t* executable_cache =
-      (fake_executable_cache_t*)base_executable_cache;
-  return executable_cache->raw_bda_supported &&
-         iree_string_view_equal(executable_format, IREE_SV("vulkan-spirv-bda"));
 }
 
 static iree_hal_device_vtable_t MakeFakeHalDeviceVtable() {
@@ -70,26 +54,10 @@ static iree_hal_device_vtable_t MakeFakeHalDeviceVtable() {
 static const iree_hal_device_vtable_t kFakeHalDeviceVtable =
     MakeFakeHalDeviceVtable();
 
-static iree_hal_executable_cache_vtable_t MakeFakeExecutableCacheVtable() {
-  iree_hal_executable_cache_vtable_t vtable = {};
-  vtable.can_prepare_format = fake_executable_cache_can_prepare_format;
-  return vtable;
-}
-
-static const iree_hal_executable_cache_vtable_t kFakeExecutableCacheVtable =
-    MakeFakeExecutableCacheVtable();
-
 static void InitializeFakeHalDevice(const iree_hal_device_spec_t* device_spec,
                                     fake_hal_device_t* out_device) {
   out_device->device_spec = device_spec;
   iree_hal_resource_initialize(&kFakeHalDeviceVtable, &out_device->resource);
-}
-
-static void InitializeFakeExecutableCache(
-    bool raw_bda_supported, fake_executable_cache_t* out_executable_cache) {
-  out_executable_cache->raw_bda_supported = raw_bda_supported;
-  iree_hal_resource_initialize(&kFakeExecutableCacheVtable,
-                               &out_executable_cache->resource);
 }
 
 static iree_hal_vulkan_features_t BaselineVulkanFeatures() {
@@ -141,23 +109,44 @@ static iree_status_t CreateBaselineDeviceSpec(
       /*.enabled_features=*/BaselineVulkanFeatures(),
       /*.flags=*/IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_NONE,
   };
-  uint8_t vulkan_payload_storage[8 + sizeof(iree_hal_vulkan_device_spec_t)];
+  iree_host_size_t vulkan_payload_size = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_spec_calculate_payload_size(
+      /*property_count=*/0, &vulkan_payload_size));
+  std::vector<uint8_t> vulkan_payload_storage(vulkan_payload_size);
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_spec_encode(
-      &vulkan_spec, iree_make_byte_span(vulkan_payload_storage,
-                                        sizeof(vulkan_payload_storage))));
+      &vulkan_spec, /*property_count=*/0, /*properties=*/nullptr,
+      iree_make_byte_span(vulkan_payload_storage.data(),
+                          vulkan_payload_storage.size())));
   iree_hal_device_spec_facet_t vulkan_facet = {
       /*.schema_id=*/
       iree_make_cstring_view(IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_ID),
       /*.schema_version=*/IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_VERSION,
       /*.payload=*/
-      iree_make_const_byte_span(vulkan_payload_storage,
-                                sizeof(vulkan_payload_storage)),
+      iree_make_const_byte_span(vulkan_payload_storage.data(),
+                                vulkan_payload_storage.size()),
   };
 
   iree_hal_device_spec_builder_t builder;
   iree_hal_device_spec_builder_initialize(iree_allocator_system(), &builder);
   iree_status_t status =
       iree_hal_device_spec_builder_set_dispatch(&builder, &dispatch);
+  const iree_hal_executable_target_t executable_target = {
+      /*.family=*/IREE_SV("spirv"),
+      /*.target_key=*/IREE_SV("vulkan1.3+bda"),
+      /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
+      /*.priority=*/100,
+      /*.physical_device_affinity=*/1,
+      /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+  };
+  const iree_hal_device_executable_spec_t executables = {
+      /*.target_count=*/1,
+      /*.targets=*/&executable_target,
+      /*.flags=*/IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
+  };
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_device_spec_builder_set_executables(&builder, &executables);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_spec_builder_add_facet(&builder, &vulkan_facet);
   }
@@ -193,6 +182,10 @@ class SpirvVulkanHalArtifactProviderTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    loom_spirv_vulkan_hal_artifact_provider.deinitialize_device_target(
+        &loom_spirv_vulkan_hal_artifact_provider, &target_,
+        iree_allocator_system());
+    iree_hal_device_spec_release(device_spec_);
     loom_context_deinitialize(&context_);
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
@@ -282,32 +275,27 @@ class SpirvVulkanHalArtifactProviderTest : public ::testing::Test {
     return iree_ok_status();
   }
 
-  iree_status_t SelectBaselineTarget(loom_run_hal_device_target_t* out_target) {
-    iree_hal_device_spec_t* device_spec = NULL;
-    IREE_RETURN_IF_ERROR(CreateBaselineDeviceSpec(&device_spec));
+  iree_status_t SelectBaselineTarget() {
+    IREE_RETURN_IF_ERROR(CreateBaselineDeviceSpec(&device_spec_));
     fake_hal_device_t device = {};
-    InitializeFakeHalDevice(device_spec, &device);
-    fake_executable_cache_t executable_cache = {};
-    InitializeFakeExecutableCache(true, &executable_cache);
+    InitializeFakeHalDevice(device_spec_, &device);
     loom_run_hal_runtime_t runtime = {};
     runtime.device = (iree_hal_device_t*)&device;
-    runtime.executable_cache = (iree_hal_executable_cache_t*)&executable_cache;
-    iree_status_t status =
-        loom_spirv_vulkan_hal_artifact_provider.select_device_target(
-            &loom_spirv_vulkan_hal_artifact_provider, &runtime,
-            iree_allocator_system(), out_target);
-    iree_hal_device_spec_release(device_spec);
-    return status;
+    return loom_spirv_vulkan_hal_artifact_provider.select_device_target(
+        &loom_spirv_vulkan_hal_artifact_provider, &runtime,
+        iree_allocator_system(), &target_);
   }
 
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_ = {};
   loom_target_low_descriptor_registry_t low_registry_ = {};
+  iree_hal_device_spec_t* device_spec_ = nullptr;
+  loom_run_hal_device_target_t target_ = {};
 };
 
 TEST_F(SpirvVulkanHalArtifactProviderTest, SelectsRawBdaDeviceTarget) {
-  loom_run_hal_device_target_t target = {};
-  IREE_ASSERT_OK(SelectBaselineTarget(&target));
+  IREE_ASSERT_OK(SelectBaselineTarget());
+  const loom_run_hal_device_target_t& target = target_;
 
   ASSERT_NE(target.target_bundle, nullptr);
   EXPECT_EQ(target.target_bundle, &target.target_storage.bundle);
@@ -328,8 +316,8 @@ TEST_F(SpirvVulkanHalArtifactProviderTest, EmitsRawBdaSpirvArtifact) {
   IREE_ASSERT_OK(ParseRawBdaRoundtripModule(&module));
   ASSERT_NE(module.get(), nullptr);
 
-  loom_run_hal_device_target_t target = {};
-  IREE_ASSERT_OK(SelectBaselineTarget(&target));
+  IREE_ASSERT_OK(SelectBaselineTarget());
+  const loom_run_hal_device_target_t& target = target_;
 
   loom_run_hal_artifact_t artifact = {};
   bool emitted = false;
@@ -343,8 +331,9 @@ TEST_F(SpirvVulkanHalArtifactProviderTest, EmitsRawBdaSpirvArtifact) {
       iree_allocator_system(), &emitted, &artifact));
 
   EXPECT_TRUE(emitted);
-  EXPECT_TRUE(iree_string_view_equal(artifact.executable_format,
-                                     IREE_SV("vulkan-spirv-bda")));
+  EXPECT_EQ(artifact.hal_target, target.hal_target);
+  EXPECT_TRUE(
+      iree_string_view_equal(artifact.target_key, IREE_SV("vulkan1.3+bda")));
   EXPECT_EQ(artifact.target_bundle, target.target_bundle);
   EXPECT_EQ(artifact.target_artifact_format,
             LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY);
@@ -368,8 +357,8 @@ TEST_F(SpirvVulkanHalArtifactProviderTest, EmitsAllCompatibleEntries) {
   IREE_ASSERT_OK(ParseRawBdaMultiEntryModule(&module));
   ASSERT_NE(module.get(), nullptr);
 
-  loom_run_hal_device_target_t target = {};
-  IREE_ASSERT_OK(SelectBaselineTarget(&target));
+  IREE_ASSERT_OK(SelectBaselineTarget());
+  const loom_run_hal_device_target_t& target = target_;
 
   loom_run_hal_artifact_t artifact = {};
   bool emitted = false;

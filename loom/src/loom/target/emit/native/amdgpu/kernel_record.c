@@ -11,6 +11,7 @@
 
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/packet.h"
+#include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/emit/native/amdgpu/preflight.h"
@@ -570,11 +571,7 @@ static iree_status_t loom_amdgpu_kernel_record_build_metadata_arguments(
   for (iree_host_size_t i = 0; i < abi_layout->resource_count; ++i) {
     const loom_amdgpu_hal_kernarg_resource_t* resource =
         &abi_layout->resources[i];
-    if (resource->parameter_index >= argument_count) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "AMDGPU kernel emission reached an invalid resource parameter index");
-    }
+    IREE_ASSERT_LT(resource->parameter_index, argument_count);
     arguments[resource->parameter_index] = (loom_amdgpu_metadata_argument_t){
         .name = resource->name,
         .offset = resource->kernarg_offset,
@@ -587,11 +584,7 @@ static iree_status_t loom_amdgpu_kernel_record_build_metadata_arguments(
   for (iree_host_size_t i = 0; i < abi_layout->direct_arg_count; ++i) {
     const loom_amdgpu_hal_kernarg_direct_arg_t* direct_arg =
         &abi_layout->direct_args[i];
-    if (direct_arg->parameter_index >= argument_count) {
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "AMDGPU kernel emission reached an invalid "
-                              "direct argument parameter index");
-    }
+    IREE_ASSERT_LT(direct_arg->parameter_index, argument_count);
     arguments[direct_arg->parameter_index] = (loom_amdgpu_metadata_argument_t){
         .name = direct_arg->name,
         .offset = direct_arg->kernarg_offset,
@@ -611,12 +604,12 @@ static iree_status_t loom_amdgpu_kernel_record_max_flat_workgroup_size(
   const loom_target_workgroup_size_t* required =
       &hal_kernel->required_workgroup_size;
   if (loom_target_workgroup_size_is_concrete(required)) {
-    if (!loom_target_workgroup_size_flat_product_u32(
-            required, out_max_flat_workgroup_size)) {
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "validated HAL kernel workgroup size overflows "
-                              "uint32_t");
-    }
+    const bool has_flat_workgroup_size =
+        loom_target_workgroup_size_flat_product_u32(
+            required, out_max_flat_workgroup_size);
+    IREE_ASSERT(has_flat_workgroup_size,
+                "validated HAL kernel workgroup size fits uint32_t");
+    (void)has_flat_workgroup_size;
     return iree_ok_status();
   }
   *out_max_flat_workgroup_size = hal_kernel->flat_workgroup_size_max != 0
@@ -729,6 +722,10 @@ iree_status_t loom_amdgpu_kernel_record_build(
   const bool has_required_workgroup_size =
       loom_target_workgroup_size_is_concrete(
           &hal_kernel->required_workgroup_size);
+  loom_target_workgroup_cluster_size_t workgroup_cluster_size = {0};
+  const bool has_workgroup_cluster_size =
+      loom_low_kernel_def_static_workgroup_cluster_size(
+          schedule->function_op, &workgroup_cluster_size);
   uint32_t max_flat_workgroup_size = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_max_flat_workgroup_size(
       &schedule->target.bundle_storage.snapshot, hal_kernel,
@@ -757,6 +754,8 @@ iree_status_t loom_amdgpu_kernel_record_build(
               .max_flat_workgroup_size = max_flat_workgroup_size,
               .required_workgroup_size = hal_kernel->required_workgroup_size,
               .has_required_workgroup_size = has_required_workgroup_size,
+              .workgroup_cluster_size = workgroup_cluster_size,
+              .has_workgroup_cluster_size = has_workgroup_cluster_size,
               .arguments = arguments,
               .argument_count = abi_layout->parameter_count,
           },

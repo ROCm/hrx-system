@@ -63,7 +63,6 @@ iree_runtime_cc_library(
         "driver_registry.c",
         "event.c",
         "executable.c",
-        "executable_cache.c",
         "fence.c",
         "file.c",
         "pool.c",
@@ -94,7 +93,6 @@ iree_runtime_cc_library(
         "driver_registry.h",
         "event.h",
         "executable.h",
-        "executable_cache.h",
         "fence.h",
         "file.h",
         "pool.h",
@@ -176,6 +174,7 @@ iree_runtime_cc_test(
     deps = [
         ":hal",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:fpu_state",
         "//runtime/src/iree/base/internal:span",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

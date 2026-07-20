@@ -6,7 +6,6 @@
 
 #include "loom/codegen/low/storage_lease.h"
 
-#include <inttypes.h>
 #include <string.h>
 
 typedef struct loom_low_storage_lease_build_state_t {
@@ -64,85 +63,40 @@ static bool loom_low_storage_lease_flags_are_valid(
   return true;
 }
 
-static iree_status_t loom_low_storage_lease_validate_event(
+static void loom_low_storage_lease_validate_event(
     const loom_low_storage_lease_build_state_t* state,
     const loom_low_storage_lease_event_t* event) {
-  if (!loom_low_storage_lease_kind_is_valid(event->kind)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "storage lease event has invalid kind %u",
-                            (unsigned)event->kind);
-  }
-  if (!loom_low_storage_lease_attachment_is_valid(event->attachment)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "storage lease event has invalid attachment kind %u",
-        (unsigned)event->attachment);
-  }
-  if (!loom_low_storage_lease_release_scope_is_valid(event->release_scope)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "storage lease event has invalid release scope %u",
-                            (unsigned)event->release_scope);
-  }
-  if (event->release_class_id == LOOM_LOW_STORAGE_LEASE_RELEASE_CLASS_NONE) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "storage lease event has no release class");
-  }
-  if (iree_string_view_is_empty(event->release_class_name)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "storage lease event has no stable release class name");
-  }
-  if (event->release_action_id == LOOM_LOW_STORAGE_RELEASE_ACTION_NONE ||
-      iree_string_view_is_empty(event->release_action_name)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "storage lease event has no target release action id and name");
-  }
-  if (event->release_reason_id == LOOM_LOW_STORAGE_RELEASE_REASON_NONE ||
-      iree_string_view_is_empty(event->release_reason_name)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "storage lease event has no target release reason id and name");
-  }
-  if (event->unit_count == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "storage lease event has no leased units");
-  }
-  if (!loom_low_storage_lease_flags_are_valid(event->flags)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "storage lease event has invalid flags 0x%04x",
-                            event->flags);
-  }
+  IREE_ASSERT(loom_low_storage_lease_kind_is_valid(event->kind));
+  IREE_ASSERT(loom_low_storage_lease_attachment_is_valid(event->attachment));
+  IREE_ASSERT(
+      loom_low_storage_lease_release_scope_is_valid(event->release_scope));
+  IREE_ASSERT_NE(event->release_class_id,
+                 LOOM_LOW_STORAGE_LEASE_RELEASE_CLASS_NONE);
+  IREE_ASSERT(!iree_string_view_is_empty(event->release_class_name));
+  IREE_ASSERT_NE(event->release_action_id,
+                 LOOM_LOW_STORAGE_RELEASE_ACTION_NONE);
+  IREE_ASSERT(!iree_string_view_is_empty(event->release_action_name));
+  IREE_ASSERT_NE(event->release_reason_id,
+                 LOOM_LOW_STORAGE_RELEASE_REASON_NONE);
+  IREE_ASSERT(!iree_string_view_is_empty(event->release_reason_name));
+  IREE_ASSERT_NE(event->unit_count, 0u);
+  IREE_ASSERT(loom_low_storage_lease_flags_are_valid(event->flags));
 
   const loom_low_schedule_node_t* node = state->current_node;
   const uint16_t attachment_count =
       event->attachment == LOOM_LOW_STORAGE_LEASE_ATTACHMENT_OPERAND
           ? node->operand_count
           : node->result_count;
-  if (event->attachment_index >= attachment_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "storage lease event attachment index %u exceeds node %u %s count %u",
-        event->attachment_index, state->current_node_index,
-        event->attachment == LOOM_LOW_STORAGE_LEASE_ATTACHMENT_OPERAND
-            ? "operand"
-            : "result",
-        attachment_count);
-  }
-  return iree_ok_status();
+  IREE_ASSERT_LT(event->attachment_index, attachment_count);
 }
 
 static iree_status_t loom_low_storage_lease_count_event(
     void* user_data, const loom_low_storage_lease_event_t* event) {
   loom_low_storage_lease_build_state_t* state =
       (loom_low_storage_lease_build_state_t*)user_data;
-  IREE_RETURN_IF_ERROR(loom_low_storage_lease_validate_event(state, event));
-  iree_host_size_t next_record_count = 0;
-  if (!iree_host_size_checked_add(state->record_count, 1, &next_record_count)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "storage lease record count exceeds host size");
-  }
-  state->record_count = next_record_count;
+  loom_low_storage_lease_validate_event(state, event);
+  IREE_ASSERT_NE(state->record_count, IREE_HOST_SIZE_MAX);
+  ++state->record_count;
   return iree_ok_status();
 }
 
@@ -150,12 +104,8 @@ static iree_status_t loom_low_storage_lease_append_event(
     void* user_data, const loom_low_storage_lease_event_t* event) {
   loom_low_storage_lease_build_state_t* state =
       (loom_low_storage_lease_build_state_t*)user_data;
-  IREE_RETURN_IF_ERROR(loom_low_storage_lease_validate_event(state, event));
-  if (state->record_count >= state->record_capacity) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "storage lease provider emitted inconsistent record count");
-  }
+  loom_low_storage_lease_validate_event(state, event);
+  IREE_ASSERT_LT(state->record_count, state->record_capacity);
   const loom_low_schedule_node_t* node = state->current_node;
   state->records[state->record_count++] = (loom_low_storage_lease_record_t){
       .packet_index = state->current_packet_index,
@@ -184,8 +134,10 @@ iree_status_t loom_low_storage_lease_query_descriptor_rows(
     const loom_low_schedule_node_t* node, loom_low_storage_lease_emit_fn_t emit,
     void* emit_user_data) {
   (void)user_data;
-  if (schedule == NULL || node == NULL || node->descriptor == NULL ||
-      schedule->target.descriptor_set == NULL) {
+  IREE_ASSERT_ARGUMENT(schedule);
+  IREE_ASSERT_ARGUMENT(node);
+  IREE_ASSERT_ARGUMENT(emit);
+  if (node->descriptor == NULL || schedule->target.descriptor_set == NULL) {
     return iree_ok_status();
   }
   const loom_low_descriptor_set_t* descriptor_set =
@@ -194,12 +146,11 @@ iree_status_t loom_low_storage_lease_query_descriptor_rows(
   if (descriptor->storage_lease_count == 0) {
     return iree_ok_status();
   }
-  if (descriptor->storage_lease_start > descriptor_set->storage_lease_count ||
-      descriptor->storage_lease_count > descriptor_set->storage_lease_count -
-                                            descriptor->storage_lease_start) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "descriptor storage-lease range is out of bounds");
-  }
+  IREE_ASSERT_LE(descriptor->storage_lease_start,
+                 descriptor_set->storage_lease_count);
+  IREE_ASSERT_LE(
+      descriptor->storage_lease_count,
+      descriptor_set->storage_lease_count - descriptor->storage_lease_start);
   for (uint16_t i = 0; i < descriptor->storage_lease_count; ++i) {
     const loom_low_descriptor_storage_lease_t* row =
         &descriptor_set->storage_leases[descriptor->storage_lease_start + i];
@@ -226,6 +177,62 @@ iree_status_t loom_low_storage_lease_query_descriptor_rows(
   return iree_ok_status();
 }
 
+iree_status_t loom_low_storage_release_action_index_build(
+    const loom_low_storage_release_action_t* actions,
+    iree_host_size_t action_count,
+    loom_low_storage_release_action_index_key_t key, iree_host_size_t key_count,
+    iree_arena_allocator_t* arena,
+    loom_low_storage_release_action_index_t* out_index) {
+  IREE_ASSERT_ARGUMENT(out_index);
+  *out_index = (loom_low_storage_release_action_index_t){0};
+  if (action_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_ASSERT_ARGUMENT(actions);
+  IREE_ASSERT_ARGUMENT(arena);
+  IREE_ASSERT_LE(action_count, UINT32_MAX);
+  IREE_ASSERT_NE(key_count, 0u);
+  IREE_ASSERT(key ==
+                  LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_PACKET ||
+              key == LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_NODE);
+  const bool use_packet_index =
+      key == LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_PACKET;
+
+  uint32_t* first_action_indices = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, key_count, sizeof(*first_action_indices),
+                                (void**)&first_action_indices));
+  for (iree_host_size_t i = 0; i < key_count; ++i) {
+    first_action_indices[i] = LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE;
+  }
+
+  uint32_t* next_action_indices = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, action_count,
+                                                 sizeof(*next_action_indices),
+                                                 (void**)&next_action_indices));
+  for (iree_host_size_t i = 0; i < action_count; ++i) {
+    next_action_indices[i] = LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE;
+  }
+
+  for (iree_host_size_t i = action_count; i > 0; --i) {
+    const uint32_t action_index = (uint32_t)(i - 1);
+    const loom_low_storage_release_action_t* action = &actions[action_index];
+    const iree_host_size_t key_index = use_packet_index
+                                           ? action->insertion_packet_index
+                                           : action->insertion_node_index;
+    IREE_ASSERT_LT(key_index, key_count);
+    next_action_indices[action_index] = first_action_indices[key_index];
+    first_action_indices[key_index] = action_index;
+  }
+
+  *out_index = (loom_low_storage_release_action_index_t){
+      .first_action_indices = first_action_indices,
+      .next_action_indices = next_action_indices,
+      .key_count = key_count,
+  };
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_storage_lease_run_pass(
     loom_low_storage_lease_build_state_t* state,
     loom_low_storage_lease_emit_fn_t emit) {
@@ -233,6 +240,7 @@ static iree_status_t loom_low_storage_lease_run_pass(
        packet_index < state->schedule->scheduled_node_count; ++packet_index) {
     const uint32_t node_index =
         state->schedule->scheduled_node_indices[packet_index];
+    IREE_ASSERT_LT(node_index, state->schedule->node_count);
     const loom_low_schedule_node_t* node = &state->schedule->nodes[node_index];
     state->current_packet_index = packet_index;
     state->current_node_index = node_index;
@@ -250,6 +258,11 @@ iree_status_t loom_low_storage_lease_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_storage_lease_provider_t* provider,
     iree_arena_allocator_t* arena, loom_low_storage_lease_table_t* out_table) {
+  IREE_ASSERT_ARGUMENT(schedule);
+  IREE_ASSERT_ARGUMENT(provider);
+  IREE_ASSERT_ARGUMENT(provider->query);
+  IREE_ASSERT_ARGUMENT(arena);
+  IREE_ASSERT_ARGUMENT(out_table);
   memset(out_table, 0, sizeof(*out_table));
 
   loom_low_storage_lease_build_state_t state = {
@@ -273,12 +286,7 @@ iree_status_t loom_low_storage_lease_build(
   state.record_count = 0;
   IREE_RETURN_IF_ERROR(loom_low_storage_lease_run_pass(
       &state, loom_low_storage_lease_append_event));
-  if (state.record_count != record_capacity) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "storage lease provider emitted %" PRIhsz
-                            " record(s) after counting %" PRIhsz,
-                            state.record_count, record_capacity);
-  }
+  IREE_ASSERT_EQ(state.record_count, record_capacity);
 
   *out_table = (loom_low_storage_lease_table_t){
       .schedule = schedule,

@@ -87,7 +87,8 @@
         "contains": [
           "\"row\":\"comparison\"",
           "\"method\":\"ABABA\"",
-          "\"benchmark_count\":2",
+          "\"benchmark_count\":3",
+          "\"selected_benchmark_count\":2",
           "\"failures\":{\"row_count\":0,\"failed_benchmark_count\":0}"
         ]
       }

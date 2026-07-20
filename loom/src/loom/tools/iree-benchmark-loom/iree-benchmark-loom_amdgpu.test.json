@@ -49,6 +49,7 @@
           "--min-time-ms=0",
           "--max-batches=1",
           "--input-ring-count=1",
+          "--compile-report=summary",
           "--output-format=jsonl"
         ]
       },
@@ -60,6 +61,15 @@
           "\"actual_invocation_count\":2",
           "\"driver\":\"amdgpu\"",
           "\"provider\":\"amdgpu-hal\"",
+          { "regex": "\"row\":\"compile\".*\"entry\":\"store_i32\"" },
+          { "regex": "\"row\":\"compile\".*\"entry\":\"double_i32\"" },
+          "\"target_capability_rows\":{\"count\":",
+          "\"namespace\":\"amdgpu\",\"key\":\"matrix_feature_profile\"",
+          "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp8_native_kind\"",
+          "\"source_low\":{\"selected_op_count\":",
+          "\"memory\":{\"packet_count\":",
+          "\"roots\":[",
+          "\"source_root\":\"output\"",
           "\"row\":\"benchmark\"",
           "\"state\":\"ok\"",
           "\"failures\":{\"row_count\":0,\"failed_benchmark_count\":0}"

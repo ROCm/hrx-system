@@ -42,6 +42,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_CACHE_SCOPE_KEYWORDS,
     AMDGPU_CACHE_TEMPORAL_KEYWORDS,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION,
     AMDGPU_DESCRIPTOR_SET_INFO_KNOWN_FLAGS,
     AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ACCUM_OFFSET,
@@ -64,6 +65,9 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
+    AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
+    AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+    AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS,
     AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
     AMDGPU_PROCESSOR_SCHEDULING_KNOWN_BITS,
     AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES,
@@ -71,6 +75,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES,
     AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR,
     AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES,
+    AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER,
     AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ATTRS,
     AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_INFOS,
     AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE,
@@ -108,10 +113,6 @@ class _AmdgpuDescriptorSetRow:
 
 def _u16_expr(value: int) -> str:
     return f"UINT16_C({value})"
-
-
-def _padded_arg(value: str, width: int) -> str:
-    return f"{value},{' ' * (width - len(value) + 1)}"
 
 
 def _c_ident(value: str) -> str:
@@ -156,6 +157,21 @@ _DESCRIPTOR_SET_INFO_FLAG_EXPRS = (
     (
         AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
         "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING",
+    ),
+    (
+        AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION,
+        "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION",
+    ),
+)
+
+_PROCESSOR_INFO_FLAG_EXPRS = (
+    (
+        AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+        "LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION",
+    ),
+    (
+        AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
+        "LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE",
     ),
 )
 
@@ -217,6 +233,10 @@ _PROCESSOR_SCHEDULING_BIT_EXPRS = (
     (
         AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
         "LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU",
+    ),
+    (
+        AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER,
+        "LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER",
     ),
 )
 
@@ -441,6 +461,16 @@ def _descriptor_set_info_flags_expr(flags: int) -> str:
     )
 
 
+def _processor_info_flags_expr(flags: int) -> str:
+    return _flag_bits_expr(
+        flags,
+        known_bits=AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS,
+        rows=_PROCESSOR_INFO_FLAG_EXPRS,
+        zero_expr="UINT32_C(0)",
+        description="processor info",
+    )
+
+
 def _wavefront_size_flags_expr(flags: int) -> str:
     return _flag_bits_expr(
         flags,
@@ -634,6 +664,9 @@ def _validate_processors(
             raise ValueError(f"AMDGPU ELF feature flags for {info.processor} must fit u32")
         if info.elf.feature_flags & 0x0FF:
             raise ValueError(f"AMDGPU ELF feature flags for {info.processor} must not overlap EF_AMDGPU_MACH")
+        if info.flags < 0 or info.flags > 0xFFFFFFFF:
+            raise ValueError(f"AMDGPU processor info flags for {info.processor} must fit u32")
+        _processor_info_flags_expr(info.flags)
         if info.wavefront.default_size not in (32, 64):
             raise ValueError(f"AMDGPU default wavefront size for {info.processor} must be 32 or 64")
         supported_wavefront_sizes = _supported_wavefront_sizes(info)
@@ -655,6 +688,13 @@ def _validate_processors(
                 raise ValueError(f"AMDGPU processor {info.processor} has descriptor profile but no VGPR encoding granules")
             if info.elf.machine_flags == 0:
                 raise ValueError(f"AMDGPU processor {info.processor} has a kernel descriptor profile but no ELF machine flags")
+        if info.flags & AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION:
+            if not info.descriptor_set.key:
+                raise ValueError(f"AMDGPU processor {info.processor} has HSACO emission support but no descriptor set")
+            if profile == AMDGPU_KERNEL_DESCRIPTOR_PROFILE_NONE:
+                raise ValueError(f"AMDGPU processor {info.processor} has HSACO emission support but no kernel descriptor profile")
+            if info.elf.machine_flags == 0:
+                raise ValueError(f"AMDGPU processor {info.processor} has HSACO emission support but no ELF machine flags")
         if info.features.scheduling < 0 or info.features.scheduling > 0xFFFFFFFF:
             raise ValueError(f"AMDGPU scheduling bits for {info.processor} must fit u32")
         _processor_scheduling_bits_expr(info.features.scheduling)
@@ -728,125 +768,83 @@ def _emit_tables_header() -> str:
 
 
 def _emit_descriptor_set_rows(rows: Sequence[_AmdgpuDescriptorSetRow]) -> list[str]:
-    key_width = max(len(_c_string_arg(row.info.key)) for row in rows)
-    ordinal_width = len("UINT16_C(65535)")
-    opcode_width = len("0x000")
-    flags_width = max(len(_descriptor_set_info_flags_expr(row.info.flags)) for row in rows)
-    cache_swizzle_width = len("LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT")
     lines = [
-        "#define LOOM_AMDGPU_DESCRIPTOR_SET_INFO(ordinal_, key_, sopp_nop_, sopp_delay_alu_, sopp_endpgm_, sopp_branch_, sopp_cbranch_scc0_, sopp_cbranch_scc1_, flags_, buffer_resource_cache_swizzle_, vector_memory_cache_policy_encoding_) \\",
-        "  { \\",
-        "    .key = IREE_SVL(key_), \\",
-        "    .ordinal = ordinal_, \\",
-        "    .sopp = { \\",
-        "      .nop = UINT16_C(sopp_nop_), \\",
-        "      .delay_alu = UINT16_C(sopp_delay_alu_), \\",
-        "      .endpgm = UINT16_C(sopp_endpgm_), \\",
-        "      .branch = UINT16_C(sopp_branch_), \\",
-        "      .conditional_branch_scc0 = UINT16_C(sopp_cbranch_scc0_), \\",
-        "      .conditional_branch_scc1 = UINT16_C(sopp_cbranch_scc1_), \\",
-        "    }, \\",
-        "    .flags = flags_, \\",
-        "    .buffer_resource = { \\",
-        "      .cache_swizzle = buffer_resource_cache_swizzle_, \\",
-        "    }, \\",
-        "    .vector_memory = { \\",
-        "      .cache_policy_encoding = vector_memory_cache_policy_encoding_, \\",
-        "    }, \\",
-        "  }",
-        "",
         "const loom_amdgpu_descriptor_set_info_t loom_amdgpu_target_info_descriptor_set_infos[] = {",
-        "  // ordinal         key                    s_nop s_delay_alu s_endpgm s_branch s_cbranch_scc0 s_cbranch_scc1 flags cache_swizzle cache_policy",
     ]
-    lines.extend(
-        (
-            "  LOOM_AMDGPU_DESCRIPTOR_SET_INFO("
-            f"{_padded_arg(_u16_expr(amdgpu_descriptor_set_ordinal(info.key)), ordinal_width)}"
-            f"{_padded_arg(_c_string_arg(info.key), key_width)}"
-            f"{_padded_arg(f'0x{row.sopp.nop:03x}', opcode_width)}"
-            f"{_padded_arg(f'0x{row.sopp.delay_alu:03x}', opcode_width)}"
-            f"{_padded_arg(f'0x{row.sopp.endpgm:03x}', opcode_width)}"
-            f"{_padded_arg(f'0x{row.sopp.branch:03x}', opcode_width)}"
-            f"{_padded_arg(f'0x{row.sopp.conditional_branch_scc0:03x}', opcode_width)}"
-            f"{_padded_arg(f'0x{row.sopp.conditional_branch_scc1:03x}', opcode_width)}"
-            f"{_padded_arg(_descriptor_set_info_flags_expr(info.flags), flags_width)}"
-            f"{_padded_arg(_buffer_resource_cache_swizzle_expr(info.buffer_resource.cache_swizzle), cache_swizzle_width)}"
-            f"{_vector_memory_cache_policy_encoding_expr(info.vector_memory.cache_policy_encoding)}"
-            "),"
+    for row in rows:
+        info = row.info
+        lines.extend(
+            [
+                "  {",
+                f"    .key = IREE_SVL({_c_string_arg(info.key)}),",
+                f"    .ordinal = {_u16_expr(amdgpu_descriptor_set_ordinal(info.key))},",
+                "    .sopp = {",
+                f"      .nop = UINT16_C(0x{row.sopp.nop:03x}),",
+                f"      .delay_alu = UINT16_C(0x{row.sopp.delay_alu:03x}),",
+                f"      .endpgm = UINT16_C(0x{row.sopp.endpgm:03x}),",
+                f"      .branch = UINT16_C(0x{row.sopp.branch:03x}),",
+                f"      .conditional_branch_scc0 = UINT16_C(0x{row.sopp.conditional_branch_scc0:03x}),",
+                f"      .conditional_branch_scc1 = UINT16_C(0x{row.sopp.conditional_branch_scc1:03x}),",
+                "    },",
+                f"    .flags = {_descriptor_set_info_flags_expr(info.flags)},",
+                "    .buffer_resource = {",
+                f"      .cache_swizzle = {_buffer_resource_cache_swizzle_expr(info.buffer_resource.cache_swizzle)},",
+                "    },",
+                "    .vector_memory = {",
+                f"      .cache_policy_encoding = {_vector_memory_cache_policy_encoding_expr(info.vector_memory.cache_policy_encoding)},",
+                "    },",
+                "  },",
+            ]
         )
-        for row in rows
-        for info in (row.info,)
-    )
-    lines.extend(["};", "", "#undef LOOM_AMDGPU_DESCRIPTOR_SET_INFO", ""])
+    lines.extend(["};", ""])
     return lines
 
 
+def _processor_descriptor_set_ordinal_expr(info: AmdgpuProcessorInfo) -> str:
+    if not info.descriptor_set.key:
+        return "LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE"
+    return _u16_expr(amdgpu_descriptor_set_ordinal(info.descriptor_set.key))
+
+
 def _emit_processor_rows(processors: Sequence[AmdgpuProcessorInfo]) -> list[str]:
-    processor_width = max(len(_c_string_arg(info.processor)) for info in processors)
-    descriptor_set_width = max(len(_c_string_arg(info.descriptor_set.key)) for info in processors)
-    ordinal_width = len("UINT16_C(65535)")
-    machine_flags_width = len("0x000")
-    feature_flags_width = len("0x0")
-    wavefront_width = 2
-    wavefront_flags_width = max(len(_wavefront_size_flags_expr(_supported_wavefront_sizes(info))) for info in processors)
-    kernel_profile_width = max(len(_kernel_descriptor_profile_expr(info.kernel_descriptor.profile)) for info in processors)
-    kernel_flags_width = max(len(_kernel_descriptor_abi_flags_expr(info.kernel_descriptor.flags)) for info in processors)
-    matrix_profile_width = max(len(_matrix_feature_profile_expr(info.features.matrix)) for info in processors)
-    scheduling_width = max(len(_processor_scheduling_bits_expr(info.features.scheduling)) for info in processors)
-    register_granule_width = 1
     lines = [
-        "#define LOOM_AMDGPU_PROCESSOR_INFO(processor_, descriptor_set_key_, descriptor_set_ordinal_, elf_machine_flags_, elf_feature_flags_, default_wavefront_size_, supported_wavefront_sizes_, kd_profile_, kd_flags_, matrix_profile_, scheduling_bits_, vgpr_granule_wave32_, vgpr_granule_wave64_) \\",
-        "  { \\",
-        "    .name = IREE_SVL(processor_), \\",
-        "    .descriptor_set = { \\",
-        "      .key = IREE_SVL(descriptor_set_key_), \\",
-        "      .ordinal = descriptor_set_ordinal_, \\",
-        "    }, \\",
-        "    .elf = { \\",
-        "      .machine_flags = UINT32_C(elf_machine_flags_), \\",
-        "      .feature_flags = UINT32_C(elf_feature_flags_), \\",
-        "    }, \\",
-        "    .wavefront = { \\",
-        "      .default_size = default_wavefront_size_, \\",
-        "      .supported_sizes = supported_wavefront_sizes_, \\",
-        "    }, \\",
-        "    .kernel_descriptor = { \\",
-        "      .profile = kd_profile_, \\",
-        "      .flags = kd_flags_, \\",
-        "      .vgpr_granules = { \\",
-        "        .wave32 = vgpr_granule_wave32_, \\",
-        "        .wave64 = vgpr_granule_wave64_, \\",
-        "      }, \\",
-        "    }, \\",
-        "    .features = { \\",
-        "      .matrix = matrix_profile_, \\",
-        "      .scheduling = scheduling_bits_, \\",
-        "    }, \\",
-        "  }",
-        "",
         "const loom_amdgpu_processor_info_t loom_amdgpu_target_info_processor_infos[] = {",
-        "  // processor descriptor_set_key    ordinal         mach  feat wave wave_flags kernel_profile                              kd_flags matrix_profile                             sched vgpr32 vgpr64",
     ]
-    lines.extend(
-        (
-            "  LOOM_AMDGPU_PROCESSOR_INFO("
-            f"{_padded_arg(_c_string_arg(info.processor), processor_width)}"
-            f"{_padded_arg(_c_string_arg(info.descriptor_set.key), descriptor_set_width)}"
-            f"{_padded_arg(_u16_expr(amdgpu_descriptor_set_ordinal(info.descriptor_set.key)) if info.descriptor_set.key else 'LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE', ordinal_width)}"
-            f"{_padded_arg(f'0x{info.elf.machine_flags:03x}', machine_flags_width)}"
-            f"{_padded_arg(f'0x{info.elf.feature_flags:x}', feature_flags_width)}"
-            f"{_padded_arg(str(info.wavefront.default_size), wavefront_width)}"
-            f"{_padded_arg(_wavefront_size_flags_expr(_supported_wavefront_sizes(info)), wavefront_flags_width)}"
-            f"{_padded_arg(_kernel_descriptor_profile_expr(info.kernel_descriptor.profile), kernel_profile_width)}"
-            f"{_padded_arg(_kernel_descriptor_abi_flags_expr(info.kernel_descriptor.flags), kernel_flags_width)}"
-            f"{_padded_arg(_matrix_feature_profile_expr(info.features.matrix), matrix_profile_width)}"
-            f"{_padded_arg(_processor_scheduling_bits_expr(info.features.scheduling), scheduling_width)}"
-            f"{_padded_arg(str(info.kernel_descriptor.vgpr_granules.wave32), register_granule_width)}"
-            f"{info.kernel_descriptor.vgpr_granules.wave64!s}),"
+    for info in processors:
+        kernel_descriptor = info.kernel_descriptor
+        lines.extend(
+            [
+                "  {",
+                f"    .name = IREE_SVL({_c_string_arg(info.processor)}),",
+                f"    .flags = {_processor_info_flags_expr(info.flags)},",
+                "    .descriptor_set = {",
+                f"      .key = IREE_SVL({_c_string_arg(info.descriptor_set.key)}),",
+                f"      .ordinal = {_processor_descriptor_set_ordinal_expr(info)},",
+                "    },",
+                "    .elf = {",
+                f"      .machine_flags = UINT32_C(0x{info.elf.machine_flags:03x}),",
+                f"      .feature_flags = UINT32_C(0x{info.elf.feature_flags:x}),",
+                "    },",
+                "    .wavefront = {",
+                f"      .default_size = {info.wavefront.default_size},",
+                f"      .supported_sizes = {_wavefront_size_flags_expr(_supported_wavefront_sizes(info))},",
+                "    },",
+                "    .kernel_descriptor = {",
+                f"      .profile = {_kernel_descriptor_profile_expr(kernel_descriptor.profile)},",
+                f"      .flags = {_kernel_descriptor_abi_flags_expr(kernel_descriptor.flags)},",
+                "      .vgpr_granules = {",
+                f"        .wave32 = {kernel_descriptor.vgpr_granules.wave32},",
+                f"        .wave64 = {kernel_descriptor.vgpr_granules.wave64},",
+                "      },",
+                "    },",
+                "    .features = {",
+                f"      .matrix = {_matrix_feature_profile_expr(info.features.matrix)},",
+                f"      .scheduling = {_processor_scheduling_bits_expr(info.features.scheduling)},",
+                "    },",
+                "  },",
+            ]
         )
-        for info in processors
-    )
-    lines.extend(["};", "", "#undef LOOM_AMDGPU_PROCESSOR_INFO", ""])
+    lines.extend(["};", ""])
     return lines
 
 

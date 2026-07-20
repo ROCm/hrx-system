@@ -42,7 +42,6 @@
 ///     .structure_size = sizeof(loomc_iree_hal_profile_options_t),
 ///     .identifier = loomc_make_cstring_view("jit-device"),
 ///     .device = device,
-///     .executable_cache = executable_cache,
 ///     .providers = providers,
 ///     .provider_count = 1,
 /// };
@@ -129,9 +128,6 @@ struct loomc_iree_hal_profile_options_t {
 
   /// IREE HAL device borrowed for the duration of the call.
   iree_hal_device_t* device;
-
-  /// IREE HAL executable cache borrowed for the duration of the call.
-  iree_hal_executable_cache_t* executable_cache;
 
   /// Ordered borrowed array of provider descriptors.
   const loomc_iree_hal_profile_provider_t* const* providers;

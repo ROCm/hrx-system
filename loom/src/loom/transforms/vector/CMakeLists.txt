@@ -11,6 +11,29 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    bank_sroa
+  HDRS
+    "bank_sroa.h"
+  SRCS
+    "bank_sroa.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::error::error_defs
+    loom::ir
+    loom::ops::op_defs
+    loom::ops::scf
+    loom::ops::vector
+    loom::pass::types
+    loom::rewrite::materialize
+    loom::rewrite::remap
+    loom::rewrite::rewriter
+    loom::util::walk
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     memory_footprint
   HDRS
     "memory_footprint.h"
@@ -23,6 +46,23 @@ loom_cc_library(
     loom::ops::op_defs
     loom::pass::types
     loom::pass::value_facts
+    loom::target::selection
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    sink_single_use_reads
+  HDRS
+    "sink_single_use_reads.h"
+  SRCS
+    "sink_single_use_reads.c"
+  DEPS
+    iree::base
+    loom::ir
+    loom::ops::op_defs
+    loom::pass::types
+    loom::rewrite::rewriter
   PUBLIC
 )
 
@@ -61,6 +101,7 @@ loom_cc_library(
     "to_scalar_transforms.h"
   DEPS
     iree::base
+    iree::base::internal
     loom::analysis::contract
     loom::analysis::matrix_fragment_layout
     loom::error::error_defs
@@ -77,7 +118,6 @@ loom_cc_library(
     loom::pass::types
     loom::pass::value_facts
     loom::rewrite::rewriter
-    loom::util::math
   PUBLIC
 )
 

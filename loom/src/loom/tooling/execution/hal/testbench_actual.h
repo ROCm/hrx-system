@@ -25,6 +25,7 @@
 #include "loom/tooling/execution/hal/invocation.h"
 #include "loom/tooling/execution/hal/runtime.h"
 #include "loom/tooling/execution/session.h"
+#include "loom/tooling/testbench/invocation.h"
 #include "loom/tooling/testbench/requirements.h"
 #include "loom/tooling/testbench/testbench.h"
 #include "loom/tooling/testbench/value_materializer.h"
@@ -119,8 +120,8 @@ typedef struct loom_run_hal_testbench_actual_provider_options_t {
   const loom_module_t* test_module;
   // Actual invocation selected from the owning check.case.
   const loom_testbench_invocation_plan_t* actual_invocation;
-  // Optional case plan providing parameter values for sample constants.
-  const loom_testbench_case_plan_t* sample_constant_case_plan;
+  // Optional case plan providing compile-time literals and sample parameters.
+  const loom_testbench_case_plan_t* case_plan;
   // Case sample ordinal used when |has_sample_constant_ordinal| is true.
   iree_host_size_t sample_constant_ordinal;
   // True when sample parameter values become compile-time constants.
@@ -158,8 +159,8 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   const loom_module_t* test_module;
   // Actual invocation selected from the owning check.case.
   const loom_testbench_invocation_plan_t* actual_invocation;
-  // Optional case plan providing parameter values for sample constants.
-  const loom_testbench_case_plan_t* sample_constant_case_plan;
+  // Optional case plan providing compile-time literals and sample parameters.
+  const loom_testbench_case_plan_t* case_plan;
   // Case sample ordinal used when |has_sample_constant_ordinal| is true.
   iree_host_size_t sample_constant_ordinal;
   // True when sample parameter values become compile-time constants.
@@ -237,8 +238,6 @@ typedef struct loom_run_hal_testbench_actual_sequence_options_t {
   const loom_module_t* test_module;
   // Case plan whose actual invocations are executed by the sequence.
   const loom_testbench_case_plan_t* case_plan;
-  // Optional case plan providing parameter values for sample constants.
-  const loom_testbench_case_plan_t* sample_constant_case_plan;
   // Case sample ordinal used when |has_sample_constant_ordinal| is true.
   iree_host_size_t sample_constant_ordinal;
   // True when sample parameter values become compile-time constants.
@@ -296,6 +295,12 @@ iree_status_t loom_run_hal_testbench_actual_sequence_invoke(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
     iree_host_size_t input_count, const loom_testbench_value_t* inputs,
     iree_host_size_t result_count, loom_testbench_value_t* out_results);
+
+// Reports a compile rejection recorded by the provider for |invocation|, if
+// any.
+iree_status_t loom_run_hal_testbench_actual_sequence_query_issue(
+    void* user_data, const loom_testbench_invocation_plan_t* invocation,
+    loom_testbench_sample_issue_t* out_issue);
 
 // Appends borrowed testbench input values to HAL bindings/constants.
 //

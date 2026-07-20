@@ -31,12 +31,14 @@ from loom.assembly import (
 from loom.dsl import (
     ANY,
     ATTR_TYPE_BYTES,
+    ATTR_TYPE_ENUM,
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64_ARRAY,
     ATTR_TYPE_PREDICATE_LIST,
     ATTR_TYPE_SYMBOL,
     DECOMPOSABLE,
     ELEMENTWISE,
+    HINT,
     INTEGER,
     POOL,
     SYMBOL_DEFINE,
@@ -59,9 +61,12 @@ from loom.dsl import (
     Op,
     OpCategory,
     Operand,
+    OperandRole,
     OpPhase,
     PackedPayloadBitCountMatchesStorage,
     PositiveBitWidthAttr,
+    Reads,
+    ReadWrites,
     RegionDef,
     Result,
     Retain,
@@ -74,6 +79,7 @@ from loom.dsl import (
     TypeDef,
     TypeSemantic,
     UnpackedPayloadBitCountMatchesStorage,
+    Writes,
 )
 from loom.gen.ops import model as c_table_model
 from loom.gen.ops.c_builders import generate_builders_c
@@ -604,6 +610,78 @@ def test_generate_builders_use_explicit_flags_for_optional_symbol_refs() -> None
     assert "loom_op_attrs(*out_op)[0] = loom_attr_symbol(target);" in builders_c
 
 
+def test_generate_builders_use_macros_for_32_bit_build_flags() -> None:
+    op = Op(
+        "test.wide32",
+        group=Dialect("test"),
+        attrs=[AttrDef(f"value_{i}", "i64", optional=True) for i in range(32)],
+        format=[AttrDict()],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+
+    assert "enum loom_test_wide32_build_flag_bits_e" not in ops_h
+    assert "#define LOOM_TEST_WIDE32_BUILD_FLAG_HAS_VALUE_0 (1u << 0)" in ops_h
+    assert "#define LOOM_TEST_WIDE32_BUILD_FLAG_HAS_VALUE_31 (1u << 31)" in ops_h
+    assert "typedef uint32_t loom_test_wide32_build_flags_t;" in ops_h
+
+
+def test_generate_builders_use_macros_for_64_bit_build_flags() -> None:
+    op = Op(
+        "test.wide64",
+        group=Dialect("test"),
+        attrs=[AttrDef(f"value_{i}", "i64", optional=True) for i in range(33)],
+        format=[AttrDict()],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+
+    assert "enum loom_test_wide64_build_flag_bits_e" not in ops_h
+    assert "#define LOOM_TEST_WIDE64_BUILD_FLAG_HAS_VALUE_0 (UINT64_C(1) << 0)" in ops_h
+    assert "#define LOOM_TEST_WIDE64_BUILD_FLAG_HAS_VALUE_32 (UINT64_C(1) << 32)" in ops_h
+    assert "typedef uint64_t loom_test_wide64_build_flags_t;" in ops_h
+
+
+def test_generate_builders_define_mixed_fixed_results() -> None:
+    op = Op(
+        "test.mixed_results",
+        group=Dialect("test"),
+        results=[
+            Result("payload", ANY),
+            Result("valid", TypeConstraint.I1),
+        ],
+        format=[],
+    )
+
+    builders_c = generate_builders_c("test", [op])
+
+    assert "loom_type_t result_type" in builders_c
+    assert "loom_type_t result_types_storage[2] = {" in builders_c
+    assert "result_type," in builders_c
+    assert "loom_type_scalar(LOOM_SCALAR_TYPE_I1)," in builders_c
+    assert "builder, result_types_storage, 2," in builders_c
+
+
+def test_generate_builders_keep_array_for_multiple_dynamic_fixed_results() -> None:
+    op = Op(
+        "test.dynamic_results",
+        group=Dialect("test"),
+        results=[
+            Result("lhs", ANY),
+            Result("rhs", INTEGER),
+        ],
+        format=[ResultTypeList("lhs", parens=False)],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+
+    assert "const loom_type_t* result_types" in ops_h
+    assert "const loom_type_t* result_types" in builders_c
+    assert "builder, result_types, 2," in builders_c
+    assert "result_types_storage" not in builders_c
+
+
 def test_generate_tables_uses_template_param_for_symbol_attrs() -> None:
     op = Op(
         "test.targeted",
@@ -683,6 +761,45 @@ def test_generate_builders_use_explicit_flags_for_optional_regions() -> None:
     assert "uint8_t region_count = 1;" in builders_c
     assert "region_count = 2;" in builders_c
     assert "LOOM_REGION_OPTIONAL" in tables_c
+
+
+def test_generate_tables_encodes_region_argument_uniform_scope() -> None:
+    op = Op(
+        "test.kernel_region",
+        group=Dialect("test"),
+        regions=[RegionDef("body", arg_uniform_scope="workgroup")],
+        format=[Region("body")],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert "LOOM_REGION_WORKGROUP_UNIFORM_ARGS" in tables_c
+
+    cluster_op = Op(
+        "test.cluster_kernel_region",
+        group=Dialect("test"),
+        regions=[RegionDef("body", arg_uniform_scope="cluster")],
+        format=[Region("body")],
+    )
+
+    cluster_tables_c = generate_tables_c("test", 0, [cluster_op])
+
+    assert "LOOM_REGION_CLUSTER_UNIFORM_ARGS" in cluster_tables_c
+
+
+def test_generate_tables_rejects_unknown_region_argument_uniform_scope() -> None:
+    op = Op(
+        "test.bad_region_scope",
+        group=Dialect("test"),
+        regions=[RegionDef("body", arg_uniform_scope="device")],
+        format=[Region("body")],
+    )
+
+    with _raises_value_error(
+        r"Op 'test\.bad_region_scope' region 'body' has unsupported "
+        r"arg_uniform_scope 'device'"
+    ):
+        generate_tables_c("test", 0, [op])
 
 
 def test_has_parent_generates_direct_parent_placement() -> None:
@@ -845,6 +962,32 @@ def test_generate_tables_preserves_operand_and_result_descriptor_names() -> None
     assert ('{_BSTRING(7, "results"), LOOM_TYPE_CONSTRAINT_INTEGER, LOOM_RESULT_VARIADIC}') in tables_c
 
 
+def test_generate_tables_emits_operand_roles_when_declared() -> None:
+    op = Op(
+        "test.select",
+        group=Dialect("test"),
+        operands=[
+            Operand("condition", INTEGER, role=OperandRole.SELECT_CONDITION),
+            Operand("true_value", INTEGER, role=OperandRole.SELECT_PAYLOAD),
+            Operand("false_value", INTEGER, role=OperandRole.SELECT_PAYLOAD),
+        ],
+        results=[Result("result", INTEGER)],
+        format=[
+            Ref("condition"),
+            Ref("true_value"),
+            Ref("false_value"),
+            COLON,
+            ResultType("result"),
+        ],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert ('{_BSTRING(9, "condition"), LOOM_TYPE_CONSTRAINT_INTEGER, 0, LOOM_OPERAND_OWNERSHIP_NONE, LOOM_OWNERSHIP_CARRIER_NONE, LOOM_OPERAND_ROLE_SELECT_CONDITION}') in tables_c
+    assert ('{_BSTRING(10, "true_value"), LOOM_TYPE_CONSTRAINT_INTEGER, 0, LOOM_OPERAND_OWNERSHIP_NONE, LOOM_OWNERSHIP_CARRIER_NONE, LOOM_OPERAND_ROLE_SELECT_PAYLOAD}') in tables_c
+    assert (".operand_role_mask = LOOM_OPERAND_ROLE_MASK_SELECT_CONDITION | LOOM_OPERAND_ROLE_MASK_SELECT_PAYLOAD,") in tables_c
+
+
 def test_generate_tables_emits_ownership_descriptors_only_when_needed() -> None:
     op = Op(
         "test.resource.retain",
@@ -869,7 +1012,7 @@ def test_generate_tables_emits_ownership_descriptors_only_when_needed() -> None:
 
     tables_c = generate_tables_c("test", 0, [op, alias])
 
-    assert ('{_BSTRING(8, "resource"), LOOM_TYPE_CONSTRAINT_POOL, 0, LOOM_OPERAND_OWNERSHIP_RETAIN, LOOM_OWNERSHIP_CARRIER_BY_VALUE}') in tables_c
+    assert ('{_BSTRING(8, "resource"), LOOM_TYPE_CONSTRAINT_POOL, 0, LOOM_OPERAND_OWNERSHIP_RETAIN, LOOM_OWNERSHIP_CARRIER_BY_VALUE, LOOM_OPERAND_ROLE_NONE}') in tables_c
     assert ('{_BSTRING(6, "result"), LOOM_TYPE_CONSTRAINT_POOL, 0, LOOM_RESULT_OWNERSHIP_RETAINED, LOOM_RESULT_OWNERSHIP_SOURCE_FIELD_NONE}') in tables_c
     assert ('{_BSTRING(6, "result"), LOOM_TYPE_CONSTRAINT_POOL, 0, LOOM_RESULT_OWNERSHIP_ALIAS, 0}') in tables_c
 
@@ -952,17 +1095,159 @@ def test_generate_tables_memory_access_defaults_use_matching_fields() -> None:
         ],
         results=[Result("result", ANY)],
         attrs=[AttrDef("static_indices", ATTR_TYPE_I64_ARRAY)],
+        effects=[Reads("view")],
         interfaces=[MemoryAccessInterface()],
     )
 
     tables_c = generate_tables_c("test", 0, [op])
 
     assert "static const loom_memory_access_vtable_t loom_test_load_memory_access" in tables_c
+    assert ".operation_kind = LOOM_MEMORY_ACCESS_OPERATION_LOAD," in tables_c
     assert ".view_operand_index = 0," in tables_c
     assert ".value_operand_index = 255," in tables_c
-    assert ".indices_operand_offset = 1," in tables_c
+    assert ".indices_operand_field_index = 1," in tables_c
     assert ".static_indices_attr_index = 0," in tables_c
     assert ".cache_scope_attr_index = 255," in tables_c
+
+
+def test_generate_tables_memory_access_operation_kind_rows() -> None:
+    dialect = Dialect("test")
+    atomic_kind = EnumDef("AtomicKind", [EnumCase("addi", 0)])
+    atomic_ordering = EnumDef("AtomicOrdering", [EnumCase("relaxed", 0)])
+    atomic_scope = EnumDef("AtomicScope", [EnumCase("workgroup", 0)])
+
+    def atomic_attrs() -> list[AttrDef]:
+        return [
+            AttrDef("kind", ATTR_TYPE_ENUM, enum_def=atomic_kind),
+            AttrDef("ordering", ATTR_TYPE_ENUM, enum_def=atomic_ordering),
+            AttrDef("scope", ATTR_TYPE_ENUM, enum_def=atomic_scope),
+        ]
+
+    ops = [
+        Op(
+            "test.store",
+            group=dialect,
+            operands=[
+                Operand("value", ANY),
+                Operand("view", ANY),
+            ],
+            effects=[Writes("view")],
+            interfaces=[MemoryAccessInterface(value="value")],
+        ),
+        Op(
+            "test.prefetch",
+            group=dialect,
+            operands=[
+                Operand("view", ANY),
+            ],
+            traits=[HINT],
+            interfaces=[MemoryAccessInterface()],
+        ),
+        Op(
+            "test.atomic.reduce",
+            group=dialect,
+            operands=[
+                Operand("value", ANY),
+                Operand("view", ANY),
+            ],
+            attrs=atomic_attrs(),
+            effects=[ReadWrites("view")],
+            interfaces=[
+                MemoryAccessInterface(
+                    value="value",
+                    atomic_kind="kind",
+                    atomic_ordering="ordering",
+                    atomic_scope="scope",
+                )
+            ],
+        ),
+        Op(
+            "test.atomic.rmw",
+            group=dialect,
+            operands=[
+                Operand("value", ANY),
+                Operand("view", ANY),
+            ],
+            results=[Result("old", ANY)],
+            attrs=atomic_attrs(),
+            effects=[ReadWrites("view")],
+            interfaces=[
+                MemoryAccessInterface(
+                    value="value",
+                    atomic_kind="kind",
+                    atomic_ordering="ordering",
+                    atomic_scope="scope",
+                )
+            ],
+        ),
+        Op(
+            "test.atomic.cmpxchg",
+            group=dialect,
+            operands=[
+                Operand("expected", ANY),
+                Operand("replacement", ANY),
+                Operand("view", ANY),
+            ],
+            results=[Result("old", ANY)],
+            attrs=[
+                AttrDef("success_ordering", ATTR_TYPE_ENUM, enum_def=atomic_ordering),
+                AttrDef("failure_ordering", ATTR_TYPE_ENUM, enum_def=atomic_ordering),
+                AttrDef("scope", ATTR_TYPE_ENUM, enum_def=atomic_scope),
+            ],
+            effects=[ReadWrites("view")],
+            interfaces=[
+                MemoryAccessInterface(
+                    expected="expected",
+                    replacement="replacement",
+                    atomic_success_ordering="success_ordering",
+                    atomic_failure_ordering="failure_ordering",
+                    atomic_scope="scope",
+                )
+            ],
+        ),
+    ]
+
+    tables_c = generate_tables_c("test", 0, ops)
+
+    assert ".operation_kind = LOOM_MEMORY_ACCESS_OPERATION_STORE," in tables_c
+    assert ".operation_kind = LOOM_MEMORY_ACCESS_OPERATION_PREFETCH," in tables_c
+    assert ".operation_kind = LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE," in tables_c
+    assert ".operation_kind = LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW," in tables_c
+    assert ".operation_kind = LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG," in tables_c
+
+
+def test_generate_tables_memory_access_rejects_missing_effects() -> None:
+    op = Op(
+        "test.load",
+        group=Dialect("test"),
+        operands=[Operand("view", ANY)],
+        results=[Result("result", ANY)],
+        interfaces=[MemoryAccessInterface()],
+    )
+
+    with _raises_value_error(r"MemoryAccessInterface on 'test\.load': unable to infer memory access operation kind"):
+        generate_tables_c("test", 0, [op])
+
+
+def test_generate_tables_memory_access_accepts_segmented_indices_field() -> None:
+    op = Op(
+        "test.load",
+        group=Dialect("test"),
+        operands=[
+            Operand("view", ANY),
+            Operand("indices", ANY, variadic=True),
+            Operand("auxiliary", ANY, variadic=True),
+        ],
+        results=[Result("result", ANY)],
+        effects=[Reads("view")],
+        interfaces=[MemoryAccessInterface()],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert "LOOM_OP_VTABLE_SEGMENTED_OPERANDS" in tables_c
+    assert ".view_operand_index = 0," in tables_c
+    assert ".indices_operand_field_index = 1," in tables_c
 
 
 def test_generate_tables_memory_access_rejects_explicit_missing_field() -> None:

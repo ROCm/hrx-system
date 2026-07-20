@@ -103,6 +103,7 @@ from loom.dsl import (
     OffsetCountMatchesRank,
     Op,
     Operand,
+    OperandRole,
     Reads,
     ReadWrites,
     RegionDef,
@@ -503,16 +504,64 @@ test_fact_power_of_two = Op(
     examples=["%p2 = test.fact_power_of_two %x : index -> i1"],
 )
 
-test_fact_uniform = Op(
-    "test.fact_uniform",
+test_fact_finite = Op(
+    "test.fact_finite",
     group=test_ops,
-    doc="Returns 1 if the input is provably uniform across active lanes, 0 otherwise.",
+    doc="Returns 1 if the input is provably finite, 0 otherwise.",
     operands=[Operand("value", ANY)],
     results=[Result("result", I1)],
     traits=[PURE],
-    facts="loom_test_fact_uniform_facts",
+    facts="loom_test_fact_finite_facts",
     format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
-    examples=["%uniform = test.fact_uniform %x : index -> i1"],
+    examples=["%finite = test.fact_finite %x : f32 -> i1"],
+)
+
+test_fact_not_subnormal = Op(
+    "test.fact_not_subnormal",
+    group=test_ops,
+    doc="Returns 1 if the input is provably not subnormal, 0 otherwise.",
+    operands=[Operand("value", ANY)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    facts="loom_test_fact_not_subnormal_facts",
+    format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
+    examples=["%not_subnormal = test.fact_not_subnormal %x : f32 -> i1"],
+)
+
+test_fact_subgroup_uniform = Op(
+    "test.fact_subgroup_uniform",
+    group=test_ops,
+    doc="Returns 1 if the input is provably uniform across a subgroup, 0 otherwise.",
+    operands=[Operand("value", ANY)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    facts="loom_test_fact_subgroup_uniform_facts",
+    format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
+    examples=["%uniform = test.fact_subgroup_uniform %x : index -> i1"],
+)
+
+test_fact_workgroup_uniform = Op(
+    "test.fact_workgroup_uniform",
+    group=test_ops,
+    doc="Returns 1 if the input is provably uniform across a workgroup, 0 otherwise.",
+    operands=[Operand("value", ANY)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    facts="loom_test_fact_workgroup_uniform_facts",
+    format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
+    examples=["%uniform = test.fact_workgroup_uniform %x : index -> i1"],
+)
+
+test_fact_cluster_uniform = Op(
+    "test.fact_cluster_uniform",
+    group=test_ops,
+    doc=("Returns 1 if the input is provably uniform across every workgroup in a workgroup cluster, 0 otherwise."),
+    operands=[Operand("value", ANY)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    facts="loom_test_fact_cluster_uniform_facts",
+    format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
+    examples=["%uniform = test.fact_cluster_uniform %x : index -> i1"],
 )
 
 test_fact_lane_varying = Op(
@@ -618,9 +667,10 @@ test_fact_encoding_matrix_field = Op(
         "Exposes an encoded-operand storage-schema summary field as an i64 "
         "constant. Supported fields are element_format, payload_packing, "
         "scale_topology, scale_format, secondary_scale_format, affine, "
-        "rounding, codebook, sparsity, payload_registers, payload_elements, "
-        "scale_group_elements, scale_operands, zero_scale_fallback, and "
-        "static_spec."
+        "rounding, codebook, sparsity, sparsity_group_elements, "
+        "sparsity_group_nonzero_elements, payload_registers, "
+        "payload_elements, scale_group_elements, scale_operands, "
+        "zero_scale_fallback, and static_spec."
     ),
     operands=[Operand("value", ANY_ENCODING)],
     attrs=[AttrDef("field", "string", doc="Matrix schema field to inspect.")],
@@ -1355,7 +1405,9 @@ test_branch = Op(
     "test.branch",
     group=test_ops,
     doc="Test if/else with both regions always present.",
-    operands=[Operand("condition", INTEGER)],
+    operands=[
+        Operand("condition", INTEGER, role=OperandRole.CONTROL_CONDITION),
+    ],
     results=[Result("results", ANY, variadic=True)],
     regions=[
         RegionDef(
@@ -2401,7 +2453,8 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_fact_non_zero,
     test_fact_positive,
     test_fact_power_of_two,
-    test_fact_uniform,
+    test_fact_subgroup_uniform,
+    test_fact_workgroup_uniform,
     test_fact_lane_varying,
     test_fact_lane_predicate,
     test_fact_subgroup_lane_mask,
@@ -2454,4 +2507,7 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_segmented,
     test_template_param_symbol,
     test_template_param_symbol_flags,
+    test_fact_finite,
+    test_fact_not_subnormal,
+    test_fact_cluster_uniform,
 )

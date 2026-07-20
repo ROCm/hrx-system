@@ -170,6 +170,7 @@ extern const loom_op_vtable_t loom_vector_reduce_axes_vtable;
 extern const loom_op_vtable_t loom_vector_decode_vtable;
 extern const loom_op_vtable_t loom_vector_encode_vtable;
 extern const loom_op_vtable_t loom_vector_fragment_vtable;
+extern const loom_op_vtable_t loom_vector_fragment_repack_vtable;
 
 #ifdef __cplusplus
 }  // extern "C"

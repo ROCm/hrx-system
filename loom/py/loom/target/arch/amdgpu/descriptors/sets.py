@@ -11,6 +11,24 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+from loom.target.arch.amdgpu.encoding import (
+    AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_COUNT,
+    AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_OFFSET,
+)
+from loom.target.arch.amdgpu.isa_xml import (
+    AmdgpuIsaBitRange,
+    AmdgpuIsaEncoding,
+    AmdgpuIsaEncodingField,
+    AmdgpuIsaFactSource,
+    AmdgpuIsaFunctionalGroup,
+    AmdgpuIsaInstruction,
+    AmdgpuIsaInstructionEncoding,
+    AmdgpuIsaInstructionFlags,
+    AmdgpuIsaOperand,
+)
+
 from .alu import *
 from .atomic import *
 from .cdna import *
@@ -247,12 +265,14 @@ def _rdna_scalar_domain_fma_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
 
 def _cdna_core_overlays(
     *,
+    packed8_source_semantics: str,
     global_load_lds_variants: tuple[tuple[str, str, str, int, int], ...],
     buffer_load_lds_variants: tuple[
         tuple[str, str, str, int, int, AmdgpuImplicitOperandOverlay], ...
     ],
     include_v_dot2_f32_bf16: bool,
     include_v_cvt_pk_bf16_f32: bool,
+    include_v_cvt_scalef32_pk_packed8: bool,
     include_ds_transpose_reads: bool,
     matrix_overlays: tuple[AmdgpuDescriptorOverlay, ...],
 ) -> tuple[AmdgpuDescriptorOverlay, ...]:
@@ -280,6 +300,7 @@ def _cdna_core_overlays(
         _v_add_u32_overlay("V_ADD_U32"),
         _v_add_u32_src0_inline_overlay("V_ADD_U32"),
         _v_add_u32_literal_overlay("V_ADD_U32"),
+        _v_add3_u32_overlay(include_literal_forms=False),
         _v_add_co_u32_overlay(),
         _v_add_co_ci_u32_overlay(
             instruction_name="V_ADDC_CO_U32", mnemonic="v_addc_co_u32"
@@ -292,6 +313,7 @@ def _cdna_core_overlays(
         _v_mov_b32_literal_overlay(),
         _v_mov_b32_copy_overlay(),
         _v_mov_b32_dpp_legacy_overlay(),
+        _v_mov_b32_dpp_masked_legacy_overlay(),
         _v_mov_b32_sdwa_overlay(),
         _v_mul_lo_u32_overlay(),
         _v_mul_hi_u32_overlay(),
@@ -305,8 +327,8 @@ def _cdna_core_overlays(
         _v_max_u32_overlay(),
         _v_readfirstlane_b32_overlay(),
         _v_readlane_b32_src1_inline_overlay(),
-        *_integer_bitwise_shift_overlays(),
-        *_integer_bitwise_permute_overlays(),
+        *_integer_bitwise_shift_overlays(include_vop3_literal_forms=False),
+        *_integer_bitwise_permute_overlays(include_vop3_literal_forms=False),
         *_v_binary_f32_overlays(),
         *_v_binary_f16_overlays(),
         *_v_binary_f32_dpp_legacy_overlays(),
@@ -317,6 +339,7 @@ def _cdna_core_overlays(
         *_cdna_scalar_fma_overlays(),
         _v_pk_fmac_f16_overlay(),
         _v_pk_fma_f16_overlay(),
+        _v_pk_mul_f16_overlay(),
         *_v_pk_i16_binary_overlays(),
         _v_pk_mad_i16_overlay(),
         _v_pk_mad_u16_overlay(),
@@ -333,6 +356,12 @@ def _cdna_core_overlays(
         _v_div_fixup_f32_overlay(),
         _v_cvt_f32_f16_overlay(),
         _v_cvt_f16_f32_overlay(),
+        *_v_cvt_f32_packed8_overlays(packed8_source_semantics),
+        *(
+            _v_cvt_scalef32_pk_packed8_overlays()
+            if include_v_cvt_scalef32_pk_packed8
+            else ()
+        ),
         _v_cvt_pk_u16_u32_overlay(),
         *((_v_cvt_pk_bf16_f32_overlay(),) if include_v_cvt_pk_bf16_f32 else ()),
         _v_cvt_f32_i32_overlay(),
@@ -340,7 +369,9 @@ def _cdna_core_overlays(
         _v_cvt_i32_f32_overlay(),
         _v_cvt_u32_f32_overlay(),
         *_v_cmp_overlays(),
+        *_v_cmp_i32_equality_vcc_overlays(),
         *_v_cndmask_b32_overlays(include_literal_forms=False),
+        _v_cndmask_b32_dpp_legacy_overlay(),
         *_s_load_dword_width_overlays(
             fixed_encoding_fields=_CDNA_SMEM_SGPR_IMM_FIXED_FIELDS
         ),
@@ -801,10 +832,12 @@ def _cdna_core_overlays(
 
 def _gfx940_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return _cdna_core_overlays(
+        packed8_source_semantics="fnuz",
         global_load_lds_variants=_GLOBAL_LOAD_LDS_CDNA3_VARIANTS,
         buffer_load_lds_variants=_BUFFER_LOAD_LDS_CDNA3_VARIANTS,
         include_v_dot2_f32_bf16=False,
         include_v_cvt_pk_bf16_f32=False,
+        include_v_cvt_scalef32_pk_packed8=False,
         include_ds_transpose_reads=False,
         matrix_overlays=(*_cdna3_mfma_overlays(), *_cdna3_smfmac_overlays()),
     )
@@ -812,10 +845,12 @@ def _gfx940_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
 
 def _gfx950_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return _cdna_core_overlays(
+        packed8_source_semantics="ocp",
         global_load_lds_variants=_GLOBAL_LOAD_LDS_GFX950_VARIANTS,
         buffer_load_lds_variants=_BUFFER_LOAD_LDS_GFX950_VARIANTS,
         include_v_dot2_f32_bf16=True,
         include_v_cvt_pk_bf16_f32=True,
+        include_v_cvt_scalef32_pk_packed8=True,
         include_ds_transpose_reads=True,
         matrix_overlays=(*_cdna4_mfma_overlays(), *_cdna4_smfmac_overlays()),
     )
@@ -862,6 +897,10 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_add_u32_overlay("V_ADD_NC_U32"),
         _v_add_u32_src0_inline_overlay("V_ADD_NC_U32"),
         _v_add_u32_literal_overlay("V_ADD_NC_U32"),
+        _v_add3_u32_overlay(),
+        _v_add3_u32_literal_overlay("src0"),
+        _v_add3_u32_literal_overlay("src1"),
+        _v_add3_u32_literal_overlay("src2"),
         _v_add_co_u32_overlay(),
         _v_add_co_ci_u32_overlay(),
         _v_sub_co_u32_overlay(),
@@ -870,6 +909,7 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_mov_b32_literal_overlay(),
         _v_mov_b32_copy_overlay(),
         _v_mov_b32_dpp16_overlay(),
+        _v_mov_b32_dpp16_masked_overlay(),
         _v_mul_lo_u32_overlay(),
         _v_mul_hi_u32_overlay(),
         _v_mul_u32_u24_overlay(),
@@ -900,6 +940,7 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_pk_fmac_f16_overlay(),
         _v_pk_fma_f16_overlay(include_literal_forms=True),
         *_v_pk_fma_f16_literal_overlays(),
+        _v_pk_mul_f16_overlay(),
         *_v_pk_i16_binary_overlays(),
         _v_pk_mad_i16_overlay(include_literal_forms=True),
         *_v_pk_mad_i16_literal_overlays(),
@@ -918,12 +959,15 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_cvt_f32_f16_overlay(encoding_name="ENC_VOP3"),
         _v_cvt_f16_f32_overlay(),
         _v_cvt_pk_u16_u32_overlay(),
+        _v_cvt_pk_u16_u32_dpp16_overlay(),
         _v_cvt_f32_i32_overlay(),
         _v_cvt_f32_u32_overlay(),
         _v_cvt_i32_f32_overlay(),
         _v_cvt_u32_f32_overlay(),
         *_v_cmp_overlays(),
+        *_v_cmp_i32_equality_vcc_overlays(),
         *_v_cndmask_b32_overlays(),
+        _v_cndmask_b32_dpp16_overlay(),
         *_s_load_dword_width_overlays(),
         *_s_load_dword_offset_only_overlays(fixed_soffset=_predefined("NULL")),
         *_s_buffer_load_width_overlays(),
@@ -1278,7 +1322,12 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
                 accumulator_size_exception_reason=_WMMA_GFX11_WAVE64_ACCUMULATOR_SIZE_REASON,
             )
         ),
-        *_with_zero_accumulator_form(_v_wmma_i32_16x16x16_iu8_overlay(operand_units=4)),
+        *_with_zero_accumulator_form(
+            _v_wmma_i32_16x16x16_iu8_overlay(
+                operand_units=4,
+                mirrors_sign_select_to_high_halves=True,
+            )
+        ),
         *_with_zero_accumulator_form(
             _v_wmma_i32_16x16x16_iu8_overlay(
                 descriptor_key_suffix=".w64",
@@ -1286,9 +1335,15 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
                 operand_units=4,
                 accumulator_units=4,
                 accumulator_size_exception_reason=_WMMA_GFX11_WAVE64_ACCUMULATOR_SIZE_REASON,
+                mirrors_sign_select_to_high_halves=True,
             )
         ),
-        *_with_zero_accumulator_form(_v_wmma_i32_16x16x16_iu4_overlay(operand_units=2)),
+        *_with_zero_accumulator_form(
+            _v_wmma_i32_16x16x16_iu4_overlay(
+                operand_units=2,
+                mirrors_sign_select_to_high_halves=True,
+            )
+        ),
         *_with_zero_accumulator_form(
             _v_wmma_i32_16x16x16_iu4_overlay(
                 descriptor_key_suffix=".w64",
@@ -1296,6 +1351,7 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
                 operand_units=2,
                 accumulator_units=4,
                 accumulator_size_exception_reason=_WMMA_GFX11_WAVE64_ACCUMULATOR_SIZE_REASON,
+                mirrors_sign_select_to_high_halves=True,
             )
         ),
         _s_barrier_overlay(),
@@ -1362,6 +1418,10 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_add_u32_overlay("V_ADD_NC_U32"),
         _v_add_u32_src0_inline_overlay("V_ADD_NC_U32"),
         _v_add_u32_literal_overlay("V_ADD_NC_U32"),
+        _v_add3_u32_overlay(),
+        _v_add3_u32_literal_overlay("src0"),
+        _v_add3_u32_literal_overlay("src1"),
+        _v_add3_u32_literal_overlay("src2"),
         _v_add_co_u32_overlay(),
         _v_add_co_ci_u32_overlay(),
         _v_sub_co_u32_overlay(),
@@ -1370,6 +1430,7 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_mov_b32_literal_overlay(),
         _v_mov_b32_copy_overlay(),
         _v_mov_b32_dpp16_overlay(),
+        _v_mov_b32_dpp16_masked_overlay(),
         _v_mul_lo_u32_overlay(),
         _v_mul_hi_u32_overlay(),
         _v_mul_u32_u24_overlay(),
@@ -1399,13 +1460,19 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         *_rdna_scalar_domain_fma_overlays(),
         *_rdna_scalar_fma_overlays(),
         _v_pk_fmac_f16_overlay(),
-        _v_pk_fma_f16_overlay(include_literal_forms=True),
-        *_v_pk_fma_f16_literal_overlays(),
-        *_v_pk_i16_binary_overlays(),
-        _v_pk_mad_i16_overlay(include_literal_forms=True),
-        *_v_pk_mad_i16_literal_overlays(),
-        _v_pk_mad_u16_overlay(include_literal_forms=True),
-        *_v_pk_mad_u16_literal_overlays(),
+        *_v_pk_with_op_sel_hi_field(
+            (
+                _v_pk_fma_f16_overlay(include_literal_forms=True),
+                *_v_pk_fma_f16_literal_overlays(),
+                _v_pk_mul_f16_overlay(),
+                *_v_pk_i16_binary_overlays(),
+                _v_pk_mad_i16_overlay(include_literal_forms=True),
+                *_v_pk_mad_i16_literal_overlays(),
+                _v_pk_mad_u16_overlay(include_literal_forms=True),
+                *_v_pk_mad_u16_literal_overlays(),
+            ),
+            "OPSEL_HI",
+        ),
         *_v_fma_mix_f32_overlays(),
         *_v_fma_mixlo_f16_overlays(),
         *_v_fma_mixhi_f16_overlays(),
@@ -1418,13 +1485,17 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_div_fixup_f32_overlay(),
         _v_cvt_f32_f16_overlay(encoding_name="ENC_VOP3"),
         _v_cvt_f16_f32_overlay(),
+        *_v_cvt_f32_packed8_overlays("ocp"),
         _v_cvt_pk_u16_u32_overlay(),
+        _v_cvt_pk_u16_u32_dpp16_overlay(),
         _v_cvt_f32_i32_overlay(),
         _v_cvt_f32_u32_overlay(),
         _v_cvt_i32_f32_overlay(),
         _v_cvt_u32_f32_overlay(),
         *_v_cmp_overlays(),
+        *_v_cmp_i32_equality_vcc_overlays(),
         *_v_cndmask_b32_overlays(),
+        _v_cndmask_b32_dpp16_overlay(),
         *_s_load_dword_width_overlays("IOFFSET", offset_bit_width=24, include_b96=True),
         *_s_load_narrow_overlays("IOFFSET", offset_bit_width=24),
         *_s_load_dword_offset_only_overlays(
@@ -1660,23 +1731,43 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_dot4_f32_packed8_overlay(lhs_type="bf8", rhs_type="fp8"),
         _v_dot4_f32_packed8_overlay(lhs_type="fp8", rhs_type="fp8"),
         _v_dot4_f32_packed8_overlay(lhs_type="bf8", rhs_type="bf8"),
-        *_with_zero_accumulator_form(_v_wmma_f32_16x16x16_f16_overlay()),
-        *_with_zero_accumulator_form(_v_wmma_f32_16x16x16_bf16_overlay()),
-        *_with_zero_accumulator_form(_v_wmma_f16_16x16x16_f16_overlay()),
-        *_with_zero_accumulator_form(_v_wmma_bf16_16x16x16_bf16_overlay()),
-        *_with_zero_accumulator_form(_v_wmma_i32_16x16x16_iu8_overlay()),
-        *_with_zero_accumulator_form(_v_wmma_i32_16x16x16_iu4_overlay()),
         *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(lhs_type="fp8", rhs_type="fp8")
+            _v_wmma_f32_16x16x16_f16_overlay(op_sel_hi_field="OPSEL_HI")
         ),
         *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(lhs_type="fp8", rhs_type="bf8")
+            _v_wmma_f32_16x16x16_bf16_overlay(op_sel_hi_field="OPSEL_HI")
         ),
         *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(lhs_type="bf8", rhs_type="fp8")
+            _v_wmma_f16_16x16x16_f16_overlay(op_sel_hi_field="OPSEL_HI")
         ),
         *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(lhs_type="bf8", rhs_type="bf8")
+            _v_wmma_bf16_16x16x16_bf16_overlay(op_sel_hi_field="OPSEL_HI")
+        ),
+        *_with_zero_accumulator_form(
+            _v_wmma_i32_16x16x16_iu8_overlay(op_sel_hi_field="OPSEL_HI")
+        ),
+        *_with_zero_accumulator_form(
+            _v_wmma_i32_16x16x16_iu4_overlay(op_sel_hi_field="OPSEL_HI")
+        ),
+        *_with_zero_accumulator_form(
+            _v_wmma_f32_16x16x16_packed8_overlay(
+                lhs_type="fp8", rhs_type="fp8", op_sel_hi_field="OPSEL_HI"
+            )
+        ),
+        *_with_zero_accumulator_form(
+            _v_wmma_f32_16x16x16_packed8_overlay(
+                lhs_type="fp8", rhs_type="bf8", op_sel_hi_field="OPSEL_HI"
+            )
+        ),
+        *_with_zero_accumulator_form(
+            _v_wmma_f32_16x16x16_packed8_overlay(
+                lhs_type="bf8", rhs_type="fp8", op_sel_hi_field="OPSEL_HI"
+            )
+        ),
+        *_with_zero_accumulator_form(
+            _v_wmma_f32_16x16x16_packed8_overlay(
+                lhs_type="bf8", rhs_type="bf8", op_sel_hi_field="OPSEL_HI"
+            )
         ),
         *_with_zero_accumulator_form(_v_wmma_i32_16x16x32_iu4_overlay()),
         *_rdna4_swmmac_overlays(),
@@ -1710,12 +1801,328 @@ def _gfx12_core_overlay_descriptors(
 
 
 def _gfx1250_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
-    return _rdna4_core_overlays()
+    return (
+        *_rdna4_core_overlays(),
+        _s_getreg_b32_cluster_workgroup_flat_id_overlay(),
+        *_v_cvt_pk_f16_packed8_overlays("ocp"),
+        *_v_cvt_scale_pk8_overlays(),
+        _v_cvt_pk_bf16_f32_overlay(),
+        _v_cvt_pk_bf16_f32_dpp16_overlay(),
+        *_v_pk_with_op_sel_hi_field(
+            (
+                _v_pk_add_bf16_overlay(),
+                _v_pk_mul_bf16_overlay(),
+                _v_pk_fma_bf16_overlay(),
+            ),
+            "OPSEL_HI",
+        ),
+    )
+
+
+_GFX1250_SUPPLEMENTAL_INSTRUCTION_FLAGS = AmdgpuIsaInstructionFlags(
+    is_branch=False,
+    is_conditional_branch=False,
+    is_indirect_branch=False,
+    is_program_terminator=False,
+    is_immediately_executed=False,
+)
+
+
+def _gfx1250_supplemental_bit_range(
+    bit_offset: int, bit_count: int
+) -> AmdgpuIsaBitRange:
+    return AmdgpuIsaBitRange(order=0, bit_offset=bit_offset, bit_count=bit_count)
+
+
+def _gfx1250_supplemental_encoding_field(
+    name: str, *ranges: AmdgpuIsaBitRange
+) -> AmdgpuIsaEncodingField:
+    return AmdgpuIsaEncodingField(name=name, is_conditional=False, ranges=ranges)
+
+
+def _gfx1250_vop3_scale_sel_field() -> AmdgpuIsaEncodingField:
+    return _gfx1250_supplemental_encoding_field(
+        "SCALE_SEL",
+        _gfx1250_supplemental_bit_range(
+            AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_OFFSET,
+            AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_COUNT,
+        ),
+    )
+
+
+def _gfx1250_supplement_encoding(
+    encoding: AmdgpuIsaEncoding,
+) -> AmdgpuIsaEncoding:
+    if encoding.name != "ENC_VOP3":
+        return encoding
+    if any(field.name == "SCALE_SEL" for field in encoding.fields):
+        return encoding
+    return replace(
+        encoding,
+        fields=(*encoding.fields, _gfx1250_vop3_scale_sel_field()),
+    )
+
+
+def _gfx1250_spec_with_supplemental_encoding_facts(
+    spec: AmdgpuIsaFactSource,
+) -> AmdgpuIsaFactSource:
+    encodings = tuple(
+        _gfx1250_supplement_encoding(encoding) for encoding in spec.encodings
+    )
+    if encodings == spec.encodings:
+        return spec
+    return replace(spec, encodings=encodings)
+
+
+def _gfx1250_supplemental_vop1_source(
+    field_name: str,
+    data_format_name: str,
+) -> AmdgpuIsaOperand:
+    return AmdgpuIsaOperand(
+        order=2,
+        field_name=field_name,
+        data_format_name=data_format_name,
+        operand_type="OPR_SRC",
+        size_bits=32,
+        is_input=True,
+        is_output=False,
+        is_implicit=False,
+        is_binary_microcode_required=True,
+    )
+
+
+def _gfx1250_supplemental_vop1_result(
+    data_format_name: str,
+) -> AmdgpuIsaOperand:
+    return AmdgpuIsaOperand(
+        order=1,
+        field_name="VDST",
+        data_format_name=data_format_name,
+        operand_type="OPR_VGPR",
+        size_bits=32,
+        is_input=False,
+        is_output=True,
+        is_implicit=False,
+        is_binary_microcode_required=True,
+    )
+
+
+def _gfx1250_supplemental_vop3_source(
+    order: int,
+    field_name: str,
+    data_format_name: str,
+    *,
+    size_bits: int = 32,
+    operand_type: str = "OPR_SRC",
+) -> AmdgpuIsaOperand:
+    return AmdgpuIsaOperand(
+        order=order,
+        field_name=field_name,
+        data_format_name=data_format_name,
+        operand_type=operand_type,
+        size_bits=size_bits,
+        is_input=True,
+        is_output=False,
+        is_implicit=False,
+        is_binary_microcode_required=True,
+    )
+
+
+def _gfx1250_supplemental_vop3_result(
+    data_format_name: str,
+    *,
+    size_bits: int = 32,
+) -> AmdgpuIsaOperand:
+    return AmdgpuIsaOperand(
+        order=1,
+        field_name="VDST",
+        data_format_name=data_format_name,
+        operand_type="OPR_VGPR",
+        size_bits=size_bits,
+        is_input=False,
+        is_output=True,
+        is_implicit=False,
+        is_binary_microcode_required=True,
+    )
+
+
+def _gfx1250_supplemental_instruction(
+    *,
+    name: str,
+    encoding_name: str,
+    opcode: int,
+    operands: tuple[AmdgpuIsaOperand, ...],
+    additional_encodings: tuple[AmdgpuIsaInstructionEncoding, ...] = (),
+) -> AmdgpuIsaInstruction:
+    return AmdgpuIsaInstruction(
+        name=name,
+        aliases=(),
+        flags=_GFX1250_SUPPLEMENTAL_INSTRUCTION_FLAGS,
+        encodings=(
+            AmdgpuIsaInstructionEncoding(
+                encoding_name=encoding_name,
+                condition_name="default",
+                opcode=opcode,
+                operands=operands,
+            ),
+            *additional_encodings,
+        ),
+        functional_groups=(AmdgpuIsaFunctionalGroup("VALU", ("NOT_ASSIGNED",)),),
+    )
+
+
+_GFX1250_CVT_SCALE_PK8_ROWS = (
+    ("V_CVT_SCALE_PK8_F16_FP4", 0x29F, 32, "FMT_NUM_PK2_F16", 128),
+    ("V_CVT_SCALE_PK8_BF16_FP4", 0x2A0, 32, "FMT_NUM_PK2_BF16", 128),
+    ("V_CVT_SCALE_PK8_F32_FP4", 0x2A1, 32, "FMT_NUM_F32", 256),
+    ("V_CVT_SCALE_PK8_F16_FP8", 0x2A8, 64, "FMT_NUM_PK2_F16", 128),
+    ("V_CVT_SCALE_PK8_BF16_FP8", 0x2A9, 64, "FMT_NUM_PK2_BF16", 128),
+    ("V_CVT_SCALE_PK8_F32_FP8", 0x2AA, 64, "FMT_NUM_F32", 256),
+    ("V_CVT_SCALE_PK8_F16_BF8", 0x2AB, 64, "FMT_NUM_PK2_F16", 128),
+    ("V_CVT_SCALE_PK8_BF16_BF8", 0x2AC, 64, "FMT_NUM_PK2_BF16", 128),
+    ("V_CVT_SCALE_PK8_F32_BF8", 0x2AD, 64, "FMT_NUM_F32", 256),
+)
+
+
+def _gfx1250_supplemental_cvt_scale_pk8_instruction(
+    name: str,
+    opcode: int,
+    source_bits: int,
+    result_format_name: str,
+    result_bits: int,
+) -> AmdgpuIsaInstruction:
+    return _gfx1250_supplemental_instruction(
+        name=name,
+        encoding_name="ENC_VOP3",
+        opcode=opcode,
+        operands=(
+            _gfx1250_supplemental_vop3_result(
+                result_format_name,
+                size_bits=result_bits,
+            ),
+            _gfx1250_supplemental_vop3_source(
+                2,
+                "SRC0",
+                "FMT_NUM_UINT",
+                size_bits=source_bits,
+            ),
+            _gfx1250_supplemental_vop3_source(3, "SRC1", "FMT_NUM_UINT"),
+        ),
+    )
+
+
+_GFX1250_SUPPLEMENTAL_INSTRUCTIONS = (
+    *(
+        _gfx1250_supplemental_cvt_scale_pk8_instruction(*row)
+        for row in _GFX1250_CVT_SCALE_PK8_ROWS
+    ),
+    _gfx1250_supplemental_instruction(
+        name="V_CVT_PK_F16_FP8",
+        encoding_name="ENC_VOP1",
+        opcode=0xEB,
+        operands=(
+            _gfx1250_supplemental_vop1_result("FMT_NUM_PK2_F16"),
+            _gfx1250_supplemental_vop1_source("SRC0", "FMT_NUM_UINT"),
+        ),
+    ),
+    _gfx1250_supplemental_instruction(
+        name="V_CVT_PK_F16_BF8",
+        encoding_name="ENC_VOP1",
+        opcode=0xED,
+        operands=(
+            _gfx1250_supplemental_vop1_result("FMT_NUM_PK2_F16"),
+            _gfx1250_supplemental_vop1_source("SRC0", "FMT_NUM_UINT"),
+        ),
+    ),
+    _gfx1250_supplemental_instruction(
+        name="V_CVT_PK_BF16_F32",
+        encoding_name="ENC_VOP3",
+        opcode=877,
+        operands=(
+            _gfx1250_supplemental_vop3_result("FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(2, "SRC0", "FMT_NUM_F32"),
+            _gfx1250_supplemental_vop3_source(3, "SRC1", "FMT_NUM_F32"),
+        ),
+        additional_encodings=(
+            AmdgpuIsaInstructionEncoding(
+                encoding_name="VOP3_VOP_DPP16",
+                condition_name="has_dpp16",
+                opcode=877,
+                operands=(
+                    _gfx1250_supplemental_vop3_result("FMT_NUM_PK2_BF16"),
+                    _gfx1250_supplemental_vop3_source(
+                        2,
+                        "VSRC0",
+                        "FMT_NUM_F32",
+                        operand_type="OPR_VGPR",
+                    ),
+                    _gfx1250_supplemental_vop3_source(
+                        3,
+                        "SRC1",
+                        "FMT_NUM_F32",
+                        operand_type="OPR_SRC_VGPR",
+                    ),
+                ),
+            ),
+        ),
+    ),
+    _gfx1250_supplemental_instruction(
+        name="V_PK_ADD_BF16",
+        encoding_name="ENC_VOP3P",
+        opcode=0x23,
+        operands=(
+            _gfx1250_supplemental_vop3_result("FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(2, "SRC0", "FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(3, "SRC1", "FMT_NUM_PK2_BF16"),
+        ),
+    ),
+    _gfx1250_supplemental_instruction(
+        name="V_PK_MUL_BF16",
+        encoding_name="ENC_VOP3P",
+        opcode=0x2A,
+        operands=(
+            _gfx1250_supplemental_vop3_result("FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(2, "SRC0", "FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(3, "SRC1", "FMT_NUM_PK2_BF16"),
+        ),
+    ),
+    _gfx1250_supplemental_instruction(
+        name="V_PK_FMA_BF16",
+        encoding_name="ENC_VOP3P",
+        opcode=0x11,
+        operands=(
+            _gfx1250_supplemental_vop3_result("FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(2, "SRC0", "FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(3, "SRC1", "FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(4, "SRC2", "FMT_NUM_PK2_BF16"),
+        ),
+    ),
+)
+
+
+def _gfx1250_spec_with_supplemental_instruction_facts(
+    spec: AmdgpuIsaFactSource,
+) -> AmdgpuIsaFactSource:
+    existing_instruction_names = spec.instruction_map(include_aliases=True)
+    supplemental_instructions = tuple(
+        instruction
+        for instruction in _GFX1250_SUPPLEMENTAL_INSTRUCTIONS
+        if instruction.name not in existing_instruction_names
+    )
+    if not supplemental_instructions:
+        return spec
+
+    # The pinned RDNA4 ISA XML lacks these gfx125x instructions even though the
+    # ROCm LLVM assembler accepts them. Keep the supplemental facts narrow to
+    # gfx125x and let normal overlay materialization validate each descriptor.
+    return replace(spec, instructions=(*spec.instructions, *supplemental_instructions))
 
 
 def _gfx1250_core_overlay_descriptors(
     spec: AmdgpuIsaFactSource,
 ) -> tuple[Descriptor, ...]:
+    spec = _gfx1250_spec_with_supplemental_encoding_facts(spec)
+    spec = _gfx1250_spec_with_supplemental_instruction_facts(spec)
     return _with_execution_mask_state_reads(
         materialize_amdgpu_descriptor_overlays(spec, _gfx1250_core_overlays())
     )

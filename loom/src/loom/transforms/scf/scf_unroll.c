@@ -1351,21 +1351,6 @@ static bool loom_scf_unroll_effects_conflict(
                                                LOOM_SCF_UNROLL_EFFECT_WRITE);
 }
 
-static void loom_scf_unroll_endpoint_region(
-    const loom_movement_endpoint_t* endpoint, loom_view_region_t* out_region) {
-  *out_region = (loom_view_region_t){
-      .view_value_id = endpoint->value_id,
-      .root_value_id = endpoint->root_value_id,
-      .begin_byte_offset = endpoint->begin_byte_offset,
-      .byte_length = endpoint->byte_length,
-      .end_byte_offset = endpoint->end_byte_offset,
-      .minimum_alignment = endpoint->minimum_alignment,
-      .root_minimum_alignment = endpoint->root_minimum_alignment,
-      .memory_space = endpoint->memory_space,
-      .precision_flags = endpoint->precision_flags,
-  };
-}
-
 static bool loom_scf_unroll_symbolic_expr_contains_value(
     const loom_symbolic_expr_t* expression, loom_value_id_t value_id) {
   if (!loom_symbolic_expr_is_linear(expression)) return false;
@@ -1398,19 +1383,21 @@ static iree_status_t loom_scf_unroll_endpoints_no_overlap(
     return iree_ok_status();
   }
   if (left->root_value_id == LOOM_VALUE_ID_INVALID ||
-      right->root_value_id == LOOM_VALUE_ID_INVALID ||
-      left->root_value_id != right->root_value_id) {
+      right->root_value_id == LOOM_VALUE_ID_INVALID) {
     return iree_ok_status();
   }
-  if (varying_value_id != LOOM_VALUE_ID_INVALID &&
+  if (left->root_value_id == right->root_value_id &&
+      varying_value_id != LOOM_VALUE_ID_INVALID &&
       (loom_scf_unroll_endpoint_contains_value(left, varying_value_id) ||
        loom_scf_unroll_endpoint_contains_value(right, varying_value_id))) {
     return iree_ok_status();
   }
   loom_view_region_t left_region = {0};
-  loom_scf_unroll_endpoint_region(left, &left_region);
   loom_view_region_t right_region = {0};
-  loom_scf_unroll_endpoint_region(right, &right_region);
+  if (!loom_movement_endpoint_as_view_region(left, &left_region) ||
+      !loom_movement_endpoint_as_view_region(right, &right_region)) {
+    return iree_ok_status();
+  }
   return loom_view_regions_prove_no_overlap(&movement_analysis->view_regions,
                                             &left_region, &right_region,
                                             out_no_overlap);

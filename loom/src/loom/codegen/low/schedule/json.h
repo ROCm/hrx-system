@@ -11,10 +11,17 @@
 
 #include "iree/base/api.h"
 #include "loom/codegen/low/schedule/types.h"
+#include "loom/util/json.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Writes the common schedule hazard-gap fields into |object|. Callers may add
+// context-specific identity fields before or after these fields.
+iree_status_t loom_low_schedule_hazard_gap_write_json_fields(
+    const loom_low_schedule_hazard_gap_t* hazard_gap,
+    loom_json_object_writer_t* object);
 
 // Appends a compact JSON object describing |table| to |builder|. The format
 // is diagnostic/test output, not bytecode-stable artifact identity.

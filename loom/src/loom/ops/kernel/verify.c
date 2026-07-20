@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/analysis/control_uniformity.h"
+#include "loom/analysis/symbol_facts.h"
 #include "loom/error/emitter.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
@@ -12,8 +14,10 @@
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/cache.h"
 #include "loom/ops/combining.h"
+#include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/target/facts.h"
 #include "loom/ops/view/ops.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/walk.h"
@@ -96,6 +100,29 @@ static iree_status_t loom_kernel_verify_def_contract(
   return iree_ok_status();
 }
 
+iree_status_t loom_kernel_launch_config_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  (void)module;
+  const uint32_t cluster_dimension_count =
+      (uint32_t)loom_kernel_launch_config_workgroup_cluster_size_x_is_present(
+          op) +
+      (uint32_t)loom_kernel_launch_config_workgroup_cluster_size_y_is_present(
+          op) +
+      (uint32_t)loom_kernel_launch_config_workgroup_cluster_size_z_is_present(
+          op);
+  if (cluster_dimension_count == 0 || cluster_dimension_count == 3) {
+    return iree_ok_status();
+  }
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(IREE_SV("kernel.launch.config")),
+      loom_param_u32(op->operand_count),
+      loom_param_u32(9),
+  };
+  return loom_kernel_emit(emitter, op, LOOM_ERR_STRUCTURE_001, params,
+                          IREE_ARRAYSIZE(params));
+}
+
 static iree_status_t loom_kernel_emit_operand_constraint(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
     iree_string_view_t operand_name, loom_type_t actual_type,
@@ -125,7 +152,7 @@ static iree_status_t loom_kernel_emit_result_constraint(
 static iree_string_view_t loom_kernel_value_name(const loom_module_t* module,
                                                  loom_value_id_t value_id) {
   if (value_id >= module->values.count) return IREE_SV("<invalid>");
-  loom_string_id_t name_id = module->values.entries[value_id].name_id;
+  loom_string_id_t name_id = loom_module_value(module, value_id)->name_id;
   if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
     return IREE_SV("<unnamed>");
   }
@@ -676,7 +703,11 @@ static iree_status_t loom_kernel_verify_group_origin_if_local(
   const loom_value_t* group = loom_module_value(module, group_id);
   if (loom_value_is_block_arg(group)) return iree_ok_status();
   const loom_op_t* defining_op = loom_value_def_op(group);
-  if (defining_op && loom_kernel_async_group_isa(defining_op)) {
+  // Template applications are selected and inlined before whole-function async
+  // lifetime verification. Runtime calls remain unsupported ownership
+  // boundaries and are deliberately rejected here.
+  if (defining_op && (loom_kernel_async_group_isa(defining_op) ||
+                      loom_func_apply_isa(defining_op))) {
     return iree_ok_status();
   }
   return loom_kernel_emit_value_user_constraint(
@@ -858,99 +889,137 @@ static iree_status_t loom_kernel_verify_async_tensor_like(
   return loom_kernel_verify_copy_token_group_use(module, emitter, op, token_id);
 }
 
-static bool loom_kernel_value_facts_are_lane_varying(
-    const loom_value_fact_table_t* fact_table, loom_value_id_t value_id) {
-  loom_value_facts_t facts = loom_value_fact_table_lookup(fact_table, value_id);
-  return loom_value_facts_is_lane_varying(facts) ||
-         loom_value_facts_is_lane_predicate(facts);
-}
-
 static iree_status_t loom_kernel_emit_barrier_control_constraint(
     const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_op_t* barrier_op, iree_string_view_t control_kind,
-    loom_value_id_t control_value, const loom_op_t* control_op) {
+    const loom_op_t* barrier_op, loom_value_fact_uniform_scope_t required_scope,
+    const loom_control_uniformity_failure_t* failure) {
+  const iree_string_view_t scope_name =
+      loom_control_uniformity_scope_name(required_scope);
+  const iree_string_view_t control_value_name =
+      failure->control_value == LOOM_VALUE_ID_INVALID
+          ? IREE_SV("<unexposed>")
+          : loom_kernel_value_name(module, failure->control_value);
   loom_diagnostic_param_t params[] = {
       loom_param_string(IREE_SV("kernel.barrier")),
-      loom_param_string(control_kind),
-      loom_param_string(loom_kernel_value_name(module, control_value)),
-      loom_param_string(loom_kernel_op_name(module, control_op)),
+      loom_param_string(scope_name),
+      loom_param_string(loom_control_uniformity_source_name(failure->source)),
+      loom_param_string(control_value_name),
+      loom_param_string(loom_kernel_op_name(module, failure->control_op)),
+      loom_param_string(loom_control_uniformity_fact_distribution_name(
+          failure->control_facts)),
   };
   return loom_kernel_emit(emitter, barrier_op, LOOM_ERR_STRUCTURE_038, params,
                           IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_kernel_verify_barrier_control_value(
-    const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_value_fact_table_t* fact_table, const loom_op_t* barrier_op,
-    const loom_op_t* control_op, iree_string_view_t control_kind,
-    loom_value_id_t control_value) {
-  if (control_value == LOOM_VALUE_ID_INVALID ||
-      !loom_kernel_value_facts_are_lane_varying(fact_table, control_value)) {
-    return iree_ok_status();
+static loom_value_fact_uniform_scope_t
+loom_kernel_barrier_required_uniform_scope(const loom_op_t* barrier_op) {
+  if (!loom_kernel_barrier_isa(barrier_op)) {
+    return LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE;
   }
-  return loom_kernel_emit_barrier_control_constraint(
-      module, emitter, barrier_op, control_kind, control_value, control_op);
+  const loom_atomic_scope_t barrier_scope =
+      loom_kernel_barrier_scope(barrier_op);
+  if (barrier_scope == LOOM_ATOMIC_SCOPE_SUBGROUP) {
+    return LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP;
+  }
+  if (barrier_scope == LOOM_ATOMIC_SCOPE_WORKGROUP) {
+    return LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP;
+  }
+  return LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE;
 }
 
-static iree_status_t loom_kernel_verify_workgroup_barrier_ancestor(
+static iree_status_t loom_kernel_verify_barrier_control(
     const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_value_fact_table_t* fact_table, const loom_op_t* barrier_op,
-    const loom_op_t* ancestor_op) {
-  loom_region_branch_t branch =
-      loom_region_branch_cast(module, (loom_op_t*)ancestor_op);
-  if (loom_region_branch_isa(branch)) {
-    IREE_RETURN_IF_ERROR(loom_kernel_verify_barrier_control_value(
-        module, emitter, fact_table, barrier_op, ancestor_op,
-        IREE_SV("region selector"), loom_region_branch_selector(branch)));
-  }
-
-  loom_loop_like_t loop = loom_loop_like_cast(module, (loom_op_t*)ancestor_op);
-  if (loom_loop_like_isa(loop) && loom_loop_like_has_counted_range(loop)) {
-    IREE_RETURN_IF_ERROR(loom_kernel_verify_barrier_control_value(
-        module, emitter, fact_table, barrier_op, ancestor_op,
-        IREE_SV("loop lower bound"), loom_loop_like_lower_bound(loop)));
-    IREE_RETURN_IF_ERROR(loom_kernel_verify_barrier_control_value(
-        module, emitter, fact_table, barrier_op, ancestor_op,
-        IREE_SV("loop upper bound"), loom_loop_like_upper_bound(loop)));
-    IREE_RETURN_IF_ERROR(loom_kernel_verify_barrier_control_value(
-        module, emitter, fact_table, barrier_op, ancestor_op,
-        IREE_SV("loop step"), loom_loop_like_step(loop)));
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_kernel_verify_workgroup_barrier_control(
-    const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_value_fact_table_t* fact_table, const loom_op_t* barrier_op) {
-  if (!loom_kernel_barrier_isa(barrier_op) ||
-      loom_kernel_barrier_scope(barrier_op) != LOOM_ATOMIC_SCOPE_WORKGROUP) {
-    return iree_ok_status();
-  }
-  for (const loom_op_t* ancestor_op = barrier_op->parent_op; ancestor_op;
-       ancestor_op = ancestor_op->parent_op) {
-    IREE_RETURN_IF_ERROR(loom_kernel_verify_workgroup_barrier_ancestor(
-        module, emitter, fact_table, barrier_op, ancestor_op));
+    loom_control_uniformity_info_t* control_uniformity,
+    const loom_op_t* barrier_op,
+    loom_value_fact_uniform_scope_t required_scope) {
+  loom_control_uniformity_failure_t failure = {0};
+  bool proven = false;
+  IREE_RETURN_IF_ERROR(loom_control_uniformity_prove_execution(
+      control_uniformity, barrier_op, required_scope, &failure, &proven));
+  if (!proven) {
+    return loom_kernel_emit_barrier_control_constraint(
+        module, emitter, barrier_op, required_scope, &failure);
   }
   return iree_ok_status();
 }
 
 typedef struct loom_kernel_barrier_control_verifier_t {
+  // Module containing the kernel and authored target record.
   const loom_module_t* module;
+  // Structured diagnostic sink.
   iree_diagnostic_emitter_t emitter;
-  const loom_value_fact_table_t* fact_table;
+  // Function whose barriers are being checked.
+  loom_func_like_t function;
+  // Function-scoped scratch storage.
+  iree_arena_allocator_t* arena;
+  // Value facts populated when the first relevant barrier is encountered.
+  loom_value_fact_table_t fact_table;
+  // Reusable control summary over fact_table.
+  loom_control_uniformity_info_t control_uniformity;
 } loom_kernel_barrier_control_verifier_t;
+
+static iree_status_t loom_kernel_barrier_control_target_bundle(
+    loom_kernel_barrier_control_verifier_t* verifier,
+    const loom_target_bundle_t** out_target_bundle) {
+  *out_target_bundle = NULL;
+  const loom_symbol_ref_t target_ref =
+      loom_func_like_target(verifier->function);
+  if (!loom_symbol_ref_is_valid(target_ref) || target_ref.module_id != 0 ||
+      target_ref.symbol_id >= verifier->module->symbols.count) {
+    return iree_ok_status();
+  }
+
+  loom_symbol_fact_table_t symbol_facts = {0};
+  loom_symbol_fact_table_initialize(&symbol_facts, verifier->arena);
+  const loom_symbol_facts_base_t* base_facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
+      &symbol_facts, verifier->module, target_ref, &base_facts));
+  const loom_target_symbol_facts_t* target_facts =
+      loom_target_symbol_facts_cast(base_facts);
+  if (target_facts) {
+    *out_target_bundle = &target_facts->storage.bundle;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_kernel_barrier_control_verifier_initialize(
+    loom_kernel_barrier_control_verifier_t* verifier) {
+  if (verifier->fact_table.arena) return iree_ok_status();
+
+  const loom_target_bundle_t* target_bundle = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_kernel_barrier_control_target_bundle(verifier, &target_bundle));
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_initialize(
+      &verifier->fact_table, verifier->arena, verifier->module->values.count));
+  verifier->fact_table.context.target_bundle = target_bundle;
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_compute(
+      &verifier->fact_table, verifier->module, verifier->function));
+  loom_control_uniformity_info_initialize(
+      verifier->module, &verifier->fact_table, verifier->arena,
+      &verifier->control_uniformity);
+  return iree_ok_status();
+}
 
 static iree_status_t loom_kernel_verify_barrier_control_walk(
     void* user_data, loom_op_t* op, const loom_walk_context_t* context,
     loom_walk_result_t* out_result) {
   (void)context;
   *out_result = LOOM_WALK_CONTINUE;
-  const loom_kernel_barrier_control_verifier_t* verifier = user_data;
-  return loom_kernel_verify_workgroup_barrier_control(
-      verifier->module, verifier->emitter, verifier->fact_table, op);
+  loom_kernel_barrier_control_verifier_t* verifier = user_data;
+  const loom_value_fact_uniform_scope_t required_scope =
+      loom_kernel_barrier_required_uniform_scope(op);
+  if (required_scope == LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_kernel_barrier_control_verifier_initialize(verifier));
+  return loom_kernel_verify_barrier_control(verifier->module, verifier->emitter,
+                                            &verifier->control_uniformity, op,
+                                            required_scope);
 }
 
-static iree_status_t loom_kernel_verify_workgroup_barrier_controls(
+static iree_status_t loom_kernel_verify_barrier_controls(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {
   loom_func_like_t function = loom_func_like_cast(module, (loom_op_t*)op);
@@ -959,27 +1028,20 @@ static iree_status_t loom_kernel_verify_workgroup_barrier_controls(
   iree_arena_allocator_t arena;
   iree_arena_initialize(module->arena.block_pool, &arena);
 
-  loom_value_fact_table_t fact_table = {0};
-  iree_status_t status = loom_value_fact_table_initialize(&fact_table, &arena,
-                                                          module->values.count);
-  if (iree_status_is_ok(status)) {
-    status = loom_value_fact_table_compute(&fact_table, module, function);
-  }
-  if (iree_status_is_ok(status)) {
-    const loom_kernel_barrier_control_verifier_t verifier = {
-        .module = module,
-        .emitter = emitter,
-        .fact_table = &fact_table,
-    };
-    loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
-    status =
-        loom_walk_region(module, loom_kernel_def_body(op), LOOM_WALK_PRE_ORDER,
-                         (loom_walk_callback_t){
-                             .fn = loom_kernel_verify_barrier_control_walk,
-                             .user_data = (void*)&verifier,
-                         },
-                         &arena, &walk_result);
-  }
+  loom_kernel_barrier_control_verifier_t verifier = {
+      .module = module,
+      .emitter = emitter,
+      .function = function,
+      .arena = &arena,
+  };
+  loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
+  iree_status_t status =
+      loom_walk_region(module, loom_kernel_def_body(op), LOOM_WALK_PRE_ORDER,
+                       (loom_walk_callback_t){
+                           .fn = loom_kernel_verify_barrier_control_walk,
+                           .user_data = &verifier,
+                       },
+                       &arena, &walk_result);
   iree_arena_deinitialize(&arena);
   return status;
 }
@@ -988,7 +1050,7 @@ iree_status_t loom_kernel_def_verify(const loom_module_t* module,
                                      const loom_op_t* op,
                                      iree_diagnostic_emitter_t emitter) {
   IREE_RETURN_IF_ERROR(loom_kernel_verify_def_contract(emitter, op));
-  return loom_kernel_verify_workgroup_barrier_controls(module, op, emitter);
+  return loom_kernel_verify_barrier_controls(module, op, emitter);
 }
 
 iree_status_t loom_kernel_barrier_verify(const loom_module_t* module,

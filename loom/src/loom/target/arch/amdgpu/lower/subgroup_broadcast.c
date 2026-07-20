@@ -66,10 +66,8 @@ iree_status_t loom_amdgpu_select_kernel_subgroup_broadcast_plan(
   }
 
   uint32_t wavefront_size = 0;
-  bool full_wave_selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_select_full_wave_direct_subgroup_width(
-      context, &wavefront_size, &full_wave_selected));
-  if (!full_wave_selected) {
+  if (!loom_amdgpu_select_full_wave_direct_subgroup_width(context,
+                                                          &wavefront_size)) {
     return iree_ok_status();
   }
 
@@ -121,10 +119,8 @@ iree_status_t loom_amdgpu_select_kernel_subgroup_broadcast_first_plan(
   }
 
   uint32_t wavefront_size = 0;
-  bool full_wave_selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_select_full_wave_direct_subgroup_width(
-      context, &wavefront_size, &full_wave_selected));
-  if (!full_wave_selected) {
+  if (!loom_amdgpu_select_full_wave_direct_subgroup_width(context,
+                                                          &wavefront_size)) {
     return iree_ok_status();
   }
 
@@ -197,7 +193,8 @@ iree_status_t loom_amdgpu_lower_kernel_subgroup_broadcast(
         &low_source_register));
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
         context, source_op, &plan->descriptor, low_source_byte_offset,
-        low_source_register, lane_type, &result_registers[i]));
+        /*static_byte_offset=*/0, low_source_register, lane_type,
+        &result_registers[i]));
   }
 
   return loom_amdgpu_collective_bind_payload_result(

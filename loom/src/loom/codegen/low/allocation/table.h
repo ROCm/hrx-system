@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
+#include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/storage_lease.h"
@@ -141,9 +142,11 @@ typedef struct loom_low_allocation_spill_plan_t {
   uint32_t byte_size;
   // Required slot alignment in bytes.
   uint32_t byte_alignment;
-  // Predicted stores needed by the current synthetic spill plan.
+  // Predicted stores needed by the current synthetic spill plan. Actual
+  // materialization may differ after earlier spill rewrites in the same frame.
   uint32_t store_count;
-  // Predicted operand-use reloads in the current synthetic spill plan.
+  // Predicted operand-use reloads in the current synthetic spill plan. Actual
+  // materialization may differ after earlier spill rewrites in the same frame.
   uint32_t reload_count;
 } loom_low_allocation_spill_plan_t;
 
@@ -281,6 +284,10 @@ typedef struct loom_low_allocation_table_t {
   loom_liveness_analysis_t liveness;
   // Placement relations consumed while assigning intervals.
   loom_low_placement_table_t placement;
+  // Resolved fixed SSA value locations consumed by this allocation.
+  const loom_low_allocation_resolved_fixed_value_t* fixed_values;
+  // Number of records in |fixed_values|.
+  iree_host_size_t fixed_value_count;
   // Allocation mode requested on the low function, or 0 for the default.
   uint8_t allocation_mode;
   // Number of error diagnostics emitted while attempting allocation.
@@ -289,6 +296,14 @@ typedef struct loom_low_allocation_table_t {
   const loom_low_allocation_assignment_t* assignments;
   // Number of records in |assignments|.
   iree_host_size_t assignment_count;
+  // Dense assigned-location extents retained from allocation search.
+  struct {
+    // Maximum one-past-last assigned location indexed by descriptor register
+    // class ID. The location kind is the canonical kind for each class.
+    const uint32_t* ends_by_reg_class;
+    // Number of entries in |ends_by_reg_class|.
+    iree_host_size_t count;
+  } assigned_extents;
   // Assignment indices by liveness local value ordinal. Entries without an
   // assignment contain UINT32_MAX.
   const uint32_t* assignment_indices_by_value_ordinal;
@@ -331,6 +346,8 @@ typedef struct loom_low_allocation_table_t {
   const loom_low_allocation_packet_move_temporary_t* packet_move_temporaries;
   // Number of records in |packet_move_temporaries|.
   iree_host_size_t packet_move_temporary_count;
+  // Number of target-register unit moves across packet-local move sets.
+  iree_host_size_t packet_move_count;
   // Target storage-lease facts consumed by this allocation.
   loom_low_storage_lease_table_t storage_leases;
   // Assignment-backed storage-lease records in storage-lease table order.
@@ -347,6 +364,10 @@ typedef struct loom_low_allocation_table_t {
   iree_host_size_t coalesced_copy_count;
   // Number of low.copy ops that must remain materialized.
   iree_host_size_t materialized_copy_count;
+  // Resolved whole-function target-owned location ranges.
+  const loom_low_allocation_resolved_reserved_range_t* reserved_ranges;
+  // Number of records in |reserved_ranges|.
+  iree_host_size_t reserved_range_count;
 } loom_low_allocation_table_t;
 
 // Active allocation-owned lease over the module value-ordinal scratch map.

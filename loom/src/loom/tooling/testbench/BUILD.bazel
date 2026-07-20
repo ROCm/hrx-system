@@ -49,7 +49,6 @@ loom_cc_library(
     deps = [
         ":testbench",
         "//loom/src/loom/ir",
-        "//loom/src/loom/util:math",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:prng",

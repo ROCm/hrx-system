@@ -1120,12 +1120,8 @@ static iree_status_t loom_type_propagator_process_value_adjacency(
     if (propagator->conflict) return iree_ok_status();
   }
 
-  if ((iree_host_size_t)value_id >=
-      propagator->module->type_uses.value_capacity) {
-    return iree_ok_status();
-  }
   loom_type_use_id_t type_use_id =
-      propagator->module->type_uses.value_heads[value_id].first_incoming_use_id;
+      loom_module_value_first_incoming_type_use(propagator->module, value_id);
   while (type_use_id != LOOM_TYPE_USE_ID_INVALID) {
     const loom_type_use_t* type_use =
         &propagator->module->type_uses.records[type_use_id];
@@ -1180,9 +1176,9 @@ static iree_status_t loom_type_propagator_commit(
         current_type, candidate_type, &propagator->module->arena,
         &committed_type, &result));
     if (result == LOOM_TYPE_REFINEMENT_CONFLICT) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
+      IREE_ASSERT_UNREACHABLE(
           "accepted type propagation transaction conflicted during commit");
+      IREE_BUILTIN_UNREACHABLE();
     }
     if (result == LOOM_TYPE_REFINEMENT_UNCHANGED ||
         loom_type_equal(current_type, committed_type)) {

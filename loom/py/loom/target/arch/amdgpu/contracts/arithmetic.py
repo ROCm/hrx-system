@@ -11,6 +11,7 @@ from __future__ import annotations
 from loom.dialect.index import ALL_INDEX_OPS
 from loom.dialect.index import defs as index
 from loom.dialect.scalar import ALL_SCALAR_OPS
+from loom.dialect.scalar import analysis as scalar_analysis
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.scalar import math as scalar_math
@@ -32,6 +33,7 @@ from loom.target.contracts import (
     EmitDescriptorOp,
     Guard,
     GuardDiagnostic,
+    OrdinalValueAliasRule,
     RecipeRule,
     Scalar,
     TypePattern,
@@ -82,9 +84,14 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_div_fmas_f32",
     "amdgpu.v_div_fixup_f32",
     "amdgpu.v_cvt_f32_f16",
+    "amdgpu.v_cvt_f32_fp8.ocp",
+    "amdgpu.v_cvt_f32_bf8.ocp",
     "amdgpu.v_cvt_f16_f32",
     "amdgpu.v_pk_fmac_f16",
     "amdgpu.v_pk_fma_f16",
+    "amdgpu.v_pk_add_bf16",
+    "amdgpu.v_pk_mul_bf16",
+    "amdgpu.v_pk_fma_bf16",
     "amdgpu.v_pk_add_u16",
     "amdgpu.v_pk_sub_i16",
     "amdgpu.v_pk_mul_lo_u16",
@@ -173,6 +180,11 @@ _VEC_F64_STATIC = Vector(
     minimum_static_elements=1,
     maximum_static_elements="(LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES / 2u)",
 )
+_VEC_I1_STATIC = Vector(
+    "i1",
+    minimum_static_elements=1,
+    maximum_static_elements="LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES",
+)
 _VEC_F16_PACKED_STORAGE = Vector(
     "f16",
     minimum_lanes=1,
@@ -188,6 +200,7 @@ _VEC_BF16_PACKED_STORAGE = Vector(
     minimum_lanes=1,
     maximum_lanes="LOOM_AMDGPU_MAX_PACKED_16BIT_FLOAT_LANES",
 )
+_VEC_BF16_PACKED_REGISTER = Vector("bf16", lanes=2)
 _VEC_I16_PACKED_STORAGE = Vector(
     "i16",
     minimum_lanes=1,
@@ -203,6 +216,17 @@ _VEC_I8_PACKED = Vector(
     minimum_lanes=1,
     maximum_lanes="LOOM_AMDGPU_MAX_PACKED_I8_LANES",
 )
+_VEC_F8E4M3_PACKED = Vector(
+    "f8E4M3",
+    minimum_lanes=1,
+    maximum_lanes="LOOM_AMDGPU_MAX_PACKED_I8_LANES",
+)
+_VEC_F8E5M2_PACKED = Vector(
+    "f8E5M2",
+    minimum_lanes=1,
+    maximum_lanes="LOOM_AMDGPU_MAX_PACKED_I8_LANES",
+)
+_I1 = Scalar("i1")
 _I8 = Scalar("i8")
 _I16 = Scalar("i16")
 _I32 = Scalar("i32")
@@ -253,6 +277,11 @@ _VEC_F64_DIAGNOSTIC = GuardDiagnostic(
     subject_name="vector<f64>",
     constraint_key="amdgpu.arithmetic.vector_f64",
 )
+_VEC_I1_DIAGNOSTIC = GuardDiagnostic(
+    subject_role="type",
+    subject_name="vector<i1>",
+    constraint_key="amdgpu.arithmetic.vector_i1",
+)
 _VEC_F16_PACKED_DIAGNOSTIC = GuardDiagnostic(
     subject_role="type",
     subject_name="vector<f16>",
@@ -272,6 +301,11 @@ _VEC_I8_PACKED_DIAGNOSTIC = GuardDiagnostic(
     subject_role="type",
     subject_name="vector<i8>",
     constraint_key="amdgpu.arithmetic.vector_i8_packed",
+)
+_VEC_F8_PACKED_DIAGNOSTIC = GuardDiagnostic(
+    subject_role="type",
+    subject_name="vector<f8>",
+    constraint_key="amdgpu.arithmetic.vector_f8_packed",
 )
 _VEC_I16_PACKED_EVEN_LANES_DIAGNOSTIC = GuardDiagnostic(
     subject_role="lane-count",
@@ -373,6 +407,11 @@ _RESULT_VGPR_DIAGNOSTIC = GuardDiagnostic(
     subject_name="vgpr",
     constraint_key="amdgpu.arithmetic.result_vgpr",
 )
+_I1_DIAGNOSTIC = GuardDiagnostic(
+    subject_role="type",
+    subject_name="i1",
+    constraint_key="amdgpu.arithmetic.i1",
+)
 _LITERAL_EXACT_DIAGNOSTIC = GuardDiagnostic(
     subject_role="literal",
     subject_name="i64",
@@ -420,7 +459,7 @@ _VECTOR_EXTRACT_SHAPE_DIAGNOSTIC = GuardDiagnostic(
 )
 _VECTOR_16BIT_FLOAT_CONVERSION_SHAPE_DIAGNOSTIC = GuardDiagnostic(
     subject_role="shape",
-    subject_name="vector.16bit_float_conversion",
+    subject_name="vector.packed_float_conversion",
     constraint_key="amdgpu.arithmetic.vector_16bit_float_conversion_shape",
 )
 
@@ -438,14 +477,18 @@ def _type_diagnostic(type_pattern: TypePattern) -> GuardDiagnostic:
         return _VEC_I64_DIAGNOSTIC
     if type_pattern == _VEC_F64_STATIC:
         return _VEC_F64_DIAGNOSTIC
+    if type_pattern == _VEC_I1_STATIC:
+        return _VEC_I1_DIAGNOSTIC
     if type_pattern in (_VEC_F16_PACKED, _VEC_F16_PACKED_STORAGE):
         return _VEC_F16_PACKED_DIAGNOSTIC
-    if type_pattern == _VEC_BF16_PACKED_STORAGE:
+    if type_pattern in (_VEC_BF16_PACKED_STORAGE, _VEC_BF16_PACKED_REGISTER):
         return _VEC_BF16_PACKED_DIAGNOSTIC
     if type_pattern in (_VEC_I16_PACKED, _VEC_I16_PACKED_STORAGE):
         return _VEC_I16_PACKED_DIAGNOSTIC
     if type_pattern == _VEC_I8_PACKED:
         return _VEC_I8_PACKED_DIAGNOSTIC
+    if type_pattern in (_VEC_F8E4M3_PACKED, _VEC_F8E5M2_PACKED):
+        return _VEC_F8_PACKED_DIAGNOSTIC
     if type_pattern == _I32:
         return _I32_DIAGNOSTIC
     if type_pattern == _I64:
@@ -466,6 +509,8 @@ def _type_diagnostic(type_pattern: TypePattern) -> GuardDiagnostic:
         return _F64_DIAGNOSTIC
     if type_pattern == _INDEX:
         return _INDEX_DIAGNOSTIC
+    if type_pattern == _I1:
+        return _I1_DIAGNOSTIC
     raise ValueError(f"unknown AMDGPU arithmetic type pattern: {type_pattern!r}")
 
 
@@ -500,6 +545,37 @@ def _bitcast_alias_rule(
             _value_type("input", input_type),
             _value_type("result", result_type),
         ),
+    )
+
+
+def _scalar_assume_alias_rule(type_pattern: TypePattern) -> OrdinalValueAliasRule:
+    return OrdinalValueAliasRule(
+        source_op=scalar_analysis.scalar_assume,
+        source=ValueRef.operand("values"),
+        result=ValueRef.result("results"),
+        guards=(
+            _value_type("values", type_pattern),
+            _value_type("results", type_pattern),
+        ),
+    )
+
+
+def _scalar_assume_alias_rules() -> tuple[OrdinalValueAliasRule, ...]:
+    return tuple(
+        _scalar_assume_alias_rule(type_pattern)
+        for type_pattern in (
+            _I1,
+            _I8,
+            _I16,
+            _I32,
+            _I64,
+            _F8E4M3,
+            _F8E5M2,
+            _F16,
+            _BF16,
+            _F32,
+            _F64,
+        )
     )
 
 
@@ -818,10 +894,41 @@ def _vector_extract_recipe_rules() -> tuple[RecipeRule, ...]:
         (_VEC_BF16_PACKED_STORAGE, _BF16),
         (_VEC_I16_PACKED_STORAGE, _I16),
         (_VEC_I8_PACKED, _I8),
+        (_VEC_F8E4M3_PACKED, _F8E4M3),
+        (_VEC_F8E5M2_PACKED, _F8E5M2),
     )
     return tuple(
         _vector_extract_recipe_rule(source_type, result_type)
         for source_type, result_type in (*full_width_pairs, *packed_scalar_pairs)
+    )
+
+
+def _vector_splat_recipe_rule(
+    scalar_type: TypePattern,
+    result_type: TypePattern,
+) -> RecipeRule:
+    return RecipeRule(
+        source_op=vector.vector_splat,
+        guards=(
+            _value_type("scalar", scalar_type),
+            _value_type("result", result_type),
+        ),
+    )
+
+
+def _vector_splat_recipe_rules() -> tuple[RecipeRule, ...]:
+    return (
+        _vector_splat_recipe_rule(_I1, _VEC_I1_STATIC),
+        _vector_splat_recipe_rule(_I32, _VEC_I32_STATIC),
+        _vector_splat_recipe_rule(_F32, _VEC_F32_STATIC),
+        _vector_splat_recipe_rule(_I64, _VEC_I64_STATIC),
+        _vector_splat_recipe_rule(_F64, _VEC_F64_STATIC),
+        _vector_splat_recipe_rule(_F16, _VEC_F16_PACKED_STORAGE),
+        _vector_splat_recipe_rule(_BF16, _VEC_BF16_PACKED_STORAGE),
+        _vector_splat_recipe_rule(_I16, _VEC_I16_PACKED_STORAGE),
+        _vector_splat_recipe_rule(_I8, _VEC_I8_PACKED),
+        _vector_splat_recipe_rule(_F8E4M3, _VEC_F8E4M3_PACKED),
+        _vector_splat_recipe_rule(_F8E5M2, _VEC_F8E5M2_PACKED),
     )
 
 
@@ -855,6 +962,36 @@ def _vector_16bit_float_conversion_recipe_rules() -> tuple[RecipeRule, ...]:
             vector.vector_extf,
             _VEC_BF16_PACKED_STORAGE,
             _VEC_F32_STATIC,
+        ),
+        _vector_16bit_float_conversion_recipe_rule(
+            vector.vector_extf,
+            _VEC_F8E4M3_PACKED,
+            _VEC_F32_STATIC,
+        ),
+        _vector_16bit_float_conversion_recipe_rule(
+            vector.vector_extf,
+            _VEC_F8E5M2_PACKED,
+            _VEC_F32_STATIC,
+        ),
+        _vector_16bit_float_conversion_recipe_rule(
+            vector.vector_extf,
+            _VEC_F8E4M3_PACKED,
+            _VEC_BF16_PACKED_STORAGE,
+        ),
+        _vector_16bit_float_conversion_recipe_rule(
+            vector.vector_extf,
+            _VEC_F8E5M2_PACKED,
+            _VEC_BF16_PACKED_STORAGE,
+        ),
+        _vector_16bit_float_conversion_recipe_rule(
+            vector.vector_extf,
+            _VEC_F8E4M3_PACKED,
+            _VEC_F16_PACKED_STORAGE,
+        ),
+        _vector_16bit_float_conversion_recipe_rule(
+            vector.vector_extf,
+            _VEC_F8E5M2_PACKED,
+            _VEC_F16_PACKED_STORAGE,
         ),
         _vector_16bit_float_conversion_recipe_rule(
             vector.vector_fptrunc,
@@ -1417,7 +1554,7 @@ def _divf_arcp_one_rule(
         guards=(
             *_typed_guards(("lhs", "rhs", "result"), type_pattern),
             Guard.instance_flags_has_all("fastmath", "arcp"),
-            Guard.value_f64_equals("lhs", 1.0),
+            Guard.value_float_equals("lhs", 1.0),
             Guard.descriptor_available(reciprocal),
         ),
         emit=(
@@ -1450,7 +1587,7 @@ def _divf_arcp_literal_lhs_rule(
         guards=(
             *_typed_guards(("lhs", "rhs", "result"), type_pattern),
             Guard.instance_flags_has_all("fastmath", "arcp"),
-            Guard.value_exact_f64(
+            Guard.value_exact_float(
                 "lhs",
                 diagnostic=_LITERAL_EXACT_F32_DIAGNOSTIC,
             ),
@@ -1474,7 +1611,7 @@ def _divf_arcp_literal_lhs_rule(
                 operands={"rhs": ValueRef.temporary("reciprocal")},
                 results={"dst": ValueRef.result("result")},
                 immediates={
-                    "imm32": ValueProject.f64_as_f32_bits("lhs"),
+                    "imm32": ValueProject.float_as_f32_bits("lhs"),
                 },
                 form=_emit_form(type_pattern),
             ),
@@ -2062,7 +2199,7 @@ def _f32_literal_binary_rule(
         descriptor=descriptor,
         guards=(
             *_typed_guards(("lhs", "rhs", "result"), type_pattern),
-            Guard.value_exact_f64(
+            Guard.value_exact_float(
                 literal_source,
                 diagnostic=_LITERAL_EXACT_F32_DIAGNOSTIC,
             ),
@@ -2079,7 +2216,7 @@ def _f32_literal_binary_rule(
                 },
                 results={"dst": ValueRef.result("result")},
                 immediates={
-                    "imm32": ValueProject.f64_as_f32_bits(literal_source),
+                    "imm32": ValueProject.float_as_f32_bits(literal_source),
                 },
                 form=_emit_form(type_pattern),
             ),
@@ -2104,7 +2241,7 @@ def _f32_inline_binary_rule(
         descriptor=descriptor,
         guards=(
             *_typed_guards(("lhs", "rhs", "result"), type_pattern),
-            Guard.value_f64_equals(
+            Guard.value_float_equals(
                 literal_source,
                 literal_value,
                 diagnostic=_LITERAL_EXACT_F32_DIAGNOSTIC,
@@ -2122,7 +2259,7 @@ def _f32_inline_binary_rule(
                 },
                 results={"dst": ValueRef.result("result")},
                 immediates={
-                    "imm32": ValueProject.f64_as_f32_bits(literal_source),
+                    "imm32": ValueProject.float_as_f32_bits(literal_source),
                 },
                 form=_emit_form(type_pattern),
             ),
@@ -2705,7 +2842,7 @@ def _f32_fmaak_literal_rule(
         guards=(
             *_typed_guards(("a", "b", "c", "result"), type_pattern),
             _register_class("a", a_register_class),
-            Guard.value_exact_f64(
+            Guard.value_exact_float(
                 "c",
                 diagnostic=_LITERAL_EXACT_F32_DIAGNOSTIC,
             ),
@@ -2725,7 +2862,7 @@ def _f32_fmaak_literal_rule(
                 },
                 results={"dst": ValueRef.result("result")},
                 immediates={
-                    "imm32": ValueProject.f64_as_f32_bits("c"),
+                    "imm32": ValueProject.float_as_f32_bits("c"),
                 },
                 form=_emit_form(type_pattern),
             ),
@@ -2748,7 +2885,7 @@ def _f32_fmamk_literal_rule(
         guards=(
             *_typed_guards(("a", "b", "c", "result"), type_pattern),
             _register_class(multiply_source, multiply_register_class),
-            Guard.value_exact_f64(
+            Guard.value_exact_float(
                 literal_source,
                 diagnostic=_LITERAL_EXACT_F32_DIAGNOSTIC,
             ),
@@ -2768,7 +2905,7 @@ def _f32_fmamk_literal_rule(
                 },
                 results={"dst": ValueRef.result("result")},
                 immediates={
-                    "imm32": ValueProject.f64_as_f32_bits(literal_source),
+                    "imm32": ValueProject.float_as_f32_bits(literal_source),
                 },
                 form=_emit_form(type_pattern),
             ),
@@ -2874,6 +3011,63 @@ def _packed_f16_vector_fma_rules() -> tuple[DescriptorRule, ...]:
                 "b": ValueRef.operand("b"),
                 "c": ValueRef.operand("c"),
             },
+        ),
+    )
+
+
+def _packed_bf16_vector_fma_rule() -> DescriptorRule:
+    descriptor = _descriptor("amdgpu.v_pk_fma_bf16")
+    return DescriptorRule(
+        source_op=vector.vector_fmaf,
+        descriptor=descriptor,
+        guards=(
+            *_typed_guards(("a", "b", "c", "result"), _VEC_BF16_PACKED_REGISTER),
+            Guard.value_static_dim0_multiple(
+                "result",
+                2,
+                diagnostic=_VEC_BF16_PACKED_DIAGNOSTIC,
+            ),
+            Guard.descriptor_available(descriptor),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={
+                    "a": ValueRef.operand("a"),
+                    "b": ValueRef.operand("b"),
+                    "c": ValueRef.operand("c"),
+                },
+                results={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+    )
+
+
+def _packed_bf16_binary_rule(source_op: Op, descriptor_key: str) -> DescriptorRule:
+    descriptor = _descriptor(descriptor_key)
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=(
+            *_typed_guards(("lhs", "rhs", "result"), _VEC_BF16_PACKED_REGISTER),
+            Guard.value_static_dim0_multiple(
+                "result",
+                2,
+                diagnostic=_VEC_BF16_PACKED_DIAGNOSTIC,
+            ),
+            Guard.descriptor_available(descriptor),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={
+                    "lhs": ValueRef.operand("lhs"),
+                    "rhs": ValueRef.operand("rhs"),
+                },
+                results={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
+            ),
         ),
     )
 
@@ -3022,6 +3216,12 @@ def _f32_vector_sub_literal_rules() -> tuple[DescriptorRule, ...]:
 
 def _rules() -> tuple[ContractCase, ...]:
     rules: list[ContractCase] = []
+    rules.extend(
+        (
+            _packed_bf16_binary_rule(vector.vector_addf, "amdgpu.v_pk_add_bf16"),
+            _packed_bf16_binary_rule(vector.vector_mulf, "amdgpu.v_pk_mul_bf16"),
+        )
+    )
     for source_op, descriptor_key in (
         (vector.vector_addf, "amdgpu.v_add_f32.lit"),
         (vector.vector_mulf, "amdgpu.v_mul_f32.lit"),
@@ -3067,6 +3267,7 @@ def _rules() -> tuple[ContractCase, ...]:
             ),
             _packed_f32_vector_fma_rule(),
             *_packed_f16_vector_fma_rules(),
+            _packed_bf16_vector_fma_rule(),
             *_packed_i16_vector_fmai_rules(),
             *_vector_extract_recipe_rules(),
             *_vector_16bit_float_conversion_recipe_rules(),
@@ -3435,6 +3636,18 @@ def _rules() -> tuple[ContractCase, ...]:
                 _F32,
                 "amdgpu.v_cvt_f32_f16",
             ),
+            _cast_rule(
+                scalar_conversion.scalar_extf,
+                _F8E4M3,
+                _F32,
+                "amdgpu.v_cvt_f32_fp8.ocp",
+            ),
+            _cast_rule(
+                scalar_conversion.scalar_extf,
+                _F8E5M2,
+                _F32,
+                "amdgpu.v_cvt_f32_bf8.ocp",
+            ),
             _bf16_extf_rule(),
             _cast_rule(
                 scalar_conversion.scalar_fptrunc,
@@ -3586,6 +3799,7 @@ def _rules() -> tuple[ContractCase, ...]:
             _index_madd_rule(),
         )
     )
+    rules.extend((*_vector_splat_recipe_rules(), *_scalar_assume_alias_rules()))
     return tuple(rules)
 
 

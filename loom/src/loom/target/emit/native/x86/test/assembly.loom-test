@@ -416,10 +416,9 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<
 }
 
 // ----
-  vmovdqa32 zmm1, zmm0
   jmp .Lbb1
 .Lbb1:
-  vpaddd zmm0, zmm1, zmm0
+  vpaddd zmm0, zmm0, zmm0
   vmovdqu32 [rax + 256], zmm0
   ret
 

@@ -108,6 +108,21 @@ typedef enum loom_amdgpu_matrix_feature_profile_e {
   LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250 = 7,
 } loom_amdgpu_matrix_feature_profile_t;
 
+typedef enum loom_amdgpu_processor_info_flag_bits_e {
+  // Processor has enough target-owned facts for native HSACO emission.
+  LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION = 1u << 0,
+  // Clustered dispatches provide workgroup and cluster identity in the GFX1250
+  // launch-state TTMP and IB_STS2 ABI.
+  LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE = 1u << 1,
+  // Processor info flags known by the AMDGPU target package.
+  LOOM_AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS =
+      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION |
+      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
+} loom_amdgpu_processor_info_flag_bits_t;
+
+// Bitset of loom_amdgpu_processor_info_flag_bits_t values.
+typedef uint32_t loom_amdgpu_processor_info_flags_t;
+
 typedef enum loom_amdgpu_processor_scheduling_bit_e {
   // Nearby VALU uses of TRANS results require va_vdst depctr drains.
   LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR = 1u << 0,
@@ -121,6 +136,8 @@ typedef enum loom_amdgpu_processor_scheduling_bit_e {
   LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR = 1u << 4,
   // GFX11+ processors support s_delay_alu for short ALU dependency delays.
   LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU = 1u << 5,
+  // Same-class VMEM instructions write vector-register results in issue order.
+  LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER = 1u << 6,
   // Processor scheduling bits known by the AMDGPU target package.
   LOOM_AMDGPU_PROCESSOR_SCHEDULING_KNOWN_BITS =
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
@@ -128,11 +145,20 @@ typedef enum loom_amdgpu_processor_scheduling_bit_e {
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES |
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES |
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR |
-      LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
+      LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU |
+      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER,
 } loom_amdgpu_processor_scheduling_bit_t;
 
 // Bitset of loom_amdgpu_processor_scheduling_bit_t values.
 typedef uint32_t loom_amdgpu_processor_scheduling_bits_t;
+
+// Maximum nearby vector ALU packet interval covered by the
+// LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR hazard window.
+#define LOOM_AMDGPU_VALU_TRANS_USE_DEPCTR_MAX_VALU_INTERVAL 5u
+
+// Maximum nearby TRANS packet interval covered by the
+// LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR hazard window.
+#define LOOM_AMDGPU_VALU_TRANS_USE_DEPCTR_MAX_TRANS_INTERVAL 1u
 
 typedef enum loom_amdgpu_wavefront_size_flag_bits_e {
   // Processor supports wavefront-size-32 kernels.
@@ -151,9 +177,12 @@ typedef enum loom_amdgpu_descriptor_set_info_flag_bits_e {
   // Descriptor packets have implemented native binary encoding.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING = UINT64_C(1)
                                                                     << 0,
+  // Descriptor set supports native VOPD packetization for wave32 kernels.
+  LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION = UINT64_C(1) << 1,
   // Descriptor-set info flags known by the AMDGPU target package.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_KNOWN_FLAGS =
-      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING |
+      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION,
 } loom_amdgpu_descriptor_set_info_flag_bits_t;
 
 // Bitset of loom_amdgpu_descriptor_set_info_flag_bits_t values.
@@ -289,6 +318,8 @@ typedef struct loom_amdgpu_processor_feature_info_t {
 typedef struct loom_amdgpu_processor_info_t {
   // Processor name used in AMDHSA target IDs, such as `gfx1100`.
   iree_string_view_t name;
+  // Processor-wide target-info capability flags.
+  loom_amdgpu_processor_info_flags_t flags;
   // Target-low descriptor-set identity selected for this processor.
   loom_amdgpu_processor_descriptor_set_info_t descriptor_set;
   // AMDHSA ELF code-object identity for this processor.
@@ -350,6 +381,21 @@ static inline bool loom_amdgpu_processor_kernel_descriptor_has_flags(
          iree_all_bits_set(processor->kernel_descriptor.flags, flags);
 }
 
+// Returns true when |processor| advertises every requested processor-info flag.
+static inline bool loom_amdgpu_processor_info_has_flags(
+    const loom_amdgpu_processor_info_t* processor,
+    loom_amdgpu_processor_info_flags_t flags) {
+  return processor != NULL && iree_all_bits_set(processor->flags, flags);
+}
+
+// Returns true when |processor| advertises every requested scheduling bit.
+static inline bool loom_amdgpu_processor_has_scheduling(
+    const loom_amdgpu_processor_info_t* processor,
+    loom_amdgpu_processor_scheduling_bits_t bits) {
+  return processor != NULL &&
+         iree_all_bits_set(processor->features.scheduling, bits);
+}
+
 // Returns true when |descriptor_set| advertises every requested descriptor-set
 // info flag.
 static inline bool loom_amdgpu_descriptor_set_info_has_flags(
@@ -359,10 +405,19 @@ static inline bool loom_amdgpu_descriptor_set_info_has_flags(
          iree_all_bits_set(descriptor_set->flags, flags);
 }
 
-// Returns whether |processor| has enough native target information to emit an
-// AMDHSA HSACO code object.
-iree_status_t loom_amdgpu_target_info_processor_supports_hsaco(
-    const loom_amdgpu_processor_info_t* processor, bool* out_supported);
+// Returns true when |descriptor_set| supports native VOPD packetization.
+static inline bool loom_amdgpu_descriptor_set_info_supports_vopd(
+    const loom_amdgpu_descriptor_set_info_t* descriptor_set) {
+  return loom_amdgpu_descriptor_set_info_has_flags(
+      descriptor_set, LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION);
+}
+
+// Returns true when |processor| supports native AMDHSA HSACO emission.
+static inline bool loom_amdgpu_processor_supports_hsaco(
+    const loom_amdgpu_processor_info_t* processor) {
+  return loom_amdgpu_processor_info_has_flags(
+      processor, LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION);
+}
 
 // Returns the number of known AMDGPU processor fact rows.
 iree_host_size_t loom_amdgpu_target_info_processor_count(void);

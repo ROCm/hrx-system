@@ -19,6 +19,7 @@ except ModuleNotFoundError:
 
 CI_DRY_RUN_COMMANDS = (
     ("iree-bazel-cpu",),
+    ("iree-bazel-repository-build",),
     ("iree-bazel-cpu-asan",),
     ("iree-bazel-cpu-msan",),
     ("iree-bazel-cpu-tsan",),

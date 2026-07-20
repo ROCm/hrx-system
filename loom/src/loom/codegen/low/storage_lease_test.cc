@@ -218,6 +218,79 @@ TEST_F(LowStorageLeaseTest, BuildsSyntheticTargetLeaseRecords) {
   EXPECT_EQ(table.records[2].scheduled_ordinal, 1u);
 }
 
+TEST_F(LowStorageLeaseTest, BuildsReleaseActionIndexByPacket) {
+  const loom_low_storage_release_action_t actions[4] = {
+      {
+          /*.insertion_packet_index=*/1,
+          /*.insertion_node_index=*/5,
+      },
+      {
+          /*.insertion_packet_index=*/0,
+          /*.insertion_node_index=*/2,
+      },
+      {
+          /*.insertion_packet_index=*/1,
+          /*.insertion_node_index=*/6,
+      },
+      {
+          /*.insertion_packet_index=*/2,
+          /*.insertion_node_index=*/7,
+      },
+  };
+  loom_low_storage_release_action_index_t index = {};
+  IREE_ASSERT_OK(loom_low_storage_release_action_index_build(
+      actions, IREE_ARRAYSIZE(actions),
+      LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_PACKET,
+      /*key_count=*/3, &arena_, &index));
+
+  ASSERT_EQ(index.key_count, 3u);
+  ASSERT_NE(index.first_action_indices, nullptr);
+  ASSERT_NE(index.next_action_indices, nullptr);
+  EXPECT_EQ(index.first_action_indices[0], 1u);
+  EXPECT_EQ(index.next_action_indices[1],
+            LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE);
+  EXPECT_EQ(index.first_action_indices[1], 0u);
+  EXPECT_EQ(index.next_action_indices[0], 2u);
+  EXPECT_EQ(index.next_action_indices[2],
+            LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE);
+  EXPECT_EQ(index.first_action_indices[2], 3u);
+  EXPECT_EQ(index.next_action_indices[3],
+            LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE);
+}
+
+TEST_F(LowStorageLeaseTest, BuildsReleaseActionIndexByNode) {
+  const loom_low_storage_release_action_t actions[3] = {
+      {
+          /*.insertion_packet_index=*/7,
+          /*.insertion_node_index=*/2,
+      },
+      {
+          /*.insertion_packet_index=*/8,
+          /*.insertion_node_index=*/1,
+      },
+      {
+          /*.insertion_packet_index=*/9,
+          /*.insertion_node_index=*/2,
+      },
+  };
+  loom_low_storage_release_action_index_t index = {};
+  IREE_ASSERT_OK(loom_low_storage_release_action_index_build(
+      actions, IREE_ARRAYSIZE(actions),
+      LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_NODE,
+      /*key_count=*/3, &arena_, &index));
+
+  ASSERT_EQ(index.key_count, 3u);
+  EXPECT_EQ(index.first_action_indices[0],
+            LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE);
+  EXPECT_EQ(index.first_action_indices[1], 1u);
+  EXPECT_EQ(index.next_action_indices[1],
+            LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE);
+  EXPECT_EQ(index.first_action_indices[2], 0u);
+  EXPECT_EQ(index.next_action_indices[0], 2u);
+  EXPECT_EQ(index.next_action_indices[2],
+            LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE);
+}
+
 TEST_F(LowStorageLeaseTest, BuildsEmptyLeaseTable) {
   const loom_low_storage_lease_provider_t provider = {
       /*.user_data=*/{},
@@ -229,56 +302,6 @@ TEST_F(LowStorageLeaseTest, BuildsEmptyLeaseTable) {
   EXPECT_EQ(table.schedule, &state_.schedule);
   EXPECT_EQ(table.record_count, 0u);
   EXPECT_EQ(table.records, nullptr);
-}
-
-iree_status_t InvalidAttachmentLeaseQuery(
-    void* user_data, const loom_low_schedule_table_t* schedule,
-    const loom_low_schedule_node_t* node, loom_low_storage_lease_emit_fn_t emit,
-    void* emit_user_data) {
-  (void)user_data;
-  (void)schedule;
-  (void)node;
-  return EmitEvent(emit, emit_user_data, LOOM_LOW_STORAGE_LEASE_SOURCE_READ,
-                   LOOM_LOW_STORAGE_LEASE_ATTACHMENT_OPERAND, 2, 0, 1,
-                   kSyntheticReleaseStore, IREE_SV("synthetic.store"),
-                   LOOM_LOW_STORAGE_LEASE_FLAG_STARTS_AT_ISSUE);
-}
-
-TEST_F(LowStorageLeaseTest, RejectsInvalidAttachmentIndex) {
-  const loom_low_storage_lease_provider_t provider = {
-      /*.user_data=*/{},
-      /*.query=*/InvalidAttachmentLeaseQuery,
-  };
-  loom_low_storage_lease_table_t table = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_low_storage_lease_build(
-                            &state_.schedule, &provider, &arena_, &table));
-}
-
-iree_status_t InvalidFlagsLeaseQuery(void* user_data,
-                                     const loom_low_schedule_table_t* schedule,
-                                     const loom_low_schedule_node_t* node,
-                                     loom_low_storage_lease_emit_fn_t emit,
-                                     void* emit_user_data) {
-  (void)user_data;
-  (void)schedule;
-  (void)node;
-  return EmitEvent(emit, emit_user_data, LOOM_LOW_STORAGE_LEASE_SOURCE_READ,
-                   LOOM_LOW_STORAGE_LEASE_ATTACHMENT_OPERAND, 0, 0, 1,
-                   kSyntheticReleaseStore, IREE_SV("synthetic.store"),
-                   LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_BEFORE_BOUNDARY |
-                       LOOM_LOW_STORAGE_LEASE_FLAG_MAY_CARRY_ACROSS_BOUNDARY);
-}
-
-TEST_F(LowStorageLeaseTest, RejectsContradictoryBoundaryFlags) {
-  const loom_low_storage_lease_provider_t provider = {
-      /*.user_data=*/{},
-      /*.query=*/InvalidFlagsLeaseQuery,
-  };
-  loom_low_storage_lease_table_t table = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_low_storage_lease_build(
-                            &state_.schedule, &provider, &arena_, &table));
 }
 
 }  // namespace

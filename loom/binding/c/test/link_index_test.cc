@@ -7,6 +7,7 @@
 #include "loomc/link_index.h"
 
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -86,6 +87,31 @@ void FinishSucceeded(loomc_link_index_builder_t* builder,
   ASSERT_TRUE(loomc_result_succeeded(result_ptr.get()));
   ASSERT_NE(link_index, nullptr);
   *out_link_index = LinkIndexPtr(link_index);
+}
+
+TEST(LinkIndexTest, RejectsInvalidBlockSizes) {
+  ContextPtr context = CreateContext();
+  loomc_link_index_builder_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_INDEX_BUILDER_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.block_size=*/1,
+  };
+  loomc_link_index_builder_t* builder =
+      reinterpret_cast<loomc_link_index_builder_t*>(0x1);
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_link_index_builder_create(context.get(), &options,
+                                      loomc_allocator_system(), &builder));
+  EXPECT_EQ(builder, nullptr);
+
+  options.block_size = std::numeric_limits<loomc_host_size_t>::max();
+  builder = reinterpret_cast<loomc_link_index_builder_t*>(0x1);
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_OUT_OF_RANGE,
+      loomc_link_index_builder_create(context.get(), &options,
+                                      loomc_allocator_system(), &builder));
+  EXPECT_EQ(builder, nullptr);
 }
 
 std::vector<uint8_t> WriteBytecodeModule(const char* source_text) {

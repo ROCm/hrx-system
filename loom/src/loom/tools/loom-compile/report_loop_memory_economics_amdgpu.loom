@@ -1,0 +1,20 @@
+amdgpu.target<gfx1100> @gfx1100_target
+
+kernel.def target(@gfx1100_target) export("compile_report_loop_memory_economics") @compile_report_loop_memory_economics() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %one_index = index.constant 1 : index
+  %four_index = index.constant 4 : index
+  %global_input = buffer.assume.memory_space<global> %input : buffer
+  %global_output = buffer.assume.memory_space<global> %output : buffer
+  %input_view = buffer.view %global_input[%zero_offset] : buffer -> view<4xi32, #dense>
+  %output_view = buffer.view %global_output[%zero_offset] : buffer -> view<4xi32, #dense>
+  scf.for %i = [%zero_index to %four_index step %one_index] {
+    %value = view.load %input_view[%i] : view<4xi32, #dense> -> i32
+    view.store %value, %output_view[%i] : i32, view<4xi32, #dense>
+  }
+  kernel.return
+}

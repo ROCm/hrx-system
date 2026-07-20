@@ -13,6 +13,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/text_asm.h"
+#include "loom/error/error_catalog.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -21,6 +22,8 @@
 #include "loom/sanitizer/site_table.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/matrix/contract.h"
+#include "loom/target/arch/amdgpu/planning/wait_counters.h"
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
@@ -68,6 +71,79 @@ bool SupportsWgpMode(const loom_amdgpu_processor_info_t* processor) {
     case LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX9:
     case LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125:
       return false;
+  }
+  return false;
+}
+
+bool HasTargetCapabilityString(const loom_target_compile_report_t& report,
+                               const char* namespace_name, const char* key,
+                               const char* value) {
+  const iree_string_view_t expected_namespace =
+      iree_make_cstring_view(namespace_name);
+  const iree_string_view_t expected_key = iree_make_cstring_view(key);
+  const iree_string_view_t expected_value = iree_make_cstring_view(value);
+  for (const loom_target_compile_report_vec_t* vec =
+           report.target_capability_rows.head;
+       vec != nullptr; vec = vec->next) {
+    const loom_target_compile_report_target_capability_row_t* rows =
+        static_cast<const loom_target_compile_report_target_capability_row_t*>(
+            loom_target_compile_report_vec_const_rows(vec));
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      const loom_target_compile_report_target_capability_row_t& row = rows[i];
+      if (row.value_kind ==
+              LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_STRING &&
+          iree_string_view_equal(row.namespace_name, expected_namespace) &&
+          iree_string_view_equal(row.key, expected_key) &&
+          iree_string_view_equal(row.value_string, expected_value)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool HasTargetCapabilityU64(const loom_target_compile_report_t& report,
+                            const char* namespace_name, const char* key,
+                            uint64_t value) {
+  const iree_string_view_t expected_namespace =
+      iree_make_cstring_view(namespace_name);
+  const iree_string_view_t expected_key = iree_make_cstring_view(key);
+  for (const loom_target_compile_report_vec_t* vec =
+           report.target_capability_rows.head;
+       vec != nullptr; vec = vec->next) {
+    const loom_target_compile_report_target_capability_row_t* rows =
+        static_cast<const loom_target_compile_report_target_capability_row_t*>(
+            loom_target_compile_report_vec_const_rows(vec));
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      const loom_target_compile_report_target_capability_row_t& row = rows[i];
+      if (row.value_kind == LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_U64 &&
+          iree_string_view_equal(row.namespace_name, expected_namespace) &&
+          iree_string_view_equal(row.key, expected_key) &&
+          row.value_u64 == value) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool HasWaitCounter(const loom_target_compile_report_t& report,
+                    uint32_t counter_id, const char* counter_name) {
+  const iree_string_view_t expected_name = iree_make_cstring_view(counter_name);
+  for (const loom_target_compile_report_vec_t* vec =
+           report.wait_counter_rows.head;
+       vec != nullptr; vec = vec->next) {
+    const loom_target_compile_report_wait_counter_row_t* rows =
+        static_cast<const loom_target_compile_report_wait_counter_row_t*>(
+            loom_target_compile_report_vec_const_rows(vec));
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      const loom_target_compile_report_wait_counter_row_t& row = rows[i];
+      if (row.counter_id == counter_id &&
+          iree_string_view_equal(row.counter_name, expected_name) &&
+          row.summary.action_count > 0) {
+        return true;
+      }
+    }
   }
   return false;
 }
@@ -309,6 +385,91 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
         ParseSource(iree_make_cstring_view(kSource), out_module));
   }
 
+  void ParseGfx1250ClusteredKernel(loom_module_t** out_module) {
+    static const char kSource[] =
+        "amdgpu.target<gfx1250> @gfx_target\n"
+        "kernel.def target(@gfx_target) @loom_kernel() {\n"
+        "  %c1 = index.constant 1 : index\n"
+        "  %c2 = index.constant 2 : index\n"
+        "  %c4 = index.constant 4 : index\n"
+        "  %c64 = index.constant 64 : index\n"
+        "  kernel.launch.config workgroups(%c4, %c4, %c4) "
+        "workgroup_size(%c64, %c1, %c1) cluster_size(%c2, %c2, %c2) : "
+        "index\n"
+        "} launch(%output: buffer) {\n"
+        "  %workgroup_x = kernel.workgroup.id<x> : index\n"
+        "  %workgroup_y = kernel.workgroup.id<y> : index\n"
+        "  %workgroup_z = kernel.workgroup.id<z> : index\n"
+        "  %cluster_x = kernel.cluster.id<x> : index\n"
+        "  %cluster_y = kernel.cluster.id<y> : index\n"
+        "  %cluster_z = kernel.cluster.id<z> : index\n"
+        "  %flat_local = kernel.cluster.workgroup.flat_id : index\n"
+        "  %sum0 = index.add %workgroup_x, %workgroup_y : index\n"
+        "  %sum1 = index.add %sum0, %workgroup_z : index\n"
+        "  %sum2 = index.add %sum1, %cluster_x : index\n"
+        "  %sum3 = index.add %sum2, %cluster_y : index\n"
+        "  %sum4 = index.add %sum3, %cluster_z : index\n"
+        "  %sum = index.add %sum4, %flat_local : index\n"
+        "  %value = index.cast %sum : index to i32\n"
+        "  %result = vector.from_elements %value : vector<1xi32>\n"
+        "  %zero = index.constant 0 : offset\n"
+        "  %output_view = buffer.view %output[%zero] : buffer -> "
+        "view<1xi32, #dense>\n"
+        "  vector.store %result, %output_view[0] : vector<1xi32>, "
+        "view<1xi32, #dense>\n"
+        "  kernel.return\n"
+        "}\n";
+    ASSERT_NO_FATAL_FAILURE(
+        ParseSource(iree_make_cstring_view(kSource), out_module));
+  }
+
+  void ParseWorkgroupStorageKernel(iree_string_view_t target_config,
+                                   iree_string_view_t processor_name,
+                                   uint64_t byte_length,
+                                   loom_module_t** out_module) {
+    std::string source = "amdgpu.target<";
+    source.append(target_config.data, target_config.size);
+    source += "> @gfx_target {processor = \"";
+    source.append(processor_name.data, processor_name.size);
+    source +=
+        "\"}\n"
+        "low.kernel.def target(@gfx_target) workgroup_size(1, 1, 1) "
+        "@loom_kernel() {\n"
+        "  %storage = low.storage.reserve {byte_alignment = 16, "
+        "byte_length = ";
+    source += std::to_string(byte_length);
+    source +=
+        "} : low.storage<workgroup>\n"
+        "  low.return\n"
+        "}\n";
+    ASSERT_NO_FATAL_FAILURE(ParseSource(
+        iree_make_string_view(source.data(), source.size()), out_module));
+  }
+
+  void EmitWorkgroupStorageKernel(
+      iree_string_view_t target_config, iree_string_view_t processor_name,
+      uint64_t byte_length, DiagnosticCapture* capture, bool* out_emitted,
+      loom_amdgpu_hal_kernel_library_t* out_library) {
+    loom_module_t* module = nullptr;
+    ASSERT_NO_FATAL_FAILURE(ParseWorkgroupStorageKernel(
+        target_config, processor_name, byte_length, &module));
+
+    loom_amdgpu_hal_kernel_library_options_t options = {
+        /*.processor=*/{},
+        /*.target_selection=*/{},
+        /*.runtime_globals=*/{},
+        /*.data_symbols=*/{},
+        /*.data_symbol_count=*/{},
+        /*.diagnostic_sink=*/capture->sink(),
+        /*.source_resolver=*/{},
+        /*.max_errors=*/20,
+    };
+    iree_status_t status = loom_amdgpu_emit_hal_kernel_library(
+        module, &options, iree_allocator_system(), out_emitted, out_library);
+    loom_module_free(module);
+    IREE_ASSERT_OK(status);
+  }
+
   void ParseGfx11KernelWithArguments(loom_module_t** out_module) {
     static const char kSource[] =
         "amdgpu.target<gfx1100> @gfx_target\n"
@@ -326,6 +487,42 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
         "  %view = low.op<amdgpu.s_load_dwordx2_offset_only>(%kernarg) "
         "{offset = 0} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>\n"
         "  low.return\n"
+        "}\n";
+    ASSERT_NO_FATAL_FAILURE(
+        ParseSource(iree_make_cstring_view(kSource), out_module));
+  }
+
+  void ParseGfx1250TensorLoadKernel(loom_module_t** out_module) {
+    static const char kSource[] =
+        "amdgpu.target<gfx1250> @gfx_target\n"
+        "kernel.def target(@gfx_target) @tensor_load() {\n"
+        "  %one = index.constant 1 : index\n"
+        "  %size = index.constant 64 : index\n"
+        "  kernel.launch.config workgroups(%one, %one, %one) "
+        "workgroup_size(%size, %one, %one) : index\n"
+        "} launch(%input: buffer) {\n"
+        "  %zero = index.constant 0 : offset\n"
+        "  %bytes = index.constant 16384 : offset\n"
+        "  %d0 = vector.constant 0 : vector<4xi32>\n"
+        "  %d1 = vector.constant 0 : vector<8xi32>\n"
+        "  %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : "
+        "vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor\n"
+        "  %global = buffer.assume.memory_space<global> %input : buffer\n"
+        "  %source = buffer.view %global[%zero] : buffer -> "
+        "view<64x64xf32, #dense>\n"
+        "  %scratch = buffer.alloca %bytes {base_alignment = 256, "
+        "memory_space = workgroup} : buffer\n"
+        "  %dest = buffer.view %scratch[%zero] : buffer -> "
+        "view<64x64xf32, #dense>\n"
+        "  %copy = kernel.async.tensor.load.to.lds %source to %dest using "
+        "%descriptor {cache_scope = cu, cache_temporal = regular} : "
+        "view<64x64xf32, #dense> to view<64x64xf32, #dense>, "
+        "kernel.tensor.lds.descriptor -> kernel.async.token\n"
+        "  %group = kernel.async.group %copy : kernel.async.token -> "
+        "kernel.async.group\n"
+        "  kernel.async.wait %group {newer_groups = 0} : "
+        "kernel.async.group\n"
+        "  kernel.return\n"
         "}\n";
     ASSERT_NO_FATAL_FAILURE(
         ParseSource(iree_make_cstring_view(kSource), out_module));
@@ -579,6 +776,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsDynamicLocalSizeKernel) {
   EXPECT_NE(hsaco.find("loom_kernel.kd"), std::string::npos);
   EXPECT_NE(hsaco.find(".max_flat_workgroup_size"), std::string::npos);
   EXPECT_EQ(hsaco.find(".reqd_workgroup_size"), std::string::npos);
+  EXPECT_EQ(hsaco.find(".cluster_dims"), std::string::npos);
 
   ASSERT_NE(library.artifact_manifest.contents.data, nullptr);
   std::string manifest(
@@ -595,6 +793,170 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsDynamicLocalSizeKernel) {
   loom_module_free(module);
 }
 
+TEST_F(AmdgpuHalKernelLibraryTest, EmitsWorkgroupClusterDimensions) {
+  loom_module_t* module = nullptr;
+  ASSERT_NO_FATAL_FAILURE(ParseGfx1250ClusteredKernel(&module));
+
+  DiagnosticCapture capture;
+  ASSERT_NO_FATAL_FAILURE(RunPreparedLowPipeline(module, &capture));
+
+  loom_target_artifact_manifest_collect_options_t artifact_manifest_options;
+  loom_target_artifact_manifest_collect_options_initialize(
+      &artifact_manifest_options);
+  artifact_manifest_options.mode = LOOM_TARGET_ARTIFACT_MANIFEST_MODE_SUMMARY;
+
+  loom_amdgpu_hal_kernel_library_t library = {};
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      /*.processor=*/{},
+      /*.target_selection=*/{},
+      /*.runtime_globals=*/{},
+      /*.data_symbols=*/{},
+      /*.data_symbol_count=*/{},
+      /*.diagnostic_sink=*/capture.sink(),
+      /*.source_resolver=*/{},
+      /*.max_errors=*/20,
+      /*.report=*/nullptr,
+      /*.capture_target_listing=*/true,
+      /*.artifact_name=*/{},
+      /*.artifact_manifest_identifier=*/{},
+      /*.artifact_manifest=*/artifact_manifest_options,
+  };
+  bool emitted = false;
+  IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
+      module, &options, iree_allocator_system(), &emitted, &library));
+
+  EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
+  EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
+  ASSERT_NE(library.hsaco_data, nullptr);
+  std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
+                    library.hsaco_data_length);
+  EXPECT_NE(hsaco.find(".cluster_dims"), std::string::npos);
+
+  ASSERT_NE(library.target_listing_data, nullptr);
+  const std::string listing(library.target_listing_data,
+                            library.target_listing_data_length);
+  EXPECT_NE(listing.find(".amdhsa_code_object_version 6\n"), std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("      .cluster_dims:\n"
+                         "        - 2\n"
+                         "        - 2\n"
+                         "        - 2\n"),
+            std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("s_and_b32_rhs_inline s2, ttmp6, 15\n"),
+            std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("s_lshl1_add_u32 s2, ttmp9, s2\n"), std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("s_and_b32 s3, 65535, ttmp7\n"), std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("s_getreg_b32 s3, "
+                         "hwreg(HW_REG_IB_STS2, 21, 4)\n"),
+            std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("  .amdhsa_system_sgpr_workgroup_id_x 0\n"),
+            std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("  .amdhsa_system_sgpr_workgroup_id_y 0\n"),
+            std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("  .amdhsa_system_sgpr_workgroup_id_z 0\n"),
+            std::string::npos)
+      << listing;
+  EXPECT_NE(listing.find("  .amdhsa_next_free_sgpr 10\n"), std::string::npos)
+      << listing;
+
+  ASSERT_NE(library.artifact_manifest.contents.data, nullptr);
+  const std::string manifest(
+      reinterpret_cast<const char*>(library.artifact_manifest.contents.data),
+      library.artifact_manifest.contents.data_length);
+  EXPECT_NE(manifest.find("\"cluster_size\":[2,2,2]"), std::string::npos)
+      << manifest;
+
+  loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                              iree_allocator_system());
+  loom_module_free(module);
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest,
+       RejectsGfx11FinalWorkgroupStorageAboveTargetLimit) {
+  DiagnosticCapture capture;
+  loom_amdgpu_hal_kernel_library_t library = {};
+  bool emitted = true;
+  ASSERT_NO_FATAL_FAILURE(
+      EmitWorkgroupStorageKernel(IREE_SV("gfx1100"), IREE_SV("gfx1100"), 65540,
+                                 &capture, &emitted, &library));
+
+  EXPECT_FALSE(emitted);
+  ASSERT_EQ(capture.diagnostics.size(), 1u) << DiagnosticSummary(capture);
+  const CapturedDiagnostic* diagnostic =
+      FindDiagnostic(capture, LOOM_ERR_TARGET_051);
+  ASSERT_NE(diagnostic, nullptr);
+  EXPECT_EQ(GetStringParam(*diagnostic, 0), "loom_kernel");
+  EXPECT_EQ(GetStringParam(*diagnostic, 1), "gfx_target");
+  ASSERT_EQ(diagnostic->params.size(), 4u);
+  ASSERT_EQ(diagnostic->params[2].kind, LOOM_PARAM_U64);
+  EXPECT_EQ(diagnostic->params[2].u64, 65540u);
+  ASSERT_EQ(diagnostic->params[3].kind, LOOM_PARAM_U64);
+  EXPECT_EQ(diagnostic->params[3].u64, 65536u);
+
+  loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                              iree_allocator_system());
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest, AcceptsGfx125xLargeWorkgroupStorage) {
+  static constexpr const char* kProcessors[] = {"gfx1250", "gfx1251"};
+  for (const char* processor_name : kProcessors) {
+    SCOPED_TRACE(processor_name);
+    DiagnosticCapture capture;
+    loom_amdgpu_hal_kernel_library_t library = {};
+    bool emitted = false;
+    ASSERT_NO_FATAL_FAILURE(EmitWorkgroupStorageKernel(
+        IREE_SV("gfx1250"), iree_make_cstring_view(processor_name), 114688,
+        &capture, &emitted, &library));
+
+    EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
+    EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
+    EXPECT_NE(library.hsaco_data, nullptr);
+    EXPECT_NE(iree_string_view_find(library.target_key,
+                                    iree_make_cstring_view(processor_name), 0),
+              IREE_STRING_VIEW_NPOS);
+
+    loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                                iree_allocator_system());
+  }
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest,
+       RejectsGfx125xWorkgroupStorageAboveTargetLimit) {
+  static constexpr const char* kProcessors[] = {"gfx1250", "gfx1251"};
+  for (const char* processor_name : kProcessors) {
+    SCOPED_TRACE(processor_name);
+    DiagnosticCapture capture;
+    loom_amdgpu_hal_kernel_library_t library = {};
+    bool emitted = true;
+    ASSERT_NO_FATAL_FAILURE(EmitWorkgroupStorageKernel(
+        IREE_SV("gfx1250"), iree_make_cstring_view(processor_name), 327681,
+        &capture, &emitted, &library));
+
+    EXPECT_FALSE(emitted);
+    ASSERT_EQ(capture.diagnostics.size(), 1u) << DiagnosticSummary(capture);
+    const CapturedDiagnostic* diagnostic =
+        FindDiagnostic(capture, LOOM_ERR_TARGET_051);
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_EQ(GetStringParam(*diagnostic, 0), "loom_kernel");
+    EXPECT_EQ(GetStringParam(*diagnostic, 1), "gfx_target");
+    ASSERT_EQ(diagnostic->params.size(), 4u);
+    ASSERT_EQ(diagnostic->params[2].kind, LOOM_PARAM_U64);
+    EXPECT_EQ(diagnostic->params[2].u64, 327681u);
+    ASSERT_EQ(diagnostic->params[3].kind, LOOM_PARAM_U64);
+    EXPECT_EQ(diagnostic->params[3].u64, 327680u);
+
+    loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                                iree_allocator_system());
+  }
+}
+
 TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedSupportedProcessor) {
   iree_host_size_t linked_supported_count = 0;
   const iree_host_size_t processor_count =
@@ -603,10 +965,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedSupportedProcessor) {
     const loom_amdgpu_processor_info_t* processor =
         loom_amdgpu_target_info_processor_at(i);
     ASSERT_NE(processor, nullptr);
-    bool hsaco_supported = false;
-    IREE_ASSERT_OK(loom_amdgpu_target_info_processor_supports_hsaco(
-        processor, &hsaco_supported));
-    if (!hsaco_supported) {
+    if (!loom_amdgpu_processor_supports_hsaco(processor)) {
       continue;
     }
     if (!IsProcessorDescriptorSetLinked(processor)) {
@@ -646,9 +1005,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedSupportedProcessor) {
                 processor->elf.machine_flags | processor->elf.feature_flags)
           << StringViewToString(processor->name);
     }
-    EXPECT_NE(
-        iree_string_view_find(library.executable_format, processor->name, 0),
-        IREE_STRING_VIEW_NPOS)
+    EXPECT_NE(iree_string_view_find(library.target_key, processor->name, 0),
+              IREE_STRING_VIEW_NPOS)
         << StringViewToString(processor->name);
     std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
                       library.hsaco_data_length);
@@ -660,6 +1018,132 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedSupportedProcessor) {
     loom_module_free(module);
   }
   EXPECT_GE(linked_supported_count, 1u);
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
+  struct MatrixFeatureReportCase {
+    // Concrete AMDGPU processor to compile for.
+    const char* processor_name;
+    // Matrix feature profile expected for |processor_name|.
+    const char* profile_name;
+    // Active matrix feature expected for |processor_name|.
+    const char* feature_name;
+    // Native FP8/BF8 support kind expected for |processor_name|.
+    const char* fp8_bf8_native_kind;
+  };
+  static constexpr MatrixFeatureReportCase kCases[] = {
+      {"gfx942", "mfma-gfx940", "mfma-gfx940-fp8", "unscaled"},
+      {"gfx950", "mfma-gfx950", "mfma-gfx950-scale-f8f6f4", "unscaled_scaled"},
+      {"gfx1100", "wmma-gfx11", "wmma-gfx11", "none"},
+      {"gfx1200", "wmma-gfx12", "wmma-gfx12", "unscaled"},
+      {"gfx1250", "wmma-gfx1250", "wmma-gfx1250-scale-f8f6f4",
+       "unscaled_scaled"},
+  };
+
+  iree_host_size_t checked_count = 0;
+  for (const MatrixFeatureReportCase& test_case : kCases) {
+    const loom_amdgpu_processor_info_t* processor =
+        loom_amdgpu_target_info_find_processor(
+            iree_make_cstring_view(test_case.processor_name));
+    ASSERT_NE(processor, nullptr) << test_case.processor_name;
+    if (!loom_amdgpu_processor_supports_hsaco(processor) ||
+        !IsProcessorDescriptorSetLinked(processor)) {
+      continue;
+    }
+    ++checked_count;
+
+    loom_module_t* module = nullptr;
+    ASSERT_NO_FATAL_FAILURE(ParseKernelForProcessor(processor, &module));
+
+    loom_target_compile_report_t report = {};
+    loom_target_compile_report_initialize(&report, iree_allocator_system());
+    DiagnosticCapture capture;
+    loom_amdgpu_hal_kernel_library_t library = {};
+    loom_amdgpu_hal_kernel_library_options_t options = {
+        /*.processor=*/{},
+        /*.target_selection=*/{},
+        /*.runtime_globals=*/{},
+        /*.data_symbols=*/{},
+        /*.data_symbol_count=*/{},
+        /*.diagnostic_sink=*/capture.sink(),
+        /*.source_resolver=*/{},
+        /*.max_errors=*/20,
+        /*.report=*/&report,
+    };
+    bool emitted = false;
+    IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
+        module, &options, iree_allocator_system(), &emitted, &library))
+        << test_case.processor_name;
+
+    EXPECT_TRUE(emitted) << test_case.processor_name;
+    EXPECT_TRUE(capture.diagnostics.empty()) << test_case.processor_name;
+    EXPECT_TRUE(HasTargetCapabilityString(
+        report, "amdgpu", "matrix_feature_profile", test_case.profile_name))
+        << test_case.processor_name;
+    EXPECT_TRUE(HasTargetCapabilityString(report, "amdgpu", "matrix_feature",
+                                          test_case.feature_name))
+        << test_case.processor_name;
+    EXPECT_TRUE(HasTargetCapabilityString(report, "amdgpu",
+                                          "matrix_fp8_native_kind",
+                                          test_case.fp8_bf8_native_kind))
+        << test_case.processor_name;
+    EXPECT_TRUE(HasTargetCapabilityString(report, "amdgpu",
+                                          "matrix_bf8_native_kind",
+                                          test_case.fp8_bf8_native_kind))
+        << test_case.processor_name;
+    loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
+    ASSERT_TRUE(loom_amdgpu_matrix_feature_bits_from_profile(
+        processor->features.matrix, &feature_bits))
+        << test_case.processor_name;
+    EXPECT_TRUE(HasTargetCapabilityU64(report, "amdgpu", "matrix_feature_bits",
+                                       feature_bits))
+        << test_case.processor_name;
+    loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                                iree_allocator_system());
+    loom_target_compile_report_deinitialize(&report);
+    loom_module_free(module);
+  }
+  EXPECT_GE(checked_count, 1u);
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest, RecordsTensorWaitCounter) {
+  if (!IsDescriptorSetLinked(IREE_SV("amdgpu.rdna4.gfx125x.core"))) {
+    GTEST_SKIP() << "amdgpu.rdna4.gfx125x.core is not linked in this build";
+  }
+
+  loom_module_t* module = nullptr;
+  ASSERT_NO_FATAL_FAILURE(ParseGfx1250TensorLoadKernel(&module));
+  DiagnosticCapture capture;
+  ASSERT_NO_FATAL_FAILURE(RunPreparedLowPipeline(module, &capture));
+
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  report.requested_detail_flags = LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN;
+  loom_amdgpu_hal_kernel_library_t library = {};
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      /*.processor=*/{},
+      /*.target_selection=*/{},
+      /*.runtime_globals=*/{},
+      /*.data_symbols=*/{},
+      /*.data_symbol_count=*/{},
+      /*.diagnostic_sink=*/capture.sink(),
+      /*.source_resolver=*/{},
+      /*.max_errors=*/20,
+      /*.report=*/&report,
+  };
+  bool emitted = false;
+  IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
+      module, &options, iree_allocator_system(), &emitted, &library));
+
+  EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
+  EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
+  EXPECT_TRUE(
+      HasWaitCounter(report, LOOM_AMDGPU_WAIT_COUNTER_TENSOR, "tensor"));
+
+  loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                              iree_allocator_system());
+  loom_target_compile_report_deinitialize(&report);
+  loom_module_free(module);
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest, CapturesCompleteGfx11KernelDirectives) {
@@ -755,10 +1239,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, CapturesTargetSpecificKernelDirectives) {
         loom_amdgpu_target_info_find_processor(
             iree_make_cstring_view(processor_name));
     ASSERT_NE(processor, nullptr) << processor_name;
-    bool hsaco_supported = false;
-    IREE_ASSERT_OK(loom_amdgpu_target_info_processor_supports_hsaco(
-        processor, &hsaco_supported));
-    if (!hsaco_supported || !IsProcessorDescriptorSetLinked(processor)) {
+    if (!loom_amdgpu_processor_supports_hsaco(processor) ||
+        !IsProcessorDescriptorSetLinked(processor)) {
       continue;
     }
 

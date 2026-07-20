@@ -67,6 +67,16 @@ static bool loom_target_pipeline_sanitizer_has_checks(
   return iree_any_bit_set(context->sanitizer_options.checks, checks);
 }
 
+static bool loom_target_pipeline_source_to_low_has_memory_diagnostics(
+    const loom_target_pipeline_build_context_t* context) {
+  if (!context->options) {
+    return false;
+  }
+  return iree_any_bit_set(
+      context->options->source_to_low_legality_diagnostic_flags,
+      LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_MEMORY_ACCESS);
+}
+
 static iree_status_t loom_target_pipeline_build_string_attr(
     loom_builder_t* builder, iree_string_view_t name, iree_string_view_t value,
     loom_named_attr_t* out_attr) {
@@ -129,6 +139,13 @@ static iree_status_t loom_target_pipeline_build_sanitizer_race_observations(
   return loom_target_pipeline_build_run_with_string_option(
       builder, IREE_SV("sanitizer-insert-race-observations"), IREE_SV("checks"),
       checks_value);
+}
+
+static iree_status_t loom_target_pipeline_build_vector_memory_footprint(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  return loom_target_pipeline_build_run(builder,
+                                        IREE_SV("vector-memory-footprint"));
 }
 
 static iree_status_t loom_target_pipeline_build_target_function_body(
@@ -236,6 +253,12 @@ static iree_status_t loom_target_pipeline_build_cleanup(
   return loom_target_pipeline_build_run(builder, IREE_SV("cse"));
 }
 
+static iree_status_t loom_target_pipeline_build_cleanup_body(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  return loom_target_pipeline_build_cleanup(builder);
+}
+
 static iree_status_t
 loom_target_pipeline_build_source_normalization_before_legalize(
     loom_builder_t* builder, void* user_data) {
@@ -264,14 +287,19 @@ loom_target_pipeline_build_source_safe_normalization_after_legalize(
 }
 
 static iree_status_t
-loom_target_pipeline_build_cfg_source_normalization_after_legalize(
+loom_target_pipeline_build_cfg_source_finalization_after_legalize(
     loom_builder_t* builder, void* user_data) {
-  IREE_RETURN_IF_ERROR(
-      loom_target_pipeline_build_source_safe_normalization_after_legalize(
-          builder, user_data));
+  (void)user_data;
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_run(builder, IREE_SV("unroll-scf-for")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup(builder));
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_run(builder, IREE_SV("sroa-vector-banks")));
+  loom_op_t* if_changed_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_cleanup_body, NULL, &if_changed_op));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
+      builder, IREE_SV("sink-single-use-reads")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
       builder, IREE_SV("promote-private-fragments")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup(builder));
@@ -295,6 +323,8 @@ static iree_status_t loom_target_pipeline_build_low_cleanup_body(
     IREE_RETURN_IF_ERROR(
         loom_target_pipeline_build_run(builder, IREE_SV("cfg-simplify")));
   }
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
+      builder, IREE_SV("low-decompose-cfg-tuples")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup(builder));
   return loom_target_pipeline_build_run(builder, IREE_SV("low-dce"));
 }
@@ -341,14 +371,18 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_authoring_expansion(builder));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_target_legalize(builder, IREE_SV("eager")));
-  loom_pass_ir_body_build_fn_t source_finish_body =
-      control_flow_lowering == LOOM_TARGET_CONTROL_FLOW_LOWERING_STRUCTURED_LOW
-          ? loom_target_pipeline_build_source_safe_normalization_after_legalize
-          : loom_target_pipeline_build_cfg_source_normalization_after_legalize;
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
-      builder, source_finish_body, user_data, &for_op));
+      builder,
+      loom_target_pipeline_build_source_safe_normalization_after_legalize,
+      user_data, &for_op));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_target_legalize(builder, IREE_SV("eager")));
+  if (control_flow_lowering == LOOM_TARGET_CONTROL_FLOW_LOWERING_CFG) {
+    IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
+        builder,
+        loom_target_pipeline_build_cfg_source_finalization_after_legalize,
+        user_data, &for_op));
+  }
   if (loom_target_pipeline_sanitizer_has_checks(
           context, LOOM_SANITIZER_CHECK_ACCESS | LOOM_SANITIZER_CHECK_VALUE |
                        LOOM_SANITIZER_CHECK_OPERATION)) {
@@ -361,6 +395,11 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
     IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
         builder, loom_target_pipeline_build_sanitizer_race_observations,
         user_data, &for_op));
+  }
+  if (loom_target_pipeline_source_to_low_has_memory_diagnostics(context)) {
+    IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
+        builder, loom_target_pipeline_build_vector_memory_footprint, user_data,
+        &for_op));
   }
   IREE_RETURN_IF_ERROR(loom_target_pipeline_contribute_phase(
       builder, context, LOOM_TARGET_PIPELINE_PHASE_SOURCE_TO_LOW));
@@ -383,9 +422,14 @@ loom_target_pipeline_build_source_low_diagnostic_artifacts_body(
     loom_builder_t* builder, void* user_data) {
   const loom_target_pipeline_build_context_t* context =
       (const loom_target_pipeline_build_context_t*)user_data;
+  loom_op_t* for_op = NULL;
+  if (loom_target_pipeline_source_to_low_has_memory_diagnostics(context)) {
+    IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
+        builder, loom_target_pipeline_build_vector_memory_footprint, user_data,
+        &for_op));
+  }
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_source_to_low(builder, context->options));
-  loom_op_t* for_op = NULL;
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
       builder, loom_target_pipeline_build_source_low_artifact_preparation,
       user_data, &for_op));

@@ -216,8 +216,8 @@
         "contains": {
           "unordered": [
             "\"target_key\":\"gfx11-generic\"",
-            "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
-            "\"status\":\"OK\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"local_memory_bytes\":256",
             "\"local_memory_count\":2",
             "\"barrier_count\":1"
@@ -309,8 +309,8 @@
         "contains": {
           "unordered": [
             "\"target_key\":\"gfx11-generic\"",
-            "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
-            "\"status\":\"OK\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"function\":\"shared_memory_wave_i32_roundtrip\"",
             "\"function\":\"shared_memory_wave_i32_roundtrip_static_offset\"",
             "\"function\":\"shared_memory_wave_i32_partial_lane_roundtrip\"",
@@ -401,8 +401,8 @@
         "contains": {
           "unordered": [
             "\"target_key\":\"gfx1100\"",
-            "\"executable_format\":\"amdgcn-amd-amdhsa--gfx1100\"",
-            "\"status\":\"OK\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"function\":\"wave64_workgroup_reduce_sub_wave\"",
             "\"function\":\"wave64_workgroup_reduce_full_wave\"",
             "\"function\":\"wave64_workgroup_reduce_cross_wave\"",
@@ -485,8 +485,8 @@
         "contains": {
           "unordered": [
             "\"target_key\":\"gfx11-generic\"",
-            "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
-            "\"status\":\"OK\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"local_memory_bytes\":512",
             "\"local_memory_count\":4",
             "\"barrier_count\":2"
@@ -566,8 +566,8 @@
         "contains": {
           "unordered": [
             "\"target_key\":\"gfx11-generic\"",
-            "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
-            "\"status\":\"OK\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"local_memory_bytes\":1024",
             "\"local_memory_count\":2",
             "\"barrier_count\":1"
@@ -711,6 +711,64 @@
             "scale_i32_gfx1200",
             "scale_i32_fallback"
           ]
+        }
+      ]
+    },
+    {
+      "name": "plans gfx1250 cluster b128 multicast recipe",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/cluster_b128_multicast.loom",
+          "--dry-run"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "bench_cluster_b128_multicast",
+          "case_cluster_b128_multicast"
+        ]
+      }
+    },
+    {
+      "name": "compiles gfx1250 cluster b128 multicast recipe",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/cluster_b128_multicast.loom",
+          "--backend=amdgpu-hal",
+          "--target=gfx1250",
+          "--output={tmp}/cluster_b128_multicast.vmfb",
+          "--emit-target-artifact={tmp}/cluster_b128_multicast.hsaco",
+          "--artifact-manifest=summary",
+          "--compile-report=summary"
+        ]
+      },
+      "stderr": {
+        "contains": {
+          "unordered": [
+            "\"target_key\":\"gfx1250\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
+            "\"cluster_size\":{\"x\":1,\"y\":2,\"z\":1,\"flat\":2}",
+            "\"local_memory_bytes\":512",
+            "\"explicit_action_count\":1",
+            "\"barrier_count\":2"
+          ]
+        }
+      },
+      "files": [
+        {
+          "path": "{tmp}/cluster_b128_multicast.vmfb",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/cluster_b128_multicast.hsaco",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/cluster_b128_multicast.hsaco.manifest.json",
+          "non_empty": true
         }
       ]
     },

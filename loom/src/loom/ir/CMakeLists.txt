@@ -14,12 +14,14 @@ loom_cc_library(
     facts
   HDRS
     "facts.h"
+    "float_facts.h"
   SRCS
     "facts.c"
+    "float_facts.c"
   DEPS
     ::ir
     iree::base
-    loom::util::math
+    iree::base::internal
   PUBLIC
 )
 
@@ -28,8 +30,10 @@ loom_cc_test(
     facts_test
   SRCS
     "facts_test.cc"
+    "float_facts_test.cc"
   DEPS
     ::facts
+    iree::base::internal::fpu_state
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -62,6 +66,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::error::emitter
     loom::util::bstring
+    loom::util::segmented_storage
   PUBLIC
 )
 

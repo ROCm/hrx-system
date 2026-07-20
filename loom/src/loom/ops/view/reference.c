@@ -7,7 +7,6 @@
 #include "loom/ops/view/reference.h"
 
 #include "loom/ops/encoding/storage.h"
-#include "loom/util/math.h"
 
 static loom_value_facts_t loom_view_nonnegative_unknown_facts(void) {
   return loom_value_facts_make(0, INT64_MAX, 1);

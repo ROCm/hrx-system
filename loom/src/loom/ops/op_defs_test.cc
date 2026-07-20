@@ -74,5 +74,39 @@ TEST(DialectTableHelpers, LookupSemanticsByDialectAndIndex) {
   EXPECT_EQ(out_of_range.contract_families, 0u);
 }
 
+TEST(MemoryAccessHelpers, OperandIndexIsPayload) {
+  loom_op_t op = {};
+  op.operand_count = 5;
+
+  loom_memory_access_vtable_t memory_access = {};
+  memory_access.operation_kind = LOOM_MEMORY_ACCESS_OPERATION_STORE;
+  memory_access.value_operand_index = 3;
+  memory_access.expected_operand_index = LOOM_OPERAND_INDEX_NONE;
+  memory_access.replacement_operand_index = LOOM_OPERAND_INDEX_NONE;
+
+  loom_op_vtable_t op_vtable = {};
+  op_vtable.fixed_operand_count = op.operand_count;
+  op_vtable.memory_access = &memory_access;
+
+  loom_memory_access_t access = {};
+  access.op = &op;
+  access.op_vtable = &op_vtable;
+
+  EXPECT_FALSE(loom_memory_access_operand_index_is_payload(access, 0));
+  EXPECT_TRUE(loom_memory_access_operand_index_is_payload(access, 3));
+  EXPECT_FALSE(loom_memory_access_operand_index_is_payload(access, 5));
+
+  memory_access.operation_kind = LOOM_MEMORY_ACCESS_OPERATION_LOAD;
+  EXPECT_FALSE(loom_memory_access_operand_index_is_payload(access, 3));
+
+  memory_access.operation_kind = LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG;
+  memory_access.value_operand_index = LOOM_OPERAND_INDEX_NONE;
+  memory_access.expected_operand_index = 1;
+  memory_access.replacement_operand_index = 2;
+  EXPECT_FALSE(loom_memory_access_operand_index_is_payload(access, 0));
+  EXPECT_TRUE(loom_memory_access_operand_index_is_payload(access, 1));
+  EXPECT_TRUE(loom_memory_access_operand_index_is_payload(access, 2));
+}
+
 }  // namespace
 }  // namespace loom

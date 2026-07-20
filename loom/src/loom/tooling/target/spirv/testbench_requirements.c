@@ -234,8 +234,8 @@ loom_spirv_vulkan_hal_testbench_query_cooperative_matrix_requirement(
   loom_spirv_vulkan_hal_target_profile_storage_t profile_storage = {0};
   bool profile_storage_initialized = false;
 
-  iree_status_t status = loom_spirv_vulkan_hal_profile_query(
-      context->runtime.device, context->runtime.executable_cache, &facts);
+  iree_status_t status =
+      loom_spirv_vulkan_hal_profile_query(context->runtime.device, &facts);
   if (iree_status_is_ok(status) &&
       iree_any_bit_set(
           facts.flags,

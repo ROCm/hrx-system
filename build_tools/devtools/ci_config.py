@@ -23,6 +23,9 @@ IREE_TARGET_DIRECTORIES = ("runtime", "loom")
 # provide.
 SANITIZER_TEST_CONFIGS = ("asan", "ubsan", "tsan")
 SANITIZER_BUILD_CONFIGS = ("msan",)
+# Tests whose production resource layout conflicts with host TSAN use this
+# conventional Bazel tag and CTest label.
+HOST_TSAN_INCOMPATIBLE_TEST_LABEL = "notsan"
 
 CMAKE_SANITIZER_SMOKE_TEST_BUILD_TARGETS = (
     "iree::base::status_test",
@@ -144,10 +147,11 @@ NON_CPU_HAL_DRIVER_CTEST_REGEX = (
 
 AMDGPU_BAZEL_DRIVER_TARGETS = ("//runtime/src/iree/hal/drivers/amdgpu/...",)
 AMDGPU_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/drivers/amdgpu/all",)
-AMDGPU_TARGET_SELECTOR = "gfx942"
-RUNTIME_AMDGPU_RESOURCE_TAG = "iree-run-requirement=runtime.resource.amd_gpu"
+DEFAULT_AMDGPU_TARGET_SELECTOR = "gfx942"
+AMDGPU_RESOURCE_TAG = "iree-run-requirement=runtime.resource.amd_gpu"
 AMDGPU_BAZEL_RESOURCE_SLICES = (
-    ("runtime", "//runtime", "//runtime/...", RUNTIME_AMDGPU_RESOURCE_TAG),
+    ("runtime", "//runtime", "//runtime/...", AMDGPU_RESOURCE_TAG),
+    ("Loom", "//loom", "//loom/...", AMDGPU_RESOURCE_TAG),
 )
 RUNTIME_CTEST_RESOURCE_LABEL_PREFIX = "runtime-resource="
 CTEST_RESOURCE_LABEL_EXCLUDE_REGEX = RUNTIME_CTEST_RESOURCE_LABEL_PREFIX
@@ -182,6 +186,20 @@ LOOM_AMDGPU_CMAKE_COMPILE_CTEST_REGEXES = tuple(
 AMDGPU_XFAILS = ()
 AMDGPU_SANITIZERS_XFAILS = ()
 AMDGPU_TSAN_XFAILS = ()
+AMDGPU_BAZEL_XFAILS_BY_TARGET_SELECTOR = {
+    # gfx1151 currently hangs while waiting for manually instrumented ASAN
+    # feedback. Keep the ordinary ASAN executable coverage active.
+    "gfx1151": (
+        bazel_xfail(
+            "//runtime/src/iree/hal/drivers/amdgpu/cts:manual_asan_executable_tests"
+        ),
+    ),
+    # gfx120X currently hangs while initializing or executing device-side TSAN.
+    # Keep every other Loom AMDGPU execution test active on the runner.
+    "gfx120X-all": (
+        bazel_xfail("//loom/src/loom/tools/iree-test-loom:amdgpu_tsan_execution_test"),
+    ),
+}
 AMDGPU_XFAIL_TARGETS = bazel_xfail_targets(AMDGPU_XFAILS)
 AMDGPU_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(AMDGPU_XFAILS)
 AMDGPU_SANITIZERS_XFAIL_TARGETS = bazel_xfail_targets(AMDGPU_SANITIZERS_XFAILS)
@@ -195,6 +213,13 @@ AMDGPU_TSAN_SANITIZERS_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(
     AMDGPU_SANITIZERS_XFAILS + AMDGPU_TSAN_XFAILS
 )
 
+
+def amdgpu_bazel_xfail_targets(target_selector: str) -> tuple[str, ...]:
+    return bazel_xfail_targets(
+        AMDGPU_BAZEL_XFAILS_BY_TARGET_SELECTOR.get(target_selector, ())
+    )
+
+
 VULKAN_BAZEL_DRIVER_TARGETS = ("//runtime/src/iree/hal/drivers/vulkan/...",)
 RUNTIME_VULKAN_RESOURCE_TAG = "iree-run-requirement=runtime.resource.vulkan_device"
 VULKAN_BAZEL_RESOURCE_SLICES = (
@@ -203,43 +228,5 @@ VULKAN_BAZEL_RESOURCE_SLICES = (
 VULKAN_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/drivers/vulkan/all",)
 VULKAN_CTEST_REGEX = r"^iree/hal/drivers/vulkan/"
 VULKAN_CTEST_RESOURCE_LABEL_REGEX = "runtime-resource=vulkan-device"
-VULKAN_XFAILS = (
-    # These generic executable CTS binaries still bind the empty compatibility
-    # testdata registration instead of real SPIR-V payloads.
-    bazel_xfail("//runtime/src/iree/hal/drivers/vulkan/cts:profiling_tests"),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_pipeline_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_reuse_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_constants_bindings_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_constants_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_indirect_parameters_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_multi_entrypoint_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:command_buffer_dispatch_multi_workgroup_tests"
-    ),
-    bazel_xfail("//runtime/src/iree/hal/drivers/vulkan/cts:executable_tests"),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:queue_dispatch_direct_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:queue_dispatch_indirect_parameters_tests"
-    ),
-    bazel_xfail(
-        "//runtime/src/iree/hal/drivers/vulkan/cts:queue_descriptor_cache_tests"
-    ),
-)
+VULKAN_XFAILS = ()
 VULKAN_XFAIL_TARGETS = bazel_xfail_targets(VULKAN_XFAILS)

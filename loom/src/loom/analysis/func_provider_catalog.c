@@ -6,11 +6,13 @@
 
 #include "loom/analysis/func_provider_catalog.h"
 
-#include <stdlib.h>
 #include <string.h>
 
+#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
+#include "loom/util/adaptive_sort.h"
+#include "loom/util/walk.h"
 
 #define LOOM_FUNC_PROVIDER_INDEX_INVALID ((uint32_t)UINT32_MAX)
 
@@ -36,27 +38,27 @@ static bool loom_func_provider_symbol_is_live_provider(
          !iree_any_bit_set(symbol->defining_op->flags, LOOM_OP_FLAG_DEAD);
 }
 
-static int loom_func_provider_summary_compare(const void* lhs,
-                                              const void* rhs) {
-  const loom_func_provider_summary_t* left =
-      (const loom_func_provider_summary_t*)lhs;
-  const loom_func_provider_summary_t* right =
-      (const loom_func_provider_summary_t*)rhs;
+static bool loom_func_provider_summary_less(
+    const loom_func_provider_summary_t* left,
+    const loom_func_provider_summary_t* right) {
   if (left->contract_id != right->contract_id) {
-    return left->contract_id < right->contract_id ? -1 : 1;
+    return left->contract_id < right->contract_id;
   }
   if (left->priority != right->priority) {
-    return left->priority > right->priority ? -1 : 1;
+    return left->priority > right->priority;
   }
   if (left->kind != right->kind) {
-    return left->kind < right->kind ? -1 : 1;
+    return left->kind < right->kind;
   }
   if (left->origin != right->origin) {
-    return left->origin < right->origin ? -1 : 1;
+    return left->origin < right->origin;
   }
-  if (left->provider_id == right->provider_id) return 0;
-  return left->provider_id < right->provider_id ? -1 : 1;
+  return left->provider_id < right->provider_id;
 }
+
+LOOM_DEFINE_ADAPTIVE_SORT(loom_func_provider_summary_sort,
+                          loom_func_provider_summary_t,
+                          loom_func_provider_summary_less)
 
 static iree_status_t loom_func_provider_catalog_count_local(
     const loom_module_t* module, iree_host_size_t* out_provider_count) {
@@ -85,8 +87,8 @@ static iree_status_t loom_func_provider_catalog_lookup_facts(
   const loom_func_symbol_facts_t* facts =
       loom_func_symbol_facts_cast(base_facts);
   if (!facts) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "func provider symbol has no func facts");
+    IREE_ASSERT_UNREACHABLE("func provider symbol has no func facts");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (facts->implements_id == LOOM_STRING_ID_INVALID ||
       facts->implements_id >= module->strings.count) {
@@ -139,6 +141,136 @@ static iree_status_t loom_func_provider_catalog_populate_signature(
   return iree_ok_status();
 }
 
+typedef struct loom_func_provider_context_collector_t {
+  // Module containing the provider body.
+  const loom_module_t* module;
+
+  // Provider operation bounding internal ancestor searches.
+  const loom_op_t* provider_op;
+
+  // Caller-supplied required ancestor kinds.
+  loom_op_kind_t* required_ancestors;
+
+  // Number of entries in |required_ancestors|.
+  iree_host_size_t required_ancestor_count;
+
+  // Capacity of |required_ancestors|.
+  iree_host_size_t required_ancestor_capacity;
+
+  // Caller-supplied forbidden ancestor kinds.
+  loom_op_kind_t* forbidden_ancestors;
+
+  // Number of entries in |forbidden_ancestors|.
+  iree_host_size_t forbidden_ancestor_count;
+
+  // Capacity of |forbidden_ancestors|.
+  iree_host_size_t forbidden_ancestor_capacity;
+
+  // Arena owning collected arrays and walk scratch.
+  iree_arena_allocator_t* arena;
+} loom_func_provider_context_collector_t;
+
+static bool loom_func_provider_catalog_has_internal_ancestor(
+    const loom_op_t* op, const loom_op_t* provider_op,
+    loom_op_kind_t ancestor_kind) {
+  for (const loom_op_t* ancestor = op->parent_op; ancestor;
+       ancestor = ancestor->parent_op) {
+    if (ancestor->kind == ancestor_kind) return true;
+    if (ancestor == provider_op) break;
+  }
+  return false;
+}
+
+static iree_status_t loom_func_provider_catalog_append_context_kind(
+    iree_arena_allocator_t* arena, loom_op_kind_t kind, loom_op_kind_t** values,
+    iree_host_size_t* count, iree_host_size_t* capacity) {
+  for (iree_host_size_t i = 0; i < *count; ++i) {
+    if ((*values)[i] == kind) return iree_ok_status();
+  }
+  if (*count >= *capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        arena, *count, *count + 1, sizeof(**values), capacity, (void**)values));
+  }
+  (*values)[(*count)++] = kind;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_func_provider_catalog_collect_context_op(
+    void* user_data, loom_op_t* op, const loom_walk_context_t* context,
+    loom_walk_result_t* out_result) {
+  (void)context;
+  *out_result = LOOM_WALK_CONTINUE;
+  loom_func_provider_context_collector_t* collector =
+      (loom_func_provider_context_collector_t*)user_data;
+  const loom_op_vtable_t* vtable = loom_op_vtable(collector->module, op);
+  if (!vtable) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "func provider contains an unknown op kind");
+  }
+
+  // Nested isolated operations own their own contextual placement contract.
+  if (loom_traits_is_isolated(vtable->traits)) {
+    *out_result = LOOM_WALK_SKIP;
+    return iree_ok_status();
+  }
+
+  const loom_op_placement_descriptor_t* placement = vtable->placement;
+  if (!placement) return iree_ok_status();
+  for (uint8_t i = 0; i < placement->required_ancestor_count; ++i) {
+    const loom_op_kind_t ancestor_kind = placement->required_ancestors[i];
+    if (loom_func_provider_catalog_has_internal_ancestor(
+            op, collector->provider_op, ancestor_kind)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_func_provider_catalog_append_context_kind(
+        collector->arena, ancestor_kind, &collector->required_ancestors,
+        &collector->required_ancestor_count,
+        &collector->required_ancestor_capacity));
+  }
+  for (uint8_t i = 0; i < placement->forbidden_ancestor_count; ++i) {
+    const loom_op_kind_t ancestor_kind = placement->forbidden_ancestors[i];
+    if (loom_func_provider_catalog_has_internal_ancestor(
+            op, collector->provider_op, ancestor_kind)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_func_provider_catalog_append_context_kind(
+        collector->arena, ancestor_kind, &collector->forbidden_ancestors,
+        &collector->forbidden_ancestor_count,
+        &collector->forbidden_ancestor_capacity));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_func_provider_catalog_populate_context(
+    loom_func_provider_catalog_t* catalog, const loom_module_t* module,
+    loom_func_provider_summary_t* provider) {
+  if (!provider->has_body) return iree_ok_status();
+  loom_func_provider_context_collector_t collector = {
+      .module = module,
+      .provider_op = provider->function.op,
+      .arena = catalog->arena,
+  };
+  loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
+  IREE_RETURN_IF_ERROR(loom_walk_function(
+      module, provider->function, LOOM_WALK_PRE_ORDER,
+      (loom_walk_callback_t){loom_func_provider_catalog_collect_context_op,
+                             &collector},
+      catalog->arena, &walk_result));
+  if (collector.required_ancestor_count > UINT16_MAX ||
+      collector.forbidden_ancestor_count > UINT16_MAX) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "func provider contextual ancestor count exceeds uint16_t range");
+  }
+  provider->required_caller_ancestors = collector.required_ancestors;
+  provider->required_caller_ancestor_count =
+      (uint16_t)collector.required_ancestor_count;
+  provider->forbidden_caller_ancestors = collector.forbidden_ancestors;
+  provider->forbidden_caller_ancestor_count =
+      (uint16_t)collector.forbidden_ancestor_count;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_func_provider_catalog_populate_local(
     loom_func_provider_catalog_t* catalog, const loom_module_t* module,
     loom_symbol_fact_table_t* fact_table,
@@ -155,8 +287,8 @@ static iree_status_t loom_func_provider_catalog_populate_local(
     loom_func_like_t function =
         loom_func_like_cast(module, symbol->defining_op);
     if (!loom_func_like_isa(function)) {
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "func provider symbol is not function-like");
+      IREE_ASSERT_UNREACHABLE("func provider symbol is not function-like");
+      IREE_BUILTIN_UNREACHABLE();
     }
 
     loom_func_provider_summary_t* provider = &providers[provider_index];
@@ -187,12 +319,13 @@ static iree_status_t loom_func_provider_catalog_populate_local(
     };
     IREE_RETURN_IF_ERROR(loom_func_provider_catalog_populate_signature(
         catalog, module, facts, provider));
+    IREE_RETURN_IF_ERROR(
+        loom_func_provider_catalog_populate_context(catalog, module, provider));
     ++provider_index;
   }
   catalog->provider_count = provider_index;
   if (provider_index > 1) {
-    qsort(providers, provider_index, sizeof(*providers),
-          loom_func_provider_summary_compare);
+    loom_func_provider_summary_sort(providers, provider_index);
   }
   return iree_ok_status();
 }

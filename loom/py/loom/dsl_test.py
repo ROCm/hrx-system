@@ -51,6 +51,7 @@ from loom.dsl import (
     INTEGER,
     INTEGER_ELEMENT,
     INVOLUTION,
+    MEMORY_FENCE,
     NON_DETERMINISTIC,
     OFFSET,
     POOL,
@@ -1909,6 +1910,22 @@ class TestEffects:
     def test_convergent_can_be_pure(self) -> None:
         op = Op("test.convergent", traits=[PURE, CONVERGENT])
         assert op.is_pure
+
+    def test_memory_fence_can_be_convergent(self) -> None:
+        op = Op("test.barrier", traits=[MEMORY_FENCE, CONVERGENT])
+        assert not op.is_pure
+
+    def test_memory_fence_conflicts_with_pure(self) -> None:
+        with _raises(ValueError, match="PURE.*MEMORY_FENCE"):
+            Op("test.bad", traits=[PURE, MEMORY_FENCE])
+
+    def test_memory_fence_conflicts_with_hint(self) -> None:
+        with _raises(ValueError, match="HINT.*MEMORY_FENCE"):
+            Op("test.bad", traits=[HINT, MEMORY_FENCE])
+
+    def test_memory_fence_conflicts_with_safe_to_speculate(self) -> None:
+        with _raises(ValueError, match="SAFE_TO_SPECULATE.*MEMORY_FENCE"):
+            Op("test.bad", traits=[SAFE_TO_SPECULATE, MEMORY_FENCE])
 
     def test_safe_to_speculate_conflicts_with_hint(self) -> None:
         with _raises(ValueError, match="SAFE_TO_SPECULATE.*HINT"):

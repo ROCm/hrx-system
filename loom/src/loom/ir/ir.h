@@ -45,7 +45,7 @@
 //
 // Table-owned entities use integer IDs; ownership/backreference edges use
 // stable arena pointers:
-//   value_id   -> index into module->values.entries[]
+//   value_id   -> index into the module value table
 //   symbol_id  -> index into module->symbols.entries[]
 //   string_id  -> index into module->strings.entries[]
 //   type_id    -> index into module->types.entries[] (for interned types)
@@ -96,6 +96,7 @@
 #include "loom/ir/location.h"
 #include "loom/ir/types.h"
 #include "loom/util/bstring.h"
+#include "loom/util/segmented_storage.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -708,31 +709,45 @@ enum loom_trait_bits_e {
   // hot-path guard before asking a dialect-owned helper for exact source/result
   // ranges.
   LOOM_TRAIT_STORAGE_RELATION = 1u << 23,
+  // Op orders memory accesses without directly reading or writing a resource.
+  // Generic effect queries treat fences as read/write barriers so existing
+  // transforms preserve their ordering. Exact memory analyses may distinguish
+  // the ordering effect from storage-root interference.
+  LOOM_TRAIT_MEMORY_FENCE = 1u << 24,
 };
 typedef uint32_t loom_trait_flags_t;
 
-// Returns true if the trait flags indicate the op may write to memory
-// or has unknown effects. Works on raw bitfields to avoid redundant
+// Returns true if the trait flags indicate the op may write to memory, order
+// memory, or has unknown effects. Works on raw bitfields to avoid redundant
 // vtable lookups when the vtable is already resolved.
 static inline bool loom_traits_may_write(loom_trait_flags_t traits) {
-  return (traits & (LOOM_TRAIT_WRITES_MEMORY | LOOM_TRAIT_UNKNOWN_EFFECTS)) !=
-         0;
+  return (traits & (LOOM_TRAIT_WRITES_MEMORY | LOOM_TRAIT_UNKNOWN_EFFECTS |
+                    LOOM_TRAIT_MEMORY_FENCE)) != 0;
 }
 
 // Returns true if the trait flags indicate the op may observe memory or
 // external state in a way that prevents pure/deterministic reasoning.
 // NON_DETERMINISTIC is counted with read-like effects because CSE and purity
 // checks must treat it as an observation even when it does not read memory.
+// MEMORY_FENCE is counted so generic transforms preserve memory ordering.
 static inline bool loom_traits_may_read(loom_trait_flags_t traits) {
   return (traits & (LOOM_TRAIT_READS_MEMORY | LOOM_TRAIT_UNKNOWN_EFFECTS |
-                    LOOM_TRAIT_NON_DETERMINISTIC)) != 0;
+                    LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_MEMORY_FENCE)) !=
+         0;
 }
 
 // Returns true if the trait flags indicate the op may produce different
-// results for identical inputs, writes memory, or has unknown effects.
+// results for identical inputs, write memory, order memory, or have unknown
+// effects.
 static inline bool loom_traits_has_side_effects(loom_trait_flags_t traits) {
   return (traits & (LOOM_TRAIT_WRITES_MEMORY | LOOM_TRAIT_UNKNOWN_EFFECTS |
-                    LOOM_TRAIT_NON_DETERMINISTIC)) != 0;
+                    LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_MEMORY_FENCE)) !=
+         0;
+}
+
+// Returns true when the op carries an explicit memory ordering effect.
+static inline bool loom_traits_order_memory(loom_trait_flags_t traits) {
+  return (traits & LOOM_TRAIT_MEMORY_FENCE) != 0;
 }
 
 // Returns true if the trait flags indicate the op's regions cannot
@@ -1143,11 +1158,42 @@ typedef struct loom_region_branch_t {
 // MemoryAccess interface vtable
 //===----------------------------------------------------------------------===//
 
+typedef enum loom_memory_access_operation_kind_e {
+  LOOM_MEMORY_ACCESS_OPERATION_LOAD = 0,
+  LOOM_MEMORY_ACCESS_OPERATION_STORE = 1,
+  LOOM_MEMORY_ACCESS_OPERATION_PREFETCH = 2,
+  LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE = 3,
+  LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW = 4,
+  LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG = 5,
+  LOOM_MEMORY_ACCESS_OPERATION_COUNT_ = 6,
+} loom_memory_access_operation_kind_t;
+
+// Returns true when the operation family carries written value operands such as
+// store values, atomic contributions, or compare-exchange pairs.
+static inline bool loom_memory_access_operation_kind_has_payload_operands(
+    loom_memory_access_operation_kind_t kind) {
+  return kind == LOOM_MEMORY_ACCESS_OPERATION_STORE ||
+         kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE ||
+         kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW ||
+         kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG;
+}
+
+// Returns true when the operation family performs an atomic memory update.
+static inline bool loom_memory_access_operation_kind_is_atomic(
+    loom_memory_access_operation_kind_t kind) {
+  return kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE ||
+         kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW ||
+         kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG;
+}
+
 // Interface descriptor for ops that access memory through a view-like operand.
 // Every field is an operand or attr index resolved from MemoryAccessInterface
 // declarations in the Python DSL. LOOM_*_INDEX_NONE marks roles that are not
 // part of a particular op shape.
 typedef struct loom_memory_access_vtable_t {
+  // Memory operation family represented by this op shape.
+  uint8_t operation_kind;
+
   // Index of the view or memory-object operand being accessed.
   uint8_t view_operand_index;
 
@@ -1169,8 +1215,8 @@ typedef struct loom_memory_access_vtable_t {
   // Index of the per-lane offsets operand.
   uint8_t offsets_operand_index;
 
-  // Operand offset of the variadic dynamic logical-origin index slice.
-  uint8_t indices_operand_offset;
+  // Operand field index of the dynamic logical-origin index slice.
+  uint8_t indices_operand_field_index;
 
   // Index of the static logical-origin indices attr.
   uint8_t static_indices_attr_index;
@@ -1202,8 +1248,9 @@ typedef struct loom_memory_access_t {
   // Operation implementing the MemoryAccess interface.
   const loom_op_t* op;
 
-  // Interface vtable for |op|.
-  const loom_memory_access_vtable_t* vtable;
+  // Operation vtable for |op|. The memory-access vtable hangs from this while
+  // segmented operand helpers use the same vtable to resolve field spans.
+  const loom_op_vtable_t* op_vtable;
 } loom_memory_access_t;
 
 //===----------------------------------------------------------------------===//
@@ -1262,8 +1309,8 @@ struct loom_op_vtable_t {
   uint8_t operand_descriptor_count;
   // Structural control-flow semantics declared by the op kind.
   loom_op_control_flow_flags_t control_flow_flags;
-  // Reserved for future compact control-flow metadata. Always zero.
-  uint8_t control_flow_reserved;
+  // Bitmask of semantic operand roles present on this op kind.
+  uint8_t operand_role_mask;
   // Selector operand index for multi-successor terminators. Valid only when
   // control_flow_flags has LOOM_OP_CONTROL_FLOW_HAS_SUCCESSOR_SELECTOR.
   uint16_t successor_selector_operand_index;
@@ -1826,14 +1873,128 @@ typedef struct loom_string_table_t {
   iree_string_view_t* entries;
 } loom_string_table_t;
 
-// Value table. Cache-line-aligned entries for fast iteration.
-// All values (op results and block arguments) in a module live here.
+// Index into the module's type-use record table.
+typedef uint32_t loom_type_use_id_t;
+#define LOOM_TYPE_USE_ID_INVALID ((loom_type_use_id_t)UINT32_MAX)
+
+// Per-value heads for the type-use adjacency lists.
+typedef struct loom_value_type_use_heads_t {
+  // First record whose referenced_value_id is this value.
+  loom_type_use_id_t first_incoming_use_id;
+  // First record whose user_value_id is this value.
+  loom_type_use_id_t first_outgoing_use_id;
+} loom_value_type_use_heads_t;
+
+// Number of module values stored in each stable value segment.
+#define LOOM_VALUE_SEGMENT_CAPACITY 256u
+
+// Shift mapping a value ID to its value-segment index.
+#define LOOM_VALUE_SEGMENT_SHIFT 8u
+
+// Mask mapping a value ID to its row within a value segment.
+#define LOOM_VALUE_SEGMENT_MASK (LOOM_VALUE_SEGMENT_CAPACITY - 1u)
+
+static_assert((1u << LOOM_VALUE_SEGMENT_SHIFT) == LOOM_VALUE_SEGMENT_CAPACITY,
+              "value segment capacity must match its index shift");
+
+// Stable storage for one range of module value IDs.
+//
+// Semantic values, reusable u32 scratch, and type-use adjacency heads share
+// one segment because they have the same value-ID lifetime and cardinality.
+// The structure-of-arrays layout keeps hot value iteration contiguous while
+// fitting the complete segment in a 32 KiB compiler workspace block.
+typedef iree_alignas(64) struct loom_value_segment_t {
+  // Cache-line-aligned semantic value rows.
+  loom_value_t values[LOOM_VALUE_SEGMENT_CAPACITY];
+  // Reusable compiler scratch indexed by the same value rows.
+  uint32_t u32_scratch[LOOM_VALUE_SEGMENT_CAPACITY];
+  // Type-use adjacency heads indexed by the same value rows.
+  loom_value_type_use_heads_t type_use_heads[LOOM_VALUE_SEGMENT_CAPACITY];
+} loom_value_segment_t;
+
+static_assert(sizeof(loom_value_segment_t) == 19456,
+              "value segment must fit in one workspace block");
+
+// Value table. All values live in stable, cache-line-aligned segments and are
+// accessed by dense module value ID.
 typedef struct loom_value_table_t {
+  // Number of defined module values.
   iree_host_size_t count;
-  iree_host_size_t capacity;
-  // 64-byte aligned value entries.
-  loom_value_t* entries;
+  // Stable arena-backed value-segment directory.
+  loom_segmented_storage_t segments;
 } loom_value_table_t;
+
+// Returns the number of value rows allocated across all stable segments.
+static inline iree_host_size_t loom_value_table_capacity(
+    const loom_value_table_t* table) {
+  return (iree_host_size_t)table->segments.segment_count *
+         LOOM_VALUE_SEGMENT_CAPACITY;
+}
+
+// Returns the mutable segment containing |value_id|.
+static inline loom_value_segment_t* loom_value_table_segment_for_id(
+    loom_value_table_t* table, loom_value_id_t value_id) {
+  IREE_ASSERT(value_id < table->count);
+  return (loom_value_segment_t*)loom_segmented_storage_segment(
+      &table->segments, value_id >> LOOM_VALUE_SEGMENT_SHIFT);
+}
+
+// Returns the const segment containing |value_id|.
+static inline const loom_value_segment_t* loom_value_table_const_segment_for_id(
+    const loom_value_table_t* table, loom_value_id_t value_id) {
+  IREE_ASSERT(value_id < table->count);
+  return (const loom_value_segment_t*)loom_segmented_storage_const_segment(
+      &table->segments, value_id >> LOOM_VALUE_SEGMENT_SHIFT);
+}
+
+// Returns the mutable semantic value row for |value_id|.
+static inline loom_value_t* loom_value_table_value(loom_value_table_t* table,
+                                                   loom_value_id_t value_id) {
+  loom_value_segment_t* segment =
+      loom_value_table_segment_for_id(table, value_id);
+  return &segment->values[value_id & LOOM_VALUE_SEGMENT_MASK];
+}
+
+// Returns the const semantic value row for |value_id|.
+static inline const loom_value_t* loom_value_table_const_value(
+    const loom_value_table_t* table, loom_value_id_t value_id) {
+  const loom_value_segment_t* segment =
+      loom_value_table_const_segment_for_id(table, value_id);
+  return &segment->values[value_id & LOOM_VALUE_SEGMENT_MASK];
+}
+
+// Returns the mutable u32 scratch row for |value_id|.
+static inline uint32_t* loom_value_table_u32_scratch(loom_value_table_t* table,
+                                                     loom_value_id_t value_id) {
+  loom_value_segment_t* segment =
+      loom_value_table_segment_for_id(table, value_id);
+  return &segment->u32_scratch[value_id & LOOM_VALUE_SEGMENT_MASK];
+}
+
+// Returns the const u32 scratch row for |value_id|.
+static inline const uint32_t* loom_value_table_const_u32_scratch(
+    const loom_value_table_t* table, loom_value_id_t value_id) {
+  const loom_value_segment_t* segment =
+      loom_value_table_const_segment_for_id(table, value_id);
+  return &segment->u32_scratch[value_id & LOOM_VALUE_SEGMENT_MASK];
+}
+
+// Returns the mutable type-use adjacency heads for |value_id|.
+static inline loom_value_type_use_heads_t* loom_value_table_type_use_heads(
+    loom_value_table_t* table, loom_value_id_t value_id) {
+  loom_value_segment_t* segment =
+      loom_value_table_segment_for_id(table, value_id);
+  return &segment->type_use_heads[value_id & LOOM_VALUE_SEGMENT_MASK];
+}
+
+// Returns the const type-use adjacency heads for |value_id|.
+static inline const loom_value_type_use_heads_t*
+loom_value_table_const_type_use_heads(const loom_value_table_t* table,
+                                      loom_value_id_t value_id) {
+  const loom_value_segment_t* segment =
+      loom_value_table_const_segment_for_id(table, value_id);
+  return &segment->type_use_heads[value_id & LOOM_VALUE_SEGMENT_MASK];
+}
 
 // Active state for module value-id indexed u32 scratch storage.
 typedef enum loom_value_u32_scratch_state_e {
@@ -1852,16 +2013,14 @@ typedef enum loom_value_u32_scratch_state_e {
 
 // Compiler scratch mapping module value IDs to one active u32 payload.
 //
-// The entries mirror the value table capacity and are reused by phase frames
-// that need value-id keyed scratch. The table does not describe semantic IR
-// state: value IDs remain the durable identity, while payloads are transient
-// facts assigned by the active frame. Only one typed frame may acquire the
-// table at a time.
+// Scratch rows share the stable value segments and are reused by phase frames
+// that need value-id keyed storage. They do not describe semantic IR state:
+// value IDs remain the durable identity, while payloads are transient facts
+// assigned by the active frame. Only one typed frame may acquire the rows at a
+// time.
 typedef struct loom_value_u32_scratch_t {
-  // Dense value_id -> typed u32 payload entries.
-  uint32_t* values_by_value_id;
-  // Number of entries allocated in values_by_value_id.
-  iree_host_size_t capacity;
+  // Value table whose segments own the u32 payload rows.
+  loom_value_table_t* value_table;
   // Active ownership and payload interpretation state.
   loom_value_u32_scratch_state_t state;
 } loom_value_u32_scratch_t;
@@ -1886,18 +2045,6 @@ typedef struct loom_type_table_t {
   loom_type_t* entries;
 } loom_type_table_t;
 
-// Index into the module's type-use record table.
-typedef uint32_t loom_type_use_id_t;
-#define LOOM_TYPE_USE_ID_INVALID ((loom_type_use_id_t)UINT32_MAX)
-
-// Per-value heads for the type-use adjacency lists.
-typedef struct loom_value_type_use_heads_t {
-  // First record whose referenced_value_id is this value.
-  loom_type_use_id_t first_incoming_use_id;
-  // First record whose user_value_id is this value.
-  loom_type_use_id_t first_outgoing_use_id;
-} loom_value_type_use_heads_t;
-
 // A reference from one SSA value's type to another SSA value.
 //
 // Type uses are not operands: they describe symbolic type structure such as
@@ -1918,12 +2065,10 @@ typedef struct loom_type_use_t {
   loom_type_use_id_t previous_outgoing_use_id;
 } loom_type_use_t;
 
-// Dense side metadata for SSA references embedded in value types.
+// Side metadata for SSA references embedded in value types.
 typedef struct loom_type_use_table_t {
-  // Number of per-value head entries allocated in value_heads.
-  iree_host_size_t value_capacity;
-  // Dense per-value incoming/outgoing list heads, indexed by value ID.
-  loom_value_type_use_heads_t* value_heads;
+  // Value table whose segments own the per-value adjacency heads.
+  loom_value_table_t* value_table;
   // Number of record slots ever allocated from records.
   iree_host_size_t record_count;
   // Number of record slots allocated in records.
@@ -2023,8 +2168,8 @@ typedef struct loom_module_t {
   // Allocator used to allocate and free the module struct itself.
   iree_allocator_t allocator;
 
-  // Arena backing all IR storage. Bump-pointer allocation during
-  // construction. O(1) destruction. Grows in large blocks (~64KB).
+  // Arena backing all IR storage. Bump-pointer allocation during construction
+  // and O(1) destruction through reusable workspace blocks.
   iree_arena_allocator_t arena;
 
   // Interned strings (SSA names, function names, attribute keys).
@@ -2037,8 +2182,7 @@ typedef struct loom_module_t {
   // by the encoding_id field in loom_type_t (0 = no encoding).
   loom_encoding_table_t encodings;
 
-  // All SSA values (op results and block arguments).
-  // 64-byte aligned for cache-line access.
+  // All SSA values in stable, cache-line-aligned segments.
   loom_value_table_t values;
 
   // Reusable compiler scratch indexed by value ID.
@@ -2073,6 +2217,32 @@ typedef struct loom_module_t {
   loom_intern_table_t string_intern;
   loom_intern_table_t type_intern;
 } loom_module_t;
+
+// Returns a pointer to a value by ID.
+static inline loom_value_t* loom_module_value(const loom_module_t* module,
+                                              loom_value_id_t value_id) {
+  return loom_value_table_value((loom_value_table_t*)&module->values, value_id);
+}
+
+// Returns the type of a value by ID.
+static inline loom_type_t loom_module_value_type(const loom_module_t* module,
+                                                 loom_value_id_t value_id) {
+  return loom_module_value(module, value_id)->type;
+}
+
+// Returns the optional SSA display name for |value_id|, or an empty string view
+// when the value is anonymous or invalid.
+static inline iree_string_view_t loom_module_value_name(
+    const loom_module_t* module, loom_value_id_t value_id) {
+  if (module == NULL || value_id >= module->values.count) {
+    return iree_string_view_empty();
+  }
+  const loom_string_id_t name_id = loom_module_value(module, value_id)->name_id;
+  if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
+    return iree_string_view_empty();
+  }
+  return module->strings.entries[name_id];
+}
 
 //===----------------------------------------------------------------------===//
 // Enumeration macros

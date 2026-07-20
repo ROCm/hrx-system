@@ -119,6 +119,7 @@ void InitializeAddressabilityTestState(
       /*.unit_count=*/1,
       /*.address_map_kind=*/{},
       /*.addressable_unit_count=*/{},
+      /*.address_state_slot=*/{},
       /*.data_format_id=*/{},
       /*.register_part_id=*/LOOM_LOW_REGISTER_PART_NONE,
   };
@@ -132,6 +133,7 @@ void InitializeAddressabilityTestState(
       /*.unit_count=*/static_cast<uint16_t>(assigned_count),
       /*.address_map_kind=*/address_map_kind,
       /*.addressable_unit_count=*/addressable_unit_count,
+      /*.address_state_slot=*/{},
       /*.data_format_id=*/{},
       /*.register_part_id=*/LOOM_LOW_REGISTER_PART_NONE,
   };

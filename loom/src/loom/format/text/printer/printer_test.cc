@@ -2081,7 +2081,7 @@ TEST_F(PrintPredicateTest, SingleMulPredicate) {
 
   // Name the value %M (string table stores bare name "M").
   loom_string_id_t name_id = intern("M");
-  module_->values.entries[dim_value].name_id = name_id;
+  loom_module_value(module_, dim_value)->name_id = name_id;
 
   // Build: mul(%M, 16)
   loom_predicate_t predicates[1] = {};
@@ -2102,7 +2102,7 @@ TEST_F(PrintPredicateTest, MultipleMixedPredicates) {
   loom_value_id_t k_value = def(index_type);
 
   loom_string_id_t k_name = intern("K");
-  module_->values.entries[k_value].name_id = k_name;
+  loom_module_value(module_, k_value)->name_id = k_name;
 
   // Build: [mul(%K, 16), lt(%K, 1024)]
   loom_predicate_t predicates[2] = {};
@@ -2130,7 +2130,7 @@ TEST_F(PrintPredicateTest, Pow2SingleArg) {
   loom_value_id_t value = def(index_type);
 
   loom_string_id_t name = intern("N");
-  module_->values.entries[value].name_id = name;
+  loom_module_value(module_, value)->name_id = name;
 
   // Build: [pow2(%N)]
   loom_predicate_t predicates[1] = {};
@@ -2149,7 +2149,7 @@ TEST_F(PrintPredicateTest, RangeThreeArgs) {
   loom_value_id_t value = def(index_type);
 
   loom_string_id_t name = intern("M");
-  module_->values.entries[value].name_id = name;
+  loom_module_value(module_, value)->name_id = name;
 
   // Build: [range(%M, 1, 4096)]
   loom_predicate_t predicates[1] = {};
@@ -2206,8 +2206,8 @@ TEST_F(PrintPredicateTest, GeneratedTestAssume) {
   // Create named values %M and %K.
   loom_value_id_t m_id = def(index_type);
   loom_value_id_t k_id = def(index_type);
-  module_->values.entries[m_id].name_id = intern("M");
-  module_->values.entries[k_id].name_id = intern("K");
+  loom_module_value(module_, m_id)->name_id = intern("M");
+  loom_module_value(module_, k_id)->name_id = intern("K");
 
   // Build predicates for the where clause.
   loom_predicate_t predicates[2] = {};
@@ -2317,7 +2317,7 @@ TEST_F(PrintOpTest, DynamicDimNamedValue) {
   // Dynamic dim referencing a named value prints [%name].
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_value_id_t dim_id = def(index_type);
-  module_->values.entries[dim_id].name_id = intern("M");
+  loom_module_value(module_, dim_id)->name_id = intern("M");
   loom_type_t tensor = loom_type_shaped_1d(
       LOOM_TYPE_TENSOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_dynamic(dim_id), 0);
   EXPECT_EQ(print_type(tensor, module_), "tensor<[%M]xf32>");
@@ -2337,7 +2337,7 @@ TEST_F(PrintOpTest, TypeWithSSAEncoding) {
   // SSA encoding prints as %name when the value is named.
   loom_type_t encoding_type = loom_type_encoding();
   loom_value_id_t enc_id = def(encoding_type);
-  module_->values.entries[enc_id].name_id = intern("enc");
+  loom_module_value(module_, enc_id)->name_id = intern("enc");
   loom_type_t tile = loom_type_shaped_1d(LOOM_TYPE_TILE, LOOM_SCALAR_TYPE_I8,
                                          loom_dim_pack_static(256),
                                          /*encoding_id=*/(uint16_t)enc_id);

@@ -51,6 +51,22 @@ function(_iree_amdgpu_abs_binary_path out_var path)
   endif()
 endfunction()
 
+function(_iree_amdgpu_add_generated_input_dependencies TARGET_NAME)
+  if(NOT TARGET "${TARGET_NAME}")
+    return()
+  endif()
+  set(_CONSUMER_TARGETS "${TARGET_NAME}")
+  if(TARGET "${TARGET_NAME}.objects")
+    list(APPEND _CONSUMER_TARGETS "${TARGET_NAME}.objects")
+  endif()
+  foreach(_INPUT IN LISTS ARGN)
+    foreach(_CONSUMER_TARGET IN LISTS _CONSUMER_TARGETS)
+      iree_generated_output_add_consumer(
+        "${_INPUT}" "${_CONSUMER_TARGET}")
+    endforeach()
+  endforeach()
+endfunction()
+
 function(_iree_amdgpu_resolve_bitcode_deps out_paths out_targets)
   set(_DEP_PATHS)
   set(_DEP_TARGETS)
@@ -227,7 +243,12 @@ function(iree_amdgpu_library)
   add_custom_target("${_TARGET_NAME}"
     DEPENDS "${_OUT}"
   )
+  _iree_amdgpu_add_generated_input_dependencies(
+    "${_TARGET_NAME}" ${_RULE_INTERNAL_HDRS})
   _iree_amdgpu_abs_binary_path(_OUT_PATH "${_OUT}")
+  iree_register_generated_output_producer("${_TARGET_NAME}"
+    OUTPUTS "${_OUT_PATH}"
+  )
   set_property(TARGET "${_TARGET_NAME}"
     PROPERTY IREE_AMDGPU_BITCODE_ARCHIVE_OUTPUT "${_OUT_PATH}")
 endfunction()
@@ -440,8 +461,15 @@ function(iree_amdgpu_binary)
 
   # Only add iree_${NAME} as custom target doesn't support aliasing to
   # iree::${NAME}.
-  add_custom_target("${_PACKAGE_NAME}_${_RULE_NAME}"
+  set(_TARGET_NAME "${_PACKAGE_NAME}_${_RULE_NAME}")
+  add_custom_target("${_TARGET_NAME}"
     DEPENDS "${_OUT}"
+  )
+  _iree_amdgpu_add_generated_input_dependencies(
+    "${_TARGET_NAME}" ${_RULE_INTERNAL_HDRS} ${_BITCODE_DEP_PATHS})
+  _iree_amdgpu_abs_binary_path(_OUT_PATH "${_OUT}")
+  iree_register_generated_output_producer("${_TARGET_NAME}"
+    OUTPUTS "${_OUT_PATH}"
   )
 endfunction()
 

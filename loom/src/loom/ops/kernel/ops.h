@@ -66,7 +66,12 @@ enum {
   LOOM_OP_KERNEL_WORKGROUP_VOTE_ALL = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 39),
   LOOM_OP_KERNEL_WORKGROUP_VOTE_COUNT = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 40),
   LOOM_OP_KERNEL_ASSERT = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 41),
-  LOOM_OP_KERNEL_COUNT_ = 42,
+  LOOM_OP_KERNEL_CLUSTER_ID = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 42),
+  LOOM_OP_KERNEL_CLUSTER_WORKGROUP_ID = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 43),
+  LOOM_OP_KERNEL_CLUSTER_WORKGROUP_FLAT_ID = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 44),
+  LOOM_OP_KERNEL_CLUSTER_SIZE = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 45),
+  LOOM_OP_KERNEL_CLUSTER_COUNT = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 46),
+  LOOM_OP_KERNEL_COUNT_ = 47,
 };
 
 // Required async copy direction.
@@ -170,7 +175,7 @@ iree_status_t loom_kernel_def_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_KERNEL_LAUNCH_CONFIG: Terminate a kernel launch configuration region with the computed workgroup grid and required workgroup size.
+// LOOM_OP_KERNEL_LAUNCH_CONFIG: Terminate a kernel launch configuration region with the computed workgroup grid, required workgroup size, and optional static workgroup-cluster size.
 // kernel.launch.config workgroups(%gx, %gy, %gz) workgroup_size(%sx, %sy, %sz) : index
 LOOM_DEFINE_ISA(loom_kernel_launch_config_isa, LOOM_OP_KERNEL_LAUNCH_CONFIG)
 LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_count_x, 0)
@@ -179,16 +184,32 @@ LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_count_z, 2)
 LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_size_x, 3)
 LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_size_y, 4)
 LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_size_z, 5)
+LOOM_DEFINE_OPTIONAL_OPERAND(loom_kernel_launch_config_workgroup_cluster_size_x, 6)
+LOOM_DEFINE_OPTIONAL_OPERAND(loom_kernel_launch_config_workgroup_cluster_size_y, 7)
+LOOM_DEFINE_OPTIONAL_OPERAND(loom_kernel_launch_config_workgroup_cluster_size_z, 8)
+enum loom_kernel_launch_config_build_flag_bits_e {
+  LOOM_KERNEL_LAUNCH_CONFIG_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_X = 1u << 0,
+  LOOM_KERNEL_LAUNCH_CONFIG_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Y = 1u << 1,
+  LOOM_KERNEL_LAUNCH_CONFIG_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Z = 1u << 2,
+};
+typedef uint32_t loom_kernel_launch_config_build_flags_t;
 iree_status_t loom_kernel_launch_config_build(
     loom_builder_t* builder,
+    loom_kernel_launch_config_build_flags_t build_flags,
     loom_value_id_t workgroup_count_x,
     loom_value_id_t workgroup_count_y,
     loom_value_id_t workgroup_count_z,
     loom_value_id_t workgroup_size_x,
     loom_value_id_t workgroup_size_y,
     loom_value_id_t workgroup_size_z,
+    loom_optional loom_value_id_t workgroup_cluster_size_x,
+    loom_optional loom_value_id_t workgroup_cluster_size_y,
+    loom_optional loom_value_id_t workgroup_cluster_size_z,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_kernel_launch_config_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_KERNEL_RETURN: Return from a dispatchable kernel entry.
 // kernel.return
@@ -417,7 +438,7 @@ iree_status_t loom_kernel_async_tensor_store_from_lds_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER: Initiate an AMDGPU gfx1250+ cluster asynchronous load from a global-like source view into a workgroup/LDS destination view. The required i32 cluster_mask is the hardware workgroup broadcast mask loaded through M0. Source and destination must have the same static byte footprint, and that footprint must be exactly 1, 4, 8, or 16 bytes; target lowering maps those widths to llvm.amdgcn.cluster.load.async.to.lds.b8/b32/b64/b128. The LLVM offset and cache-policy immediate operands are lowering choices derived from the view address and cache attributes, not separate Loom semantics. The returned token must be committed to exactly one kernel.async.group.
+// LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER: Initiate a workgroup-cluster asynchronous load from a global-like source view into a workgroup/shared-memory destination view. The required i32 cluster_mask is a semantic participant set: bit N names flat cluster rank N, with x as the minor dimension. Source and destination must have the same static byte footprint, and that footprint must be exactly 1, 4, 8, or 16 bytes. Every named participant must execute the operation in the same dynamic order with corresponding lane-local source and destination addresses. Target lowering maps the participant set, addresses, and cache policy to the selected machine protocol. The returned token must be committed to exactly one kernel.async.group.
 // %copy = kernel.async.cluster.gather %src to %lds using %mask {cache_scope = se, cache_temporal = high_temporal} : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
 LOOM_DEFINE_ISA(loom_kernel_async_cluster_gather_isa, LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER)
 LOOM_DEFINE_OPERAND(loom_kernel_async_cluster_gather_source, 0)
@@ -440,7 +461,7 @@ iree_status_t loom_kernel_async_cluster_gather_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER_MASK: Predicated form of kernel.async.cluster.gather. False predicates perform no source or destination access for the current invocation but still produce a completed token, preserving a uniform async group shape for tails and guarded tiles. The cluster_mask remains the target workgroup broadcast mask and is distinct from the scalar i1 predicate.
+// LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER_MASK: Predicated form of kernel.async.cluster.gather. False predicates perform no source or destination access for the current invocation but still produce a completed token, preserving a uniform async group shape for tails and guarded tiles. The cluster_mask remains the semantic participant set and is distinct from the scalar i1 predicate.
 // %copy = kernel.async.cluster.gather.mask %src to %lds using %mask, %in_bounds {cache_scope = cu, cache_temporal = regular} : view<4xi8> to view<4xi8>, i32, i1 -> kernel.async.token
 LOOM_DEFINE_ISA(loom_kernel_async_cluster_gather_mask_isa, LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER_MASK)
 LOOM_DEFINE_OPERAND(loom_kernel_async_cluster_gather_mask_source, 0)
@@ -645,6 +666,11 @@ iree_status_t loom_kernel_subgroup_broadcast_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_kernel_subgroup_broadcast_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 iree_status_t loom_kernel_subgroup_broadcast_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
@@ -660,6 +686,11 @@ iree_status_t loom_kernel_subgroup_broadcast_first_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_kernel_subgroup_broadcast_first_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 iree_status_t loom_kernel_subgroup_value_result_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
@@ -687,6 +718,11 @@ iree_status_t loom_kernel_subgroup_reduce_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_kernel_subgroup_reduce_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 iree_status_t loom_kernel_subgroup_reduce_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
@@ -718,6 +754,11 @@ iree_status_t loom_kernel_subgroup_scan_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_kernel_scan_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 iree_status_t loom_kernel_subgroup_scan_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
@@ -850,6 +891,11 @@ iree_status_t loom_kernel_workgroup_reduce_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_kernel_workgroup_reduce_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 iree_status_t loom_kernel_workgroup_reduce_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
@@ -871,6 +917,11 @@ iree_status_t loom_kernel_workgroup_scan_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_kernel_scan_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 iree_status_t loom_kernel_workgroup_scan_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
@@ -886,6 +937,11 @@ iree_status_t loom_kernel_workgroup_vote_any_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_kernel_workgroup_vote_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // LOOM_OP_KERNEL_WORKGROUP_VOTE_ALL: Return true when all workgroup invocations have a true predicate.
 // %all = kernel.workgroup.vote.all %p : i1
@@ -898,6 +954,11 @@ iree_status_t loom_kernel_workgroup_vote_all_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_kernel_workgroup_vote_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // LOOM_OP_KERNEL_WORKGROUP_VOTE_COUNT: Count workgroup invocations with a true predicate.
 // %count = kernel.workgroup.vote.count %p : i1 -> i32
@@ -910,6 +971,11 @@ iree_status_t loom_kernel_workgroup_vote_count_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_kernel_workgroup_vote_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 iree_status_t loom_kernel_workgroup_vote_count_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
@@ -930,6 +996,94 @@ iree_status_t loom_kernel_assert_build(
     loom_optional loom_string_id_t message,
     loom_location_id_t location,
     loom_op_t** out_op);
+
+// LOOM_OP_KERNEL_CLUSTER_ID: Read one coordinate of the current workgroup cluster within the dispatch cluster grid. The global workgroup coordinate in a dimension is cluster.id * cluster.size + cluster.workgroup.id.
+// %cluster = kernel.cluster.id<x> : index
+LOOM_DEFINE_ISA(loom_kernel_cluster_id_isa, LOOM_OP_KERNEL_CLUSTER_ID)
+LOOM_DEFINE_RESULT(loom_kernel_cluster_id_result, 0)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_cluster_id_dimension, 0, loom_kernel_dimension_t)
+iree_status_t loom_kernel_cluster_id_build(
+    loom_builder_t* builder,
+    loom_kernel_dimension_t dimension,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_cluster_id_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_kernel_cluster_id_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
+// LOOM_OP_KERNEL_CLUSTER_WORKGROUP_ID: Read one coordinate of the current workgroup within its workgroup cluster. The coordinate is zero for an ordinary non-clustered launch.
+// %local_cluster_id = kernel.cluster.workgroup.id<y> : index
+LOOM_DEFINE_ISA(loom_kernel_cluster_workgroup_id_isa, LOOM_OP_KERNEL_CLUSTER_WORKGROUP_ID)
+LOOM_DEFINE_RESULT(loom_kernel_cluster_workgroup_id_result, 0)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_cluster_workgroup_id_dimension, 0, loom_kernel_dimension_t)
+iree_status_t loom_kernel_cluster_workgroup_id_build(
+    loom_builder_t* builder,
+    loom_kernel_dimension_t dimension,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_cluster_workgroup_id_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_kernel_cluster_workgroup_id_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
+// LOOM_OP_KERNEL_CLUSTER_WORKGROUP_FLAT_ID: Read the row-major flat coordinate of the current workgroup within its workgroup cluster, with x as the minor dimension.
+// %local_cluster_rank = kernel.cluster.workgroup.flat_id : index
+LOOM_DEFINE_ISA(loom_kernel_cluster_workgroup_flat_id_isa, LOOM_OP_KERNEL_CLUSTER_WORKGROUP_FLAT_ID)
+LOOM_DEFINE_RESULT(loom_kernel_cluster_workgroup_flat_id_result, 0)
+iree_status_t loom_kernel_cluster_workgroup_flat_id_build(
+    loom_builder_t* builder,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_cluster_workgroup_flat_id_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_kernel_cluster_workgroup_flat_id_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
+// LOOM_OP_KERNEL_CLUSTER_SIZE: Read the selected workgroup-cluster extent. An ordinary non-clustered launch has extent one in every dimension.
+// %cluster_size = kernel.cluster.size<y> : index
+LOOM_DEFINE_ISA(loom_kernel_cluster_size_isa, LOOM_OP_KERNEL_CLUSTER_SIZE)
+LOOM_DEFINE_RESULT(loom_kernel_cluster_size_result, 0)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_cluster_size_dimension, 0, loom_kernel_dimension_t)
+iree_status_t loom_kernel_cluster_size_build(
+    loom_builder_t* builder,
+    loom_kernel_dimension_t dimension,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_cluster_size_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_kernel_cluster_size_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
+// LOOM_OP_KERNEL_CLUSTER_COUNT: Read the number of workgroup clusters in one dispatch dimension. This is the exact quotient of workgroup.count by cluster.size.
+// %cluster_count = kernel.cluster.count<y> : index
+LOOM_DEFINE_ISA(loom_kernel_cluster_count_isa, LOOM_OP_KERNEL_CLUSTER_COUNT)
+LOOM_DEFINE_RESULT(loom_kernel_cluster_count_result, 0)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_cluster_count_dimension, 0, loom_kernel_dimension_t)
+iree_status_t loom_kernel_cluster_count_build(
+    loom_builder_t* builder,
+    loom_kernel_dimension_t dimension,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_cluster_count_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_kernel_cluster_count_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // Returns the vtable array for the kernel dialect.
 const loom_op_vtable_t* const* loom_kernel_dialect_vtables(

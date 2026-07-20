@@ -85,6 +85,8 @@ typedef enum loom_contract_numeric_type_e {
   LOOM_CONTRACT_NUMERIC_BF6 = 16,
   // The payload is interpreted as FP4 elements.
   LOOM_CONTRACT_NUMERIC_FP4 = 17,
+  // The payload is interpreted as TF32 elements stored in f32 lanes.
+  LOOM_CONTRACT_NUMERIC_TF32 = 18,
 } loom_contract_numeric_type_t;
 
 typedef enum loom_contract_scale_kind_e {
@@ -280,6 +282,9 @@ typedef struct loom_contract_shape_t {
 
   // Exact K/reduction extent when proven, or 0 when dynamic.
   int64_t k;
+
+  // Exact independent matrix block count when proven, or 0 when dynamic.
+  int64_t block_count;
 } loom_contract_shape_t;
 
 typedef struct loom_contract_shape_value_refs_t {
@@ -291,6 +296,9 @@ typedef struct loom_contract_shape_value_refs_t {
 
   // Optional SSA value carrying the K/reduction extent.
   loom_contract_value_ref_t k;
+
+  // Optional SSA value carrying the independent matrix block count.
+  loom_contract_value_ref_t block_count;
 
   // Optional SSA value carrying the K-group element count.
   loom_contract_value_ref_t k_group_size;
@@ -470,6 +478,14 @@ bool loom_contract_numeric_type_from_scalar(
 
 // Returns the stable diagnostic spelling for a generic numeric type.
 iree_string_view_t loom_contract_numeric_type_name(
+    loom_contract_numeric_type_t numeric_type);
+
+// Returns true when |numeric_type| is a signed integer interpretation.
+bool loom_contract_numeric_type_is_signed_integer(
+    loom_contract_numeric_type_t numeric_type);
+
+// Returns true when |numeric_type| is an unsigned integer interpretation.
+bool loom_contract_numeric_type_is_unsigned_integer(
     loom_contract_numeric_type_t numeric_type);
 
 // Returns a diagnostic detail string for generic contract rejection flags.

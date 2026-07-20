@@ -27,6 +27,7 @@ from loom.target.low_descriptors import (
     DescriptorSet,
     Hazard,
     HazardReferenceKind,
+    Operand,
     descriptor_stable_id,
 )
 
@@ -35,6 +36,16 @@ def _register_part_id_expr(compiled: CompiledDescriptorSet, part_name: str | Non
     if part_name is None:
         return "LOOM_LOW_REGISTER_PART_NONE"
     return str(compiled.register_part_ids[part_name])
+
+
+def _operand_flag_expr(operand: Operand, rematerializable: bool) -> str:
+    flag_expr = c_spelling.flag_expr(operand.flags)
+    if not rematerializable:
+        return flag_expr
+    rematerializable_flag = "LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE"
+    if flag_expr == "0":
+        return rematerializable_flag
+    return f"{flag_expr} | {rematerializable_flag}"
 
 
 def _hazard_reference_kind(hazard: Hazard) -> HazardReferenceKind:
@@ -245,6 +256,7 @@ def _descriptor_row_lines(
             f".operand_form_count = {descriptor_rows[i]['operand_form_count']},",
             f".schedule_class_id = {compiled.schedule_class_ids[descriptor.schedule_class]},",
             f".flags = {c_spelling.flag_expr(descriptor.flags)},",
+            f".instruction_class_flags = {c_spelling.flag_expr(compiled.instruction_classes[i])},",
             f".canonical_asm_form_ordinal = {c_spelling.canonical_asm_form_ordinal_expr(canonical_asm_form_ordinals[i])},",
         ]
         for i, descriptor in enumerate(descriptors)
@@ -375,6 +387,8 @@ def emit_source_for_views(
                 f".flags = {c_spelling.flag_expr(reg_class.flags)},",
                 f".alloc_unit_bits = {reg_class.alloc_unit_bits},",
                 f".allocatable_count = {reg_class.allocatable_count},",
+                f".fixed_location_base = {reg_class.fixed_location_base},",
+                f".fixed_location_count = {reg_class.fixed_location_count},",
                 f".alias_set_id = {reg_class.alias_set_id},",
                 ".spill_class_id = " + ("LOOM_LOW_REG_CLASS_NONE" if reg_class.spill_class is None else str(compiled.reg_class_ids[reg_class.spill_class])) + ",",
                 f".full_register_part_mask = {c_spelling.hex_u32_literal(reg_class.full_register_part_mask)},",
@@ -420,12 +434,13 @@ def emit_source_for_views(
             [
                 f".field_name_string_offset = {pool.ref(f'field_{operand.field_name}')},",
                 f".role = {operand.role.c_name},",
-                f".flags = {c_spelling.flag_expr(operand.flags)},",
+                f".flags = {_operand_flag_expr(operand, compiled.operand_rematerializable[i])},",
                 f".reg_class_alt_start = {compiled.operand_alt_starts[i]},",
                 f".reg_class_alt_count = {len(operand.reg_alts)},",
                 f".unit_count = {operand.unit_count},",
                 f".address_map_kind = {operand.address_map_kind.c_name},",
                 f".addressable_unit_count = {operand.addressable_unit_count},",
+                f".address_state_slot = {operand.address_state_slot},",
                 f".encoding_field_id = {operand.encoding_field_id},",
                 f".data_format_id = {operand.data_format_id},",
                 f".register_part_id = {_register_part_id_expr(compiled, operand.register_part)},",

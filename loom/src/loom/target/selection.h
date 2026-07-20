@@ -16,6 +16,8 @@
 #define LOOM_TARGET_SELECTION_H_
 
 #include "iree/base/api.h"
+#include "iree/base/internal/arena.h"
+#include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/module.h"
 #include "loom/pass/environment.h"
@@ -68,6 +70,29 @@ loom_symbol_ref_t loom_target_pass_capability_target_ref(
 loom_symbol_ref_t loom_target_effective_target_ref(
     loom_symbol_ref_t authored_target_ref,
     const loom_target_pass_capability_t* capability);
+
+// Returns true when |effective_target_ref| is the invocation-materialized
+// target carried by |capability| and that invocation can refine
+// |authored_target_bundle|. Explicitly authored effective targets are not
+// interchangeable even when their bundles are compatible.
+bool loom_target_pass_capability_can_refine_target_bundle(
+    const loom_target_pass_capability_t* capability,
+    loom_symbol_ref_t effective_target_ref,
+    const loom_target_bundle_t* authored_target_bundle);
+
+// Resolves the effective target bundle for |function| under |environment|.
+//
+// Authored function target records win over the invocation target ref carried
+// by the environment. A compatible invocation target selection refines the
+// authored target bundle. Returns OK with |out_resolved| false when no target
+// is available or the invocation selection is incompatible with the authored
+// target, so callers that are not the primary lowering path can simply skip
+// target-sensitive work for that function.
+iree_status_t loom_target_pass_capability_resolve_function_bundle(
+    const loom_pass_environment_t* environment, const loom_module_t* module,
+    loom_func_like_t function, iree_diagnostic_emitter_t diagnostic_emitter,
+    iree_arena_allocator_t* arena, bool* out_resolved,
+    loom_target_bundle_storage_t* out_bundle_storage);
 
 // Compacts module symbols while preserving the invocation target ref carried by
 // |pass|, if any.

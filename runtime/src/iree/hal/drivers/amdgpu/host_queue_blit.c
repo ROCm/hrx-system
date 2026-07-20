@@ -678,7 +678,7 @@ iree_status_t iree_hal_amdgpu_host_queue_prepare_update_copy(
     uint8_t** out_target_device_ptr) {
   *out_source_bytes = NULL;
   *out_source_length = 0;
-  *out_target_device_ptr = NULL;
+  if (out_target_device_ptr) *out_target_device_ptr = NULL;
 
   if (IREE_UNLIKELY(!source_buffer)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -720,21 +720,24 @@ iree_status_t iree_hal_amdgpu_host_queue_prepare_update_copy(
   }
   (void)source_end;
 
-  iree_hal_buffer_t* allocated_target_buffer =
-      iree_hal_buffer_allocated_buffer(target_buffer);
-  uint8_t* target_device_ptr =
-      (uint8_t*)iree_hal_amdgpu_buffer_device_pointer(allocated_target_buffer);
-  if (IREE_UNLIKELY(!target_device_ptr)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "target buffer must be backed by an AMDGPU allocation");
+  if (out_target_device_ptr) {
+    iree_hal_buffer_t* allocated_target_buffer =
+        iree_hal_buffer_allocated_buffer(target_buffer);
+    uint8_t* target_device_ptr =
+        (uint8_t*)iree_hal_amdgpu_buffer_device_pointer(
+            allocated_target_buffer);
+    if (IREE_UNLIKELY(!target_device_ptr)) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "target buffer does not yet have an AMDGPU backing allocation");
+    }
+    target_device_ptr +=
+        iree_hal_buffer_byte_offset(target_buffer) + target_offset;
+    *out_target_device_ptr = target_device_ptr;
   }
-  target_device_ptr +=
-      iree_hal_buffer_byte_offset(target_buffer) + target_offset;
 
   *out_source_bytes = (const uint8_t*)source_buffer + source_offset;
   *out_source_length = source_length;
-  *out_target_device_ptr = target_device_ptr;
   return iree_ok_status();
 }
 

@@ -18,8 +18,8 @@
 #include "iree/hal/drivers/amdgpu/util/feedback_channel.h"
 #include "iree/hal/drivers/amdgpu/util/feedback_channel_test_kernels.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 

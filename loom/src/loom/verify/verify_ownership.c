@@ -6,18 +6,20 @@
 
 #include "loom/verify/verify_ownership.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 #include "loom/analysis/consumption.h"
 #include "loom/error/error_catalog.h"
+#include "loom/util/adaptive_sort.h"
 #include "loom/verify/verify_diagnostics.h"
 
-static int loom_compare_value_ids(const void* lhs, const void* rhs) {
-  loom_value_id_t lhs_id = *(const loom_value_id_t*)lhs;
-  loom_value_id_t rhs_id = *(const loom_value_id_t*)rhs;
-  return (lhs_id > rhs_id) - (lhs_id < rhs_id);
+static bool loom_value_id_less(const loom_value_id_t* lhs,
+                               const loom_value_id_t* rhs) {
+  return *lhs < *rhs;
 }
+
+LOOM_DEFINE_ADAPTIVE_SORT(loom_value_id_sort, loom_value_id_t,
+                          loom_value_id_less)
 
 // Prepares the reusable tied-result scratch tables for an op with
 // |result_count| results and |operand_count| operands. Grows the
@@ -404,9 +406,8 @@ iree_status_t loom_verify_tied_results(loom_verify_state_t* state,
         .operand_value_ids[state->tied_table.operand_value_count++] = value_id;
   }
   if (state->tied_table.operand_value_count > 1) {
-    qsort(state->tied_table.operand_value_ids,
-          state->tied_table.operand_value_count, sizeof(loom_value_id_t),
-          loom_compare_value_ids);
+    loom_value_id_sort(state->tied_table.operand_value_ids,
+                       state->tied_table.operand_value_count);
   }
 
   for (uint16_t i = 0; i < op->tied_result_count; ++i) {

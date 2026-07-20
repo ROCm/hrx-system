@@ -313,8 +313,10 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
       /*.target_ref=*/{},
       /*.descriptor_set=*/nullptr,
       /*.fact_table=*/nullptr,
+      /*.value_domain=*/nullptr,
       /*.view_regions=*/nullptr,
       /*.arena=*/nullptr,
+      /*.target_state_allocator=*/{},
   };
   loom_op_t op = {};
   op.kind = kSourceOpKind;
@@ -423,8 +425,10 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleReportsRejectedCase) {
       /*.target_ref=*/{},
       /*.descriptor_set=*/nullptr,
       /*.fact_table=*/nullptr,
+      /*.value_domain=*/nullptr,
       /*.view_regions=*/nullptr,
       /*.arena=*/&arena,
+      /*.target_state_allocator=*/{},
   };
   loom_op_t op = {};
   op.kind = kSourceOpKind;
@@ -580,8 +584,10 @@ TEST_F(LowContractQuerySourceMemoryTest,
       /*.target_ref=*/{},
       /*.descriptor_set=*/nullptr,
       /*.fact_table=*/&facts,
+      /*.value_domain=*/nullptr,
       /*.view_regions=*/nullptr,
       /*.arena=*/&arena,
+      /*.target_state_allocator=*/{},
   };
   loom_target_contract_query_result_t result =
       loom_target_contract_query_result_empty();

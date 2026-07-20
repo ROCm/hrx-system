@@ -32,6 +32,8 @@ _ATOMIC_KIND = {
     "or.b32": (AmdgpuAtomicKind.ORI, AmdgpuAtomicValueKind.I32),
     "xor.b32": (AmdgpuAtomicKind.XORI, AmdgpuAtomicValueKind.I32),
     "exchange.b32": (AmdgpuAtomicKind.XCHGI, AmdgpuAtomicValueKind.I32),
+    "add.u64": (AmdgpuAtomicKind.ADDI, AmdgpuAtomicValueKind.I64),
+    "exchange.u64": (AmdgpuAtomicKind.XCHGI, AmdgpuAtomicValueKind.I64),
     "add.f32": (AmdgpuAtomicKind.ADDF, AmdgpuAtomicValueKind.F32),
     "minnum.f32": (AmdgpuAtomicKind.MINNUMF, AmdgpuAtomicValueKind.F32),
     "maxnum.f32": (AmdgpuAtomicKind.MAXNUMF, AmdgpuAtomicValueKind.F32),
@@ -342,6 +344,15 @@ def _amdgpu_atomic_candidate_from_overlay(
             operation_kind=AmdgpuAtomicOperationKind.CMPXCHG,
             atomic_kind=AmdgpuAtomicKind.NONE,
             value_kind=AmdgpuAtomicValueKind.I32,
+            descriptor_key=overlay.descriptor_key,
+        )
+    if semantic_parts == ("compare_exchange", "b64"):
+        return AmdgpuAtomicDescriptorCandidate(
+            memory_space=memory_space,
+            address_form=address_form,
+            operation_kind=AmdgpuAtomicOperationKind.CMPXCHG,
+            atomic_kind=AmdgpuAtomicKind.NONE,
+            value_kind=AmdgpuAtomicValueKind.I64,
             descriptor_key=overlay.descriptor_key,
         )
 

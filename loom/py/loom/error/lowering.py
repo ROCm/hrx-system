@@ -319,6 +319,85 @@ ERR_LOWERING_036 = ErrorDef(
     ),
 )
 
+# ERR_LOWERING_037: Write overlaps a pending async source.
+ERR_LOWERING_037 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=37,
+    severity=Severity.ERROR,
+    summary="Write overlaps a pending async source.",
+    message=(
+        "{phase_name} found {op_name} writing a view that may overlap a "
+        "pending async source before wait"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("phase_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Wait the pending async group before the write or prove the written "
+        "view is disjoint from every pending source"
+    ),
+)
+
+# ERR_LOWERING_038: Kernel async group does not commit the current transfers.
+ERR_LOWERING_038 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=38,
+    severity=Severity.ERROR,
+    summary="Kernel async group does not commit the current transfers.",
+    message=(
+        "{phase_name} requires {op_name} to commit the exact uncommitted "
+        "transfer token sequence in program order"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("phase_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Commit every transfer token since the previous group exactly once "
+        "and in source program order"
+    ),
+)
+
+# ERR_LOWERING_039: Kernel async transfer leaves a block before group commit.
+ERR_LOWERING_039 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=39,
+    severity=Severity.ERROR,
+    summary="Kernel async transfer leaves a block before group commit.",
+    message=(
+        "{phase_name} requires {op_name} to be committed to a local async "
+        "group before leaving its block"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("phase_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Commit the transfer token to the next kernel.async.group in the same "
+        "straight-line block"
+    ),
+)
+
+# ERR_LOWERING_040: Kernel async transfer token escapes the local stream.
+ERR_LOWERING_040 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=40,
+    severity=Severity.ERROR,
+    summary="Kernel async transfer token escapes the local stream.",
+    message=(
+        "{phase_name} requires the token produced by {op_name} to have exactly "
+        "one local kernel.async.group use"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("phase_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use the transfer token exactly once in the next local kernel.async.group"
+    ),
+)
+
 # ERR_LOWERING_043: Boundary fact refinement did not converge.
 ERR_LOWERING_043 = ErrorDef(
     domain=ErrorDomain.LOWERING,
@@ -399,6 +478,27 @@ ERR_LOWERING_046 = ErrorDef(
     ),
 )
 
+# ERR_LOWERING_047: Vector bank scalarization contract failed.
+ERR_LOWERING_047 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=47,
+    severity=Severity.ERROR,
+    summary="Vector bank scalarization contract failed.",
+    message=(
+        "{phase_name} cannot scalarize carried slot {slot} of {op_name}: {reason}"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("phase_name", ParamKind.STRING),
+        ErrorParam("slot", ParamKind.U32),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Address the bank only through one static leading-index prefix and "
+        "keep the aggregate inside its scf.for recurrence"
+    ),
+)
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -415,8 +515,13 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_034,
     ERR_LOWERING_035,
     ERR_LOWERING_036,
+    ERR_LOWERING_037,
+    ERR_LOWERING_038,
+    ERR_LOWERING_039,
+    ERR_LOWERING_040,
     ERR_LOWERING_043,
     ERR_LOWERING_044,
     ERR_LOWERING_045,
     ERR_LOWERING_046,
+    ERR_LOWERING_047,
 )

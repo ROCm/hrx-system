@@ -18,11 +18,11 @@ kernel.def target(@target) @default_source_low_memory_diagnostics_stay_silent() 
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @default_source_low_memory_diagnostics_stay_silent() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @default_source_low_memory_diagnostics_stay_silent() asm<amdgpu.rdna3.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %9 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %one = v_mov_b32 1
   %12 = v_lshlrev_b32_src0_inline %tid, 2
-  ds_write_b32 %12, %one
+  low.op<amdgpu.ds_write_b32>(%12, %one) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 252, 4, 256]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   return
 }

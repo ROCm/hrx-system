@@ -329,7 +329,7 @@ def _dotf_zero_init_rule() -> DescriptorRule:
             _value_type("rhs", _VEC_F32, _DOTF_RHS_DIAGNOSTIC),
             _unit_count_eq("lhs", "rhs", _DOTF_RHS_DIAGNOSTIC),
             _value_type("init", _F32, _DOTF_ACC_DIAGNOSTIC),
-            Guard.value_f64_equals("init", 0.0, diagnostic=_DOTF_ACC_DIAGNOSTIC),
+            Guard.value_float_equals("init", 0.0, diagnostic=_DOTF_ACC_DIAGNOSTIC),
             _value_type("result", _F32, _DOTF_RESULT_DIAGNOSTIC),
             _vgpr("result", _RESULT_VGPR_DIAGNOSTIC),
             Guard.descriptor_available(

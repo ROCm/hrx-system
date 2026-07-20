@@ -17,6 +17,7 @@
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/lower/lower_rules.h"
 #include "loom/codegen/low/memory_access.h"
+#include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 
@@ -38,6 +39,28 @@ enum loom_low_lower_selected_plan_flag_bits_e {
   LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED = (uint8_t)1u << 0,
 };
 typedef uint8_t loom_low_lower_selected_plan_flags_t;
+
+typedef struct loom_low_lower_memory_expr_term_t {
+  // Source SSA value multiplied into this symbolic byte expression.
+  loom_value_id_t value_id;
+  // Signed byte coefficient applied to |value_id|.
+  int64_t coefficient;
+} loom_low_lower_memory_expr_term_t;
+
+typedef struct loom_low_lower_memory_expr_key_t {
+  // Static byte constant added to all dynamic terms.
+  int64_t constant;
+  // Number of populated entries in |terms|.
+  uint8_t term_count;
+  // Sorted symbolic byte terms.
+  loom_low_lower_memory_expr_term_t
+      terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
+} loom_low_lower_memory_expr_key_t;
+
+typedef struct loom_low_lower_memory_expr_entry_t {
+  // Comparable symbolic expression key interned for report-only accounting.
+  loom_low_lower_memory_expr_key_t key;
+} loom_low_lower_memory_expr_entry_t;
 
 typedef enum loom_low_lower_selected_plan_kind_e {
   // Selection came from a table-driven source-to-low rule.
@@ -85,6 +108,12 @@ typedef struct loom_low_lower_successor_interpositions_t {
   // Number of entries in low_dests.
   uint8_t low_dest_count;
 } loom_low_lower_successor_interpositions_t;
+
+// Returns exact source execution evidence for an operation when loop and CFG
+// facts can prove it without target execution.
+iree_status_t loom_low_lower_source_op_execution_count_plus_one(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    uint64_t* out_execution_count_plus_one);
 
 typedef struct loom_low_lower_target_state_record_t {
   // Target-owned static key identifying this function-local state object.
@@ -148,6 +177,18 @@ typedef struct loom_low_lowering_frame_t {
   iree_host_size_t selected_plan_capacity;
   // Next selected plan consumed by the emission walk.
   iree_host_size_t selected_plan_emit_index;
+  // Cached source-function CFG block execution counts for memory reports.
+  uint64_t* source_block_execution_counts;
+  // True when source_block_execution_counts has been initialized.
+  bool source_block_execution_counts_initialized;
+  // True when every reachable source CFG backedge was counted exactly.
+  bool source_block_execution_counts_exact;
+  // Function-local symbolic byte expressions interned for report accounting.
+  loom_low_lower_memory_expr_entry_t* memory_expr_entries;
+  // Number of interned symbolic byte expressions.
+  iree_host_size_t memory_expr_entry_count;
+  // Capacity of |memory_expr_entries|.
+  iree_host_size_t memory_expr_entry_capacity;
   // Source-derived memory access rows copied into options.table_arena.
   loom_low_memory_access_record_t* memory_access_records;
   // Number of memory access rows recorded during emission.

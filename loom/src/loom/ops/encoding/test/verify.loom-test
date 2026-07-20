@@ -98,9 +98,42 @@ func.def @physical_storage_static_params() {
 
 func.def @physical_storage_fp8_fnuz_params() {
   %layout = encoding.layout.dense : encoding<layout>
+  %ieee_schema = encoding.define #ieee_fp8_e5m2 : encoding<schema>
+  %storage0 = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %ieee_schema : encoding<schema>} : encoding<storage>
   %schema = encoding.define #fp8_e4m3fnuz : encoding<schema>
   %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %storage2 = encoding.define #physical_storage<layout=#dense, schema=#fp8_e5m2fnuz> : encoding<storage>
+  func.return
+}
+
+// ====
+
+func.def @named_fp8_schema_rounding_params() {
+  %schema = encoding.define #fp8_e4m3fn<rounding=finite_only, storage_bits=8> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @named_fp8_schema_unsupported_param() {
+  // ERROR@+1: ENCODING/008 "fp8_e4m3fn" "payload_elements"
+  %schema = encoding.define #fp8_e4m3fn<payload_elements=16> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @named_fp8_schema_bad_rounding() {
+  // ERROR@+1: ENCODING/013 "fp8_e4m3fn" "rounding" "wat"
+  %schema = encoding.define #fp8_e4m3fn<rounding=wat> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @named_fp8_schema_bad_storage_bits() {
+  // ERROR@+1: STRUCTURE/014 "storage_bits"
+  %schema = encoding.define #ieee_fp8_e4m3<storage_bits=16> : encoding<schema>
   func.return
 }
 
@@ -238,6 +271,30 @@ func.def @matrix_operand_rejects_scaled_schema_without_scale_operands() {
 func.def @matrix_operand_rejects_zero_payload_registers() {
   // ERROR@+1: STRUCTURE/014 "payload_registers" "0"
   %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=0> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @matrix_operand_rejects_structured_sparsity_without_density() {
+  // ERROR@+1: STRUCTURE/014 "sparsity_group_nonzero_elements" "0"
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @matrix_operand_rejects_non_decreasing_structured_sparsity_density() {
+  // ERROR@+1: STRUCTURE/014 "sparsity_group_nonzero_elements" "4"
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=4> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @matrix_operand_rejects_density_without_structured_sparsity() {
+  // ERROR@+1: STRUCTURE/014 "sparsity_group_elements" "4"
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   func.return
 }
 

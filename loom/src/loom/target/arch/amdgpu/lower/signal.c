@@ -53,24 +53,18 @@ static bool loom_amdgpu_signal_type_is_register_class(
          loom_low_register_type_class_id(type) == reg_class_id;
 }
 
-static iree_status_t loom_amdgpu_signal_require_register_class(
+static void loom_amdgpu_signal_require_register_class(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_value_id_t value, uint16_t reg_class_id, uint32_t unit_count) {
-  if (value >= builder->module->values.count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU signal builder received an invalid low value");
-  }
+  IREE_ASSERT(value < builder->module->values.count,
+              "AMDGPU signal builder received an invalid low value");
   const loom_type_t type = loom_module_value_type(builder->module, value);
-  if (!loom_amdgpu_signal_type_is_register_class(descriptor_set, type,
-                                                 reg_class_id) ||
-      loom_low_register_type_unit_count(type) != unit_count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU signal builder received a low value with an unsupported "
-        "register shape");
-  }
-  return iree_ok_status();
+  IREE_ASSERT(
+      loom_amdgpu_signal_type_is_register_class(descriptor_set, type,
+                                                reg_class_id) &&
+          loom_low_register_type_unit_count(type) == unit_count,
+      "AMDGPU signal builder received a low value with an unsupported register "
+      "shape");
 }
 
 static iree_status_t loom_amdgpu_signal_descriptor_operand_type(
@@ -78,27 +72,14 @@ static iree_status_t loom_amdgpu_signal_descriptor_operand_type(
     const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index,
     loom_type_t* out_type) {
   *out_type = loom_type_none();
-  if (descriptor_operand_index >= descriptor->operand_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU signal descriptor operand index is out of range");
-  }
+  IREE_ASSERT_LT(descriptor_operand_index, descriptor->operand_count);
   const uint32_t operand_index =
       (uint32_t)descriptor->operand_start + descriptor_operand_index;
-  if (operand_index >= descriptor_set->operand_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU signal descriptor operand row is out of "
-                            "range");
-  }
+  IREE_ASSERT_LT(operand_index, descriptor_set->operand_count);
   const loom_low_operand_t* operand = &descriptor_set->operands[operand_index];
   for (uint16_t i = 0; i < operand->reg_class_alt_count; ++i) {
     const uint32_t alt_index = operand->reg_class_alt_start + i;
-    if (alt_index >= descriptor_set->reg_class_alt_count) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU signal descriptor operand register-class alternative is out "
-          "of range");
-    }
+    IREE_ASSERT_LT(alt_index, descriptor_set->reg_class_alt_count);
     const loom_low_reg_class_alt_t* alt =
         &descriptor_set->reg_class_alts[alt_index];
     if (iree_any_bit_set(alt->flags, LOOM_LOW_REG_CLASS_ALT_FLAG_IMMEDIATE)) {
@@ -107,36 +88,24 @@ static iree_status_t loom_amdgpu_signal_descriptor_operand_type(
     return loom_low_build_register_type(descriptor_set, alt->reg_class_id,
                                         operand->unit_count, out_type);
   }
-  return iree_make_status(
-      IREE_STATUS_FAILED_PRECONDITION,
+  IREE_ASSERT_UNREACHABLE(
       "AMDGPU signal descriptor operand has no register alternative");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
-static iree_status_t loom_amdgpu_signal_asm_form(
+static const loom_low_asm_form_t* loom_amdgpu_signal_asm_form(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor,
-    const loom_low_asm_form_t** out_asm_form) {
-  *out_asm_form = NULL;
-  if (descriptor->canonical_asm_form_ordinal >=
-      descriptor_set->asm_form_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU signal descriptor has no canonical asm form");
-  }
-  *out_asm_form =
-      &descriptor_set->asm_forms[descriptor->canonical_asm_form_ordinal];
-  return iree_ok_status();
+    const loom_low_descriptor_t* descriptor) {
+  IREE_ASSERT_LT(descriptor->canonical_asm_form_ordinal,
+                 descriptor_set->asm_form_count);
+  return &descriptor_set->asm_forms[descriptor->canonical_asm_form_ordinal];
 }
 
 static iree_status_t loom_amdgpu_signal_descriptor_result_type(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t result_index,
     loom_type_t* out_type) {
-  if (result_index >= descriptor->result_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU signal descriptor result index is out of range");
-  }
+  IREE_ASSERT_LT(result_index, descriptor->result_count);
   return loom_amdgpu_signal_descriptor_operand_type(descriptor_set, descriptor,
                                                     result_index, out_type);
 }
@@ -228,30 +197,22 @@ static iree_status_t loom_amdgpu_signal_materialize_vgpr_b32(
     loom_value_id_t source, loom_location_id_t location,
     loom_value_id_t* out_value) {
   *out_value = source;
-  if (source >= builder->module->values.count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU signal builder received an invalid low value");
-  }
+  IREE_ASSERT(source < builder->module->values.count,
+              "AMDGPU signal builder received an invalid low value");
   const loom_type_t source_type =
       loom_module_value_type(builder->module, source);
-  if (!loom_low_type_is_register(source_type) ||
-      loom_low_register_type_unit_count(source_type) != 1) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU signal builder cannot materialize value with unsupported "
-        "register shape");
-  }
+  IREE_ASSERT(loom_low_type_is_register(source_type) &&
+                  loom_low_register_type_unit_count(source_type) == 1,
+              "AMDGPU signal builder cannot materialize value with unsupported "
+              "register shape");
   if (loom_amdgpu_signal_type_is_register_class(
           descriptor_set, source_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR)) {
     return iree_ok_status();
   }
-  if (!loom_amdgpu_signal_type_is_register_class(
-          descriptor_set, source_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU signal builder cannot materialize non-SGPR value into VGPR");
-  }
+  IREE_ASSERT(loom_amdgpu_signal_type_is_register_class(
+                  descriptor_set, source_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR),
+              "AMDGPU signal builder cannot materialize non-SGPR value into "
+              "VGPR");
   return loom_amdgpu_signal_build_vgpr_b32_copy(builder, descriptor_set, source,
                                                 location, out_value);
 }
@@ -304,14 +265,12 @@ static iree_status_t loom_amdgpu_signal_build_vgpr_u64_const(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_signal_packet_operand_count(
+static uint16_t loom_amdgpu_signal_packet_operand_count(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, uint16_t* out_operand_count) {
-  const loom_low_asm_form_t* asm_form = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_signal_asm_form(descriptor_set, descriptor, &asm_form));
-  *out_operand_count = asm_form->operand_index_count;
-  return iree_ok_status();
+    const loom_low_descriptor_t* descriptor) {
+  const loom_low_asm_form_t* asm_form =
+      loom_amdgpu_signal_asm_form(descriptor_set, descriptor);
+  return asm_form->operand_index_count;
 }
 
 static iree_status_t loom_amdgpu_signal_append_optional_m0_operand(
@@ -319,18 +278,15 @@ static iree_status_t loom_amdgpu_signal_append_optional_m0_operand(
     const loom_low_descriptor_t* descriptor, loom_location_id_t location,
     loom_value_id_t* operands, iree_host_size_t operand_capacity,
     iree_host_size_t* inout_operand_count) {
-  uint16_t packet_operand_count = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_signal_packet_operand_count(
-      descriptor_set, descriptor, &packet_operand_count));
+  const uint16_t packet_operand_count =
+      loom_amdgpu_signal_packet_operand_count(descriptor_set, descriptor);
   if (packet_operand_count == *inout_operand_count) {
     return iree_ok_status();
   }
-  if (packet_operand_count != *inout_operand_count + 1 ||
-      *inout_operand_count >= operand_capacity) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU signal descriptor has an unsupported packet operand count");
-  }
+  IREE_ASSERT_EQ(packet_operand_count, *inout_operand_count + 1,
+                 "AMDGPU signal descriptor has an unsupported packet operand "
+                 "count");
+  IREE_ASSERT_LT(*inout_operand_count, operand_capacity);
   loom_value_id_t m0_value = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_signal_build_m0_const_u32(
       builder, descriptor_set, descriptor, 0, location, &m0_value));
@@ -343,12 +299,12 @@ static iree_status_t loom_amdgpu_signal_build_global_store_b64(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_value_id_t zero_vaddr, loom_value_id_t saddr, loom_value_id_t value,
     loom_location_id_t location) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_signal_require_register_class(
-      builder, descriptor_set, zero_vaddr, LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_signal_require_register_class(
-      builder, descriptor_set, value, LOOM_AMDGPU_REG_CLASS_ID_VGPR, 2));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_signal_require_register_class(
-      builder, descriptor_set, saddr, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2));
+  loom_amdgpu_signal_require_register_class(builder, descriptor_set, zero_vaddr,
+                                            LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1);
+  loom_amdgpu_signal_require_register_class(builder, descriptor_set, value,
+                                            LOOM_AMDGPU_REG_CLASS_ID_VGPR, 2);
+  loom_amdgpu_signal_require_register_class(builder, descriptor_set, saddr,
+                                            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2);
 
   const loom_low_descriptor_t* descriptor = NULL;
   loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
@@ -395,8 +351,8 @@ static iree_status_t loom_amdgpu_signal_build_m0_from_sgpr(
     loom_value_id_t source, loom_location_id_t location,
     loom_value_id_t* out_value) {
   *out_value = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_signal_require_register_class(
-      builder, descriptor_set, source, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1));
+  loom_amdgpu_signal_require_register_class(builder, descriptor_set, source,
+                                            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1);
   const loom_low_descriptor_t* descriptor = NULL;
   loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_descriptor_ref(
@@ -421,9 +377,9 @@ iree_status_t loom_amdgpu_build_signal_values(
     loom_amdgpu_signal_values_t* out_values) {
   IREE_ASSERT_ARGUMENT(out_values);
   *out_values = loom_amdgpu_signal_values_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_signal_require_register_class(
-      builder, descriptor_set, signal_address, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
-      2));
+  loom_amdgpu_signal_require_register_class(builder, descriptor_set,
+                                            signal_address,
+                                            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2);
 
   loom_amdgpu_signal_values_t values = loom_amdgpu_signal_values_empty();
   values.address = signal_address;
@@ -443,9 +399,9 @@ iree_status_t loom_amdgpu_build_signal_values(
 iree_status_t loom_amdgpu_build_signal_add_one_release(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_value_id_t signal_address, loom_location_id_t location) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_signal_require_register_class(
-      builder, descriptor_set, signal_address, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
-      2));
+  loom_amdgpu_signal_require_register_class(builder, descriptor_set,
+                                            signal_address,
+                                            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2);
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_build_release_ordering(
       builder, descriptor_set, location));
@@ -495,22 +451,13 @@ iree_status_t loom_amdgpu_build_signal_mailbox_message_id(
     loom_value_id_t* out_message_id) {
   IREE_ASSERT_ARGUMENT(out_message_id);
   *out_message_id = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_signal_require_register_class(
-      builder, descriptor_set, event_id, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1));
+  loom_amdgpu_signal_require_register_class(builder, descriptor_set, event_id,
+                                            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1);
 
-  switch (descriptor_set->descriptor_set_ordinal) {
-    case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3:
-    case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA4:
-    case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3:
-    case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3_5:
-    case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4:
-    case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X:
-      break;
-    default:
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU signal mailbox message-id mask is not known for the "
-          "descriptor set");
+  if (descriptor_set->descriptor_set_ordinal >=
+      LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT) {
+    IREE_ASSERT_UNREACHABLE("selected AMDGPU signal descriptor set");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   loom_type_t sgpr_type = loom_type_none();
@@ -540,11 +487,11 @@ iree_status_t loom_amdgpu_build_signal_poke_mailbox(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_value_id_t event_mailbox_ptr, loom_value_id_t event_id,
     loom_location_id_t location) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_signal_require_register_class(
-      builder, descriptor_set, event_mailbox_ptr, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
-      2));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_signal_require_register_class(
-      builder, descriptor_set, event_id, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1));
+  loom_amdgpu_signal_require_register_class(builder, descriptor_set,
+                                            event_mailbox_ptr,
+                                            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2);
+  loom_amdgpu_signal_require_register_class(builder, descriptor_set, event_id,
+                                            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1);
 
   loom_value_id_t zero_vaddr = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_signal_build_vgpr_u32_const(

@@ -30,6 +30,7 @@ belong to `iree-benchmark-loom` flags or embedding APIs.
 | Local unroll intent | `ffn_gate_up_swiglu_q6q8.loom` keeps block/part loops structured and marks the tiny trip-count loops with `unroll`. |
 | Logical indexing | The examples use index/view math for logical rows, blocks, lanes, byte positions, and dense tensor coordinates. |
 | Dynamic case parameters | `mlp_down_projection_residual_bf16.loom` names `rows` on a `check.param.choice` and threads it through shapes, launch geometry, and the kernel ABI. |
+| Finite FP8/BF8 checkpoint storage | `fp8_finite_storage_decode.loom` puts explicit rounding policy on physical storage and materializes E4M3/BF8 rows into F32 and BF16 destinations, including scale-only BF16 decode and compact BF16 GEMM preparation. |
 | Benchmark slices | `mlp_down_projection_residual_bf16.loom` has an anonymous full sweep plus named decode/full rows with assignment dictionaries. |
 | HIP C++ porting motifs | `hip/README.md` maps HIP/CUDA kernel habits to Loom source spellings, proof commands, diagnostics, and authoring-level report workflows. |
 | Packed field contracts | `hip/packed_field_contracts.loom` shows q2/q3/q4/q5/q6-style fields as explicit storage/decode/repack contracts instead of fake scalar element types. |
@@ -119,7 +120,46 @@ emitted code bytes, and memory summaries. Useful first inspections are:
 
 ```bash
 jq '{artifact, targets, functions}' /tmp/loom-q6q8.manifest.json
-jq '{status, target_key, target_bundle, target_export, spills:.allocation.spill_count, code_bytes:.emission.code_byte_count, dots:.static_instruction_mix.dot_count}' \
+jq '{status, target_key, target_bundle, target_export,
+     planned_spills:.allocation.spill_count,
+     materialized_spill_storage:.allocation.materialized_spill_storage_count,
+     materialized_spill_stores:.allocation.materialized_spill_store_count,
+     materialized_reloads:.allocation.materialized_reload_count,
+     private:.memory.private_bytes,
+     final_vgprs:.target_resources.vector.final.register_count,
+     scheduled_vgpr_pressure:
+       .target_resources.vector.scheduled_pressure.peak_live_units,
+     code_bytes:.emission.code_byte_count,
+     matrix:.static_instruction_mix.matrix_count,
+     wmma:.static_instruction_mix.wmma_count,
+     mfma:.static_instruction_mix.mfma_count,
+     dots:.static_instruction_mix.dot_count}' \
+  /tmp/loom-q6q8.compile-report.json
+```
+
+`target_resources.{scalar,vector}.final.register_count` records final target
+metadata used for occupancy. The adjacent
+`target_resources.{scalar,vector}.scheduled_pressure.peak_live_units` value is
+scheduled virtual pressure before final allocation metadata, so the two numbers
+can differ without implying that allocation contradicted itself.
+
+Source-low selection summaries show which target rule or plan handled each
+source operation. The descriptor key is target-specific, while
+`descriptor_semantic_tag` gives the portable instruction family used for
+high-level comparisons. Matrix-family checks should filter on semantic tags
+instead of hardcoding one target mnemonic:
+
+```bash
+jq '.source_low.selection_summaries.rows[]?
+  | {function, source_op, selection, plan_key, descriptor_key,
+     descriptor_semantic_tag, selected_op_count, emitted_low_op_count}
+  | with_entries(select(.value != null))' \
+  /tmp/loom-q6q8.compile-report.json
+
+jq '.source_low.selection_summaries.rows[]?
+  | select((.descriptor_semantic_tag // "") | startswith("matrix."))
+  | {function, source_op, plan_key, descriptor_key, descriptor_semantic_tag,
+     selected_op_count, emitted_low_op_count}' \
   /tmp/loom-q6q8.compile-report.json
 ```
 
@@ -226,8 +266,17 @@ between tools without changing the report fields:
 jq 'select(.row=="compile" and .compile_report) |
   {candidate_id,
    code:.compile_report.emission.code_byte_count,
-   spills:.compile_report.allocation.spill_count,
+   planned_spills:.compile_report.allocation.spill_count,
+   materialized_spill_storage:
+     .compile_report.allocation.materialized_spill_storage_count,
+   materialized_spill_stores:
+     .compile_report.allocation.materialized_spill_store_count,
+   materialized_reloads:.compile_report.allocation.materialized_reload_count,
    local:.compile_report.memory.local_bytes,
+   private:.compile_report.memory.private_bytes,
+   final_vgprs:.compile_report.target_resources.vector.final.register_count,
+   scheduled_vgpr_pressure:
+     .compile_report.target_resources.vector.scheduled_pressure.peak_live_units,
    pressure:.compile_report.schedule.register_pressure_peak_live_units}' \
   /tmp/loom-q6q8-run/results.jsonl
 
@@ -235,8 +284,17 @@ jq 'select(.row=="benchmark" and .benchmark_result.compile_report) |
   .benchmark_result |
   {benchmark,
    code:.compile_report.emission.code_byte_count,
-   spills:.compile_report.allocation.spill_count,
-   local:.compile_report.memory.local_bytes}' \
+   planned_spills:.compile_report.allocation.spill_count,
+   materialized_spill_storage:
+     .compile_report.allocation.materialized_spill_storage_count,
+   materialized_spill_stores:
+     .compile_report.allocation.materialized_spill_store_count,
+   materialized_reloads:.compile_report.allocation.materialized_reload_count,
+   local:.compile_report.memory.local_bytes,
+   final_vgprs:.compile_report.target_resources.vector.final.register_count,
+   scheduled_vgpr_pressure:
+     .compile_report.target_resources.vector.scheduled_pressure.peak_live_units,
+   private:.compile_report.memory.private_bytes}' \
   /tmp/loom-q6q8-run/results.jsonl
 ```
 
@@ -279,12 +337,30 @@ jq '.static_instruction_mix
 ```
 
 For per-operation attribution, detailed reports expose the selected packet and
-memory-space facts in `source_low.memory_rows`:
+memory-space facts in `.source_low.memory_rows[]`:
 
 ```bash
 jq '.source_low.memory_rows[]?
   | {function, source_op, operation, memory_space, packet, address_form,
      vector_lanes}' \
+  /tmp/kernel.compile-report.json
+```
+
+For traffic economics, `.source_low.memory` groups the same evidence by source
+root, argument, and selected strategy:
+
+```bash
+jq '.source_low.memory
+  | {read_bytes: .dispatch_issued.read_bytes,
+     write_bytes: .dispatch_issued.write_bytes,
+     roots: [.roots[]? | {function, source_root, memory_space,
+                          read_bytes: .dispatch_issued.read_bytes,
+                          write_bytes: .dispatch_issued.write_bytes}],
+     strategies: [.strategies[]? | {function, operation, strategy,
+                                    packet_count,
+                                    read_bytes: .dispatch_issued.read_bytes,
+                                    write_bytes:
+                                      .dispatch_issued.write_bytes}]}' \
   /tmp/kernel.compile-report.json
 ```
 
@@ -316,7 +392,7 @@ loom-compile loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.l
   --compile-report-output=/tmp/shared-memory-vector-tile.compile-report.json
 ```
 
-The `source_low.memory_rows` array records one selected memory-packet row per
+The `.source_low.memory_rows[]` array records one selected memory-packet row per
 reported source memory operation:
 
 ```bash
@@ -432,6 +508,45 @@ see the real accessible range.
 When a logical coordinate selects a packed byte window, `index.scale` is the
 explicit boundary: it multiplies an `index` coordinate by an `offset` byte
 stride and produces the `offset` value expected by `buffer.view`.
+
+FP8 checkpoint storage should carry both the payload dialect and the content
+contract on the view storage schema. A plain `f8E4M3` or `f8E5M2` view only
+carries the scalar FP8 type facts; NaN, zero, and subnormal payloads remain
+possible unless storage says more, and IEEE-style `f8E5M2` can also represent
+infinity. The schema `element_format` records the payload dialect, such as
+`f8e4m3`, `f8e4m3fn`, or `f8e5m2`. Model weights that have been validated finite
+should also set `rounding=finite_only` so loads and fragments publish
+no-NaN/no-infinity facts while still preserving exact zero and subnormal
+behavior. `finite_flush_subnormal` is only for storage whose physical payloads
+have already been flushed or are otherwise guaranteed not to contain subnormal
+values; it is a stronger content contract, not a request for the target decoder
+to repair contradictory bytes at load time.
+
+The distinction is visible in codegen on targets that construct FP8 fragments
+through software packets. `finite_only` removes NaN and infinity repair, but
+exact zero and subnormal payloads still require repair unless other value facts
+prove they cannot appear. `finite_flush_subnormal` lets those targets skip the
+subnormal side of that repair. Use the source-low memory report strategy key to
+confirm the selected route, such as
+`fp8_packed_bf16_decode_repair_zero_subnormal` versus
+`fp8_packed_bf16_decode_repair_zero`, instead of inferring it from source text.
+
+For weight-only FP8 linears, the portable source shape is often two explicit
+phases: preserve FP8/BF8 checkpoint storage facts on the source view, then
+materialize the packed rows into the BF16 layout consumed by the contraction.
+Targets without a profitable native FP8 matrix path can select the BF16 GEMM
+route, while targets with native FP8 support can specialize the same semantic
+contract through target facts and report rows. Direct FP8 fragment loads remain
+useful coverage and may be profitable on some targets, but they should be
+selected because the report proves they are the best route, not because the
+source hid storage materialization inside the matrix kernel.
+
+```loom
+%weight_layout = encoding.layout.strided [1, %input_size] : encoding<layout>
+%weight_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, rounding=finite_only> : encoding<schema>
+%weight_storage = encoding.define #physical_storage {layout = %weight_layout : encoding<layout>, schema = %weight_schema : encoding<schema>} : encoding<storage>
+%weight_view = buffer.view %weight_buffer[%base] : buffer -> view<[%input_size]x[%output_size]xf8E4M3, %weight_storage>
+```
 
 The authoring source linter keeps this reference surface aligned with those
 rules. It rejects redundant kernel-buffer memory-space assumes, sentinel-sized

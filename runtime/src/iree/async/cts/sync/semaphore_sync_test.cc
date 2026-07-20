@@ -509,18 +509,11 @@ TEST_P(SemaphoreSyncTest, TimepointCrossThread) {
 
   // Signal from another thread.
   std::thread signaler([semaphore]() {
-    iree_wait_until(iree_time_now() + iree_make_duration_ms(10));
     iree_status_t status = iree_async_semaphore_signal(semaphore, 10, NULL);
     IREE_CHECK_OK(status);
   });
 
-  // Wait for the timepoint to fire (with generous budget).
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(5000);
-  while (tracker.call_count.load(std::memory_order_acquire) == 0 &&
-         iree_time_now() < deadline) {
-    iree_thread_yield();
-  }
-
+  // Timepoint callbacks run synchronously on the signaling thread.
   signaler.join();
 
   EXPECT_EQ(tracker.call_count.load(std::memory_order_acquire), 1);

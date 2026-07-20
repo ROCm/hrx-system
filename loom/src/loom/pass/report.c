@@ -247,13 +247,6 @@ static iree_string_view_t loom_pass_report_kind_name(loom_pass_kind_t kind) {
   }
 }
 
-static iree_status_t loom_pass_report_write_json_string_field(
-    loom_output_stream_t* stream, const char* name, iree_string_view_t value) {
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_format(stream, "\"%s\":", name));
-  return loom_json_write_escaped_string(stream, value);
-}
-
 static iree_string_view_t loom_pass_report_option_schema_kind_name(
     loom_pass_option_schema_kind_t kind) {
   switch (kind) {
@@ -291,60 +284,64 @@ static iree_status_t loom_pass_report_format_detail_value_json(
 
 static iree_status_t loom_pass_report_format_details_json(
     const loom_pass_report_invocation_t* invocation,
-    loom_output_stream_t* stream) {
+    loom_json_object_writer_t* invocation_object) {
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"details\":["));
+      loom_json_object_begin_field(invocation_object, IREE_SV("details")));
+  loom_json_array_writer_t details;
+  IREE_RETURN_IF_ERROR(
+      loom_json_array_begin(invocation_object->stream, &details));
   const loom_pass_report_detail_t* detail = invocation->details;
   for (iree_host_size_t i = 0; i < invocation->detail_count && detail;
        ++i, detail = detail->next) {
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&details));
+    loom_json_object_writer_t detail_object;
     IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, i == 0 ? "{" : ",{"));
-    IREE_RETURN_IF_ERROR(loom_pass_report_write_json_string_field(
-        stream, "category", detail->category));
+        loom_json_object_begin(details.stream, &detail_object));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &detail_object, IREE_SV("category"), detail->category));
     for (uint16_t j = 0; j < detail->field_count; ++j) {
       const loom_pass_report_detail_field_t* field = &detail->fields[j];
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-      IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(stream, field->name));
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ":"));
       IREE_RETURN_IF_ERROR(
-          loom_pass_report_format_detail_value_json(field, stream));
+          loom_json_object_begin_field(&detail_object, field->name));
+      IREE_RETURN_IF_ERROR(
+          loom_pass_report_format_detail_value_json(field, details.stream));
     }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&detail_object));
   }
-  return loom_output_stream_write_cstring(stream, "]");
+  return loom_json_array_end(&details);
 }
 
 static iree_status_t loom_pass_report_format_option_schema_json(
     const loom_pass_option_schema_t* schema, loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  IREE_RETURN_IF_ERROR(
-      loom_pass_report_write_json_string_field(stream, "name", schema->name));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-  IREE_RETURN_IF_ERROR(loom_pass_report_write_json_string_field(
-      stream, "kind", loom_pass_report_option_schema_kind_name(schema->kind)));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"required\":%s",
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("name"), schema->name));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("kind"),
+      loom_pass_report_option_schema_kind_name(schema->kind)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("required"),
       iree_all_bits_set(
           schema->flags,
-          (loom_pass_option_schema_flags_t)LOOM_PASS_OPTION_SCHEMA_REQUIRED)
-          ? "true"
-          : "false"));
+          (loom_pass_option_schema_flags_t)LOOM_PASS_OPTION_SCHEMA_REQUIRED)));
   if (schema->kind == LOOM_PASS_OPTION_SCHEMA_UINT32) {
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-        stream, ",\"minimum\":%" PRIu32 ",\"maximum\":%" PRIu32,
-        schema->minimum_uint32, schema->maximum_uint32));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &object, IREE_SV("minimum"), schema->minimum_uint32));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &object, IREE_SV("maximum"), schema->maximum_uint32));
   } else if (schema->kind == LOOM_PASS_OPTION_SCHEMA_ENUM) {
     IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ",\"values\":["));
+        loom_json_object_begin_field(&object, IREE_SV("values")));
+    loom_json_array_writer_t values;
+    IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &values));
     for (uint16_t i = 0; i < schema->enum_value_count; ++i) {
-      IREE_RETURN_IF_ERROR(
-          loom_output_stream_write_cstring(stream, i == 0 ? "" : ","));
-      IREE_RETURN_IF_ERROR(
-          loom_json_write_escaped_string(stream, schema->enum_values[i].value));
+      IREE_RETURN_IF_ERROR(loom_json_array_write_string_element(
+          &values, schema->enum_values[i].value));
     }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]"));
+    IREE_RETURN_IF_ERROR(loom_json_array_end(&values));
   }
-  return loom_output_stream_write_cstring(stream, "}");
+  return loom_json_object_end(&object);
 }
 
 static iree_status_t loom_pass_report_format_descriptor_json(
@@ -356,130 +353,146 @@ static iree_status_t loom_pass_report_format_descriptor_json(
                             (int)descriptor->key.size, descriptor->key.data);
   }
 
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  IREE_RETURN_IF_ERROR(
-      loom_pass_report_write_json_string_field(stream, "key", descriptor->key));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-  IREE_RETURN_IF_ERROR(loom_pass_report_write_json_string_field(
-      stream, "kind", loom_pass_report_kind_name(info->kind)));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-  IREE_RETURN_IF_ERROR(loom_pass_report_write_json_string_field(
-      stream, "description", info->description));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("key"), descriptor->key));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("kind"), loom_pass_report_kind_name(info->kind)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("description"), info->description));
   bool available = loom_pass_descriptor_is_available(descriptor);
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"available\":%s", available ? "true" : "false"));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("available"), available));
   if (!available) {
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ",\"unavailable_reason\":"));
-    IREE_RETURN_IF_ERROR(
-        loom_json_write_escaped_string(stream, descriptor->unavailable_reason));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("unavailable_reason"),
+        descriptor->unavailable_reason));
   }
 
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"options\":["));
+      loom_json_object_begin_field(&object, IREE_SV("options")));
+  loom_json_array_writer_t options;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &options));
   for (uint16_t i = 0; i < descriptor->option_schema_count; ++i) {
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, i == 0 ? "" : ","));
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&options));
     IREE_RETURN_IF_ERROR(loom_pass_report_format_option_schema_json(
         &descriptor->option_schema[i], stream));
   }
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&options));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "],\"statistics\":["));
+      loom_json_object_begin_field(&object, IREE_SV("statistics")));
+  loom_json_array_writer_t statistics;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &statistics));
   const loom_pass_statistic_layout_t* statistic_layout = info->statistic_layout;
   uint16_t statistic_count =
       statistic_layout ? statistic_layout->field_count : 0;
   for (uint16_t i = 0; i < statistic_count; ++i) {
     const loom_pass_statistic_field_t* statistic = &statistic_layout->fields[i];
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, i == 0 ? "{" : ",{"));
-    IREE_RETURN_IF_ERROR(loom_pass_report_write_json_string_field(
-        stream, "name", statistic->name));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    IREE_RETURN_IF_ERROR(loom_pass_report_write_json_string_field(
-        stream, "description", statistic->description));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&statistics));
+    loom_json_object_writer_t statistic_object;
+    IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &statistic_object));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &statistic_object, IREE_SV("name"), statistic->name));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &statistic_object, IREE_SV("description"), statistic->description));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&statistic_object));
   }
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&statistics));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "],\"requirements\":["));
+      loom_json_object_begin_field(&object, IREE_SV("requirements")));
+  loom_json_array_writer_t requirements;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &requirements));
   for (uint16_t i = 0; i < descriptor->requirement_count; ++i) {
     const loom_pass_requirement_def_t* requirement =
         &descriptor->requirement_defs[i];
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, i == 0 ? "{" : ",{"));
-    IREE_RETURN_IF_ERROR(loom_pass_report_write_json_string_field(
-        stream, "key", requirement->key));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    IREE_RETURN_IF_ERROR(loom_pass_report_write_json_string_field(
-        stream, "capability", requirement->capability_type->name));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    IREE_RETURN_IF_ERROR(loom_pass_report_write_json_string_field(
-        stream, "description", requirement->description));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&requirements));
+    loom_json_object_writer_t requirement_object;
+    IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &requirement_object));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &requirement_object, IREE_SV("key"), requirement->key));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &requirement_object, IREE_SV("capability"),
+        requirement->capability_type->name));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &requirement_object, IREE_SV("description"), requirement->description));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&requirement_object));
   }
-  return loom_output_stream_write_cstring(stream, "]}");
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&requirements));
+  return loom_json_object_end(&object);
 }
 
 iree_status_t loom_pass_report_format_json(const loom_pass_report_t* report,
                                            loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "{\n  \"invocations\": ["));
+      loom_json_object_begin_field(&object, IREE_SV("invocations")));
+  loom_json_array_writer_t invocations;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &invocations));
   for (iree_host_size_t i = 0; i < report->invocation_count; ++i) {
     const loom_pass_report_invocation_t* invocation = &report->invocations[i];
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
-        stream, i == 0 ? "\n    {" : ",\n    {"));
-    IREE_RETURN_IF_ERROR(loom_pass_report_write_json_string_field(
-        stream, "pass", invocation->pass_key));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    IREE_RETURN_IF_ERROR(loom_pass_report_write_json_string_field(
-        stream, "kind", loom_pass_report_kind_name(invocation->pass_kind)));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    IREE_RETURN_IF_ERROR(loom_pass_report_write_json_string_field(
-        stream, "anchor", loom_pass_report_kind_name(invocation->anchor_kind)));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    IREE_RETURN_IF_ERROR(loom_pass_report_write_json_string_field(
-        stream, "pipeline", invocation->pipeline_symbol));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    IREE_RETURN_IF_ERROR(loom_pass_report_write_json_string_field(
-        stream, "symbol", invocation->symbol_name));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-        stream,
-        ",\"instruction_index\":%" PRIhsz ",\"duration_ns\":%" PRId64
-        ",\"changed\":%s,\"status\":",
-        invocation->instruction_index, invocation->duration_nanoseconds,
-        invocation->changed ? "true" : "false"));
-    IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(
-        stream, iree_status_code_string(invocation->status_code)));
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&invocations));
+    loom_json_object_writer_t invocation_object;
+    IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &invocation_object));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &invocation_object, IREE_SV("pass"), invocation->pass_key));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &invocation_object, IREE_SV("kind"),
+        loom_pass_report_kind_name(invocation->pass_kind)));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &invocation_object, IREE_SV("anchor"),
+        loom_pass_report_kind_name(invocation->anchor_kind)));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &invocation_object, IREE_SV("pipeline"), invocation->pipeline_symbol));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &invocation_object, IREE_SV("symbol"), invocation->symbol_name));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+        &invocation_object, IREE_SV("instruction_index"),
+        invocation->instruction_index));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_int64_field(
+        &invocation_object, IREE_SV("duration_ns"),
+        invocation->duration_nanoseconds));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+        &invocation_object, IREE_SV("changed"), invocation->changed));
     IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ",\"statistics\":{"));
+        loom_json_object_begin_field(&invocation_object, IREE_SV("status")));
+    IREE_RETURN_IF_ERROR(loom_json_write_status_object(
+        stream, invocation->status_code, iree_string_view_empty()));
+    IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&invocation_object,
+                                                      IREE_SV("statistics")));
+    loom_json_object_writer_t statistics;
+    IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &statistics));
     for (uint16_t j = 0; j < invocation->statistic_count; ++j) {
       const loom_pass_report_statistic_t* statistic =
           &invocation->statistics[j];
-      IREE_RETURN_IF_ERROR(
-          loom_output_stream_write_cstring(stream, j == 0 ? "" : ","));
-      IREE_RETURN_IF_ERROR(
-          loom_json_write_escaped_string(stream, statistic->name));
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_format(stream, ":%" PRId64,
-                                                           statistic->value));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_int64_field(
+          &statistics, statistic->name, statistic->value));
     }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&statistics));
     IREE_RETURN_IF_ERROR(
-        loom_pass_report_format_details_json(invocation, stream));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
+        loom_pass_report_format_details_json(invocation, &invocation_object));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&invocation_object));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "\n  ]\n}\n"));
-  return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&invocations));
+  IREE_RETURN_IF_ERROR(loom_json_object_end(&object));
+  return loom_output_stream_write_char(stream, '\n');
 }
 
 iree_status_t loom_pass_report_format_registry_json(
     const loom_pass_registry_t* registry, loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "{\n  \"passes\": ["));
+      loom_json_object_begin_field(&object, IREE_SV("passes")));
+  loom_json_array_writer_t passes;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &passes));
   for (iree_host_size_t i = 0; i < registry->descriptor_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
-        stream, i == 0 ? "\n    " : ",\n    "));
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&passes));
     IREE_RETURN_IF_ERROR(loom_pass_report_format_descriptor_json(
         &registry->descriptors[i], stream));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "\n  ]\n}\n"));
-  return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&passes));
+  IREE_RETURN_IF_ERROR(loom_json_object_end(&object));
+  return loom_output_stream_write_char(stream, '\n');
 }

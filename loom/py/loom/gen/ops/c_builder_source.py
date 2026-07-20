@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from loom.assembly import StableKeyRef
-from loom.dsl import Op
+from loom.dsl import Op, TypeConstraint
 from loom.fields import FieldKind, compute_layout
 from loom.gen.ops import c_builder_model, c_queries
 from loom.gen.ops.c_enum_attrs import SharedEnumMap
@@ -82,6 +82,33 @@ def _emit_builder_bytes_storage(
     lines.append(f"      &{storage}));")
 
 
+_FIXED_RESULT_TYPE_C_EXPRS: dict[TypeConstraint, str] = {
+    TypeConstraint.I1: "loom_type_scalar(LOOM_SCALAR_TYPE_I1)",
+    TypeConstraint.INDEX: "loom_type_scalar(LOOM_SCALAR_TYPE_INDEX)",
+    TypeConstraint.OFFSET: "loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET)",
+}
+
+
+def _fixed_result_type_c_expr(result_constraint: TypeConstraint) -> str | None:
+    """Returns a C expression for a result type fixed by the op declaration."""
+    return _FIXED_RESULT_TYPE_C_EXPRS.get(result_constraint)
+
+
+def _single_builder_type_result_exprs(op: Op) -> list[str]:
+    """Returns fixed result type expressions for a compact result_type builder."""
+    result_exprs: list[str] = []
+    dynamic_result_count = 0
+    for result in op.results:
+        expr = _fixed_result_type_c_expr(result.type_constraint)
+        if expr is None:
+            dynamic_result_count += 1
+            expr = "result_type"
+        result_exprs.append(expr)
+    if dynamic_result_count > 1:
+        raise ValueError(f"Op '{op.name}': fixed-result builder needs {dynamic_result_count} dynamic result types; use a result_types parameter instead")
+    return result_exprs
+
+
 def _generate_builder_implementation(
     op: Op,
     prefix: str,
@@ -116,7 +143,7 @@ def _generate_builder_implementation(
             variadic_operand_param = param["name"]
             break
 
-    c_params = c_builder_model.build_c_param_list(params, layout, prefix)
+    c_params = c_builder_model.build_c_param_list(op, params, layout, prefix)
 
     lines.append(f"iree_status_t {prefix}_build(")
     for i, p in enumerate(c_params):
@@ -679,9 +706,21 @@ def _generate_builder_implementation(
             if has_variadic_result:
                 lines.append("  IREE_RETURN_IF_ERROR(loom_builder_define_results(")
                 lines.append("      builder, result_types, result_count, loom_op_results(*out_op)));")
-            else:
+            elif layout.fixed_result_count == 1:
                 lines.append("  IREE_RETURN_IF_ERROR(loom_builder_define_result(")
                 lines.append("      builder, result_type, &loom_op_results(*out_op)[0]));")
+            elif c_builder_model.fixed_result_types_fit_single_builder_type(op):
+                result_exprs = _single_builder_type_result_exprs(op)
+                lines.append(f"  loom_type_t result_types_storage[{layout.fixed_result_count}] = {{")
+                lines.extend(f"      {expr}," for expr in result_exprs)
+                lines.append("  };")
+                lines.append("  IREE_RETURN_IF_ERROR(loom_builder_define_results(")
+                lines.append(f"      builder, result_types_storage, {layout.fixed_result_count},")
+                lines.append("      loom_op_results(*out_op)));")
+            else:
+                lines.append("  IREE_RETURN_IF_ERROR(loom_builder_define_results(")
+                lines.append(f"      builder, result_types, {layout.fixed_result_count},")
+                lines.append("      loom_op_results(*out_op)));")
 
     # Populate tied result metadata.
     if static_ties:

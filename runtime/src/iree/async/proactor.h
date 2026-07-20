@@ -618,7 +618,8 @@ typedef struct iree_async_proactor_vtable_t {
       iree_async_relay_error_callback_t error_callback,
       iree_async_relay_t** out_relay);
   void (*unregister_relay)(iree_async_proactor_t* proactor,
-                           iree_async_relay_t* relay);
+                           iree_async_relay_t* relay,
+                           iree_async_relay_unregistered_callback_t callback);
 
   iree_status_t (*register_buffer)(
       iree_async_proactor_t* proactor,
@@ -798,7 +799,8 @@ static inline iree_status_t iree_async_proactor_submit_one(
 
 // Drains completions and invokes callbacks.
 //
-// Blocks until |timeout| is reached or at least one completion is available.
+// Blocks until |timeout| is reached, at least one completion is available, or
+// an explicit wake or internal progress event is observed.
 // All callbacks fire synchronously from within this call on the calling thread.
 //
 // Availability:
@@ -820,11 +822,13 @@ static inline iree_status_t iree_async_proactor_submit_one(
 // Parameters:
 //   timeout: Maximum time to block. Use iree_timeout_t (not raw duration) to
 //     avoid drift—absolute deadlines are converted to relative only at the
-//     syscall boundary. Use iree_make_timeout_ms(0) for non-blocking poll.
+//     syscall boundary. Use iree_immediate_timeout() for non-blocking poll.
 //   out_completed_count: Number of callbacks invoked (may be NULL).
 //
 // Returns:
-//   IREE_STATUS_OK: One or more completions processed.
+//   IREE_STATUS_OK: One or more completions were processed, an explicit wake
+//     was observed, or an internal source or relay made progress. The completed
+//     count may be zero for wake and internal progress events.
 //   IREE_STATUS_DEADLINE_EXCEEDED: Timeout expired with no completions
 //     (not an error—normal for polling loops).
 //   IREE_STATUS_ABORTED: Proactor is shutting down.
@@ -832,13 +836,10 @@ static inline iree_status_t iree_async_proactor_submit_one(
 // Example:
 //   while (running) {
 //     iree_status_t status = iree_async_proactor_poll(
-//         proactor, iree_make_timeout_ms(100), NULL);
-//     if (iree_status_is_deadline_exceeded(status)) {
-//       iree_status_ignore(status);  // Normal timeout, continue loop.
-//     } else if (!iree_status_is_ok(status)) {
-//       return status;  // Actual error.
-//     }
+//         proactor, iree_infinite_timeout(), NULL);
+//     if (!iree_status_is_ok(status)) return status;
 //   }
+//   // The thread clearing |running| calls iree_async_proactor_wake().
 static inline iree_status_t iree_async_proactor_poll(
     iree_async_proactor_t* proactor, iree_timeout_t timeout,
     iree_host_size_t* out_completed_count) {
@@ -1212,10 +1213,11 @@ static inline void iree_async_proactor_unregister_event_source(
 // firing once.
 //
 // Error handling:
-//   If a persistent relay fails to re-arm (e.g., syscall error), the
-//   |error_callback| is invoked with the error code. The relay transitions
-//   to a faulted state and should be unregistered. Pass
-//   iree_async_relay_error_callback_none() if errors can be ignored.
+//   If a sink transfer fails or a persistent relay cannot re-arm its source,
+//   |error_callback| is invoked with the error code. Persistent relay handles
+//   remain valid for terminal unregistration after poll() returns. Pass
+//   iree_async_relay_error_callback_none() only when terminal relay failure is
+//   intentionally unobserved.
 //
 // Availability:
 //   generic | io_uring | IOCP | kqueue
@@ -1250,10 +1252,22 @@ static inline iree_status_t iree_async_proactor_register_relay(
                                           error_callback, out_relay);
 }
 
-// Unregisters a relay and stops monitoring.
+// Begins terminal relay unregistration and stops monitoring.
 //
-// After this call returns, the sink will not fire again for this relay.
-// If OWN_SOURCE_PRIMITIVE was set, the source fd is closed.
+// |callback| fires after the sink can no longer fire, all backend operations
+// referencing the relay have completed, and the relay has been destroyed. If
+// OWN_SOURCE_PRIMITIVE was set, the source primitive has been closed before
+// the callback fires. The callback may fire synchronously from this call.
+// The relay handle becomes invalid immediately and must not be used or
+// unregistered again.
+// Deferred callbacks normally fire from iree_async_proactor_poll() on the
+// polling thread. Proactor destruction also completes any unregistration it
+// owns before returning. The proactor must not be released from inside the
+// callback.
+//
+// The caller must keep source and sink resources not owned by the relay alive
+// until |callback| fires. The proactor must also remain alive so asynchronous
+// backends can dispatch terminal cancellation completions.
 //
 // Must NOT be called from within a relay sink's callback (the sink fires
 // from poll(), which holds internal state). Defer unregistration if needed.
@@ -1264,9 +1278,13 @@ static inline iree_status_t iree_async_proactor_register_relay(
 // Thread safety:
 //   Must be called from the proactor's poll thread.
 static inline void iree_async_proactor_unregister_relay(
-    iree_async_proactor_t* proactor, iree_async_relay_t* relay) {
-  if (!relay) return;
-  proactor->vtable->unregister_relay(proactor, relay);
+    iree_async_proactor_t* proactor, iree_async_relay_t* relay,
+    iree_async_relay_unregistered_callback_t callback) {
+  if (!relay) {
+    if (callback.fn) callback.fn(callback.user_data);
+    return;
+  }
+  proactor->vtable->unregister_relay(proactor, relay, callback);
 }
 
 //===----------------------------------------------------------------------===//

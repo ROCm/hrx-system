@@ -6,6 +6,8 @@
 
 #include "loom/pass/value_facts.h"
 
+#include <cstdint>
+
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ops/test/ops.h"
@@ -113,6 +115,7 @@ TEST_F(PassValueFactsTest, ScopeConstructorsPopulateNamedFields) {
   loom_func_like_t function = Function(module, 0);
   loom_region_t* region = loom_func_like_body(function);
   loom_target_bundle_t target_bundle = {};
+  const uintptr_t target_data = 1;
 
   const loom_pass_value_fact_scope_t none_scope =
       loom_pass_value_fact_scope_none();
@@ -122,6 +125,7 @@ TEST_F(PassValueFactsTest, ScopeConstructorsPopulateNamedFields) {
   EXPECT_EQ(none_scope.region, nullptr);
   EXPECT_EQ(none_scope.parent_op, nullptr);
   EXPECT_EQ(none_scope.target_bundle, nullptr);
+  EXPECT_EQ(none_scope.target_data, nullptr);
 
   const loom_pass_value_fact_scope_t function_scope =
       loom_pass_value_fact_scope_function(function);
@@ -131,15 +135,18 @@ TEST_F(PassValueFactsTest, ScopeConstructorsPopulateNamedFields) {
   EXPECT_EQ(function_scope.region, nullptr);
   EXPECT_EQ(function_scope.parent_op, nullptr);
   EXPECT_EQ(function_scope.target_bundle, nullptr);
+  EXPECT_EQ(function_scope.target_data, nullptr);
 
   const loom_pass_value_fact_scope_t target_function_scope =
-      loom_pass_value_fact_scope_function_for_target(function, &target_bundle);
+      loom_pass_value_fact_scope_function_for_target(function, &target_bundle,
+                                                     &target_data);
   EXPECT_EQ(target_function_scope.kind, LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION);
   EXPECT_EQ(target_function_scope.function.op, function.op);
   EXPECT_EQ(target_function_scope.function.vtable, function.vtable);
   EXPECT_EQ(target_function_scope.region, nullptr);
   EXPECT_EQ(target_function_scope.parent_op, nullptr);
   EXPECT_EQ(target_function_scope.target_bundle, &target_bundle);
+  EXPECT_EQ(target_function_scope.target_data, &target_data);
 
   const loom_pass_value_fact_scope_t region_scope =
       loom_pass_value_fact_scope_region(function, region, function.op);
@@ -149,16 +156,18 @@ TEST_F(PassValueFactsTest, ScopeConstructorsPopulateNamedFields) {
   EXPECT_EQ(region_scope.region, region);
   EXPECT_EQ(region_scope.parent_op, function.op);
   EXPECT_EQ(region_scope.target_bundle, nullptr);
+  EXPECT_EQ(region_scope.target_data, nullptr);
 
   const loom_pass_value_fact_scope_t target_region_scope =
-      loom_pass_value_fact_scope_region_for_target(function, region,
-                                                   function.op, &target_bundle);
+      loom_pass_value_fact_scope_region_for_target(
+          function, region, function.op, &target_bundle, &target_data);
   EXPECT_EQ(target_region_scope.kind, LOOM_PASS_VALUE_FACT_SCOPE_REGION);
   EXPECT_EQ(target_region_scope.function.op, function.op);
   EXPECT_EQ(target_region_scope.function.vtable, function.vtable);
   EXPECT_EQ(target_region_scope.region, region);
   EXPECT_EQ(target_region_scope.parent_op, function.op);
   EXPECT_EQ(target_region_scope.target_bundle, &target_bundle);
+  EXPECT_EQ(target_region_scope.target_data, &target_data);
 
   const loom_pass_value_fact_scope_t module_scope =
       loom_pass_value_fact_scope_module();
@@ -168,6 +177,7 @@ TEST_F(PassValueFactsTest, ScopeConstructorsPopulateNamedFields) {
   EXPECT_EQ(module_scope.region, nullptr);
   EXPECT_EQ(module_scope.parent_op, nullptr);
   EXPECT_EQ(module_scope.target_bundle, nullptr);
+  EXPECT_EQ(module_scope.target_data, nullptr);
 
   loom_pass_value_fact_owner_t owner = {};
   loom_pass_value_fact_owner_initialize(block_pool(), &owner);
@@ -176,6 +186,7 @@ TEST_F(PassValueFactsTest, ScopeConstructorsPopulateNamedFields) {
       &owner, module, target_function_scope, &facts));
   ASSERT_NE(facts, nullptr);
   EXPECT_EQ(facts->context.target_bundle, &target_bundle);
+  EXPECT_EQ(facts->context.target_data, &target_data);
   loom_pass_value_fact_owner_deinitialize(&owner);
 }
 
@@ -255,6 +266,51 @@ TEST_F(PassValueFactsTest, RegionScopeComputesRequestedProjection) {
   EXPECT_EQ(body_facts, facts);
   EXPECT_EQ(loom_value_fact_table_lookup(body_facts, body_value).range_lo, 42);
   EXPECT_EQ(loom_value_fact_table_lookup(body_facts, config_value).range_lo, 7);
+
+  loom_pass_value_fact_owner_deinitialize(&owner);
+}
+
+TEST_F(PassValueFactsTest, TargetScopeIncludesTargetData) {
+  loom_module_t* module =
+      Parse(IREE_SV("test.func @main() {\n"
+                    "  %value = test.constant 42 : i32\n"
+                    "  test.yield\n"
+                    "}\n"));
+  ASSERT_NE(module, nullptr);
+  loom_func_like_t function = Function(module, 0);
+  loom_value_id_t value = FirstConstantResult(function);
+  ASSERT_NE(value, LOOM_VALUE_ID_INVALID);
+
+  const uintptr_t target_bundle_storage = 1;
+  const loom_target_bundle_t* target_bundle =
+      reinterpret_cast<const loom_target_bundle_t*>(&target_bundle_storage);
+  const uintptr_t first_target_data = 1;
+  const uintptr_t second_target_data = 2;
+
+  loom_pass_value_fact_owner_t owner = {};
+  loom_pass_value_fact_owner_initialize(block_pool(), &owner);
+
+  loom_value_fact_table_t* facts = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &owner, module,
+      loom_pass_value_fact_scope_function_for_target(function, target_bundle,
+                                                     &first_target_data),
+      &facts));
+  ASSERT_NE(facts, nullptr);
+  EXPECT_EQ(facts->context.target_bundle, target_bundle);
+  EXPECT_EQ(facts->context.target_data, &first_target_data);
+  EXPECT_EQ(loom_value_fact_table_lookup(facts, value).range_lo, 42);
+
+  loom_value_fact_table_t* retargeted_facts = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &owner, module,
+      loom_pass_value_fact_scope_function_for_target(function, target_bundle,
+                                                     &second_target_data),
+      &retargeted_facts));
+  EXPECT_EQ(retargeted_facts, facts);
+  EXPECT_EQ(retargeted_facts->context.target_bundle, target_bundle);
+  EXPECT_EQ(retargeted_facts->context.target_data, &second_target_data);
+  EXPECT_EQ(loom_value_fact_table_lookup(retargeted_facts, value).range_lo, 42);
 
   loom_pass_value_fact_owner_deinitialize(&owner);
 }

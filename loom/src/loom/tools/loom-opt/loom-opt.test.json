@@ -87,7 +87,7 @@
       },
       "stdout": {
         "contains": [
-          "low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_arith()",
+          "low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_arith()",
           "reg<amdgpu.sgpr x2>",
           "low.op<amdgpu.v_add_f32>"
         ],
@@ -260,6 +260,7 @@
       "stderr": {
         "contains": [
           "\"pass\":\"select-templates\"",
+          "\"status\":{\"code\":0,\"name\":\"OK\"}",
           "\"apply-sites\":1",
           "\"selected-sites\":1",
           "\"fallback-selected-sites\":1",
@@ -671,11 +672,17 @@
       "files": [
         {
           "path": "{tmp}/pass.repro",
-          "non_empty": true
+          "contains": [
+            "\"status\": {\"code\":",
+            "\"name\":"
+          ]
         },
         {
           "path": "{tmp}/failed-pass-trace.jsonl",
-          "non_empty": true
+          "contains": [
+            "\"status\":{\"code\":",
+            "\"name\":"
+          ]
         }
       ]
     }

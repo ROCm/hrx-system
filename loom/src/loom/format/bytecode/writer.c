@@ -1274,7 +1274,7 @@ static iree_status_t loom_bytecode_collect_global_value_type_refs(
     loom_bytecode_global_value_list_t* list, iree_host_size_t* scan_index) {
   while (*scan_index < list->count) {
     loom_value_id_t value_id = list->values[(*scan_index)++];
-    loom_type_t type = list->module->values.entries[value_id].type;
+    loom_type_t type = loom_module_value_type(list->module, value_id);
     IREE_RETURN_IF_ERROR(loom_type_walk_value_refs(
         type, loom_bytecode_collect_global_type_value_ref, list));
   }
@@ -1366,7 +1366,7 @@ static iree_status_t loom_bytecode_number_global(
   const loom_module_t* module = numbering->module;
   for (iree_host_size_t i = 0; i < local_values->count; ++i) {
     const loom_value_t* value =
-        &module->values.entries[local_values->values[i]];
+        loom_module_value(module, local_values->values[i]);
     if (value->name_id != LOOM_STRING_ID_INVALID) {
       IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
           numbering, value->name_id, &unused_id));
@@ -1503,7 +1503,7 @@ static iree_status_t loom_bytecode_number_function(
     loom_value_id_t value_id = arg_ids[i];
     if (value_id < numbering->module->values.count) {
       loom_string_id_t name_id =
-          numbering->module->values.entries[value_id].name_id;
+          loom_module_value(numbering->module, value_id)->name_id;
       if (name_id != LOOM_STRING_ID_INVALID) {
         IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
             numbering, name_id, &unused_id));
@@ -1511,7 +1511,8 @@ static iree_status_t loom_bytecode_number_function(
     }
   }
   for (uint16_t i = 0; i < arg_count; ++i) {
-    loom_type_t arg_type = numbering->module->values.entries[arg_ids[i]].type;
+    loom_type_t arg_type =
+        loom_module_value_type(numbering->module, arg_ids[i]);
     IREE_RETURN_IF_ERROR(
         loom_bytecode_numbering_intern_type(numbering, arg_type, &unused_id));
   }
@@ -1521,7 +1522,7 @@ static iree_status_t loom_bytecode_number_function(
   const loom_value_id_t* result_ids = loom_op_const_results(func_like.op);
   for (uint16_t i = 0; i < result_count; ++i) {
     loom_type_t result_type =
-        numbering->module->values.entries[result_ids[i]].type;
+        loom_module_value_type(numbering->module, result_ids[i]);
     IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_type(
         numbering, result_type, &unused_id));
   }
@@ -1572,7 +1573,8 @@ static iree_status_t loom_bytecode_number_region(
     // Block arg names and types.
     for (uint16_t arg_index = 0; arg_index < block->arg_count; ++arg_index) {
       loom_value_id_t value_id = loom_block_arg_id(block, arg_index);
-      const loom_value_t* value = &numbering->module->values.entries[value_id];
+      const loom_value_t* value =
+          loom_module_value(numbering->module, value_id);
       if (value->name_id != LOOM_STRING_ID_INVALID) {
         IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
             numbering, value->name_id, &unused_id));
@@ -1602,7 +1604,8 @@ static iree_status_t loom_bytecode_number_operation(
   // Result names and types.
   const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
-    const loom_value_t* value = &numbering->module->values.entries[results[i]];
+    const loom_value_t* value =
+        loom_module_value(numbering->module, results[i]);
     if (value->name_id != LOOM_STRING_ID_INVALID) {
       IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
           numbering, value->name_id, &unused_id));
@@ -2455,7 +2458,7 @@ static iree_status_t loom_bytecode_write_operation(
   IREE_RETURN_IF_ERROR(
       loom_bytecode_page_writer_write_uvarint(writer, op->result_count));
   for (uint16_t i = 0; i < op->result_count; ++i) {
-    const loom_value_t* value = &module->values.entries[results[i]];
+    const loom_value_t* value = loom_module_value(module, results[i]);
     IREE_RETURN_IF_ERROR(loom_bytecode_write_value_def(writer, numbering,
                                                        value_numbering, value));
   }
@@ -2554,7 +2557,7 @@ static iree_status_t loom_bytecode_write_block(
       loom_bytecode_page_writer_write_uvarint(writer, block->arg_count));
   for (uint16_t i = 0; i < block->arg_count; ++i) {
     loom_value_id_t value_id = loom_block_arg_id(block, i);
-    const loom_value_t* value = &module->values.entries[value_id];
+    const loom_value_t* value = loom_module_value(module, value_id);
     IREE_RETURN_IF_ERROR(loom_bytecode_write_value_def(writer, numbering,
                                                        value_numbering, value));
   }
@@ -2840,7 +2843,7 @@ static iree_status_t loom_bytecode_write_func_metadata(
   for (uint16_t i = 0; i < arg_count; ++i) {
     IREE_RETURN_IF_ERROR(
         loom_bytecode_emit_value_def(builder, numbering, signature_numbering,
-                                     &module->values.entries[arg_ids[i]]));
+                                     loom_module_value(module, arg_ids[i])));
   }
 
   // Result value definitions with tied info.
@@ -2859,7 +2862,7 @@ static iree_status_t loom_bytecode_write_func_metadata(
     IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, is_tied ? 1 : 0));
     IREE_RETURN_IF_ERROR(
         loom_bytecode_emit_value_def(builder, numbering, signature_numbering,
-                                     &module->values.entries[result_ids[i]]));
+                                     loom_module_value(module, result_ids[i])));
     if (is_tied) {
       IREE_RETURN_IF_ERROR(
           loom_bytecode_emit_uvarint(builder, tied_operand_index));
@@ -2969,7 +2972,7 @@ static iree_status_t loom_bytecode_write_global_metadata(
   for (iree_host_size_t i = 0; i < local_values.count; ++i) {
     IREE_RETURN_IF_ERROR(loom_bytecode_emit_value_def(
         builder, numbering, value_numbering,
-        &module->values.entries[local_values.values[i]]));
+        loom_module_value(module, local_values.values[i])));
   }
 
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);

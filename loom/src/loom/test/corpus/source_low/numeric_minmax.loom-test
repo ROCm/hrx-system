@@ -188,6 +188,17 @@ func.def @scf_select_i1_false_condition(%values: vector<2xi32>, %limit: i32, %up
 
 // ====
 
+func.def @scf_select_i1_assume_second_condition(%values: vector<2xi32>, %limit: i32, %upper: i32, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %scalar_condition = scalar.cmpi slt, %limit, %upper : i32
+  %checked_lane_condition, %checked_scalar_condition = scalar.assume %lane_condition, %scalar_condition [] : i1, i1
+  %result = scf.select %checked_scalar_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ====
+
 func.def @scf_select_i1_true_false_constants(%values: vector<2xi32>, %limit: i32, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %lane_condition = scalar.cmpi slt, %lane, %limit : i32

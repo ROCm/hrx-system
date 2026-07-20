@@ -18,6 +18,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/testing/diagnostic_matchers.h"
 
 namespace loom {
@@ -30,6 +31,13 @@ const loom_low_descriptor_set_t* LookupAmdgpuCdna3DescriptorSet() {
   loom_amdgpu_low_descriptor_registry_initialize(&registry);
   return loom_low_descriptor_registry_lookup(&registry.registry,
                                              IREE_SV("amdgpu.cdna3.core"));
+}
+
+const loom_low_descriptor_set_t* LookupAmdgpuGfx125xDescriptorSet() {
+  loom_target_low_descriptor_registry_t registry = {};
+  loom_amdgpu_low_descriptor_registry_initialize(&registry);
+  return loom_low_descriptor_registry_lookup(
+      &registry.registry, IREE_SV("amdgpu.rdna4.gfx125x.core"));
 }
 
 uint16_t FindRegisterClassId(const loom_low_descriptor_set_t* descriptor_set,
@@ -202,6 +210,40 @@ TEST_F(AmdgpuNativePreflightTest,
   EXPECT_EQ(emission.string_params[5], "amdgpu.agpr");
   EXPECT_EQ(emission.string_params[6], "amdgpu.agpr");
   EXPECT_EQ(emission.string_params[7], "AGPR kernel-descriptor");
+}
+
+TEST_F(AmdgpuNativePreflightTest, TtmpFixedLocationsDoNotIncreaseSgprMetadata) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      LookupAmdgpuGfx125xDescriptorSet();
+  ASSERT_NE(descriptor_set, nullptr);
+
+  loom_low_schedule_table_t schedule = Schedule(descriptor_set);
+  loom_low_allocation_assignment_t assignments[2] = {};
+  for (loom_low_allocation_assignment_t& assignment : assignments) {
+    assignment.value_class.type_kind = LOOM_TYPE_REGISTER;
+    assignment.value_class.register_descriptor_set_stable_id =
+        descriptor_set->stable_id;
+    assignment.value_class.register_class_id = LOOM_AMDGPU_REG_CLASS_ID_SGPR;
+    assignment.descriptor_reg_class_id = LOOM_AMDGPU_REG_CLASS_ID_SGPR;
+    assignment.unit_count = 1;
+    assignment.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
+    assignment.location_count = 1;
+  }
+  assignments[0].value_id = 0;
+  assignments[0].location_base = 5;
+  assignments[1].value_id = 1;
+  assignments[1].location_base = 114;
+
+  loom_low_allocation_table_t allocation = Allocation(descriptor_set);
+  allocation.assignments = assignments;
+  allocation.assignment_count = IREE_ARRAYSIZE(assignments);
+
+  loom_amdgpu_native_preflight_t preflight = {};
+  IREE_ASSERT_OK(loom_amdgpu_native_preflight_analyze(
+      &schedule, &allocation, /*options=*/nullptr, &preflight));
+
+  EXPECT_EQ(preflight.error_count, 0u);
+  EXPECT_EQ(preflight.next_free_sgpr, 6u);
 }
 
 TEST_F(AmdgpuNativePreflightTest, StackStorageUnsupportedEmitsDiagnostic) {

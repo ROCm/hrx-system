@@ -177,7 +177,7 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx1100\"",
-                "\"status\":\"OK\""
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           },

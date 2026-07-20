@@ -21,52 +21,11 @@
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/packet_hazard_plan.h"
 #include "loom/codegen/low/schedule/types.h"
+#include "loom/target/arch/amdgpu/planning/wait_counters.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// AMDGPU target counter ids used by the current descriptor overlays.
-enum loom_amdgpu_wait_counter_e {
-  // Descriptor did not name a concrete AMDGPU wait counter.
-  LOOM_AMDGPU_WAIT_COUNTER_NONE = 0,
-  // VMEM/global load-result dependency counter.
-  LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD = 1,
-  // VMEM/global store completion counter.
-  LOOM_AMDGPU_WAIT_COUNTER_VMEM_STORE = 2,
-  // LDS/DS dependency and completion counter.
-  LOOM_AMDGPU_WAIT_COUNTER_LDS = 3,
-  // Scalar-memory dependency counter.
-  LOOM_AMDGPU_WAIT_COUNTER_SMEM = 4,
-  // ALU dependency counter used by depctr-style wait packets.
-  LOOM_AMDGPU_WAIT_COUNTER_ALU = 5,
-};
-
-// Number of concrete AMDGPU wait-counter slots. Counter ids are one-based, so
-// slot ids map to counter ids by adding one.
-#define LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT LOOM_AMDGPU_WAIT_COUNTER_ALU
-
-// Bit masks for AMDGPU wait counters. These are descriptor-overlay ids, not
-// native instruction bit encodings.
-#define LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD ((uint32_t)1u << 0)
-#define LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE ((uint32_t)1u << 1)
-#define LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS ((uint32_t)1u << 2)
-#define LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM ((uint32_t)1u << 3)
-#define LOOM_AMDGPU_WAIT_COUNTER_MASK_ALU ((uint32_t)1u << 4)
-#define LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM   \
-  (LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD | \
-   LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE)
-#define LOOM_AMDGPU_WAIT_COUNTER_MASK_READ   \
-  (LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD | \
-   LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS | LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM)
-#define LOOM_AMDGPU_WAIT_COUNTER_MASK_WRITE \
-  (LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE | LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS)
-#define LOOM_AMDGPU_WAIT_COUNTER_MASK_WORKGROUP \
-  LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS
-#define LOOM_AMDGPU_WAIT_COUNTER_MASK_MEMORY \
-  (LOOM_AMDGPU_WAIT_COUNTER_MASK_READ | LOOM_AMDGPU_WAIT_COUNTER_MASK_WRITE)
-#define LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL \
-  (LOOM_AMDGPU_WAIT_COUNTER_MASK_MEMORY | LOOM_AMDGPU_WAIT_COUNTER_MASK_ALU)
 
 typedef enum loom_amdgpu_wait_plan_action_kind_e {
   // Unknown or uninitialized action kind.
@@ -76,6 +35,12 @@ typedef enum loom_amdgpu_wait_plan_action_kind_e {
   // Wait must be inserted before final emission.
   LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED = 2,
 } loom_amdgpu_wait_plan_action_kind_t;
+
+typedef enum loom_amdgpu_wait_plan_action_flag_bits_e {
+  // Action was derived from an allocation storage-release record.
+  LOOM_AMDGPU_WAIT_PLAN_ACTION_FLAG_STORAGE_RELEASE = 1u << 0,
+} loom_amdgpu_wait_plan_action_flag_bits_t;
+typedef uint8_t loom_amdgpu_wait_plan_action_flags_t;
 
 typedef enum loom_amdgpu_wait_plan_reason_e {
   // Unknown or uninitialized wait reason.
@@ -95,6 +60,18 @@ typedef enum loom_amdgpu_wait_plan_reason_e {
   LOOM_AMDGPU_WAIT_PLAN_REASON_TRANS_RESULT_USE = 6,
   // A GFX12 ALU packet reads SGPR state with outstanding ALU dependencies.
   LOOM_AMDGPU_WAIT_PLAN_REASON_VALU_SGPR_READ = 7,
+  // A memory-effect dependency observes an outstanding memory packet.
+  LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_EFFECT = 8,
+  // Program exit observes outstanding memory stores.
+  LOOM_AMDGPU_WAIT_PLAN_REASON_PROGRAM_EXIT = 9,
+  // A packet reuses scalar source registers still consumed by an outstanding
+  // memory packet.
+  LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE = 10,
+  // A packet writes EXEC while outstanding gfx125x VMEM translations still
+  // retain the execution mask used when they were issued.
+  LOOM_AMDGPU_WAIT_PLAN_REASON_XCNT_EXEC_REUSE = 11,
+  // Total number of wait-plan reason values.
+  LOOM_AMDGPU_WAIT_PLAN_REASON_COUNT,
 } loom_amdgpu_wait_plan_reason_t;
 
 typedef enum loom_amdgpu_wait_plan_residual_action_e {
@@ -108,6 +85,8 @@ typedef enum loom_amdgpu_wait_plan_residual_action_e {
 typedef struct loom_amdgpu_wait_plan_action_t {
   // Whether the action is present in the IR or must be inserted.
   loom_amdgpu_wait_plan_action_kind_t kind;
+  // Internal origin and materialization flags.
+  loom_amdgpu_wait_plan_action_flags_t flags;
   // Why this wait action exists.
   loom_amdgpu_wait_plan_reason_t reason;
   // AMDGPU wait counter affected by the action.
@@ -153,10 +132,6 @@ iree_string_view_t loom_amdgpu_wait_counter_name(uint16_t counter_id);
 iree_string_view_t loom_amdgpu_wait_counter_progress_class_name(
     uint16_t counter_id);
 
-// Returns the bit mask for one AMDGPU wait counter id.
-iree_status_t loom_amdgpu_wait_counter_mask(uint16_t counter_id,
-                                            uint32_t* out_mask);
-
 // Returns the stable diagnostic spelling for an AMDGPU wait-plan reason.
 iree_string_view_t loom_amdgpu_wait_plan_reason_name(
     loom_amdgpu_wait_plan_reason_t reason);
@@ -168,10 +143,10 @@ iree_string_view_t loom_amdgpu_wait_plan_residual_action_name(
 // Builds an AMDGPU wait-counter plan from a scheduled low function. When
 // |allocation| is provided, the plan also materializes target storage-release
 // actions requested by allocation, such as outstanding memory reads whose
-// destination registers have not yet been written and VMEM stores whose VGPR
-// sources have not yet been consumed by the memory pipe. The caller must keep
-// |schedule|, |allocation|, and |arena| immutable/alive for as long as
-// |out_plan| is used.
+// destination registers have not yet been written and memory packets whose
+// scalar or vector sources have not yet been consumed by the memory pipe. The
+// caller must keep |schedule|, |allocation|, and |arena| immutable/alive for as
+// long as |out_plan| is used.
 iree_status_t loom_amdgpu_wait_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,

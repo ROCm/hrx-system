@@ -234,9 +234,8 @@ iree_status_t loom_parse_attr_value(loom_parser_t* parser,
       (void)loom_tokenizer_next(&parser->tokenizer);
       // Look up the enum case name.
       if (!descriptor->enum_case_names) {
-        // Internal bug: enum attribute declared without case names.
-        return iree_make_status(IREE_STATUS_INTERNAL,
-                                "enum attribute has no case name table");
+        IREE_ASSERT_UNREACHABLE("enum attribute has no case name table");
+        IREE_BUILTIN_UNREACHABLE();
       }
       // Linear scan through case names. Enum case lists are short.
       for (uint8_t i = 0; i < descriptor->enum_case_count; ++i) {

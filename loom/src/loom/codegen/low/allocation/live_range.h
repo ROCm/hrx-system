@@ -117,11 +117,13 @@ iree_status_t loom_low_allocation_op_point_index_lookup(
 
 // Returns true when two assignments have overlapping live target-visible
 // storage units under descriptor aliasing and per-unit end points.
+// Assignment sparse segment ranges, when present, must belong to |liveness|.
 // |unit_end_points| may be NULL only when no in-domain unit offset will be
 // read.
 bool loom_low_allocation_live_range_assignments_conflict(
     const loom_low_descriptor_set_t* descriptor_set,
-    const uint32_t* unit_end_points, iree_host_size_t unit_end_point_count,
+    const loom_liveness_analysis_t* liveness, const uint32_t* unit_end_points,
+    iree_host_size_t unit_end_point_count,
     const loom_low_allocation_assignment_t* lhs,
     const loom_low_allocation_assignment_t* rhs);
 

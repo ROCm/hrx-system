@@ -177,6 +177,25 @@ TEST_F(AmdgpuProviderTest, ContributesHalKernelAbiMaterialization) {
   EXPECT_TRUE(loom_pass_yield_isa(pipeline_body->last_op));
 }
 
+TEST_F(AmdgpuProviderTest, ProvidesLoweringPolicyForEveryDescriptorSet) {
+  loom_low_lower_policy_registry_t registry = {0};
+  IREE_ASSERT_OK(loom_target_environment_initialize_low_lower_policy_registry(
+      &target_environment_, &registry));
+
+  const iree_host_size_t descriptor_set_count =
+      loom_amdgpu_target_info_descriptor_set_count();
+  ASSERT_NE(descriptor_set_count, 0u);
+  for (iree_host_size_t i = 0; i < descriptor_set_count; ++i) {
+    const loom_amdgpu_descriptor_set_info_t* descriptor_set =
+        loom_amdgpu_target_info_descriptor_set_at((uint16_t)i);
+    ASSERT_NE(descriptor_set, nullptr);
+    EXPECT_NE(
+        loom_low_lower_policy_registry_lookup(&registry, descriptor_set->key),
+        nullptr)
+        << "descriptor set ordinal " << i;
+  }
+}
+
 TEST_F(AmdgpuProviderTest, MaterializesSelectedProcessors) {
   ModulePtr module;
   IREE_ASSERT_OK(AllocateModule(IREE_SV("materialize"), &module));

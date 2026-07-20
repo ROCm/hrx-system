@@ -90,6 +90,10 @@ add_custom_command(OUTPUT mlir_import_tests.stamp
 add_custom_target(mlir_import_tests
     DEPENDS mlir_import_tests.stamp
 )
+iree_register_generated_compile_input(mlir_import_tests
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/mlir_import_tests.stamp"
+)
 
 if(LOOM_IMPORT_MLIR)
 iree_py_test(

@@ -34,7 +34,7 @@ python dev.py bazel run //loom/src/loom/tools/loom-opt:loom-opt -- \
 | --- | --- | --- |
 | `#pragma unroll`, `pragma-unroll`, `loop-expansion`, `for`, `q8`, `WG64` | `scf.for ... unroll`, `unroll-scf-for`, range-fact trip count inference | `q8_block_unroll.loom` |
 | `blockIdx`, `threadIdx`, `lane`, `warp`, `wavefront` | `kernel.launch.config`, `kernel.workgroup.id`, `kernel.workitem.id`, `kernel.subgroup.*` | `q8_block_unroll.loom` |
-| `threadIdx`, `lane_id`, `warp lane`, `wavefront lane`, `SGPR`, `VGPR`, `EXEC`, `scalarized`, `lane-varying`, `uniform`, `dot operand` | value distribution facts, `test.fact_uniform`, `test.fact_lane_varying`, `test.fact_lane_predicate` | `lane_distribution.loom` |
+| `threadIdx`, `lane_id`, `warp lane`, `wavefront lane`, `SGPR`, `VGPR`, `EXEC`, `scalarized`, `lane-varying`, `uniform`, `dot operand` | value distribution facts, `test.fact_subgroup_uniform`, `test.fact_workgroup_uniform`, `test.fact_lane_varying`, `test.fact_lane_predicate` | `lane_distribution.loom` |
 | `__global__`, `restrict`, pointer casts, address arithmetic | kernel ABI `buffer`, `buffer.assume.noalias`, `buffer.view`, `index`/`offset` math | `q8_block_unroll.loom` |
 | `global_load_b32`, packed bytes, `q8`, bitfield, unpack | `vector.load`, `vector.bitunpacks<8>`, `scalar.extf`, `vector.dotf` | `q8_block_unroll.loom` |
 | `global_load_b32`, `global_load_b128`, `uint4`, adjacent scalar loads, coalescing | `vector.load -> vector<1xi32>` versus `vector.load -> vector<4xi32>` | `q8_load_width.loom` |
@@ -45,6 +45,7 @@ python dev.py bazel run //loom/src/loom/tools/loom-opt:loom-opt -- \
 | `q2`, `q3`, `q4`, `q5`, `q6`, split high bits, lookup tables, offset-binary, packed-dot repack | `vector.bitunpacku`, `vector.bitfield.extractu`, `vector.bitfield.insert`, `vector.table.lookup`, `vector.dot8i4` | `packed_field_contracts.loom` |
 | dynamic lower-bound unroll, missing facts | structured diagnostic, exact/range facts | `q8_hip_shaped_unroll_unresolved.loom` |
 | `#if __gfx*__`, template, macro, arch-specialization, fallback | `func.apply`, `func.template`, `target(@...)`, `priority(...)` | `target_provider_selection.loom` |
+| `__cluster_dims__`, cluster multicast, async-to-LDS, `s_wait_asynccnt`, b128 | static `cluster_size`, `kernel.async.cluster.gather`, async groups and waits | `cluster_b128_multicast.loom` |
 
 ## Lane Distribution
 
@@ -715,6 +716,93 @@ Expected signal:
 
 The transformed file should contain the selected gfx1100 implementation body,
 not `func.apply`, `@scale_i32_gfx1200`, or `@scale_i32_fallback`.
+
+## Workgroup-Cluster B128 Multicast
+
+Tags: `__cluster_dims__`, `workgroup cluster`, `cluster multicast`,
+`async-to-LDS`, `global_load_lds`, `b128`, `s_wait_asynccnt`, `LDS`,
+`recipient-owned LDS`.
+
+HIP habit:
+
+```c++
+// Both workgroups in a 1x2x1 cluster execute the same collective transfer.
+// Hardware may coalesce the matching requests and writes each recipient's LDS.
+cluster_memcpy_async_multicast(destination, source, 16, /*participants=*/0x3);
+cluster_async_wait();
+__syncthreads();
+```
+
+Loom spelling:
+
+```loom
+kernel.launch.config workgroups(%one, %two, %one)
+    workgroup_size(%thirty_two, %one, %one)
+    cluster_size(%one, %two, %one) : index
+
+%copy = kernel.async.cluster.gather %source to %destination using %participants
+    {cache_scope = device, cache_temporal = regular}
+    : view<16xi8, #dense> to view<16xi8, #dense>, i32 -> kernel.async.token
+%group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+```
+
+Every selected workgroup participates in the collective operation. The mask
+names recipient workgroups; it does not elect one workgroup to issue on behalf
+of the others. Each lane names the same logical 16-byte source and the
+lane-corresponding destination in its workgroup-owned LDS. The async wait drains
+the target's cluster-transfer counter before the ordinary workgroup barrier
+makes the populated LDS visible to consumers.
+
+`cluster_b128_multicast.loom` uses a nonuniform iota rather than a constant
+payload. Both recipients independently read their own LDS allocation and check
+all four words transferred for every lane. That shape catches wrong cluster
+identity, wrong recipient remapping, missing destination offsets, truncated
+b128 transfers, and accidental validation of only one participant.
+
+Proof command:
+
+```bash
+loom-compile cluster_b128_multicast.loom \
+  --backend=amdgpu-hal \
+  --target=gfx1250 \
+  --output=/tmp/cluster-b128-multicast.vmfb \
+  --emit-target-artifact=/tmp/cluster-b128-multicast.hsaco \
+  --artifact-manifest=summary \
+  --emit-artifact-manifest=/tmp/cluster-b128-multicast.manifest.json \
+  --compile-report=summary \
+  --compile-report-output=/tmp/cluster-b128-multicast.compile-report.json
+```
+
+Useful queries:
+
+```bash
+llvm-objdump --disassemble --mcpu=gfx1250 \
+  /tmp/cluster-b128-multicast.hsaco
+
+jq '{target_key, workload, local_memory_bytes,
+     explicit_action_count: .wait_plan.explicit_action_count,
+     barrier_count: .static_instruction_mix.barrier_count}' \
+  /tmp/cluster-b128-multicast.compile-report.json
+```
+
+Expected target signal:
+
+```text
+cluster_load_async_to_lds_b128 ... scope:SCOPE_DEV
+s_wait_asynccnt 0
+s_barrier_signal
+s_barrier_wait
+ds_load_b128
+```
+
+The compile report and final disassembly prove the selected launch shape,
+transfer width, wait domain, barrier placement, and resource viability. Running
+the check case through a compatible simulator additionally proves the modeled
+recipient and data semantics. Neither is a bandwidth claim: request coalescing,
+latency hiding, and the physical multicast ratio require counters and timing on
+the target GPU.
 
 ## First Translation Questions
 

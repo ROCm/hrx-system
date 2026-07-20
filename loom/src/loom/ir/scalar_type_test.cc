@@ -41,5 +41,27 @@ TEST(ScalarTypeTest, AddressTypesAreTargetWidth) {
   EXPECT_EQ(loom_scalar_type_bitwidth(LOOM_SCALAR_TYPE_OFFSET), 64);
 }
 
+TEST(ScalarTypeTest, Fp8Formats) {
+  loom_scalar_type_fp8_format_t format = {};
+  EXPECT_TRUE(loom_scalar_type_fp8_format(LOOM_SCALAR_TYPE_F8E4M3, &format));
+  EXPECT_EQ(format.exponent_bits, 4);
+  EXPECT_EQ(format.mantissa_bits, 3);
+  EXPECT_EQ(format.exponent_bias, 7);
+  EXPECT_EQ(format.special_policy,
+            LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN);
+
+  EXPECT_TRUE(loom_scalar_type_fp8_format(LOOM_SCALAR_TYPE_F8E5M2, &format));
+  EXPECT_EQ(format.exponent_bits, 5);
+  EXPECT_EQ(format.mantissa_bits, 2);
+  EXPECT_EQ(format.exponent_bias, 15);
+  EXPECT_EQ(format.special_policy, LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_IEEE);
+
+  EXPECT_FALSE(loom_scalar_type_fp8_format(LOOM_SCALAR_TYPE_F16, &format));
+  EXPECT_EQ(format.exponent_bits, 0);
+  EXPECT_EQ(format.mantissa_bits, 0);
+  EXPECT_EQ(format.exponent_bias, 0);
+  EXPECT_EQ(format.special_policy, LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_IEEE);
+}
+
 }  // namespace
 }  // namespace loom

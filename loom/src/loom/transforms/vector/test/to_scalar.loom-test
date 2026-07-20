@@ -292,6 +292,99 @@ func.def @scalarizes_block_scaled_f8_mma(%lhs_data: vector<4xf8E4M3>, %rhs_data:
 
 // ====
 
+func.def @scalarizes_block_scaled_f8_decode(%payload: vector<4xf8E4M3>, %scale: vector<2xf32>) -> (vector<4xf32>) {
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_packing=dense_lanes, payload_elements=4, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d, affine=scale_only> : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<2xf32>} : vector<4xf8E4M3>, encoding<schema> -> vector<4xf32>
+  func.return %decoded : vector<4xf32>
+}
+
+// ----
+func.def @scalarizes_block_scaled_f8_decode(%payload: vector<4xf8E4M3>, %scale: vector<2xf32>) -> (vector<4xf32>) {
+  %5 = vector.extract %payload[0] : vector<4xf8E4M3> -> f8E4M3
+  %6 = scalar.extf %5 : f8E4M3 to f32
+  %7 = vector.extract %scale[0] : vector<2xf32> -> f32
+  %8 = scalar.mulf %6, %7 : f32
+  %9 = vector.extract %payload[1] : vector<4xf8E4M3> -> f8E4M3
+  %10 = scalar.extf %9 : f8E4M3 to f32
+  %11 = vector.extract %scale[0] : vector<2xf32> -> f32
+  %12 = scalar.mulf %10, %11 : f32
+  %13 = vector.extract %payload[2] : vector<4xf8E4M3> -> f8E4M3
+  %14 = scalar.extf %13 : f8E4M3 to f32
+  %15 = vector.extract %scale[1] : vector<2xf32> -> f32
+  %16 = scalar.mulf %14, %15 : f32
+  %17 = vector.extract %payload[3] : vector<4xf8E4M3> -> f8E4M3
+  %18 = scalar.extf %17 : f8E4M3 to f32
+  %19 = vector.extract %scale[1] : vector<2xf32> -> f32
+  %20 = scalar.mulf %18, %19 : f32
+  %decoded = vector.from_elements %8, %12, %16, %20 : vector<4xf32>
+  func.return %decoded : vector<4xf32>
+}
+
+// ====
+
+func.def @scalarizes_content_policy_f8_decode(%payload: vector<2xf8E4M3>) -> (vector<2xbf16>) {
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_packing=dense_lanes, payload_elements=2, payload_registers=0, rounding=finite_flush_subnormal> : encoding<schema>
+  %decoded = vector.decode %payload using %schema : vector<2xf8E4M3>, encoding<schema> -> vector<2xbf16>
+  func.return %decoded : vector<2xbf16>
+}
+
+// ----
+func.def @scalarizes_content_policy_f8_decode(%payload: vector<2xf8E4M3>) -> (vector<2xbf16>) {
+  %4 = vector.extract %payload[0] : vector<2xf8E4M3> -> f8E4M3
+  %5 = scalar.extf %4 : f8E4M3 to bf16
+  %6 = vector.extract %payload[1] : vector<2xf8E4M3> -> f8E4M3
+  %7 = scalar.extf %6 : f8E4M3 to bf16
+  %decoded = vector.from_elements %5, %7 : vector<2xbf16>
+  func.return %decoded : vector<2xbf16>
+}
+
+// ====
+
+func.def @scalarizes_row_scaled_f8_decode(%payload: vector<2x2xf8E4M3>, %scale: vector<2xf32>) -> (vector<2x2xf32>) {
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_packing=dense_lanes, payload_elements=4, payload_registers=0, scale_format=f32, scale_group_elements=1, scale_operands=1, scale_topology=row, affine=scale_only> : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<2xf32>} : vector<2x2xf8E4M3>, encoding<schema> -> vector<2x2xf32>
+  func.return %decoded : vector<2x2xf32>
+}
+
+// ----
+func.def @scalarizes_row_scaled_f8_decode(%payload: vector<2x2xf8E4M3>, %scale: vector<2xf32>) -> (vector<2x2xf32>) {
+  %5 = vector.extract %payload[0, 0] : vector<2x2xf8E4M3> -> f8E4M3
+  %6 = scalar.extf %5 : f8E4M3 to f32
+  %7 = vector.extract %scale[0] : vector<2xf32> -> f32
+  %8 = scalar.mulf %6, %7 : f32
+  %9 = vector.extract %payload[0, 1] : vector<2x2xf8E4M3> -> f8E4M3
+  %10 = scalar.extf %9 : f8E4M3 to f32
+  %11 = vector.extract %scale[0] : vector<2xf32> -> f32
+  %12 = scalar.mulf %10, %11 : f32
+  %13 = vector.extract %payload[1, 0] : vector<2x2xf8E4M3> -> f8E4M3
+  %14 = scalar.extf %13 : f8E4M3 to f32
+  %15 = vector.extract %scale[1] : vector<2xf32> -> f32
+  %16 = scalar.mulf %14, %15 : f32
+  %17 = vector.extract %payload[1, 1] : vector<2x2xf8E4M3> -> f8E4M3
+  %18 = scalar.extf %17 : f8E4M3 to f32
+  %19 = vector.extract %scale[1] : vector<2xf32> -> f32
+  %20 = scalar.mulf %18, %19 : f32
+  %decoded = vector.from_elements %8, %12, %16, %20 : vector<2x2xf32>
+  func.return %decoded : vector<2x2xf32>
+}
+
+// ====
+
+func.def @leaves_packed_q8_decode_for_later_lowering(%payload: vector<4xi32>, %scale: vector<1xf16>) -> (vector<32xf32>) {
+  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf16>} : vector<4xi32>, encoding<schema> -> vector<32xf32>
+  func.return %decoded : vector<32xf32>
+}
+
+// ----
+func.def @leaves_packed_q8_decode_for_later_lowering(%payload: vector<4xi32>, %scale: vector<1xf16>) -> (vector<32xf32>) {
+  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf16>} : vector<4xi32>, encoding<schema> -> vector<32xf32>
+  func.return %decoded : vector<32xf32>
+}
+
+// ====
+
 func.def @scalarizes_quant_i8_zero_point_mma(%lhs_data: vector<4xi8>, %rhs_data: vector<4xi8>, %init_data: vector<4xf32>, %lhs_scale: vector<2xf32>, %rhs_scale: vector<2xf32>, %lhs_zero_point: vector<2xi8>, %rhs_zero_point: vector<2xi8>) -> (vector<4xf32>) {
   %m = index.constant 2 : index
   %n = index.constant 2 : index
@@ -613,6 +706,124 @@ func.def @scalarizes_static_dense_rank2_f32_mma(%lhs_data: vector<1x2xf32>, %rhs
   %20 = vector.splat %17 : vector<1x1xf32>
   %result = vector.fragment<result> %20 shape [%m, %n] : vector<1x1xf32>
   func.return %result : vector<1x1xf32>
+}
+
+// ====
+
+func.def @scalarizes_static_blocked_f32_mma(%lhs_data: vector<2x1x2xf32>, %rhs_data: vector<2x2x1xf32>, %init_data: vector<2x1x1xf32>) -> (vector<2x1x1xf32>) {
+  %blocks = index.constant 2 : index
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %k = index.constant 2 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [blocks(%blocks), %m, %k] : vector<2x1x2xf32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [blocks(%blocks), %k, %n] : vector<2x2x1xf32>
+  %init = vector.fragment<init> %init_data shape [blocks(%blocks), %m, %n] : vector<2x1x1xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<2x1x2xf32>, vector<2x2x1xf32>, vector<2x1x1xf32>
+  func.return %result : vector<2x1x1xf32>
+}
+
+// ----
+func.def @scalarizes_static_blocked_f32_mma(%lhs_data: vector<2x1x2xf32>, %rhs_data: vector<2x2x1xf32>, %init_data: vector<2x1x1xf32>) -> (vector<2x1x1xf32>) {
+  %blocks = index.constant 2 : index
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %12 = vector.extract %init_data[0, 0, 0] : vector<2x1x1xf32> -> f32
+  %13 = vector.extract %lhs_data[0, 0, 0] : vector<2x1x2xf32> -> f32
+  %14 = vector.extract %rhs_data[0, 0, 0] : vector<2x2x1xf32> -> f32
+  %15 = scalar.fmaf %13, %14, %12 : f32
+  %16 = vector.extract %lhs_data[0, 0, 1] : vector<2x1x2xf32> -> f32
+  %17 = vector.extract %rhs_data[0, 1, 0] : vector<2x2x1xf32> -> f32
+  %18 = scalar.fmaf %16, %17, %15 : f32
+  %19 = vector.extract %init_data[1, 0, 0] : vector<2x1x1xf32> -> f32
+  %20 = vector.extract %lhs_data[1, 0, 0] : vector<2x1x2xf32> -> f32
+  %21 = vector.extract %rhs_data[1, 0, 0] : vector<2x2x1xf32> -> f32
+  %22 = scalar.fmaf %20, %21, %19 : f32
+  %23 = vector.extract %lhs_data[1, 0, 1] : vector<2x1x2xf32> -> f32
+  %24 = vector.extract %rhs_data[1, 1, 0] : vector<2x2x1xf32> -> f32
+  %25 = scalar.fmaf %23, %24, %22 : f32
+  %26 = vector.from_elements %18, %25 : vector<2x1x1xf32>
+  %result = vector.fragment<result> %26 shape [blocks(%blocks), %m, %n] : vector<2x1x1xf32>
+  func.return %result : vector<2x1x1xf32>
+}
+
+// ====
+
+func.def @scalarizes_dynamic_blocked_f32_mma(%blocks: index, %m: index, %n: index, %k: index, %lhs_data: vector<[%blocks]x[%m]x[%k]xf32>, %rhs_data: vector<[%blocks]x[%k]x[%n]xf32>, %init_data: vector<[%blocks]x[%m]x[%n]xf32>) -> (vector<[%blocks]x[%m]x[%n]xf32>) {
+  %lhs = vector.fragment<lhs> %lhs_data shape [blocks(%blocks), %m, %k] : vector<[%blocks]x[%m]x[%k]xf32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [blocks(%blocks), %k, %n] : vector<[%blocks]x[%k]x[%n]xf32>
+  %init = vector.fragment<init> %init_data shape [blocks(%blocks), %m, %n] : vector<[%blocks]x[%m]x[%n]xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<[%blocks]x[%m]x[%k]xf32>, vector<[%blocks]x[%k]x[%n]xf32>, vector<[%blocks]x[%m]x[%n]xf32>
+  func.return %result : vector<[%blocks]x[%m]x[%n]xf32>
+}
+
+// ----
+func.def @scalarizes_dynamic_blocked_f32_mma(%blocks: index, %m: index, %n: index, %k: index, %lhs_data: vector<[%blocks]x[%m]x[%k]xf32>, %rhs_data: vector<[%blocks]x[%k]x[%n]xf32>, %init_data: vector<[%blocks]x[%m]x[%n]xf32>) -> (vector<[%blocks]x[%m]x[%n]xf32>) {
+  %12 = index.constant 0 : index
+  %13 = index.constant 1 : index
+  %16 = scf.for %14 = [%12 to %blocks step %13](%15 = %init_data : vector<[%blocks]x[%m]x[%n]xf32>) -> (vector<[%blocks]x[%m]x[%n]xf32>) {
+    %17 = index.constant 0 : index
+    %18 = index.constant 1 : index
+    %21 = scf.for %19 = [%17 to %m step %18](%20 = %15 : vector<[%blocks]x[%m]x[%n]xf32>) -> (vector<[%blocks]x[%m]x[%n]xf32>) {
+      %22 = index.constant 0 : index
+      %23 = index.constant 1 : index
+      %26 = scf.for %24 = [%22 to %n step %23](%25 = %20 : vector<[%blocks]x[%m]x[%n]xf32>) -> (vector<[%blocks]x[%m]x[%n]xf32>) {
+        %27 = vector.extract %init_data[%14, %19, %24] : vector<[%blocks]x[%m]x[%n]xf32> -> f32
+        %28 = index.constant 0 : index
+        %29 = index.constant 1 : index
+        %32 = scf.for %30 = [%28 to %k step %29](%31 = %27 : f32) -> (f32) {
+          %33 = vector.extract %lhs_data[%14, %19, %30] : vector<[%blocks]x[%m]x[%k]xf32> -> f32
+          %34 = vector.extract %rhs_data[%14, %30, %24] : vector<[%blocks]x[%k]x[%n]xf32> -> f32
+          %35 = scalar.fmaf %33, %34, %31 : f32
+          scf.yield %35 : f32
+        }
+        %36 = vector.insert %32 into %25[%14, %19, %24] : f32, vector<[%blocks]x[%m]x[%n]xf32>
+        scf.yield %36 : vector<[%blocks]x[%m]x[%n]xf32>
+      }
+      scf.yield %26 : vector<[%blocks]x[%m]x[%n]xf32>
+    }
+    scf.yield %21 : vector<[%blocks]x[%m]x[%n]xf32>
+  }
+  %result = vector.fragment<result> %16 shape [blocks(%blocks), %m, %n] : vector<[%blocks]x[%m]x[%n]xf32>
+  func.return %result : vector<[%blocks]x[%m]x[%n]xf32>
+}
+
+// ====
+
+func.def @scalarizes_dynamic_blocked_fragment_copy(%source_buffer: buffer, %target_buffer: buffer, %source_base: offset, %target_base: offset, %block: index, %row: index, %column: index, %blocks: index, %m: index, %n: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %source = buffer.view %source_buffer[%source_base] : buffer -> view<[%blocks]x[%m]x[%n]xf32, %layout>
+  %target = buffer.view %target_buffer[%target_base] : buffer -> view<[%blocks]x[%m]x[%n]xf32, %layout>
+  %loaded = vector.fragment.load<result> %source[%block, %row, %column] shape [blocks(%blocks), %m, %n] : view<[%blocks]x[%m]x[%n]xf32, %layout> -> vector<[%blocks]x[%m]x[%n]xf32>
+  vector.fragment.store<result> %loaded, %target[%block, %row, %column] shape [blocks(%blocks), %m, %n] : vector<[%blocks]x[%m]x[%n]xf32>, view<[%blocks]x[%m]x[%n]xf32, %layout>
+  func.return
+}
+
+// ----
+func.def @scalarizes_dynamic_blocked_fragment_copy(%source_buffer: buffer, %target_buffer: buffer, %source_base: offset, %target_base: offset, %block: index, %row: index, %column: index, %blocks: index, %m: index, %n: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %source = buffer.view %source_buffer[%source_base] : buffer -> view<[%blocks]x[%m]x[%n]xf32, %layout>
+  %target = buffer.view %target_buffer[%target_base] : buffer -> view<[%blocks]x[%m]x[%n]xf32, %layout>
+  %14 = index.constant 0 : index
+  %15 = index.constant 1 : index
+  scf.for %16 = [%14 to %blocks step %15] {
+    %17 = index.constant 0 : index
+    %18 = index.constant 1 : index
+    scf.for %19 = [%17 to %m step %18] {
+      %20 = index.constant 0 : index
+      %21 = index.constant 1 : index
+      scf.for %22 = [%20 to %n step %21] {
+        %23 = index.add %block, %16 : index
+        %24 = index.add %row, %19 : index
+        %25 = index.add %column, %22 : index
+        %26 = view.load %source[%23, %24, %25] : view<[%blocks]x[%m]x[%n]xf32, %layout> -> f32
+        %27 = index.add %block, %16 : index
+        %28 = index.add %row, %19 : index
+        %29 = index.add %column, %22 : index
+        view.store %26, %target[%27, %28, %29] : f32, view<[%blocks]x[%m]x[%n]xf32, %layout>
+      }
+    }
+  }
+  func.return
 }
 
 // ====

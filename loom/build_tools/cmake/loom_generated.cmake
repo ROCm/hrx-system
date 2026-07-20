@@ -84,7 +84,9 @@ function(loom_generated_textual_header)
     DEPENDS
       "${_OUTPUT}"
   )
-  iree_register_generated_compile_input("${_GEN_TARGET}")
+  iree_register_generated_compile_input("${_GEN_TARGET}"
+    OUTPUTS "${_OUTPUT}"
+  )
 endfunction()
 
 function(loom_generated_cc_library)
@@ -92,7 +94,7 @@ function(loom_generated_cc_library)
     _RULE
     "TESTONLY"
     "NAME;GENERATOR;SOURCE"
-    "SRCS;GENERATED_SRC_FLAGS;GENERATED_SRCS;HDRS;GENERATED_HDR_FLAGS;GENERATED_HDRS;ARGS;INPUTS;EXTRA_OUTPUT_FLAGS;EXTRA_OUTPUTS;DEPS"
+    "SRCS;TEXTUAL_HDRS;GENERATED_SRC_FLAGS;GENERATED_SRCS;HDRS;GENERATED_HDR_FLAGS;GENERATED_HDRS;ARGS;INPUTS;EXTRA_OUTPUT_FLAGS;EXTRA_OUTPUTS;DEPS"
     ${ARGN}
   )
 
@@ -205,7 +207,9 @@ function(loom_generated_cc_library)
     DEPENDS
       ${_OUTPUTS}
   )
-  iree_register_generated_compile_input("${_GEN_TARGET}")
+  iree_register_generated_compile_input("${_GEN_TARGET}"
+    OUTPUTS ${_OUTPUTS}
+  )
   if(_RULE_TESTONLY)
     set(_TESTONLY_ARG TESTONLY)
   else()
@@ -221,6 +225,8 @@ function(loom_generated_cc_library)
     SRCS
       ${_RULE_SRCS}
       ${_GENERATED_SRCS}
+    TEXTUAL_HDRS
+      ${_RULE_TEXTUAL_HDRS}
     DEPS
       ${_RULE_DEPS}
     ${_TESTONLY_ARG}

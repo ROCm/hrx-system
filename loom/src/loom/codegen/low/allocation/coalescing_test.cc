@@ -16,6 +16,8 @@
 namespace loom {
 namespace {
 
+constexpr loom_liveness_analysis_t kEmptyLiveness = {};
+
 class LowAllocationCoalescingTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -89,8 +91,10 @@ static iree_status_t AppendAssignment(
 }
 
 static iree_status_t UnexpectedConsumptionQuery(
-    void* user_data, loom_consumption_region_query_t** out_query) {
+    void* user_data, const loom_region_t* region,
+    loom_consumption_region_query_t** out_query) {
   (void)user_data;
+  (void)region;
   *out_query = nullptr;
   return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                           "test did not expect a consumption query");
@@ -175,10 +179,13 @@ TEST_F(LowAllocationCoalescingTest, AssignsTiedIntervalToSourceLocation) {
 
   uint32_t unit_end_point_starts[] = {0, 1};
   uint32_t unit_end_points[] = {8, 6};
+  uint64_t edge_handoff_words[] = {0};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
   unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
   unit_liveness.end_points = unit_end_points;
   unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.values_with_edge_handoff_units = {liveness.value_count,
+                                                  edge_handoff_words};
 
   loom_low_reg_class_t reg_class = {};
   reg_class.flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
@@ -255,7 +262,8 @@ TEST_F(LowAllocationCoalescingTest, AssignsTiedIntervalToSourceLocation) {
 
   loom_low_allocation_active_set_t active_set = {};
   IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
-      /*assignment_capacity=*/2, /*unit_capacity=*/8, &arena_, &active_set));
+      &kEmptyLiveness, /*assignment_capacity=*/2, /*unit_capacity=*/8, &arena_,
+      &active_set));
   loom_low_allocation_active_set_insert(&active_set, &descriptor_set,
                                         assignments, /*assignment_count=*/1,
                                         /*assignment_index=*/0);

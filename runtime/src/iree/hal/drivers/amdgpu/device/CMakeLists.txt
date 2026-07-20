@@ -21,6 +21,10 @@ add_custom_command(OUTPUT bitcode_srcs.stamp
 add_custom_target(bitcode_srcs
     DEPENDS bitcode_srcs.stamp
 )
+iree_register_generated_compile_input(bitcode_srcs
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/bitcode_srcs.stamp"
+)
 
 add_custom_command(OUTPUT bitcode_hdrs.stamp
     COMMAND ${CMAKE_COMMAND} -E touch bitcode_hdrs.stamp
@@ -42,6 +46,10 @@ add_custom_command(OUTPUT bitcode_hdrs.stamp
 
 add_custom_target(bitcode_hdrs
     DEPENDS bitcode_hdrs.stamp
+)
+iree_register_generated_compile_input(bitcode_hdrs
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/bitcode_hdrs.stamp"
 )
 
 if(IREE_HAL_DRIVER_AMDGPU)
@@ -187,6 +195,26 @@ iree_cc_test(
     ::headers
     ::timestamp
     iree::hal::drivers::amdgpu::abi
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    tsan_test
+  SRCS
+    "tsan_test.cc"
+  DEPS
+    ::headers
+    ::tsan
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

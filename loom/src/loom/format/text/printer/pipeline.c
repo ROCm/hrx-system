@@ -299,6 +299,14 @@ static bool loom_print_pipeline_statement_is_friendly(
                                                   body_descriptor);
   }
 
+  vtable = loom_print_pipeline_op_vtable(ctx, op, IREE_SV("pass.if_changed"));
+  if (vtable) {
+    const loom_region_descriptor_t* body_descriptor =
+        loom_print_pipeline_body_region_descriptor(vtable);
+    return body_descriptor && loom_print_pipeline_region_is_friendly(
+                                  ctx, loom_op_regions(op)[0], body_descriptor);
+  }
+
   vtable = loom_print_pipeline_op_vtable(ctx, op, IREE_SV("pass.call"));
   if (vtable) {
     return loom_print_pipeline_symbol_attr(ctx, op, vtable, IREE_SV("callee"));
@@ -484,6 +492,16 @@ static iree_status_t loom_print_pipeline_statement(loom_print_context_t* ctx,
       IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, ')'));
     }
     IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, ' '));
+    return loom_print_pipeline_nested_region(ctx, loom_op_regions(op)[0],
+                                             body_descriptor);
+  }
+
+  vtable = loom_print_pipeline_op_vtable(ctx, op, IREE_SV("pass.if_changed"));
+  if (vtable) {
+    const loom_region_descriptor_t* body_descriptor =
+        loom_print_pipeline_body_region_descriptor(vtable);
+    IREE_RETURN_IF_ERROR(
+        loom_output_stream_write_cstring(ctx->stream, "if changed "));
     return loom_print_pipeline_nested_region(ctx, loom_op_regions(op)[0],
                                              body_descriptor);
   }

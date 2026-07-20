@@ -439,7 +439,7 @@ iree_status_t loom_parser_define_value(loom_parser_t* parser,
           loom_parser_lookup_unresolved_placeholder(parser, value_id);
       if (placeholder && !placeholder->resolved) {
         loom_type_t placeholder_type =
-            parser->module->values.entries[value_id].type;
+            loom_module_value_type(parser->module, value_id);
         if (loom_type_kind(placeholder_type) != LOOM_TYPE_NONE &&
             !loom_type_equal(placeholder_type, type)) {
           return loom_parser_emit_duplicate_value_name(parser, name_token);

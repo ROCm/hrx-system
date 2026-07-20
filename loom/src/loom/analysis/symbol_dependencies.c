@@ -311,7 +311,8 @@ static iree_status_t loom_symbol_dependency_visit_value_type(
     return iree_ok_status();
   }
   return loom_symbol_dependency_visit_type(
-      builder, source_symbol_id, builder->module->values.entries[value_id].type,
+      builder, source_symbol_id,
+      loom_module_value_type(builder->module, value_id),
       LOOM_SYMBOL_DEPENDENCY_EDGE_VALUE_TYPE,
       LOOM_SYMBOL_DEPENDENCY_ATTR_INDEX_NONE, user_op);
 }

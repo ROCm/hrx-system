@@ -12,6 +12,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/facts.h"
+#include "loom/ir/float_facts.h"
 
 namespace loom {
 namespace {
@@ -102,10 +103,10 @@ TEST_F(LoopDomainTest, RangeFactsDoNotProveEquality) {
 }
 
 TEST_F(LoopDomainTest, FloatFactsDoNotProveEquality) {
-  DefineFacts(1, loom_value_facts_exact_f64(0.0));
+  DefineFacts(1, loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 0.0));
   DefineFacts(2, loom_value_facts_exact_i64(16));
   DefineFacts(3, loom_value_facts_exact_i64(1));
-  DefineFacts(4, loom_value_facts_exact_f64(0.0));
+  DefineFacts(4, loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 0.0));
 
   loom_loop_domain_t lhs = {
       /*.lower_bound=*/1,
@@ -119,6 +120,62 @@ TEST_F(LoopDomainTest, FloatFactsDoNotProveEquality) {
   };
 
   EXPECT_FALSE(loom_loop_domain_equal(&fact_table_, lhs, rhs));
+}
+
+TEST_F(LoopDomainTest, RangeFactsProveNonemptyDomain) {
+  DefineFacts(1, loom_value_facts_make(0, 4, 1));
+  DefineFacts(2, loom_value_facts_make(8, 16, 1));
+  DefineFacts(3, loom_value_facts_make(1, 4, 1));
+  loom_loop_domain_t domain = {
+      /*.lower_bound=*/1,
+      /*.upper_bound=*/2,
+      /*.step=*/3,
+  };
+
+  EXPECT_TRUE(loom_loop_domain_proven_nonempty(&fact_table_, domain));
+  EXPECT_FALSE(loom_loop_domain_proven_empty(&fact_table_, domain));
+}
+
+TEST_F(LoopDomainTest, RangeFactsProveEmptyDomain) {
+  DefineFacts(1, loom_value_facts_make(16, 24, 1));
+  DefineFacts(2, loom_value_facts_make(0, 16, 1));
+  DefineFacts(3, loom_value_facts_exact_i64(1));
+  loom_loop_domain_t domain = {
+      /*.lower_bound=*/1,
+      /*.upper_bound=*/2,
+      /*.step=*/3,
+  };
+
+  EXPECT_TRUE(loom_loop_domain_proven_empty(&fact_table_, domain));
+  EXPECT_FALSE(loom_loop_domain_proven_nonempty(&fact_table_, domain));
+}
+
+TEST_F(LoopDomainTest, OverlappingBoundsProveNeitherDomainState) {
+  DefineFacts(1, loom_value_facts_make(0, 12, 1));
+  DefineFacts(2, loom_value_facts_make(8, 16, 1));
+  DefineFacts(3, loom_value_facts_exact_i64(1));
+  loom_loop_domain_t domain = {
+      /*.lower_bound=*/1,
+      /*.upper_bound=*/2,
+      /*.step=*/3,
+  };
+
+  EXPECT_FALSE(loom_loop_domain_proven_empty(&fact_table_, domain));
+  EXPECT_FALSE(loom_loop_domain_proven_nonempty(&fact_table_, domain));
+}
+
+TEST_F(LoopDomainTest, NonpositiveStepProvesNeitherDomainState) {
+  DefineFacts(1, loom_value_facts_exact_i64(0));
+  DefineFacts(2, loom_value_facts_exact_i64(16));
+  DefineFacts(3, loom_value_facts_exact_i64(0));
+  loom_loop_domain_t domain = {
+      /*.lower_bound=*/1,
+      /*.upper_bound=*/2,
+      /*.step=*/3,
+  };
+
+  EXPECT_FALSE(loom_loop_domain_proven_empty(&fact_table_, domain));
+  EXPECT_FALSE(loom_loop_domain_proven_nonempty(&fact_table_, domain));
 }
 
 }  // namespace

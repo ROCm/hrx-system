@@ -36,6 +36,10 @@ on:
       - main
       - main-staging
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   actions: read
   contents: read
@@ -103,12 +107,12 @@ jobs:
         include:
           - name: Linux / CMake / GPU gfx942
             chip: gfx942
-            runner_label: linux-gfx942-1gpu-core42-ossci-rocm
+            runner_labels: '["linux-gfx942-1gpu-ccs-csp-ossci-rocm"]'
             ctest_exclude_regex: ""
             experimental: false
           - name: Linux / CMake / GPU gfx1201
             chip: gfx1201
-            runner_label: gpu_navi4x
+            runner_labels: '["self-hosted", "Linux", "X64", "gpu_navi4x"]'
             ctest_exclude_regex: ""
             experimental: false
     uses: ./.github/workflows/test_core_linux_gpu.yml
@@ -117,7 +121,7 @@ jobs:
       contents: read
     with:
       name: ${{ matrix.name }}
-      runner_label: ${{ matrix.runner_label }}
+      runner_labels: ${{ matrix.runner_labels }}
       artifact_run_id: ${{ github.run_id }}
       device: gpu:0
       ctest_exclude_regex: ${{ matrix.ctest_exclude_regex }}

@@ -53,7 +53,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/spirv/descriptors",
         "//loom/src/loom/target/arch/spirv/descriptors:descriptors_ids",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )

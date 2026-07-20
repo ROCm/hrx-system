@@ -125,36 +125,14 @@ void iree_hal_executable_loader_retain(
 void iree_hal_executable_loader_release(
     iree_hal_executable_loader_t* executable_loader);
 
-// Attempts to infer the executable format from the given |executable_data|.
-// Returns the format string in |executable_format| and the inferred data size
-// in |out_inferred_size|. The inferred size indicates the size of valid data
-// following the |executable_data| base pointer and may be less than the
-// provided size.
+// Returns true if the loader can load native artifacts for |target|.
 //
-// If the size of the data is not know callers can pass the base pointer in
-// |executable_data| with a 0 size. The loader will attempt to discover how many
-// valid bytes follow the pointer _with no bounds check_. **THIS IS UNSAFE** as
-// the data could trivially say it's the entire rest of memory and then we'll be
-// wiring that for access. CUDA (and HIP) have a terrible API, though, and this
-// is required to support loading their modules. This should never be used if
-// the size is available (file length, etc).
-//
-// Returns IREE_STATUS_INCOMPATIBLE if the format could not be recognized by the
-// loader.
-iree_status_t iree_hal_executable_loader_infer_format(
+// This is a pure capability query over a target borrowed from the owning
+// device spec. Artifact bytes may still be malformed or incompatible and are
+// classified separately.
+bool iree_hal_executable_loader_query_target_support(
     iree_hal_executable_loader_t* executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size);
-
-// Returns true if the loader can load executables of the given
-// |executable_format|. Note that loading may still fail if the executable uses
-// features not available on the current host or runtime.
-bool iree_hal_executable_loader_query_support(
-    iree_hal_executable_loader_t* executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_string_view_t executable_format);
+    const iree_hal_executable_target_t* target);
 
 // Returns immutable executable facts owned by |executable_loader|.
 //
@@ -165,30 +143,42 @@ void iree_hal_executable_loader_query_spec(
     iree_hal_executable_loader_t* executable_loader,
     iree_hal_device_executable_spec_t* out_executable_spec);
 
-// Returns true if any loader in the list can load executables of the given
-// |executable_format|. Note that loading may still fail if the executable uses
-// features not available on the current host or runtime.
-bool iree_hal_query_any_executable_loader_support(
+// Returns true if any loader in the list supports |target|.
+bool iree_hal_query_any_executable_loader_target_support(
     iree_host_size_t loader_count, iree_hal_executable_loader_t** loaders,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_string_view_t executable_format);
+    const iree_hal_executable_target_t* target);
 
-// Tries loading the executable data provided in the given format.
-// May fail even if the executable is valid if it requires features not
-// supported by the current host or runtime (such as available architectures,
-// imports, etc).
+// Returns true when |executable_loader| claims |load_params->executable_data|
+// for |target|.
 //
-// Depending on loader ability the caching_mode is used to enable certain
-// features such as instrumented profiling. Not all formats support these
-// features and cooperation of both the compiler producing the executables and
-// the runtime loader and system are required.
-//
-// Returns IREE_STATUS_CANCELLED when the loader cannot load the file in the
-// given format. Returns IREE_STATUS_NOT_FOUND if the executable requested is
-// not registered with the loader.
-iree_status_t iree_hal_executable_loader_try_load(
+// Claims are status-free routing decisions. A loader claims malformed data
+// when its identifying bytes are present so that its load call can return a
+// specific diagnostic. A false result means the loader will not inspect or
+// load the bytes.
+bool iree_hal_executable_loader_claims_executable(
     iree_hal_executable_loader_t* executable_loader,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params);
+
+// Loads a previously claimed executable.
+//
+// Failures are terminal and must not be used to fall through to another
+// loader. Callers must establish target support and byte ownership first.
+iree_status_t iree_hal_executable_loader_load(
+    iree_hal_executable_loader_t* executable_loader,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable);
+
+// Selects the unique loader claiming |load_params| for |target| and loads it.
+//
+// Returns NOT_FOUND when no target-compatible loader claims the bytes and
+// FAILED_PRECONDITION when multiple loaders claim them. A claimed load failure
+// is returned directly without trying another loader.
+iree_status_t iree_hal_executable_loader_select_and_load(
+    iree_host_size_t loader_count, iree_hal_executable_loader_t** loaders,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
     iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable);
 
 //===----------------------------------------------------------------------===//
@@ -198,25 +188,23 @@ iree_status_t iree_hal_executable_loader_try_load(
 typedef struct iree_hal_executable_loader_vtable_t {
   void(IREE_API_PTR* destroy)(iree_hal_executable_loader_t* executable_loader);
 
-  iree_status_t(IREE_API_PTR* infer_format)(
+  bool(IREE_API_PTR* query_target_support)(
       iree_hal_executable_loader_t* executable_loader,
-      iree_hal_executable_caching_mode_t caching_mode,
-      iree_const_byte_span_t executable_data,
-      iree_host_size_t executable_format_capacity, char* executable_format,
-      iree_host_size_t* out_inferred_size);
-
-  bool(IREE_API_PTR* query_support)(
-      iree_hal_executable_loader_t* executable_loader,
-      iree_hal_executable_caching_mode_t caching_mode,
-      iree_string_view_t executable_format);
+      const iree_hal_executable_target_t* target);
 
   void(IREE_API_PTR* query_spec)(
       iree_hal_executable_loader_t* executable_loader,
       iree_hal_device_executable_spec_t* out_executable_spec);
 
-  iree_status_t(IREE_API_PTR* try_load)(
+  bool(IREE_API_PTR* claims_executable)(
       iree_hal_executable_loader_t* executable_loader,
-      const iree_hal_executable_params_t* executable_params,
+      const iree_hal_executable_target_t* target,
+      const iree_hal_executable_load_params_t* load_params);
+
+  iree_status_t(IREE_API_PTR* load)(
+      iree_hal_executable_loader_t* executable_loader,
+      const iree_hal_executable_target_t* target,
+      const iree_hal_executable_load_params_t* load_params,
       iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable);
 } iree_hal_executable_loader_vtable_t;
 

@@ -15,6 +15,7 @@
 #include "loom/ops/encoding/params.h"
 #include "loom/ops/encoding/roles.h"
 #include "loom/util/fact_table.h"
+#include "loom/util/numeric_format.h"
 
 static iree_string_view_t loom_encoding_physical_storage_name(void) {
   return IREE_SV("physical_storage");
@@ -103,6 +104,16 @@ static iree_string_view_t loom_encoding_codebook_param_name(void) {
 
 static iree_string_view_t loom_encoding_sparsity_param_name(void) {
   return IREE_SV("sparsity");
+}
+
+static iree_string_view_t loom_encoding_sparsity_group_elements_param_name(
+    void) {
+  return IREE_SV("sparsity_group_elements");
+}
+
+static iree_string_view_t
+loom_encoding_sparsity_group_nonzero_elements_param_name(void) {
+  return IREE_SV("sparsity_group_nonzero_elements");
 }
 
 static iree_string_view_t loom_encoding_zero_scale_fallback_param_name(void) {
@@ -319,6 +330,8 @@ static bool loom_encoding_static_matrix_operand_schema(
   uint16_t payload_registers = 0;
   uint16_t scale_group_elements = 0;
   uint16_t scale_operands = 0;
+  uint16_t sparsity_group_elements = 0;
+  uint16_t sparsity_group_nonzero_elements = 0;
   bool zero_scale_fallback = false;
   uint64_t payload_packing_value = 0;
   uint64_t scale_topology_value = 0;
@@ -376,6 +389,13 @@ static bool loom_encoding_static_matrix_operand_schema(
           module, encoding, loom_encoding_sparsity_param_name(),
           LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_SPARSITY_POLICY,
           LOOM_VALUE_FACT_SPARSITY_POLICY_NONE, &sparsity_policy_value) ||
+      !loom_encoding_static_nonnegative_u16_param_or_default(
+          module, encoding, loom_encoding_sparsity_group_elements_param_name(),
+          /*default_value=*/0, &sparsity_group_elements) ||
+      !loom_encoding_static_nonnegative_u16_param_or_default(
+          module, encoding,
+          loom_encoding_sparsity_group_nonzero_elements_param_name(),
+          /*default_value=*/0, &sparsity_group_nonzero_elements) ||
       !loom_encoding_static_bool_param_or_default(
           module, encoding, loom_encoding_zero_scale_fallback_param_name(),
           /*default_value=*/false, &zero_scale_fallback)) {
@@ -398,6 +418,11 @@ static bool loom_encoding_static_matrix_operand_schema(
       .rounding_policy = rounding_policy,
       .codebook_policy = codebook_policy,
       .sparsity_policy = sparsity_policy,
+      .sparsity_group =
+          {
+              .nonzero_element_count = sparsity_group_nonzero_elements,
+              .element_count = sparsity_group_elements,
+          },
       .payload_register_count = payload_registers,
       .payload_element_count = payload_elements,
       .scale_group_element_count = scale_group_elements,
@@ -412,6 +437,10 @@ static bool loom_encoding_static_matrix_operand_schema(
   }
 
   if (!loom_value_fact_encoded_operand_schema_scale_is_complete(
+          encoded_operand)) {
+    return true;
+  }
+  if (!loom_value_fact_encoded_operand_schema_sparsity_is_complete(
           encoded_operand)) {
     return true;
   }
@@ -448,6 +477,60 @@ static bool loom_encoding_static_ggml_q8_0_schema(
       .payload_element_count = block_elements,
       .scale_group_element_count = block_elements,
       .scale_operand_count = 1,
+  };
+  return true;
+}
+
+typedef struct loom_encoding_named_fp8_schema_t {
+  iree_string_view_t name;
+  loom_value_fact_numeric_format_flags_t element_format;
+} loom_encoding_named_fp8_schema_t;
+
+static const loom_encoding_named_fp8_schema_t kLoomEncodingNamedFp8Schemas[] = {
+    {IREE_SVL("ieee_fp8_e4m3"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3},
+    {IREE_SVL("ieee_fp8_e5m2"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2},
+    {IREE_SVL("fp8_e4m3fn"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN},
+    {IREE_SVL("fp8_e4m3fnuz"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ},
+    {IREE_SVL("fp8_e5m2fnuz"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ},
+};
+
+static const loom_encoding_named_fp8_schema_t*
+loom_encoding_find_named_fp8_schema(const loom_module_t* module,
+                                    const loom_encoding_t* encoding) {
+  if (!encoding) return NULL;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kLoomEncodingNamedFp8Schemas);
+       ++i) {
+    const loom_encoding_named_fp8_schema_t* entry =
+        &kLoomEncodingNamedFp8Schemas[i];
+    if (loom_encoding_string_id_equal(module, encoding->name_id, entry->name)) {
+      return entry;
+    }
+  }
+  return NULL;
+}
+
+static bool loom_encoding_static_named_fp8_schema(
+    const loom_module_t* module, uint16_t encoding_id,
+    const loom_encoding_t* encoding,
+    loom_value_fact_storage_schema_t* out_schema) {
+  const loom_encoding_named_fp8_schema_t* schema =
+      loom_encoding_find_named_fp8_schema(module, encoding);
+  if (!schema) return false;
+
+  uint64_t rounding_policy_value = 0;
+  if (!loom_encoding_static_symbol_param_or_default(
+          module, encoding, loom_encoding_rounding_param_name(),
+          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_ROUNDING_POLICY,
+          LOOM_VALUE_FACT_ROUNDING_POLICY_NONE, &rounding_policy_value)) {
+    return true;
+  }
+
+  out_schema->static_spec_encoding_id = encoding_id;
+  out_schema->encoded_operand = (loom_value_fact_encoded_operand_schema_t){
+      .element_format = schema->element_format,
+      .payload_packing = LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES,
+      .rounding_policy = (uint32_t)rounding_policy_value,
+      .payload_element_count = 1,
   };
   return true;
 }
@@ -524,6 +607,10 @@ static bool loom_encoding_query_static_storage_schema_rec(
                                loom_encoding_ggml_q8_0_name())) {
     return loom_encoding_static_ggml_q8_0_schema(module, encoding_id, encoding,
                                                  out_schema);
+  }
+  if (loom_encoding_static_named_fp8_schema(module, encoding_id, encoding,
+                                            out_schema)) {
+    return true;
   }
   return true;
 }
@@ -611,6 +698,66 @@ bool loom_encoding_query_type_storage_schema(
   loom_value_facts_t facts =
       loom_value_fact_table_lookup(context->table, value_id);
   return loom_encoding_value_storage_schema(context, facts, out_schema);
+}
+
+bool loom_encoding_query_storage_schema_content_facts(
+    const loom_value_fact_storage_schema_t* storage_schema,
+    loom_scalar_type_t element_type, loom_value_facts_t* out_facts) {
+  if (!out_facts) return false;
+  *out_facts = loom_value_facts_unknown();
+  if (!loom_scalar_type_is_float(element_type)) {
+    return false;
+  }
+  const loom_value_fact_numeric_format_flags_t element_format =
+      storage_schema != NULL &&
+              storage_schema->encoded_operand.element_format !=
+                  LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE
+          ? storage_schema->encoded_operand.element_format
+          : loom_numeric_format_from_scalar_type(element_type);
+  if (storage_schema != NULL &&
+      iree_any_bit_set(storage_schema->encoded_operand.rounding_policy,
+                       LOOM_VALUE_FACT_ROUNDING_POLICY_FINITE_ONLY)) {
+    out_facts->flags |= LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |
+                        LOOM_VALUE_FACT_FINITE;
+  }
+  const loom_numeric_format_info_t* element_format_info = NULL;
+  if (loom_numeric_format_info(element_format, &element_format_info) &&
+      element_format_info->kind == LOOM_NUMERIC_FORMAT_KIND_FLOAT) {
+    if (!iree_any_bit_set(element_format_info->flags,
+                          LOOM_NUMERIC_FORMAT_FLAG_HAS_NAN)) {
+      out_facts->flags |= LOOM_VALUE_FACT_NOT_NAN;
+    }
+    if (!iree_any_bit_set(element_format_info->flags,
+                          LOOM_NUMERIC_FORMAT_FLAG_HAS_INFINITY)) {
+      out_facts->flags |= LOOM_VALUE_FACT_NOT_INF;
+    }
+    if (loom_value_facts_is_not_nan(*out_facts) &&
+        loom_value_facts_is_not_inf(*out_facts)) {
+      out_facts->flags |= LOOM_VALUE_FACT_FINITE;
+    }
+  }
+  if (storage_schema != NULL &&
+      iree_any_bit_set(storage_schema->encoded_operand.rounding_policy,
+                       LOOM_VALUE_FACT_ROUNDING_POLICY_FLUSH_SUBNORMAL)) {
+    out_facts->flags |= LOOM_VALUE_FACT_NOT_SUBNORMAL;
+  }
+  return out_facts->flags != 0;
+}
+
+bool loom_encoding_query_type_storage_content_facts(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_type_t type, loom_value_facts_t* out_facts) {
+  if (!out_facts) return false;
+  *out_facts = loom_value_facts_unknown();
+  const loom_scalar_type_t element_type = loom_type_element_type(type);
+  loom_value_fact_storage_schema_t storage_schema = {0};
+  if (!loom_encoding_query_type_storage_schema(context, module, type,
+                                               &storage_schema)) {
+    return loom_encoding_query_storage_schema_content_facts(NULL, element_type,
+                                                            out_facts);
+  }
+  return loom_encoding_query_storage_schema_content_facts(
+      &storage_schema, element_type, out_facts);
 }
 
 static iree_status_t loom_encoding_emit(iree_diagnostic_emitter_t emitter,

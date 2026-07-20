@@ -10,7 +10,6 @@
 
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/runtime_requirements.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/hal_kernel_library.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
@@ -21,20 +20,10 @@ typedef struct loom_amdgpu_hal_artifact_storage_t {
   loom_amdgpu_hal_kernel_library_t kernel_library;
 } loom_amdgpu_hal_artifact_storage_t;
 
-static iree_status_t loom_amdgpu_hal_artifact_provider_format_target_id(
-    const loom_amdgpu_processor_info_t* processor,
-    iree_string_builder_t* builder) {
-  iree_string_builder_reset(builder);
-  return loom_amdgpu_amdhsa_target_id_append(processor,
-                                             iree_string_view_empty(), builder);
-}
-
 static iree_status_t loom_amdgpu_hal_artifact_provider_try_select_processor(
     const loom_amdgpu_processor_info_t* processor,
-    const loom_run_hal_runtime_t* runtime, iree_string_builder_t* builder,
-    bool* out_selected, loom_run_hal_device_target_t* out_target) {
-  IREE_ASSERT_ARGUMENT(runtime);
-  IREE_ASSERT_ARGUMENT(builder);
+    const iree_hal_executable_target_t* hal_target, bool* out_selected,
+    loom_run_hal_device_target_t* out_target) {
   IREE_ASSERT_ARGUMENT(out_selected);
   IREE_ASSERT_ARGUMENT(out_target);
   *out_selected = false;
@@ -42,10 +31,7 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_try_select_processor(
     return iree_ok_status();
   }
 
-  bool emit_supported = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_processor_supports_hsaco(
-      processor, &emit_supported));
-  if (!emit_supported) {
+  if (!loom_amdgpu_processor_supports_hsaco(processor)) {
     return iree_ok_status();
   }
 
@@ -56,16 +42,8 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_try_select_processor(
     return iree_ok_status();
   }
 
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_hal_artifact_provider_format_target_id(processor, builder));
-  if (!iree_hal_executable_cache_can_prepare_format(
-          runtime->executable_cache,
-          IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION,
-          iree_string_builder_view(builder))) {
-    return iree_ok_status();
-  }
-
   *out_target = (loom_run_hal_device_target_t){
+      .hal_target = hal_target,
       .data = processor,
       .target_bundle = target_bundle,
       .target_key = processor->name,
@@ -76,11 +54,9 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_try_select_processor(
 
 static iree_status_t loom_amdgpu_hal_artifact_provider_try_select_device_target(
     const loom_run_hal_runtime_t* runtime,
-    iree_hal_executable_target_selection_policy_t policy,
-    iree_string_builder_t* builder, bool* out_selected,
+    iree_hal_executable_target_kind_flags_t kind_flags, bool* out_selected,
     loom_run_hal_device_target_t* out_target) {
   IREE_ASSERT_ARGUMENT(runtime);
-  IREE_ASSERT_ARGUMENT(builder);
   IREE_ASSERT_ARGUMENT(out_selected);
   IREE_ASSERT_ARGUMENT(out_target);
   *out_selected = false;
@@ -91,35 +67,31 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_try_select_device_target(
     return iree_ok_status();
   }
 
-  const iree_hal_executable_target_t* target = NULL;
   const iree_hal_executable_target_selection_t selection = {
-      .policy = policy,
       .family = IREE_SV("amdgpu"),
-      .architecture = IREE_SV("gfxip"),
-      .runtime_abi = IREE_SV("hsa"),
-      .loader_namespace = IREE_SV("amdgpu"),
-      .metadata_schema = IREE_SV("amdgpu.hsaco.metadata"),
+      .kind_flags = kind_flags,
   };
   const iree_hal_executable_target_selection_result_t result =
-      iree_hal_device_spec_select_executable_target(device_spec, &selection,
-                                                    &target);
-  switch (result) {
-    case IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_SELECTED:
-      return loom_amdgpu_hal_artifact_provider_try_select_processor(
-          loom_amdgpu_target_info_find_processor(target->processor), runtime,
-          builder, out_selected, out_target);
-    case IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_NO_MATCH:
-      return iree_ok_status();
-    case IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_AMBIGUOUS:
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU HAL device spec reports ambiguous executable targets");
-    default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "AMDGPU HAL device spec target selection "
-                              "returned invalid result %" PRIu32,
-                              result);
+      iree_hal_device_spec_select_executable_target(device_spec, &selection);
+  if (result.outcome == IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+    return iree_ok_status();
   }
+  if (result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU HAL device spec reports ambiguous executable targets");
+  }
+
+  iree_string_view_t processor_name = iree_string_view_empty();
+  iree_string_view_t feature_suffix = iree_string_view_empty();
+  if (iree_string_view_split(result.target->target_key, ':', &processor_name,
+                             &feature_suffix) == -1) {
+    processor_name = result.target->target_key;
+  }
+  return loom_amdgpu_hal_artifact_provider_try_select_processor(
+      loom_amdgpu_target_info_find_processor(processor_name), result.target,
+      out_selected, out_target);
 }
 
 static iree_status_t loom_amdgpu_hal_artifact_provider_select_device_target(
@@ -132,21 +104,17 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_select_device_target(
 
   *out_target = (loom_run_hal_device_target_t){0};
 
-  iree_string_builder_t target_id_builder;
-  iree_string_builder_initialize(allocator, &target_id_builder);
-
   iree_status_t status = iree_ok_status();
   bool selected = false;
   status = loom_amdgpu_hal_artifact_provider_try_select_device_target(
-      runtime, IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_EXACT_DEVICE,
-      &target_id_builder, &selected, out_target);
+      runtime, IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT, &selected,
+      out_target);
   if (iree_status_is_ok(status) && !selected) {
     status = loom_amdgpu_hal_artifact_provider_try_select_device_target(
-        runtime, IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_COMPATIBLE_GENERIC,
-        &target_id_builder, &selected, out_target);
+        runtime, IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC, &selected,
+        out_target);
   }
 
-  iree_string_builder_deinitialize(&target_id_builder);
   if (iree_status_is_ok(status) && out_target->data == NULL) {
     status = iree_make_status(
         IREE_STATUS_UNAVAILABLE,
@@ -170,10 +138,7 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_select_target_key(
   const loom_amdgpu_processor_info_t* processor = NULL;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_target_info_lookup_processor(target_key, &processor));
-  bool emit_supported = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_processor_supports_hsaco(
-      processor, &emit_supported));
-  if (!emit_supported) {
+  if (!loom_amdgpu_processor_supports_hsaco(processor)) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "AMDGPU processor '%.*s' cannot be emitted as "
                             "HSACO by Loom",
@@ -285,7 +250,8 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_emit_artifact(
         iree_make_const_byte_span(storage->kernel_library.hsaco_data,
                                   storage->kernel_library.hsaco_data_length);
     *out_artifact = (loom_run_hal_artifact_t){
-        .executable_format = storage->kernel_library.executable_format,
+        .hal_target = target->hal_target,
+        .target_key = storage->kernel_library.target_key,
         .target_bundle = target->target_bundle,
         .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
         .target_artifact_data = hsaco_data,

@@ -206,8 +206,8 @@ iree_status_t loom_low_lower_query_descriptor_matrix_contract(
     }
     case LOOM_TARGET_CONTRACT_DESCRIPTOR_MATRIX_SOURCE_NONE:
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unknown descriptor-matrix source");
+      IREE_ASSERT_UNREACHABLE("unknown descriptor-matrix source");
+      IREE_BUILTIN_UNREACHABLE();
   }
 
   return descriptor_matrix->query(descriptor_matrix->user_data, environment,
@@ -273,15 +273,9 @@ static iree_status_t loom_low_lower_query_target_contract_index(
       if (descriptor_ref != LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
         IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_descriptor_ref(
             match_context, rule_set, descriptor_ref, &selected_descriptor));
-        if (selected_descriptor == NULL) {
-          const iree_string_view_t key =
-              rule_set->descriptor_refs[descriptor_ref].key;
-          return iree_make_status(
-              IREE_STATUS_INTERNAL,
-              "generated target-low contract selected missing descriptor "
-              "'%.*s'",
-              (int)key.size, key.data);
-        }
+        IREE_ASSERT(
+            selected_descriptor != NULL,
+            "generated target-low contract selected a missing descriptor");
       }
       *out_result = (loom_target_contract_query_result_t){
           .outcome = LOOM_TARGET_CONTRACT_QUERY_LEGAL,
@@ -371,6 +365,7 @@ iree_status_t loom_low_lower_query_target_contract(
       .can_materialize = options->can_materialize,
       .descriptor_ref = options->descriptor_ref,
       .fact_table = environment->fact_table,
+      .view_regions = environment->view_regions,
       .symbolic_expr_context = expression_context_ptr,
       .flags = LOOM_LOW_LOWER_RULE_MATCH_FLAG_CONTRACT_ONLY,
   };

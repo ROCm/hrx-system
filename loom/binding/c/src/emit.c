@@ -11,8 +11,8 @@
 #include "diagnostic.h"
 #include "iree/base/internal/arena.h"
 #include "loom/error/error_defs.h"
-#include "loom/target/compile_report_format.h"
 #include "loom/target/provider.h"
+#include "loom/target/reporting/format.h"
 #include "loomc/compile_report.h"
 #include "loomc/iree.h"
 #include "module.h"
@@ -440,7 +440,8 @@ loomc_emit_compile_report_requested_detail_flags(
   return LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ROWS |
          LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS |
          LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS |
-         LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_LEGALIZATION_ROWS;
+         LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_LEGALIZATION_ROWS |
+         LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS;
 }
 
 static loomc_status_t loomc_emit_result_fail_format_message(
@@ -826,7 +827,8 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
         compile_report.artifact_kind =
             LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
         compile_report.backend_name = emitter->name;
-        compile_report.executable_format = emitter->public_artifact_format;
+        compile_report.artifact_format =
+            loom_target_artifact_format_name(emitter->target_artifact_format);
         compile_report.requested_detail_flags =
             loomc_emit_compile_report_requested_detail_flags(
                 resolved_options.compile_report_mode);

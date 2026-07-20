@@ -72,15 +72,14 @@ loom_amdgpu_hal_binding_resolve_low_op_descriptor(
                                                descriptor_ordinal);
 }
 
-static iree_status_t loom_amdgpu_hal_binding_cache_swizzle_kind(
-    const loom_low_descriptor_set_t* descriptor_set,
-    loom_amdgpu_buffer_resource_cache_swizzle_t* out_kind) {
-  *out_kind = LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE;
-  const loom_amdgpu_descriptor_set_info_t* descriptor_set_info = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_lookup_descriptor_set_by_ordinal(
-      descriptor_set->descriptor_set_ordinal, &descriptor_set_info));
-  *out_kind = descriptor_set_info->buffer_resource.cache_swizzle;
-  return iree_ok_status();
+static loom_amdgpu_buffer_resource_cache_swizzle_t
+loom_amdgpu_hal_binding_cache_swizzle_kind(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
+      loom_amdgpu_target_info_descriptor_set_at(
+          descriptor_set->descriptor_set_ordinal);
+  IREE_ASSERT(descriptor_set_info != NULL);
+  return descriptor_set_info->buffer_resource.cache_swizzle;
 }
 
 static iree_status_t loom_amdgpu_hal_binding_insert_kernarg_live_in(
@@ -127,8 +126,9 @@ static iree_status_t loom_amdgpu_hal_binding_get_kernarg_live_in(
       continue;
     }
     const loom_value_id_t live_in_value = loom_low_live_in_result(op);
-    if (loom_amdgpu_hal_kernel_abi_is_kernarg_segment_ptr_live_in(
-            rewriter->module, live_in_value)) {
+    if (loom_amdgpu_hal_kernel_abi_live_in_source_kind(rewriter->module,
+                                                       live_in_value) ==
+        LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_KERNARG_SEGMENT_PTR) {
       *out_value = live_in_value;
       return iree_ok_status();
     }
@@ -187,22 +187,12 @@ static iree_status_t loom_amdgpu_hal_binding_resolve_descriptor_ref(
   *out_opcode_id = LOOM_STRING_ID_INVALID;
   const loom_low_descriptor_t* descriptor =
       loom_amdgpu_descriptor_ref_descriptor(descriptor_set, descriptor_ref);
-  if (descriptor == NULL) {
-    return iree_make_status(
-        IREE_STATUS_NOT_FOUND,
-        "AMDGPU HAL binding materialization references missing descriptor ref "
-        "%" PRIu16,
-        descriptor_ref);
-  }
+  IREE_ASSERT(descriptor != NULL,
+              "generated AMDGPU HAL materialization descriptor refs exist");
   iree_string_view_t key = loom_low_descriptor_set_string(
       descriptor_set, descriptor->key_string_offset);
-  if (iree_string_view_is_empty(key)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU HAL binding materialization descriptor ref %" PRIu16
-        " has no descriptor key",
-        descriptor_ref);
-  }
+  IREE_ASSERT(!iree_string_view_is_empty(key),
+              "generated AMDGPU HAL materialization descriptors have keys");
   IREE_RETURN_IF_ERROR(
       loom_module_intern_string(rewriter->module, key, out_opcode_id));
   *out_descriptor = descriptor;
@@ -366,16 +356,13 @@ static iree_status_t loom_amdgpu_hal_binding_build_descriptor_pointer(
 
   loom_value_id_t descriptor_pointer_high = masked_pointer_high;
   if (has_cache_swizzle) {
-    loom_amdgpu_buffer_resource_cache_swizzle_t cache_swizzle_kind =
-        LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_cache_swizzle_kind(
-        descriptor_set, &cache_swizzle_kind));
+    const loom_amdgpu_buffer_resource_cache_swizzle_t cache_swizzle_kind =
+        loom_amdgpu_hal_binding_cache_swizzle_kind(descriptor_set);
     if (cache_swizzle_kind !=
         LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "AMDGPU HAL binding materialization reached an unverified cache "
-          "swizzle descriptor");
+      IREE_ASSERT_UNREACHABLE(
+          "verified AMDGPU HAL buffer descriptor cache swizzle");
+      IREE_BUILTIN_UNREACHABLE();
     }
 
     const uint32_t cache_swizzle_word =
@@ -553,6 +540,26 @@ static bool loom_amdgpu_hal_binding_direct_arg_is_used(
          loom_module_value_has_type_uses(module, direct_arg->arg_id);
 }
 
+static bool loom_amdgpu_hal_binding_layout_uses_kernarg_segment_ptr(
+    const loom_module_t* module,
+    const loom_amdgpu_hal_kernel_abi_layout_t* layout) {
+  for (iree_host_size_t i = 0; i < layout->resource_count; ++i) {
+    const loom_amdgpu_hal_kernarg_resource_t* resource = &layout->resources[i];
+    if (resource->resource_op != NULL &&
+        !iree_any_bit_set(resource->resource_op->flags, LOOM_OP_FLAG_DEAD) &&
+        loom_amdgpu_hal_binding_resource_is_used(module, resource)) {
+      return true;
+    }
+  }
+  for (iree_host_size_t i = 0; i < layout->direct_arg_count; ++i) {
+    if (loom_amdgpu_hal_binding_direct_arg_is_used(module,
+                                                   &layout->direct_args[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool loom_amdgpu_hal_binding_direct_arg_unit_count(
     const loom_amdgpu_hal_kernarg_direct_arg_t* direct_arg,
     loom_type_t sgpr_type, loom_type_t sgpr_x2_type, uint32_t* out_unit_count) {
@@ -683,10 +690,8 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_direct_arg_load(
         rewriter, descriptor_set, kernarg_ptr, direct_arg->kernarg_offset,
         sgpr_x2_type, location, &loaded));
   } else {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL binding materialization reached an unverified direct "
-        "argument layout");
+    IREE_ASSERT_UNREACHABLE("verified AMDGPU HAL ABI direct argument layout");
+    IREE_BUILTIN_UNREACHABLE();
   }
   return loom_amdgpu_hal_binding_materialize_direct_arg_value(
       rewriter, direct_arg, loaded);
@@ -714,10 +719,9 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_direct_args(
       continue;
     }
     if (kernarg_ptr == LOOM_VALUE_ID_INVALID) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "AMDGPU HAL binding materialization direct argument requires an "
-          "available kernarg segment pointer");
+      IREE_ASSERT_UNREACHABLE(
+          "verified AMDGPU HAL ABI direct argument kernarg dependency");
+      IREE_BUILTIN_UNREACHABLE();
     }
 
     uint32_t arg_unit_count = 0;
@@ -761,20 +765,19 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_direct_args(
     const loom_amdgpu_hal_kernarg_direct_arg_t* direct_arg =
         &layout->direct_args[i - 1];
     if (direct_arg->argument_index >= entry_block->arg_count) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "AMDGPU HAL binding materialization direct argument index was "
-          "invalidated before removal");
+      IREE_ASSERT_UNREACHABLE(
+          "AMDGPU HAL direct argument entry-block index is stable");
+      IREE_BUILTIN_UNREACHABLE();
     }
     if (loom_block_arg_id(entry_block, direct_arg->argument_index) !=
         direct_arg->arg_id) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "AMDGPU HAL binding materialization direct argument ordering changed "
-          "before removal");
+      IREE_ASSERT_UNREACHABLE(
+          "AMDGPU HAL direct argument entry-block order is stable");
+      IREE_BUILTIN_UNREACHABLE();
     }
     IREE_RETURN_IF_ERROR(loom_block_remove_arg(rewriter->module, entry_block,
                                                direct_arg->argument_index));
+    rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
   }
   return iree_ok_status();
 }
@@ -801,10 +804,9 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_resources(
       continue;
     }
     if (kernarg_ptr == LOOM_VALUE_ID_INVALID) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "AMDGPU HAL binding materialization resource requires an available "
-          "kernarg segment pointer");
+      IREE_ASSERT_UNREACHABLE(
+          "verified AMDGPU HAL ABI resource kernarg dependency");
+      IREE_BUILTIN_UNREACHABLE();
     }
 
     if (loom_amdgpu_hal_binding_can_group_resource_load(
@@ -904,11 +906,8 @@ loom_amdgpu_hal_binding_materialize_buffer_descriptors_with_types(
     loom_type_t sgpr_x2_type, iree_host_size_t* out_materialized_count) {
   *out_materialized_count = 0;
   loom_region_t* body = loom_low_function_body(function_op);
-  if (body == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL binding materialization reached a low function without a "
-        "body");
+  if (body == NULL || body->block_count == 0) {
+    return iree_ok_status();
   }
   iree_status_t status = iree_ok_status();
   const loom_low_descriptor_t* static_descriptor =
@@ -1006,10 +1005,16 @@ iree_status_t loom_amdgpu_hal_binding_materialize(
         "AMDGPU HAL binding materialization requires low.func.def or "
         "low.kernel.def");
   }
+  loom_region_t* body = loom_low_function_body(function_op);
+  if (body == NULL || body->block_count == 0) {
+    return iree_ok_status();
+  }
 
   loom_amdgpu_hal_kernel_abi_layout_t layout = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_layout_from_low(
       module, function_op, &layout, scratch_arena));
+  layout.uses_kernarg_segment_ptr =
+      loom_amdgpu_hal_binding_layout_uses_kernarg_segment_ptr(module, &layout);
   out_result->abi_layout = layout;
 
   loom_type_t sgpr_type = loom_type_none();
@@ -1043,14 +1048,6 @@ iree_status_t loom_amdgpu_hal_binding_materialize(
   loom_value_id_t kernarg_ptr = LOOM_VALUE_ID_INVALID;
   bool inserted_live_in = false;
 
-  loom_region_t* body = loom_low_function_body(function_op);
-  if (body == NULL) {
-    loom_rewriter_deinitialize(&rewriter);
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL binding materialization reached a low function without a "
-        "body");
-  }
   if (iree_status_is_ok(status) && layout.uses_kernarg_segment_ptr) {
     status = loom_amdgpu_hal_binding_get_kernarg_live_in(
         &rewriter, function_op, sgpr_x2_type, &kernarg_ptr, &inserted_live_in);
@@ -1075,6 +1072,9 @@ iree_status_t loom_amdgpu_hal_binding_materialize(
         sgpr_x2_type, &out_result->materialized_descriptor_count);
   }
 
+  out_result->changed =
+      rewriter.created_op_count != 0 || rewriter.erased_op_count != 0 ||
+      iree_any_bit_set(rewriter.flags, LOOM_REWRITER_FLAG_CHANGED);
   out_result->inserted_kernarg_segment_ptr_live_in = inserted_live_in;
   loom_rewriter_deinitialize(&rewriter);
   return status;

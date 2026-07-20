@@ -25,7 +25,6 @@
 #include "iree/hal/driver_registry.h"   // IWYU pragma: export
 #include "iree/hal/event.h"             // IWYU pragma: export
 #include "iree/hal/executable.h"        // IWYU pragma: export
-#include "iree/hal/executable_cache.h"  // IWYU pragma: export
 #include "iree/hal/fence.h"             // IWYU pragma: export
 #include "iree/hal/file.h"              // IWYU pragma: export
 #include "iree/hal/pool.h"              // IWYU pragma: export

@@ -32,23 +32,22 @@ iree_status_t iree_hal_executable_library_validate_query_result(
 }
 
 iree_status_t iree_hal_executable_library_verify(
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     const iree_hal_executable_library_v0_t* library) {
   // Tooling and testing may disable verification to make it easier to define
   // libraries. The compiler should never produce anything that fails
   // verification, though, and should always have it enabled.
-  const bool disable_verification =
-      iree_all_bits_set(executable_params->caching_mode,
-                        IREE_HAL_EXECUTABLE_CACHING_MODE_DISABLE_VERIFICATION);
+  const bool disable_verification = iree_all_bits_set(
+      load_params->flags, IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION);
   if (disable_verification) return iree_ok_status();
 
   // Check to make sure that the constant table has values for all constants.
-  if (library->constants.count != executable_params->constant_count) {
+  if (library->constants.count != load_params->constant_count) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "executable requires %u constants but caller "
                             "provided %" PRIhsz "; must match",
                             library->constants.count,
-                            executable_params->constant_count);
+                            load_params->constant_count);
   }
 
   // Validate that dispatch attributes are present.
@@ -244,6 +243,7 @@ iree_status_t iree_hal_executable_library_export_parameters(
   for (iree_host_size_t i = 0; i < count; ++i) {
     const iree_hal_executable_dispatch_parameter_v0_t* src = &export_params[i];
     iree_hal_executable_function_parameter_t* dst = &out_parameters[i];
+    memset(dst, 0, sizeof(*dst));
     switch (src->type) {
       case IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_CONSTANT:
         dst->type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT;

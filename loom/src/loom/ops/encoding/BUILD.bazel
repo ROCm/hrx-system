@@ -48,6 +48,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:numeric_format",
         "//loom/src/loom/util:stable_id",
         "//runtime/src/iree/base",
     ],

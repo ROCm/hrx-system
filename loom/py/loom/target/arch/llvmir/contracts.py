@@ -392,13 +392,13 @@ def _const_i64_rule(source_op: Op, result_type: TypePattern) -> DescriptorRule:
 
 def _const_float_bits_project(element: str) -> ValueProject:
     if element == "f16":
-        return ValueProject.f64_as_f16_bits("result")
+        return ValueProject.float_as_f16_bits("result")
     if element == "bf16":
-        return ValueProject.f64_as_bf16_bits("result")
+        return ValueProject.float_as_bf16_bits("result")
     if element == "f32":
-        return ValueProject.f64_as_f32_bits("result")
+        return ValueProject.float_as_f32_bits("result")
     if element == "f64":
-        return ValueProject.f64_as_f64_bits("result")
+        return ValueProject.float_as_f64_bits("result")
     raise ValueError(f"unsupported LLVMIR float constant type '{element}'")
 
 
@@ -413,7 +413,7 @@ def _const_float_rule(
         guards=(
             Guard.attr_kind("value", "f64", diagnostic=_F64_ATTR_DIAGNOSTIC),
             Guard.value_type("result", result_type),
-            Guard.value_exact_f64("result"),
+            Guard.value_exact_float("result"),
         ),
         emit=(
             EmitDescriptorOp(
@@ -465,7 +465,7 @@ def _vector_const_float_rule(element: str, lane_count: int) -> DescriptorRule:
         guards=(
             Guard.attr_kind("value", "f64", diagnostic=_F64_ATTR_DIAGNOSTIC),
             Guard.value_type("result", result_type),
-            Guard.value_exact_f64("result"),
+            Guard.value_exact_float("result"),
         ),
         emit=(
             EmitDescriptorOp(

@@ -16,23 +16,6 @@ typedef struct loom_native_section_accumulator_t {
   uint64_t next_offset;
 } loom_native_section_accumulator_t;
 
-static bool loom_native_contribution_checked_add_uint64(uint64_t lhs,
-                                                        uint64_t rhs,
-                                                        uint64_t* out_result) {
-  *out_result = lhs + rhs;
-  return *out_result >= lhs;
-}
-
-static bool loom_native_contribution_checked_align_uint64(
-    uint64_t value, uint64_t alignment, uint64_t* out_result) {
-  if (!loom_native_contribution_checked_add_uint64(value, alignment - 1u,
-                                                   out_result)) {
-    return false;
-  }
-  *out_result &= ~(alignment - 1u);
-  return true;
-}
-
 static uint64_t loom_native_contribution_normalize_alignment(
     uint64_t alignment) {
   return alignment == 0 ? 1u : alignment;
@@ -166,15 +149,15 @@ static iree_status_t loom_native_contribution_plan_layout(
     }
 
     uint64_t section_offset = 0;
-    if (!loom_native_contribution_checked_align_uint64(
-            accumulator->next_offset, alignment, &section_offset)) {
+    if (!iree_checked_align_u64(accumulator->next_offset, alignment,
+                                &section_offset)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "native contribution section layout overflow");
     }
     uint64_t next_offset = 0;
-    if (!loom_native_contribution_checked_add_uint64(
-            section_offset, (uint64_t)contribution->contents.data_length,
-            &next_offset)) {
+    if (!iree_checked_add_u64(section_offset,
+                              (uint64_t)contribution->contents.data_length,
+                              &next_offset)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "native contribution section layout overflow");
     }

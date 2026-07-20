@@ -35,8 +35,8 @@
               "contains": [
                 "\"artifact_kind\":\"target-artifact\"",
                 "\"backend\":\"llvmir-text\"",
-                "\"executable_format\":\"llvmir-text\"",
-                "\"status_code\":0"
+                "\"artifact_format\":\"llvmir_text\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           ]

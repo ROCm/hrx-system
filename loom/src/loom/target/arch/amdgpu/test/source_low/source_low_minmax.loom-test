@@ -210,13 +210,11 @@ low.func.def target(@target) abi(hal_kernel) @scf_select_q6_nibble_i8(%code: reg
   %low_i32 = s_and_b32 %code, %mask
   %high_i32 = s_and_b32 %high_shifted, %mask
   %21 = v_mov_b32_copy %low_i32
-  %22 = v_lshlrev_b32_src0_inline %21, 24
-  %low = v_ashrrev_i32_src0_inline %22, 24
-  %24 = v_mov_b32_copy %high_i32
-  %25 = v_lshlrev_b32_src0_inline %24, 24
-  %high = v_ashrrev_i32_src0_inline %25, 24
-  %27 = v_mov_b32_copy %use_high
-  %cond = v_cmp_ne_i32_src1_inline %27 {rhs = 0}
+  %low = v_bfe_i32_offset_width_inline %21 {offset = 0, width = 8}
+  %23 = v_mov_b32_copy %high_i32
+  %high = v_bfe_i32_offset_width_inline %23 {offset = 0, width = 8}
+  %25 = v_mov_b32_copy %use_high
+  %cond = v_cmp_ne_i32_src1_inline %25 {rhs = 0}
   %selected = v_cndmask_b32 %low, %high, %cond
   return %selected
 }
@@ -239,14 +237,12 @@ func.def target(@target) @scf_select_scale_piece_i16(%packed: i32, %use_high: i3
 low.func.def target(@target) abi(hal_kernel) @scf_select_scale_piece_i16(%packed: reg<amdgpu.sgpr>, %use_high: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
   %sixteen = s_mov_b32 16
   %14 = v_mov_b32_copy %packed
-  %15 = v_lshlrev_b32_src0_inline %14, 16
-  %low = v_ashrrev_i32_src0_inline %15, 16
+  %low = v_bfe_i32_offset_width_inline %14 {offset = 0, width = 16}
   %high_shifted = s_lshr_b32 %packed, %sixteen
-  %18 = v_mov_b32_copy %high_shifted
-  %19 = v_lshlrev_b32_src0_inline %18, 16
-  %high = v_ashrrev_i32_src0_inline %19, 16
-  %21 = v_mov_b32_copy %use_high
-  %cond = v_cmp_ne_i32_src1_inline %21 {rhs = 0}
+  %17 = v_mov_b32_copy %high_shifted
+  %high = v_bfe_i32_offset_width_inline %17 {offset = 0, width = 16}
+  %19 = v_mov_b32_copy %use_high
+  %cond = v_cmp_ne_i32_src1_inline %19 {rhs = 0}
   %selected = v_cndmask_b32 %low, %high, %cond
   return %selected
 }
@@ -438,6 +434,27 @@ low.func.def target(@target) abi(hal_kernel) @scf_select_i1_false_condition(%val
   %inside_upper = v_cmp_lt_i32 %lane, %20
   %selected_condition = s_and_b64 %lane_condition, %inside_upper
   %result = v_cndmask_b32 %false_value, %true_value, %selected_condition
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @scf_select_i1_assume_second_condition(%values: vector<2xi32>, %limit: i32, %upper: i32, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %scalar_condition = scalar.cmpi slt, %limit, %upper : i32
+  %checked_lane_condition, %checked_scalar_condition = scalar.assume %lane_condition, %scalar_condition [] : i1, i1
+  %result = scf.select %checked_scalar_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scf_select_i1_assume_second_condition(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %21 = v_mov_b32_copy %limit
+  %22 = v_mov_b32_copy %upper
+  %checked_scalar_condition = v_cmp_lt_i32 %21, %22
+  %result = v_cndmask_b32 %false_value, %true_value, %checked_scalar_condition
   return %result
 }
 
@@ -688,7 +705,7 @@ kernel.def target(@target) @index_minmax_vgpr_select() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @index_minmax_vgpr_select() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @index_minmax_vgpr_select() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %15 = v_mov_b32 31

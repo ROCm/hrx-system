@@ -16,6 +16,7 @@
 #include "loom/ops/test/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/pass/value_facts.h"
+#include "loom/target/types.h"
 
 namespace loom {
 namespace {
@@ -607,6 +608,69 @@ TEST_F(CanonicalizeTest, DriverAcceptsSeedFacts) {
   iree_arena_deinitialize(&seed_arena);
 }
 
+TEST_F(CanonicalizeTest, DriverPreservesSeedTargetContextAcrossSideRegions) {
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+
+  loom_builder_t module_builder;
+  loom_builder_initialize(module_, &module_->arena, loom_module_block(module_),
+                          &module_builder);
+  loom_symbol_ref_t callee = {};
+  IREE_ASSERT_OK(add_symbol(IREE_SV("target_scoped"), &callee));
+  loom_op_t* split_op = NULL;
+  IREE_ASSERT_OK(loom_test_split_func_build(&module_builder, 0, 0, 0, callee,
+                                            &i32, 1, LOOM_LOCATION_UNKNOWN,
+                                            &split_op));
+  loom_func_like_t split_func = loom_func_like_cast(module_, split_op);
+
+  loom_target_snapshot_t snapshot = {};
+  snapshot.name = IREE_SVL("target-context-test");
+  loom_target_export_plan_t export_plan = {};
+  export_plan.name = IREE_SVL("target-context-test");
+  loom_target_config_t config = {};
+  config.name = IREE_SVL("target-context-test");
+  loom_target_bundle_t bundle = {
+      /*.name=*/IREE_SVL("target-context-test"),
+      /*.snapshot=*/&snapshot,
+      /*.export_plan=*/&export_plan,
+      /*.config=*/&config,
+  };
+  int target_data = 0;
+
+  iree_arena_allocator_t seed_arena;
+  iree_arena_initialize(&block_pool_, &seed_arena);
+  loom_value_fact_table_t seed_facts;
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(
+      &seed_facts, &seed_arena, loom_value_table_capacity(&module_->values)));
+  seed_facts.context.target_bundle = &bundle;
+  seed_facts.context.target_data = &target_data;
+
+  iree_arena_allocator_t pass_arena;
+  iree_arena_initialize(&block_pool_, &pass_arena);
+  loom_pass_value_fact_owner_t value_facts = {};
+  loom_pass_value_fact_owner_initialize(&block_pool_, &value_facts);
+  loom_canonicalizer_t canonicalizer;
+  IREE_ASSERT_OK(loom_canonicalizer_initialize(module_, &pass_arena,
+                                               &value_facts, &canonicalizer));
+  loom_canonicalizer_result_t result;
+  loom_canonicalizer_options_t options = {
+      /*.max_iterations=*/{},
+      /*.seed_facts=*/&seed_facts,
+  };
+  IREE_ASSERT_OK(loom_canonicalizer_run_function(&canonicalizer, split_func,
+                                                 &options, &result));
+
+  const loom_value_fact_table_t* final_facts =
+      loom_canonicalizer_fact_table(&canonicalizer);
+  ASSERT_NE(final_facts, nullptr);
+  EXPECT_EQ(final_facts->context.target_bundle, &bundle);
+  EXPECT_EQ(final_facts->context.target_data, &target_data);
+
+  loom_canonicalizer_deinitialize(&canonicalizer);
+  loom_pass_value_fact_owner_deinitialize(&value_facts);
+  iree_arena_deinitialize(&pass_arena);
+  iree_arena_deinitialize(&seed_arena);
+}
+
 TEST_F(CanonicalizeTest, RegionDriverAcceptsSeedFacts) {
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
 
@@ -639,8 +703,8 @@ TEST_F(CanonicalizeTest, RegionDriverAcceptsSeedFacts) {
   iree_arena_allocator_t seed_arena;
   iree_arena_initialize(&block_pool_, &seed_arena);
   loom_value_fact_table_t seed_facts;
-  IREE_ASSERT_OK(loom_value_fact_table_initialize(&seed_facts, &seed_arena,
-                                                  module_->values.capacity));
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(
+      &seed_facts, &seed_arena, loom_value_table_capacity(&module_->values)));
   IREE_ASSERT_OK(loom_value_fact_table_define(&seed_facts, config_arg,
                                               loom_value_facts_exact_i64(5)));
 

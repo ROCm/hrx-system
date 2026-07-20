@@ -171,53 +171,48 @@ static iree_status_t loom_intern_table_find_or_insert(
 // Growable table helpers
 //===----------------------------------------------------------------------===//
 
-static iree_status_t loom_value_table_ensure_capacity(
-    iree_arena_allocator_t* arena, loom_value_table_t* table) {
-  if (table->count < table->capacity) return iree_ok_status();
-  iree_host_size_t new_capacity =
-      table->capacity > 0 ? table->capacity * 2 : 2048;
-  loom_value_t* new_entries = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array_aligned(
-      arena, new_capacity, sizeof(loom_value_t), 64, (void**)&new_entries));
-  memset(new_entries, 0, new_capacity * sizeof(loom_value_t));
-  if (table->count > 0) {
-    memcpy(new_entries, table->entries, table->count * sizeof(loom_value_t));
-  }
-  table->entries = new_entries;
-  table->capacity = new_capacity;
-  return iree_ok_status();
-}
-
-static void loom_value_u32_scratch_initialize_ordinal_range(
-    uint32_t* values_by_value_id, iree_host_size_t count) {
+static void loom_type_use_heads_initialize(loom_value_type_use_heads_t* heads,
+                                           iree_host_size_t count) {
   for (iree_host_size_t i = 0; i < count; ++i) {
-    values_by_value_id[i] = LOOM_VALUE_ORDINAL_INVALID;
+    heads[i].first_incoming_use_id = LOOM_TYPE_USE_ID_INVALID;
+    heads[i].first_outgoing_use_id = LOOM_TYPE_USE_ID_INVALID;
   }
 }
 
-static iree_status_t loom_value_u32_scratch_ensure_capacity(
-    iree_arena_allocator_t* arena, loom_value_u32_scratch_t* scratch,
-    iree_host_size_t minimum_capacity) {
-  if (scratch->capacity >= minimum_capacity) return iree_ok_status();
-  iree_host_size_t old_capacity = scratch->capacity;
-  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-      arena, old_capacity, minimum_capacity,
-      sizeof(*scratch->values_by_value_id), &scratch->capacity,
-      (void**)&scratch->values_by_value_id));
-  if (scratch->state == LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED ||
-      scratch->state == LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ZEROED) {
-    memset(scratch->values_by_value_id + old_capacity, 0,
-           (scratch->capacity - old_capacity) *
-               sizeof(scratch->values_by_value_id[0]));
-  } else {
-    loom_value_u32_scratch_initialize_ordinal_range(
-        scratch->values_by_value_id + old_capacity,
-        scratch->capacity - old_capacity);
+static void loom_value_segment_initialize(loom_value_segment_t* segment) {
+  memset(segment, 0, sizeof(*segment));
+  memset(segment->u32_scratch, 0xFF, sizeof(segment->u32_scratch));
+  loom_type_use_heads_initialize(segment->type_use_heads,
+                                 LOOM_VALUE_SEGMENT_CAPACITY);
+}
+
+static iree_status_t loom_value_table_ensure_capacity(loom_module_t* module) {
+  loom_value_table_t* table = &module->values;
+  if (table->count < loom_value_table_capacity(table)) {
+    return iree_ok_status();
   }
-  if (scratch->state == LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_UNKNOWN) {
-    scratch->state = LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ORDINALS;
-  }
+  loom_value_segment_t* segment = NULL;
+  IREE_RETURN_IF_ERROR(loom_segmented_storage_append(
+      &table->segments, &module->arena, (void**)&segment));
+  loom_value_segment_initialize(segment);
   return iree_ok_status();
+}
+
+static void loom_value_u32_scratch_fill(loom_value_u32_scratch_t* scratch,
+                                        iree_host_size_t value_count,
+                                        int byte_value) {
+  IREE_ASSERT(value_count <= scratch->value_table->count);
+  iree_host_size_t remaining_count = value_count;
+  for (uint32_t segment_index = 0; remaining_count > 0; ++segment_index) {
+    loom_value_segment_t* segment =
+        (loom_value_segment_t*)loom_segmented_storage_segment(
+            &scratch->value_table->segments, segment_index);
+    const iree_host_size_t segment_value_count = iree_min(
+        remaining_count, (iree_host_size_t)LOOM_VALUE_SEGMENT_CAPACITY);
+    memset(segment->u32_scratch, byte_value,
+           segment_value_count * sizeof(segment->u32_scratch[0]));
+    remaining_count -= segment_value_count;
+  }
 }
 
 static iree_status_t loom_string_table_ensure_capacity(
@@ -302,28 +297,6 @@ static iree_status_t loom_comment_table_ensure_capacity(
   return iree_ok_status();
 }
 
-static void loom_type_use_heads_initialize(loom_value_type_use_heads_t* heads,
-                                           iree_host_size_t count) {
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    heads[i].first_incoming_use_id = LOOM_TYPE_USE_ID_INVALID;
-    heads[i].first_outgoing_use_id = LOOM_TYPE_USE_ID_INVALID;
-  }
-}
-
-static iree_status_t loom_type_use_table_ensure_value_capacity(
-    iree_arena_allocator_t* arena, loom_type_use_table_t* table,
-    iree_host_size_t minimum_capacity) {
-  if (table->value_capacity >= minimum_capacity) return iree_ok_status();
-  iree_host_size_t old_capacity = table->value_capacity;
-  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-      arena, old_capacity, minimum_capacity,
-      sizeof(loom_value_type_use_heads_t), &table->value_capacity,
-      (void**)&table->value_heads));
-  loom_type_use_heads_initialize(table->value_heads + old_capacity,
-                                 table->value_capacity - old_capacity);
-  return iree_ok_status();
-}
-
 static iree_status_t loom_type_use_table_ensure_record_capacity(
     iree_arena_allocator_t* arena, loom_type_use_table_t* table,
     iree_host_size_t additional_record_count) {
@@ -344,8 +317,22 @@ static iree_status_t loom_type_use_table_ensure_record_capacity(
   return iree_ok_status();
 }
 
+static void loom_value_table_reset_type_use_heads(loom_value_table_t* table) {
+  iree_host_size_t remaining_count = table->count;
+  for (uint32_t segment_index = 0; remaining_count > 0; ++segment_index) {
+    loom_value_segment_t* segment =
+        (loom_value_segment_t*)loom_segmented_storage_segment(&table->segments,
+                                                              segment_index);
+    const iree_host_size_t segment_value_count = iree_min(
+        remaining_count, (iree_host_size_t)LOOM_VALUE_SEGMENT_CAPACITY);
+    loom_type_use_heads_initialize(segment->type_use_heads,
+                                   segment_value_count);
+    remaining_count -= segment_value_count;
+  }
+}
+
 static void loom_type_use_table_reset(loom_type_use_table_t* table) {
-  loom_type_use_heads_initialize(table->value_heads, table->value_capacity);
+  loom_value_table_reset_type_use_heads(table->value_table);
   table->record_count = 0;
   table->active_count = 0;
   table->free_count = 0;
@@ -501,40 +488,31 @@ static iree_status_t loom_module_initialize_tables(
     loom_module_t* module, const loom_module_size_hints_t* hints) {
   iree_arena_allocator_t* arena = &module->arena;
 
-  iree_host_size_t value_capacity = 2048;
   iree_host_size_t string_capacity = 512;
   iree_host_size_t type_capacity = 64;
   iree_host_size_t symbol_capacity = 32;
 
   if (hints) {
-    value_capacity =
-        (iree_host_size_t)(hints->value_count * LOOM_MODULE_GROWTH_FACTOR);
     string_capacity =
         (iree_host_size_t)(hints->string_count * LOOM_MODULE_GROWTH_FACTOR);
     type_capacity =
         (iree_host_size_t)(hints->type_count * LOOM_MODULE_GROWTH_FACTOR);
     symbol_capacity =
         (iree_host_size_t)(hints->symbol_count * LOOM_MODULE_GROWTH_FACTOR);
-    if (value_capacity < 16) value_capacity = 16;
     if (string_capacity < 8) string_capacity = 8;
     if (type_capacity < 8) type_capacity = 8;
     if (symbol_capacity < 4) symbol_capacity = 4;
   }
 
-  // Values: 64-byte aligned.
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array_aligned(
-      arena, value_capacity, sizeof(loom_value_t), 64,
-      (void**)&module->values.entries));
-  module->values.capacity = value_capacity;
-  memset(module->values.entries, 0, value_capacity * sizeof(loom_value_t));
-
-  // Value scratch: dense compiler scratch indexed by value ID.
-  IREE_RETURN_IF_ERROR(loom_value_u32_scratch_ensure_capacity(
-      arena, &module->scratch.values, value_capacity));
-
-  // Type-use heads: dense side metadata indexed by value ID.
-  IREE_RETURN_IF_ERROR(loom_type_use_table_ensure_value_capacity(
-      arena, &module->type_uses, value_capacity));
+  // Value segments are allocated lazily as values are defined. The matching
+  // scratch and type-use head tables share each segment.
+  loom_segmented_storage_initialize(sizeof(loom_value_segment_t),
+                                    iree_alignof(loom_value_segment_t),
+                                    &module->values.segments);
+  module->scratch.values.value_table = &module->values;
+  module->scratch.values.state =
+      LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ORDINALS;
+  module->type_uses.value_table = &module->values;
   module->type_uses.first_free_use_id = LOOM_TYPE_USE_ID_INVALID;
 
   // Strings.
@@ -621,8 +599,7 @@ void loom_module_value_ordinal_scratch_acquire(loom_module_t* module) {
   IREE_ASSERT(scratch->state != LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS);
   IREE_ASSERT(scratch->state != LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED);
   if (scratch->state != LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ORDINALS) {
-    loom_value_u32_scratch_initialize_ordinal_range(scratch->values_by_value_id,
-                                                    module->values.count);
+    loom_value_u32_scratch_fill(scratch, module->values.count, 0xFF);
   }
   scratch->state = LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS;
 }
@@ -637,13 +614,10 @@ void loom_module_value_ordinal_scratch_release(loom_module_t* module) {
 void loom_value_u32_scratch_acquire_zeroed(loom_value_u32_scratch_t* scratch,
                                            iree_host_size_t value_count) {
   IREE_ASSERT(scratch != NULL);
-  IREE_ASSERT(value_count <= scratch->capacity);
+  IREE_ASSERT(value_count <= scratch->value_table->count);
   IREE_ASSERT(scratch->state != LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS);
   IREE_ASSERT(scratch->state != LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED);
-  if (value_count != 0) {
-    memset(scratch->values_by_value_id, 0,
-           value_count * sizeof(scratch->values_by_value_id[0]));
-  }
+  loom_value_u32_scratch_fill(scratch, value_count, 0);
   scratch->state = LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED;
 }
 
@@ -1438,19 +1412,26 @@ static loom_type_use_id_t loom_type_use_table_allocate_record(
   return use_id;
 }
 
+static loom_value_type_use_heads_t* loom_type_use_table_value_heads(
+    loom_type_use_table_t* table, loom_value_id_t value_id) {
+  return loom_value_table_type_use_heads(table->value_table, value_id);
+}
+
 static void loom_type_use_table_link_record(loom_type_use_table_t* table,
                                             loom_type_use_id_t use_id,
                                             loom_value_id_t referenced_value_id,
                                             loom_value_id_t user_value_id) {
   loom_type_use_t* record = &table->records[use_id];
+  loom_value_type_use_heads_t* referenced_heads =
+      loom_type_use_table_value_heads(table, referenced_value_id);
+  loom_value_type_use_heads_t* user_heads =
+      loom_type_use_table_value_heads(table, user_value_id);
   *record = (loom_type_use_t){
       .referenced_value_id = referenced_value_id,
       .user_value_id = user_value_id,
-      .next_incoming_use_id =
-          table->value_heads[referenced_value_id].first_incoming_use_id,
+      .next_incoming_use_id = referenced_heads->first_incoming_use_id,
       .previous_incoming_use_id = LOOM_TYPE_USE_ID_INVALID,
-      .next_outgoing_use_id =
-          table->value_heads[user_value_id].first_outgoing_use_id,
+      .next_outgoing_use_id = user_heads->first_outgoing_use_id,
       .previous_outgoing_use_id = LOOM_TYPE_USE_ID_INVALID,
   };
   if (record->next_incoming_use_id != LOOM_TYPE_USE_ID_INVALID) {
@@ -1461,8 +1442,8 @@ static void loom_type_use_table_link_record(loom_type_use_table_t* table,
     table->records[record->next_outgoing_use_id].previous_outgoing_use_id =
         use_id;
   }
-  table->value_heads[referenced_value_id].first_incoming_use_id = use_id;
-  table->value_heads[user_value_id].first_outgoing_use_id = use_id;
+  referenced_heads->first_incoming_use_id = use_id;
+  user_heads->first_outgoing_use_id = use_id;
 }
 
 static void loom_type_use_table_unlink_record(loom_type_use_table_t* table,
@@ -1472,8 +1453,8 @@ static void loom_type_use_table_unlink_record(loom_type_use_table_t* table,
     table->records[record->previous_incoming_use_id].next_incoming_use_id =
         record->next_incoming_use_id;
   } else {
-    table->value_heads[record->referenced_value_id].first_incoming_use_id =
-        record->next_incoming_use_id;
+    loom_type_use_table_value_heads(table, record->referenced_value_id)
+        ->first_incoming_use_id = record->next_incoming_use_id;
   }
   if (record->next_incoming_use_id != LOOM_TYPE_USE_ID_INVALID) {
     table->records[record->next_incoming_use_id].previous_incoming_use_id =
@@ -1483,8 +1464,8 @@ static void loom_type_use_table_unlink_record(loom_type_use_table_t* table,
     table->records[record->previous_outgoing_use_id].next_outgoing_use_id =
         record->next_outgoing_use_id;
   } else {
-    table->value_heads[record->user_value_id].first_outgoing_use_id =
-        record->next_outgoing_use_id;
+    loom_type_use_table_value_heads(table, record->user_value_id)
+        ->first_outgoing_use_id = record->next_outgoing_use_id;
   }
   if (record->next_outgoing_use_id != LOOM_TYPE_USE_ID_INVALID) {
     table->records[record->next_outgoing_use_id].previous_outgoing_use_id =
@@ -1510,9 +1491,10 @@ static void loom_type_use_table_release_record(loom_type_use_table_t* table,
 
 static void loom_type_use_table_remove_outgoing_for_value(
     loom_type_use_table_t* table, loom_value_id_t user_value_id) {
-  if (user_value_id >= table->value_capacity) return;
+  if (user_value_id >= table->value_table->count) return;
   loom_type_use_id_t use_id =
-      table->value_heads[user_value_id].first_outgoing_use_id;
+      loom_type_use_table_value_heads(table, user_value_id)
+          ->first_outgoing_use_id;
   while (use_id != LOOM_TYPE_USE_ID_INVALID) {
     loom_type_use_id_t next_use_id =
         table->records[use_id].next_outgoing_use_id;
@@ -1569,12 +1551,7 @@ iree_status_t loom_module_define_value(loom_module_t* module, loom_type_t type,
                             (unsigned)(LOOM_VALUE_ID_INVALID - 1));
   }
 
-  IREE_RETURN_IF_ERROR(
-      loom_value_table_ensure_capacity(&module->arena, &module->values));
-  IREE_RETURN_IF_ERROR(loom_value_u32_scratch_ensure_capacity(
-      &module->arena, &module->scratch.values, module->values.capacity));
-  IREE_RETURN_IF_ERROR(loom_type_use_table_ensure_value_capacity(
-      &module->arena, &module->type_uses, module->values.capacity));
+  IREE_RETURN_IF_ERROR(loom_value_table_ensure_capacity(module));
   loom_type_t canonical_type = {0};
   IREE_RETURN_IF_ERROR(
       loom_module_canonicalize_value_type(module, type, &canonical_type));
@@ -1583,11 +1560,16 @@ iree_status_t loom_module_define_value(loom_module_t* module, loom_type_t type,
       loom_type_use_prepare_for_type(module, canonical_type, &reference_count));
 
   loom_value_id_t id = (loom_value_id_t)module->values.count;
-  loom_value_t* value = &module->values.entries[id];
+  ++module->values.count;
+  loom_value_t* value = loom_module_value(module, id);
   value->type = canonical_type;
   value->name_id = LOOM_STRING_ID_INVALID;
   value->def = loom_value_def_make_none();
-  module->values.count++;
+  loom_value_u32_scratch_t* scratch = &module->scratch.values;
+  if (scratch->state == LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED ||
+      scratch->state == LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ZEROED) {
+    loom_value_u32_scratch_store(scratch, id, 0);
+  }
 
   if (reference_count > 0) {
     IREE_RETURN_IF_ERROR(
@@ -1607,7 +1589,7 @@ iree_status_t loom_module_set_value_type(loom_module_t* module,
                             " values)",
                             (unsigned)value_id, module->values.count);
   }
-  loom_value_t* value = &module->values.entries[value_id];
+  loom_value_t* value = loom_module_value(module, value_id);
   loom_type_t canonical_type = {0};
   IREE_RETURN_IF_ERROR(
       loom_module_canonicalize_value_type(module, type, &canonical_type));
@@ -1635,7 +1617,7 @@ iree_status_t loom_module_set_value_name(loom_module_t* module,
                             "%" PRIhsz " strings)",
                             (unsigned)name_id, module->strings.count);
   }
-  module->values.entries[value_id].name_id = name_id;
+  loom_module_value(module, value_id)->name_id = name_id;
   return iree_ok_status();
 }
 
@@ -1757,7 +1739,7 @@ iree_status_t loom_module_refresh_value_type_uses(loom_module_t* module,
                             (unsigned)value_id, module->values.count);
   }
   iree_host_size_t reference_count = 0;
-  loom_type_t type = module->values.entries[value_id].type;
+  loom_type_t type = loom_module_value_type(module, value_id);
   IREE_RETURN_IF_ERROR(
       loom_type_use_prepare_for_type(module, type, &reference_count));
   loom_type_use_table_remove_outgoing_for_value(&module->type_uses, value_id);
@@ -1776,12 +1758,13 @@ iree_status_t loom_module_recompute_type_uses(loom_module_t* module) {
   // intact. This is a bulk recovery path after structural reconstruction, not
   // the per-edit hot path.
   for (iree_host_size_t i = 0; i < module->values.count; ++i) {
-    if (!loom_module_value_tracks_type_uses(&module->values.entries[i])) {
+    const loom_value_t* value = loom_module_value(module, (loom_value_id_t)i);
+    if (!loom_module_value_tracks_type_uses(value)) {
       continue;
     }
     iree_host_size_t value_reference_count = 0;
     IREE_RETURN_IF_ERROR(loom_type_use_prepare_for_type(
-        module, module->values.entries[i].type, &value_reference_count));
+        module, value->type, &value_reference_count));
     reference_count += value_reference_count;
   }
   IREE_RETURN_IF_ERROR(loom_type_use_table_ensure_record_capacity(
@@ -1789,21 +1772,20 @@ iree_status_t loom_module_recompute_type_uses(loom_module_t* module) {
 
   loom_type_use_table_reset(&module->type_uses);
   for (iree_host_size_t i = 0; i < module->values.count; ++i) {
-    if (!loom_module_value_tracks_type_uses(&module->values.entries[i])) {
+    const loom_value_t* value = loom_module_value(module, (loom_value_id_t)i);
+    if (!loom_module_value_tracks_type_uses(value)) {
       continue;
     }
     IREE_RETURN_IF_ERROR(loom_type_use_table_add_outgoing_for_value(
-        module, (loom_value_id_t)i, module->values.entries[i].type));
+        module, (loom_value_id_t)i, value->type));
   }
   return iree_ok_status();
 }
 
 bool loom_module_value_has_type_uses(const loom_module_t* module,
                                      loom_value_id_t value_id) {
-  return value_id < module->values.count &&
-         value_id < module->type_uses.value_capacity &&
-         module->type_uses.value_heads[value_id].first_incoming_use_id !=
-             LOOM_TYPE_USE_ID_INVALID;
+  return loom_module_value_first_incoming_type_use(module, value_id) !=
+         LOOM_TYPE_USE_ID_INVALID;
 }
 
 static bool loom_module_value_tracks_type_uses(const loom_value_t* value) {
@@ -2973,10 +2955,10 @@ iree_status_t loom_module_replace_value_type_uses(loom_module_t* module,
   // still-unprocessed carrier without rescanning the table.
   while (loom_module_value_has_type_uses(module, old_id)) {
     loom_type_use_id_t use_id =
-        module->type_uses.value_heads[old_id].first_incoming_use_id;
+        loom_module_value_first_incoming_type_use(module, old_id);
     loom_value_id_t user_value_id =
         module->type_uses.records[use_id].user_value_id;
-    loom_type_t old_type = module->values.entries[user_value_id].type;
+    loom_type_t old_type = loom_module_value_type(module, user_value_id);
     loom_type_t new_type = old_type;
     bool changed = false;
     IREE_RETURN_IF_ERROR(loom_module_replace_type_value_refs_impl(
@@ -3077,6 +3059,7 @@ iree_status_t loom_region_insert_block(loom_module_t* module,
                                        loom_region_t* region,
                                        uint16_t block_index,
                                        loom_block_t** out_block) {
+  IREE_ASSERT_ARGUMENT(region);
   if (block_index > region->block_count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -3109,28 +3092,18 @@ iree_status_t loom_region_insert_block(loom_module_t* module,
 // Block arguments
 //===----------------------------------------------------------------------===//
 
-iree_status_t loom_block_add_arg(loom_module_t* module, loom_block_t* block,
-                                 loom_value_id_t value_id) {
-  if (block->arg_count >= UINT16_MAX) {
+static iree_status_t loom_block_arg_ids_ensure_capacity(
+    loom_module_t* module, loom_block_t* block, uint32_t required_count) {
+  if (required_count > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "block arg count exceeds UINT16_MAX");
   }
-  if (value_id >= module->values.count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "value %%%u out of range (module has %" PRIhsz
-                            " values)",
-                            (unsigned)value_id, module->values.count);
-  }
-  if (block->arg_count >= block->arg_capacity) {
-    if (block->arg_count == UINT16_MAX) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "block argument count exceeds storage limit");
-    }
+  if (required_count > block->arg_capacity) {
     iree_host_size_t doubled_capacity =
         (iree_host_size_t)block->arg_capacity * 2;
     iree_host_size_t new_capacity =
         doubled_capacity > 4 ? doubled_capacity : (iree_host_size_t)4;
-    iree_host_size_t required_capacity = (iree_host_size_t)block->arg_count + 1;
+    iree_host_size_t required_capacity = required_count;
     if (new_capacity < required_capacity) {
       new_capacity = required_capacity;
     }
@@ -3148,10 +3121,52 @@ iree_status_t loom_block_add_arg(loom_module_t* module, loom_block_t* block,
     block->arg_ids = new_arg_ids;
     block->arg_capacity = (uint16_t)new_capacity;
   }
-  uint16_t arg_index = block->arg_count++;
+  return iree_ok_status();
+}
+
+iree_status_t loom_block_add_arg(loom_module_t* module, loom_block_t* block,
+                                 loom_value_id_t value_id) {
+  return loom_block_insert_arg(module, block, block->arg_count, value_id);
+}
+
+iree_status_t loom_block_insert_arg(loom_module_t* module, loom_block_t* block,
+                                    uint16_t arg_index,
+                                    loom_value_id_t value_id) {
+  if (arg_index > block->arg_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "block argument insertion index %u out of range for %u argument(s)",
+        (unsigned)arg_index, (unsigned)block->arg_count);
+  }
+  if (value_id >= module->values.count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "value %%%u out of range (module has %" PRIhsz
+                            " values)",
+                            (unsigned)value_id, module->values.count);
+  }
+
+  const uint32_t required_count = (uint32_t)block->arg_count + 1;
+  IREE_RETURN_IF_ERROR(
+      loom_block_arg_ids_ensure_capacity(module, block, required_count));
+
+  for (uint16_t i = block->arg_count; i > arg_index; --i) {
+    const loom_value_id_t shifted_id = block->arg_ids[i - 1];
+    block->arg_ids[i] = shifted_id;
+    if (shifted_id == LOOM_VALUE_ID_INVALID ||
+        shifted_id >= module->values.count) {
+      continue;
+    }
+    loom_value_t* shifted = loom_module_value(module, shifted_id);
+    if (loom_value_is_block_arg(shifted) &&
+        loom_value_def_block(shifted) == block) {
+      shifted->def = loom_value_def_make_block(block, i);
+    }
+  }
+
+  ++block->arg_count;
   block->arg_ids[arg_index] = value_id;
 
-  loom_value_t* value = &module->values.entries[value_id];
+  loom_value_t* value = loom_module_value(module, value_id);
   value->flags |= LOOM_VALUE_FLAG_BLOCK_ARG;
   value->def = loom_value_def_make_block(block, arg_index);
   return iree_ok_status();

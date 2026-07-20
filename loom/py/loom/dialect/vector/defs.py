@@ -17,7 +17,9 @@ from loom.assembly import (
     COMMA,
     GLUE,
     LBRACKET,
+    LPAREN,
     RBRACKET,
+    RPAREN,
     Attr,
     AttrDict,
     Flags,
@@ -98,6 +100,7 @@ from loom.dsl import (
     Op,
     OpCategory,
     Operand,
+    OperandRole,
     OpPhase,
     PackedPayloadBitCountMatchesStorage,
     PositiveBitWidthAttr,
@@ -403,6 +406,7 @@ def _vector_cast(
     source_constraint: Callable[[str], Constraint],
     doc: str,
     constraints: Sequence[Constraint] = (),
+    input_role: OperandRole = OperandRole.NONE,
     facts: str = "",
     canonicalize: str = "",
     **kwargs: Any,
@@ -412,7 +416,7 @@ def _vector_cast(
         name,
         group=vector_ops,
         doc=doc,
-        operands=[Operand("input", VECTOR)],
+        operands=[Operand("input", VECTOR, role=input_role)],
         results=[Result("result", VECTOR)],
         constraints=[
             source_constraint("input"),
@@ -513,7 +517,7 @@ vector_splat = Op(
         "must already have the same element type, so conversions must be "
         "spelled with scalar/vector cast ops before or after the splat."
     ),
-    operands=[Operand("scalar", SCALAR)],
+    operands=[Operand("scalar", SCALAR, role=OperandRole.BROADCAST_SOURCE)],
     results=[Result("result", VECTOR)],
     constraints=[SameElementType("scalar", "result")],
     facts="loom_vector_splat_facts",
@@ -640,7 +644,9 @@ vector_from_elements = Op(
         "element type: the number of operands must equal the static element "
         "count, and every operand must have the vector element type."
     ),
-    operands=[Operand("elements", SCALAR, variadic=True)],
+    operands=[
+        Operand("elements", SCALAR, variadic=True, role=OperandRole.COMPOSITE_ELEMENT),
+    ],
     results=[Result("result", VECTOR)],
     constraints=[
         HasAllStaticVector("result"),
@@ -730,6 +736,7 @@ vector_insert = Op(
     ],
     verify="loom_vector_insert_verify",
     facts="loom_vector_insert_facts",
+    canonicalize="loom_vector_insert_canonicalize",
     traits=[PURE],
     format=[
         Ref("value"),
@@ -1155,6 +1162,7 @@ vector_decode = Op(
         ),
     ],
     verify="loom_vector_decode_verify",
+    facts="loom_vector_decode_facts",
     canonicalize="loom_vector_decode_canonicalize",
     traits=[PURE, REFINABLE_RESULT_TYPE_REFS],
     format=[
@@ -1230,8 +1238,10 @@ vector_fragment = Op(
     doc=(
         "Attach a matrix-fragment interpretation to a physical vector value "
         "without changing the physical vector type. The role selects how the "
-        "two shape operands are interpreted: lhs is [m, k], rhs is [k, n], "
-        "and init/result are [m, n]. Dense/default fragments need only the "
+        "shape operands are interpreted: lhs is [m, k], rhs is [k, n], and "
+        "init/result are [m, n]. A leading block extent forms independent "
+        "batched fragments [b, m, k], [b, k, n], and [b, m, n]. Dense/default "
+        "fragments need only the "
         "data value and shape SSA values. Encoded fragments carry schema and "
         "scale/table/sparse metadata values in the keyed using dictionary so "
         "bulk runtime data remains ordinary SSA while lowering can consume a "
@@ -1239,6 +1249,12 @@ vector_fragment = Op(
     ),
     operands=[
         Operand("data", VECTOR, doc="Physical vector lanes or packed registers."),
+        Operand(
+            "blocks",
+            INDEX,
+            optional=True,
+            doc="Optional independent matrix block count.",
+        ),
         Operand("rows", INDEX, doc="Logical matrix row count for this fragment role."),
         Operand("columns", INDEX, doc="Logical matrix column count for this fragment role."),
         Operand(
@@ -1273,6 +1289,10 @@ vector_fragment = Op(
         Ref("data"),
         kw("shape"),
         LBRACKET,
+        OptionalGroup(
+            [kw("blocks"), GLUE, LPAREN, Ref("blocks"), RPAREN, COMMA],
+            anchor="blocks",
+        ),
         Ref("rows"),
         COMMA,
         Ref("columns"),
@@ -1291,6 +1311,66 @@ vector_fragment = Op(
     examples=[
         "%fragment = vector.fragment<lhs> %payload shape [%m, %k] : vector<4xi32>",
         "%fragment = vector.fragment<rhs> %payload shape [%k, %n] using {scale = %scale : vector<1xf16>, schema = %schema : encoding<schema>} : vector<4xi32>",
+    ],
+)
+
+vector_fragment_repack = Op(
+    "vector.fragment.repack",
+    group=vector_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Repack a native matrix-fragment payload to another fragment role "
+        "without going through memory. The source value must carry fragment "
+        "facts naming its current role and shape; the target role interprets "
+        "the result vector lanes and payload registers. The logical shape "
+        "operands are shared by both roles, so result row/column payloads can "
+        "become lhs row/reduction or rhs reduction/column payloads for "
+        "attention-style fragment reuse. When the source and result element "
+        "types differ, the op also represents a fragment-shaped numeric "
+        "conversion that target lowering must select explicitly or reject with "
+        "target diagnostics."
+    ),
+    operands=[
+        Operand("source", VECTOR, doc="Native source matrix fragment payload."),
+        Operand(
+            "blocks",
+            INDEX,
+            optional=True,
+            doc="Optional independent matrix block count.",
+        ),
+        Operand("rows", INDEX, doc="Logical matrix row count for the fragment tile."),
+        Operand(
+            "columns",
+            INDEX,
+            doc="Logical matrix column or reduction count for the fragment tile.",
+        ),
+    ],
+    results=[Result("result", VECTOR, doc="Native target matrix fragment payload.")],
+    attrs=[
+        AttrDef("role", ATTR_TYPE_ENUM, enum_def=VectorFragmentRole),
+    ],
+    facts="loom_vector_fragment_repack_facts",
+    traits=[PURE, REFINABLE_RESULT_TYPE_REFS],
+    format=[
+        TemplateParam("role"),
+        Ref("source"),
+        kw("shape"),
+        LBRACKET,
+        OptionalGroup(
+            [kw("blocks"), GLUE, LPAREN, Ref("blocks"), RPAREN, COMMA],
+            anchor="blocks",
+        ),
+        Ref("rows"),
+        COMMA,
+        Ref("columns"),
+        RBRACKET,
+        COLON,
+        TypeOf("source"),
+        ARROW,
+        ResultType("result"),
+    ],
+    examples=[
+        "%lhs = vector.fragment.repack<lhs> %acc shape [%m, %k] : vector<8xf32> -> vector<16xbf16>",
     ],
 )
 
@@ -1389,20 +1469,44 @@ vector_fragment_load = Op(
         "shape, view layout, and target legality; it is not an ordinary "
         "trailing-axis footprint of the view. The result carries fragment "
         "facts directly so vector.mma can consume it without a separate "
-        "vector.fragment wrapper."
+        "vector.fragment wrapper. When the view and payload element types "
+        "differ, the operation represents a fragment-shaped numeric conversion "
+        "at the load boundary and target lowering must either select that "
+        "conversion explicitly or reject it with target diagnostics."
+        " When the view storage schema requires runtime auxiliary values such "
+        "as sparse metadata, scale values, or codebooks, the optional keyed "
+        "`using` operands provide those SSA values while the view type remains "
+        "the source of truth for the storage schema."
     ),
     operands=[
         Operand("view", VIEW, doc="Typed source view holding logical matrix data."),
+        Operand("indices", INDEX, doc="Dynamic logical origin indices.", variadic=True),
+        Operand(
+            "blocks",
+            INDEX,
+            optional=True,
+            doc="Optional independent matrix block count.",
+        ),
         Operand("rows", INDEX, doc="Logical matrix row count for this fragment role."),
         Operand("columns", INDEX, doc="Logical matrix column count for this fragment role."),
-        Operand("indices", INDEX, doc="Dynamic logical origin indices.", variadic=True),
+        Operand(
+            "auxiliary",
+            VECTOR,
+            variadic=True,
+            doc="Optional keyed runtime auxiliary operands required by the view storage schema.",
+        ),
     ],
     results=[Result("result", VECTOR, doc="Loaded physical matrix fragment payload.")],
     attrs=[
         AttrDef("role", ATTR_TYPE_ENUM, enum_def=VectorFragmentRole),
+        AttrDef(
+            "auxiliary_names",
+            ATTR_TYPE_DICT,
+            optional=True,
+            doc="Sorted auxiliary operand keys mapped to auxiliary operand ordinals.",
+        ),
         *_indexed_memory_attrs(),
     ],
-    constraints=[SameElementType("view", "result")],
     traits=[REFINABLE_RESULT_TYPE_REFS],
     effects=[Reads("view")],
     interfaces=[_memory_access_interface()],
@@ -1414,10 +1518,18 @@ vector_fragment_load = Op(
         IndexList("indices", "static_indices"),
         kw("shape"),
         LBRACKET,
+        OptionalGroup(
+            [kw("blocks"), GLUE, LPAREN, Ref("blocks"), RPAREN, COMMA],
+            anchor="blocks",
+        ),
         Ref("rows"),
         COMMA,
         Ref("columns"),
         RBRACKET,
+        OptionalGroup(
+            [kw("using"), OperandDict("auxiliary", "auxiliary_names")],
+            anchor="auxiliary",
+        ),
         AttrDict(),
         COLON,
         TypeOf("view"),
@@ -1426,6 +1538,7 @@ vector_fragment_load = Op(
     ],
     examples=[
         "%lhs = vector.fragment.load<lhs> %a[%row, %k0] shape [%m, %k] : view<[%M]x[%K]xf16, %layout> -> vector<16xf16>",
+        "%rhs = vector.fragment.load<rhs> %b[%k0, %col] shape [%k, %n] using {sparsity = %metadata : vector<1xi32>} : view<[%K]x[%N]xf8E4M3, %storage> -> vector<8xi32>",
     ],
 )
 
@@ -1447,9 +1560,15 @@ vector_fragment_store = Op(
     operands=[
         Operand("value", VECTOR, doc="Physical matrix fragment payload to store."),
         Operand("view", VIEW, doc="Typed destination view for logical matrix data."),
+        Operand("indices", INDEX, doc="Dynamic logical origin indices.", variadic=True),
+        Operand(
+            "blocks",
+            INDEX,
+            optional=True,
+            doc="Optional independent matrix block count.",
+        ),
         Operand("rows", INDEX, doc="Logical matrix row count for this fragment role."),
         Operand("columns", INDEX, doc="Logical matrix column count for this fragment role."),
-        Operand("indices", INDEX, doc="Dynamic logical origin indices.", variadic=True),
     ],
     attrs=[
         AttrDef("role", ATTR_TYPE_ENUM, enum_def=VectorFragmentRole),
@@ -1466,6 +1585,10 @@ vector_fragment_store = Op(
         IndexList("indices", "static_indices"),
         kw("shape"),
         LBRACKET,
+        OptionalGroup(
+            [kw("blocks"), GLUE, LPAREN, Ref("blocks"), RPAREN, COMMA],
+            anchor="blocks",
+        ),
         Ref("rows"),
         COMMA,
         Ref("columns"),
@@ -1503,6 +1626,7 @@ vector_load = Op(
     effects=[Reads("view")],
     interfaces=[_memory_access_interface()],
     verify="loom_vector_load_verify",
+    facts="loom_vector_load_facts",
     format=[
         Ref("view"),
         IndexList("indices", "static_indices"),
@@ -2254,9 +2378,9 @@ vector_select = Op(
     phase=OpPhase.EXECUTABLE,
     doc=("Lanewise select from two same-typed vector values using an i1 mask vector. True condition lanes choose true_value; false lanes choose false_value."),
     operands=[
-        Operand("condition", VECTOR),
-        Operand("true_value", VECTOR),
-        Operand("false_value", VECTOR),
+        Operand("condition", VECTOR, role=OperandRole.SELECT_CONDITION),
+        Operand("true_value", VECTOR, role=OperandRole.SELECT_PAYLOAD),
+        Operand("false_value", VECTOR, role=OperandRole.SELECT_PAYLOAD),
     ],
     results=[Result("result", VECTOR)],
     constraints=[
@@ -2325,7 +2449,10 @@ vector_cmpf = Op(
         Operand("rhs", VECTOR),
     ],
     results=[Result("result", VECTOR)],
-    attrs=[AttrDef("predicate", ATTR_TYPE_ENUM, enum_def=CmpFPredicate)],
+    attrs=[
+        AttrDef("predicate", ATTR_TYPE_ENUM, enum_def=CmpFPredicate),
+        AttrDef("fastmath", ATTR_TYPE_FLAGS, optional=True, enum_def=FastMathFlags),
+    ],
     constraints=[
         HasFloatElement("lhs"),
         HasI1Element("result"),
@@ -2337,6 +2464,7 @@ vector_cmpf = Op(
     facts="loom_vector_cmpf_facts",
     canonicalize="loom_vector_comparison_canonicalize",
     format=[
+        Flags("fastmath"),
         Attr("predicate"),
         COMMA,
         Ref("lhs"),
@@ -2368,7 +2496,7 @@ vector_addf = _lanewise_binary(
     traits=[SAFE_TO_SPECULATE],
     flags=_VF,
     facts="loom_vector_addf_facts",
-    canonicalize="loom_vector_uniform_result_canonicalize",
+    canonicalize="loom_vector_addf_canonicalize",
 )
 
 vector_subf = _lanewise_binary(
@@ -2965,7 +3093,7 @@ vector_cosf = _lanewise_unary(
 vector_sinturnsf = _lanewise_unary(
     "vector.sinturnsf",
     result_constraint=FLOAT_ELEMENT,
-    doc=("Lanewise sine over turns: sin(2*pi*x), where 1.0 is one full revolution."),
+    doc=("Lanewise sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN."),
     flags=_VF,
     facts="loom_vector_sinturnsf_facts",
     canonicalize="loom_vector_uniform_result_canonicalize",
@@ -2974,7 +3102,7 @@ vector_sinturnsf = _lanewise_unary(
 vector_costurnsf = _lanewise_unary(
     "vector.costurnsf",
     result_constraint=FLOAT_ELEMENT,
-    doc=("Lanewise cosine over turns: cos(2*pi*x), where 1.0 is one full revolution."),
+    doc=("Lanewise cosine over turns: cos(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN."),
     flags=_VF,
     facts="loom_vector_costurnsf_facts",
     canonicalize="loom_vector_uniform_result_canonicalize",
@@ -3268,8 +3396,9 @@ vector_extf = _vector_cast(
     result_constraint=FLOAT_ELEMENT,
     doc=("Lanewise floating-point precision extension. Source and result shapes match exactly; only the floating-point element type widens."),
     constraints=[ElementWidthGreaterThan("result", "input")],
+    input_role=OperandRole.FLOAT_EXTENSION_SOURCE,
     facts="loom_vector_extf_facts",
-    canonicalize="loom_vector_uniform_result_canonicalize",
+    canonicalize="loom_vector_extf_canonicalize",
 )
 
 vector_fptrunc = _vector_cast(
@@ -3279,6 +3408,8 @@ vector_fptrunc = _vector_cast(
     result_constraint=FLOAT_ELEMENT,
     doc=("Lanewise floating-point precision truncation. Source and result shapes match exactly; only the floating-point element type narrows."),
     constraints=[ElementWidthLessThan("result", "input")],
+    facts="loom_vector_fptrunc_facts",
+    canonicalize="loom_vector_fptrunc_canonicalize",
 )
 
 vector_extsi = _vector_cast(
@@ -4195,6 +4326,7 @@ VECTOR_ENCODING_OPS: tuple[Op, ...] = (
     vector_decode,
     vector_encode,
     vector_fragment,
+    vector_fragment_repack,
 )
 
 VECTOR_OP_CATEGORY_GROUPS: tuple[tuple[OpCategory, tuple[Op, ...]], ...] = (

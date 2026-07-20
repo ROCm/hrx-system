@@ -16,12 +16,12 @@
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/ireevm/descriptors/descriptors.h"
 #include "loom/target/arch/ireevm/provider.h"
-#include "loom/target/compile_report_low.h"
 #include "loom/target/emit/ireevm/function_bytecode.h"
 #include "loom/target/emit/ireevm/module_plan.h"
 #include "loom/target/entry_selection.h"
 #include "loom/target/provider.h"
 #include "loom/target/registers.h"
+#include "loom/target/reporting/low.h"
 
 enum {
   LOOM_IREEVM_ARCHIVE_EMIT_DEFAULT_MAX_ERRORS = 20,
@@ -108,9 +108,8 @@ typedef struct loom_ireevm_archive_emit_state_t {
   loom_target_low_descriptor_registry_t low_registry;
   // Diagnostic materializer shared by target-low verification and emission.
   loom_target_entry_diagnostic_emitter_t diagnostic_emitter;
-  // Block pool backing all per-emission arena allocations.
-  iree_arena_block_pool_t block_pool;
-  // Arena for facts, frames, bytecode arrays, and archive table views.
+  // Arena for facts, frames, bytecode arrays, and archive table views backed
+  // by the module workspace pool.
   iree_arena_allocator_t table_arena;
   // Function bytecode objects emitted before archive wrapping.
   loom_ireevm_function_bytecode_t* bytecodes;
@@ -127,7 +126,6 @@ static void loom_ireevm_archive_emit_state_deinitialize(
                                                state->allocator);
   }
   iree_arena_deinitialize(&state->table_arena);
-  iree_arena_block_pool_deinitialize(&state->block_pool);
   loom_target_environment_deinitialize(&state->target_environment);
   state->initialized = false;
 }
@@ -160,9 +158,7 @@ static iree_status_t loom_ireevm_archive_emit_state_initialize(
         loom_ireevm_archive_emit_module_name(options);
   }
 
-  iree_arena_block_pool_initialize(32 * 1024, allocator,
-                                   &out_state->block_pool);
-  iree_arena_initialize(&out_state->block_pool, &out_state->table_arena);
+  iree_arena_initialize(module->arena.block_pool, &out_state->table_arena);
   out_state->initialized = true;
 
   iree_status_t status = loom_target_environment_initialize(
@@ -262,7 +258,7 @@ static void loom_ireevm_archive_emit_accumulate_frame_report(
   }
   totals->schedule_node_count += frame->schedule.node_count;
   totals->scheduled_node_count += frame->schedule.scheduled_node_count;
-  totals->schedule_dependency_count += frame->schedule.dependency_count;
+  totals->schedule_dependency_count += frame->schedule.dependencies.count;
   totals->schedule_resource_use_count += frame->schedule.resource_use_count;
   totals->schedule_hazard_gap_count += frame->schedule.hazard_gap_count;
   totals->schedule_model_summary_count += frame->schedule.model_summary_count;
@@ -431,18 +427,24 @@ static iree_status_t loom_ireevm_archive_emit_function(
       state, function->op, &fixed_values, &fixed_value_count));
 
   loom_low_emission_frame_t frame = {0};
+  loom_low_planning_statistics_t planning_statistics = {0};
   const loom_low_emission_frame_options_t frame_options = {
       .descriptor_registry = &state->low_registry.registry,
       .memory_access_table = loom_low_memory_access_table_empty(),
       .allocation_fixed_values = fixed_values,
       .allocation_fixed_value_count = fixed_value_count,
       .emitter = loom_target_entry_emitter(&state->diagnostic_emitter),
+      .statistics = state->report != NULL ? &planning_statistics : NULL,
   };
   const loom_low_emission_frame_spill_free_options_t spill_free_options = {
       .materialization_options =
           {
               .has_supported_storage_spaces = true,
               .supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_NONE,
+              .record_materialized_spills =
+                  loom_target_compile_report_wants_details(
+                      state->report,
+                      LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS),
               .emitter = frame_options.emitter,
           },
   };
@@ -450,13 +452,19 @@ static iree_status_t loom_ireevm_archive_emit_function(
       state->module, function->op, &frame_options, &spill_free_options,
       &state->table_arena, &frame));
   if (state->diagnostic_emitter.error_count != 0) {
-    if (state->report != NULL && frame.allocation.function_op != NULL) {
-      IREE_RETURN_IF_ERROR(loom_target_compile_report_record_low_allocation(
-          state->report, &frame.allocation));
+    if (state->report != NULL) {
+      loom_target_compile_report_record_low_planning(state->report,
+                                                     &planning_statistics);
+      if (frame.allocation.function_op != NULL) {
+        IREE_RETURN_IF_ERROR(loom_target_compile_report_record_low_allocation(
+            state->report, &frame.allocation));
+      }
     }
     return iree_ok_status();
   }
   if (state->report != NULL) {
+    loom_target_compile_report_record_low_planning(state->report,
+                                                   &planning_statistics);
     IREE_RETURN_IF_ERROR(loom_target_compile_report_record_low_emission_frame(
         state->report, &frame));
     loom_ireevm_archive_emit_accumulate_frame_report(state, &frame);

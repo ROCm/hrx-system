@@ -6,6 +6,7 @@
 
 #include "loom/ops/special_values.h"
 
+#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
@@ -84,7 +85,10 @@ bool loom_value_facts_can_materialize_constant(loom_value_facts_t facts,
 static loom_attribute_t loom_constant_attr_from_facts(loom_value_facts_t facts,
                                                       loom_scalar_type_t type) {
   if (loom_scalar_type_is_float(type)) {
-    return loom_attr_f64(loom_value_facts_as_f64(facts));
+    double value = 0.0;
+    const bool has_value = loom_value_facts_as_exact_float(type, facts, &value);
+    IREE_ASSERT(has_value);
+    return loom_attr_f64(value);
   }
   if (type == LOOM_SCALAR_TYPE_I1) return loom_attr_bool(facts.range_lo != 0);
   return loom_attr_i64(facts.range_lo);

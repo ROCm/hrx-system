@@ -114,6 +114,10 @@ add_custom_command(OUTPUT tilelang_import_tests.stamp
 add_custom_target(tilelang_import_tests
     DEPENDS tilelang_import_tests.stamp
 )
+iree_register_generated_compile_input(tilelang_import_tests
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/tilelang_import_tests.stamp"
+)
 
 if(LOOM_IMPORT_TILELANG)
 iree_py_test(

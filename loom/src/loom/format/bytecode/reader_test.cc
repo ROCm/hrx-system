@@ -2009,7 +2009,7 @@ TEST_F(ReaderTest, ReadsDynamicGlobalSymbolModule) {
   ASSERT_TRUE(loom_type_dim_is_dynamic_at(type, 0));
   loom_value_id_t dim_id = loom_type_dim_value_id_at(type, 0);
   ASSERT_LT(dim_id, read_module->values.count);
-  const loom_value_t& dim_value = read_module->values.entries[dim_id];
+  const loom_value_t& dim_value = *loom_module_value(read_module, dim_id);
   EXPECT_TRUE(loom_type_equal(dim_value.type,
                               loom_type_scalar(LOOM_SCALAR_TYPE_INDEX)));
   ASSERT_NE(dim_value.name_id, LOOM_STRING_ID_INVALID);

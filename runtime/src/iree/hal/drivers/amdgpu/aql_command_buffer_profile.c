@@ -145,10 +145,7 @@ static void iree_hal_amdgpu_aql_command_buffer_initialize_profile_operation(
              dimension_ordinal < IREE_ARRAYSIZE(record.workgroup_count);
              ++dimension_ordinal) {
           record.workgroup_count[dimension_ordinal] =
-              dispatch_command->workgroup_size[dimension_ordinal] == 0
-                  ? 0
-                  : dispatch_command->grid_size[dimension_ordinal] /
-                        dispatch_command->workgroup_size[dimension_ordinal];
+              dispatch_command->workgroup_count[dimension_ordinal];
         }
       }
       break;

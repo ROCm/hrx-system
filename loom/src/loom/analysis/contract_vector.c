@@ -176,6 +176,7 @@ static bool loom_contract_vector_populate_fragment(
   request->shape.m = (int64_t)request->fragment.result_lane_count;
   request->shape.n = 1;
   request->shape.k = (int64_t)request->fragment.source_lane_count;
+  request->shape.block_count = 1;
   request->k_group_size = k_group_size;
   return true;
 }
@@ -254,7 +255,8 @@ static bool loom_contract_vector_query_fragment_fact(
       !loom_vector_fragment_fact_query_value_facts(
           &fact_table->context,
           loom_value_fact_table_lookup(fact_table, value_id), &fact) ||
-      !iree_any_bit_set(fact.role_flags, role_flags) || fact.shape_rank != 2) {
+      !iree_any_bit_set(fact.role_flags, role_flags) ||
+      !loom_vector_fragment_fact_has_matrix_shape(fact)) {
     return false;
   }
   *out_fact = fact;
@@ -353,6 +355,42 @@ static bool loom_contract_vector_fragment_storage_schema(
       out_schema->encoded_operand);
 }
 
+static bool loom_contract_vector_operand_adapt_schema_to_typed_payload(
+    const loom_module_t* module, loom_value_id_t value_id,
+    loom_contract_operand_role_t role, loom_contract_operand_t* operand) {
+  if (role != LOOM_CONTRACT_OPERAND_ROLE_LHS &&
+      role != LOOM_CONTRACT_OPERAND_ROLE_RHS) {
+    return false;
+  }
+
+  loom_type_t type = loom_type_none();
+  if (!loom_contract_vector_value_type(module, value_id, &type) ||
+      !loom_type_is_vector(type)) {
+    return false;
+  }
+  const loom_scalar_type_t element_type = loom_type_element_type(type);
+  loom_contract_numeric_type_t payload_numeric_type =
+      LOOM_CONTRACT_NUMERIC_UNKNOWN;
+  if (!loom_scalar_type_is_float(element_type) ||
+      !loom_contract_numeric_type_from_scalar(element_type, false,
+                                              &payload_numeric_type) ||
+      payload_numeric_type == operand->numeric_type) {
+    return false;
+  }
+
+  const loom_contract_encoded_operand_t encoded = operand->encoded;
+  loom_contract_rejection_bits_t unused_rejection_bits =
+      LOOM_CONTRACT_REJECTION_NONE;
+  if (!loom_contract_vector_assign_dense_payload(type, operand,
+                                                 &unused_rejection_bits)) {
+    return false;
+  }
+  operand->role = role;
+  operand->numeric_type = payload_numeric_type;
+  operand->encoded = encoded;
+  return true;
+}
+
 static bool loom_contract_vector_operand_from_fragment(
     const loom_module_t* module, loom_value_id_t value_id,
     loom_vector_fragment_fact_t fact, loom_contract_operand_role_t role,
@@ -370,6 +408,8 @@ static bool loom_contract_vector_operand_from_fragment(
       *out_rejection_bits = LOOM_CONTRACT_REJECTION_SCHEMA;
       return false;
     }
+    (void)loom_contract_vector_operand_adapt_schema_to_typed_payload(
+        module, value_id, role, out_operand);
     loom_contract_vector_populate_auxiliary_operands(&fact.auxiliary,
                                                      &out_operand->encoded);
     return true;
@@ -399,6 +439,7 @@ static bool loom_contract_vector_numeric_is_float(
     case LOOM_CONTRACT_NUMERIC_F16:
     case LOOM_CONTRACT_NUMERIC_BF16:
     case LOOM_CONTRACT_NUMERIC_F32:
+    case LOOM_CONTRACT_NUMERIC_TF32:
     case LOOM_CONTRACT_NUMERIC_F64:
     case LOOM_CONTRACT_NUMERIC_FP8:
     case LOOM_CONTRACT_NUMERIC_BF8:
@@ -691,7 +732,19 @@ bool loom_contract_request_from_vector_mma_op(
     return loom_contract_vector_mma_fail(LOOM_CONTRACT_REJECTION_ROLE,
                                          out_diagnostic);
   }
+  if (lhs_fragment.shape_rank != rhs_fragment.shape_rank ||
+      lhs_fragment.shape_rank != init_fragment.shape_rank) {
+    return loom_contract_vector_mma_fail(LOOM_CONTRACT_REJECTION_SHAPE,
+                                         out_diagnostic);
+  }
 
+  loom_contract_vector_shape_dimension_t lhs_blocks = {0};
+  loom_contract_vector_shape_dimension_t rhs_blocks = {0};
+  loom_contract_vector_shape_dimension_t init_blocks = {0};
+  loom_contract_vector_shape_dimension_t source_blocks = {0};
+  loom_contract_vector_shape_dimension_t blocks = {
+      .exact_value = 1,
+  };
   loom_contract_vector_shape_dimension_t lhs_m = {0};
   loom_contract_vector_shape_dimension_t lhs_k = {0};
   loom_contract_vector_shape_dimension_t rhs_k = {0};
@@ -701,18 +754,38 @@ bool loom_contract_request_from_vector_mma_op(
   loom_contract_vector_shape_dimension_t m = {0};
   loom_contract_vector_shape_dimension_t n = {0};
   loom_contract_vector_shape_dimension_t k = {0};
-  if (!loom_contract_vector_query_shape_dimension(
-          fact_table, lhs_fragment.shape_value_ids[0], &lhs_m) ||
+  if ((lhs_fragment.shape_rank == 3 &&
+       (!loom_contract_vector_query_shape_dimension(
+            fact_table, loom_vector_fragment_fact_block_value(lhs_fragment),
+            &lhs_blocks) ||
+        !loom_contract_vector_query_shape_dimension(
+            fact_table, loom_vector_fragment_fact_block_value(rhs_fragment),
+            &rhs_blocks) ||
+        !loom_contract_vector_query_shape_dimension(
+            fact_table, loom_vector_fragment_fact_block_value(init_fragment),
+            &init_blocks) ||
+        !loom_contract_vector_shape_dimensions_match(lhs_blocks, rhs_blocks,
+                                                     &source_blocks) ||
+        !loom_contract_vector_shape_dimensions_match(source_blocks, init_blocks,
+                                                     &blocks))) ||
       !loom_contract_vector_query_shape_dimension(
-          fact_table, lhs_fragment.shape_value_ids[1], &lhs_k) ||
+          fact_table, loom_vector_fragment_fact_row_value(lhs_fragment),
+          &lhs_m) ||
       !loom_contract_vector_query_shape_dimension(
-          fact_table, rhs_fragment.shape_value_ids[0], &rhs_k) ||
+          fact_table, loom_vector_fragment_fact_column_value(lhs_fragment),
+          &lhs_k) ||
       !loom_contract_vector_query_shape_dimension(
-          fact_table, rhs_fragment.shape_value_ids[1], &rhs_n) ||
+          fact_table, loom_vector_fragment_fact_row_value(rhs_fragment),
+          &rhs_k) ||
       !loom_contract_vector_query_shape_dimension(
-          fact_table, init_fragment.shape_value_ids[0], &init_m) ||
+          fact_table, loom_vector_fragment_fact_column_value(rhs_fragment),
+          &rhs_n) ||
       !loom_contract_vector_query_shape_dimension(
-          fact_table, init_fragment.shape_value_ids[1], &init_n) ||
+          fact_table, loom_vector_fragment_fact_row_value(init_fragment),
+          &init_m) ||
+      !loom_contract_vector_query_shape_dimension(
+          fact_table, loom_vector_fragment_fact_column_value(init_fragment),
+          &init_n) ||
       !loom_contract_vector_shape_dimensions_match(lhs_m, init_m, &m) ||
       !loom_contract_vector_shape_dimensions_match(rhs_n, init_n, &n) ||
       !loom_contract_vector_shape_dimensions_match(lhs_k, rhs_k, &k)) {
@@ -749,17 +822,23 @@ bool loom_contract_request_from_vector_mma_op(
       .m = m.exact_value,
       .n = n.exact_value,
       .k = k.exact_value,
+      .block_count = blocks.exact_value,
   };
   out_request->shape_value_refs = (loom_contract_shape_value_refs_t){
       .m = m.value_ref,
       .n = n.value_ref,
       .k = k.value_ref,
+      .block_count = blocks.value_ref,
   };
   out_request->k_group_size = options->k_group_size;
   out_request->fragment = options->fragment;
   out_request->capability_class = options->capability_class;
   out_request->policy = options->policy;
   out_request->arithmetic = loom_contract_vector_mma_arithmetic(out_request);
+  // vector.mma has ordinary arithmetic semantics, so a target instruction's
+  // optional integer saturation control is known to be disabled.
+  out_request->result.encoded.available_capability_flags |=
+      LOOM_CONTRACT_CAPABILITY_CLAMP;
   if (!loom_contract_request_validate(out_request, out_diagnostic)) {
     return false;
   }

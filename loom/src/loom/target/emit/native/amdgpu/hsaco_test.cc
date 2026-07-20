@@ -240,6 +240,8 @@ loom_amdgpu_metadata_kernel_t MinimalKernel(iree_string_view_t name,
       /*.max_flat_workgroup_size=*/64,
       /*.required_workgroup_size=*/{/*.x=*/64, /*.y=*/1, /*.z=*/1},
       /*.has_required_workgroup_size=*/true,
+      /*.workgroup_cluster_size=*/{},
+      /*.has_workgroup_cluster_size=*/false,
       /*.arguments=*/nullptr,
       /*.argument_count=*/0,
   };
@@ -778,10 +780,7 @@ TEST(AmdgpuHsacoTest, WritesSupportedProcessorCodeObjectFlags) {
     const loom_amdgpu_processor_info_t* processor =
         loom_amdgpu_target_info_processor_at(i);
     ASSERT_NE(processor, nullptr);
-    bool hsaco_supported = false;
-    IREE_ASSERT_OK(loom_amdgpu_target_info_processor_supports_hsaco(
-        processor, &hsaco_supported));
-    if (!hsaco_supported) {
+    if (!loom_amdgpu_processor_supports_hsaco(processor)) {
       continue;
     }
     ++supported_count;

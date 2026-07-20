@@ -31,8 +31,6 @@ iree_cc_library(
     "event.h"
     "executable.c"
     "executable.h"
-    "executable_cache.c"
-    "executable_cache.h"
     "semaphore.c"
     "semaphore.h"
   DEPS

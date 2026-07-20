@@ -610,14 +610,13 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
   // This requires creating the module from the fat binary.
   // fprintf(stderr, "[REGISTRY] lazy module load from binary %p\n",
   //         registration->module_binary);
-  iree_hal_executable_caching_mode_t caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA |
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION;
+  iree_hal_executable_load_flags_t load_flags =
+      IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION;
   iree_const_byte_span_t module_data =
       iree_make_const_byte_span((const uint8_t*)registration->module_binary,
                                 /*infer*/ 0);
   iree_status_t status = iree_hal_streaming_module_create_from_memory(
-      map->context, caching_mode, module_data, map->host_allocator,
+      map->context, load_flags, module_data, map->host_allocator,
       &entry->module);
   // fprintf(stderr, "[REGISTRY] module load %s\n",
   //         iree_status_is_ok(status) ? "OK" : "FAILED");

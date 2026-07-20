@@ -190,18 +190,4 @@ TEST_F(AmdgpuDataSymbolTest, BuildsRel32AddressMaterializationSequence) {
                                            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2)));
 }
 
-TEST_F(AmdgpuDataSymbolTest, RejectsUnencodableByteOffset) {
-  const loom_amdgpu_data_symbol_address_t target = {
-      /*.symbol=*/AddSymbol(IREE_SV("loom_sanitizer_sites")),
-      /*.byte_offset=*/(uint64_t)INT64_MAX + 1u,
-  };
-  loom_value_id_t address = LOOM_VALUE_ID_INVALID;
-  iree_status_t status = loom_amdgpu_build_data_symbol_address(
-      &builder_, descriptor_set_, target, LOOM_LOCATION_UNKNOWN, &address);
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_OUT_OF_RANGE);
-  iree_status_free(status);
-  EXPECT_EQ(address, LOOM_VALUE_ID_INVALID);
-  EXPECT_TRUE(Ops().empty());
-}
-
 }  // namespace

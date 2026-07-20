@@ -53,7 +53,7 @@ func.def @divf_arcp_constant_rhs_to_reciprocal_mulf(%x: f32) -> (f32, f32) {
 func.def @divf_arcp_constant_rhs_to_reciprocal_mulf(%x: f32) -> (f32, f32) {
   %scale = scalar.constant 127.0 : f32
   %strict = scalar.divf %x, %scale : f32
-  %6 = scalar.constant 0.007874015748031496 : f32
+  %6 = scalar.constant 0.007874015718698502 : f32
   %fast = scalar.mulf<nnan|ninf|nsz|arcp> %x, %6 : f32
   func.return %strict, %fast : f32, f32
 }
@@ -70,7 +70,7 @@ func.def @mulf_absorbs_negated_input_constant(%x: f32) -> (f32) {
 
 // ----
 func.def @mulf_absorbs_negated_input_constant(%x: f32) -> (f32) {
-  %7 = scalar.constant -1.4426950408889634 : f32
+  %7 = scalar.constant -1.4426950216293335 : f32
   %scaled = scalar.mulf<nnan|ninf|nsz> %x, %7 : f32
   func.return %scaled : f32
 }
@@ -110,4 +110,52 @@ func.def @fmaf_preserves_fastmath_flags(%a: f32, %b: f32, %c: f32) -> (f32, f32,
   %to_mul = scalar.mulf<nsz> %a, %b : f32
   %to_add = scalar.addf<reassoc> %b, %c : f32
   func.return %c, %to_mul, %to_add : f32, f32, f32
+}
+
+// ====
+
+// Contracted product-add spellings become an explicit fused multiply-add.
+func.def @contracted_product_add_to_fmaf(%lhs: f32, %rhs: f32, %addend: f32) -> (f32) {
+  %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : f32
+  %r = scalar.addf<reassoc|nnan|ninf|nsz|contract> %product, %addend : f32
+  func.return %r : f32
+}
+
+// ----
+func.def @contracted_product_add_to_fmaf(%lhs: f32, %rhs: f32, %addend: f32) -> (f32) {
+  %r = scalar.fmaf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs, %addend : f32
+  func.return %r : f32
+}
+
+// ====
+
+// Addition is commutative, so the product can appear on either side.
+func.def @contracted_reversed_product_add_to_fmaf(%lhs: f32, %rhs: f32, %addend: f32) -> (f32) {
+  %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : f32
+  %r = scalar.addf<reassoc|nnan|ninf|nsz|contract> %addend, %product : f32
+  func.return %r : f32
+}
+
+// ----
+func.def @contracted_reversed_product_add_to_fmaf(%lhs: f32, %rhs: f32, %addend: f32) -> (f32) {
+  %r = scalar.fmaf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs, %addend : f32
+  func.return %r : f32
+}
+
+// ====
+
+// Exact add keeps the separately rounded product and addition.
+func.def @exact_product_add_stays_separate(%lhs: f32, %rhs: f32, %addend: f32) -> (f32) {
+  %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : f32
+  %r = scalar.addf<reassoc|nnan|ninf|nsz> %product, %addend : f32
+  func.return %r : f32
+}
+
+// ====
+
+// A shared product remains explicit instead of duplicating the multiply.
+func.def @shared_product_add_stays_separate(%lhs: f32, %rhs: f32, %addend: f32) -> (f32, f32) {
+  %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : f32
+  %r = scalar.addf<reassoc|nnan|ninf|nsz|contract> %product, %addend : f32
+  func.return %product, %r : f32, f32
 }

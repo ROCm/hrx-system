@@ -59,7 +59,7 @@ Running `target_map.py` emits generated fragments consumed by multiple layers:
 | `build_tools/amdgpu/target_map.cmake` | CMake selector helpers. |
 | `build_tools/amdgpu/elf_machine_map.inl` | C/C++ ELF machine decode tables for runtime, libhrx, and Loom. |
 | `build_tools/amdgpu/target_map.h` | C/C++ tests that need exact-to-code-object lookup. |
-| `runtime/src/iree/hal/drivers/amdgpu/util/target_id_map.inl` | Runtime AMDGPU device-library lookup. |
+| `runtime/src/iree/hal/executable/amdgpu/target_id_map.inl` | Runtime AMDGPU device-library lookup. |
 
 The generated files are checked in. The presubmit check runs:
 

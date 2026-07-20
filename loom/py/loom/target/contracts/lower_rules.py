@@ -57,6 +57,7 @@ from loom.target.contracts.kinds import SourceValueKind
 from loom.target.contracts.patterns import TypePattern
 from loom.target.contracts.rules import (
     DescriptorRule,
+    OrdinalValueAliasRule,
     RecipeRule,
     ValueAliasRule,
     ValueElideRule,
@@ -98,10 +99,10 @@ class LowerAttrCopyKind(Enum):
     VALUE_U32_DIVISOR_MAGIC_MULTIPLIER = "value_u32_divisor_magic_multiplier"
     VALUE_U32_DIVISOR_MAGIC_SHIFT = "value_u32_divisor_magic_shift"
     VALUE_I32_AS_U32_BITS = "value_i32_as_u32_bits"
-    VALUE_F64_AS_F16_BITS = "value_f64_as_f16_bits"
-    VALUE_F64_AS_BF16_BITS = "value_f64_as_bf16_bits"
-    VALUE_F64_AS_F32_BITS = "value_f64_as_f32_bits"
-    VALUE_F64_AS_F64_BITS = "value_f64_as_f64_bits"
+    VALUE_FLOAT_AS_F16_BITS = "value_float_as_f16_bits"
+    VALUE_FLOAT_AS_BF16_BITS = "value_float_as_bf16_bits"
+    VALUE_FLOAT_AS_F32_BITS = "value_float_as_f32_bits"
+    VALUE_FLOAT_AS_F64_BITS = "value_float_as_f64_bits"
     I64_ARRAY_LANE_BYTE = "i64_array_lane_byte"
     SOURCE_MEMORY_STATIC_BYTE_OFFSET = "source_memory_static_byte_offset"
     SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT = (
@@ -128,6 +129,7 @@ LOWER_EMIT_FLAG_ACCUMULATE_SKIP_FIRST_LANE = 1 << 5
 LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE = 1 << 6
 LOWER_SOURCE_MEMORY_NONE = 0
 LOWER_RULE_FLAG_CONTRACT_ONLY = 1 << 0
+LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS = 1 << 1
 
 _LOW_VALUE_GUARD_KINDS = (
     GuardKind.LOW_VALUE_REGISTER_CLASS,
@@ -150,6 +152,7 @@ class LowerValueRef:
 
     kind: SourceValueKind
     index: int
+    element_index: int = 0
     materializer_index: int = 0
 
 
@@ -342,7 +345,22 @@ class _LowerRuleSetCompiler:
             if isinstance(contract_case, DescriptorRule):
                 self._append_descriptor_rule(authored_case_index, contract_case)
             elif isinstance(contract_case, ValueAliasRule):
-                self._append_alias_rule(authored_case_index, contract_case)
+                self._append_alias_rule(
+                    authored_case_index,
+                    contract_case.source_op,
+                    contract_case.source,
+                    contract_case.result,
+                    contract_case.guards,
+                )
+            elif isinstance(contract_case, OrdinalValueAliasRule):
+                self._append_alias_rule(
+                    authored_case_index,
+                    contract_case.source_op,
+                    contract_case.source,
+                    contract_case.result,
+                    contract_case.guards,
+                    flags=LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
+                )
             elif isinstance(contract_case, ValueElideRule):
                 self._append_elide_rule(authored_case_index, contract_case)
             elif isinstance(contract_case, RecipeRule):
@@ -404,26 +422,32 @@ class _LowerRuleSetCompiler:
     def _append_alias_rule(
         self,
         authored_case_index: int,
-        rule: ValueAliasRule,
+        source_op: Op,
+        source: ValueRef,
+        result: ValueRef,
+        guards: tuple[Guard, ...],
+        *,
+        flags: int = 0,
     ) -> None:
         guard_start = len(self._guards)
         type_patterns_by_field: dict[str, TypePattern] = {}
-        for guard in rule.guards:
-            self._append_guard(rule.source_op, guard, type_patterns_by_field)
+        for guard in guards:
+            self._append_guard(source_op, guard, type_patterns_by_field)
         alias_ref_start = self._append_value_ref_sequence(
             (
-                self._lower_value_ref(rule.source_op, rule.source, {}),
-                self._lower_value_ref(rule.source_op, rule.result, {}),
+                self._lower_value_ref(source_op, source, {}),
+                self._lower_value_ref(source_op, result, {}),
             )
         )
         self._rules.append(
             LowerRule(
-                source_op=rule.source_op,
+                source_op=source_op,
                 temporary_count=0,
                 guard_start=guard_start,
                 guard_count=len(self._guards) - guard_start,
                 emit_start=0,
                 emit_count=0,
+                flags=flags,
                 alias_ref_start=alias_ref_start,
                 alias_ref_count=1,
             )
@@ -736,11 +760,11 @@ class _LowerRuleSetCompiler:
             GuardKind.VALUE_EXACT_I64,
             GuardKind.VALUE_EXACT_POWER_OF_TWO_I64,
             GuardKind.VALUE_U32_DIVISOR_MAGIC_IS_ADD,
-            GuardKind.VALUE_EXACT_F64,
+            GuardKind.VALUE_EXACT_FLOAT,
             GuardKind.VALUE_I64_RANGE,
             GuardKind.VALUE_I64_RANGE_LE,
             GuardKind.VALUE_I64_RANGE_GE,
-            GuardKind.VALUE_F64_EQUALS,
+            GuardKind.VALUE_FLOAT_EQUALS,
             GuardKind.VALUE_STORAGE_ELEMENT_FORMAT,
             GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
             GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
@@ -1020,7 +1044,7 @@ class _LowerRuleSetCompiler:
                 )
             )
             return
-        if guard.kind == GuardKind.VALUE_EXACT_F64:
+        if guard.kind == GuardKind.VALUE_EXACT_FLOAT:
             self._guards.append(
                 LowerGuard(
                     kind=guard.kind,
@@ -1103,7 +1127,7 @@ class _LowerRuleSetCompiler:
                 )
             )
             return
-        if guard.kind == GuardKind.VALUE_F64_EQUALS:
+        if guard.kind == GuardKind.VALUE_FLOAT_EQUALS:
             if guard.f64_value is None:
                 raise ValueError(f"{source_op.name}: f64-equals guard needs a value")
             self._guards.append(
@@ -1665,14 +1689,14 @@ class _LowerRuleSetCompiler:
             kind = LowerAttrCopyKind.VALUE_U32_DIVISOR_MAGIC_SHIFT
         elif project.kind == ValueProjectKind.I32_AS_U32_BITS:
             kind = LowerAttrCopyKind.VALUE_I32_AS_U32_BITS
-        elif project.kind == ValueProjectKind.F64_AS_F16_BITS:
-            kind = LowerAttrCopyKind.VALUE_F64_AS_F16_BITS
-        elif project.kind == ValueProjectKind.F64_AS_BF16_BITS:
-            kind = LowerAttrCopyKind.VALUE_F64_AS_BF16_BITS
-        elif project.kind == ValueProjectKind.F64_AS_F32_BITS:
-            kind = LowerAttrCopyKind.VALUE_F64_AS_F32_BITS
-        elif project.kind == ValueProjectKind.F64_AS_F64_BITS:
-            kind = LowerAttrCopyKind.VALUE_F64_AS_F64_BITS
+        elif project.kind == ValueProjectKind.FLOAT_AS_F16_BITS:
+            kind = LowerAttrCopyKind.VALUE_FLOAT_AS_F16_BITS
+        elif project.kind == ValueProjectKind.FLOAT_AS_BF16_BITS:
+            kind = LowerAttrCopyKind.VALUE_FLOAT_AS_BF16_BITS
+        elif project.kind == ValueProjectKind.FLOAT_AS_F32_BITS:
+            kind = LowerAttrCopyKind.VALUE_FLOAT_AS_F32_BITS
+        elif project.kind == ValueProjectKind.FLOAT_AS_F64_BITS:
+            kind = LowerAttrCopyKind.VALUE_FLOAT_AS_F64_BITS
         else:
             raise ValueError(
                 f"{source_op.name}: immediate projection '{project.kind.value}' is "
@@ -1953,6 +1977,9 @@ def _lower_value_ref(
     return LowerValueRef(
         kind=value_ref.kind,
         index=_source_value_index(source_op, value_ref, temporary_ordinals),
+        element_index=value_ref.element
+        if value_ref.kind == SourceValueKind.OPERAND
+        else 0,
         materializer_index=materializer_index,
     )
 
@@ -1965,7 +1992,7 @@ def _source_value_index(
     if value_ref.kind == SourceValueKind.OPERAND:
         operand = source_op.operand(value_ref.field)
         if operand is not None:
-            return source_op.operands.index(operand) + value_ref.element
+            return source_op.operands.index(operand)
     if value_ref.kind == SourceValueKind.RESULT:
         result = source_op.result(value_ref.field)
         if result is not None:
@@ -2185,7 +2212,7 @@ def _u32_divisor_magic_is_add_diagnostic(field: str, *, is_add: bool) -> Diagnos
 
 
 def _exact_float_diagnostic(field: str) -> DiagnosticRef:
-    return _named_constraint_diagnostic("value_fact", field, "exact_f64")
+    return _named_constraint_diagnostic("value_fact", field, "exact_float")
 
 
 def _integer_range_diagnostic(
@@ -2213,7 +2240,7 @@ def _integer_range_relation_diagnostic(
 
 def _float_equals_diagnostic(field: str, value: float) -> DiagnosticRef:
     return _named_constraint_diagnostic(
-        "value_fact", field, f"f64_equals.0x{_f64_bits(value):016x}"
+        "value_fact", field, f"float_equals.0x{_f64_bits(value):016x}"
     )
 
 

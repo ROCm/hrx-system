@@ -372,6 +372,28 @@ bool loom_op_operand_field_present(const loom_op_vtable_t* vtable,
   return loom_op_operand_field_span(vtable, op, field_index).count > 0;
 }
 
+loom_value_slice_t loom_op_result_field_span(const loom_op_vtable_t* vtable,
+                                             const loom_op_t* op,
+                                             uint8_t field_index) {
+  if (!vtable || !op) return (loom_value_slice_t){0};
+  if (field_index < vtable->fixed_result_count) {
+    if (field_index >= op->result_count) return (loom_value_slice_t){0};
+    return (loom_value_slice_t){
+        .values = loom_op_results(op) + field_index,
+        .count = 1,
+    };
+  }
+  if (iree_any_bit_set(vtable->vtable_flags, LOOM_OP_VTABLE_VARIADIC_RESULTS) &&
+      field_index == vtable->fixed_result_count) {
+    if (field_index > op->result_count) return (loom_value_slice_t){0};
+    return (loom_value_slice_t){
+        .values = loom_op_results(op) + field_index,
+        .count = (uint16_t)(op->result_count - field_index),
+    };
+  }
+  return (loom_value_slice_t){0};
+}
+
 bool loom_op_operand_descriptor_at(
     const loom_op_vtable_t* vtable, const loom_op_t* op, uint16_t operand_index,
     const loom_operand_descriptor_t** out_descriptor, uint8_t* out_field_index,
@@ -416,6 +438,64 @@ bool loom_op_operand_descriptor_at(
           (uint16_t)(operand_index - vtable->fixed_operand_count);
     }
     return true;
+  }
+  return false;
+}
+
+loom_operand_role_t loom_op_operand_role_at(const loom_op_vtable_t* vtable,
+                                            const loom_op_t* op,
+                                            uint16_t operand_index) {
+  if (!vtable || vtable->operand_role_mask == 0) {
+    return LOOM_OPERAND_ROLE_NONE;
+  }
+  const loom_operand_descriptor_t* descriptor = NULL;
+  if (!loom_op_operand_descriptor_at(vtable, op, operand_index, &descriptor,
+                                     NULL, NULL)) {
+    return LOOM_OPERAND_ROLE_NONE;
+  }
+  return descriptor->role;
+}
+
+loom_operand_role_t loom_op_operand_role(const loom_module_t* module,
+                                         const loom_op_t* op,
+                                         uint16_t operand_index) {
+  if (module == NULL || op == NULL) return LOOM_OPERAND_ROLE_NONE;
+  return loom_op_operand_role_at(loom_op_vtable(module, op), op, operand_index);
+}
+
+bool loom_op_operand_has_role(const loom_module_t* module, const loom_op_t* op,
+                              uint16_t operand_index,
+                              loom_operand_role_t role) {
+  if (role == LOOM_OPERAND_ROLE_NONE) return false;
+  return loom_op_operand_role(module, op, operand_index) == role;
+}
+
+bool loom_op_first_operand_with_role(const loom_module_t* module,
+                                     const loom_op_t* op,
+                                     loom_operand_role_t role,
+                                     loom_value_id_t* out_value_id) {
+  *out_value_id = LOOM_VALUE_ID_INVALID;
+  if (module == NULL || op == NULL) return false;
+  const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
+  if (vtable == NULL || !iree_any_bit_set(vtable->operand_role_mask,
+                                          loom_operand_role_mask_bit(role))) {
+    return false;
+  }
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    if (loom_op_operand_role_at(vtable, op, i) == role) {
+      *out_value_id = operands[i];
+      return true;
+    }
+  }
+  return false;
+}
+
+bool loom_op_defines_value(const loom_op_t* op, loom_value_id_t value_id) {
+  if (op == NULL || value_id == LOOM_VALUE_ID_INVALID) return false;
+  const loom_value_id_t* results = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    if (results[i] == value_id) return true;
   }
   return false;
 }
@@ -486,12 +566,9 @@ bool loom_op_regions_have_hints(const loom_module_t* module,
 static bool loom_value_has_type_uses_outside_op(const loom_module_t* module,
                                                 loom_value_id_t value_id,
                                                 const loom_op_t* op) {
-  if (value_id >= module->values.count ||
-      value_id >= module->type_uses.value_capacity) {
-    return false;
-  }
+  if (value_id >= module->values.count) return false;
   loom_type_use_id_t use_id =
-      module->type_uses.value_heads[value_id].first_incoming_use_id;
+      loom_module_value_first_incoming_type_use(module, value_id);
   while (use_id != LOOM_TYPE_USE_ID_INVALID) {
     const loom_type_use_t* type_use = &module->type_uses.records[use_id];
     if (type_use->user_value_id >= module->values.count) return true;
@@ -925,6 +1002,13 @@ loom_named_attr_slice_t loom_func_like_export_attrs(loom_func_like_t func) {
       loom_op_attrs(func.op)[func.vtable->export_attrs_attr_index]);
 }
 
+bool loom_func_like_is_kernel_entry(loom_func_like_t func) {
+  if (!func.op) return false;
+  const loom_op_kind_t kernel_def = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 0);
+  const loom_op_kind_t low_kernel_def = LOOM_OP_KIND(LOOM_DIALECT_LOW, 1);
+  return func.op->kind == kernel_def || func.op->kind == low_kernel_def;
+}
+
 bool loom_func_like_export_linkage(loom_func_like_t func,
                                    uint8_t* out_linkage) {
   *out_linkage = 0;
@@ -1311,26 +1395,94 @@ iree_status_t loom_region_branch_build_region_terminator(
 
 loom_memory_access_t loom_memory_access_cast(const loom_module_t* module,
                                              const loom_op_t* op) {
-  if (!op) return (loom_memory_access_t){.op = NULL, .vtable = NULL};
+  if (!op) return (loom_memory_access_t){.op = NULL, .op_vtable = NULL};
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
   if (!vtable || !vtable->memory_access) {
-    return (loom_memory_access_t){.op = NULL, .vtable = NULL};
+    return (loom_memory_access_t){.op = NULL, .op_vtable = NULL};
   }
-  return (loom_memory_access_t){.op = op, .vtable = vtable->memory_access};
+  return (loom_memory_access_t){.op = op, .op_vtable = vtable};
+}
+
+static const loom_memory_access_vtable_t* loom_memory_access_vtable(
+    loom_memory_access_t access) {
+  return access.op_vtable ? access.op_vtable->memory_access : NULL;
+}
+
+loom_memory_access_operation_kind_t loom_memory_access_operation_kind(
+    loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
+  return vtable ? (loom_memory_access_operation_kind_t)vtable->operation_kind
+                : LOOM_MEMORY_ACCESS_OPERATION_COUNT_;
+}
+
+static bool loom_memory_access_operand_field_contains(
+    loom_memory_access_t access, uint8_t operand_field_index,
+    uint16_t operand_index) {
+  if (!access.op || !access.op_vtable ||
+      operand_field_index == LOOM_OPERAND_INDEX_NONE ||
+      operand_index >= access.op->operand_count) {
+    return false;
+  }
+  if (!loom_op_vtable_has_segmented_operands(access.op_vtable)) {
+    return operand_field_index == operand_index;
+  }
+  const loom_value_slice_t span = loom_op_operand_field_span(
+      access.op_vtable, access.op, operand_field_index);
+  if (span.count == 0 || span.values == NULL) {
+    return false;
+  }
+  const uintptr_t operand_base = (uintptr_t)loom_op_const_operands(access.op);
+  const uintptr_t span_base = (uintptr_t)span.values;
+  if (span_base < operand_base) {
+    return false;
+  }
+  const uintptr_t span_offset_bytes = span_base - operand_base;
+  if (span_offset_bytes % sizeof(*span.values) != 0) {
+    return false;
+  }
+  const uintptr_t first_operand_index =
+      span_offset_bytes / sizeof(*span.values);
+  return operand_index >= first_operand_index &&
+         operand_index < first_operand_index + span.count;
+}
+
+bool loom_memory_access_operand_index_is_payload(loom_memory_access_t access,
+                                                 uint16_t operand_index) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
+  if (!vtable ||
+      !loom_memory_access_operation_kind_has_payload_operands(
+          (loom_memory_access_operation_kind_t)vtable->operation_kind)) {
+    return false;
+  }
+  return loom_memory_access_operand_field_contains(
+             access, vtable->value_operand_index, operand_index) ||
+         loom_memory_access_operand_field_contains(
+             access, vtable->expected_operand_index, operand_index) ||
+         loom_memory_access_operand_field_contains(
+             access, vtable->replacement_operand_index, operand_index);
 }
 
 static loom_value_id_t loom_memory_access_operand(loom_memory_access_t access,
-                                                  uint8_t operand_index) {
-  if (!access.vtable || operand_index == LOOM_OPERAND_INDEX_NONE ||
-      operand_index >= access.op->operand_count) {
+                                                  uint8_t operand_field_index) {
+  if (!access.op || !access.op_vtable ||
+      operand_field_index == LOOM_OPERAND_INDEX_NONE) {
     return LOOM_VALUE_ID_INVALID;
   }
-  return loom_op_operands(access.op)[operand_index];
+  if (!loom_op_vtable_has_segmented_operands(access.op_vtable)) {
+    if (operand_field_index >= access.op->operand_count) {
+      return LOOM_VALUE_ID_INVALID;
+    }
+    return loom_op_operands(access.op)[operand_field_index];
+  }
+  loom_value_slice_t span = loom_op_operand_field_span(
+      access.op_vtable, access.op, operand_field_index);
+  return span.count == 1 ? span.values[0] : LOOM_VALUE_ID_INVALID;
 }
 
 static loom_attribute_t loom_memory_access_attr(loom_memory_access_t access,
                                                 uint8_t attr_index) {
-  if (!access.vtable || attr_index == LOOM_ATTR_INDEX_NONE ||
+  if (!access.op || !loom_memory_access_vtable(access) ||
+      attr_index == LOOM_ATTR_INDEX_NONE ||
       attr_index >= access.op->attribute_count) {
     return loom_attr_absent();
   }
@@ -1338,112 +1490,127 @@ static loom_attribute_t loom_memory_access_attr(loom_memory_access_t access,
 }
 
 loom_value_id_t loom_memory_access_view(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_operand(
-      access, access.vtable ? access.vtable->view_operand_index
-                            : LOOM_OPERAND_INDEX_NONE);
+      access, vtable ? vtable->view_operand_index : LOOM_OPERAND_INDEX_NONE);
 }
 
 loom_value_id_t loom_memory_access_value(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_operand(
-      access, access.vtable ? access.vtable->value_operand_index
-                            : LOOM_OPERAND_INDEX_NONE);
+      access, vtable ? vtable->value_operand_index : LOOM_OPERAND_INDEX_NONE);
 }
 
 loom_value_id_t loom_memory_access_expected(loom_memory_access_t access) {
-  return loom_memory_access_operand(
-      access, access.vtable ? access.vtable->expected_operand_index
-                            : LOOM_OPERAND_INDEX_NONE);
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
+  return loom_memory_access_operand(access, vtable
+                                                ? vtable->expected_operand_index
+                                                : LOOM_OPERAND_INDEX_NONE);
 }
 
 loom_value_id_t loom_memory_access_replacement(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_operand(
-      access, access.vtable ? access.vtable->replacement_operand_index
-                            : LOOM_OPERAND_INDEX_NONE);
+      access,
+      vtable ? vtable->replacement_operand_index : LOOM_OPERAND_INDEX_NONE);
 }
 
 loom_value_id_t loom_memory_access_mask(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_operand(
-      access, access.vtable ? access.vtable->mask_operand_index
-                            : LOOM_OPERAND_INDEX_NONE);
+      access, vtable ? vtable->mask_operand_index : LOOM_OPERAND_INDEX_NONE);
 }
 
 loom_value_id_t loom_memory_access_passthrough(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_operand(
-      access, access.vtable ? access.vtable->passthrough_operand_index
-                            : LOOM_OPERAND_INDEX_NONE);
+      access,
+      vtable ? vtable->passthrough_operand_index : LOOM_OPERAND_INDEX_NONE);
 }
 
 loom_value_id_t loom_memory_access_offsets(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_operand(
-      access, access.vtable ? access.vtable->offsets_operand_index
-                            : LOOM_OPERAND_INDEX_NONE);
+      access, vtable ? vtable->offsets_operand_index : LOOM_OPERAND_INDEX_NONE);
 }
 
 loom_value_slice_t loom_memory_access_dynamic_indices(
     loom_memory_access_t access) {
-  if (!access.vtable ||
-      access.vtable->indices_operand_offset == LOOM_OPERAND_INDEX_NONE ||
-      access.vtable->indices_operand_offset >= access.op->operand_count) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
+  if (!access.op || !access.op_vtable || !vtable ||
+      vtable->indices_operand_field_index == LOOM_OPERAND_INDEX_NONE) {
     return (loom_value_slice_t){.values = NULL, .count = 0};
   }
-  uint8_t offset = access.vtable->indices_operand_offset;
-  return (loom_value_slice_t){
-      .values = loom_op_operands(access.op) + offset,
-      .count = (uint16_t)(access.op->operand_count - offset),
-  };
+  if (!loom_op_vtable_has_segmented_operands(access.op_vtable)) {
+    uint8_t offset = vtable->indices_operand_field_index;
+    if (offset > access.op->operand_count) {
+      return (loom_value_slice_t){.values = NULL, .count = 0};
+    }
+    return (loom_value_slice_t){
+        .values = loom_op_operands(access.op) + offset,
+        .count = (uint16_t)(access.op->operand_count - offset),
+    };
+  }
+  return loom_op_operand_field_span(access.op_vtable, access.op,
+                                    vtable->indices_operand_field_index);
 }
 
 loom_attribute_t loom_memory_access_static_indices(
     loom_memory_access_t access) {
-  return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->static_indices_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
+  return loom_memory_access_attr(access, vtable
+                                             ? vtable->static_indices_attr_index
+                                             : LOOM_ATTR_INDEX_NONE);
 }
 
 loom_attribute_t loom_memory_access_cache_scope(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->cache_scope_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+      access, vtable ? vtable->cache_scope_attr_index : LOOM_ATTR_INDEX_NONE);
 }
 
 loom_attribute_t loom_memory_access_cache_temporal(
     loom_memory_access_t access) {
-  return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->cache_temporal_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
+  return loom_memory_access_attr(access, vtable
+                                             ? vtable->cache_temporal_attr_index
+                                             : LOOM_ATTR_INDEX_NONE);
 }
 
 loom_attribute_t loom_memory_access_atomic_kind(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->atomic_kind_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+      access, vtable ? vtable->atomic_kind_attr_index : LOOM_ATTR_INDEX_NONE);
 }
 
 loom_attribute_t loom_memory_access_atomic_ordering(
     loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->atomic_ordering_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+      access,
+      vtable ? vtable->atomic_ordering_attr_index : LOOM_ATTR_INDEX_NONE);
 }
 
 loom_attribute_t loom_memory_access_atomic_success_ordering(
     loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->atomic_success_ordering_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+      access, vtable ? vtable->atomic_success_ordering_attr_index
+                     : LOOM_ATTR_INDEX_NONE);
 }
 
 loom_attribute_t loom_memory_access_atomic_failure_ordering(
     loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->atomic_failure_ordering_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+      access, vtable ? vtable->atomic_failure_ordering_attr_index
+                     : LOOM_ATTR_INDEX_NONE);
 }
 
 loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->atomic_scope_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+      access, vtable ? vtable->atomic_scope_attr_index : LOOM_ATTR_INDEX_NONE);
 }
 
 //===----------------------------------------------------------------------===//
@@ -2094,12 +2261,13 @@ iree_status_t loom_op_remove_results(loom_module_t* module, loom_op_t* op,
     loom_value_id_t result = results[i];
     if (remove_results[i]) {
       loom_module_drop_value_type_uses(module, result);
-      module->values.entries[result].def = loom_value_def_make_none();
+      loom_module_value(module, result)->def = loom_value_def_make_none();
       continue;
     }
     uint16_t new_index = result_map[i];
     results[new_index] = result;
-    module->values.entries[result].def = loom_value_def_make_op(op, new_index);
+    loom_module_value(module, result)->def =
+        loom_value_def_make_op(op, new_index);
   }
 
   op->result_count = kept_count;
@@ -2131,13 +2299,13 @@ static iree_status_t loom_op_verify_erase_preconditions(loom_module_t* module,
   loom_value_id_t* results = loom_op_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (results[i] != LOOM_VALUE_ID_INVALID &&
-        module->values.entries[results[i]].use_count > 0) {
+        loom_module_value(module, results[i])->use_count > 0) {
       iree_string_view_t op_name = loom_op_name(module, op);
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
           "cannot erase %.*s: result %%%u still has %u use(s)",
           (int)op_name.size, op_name.data, (unsigned)results[i],
-          (unsigned)module->values.entries[results[i]].use_count);
+          (unsigned)loom_module_value(module, results[i])->use_count);
     }
     if (results[i] != LOOM_VALUE_ID_INVALID &&
         loom_value_has_type_uses_outside_op(module, results[i], op)) {
@@ -2227,7 +2395,7 @@ static iree_status_t loom_op_erase_subtree(loom_module_t* module, loom_op_t* op,
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (results[i] != LOOM_VALUE_ID_INVALID) {
       loom_module_drop_value_type_uses(module, results[i]);
-      module->values.entries[results[i]].def = loom_value_def_make_none();
+      loom_module_value(module, results[i])->def = loom_value_def_make_none();
     }
   }
   loom_module_unlink_symbol_defining_op(module, op, loom_op_vtable(module, op));
@@ -2346,9 +2514,8 @@ static iree_status_t loom_region_remove_verify_value_uses(
     }
   }
 
-  if (value_id >= module->type_uses.value_capacity) return iree_ok_status();
   loom_type_use_id_t use_id =
-      module->type_uses.value_heads[value_id].first_incoming_use_id;
+      loom_module_value_first_incoming_type_use(module, value_id);
   while (use_id != LOOM_TYPE_USE_ID_INVALID) {
     const loom_type_use_t* type_use = &module->type_uses.records[use_id];
     if (!loom_region_remove_value_is_removed(module, region, remove_blocks,
@@ -2546,7 +2713,8 @@ static iree_status_t loom_module_note_attribute_type_value_ref(
     loom_value_id_t value_id, void* user_data) {
   loom_module_t* module = (loom_module_t*)user_data;
   if (value_id < module->values.count) {
-    module->values.entries[value_id].flags |= LOOM_VALUE_FLAG_ATTRIBUTE_USES;
+    loom_module_value(module, value_id)->flags |=
+        LOOM_VALUE_FLAG_ATTRIBUTE_USES;
   }
   return iree_ok_status();
 }
@@ -2554,7 +2722,8 @@ static iree_status_t loom_module_note_attribute_type_value_ref(
 static void loom_module_note_attribute_value_ref(loom_module_t* module,
                                                  loom_value_id_t value_id) {
   if (value_id < module->values.count) {
-    module->values.entries[value_id].flags |= LOOM_VALUE_FLAG_ATTRIBUTE_USES;
+    loom_module_value(module, value_id)->flags |=
+        LOOM_VALUE_FLAG_ATTRIBUTE_USES;
   }
 }
 
@@ -2633,7 +2802,7 @@ iree_status_t loom_module_note_op_attribute_value_refs(loom_module_t* module,
 iree_status_t loom_value_add_use(loom_module_t* module,
                                  loom_value_id_t value_id, loom_op_t* user_op,
                                  uint16_t operand_index) {
-  loom_value_t* value = &module->values.entries[value_id];
+  loom_value_t* value = loom_module_value(module, value_id);
   if (value->use_count >= LOOM_VALUE_MAX_USE_COUNT) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED, "value %%%u has too many uses (%u max)",
@@ -2704,7 +2873,7 @@ iree_status_t loom_value_remove_use(loom_module_t* module,
                                     loom_value_id_t value_id,
                                     loom_op_t* user_op,
                                     uint16_t operand_index) {
-  loom_value_t* value = &module->values.entries[value_id];
+  loom_value_t* value = loom_module_value(module, value_id);
   loom_use_index_t* operand_use_indices = loom_op_operand_use_indices(user_op);
   loom_use_index_t use_index = operand_use_indices[operand_index];
   loom_use_t* uses = loom_value_uses_mutable(value);
@@ -2796,7 +2965,7 @@ iree_status_t loom_builder_finalize_op(loom_builder_t* builder, loom_op_t* op) {
   loom_value_id_t* results = loom_op_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (results[i] != LOOM_VALUE_ID_INVALID) {
-      builder->module->values.entries[results[i]].def =
+      loom_module_value(builder->module, results[i])->def =
           loom_value_def_make_op(op, i);
     }
   }
@@ -3118,11 +3287,11 @@ iree_status_t loom_value_replace_all_uses_with(loom_module_t* module,
                                                loom_value_id_t old_id,
                                                loom_value_id_t new_id) {
   if (old_id == new_id) return iree_ok_status();
-  loom_value_t* old_value = &module->values.entries[old_id];
+  loom_value_t* old_value = loom_module_value(module, old_id);
   uint32_t old_use_count = old_value->use_count;
   const bool old_has_attribute_uses = loom_value_has_attribute_uses(old_value);
 
-  loom_value_t* new_value = &module->values.entries[new_id];
+  loom_value_t* new_value = loom_module_value(module, new_id);
   IREE_RETURN_IF_ERROR(
       loom_value_ensure_use_capacity(module, new_value, old_use_count));
 
@@ -3170,7 +3339,7 @@ iree_status_t loom_value_replace_all_uses_except(loom_module_t* module,
                                                  loom_value_id_t new_id,
                                                  const loom_op_t* except_op) {
   if (old_id == new_id) return iree_ok_status();
-  loom_value_t* old_value = &module->values.entries[old_id];
+  loom_value_t* old_value = loom_module_value(module, old_id);
   if (old_value->use_count == 0) return iree_ok_status();
 
   // Count how many uses will be transferred vs kept.
@@ -3184,7 +3353,7 @@ iree_status_t loom_value_replace_all_uses_except(loom_module_t* module,
   if (transfer_count == 0) return iree_ok_status();
 
   // Ensure new has capacity.
-  loom_value_t* new_value = &module->values.entries[new_id];
+  loom_value_t* new_value = loom_module_value(module, new_id);
   IREE_RETURN_IF_ERROR(
       loom_value_ensure_use_capacity(module, new_value, transfer_count));
 
@@ -3228,7 +3397,7 @@ iree_status_t loom_value_replace_uses_if(loom_module_t* module,
                                          loom_use_predicate_fn predicate,
                                          void* user_data) {
   if (old_id == new_id) return iree_ok_status();
-  loom_value_t* old_value = &module->values.entries[old_id];
+  loom_value_t* old_value = loom_module_value(module, old_id);
   if (old_value->use_count == 0) return iree_ok_status();
 
   // Count how many uses will be transferred.
@@ -3242,7 +3411,7 @@ iree_status_t loom_value_replace_uses_if(loom_module_t* module,
   if (transfer_count == 0) return iree_ok_status();
 
   // Ensure new has capacity.
-  loom_value_t* new_value = &module->values.entries[new_id];
+  loom_value_t* new_value = loom_module_value(module, new_id);
   IREE_RETURN_IF_ERROR(
       loom_value_ensure_use_capacity(module, new_value, transfer_count));
 
@@ -3307,7 +3476,7 @@ static iree_status_t loom_region_compute_uses(loom_module_t* module,
     for (uint16_t a = 0; a < block->arg_count; ++a) {
       loom_value_id_t arg_id = loom_block_arg_id(block, a);
       if (arg_id != LOOM_VALUE_ID_INVALID) {
-        module->values.entries[arg_id].def =
+        loom_module_value(module, arg_id)->def =
             loom_value_def_make_block(block, a);
       }
     }
@@ -3330,7 +3499,7 @@ static iree_status_t loom_region_compute_uses(loom_module_t* module,
       loom_value_id_t* results = loom_op_results(op);
       for (uint16_t i = 0; i < op->result_count; ++i) {
         if (results[i] != LOOM_VALUE_ID_INVALID) {
-          module->values.entries[results[i]].def =
+          loom_module_value(module, results[i])->def =
               loom_value_def_make_op(op, i);
         }
       }
@@ -3357,7 +3526,7 @@ iree_status_t loom_module_compute_uses(loom_module_t* module) {
   loom_region_reset_effect_summaries(module->body);
   // Clear all use and def data on every value.
   for (iree_host_size_t i = 0; i < module->values.count; ++i) {
-    loom_value_t* value = &module->values.entries[i];
+    loom_value_t* value = loom_module_value(module, (loom_value_id_t)i);
     value->use_count = 0;
     value->flags &=
         ~(LOOM_VALUE_FLAG_OVERFLOW_USES | LOOM_VALUE_FLAG_ATTRIBUTE_USES);

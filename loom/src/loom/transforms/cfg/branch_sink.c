@@ -162,9 +162,8 @@ static bool loom_branch_sink_value_uses_target_one_region(
     }
   }
 
-  if (value_id >= module->type_uses.value_capacity) return true;
   loom_type_use_id_t use_id =
-      module->type_uses.value_heads[value_id].first_incoming_use_id;
+      loom_module_value_first_incoming_type_use(module, value_id);
   while (use_id != LOOM_TYPE_USE_ID_INVALID) {
     const loom_type_use_t* type_use = &module->type_uses.records[use_id];
     if (type_use->user_value_id >= module->values.count) return false;
@@ -222,9 +221,8 @@ static bool loom_branch_sink_value_uses_only_op(const loom_module_t* module,
     *has_use = true;
   }
 
-  if (value_id >= module->type_uses.value_capacity) return true;
   loom_type_use_id_t use_id =
-      module->type_uses.value_heads[value_id].first_incoming_use_id;
+      loom_module_value_first_incoming_type_use(module, value_id);
   while (use_id != LOOM_TYPE_USE_ID_INVALID) {
     const loom_type_use_t* type_use = &module->type_uses.records[use_id];
     if (type_use->user_value_id >= module->values.count) return false;
@@ -446,8 +444,9 @@ iree_status_t loom_branch_sink_run(loom_pass_t* pass, loom_module_t* module,
   iree_status_t status = loom_branch_sink_region_stack_initialize(
       pass->arena, &context.region_stack);
   if (iree_status_is_ok(status)) {
-    status =
-        loom_motion_analysis_initialize(module, pass->arena, &context.motion);
+    status = loom_motion_analysis_initialize(module, /*fact_table=*/NULL,
+                                             /*value_domain=*/NULL, pass->arena,
+                                             &context.motion);
   }
 
   bool changed = true;

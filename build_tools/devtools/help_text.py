@@ -599,6 +599,8 @@ maps to `cmake --build ... --target TARGET`.
 
 ```bash
 iree-cmake-configure
+iree-cmake-configure --fresh
+iree-cmake-configure --fresh -GNinja
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF
@@ -874,7 +876,10 @@ iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF
 
 The first configure uses `build/cmake` unless `--cmake-build-dir` or
 `IREE_CMAKE_BUILD_DIR` selects another tree. The selected tree is recorded for
-later CMake wrappers."""
+later CMake wrappers. `--fresh` preserves the configured generator unless `-G`
+selects another one. Switching generators removes the complete build tree first
+so nested CMake and FetchContent subbuilds cannot retain mixed generator state.
+Recursive cleanup is limited to build trees owned by this checkout."""
 
     if command == "build":
         return """## iree-cmake-build

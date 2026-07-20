@@ -50,7 +50,8 @@ static bool hip_registered_ =
          "hip",
          {"hip",
           CreateHipDevice,
-          /*executable_format=*/nullptr,
+          /*executable_target_family=*/nullptr,
+          /*executable_target_key=*/nullptr,
           /*executable_data=*/nullptr,
           RecordingMode::kDirect,
           /*unsupported_tests=*/

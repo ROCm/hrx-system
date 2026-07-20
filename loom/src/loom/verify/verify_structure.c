@@ -127,6 +127,11 @@ static bool loom_verify_trait_conflict(loom_trait_flags_t traits,
     *out_trait_b = IREE_SV("UNKNOWN_EFFECTS");
     return true;
   }
+  if (iree_all_bits_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_MEMORY_FENCE)) {
+    *out_trait_a = IREE_SV("HINT");
+    *out_trait_b = IREE_SV("MEMORY_FENCE");
+    return true;
+  }
   if (iree_all_bits_set(traits,
                         LOOM_TRAIT_HINT | LOOM_TRAIT_NON_DETERMINISTIC)) {
     *out_trait_a = IREE_SV("HINT");
@@ -157,6 +162,11 @@ static bool loom_verify_trait_conflict(loom_trait_flags_t traits,
   if (iree_all_bits_set(traits, LOOM_TRAIT_PURE | LOOM_TRAIT_UNKNOWN_EFFECTS)) {
     *out_trait_a = IREE_SV("PURE");
     *out_trait_b = IREE_SV("UNKNOWN_EFFECTS");
+    return true;
+  }
+  if (iree_all_bits_set(traits, LOOM_TRAIT_PURE | LOOM_TRAIT_MEMORY_FENCE)) {
+    *out_trait_a = IREE_SV("PURE");
+    *out_trait_b = IREE_SV("MEMORY_FENCE");
     return true;
   }
   if (iree_all_bits_set(traits, LOOM_TRAIT_PURE | LOOM_TRAIT_UNIQUE_IDENTITY)) {
@@ -190,6 +200,12 @@ static bool loom_verify_trait_conflict(loom_trait_flags_t traits,
           traits, LOOM_TRAIT_SAFE_TO_SPECULATE | LOOM_TRAIT_UNKNOWN_EFFECTS)) {
     *out_trait_a = IREE_SV("SAFE_TO_SPECULATE");
     *out_trait_b = IREE_SV("UNKNOWN_EFFECTS");
+    return true;
+  }
+  if (iree_all_bits_set(
+          traits, LOOM_TRAIT_SAFE_TO_SPECULATE | LOOM_TRAIT_MEMORY_FENCE)) {
+    *out_trait_a = IREE_SV("SAFE_TO_SPECULATE");
+    *out_trait_b = IREE_SV("MEMORY_FENCE");
     return true;
   }
   if (iree_all_bits_set(traits, LOOM_TRAIT_SAFE_TO_SPECULATE |
@@ -283,6 +299,24 @@ static const loom_op_t* loom_verify_find_ancestor(const loom_op_t* op,
   return NULL;
 }
 
+static bool loom_verify_has_deferred_template_ancestor(
+    const loom_verify_state_t* state, const loom_op_t* op) {
+  const loom_op_t* parent = op->parent_op;
+  while (parent) {
+    const loom_op_vtable_t* parent_vtable =
+        loom_context_resolve_op(state->module->context, parent->kind);
+    if (parent_vtable &&
+        parent_vtable->symbol_kind == LOOM_SYMBOL_FUNC_TEMPLATE) {
+      return true;
+    }
+    if (parent_vtable && loom_traits_is_isolated(parent_vtable->traits)) {
+      return false;
+    }
+    parent = parent->parent_op;
+  }
+  return false;
+}
+
 static void loom_verify_emit_placement_diagnostic(
     loom_verify_state_t* state, const loom_op_t* op,
     const loom_op_vtable_t* vtable, iree_string_view_t constraint_kind,
@@ -312,6 +346,12 @@ void loom_verify_op_placement(loom_verify_state_t* state, const loom_op_t* op,
   for (uint8_t i = 0; i < placement->required_ancestor_count; ++i) {
     loom_op_kind_t ancestor_kind = placement->required_ancestors[i];
     if (loom_verify_find_ancestor(op, ancestor_kind)) continue;
+    // Template bodies are verified before their application context is known.
+    // Provider selection checks deferred ancestor requirements at each apply
+    // site before materializing the body.
+    if (loom_verify_has_deferred_template_ancestor(state, op)) {
+      continue;
+    }
     loom_verify_emit_placement_diagnostic(
         state, op, vtable, IREE_SV("required"), ancestor_kind,
         loom_verify_parent_context_name(state, op));
@@ -1018,7 +1058,7 @@ static bool loom_verify_op_result_contains_value(const loom_op_t* op,
 static bool loom_verify_value_is_named_placeholder(
     const loom_verify_state_t* state, loom_value_id_t value_id) {
   if (value_id >= state->module->values.count) return false;
-  const loom_value_t* value = &state->module->values.entries[value_id];
+  const loom_value_t* value = loom_module_value(state->module, value_id);
   if (loom_value_is_block_arg(value)) return false;
   return value->name_id != LOOM_STRING_ID_INVALID &&
          loom_def_op(value->def) == NULL;

@@ -1,0 +1,33 @@
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) export("two_live_wmma_accumulators") @two_live_wmma_accumulators() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 32 : index
+  %rhs_layout = encoding.layout.strided [1, 32] : encoding<layout>
+  %output_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<16x32xbf16, #dense>
+  %weight_view = buffer.view %weight[%base] : buffer -> view<32x32xbf16, %rhs_layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<16x32xf32, %output_layout>
+  %zero_values = vector.constant 0.0 : vector<8xf32>
+  %init0 = vector.fragment<init> %zero_values shape [%m, %n] : vector<8xf32>
+  %init1 = vector.fragment<init> %zero_values shape [%m, %n] : vector<8xf32>
+  %result0, %result1 = scf.for %iteration = [%zero to %one step %one](%acc0 = %init0 : vector<8xf32>, %acc1 = %init1 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) {
+    %lhs = vector.fragment.load<lhs> %input_view[0, 0] shape [%m, %k] : view<16x32xbf16, #dense> -> vector<16xbf16>
+    %rhs0 = vector.fragment.load<rhs> %weight_view[0, 0] shape [%k, %n] : view<32x32xbf16, %rhs_layout> -> vector<16xbf16>
+    %rhs1 = vector.fragment.load<rhs> %weight_view[0, 16] shape [%k, %n] : view<32x32xbf16, %rhs_layout> -> vector<16xbf16>
+    %next0 = vector.mma %lhs, %rhs0, %acc0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next1 = vector.mma %lhs, %rhs1, %acc1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next0, %next1 : vector<8xf32>, vector<8xf32>
+  }
+  vector.fragment.store<result> %result0, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x32xf32, %output_layout>
+  vector.fragment.store<result> %result1, %output_view[0, 16] shape [%m, %n] : vector<8xf32>, view<16x32xf32, %output_layout>
+  kernel.return
+}

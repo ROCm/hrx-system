@@ -25,14 +25,25 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
+    target_records_tables
+  TEXTUAL_HDRS
+    "target_records_tables.inl"
+  DEPS
+
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
     target_records
   HDRS
     "target_records.h"
-  TEXTUAL_HDRS
-    "target_records_tables.inl"
   SRCS
     "target_records.c"
   DEPS
+    ::target_records_tables
     iree::base
     loom::target::arch::amdgpu::target_info
     loom::target::types

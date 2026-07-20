@@ -61,6 +61,8 @@ typedef struct loom_low_allocation_storage_lease_state_t {
   loom_low_storage_release_action_t* release_actions;
   // Storage-lease record heads indexed by allocation-local value ordinal.
   uint32_t* record_heads_by_value_ordinal;
+  // Defining schedule node indexed by allocation-local value ordinal.
+  uint32_t* defining_node_indices_by_value_ordinal;
   // Next storage-lease record index for the same allocation-local value.
   uint32_t* next_record_indices;
   // True when the storage-lease record has a materialized instance.

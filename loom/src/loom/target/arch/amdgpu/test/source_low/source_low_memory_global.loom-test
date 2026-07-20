@@ -827,15 +827,14 @@ low.func.def target(@target) abi(hal_kernel) @descriptor_dynamic_projected_base_
   %13 = v_mov_b32 0
   %14 = s_mov_b32 16
   %15 = s_add_u32 %base, %14
-  %16 = s_add_u32_rhs_inline %15, 4
-  %19 = slice %input_refined[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %20 = slice %input_refined[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %21 = s_mov_b32 65535
-  %22 = s_and_b32 %20, %21
-  %23 = concat(%19, %22) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %24 = s_mov_b32 822243328
-  %25 = concat(%23, %16, %24) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %loaded = buffer_load_dword %25, %13, %base {offset = 12}
+  %18 = slice %input_refined[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %19 = slice %input_refined[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %20 = s_mov_b32 65535
+  %21 = s_and_b32 %19, %20
+  %22 = concat(%18, %21) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %23 = s_mov_b32 822243328
+  %24 = concat(%22, %15, %23) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %loaded = buffer_load_dword %24, %13, %base {offset = 12}
   return %loaded
 }
 
@@ -1061,7 +1060,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_readonly_uniform_smem() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(16, 1, 1) @i32_readonly_uniform_smem() asm<amdgpu.rdna3.core> {
   %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
@@ -1107,7 +1106,7 @@ kernel.def target(@target) @f32x4_readonly_uniform_smem_copy() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @f32x4_readonly_uniform_smem_copy() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(16, 1, 1) @f32x4_readonly_uniform_smem_copy() asm<amdgpu.rdna3.core> {
   %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 280} : reg<amdgpu.sgpr x2>
@@ -1161,7 +1160,7 @@ kernel.def target(@target) @f32x8_readonly_uniform_smem_copy() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @f32x8_readonly_uniform_smem_copy() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(16, 1, 1) @f32x8_readonly_uniform_smem_copy() asm<amdgpu.rdna3.core> {
   %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 544} : reg<amdgpu.sgpr x2>
@@ -1224,7 +1223,7 @@ kernel.def target(@target) @i32_workgroup_global_saddr() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_workgroup_global_saddr() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(16, 1, 1) @i32_workgroup_global_saddr() asm<amdgpu.rdna3.core> {
   %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %column = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 2048} : reg<amdgpu.sgpr x2>
@@ -1270,7 +1269,7 @@ kernel.def target(@target) @i32_zero_workgroup_saddr_term() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_zero_workgroup_saddr_term() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_zero_workgroup_saddr_term() asm<amdgpu.rdna3.core> {
   %column = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -1302,7 +1301,7 @@ kernel.def target(@target) @i32_dynamic_leading_dim_global_saddr() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @i32_dynamic_leading_dim_global_saddr(%columns: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(2, 1, 1) @i32_dynamic_leading_dim_global_saddr(%columns: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %column = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
@@ -1349,7 +1348,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_non_power_two_stride() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_readonly_uniform_smem_non_power_two_stride() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(2, 1, 1) @i32_readonly_uniform_smem_non_power_two_stride() asm<amdgpu.rdna3.core> {
   %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 24} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
@@ -1397,7 +1396,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_scalar_branch() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_readonly_uniform_smem_scalar_branch() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(16, 1, 1) @i32_readonly_uniform_smem_scalar_branch() asm<amdgpu.rdna3.core> {
   %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
@@ -1449,7 +1448,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_loop_bound() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_readonly_uniform_smem_loop_bound() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_readonly_uniform_smem_loop_bound() asm<amdgpu.rdna3.core> {
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %input_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -1498,7 +1497,7 @@ kernel.def target(@target) @f32_readonly_uniform_smem_vector_math() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_readonly_uniform_smem_vector_math() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_readonly_uniform_smem_vector_math() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %input_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -1543,7 +1542,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_address() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_readonly_uniform_smem_address() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_readonly_uniform_smem_address() asm<amdgpu.rdna3.core> {
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %15 = s_mov_b32 0
@@ -1583,7 +1582,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_guarded_index_address() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_readonly_uniform_smem_guarded_index_address() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_readonly_uniform_smem_guarded_index_address() asm<amdgpu.rdna3.core> {
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %16 = v_mov_b32 0
@@ -1629,7 +1628,7 @@ kernel.def target(@target) @i64_readonly_uniform_smem_guarded_index_address() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i64_readonly_uniform_smem_guarded_index_address() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i64_readonly_uniform_smem_guarded_index_address() asm<amdgpu.rdna3.core> {
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %17 = v_mov_b32 0
@@ -1685,7 +1684,7 @@ kernel.def target(@target) @i32_b128() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_b128() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_b128() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -1729,32 +1728,32 @@ kernel.def target(@target) @f32x8_split_b128() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32x8_split_b128() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32x8_split_b128() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 2048} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 2048} : reg<amdgpu.sgpr x2>
   %42 = v_lshlrev_b32_src0_inline %lane, 5
   %43 = global_load_b128_saddr %42, %input_view
-  %45 = global_load_b128_saddr %42, %input_view {offset = 16}
-  %46 = slice %43[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %44 = slice %43[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %45 = v_add_f32_src0_inline %44, 1073741824
+  %46 = slice %43[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %47 = v_add_f32_src0_inline %46, 1073741824
-  %48 = slice %43[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %48 = slice %43[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %49 = v_add_f32_src0_inline %48, 1073741824
-  %50 = slice %43[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %50 = slice %43[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %51 = v_add_f32_src0_inline %50, 1073741824
-  %52 = slice %43[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %53 = v_add_f32_src0_inline %52, 1073741824
-  %54 = concat(%47, %49, %51, %53) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %55 = slice %45[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %52 = concat(%45, %47, %49, %51) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %54 = global_load_b128_saddr %42, %input_view {offset = 16}
+  %55 = slice %54[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %56 = v_add_f32_src0_inline %55, 1073741824
-  %57 = slice %45[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %57 = slice %54[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %58 = v_add_f32_src0_inline %57, 1073741824
-  %59 = slice %45[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %59 = slice %54[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %60 = v_add_f32_src0_inline %59, 1073741824
-  %61 = slice %45[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %61 = slice %54[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %62 = v_add_f32_src0_inline %61, 1073741824
   %63 = concat(%56, %58, %60, %62) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %42, %54, %output_view
+  global_store_b128_saddr %42, %52, %output_view
   global_store_b128_saddr %42, %63, %output_view {offset = 16}
   return
 }
@@ -1779,7 +1778,7 @@ kernel.def target(@target) @i32_scalar_2d_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 1) @i32_scalar_2d_store() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @i32_scalar_2d_store() asm<amdgpu.rdna3.core> {
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
@@ -1813,7 +1812,7 @@ kernel.def target(@target) @i32_view_scalar_2d_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 1) @i32_view_scalar_2d_store() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @i32_view_scalar_2d_store() asm<amdgpu.rdna3.core> {
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
@@ -1846,7 +1845,7 @@ kernel.def target(@target) @i32_dynamic_constant_index() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_dynamic_constant_index() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_dynamic_constant_index() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -1874,7 +1873,7 @@ kernel.def target(@target) @i32_scalar_arg_index() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_scalar_arg_index(%column: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_scalar_arg_index(%column: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
   %13 = v_mov_b32 0
@@ -1914,7 +1913,7 @@ kernel.def target(@target) @i32_dynamic_view_base() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_dynamic_view_base(%base: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_dynamic_view_base(%base: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %13 = v_mov_b32 0
@@ -1948,7 +1947,7 @@ kernel.def target(@target) @i32_dynamic_view_base_loaded() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_dynamic_view_base_loaded() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_dynamic_view_base_loaded() asm<amdgpu.rdna3.core> {
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %12 = v_mov_b32 0
@@ -1976,7 +1975,7 @@ kernel.def target(@target) @i32x4_dynamic_view_base_b128() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32x4_dynamic_view_base_b128(%base: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32x4_dynamic_view_base_b128(%base: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %13 = v_mov_b32 0
@@ -2018,7 +2017,7 @@ kernel.def target(@target) @f32x4_dynamic_view_base_flat() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(256, 1, 1) @f32x4_dynamic_view_base_flat(%input_base: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(256, 1, 1) workgroup_count(1, 1, 1) @f32x4_dynamic_view_base_flat(%input_base: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4096} : reg<amdgpu.sgpr x2>
@@ -2062,7 +2061,7 @@ kernel.def target(@target) @f16_view_scalar() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @f16_view_scalar(%column: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f16_view_scalar(%column: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %15 = v_mov_b32 0
@@ -2107,7 +2106,7 @@ kernel.def target(@target) @bf16_view_scalar() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @bf16_view_scalar(%column: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @bf16_view_scalar(%column: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %15 = v_mov_b32 0
@@ -2149,7 +2148,7 @@ kernel.def target(@target) @f16x2_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f16x2_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f16x2_b32() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -2177,7 +2176,7 @@ kernel.def target(@target) @f16x4_b64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f16x4_b64() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f16x4_b64() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -2205,7 +2204,7 @@ kernel.def target(@target) @bf16x2_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @bf16x2_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf16x2_b32() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -2233,7 +2232,7 @@ kernel.def target(@target) @bf16x4_b64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @bf16x4_b64() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf16x4_b64() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -2304,7 +2303,7 @@ kernel.def target(@target) @i32_dynamic_flat_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_dynamic_flat_store(%row_count: reg<amdgpu.sgpr>, %row: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_dynamic_flat_store(%row_count: reg<amdgpu.sgpr>, %row: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %18 = v_mov_b32 0
@@ -2348,7 +2347,7 @@ kernel.def target(@target) @loaded_i32_row_stride_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_stride_store(%value: reg<amdgpu.sgpr>, %stride: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_stride_store(%value: reg<amdgpu.sgpr>, %stride: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %23 = v_mov_b32 0
@@ -2385,7 +2384,7 @@ kernel.def target(@target) @loaded_i64_row_stride_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i64_row_stride_store(%value: reg<amdgpu.sgpr>, %stride: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i64_row_stride_store(%value: reg<amdgpu.sgpr>, %stride: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %23 = v_mov_b32 0
@@ -2426,7 +2425,7 @@ kernel.def target(@target) @loaded_i64_row_stride_load() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i64_row_stride_load(%stride: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i64_row_stride_load(%stride: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
   %input_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -2464,7 +2463,7 @@ kernel.def target(@target) @loaded_i32_row_shift_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_shift_store(%value: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_shift_store(%value: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %20 = v_mov_b32 0
@@ -2501,7 +2500,7 @@ kernel.def target(@target) @loaded_i32_row_shift_load() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_shift_load(%element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_shift_load(%element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %input_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -2541,7 +2540,7 @@ kernel.def target(@target) @selected_i32_row_shift_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @selected_i32_row_shift_store(%value: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>, %condition_i32: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @selected_i32_row_shift_store(%value: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>, %condition_i32: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %27 = v_mov_b32 0
@@ -2577,7 +2576,7 @@ kernel.def target(@target) @loaded_i32_row_stride_f32_to_f16_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_stride_f32_to_f16_store(%value: reg<amdgpu.sgpr>, %stride: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_stride_f32_to_f16_store(%value: reg<amdgpu.sgpr>, %stride: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %24 = v_mov_b32 0
@@ -2618,7 +2617,7 @@ kernel.def target(@target) @loaded_i32_row_stride_f32_to_f16_bits_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_stride_f32_to_f16_bits_store(%value: reg<amdgpu.sgpr>, %stride: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_stride_f32_to_f16_bits_store(%value: reg<amdgpu.sgpr>, %stride: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %25 = v_mov_b32 0
@@ -2659,7 +2658,7 @@ kernel.def target(@target) @loaded_i32_row_stride_f32_to_bf16_bits_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_stride_f32_to_bf16_bits_store(%value: reg<amdgpu.sgpr>, %stride: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_stride_f32_to_bf16_bits_store(%value: reg<amdgpu.sgpr>, %stride: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %25 = v_mov_b32 0
@@ -2705,7 +2704,7 @@ kernel.def target(@target) @loaded_i32_row_stride_f16_to_f32_load() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_stride_f16_to_f32_load(%stride: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_stride_f16_to_f32_load(%stride: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %input_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -2747,7 +2746,7 @@ kernel.def target(@target) @wide_intermediate_narrowed_f16_index_madd_load() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @wide_intermediate_narrowed_f16_index_madd_load(%row: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_intermediate_narrowed_f16_index_madd_load(%row: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -2786,7 +2785,7 @@ kernel.def target(@target) @rank2_vector_tile_transpose() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(16, 1, 1) @rank2_vector_tile_transpose() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(16, 1, 1) workgroup_count(1, 1, 1) @rank2_vector_tile_transpose() asm<amdgpu.rdna3.core> {
   %block = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -2851,47 +2850,41 @@ kernel.def target(@target) @grid_stride_store_offset() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @grid_stride_store_offset(%byte_length: reg<amdgpu.sgpr x2>, %pattern: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @grid_stride_store_offset(%byte_length: reg<amdgpu.sgpr x2>, %pattern: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %target_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %step = s_mov_b32 64
   %value = v_mov_b32_copy %pattern
   %25 = v_mov_b32 0
-  %26 = concat(%lane, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   low.br ^_bb3
-^loop(%byte_offset: reg<amdgpu.vgpr x2>):
-  %27 = slice %byte_offset[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %28 = slice %byte_offset[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+^loop(%63: reg<amdgpu.vgpr>, %64: reg<amdgpu.vgpr>):
   %29 = slice %byte_length[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %30 = v_mov_b32_copy %29
   %31 = slice %byte_length[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %32 = v_mov_b32_copy %31
-  %33 = v_cmp_lt_u32 %28, %32
-  %34 = v_cmp_lt_u32 %27, %30
-  %35 = v_cmp_eq_i32 %28, %32
+  %33 = v_cmp_lt_u32 %64, %32
+  %34 = v_cmp_lt_u32 %63, %30
+  %35 = v_cmp_eq_i32 %64, %32
   %36 = s_and_b64 %35, %34
   %inside = s_or_b64 %33, %36
   %39, %40 = s_and_saveexec_b64 %inside
   low.cond_br %40, ^body, ^_bb4 : reg<amdgpu.scc>
 ^body:
-  %41 = slice %byte_offset[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %42 = slice %byte_offset[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %43 = slice %target_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %44 = slice %target_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %45, %46 = v_add_co_u32 %43, %41
+  %45, %46 = v_add_co_u32 %43, %63
   %47 = v_mov_b32_copy %44
-  %48, %49 = v_add_co_ci_u32 %47, %42, %46
+  %48, %49 = v_add_co_ci_u32 %47, %64, %46
   %50 = concat(%45, %48) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   global_store_b32_vaddr %50, %value
   %51 = v_mov_b32_copy %step
   %52 = v_mov_b32 0
-  %58, %59 = v_add_co_u32 %41, %51
-  %60, %61 = v_add_co_ci_u32 %42, %52, %59
-  %next = concat(%58, %60) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  low.br ^loop(%next: reg<amdgpu.vgpr x2>)
+  %58, %59 = v_add_co_u32 %63, %51
+  %60, %61 = v_add_co_ci_u32 %64, %52, %59
+  low.br ^loop(%58: reg<amdgpu.vgpr>, %60: reg<amdgpu.vgpr>)
 ^_bb3:
   %38 = s_mov_b64_exec_read
-  low.br ^loop(%26: reg<amdgpu.vgpr x2>)
+  low.br ^loop(%lane: reg<amdgpu.vgpr>, %25: reg<amdgpu.vgpr>)
 ^_bb4:
   s_mov_b64_exec %38
   return

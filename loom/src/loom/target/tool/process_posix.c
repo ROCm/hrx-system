@@ -28,11 +28,7 @@ typedef struct loom_tool_capture_file_t {
 } loom_tool_capture_file_t;
 
 static const char* loom_tool_temp_directory(void) {
-  const char* temp_directory = getenv("TEST_TMPDIR");
-  if (temp_directory != NULL && temp_directory[0] != '\0') {
-    return temp_directory;
-  }
-  temp_directory = getenv("TMPDIR");
+  const char* temp_directory = getenv("TMPDIR");
   if (temp_directory != NULL && temp_directory[0] != '\0') {
     return temp_directory;
   }

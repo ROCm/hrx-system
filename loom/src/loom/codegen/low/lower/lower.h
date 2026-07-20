@@ -379,11 +379,22 @@ typedef struct loom_low_lower_report_row_t {
   loom_low_lower_plan_id_t plan_id;
   // Stable target-owned key identifying the selected plan variant, if any.
   iree_string_view_t plan_key;
-  // First stable low descriptor id emitted by a table rule, or none for plans.
-  uint64_t descriptor_id;
+  // First low descriptor key emitted by this source op, if any.
+  iree_string_view_t descriptor_key;
+  // First low descriptor semantic tag emitted by this source op, if any.
+  iree_string_view_t descriptor_semantic_tag;
   // Number of low operations emitted for this source operation.
   uint32_t emitted_low_op_count;
+  // Exact source execution count plus one, or zero when unknown.
+  uint64_t execution_count_plus_one;
 } loom_low_lower_report_row_t;
+
+// Source execution count evidence is not statically known.
+#define LOOM_LOW_LOWER_REPORT_EXECUTION_COUNT_PLUS_ONE_UNKNOWN 0u
+
+// Source memory packet execution count evidence is not statically known.
+#define LOOM_LOW_LOWER_MEMORY_REPORT_EXECUTION_COUNT_PLUS_ONE_UNKNOWN \
+  LOOM_LOW_LOWER_REPORT_EXECUTION_COUNT_PLUS_ONE_UNKNOWN
 
 // One emitted source-memory packet row captured for production diagnostics.
 typedef struct loom_low_lower_memory_report_row_t {
@@ -393,12 +404,18 @@ typedef struct loom_low_lower_memory_report_row_t {
   iree_string_view_t source_op_name;
   // Numeric source operation kind that emitted this memory packet.
   loom_op_kind_t source_op_kind;
+  // Named source memory root selected by value facts, if available.
+  iree_string_view_t source_root_name;
+  // Source function entry argument index for the memory root, or UINT16_MAX.
+  uint16_t source_root_argument_index;
   // Target-independent memory-space key selected by the target.
   iree_string_view_t memory_space;
   // Source memory operation kind selected by the target.
   iree_string_view_t operation_kind;
   // Stable target packet key selected for this emitted low operation.
   iree_string_view_t packet_key;
+  // Stable target-owned strategy key selected for this memory packet, if any.
+  iree_string_view_t strategy_key;
   // Stable target address-form key selected for this emitted low operation.
   iree_string_view_t address_form;
   // Stable target dynamic-term operand key for the source address.
@@ -411,6 +428,14 @@ typedef struct loom_low_lower_memory_report_row_t {
   uint32_t element_byte_count;
   // Number of source vector lanes moved by this packet.
   uint32_t vector_lane_count;
+  // Byte count read by the emitted target packet effect.
+  uint32_t issued_read_byte_count;
+  // Byte count written by the emitted target packet effect.
+  uint32_t issued_write_byte_count;
+  // Number of read effects without a known byte-aligned target width.
+  uint16_t issued_read_unknown_width_count;
+  // Number of write effects without a known byte-aligned target width.
+  uint16_t issued_write_unknown_width_count;
   // Byte stride between adjacent dynamic workitem terms, or zero when unknown.
   uint32_t dynamic_stride_bytes;
   // Byte stride between adjacent source vector lanes.
@@ -421,6 +446,28 @@ typedef struct loom_low_lower_memory_report_row_t {
   uint32_t bank_conflict_degree;
   // Stable target-owned bank-conflict classification key.
   iree_string_view_t bank_conflict_kind;
+  // Logical storage element format recovered from source encoding facts.
+  iree_string_view_t storage_element_format;
+  // Primary scale format recovered from source encoding facts.
+  iree_string_view_t storage_scale_format;
+  // Secondary scale format recovered from source encoding facts.
+  iree_string_view_t storage_secondary_scale_format;
+  // Physical payload packing recovered from source encoding facts.
+  iree_string_view_t storage_payload_packing;
+  // Scale topology recovered from source encoding facts.
+  iree_string_view_t storage_scale_topology;
+  // Affine payload interpretation recovered from source encoding facts.
+  iree_string_view_t storage_affine_policy;
+  // Rounding or finite-policy contract recovered from source encoding facts.
+  iree_string_view_t storage_rounding_policy;
+  // Codebook ownership contract recovered from source encoding facts.
+  iree_string_view_t storage_codebook_policy;
+  // Sparse metadata contract recovered from source encoding facts.
+  iree_string_view_t storage_sparsity_policy;
+  // Conservative source byte interval evidence for this memory packet.
+  loom_low_byte_interval_t source_interval;
+  // Exact source execution count plus one, or zero when unknown.
+  uint64_t execution_count_plus_one;
 } loom_low_lower_memory_report_row_t;
 
 // Linked storage block for homogeneous source-to-low report rows.
@@ -693,6 +740,19 @@ typedef struct loom_low_lower_options_t {
   iree_allocator_t report_allocator;
 } loom_low_lower_options_t;
 
+typedef uint32_t loom_low_lower_static_launch_config_flags_t;
+enum {
+  // No source launch-config facts were proven.
+  LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_NONE = 0u,
+  // |static_workgroup_size| was proven from the source launch config.
+  LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_SIZE = 1u << 0,
+  // |static_workgroup_count| was proven from the source launch config.
+  LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_COUNT = 1u << 1,
+  // |static_workgroup_cluster_size| was proven from a nontrivial source
+  // workgroup-cluster launch config.
+  LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_CLUSTER_SIZE = 1u << 2,
+};
+
 typedef struct loom_low_lower_result_t {
   // Number of error diagnostics emitted.
   uint32_t error_count;
@@ -709,6 +769,14 @@ typedef struct loom_low_lower_result_t {
   uint64_t selected_source_op_count;
   // Reported number of low operations emitted from source operation selections.
   uint64_t emitted_low_op_count;
+  // Static launch-config fact bits proven while the source kernel was alive.
+  loom_low_lower_static_launch_config_flags_t static_launch_config_flags;
+  // Proven workgroup size from the source kernel launch config.
+  loom_target_workgroup_size_t static_workgroup_size;
+  // Proven dispatch workgroup count from the source kernel launch config.
+  loom_target_dispatch_workgroup_count_t static_workgroup_count;
+  // Proven nontrivial workgroup-cluster size from the source launch config.
+  loom_target_workgroup_cluster_size_t static_workgroup_cluster_size;
   // Allocator used for owned source-low report rows.
   iree_allocator_t report_allocator;
   // Allocator used for owned source-memory packet report row storage.
@@ -825,6 +893,12 @@ loom_builder_t* loom_low_lower_context_builder(
 // Returns the source function being lowered.
 loom_func_like_t loom_low_lower_context_source_function(
     const loom_low_lower_context_t* context);
+
+// Returns the source function entry argument index for |source_plan|'s memory
+// root, or UINT16_MAX when the root is not an entry argument.
+uint16_t loom_low_lower_source_memory_root_argument_index(
+    const loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source_plan);
 
 // Returns the mapped ABI argument records for every source function argument.
 // Resource entries may not appear in the emitted low function signature; this
@@ -1131,23 +1205,37 @@ iree_status_t loom_low_lower_emit_resolved_descriptor_const(
     loom_named_attr_slice_t attrs, loom_type_t result_type,
     loom_location_id_t location, loom_op_t** out_op);
 
+typedef enum loom_low_lower_memory_access_record_bits_e {
+  // Attaches serializable precision to the low op so it remains available
+  // across pass and serialization boundaries.
+  LOOM_LOW_LOWER_MEMORY_ACCESS_RECORD_PRESERVE = 1u << 0,
+} loom_low_lower_memory_access_record_bits_t;
+typedef uint32_t loom_low_lower_memory_access_record_flags_t;
+
 // Records a source-derived memory summary for an emitted low memory packet.
-//
-// The row is copied into options.table_arena when provided. Calls are ignored
-// when the current lowering run has no table arena, preserving conservative
-// descriptor-only scheduling for callers that do not need source precision.
+// The row is copied into options.table_arena when provided. PRESERVE also
+// attaches the summary to the low op for later scheduling.
 iree_status_t loom_low_lower_record_memory_access_summary(
-    loom_low_lower_context_t* context, const loom_op_t* low_op,
-    const loom_low_memory_access_summary_t* summary);
+    loom_low_lower_context_t* context, loom_op_t* low_op,
+    const loom_low_memory_access_summary_t* summary,
+    loom_low_lower_memory_access_record_flags_t flags);
 
 // Records a source memory access plan for an emitted low memory packet.
 iree_status_t loom_low_lower_record_source_memory_access(
-    loom_low_lower_context_t* context, const loom_op_t* low_op,
-    const loom_low_source_memory_access_plan_t* source_plan);
+    loom_low_lower_context_t* context, loom_op_t* low_op,
+    const loom_low_source_memory_access_plan_t* source_plan,
+    loom_low_lower_memory_access_record_flags_t flags);
+
+// Populates row source interval evidence from |source_plan| and interns exact
+// symbolic interval endpoints when report-only accounting can prove them.
+iree_status_t loom_low_lower_memory_report_row_populate_source_interval(
+    loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source_plan,
+    loom_low_lower_memory_report_row_t* row);
 
 // Records an emitted source-memory packet report row.
 iree_status_t loom_low_lower_record_memory_report_row(
-    loom_low_lower_context_t* context,
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_memory_report_row_t* row);
 
 // Emits ERR_TARGET_033 for a source value type rejected by the active

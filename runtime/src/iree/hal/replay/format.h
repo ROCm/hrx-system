@@ -20,7 +20,7 @@ extern "C" {
 #define IREE_HAL_REPLAY_FILE_MAGIC 0x50525249u
 
 // Major version of the IREE HAL replay file format.
-#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 2u
+#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 3u
 
 // Minor version of the IREE HAL replay file format.
 #define IREE_HAL_REPLAY_FILE_VERSION_MINOR 0u
@@ -67,13 +67,12 @@ enum iree_hal_replay_object_type_e {
   IREE_HAL_REPLAY_OBJECT_TYPE_POOL = 3u,
   IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER = 4u,
   IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER = 5u,
-  IREE_HAL_REPLAY_OBJECT_TYPE_EXECUTABLE_CACHE = 6u,
-  IREE_HAL_REPLAY_OBJECT_TYPE_EXECUTABLE = 7u,
-  IREE_HAL_REPLAY_OBJECT_TYPE_SEMAPHORE = 8u,
-  IREE_HAL_REPLAY_OBJECT_TYPE_FILE = 9u,
-  IREE_HAL_REPLAY_OBJECT_TYPE_EVENT = 10u,
-  IREE_HAL_REPLAY_OBJECT_TYPE_CHANNEL = 11u,
-  IREE_HAL_REPLAY_OBJECT_TYPE_HOST_CALL = 12u,
+  IREE_HAL_REPLAY_OBJECT_TYPE_EXECUTABLE = 6u,
+  IREE_HAL_REPLAY_OBJECT_TYPE_SEMAPHORE = 7u,
+  IREE_HAL_REPLAY_OBJECT_TYPE_FILE = 8u,
+  IREE_HAL_REPLAY_OBJECT_TYPE_EVENT = 9u,
+  IREE_HAL_REPLAY_OBJECT_TYPE_CHANNEL = 10u,
+  IREE_HAL_REPLAY_OBJECT_TYPE_HOST_CALL = 11u,
 };
 
 // High-level HAL API operation kind.
@@ -86,7 +85,7 @@ enum iree_hal_replay_operation_code_e {
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_CHANNEL = 6u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_COMMAND_BUFFER = 7u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_EVENT = 8u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_EXECUTABLE_CACHE = 9u,
+  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_LOAD_EXECUTABLE = 9u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_IMPORT_FILE = 10u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_SEMAPHORE = 11u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUERY_QUEUE_POOL_BACKEND = 12u,
@@ -146,10 +145,6 @@ enum iree_hal_replay_operation_code_e {
   IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_COLLECTIVE = 312u,
   IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_DISPATCH = 313u,
 
-  IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_CACHE_INFER_FORMAT = 400u,
-  IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_CACHE_CAN_PREPARE_FORMAT = 401u,
-  IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_CACHE_PREPARE_EXECUTABLE = 402u,
-
   IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_COUNT = 500u,
   IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_INFO = 501u,
   IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_PARAMETERS = 502u,
@@ -165,28 +160,27 @@ enum iree_hal_replay_payload_type_e {
   IREE_HAL_REPLAY_PAYLOAD_TYPE_BUFFER_RANGE = 3u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_BUFFER_RANGE_DATA = 4u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_OBJECT = 5u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_CACHE_OBJECT = 6u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_PREPARE = 7u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DISPATCH = 8u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_EXECUTE = 9u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_SEMAPHORE_OBJECT = 10u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_COPY_BUFFER = 11u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ALLOCA = 12u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_EXECUTION_BARRIER = 13u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_DEALLOCA = 14u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_FILL = 15u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_UPDATE = 16u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_COPY = 17u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_FILL_BUFFER = 18u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_UPDATE_BUFFER = 19u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_EVENT_OBJECT = 20u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_EVENT = 21u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_WAIT_EVENTS = 22u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_FILE_OBJECT = 23u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_READ = 24u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_WRITE = 25u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_IMPORT_BUFFER = 26u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_REPLAY_SCOPE = 27u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_LOAD = 6u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_DISPATCH = 7u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_EXECUTE = 8u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_SEMAPHORE_OBJECT = 9u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_COPY_BUFFER = 10u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ALLOCA = 11u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_EXECUTION_BARRIER = 12u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_DEALLOCA = 13u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_FILL = 14u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_UPDATE = 15u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_COPY = 16u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_FILL_BUFFER = 17u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_UPDATE_BUFFER = 18u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_EVENT_OBJECT = 19u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_EVENT = 20u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_WAIT_EVENTS = 21u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_FILE_OBJECT = 22u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_READ = 23u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_WRITE = 24u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_IMPORT_BUFFER = 25u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_REPLAY_SCOPE = 26u,
 };
 
 // Bitfield specifying properties of one replay scope marker.
@@ -333,33 +327,35 @@ typedef struct iree_hal_replay_command_buffer_object_payload_t {
   uint64_t binding_capacity;
 } iree_hal_replay_command_buffer_object_payload_t;
 
-// Payload describing an executable cache object followed by identifier bytes.
-typedef struct iree_hal_replay_executable_cache_object_payload_t {
-  // Byte length of the executable cache identifier following this header.
-  uint64_t identifier_length;
-  // Reserved for future executable cache metadata; must be zero.
-  uint64_t reserved0;
-} iree_hal_replay_executable_cache_object_payload_t;
-
-// Payload describing one executable preparation request.
-typedef struct iree_hal_replay_executable_prepare_payload_t {
-  // Queue affinity from the executable parameters.
+// Payload describing one device executable load request.
+typedef struct iree_hal_replay_executable_load_payload_t {
+  // Queue affinity passed to the device load operation.
   uint64_t queue_affinity;
-  // Byte length of executable data following the executable format bytes.
+  // Physical-device affinity advertised by the captured target.
+  uint64_t target_physical_device_affinity;
+  // Byte length of executable data following the target key bytes.
   uint64_t executable_data_length;
   // Number of 32-bit specialization constants following executable data.
   uint64_t constant_count;
-  // Executable caching mode bits from the executable parameters.
-  uint32_t caching_mode;
-  // Byte length of the executable format string following this header.
-  uint32_t executable_format_length;
+  // Executable load flag bits from the load parameters.
+  uint32_t load_flags;
+  // Captured executable target kind.
+  uint32_t target_kind;
+  // Captured executable target flags.
+  uint32_t target_flags;
+  // Byte length of the target family string following this header.
+  uint32_t target_family_length;
+  // Byte length of the target key string following the target family.
+  uint32_t target_key_length;
   // Byte length of executable ABI metadata following specialization constants.
   uint32_t executable_metadata_length;
-  // Reserved for future executable preparation metadata; must be zero.
+  // Reserved for future executable load metadata; must be zero.
+  uint32_t reserved0;
+  // Reserved for future executable load metadata; must be zero.
   uint32_t reserved1;
-} iree_hal_replay_executable_prepare_payload_t;
+} iree_hal_replay_executable_load_payload_t;
 
-// Header for executable ABI metadata appended to executable prepare payloads.
+// Header for executable ABI metadata appended to executable load payloads.
 typedef struct iree_hal_replay_executable_metadata_header_t {
   // Number of function metadata records following this header.
   uint64_t function_count;
@@ -391,14 +387,16 @@ typedef struct iree_hal_replay_executable_function_metadata_t {
 typedef struct iree_hal_replay_executable_parameter_metadata_t {
   // Parameter offset in bytes or binding ordinal, depending on type.
   uint16_t offset;
+  // Target ABI byte offset when the native ABI offset flag is set.
+  uint16_t native_abi_offset;
   // Parameter flags from iree_hal_executable_function_parameter_t.
   uint16_t flags;
+  // Parameter size in bytes.
+  uint16_t size;
   // iree_hal_executable_function_parameter_type_t value.
   uint8_t type;
-  // Parameter size in bytes.
-  uint8_t size;
   // Reserved for future parameter metadata; must be zero.
-  uint16_t reserved0;
+  uint8_t reserved0;
 } iree_hal_replay_executable_parameter_metadata_t;
 
 // Payload describing a captured semaphore object.

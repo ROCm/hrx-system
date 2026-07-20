@@ -251,7 +251,7 @@ kernel.def target(@target) @llvmir_hal_buffer_resources() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @llvmir_hal_buffer_resources() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @llvmir_hal_buffer_resources() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %loaded = load.i32 %input_view, 0

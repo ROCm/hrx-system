@@ -22,9 +22,11 @@ loom_cc_library(
     "lower.c"
     "lower_context.c"
     "lower_policy.c"
+    "lower_report.c"
     "lower_rules.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::analysis::contract_vector
     loom::analysis::kernel_async_legality
@@ -34,6 +36,7 @@ loom_cc_library(
     loom::codegen::low::builder
     loom::codegen::low::descriptors
     loom::codegen::low::memory_access
+    loom::codegen::low::memory_access_ir
     loom::codegen::low::source_memory_plan
     loom::error::emitter
     loom::error::error_defs
@@ -56,8 +59,8 @@ loom_cc_library(
     loom::target::low_legality
     loom::target::registers
     loom::target::types
+    loom::util::cfg_graph
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 

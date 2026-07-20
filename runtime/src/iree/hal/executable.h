@@ -22,6 +22,44 @@ typedef struct iree_hal_device_t iree_hal_device_t;
 typedef struct iree_hal_buffer_t iree_hal_buffer_t;
 
 //===----------------------------------------------------------------------===//
+// Executable loading
+//===----------------------------------------------------------------------===//
+
+// Controls native executable loading behavior.
+typedef uint32_t iree_hal_executable_load_flags_t;
+typedef enum iree_hal_executable_load_flag_bits_e {
+  // No optional executable loading behavior is enabled.
+  IREE_HAL_EXECUTABLE_LOAD_FLAG_NONE = 0u,
+  // Allows expensive load-time optimization intended to improve execution.
+  IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION = 1u << 0,
+  // Retains debugging information and enables debugging hooks when supported.
+  IREE_HAL_EXECUTABLE_LOAD_FLAG_ENABLE_DEBUGGING = 1u << 1,
+  // Disables executable verification for diagnostic and recovery tooling.
+  // Production callers should leave verification enabled.
+  IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION = 1u << 2,
+} iree_hal_executable_load_flag_bits_t;
+
+// Native executable artifact and load-time specialization parameters.
+//
+// All referenced storage is borrowed only for the duration of the load call.
+// Executable implementations must finish consuming or copy any retained data
+// before returning from iree_hal_device_load_executable.
+typedef struct iree_hal_executable_load_params_t {
+  // Optional executable loading behavior.
+  iree_hal_executable_load_flags_t flags;
+  // Bounded native executable artifact bytes.
+  iree_const_byte_span_t executable_data;
+  // Number of executable-level specialization constants.
+  iree_host_size_t constant_count;
+  // Executable-level specialization constants in compiler-defined order.
+  const uint32_t* constants;
+} iree_hal_executable_load_params_t;
+
+// Initializes |out_params| for normal executable loading.
+IREE_API_EXPORT void iree_hal_executable_load_params_initialize(
+    iree_hal_executable_load_params_t* out_params);
+
+//===----------------------------------------------------------------------===//
 // iree_hal_executable_t
 //===----------------------------------------------------------------------===//
 
@@ -154,7 +192,7 @@ enum iree_hal_executable_function_parameter_type_e {
   // Parameter is a constant uniform value.
   // Passed to the dispatch in the constants table. The offset indicates the
   // byte offset from the start of the constants table. The size is the total
-  // bytes the constant occupies in the constant table without padding.
+  // bytes the constant occupies in the constants table without padding.
   IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT = 0,
   // Parameter is a buffer binding.
   // Passed to the dispatch in the binding_ptrs table and the length is
@@ -173,6 +211,9 @@ typedef uint8_t iree_hal_executable_function_parameter_type_t;
 // Defines parameter handling behavior.
 enum iree_hal_executable_function_parameter_flag_bits_e {
   IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NONE = 0,
+  // Parameter has a target ABI byte offset distinct from its HAL dispatch
+  // table offset or binding ordinal.
+  IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET = 1u << 0,
 };
 typedef uint16_t iree_hal_executable_function_parameter_flags_t;
 
@@ -182,12 +223,18 @@ typedef struct iree_hal_executable_function_parameter_t {
   iree_hal_executable_function_parameter_type_t type;
   // Flags indicating parameter behavior.
   iree_hal_executable_function_parameter_flags_t flags;
-  // Size of the parameter in bytes. Does not contain padding.
-  // Widened from uint8_t so we can represent kernarg structs emitted by
-  // user toolchains.
+  // Size of the parameter in bytes. Does not contain padding and can represent
+  // large by-value argument records emitted by user toolchains.
   uint16_t size;
-  // Offset of the parameter in bytes or binding ordinal, depending on type.
+  // HAL dispatch offset in bytes or binding ordinal, depending on type.
+  // CONSTANT and BUFFER_PTR parameters use byte offsets in the constants
+  // table. BINDING parameters use binding-list ordinals.
   uint16_t offset;
+  // Target ABI byte offset when
+  // IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET is set.
+  // Native entry points may keep padding or pointer slots that are not present
+  // in the dense HAL constants table.
+  uint16_t native_abi_offset;
   // Parameter name if available, otherwise empty.
   iree_string_view_t name;
 } iree_hal_executable_function_parameter_t;
@@ -201,10 +248,6 @@ typedef struct iree_hal_executable_global_info_t {
 } iree_hal_executable_global_info_t;
 
 // Handle to a loaded executable.
-// Loading of executables routes through an executable cache, allowing for
-// context-aware scoped caches. HAL implementations can use this to preserve
-// JIT'ed executables across processes or reuse executables across device
-// instances.
 //
 // Executables provide one or more functions that can be dispatched via
 // iree_hal_command_buffer_dispatch. Some functions may represent the same

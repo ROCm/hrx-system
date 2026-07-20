@@ -44,8 +44,11 @@ class BdaDispatchValidationTest : public CtsTestBase<> {
     CtsTestBase::SetUp();
     if (HasFatalFailure() || IsSkipped()) return;
 
-    IREE_ASSERT_OK(iree_hal_executable_cache_create(
-        device_, iree_make_cstring_view("default"), &executable_cache_));
+    const iree_hal_executable_target_selection_result_t target_result =
+        SelectExecutableTarget(IREE_SV("spirv"), IREE_SV("vulkan1.3+bda"));
+    ASSERT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
+              target_result.outcome);
+    executable_target_ = target_result.target;
 
     IREE_ASSERT_OK(
         PrepareBdaExecutable(BdaDispatchValidationSpirvFixture(
@@ -61,8 +64,7 @@ class BdaDispatchValidationTest : public CtsTestBase<> {
     requirement_executable_ = nullptr;
     iree_hal_executable_release(executable_);
     executable_ = nullptr;
-    iree_hal_executable_cache_release(executable_cache_);
-    executable_cache_ = nullptr;
+    executable_target_ = nullptr;
     CtsTestBase::TearDown();
   }
 
@@ -72,16 +74,9 @@ class BdaDispatchValidationTest : public CtsTestBase<> {
 
   iree_status_t PrepareBdaExecutable(iree_const_byte_span_t executable_data,
                                      iree_hal_executable_t** out_executable) {
-    iree_hal_executable_params_t executable_params;
-    iree_hal_executable_params_initialize(&executable_params);
-    executable_params.caching_mode =
-        IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA |
-        IREE_HAL_EXECUTABLE_CACHING_MODE_DISABLE_VERIFICATION;
-    executable_params.executable_format =
-        iree_make_cstring_view("vulkan-spirv-bda");
-    executable_params.executable_data = executable_data;
-    return iree_hal_executable_cache_prepare_executable(
-        executable_cache_, &executable_params, out_executable);
+    return LoadExecutable(executable_target_,
+                          IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION,
+                          executable_data, out_executable);
   }
 
   iree_status_t CreateInputOutputBuffers(
@@ -103,7 +98,7 @@ class BdaDispatchValidationTest : public CtsTestBase<> {
 
   static constexpr uint32_t constant_data_[2] = {3, 10};
 
-  iree_hal_executable_cache_t* executable_cache_ = nullptr;
+  const iree_hal_executable_target_t* executable_target_ = nullptr;
   iree_hal_executable_t* executable_ = nullptr;
   iree_hal_executable_t* requirement_executable_ = nullptr;
 };

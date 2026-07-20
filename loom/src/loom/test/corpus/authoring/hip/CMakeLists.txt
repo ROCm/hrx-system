@@ -20,6 +20,7 @@ iree_execution_test_suite(
     "loom-compile=loom::tools::loom-compile"
     "loom-opt=loom::tools::loom-opt"
   DATA
+    "cluster_b128_multicast.loom"
     "lane_distribution.loom"
     "packed_field_contracts.loom"
     "q8_block_unroll.loom"

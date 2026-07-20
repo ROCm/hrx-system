@@ -306,11 +306,7 @@ loomc_status_t loomc_target_profile_create_amdgpu(
   LOOMC_RETURN_IF_ERROR(
       loomc_status_from_iree(loom_amdgpu_target_info_lookup_processor(
           iree_string_view_from_loomc(options->processor), &processor)));
-  bool hsaco_supported = false;
-  LOOMC_RETURN_IF_ERROR(
-      loomc_status_from_iree(loom_amdgpu_target_info_processor_supports_hsaco(
-          processor, &hsaco_supported)));
-  if (!hsaco_supported) {
+  if (!loom_amdgpu_processor_supports_hsaco(processor)) {
     return loomc_make_status(LOOMC_STATUS_UNAVAILABLE,
                              "AMDGPU processor cannot be emitted as HSACO");
   }

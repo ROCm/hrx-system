@@ -22,6 +22,58 @@ or enum for a backend table is usually hiding the contract in the wrong place.
 Move the type to a checked-in header and have Python emit rows that initialize
 that type.
 
+## IR Represents Programs, Not Pass State
+
+Loom IR is never an inter-pass mailbox. An operation, attribute, operand, type,
+or region belongs in the IR only when it represents structurally coherent
+program semantics or an explicit user-facing compilation contract. The
+representation must remain meaningful when authored in text, parsed from
+bytecode, cloned, canonicalized, transformed independently, and inspected
+without hidden knowledge of the pass that produced it or the later pass that
+plans to consume it.
+
+Analysis and planning state lives in analysis results, pipeline-owned plan
+objects, or explicit lowering interfaces with defined ownership, lifetime,
+invalidation, and translation rules. An analysis never inserts synthetic
+identity operations, zero-result sentinels, hint operations, fake operands, or
+metadata attributes merely to make later passes remember its decisions. Using
+SSA use lists or ordinary cloning to transport compiler bookkeeping is a
+representation failure: it changes the program seen by every intervening pass
+and makes those passes accidental participants in the analysis protocol.
+
+Names such as `compiler_owned`, `temporary`, `marker`, `hint`, `annotation`, or
+`metadata` grant no exception. If a construct would be incoherent or useless
+when written by a user, it is not an IR construct. A narrow exception exists
+for deliberate user control over compilation, such as a schedule or resource
+contract owned by the operation it governs. Such a contract is part of the
+documented dialect semantics, verifies without private producer state, and
+fails loudly when the selected pipeline cannot implement it. Candidate lists,
+analysis snapshots, repair recipes, provenance checksums, and pass-local
+decisions remain compiler state even when exposing them as IR would make
+cloning convenient.
+
+State that must survive rewriting creates an infrastructure question rather
+than permission to encode a side table as IR. The design must identify the
+state owner, mutation and invalidation boundaries, how cloning or lowering
+translates it, and when it is consumed. A general provenance or rewrite
+tracking facility must be justified as reusable compiler infrastructure and
+must remain separate from program semantics.
+
+## Reviewable Pipeline Changes
+
+A pull request boundary is an architectural cut, not a file-count or
+commit-count cut. Each PR must present a coherent end-to-end behavior that can
+be evaluated critically on its own. A producer that writes an internal
+contract in one PR while a later PR supplies the only meaningful consumer or
+enforcement is not an independently valid change. Green CI on a dormant,
+silently discarded, or unreachable contract does not validate the design.
+
+When correctness or architecture can only be judged across a stack, the stack
+stays on one unpublished branch until the integrated design has been reviewed.
+It may be split afterward only at interfaces whose semantics are complete in
+every cut: supported behavior works end to end, unsupported behavior fails
+loudly, and no later PR retroactively makes an earlier representation valid.
+
 ## Generated Tables
 
 Generated backend tables should be data. The normal shape is a checked-in

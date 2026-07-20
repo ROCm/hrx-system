@@ -661,12 +661,14 @@ def _index_cast_i32_extend_rule(
     unsigned: bool,
 ) -> DescriptorRule:
     descriptor = descriptor_lookup(descriptor_key)
-    value_guard = (
-        Guard.value_unsigned_bit_count("input", 32, diagnostic=_INDEX_CAST_DIAGNOSTIC)
-        if unsigned
-        else Guard.value_signed_bit_count(
-            "input", 32, diagnostic=_INDEX_CAST_DIAGNOSTIC
+    value_guards = (
+        (
+            Guard.value_unsigned_bit_count(
+                "input", 32, diagnostic=_INDEX_CAST_DIAGNOSTIC
+            ),
         )
+        if unsigned
+        else ()
     )
     return DescriptorRule(
         source_op=index.index_cast,
@@ -674,7 +676,7 @@ def _index_cast_i32_extend_rule(
         guards=(
             Guard.value_type("input", _I32),
             Guard.value_type("result", _INDEX),
-            value_guard,
+            *value_guards,
         ),
         emit=(
             _op_emit(

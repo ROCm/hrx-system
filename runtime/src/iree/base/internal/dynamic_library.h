@@ -47,7 +47,7 @@ iree_status_t iree_dynamic_library_load_from_files(
 
 // Opens a dynamic library from a range of bytes in memory.
 // |identifier| will be used as the module name in debugging/profiling tools.
-// |buffer| must remain live for the lifetime of the library.
+// |buffer| is borrowed only for the duration of the call.
 iree_status_t iree_dynamic_library_load_from_memory(
     iree_string_view_t identifier, iree_const_byte_span_t buffer,
     iree_dynamic_library_flags_t flags, iree_allocator_t allocator,
@@ -75,8 +75,8 @@ iree_status_t iree_dynamic_library_attach_symbols_from_file(
     iree_dynamic_library_t* library, const char* file_path);
 
 // Loads a debug database (PDB/DWARF/etc) from a range of bytes in memory and
-// attaches it to the symbol store (if active). |buffer| must remain live for
-// the lifetime of the library.
+// attaches it to the symbol store (if active). |buffer| is borrowed only for
+// the duration of the call.
 iree_status_t iree_dynamic_library_attach_symbols_from_memory(
     iree_dynamic_library_t* library, iree_const_byte_span_t buffer);
 

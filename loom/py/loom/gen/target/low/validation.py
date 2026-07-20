@@ -27,8 +27,11 @@ from loom.target.low_descriptors import (
     OperandAddressMapKind,
     OperandFlag,
     OperandRole,
+    RegClass,
+    RegClassFlag,
     RegisterPart,
     StorageLeaseAttachment,
+    StorageLeaseFlag,
 )
 
 
@@ -55,6 +58,76 @@ def validate_u64(value: int, description: str) -> None:
 def validate_i64(value: int, description: str) -> None:
     if value < -(1 << 63) or value > (1 << 63) - 1:
         raise ValueError(f"{description} does not fit i64")
+
+
+def validate_register_classes(
+    descriptor_set_key: str,
+    register_classes: Sequence[RegClass],
+) -> None:
+    """Validates register classes and their shared storage namespaces."""
+    alias_sets: dict[int, list[RegClass]] = {}
+    for register_class in register_classes:
+        description = f"descriptor set '{descriptor_set_key}' register class '{register_class.name}'"
+        if register_class.alloc_unit_bits <= 0:
+            raise ValueError(f"{description} allocation unit width must be positive")
+        validate_u16(
+            register_class.alloc_unit_bits,
+            f"{description} allocation unit width",
+        )
+        validate_u16(
+            register_class.target_bank_id,
+            f"{description} target bank ID",
+        )
+        validate_u16(
+            register_class.allocatable_count,
+            f"{description} allocatable count",
+        )
+        validate_u16(
+            register_class.fixed_location_base,
+            f"{description} fixed-location base",
+        )
+        validate_u16(
+            register_class.fixed_location_count,
+            f"{description} fixed-location count",
+        )
+        validate_u16(
+            register_class.alias_set_id,
+            f"{description} alias-set ID",
+        )
+        if RegClassFlag.PHYSICAL in register_class.flags and RegClassFlag.VIRTUAL_ONLY in register_class.flags:
+            raise ValueError(f"{description} cannot be both physical and virtual-only")
+        if register_class.allocatable_count != 0 and RegClassFlag.VIRTUAL_ONLY in register_class.flags:
+            raise ValueError(f"{description} has a physical allocation capacity but is virtual-only")
+        if (register_class.fixed_location_base != 0 or register_class.fixed_location_count != 0) and RegClassFlag.VIRTUAL_ONLY in register_class.flags:
+            raise ValueError(f"{description} has fixed physical locations but is virtual-only")
+        if register_class.fixed_location_count == 0 and register_class.fixed_location_base != 0:
+            raise ValueError(f"{description} has a fixed-location base without a count")
+        fixed_location_end = register_class.fixed_location_base + register_class.fixed_location_count
+        if fixed_location_end > 0x10000:
+            raise ValueError(f"{description} fixed-location range exceeds the u16 location namespace")
+        if register_class.fixed_location_count != 0 and register_class.fixed_location_base < register_class.allocatable_count:
+            raise ValueError(f"{description} fixed-location range overlaps its allocatable locations")
+        if register_class.alias_set_id != 0:
+            alias_sets.setdefault(register_class.alias_set_id, []).append(register_class)
+
+    alias_set_ids = sorted(alias_sets)
+    expected_alias_set_ids = list(range(1, len(alias_set_ids) + 1))
+    if alias_set_ids != expected_alias_set_ids:
+        raise ValueError(f"descriptor set '{descriptor_set_key}' alias-set IDs must be dense from 1; found {alias_set_ids}")
+
+    for alias_set_id, members in alias_sets.items():
+        reference = members[0]
+        reference_is_physical = reference.allocatable_count != 0 or RegClassFlag.PHYSICAL in reference.flags
+        for member in members[1:]:
+            member_is_physical = member.allocatable_count != 0 or RegClassFlag.PHYSICAL in member.flags
+            if member_is_physical != reference_is_physical:
+                raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} mixes physical and virtual location classes '{reference.name}' and '{member.name}'")
+            if member.target_bank_id != reference.target_bank_id:
+                raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} classes '{reference.name}' and '{member.name}' use different target banks")
+            if member.allocatable_count != reference.allocatable_count:
+                raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} classes '{reference.name}' and '{member.name}' have different allocatable counts")
+            if (member.fixed_location_base, member.fixed_location_count) != (reference.fixed_location_base, reference.fixed_location_count):
+                raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} classes '{reference.name}' and '{member.name}' have different fixed-location ranges")
 
 
 def _descriptor_asm_surface_description(
@@ -157,11 +230,17 @@ def validate_descriptor_operands(descriptor: Descriptor) -> int:
             operand.addressable_unit_count,
             f"descriptor '{descriptor.key}' operand '{operand.field_name}' addressable unit count",
         )
+        validate_u16(
+            operand.address_state_slot,
+            f"descriptor '{descriptor.key}' operand '{operand.field_name}' address state slot",
+        )
         is_explicit_packet_value = operand_role_is_packet_input(operand.role) and OperandFlag.IMPLICIT not in operand.flags
         has_addressable_assignment = is_result or is_explicit_packet_value
         if operand.address_map_kind is OperandAddressMapKind.DIRECT:
             if operand.addressable_unit_count != 0:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' direct address map must not set an addressable unit count")
+            if operand.address_state_slot != 0:
+                raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' direct address map must not set an address state slot")
         elif operand.address_map_kind in (OperandAddressMapKind.LOW_SUBSET, OperandAddressMapKind.TARGET_STATE):
             if not has_addressable_assignment:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' bounded address map must apply to an explicit value operand")
@@ -171,6 +250,11 @@ def validate_descriptor_operands(descriptor: Descriptor) -> int:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' bounded address map covers fewer units than the operand consumes")
             if not any(reg_alt.reg_class is not None for reg_alt in operand.reg_alts):
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' bounded address map requires a concrete register-class alternative")
+            if operand.address_map_kind is OperandAddressMapKind.LOW_SUBSET:
+                if operand.address_state_slot != 0:
+                    raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' low-subset address map must not set an address state slot")
+            elif operand.address_state_slot == 0:
+                raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' target-state address map must set an address state slot")
         else:
             raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' has unknown address map kind '{operand.address_map_kind}'")
         state_flags = {
@@ -221,6 +305,109 @@ def operand_role_is_packet_input(role: OperandRole) -> bool:
         OperandRole.PREDICATE,
         OperandRole.RESOURCE,
     )
+
+
+def _validate_binary_constraint(
+    descriptor: Descriptor,
+    constraint_index: int,
+    constraint_name: str,
+    lhs_operand_index: int,
+    rhs_operand_index: int | None,
+) -> int:
+    description = f"descriptor '{descriptor.key}' {constraint_name} constraint {constraint_index}"
+    if rhs_operand_index is None:
+        raise ValueError(f"{description} requires an rhs operand")
+    if lhs_operand_index == rhs_operand_index:
+        raise ValueError(f"{description} cannot reference the same operand twice")
+    return rhs_operand_index
+
+
+def _validate_rematerializable_result(
+    descriptor: Descriptor,
+    result_index: int,
+) -> None:
+    description = f"descriptor '{descriptor.key}' rematerializable result {result_index}"
+    if DescriptorFlag.DEAD_REMOVABLE not in descriptor.flags:
+        raise ValueError(f"{description} requires the dead-removable flag")
+    forbidden_flags = {
+        DescriptorFlag.SIDE_EFFECTING,
+        DescriptorFlag.TERMINATOR,
+    }.intersection(descriptor.flags)
+    if forbidden_flags:
+        names = ", ".join(sorted(flag.name.lower() for flag in forbidden_flags))
+        raise ValueError(f"{description} has incompatible descriptor flags: {names}")
+    if descriptor.effects:
+        raise ValueError(f"{description} requires an effect-free descriptor")
+
+    for operand_index, operand in enumerate(descriptor.operands):
+        state_flags = {
+            OperandFlag.STATE_READ,
+            OperandFlag.STATE_WRITE,
+        }.intersection(operand.flags)
+        if not state_flags:
+            continue
+        if OperandFlag.SCHEDULE_ONLY_STATE in operand.flags:
+            continue
+        if state_flags != {OperandFlag.STATE_WRITE} or operand.role is not OperandRole.RESULT or operand_index != result_index:
+            raise ValueError(f"{description} cannot replay target state operand '{operand.field_name}'")
+
+
+def validate_descriptor_constraints(
+    descriptor: Descriptor,
+) -> tuple[int, ...]:
+    """Validates constraints and returns rematerializable result indices."""
+
+    rematerializable_results: set[int] = set()
+    for constraint_index, constraint in enumerate(descriptor.constraints):
+        lhs_operand_index = constraint.lhs_operand_index
+        rhs_operand_index = constraint.rhs_operand_index
+        description = f"descriptor '{descriptor.key}' constraint {constraint_index}"
+        if lhs_operand_index < 0 or lhs_operand_index >= len(descriptor.operands):
+            raise ValueError(f"{description} lhs operand {lhs_operand_index} is out of range")
+        if rhs_operand_index is not None and (rhs_operand_index < 0 or rhs_operand_index >= len(descriptor.operands)):
+            raise ValueError(f"{description} rhs operand {rhs_operand_index} is out of range")
+
+        lhs = descriptor.operands[lhs_operand_index]
+        if constraint.kind in (
+            ConstraintKind.TIED,
+            ConstraintKind.DESTRUCTIVE,
+        ):
+            constraint_name = constraint.kind.name.lower()
+            rhs_operand_index = _validate_binary_constraint(
+                descriptor,
+                constraint_index,
+                constraint_name,
+                lhs_operand_index,
+                rhs_operand_index,
+            )
+            rhs = descriptor.operands[rhs_operand_index]
+            if lhs.role is not OperandRole.RESULT or not operand_role_is_packet_input(rhs.role):
+                raise ValueError(f"descriptor '{descriptor.key}' {constraint_name} constraint requires a result lhs and packet operand rhs")
+        elif constraint.kind is ConstraintKind.COMMUTABLE:
+            rhs_operand_index = _validate_binary_constraint(
+                descriptor,
+                constraint_index,
+                "commutable",
+                lhs_operand_index,
+                rhs_operand_index,
+            )
+            rhs = descriptor.operands[rhs_operand_index]
+            if lhs.role is not OperandRole.OPERAND or rhs.role is not OperandRole.OPERAND:
+                raise ValueError(f"descriptor '{descriptor.key}' commutable constraint requires two operand rows")
+        elif constraint.kind in (
+            ConstraintKind.EARLY_CLOBBER,
+            ConstraintKind.REMATERIALIZABLE,
+            ConstraintKind.FOLDABLE,
+        ):
+            if rhs_operand_index is not None or lhs.role is not OperandRole.RESULT:
+                raise ValueError(f"descriptor '{descriptor.key}' {constraint.kind.name.lower()} constraint requires one result operand")
+            if constraint.kind is ConstraintKind.REMATERIALIZABLE:
+                if lhs_operand_index in rematerializable_results:
+                    raise ValueError(f"descriptor '{descriptor.key}' repeats rematerializable result {lhs_operand_index}")
+                _validate_rematerializable_result(descriptor, lhs_operand_index)
+                rematerializable_results.add(lhs_operand_index)
+
+    return tuple(sorted(rematerializable_results))
 
 
 def operands_may_share_encoding_field(
@@ -332,6 +519,8 @@ def validate_descriptor_storage_leases(
             raise ValueError(f"{description} has zero release action id")
         if lease.release_reason_id == LOW_DESCRIPTOR_ENCODING_ID_NONE:
             raise ValueError(f"{description} has no release reason id")
+        if StorageLeaseFlag.RELEASE_BEFORE_BOUNDARY in lease.flags and StorageLeaseFlag.MAY_CARRY_ACROSS_BOUNDARY in lease.flags:
+            raise ValueError(f"{description} cannot both release before and carry across a boundary")
         unit_count = attachment_unit_counts.get((lease.attachment, lease.attachment_index))
         if unit_count is None:
             raise ValueError(f"{description} references {lease.attachment.name.lower()} {lease.attachment_index}, which is not attached to the packet")

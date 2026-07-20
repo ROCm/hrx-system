@@ -143,12 +143,9 @@ static bool loom_loop_fusion_block_is_under_op(const loom_op_t* root,
 static bool loom_loop_fusion_value_is_type_used_under_op(
     const loom_module_t* module, loom_value_id_t value_id,
     const loom_op_t* root) {
-  if (value_id >= module->values.count ||
-      value_id >= module->type_uses.value_capacity) {
-    return false;
-  }
+  if (value_id >= module->values.count) return false;
   loom_type_use_id_t use_id =
-      module->type_uses.value_heads[value_id].first_incoming_use_id;
+      loom_module_value_first_incoming_type_use(module, value_id);
   while (use_id != LOOM_TYPE_USE_ID_INVALID) {
     const loom_type_use_t* type_use = &module->type_uses.records[use_id];
     if (type_use->user_value_id >= module->values.count) return true;

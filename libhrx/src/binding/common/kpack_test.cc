@@ -2156,6 +2156,18 @@ struct HipFatHeader {
 };
 static_assert(sizeof(HipFatHeader) == 24, "wrapper must be 24 bytes");
 
+// Presents a bare AMDGPU target key the way a HAL device spec hands one to the
+// fat-binary extractor, so the HIPK integration tests drive the same target
+// validation and key projection that production uses.
+static iree_hal_executable_target_t MakeAmdgpuDeviceTarget(
+    iree_string_view_t target_key) {
+  iree_hal_executable_target_t target = {};
+  target.family = IREE_SV("amdgpu");
+  target.target_key = target_key;
+  target.physical_device_affinity = 1;
+  return target;
+}
+
 TEST(KpackIntegration, HipkWrapperResolvesToElf) {
   auto elf = MakeMinimalAmdgpuElf(/*machine=*/0x041);  // gfx1100
   auto archive =
@@ -2169,15 +2181,17 @@ TEST(KpackIntegration, HipkWrapperResolvesToElf) {
   header.binary = metadata.data();
   header.reserved = reinterpret_cast<void*>(static_cast<uintptr_t>(0));
 
+  const iree_hal_executable_target_t executable_target =
+      MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.value=*/IREE_SV("gfx1100")},
+      {/*.executable_target=*/&executable_target},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_ASSERT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
       iree_make_const_byte_span(&header, sizeof(header)),
       IREE_ARRAYSIZE(targets), targets, iree_allocator_system(), &extract));
   ASSERT_EQ(extract.match_count, 1u);
-  EXPECT_STREQ(extract.matches[0].executable_format, "gfx1100");
+  EXPECT_STREQ(extract.matches[0].code_object_target_key, "gfx1100");
   EXPECT_EQ(extract.matches[0].data.data_length, elf.size());
   iree_hal_streaming_fat_binary_extract_reset(&extract);
 }
@@ -2194,8 +2208,10 @@ TEST(KpackIntegration, HipkWrapperNoMatchReportsNotFound) {
   header.version = 1;
   header.binary = metadata.data();
 
+  const iree_hal_executable_target_t executable_target =
+      MakeAmdgpuDeviceTarget(IREE_SV("gfx942"));  // not in the archive
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.value=*/IREE_SV("gfx942")},  // not in the archive
+      {/*.executable_target=*/&executable_target},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   EXPECT_THAT(
@@ -2221,15 +2237,17 @@ TEST(KpackIntegration, HipkResolvesBundleCodeObject) {
   header.version = 1;
   header.binary = metadata.data();
 
+  const iree_hal_executable_target_t executable_target =
+      MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.value=*/IREE_SV("gfx1100")},
+      {/*.executable_target=*/&executable_target},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_ASSERT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
       iree_make_const_byte_span(&header, sizeof(header)),
       IREE_ARRAYSIZE(targets), targets, iree_allocator_system(), &extract));
   ASSERT_EQ(extract.match_count, 1u);
-  EXPECT_STREQ(extract.matches[0].executable_format, "gfx1100");
+  EXPECT_STREQ(extract.matches[0].code_object_target_key, "gfx1100");
   EXPECT_EQ(extract.matches[0].data.data_length, elf.size());
   iree_hal_streaming_fat_binary_extract_reset(&extract);
 }
@@ -2248,8 +2266,10 @@ TEST(KpackIntegration, HipkResolvedGarbageRejected) {
   header.version = 1;
   header.binary = metadata.data();
 
+  const iree_hal_executable_target_t executable_target =
+      MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.value=*/IREE_SV("gfx1100")},
+      {/*.executable_target=*/&executable_target},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   EXPECT_THAT(
@@ -2275,8 +2295,10 @@ TEST(KpackIntegration, HipkReservedSelectsCoIndex) {
   header.binary = metadata.data();
   header.reserved = reinterpret_cast<void*>(static_cast<uintptr_t>(1));
 
+  const iree_hal_executable_target_t executable_target =
+      MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.value=*/IREE_SV("gfx1100")},
+      {/*.executable_target=*/&executable_target},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_ASSERT_OK(iree_hal_streaming_fat_binary_extract_for_targets(

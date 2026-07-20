@@ -554,7 +554,7 @@ static iree_status_t loom_vector_verify_memory_access(
 static iree_status_t loom_vector_verify_fragment_memory_origin(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
     loom_type_t view_type, loom_attribute_t static_indices,
-    uint16_t dynamic_index_count) {
+    uint16_t dynamic_index_count, uint8_t fragment_rank) {
   if (!loom_type_is_view(view_type)) {
     return iree_ok_status();
   }
@@ -563,9 +563,11 @@ static iree_status_t loom_vector_verify_fragment_memory_origin(
       emitter, op, static_indices, dynamic_index_count));
 
   uint8_t view_rank = loom_type_rank(view_type);
-  if (view_rank == 0) {
+  if (view_rank < fragment_rank) {
     return loom_vector_emit_operand_constraint(
-        emitter, op, IREE_SV("view"), view_type, IREE_SV("rank >= 1 view"));
+        emitter, op, IREE_SV("view"), view_type,
+        fragment_rank == 3 ? IREE_SV("rank >= 3 view")
+                           : IREE_SV("rank >= 2 view"));
   }
   if (static_indices.count != view_rank) {
     return loom_vector_emit_offset_count_mismatch(
@@ -766,28 +768,16 @@ iree_status_t loom_vector_store_verify(const loom_module_t* module,
       LOOM_CACHE_POLICY_ACCESS_STORE);
 }
 
-iree_status_t loom_vector_fragment_load_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter) {
-  loom_type_t view_type =
-      loom_module_value_type(module, loom_vector_fragment_load_view(op));
-  IREE_RETURN_IF_ERROR(loom_vector_verify_fragment_memory_origin(
-      emitter, op, view_type, loom_vector_fragment_load_static_indices(op),
-      loom_vector_fragment_load_indices(op).count));
-  return loom_vector_verify_optional_cache_policy(
-      emitter, op, loom_vector_fragment_load_cache_scope_ATTR_INDEX,
-      loom_vector_fragment_load_cache_temporal_ATTR_INDEX,
-      LOOM_CACHE_POLICY_ACCESS_LOAD);
-}
-
 iree_status_t loom_vector_fragment_store_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {
   loom_type_t view_type =
       loom_module_value_type(module, loom_vector_fragment_store_view(op));
+  const uint8_t fragment_rank =
+      loom_vector_fragment_store_blocks_is_present(op) ? 3 : 2;
   IREE_RETURN_IF_ERROR(loom_vector_verify_fragment_memory_origin(
       emitter, op, view_type, loom_vector_fragment_store_static_indices(op),
-      loom_vector_fragment_store_indices(op).count));
+      loom_vector_fragment_store_indices(op).count, fragment_rank));
   return loom_vector_verify_optional_cache_policy(
       emitter, op, loom_vector_fragment_store_cache_scope_ATTR_INDEX,
       loom_vector_fragment_store_cache_temporal_ATTR_INDEX,
@@ -1834,6 +1824,53 @@ static iree_status_t loom_vector_verify_fragment_auxiliary_types(
   return iree_ok_status();
 }
 
+iree_status_t loom_vector_fragment_load_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  loom_type_t view_type =
+      loom_module_value_type(module, loom_vector_fragment_load_view(op));
+  const uint8_t fragment_rank =
+      loom_vector_fragment_load_blocks_is_present(op) ? 3 : 2;
+  IREE_RETURN_IF_ERROR(loom_vector_verify_fragment_memory_origin(
+      emitter, op, view_type, loom_vector_fragment_load_static_indices(op),
+      loom_vector_fragment_load_indices(op).count, fragment_rank));
+  IREE_RETURN_IF_ERROR(loom_vector_verify_optional_cache_policy(
+      emitter, op, loom_vector_fragment_load_cache_scope_ATTR_INDEX,
+      loom_vector_fragment_load_cache_temporal_ATTR_INDEX,
+      LOOM_CACHE_POLICY_ACCESS_LOAD));
+
+  loom_vector_encoding_auxiliary_view_t auxiliary;
+  iree_string_view_t unknown_key = iree_string_view_empty();
+  if (!loom_vector_encoding_auxiliary_view_resolve(
+          module, loom_vector_fragment_load_auxiliary(op),
+          loom_vector_fragment_load_auxiliary_names(op), &auxiliary,
+          &unknown_key)) {
+    return loom_vector_emit_unknown_auxiliary_key(module, emitter, op,
+                                                  unknown_key);
+  }
+  IREE_RETURN_IF_ERROR(loom_vector_verify_fragment_auxiliary_types(
+      module, op, emitter, auxiliary));
+
+  loom_value_fact_storage_schema_t storage_schema = {0};
+  if (!loom_encoding_query_type_storage_schema(
+          /*context=*/NULL, module, view_type, &storage_schema)) {
+    return iree_ok_status();
+  }
+  if (loom_value_fact_encoded_operand_schema_is_unknown(
+          storage_schema.encoded_operand)) {
+    return iree_ok_status();
+  }
+
+  loom_vector_encoding_auxiliary_key_flags_t required_keys = 0;
+  if (!loom_vector_encoding_auxiliary_required_keys_from_schema(
+          storage_schema.encoded_operand, &required_keys, NULL)) {
+    return loom_vector_emit_missing_auxiliary_key(module, emitter, op,
+                                                  IREE_SV("scale"));
+  }
+  return loom_vector_verify_required_auxiliary_keys(
+      module, emitter, op, auxiliary.present_keys, required_keys);
+}
+
 iree_status_t loom_vector_fragment_verify(const loom_module_t* module,
                                           const loom_op_t* op,
                                           iree_diagnostic_emitter_t emitter) {
@@ -2092,6 +2129,8 @@ static iree_status_t loom_vector_transform_verify_dynamic_param_shapes(
   uint8_t source_last_axis = (uint8_t)(loom_type_rank(source_type) - 1);
   uint8_t result_last_axis = (uint8_t)(loom_type_rank(result_type) - 1);
   if (matrix_rank == 2 &&
+      loom_type_element_type(matrix_type) ==
+          loom_type_element_type(source_type) &&
       loom_vector_dim_equals(matrix_type, 0, result_type, result_last_axis) &&
       loom_vector_dim_equals(matrix_type, 1, source_type, source_last_axis)) {
     return iree_ok_status();
@@ -2099,7 +2138,8 @@ static iree_status_t loom_vector_transform_verify_dynamic_param_shapes(
   return loom_vector_emit_encoding_dynamic_type_error(
       module, emitter, define_op, encoding_name,
       loom_vector_transform_matrix_param_name(), matrix_value,
-      IREE_SV("rank-2 floating-point matrix matching output x input extents"));
+      IREE_SV("rank-2 source-element-type matrix matching output x input "
+              "extents"));
 }
 
 static iree_status_t loom_vector_transform_verify_family(

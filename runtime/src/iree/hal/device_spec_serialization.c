@@ -22,7 +22,7 @@
 // emitted in source order. The format contains no native structs, alignment
 // gaps, or padding bytes.
 #define IREE_HAL_DEVICE_SPEC_MAGIC UINT32_C(0x43505344)  // DSPC
-#define IREE_HAL_DEVICE_SPEC_VERSION UINT32_C(4)
+#define IREE_HAL_DEVICE_SPEC_VERSION UINT32_C(6)
 #define IREE_HAL_DEVICE_SPEC_FNV1A64_OFFSET_BASIS UINT64_C(0xcbf29ce484222325)
 #define IREE_HAL_DEVICE_SPEC_FNV1A64_PRIME UINT64_C(0x100000001b3)
 
@@ -336,37 +336,13 @@ static iree_status_t iree_hal_device_spec_encode_timing(
   return iree_hal_device_spec_writer_write_u32(writer, value->flags);
 }
 
-static iree_status_t iree_hal_device_spec_encode_executable_format(
-    const iree_hal_executable_format_spec_t* value,
-    iree_hal_device_spec_writer_t* writer) {
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_string(writer, value->format));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_u32(writer, value->caching_modes));
-  return iree_hal_device_spec_writer_write_u32(writer, value->flags);
-}
-
 static iree_status_t iree_hal_device_spec_encode_executable_target(
     const iree_hal_executable_target_t* value,
     iree_hal_device_spec_writer_t* writer) {
   IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_writer_write_string(writer, value->family));
   IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_string(writer, value->architecture));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_string(writer, value->processor));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_string(writer, value->features));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_string(writer, value->artifact_format));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_string(writer, value->runtime_abi));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_writer_write_string(
-      writer, value->loader_namespace));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_string(writer, value->loader_target));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_writer_write_string(writer, value->metadata_schema));
+      iree_hal_device_spec_writer_write_string(writer, value->target_key));
   IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_writer_write_u32(writer, value->kind));
   IREE_RETURN_IF_ERROR(
@@ -446,8 +422,6 @@ static iree_status_t iree_hal_device_spec_encode(
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_writer_write_size(
       writer, queues->external_timepoint_handle_count));
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_writer_write_size(
-      writer, executables->format_count));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_writer_write_size(
       writer, executables->target_count));
   IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_writer_write_size(writer, facet_count));
@@ -520,10 +494,6 @@ static iree_status_t iree_hal_device_spec_encode(
 
   IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_writer_write_u32(writer, executables->flags));
-  for (iree_host_size_t i = 0; i < executables->format_count; ++i) {
-    IREE_RETURN_IF_ERROR(iree_hal_device_spec_encode_executable_format(
-        &executables->formats[i], writer));
-  }
   for (iree_host_size_t i = 0; i < executables->target_count; ++i) {
     IREE_RETURN_IF_ERROR(iree_hal_device_spec_encode_executable_target(
         &executables->targets[i], writer));
@@ -625,8 +595,6 @@ typedef struct iree_hal_device_spec_counts_t {
   iree_host_size_t queue_family_count;
   // Number of external timepoint handle records.
   iree_host_size_t external_timepoint_handle_count;
-  // Number of executable format records.
-  iree_host_size_t executable_format_count;
   // Number of executable target records.
   iree_host_size_t executable_target_count;
   // Number of driver-local facet records.
@@ -773,8 +741,6 @@ static iree_status_t iree_hal_device_spec_decode_header(
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_size(
       reader, "external timepoint handle count",
       &out_counts->external_timepoint_handle_count));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_size(
-      reader, "executable format count", &out_counts->executable_format_count));
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_size(
       reader, "executable target count", &out_counts->executable_target_count));
   return iree_hal_device_spec_reader_read_size(reader, "facet count",
@@ -1011,39 +977,14 @@ static iree_status_t iree_hal_device_spec_decode_timing(
   return iree_hal_device_spec_reader_read_u32(reader, &out_value->flags);
 }
 
-static iree_status_t iree_hal_device_spec_decode_executable_format(
-    iree_hal_device_spec_reader_t* reader,
-    iree_hal_executable_format_spec_t* out_value) {
-  memset(out_value, 0, sizeof(*out_value));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_reader_read_string(reader, &out_value->format));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_reader_read_u32(reader, &out_value->caching_modes));
-  return iree_hal_device_spec_reader_read_u32(reader, &out_value->flags);
-}
-
 static iree_status_t iree_hal_device_spec_decode_executable_target(
     iree_hal_device_spec_reader_t* reader,
     iree_hal_executable_target_t* out_value) {
   memset(out_value, 0, sizeof(*out_value));
   IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_reader_read_string(reader, &out_value->family));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_string(
-      reader, &out_value->architecture));
   IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_reader_read_string(reader, &out_value->processor));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_reader_read_string(reader, &out_value->features));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_string(
-      reader, &out_value->artifact_format));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_device_spec_reader_read_string(reader, &out_value->runtime_abi));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_string(
-      reader, &out_value->loader_namespace));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_string(
-      reader, &out_value->loader_target));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_string(
-      reader, &out_value->metadata_schema));
+      iree_hal_device_spec_reader_read_string(reader, &out_value->target_key));
   IREE_RETURN_IF_ERROR(
       iree_hal_device_spec_reader_read_u32(reader, &out_value->kind));
   IREE_RETURN_IF_ERROR(
@@ -1110,8 +1051,6 @@ typedef struct iree_hal_device_spec_parse_storage_t {
   iree_hal_queue_family_spec_t* queue_families;
   // Temporary external timepoint handle records.
   iree_hal_external_timepoint_handle_spec_t* external_timepoint_handles;
-  // Temporary executable format records.
-  iree_hal_executable_format_spec_t* executable_formats;
   // Temporary executable target records.
   iree_hal_executable_target_t* executable_targets;
   // Temporary driver-local facet records.
@@ -1135,8 +1074,6 @@ typedef struct iree_hal_device_spec_parse_layout_t {
   iree_host_size_t queue_families;
   // Byte offset of external timepoint handle records.
   iree_host_size_t external_timepoint_handles;
-  // Byte offset of executable format records.
-  iree_host_size_t executable_formats;
   // Byte offset of executable target records.
   iree_host_size_t executable_targets;
   // Byte offset of driver-local facet records.
@@ -1207,10 +1144,6 @@ static iree_status_t iree_hal_device_spec_parse_storage_initialize(
       iree_alignof(iree_hal_external_timepoint_handle_spec_t),
       &layout.total_length, &layout.external_timepoint_handles));
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_layout_parse_array(
-      counts->executable_format_count, sizeof(*out_storage->executable_formats),
-      iree_alignof(iree_hal_executable_format_spec_t), &layout.total_length,
-      &layout.executable_formats));
-  IREE_RETURN_IF_ERROR(iree_hal_device_spec_layout_parse_array(
       counts->executable_target_count, sizeof(*out_storage->executable_targets),
       iree_alignof(iree_hal_executable_target_t), &layout.total_length,
       &layout.executable_targets));
@@ -1255,10 +1188,6 @@ static iree_status_t iree_hal_device_spec_parse_storage_initialize(
         (iree_hal_external_timepoint_handle_spec_t*)(base +
                                                      layout
                                                          .external_timepoint_handles);
-  }
-  if (counts->executable_format_count) {
-    out_storage->executable_formats =
-        (iree_hal_executable_format_spec_t*)(base + layout.executable_formats);
   }
   if (counts->executable_target_count) {
     out_storage->executable_targets =
@@ -1313,8 +1242,6 @@ static iree_status_t iree_hal_device_spec_decode_body(
       counts->external_timepoint_handle_count;
   out_decoded->queues.external_timepoint_handles =
       storage->external_timepoint_handles;
-  out_decoded->executables.format_count = counts->executable_format_count;
-  out_decoded->executables.formats = storage->executable_formats;
   out_decoded->executables.target_count = counts->executable_target_count;
   out_decoded->executables.targets = storage->executable_targets;
 
@@ -1413,14 +1340,6 @@ static iree_status_t iree_hal_device_spec_decode_body(
 
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u32(
       reader, &out_decoded->executables.flags));
-  for (iree_host_size_t i = 0; i < counts->executable_format_count; ++i) {
-    iree_hal_executable_format_spec_t temporary;
-    iree_hal_executable_format_spec_t* value =
-        storage->executable_formats ? &storage->executable_formats[i]
-                                    : &temporary;
-    IREE_RETURN_IF_ERROR(
-        iree_hal_device_spec_decode_executable_format(reader, value));
-  }
   for (iree_host_size_t i = 0; i < counts->executable_target_count; ++i) {
     iree_hal_executable_target_t temporary;
     iree_hal_executable_target_t* value = storage->executable_targets

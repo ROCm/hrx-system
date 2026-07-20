@@ -138,7 +138,7 @@ extern "C" {
 // IDs
 //===----------------------------------------------------------------------===//
 
-// Index into the module's value table (module->values.entries[]).
+// Index into the module's value table.
 // Values are 64-byte cache-line-aligned entries. Prefer passing
 // value IDs over value pointers for stability across IR mutations.
 typedef uint32_t loom_value_id_t;

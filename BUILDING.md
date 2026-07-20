@@ -113,21 +113,53 @@ PATH aliases above. Command names are
 `iree-<build-system>-<target-group>[-<configuration>]`. Bazel jobs take explicit
 target patterns. CMake jobs use generated CTest names and labels directly.
 
+The CI compiler matrix assigns each compiler a deliberate role. Host compiler
+selection is explicit through `CC`, `CXX`, and `AR`; fetching ROCm never changes
+the host compiler through `PATH`. AMDGPU device actions receive the ROCm LLVM
+root independently through build configuration.
+
+| Workflow surface | Host compiler | AMDGPU device compiler | Coverage intent |
+| --- | --- | --- | --- |
+| Presubmit | Fetched ROCm Clang 23 | None | Runs repository policy checks and clang-tidy with the newest supported LLVM APIs. |
+| IREE Bazel/CMake CPU and importers | Ubuntu Clang 18 | None | Primary source build, test, sanitizer, and importer coverage. |
+| IREE Bazel/CMake Vulkan | Fetched ROCm Clang 23 | None | Vulkan source build and execution coverage on self-hosted runners that do not currently provision a generic Clang toolchain. |
+| IREE Bazel/CMake AMDGPU | Fetched ROCm Clang 23 | Fetched ROCm Clang 23 | Compiles and runs AMDGPU host and device code in the ROCm toolchain environment. |
+| IREE Bazel repository build | GCC 13 system toolchain | Fetched ROCm Clang 23 | Builds every supported Linux HAL driver, Loom target/importer, and build-compatible target under `//...`; it does not duplicate test execution. |
+| libHRX Bazel | Fetched ROCm Clang 23 | Fetched ROCm Clang 23 | Validates the source HRX product against its shipping ROCm compiler environment. |
+| Installed CMake/package CI | Fetched ROCm Clang 23 | Fetched ROCm Clang 23 | Builds, installs, packages, and tests the composed HRX distribution. |
+
+The repository-wide GCC lane intentionally uses the complete `//...` pattern,
+not a hand-maintained project list or exclusions. Platform-incompatible targets
+remain incompatible through their declared Bazel constraints; CUDA and Metal
+join this lane when their Linux Bazel dependency surfaces are enabled. The
+lane does not override GCC's linker selection; Bazel uses the GNU binutils
+provided by the system toolchain. The copyable build-shape command is:
+
+```bash
+CC=gcc CXX=g++ AR=ar \
+  python build_tools/devtools/ci.py iree-bazel-repository-build --keep-going
+```
+
 ```bash
 python build_tools/devtools/ci.py iree-bazel-cpu --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-cpu-sanitizers --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-vulkan --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-vulkan-sanitizers --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-amdgpu --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-amdgpu-sanitizers --target //runtime/... --keep-going
+python build_tools/devtools/ci.py iree-bazel-amdgpu --amdgpu-target gfx942 --keep-going
+python build_tools/devtools/ci.py iree-bazel-amdgpu-sanitizers --amdgpu-target gfx942 --keep-going
 
 python build_tools/devtools/ci.py iree-cmake-cpu --keep-going
 python build_tools/devtools/ci.py iree-cmake-cpu-sanitizers --keep-going
 python build_tools/devtools/ci.py iree-cmake-vulkan --keep-going
 python build_tools/devtools/ci.py iree-cmake-vulkan-sanitizers --keep-going
-python build_tools/devtools/ci.py iree-cmake-amdgpu --keep-going
-python build_tools/devtools/ci.py iree-cmake-amdgpu-sanitizers --keep-going
+python build_tools/devtools/ci.py iree-cmake-amdgpu --amdgpu-target gfx942 --keep-going
+python build_tools/devtools/ci.py iree-cmake-amdgpu-sanitizers --amdgpu-target gfx942 --keep-going
 ```
+
+AMDGPU commands default to `gfx942`. `--amdgpu-target` accepts an exact target
+or family selector and applies it to both the runtime HAL target set and Loom's
+`iree_hal`-derived compiler target set. Bazel AMDGPU commands run resource-tagged
+tests from both `//runtime/...` and `//loom/...`.
 
 The aggregate `*-sanitizers` commands batch sanitizer configurations for CI
 scheduling. Individual sanitizer commands are the targeted reproduction form:
@@ -135,10 +167,10 @@ scheduling. Individual sanitizer commands are the targeted reproduction form:
 ```bash
 python build_tools/devtools/ci.py iree-bazel-cpu-asan --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-vulkan-asan --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-amdgpu-tsan --target //runtime/... --keep-going
+python build_tools/devtools/ci.py iree-bazel-amdgpu-tsan --amdgpu-target gfx942 --keep-going
 python build_tools/devtools/ci.py iree-cmake-cpu-ubsan --keep-going
 python build_tools/devtools/ci.py iree-cmake-vulkan-ubsan --keep-going
-python build_tools/devtools/ci.py iree-cmake-amdgpu-tsan --keep-going
+python build_tools/devtools/ci.py iree-cmake-amdgpu-tsan --amdgpu-target gfx942 --keep-going
 ```
 
 Sanitizer CI tests ASAN, UBSAN, and TSAN. MSAN is build-only until the CI host
@@ -268,9 +300,9 @@ Older shared selectors such as `gfx9-generic`, `gfx90a`, `gfx908`,
 AMDGPU tooling, but they are not Loom compiler targets until matching Loom
 descriptor sets exist. The `iree_hal` source selector narrows Loom AMDGPU
 support to the descriptor-backed subset requested by the runtime
-`IREE_HAL_AMDGPU_TARGETS` setting. That is useful for executable-cache builds
-that want Loom linked with exactly the runtime HAL target horizon, while normal
-compiler and `loom-compile` builds should usually keep `loom_defaults`.
+`IREE_HAL_AMDGPU_TARGETS` setting. That is useful for runtime-integrated JIT
+builds that want Loom linked with exactly the runtime HAL target horizon, while
+normal compiler and `loom-compile` builds should usually keep `loom_defaults`.
 
 | Option | Values | CMake | Bazel portable | Bazel native |
 | --- | --- | --- | --- | --- |

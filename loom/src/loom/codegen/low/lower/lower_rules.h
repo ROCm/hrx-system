@@ -99,8 +99,9 @@ typedef enum loom_low_lower_value_ref_kind_e {
 // Returns true when the materializer can produce a low value for the source
 // value without emitting IR. Selection uses this to keep diagnostics tied to
 // the same value-ref row consumed during emission.
-typedef bool (*loom_low_lower_can_materialize_value_fn_t)(
-    loom_low_lower_context_t* context, loom_value_id_t source_value_id);
+typedef iree_status_t (*loom_low_lower_can_materialize_value_fn_t)(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value_id, bool* out_can_materialize);
 
 // Emits or returns the low value consumed by a descriptor operand for the
 // source value. The callback only runs when a value-ref row explicitly names
@@ -129,10 +130,11 @@ typedef struct loom_low_lower_rule_match_map_value_callback_t {
   void* user_data;
 } loom_low_lower_rule_match_map_value_callback_t;
 
-typedef bool (*loom_low_lower_rule_match_can_materialize_value_fn_t)(
+typedef iree_status_t (*loom_low_lower_rule_match_can_materialize_value_fn_t)(
     void* user_data, const loom_low_lower_rule_match_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    uint16_t value_ref_index, loom_value_id_t source_value_id);
+    uint16_t value_ref_index, loom_value_id_t source_value_id,
+    bool* out_can_materialize);
 
 typedef struct loom_low_lower_rule_match_can_materialize_value_callback_t {
   // Callback invoked for VALUE_MATERIALIZABLE guards.
@@ -181,6 +183,8 @@ struct loom_low_lower_rule_match_context_t {
   loom_low_lower_rule_match_descriptor_ref_callback_t descriptor_ref;
   // Optional dense source value facts used by fact-backed guard rows.
   const loom_value_fact_table_t* fact_table;
+  // Optional precomputed view summaries used by source-memory guard rows.
+  const loom_view_region_table_t* view_regions;
   // Optional symbolic proof context used as a cold fallback for fact-backed
   // guard rows whose scalar intervals are inconclusive.
   loom_symbolic_expr_context_t* symbolic_expr_context;
@@ -196,8 +200,11 @@ typedef struct loom_low_lower_rule_descriptor_ref_t {
 typedef struct loom_low_lower_value_ref_t {
   // Source value namespace being referenced.
   loom_low_lower_value_ref_kind_t kind;
-  // Ordinal within the namespace selected by |kind|.
+  // Ordinal within the namespace selected by |kind|. For operand refs this is
+  // the source operand field index; |element_index| selects within that field.
   uint16_t index;
+  // Element ordinal within the operand field selected by |index|.
+  uint16_t element_index;
   // One-based materializer table row used when this source ref is consumed as a
   // low operand. Zero means direct source-to-low value lookup.
   uint16_t materializer_index;
@@ -233,12 +240,12 @@ typedef enum loom_low_lower_attr_copy_kind_e {
   // Emits an exact signed i32 source value fact as a zero-extended u32 packet
   // attribute bit pattern.
   LOOM_LOW_LOWER_ATTR_COPY_VALUE_I32_AS_U32_BITS = 10,
-  // Emits an exact f64 source value fact as a rounded f32 packet attribute bit
+  // Emits an exact float source value fact as a rounded f32 packet attribute
+  // bit pattern.
+  LOOM_LOW_LOWER_ATTR_COPY_VALUE_FLOAT_AS_F32_BITS = 11,
+  // Emits an exact float source value fact as an f64 packet attribute bit
   // pattern.
-  LOOM_LOW_LOWER_ATTR_COPY_VALUE_F64_AS_F32_BITS = 11,
-  // Emits an exact f64 source value fact as an f64 packet attribute bit
-  // pattern.
-  LOOM_LOW_LOWER_ATTR_COPY_VALUE_F64_AS_F64_BITS = 12,
+  LOOM_LOW_LOWER_ATTR_COPY_VALUE_FLOAT_AS_F64_BITS = 12,
   // Expands one i64_array lane ordinal into one byte-lane immediate:
   // source_attr[source_element_index] * source_element_count + literal_i64.
   LOOM_LOW_LOWER_ATTR_COPY_I64_ARRAY_LANE_BYTE = 13,
@@ -247,12 +254,12 @@ typedef enum loom_low_lower_attr_copy_kind_e {
   // Emits one selected source-memory dynamic term byte stride as an i64
   // attribute.
   LOOM_LOW_LOWER_ATTR_COPY_SOURCE_MEMORY_DYNAMIC_BYTE_STRIDE = 15,
-  // Emits an exact f64 source value fact as a rounded f16 packet attribute bit
-  // pattern.
-  LOOM_LOW_LOWER_ATTR_COPY_VALUE_F64_AS_F16_BITS = 16,
-  // Emits an exact f64 source value fact as a rounded bf16 packet attribute bit
-  // pattern.
-  LOOM_LOW_LOWER_ATTR_COPY_VALUE_F64_AS_BF16_BITS = 17,
+  // Emits an exact float source value fact as a rounded f16 packet attribute
+  // bit pattern.
+  LOOM_LOW_LOWER_ATTR_COPY_VALUE_FLOAT_AS_F16_BITS = 16,
+  // Emits an exact float source value fact as a rounded bf16 packet attribute
+  // bit pattern.
+  LOOM_LOW_LOWER_ATTR_COPY_VALUE_FLOAT_AS_BF16_BITS = 17,
   // Emits a source enum attribute ordinal as an i64 packet attribute.
   LOOM_LOW_LOWER_ATTR_COPY_ENUM_ORDINAL = 18,
   // Emits the source op instance flag bitmask as an i64 packet attribute.
@@ -501,7 +508,7 @@ typedef enum loom_low_lower_guard_kind_e {
   // division recipe uses the add adjustment indicated by u64.
   LOOM_LOW_LOWER_GUARD_VALUE_U32_DIVISOR_MAGIC_IS_ADD = 17,
   // Source value facts must be an exact floating-point value.
-  LOOM_LOW_LOWER_GUARD_VALUE_EXACT_F64 = 18,
+  LOOM_LOW_LOWER_GUARD_VALUE_EXACT_FLOAT = 18,
   // Source value facts must prove every non-floating integer element is
   // contained in [minimum_i64, maximum_i64].
   LOOM_LOW_LOWER_GUARD_VALUE_I64_RANGE = 19,
@@ -510,9 +517,9 @@ typedef enum loom_low_lower_guard_kind_e {
   LOOM_LOW_LOWER_GUARD_OPERAND_SEGMENT_COUNT_EQ = 20,
   // Source op instance flags must contain every bit in u64.
   LOOM_LOW_LOWER_GUARD_INSTANCE_FLAGS_HAS_ALL = 21,
-  // Source value facts must prove an exact float equal to the f64 bit-pattern
-  // in u64.
-  LOOM_LOW_LOWER_GUARD_VALUE_F64_EQUALS = 22,
+  // Source value facts must prove an exact float equal to the declared-width
+  // rounding of the f64 literal bit pattern in u64.
+  LOOM_LOW_LOWER_GUARD_VALUE_FLOAT_EQUALS = 22,
   // Source value facts must prove every integer element is <= every integer
   // element in the other source value facts.
   LOOM_LOW_LOWER_GUARD_VALUE_I64_RANGE_LE = 23,
@@ -671,6 +678,10 @@ typedef uint16_t loom_low_lower_rule_flags_t;
 // emission program by source-to-low.
 #define LOOM_LOW_LOWER_RULE_FLAG_CONTRACT_ONLY \
   ((loom_low_lower_rule_flags_t)1u << 0)
+
+// Alias-ref pair names operand and result fields whose values alias by ordinal.
+#define LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS \
+  ((loom_low_lower_rule_flags_t)1u << 1)
 
 // Rule row has no structured report key.
 #define LOOM_LOW_LOWER_RULE_REPORT_KEY_NONE ((uint16_t)0)
@@ -851,6 +862,12 @@ void loom_low_lower_rule_materialize_diagnostic_params(
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_diagnostic_t* diagnostic,
     loom_diagnostic_param_t* out_params);
+
+// Resolves an operand/result value-ref row to the flat source-op value span for
+// that field. Non-source value refs return an empty span.
+loom_value_slice_t loom_low_lower_rule_value_ref_field_span(
+    const loom_module_t* module, const loom_low_lower_rule_set_t* rule_set,
+    const loom_op_t* source_op, uint16_t value_ref_index);
 
 // Resolves a rule-set-local descriptor ref against |match_context|'s selected
 // descriptor set. Missing optional descriptors return NULL.

@@ -32,6 +32,7 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
   source-to-low(control-flow = "structured-low")
   for func {
     where target {
+      low-decompose-cfg-tuples
       canonicalize
       cse
       low-dce

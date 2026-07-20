@@ -8,7 +8,7 @@
 
 #include <string.h>
 
-#include "loom/util/math.h"
+#include "iree/base/internal/math.h"
 
 // Payload tag namespace owned by the storage fact domain.
 #define LOOM_STORAGE_FACT_PAYLOAD_REFERENCE 1
@@ -58,7 +58,7 @@ iree_status_t loom_storage_facts_make_reserve(
     int64_t byte_alignment, loom_value_facts_t* out_facts) {
   if (storage_value_id == LOOM_VALUE_ID_INVALID ||
       !loom_storage_space_is_valid(storage_space) || byte_length <= 0 ||
-      !loom_is_power_of_two_i64(byte_alignment)) {
+      !iree_math_is_power_of_two_i64(byte_alignment)) {
     *out_facts = loom_value_facts_unknown();
     return iree_ok_status();
   }

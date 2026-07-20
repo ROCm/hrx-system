@@ -87,6 +87,7 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
     /*.wave_size=*/2,
     /*.tile_shape=*/
     {
+        /*.block_count=*/1,
         /*.result_row_count=*/2,
         /*.result_column_count=*/2,
         /*.reduction_count=*/2,
@@ -94,43 +95,82 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
     /*.lhs=*/
     {
         /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_LHS,
-        /*.map_kind=*/LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION,
-        /*.register_count=*/2,
-        /*.elements_per_register=*/1,
+        /*.register_count=*/1,
         /*.element_bit_count=*/16,
+        /*.payload_element_count=*/2,
+        /*.coordinate_element_offset=*/0,
+        /*.coordinate_element_stride=*/1,
+        /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
             LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+        /*.reduction_group=*/{},
+        /*.axes=*/
+        {
+            /*block=*/{},
+            /*row=*/{1, 2, 1, 1},
+            /*column=*/{},
+            /*reduction=*/{1, 1, 1, 2},
+        },
     },
     /*.rhs=*/
     {
         /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_RHS,
-        /*.map_kind=*/
-        LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION,
-        /*.register_count=*/2,
-        /*.elements_per_register=*/1,
+        /*.register_count=*/1,
         /*.element_bit_count=*/16,
+        /*.payload_element_count=*/2,
+        /*.coordinate_element_offset=*/0,
+        /*.coordinate_element_stride=*/1,
+        /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN |
             LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+        /*.reduction_group=*/{},
+        /*.axes=*/
+        {
+            /*block=*/{},
+            /*row=*/{},
+            /*column=*/{1, 2, 1, 1},
+            /*reduction=*/{1, 1, 1, 2},
+        },
     },
     /*.accumulator=*/
     {
         /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-        /*.map_kind=*/LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN,
         /*.register_count=*/2,
-        /*.elements_per_register=*/1,
         /*.element_bit_count=*/32,
+        /*.payload_element_count=*/2,
+        /*.coordinate_element_offset=*/0,
+        /*.coordinate_element_stride=*/1,
+        /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
             LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
+        /*.reduction_group=*/{},
+        /*.axes=*/
+        {
+            /*block=*/{},
+            /*row=*/{1, 1, 1, 2},
+            /*column=*/{1, 2, 1, 1},
+            /*reduction=*/{},
+        },
     },
     /*.result=*/
     {
         /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-        /*.map_kind=*/LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN,
         /*.register_count=*/2,
-        /*.elements_per_register=*/1,
         /*.element_bit_count=*/32,
+        /*.payload_element_count=*/2,
+        /*.coordinate_element_offset=*/0,
+        /*.coordinate_element_stride=*/1,
+        /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
             LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
+        /*.reduction_group=*/{},
+        /*.axes=*/
+        {
+            /*block=*/{},
+            /*row=*/{1, 1, 1, 2},
+            /*column=*/{1, 2, 1, 1},
+            /*reduction=*/{},
+        },
     },
 };
 

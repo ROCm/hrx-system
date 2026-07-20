@@ -155,10 +155,14 @@ TEST(SourceContextTest, TranslatesLoadedCodeObjectDeviceSpans) {
 TEST(SourceContextTest, ResolvesSanitizerSiteTableRecord) {
   std::vector<uint8_t> table = MakeSingleSiteTable();
   iree_hal_amdgpu_source_context_t context = MakeContext();
+
+  iree_hal_device_event_site_t site = iree_hal_device_event_site_default();
+  EXPECT_FALSE(iree_hal_amdgpu_source_context_try_resolve_sanitizer_site(
+      &context, /*site_id=*/0, &site));
+
   IREE_ASSERT_OK(iree_hal_amdgpu_source_context_set_sanitizer_site_table(
       &context, iree_make_const_byte_span(table.data(), table.size())));
 
-  iree_hal_device_event_site_t site = iree_hal_device_event_site_default();
   ASSERT_TRUE(iree_hal_amdgpu_source_context_try_resolve_sanitizer_site(
       &context, /*site_id=*/0, &site));
   EXPECT_EQ(site.record_length, sizeof(site));

@@ -17,6 +17,7 @@ from loom.target.contracts import (
     LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
     LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN,
     LOWER_RULE_FLAG_CONTRACT_ONLY,
+    LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
     LOWER_SOURCE_MEMORY_NONE,
     CompiledLowerRuleSet,
     ContractFragment,
@@ -50,11 +51,11 @@ _GUARD_VALUE_REF_KINDS = frozenset(
         GuardKind.VALUE_EXACT_I64,
         GuardKind.VALUE_EXACT_POWER_OF_TWO_I64,
         GuardKind.VALUE_U32_DIVISOR_MAGIC_IS_ADD,
-        GuardKind.VALUE_EXACT_F64,
+        GuardKind.VALUE_EXACT_FLOAT,
         GuardKind.VALUE_I64_RANGE,
         GuardKind.VALUE_I64_RANGE_LE,
         GuardKind.VALUE_I64_RANGE_GE,
-        GuardKind.VALUE_F64_EQUALS,
+        GuardKind.VALUE_FLOAT_EQUALS,
         GuardKind.VALUE_STORAGE_ELEMENT_FORMAT,
         GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
         GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
@@ -83,10 +84,10 @@ _ATTR_COPY_VALUE_REF_KINDS = frozenset(
         LowerAttrCopyKind.VALUE_U32_DIVISOR_MAGIC_MULTIPLIER,
         LowerAttrCopyKind.VALUE_U32_DIVISOR_MAGIC_SHIFT,
         LowerAttrCopyKind.VALUE_I32_AS_U32_BITS,
-        LowerAttrCopyKind.VALUE_F64_AS_F16_BITS,
-        LowerAttrCopyKind.VALUE_F64_AS_BF16_BITS,
-        LowerAttrCopyKind.VALUE_F64_AS_F32_BITS,
-        LowerAttrCopyKind.VALUE_F64_AS_F64_BITS,
+        LowerAttrCopyKind.VALUE_FLOAT_AS_F16_BITS,
+        LowerAttrCopyKind.VALUE_FLOAT_AS_BF16_BITS,
+        LowerAttrCopyKind.VALUE_FLOAT_AS_F32_BITS,
+        LowerAttrCopyKind.VALUE_FLOAT_AS_F64_BITS,
     )
 )
 
@@ -141,6 +142,7 @@ def value_ref_row(row: LowerValueRef) -> list[str]:
         always=True,
     )
     _append_field(fields, "index", row.index, always=True)
+    _append_field(fields, "element_index", row.element_index)
     _append_field(fields, "materializer_index", row.materializer_index)
     return fields
 
@@ -326,6 +328,10 @@ def _descriptor_ref_index(descriptor_refs: Mapping[str, int], descriptor: Descri
 def _rule_flags_c_expression(flags: int) -> str:
     if flags == LOWER_RULE_FLAG_CONTRACT_ONLY:
         return "LOOM_LOW_LOWER_RULE_FLAG_CONTRACT_ONLY"
+    if flags == LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS:
+        return "LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS"
+    if flags == (LOWER_RULE_FLAG_CONTRACT_ONLY | LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS):
+        return "LOOM_LOW_LOWER_RULE_FLAG_CONTRACT_ONLY | LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS"
     return f"0x{flags:X}"
 
 
@@ -378,7 +384,7 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
         GuardKind.VALUE_SIGNED_BIT_COUNT,
         GuardKind.VALUE_UNSIGNED_BIT_COUNT,
         GuardKind.VALUE_U32_DIVISOR_MAGIC_IS_ADD,
-        GuardKind.VALUE_F64_EQUALS,
+        GuardKind.VALUE_FLOAT_EQUALS,
         GuardKind.INSTANCE_FLAGS_HAS_ALL,
         GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
         GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,

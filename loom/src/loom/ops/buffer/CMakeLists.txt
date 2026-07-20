@@ -28,6 +28,7 @@ loom_generated_cc_library(
   ARGS
     "--dialect=buffer"
   DEPS
+    iree::base::internal
     loom::error::emitter
     loom::error::error_defs
     loom::ir
@@ -36,7 +37,6 @@ loom_generated_cc_library(
     loom::ops::op_defs
     loom::ops::view
     loom::util::fact_table
-    loom::util::math
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

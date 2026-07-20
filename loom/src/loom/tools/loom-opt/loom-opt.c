@@ -622,29 +622,29 @@ static iree_status_t loom_opt_format_pass_selection_json(
     loom_output_stream_t* stream) {
   iree_string_view_t pipeline_symbol =
       iree_string_view_trim(iree_make_cstring_view(FLAG_pipeline));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
   if (!iree_string_view_is_empty(pipeline_symbol)) {
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, "{\"kind\":\"pipeline\","));
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, "\"pipeline\":"));
-    IREE_RETURN_IF_ERROR(
-        loom_json_write_escaped_string(stream, pipeline_symbol));
-    return loom_output_stream_write_cstring(stream, "}");
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("kind"), IREE_SV("pipeline")));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("pipeline"), pipeline_symbol));
+    return loom_json_object_end(&object);
   }
 
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("kind"), IREE_SV("pass-list")));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "{\"kind\":\"pass-list\","));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "\"passes\":["));
+      loom_json_object_begin_field(&object, IREE_SV("passes")));
+  loom_json_array_writer_t passes_array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &passes_array));
   iree_flag_string_list_t passes = FLAG_pass_list();
   for (iree_host_size_t i = 0; i < passes.count; ++i) {
     IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, i == 0 ? "" : ","));
-    IREE_RETURN_IF_ERROR(
-        loom_json_write_escaped_string(stream, passes.values[i]));
+        loom_json_array_write_string_element(&passes_array, passes.values[i]));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]}"));
-  return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&passes_array));
+  return loom_json_object_end(&object);
 }
 
 static iree_status_t loom_opt_append_commented_block(
@@ -686,28 +686,35 @@ static iree_status_t loom_opt_append_reproducer_metadata(
   loom_output_stream_t metadata_stream;
   loom_output_stream_for_builder(&metadata_builder, &metadata_stream);
 
-  iree_status_t status = loom_output_stream_write_cstring(
-      &metadata_stream, "{\n  \"selection\": ");
+  loom_json_object_writer_t metadata_object;
+  iree_status_t status =
+      loom_json_object_begin(&metadata_stream, &metadata_object);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_json_object_begin_field(&metadata_object, IREE_SV("selection"));
+  }
   if (iree_status_is_ok(status)) {
     status = loom_opt_format_pass_selection_json(&metadata_stream);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_output_stream_write_cstring(&metadata_stream,
-                                              ",\n  \"failure_status\": ");
+    status = loom_json_object_begin_field(&metadata_object, IREE_SV("status"));
   }
   if (iree_status_is_ok(status)) {
-    status = loom_json_write_escaped_cstring(
-        &metadata_stream, iree_status_code_string(failure_status_code));
+    status = loom_json_write_status_object(
+        &metadata_stream, failure_status_code, iree_string_view_empty());
   }
   if (iree_status_is_ok(status)) {
-    status = loom_output_stream_write_cstring(&metadata_stream,
-                                              ",\n  \"registry\": ");
+    status =
+        loom_json_object_begin_field(&metadata_object, IREE_SV("registry"));
   }
   if (iree_status_is_ok(status)) {
     status = loom_pass_report_format_registry_json(registry, &metadata_stream);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_output_stream_write_cstring(&metadata_stream, "}\n");
+    status = loom_json_object_end(&metadata_object);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_output_stream_write_char(&metadata_stream, '\n');
   }
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_cstring(builder,

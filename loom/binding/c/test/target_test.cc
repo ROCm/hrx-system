@@ -543,10 +543,10 @@ TEST(TargetTest, EmitReturnsCompileReportArtifact) {
   const std::string contents = ToString(report->contents);
   EXPECT_NE(contents.find("\"artifact_kind\":\"target-artifact\""),
             std::string::npos);
-  EXPECT_NE(contents.find("\"status\":\"OK\""), std::string::npos);
-  EXPECT_NE(contents.find("\"backend\":\"fake-elf\""), std::string::npos);
-  EXPECT_NE(contents.find("\"executable_format\":\"fake-elf\""),
+  EXPECT_NE(contents.find("\"status\":{\"code\":0,\"name\":\"OK\"}"),
             std::string::npos);
+  EXPECT_NE(contents.find("\"backend\":\"fake-elf\""), std::string::npos);
+  EXPECT_NE(contents.find("\"artifact_format\":\"elf\""), std::string::npos);
   EXPECT_NE(contents.find("\"artifact_size\":4"), std::string::npos);
   EXPECT_NE(contents.find("\"instruction_count\":3"), std::string::npos);
 }

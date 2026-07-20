@@ -202,7 +202,7 @@ low.func.def target(@target) abi(hal_kernel) @i8x4_extract_dynamic(%bytes: reg<a
   %16 = v_cndmask_b32 %12, %15, %14
   %17 = v_mov_b32 3
   %18 = v_cmp_eq_i32 %8, %17
-  %19 = v_bfe_i32_offset_width_inline %bytes {offset = 24, width = 8}
+  %19 = v_ashrrev_i32_src0_inline %bytes, 24
   %lane = v_cndmask_b32 %16, %19, %18
   return %lane
 }
@@ -232,7 +232,7 @@ func.def target(@target) @i16x4_extract_static(%words: vector<4xi16>) -> (i16) {
 // ----
 low.func.def target(@target) abi(hal_kernel) @i16x4_extract_static(%words: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
   %5 = slice %words[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %lane = v_bfe_i32_offset_width_inline %5 {offset = 16, width = 16}
+  %lane = v_ashrrev_i32_src0_inline %5, 16
   return %lane
 }
 

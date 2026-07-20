@@ -24,6 +24,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/local_value_domain.h"
+#include "loom/util/cfg_graph.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -65,6 +66,26 @@ typedef struct loom_liveness_interval_t {
   // Number of units contributed to |value_class| when live.
   uint32_t unit_count;
 } loom_liveness_interval_t;
+
+// Contiguous half-open range where one value is live within one CFG block.
+//
+// A value may have multiple segments when its uses span mutually exclusive
+// blocks. Segments for each value are ordered by increasing program point and
+// never overlap.
+typedef struct loom_liveness_segment_t {
+  // First program point where the value is live in the block.
+  uint32_t start_point;
+  // One-past-last program point where the value is live in the block.
+  uint32_t end_point;
+} loom_liveness_segment_t;
+
+// Contiguous range in loom_liveness_analysis_t::segments for one value.
+typedef struct loom_liveness_segment_range_t {
+  // First segment in loom_liveness_analysis_t::segments.
+  uint32_t start;
+  // Number of segments for the value.
+  uint32_t count;
+} loom_liveness_segment_range_t;
 
 // Liveness for one block in the analyzed region.
 typedef struct loom_liveness_block_info_t {
@@ -203,6 +224,13 @@ typedef struct loom_liveness_analysis_t {
   const loom_liveness_pressure_summary_t* pressure_summaries;
   // Number of records in |pressure_summaries|.
   iree_host_size_t pressure_summary_count;
+  // Sparse block-local live segments grouped by value ordinal.
+  const loom_liveness_segment_t* segments;
+  // Number of entries in |segments|.
+  iree_host_size_t segment_count;
+  // Segment ranges indexed by local value ordinal. The table has
+  // |value_count| entries.
+  const loom_liveness_segment_range_t* value_segment_ranges;
 } loom_liveness_analysis_t;
 
 // Returns true when |analysis| models recursively nested structured regions.
@@ -231,6 +259,16 @@ iree_status_t loom_liveness_analyze_region(
 // value map instead of rebuilding module scratch ownership per analysis.
 iree_status_t loom_liveness_analyze_local_value_domain(
     const loom_local_value_domain_t* value_domain, loom_liveness_order_t order,
+    iree_arena_allocator_t* arena, loom_liveness_analysis_t* out_analysis);
+
+// Computes liveness over a local value domain and a prebuilt CFG graph.
+//
+// |cfg_graph| must describe the domain region and remain immutable until the
+// analysis completes. Non-CFG regions accept an identity-only graph. This entry
+// point lets adjacent analyses share CFG extraction without a hidden rebuild.
+iree_status_t loom_liveness_analyze_local_value_domain_with_cfg_graph(
+    const loom_local_value_domain_t* value_domain,
+    const loom_cfg_graph_t* cfg_graph, loom_liveness_order_t order,
     iree_arena_allocator_t* arena, loom_liveness_analysis_t* out_analysis);
 
 // Computes liveness using an explicit per-block operation order.
@@ -275,6 +313,18 @@ const loom_liveness_interval_t* loom_liveness_interval_for_value(
 const loom_liveness_interval_t* loom_liveness_interval_for_value_ordinal(
     const loom_liveness_analysis_t* analysis,
     loom_value_ordinal_t value_ordinal);
+
+// Returns the sparse live-segment range for |value_ordinal|. Values with no
+// semantic live range return an empty range.
+loom_liveness_segment_range_t loom_liveness_segment_range_for_value_ordinal(
+    const loom_liveness_analysis_t* analysis,
+    loom_value_ordinal_t value_ordinal);
+
+// Returns true when two non-empty sparse segment ranges overlap at any program
+// point. Both ranges must belong to |analysis|.
+bool loom_liveness_segment_ranges_overlap(
+    const loom_liveness_analysis_t* analysis, loom_liveness_segment_range_t lhs,
+    loom_liveness_segment_range_t rhs);
 
 // Returns the block record for |block|, or NULL when |block| is not owned by
 // the analyzed region.

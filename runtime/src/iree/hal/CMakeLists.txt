@@ -30,7 +30,6 @@ iree_cc_library(
     "driver_registry.h"
     "event.h"
     "executable.h"
-    "executable_cache.h"
     "fence.h"
     "file.h"
     "pool.h"
@@ -72,7 +71,6 @@ iree_cc_library(
     "driver_registry.c"
     "event.c"
     "executable.c"
-    "executable_cache.c"
     "fence.c"
     "file.c"
     "pool.c"
@@ -153,6 +151,7 @@ iree_cc_test(
   DEPS
     ::hal
     iree::base
+    iree::base::internal::fpu_state
     iree::base::internal::span
     iree::testing::gtest
     iree::testing::gtest_main

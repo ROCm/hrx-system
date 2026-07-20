@@ -301,25 +301,6 @@ TEST(Renderer, NullParamsWithNonZeroCountReturnsError) {
   iree_string_builder_deinitialize(&builder);
 }
 
-TEST(Renderer, ParamKindMismatchReturnsError) {
-  // Pass a STRING param where the schema expects U32.
-  loom_diagnostic_param_t params[3] = {
-      loom_param_string(IREE_SV("test.addi")),
-      loom_param_string(IREE_SV("wrong")),  // Schema expects U32.
-      loom_param_u32(2),
-  };
-  iree_string_builder_t builder;
-  iree_string_builder_initialize(iree_allocator_system(), &builder);
-  loom_output_stream_t stream;
-  loom_output_stream_for_builder(&builder, &stream);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INTERNAL,
-      loom_diagnostic_render_message(
-          loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 1), params, 3,
-          {nullptr, nullptr}, &stream));
-  iree_string_builder_deinitialize(&builder);
-}
-
 TEST(Renderer, BoolParam) {
   // Construct a synthetic error def to test BOOL rendering.
   static const loom_error_param_def_t bool_param_defs[] = {

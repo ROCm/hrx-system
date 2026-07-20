@@ -4,13 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "iree/base/internal/math.h"
 #include "loom/error/emitter.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/encoding/storage.h"
 #include "loom/util/fact_table.h"
-#include "loom/util/math.h"
 
 static iree_status_t loom_buffer_emit(iree_diagnostic_emitter_t emitter,
                                       const loom_op_t* op,
@@ -135,7 +135,7 @@ iree_status_t loom_buffer_alloca_verify(const loom_module_t* module,
                                         const loom_op_t* op,
                                         iree_diagnostic_emitter_t emitter) {
   int64_t base_alignment = loom_buffer_alloca_base_alignment(op);
-  if (!loom_is_power_of_two_i64(base_alignment)) {
+  if (!iree_math_is_power_of_two_i64(base_alignment)) {
     return loom_buffer_emit_attribute_value_constraint(
         emitter, op, IREE_SV("base_alignment"), base_alignment,
         IREE_SV("positive power-of-two byte alignment"));
@@ -159,7 +159,7 @@ iree_status_t loom_buffer_assume_alignment_verify(
     iree_diagnostic_emitter_t emitter) {
   int64_t minimum_alignment =
       loom_buffer_assume_alignment_minimum_alignment(op);
-  if (loom_is_power_of_two_i64(minimum_alignment)) {
+  if (iree_math_is_power_of_two_i64(minimum_alignment)) {
     return iree_ok_status();
   }
   return loom_buffer_emit_attribute_value_constraint(

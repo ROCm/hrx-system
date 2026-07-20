@@ -24,6 +24,45 @@
       }
     },
     {
+      "name": "reports amdgpu compile rejection as sample issue",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/amdgpu_compile_rejection.loom",
+          "--case=@dynamic_workgroup_count_case",
+          "--device=amdgpu"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case_count\":1",
+            "\"sample_count\":1",
+            "\"failed_sample_count\":1",
+            {
+              "regex": "\"case\":\"dynamic_workgroup_count_case\"[^}]*\"passed\":false"
+            },
+            "\"issues\":[",
+            "\"category\":\"compile_rejected\"",
+            "\"provider\":\"actual\"",
+            "\"stage\":\"compile\"",
+            "\"kind\":\"unresolved_workgroup_count\"",
+            "HAL actual invocation requires a statically resolved workgroup count"
+          ]
+        }
+      },
+      "stderr": {
+        "not_contains": [
+          "HAL actual invocation compile was rejected before dispatch",
+          "FAILED_PRECONDITION"
+        ]
+      }
+    },
+    {
       "name": "runs generated fp8 tensor case",
       "run": {
         "tool": "iree-test-loom",
@@ -46,17 +85,13 @@
       }
     },
     {
-      "name": "keeps valid loom-authored amdgpu asan access silent",
+      "name": "runs kernel whose kernargs are unused",
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/../../test/corpus/sanitizer/amdgpu_asan_actual.loom",
-          "--case=@asan_global_store_valid_case",
-          "--device=amdgpu",
-          "--sanitizer=asan",
-          "--sanitizer-reporting=report-only",
-          "--amdgpu_asan=true",
-          "--amdgpu_asan_report_policy=report-only"
+          "{srcdir}/testdata/amdgpu_unused_kernargs.loom",
+          "--case=@unused_kernargs_case",
+          "--device=amdgpu"
         ]
       },
       "stdout": {
@@ -64,85 +99,7 @@
           "unordered": [
             "\"format\":\"loom.test.v0\"",
             {
-              "regex": "\"case\":\"asan_global_store_valid_case\"[^}]*\"passed\":true"
-            },
-            "\"failed_sample_count\":0"
-          ]
-        }
-      }
-    },
-    {
-      "name": "reports loom-authored amdgpu asan redzone store",
-      "run": {
-        "tool": "iree-test-loom",
-        "args": [
-          "{srcdir}/../../test/corpus/sanitizer/amdgpu_asan_actual.loom",
-          "--case=@asan_global_store_redzone_case",
-          "--device=amdgpu",
-          "--sanitizer=asan",
-          "--sanitizer-reporting=report-only",
-          "--amdgpu_asan=true",
-          "--amdgpu_asan_report_policy=report-only"
-        ]
-      },
-      "stdout": {
-        "contains": {
-          "unordered": [
-            "\"format\":\"loom.test.v0\"",
-            {
-              "regex": "\"case\":\"asan_global_store_redzone_case\"[^}]*\"passed\":true"
-            },
-            "\"failed_sample_count\":0"
-          ]
-        }
-      }
-    },
-    {
-      "name": "reports loom-authored amdgpu tsan race",
-      "run": {
-        "tool": "iree-test-loom",
-        "args": [
-          "{srcdir}/../../test/corpus/sanitizer/amdgpu_tsan_actual.loom",
-          "--case=@tsan_workgroup_write_race_case",
-          "--device=amdgpu",
-          "--sanitizer=tsan",
-          "--sanitizer-reporting=report-only",
-          "--amdgpu_tsan=true",
-          "--amdgpu_tsan_report_policy=report-only"
-        ]
-      },
-      "stdout": {
-        "contains": {
-          "unordered": [
-            "\"format\":\"loom.test.v0\"",
-            {
-              "regex": "\"case\":\"tsan_workgroup_write_race_case\"[^}]*\"passed\":true"
-            },
-            "\"failed_sample_count\":0"
-          ]
-        }
-      }
-    },
-    {
-      "name": "keeps barrier-safe loom-authored amdgpu tsan access silent",
-      "run": {
-        "tool": "iree-test-loom",
-        "args": [
-          "{srcdir}/../../test/corpus/sanitizer/amdgpu_tsan_actual.loom",
-          "--case=@tsan_workgroup_barrier_safe_write_case",
-          "--device=amdgpu",
-          "--sanitizer=tsan",
-          "--sanitizer-reporting=report-only",
-          "--amdgpu_tsan=true",
-          "--amdgpu_tsan_report_policy=report-only"
-        ]
-      },
-      "stdout": {
-        "contains": {
-          "unordered": [
-            "\"format\":\"loom.test.v0\"",
-            {
-              "regex": "\"case\":\"tsan_workgroup_barrier_safe_write_case\"[^}]*\"passed\":true"
+              "regex": "\"case\":\"unused_kernargs_case\"[^}]*\"passed\":true"
             },
             "\"failed_sample_count\":0"
           ]

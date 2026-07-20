@@ -22,15 +22,15 @@ kernel.def target(@target) @lds_f16x4_b64_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_f16x4_b64_roundtrip() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_f16x4_b64_roundtrip() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %37 = storage {byte_alignment = 8, byte_length = 512} : low.storage<workgroup>
   %39 = v_lshlrev_b32_src0_inline %lane, 3
   %loaded = global_load_b64_saddr %39, %input_view
-  ds_write_b64 %39, %loaded
-  %roundtrip = ds_read_b64 %39
+  low.op<amdgpu.ds_write_b64>(%39, %loaded) {offset = 0} memory_access([0, 3, 7, -1, 43, 8, 0, 8, 3, 0, 504, 8, 512]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
+  %roundtrip = low.op<amdgpu.ds_read_b64>(%39) {offset = 0} memory_access([0, 3, 7, -1, 43, 8, 0, 8, 3, 0, 504, 8, 512]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   global_store_b64_saddr %39, %roundtrip, %output_view
   return
 }
@@ -58,15 +58,15 @@ kernel.def target(@target) @lds_f16x8_b128_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_f16x8_b128_roundtrip() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_f16x8_b128_roundtrip() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %37 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %39 = v_lshlrev_b32_src0_inline %lane, 4
   %loaded = global_load_b128_saddr %39, %input_view
-  ds_write_b128 %39, %loaded
-  %roundtrip = ds_read_b128 %39
+  low.op<amdgpu.ds_write_b128>(%39, %loaded) {offset = 0} memory_access([0, 3, 7, -1, 43, 16, 0, 16, 3, 0, 1008, 16, 1024]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
+  %roundtrip = low.op<amdgpu.ds_read_b128>(%39) {offset = 0} memory_access([0, 3, 7, -1, 43, 16, 0, 16, 3, 0, 1008, 16, 1024]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   global_store_b128_saddr %39, %roundtrip, %output_view
   return
 }
@@ -107,29 +107,29 @@ kernel.def target(@target) @lds_f16x8_b128_extract_scalar_stores() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_f16x8_b128_extract_scalar_stores() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_f16x8_b128_extract_scalar_stores() asm<amdgpu.rdna3.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %21 = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
   %23 = v_mov_b32 0
   %loaded = global_load_b128_saddr %23, %input_view
   %lane0 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  ds_write_b16 %23, %lane0
+  low.op<amdgpu.ds_write_b16>(%23, %lane0) {offset = 0} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 0, 0, 2, 2]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   %lane1 = v_lshrrev_b32_src0_inline %lane0, 16
-  ds_write_b16 %23, %lane1 {offset = 2}
+  low.op<amdgpu.ds_write_b16>(%23, %lane1) {offset = 2} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 2, 2, 4, 4]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   %lane2 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  ds_write_b16 %23, %lane2 {offset = 4}
+  low.op<amdgpu.ds_write_b16>(%23, %lane2) {offset = 4} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 4, 4, 6, 6]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   %lane3 = v_lshrrev_b32_src0_inline %lane2, 16
-  ds_write_b16 %23, %lane3 {offset = 6}
+  low.op<amdgpu.ds_write_b16>(%23, %lane3) {offset = 6} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 6, 6, 8, 8]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   %lane4 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  ds_write_b16 %23, %lane4 {offset = 8}
+  low.op<amdgpu.ds_write_b16>(%23, %lane4) {offset = 8} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 8, 8, 10, 10]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   %lane5 = v_lshrrev_b32_src0_inline %lane4, 16
-  ds_write_b16 %23, %lane5 {offset = 10}
+  low.op<amdgpu.ds_write_b16>(%23, %lane5) {offset = 10} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 10, 10, 12, 12]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   %lane6 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  ds_write_b16 %23, %lane6 {offset = 12}
+  low.op<amdgpu.ds_write_b16>(%23, %lane6) {offset = 12} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 12, 12, 14, 14]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   %lane7 = v_lshrrev_b32_src0_inline %lane6, 16
-  ds_write_b16 %23, %lane7 {offset = 14}
-  %roundtrip = ds_read_b128 %23
+  low.op<amdgpu.ds_write_b16>(%23, %lane7) {offset = 14} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 14, 14, 16, 16]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %roundtrip = low.op<amdgpu.ds_read_b128>(%23) {offset = 0} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 0, 0, 16, 16]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   global_store_b128_saddr %23, %roundtrip, %output_view
   return
 }
@@ -157,15 +157,15 @@ kernel.def target(@target) @lds_bf16x4_b64_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_bf16x4_b64_roundtrip() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_bf16x4_b64_roundtrip() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %37 = storage {byte_alignment = 8, byte_length = 512} : low.storage<workgroup>
   %39 = v_lshlrev_b32_src0_inline %lane, 3
   %loaded = global_load_b64_saddr %39, %input_view
-  ds_write_b64 %39, %loaded
-  %roundtrip = ds_read_b64 %39
+  low.op<amdgpu.ds_write_b64>(%39, %loaded) {offset = 0} memory_access([0, 3, 7, -1, 43, 8, 0, 8, 3, 0, 504, 8, 512]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
+  %roundtrip = low.op<amdgpu.ds_read_b64>(%39) {offset = 0} memory_access([0, 3, 7, -1, 43, 8, 0, 8, 3, 0, 504, 8, 512]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   global_store_b64_saddr %39, %roundtrip, %output_view
   return
 }
@@ -193,15 +193,15 @@ kernel.def target(@target) @lds_bf16x8_b128_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_bf16x8_b128_roundtrip() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_bf16x8_b128_roundtrip() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %37 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %39 = v_lshlrev_b32_src0_inline %lane, 4
   %loaded = global_load_b128_saddr %39, %input_view
-  ds_write_b128 %39, %loaded
-  %roundtrip = ds_read_b128 %39
+  low.op<amdgpu.ds_write_b128>(%39, %loaded) {offset = 0} memory_access([0, 3, 7, -1, 43, 16, 0, 16, 3, 0, 1008, 16, 1024]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
+  %roundtrip = low.op<amdgpu.ds_read_b128>(%39) {offset = 0} memory_access([0, 3, 7, -1, 43, 16, 0, 16, 3, 0, 1008, 16, 1024]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   global_store_b128_saddr %39, %roundtrip, %output_view
   return
 }
@@ -229,7 +229,7 @@ kernel.def target(@target) @lds_f16_scalar_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_f16_scalar_roundtrip() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_f16_scalar_roundtrip() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
@@ -237,8 +237,8 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_f16_scalar_roundtri
   %18 = v_lshlrev_b32_src0_inline %lane, 1
   %loaded = global_load_d16_b16_saddr %18, %input_view
   %20 = v_bfe_u32_offset_0_width_16_low16 %loaded
-  ds_write_b16 %18, %20
-  %roundtrip = ds_read_u16 %18
+  low.op<amdgpu.ds_write_b16>(%18, %20) {offset = 0} memory_access([0, 3, 7, -1, 43, 2, 0, 2, 3, 0, 126, 2, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %roundtrip = low.op<amdgpu.ds_read_u16>(%18) {offset = 0} memory_access([0, 3, 7, -1, 43, 2, 0, 2, 3, 0, 126, 2, 128]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
   global_store_short_saddr %18, %roundtrip, %output_view
   return
 }
@@ -264,14 +264,14 @@ kernel.def target(@target) @lds_i8x2_b16_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_i8x2_b16_roundtrip() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_i8x2_b16_roundtrip() asm<amdgpu.rdna3.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 2} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 2} : reg<amdgpu.sgpr x2>
   %13 = storage {byte_alignment = 2, byte_length = 2} : low.storage<workgroup>
   %15 = v_mov_b32 0
   %loaded = global_load_u16_saddr %15, %input_view
-  ds_write_b16 %15, %loaded
-  %roundtrip = ds_read_u16 %15
+  low.op<amdgpu.ds_write_b16>(%15, %loaded) {offset = 0} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 0, 0, 2, 2]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %roundtrip = low.op<amdgpu.ds_read_u16>(%15) {offset = 0} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 0, 0, 2, 2]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
   global_store_short_saddr %15, %roundtrip, %output_view
   return
 }
@@ -297,14 +297,14 @@ kernel.def target(@target) @lds_i16_scalar_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_i16_scalar_roundtrip() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_i16_scalar_roundtrip() asm<amdgpu.rdna3.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 2} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 2} : reg<amdgpu.sgpr x2>
   %13 = storage {byte_alignment = 2, byte_length = 2} : low.storage<workgroup>
   %15 = v_mov_b32 0
   %loaded = global_load_i16_saddr %15, %input_view
-  ds_write_b16 %15, %loaded
-  %19 = ds_read_u16 %15
+  low.op<amdgpu.ds_write_b16>(%15, %loaded) {offset = 0} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 0, 0, 2, 2]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %19 = low.op<amdgpu.ds_read_u16>(%15) {offset = 0} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 0, 0, 2, 2]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
   %roundtrip = v_bfe_i32_offset_width_inline %19 {offset = 0, width = 16}
   global_store_short_saddr %15, %roundtrip, %output_view
   return
@@ -333,7 +333,7 @@ kernel.def target(@target) @lds_bf16_scalar_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_bf16_scalar_roundtrip() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_bf16_scalar_roundtrip() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
@@ -341,8 +341,8 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_bf16_scalar_roundtr
   %18 = v_lshlrev_b32_src0_inline %lane, 1
   %loaded = global_load_d16_b16_saddr %18, %input_view
   %20 = v_bfe_u32_offset_0_width_16_low16 %loaded
-  ds_write_b16 %18, %20
-  %roundtrip = ds_read_u16 %18
+  low.op<amdgpu.ds_write_b16>(%18, %20) {offset = 0} memory_access([0, 3, 7, -1, 43, 2, 0, 2, 3, 0, 126, 2, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %roundtrip = low.op<amdgpu.ds_read_u16>(%18) {offset = 0} memory_access([0, 3, 7, -1, 43, 2, 0, 2, 3, 0, 126, 2, 128]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
   global_store_short_saddr %18, %roundtrip, %output_view
   return
 }
@@ -372,7 +372,7 @@ kernel.def target(@target) @lds_f16_strided_scalar_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(16, 16, 1) @lds_f16_strided_scalar_roundtrip() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(16, 16, 1) workgroup_count(1, 1, 1) @lds_f16_strided_scalar_roundtrip() asm<amdgpu.rdna3.core> {
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -387,8 +387,8 @@ low.kernel.def target(@target) workgroup_size(16, 16, 1) @lds_f16_strided_scalar
   %34 = v_lshlrev_b32_src0_inline %row, 1
   %35 = v_lshlrev_b32_src0_inline %column, 5
   %36 = v_add_u32 %34, %35
-  ds_write_b16 %36, %33
-  %roundtrip = ds_read_u16 %36
+  low.op<amdgpu.ds_write_b16>(%36, %33) {offset = 0} memory_access([0, 3, 9, -1, 11, 0, 0, 0, 3, 0, 510, 2, 512]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %roundtrip = low.op<amdgpu.ds_read_u16>(%36) {offset = 0} memory_access([0, 3, 9, -1, 11, 0, 0, 0, 3, 0, 510, 2, 512]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
   global_store_short_saddr %31, %roundtrip, %output_view
   return
 }

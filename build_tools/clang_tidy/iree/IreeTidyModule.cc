@@ -20,6 +20,8 @@ class IreeTidyModule final : public ClangTidyModule {
  public:
   void addCheckFactories(ClangTidyCheckFactories& CheckFactories) override {
     CheckFactories.registerCheck<SmokeCheck>("iree-smoke");
+    CheckFactories.registerCheck<AssertOutputCallCheck>(
+        "iree-assert-output-call");
     CheckFactories.registerCheck<BorrowedStatusParameterCheck>(
         "iree-status-borrowed-parameter");
     CheckFactories.registerCheck<DiscardedStatusCheck>("iree-status-discarded");

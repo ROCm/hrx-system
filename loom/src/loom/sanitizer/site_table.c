@@ -256,9 +256,9 @@ static iree_status_t loom_sanitizer_site_table_write_record(
         iree_make_byte_span(payload_data + payload_offset, payload_length),
         &encoded_length));
     if (encoded_length != payload_length) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
+      IREE_ASSERT_UNREACHABLE(
           "sanitizer site table payload length changed during encoding");
+      IREE_BUILTIN_UNREACHABLE();
     }
     *inout_payload_data_length += payload_length;
     record_flags |= LOOM_SANITIZER_SITE_TABLE_RECORD_HAS_PAYLOAD;
@@ -426,9 +426,9 @@ iree_status_t loom_sanitizer_site_table_encode(
         table_data + payload_data_offset, &current_payload_data_length));
   }
   if (current_payload_data_length != payload_data_length) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
+    IREE_ASSERT_UNREACHABLE(
         "sanitizer site table payload data length changed during encoding");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   *out_table = iree_make_const_byte_span(table_data, total_length);

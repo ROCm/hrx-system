@@ -14,6 +14,35 @@ from __future__ import annotations
 from .common import *
 from .control import *
 
+
+def _s_getreg_b32_cluster_workgroup_flat_id_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.s_getreg_b32.cluster_workgroup_flat_id",
+        instruction_name="S_GETREG_B32",
+        mnemonic="s_getreg_b32_cluster_workgroup_flat_id",
+        encoding_name="ENC_SOPK",
+        semantic_tag="kernel.cluster.workgroup.flat_id",
+        schedule_class=_SCHEDULE_SALU,
+        operands=(AmdgpuOperandOverlay("SDST", _sgpr_result()),),
+        ignored_operands=(
+            AmdgpuIgnoredOperandOverlay(
+                "SIMM16",
+                ignore_reason="fixed-gfx1250-cluster-local-rank-hwreg",
+                fixed_encoding_value=0x1D5C,
+            ),
+        ),
+        asm_forms=_asm(
+            results=("dst",),
+            native_assembly_mnemonic="s_getreg_b32",
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_literal("hwreg(HW_REG_IB_STS2, 21, 4)"),
+            ),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     key="amdgpu.rdna4.core",
     reg_classes=(
@@ -23,6 +52,8 @@ _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
             SpillSlotSpace.SCRATCH,
             flags=(RegClassFlag.PHYSICAL,),
             allocatable_count=106,
+            fixed_location_base=108,
+            fixed_location_count=16,
             full_register_part_mask=_REG_PART_SGPR_FULL32_MASK,
         ),
         RegClass(
@@ -223,6 +254,27 @@ def _gfx1250_matrix_reuse_immediates() -> tuple[Immediate, ...]:
     )
 
 
+def _gfx1250_matrix_reuse_native_values() -> tuple[NativeAsmValue, ...]:
+    return tuple(
+        _native_amdgpu_named_flag_immediate(field_name)
+        for field_name in _GFX1250_MATRIX_REUSE_IMMEDIATE_FIELDS
+    )
+
+
+def _gfx1250_matrix_integer_control_immediates() -> tuple[Immediate, ...]:
+    return (
+        _encoded_immediate(_MATRIX_SIGN_SELECT_IMMEDIATE, "NEG"),
+        _encoded_immediate(_MATRIX_CLAMP_IMMEDIATE, "CLAMP"),
+    )
+
+
+def _gfx1250_matrix_integer_control_native_values() -> tuple[NativeAsmValue, ...]:
+    return (
+        _native_amdgpu_named_bit_list_immediate("neg_lo", 3),
+        _native_amdgpu_named_flag_immediate("clamp"),
+    )
+
+
 def _gfx1250_swmmac_index_immediate(field_name: str) -> Immediate:
     # gfx1250 SWMMAC index-key variants share encoding bit 11.
     return _encoded_immediate(
@@ -279,8 +331,15 @@ def _gfx1250_wmma_descriptor(
     has_reuse_immediates: bool,
 ) -> Descriptor:
     suffix = name.replace(".", "_")
-    immediates = _gfx1250_matrix_reuse_immediates() if has_reuse_immediates else ()
-    immediate_fields = (
+    has_integer_controls = name == "i32.16x16x64.iu8"
+    integer_immediates = (
+        _gfx1250_matrix_integer_control_immediates() if has_integer_controls else ()
+    )
+    reuse_immediates = (
+        _gfx1250_matrix_reuse_immediates() if has_reuse_immediates else ()
+    )
+    immediates = (*integer_immediates, *reuse_immediates)
+    immediate_fields = (("neg_lo", "clamp") if has_integer_controls else ()) + (
         _GFX1250_MATRIX_REUSE_IMMEDIATE_FIELDS if has_reuse_immediates else ()
     )
     return Descriptor(
@@ -305,6 +364,22 @@ def _gfx1250_wmma_descriptor(
             operands=("a", "b", "acc"),
             immediates=immediate_fields,
             named_immediates=True,
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_operand("a"),
+                _native_operand("b"),
+                _native_operand("acc"),
+                *(
+                    _gfx1250_matrix_integer_control_native_values()
+                    if has_integer_controls
+                    else ()
+                ),
+                *(
+                    _gfx1250_matrix_reuse_native_values()
+                    if has_reuse_immediates
+                    else ()
+                ),
+            ),
         ),
         schedule_class=_SCHEDULE_WMMA,
         encoding_format_id=AMDGPU_ENCODING_FORMAT_VOP3P,
@@ -416,6 +491,11 @@ def _gfx1250_swmmac_descriptor(
     index_units: int,
 ) -> Descriptor:
     suffix = name.replace(".", "_")
+    has_integer_controls = name == "i32.16x16x128.iu8"
+    integer_immediates = (
+        _gfx1250_matrix_integer_control_immediates() if has_integer_controls else ()
+    )
+    integer_immediate_fields = ("neg_lo", "clamp") if has_integer_controls else ()
     return Descriptor(
         key=f"amdgpu.v_swmmac_{suffix}",
         mnemonic=f"v_swmmac_{suffix}",
@@ -429,6 +509,7 @@ def _gfx1250_swmmac_descriptor(
         ),
         immediates=(
             _gfx1250_swmmac_index_immediate(index_immediate),
+            *integer_immediates,
             *_gfx1250_matrix_reuse_immediates(),
         ),
         constraints=_DESTRUCTIVE_ACCUMULATOR_CONSTRAINTS,
@@ -438,8 +519,25 @@ def _gfx1250_swmmac_descriptor(
         asm_forms=_asm(
             results=("dst",),
             operands=("acc", "a", "b", "index"),
-            immediates=(index_immediate, *_GFX1250_MATRIX_REUSE_IMMEDIATE_FIELDS),
+            immediates=(
+                index_immediate,
+                *integer_immediate_fields,
+                *_GFX1250_MATRIX_REUSE_IMMEDIATE_FIELDS,
+            ),
             named_immediates=True,
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_operand("a"),
+                _native_operand("b"),
+                _native_operand("index"),
+                _native_amdgpu_named_i64_immediate(index_immediate, name="index_key"),
+                *(
+                    _gfx1250_matrix_integer_control_native_values()
+                    if has_integer_controls
+                    else ()
+                ),
+                *_gfx1250_matrix_reuse_native_values(),
+            ),
         ),
         schedule_class=_SCHEDULE_SWMMAC,
         encoding_format_id=AMDGPU_ENCODING_FORMAT_VOP3P,
@@ -474,7 +572,10 @@ _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     key="amdgpu.rdna4.gfx125x.core",
     reg_classes=_gfx125x_reg_classes(),
     register_parts=_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE.register_parts,
-    resources=_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE.resources,
+    resources=(
+        *_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE.resources,
+        Resource(_RESOURCE_TENSOR, capacity_per_cycle=1, kind=ResourceKind.LOAD),
+    ),
     schedule_classes=(
         *_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
         ScheduleClass(
@@ -484,6 +585,51 @@ _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
             issue_uses=(IssueUse(_RESOURCE_WMMA, cycles=1, units=1),),
             hazards=_matrix_hazards(_RESOURCE_WMMA),
             model_quality=ModelQuality.ESTIMATED,
+        ),
+        ScheduleClass(
+            _SCHEDULE_TENSOR_LOAD_LDS,
+            latency_kind=LatencyKind.VARIABLE,
+            latency_cycles=16,
+            issue_uses=(IssueUse(_RESOURCE_TENSOR, cycles=1, units=1),),
+            hazards=_TENSOR_WAIT_HAZARDS,
+            flags=(ScheduleClassFlag.MAY_LOAD, ScheduleClassFlag.MAY_STORE),
+            model_quality=ModelQuality.FALLBACK,
+        ),
+        ScheduleClass(
+            _SCHEDULE_CLUSTER_LOAD_LDS,
+            latency_kind=LatencyKind.VARIABLE,
+            latency_cycles=16,
+            issue_uses=(IssueUse(_RESOURCE_VMEM_LOAD, cycles=1, units=1),),
+            hazards=_ASYNC_WAIT_HAZARDS,
+            flags=(ScheduleClassFlag.MAY_LOAD, ScheduleClassFlag.MAY_STORE),
+            model_quality=ModelQuality.FALLBACK,
+        ),
+        ScheduleClass(
+            _SCHEDULE_WAIT_TENSOR,
+            latency_kind=LatencyKind.VARIABLE,
+            latency_cycles=1,
+            issue_uses=(IssueUse(_RESOURCE_CONTROL, cycles=1, units=1),),
+            hazards=_TENSOR_WAIT_HAZARDS,
+            flags=(ScheduleClassFlag.CONTROL,),
+            model_quality=ModelQuality.FALLBACK,
+        ),
+        ScheduleClass(
+            _SCHEDULE_WAIT_ASYNC,
+            latency_kind=LatencyKind.VARIABLE,
+            latency_cycles=1,
+            issue_uses=(IssueUse(_RESOURCE_CONTROL, cycles=1, units=1),),
+            hazards=_ASYNC_WAIT_HAZARDS,
+            flags=(ScheduleClassFlag.CONTROL,),
+            model_quality=ModelQuality.FALLBACK,
+        ),
+        ScheduleClass(
+            _SCHEDULE_WAIT_X,
+            latency_kind=LatencyKind.VARIABLE,
+            latency_cycles=1,
+            issue_uses=(IssueUse(_RESOURCE_CONTROL, cycles=1, units=1),),
+            hazards=_X_WAIT_HAZARDS,
+            flags=(ScheduleClassFlag.CONTROL,),
+            model_quality=ModelQuality.FALLBACK,
         ),
     ),
     descriptors=(
@@ -499,4 +645,5 @@ __all__ = (
     "_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE",
     "_gfx125x_reg_classes",
+    "_s_getreg_b32_cluster_workgroup_flat_id_overlay",
 )

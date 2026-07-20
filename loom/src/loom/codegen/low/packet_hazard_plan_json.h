@@ -42,12 +42,6 @@ iree_status_t loom_low_packet_progress_write_json_array(
 iree_status_t loom_low_packet_hazard_plan_write_json_array(
     const loom_low_packet_hazard_plan_t* plan, loom_output_stream_t* stream);
 
-// Writes count and row-array object members for |plan|. This is used by target
-// overlays that need their own top-level object but should not own the common
-// progress/hazard row schema.
-iree_status_t loom_low_packet_hazard_plan_write_json_members(
-    const loom_low_packet_hazard_plan_t* plan, loom_output_stream_t* stream);
-
 // Appends the canonical common packet hazard-plan JSON object to |builder|.
 iree_status_t loom_low_packet_hazard_plan_format_json(
     const loom_low_packet_hazard_plan_t* plan, iree_string_builder_t* builder);

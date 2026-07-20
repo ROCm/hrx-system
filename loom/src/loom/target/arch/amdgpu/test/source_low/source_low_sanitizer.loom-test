@@ -200,7 +200,7 @@ func.def target(@target) @sanitizer_explicit_rdna3_strided_access_write(%output:
 
 // ----
 low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_rdna3_strided_access_write() asm<amdgpu.rdna3.core> {
-  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16384} : reg<amdgpu.sgpr x2>
   %7 = s_getpc_b64
   %8 = slice %7[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %9 = slice %7[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -860,7 +860,7 @@ kernel.def target(@target) @sanitizer_dynamic_byte_stride_read() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(256, 1, 1) @sanitizer_dynamic_byte_stride_read() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(256, 1, 1) workgroup_count(1, 1, 1) @sanitizer_dynamic_byte_stride_read() asm<amdgpu.rdna3.core> {
   %row = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 53760} : reg<amdgpu.sgpr x2>
   %10 = s_getpc_b64

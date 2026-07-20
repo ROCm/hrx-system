@@ -21,13 +21,12 @@ kernel.def target(@target) @async_gather_dword() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @async_gather_dword() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_dword() asm<amdgpu.cdna4.core> {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %14 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %16 = v_mov_b32 0
-  %17 = s_mov_b32 0
-  %18 = s_mov_b32_m0 %17
-  global_load_lds_dword_saddr %16, %global, %18
+  %17 = s_mov_b32_m0_imm 0
+  global_load_lds_dword_saddr %16, %global, %17
   s_waitcnt {vmcnt = 0}
   return
 }
@@ -54,13 +53,12 @@ kernel.def target(@target) @async_gather_b128() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @async_gather_b128() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_b128() asm<amdgpu.cdna4.core> {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %14 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %16 = v_mov_b32 0
-  %17 = s_mov_b32 0
-  %18 = s_mov_b32_m0 %17
-  global_load_lds_dwordx4_saddr %16, %global, %18
+  %17 = s_mov_b32_m0_imm 0
+  global_load_lds_dwordx4_saddr %16, %global, %17
   s_waitcnt {vmcnt = 0}
   return
 }
@@ -92,16 +90,14 @@ kernel.def target(@target) @async_gather_two_stage() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @async_gather_two_stage() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_two_stage() asm<amdgpu.cdna4.core> {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %18 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
   %20 = v_mov_b32 0
-  %21 = s_mov_b32 0
-  %22 = s_mov_b32_m0 %21
-  global_load_lds_dwordx4_saddr %20, %global, %22
-  %24 = s_mov_b32 1024
-  %25 = s_mov_b32_m0 %24
-  global_load_lds_dwordx4_saddr %20, %global, %25
+  %21 = s_mov_b32_m0_imm 0
+  global_load_lds_dwordx4_saddr %20, %global, %21
+  %23 = s_mov_b32_m0_imm 1024
+  global_load_lds_dwordx4_saddr %20, %global, %23
   s_waitcnt {vmcnt = 1}
   s_waitcnt {vmcnt = 0}
   return
@@ -136,19 +132,16 @@ kernel.def target(@target) @async_gather_multi_packet_newer_group() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @async_gather_multi_packet_newer_group() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_multi_packet_newer_group() asm<amdgpu.cdna4.core> {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %20 = storage {byte_alignment = 16, byte_length = 3072} : low.storage<workgroup>
   %22 = v_mov_b32 0
-  %23 = s_mov_b32 0
-  %24 = s_mov_b32_m0 %23
-  global_load_lds_dwordx4_saddr %22, %global, %24
-  %26 = s_mov_b32 1024
-  %27 = s_mov_b32_m0 %26
+  %23 = s_mov_b32_m0_imm 0
+  global_load_lds_dwordx4_saddr %22, %global, %23
+  %25 = s_mov_b32_m0_imm 1024
+  global_load_lds_dwordx4_saddr %22, %global, %25
+  %27 = s_mov_b32_m0_imm 2048
   global_load_lds_dwordx4_saddr %22, %global, %27
-  %29 = s_mov_b32 2048
-  %30 = s_mov_b32_m0 %29
-  global_load_lds_dwordx4_saddr %22, %global, %30
   s_waitcnt {vmcnt = 2}
   s_waitcnt {vmcnt = 0}
   return
@@ -178,13 +171,12 @@ kernel.def target(@target) @async_gather_second_lds_slot() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @async_gather_second_lds_slot() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_second_lds_slot() asm<amdgpu.cdna4.core> {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %16 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %18 = v_mov_b32 0
-  %19 = s_mov_b32 0
-  %20 = s_mov_b32_m0 %19
-  global_load_lds_dwordx4_saddr %18, %global, %20
+  %19 = s_mov_b32_m0_imm 0
+  global_load_lds_dwordx4_saddr %18, %global, %19
   s_waitcnt {vmcnt = 0}
   return
 }

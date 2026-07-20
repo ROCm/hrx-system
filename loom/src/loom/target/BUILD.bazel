@@ -27,6 +27,29 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "residency",
+    srcs = ["residency.c"],
+    hdrs = ["residency.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "residency_test",
+    srcs = ["residency_test.cc"],
+    deps = [
+        ":residency",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "registers",
     hdrs = ["registers.h"],
     deps = [
@@ -46,12 +69,41 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "capability_facts",
+    srcs = ["capability_facts.c"],
+    hdrs = ["capability_facts.h"],
+    deps = [
+        ":types",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "capability_facts_test",
+    srcs = ["capability_facts_test.cc"],
+    deps = [
+        ":capability_facts",
+        ":types",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "selection",
     srcs = ["selection.c"],
     hdrs = ["selection.h"],
     deps = [
+        ":function_contract",
         ":types",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/error:emitter",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/target",
         "//loom/src/loom/pass:environment",
         "//loom/src/loom/pass:types",
         "//runtime/src/iree/base",
@@ -80,68 +132,6 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "artifact_manifest",
-    srcs = ["artifact_manifest.c"],
-    hdrs = ["artifact_manifest.h"],
-    deps = [
-        ":types",
-        "//loom/src/loom/util:json",
-        "//loom/src/loom/util:stream",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
-    name = "artifact_manifest_collect",
-    srcs = ["artifact_manifest_collect.c"],
-    hdrs = ["artifact_manifest_collect.h"],
-    deps = [
-        ":artifact_manifest",
-        ":entry_selection",
-        ":types",
-        "//loom/src/loom/analysis:symbol_dependencies",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/low",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
-loom_cc_test(
-    name = "artifact_manifest_test",
-    srcs = ["artifact_manifest_test.cc"],
-    deps = [
-        ":artifact_manifest",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_test(
-    name = "artifact_manifest_collect_test",
-    srcs = ["artifact_manifest_collect_test.cc"],
-    deps = [
-        ":artifact_manifest",
-        ":artifact_manifest_collect",
-        ":entry_selection",
-        "//loom/src/loom/analysis:symbol_dependencies",
-        "//loom/src/loom/format/text:parser",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/func",
-        "//loom/src/loom/ops/global",
-        "//loom/src/loom/ops/low",
-        "//loom/src/loom/ops/target",
-        "//loom/src/loom/testing:module_ptr",
-        "//loom/src/loom/util:stream",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_library(
     name = "function_contract",
     srcs = ["function_contract.c"],
     hdrs = ["function_contract.h"],
@@ -154,48 +144,6 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops/target",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
-    name = "compile_report",
-    srcs = ["compile_report.c"],
-    hdrs = ["compile_report.h"],
-    deps = [
-        ":types",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
-    name = "compile_report_format",
-    srcs = ["compile_report_format.c"],
-    hdrs = ["compile_report_format.h"],
-    deps = [
-        ":compile_report",
-        ":math_policy",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/util:json",
-        "//loom/src/loom/util:stream",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
-    name = "compile_report_low",
-    srcs = ["compile_report_low.c"],
-    hdrs = ["compile_report_low.h"],
-    deps = [
-        ":compile_report",
-        ":registers",
-        "//loom/src/loom/codegen/low:descriptors",
-        "//loom/src/loom/codegen/low:diagnostics",
-        "//loom/src/loom/codegen/low:frame",
-        "//loom/src/loom/codegen/low:packet",
-        "//loom/src/loom/codegen/low/lower",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
     ],
 )
@@ -343,8 +291,6 @@ loom_cc_library(
     srcs = ["provider.c"],
     hdrs = ["provider.h"],
     deps = [
-        ":artifact_manifest",
-        ":compile_report",
         ":legalization",
         ":low_asm_diagnostics",
         ":low_descriptor_registry",
@@ -357,6 +303,8 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/pass:environment",
         "//loom/src/loom/pass:registry",
+        "//loom/src/loom/target/reporting:artifact_manifest",
+        "//loom/src/loom/target/reporting:report",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -514,29 +462,6 @@ loom_cc_test(
         "//loom/src/loom/testing:diagnostic_matchers",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_test(
-    name = "compile_report_low_test",
-    srcs = ["compile_report_low_test.cc"],
-    deps = [
-        ":compile_report_low",
-        ":registers",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_test(
-    name = "compile_report_format_test",
-    srcs = ["compile_report_format_test.cc"],
-    deps = [
-        ":compile_report_format",
-        ":math_policy",
-        "//loom/src/loom/ir",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

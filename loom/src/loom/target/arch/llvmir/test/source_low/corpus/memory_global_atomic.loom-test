@@ -19,7 +19,7 @@ kernel.def target(@target) @global_atomic_add_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_add_i32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_add_i32() asm<llvmir.generic.core> {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %one = const.i32 1
   atomic.reduce.add.i32 %one, %view, 0, 0, 3
@@ -47,7 +47,7 @@ kernel.def target(@target) @global_atomic_add_f32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_add_f32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_add_f32() asm<llvmir.generic.core> {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %one = const.f32 1065353216
   atomic.reduce.fadd.f32 %one, %view, 0, 0, 3
@@ -77,7 +77,7 @@ kernel.def target(@target) @global_atomic_minnum_maxnum_f32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_minnum_maxnum_f32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_minnum_maxnum_f32() asm<llvmir.generic.core> {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %limit = const.f32 1065353216
   atomic.reduce.fmin.f32 %limit, %view, 0, 0, 3
@@ -106,7 +106,7 @@ kernel.def target(@target) @global_atomic_dynamic_minnum_f32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_dynamic_minnum_f32(%value: reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_dynamic_minnum_f32(%value: reg<llvmir.f32>) asm<llvmir.generic.core> {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %old_min = atomic.rmw.fmin.f32 %value, %view, 0, 0, 3
   %old_max = atomic.rmw.fmax.f32 %value, %view, 0, 0, 3
@@ -137,7 +137,7 @@ kernel.def target(@target) @global_atomic_bitwise_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_bitwise_i32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_bitwise_i32() asm<llvmir.generic.core> {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %mask = const.i32 255
   atomic.reduce.and.i32 %mask, %view, 0, 0, 3
@@ -169,7 +169,7 @@ kernel.def target(@target) @global_atomic_sub_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_sub_i32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_sub_i32() asm<llvmir.generic.core> {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %delta = const.i32 1
   atomic.reduce.sub.i32 %delta, %view, 0, 0, 3
@@ -196,7 +196,7 @@ kernel.def target(@target) @global_atomic_exchange_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_exchange_i32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_exchange_i32() asm<llvmir.generic.core> {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %value = const.i32 7
   %old = atomic.rmw.xchg.i32 %value, %view, 0, 0, 3
@@ -223,7 +223,7 @@ kernel.def target(@target) @global_atomic_cmpxchg_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_cmpxchg_i32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_cmpxchg_i32() asm<llvmir.generic.core> {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %expected = const.i32 7
   %replacement = const.i32 9
@@ -257,7 +257,7 @@ kernel.def target(@target) @global_atomic_minmax_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_minmax_i32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_minmax_i32() asm<llvmir.generic.core> {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %limit = const.i32 1
   atomic.reduce.min.i32 %limit, %view, 0, 0, 3

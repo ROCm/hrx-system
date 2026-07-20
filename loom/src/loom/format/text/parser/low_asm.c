@@ -801,17 +801,18 @@ static iree_status_t loom_parse_low_asm_packet(
   return status;
 }
 
-static bool loom_low_asm_token_is_canonical_structural_op(loom_token_t token) {
+static bool loom_low_asm_token_is_canonical_op(loom_token_t token) {
   return token.kind == LOOM_TOKEN_OP_NAME &&
          (iree_string_view_equal(token.text, IREE_SV("low.br")) ||
           iree_string_view_equal(token.text, IREE_SV("low.cond_br")) ||
           iree_string_view_equal(token.text, IREE_SV("low.func.call")) ||
+          iree_string_view_equal(token.text, IREE_SV("low.op")) ||
           iree_string_view_equal(token.text, IREE_SV("low.scf.yield")) ||
           iree_string_view_equal(token.text, IREE_SV("low.scf.if")) ||
           iree_string_view_equal(token.text, IREE_SV("low.scf.for")));
 }
 
-static iree_status_t loom_low_asm_next_statement_is_canonical_structural_op(
+static iree_status_t loom_low_asm_next_statement_is_canonical_op(
     loom_parser_t* parser, bool* out_canonical) {
   *out_canonical = false;
   loom_tokenizer_t lookahead = parser->tokenizer;
@@ -829,8 +830,8 @@ static iree_status_t loom_low_asm_next_statement_is_canonical_structural_op(
       return loom_tokenizer_consume_status(&lookahead);
     }
   }
-  *out_canonical = loom_low_asm_token_is_canonical_structural_op(
-      loom_tokenizer_peek(&lookahead));
+  *out_canonical =
+      loom_low_asm_token_is_canonical_op(loom_tokenizer_peek(&lookahead));
   return loom_tokenizer_consume_status(&lookahead);
 }
 
@@ -846,10 +847,10 @@ static iree_status_t loom_parse_low_asm_block_body(
       break;
     }
     uint32_t errors_before = parser->error_count;
-    bool canonical_structural = false;
-    IREE_RETURN_IF_ERROR(loom_low_asm_next_statement_is_canonical_structural_op(
-        parser, &canonical_structural));
-    if (canonical_structural) {
+    bool canonical_op = false;
+    IREE_RETURN_IF_ERROR(
+        loom_low_asm_next_statement_is_canonical_op(parser, &canonical_op));
+    if (canonical_op) {
       IREE_RETURN_IF_ERROR(loom_parse_op(parser));
     } else {
       IREE_RETURN_IF_ERROR(loom_parse_low_asm_packet(parser, descriptor_set));

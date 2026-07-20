@@ -8,12 +8,12 @@
 
 #include "loom/ir/facts.h"
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/index/compare.h"
 #include "loom/ops/index/ops.h"
-#include "loom/util/math.h"
 
 #define LOOM_INDEX_BINARY_FACTS(name, transfer_fn)                       \
   iree_status_t name(loom_fact_context_t* context,                       \
@@ -60,7 +60,7 @@ static loom_value_facts_t loom_index_cast_zero_extend_to_offset_facts(
   if (facts.range_hi < 0) {
     return loom_value_facts_make(
         facts.range_lo + unsigned_extent, facts.range_hi + unsigned_extent,
-        loom_gcd_i64(facts.known_divisor, unsigned_extent));
+        iree_math_gcd_i64(facts.known_divisor, unsigned_extent));
   }
   return loom_value_facts_make(0, unsigned_max, 1);
 }
@@ -277,24 +277,20 @@ iree_status_t loom_index_rotri_facts(loom_fact_context_t* context,
   }
 
 LOOM_INDEX_BIT_COUNT_FACTS(loom_index_ctlzi_facts, loom_index_ctlzi_result,
-                           loom_count_leading_zeros_u64_width)
+                           iree_math_count_leading_zeros_u64_width)
 LOOM_INDEX_BIT_COUNT_FACTS(loom_index_cttzi_facts, loom_index_cttzi_result,
-                           loom_count_trailing_zeros_u64_width)
+                           iree_math_count_trailing_zeros_u64_width)
 LOOM_INDEX_BIT_COUNT_FACTS(loom_index_ctpopi_facts, loom_index_ctpopi_result,
-                           loom_count_ones_u64_width)
+                           iree_math_count_ones_u64_width)
 
 #undef LOOM_INDEX_BIT_COUNT_FACTS
 
 static void loom_index_mark_compare_distribution(
     const loom_value_facts_t* operand_facts, loom_value_facts_t* result_facts) {
-  if (loom_value_facts_is_lane_predicate(operand_facts[0]) ||
-      loom_value_facts_is_lane_predicate(operand_facts[1]) ||
-      loom_value_facts_is_lane_varying(operand_facts[0]) ||
-      loom_value_facts_is_lane_varying(operand_facts[1])) {
+  loom_value_facts_propagate_binary_distribution(
+      operand_facts[0], operand_facts[1], result_facts);
+  if (loom_value_facts_is_lane_varying(*result_facts)) {
     loom_value_facts_mark_lane_predicate(result_facts);
-  } else if (loom_value_facts_is_uniform(operand_facts[0]) &&
-             loom_value_facts_is_uniform(operand_facts[1])) {
-    loom_value_facts_mark_uniform(result_facts);
   }
 }
 

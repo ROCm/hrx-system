@@ -448,7 +448,7 @@ static iree_status_t loom_finalize_op(
     for (uint16_t i = 0;
          i < parsed->result_count && i < vtable->fixed_result_count; ++i) {
       loom_value_t* value =
-          &parser->module->values.entries[parsed->result_ids[i]];
+          loom_module_value(parser->module, parsed->result_ids[i]);
       if (value->type.header != 0) {
         continue;
       }
@@ -478,7 +478,8 @@ static iree_status_t loom_finalize_op(
     if (iree_any_bit_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE)) {
       continue;
     }
-    loom_string_id_t name_id = parser->module->values.entries[value_id].name_id;
+    loom_string_id_t name_id =
+        loom_module_value(parser->module, value_id)->name_id;
     if (name_id != LOOM_STRING_ID_INVALID &&
         name_id < parser->module->strings.count) {
       bool duplicate = false;

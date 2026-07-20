@@ -17,7 +17,9 @@ uint32_t iree_hal_amdgpu_host_queue_profile_device_ordinal(
 
 uint32_t iree_hal_amdgpu_host_queue_profile_queue_ordinal(
     const iree_hal_amdgpu_host_queue_t* queue) {
-  return iree_async_axis_queue_index(queue->axis);
+  return queue->physical_queue_ordinal <= UINT32_MAX
+             ? (uint32_t)queue->physical_queue_ordinal
+             : UINT32_MAX;
 }
 
 uint64_t iree_hal_amdgpu_host_queue_profile_stream_id(

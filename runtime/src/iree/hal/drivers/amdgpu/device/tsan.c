@@ -13,6 +13,7 @@ void iree_hal_amdgpu_device_tsan_emplace_queue_initialize(
         queue_initialize_kernel_args,
     const iree_hal_amdgpu_tsan_queue_initialize_args_t* IREE_AMDGPU_RESTRICT
         queue_initialize_args,
+    uint32_t max_workgroup_count,
     iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
   iree_hal_amdgpu_tsan_queue_initialize_args_t* IREE_AMDGPU_RESTRICT kernargs =
@@ -23,13 +24,14 @@ void iree_hal_amdgpu_device_tsan_emplace_queue_initialize(
   const uint64_t clear_size = queue_initialize_args->shadow_size;
   const uint32_t workgroup_size =
       queue_initialize_kernel_args->workgroup_size[0];
-  const uint64_t max_workgroup_count = UINT32_MAX / workgroup_size;
+  const uint64_t packet_max_workgroup_count = UINT32_MAX / workgroup_size;
   const uint64_t required_workgroup_count =
       IREE_AMDGPU_CEIL_DIV(clear_size, workgroup_size);
+  const uint64_t bounded_workgroup_count = IREE_AMDGPU_MIN(
+      required_workgroup_count,
+      IREE_AMDGPU_MIN(max_workgroup_count, packet_max_workgroup_count));
   const uint32_t workgroup_count[3] = {
-      (uint32_t)IREE_AMDGPU_MAX(
-          1ull, IREE_AMDGPU_MIN(required_workgroup_count, max_workgroup_count)),
-      1, 1};
+      (uint32_t)IREE_AMDGPU_MAX(1ull, bounded_workgroup_count), 1, 1};
   kernargs->clear_workgroup_size = workgroup_size;
   kernargs->reserved0 = 0;
   kernargs->clear_byte_stride = (uint64_t)workgroup_count[0] * workgroup_size;

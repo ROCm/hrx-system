@@ -33,14 +33,22 @@ typedef struct loom_view_region_table_t loom_view_region_table_t;
 
 #define LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE UINT32_MAX
 
-typedef enum loom_low_source_memory_operation_kind_e {
-  LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD = 0,
-  LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE = 1,
-  LOOM_LOW_SOURCE_MEMORY_OPERATION_PREFETCH = 2,
-  LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_REDUCE = 3,
-  LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_RMW = 4,
-  LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_CMPXCHG = 5,
-} loom_low_source_memory_operation_kind_t;
+typedef loom_memory_access_operation_kind_t
+    loom_low_source_memory_operation_kind_t;
+
+#define LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD LOOM_MEMORY_ACCESS_OPERATION_LOAD
+#define LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE \
+  LOOM_MEMORY_ACCESS_OPERATION_STORE
+#define LOOM_LOW_SOURCE_MEMORY_OPERATION_PREFETCH \
+  LOOM_MEMORY_ACCESS_OPERATION_PREFETCH
+#define LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_REDUCE \
+  LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE
+#define LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_RMW \
+  LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW
+#define LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_CMPXCHG \
+  LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG
+#define LOOM_LOW_SOURCE_MEMORY_OPERATION_COUNT_ \
+  LOOM_MEMORY_ACCESS_OPERATION_COUNT_
 
 typedef enum loom_low_source_memory_dynamic_index_source_e {
   // The access has no dynamic index.
@@ -96,6 +104,11 @@ typedef struct loom_low_source_memory_access_diagnostic_t {
   loom_low_source_memory_access_rejection_flags_t rejection_bits;
 } loom_low_source_memory_access_diagnostic_t;
 
+// Classifies the operation family represented by a MemoryAccess op.
+bool loom_low_source_memory_operation_kind_from_access(
+    loom_memory_access_t access,
+    loom_low_source_memory_operation_kind_t* out_operation_kind);
+
 #define LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE UINT8_MAX
 #define LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY (LOOM_TYPE_MAX_RANK + 1)
 
@@ -131,6 +144,8 @@ typedef struct loom_low_source_memory_access_plan_t {
   loom_low_source_memory_operation_kind_t operation_kind;
   // Source view SSA value consumed by the memory operation.
   loom_value_id_t view_value_id;
+  // Source view SSA value that materializes the memory resource base.
+  loom_value_id_t base_view_value_id;
   // Target-independent memory space selected from source view facts.
   loom_value_fact_memory_space_t memory_space;
   // Source SSA value that represents the storage root.
@@ -174,10 +189,29 @@ static inline bool loom_low_source_memory_access_is_dynamic(
   return plan->dynamic_term_count != 0;
 }
 
+static inline loom_value_id_t loom_low_source_memory_access_base_view_value_id(
+    const loom_low_source_memory_access_plan_t* plan) {
+  return plan->base_view_value_id != LOOM_VALUE_ID_INVALID
+             ? plan->base_view_value_id
+             : plan->view_value_id;
+}
+
 static inline const loom_low_source_memory_dynamic_term_t*
 loom_low_source_memory_access_single_dynamic_term(
     const loom_low_source_memory_access_plan_t* plan) {
   return plan->dynamic_term_count == 1 ? &plan->dynamic_terms[0] : NULL;
+}
+
+// Returns true when the complete dynamic byte offset is already materialized
+// by dynamic_view_base_value_id. This is only exact when all dynamic terms come
+// from the view base and the view base contributed no extracted static addend.
+static inline bool
+loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
+    const loom_low_source_memory_access_plan_t* plan) {
+  return plan->dynamic_term_count != 0 &&
+         plan->dynamic_term_count == plan->dynamic_view_base_term_count &&
+         plan->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID &&
+         plan->static_view_base_byte_offset == 0;
 }
 
 // Returns true when |value_id| names a block argument in |module|. Targets use
@@ -204,6 +238,12 @@ bool loom_low_source_memory_dynamic_offset_fits_unsigned_bit_count(
     const loom_low_source_memory_access_plan_t* plan,
     int64_t static_byte_offset, uint8_t bit_count);
 
+// Returns the conservative byte envelope added by vector lanes within a single
+// planned memory packet.
+bool loom_low_source_memory_access_plan_lane_byte_envelope(
+    const loom_low_source_memory_access_plan_t* plan, int64_t* out_begin_offset,
+    int64_t* out_end_offset);
+
 // Builds a dependency/scheduling summary from an already selected source
 // memory access plan. |out_interval| is caller-owned and may be borrowed by the
 // returned summary when interval precision is available.
@@ -212,22 +252,17 @@ void loom_low_source_memory_access_plan_make_summary(
     loom_low_byte_interval_t* out_interval,
     loom_low_memory_access_summary_t* out_summary);
 
-// Builds a target-independent source memory plan for indexed source memory ops.
+// Builds a target-independent source memory plan for source memory ops.
+//
+// When present, |view_regions| is only queried with a non-mutating lookup and
+// must already have been analyzed by the caller. This lets lowering reuse its
+// function-local analysis without turning each memory access into a producer
+// walk or analysis construction site. Passing NULL intentionally restricts
+// planning to view-reference facts already published for the source view.
 //
 // Returns false when the source op cannot be decomposed into a complete source
 // plan. Targets are responsible for checking their own memory spaces, address
 // forms, descriptor availability, immediate ranges, and register footprints.
-bool loom_low_source_memory_access_plan_build(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    const loom_op_t* source_op, loom_low_source_memory_access_plan_t* out_plan,
-    loom_low_source_memory_access_diagnostic_t* out_diagnostic);
-
-// Builds a source memory plan with optional precomputed view-region summaries.
-//
-// When present, |view_regions| is only queried with a non-mutating lookup and
-// must already have been analyzed by the caller. This lets lowering reuse its
-// function-local analysis without turning each memory access into a fresh
-// producer walk or analysis construction site.
 bool loom_low_source_memory_access_plan_build_with_view_regions(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions, const loom_op_t* source_op,
@@ -239,17 +274,6 @@ bool loom_low_source_memory_access_plan_build_with_view_regions(
 // This is the component-level sibling of vector.load/store planning for source
 // ops that are not themselves memory transfers but still name a logical view
 // element or vector footprint, such as sanitizer access assertions.
-bool loom_low_source_memory_access_plan_build_indexed(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_low_source_memory_operation_kind_t operation_kind,
-    loom_value_id_t view_value_id, loom_value_slice_t dynamic_indices,
-    loom_attribute_t static_indices, loom_type_t vector_type,
-    loom_vector_memory_cache_policy_t cache_policy,
-    loom_low_source_memory_access_plan_t* out_plan,
-    loom_low_source_memory_access_diagnostic_t* out_diagnostic);
-
-// Builds an indexed source memory plan with optional precomputed view-region
-// summaries. See loom_low_source_memory_access_plan_build_with_view_regions.
 bool loom_low_source_memory_access_plan_build_indexed_with_view_regions(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
@@ -264,20 +288,10 @@ bool loom_low_source_memory_access_plan_build_indexed_with_view_regions(
 //
 // This is the view-payload sibling of vector.load/store planning. It treats the
 // full static footprint of |view_value_id| as the transferred vector payload
-// and preserves a single materializable dynamic subview offset when the view is
-// immediately produced by view.subview. Targets use this for memory-to-memory
-// movement ops such as async global-to-workgroup gathers, where the source IR
-// names a view projection rather than an indexed vector load.
-bool loom_low_source_memory_access_plan_build_view(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_low_source_memory_operation_kind_t operation_kind,
-    loom_value_id_t view_value_id,
-    loom_vector_memory_cache_policy_t cache_policy,
-    loom_low_source_memory_access_plan_t* out_plan,
-    loom_low_source_memory_access_diagnostic_t* out_diagnostic);
-
-// Builds a whole-view source memory plan with optional precomputed view-region
-// summaries. See loom_low_source_memory_access_plan_build_with_view_regions.
+// and preserves dynamic base terms when precomputed view-region summaries are
+// supplied. Targets use this for memory-to-memory movement ops such as async
+// global-to-workgroup gathers, where the source IR names a view projection
+// rather than an indexed vector load.
 bool loom_low_source_memory_access_plan_build_view_with_view_regions(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,

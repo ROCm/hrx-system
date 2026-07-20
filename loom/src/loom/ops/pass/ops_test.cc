@@ -118,6 +118,9 @@ TEST_F(PassOpsTest, ParsePrintVerifyAndBytecodeRoundTrip) {
   static const char kSource[] =
       "pass.pipeline<module> @cleanup pipeline {\n"
       "  canonicalize(max_iterations = 10)\n"
+      "  if changed {\n"
+      "    cse\n"
+      "  }\n"
       "  repeat until_converged(max_iterations = 8) {\n"
       "    cse\n"
       "    dce\n"

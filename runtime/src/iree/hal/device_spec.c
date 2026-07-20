@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "iree/base/alignment.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/hal/device_spec_serialization.h"
 
@@ -43,8 +44,6 @@ struct iree_hal_device_spec_t {
   iree_hal_queue_family_spec_t* queue_families;
   // Owned external timepoint handle records.
   iree_hal_external_timepoint_handle_spec_t* external_timepoint_handles;
-  // Owned executable format records.
-  iree_hal_executable_format_spec_t* executable_formats;
   // Owned executable target records.
   iree_hal_executable_target_t* executable_targets;
   // Owned driver-local extension facet records.
@@ -136,14 +135,62 @@ static iree_status_t iree_hal_device_spec_validate_count_pointer(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_device_spec_validate_concrete_affinity(
+    const char* field_name, iree_host_size_t index,
+    iree_hal_physical_device_affinity_t affinity,
+    iree_hal_physical_device_affinity_t available_affinity) {
+  if (IREE_UNLIKELY(affinity == 0)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "device spec %s %" PRIhsz
+                            " has empty physical-device affinity",
+                            field_name, index);
+  }
+  if (IREE_UNLIKELY(available_affinity != 0 &&
+                    (affinity & ~available_affinity) != 0)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "device spec %s %" PRIhsz
+                            " has physical-device affinity 0x%016" PRIx64
+                            " outside the advertised affinity 0x%016" PRIx64,
+                            field_name, index, affinity, available_affinity);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_device_spec_validate_params(
     const iree_hal_device_spec_params_t* params) {
   if (!params) return iree_ok_status();
+  iree_hal_physical_device_affinity_t available_affinity = 0;
   const iree_hal_device_identity_spec_t* identity = params->identity;
   if (identity) {
     IREE_RETURN_IF_ERROR(iree_hal_device_spec_validate_count_pointer(
         identity->physical_device_count, identity->physical_devices,
         "identity.physical_devices"));
+    if (IREE_UNLIKELY(identity->physical_device_count >
+                      IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "device spec physical device count %" PRIhsz
+                              " exceeds physical-device affinity capacity %d",
+                              identity->physical_device_count,
+                              IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT);
+    }
+    for (iree_host_size_t i = 0; i < identity->physical_device_count; ++i) {
+      const iree_hal_physical_device_affinity_t affinity =
+          identity->physical_devices[i].physical_device_affinity;
+      if (IREE_UNLIKELY(!iree_is_power_of_two_uint64(affinity))) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "device spec physical device %" PRIhsz
+            " must have one unique affinity bit; got 0x%016" PRIx64,
+            i, affinity);
+      }
+      if (IREE_UNLIKELY((available_affinity & affinity) != 0)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "device spec physical device %" PRIhsz
+                                " reuses affinity bit 0x%016" PRIx64,
+                                i, affinity);
+      }
+      available_affinity |= affinity;
+    }
   }
   const iree_hal_device_memory_spec_t* memory = params->memory;
   if (memory) {
@@ -155,6 +202,11 @@ static iree_status_t iree_hal_device_spec_validate_params(
     IREE_RETURN_IF_ERROR(iree_hal_device_spec_validate_count_pointer(
         memory->external_buffer_handle_count, memory->external_buffer_handles,
         "memory.external_buffer_handles"));
+    for (iree_host_size_t i = 0; i < memory->heap_count; ++i) {
+      IREE_RETURN_IF_ERROR(iree_hal_device_spec_validate_concrete_affinity(
+          "memory heap", i, memory->heaps[i].physical_device_affinity,
+          available_affinity));
+    }
     for (iree_host_size_t i = 0; i < memory->memory_type_count; ++i) {
       if (memory->memory_types[i].heap_index >= memory->heap_count) {
         return iree_make_status(
@@ -180,6 +232,11 @@ static iree_status_t iree_hal_device_spec_validate_params(
         queues->external_timepoint_handle_count,
         queues->external_timepoint_handles,
         "queues.external_timepoint_handles"));
+    for (iree_host_size_t i = 0; i < queues->family_count; ++i) {
+      IREE_RETURN_IF_ERROR(iree_hal_device_spec_validate_concrete_affinity(
+          "queue family", i, queues->families[i].physical_device_affinity,
+          available_affinity));
+    }
     for (iree_host_size_t i = 0; i < queues->external_timepoint_handle_count;
          ++i) {
       const iree_hal_external_timepoint_type_t handle_type =
@@ -195,19 +252,30 @@ static iree_status_t iree_hal_device_spec_validate_params(
   const iree_hal_device_executable_spec_t* executables = params->executables;
   if (executables) {
     IREE_RETURN_IF_ERROR(iree_hal_device_spec_validate_count_pointer(
-        executables->format_count, executables->formats,
-        "executables.formats"));
-    IREE_RETURN_IF_ERROR(iree_hal_device_spec_validate_count_pointer(
         executables->target_count, executables->targets,
         "executables.targets"));
     for (iree_host_size_t i = 0; i < executables->target_count; ++i) {
-      if (executables->targets[i].kind >
-          IREE_HAL_EXECUTABLE_TARGET_KIND_COMPOSITE) {
+      const iree_hal_executable_target_t* target = &executables->targets[i];
+      if (iree_string_view_is_empty(target->family)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "device spec executable target %" PRIhsz " has an empty family", i);
+      }
+      if (iree_string_view_is_empty(target->target_key)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "device spec executable target %" PRIhsz
+                                " has an empty target key",
+                                i);
+      }
+      if (target->kind > IREE_HAL_EXECUTABLE_TARGET_KIND_COMPOSITE) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "device spec executable target %" PRIhsz
                                 " has invalid kind %" PRIu32,
-                                i, executables->targets[i].kind);
+                                i, target->kind);
       }
+      IREE_RETURN_IF_ERROR(iree_hal_device_spec_validate_concrete_affinity(
+          "executable target", i, target->physical_device_affinity,
+          available_affinity));
     }
   }
   const iree_hal_device_sanitizer_spec_t* sanitizer = params->sanitizer;
@@ -317,30 +385,12 @@ static iree_status_t iree_hal_device_spec_count_strings_and_payloads(
   }
   const iree_hal_device_executable_spec_t* executables = params->executables;
   if (executables) {
-    for (iree_host_size_t i = 0; i < executables->format_count; ++i) {
-      IREE_RETURN_IF_ERROR(iree_hal_device_spec_accumulate_string(
-          executables->formats[i].format, &string_table_length));
-    }
     for (iree_host_size_t i = 0; i < executables->target_count; ++i) {
       const iree_hal_executable_target_t* target = &executables->targets[i];
       IREE_RETURN_IF_ERROR(iree_hal_device_spec_accumulate_string(
           target->family, &string_table_length));
       IREE_RETURN_IF_ERROR(iree_hal_device_spec_accumulate_string(
-          target->architecture, &string_table_length));
-      IREE_RETURN_IF_ERROR(iree_hal_device_spec_accumulate_string(
-          target->processor, &string_table_length));
-      IREE_RETURN_IF_ERROR(iree_hal_device_spec_accumulate_string(
-          target->features, &string_table_length));
-      IREE_RETURN_IF_ERROR(iree_hal_device_spec_accumulate_string(
-          target->artifact_format, &string_table_length));
-      IREE_RETURN_IF_ERROR(iree_hal_device_spec_accumulate_string(
-          target->runtime_abi, &string_table_length));
-      IREE_RETURN_IF_ERROR(iree_hal_device_spec_accumulate_string(
-          target->loader_namespace, &string_table_length));
-      IREE_RETURN_IF_ERROR(iree_hal_device_spec_accumulate_string(
-          target->loader_target, &string_table_length));
-      IREE_RETURN_IF_ERROR(iree_hal_device_spec_accumulate_string(
-          target->metadata_schema, &string_table_length));
+          target->target_key, &string_table_length));
     }
   }
   for (iree_host_size_t i = 0; i < params->facet_count; ++i) {
@@ -364,7 +414,6 @@ static void iree_hal_device_spec_destroy(iree_hal_device_spec_t* spec) {
   iree_allocator_free(host_allocator, spec->virtual_memory_classes);
   iree_allocator_free(host_allocator, spec->queue_families);
   iree_allocator_free(host_allocator, spec->external_timepoint_handles);
-  iree_allocator_free(host_allocator, spec->executable_formats);
   iree_allocator_free(host_allocator, spec->executable_targets);
   iree_allocator_free(host_allocator, spec->facets);
   iree_allocator_free(host_allocator, spec->facet_payload_storage);
@@ -519,22 +568,9 @@ IREE_API_EXPORT iree_status_t iree_hal_device_spec_create(
   if (iree_status_is_ok(status) && params && params->executables) {
     spec->executables = *params->executables;
     status = iree_hal_device_spec_clone_array(
-        host_allocator, params->executables->format_count,
-        sizeof(*spec->executable_formats), params->executables->formats,
-        (void**)&spec->executable_formats);
-    spec->executables.formats = spec->executable_formats;
-    for (iree_host_size_t i = 0;
-         i < spec->executables.format_count && iree_status_is_ok(status); ++i) {
-      spec->executable_formats[i].format = iree_hal_device_spec_copy_string(
-          params->executables->formats[i].format, string_storage,
-          &string_offset);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_device_spec_clone_array(
-          host_allocator, params->executables->target_count,
-          sizeof(*spec->executable_targets), params->executables->targets,
-          (void**)&spec->executable_targets);
-    }
+        host_allocator, params->executables->target_count,
+        sizeof(*spec->executable_targets), params->executables->targets,
+        (void**)&spec->executable_targets);
     spec->executables.targets = spec->executable_targets;
     for (iree_host_size_t i = 0;
          i < spec->executables.target_count && iree_status_is_ok(status); ++i) {
@@ -543,22 +579,8 @@ IREE_API_EXPORT iree_status_t iree_hal_device_spec_create(
       iree_hal_executable_target_t* target = &spec->executable_targets[i];
       target->family = iree_hal_device_spec_copy_string(
           source->family, string_storage, &string_offset);
-      target->architecture = iree_hal_device_spec_copy_string(
-          source->architecture, string_storage, &string_offset);
-      target->processor = iree_hal_device_spec_copy_string(
-          source->processor, string_storage, &string_offset);
-      target->features = iree_hal_device_spec_copy_string(
-          source->features, string_storage, &string_offset);
-      target->artifact_format = iree_hal_device_spec_copy_string(
-          source->artifact_format, string_storage, &string_offset);
-      target->runtime_abi = iree_hal_device_spec_copy_string(
-          source->runtime_abi, string_storage, &string_offset);
-      target->loader_namespace = iree_hal_device_spec_copy_string(
-          source->loader_namespace, string_storage, &string_offset);
-      target->loader_target = iree_hal_device_spec_copy_string(
-          source->loader_target, string_storage, &string_offset);
-      target->metadata_schema = iree_hal_device_spec_copy_string(
-          source->metadata_schema, string_storage, &string_offset);
+      target->target_key = iree_hal_device_spec_copy_string(
+          source->target_key, string_storage, &string_offset);
     }
   }
   if (iree_status_is_ok(status) && params && params->sanitizer) {
@@ -816,68 +838,48 @@ static bool iree_hal_device_spec_target_matches_selection(
                                                      target->family)) {
     return false;
   }
-  if (!iree_hal_device_spec_selection_string_matches(selection->architecture,
-                                                     target->architecture)) {
+  if (!iree_hal_device_spec_selection_string_matches(selection->target_key,
+                                                     target->target_key)) {
     return false;
   }
-  if (!iree_hal_device_spec_selection_string_matches(selection->processor,
-                                                     target->processor)) {
+  const iree_hal_executable_target_kind_flags_t target_kind_flag =
+      1u << target->kind;
+  if (selection->kind_flags != 0 &&
+      !iree_any_bit_set(selection->kind_flags, target_kind_flag)) {
     return false;
   }
-  if (!iree_hal_device_spec_selection_string_matches(selection->features,
-                                                     target->features)) {
+  if (selection->physical_device_affinity &&
+      !iree_all_bits_set(target->physical_device_affinity,
+                         selection->physical_device_affinity)) {
     return false;
   }
-  if (!iree_hal_device_spec_selection_string_matches(selection->artifact_format,
-                                                     target->artifact_format)) {
-    return false;
+  return true;
+}
+
+IREE_API_EXPORT iree_host_size_t iree_hal_device_spec_executable_target_ordinal(
+    const iree_hal_device_spec_t* spec,
+    const iree_hal_executable_target_t* target) {
+  IREE_ASSERT_ARGUMENT(spec);
+  for (iree_host_size_t i = 0; target && i < spec->executables.target_count;
+       ++i) {
+    if (target == &spec->executables.targets[i]) return i;
   }
-  if (!iree_hal_device_spec_selection_string_matches(selection->runtime_abi,
-                                                     target->runtime_abi)) {
-    return false;
-  }
-  if (!iree_hal_device_spec_selection_string_matches(
-          selection->loader_namespace, target->loader_namespace)) {
-    return false;
-  }
-  if (!iree_hal_device_spec_selection_string_matches(selection->loader_target,
-                                                     target->loader_target)) {
-    return false;
-  }
-  if (!iree_hal_device_spec_selection_string_matches(selection->metadata_schema,
-                                                     target->metadata_schema)) {
-    return false;
-  }
-  if (selection->physical_device_affinity && target->physical_device_affinity &&
-      (selection->physical_device_affinity &
-       target->physical_device_affinity) == 0) {
-    return false;
-  }
-  switch (selection->policy) {
-    case IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_EXACT_DEVICE:
-      return target->kind == IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT;
-    case IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_MATCH_FIELDS:
-      return true;
-    case IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_COMPATIBLE_GENERIC:
-      return target->kind == IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC;
-    default:
-      return false;
-  }
+  return IREE_HOST_SIZE_MAX;
 }
 
 IREE_API_EXPORT iree_hal_executable_target_selection_result_t
 iree_hal_device_spec_select_executable_target(
     const iree_hal_device_spec_t* spec,
-    const iree_hal_executable_target_selection_t* selection,
-    const iree_hal_executable_target_t** out_target) {
+    const iree_hal_executable_target_selection_t* selection) {
   IREE_ASSERT_ARGUMENT(spec);
   IREE_ASSERT_ARGUMENT(selection);
-  IREE_ASSERT_ARGUMENT(out_target);
-  *out_target = NULL;
 
   const iree_hal_executable_target_t* selected_target = NULL;
-  iree_hal_executable_target_selection_result_t result =
-      IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_NO_MATCH;
+  iree_host_size_t selected_ordinal = IREE_HOST_SIZE_MAX;
+  iree_hal_executable_target_selection_result_t result = {
+      .outcome = IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH,
+      .target = NULL,
+      .target_ordinal = IREE_HOST_SIZE_MAX};
   for (iree_host_size_t i = 0; i < spec->executables.target_count; ++i) {
     const iree_hal_executable_target_t* candidate =
         &spec->executables.targets[i];
@@ -885,14 +887,16 @@ iree_hal_device_spec_select_executable_target(
       continue;
     }
     if (!selected_target || candidate->priority > selected_target->priority) {
+      result.outcome = IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED;
       selected_target = candidate;
-      result = IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_SELECTED;
+      selected_ordinal = i;
     } else if (candidate->priority == selected_target->priority) {
-      result = IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_AMBIGUOUS;
+      result.outcome = IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS;
     }
   }
-  if (result == IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_SELECTED) {
-    *out_target = selected_target;
+  if (result.outcome == IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED) {
+    result.target = selected_target;
+    result.target_ordinal = selected_ordinal;
   }
   return result;
 }

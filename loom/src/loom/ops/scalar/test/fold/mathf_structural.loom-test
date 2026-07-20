@@ -62,11 +62,46 @@ func.def @activation_exact_zero() -> (f32, f32, f32, f32, f32, f32) {
 func.def @activation_exact_zero() -> (f32, f32, f32, f32, f32, f32) {
   %logistic = scalar.constant 0.5 : f32
   %silu = scalar.constant 0.0 : f32
-  %softplus = scalar.constant 0.69314718055994529 : f32
+  %softplus = scalar.constant 0.69314718246459961 : f32
   %gelu_erf = scalar.constant 0.0 : f32
   %gelu_tanh = scalar.constant 0.0 : f32
   %gelu_logistic = scalar.constant 0.0 : f32
   func.return %logistic, %silu, %softplus, %gelu_erf, %gelu_tanh, %gelu_logistic : f32, f32, f32, f32, f32, f32
+}
+
+// ====
+
+// Stable exact activation facts preserve representable negative tails instead
+// of collapsing through an overflowing exp(-x) intermediate.
+func.def @activation_negative_tail() -> (i1, i1, i1, i1, i1, i1) {
+  %f32_input = scalar.constant -100.0 : f32
+  %f32_zero = scalar.constant 0.0 : f32
+  %f32_logistic = scalar.logisticf %f32_input : f32
+  %f32_silu = scalar.siluf %f32_input : f32
+  %f32_gelu = scalar.geluf<logistic> %f32_input {scale = 1.0} : f32
+  %f32_logistic_positive = scalar.cmpf ogt, %f32_logistic, %f32_zero : f32
+  %f32_silu_negative = scalar.cmpf olt, %f32_silu, %f32_zero : f32
+  %f32_gelu_negative = scalar.cmpf olt, %f32_gelu, %f32_zero : f32
+
+  %f64_input = scalar.constant -710.0 : f64
+  %f64_zero = scalar.constant 0.0 : f64
+  %f64_logistic = scalar.logisticf %f64_input : f64
+  %f64_silu = scalar.siluf %f64_input : f64
+  %f64_gelu = scalar.geluf<logistic> %f64_input {scale = 1.0} : f64
+  %f64_logistic_positive = scalar.cmpf ogt, %f64_logistic, %f64_zero : f64
+  %f64_silu_negative = scalar.cmpf olt, %f64_silu, %f64_zero : f64
+  %f64_gelu_negative = scalar.cmpf olt, %f64_gelu, %f64_zero : f64
+  func.return %f32_logistic_positive, %f32_silu_negative, %f32_gelu_negative, %f64_logistic_positive, %f64_silu_negative, %f64_gelu_negative : i1, i1, i1, i1, i1, i1
+}
+// ----
+func.def @activation_negative_tail() -> (i1, i1, i1, i1, i1, i1) {
+  %f32_logistic_positive = scalar.constant true : i1
+  %f32_silu_negative = scalar.constant true : i1
+  %f32_gelu_negative = scalar.constant true : i1
+  %f64_logistic_positive = scalar.constant true : i1
+  %f64_silu_negative = scalar.constant true : i1
+  %f64_gelu_negative = scalar.constant true : i1
+  func.return %f32_logistic_positive, %f32_silu_negative, %f32_gelu_negative, %f64_logistic_positive, %f64_silu_negative, %f64_gelu_negative : i1, i1, i1, i1, i1, i1
 }
 
 // ====
@@ -86,6 +121,6 @@ func.def @turn_trig_exact_quadrants() -> (f32, f32, f32, f32) {
   %sin_zero = scalar.constant 0.0 : f32
   %cos_zero = scalar.constant 1.0 : f32
   %sin_quarter = scalar.constant 1.0 : f32
-  %cos_quarter = scalar.constant 6.123233995736766e-17 : f32
+  %cos_quarter = scalar.constant 0.0 : f32
   func.return %sin_zero, %cos_zero, %sin_quarter, %cos_quarter : f32, f32, f32, f32
 }

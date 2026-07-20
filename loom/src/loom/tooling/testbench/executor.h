@@ -68,6 +68,10 @@ typedef struct loom_testbench_case_sample_result_t {
   const loom_testbench_case_plan_t* case_plan;
   // Concrete sample ordinal executed for |case_plan|.
   iree_host_size_t sample_ordinal;
+  // Borrowed sample issues owned by the executor until the next run.
+  const loom_testbench_sample_issue_t* issues;
+  // Number of entries in |issues|.
+  iree_host_size_t issue_count;
   // True when all expectations passed.
   bool passed;
   // Borrowed report owned by the executor until the next run or deinitialize.

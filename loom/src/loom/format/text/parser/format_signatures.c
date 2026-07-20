@@ -26,7 +26,8 @@ static iree_status_t loom_parse_format_prepare_result_scope(
   for (uint16_t result_index = 0; result_index < parsed->result_count;
        ++result_index) {
     loom_value_id_t value_id = parsed->result_ids[result_index];
-    loom_string_id_t name_id = parser->module->values.entries[value_id].name_id;
+    loom_string_id_t name_id =
+        loom_module_value(parser->module, value_id)->name_id;
     if (name_id != LOOM_STRING_ID_INVALID &&
         name_id < parser->module->strings.count) {
       ++named_result_count;
@@ -41,7 +42,8 @@ static iree_status_t loom_parse_format_prepare_result_scope(
   for (uint16_t result_index = 0; result_index < parsed->result_count;
        ++result_index) {
     loom_value_id_t value_id = parsed->result_ids[result_index];
-    loom_string_id_t name_id = parser->module->values.entries[value_id].name_id;
+    loom_string_id_t name_id =
+        loom_module_value(parser->module, value_id)->name_id;
     if (name_id == LOOM_STRING_ID_INVALID ||
         name_id >= parser->module->strings.count) {
       continue;

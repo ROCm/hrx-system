@@ -762,6 +762,22 @@ TEST(StringViewTest, ParseDeviceSizeInvalid) {
   EXPECT_THAT(ParseDeviceSize("abc"), StatusIs(StatusCode::kInvalidArgument));
 }
 
+TEST(StringViewTest, ParseEmptyNumber) {
+  const iree_string_view_t empty = iree_string_view_empty();
+  int32_t i32 = 0;
+  uint32_t u32 = 0;
+  int64_t i64 = 0;
+  uint64_t u64 = 0;
+  float f32 = 0.0f;
+  double f64 = 0.0;
+  EXPECT_FALSE(iree_string_view_atoi_int32(empty, &i32));
+  EXPECT_FALSE(iree_string_view_atoi_uint32(empty, &u32));
+  EXPECT_FALSE(iree_string_view_atoi_int64(empty, &i64));
+  EXPECT_FALSE(iree_string_view_atoi_uint64(empty, &u64));
+  EXPECT_FALSE(iree_string_view_atof(empty, &f32));
+  EXPECT_FALSE(iree_string_view_atod(empty, &f64));
+}
+
 TEST(StringViewTest, MatchPattern) {
   auto match = [](const char* value, const char* pattern) -> bool {
     return iree_string_view_match_pattern(iree_make_cstring_view(value),

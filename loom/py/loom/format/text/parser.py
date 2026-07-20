@@ -3270,6 +3270,25 @@ class Parser:
                 start_loc,
             )
 
+        if tok.at(TokenKind.BARE_IDENT, "if"):
+            tok.next()
+            condition_token = self._parse_pipeline_name("pipeline condition")
+            if condition_token.text != "changed":
+                raise ParseError(
+                    "invalid pipeline condition "
+                    f"'{condition_token.text}', expected changed",
+                    condition_token.location,
+                    tok._filename,
+                )
+            body = self._parse_pipeline_nested_region(implicit_terminator_decl)
+            return self._pipeline_operation(
+                "pass.if_changed",
+                {},
+                [body],
+                comments,
+                start_loc,
+            )
+
         if tok.at(TokenKind.BARE_IDENT, "call"):
             tok.next()
             callee = tok.expect(TokenKind.SYMBOL).text

@@ -109,7 +109,7 @@ kernel.def target(@target) @scalar_sitofp_i8_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @scalar_sitofp_i8_load_store() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @scalar_sitofp_i8_load_store() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %loaded = load.i8 %input_view, 0
@@ -265,7 +265,7 @@ kernel.def target(@target) @scalar_bitcast_direct_i32_arg_f32_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @scalar_bitcast_direct_i32_arg_f32_store(%scale_bits: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @scalar_bitcast_direct_i32_arg_f32_store(%scale_bits: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %scale = bitcast.i32.f32 %scale_bits
   store.f32 %scale, %output_view, 0

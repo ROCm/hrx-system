@@ -194,11 +194,10 @@ static iree_status_t loom_native_assembly_append_block(
     loom_low_packet_view_t packet = {0};
     IREE_RETURN_IF_ERROR(
         loom_low_packet_view_at(schedule, allocation, packet_index, &packet));
-    if (loom_low_live_in_isa(packet.node->op) ||
-        loom_low_storage_reserve_isa(packet.node->op) ||
-        loom_low_storage_view_isa(packet.node->op)) {
-      continue;
-    }
+    const bool packet_is_visible =
+        !loom_low_live_in_isa(packet.node->op) &&
+        !loom_low_storage_reserve_isa(packet.node->op) &&
+        !loom_low_storage_view_isa(packet.node->op);
     loom_native_assembly_packet_context_t context = {
         .schedule = schedule,
         .allocation = allocation,
@@ -210,6 +209,7 @@ static iree_status_t loom_native_assembly_append_block(
       IREE_RETURN_IF_ERROR(options->append_before_packet.fn(
           options->append_before_packet.user_data, &context));
     }
+    if (!packet_is_visible) continue;
     const iree_host_size_t line_start = iree_string_builder_size(builder);
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "  "));
     const iree_host_size_t content_start = iree_string_builder_size(builder);

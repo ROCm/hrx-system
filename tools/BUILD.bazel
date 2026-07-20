@@ -12,8 +12,18 @@ alias(
 )
 
 alias(
+    name = "iree-benchmark-replay",
+    actual = "//runtime/src/iree/tools/iree-benchmark-replay",
+)
+
+alias(
     name = "iree-dump-cpuinfo",
     actual = "//runtime/src/iree/tools/iree-dump-cpuinfo",
+)
+
+alias(
+    name = "iree-dump-replay",
+    actual = "//runtime/src/iree/tools/iree-dump-replay",
 )
 
 alias(
@@ -24,4 +34,9 @@ alias(
 alias(
     name = "iree-run-module",
     actual = "//runtime/src/iree/tools/iree-run-module",
+)
+
+alias(
+    name = "iree-run-replay",
+    actual = "//runtime/src/iree/tools/iree-run-replay",
 )

@@ -96,13 +96,13 @@ ERR_AMDGPU_006 = ErrorDef(
     summary="AMDGPU HAL-kernel ABI resource count overflows.",
     message=(
         "AMDGPU HAL-kernel ABI has {resource_count} HAL binding resources, "
-        "but at most {max_resource_count} fit in the kernarg segment"
+        "but at most {max_resource_count} fit in the ABI layout snapshot"
     ),
     params=(
         ErrorParam("resource_count", ParamKind.U64),
         ErrorParam("max_resource_count", ParamKind.U64),
     ),
-    fix_hint="Split the kernel ABI or reduce the number of HAL binding resources",
+    fix_hint=("Split the kernel ABI or reduce the number of HAL binding resources"),
 )
 
 # ERR_AMDGPU_007: AMDGPU HAL-kernel ABI resource import kind is unsupported.
@@ -925,6 +925,108 @@ ERR_AMDGPU_040 = ErrorDef(
     ),
 )
 
+# ERR_AMDGPU_041: AMDGPU fragment repack strategy is unsupported.
+ERR_AMDGPU_041 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=41,
+    severity=Severity.ERROR,
+    summary="AMDGPU fragment repack strategy is unsupported.",
+    message=(
+        "AMDGPU target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected fragment repack '{op_name}' in "
+        "'@{function_name}': source role {source_role_key} with type "
+        "{source_type} cannot produce result role {result_role_key} with type "
+        "{result_type} using strategy '{strategy_key}' for reason "
+        "'{reason_key}'"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("source_role_key", ParamKind.STRING),
+        ErrorParam("result_role_key", ParamKind.STRING),
+        ErrorParam("source_type", ParamKind.TYPE),
+        ErrorParam("result_type", ParamKind.TYPE),
+        ErrorParam("strategy_key", ParamKind.STRING),
+        ErrorParam("reason_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use memory-backed fragment store/load until the target reports a "
+        "native fragment repack strategy for this role and type transition"
+    ),
+)
+
+# ERR_AMDGPU_042: AMDGPU sanitizer site table is too large.
+ERR_AMDGPU_042 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=42,
+    severity=Severity.ERROR,
+    summary="AMDGPU sanitizer site table is too large.",
+    message=(
+        "AMDGPU target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected sanitizer metadata for '{op_name}' in "
+        "'@{function_name}': current table has {current_site_count} site row(s) "
+        "and this function contributes {function_site_count}, but the maximum "
+        "encodable site id is {max_site_id}"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("current_site_count", ParamKind.U64),
+        ErrorParam("function_site_count", ParamKind.U64),
+        ErrorParam("max_site_id", ParamKind.U64),
+    ),
+    fix_hint=(
+        "Split the sanitizer-instrumented module or reduce the number of "
+        "sanitizer assertion sites before AMDGPU lowering"
+    ),
+)
+
+# ERR_AMDGPU_043: AMDGPU sanitizer site table symbol is reserved.
+ERR_AMDGPU_043 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=43,
+    severity=Severity.ERROR,
+    summary="AMDGPU sanitizer site table symbol is reserved.",
+    message=(
+        "AMDGPU target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected sanitizer metadata for '{op_name}' in "
+        "'@{function_name}': module symbol '{symbol_name}' is already defined"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("symbol_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Rename the user-defined symbol so AMDGPU sanitizer lowering can "
+        "materialize its reserved site table"
+    ),
+)
+
+# ERR_AMDGPU_044: AMDGPU DPP control encoding is reserved.
+ERR_AMDGPU_044 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=44,
+    severity=Severity.ERROR,
+    summary="AMDGPU DPP control encoding is reserved.",
+    message=(
+        "AMDGPU descriptor '{descriptor_name}' in '@{function_name}' uses "
+        "reserved DPP control value {immediate_value} for immediate "
+        "'{immediate_name}' in descriptor set '{descriptor_set_name}' "
+        "under contract '{constraint_key}' for reason '{reason_key}'"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("descriptor_name", ParamKind.STRING),
+        ErrorParam("descriptor_set_name", ParamKind.STRING),
+        ErrorParam("immediate_name", ParamKind.STRING),
+        ErrorParam("immediate_value", ParamKind.U32),
+        ErrorParam("constraint_key", ParamKind.STRING),
+        ErrorParam("reason_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use a legal quad, row, or wave DPP lane-control encoding for the "
+        "selected descriptor"
+    ),
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_003,
@@ -965,4 +1067,8 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_038,
     ERR_AMDGPU_039,
     ERR_AMDGPU_040,
+    ERR_AMDGPU_041,
+    ERR_AMDGPU_042,
+    ERR_AMDGPU_043,
+    ERR_AMDGPU_044,
 )

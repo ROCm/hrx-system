@@ -222,7 +222,7 @@ kernel.def target(@target) @workgroup_cached_dot4i_u8s8_tile() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @workgroup_cached_dot4i_u8s8_tile() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_cached_dot4i_u8s8_tile() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -230,8 +230,8 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @workgroup_cached_dot4i_
   %49 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %51 = v_lshlrev_b32_src0_inline %lane, 4
   %lhs = global_load_b128_saddr %51, %lhs_view
-  ds_write_b128 %51, %lhs
-  %lhs_cached = ds_read_b128 %51
+  low.op<amdgpu.ds_write_b128>(%51, %lhs) {offset = 0} memory_access([0, 3, 8, -1, 43, 16, 0, 16, 3, 0, 1008, 16, 1024]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
+  %lhs_cached = low.op<amdgpu.ds_read_b128>(%51) {offset = 0} memory_access([0, 3, 8, -1, 43, 16, 0, 16, 3, 0, 1008, 16, 1024]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   %rhs = global_load_b128_saddr %51, %rhs_view
   %58 = v_mov_b32 0
   %63 = slice %lhs_cached[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>

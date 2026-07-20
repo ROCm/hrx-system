@@ -164,6 +164,15 @@ typedef struct loom_target_workgroup_size_t {
   uint32_t z;
 } loom_target_workgroup_size_t;
 
+typedef struct loom_target_workgroup_cluster_size_t {
+  // Number of workgroups in a cluster along the x dimension.
+  uint32_t x;
+  // Number of workgroups in a cluster along the y dimension.
+  uint32_t y;
+  // Number of workgroups in a cluster along the z dimension.
+  uint32_t z;
+} loom_target_workgroup_cluster_size_t;
+
 typedef struct loom_target_grid_size_t {
   // Maximum dispatched grid size along the x dimension.
   uint32_t x;
@@ -286,6 +295,30 @@ typedef struct loom_target_selection_t {
   const void* data;
 } loom_target_selection_t;
 
+typedef uint8_t loom_target_selection_source_t;
+enum {
+  // No target selection source is known.
+  LOOM_TARGET_SELECTION_SOURCE_UNKNOWN = 0,
+  // The source function authored its target record explicitly.
+  LOOM_TARGET_SELECTION_SOURCE_AUTHORED = 1,
+  // The source function inherited the invocation-selected target record.
+  LOOM_TARGET_SELECTION_SOURCE_INVOCATION = 2,
+};
+
+// Returns the stable report spelling for |source|.
+static inline iree_string_view_t loom_target_selection_source_name(
+    loom_target_selection_source_t source) {
+  switch (source) {
+    case LOOM_TARGET_SELECTION_SOURCE_AUTHORED:
+      return IREE_SV("authored");
+    case LOOM_TARGET_SELECTION_SOURCE_INVOCATION:
+      return IREE_SV("invocation");
+    case LOOM_TARGET_SELECTION_SOURCE_UNKNOWN:
+    default:
+      return IREE_SV("unknown");
+  }
+}
+
 // Returns an empty selected target overlay.
 static inline loom_target_selection_t loom_target_selection_empty(void) {
   return (loom_target_selection_t){0};
@@ -304,6 +337,13 @@ typedef struct loom_target_bundle_table_t {
   // Number of entries in |values|.
   uint8_t count;
 } loom_target_bundle_table_t;
+
+// Resolves |selector| to a populated bundle row, or returns NULL when the
+// selector is outside the table or names an unavailable row.
+static inline const loom_target_bundle_t* loom_target_bundle_table_lookup(
+    const loom_target_bundle_table_t* table, uint32_t selector) {
+  return selector < table->count ? table->values[selector] : NULL;
+}
 
 enum loom_target_projection_value_bits_e {
   // Enum attr projected into a uint8_t target enum field.

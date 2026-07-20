@@ -193,23 +193,6 @@ endif()
 if(IREE_HAL_DRIVER_VULKAN)
 iree_cc_test(
   NAME
-    executable_test
-  SRCS
-    "executable_test.cc"
-  DEPS
-    ::headers
-    ::vulkan
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
-  LABELS
-    "iree-build-requirement=runtime.hal.vulkan"
-)
-endif()
-
-if(IREE_HAL_DRIVER_VULKAN)
-iree_cc_test(
-  NAME
     physical_device_selection_test
   SRCS
     "physical_device_selection_test.cc"
@@ -265,8 +248,6 @@ iree_cc_library(
     "driver.h"
     "executable.c"
     "executable.h"
-    "executable_cache.c"
-    "executable_cache.h"
     "logical_device.c"
     "logical_device.h"
     "physical_device.c"
