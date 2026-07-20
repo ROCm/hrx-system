@@ -142,7 +142,6 @@ def _s_buffer_load_sized_overlay(
         immediates=(_offset_immediate(offset_bit_width),),
         fixed_encoding_fields=fixed_encoding_fields,
         effects=(_global_read_effect(width_bits),),
-        constraints=_EARLY_CLOBBER_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     )
 
@@ -359,7 +358,6 @@ def _s_load_sized_overlay(
         fixed_encoding_fields=fixed_encoding_fields,
         effects=(memory_effect or _global_read_effect(width_bits),),
         operand_forms=operand_forms,
-        constraints=_EARLY_CLOBBER_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.SIDE_EFFECTING,),
         asm_forms=asm_forms,
     )
@@ -3035,7 +3033,6 @@ def _scratch_load_overlay(
         ),
         fixed_encoding_fields=fixed_encoding_fields,
         effects=(_stack_memory_effect(EffectKind.READ, width_bits),),
-        constraints=_EARLY_CLOBBER_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.SIDE_EFFECTING,),
         asm_forms=_asm(
             mnemonic=asm_mnemonic,

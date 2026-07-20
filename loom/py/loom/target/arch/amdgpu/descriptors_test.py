@@ -108,13 +108,6 @@ from loom.target.arch.amdgpu.descriptors.control import (
     _s_delay_alu_descriptor,
     _s_set_vgpr_msb_descriptor,
 )
-from loom.target.arch.amdgpu.descriptors.memory import (
-    _s_buffer_load_64_overlay,
-    _s_buffer_load_dword_overlay,
-    _s_load_dword_overlay,
-    _s_load_dwordx2_overlay,
-    _s_load_dwordx4_overlay,
-)
 from loom.target.arch.amdgpu.descriptors.tensor import (
     _s_wait_tensorcnt_descriptor,
     _tensor_load_to_lds_descriptor,
@@ -3146,22 +3139,6 @@ def test_mad_mix_descriptors_cover_cdna_half_lane_forms() -> None:
             assert not any(
                 key.startswith(f"{descriptor_key_prefix}.") for key in descriptors
             )
-
-
-def test_scalar_memory_loads_early_clobber_results() -> None:
-    for descriptor in (
-        _s_buffer_load_dword_overlay(),
-        _s_buffer_load_64_overlay(),
-        _s_load_dword_overlay(),
-        _s_load_dwordx2_overlay(),
-        _s_load_dwordx4_overlay(),
-    ):
-        assert tuple(constraint.kind for constraint in descriptor.constraints) == (
-            ConstraintKind.EARLY_CLOBBER,
-        )
-        assert tuple(
-            constraint.lhs_operand_index for constraint in descriptor.constraints
-        ) == (0,)
 
 
 def test_dpp_control_domain_covers_only_architectural_encodings() -> None:
