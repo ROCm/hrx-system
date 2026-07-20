@@ -1804,6 +1804,78 @@ iree_status_t loom_liveness_op_program_point(
                           "liveness analysis cannot find operation");
 }
 
+iree_status_t loom_liveness_region_point_range(
+    const loom_liveness_analysis_t* analysis, const loom_region_t* region,
+    loom_liveness_region_point_range_t* out_range) {
+  IREE_ASSERT_ARGUMENT(analysis);
+  IREE_ASSERT_ARGUMENT(region);
+  IREE_ASSERT_ARGUMENT(out_range);
+  *out_range = (loom_liveness_region_point_range_t){0};
+
+  uint32_t region_span = 0;
+  IREE_RETURN_IF_ERROR(loom_liveness_region_point_span_for_flags(
+      analysis->flags, region, &region_span));
+  if (region == analysis->region) {
+    *out_range = (loom_liveness_region_point_range_t){
+        .start_point = 0,
+        .end_point = region_span,
+    };
+    return iree_ok_status();
+  }
+  if (!loom_liveness_analysis_includes_region_tree(analysis)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "nested region range requires a region-tree liveness analysis");
+  }
+
+  const loom_block_t* entry_block =
+      region->block_count != 0 ? loom_region_const_entry_block(region) : NULL;
+  const loom_op_t* owner_op =
+      entry_block != NULL && entry_block->first_op != NULL
+          ? entry_block->first_op->parent_op
+          : NULL;
+  if (owner_op == NULL) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "liveness analysis cannot find region owner");
+  }
+  uint32_t start_point = 0;
+  IREE_RETURN_IF_ERROR(loom_liveness_op_program_point(
+      analysis, loom_liveness_order_empty(), owner_op, &start_point));
+  IREE_RETURN_IF_ERROR(
+      loom_liveness_add_span(&start_point, 1, IREE_SV("operation")));
+
+  bool found = false;
+  loom_region_t* const* owner_regions = loom_op_regions(owner_op);
+  for (uint8_t i = 0; i < owner_op->region_count; ++i) {
+    uint32_t owner_region_span = 0;
+    IREE_RETURN_IF_ERROR(loom_liveness_region_point_span_for_flags(
+        analysis->flags, owner_regions[i], &owner_region_span));
+    if (owner_regions[i] == region) {
+      found = true;
+      break;
+    }
+    if (owner_region_span == 0) continue;
+    IREE_RETURN_IF_ERROR(loom_liveness_add_span(&start_point, owner_region_span,
+                                                IREE_SV("nested region")));
+    IREE_RETURN_IF_ERROR(
+        loom_liveness_add_span(&start_point, 1, IREE_SV("nested region gap")));
+  }
+  if (!found) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "region is not owned by its entry block parent operation");
+  }
+  if (start_point > UINT32_MAX - region_span) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "liveness region range exceeds uint32_t");
+  }
+  *out_range = (loom_liveness_region_point_range_t){
+      .start_point = start_point,
+      .end_point = start_point + region_span,
+  };
+  return iree_ok_status();
+}
+
 iree_status_t loom_liveness_analysis_op_point_span(
     const loom_liveness_analysis_t* analysis, const loom_op_t* op,
     uint32_t* out_span) {

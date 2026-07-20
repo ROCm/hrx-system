@@ -290,6 +290,22 @@ iree_status_t loom_liveness_op_program_point(
     const loom_liveness_analysis_t* analysis, loom_liveness_order_t order,
     const loom_op_t* op, uint32_t* out_program_point);
 
+// Half-open program-point range occupied by one region and its nested tree.
+typedef struct loom_liveness_region_point_range_t {
+  // First program point in the region.
+  uint32_t start_point;
+  // One-past-last program point in the region.
+  uint32_t end_point;
+} loom_liveness_region_point_range_t;
+
+// Resolves the program-point range occupied by |region|.
+//
+// |region| must be the analysis root or a non-empty recursively nested region
+// covered by a region-tree analysis.
+iree_status_t loom_liveness_region_point_range(
+    const loom_liveness_analysis_t* analysis, const loom_region_t* region,
+    loom_liveness_region_point_range_t* out_range);
+
 // Returns the number of program points occupied by |op| under |analysis|'s
 // point model.
 iree_status_t loom_liveness_analysis_op_point_span(

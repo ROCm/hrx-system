@@ -134,6 +134,50 @@ typedef struct loom_low_lower_map_contract_value_callback_t {
   void* user_data;
 } loom_low_lower_map_contract_value_callback_t;
 
+// One named conservative contribution not represented by source SSA values.
+typedef struct loom_low_lower_pressure_reserve_t {
+  // Stable contributor name used by structured reports.
+  iree_string_view_t name;
+  // Resource units dense by residency-model direct resource ID.
+  const uint64_t* direct_resource_units;
+  // Number of entries in |direct_resource_units|.
+  iree_host_size_t direct_resource_count;
+} loom_low_lower_pressure_reserve_t;
+
+typedef uint16_t loom_low_lower_pressure_reserve_flags_t;
+enum loom_low_lower_pressure_reserve_flag_bits_e {
+  // The contributors bound all non-source target storage pressure.
+  LOOM_LOW_LOWER_PRESSURE_RESERVE_FLAG_COMPLETE = 1u << 0,
+};
+
+// Target and lowering contributions to source-level pressure projection.
+typedef struct loom_low_lower_pressure_reserve_list_t {
+  // Immutable contributor rows valid for the contract-query environment.
+  const loom_low_lower_pressure_reserve_t* values;
+  // Number of entries in |values|.
+  iree_host_size_t count;
+  // Completeness claim for the contributor set.
+  loom_low_lower_pressure_reserve_flags_t flags;
+} loom_low_lower_pressure_reserve_list_t;
+
+static inline loom_low_lower_pressure_reserve_list_t
+loom_low_lower_pressure_reserve_list_empty(void) {
+  return (loom_low_lower_pressure_reserve_list_t){0};
+}
+
+typedef iree_status_t (*loom_low_lower_pressure_reserves_fn_t)(
+    void* user_data,
+    const loom_target_contract_query_environment_t* environment,
+    loom_low_lower_pressure_reserve_list_t* out_reserves);
+
+typedef struct loom_low_lower_pressure_reserves_callback_t {
+  // Optional callback returning named target, ABI, lowering, and allocator
+  // contributions omitted from the source SSA value projection.
+  loom_low_lower_pressure_reserves_fn_t fn;
+  // Caller-owned payload passed to |fn|.
+  void* user_data;
+} loom_low_lower_pressure_reserves_callback_t;
+
 typedef const loom_target_residency_model_t* (
     *loom_low_lower_residency_model_fn_t)(
     void* user_data,
@@ -625,6 +669,9 @@ typedef struct loom_low_lower_policy_t {
   // for read-only target contract queries. Missing means table guards that need
   // register mapping cannot match.
   loom_low_lower_map_contract_value_callback_t map_contract_value;
+  // Optionally supplies named non-source resource contributions for source
+  // pressure projection.
+  loom_low_lower_pressure_reserves_callback_t pressure_reserves;
   // Optionally returns the residency model for read-only source pressure and
   // final target-low allocation queries.
   loom_low_lower_residency_model_callback_t residency_model;
