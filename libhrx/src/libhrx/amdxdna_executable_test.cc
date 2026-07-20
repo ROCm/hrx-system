@@ -154,6 +154,8 @@ void TestCompleteDescription() {
   auto reuse = iree_hal_amdxdna_xclbin_EntryPointDef_vec_at(entries, 1);
   CHECK(iree_hal_amdxdna_xclbin_EntryPointDef_xclbin_index_get(reuse) == -1);
   CHECK(iree_hal_amdxdna_xclbin_EntryPointDef_pdi_index_get(reuse) == -1);
+  CHECK(iree_hal_amdxdna_xclbin_EntryPointDef_source_location_get(reuse) ==
+        nullptr);
   hrx_host_allocator_free(allocator, data);
 }
 
