@@ -112,6 +112,7 @@ class LowBuilder(DialectBuilder):
         opcode: str,
         operands: list[ValueRef] = ...,
         attrs: Mapping[str, Any] | None = ...,
+        memory_access: list[int] | None = ...,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,

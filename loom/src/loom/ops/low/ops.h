@@ -361,12 +361,15 @@ LOOM_DEFINE_VARIADIC_RESULTS(loom_low_op_results, 0)
 LOOM_DEFINE_ATTR_STRING(loom_low_op_opcode, 0)
 LOOM_DEFINE_ATTR_I64(loom_low_op_descriptor_ordinal, 1)
 LOOM_DEFINE_ATTR_DICT(loom_low_op_attrs, 2)
+LOOM_DEFINE_ATTR_I64_ARRAY(loom_low_op_memory_access, 3)
 iree_status_t loom_low_op_build(
     loom_builder_t* builder,
     loom_string_id_t opcode,
     loom_may_consume const loom_value_id_t* operands,
     iree_host_size_t operands_count,
     loom_optional loom_named_attr_slice_t attrs,
+    loom_optional const int64_t* memory_access,
+    iree_host_size_t memory_access_count,
     const loom_type_t* result_types,
     iree_host_size_t result_count,
     const loom_tied_result_t* tied_results,

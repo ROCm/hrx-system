@@ -740,6 +740,12 @@ static iree_status_t loom_print_low_asm_statement(
       IREE_RETURN_IF_ERROR(loom_print_low_asm_structural(ctx, statement));
       break;
     }
+    case LOOM_TEXT_LOW_ASM_STATEMENT_CANONICAL: {
+      // The descriptor environment has proven that canonical register type
+      // spellings resolve in the selected asm descriptor set. loom_print_op
+      // owns the line terminator and optional location annotation.
+      return loom_print_op(ctx, statement->op);
+    }
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "unknown low asm statement kind %u",
@@ -791,7 +797,18 @@ static iree_status_t loom_print_low_asm_region_body(
         if (loom_print_low_asm_allows_canonical_structural_op(ctx,
                                                               current_op)) {
           IREE_RETURN_IF_ERROR(loom_print_indent(ctx));
-          IREE_RETURN_IF_ERROR(loom_print_op(ctx, current_op));
+          // Canonical fallback retains the operation's original register
+          // types, which may belong to a different descriptor set than the
+          // requested low-assembly spelling. Resolve each register type from
+          // its embedded stable descriptor-set identity instead of forcing the
+          // requested low-assembly set onto canonical syntax.
+          const loom_text_low_asm_descriptor_set_t*
+              previous_register_descriptor_set =
+                  ctx->low_register_descriptor_set;
+          ctx->low_register_descriptor_set = NULL;
+          iree_status_t status = loom_print_op(ctx, current_op);
+          ctx->low_register_descriptor_set = previous_register_descriptor_set;
+          IREE_RETURN_IF_ERROR(status);
           continue;
         }
         iree_string_view_t op_name = loom_op_name(ctx->module, current_op);
@@ -801,7 +818,9 @@ static iree_status_t loom_print_low_asm_region_body(
       }
       IREE_RETURN_IF_ERROR(loom_print_indent(ctx));
       IREE_RETURN_IF_ERROR(loom_print_low_asm_statement(ctx, &statement));
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
+      if (statement.kind != LOOM_TEXT_LOW_ASM_STATEMENT_CANONICAL) {
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
+      }
     }
   }
   return iree_ok_status();

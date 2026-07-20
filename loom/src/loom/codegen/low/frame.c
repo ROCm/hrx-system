@@ -14,6 +14,7 @@
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/function_model.h"
+#include "loom/codegen/low/memory_access_ir.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/schedule/run.h"
 #include "loom/error/error_catalog.h"
@@ -237,13 +238,22 @@ static iree_status_t loom_low_emission_frame_build_with_diagnostic_emitter(
   };
   if (statistics != NULL) ++statistics->frame_build_count;
 
+  loom_low_memory_access_table_t memory_access_table =
+      options->memory_access_table;
+  iree_status_t status = iree_ok_status();
+  if (loom_low_memory_access_table_is_empty(memory_access_table)) {
+    status = loom_low_memory_access_table_build_from_ir(low_func_op, arena,
+                                                        &memory_access_table);
+  }
   loom_low_function_model_t model = {0};
-  iree_status_t status = loom_low_function_model_initialize(
-      module, low_func_op, options->descriptor_registry,
-      options->target_selection, diagnostic_emitter,
-      LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, arena, &model);
+  if (iree_status_is_ok(status)) {
+    status = loom_low_function_model_initialize(
+        module, low_func_op, options->descriptor_registry,
+        options->target_selection, diagnostic_emitter,
+        LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, arena, &model);
+  }
   loom_low_schedule_options_t schedule_options = {
-      .memory_access_table = options->memory_access_table,
+      .memory_access_table = memory_access_table,
       .residency_model = options->residency_model,
       .allocation_budgets = options->allocation_budgets,
       .allocation_budget_count = options->allocation_budget_count,

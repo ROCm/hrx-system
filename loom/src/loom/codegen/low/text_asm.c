@@ -1316,6 +1316,49 @@ static iree_status_t loom_low_descriptor_text_asm_describe_packet(
   iree_string_view_t opcode = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_opcode_attr(
       module, op, opcode_attr_index, &opcode));
+
+  // Compact target assembly has no spelling for compiler-owned packet
+  // metadata. Preserve such packets in canonical low.op form, but only when
+  // the selected descriptor set owns both the opcode and every register type.
+  // Register type spellings omit the descriptor-set key, so admitting a
+  // cross-set canonical packet inside asm<...> would not round-trip.
+  if (!is_const && !loom_attr_is_absent(loom_low_op_memory_access(op))) {
+    if (loom_low_descriptor_set_lookup_descriptor(descriptor_set, opcode) ==
+        LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+      return iree_ok_status();
+    }
+    bool has_register_type = false;
+    const loom_value_id_t* results = loom_op_const_results(op);
+    for (uint16_t i = 0; i < op->result_count; ++i) {
+      const loom_type_t type = loom_module_value_type(module, results[i]);
+      if (!loom_low_type_is_register(type) ||
+          loom_low_register_type_descriptor_set_stable_id(type) !=
+              descriptor_set->stable_id) {
+        return iree_ok_status();
+      }
+      has_register_type = true;
+    }
+    const loom_value_id_t* operands = loom_op_const_operands(op);
+    for (uint16_t i = 0; i < op->operand_count; ++i) {
+      const loom_type_t type = loom_module_value_type(module, operands[i]);
+      if (!loom_low_type_is_register(type) ||
+          loom_low_register_type_descriptor_set_stable_id(type) !=
+              descriptor_set->stable_id) {
+        return iree_ok_status();
+      }
+      has_register_type = true;
+    }
+    if (!has_register_type) {
+      return iree_ok_status();
+    }
+    *out_statement = (loom_text_low_asm_statement_t){
+        .kind = LOOM_TEXT_LOW_ASM_STATEMENT_CANONICAL,
+        .op = op,
+        .location = op->location,
+    };
+    return iree_ok_status();
+  }
+
   loom_text_low_asm_packet_descriptor_t packet = {0};
   IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_lookup_packet_by_opcode(
       descriptor_set, opcode, &packet));

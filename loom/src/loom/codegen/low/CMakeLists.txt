@@ -212,6 +212,23 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    memory_access_ir
+  HDRS
+    "memory_access_ir.h"
+  SRCS
+    "memory_access_ir.c"
+  DEPS
+    ::function
+    ::memory_access
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::low
+  PUBLIC
+)
+
 loom_cc_test(
   NAME
     memory_access_test
@@ -221,6 +238,27 @@ loom_cc_test(
     ::memory_access
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    memory_access_ir_test
+  SRCS
+    "memory_access_ir_test.cc"
+  DEPS
+    ::function
+    ::memory_access_ir
+    ::text_asm
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::error::diagnostic
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::ops::test
+    loom::target::test::descriptors
+    loom::testing::module_ptr
 )
 
 loom_cc_library(
@@ -610,6 +648,7 @@ loom_cc_library(
     ::function
     ::function_model
     ::memory_access
+    ::memory_access_ir
     ::packet
     ::planning_statistics
     ::storage_lease
