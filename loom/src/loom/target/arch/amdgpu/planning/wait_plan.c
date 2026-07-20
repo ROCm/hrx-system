@@ -2569,14 +2569,6 @@ static iree_status_t loom_amdgpu_wait_plan_handle_edge_copy_writes(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_wait_plan_handle_physical_writes(
-    loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_wait_plan_handle_edge_copy_writes(builder, node_index));
-  return loom_amdgpu_wait_plan_handle_materialized_result_writes(builder,
-                                                                 node_index);
-}
-
 static uint32_t loom_amdgpu_wait_plan_outstanding_counter_mask(
     const uint32_t outstanding_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT],
     uint32_t counter_mask) {
@@ -3059,16 +3051,18 @@ static iree_status_t loom_amdgpu_wait_plan_process_node(
     loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
   loom_amdgpu_wait_node_state_t* node_state = &builder->node_states[node_index];
 
-  // Architectural XCNT drains and group transitions precede packet-local
-  // result writes. Apply that progress before checking whether those writes
-  // overlap retained source storage.
+  // Branch-edge copies execute before the packet represented by the source
+  // node. Protect them before crediting any progress supplied by that packet,
+  // including an implicit XCNT drain from a hardware branch.
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_wait_plan_handle_edge_copy_writes(builder, node_index));
+  // Architectural XCNT drains and group transitions then precede packet-local
+  // result writes and allocation reuse. Apply that progress before checking
+  // whether those packet-local writes overlap retained source storage.
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_wait_plan_handle_xcnt_pre_dependencies(builder, node_index));
-  // Structural edge copies and coalesced result placements precede the
-  // remaining packet-level effects. Protect their concrete destinations
-  // before processing those effects.
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_wait_plan_handle_physical_writes(builder, node_index));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_handle_materialized_result_writes(
+      builder, node_index));
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_handle_storage_release_actions(
       builder, node_index));
   IREE_RETURN_IF_ERROR(

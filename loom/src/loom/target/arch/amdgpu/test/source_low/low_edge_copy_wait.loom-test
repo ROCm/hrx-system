@@ -19,3 +19,26 @@ low.func.def target(@target) @branch_edge_copy_consumes_load_result(%addr: reg<a
 .Lbb1:
   v_add_u32 v1, v8, v0
   s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @branch_edge_copy_precedes_xcnt_drain strategy=source amdgpu.vgpr=4 fixed=%initial_addr:physical_register:3:1 fixed=%addr:physical_register:0:1 fixed=%value:physical_register:1:1 fixed=%replacement:physical_register:2:1 fixed=%base:physical_register:0:2
+
+amdgpu.target<gfx1250> @target
+low.func.def target(@target) @branch_edge_copy_precedes_xcnt_drain(%initial_addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %replacement: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
+  low.br ^loop(%initial_addr: reg<amdgpu.vgpr>)
+^loop(%addr: reg<amdgpu.vgpr>):
+  global_store_b32_saddr %addr, %value, %base
+  low.br ^loop(%replacement: reg<amdgpu.vgpr>)
+}
+
+// The edge copy executes before s_branch and overwrites the outstanding
+// store's address register. The branch drain therefore cannot discharge the
+// source lease until after the copy has been protected explicitly.
+// ----
+  v_mov_b32 v0, v3
+.Lbb1:
+  global_store_b32 v0, v1, s[0:1] offset:0
+  s_wait_storecnt storecnt(0)
+  s_wait_xcnt xcnt(0)
+  v_mov_b32 v0, v2
+  s_branch .Lbb1
