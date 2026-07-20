@@ -134,8 +134,11 @@ low.func.def target(@target) @cluster_counter_progress(%lds: reg<amdgpu.vgpr>, %
   return
 }
 
+// The cluster load advances both ASYNCCNT completion and the gfx125x XCNT
+// source-translation lifetime. The explicit async wait drains only ASYNCCNT;
+// program termination supplies the architectural XCNT drain.
 // ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"cluster_counter_progress","target":"target","descriptor_set":"amdgpu.rdna4.gfx125x.core","progress_count":2,"hazard_count":0,"progress":[{"index":0,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":7,"class_name":"amdgpu.async","action":"advance","units":1},{"index":1,"packet":2,"node":2,"block":0,"scheduled_ordinal":2,"class_id":7,"class_name":"amdgpu.async","action":"reset","units":0}],"hazards":[]}
+{"format":"loom.low.packet_hazard_plan.v1","function":"cluster_counter_progress","target":"target","descriptor_set":"amdgpu.rdna4.gfx125x.core","progress_count":4,"hazard_count":0,"progress":[{"index":0,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":7,"class_name":"amdgpu.async","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":8,"class_name":"amdgpu.x","action":"advance","units":1},{"index":2,"packet":2,"node":2,"block":0,"scheduled_ordinal":2,"class_id":7,"class_name":"amdgpu.async","action":"reset","units":0},{"index":3,"packet":3,"node":3,"block":0,"scheduled_ordinal":3,"class_id":8,"class_name":"amdgpu.x","action":"reset","units":0}],"hazards":[]}
 
 // ====
 // RUN: emit amdgpu-assembly @cluster_disjoint_memory_access strategy=source fixed=%lds:physical_register:0:1 fixed=%addr:physical_register:1:1 fixed=%saddr:physical_register:4:2

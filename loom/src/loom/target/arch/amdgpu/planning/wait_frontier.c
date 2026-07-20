@@ -138,6 +138,25 @@ static bool loom_amdgpu_wait_frontier_storage_lease_has_counter(
                                             record->release_class_id));
 }
 
+static loom_amdgpu_wait_xcnt_group_flags_t
+loom_amdgpu_wait_frontier_storage_lease_xcnt_group(
+    const loom_amdgpu_wait_frontier_t* frontier, iree_host_size_t lease_index) {
+  IREE_ASSERT_LT(lease_index, frontier->storage_leases.lease_count);
+  const loom_low_allocation_storage_lease_t* lease =
+      &frontier->allocation->storage_lease_instances[lease_index];
+  IREE_ASSERT_LT(lease->lease_record_index,
+                 frontier->allocation->storage_leases.record_count);
+  const loom_low_storage_lease_record_t* record =
+      &frontier->allocation->storage_leases.records[lease->lease_record_index];
+  if (record->release_scope !=
+          LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS ||
+      record->release_class_id != LOOM_AMDGPU_WAIT_COUNTER_X) {
+    return 0;
+  }
+  IREE_ASSERT_LT(record->node_index, frontier->schedule->node_count);
+  return frontier->nodes[record->node_index].xcnt_group_flags;
+}
+
 static void loom_amdgpu_wait_storage_lease_state_drain(
     const loom_amdgpu_wait_frontier_t* frontier, uint64_t* words,
     uint32_t counter_mask) {
@@ -151,6 +170,24 @@ static void loom_amdgpu_wait_storage_lease_state_drain(
           (uint32_t)(lease_index % LOOM_AMDGPU_WAIT_STORAGE_LEASES_PER_WORD);
       words[word_index] &= ~(UINT64_C(1) << bit_index);
     }
+  }
+}
+
+static void loom_amdgpu_wait_storage_lease_state_drain_xcnt_groups(
+    const loom_amdgpu_wait_frontier_t* frontier, uint64_t* words,
+    loom_amdgpu_wait_xcnt_group_flags_t group_flags) {
+  for (iree_host_size_t lease_index = 0;
+       lease_index < frontier->storage_leases.lease_count; ++lease_index) {
+    if (!iree_any_bit_set(group_flags,
+                          loom_amdgpu_wait_frontier_storage_lease_xcnt_group(
+                              frontier, lease_index))) {
+      continue;
+    }
+    const iree_host_size_t word_index =
+        lease_index / LOOM_AMDGPU_WAIT_STORAGE_LEASES_PER_WORD;
+    const uint32_t bit_index =
+        (uint32_t)(lease_index % LOOM_AMDGPU_WAIT_STORAGE_LEASES_PER_WORD);
+    words[word_index] &= ~(UINT64_C(1) << bit_index);
   }
 }
 
@@ -336,6 +373,21 @@ static void loom_amdgpu_wait_frontier_publish_node_storage_leases(
   }
 }
 
+static void loom_amdgpu_wait_frontier_apply_static_xcnt_producer(
+    const loom_amdgpu_wait_frontier_t* frontier, uint64_t* storage_lease_words,
+    loom_amdgpu_wait_xcnt_group_flags_t* xcnt_group_flags,
+    loom_amdgpu_wait_xcnt_group_flags_t producer_group_flags) {
+  if (producer_group_flags == 0) return;
+  const loom_amdgpu_wait_xcnt_group_flags_t other_group_flags =
+      *xcnt_group_flags &
+      (loom_amdgpu_wait_xcnt_group_flags_t)~producer_group_flags;
+  if (other_group_flags != 0 && storage_lease_words != NULL) {
+    loom_amdgpu_wait_storage_lease_state_drain_xcnt_groups(
+        frontier, storage_lease_words, other_group_flags);
+  }
+  *xcnt_group_flags = producer_group_flags;
+}
+
 static void loom_amdgpu_wait_frontier_build_local_states(
     loom_amdgpu_wait_frontier_t* frontier) {
   const loom_low_schedule_table_t* schedule = frontier->schedule;
@@ -358,6 +410,10 @@ static void loom_amdgpu_wait_frontier_build_local_states(
             : loom_amdgpu_wait_frontier_storage_lease_block_words(
                   frontier, frontier->storage_leases.static_outgoing_words,
                   block_index);
+    loom_amdgpu_wait_xcnt_group_flags_t* xcnt_group_flags =
+        frontier->xcnt.static_outgoing_flags == NULL
+            ? NULL
+            : &frontier->xcnt.static_outgoing_flags[block_index];
     for (uint32_t i = 0; i < block->scheduled_node_count; ++i) {
       const uint32_t node_index =
           schedule->scheduled_node_indices[block->scheduled_node_start + i];
@@ -383,6 +439,15 @@ static void loom_amdgpu_wait_frontier_build_local_states(
       if (storage_lease_words != NULL) {
         loom_amdgpu_wait_storage_lease_state_drain(
             frontier, storage_lease_words, node->drain_counter_mask);
+      }
+      if (xcnt_group_flags != NULL) {
+        if (iree_any_bit_set(node->drain_counter_mask,
+                             LOOM_AMDGPU_WAIT_COUNTER_MASK_X)) {
+          *xcnt_group_flags = 0;
+        }
+        loom_amdgpu_wait_frontier_apply_static_xcnt_producer(
+            frontier, storage_lease_words, xcnt_group_flags,
+            node->xcnt_group_flags);
       }
       if (storage_lease_words != NULL) {
         loom_amdgpu_wait_frontier_publish_node_storage_leases(
@@ -422,6 +487,13 @@ static bool loom_amdgpu_wait_frontier_block_state_union_changed(
             source_block),
         frontier->storage_leases.word_count);
   }
+  if (frontier->xcnt.static_outgoing_flags != NULL) {
+    const loom_amdgpu_wait_xcnt_group_flags_t flags =
+        frontier->xcnt.static_outgoing_flags[target_block] |
+        frontier->xcnt.static_outgoing_flags[source_block];
+    changed |= flags != frontier->xcnt.static_outgoing_flags[target_block];
+    frontier->xcnt.static_outgoing_flags[target_block] = flags;
+  }
   return changed;
 }
 
@@ -448,7 +520,8 @@ static bool loom_amdgpu_wait_frontier_block_state_is_empty(
           frontier->storage_leases.word_count)) {
     return false;
   }
-  return true;
+  return frontier->xcnt.static_outgoing_flags == NULL ||
+         frontier->xcnt.static_outgoing_flags[block_index] == 0;
 }
 
 static void loom_amdgpu_wait_frontier_worklist_push(
@@ -543,11 +616,13 @@ iree_status_t loom_amdgpu_wait_frontier_initialize(
 
   bool has_memory_producer = false;
   bool has_vmem_result_producer = false;
+  bool has_xcnt_producer = false;
   for (iree_host_size_t i = 0; i < schedule->node_count; ++i) {
     has_memory_producer |=
         nodes[i].read_counter_mask != 0 || nodes[i].write_counter_mask != 0;
     has_vmem_result_producer |=
         nodes[i].vmem_result_order_class != LOOM_AMDGPU_VMEM_RESULT_ORDER_NONE;
+    has_xcnt_producer |= nodes[i].xcnt_group_flags != 0;
   }
 
   const bool has_cross_block_state =
@@ -583,7 +658,8 @@ iree_status_t loom_amdgpu_wait_frontier_initialize(
   if (!has_cross_block_state ||
       (!has_memory_producer &&
        out_frontier->vmem_results.active_words == NULL &&
-       out_frontier->storage_leases.active_words == NULL)) {
+       out_frontier->storage_leases.active_words == NULL &&
+       !has_xcnt_producer)) {
     return iree_ok_status();
   }
 
@@ -639,6 +715,22 @@ iree_status_t loom_amdgpu_wait_frontier_initialize(
            state_word_count *
                sizeof(*out_frontier->storage_leases.resolved_outgoing_words));
   }
+  if (has_xcnt_producer) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, schedule->block_count,
+        sizeof(*out_frontier->xcnt.static_outgoing_flags),
+        (void**)&out_frontier->xcnt.static_outgoing_flags));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, schedule->block_count,
+        sizeof(*out_frontier->xcnt.resolved_outgoing_flags),
+        (void**)&out_frontier->xcnt.resolved_outgoing_flags));
+    memset(out_frontier->xcnt.static_outgoing_flags, 0,
+           schedule->block_count *
+               sizeof(*out_frontier->xcnt.static_outgoing_flags));
+    memset(out_frontier->xcnt.resolved_outgoing_flags, 0,
+           schedule->block_count *
+               sizeof(*out_frontier->xcnt.resolved_outgoing_flags));
+  }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, schedule->block_count, sizeof(*out_frontier->block_flags),
       (void**)&out_frontier->block_flags));
@@ -670,6 +762,7 @@ void loom_amdgpu_wait_frontier_begin_block(
                sizeof(*frontier->storage_leases.active_words));
   }
   frontier->vmem_results.active_flags = 0;
+  frontier->xcnt.active_flags = 0;
   frontier->active_block_index = block_index;
 
   const loom_cfg_graph_t* graph = &frontier->schedule->cfg_graph;
@@ -715,6 +808,12 @@ void loom_amdgpu_wait_frontier_begin_block(
       loom_amdgpu_wait_storage_lease_state_union_changed(
           frontier->storage_leases.active_words, predecessor_words,
           frontier->storage_leases.word_count);
+    }
+    if (frontier->xcnt.static_outgoing_flags != NULL) {
+      frontier->xcnt.active_flags |=
+          predecessor_resolved
+              ? frontier->xcnt.resolved_outgoing_flags[predecessor_index]
+              : frontier->xcnt.static_outgoing_flags[predecessor_index];
     }
   }
   if (frontier->vmem_results.active_words != NULL &&
@@ -845,6 +944,43 @@ void loom_amdgpu_wait_frontier_retire_storage_lease(
       frontier->storage_leases.active_words, lease_index);
 }
 
+loom_amdgpu_wait_xcnt_group_flags_t
+loom_amdgpu_wait_frontier_active_xcnt_groups(
+    const loom_amdgpu_wait_frontier_t* frontier) {
+  IREE_ASSERT_ARGUMENT(frontier);
+  IREE_ASSERT(frontier->active_block_index < frontier->schedule->block_count);
+  return frontier->xcnt.active_flags;
+}
+
+void loom_amdgpu_wait_frontier_prepare_xcnt_producer(
+    loom_amdgpu_wait_frontier_t* frontier,
+    loom_amdgpu_wait_xcnt_group_flags_t group_flags) {
+  IREE_ASSERT_ARGUMENT(frontier);
+  IREE_ASSERT(frontier->active_block_index < frontier->schedule->block_count);
+  IREE_ASSERT(group_flags == LOOM_AMDGPU_WAIT_XCNT_GROUP_FLAG_VMEM ||
+              group_flags == LOOM_AMDGPU_WAIT_XCNT_GROUP_FLAG_SMEM);
+  const loom_amdgpu_wait_xcnt_group_flags_t other_group_flags =
+      frontier->xcnt.active_flags &
+      (loom_amdgpu_wait_xcnt_group_flags_t)~group_flags;
+  if (other_group_flags != 0 && frontier->storage_leases.active_words != NULL) {
+    loom_amdgpu_wait_storage_lease_state_drain_xcnt_groups(
+        frontier, frontier->storage_leases.active_words, other_group_flags);
+  }
+  frontier->xcnt.active_flags &= group_flags;
+}
+
+void loom_amdgpu_wait_frontier_note_xcnt_producer(
+    loom_amdgpu_wait_frontier_t* frontier,
+    loom_amdgpu_wait_xcnt_group_flags_t group_flags) {
+  IREE_ASSERT_ARGUMENT(frontier);
+  IREE_ASSERT(frontier->active_block_index < frontier->schedule->block_count);
+  IREE_ASSERT(group_flags == LOOM_AMDGPU_WAIT_XCNT_GROUP_FLAG_VMEM ||
+              group_flags == LOOM_AMDGPU_WAIT_XCNT_GROUP_FLAG_SMEM);
+  IREE_ASSERT(frontier->xcnt.active_flags == 0 ||
+              frontier->xcnt.active_flags == group_flags);
+  frontier->xcnt.active_flags = group_flags;
+}
+
 void loom_amdgpu_wait_frontier_drain(loom_amdgpu_wait_frontier_t* frontier,
                                      uint32_t counter_mask) {
   IREE_ASSERT_ARGUMENT(frontier);
@@ -861,6 +997,9 @@ void loom_amdgpu_wait_frontier_drain(loom_amdgpu_wait_frontier_t* frontier,
   if (frontier->storage_leases.active_words != NULL) {
     loom_amdgpu_wait_storage_lease_state_drain(
         frontier, frontier->storage_leases.active_words, counter_mask);
+  }
+  if (iree_any_bit_set(counter_mask, LOOM_AMDGPU_WAIT_COUNTER_MASK_X)) {
+    frontier->xcnt.active_flags = 0;
   }
 }
 
@@ -897,6 +1036,13 @@ void loom_amdgpu_wait_frontier_end_block(
     memcpy(outgoing_storage_lease_words, frontier->storage_leases.active_words,
            frontier->storage_leases.word_count *
                sizeof(*outgoing_storage_lease_words));
+  }
+  loom_amdgpu_wait_xcnt_group_flags_t* outgoing_xcnt_group_flags =
+      frontier->xcnt.resolved_outgoing_flags == NULL
+          ? NULL
+          : &frontier->xcnt.resolved_outgoing_flags[block_index];
+  if (outgoing_xcnt_group_flags != NULL) {
+    *outgoing_xcnt_group_flags = frontier->xcnt.active_flags;
   }
   if (outgoing_memory_state != NULL || outgoing_vmem_result_words != NULL ||
       outgoing_storage_lease_words != NULL) {
@@ -947,5 +1093,6 @@ void loom_amdgpu_wait_frontier_end_block(
                sizeof(*frontier->storage_leases.active_words));
   }
   frontier->vmem_results.active_flags = 0;
+  frontier->xcnt.active_flags = 0;
   frontier->active_block_index = UINT16_MAX;
 }

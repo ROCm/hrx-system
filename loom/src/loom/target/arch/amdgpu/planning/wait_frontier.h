@@ -31,6 +31,14 @@ typedef enum loom_amdgpu_wait_memory_access_flag_bits_e {
 } loom_amdgpu_wait_memory_access_flag_bits_t;
 typedef uint8_t loom_amdgpu_wait_memory_access_flags_t;
 
+typedef enum loom_amdgpu_wait_xcnt_group_flag_bits_e {
+  // Outstanding vector-memory translation source reads.
+  LOOM_AMDGPU_WAIT_XCNT_GROUP_FLAG_VMEM = 1u << 0,
+  // Outstanding scalar-memory translation source reads.
+  LOOM_AMDGPU_WAIT_XCNT_GROUP_FLAG_SMEM = 1u << 1,
+} loom_amdgpu_wait_xcnt_group_flag_bits_t;
+typedef uint8_t loom_amdgpu_wait_xcnt_group_flags_t;
+
 // Target wait classification for one schedule node.
 typedef struct loom_amdgpu_wait_frontier_node_t {
   // Counter classes advanced by dependency-participating reads.
@@ -41,6 +49,8 @@ typedef struct loom_amdgpu_wait_frontier_node_t {
   uint32_t drained_after_production_counter_mask;
   // Counter classes drained when this node executes.
   uint32_t drain_counter_mask;
+  // Gfx125x XCNT translation group produced by this node, or zero.
+  loom_amdgpu_wait_xcnt_group_flags_t xcnt_group_flags;
   // Normalized memory spaces read by this node.
   loom_amdgpu_wait_memory_space_flags_t read_space_flags;
   // Normalized memory spaces written by this node.
@@ -103,6 +113,15 @@ typedef struct loom_amdgpu_wait_frontier_t {
     // Incoming words active while the current block is processed.
     uint64_t* active_words;
   } storage_leases;
+  // Gfx125x XCNT translation groups that may be active across block edges.
+  struct {
+    // Conservative transitive outgoing flags for every block.
+    loom_amdgpu_wait_xcnt_group_flags_t* static_outgoing_flags;
+    // Refined outgoing flags recorded after each processed block.
+    loom_amdgpu_wait_xcnt_group_flags_t* resolved_outgoing_flags;
+    // Incoming and locally produced groups active in the current block.
+    loom_amdgpu_wait_xcnt_group_flags_t active_flags;
+  } xcnt;
   // Per-block worklist and resolved-state bits.
   uint8_t* block_flags;
   // Current block index, or UINT16_MAX outside block processing.
@@ -158,6 +177,23 @@ bool loom_amdgpu_wait_frontier_storage_lease_is_active(
 // has been proven complete without a full counter drain.
 void loom_amdgpu_wait_frontier_retire_storage_lease(
     loom_amdgpu_wait_frontier_t* frontier, iree_host_size_t lease_index);
+
+// Returns gfx125x translation groups that may still retain source state at the
+// current program point.
+loom_amdgpu_wait_xcnt_group_flags_t
+loom_amdgpu_wait_frontier_active_xcnt_groups(
+    const loom_amdgpu_wait_frontier_t* frontier);
+
+// Applies the implicit gfx125x group transition before a translation packet.
+// Source leases from other groups are released; same-group leases remain.
+void loom_amdgpu_wait_frontier_prepare_xcnt_producer(
+    loom_amdgpu_wait_frontier_t* frontier,
+    loom_amdgpu_wait_xcnt_group_flags_t group_flags);
+
+// Records a gfx125x translation packet in the active group.
+void loom_amdgpu_wait_frontier_note_xcnt_producer(
+    loom_amdgpu_wait_frontier_t* frontier,
+    loom_amdgpu_wait_xcnt_group_flags_t group_flags);
 
 // Removes fully drained counter classes from active frontier state.
 void loom_amdgpu_wait_frontier_drain(loom_amdgpu_wait_frontier_t* frontier,

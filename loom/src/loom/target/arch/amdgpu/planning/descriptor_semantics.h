@@ -58,6 +58,12 @@ bool loom_amdgpu_descriptor_is_sdwa(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor);
 
+// Returns true when |descriptor| implicitly drains gfx125x XCNT before it
+// executes.
+bool loom_amdgpu_descriptor_implicitly_drains_xcnt(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor);
+
 // Builds AMDGPU schedule state-read rows for structural low materializations.
 iree_status_t loom_amdgpu_descriptor_build_structural_state_reads(
     const loom_low_descriptor_set_t* descriptor_set,
