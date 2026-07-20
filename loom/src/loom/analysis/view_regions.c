@@ -951,7 +951,7 @@ loom_view_access_flags_t loom_view_region_table_root_access_flags(
   return access_flags;
 }
 
-static bool loom_view_region_memory_spaces_are_disjoint(
+bool loom_view_memory_spaces_are_disjoint(
     loom_value_fact_memory_space_t left, loom_value_fact_memory_space_t right) {
   if (left == right || left == LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN ||
       right == LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN ||
@@ -975,8 +975,8 @@ iree_status_t loom_view_regions_prove_no_overlap(
     return iree_ok_status();
   }
   if (left_region->root_value_id != right_region->root_value_id) {
-    if (loom_view_region_memory_spaces_are_disjoint(
-            left_region->memory_space, right_region->memory_space) ||
+    if (loom_view_memory_spaces_are_disjoint(left_region->memory_space,
+                                             right_region->memory_space) ||
         (left_region->alias_scope_id != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE &&
          right_region->alias_scope_id != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE &&
          left_region->alias_scope_id != right_region->alias_scope_id)) {

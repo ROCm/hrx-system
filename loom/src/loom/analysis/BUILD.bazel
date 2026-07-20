@@ -552,6 +552,8 @@ loom_cc_library(
     hdrs = ["motion.h"],
     deps = [
         ":availability",
+        ":loop_domain",
+        ":movement",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",

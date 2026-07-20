@@ -198,6 +198,12 @@ iree_status_t loom_view_region_table_analyze(loom_view_region_table_t* table);
 loom_view_access_flags_t loom_view_region_table_root_access_flags(
     const loom_view_region_table_t* table, loom_value_id_t root_value_id);
 
+// Returns true when two concrete memory spaces cannot name the same storage.
+// Unknown and generic spaces remain conservative, as do distinct global-like
+// spaces whose target representations may overlap.
+bool loom_view_memory_spaces_are_disjoint(loom_value_fact_memory_space_t left,
+                                          loom_value_fact_memory_space_t right);
+
 // Attempts to prove that two view regions cannot overlap. Same-root regions
 // use symbolic byte intervals. Distinct roots are disjoint when their concrete
 // memory spaces cannot alias or both carry comparable and different alias

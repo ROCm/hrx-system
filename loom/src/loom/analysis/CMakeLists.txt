@@ -642,6 +642,8 @@ loom_cc_library(
     "motion.c"
   DEPS
     ::availability
+    ::loop_domain
+    ::movement
     iree::base
     iree::base::internal::arena
     loom::ir
