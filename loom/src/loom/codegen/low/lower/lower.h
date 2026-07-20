@@ -27,7 +27,6 @@
 #include "loom/ops/op_defs.h"
 #include "loom/sanitizer/options.h"
 #include "loom/target/low_legality.h"
-#include "loom/target/residency.h"
 #include "loom/target/types.h"
 #include "loom/util/fact_table.h"
 
@@ -133,22 +132,6 @@ typedef struct loom_low_lower_map_contract_value_callback_t {
   // Caller-owned payload passed to |fn|.
   void* user_data;
 } loom_low_lower_map_contract_value_callback_t;
-
-typedef const loom_target_residency_model_t* (
-    *loom_low_lower_residency_model_fn_t)(
-    void* user_data,
-    const loom_target_contract_query_environment_t* environment);
-
-typedef struct loom_low_lower_residency_model_callback_t {
-  // Optional callback returning the immutable residency model selected by a
-  // target contract. Missing or a null result means residency is unavailable.
-  // Direct resource IDs in the returned model are descriptor register-class
-  // IDs so read-only source value mappings can contribute allocation units
-  // without target-specific type tests in generic placement code.
-  loom_low_lower_residency_model_fn_t fn;
-  // Caller-owned payload passed to |fn|.
-  void* user_data;
-} loom_low_lower_residency_model_callback_t;
 
 typedef enum loom_low_lower_abi_argument_kind_e {
   // Source argument is passed as a low function block argument.
@@ -625,9 +608,6 @@ typedef struct loom_low_lower_policy_t {
   // for read-only target contract queries. Missing means table guards that need
   // register mapping cannot match.
   loom_low_lower_map_contract_value_callback_t map_contract_value;
-  // Optionally returns the residency model for read-only source pressure and
-  // final target-low allocation queries.
-  loom_low_lower_residency_model_callback_t residency_model;
   // Optionally maps source function arguments to non-direct ABI imports.
   loom_low_lower_map_argument_callback_t map_argument;
   // Optionally emits target live-ins or other structural preamble packets.

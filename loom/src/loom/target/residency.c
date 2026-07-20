@@ -337,130 +337,6 @@ static iree_status_t loom_target_residency_validate_model(
   return loom_target_residency_validate_derived_resources(model);
 }
 
-static iree_status_t loom_target_residency_validate_query_inputs(
-    const loom_target_residency_model_t* model,
-    const uint64_t* direct_resource_units,
-    iree_host_size_t direct_resource_unit_count) {
-  if (model == NULL) {
-    if (direct_resource_unit_count != 0) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "an unavailable residency model cannot consume direct resources");
-    }
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(loom_target_residency_validate_model(model));
-  if (direct_resource_unit_count != model->direct_resources.resource_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "residency query has %zu direct resource values; model requires %u",
-        direct_resource_unit_count,
-        (unsigned)model->direct_resources.resource_count);
-  }
-  if (direct_resource_unit_count != 0 && direct_resource_units == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "residency query has a null non-empty direct resource vector");
-  }
-  return iree_ok_status();
-}
-
-iree_status_t loom_target_residency_evaluator_initialize(
-    const loom_target_residency_model_t* model,
-    loom_target_residency_evaluator_t* out_evaluator) {
-  if (out_evaluator == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "residency evaluator output must be non-null");
-  }
-  *out_evaluator = (loom_target_residency_evaluator_t){0};
-  if (model == NULL) return iree_ok_status();
-  IREE_RETURN_IF_ERROR(loom_target_residency_validate_model(model));
-  *out_evaluator = (loom_target_residency_evaluator_t){
-      .model = model,
-      .direct_resource_count = model->direct_resources.resource_count,
-  };
-  return iree_ok_status();
-}
-
-iree_status_t loom_target_residency_evaluator_evaluate_tier(
-    const loom_target_residency_evaluator_t* evaluator,
-    const uint64_t* direct_resource_units,
-    iree_host_size_t direct_resource_unit_count, uint32_t* out_tier) {
-  if (evaluator == NULL || out_tier == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "residency evaluator and tier output must be "
-                            "non-null");
-  }
-  *out_tier = 0;
-  if (direct_resource_unit_count != evaluator->direct_resource_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "residency evaluator has %zu direct resource values; query supplies "
-        "%zu",
-        evaluator->direct_resource_count, direct_resource_unit_count);
-  }
-  if (direct_resource_unit_count != 0 && direct_resource_units == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "residency evaluator has a null non-empty direct resource vector");
-  }
-  const loom_target_residency_model_t* model = evaluator->model;
-  if (model == NULL) return iree_ok_status();
-
-  uint32_t tier = model->best_tier;
-  for (uint16_t resource_id = 0;
-       resource_id < model->direct_resources.resource_count; ++resource_id) {
-    const loom_target_residency_cliff_range_t range =
-        model->direct_resources.cliff_ranges[resource_id];
-    const loom_target_residency_cliff_t* cliffs =
-        range.count == 0 ? NULL : &model->direct_resources.cliffs[range.start];
-    loom_target_residency_cliff_evaluation_t evaluation;
-    loom_target_residency_evaluate_cliffs(cliffs, range.count, model->best_tier,
-                                          direct_resource_units[resource_id],
-                                          &evaluation);
-    tier = iree_min(tier, evaluation.tier);
-  }
-
-  for (uint16_t resource_id = 0;
-       resource_id < model->derived_resources.resource_count; ++resource_id) {
-    const loom_target_residency_derived_resource_t* resource =
-        &model->derived_resources.resources[resource_id];
-    uint64_t resource_units = 0;
-    for (uint16_t i = 0; i < resource->member_count; ++i) {
-      const loom_target_residency_derived_member_t* member =
-          &model->derived_resources.members[resource->member_start + i];
-      const uint64_t contribution = loom_target_residency_round_resource_units(
-          direct_resource_units[member->direct_resource_id],
-          member->contribution_granularity);
-      resource_units =
-          iree_math_saturating_add_u64(resource_units, contribution);
-    }
-    const loom_target_residency_cliff_t* cliffs =
-        resource->cliff_count == 0
-            ? NULL
-            : &model->derived_resources.cliffs[resource->cliff_start];
-    loom_target_residency_cliff_evaluation_t evaluation;
-    loom_target_residency_evaluate_cliffs(cliffs, resource->cliff_count,
-                                          model->best_tier, resource_units,
-                                          &evaluation);
-    tier = iree_min(tier, evaluation.tier);
-  }
-
-  *out_tier = tier;
-  return iree_ok_status();
-}
-
-iree_status_t loom_target_residency_evaluate_tier(
-    const loom_target_residency_model_t* model,
-    const uint64_t* direct_resource_units,
-    iree_host_size_t direct_resource_unit_count, uint32_t* out_tier) {
-  loom_target_residency_evaluator_t evaluator;
-  IREE_RETURN_IF_ERROR(
-      loom_target_residency_evaluator_initialize(model, &evaluator));
-  return loom_target_residency_evaluator_evaluate_tier(
-      &evaluator, direct_resource_units, direct_resource_unit_count, out_tier);
-}
-
 static void loom_target_residency_resource_cliffs(
     const loom_target_residency_model_t* model,
     const loom_target_residency_resource_evaluation_t* resource_evaluation,
@@ -518,12 +394,26 @@ iree_status_t loom_target_residency_query(
   }
   *out_query = (loom_target_residency_query_t){0};
   if (model == NULL) {
-    IREE_RETURN_IF_ERROR(loom_target_residency_validate_query_inputs(
-        model, direct_resource_units, direct_resource_unit_count));
+    if (direct_resource_unit_count != 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "an unavailable residency model cannot consume direct resources");
+    }
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_target_residency_validate_query_inputs(
-      model, direct_resource_units, direct_resource_unit_count));
+  IREE_RETURN_IF_ERROR(loom_target_residency_validate_model(model));
+  if (direct_resource_unit_count != model->direct_resources.resource_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "residency query has %zu direct resource values; model requires %u",
+        direct_resource_unit_count,
+        (unsigned)model->direct_resources.resource_count);
+  }
+  if (direct_resource_unit_count != 0 && direct_resource_units == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "residency query has a null non-empty direct resource vector");
+  }
 
   const iree_host_size_t resource_count =
       direct_resource_unit_count + model->derived_resources.resource_count;
