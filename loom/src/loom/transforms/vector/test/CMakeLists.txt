@@ -13,6 +13,7 @@ loom_check_test_suite(
   NAME
     test
   SRCS
+    "bank_sroa.loom-test"
     "memory_footprint.loom-test"
     "memory_to_scalar.loom-test"
     "reduce_axes_to_scalar.loom-test"

@@ -274,6 +274,7 @@ loom_cc_library(
         "//loom/src/loom/transforms/symbol:refine_boundaries",
         "//loom/src/loom/transforms/symbol:symbol_dce",
         "//loom/src/loom/transforms/symbol:template_selection",
+        "//loom/src/loom/transforms/vector:bank_sroa",
         "//loom/src/loom/transforms/vector:memory_footprint",
         "//loom/src/loom/transforms/vector:sink_single_use_reads",
         "//loom/src/loom/transforms/vector:to_scalar",
