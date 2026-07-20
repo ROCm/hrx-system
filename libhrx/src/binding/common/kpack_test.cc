@@ -2120,8 +2120,11 @@ TEST(KpackResolve, RelativeEnvPathResolves) {
   iree_host_size_t out_size = 0;
   iree_status_t status = Resolve(metadata, 0, {"gfx900"}, &out, &out_size);
   unsetenv("ROCM_KPACK_PATH");
-  ASSERT_EQ(chdir(previous_cwd), 0);
+  // Restore the working directory before consuming |status|; the restore must
+  // run on every path and IREE_ASSERT_OK aborts the test on an error status.
+  const int restore_result = chdir(previous_cwd);
   IREE_ASSERT_OK(status);
+  EXPECT_EQ(restore_result, 0);
   EXPECT_EQ(out_size, elf.size());
   FreeBuffer(out);
 }

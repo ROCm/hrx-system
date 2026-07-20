@@ -1016,9 +1016,9 @@ static iree_status_t hrx_fat_extract_from_hipk(
     iree_hal_streaming_fat_binary_extract_t* extract) {
   // Project the ranked targets to their AMDGPU target keys; the kpack resolver
   // does its own ISA feature-subset matching over the device's actual feature
-  // flags. hrx_fat_validate_targets already proved every candidate is a concrete
-  // AMDGPU target with a non-empty key before any wrapper was opened, so the
-  // keys are read directly here.
+  // flags. hrx_fat_validate_targets already proved every candidate is a
+  // concrete AMDGPU target with a non-empty key before any wrapper was opened,
+  // so the keys are read directly here.
   iree_string_view_t target_archs[32];
   iree_host_size_t target_arch_count = 0;
   for (iree_host_size_t i = 0;
