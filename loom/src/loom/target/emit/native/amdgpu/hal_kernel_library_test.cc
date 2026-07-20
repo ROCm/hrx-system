@@ -863,7 +863,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsWorkgroupClusterDimensions) {
   EXPECT_NE(listing.find("  .amdhsa_system_sgpr_workgroup_id_z 0\n"),
             std::string::npos)
       << listing;
-  EXPECT_NE(listing.find("  .amdhsa_next_free_sgpr 7\n"), std::string::npos)
+  EXPECT_NE(listing.find("  .amdhsa_next_free_sgpr 10\n"), std::string::npos)
       << listing;
 
   ASSERT_NE(library.artifact_manifest.contents.data, nullptr);

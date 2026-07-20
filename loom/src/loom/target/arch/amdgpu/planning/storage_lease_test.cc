@@ -229,6 +229,68 @@ TEST_F(AmdgpuStorageLeaseTest, LeasesTensorLoadDgroupSources) {
   }
 }
 
+TEST_F(AmdgpuStorageLeaseTest, LeasesGfx125xScalarMemorySourcesForXcnt) {
+  ASSERT_TRUE(UseDescriptorSet(IREE_SV("amdgpu.rdna4.gfx125x.core")));
+  const loom_low_descriptor_t* descriptor =
+      loom_amdgpu_descriptor_ref_descriptor(
+          descriptor_set_,
+          LOOM_AMDGPU_DESCRIPTOR_REF_S_LOAD_DWORDX8_OFFSET_ONLY);
+  ASSERT_NE(descriptor, nullptr);
+
+  loom_low_storage_lease_table_t table = {};
+  IREE_ASSERT_OK(BuildLeaseTable(descriptor, &table));
+
+  EXPECT_NE(
+      FindSourceLeaseRecord(table, /*attachment_index=*/0, /*unit_count=*/2,
+                            LOOM_AMDGPU_WAIT_COUNTER_X,
+                            LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE),
+      nullptr);
+}
+
+TEST_F(AmdgpuStorageLeaseTest, LeasesEveryGfx125xVmemPacketSourceForXcnt) {
+  ASSERT_TRUE(UseDescriptorSet(IREE_SV("amdgpu.rdna4.gfx125x.core")));
+  const loom_low_descriptor_t* descriptor =
+      loom_amdgpu_descriptor_ref_descriptor(
+          descriptor_set_, LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_B32_SADDR);
+  ASSERT_NE(descriptor, nullptr);
+
+  loom_low_storage_lease_table_t table = {};
+  IREE_ASSERT_OK(BuildLeaseTable(descriptor, &table));
+
+  EXPECT_NE(
+      FindSourceLeaseRecord(table, /*attachment_index=*/0, /*unit_count=*/1,
+                            LOOM_AMDGPU_WAIT_COUNTER_X,
+                            LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE),
+      nullptr);
+  EXPECT_NE(
+      FindSourceLeaseRecord(table, /*attachment_index=*/1, /*unit_count=*/2,
+                            LOOM_AMDGPU_WAIT_COUNTER_X,
+                            LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE),
+      nullptr);
+}
+
+TEST_F(AmdgpuStorageLeaseTest, LeasesGfx125xClusterPacketSourcesForXcnt) {
+  ASSERT_TRUE(UseDescriptorSet(IREE_SV("amdgpu.rdna4.gfx125x.core")));
+  const loom_low_descriptor_t* descriptor =
+      loom_amdgpu_descriptor_ref_descriptor(
+          descriptor_set_,
+          LOOM_AMDGPU_DESCRIPTOR_REF_CLUSTER_LOAD_ASYNC_TO_LDS_B128);
+  ASSERT_NE(descriptor, nullptr);
+
+  loom_low_storage_lease_table_t table = {};
+  IREE_ASSERT_OK(BuildLeaseTable(descriptor, &table));
+
+  const uint32_t source_unit_counts[] = {1, 1, 2};
+  for (uint16_t i = 0; i < IREE_ARRAYSIZE(source_unit_counts); ++i) {
+    EXPECT_NE(
+        FindSourceLeaseRecord(table, /*attachment_index=*/i,
+                              /*unit_count=*/source_unit_counts[i],
+                              LOOM_AMDGPU_WAIT_COUNTER_X,
+                              LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE),
+        nullptr);
+  }
+}
+
 TEST_F(AmdgpuStorageLeaseTest, DoesNotLeaseLdsStoreSourcesAsVmem) {
   const loom_low_descriptor_t* descriptor =
       loom_amdgpu_descriptor_ref_descriptor(

@@ -27,7 +27,7 @@ from loom.target.low_descriptors import InstructionClass
 from .categories import *
 from .cluster import _gfx125x_cluster_descriptors
 from .common import *
-from .control import _s_delay_alu_descriptor
+from .control import _s_delay_alu_descriptor, _s_wait_xcnt_descriptor
 from .sets import *
 from .tensor import _gfx125x_tensor_descriptors
 
@@ -337,6 +337,7 @@ def amdgpu_immediate_encoding_id_items() -> tuple[tuple[str, int], ...]:
         ("wait_counter_alu", _WAIT_COUNTER_ALU_ENCODING_ID),
         ("wait_counter_tensor", _WAIT_COUNTER_TENSOR_ENCODING_ID),
         ("wait_counter_async", _WAIT_COUNTER_ASYNC_ENCODING_ID),
+        ("wait_counter_x", _WAIT_COUNTER_X_ENCODING_ID),
     )
 
 
@@ -591,6 +592,7 @@ _AMDGPU_WAIT_COUNTER_MASKS = {
     _COUNTER_ALU: 1 << 4,
     _COUNTER_TENSOR: 1 << 5,
     _COUNTER_ASYNC: 1 << 6,
+    _COUNTER_X: 1 << 7,
 }
 
 _AMDGPU_READ_COUNTER_MASK = (
@@ -626,7 +628,21 @@ _AMDGPU_WAIT_COUNTER_PROGRESS_CLASS_NAMES = {
     _COUNTER_ALU: "amdgpu.alu",
     _COUNTER_TENSOR: "amdgpu.tensor",
     _COUNTER_ASYNC: "amdgpu.async",
+    _COUNTER_X: "amdgpu.x",
 }
+
+_GFX125X_XCNT_SCHEDULE_CLASSES = frozenset(
+    (
+        _SCHEDULE_SMEM_LOAD,
+        _SCHEDULE_SMEM_STORE,
+        _SCHEDULE_VMEM_LOAD,
+        _SCHEDULE_VMEM_LOAD_LDS,
+        _SCHEDULE_VMEM_STORE,
+        _SCHEDULE_VMEM_ATOMIC_RETURN,
+        _SCHEDULE_VMEM_ATOMIC_NO_RETURN,
+        _SCHEDULE_CLUSTER_LOAD_LDS,
+    )
+)
 
 _AMDGPU_WAIT_PLAN_RESIDUAL_ACTION_WAIT_PACKET = 1
 _AMDGPU_WAIT_PLAN_RESIDUAL_ACTION_WAIT_PACKET_NAME = "amdgpu.wait_packet"
@@ -804,6 +820,8 @@ def _amdgpu_append_memory_source_leases(
 def _amdgpu_descriptor_storage_leases(
     schedule_classes: dict[str, ScheduleClass],
     descriptor: Descriptor,
+    *,
+    enable_gfx125x_xcnt: bool,
 ) -> tuple[StorageLease, ...]:
     if descriptor.storage_leases:
         raise ValueError(
@@ -846,7 +864,17 @@ def _amdgpu_descriptor_storage_leases(
     vmem_write_counter_mask = (
         write_counter_mask & _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_VMEM_STORE]
     )
-    if memory_source_read_counter_mask != 0 or memory_source_write_counter_mask != 0:
+    xcnt_source_counter_mask = (
+        _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_X]
+        if enable_gfx125x_xcnt
+        and descriptor.schedule_class in _GFX125X_XCNT_SCHEDULE_CLASSES
+        else 0
+    )
+    if (
+        memory_source_read_counter_mask != 0
+        or memory_source_write_counter_mask != 0
+        or xcnt_source_counter_mask != 0
+    ):
         packet_operand_index = 0
         for operand in descriptor.operands[_descriptor_result_count(descriptor) :]:
             if not _amdgpu_operand_is_packet_input(operand):
@@ -855,6 +883,13 @@ def _amdgpu_descriptor_storage_leases(
             packet_operand_index += 1
             if operand.unit_count == 0:
                 continue
+            if xcnt_source_counter_mask != 0:
+                _amdgpu_append_memory_source_leases(
+                    storage_leases,
+                    operand,
+                    current_packet_operand_index,
+                    xcnt_source_counter_mask,
+                )
             if _amdgpu_operand_accepts_vgpr(operand) and vmem_write_counter_mask != 0:
                 storage_leases.append(
                     _amdgpu_storage_lease(
@@ -889,7 +924,9 @@ def _descriptor_result_count(descriptor: Descriptor) -> int:
     return result_count
 
 
-def _with_storage_lease_rows(descriptor_set: DescriptorSet) -> DescriptorSet:
+def _with_storage_lease_rows(
+    descriptor_set: DescriptorSet, *, enable_gfx125x_xcnt: bool = False
+) -> DescriptorSet:
     schedule_classes = {
         schedule_class.name: schedule_class
         for schedule_class in descriptor_set.schedule_classes
@@ -900,7 +937,9 @@ def _with_storage_lease_rows(descriptor_set: DescriptorSet) -> DescriptorSet:
             replace(
                 descriptor,
                 storage_leases=_amdgpu_descriptor_storage_leases(
-                    schedule_classes, descriptor
+                    schedule_classes,
+                    descriptor,
+                    enable_gfx125x_xcnt=enable_gfx125x_xcnt,
                 ),
             )
             for descriptor in descriptor_set.descriptors
@@ -1009,6 +1048,7 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
         overlay_descriptors=_gfx1250_core_overlay_descriptors,
         extra_descriptors=(
             _s_delay_alu_descriptor(),
+            _s_wait_xcnt_descriptor(),
             *_gfx125x_cluster_descriptors(),
             *_gfx125x_tensor_descriptors(),
         ),
@@ -1043,7 +1083,9 @@ def build_amdgpu_core_descriptor_set_from_spec(
     )
     if target == "rdna4_gfx125x":
         descriptor_set = _with_gfx125x_vgpr_msb_address_states(descriptor_set)
-    descriptor_set = _with_storage_lease_rows(descriptor_set)
+    descriptor_set = _with_storage_lease_rows(
+        descriptor_set, enable_gfx125x_xcnt=target == "rdna4_gfx125x"
+    )
     descriptor_set = _with_instruction_classes(descriptor_set)
     _validate_descriptor_encoding_formats(target, spec, descriptor_set)
     _validate_dpp_control_fields(descriptor_set)

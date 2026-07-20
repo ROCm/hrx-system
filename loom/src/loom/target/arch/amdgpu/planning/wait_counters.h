@@ -29,11 +29,13 @@ enum loom_amdgpu_wait_counter_e {
   LOOM_AMDGPU_WAIT_COUNTER_TENSOR = 6,
   // Gfx125x asynchronous cluster/global transfer completion counter.
   LOOM_AMDGPU_WAIT_COUNTER_ASYNC = 7,
+  // Gfx125x memory-source translation lifetime counter.
+  LOOM_AMDGPU_WAIT_COUNTER_X = 8,
 };
 
 // Number of concrete AMDGPU wait-counter slots. Counter ids are one-based, so
 // slot ids map to counter ids by adding one.
-#define LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT LOOM_AMDGPU_WAIT_COUNTER_ASYNC
+#define LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT LOOM_AMDGPU_WAIT_COUNTER_X
 
 // Bit masks for AMDGPU wait counters. These are descriptor-overlay ids, not
 // native instruction bit encodings.
@@ -44,6 +46,7 @@ enum loom_amdgpu_wait_counter_e {
 #define LOOM_AMDGPU_WAIT_COUNTER_MASK_ALU ((uint32_t)1u << 4)
 #define LOOM_AMDGPU_WAIT_COUNTER_MASK_TENSOR ((uint32_t)1u << 5)
 #define LOOM_AMDGPU_WAIT_COUNTER_MASK_ASYNC ((uint32_t)1u << 6)
+#define LOOM_AMDGPU_WAIT_COUNTER_MASK_X ((uint32_t)1u << 7)
 #define LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM   \
   (LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD | \
    LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE)
@@ -59,13 +62,14 @@ enum loom_amdgpu_wait_counter_e {
   LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS
 #define LOOM_AMDGPU_WAIT_COUNTER_MASK_MEMORY \
   (LOOM_AMDGPU_WAIT_COUNTER_MASK_READ | LOOM_AMDGPU_WAIT_COUNTER_MASK_WRITE)
-#define LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL \
-  (LOOM_AMDGPU_WAIT_COUNTER_MASK_MEMORY | LOOM_AMDGPU_WAIT_COUNTER_MASK_ALU)
+#define LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL                                     \
+  (LOOM_AMDGPU_WAIT_COUNTER_MASK_MEMORY | LOOM_AMDGPU_WAIT_COUNTER_MASK_ALU | \
+   LOOM_AMDGPU_WAIT_COUNTER_MASK_X)
 
 // Returns true when |counter_id| names a concrete AMDGPU wait counter.
 static inline bool loom_amdgpu_wait_counter_id_is_valid(uint16_t counter_id) {
   return counter_id >= LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD &&
-         counter_id <= LOOM_AMDGPU_WAIT_COUNTER_ASYNC;
+         counter_id <= LOOM_AMDGPU_WAIT_COUNTER_X;
 }
 
 // Converts a concrete one-based counter id into its dense zero-based slot.
