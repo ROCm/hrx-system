@@ -138,7 +138,7 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx1250\"",
-                "\"instruction_count\":509",
+                "\"instruction_count\":510",
                 "\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":352",
                 "\"target_insertions\":{\"static_packet_count\":14,\"exact_dynamic_packet_count\":14,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":44,\"row_count\":14",
                 "\"dynamic_instruction_mix\":{\"descriptor_count\":",
@@ -203,7 +203,7 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx1251\"",
-                "\"instruction_count\":509",
+                "\"instruction_count\":510",
                 "\"target_insertions\":{\"static_packet_count\":14,\"exact_dynamic_packet_count\":14,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":44,\"row_count\":14"
               ]
             }

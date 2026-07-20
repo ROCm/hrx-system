@@ -90,6 +90,19 @@ typedef struct loom_amdgpu_wait_frontier_t {
     // Flags summarizing active VMEM result state.
     uint8_t active_flags;
   } vmem_results;
+  // Assignment-backed storage leases that remain active across block edges.
+  struct {
+    // Number of allocation storage-lease instances in the packed domain.
+    iree_host_size_t lease_count;
+    // Number of packed state words per block.
+    iree_host_size_t word_count;
+    // Conservative transitive outgoing words for every block.
+    uint64_t* static_outgoing_words;
+    // Refined outgoing words recorded after each processed block.
+    uint64_t* resolved_outgoing_words;
+    // Incoming words active while the current block is processed.
+    uint64_t* active_words;
+  } storage_leases;
   // Per-block worklist and resolved-state bits.
   uint8_t* block_flags;
   // Current block index, or UINT16_MAX outside block processing.
@@ -135,6 +148,16 @@ loom_amdgpu_vmem_result_order_class_t
 loom_amdgpu_wait_frontier_query_vmem_result(
     const loom_amdgpu_wait_frontier_t* frontier,
     const loom_low_allocation_assignment_t* assignment);
+
+// Returns true when assignment-backed storage lease |lease_index| may still be
+// active on entry to the current program point.
+bool loom_amdgpu_wait_frontier_storage_lease_is_active(
+    const loom_amdgpu_wait_frontier_t* frontier, iree_host_size_t lease_index);
+
+// Retires one active assignment-backed storage lease after its exact producer
+// has been proven complete without a full counter drain.
+void loom_amdgpu_wait_frontier_retire_storage_lease(
+    loom_amdgpu_wait_frontier_t* frontier, iree_host_size_t lease_index);
 
 // Removes fully drained counter classes from active frontier state.
 void loom_amdgpu_wait_frontier_drain(loom_amdgpu_wait_frontier_t* frontier,
