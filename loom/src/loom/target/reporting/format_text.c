@@ -282,6 +282,31 @@ static iree_status_t loom_target_compile_report_append_target_resources_fields(
       limiting_resource.data);
 }
 
+static iree_status_t loom_target_compile_report_append_exact_residency_fields(
+    const loom_target_compile_report_exact_residency_t* residency,
+    iree_string_builder_t* builder) {
+  return iree_string_builder_append_format(
+      builder,
+      " contracts=%" PRIu64 " evaluated_contracts=%" PRIu64
+      " unevaluated_contracts=%" PRIu64 " minimum_contracts=%" PRIu64
+      " preserve_contracts=%" PRIu64 " satisfied=%" PRIu64
+      " unsatisfied=%" PRIu64 " repaired_contracts=%" PRIu64
+      " projection_misses=%" PRIu64 " candidates=%" PRIu64
+      " attempted_candidates=%" PRIu64 " repairs=%" PRIu64
+      " maximum_required_tier=%" PRIu32 " maximum_minimum_tier=%" PRIu32
+      " maximum_projected_baseline_tier=%" PRIu32
+      " minimum_allocated_tier=%" PRIu32 " maximum_tier_shortfall=%" PRIu32,
+      residency->contract_count, residency->evaluated_contract_count,
+      residency->unevaluated_contract_count, residency->minimum_contract_count,
+      residency->preserve_contract_count, residency->satisfied_contract_count,
+      residency->unsatisfied_contract_count, residency->repaired_contract_count,
+      residency->projection_miss_count, residency->candidate_count,
+      residency->attempted_candidate_count, residency->repair_count,
+      residency->maximum_required_tier, residency->maximum_minimum_tier,
+      residency->maximum_projected_baseline_tier,
+      residency->minimum_allocated_tier, residency->maximum_tier_shortfall);
+}
+
 static iree_status_t loom_target_compile_report_format_summary(
     const loom_target_compile_report_t* report,
     const loom_target_compile_report_format_options_t* options,
@@ -337,6 +362,17 @@ static iree_status_t loom_target_compile_report_format_summary(
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_append_low_planning_text_fields(
             &report->low_planning, builder));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_string(builder, IREE_SV("\n")));
+  }
+
+  if (iree_any_bit_set(report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_EXACT_RESIDENCY)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
+        builder, IREE_SV("COMPILE-REPORT: exact_residency")));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_append_exact_residency_fields(
+            &report->exact_residency, builder));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_string(builder, IREE_SV("\n")));
   }
@@ -758,6 +794,17 @@ static iree_status_t loom_target_compile_report_format_entry_rows(
         IREE_RETURN_IF_ERROR(
             loom_target_compile_report_append_low_planning_text_fields(
                 &row->low_planning, builder));
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_string(builder, IREE_SV("\n")));
+      }
+      if (iree_any_bit_set(row->detail_flags,
+                           LOOM_TARGET_COMPILE_REPORT_DETAIL_EXACT_RESIDENCY)) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, "COMPILE-REPORT: entry[%" PRIhsz "].exact_residency",
+            row_index));
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_append_exact_residency_fields(
+                &row->exact_residency, builder));
         IREE_RETURN_IF_ERROR(
             iree_string_builder_append_string(builder, IREE_SV("\n")));
       }

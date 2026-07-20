@@ -329,6 +329,297 @@ loom_target_compile_report_format_source_low_transforms_json(
   return loom_json_object_end(&object);
 }
 
+static iree_status_t
+loom_target_compile_report_format_source_low_residency_row_json(
+    const loom_target_compile_report_source_low_residency_row_t* row,
+    iree_host_size_t row_index, loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("index"), row_index));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("function"), row->function_name));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("source_op"), row->source_op_name));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("source_op_kind"), row->source_op_kind));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("policy"), row->policy));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("outcome"), row->outcome));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("reason"), row->reason));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("baseline_tier"), row->baseline_tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("selected_tier"), row->selected_tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("required_tier"), row->required_tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("candidate_count"), row->candidate_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("selected_count"), row->selected_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("rejected_count"), row->rejected_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("reserve_count"), row->reserve_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("projection_complete"), row->projection_complete));
+  return loom_json_object_end(&object);
+}
+
+static iree_status_t
+loom_target_compile_report_format_source_low_residency_json(
+    const loom_target_compile_report_t* report,
+    loom_target_compile_report_format_mode_t mode,
+    loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("count"), report->source_low_residency_rows.count));
+  if (mode != LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS) {
+    return loom_json_object_end(&object);
+  }
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("rows")));
+  loom_json_array_writer_t array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->source_low_residency_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_source_low_residency_row_t* rows =
+        (const loom_target_compile_report_source_low_residency_row_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array));
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_format_source_low_residency_row_json(
+              &rows[i], row_index, stream));
+    }
+  }
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&array));
+  return loom_json_object_end(&object);
+}
+
+static iree_status_t
+loom_target_compile_report_format_source_low_residency_resource_row_json(
+    const loom_target_compile_report_source_low_residency_resource_row_t* row,
+    iree_host_size_t row_index, loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("index"), row_index));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("function"), row->function_name));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("source_op"), row->source_op_name));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("source_op_kind"), row->source_op_kind));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("phase"), row->phase));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("program_point"), row->program_point));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("resource"), row->resource_name));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("resource_kind"), row->resource_kind));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("resource_id"), row->resource_id));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("units"), row->units));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_write_uint32_field(&object, IREE_SV("tier"), row->tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("next_better_tier"), row->next_better_tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("next_worse_tier"), row->next_worse_tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("next_worse_cliff_units"), row->next_worse_cliff_units));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("additional_units_to_next_worse_tier"),
+      row->additional_units_to_next_worse_tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("reduction_units_to_next_better_tier"),
+      row->reduction_units_to_next_better_tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("limiting"), row->limiting));
+  return loom_json_object_end(&object);
+}
+
+static iree_status_t
+loom_target_compile_report_format_source_low_residency_resources_json(
+    const loom_target_compile_report_t* report,
+    loom_target_compile_report_format_mode_t mode,
+    loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("count"),
+      report->source_low_residency_resource_rows.count));
+  if (mode != LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS) {
+    return loom_json_object_end(&object);
+  }
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("rows")));
+  loom_json_array_writer_t array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->source_low_residency_resource_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_source_low_residency_resource_row_t* rows =
+        (const loom_target_compile_report_source_low_residency_resource_row_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array));
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_format_source_low_residency_resource_row_json(
+              &rows[i], row_index, stream));
+    }
+  }
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&array));
+  return loom_json_object_end(&object);
+}
+
+static iree_status_t
+loom_target_compile_report_format_source_low_residency_reserve_row_json(
+    const loom_target_compile_report_source_low_residency_reserve_row_t* row,
+    iree_host_size_t row_index, loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("index"), row_index));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("function"), row->function_name));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("reserve"), row->reserve_name));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("resource"), row->resource_name));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("resource_id"), row->resource_id));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("units"), row->units));
+  return loom_json_object_end(&object);
+}
+
+static iree_status_t
+loom_target_compile_report_format_source_low_residency_reserves_json(
+    const loom_target_compile_report_t* report,
+    loom_target_compile_report_format_mode_t mode,
+    loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("count"),
+      report->source_low_residency_reserve_rows.count));
+  if (mode != LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS) {
+    return loom_json_object_end(&object);
+  }
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("rows")));
+  loom_json_array_writer_t array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->source_low_residency_reserve_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_source_low_residency_reserve_row_t* rows =
+        (const loom_target_compile_report_source_low_residency_reserve_row_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array));
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_format_source_low_residency_reserve_row_json(
+              &rows[i], row_index, stream));
+    }
+  }
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&array));
+  return loom_json_object_end(&object);
+}
+
+static iree_status_t
+loom_target_compile_report_format_residency_candidate_row_json(
+    const loom_target_compile_report_residency_candidate_row_t* row,
+    iree_host_size_t row_index, loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("index"), row_index));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("function"), row->function_name));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("source_op"), row->source_op_name));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("source_op_kind"), row->source_op_kind));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("candidate_id"), row->candidate_id));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("stage"), row->stage));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("outcome"), row->outcome));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("projected_recompute_cost"),
+      row->projected_recompute_cost));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("exact_use_count"), row->exact_use_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("cloned_packet_count"), row->cloned_packet_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("rewritten_operand_count"),
+      row->rewritten_operand_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("preserves_baseline"), row->preserves_baseline));
+  return loom_json_object_end(&object);
+}
+
+static iree_status_t
+loom_target_compile_report_format_residency_candidates_json(
+    const loom_target_compile_report_t* report,
+    loom_target_compile_report_format_mode_t mode,
+    loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("count"), report->residency_candidate_rows.count));
+  if (mode != LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS) {
+    return loom_json_object_end(&object);
+  }
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("rows")));
+  loom_json_array_writer_t array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->residency_candidate_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_residency_candidate_row_t* rows =
+        (const loom_target_compile_report_residency_candidate_row_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array));
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_format_residency_candidate_row_json(
+              &rows[i], row_index, stream));
+    }
+  }
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&array));
+  return loom_json_object_end(&object);
+}
+
 static iree_status_t loom_target_compile_report_format_memory_interval_json(
     const loom_target_compile_report_memory_interval_t* interval,
     loom_json_object_writer_t* object) {
@@ -1100,6 +1391,34 @@ static iree_status_t loom_target_compile_report_format_source_low_json(
         loom_json_object_begin_field(&object, IREE_SV("transforms")));
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_format_source_low_transforms_json(
+            report, mode, stream));
+  }
+  if (report->source_low_residency_rows.count != 0) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("residency_placements")));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_format_source_low_residency_json(
+            report, mode, stream));
+  }
+  if (report->source_low_residency_resource_rows.count != 0) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("residency_resources")));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_format_source_low_residency_resources_json(
+            report, mode, stream));
+  }
+  if (report->source_low_residency_reserve_rows.count != 0) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("residency_reserves")));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_format_source_low_residency_reserves_json(
+            report, mode, stream));
+  }
+  if (report->residency_candidate_rows.count != 0) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("residency_candidates")));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_format_residency_candidates_json(
             report, mode, stream));
   }
   IREE_RETURN_IF_ERROR(

@@ -14,6 +14,8 @@ iree_status_t loom_target_compile_report_append_low_planning_text_fields(
     const loom_low_planning_statistics_t* statistics,
     iree_string_builder_t* builder) {
   const loom_low_planning_repair_statistics_t* repair = &statistics->repair;
+  const loom_low_planning_residency_statistics_t* residency =
+      &statistics->residency;
   const loom_low_planning_memory_statistics_t* memory = &statistics->memory;
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder,
@@ -23,10 +25,16 @@ iree_status_t loom_target_compile_report_append_low_planning_text_fields(
       " live_range_split_operands=%" PRIu64
       " pair_replication_attempts=%" PRIu64 " pair_replication_edits=%" PRIu64
       " pair_replication_rejections=%" PRIu64
-      " spill_materialization_batches=%" PRIu64
-      " frame_arena_used_peak=%" PRIu64 " frame_arena_owned_peak=%" PRIu64
-      " repair_arena_used_peak=%" PRIu64 " repair_arena_owned_peak=%" PRIu64
-      " scratch_arena_used_peak=%" PRIu64 " scratch_arena_owned_peak=%" PRIu64,
+      " spill_materialization_batches=%" PRIu64 " residency_contracts=%" PRIu64
+      " residency_candidates=%" PRIu64 " residency_validations=%" PRIu64
+      " residency_projected_required_tier_max=%" PRIu32
+      " residency_observed_allocated_tier_min=%" PRIu32
+      " residency_observed_tier_shortfall_max=%" PRIu32
+      " residency_repair_attempts=%" PRIu64 " residency_repairs=%" PRIu64
+      " residency_failures=%" PRIu64 " frame_arena_used_peak=%" PRIu64
+      " frame_arena_owned_peak=%" PRIu64 " repair_arena_used_peak=%" PRIu64
+      " repair_arena_owned_peak=%" PRIu64 " scratch_arena_used_peak=%" PRIu64
+      " scratch_arena_owned_peak=%" PRIu64,
       statistics->frame_build_count, statistics->allocation_run_count,
       repair->iteration_count, repair->diagnostic_replay_count,
       repair->spill_traffic_lowering_count,
@@ -35,8 +43,13 @@ iree_status_t loom_target_compile_report_append_low_planning_text_fields(
       repair->pair_replication_attempt_count,
       repair->pair_replication_edit_count,
       repair->pair_replication_rejection_count,
-      repair->spill_materialization_batch_count,
-      memory->frame_arena.used_bytes_high_water,
+      repair->spill_materialization_batch_count, residency->contract_count,
+      residency->candidate_count, residency->validation_count,
+      residency->maximum_projected_required_tier,
+      residency->minimum_observed_allocated_tier,
+      residency->maximum_observed_tier_shortfall,
+      residency->repair_attempt_count, residency->repair_count,
+      residency->failure_count, memory->frame_arena.used_bytes_high_water,
       memory->frame_arena.owned_bytes_high_water,
       memory->repair_arena.used_bytes_high_water,
       memory->repair_arena.owned_bytes_high_water,
@@ -79,6 +92,8 @@ iree_status_t loom_target_compile_report_format_low_planning_json(
     const loom_low_planning_statistics_t* statistics,
     loom_output_stream_t* stream) {
   const loom_low_planning_repair_statistics_t* repair = &statistics->repair;
+  const loom_low_planning_residency_statistics_t* residency =
+      &statistics->residency;
   const loom_low_planning_memory_statistics_t* memory = &statistics->memory;
   loom_json_object_writer_t root;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &root));
@@ -118,6 +133,36 @@ iree_status_t loom_target_compile_report_format_low_planning_json(
       &repair_object, IREE_SV("spill_materialization_batch_count"),
       repair->spill_materialization_batch_count));
   IREE_RETURN_IF_ERROR(loom_json_object_end(&repair_object));
+
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&root, IREE_SV("residency")));
+  loom_json_object_writer_t residency_object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &residency_object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &residency_object, IREE_SV("contract_count"), residency->contract_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &residency_object, IREE_SV("candidate_count"),
+      residency->candidate_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &residency_object, IREE_SV("maximum_projected_required_tier"),
+      residency->maximum_projected_required_tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &residency_object, IREE_SV("validation_count"),
+      residency->validation_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &residency_object, IREE_SV("minimum_observed_allocated_tier"),
+      residency->minimum_observed_allocated_tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &residency_object, IREE_SV("maximum_observed_tier_shortfall"),
+      residency->maximum_observed_tier_shortfall));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &residency_object, IREE_SV("repair_attempt_count"),
+      residency->repair_attempt_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &residency_object, IREE_SV("repair_count"), residency->repair_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &residency_object, IREE_SV("failure_count"), residency->failure_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_end(&residency_object));
 
   IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&root, IREE_SV("memory")));
   loom_json_object_writer_t memory_object;

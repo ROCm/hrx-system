@@ -709,6 +709,62 @@ static iree_status_t loom_target_compile_report_format_target_resources_json(
   return loom_json_object_end(&object);
 }
 
+static iree_status_t loom_target_compile_report_format_exact_residency_json(
+    const loom_target_compile_report_exact_residency_t* residency,
+    loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("contract_count"), residency->contract_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("evaluated_contract_count"),
+      residency->evaluated_contract_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("unevaluated_contract_count"),
+      residency->unevaluated_contract_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("minimum_contract_count"),
+      residency->minimum_contract_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("preserve_contract_count"),
+      residency->preserve_contract_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("satisfied_contract_count"),
+      residency->satisfied_contract_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("unsatisfied_contract_count"),
+      residency->unsatisfied_contract_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("repaired_contract_count"),
+      residency->repaired_contract_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("projection_miss_count"),
+      residency->projection_miss_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("candidate_count"), residency->candidate_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("attempted_candidate_count"),
+      residency->attempted_candidate_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("repair_count"), residency->repair_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("maximum_required_tier"),
+      residency->maximum_required_tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("maximum_minimum_tier"),
+      residency->maximum_minimum_tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("maximum_projected_baseline_tier"),
+      residency->maximum_projected_baseline_tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("minimum_allocated_tier"),
+      residency->minimum_allocated_tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("maximum_tier_shortfall"),
+      residency->maximum_tier_shortfall));
+  return loom_json_object_end(&object);
+}
+
 static iree_status_t loom_target_compile_report_format_dimension3_json(
     uint32_t x, uint32_t y, uint32_t z, uint64_t flat, bool include_flat,
     loom_output_stream_t* stream) {
@@ -1270,6 +1326,13 @@ static iree_status_t loom_target_compile_report_format_entry_json(
         loom_target_compile_report_format_target_resources_json(
             &row->target_resources, stream));
   }
+  if (iree_any_bit_set(row->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_EXACT_RESIDENCY)) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("exact_residency")));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_format_exact_residency_json(
+        &row->exact_residency, stream));
+  }
   if (iree_any_bit_set(
           row->detail_flags,
           LOOM_TARGET_COMPILE_REPORT_DETAIL_STATIC_INSTRUCTION_MIX)) {
@@ -1380,6 +1443,9 @@ iree_status_t loom_target_compile_report_format_json(
   }
   loom_json_object_writer_t object;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("schema_version"),
+      LOOM_TARGET_COMPILE_REPORT_JSON_SCHEMA_VERSION));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("artifact_kind"),
       loom_target_compile_report_artifact_kind_name(report->artifact_kind)));
@@ -1561,6 +1627,13 @@ iree_status_t loom_target_compile_report_format_json(
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_format_target_resources_json(
             &report->target_resources, stream));
+  }
+  if (iree_any_bit_set(report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_EXACT_RESIDENCY)) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("exact_residency")));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_format_exact_residency_json(
+        &report->exact_residency, stream));
   }
   IREE_RETURN_IF_ERROR(loom_target_compile_report_format_json_planning_details(
       report, options->mode, &object, stream));

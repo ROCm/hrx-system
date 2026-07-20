@@ -524,6 +524,192 @@ loom_target_compile_report_format_source_low_transform_rows(
   return iree_ok_status();
 }
 
+static iree_status_t
+loom_target_compile_report_format_source_low_residency_rows(
+    const loom_target_compile_report_t* report,
+    iree_string_builder_t* builder) {
+  if (report->source_low_residency_rows.count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder, "COMPILE-REPORT: source_low_residency rows=%" PRIhsz "\n",
+      report->source_low_residency_rows.count));
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->source_low_residency_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_source_low_residency_row_t* rows =
+        (const loom_target_compile_report_source_low_residency_row_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      const loom_target_compile_report_source_low_residency_row_t* row =
+          &rows[i];
+      const iree_string_view_t function_name =
+          loom_target_compile_report_text_non_empty(row->function_name);
+      const iree_string_view_t source_op_name =
+          loom_target_compile_report_text_non_empty(row->source_op_name);
+      const iree_string_view_t policy =
+          loom_target_compile_report_text_non_empty(row->policy);
+      const iree_string_view_t outcome =
+          loom_target_compile_report_text_non_empty(row->outcome);
+      const iree_string_view_t reason =
+          loom_target_compile_report_text_non_empty(row->reason);
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "COMPILE-REPORT: source_low_residency[%" PRIhsz
+          "] function=%.*s source_op=%.*s policy=%.*s outcome=%.*s "
+          "reason=%.*s baseline_tier=%u selected_tier=%u required_tier=%u "
+          "candidates=%u selected=%u rejected=%u reserves=%u "
+          "projection_complete=%s\n",
+          row_index, (int)function_name.size, function_name.data,
+          (int)source_op_name.size, source_op_name.data, (int)policy.size,
+          policy.data, (int)outcome.size, outcome.data, (int)reason.size,
+          reason.data, row->baseline_tier, row->selected_tier,
+          row->required_tier, row->candidate_count, row->selected_count,
+          row->rejected_count, row->reserve_count,
+          row->projection_complete ? "true" : "false"));
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+loom_target_compile_report_format_source_low_residency_resource_rows(
+    const loom_target_compile_report_t* report,
+    iree_string_builder_t* builder) {
+  if (report->source_low_residency_resource_rows.count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      "COMPILE-REPORT: source_low_residency_resources rows=%" PRIhsz "\n",
+      report->source_low_residency_resource_rows.count));
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->source_low_residency_resource_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_source_low_residency_resource_row_t* rows =
+        (const loom_target_compile_report_source_low_residency_resource_row_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      const loom_target_compile_report_source_low_residency_resource_row_t*
+          row = &rows[i];
+      const iree_string_view_t function_name =
+          loom_target_compile_report_text_non_empty(row->function_name);
+      const iree_string_view_t source_op_name =
+          loom_target_compile_report_text_non_empty(row->source_op_name);
+      const iree_string_view_t phase =
+          loom_target_compile_report_text_non_empty(row->phase);
+      const iree_string_view_t resource_name =
+          loom_target_compile_report_text_non_empty(row->resource_name);
+      const iree_string_view_t resource_kind =
+          loom_target_compile_report_text_non_empty(row->resource_kind);
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "COMPILE-REPORT: source_low_residency_resource[%" PRIhsz
+          "] function=%.*s source_op=%.*s phase=%.*s point=%u resource=%.*s "
+          "kind=%.*s resource_id=%u units=%" PRIu64
+          " tier=%u next_better_tier=%u next_worse_tier=%u "
+          "next_worse_cliff=%u units_to_worse=%" PRIu64
+          " units_to_better=%" PRIu64 " limiting=%s\n",
+          row_index, (int)function_name.size, function_name.data,
+          (int)source_op_name.size, source_op_name.data, (int)phase.size,
+          phase.data, row->program_point, (int)resource_name.size,
+          resource_name.data, (int)resource_kind.size, resource_kind.data,
+          row->resource_id, row->units, row->tier, row->next_better_tier,
+          row->next_worse_tier, row->next_worse_cliff_units,
+          row->additional_units_to_next_worse_tier,
+          row->reduction_units_to_next_better_tier,
+          row->limiting ? "true" : "false"));
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+loom_target_compile_report_format_source_low_residency_reserve_rows(
+    const loom_target_compile_report_t* report,
+    iree_string_builder_t* builder) {
+  if (report->source_low_residency_reserve_rows.count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      "COMPILE-REPORT: source_low_residency_reserves rows=%" PRIhsz "\n",
+      report->source_low_residency_reserve_rows.count));
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->source_low_residency_reserve_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_source_low_residency_reserve_row_t* rows =
+        (const loom_target_compile_report_source_low_residency_reserve_row_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      const loom_target_compile_report_source_low_residency_reserve_row_t* row =
+          &rows[i];
+      const iree_string_view_t function_name =
+          loom_target_compile_report_text_non_empty(row->function_name);
+      const iree_string_view_t reserve_name =
+          loom_target_compile_report_text_non_empty(row->reserve_name);
+      const iree_string_view_t resource_name =
+          loom_target_compile_report_text_non_empty(row->resource_name);
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "COMPILE-REPORT: source_low_residency_reserve[%" PRIhsz
+          "] function=%.*s reserve=%.*s resource=%.*s resource_id=%u "
+          "units=%" PRIu64 "\n",
+          row_index, (int)function_name.size, function_name.data,
+          (int)reserve_name.size, reserve_name.data, (int)resource_name.size,
+          resource_name.data, row->resource_id, row->units));
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_target_compile_report_format_residency_candidate_rows(
+    const loom_target_compile_report_t* report,
+    iree_string_builder_t* builder) {
+  if (report->residency_candidate_rows.count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder, "COMPILE-REPORT: residency_candidates rows=%" PRIhsz "\n",
+      report->residency_candidate_rows.count));
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->residency_candidate_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_residency_candidate_row_t* rows =
+        (const loom_target_compile_report_residency_candidate_row_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      const loom_target_compile_report_residency_candidate_row_t* row =
+          &rows[i];
+      const iree_string_view_t function_name =
+          loom_target_compile_report_text_non_empty(row->function_name);
+      const iree_string_view_t source_op_name =
+          loom_target_compile_report_text_non_empty(row->source_op_name);
+      const iree_string_view_t stage =
+          loom_target_compile_report_text_non_empty(row->stage);
+      const iree_string_view_t outcome =
+          loom_target_compile_report_text_non_empty(row->outcome);
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "COMPILE-REPORT: residency_candidate[%" PRIhsz
+          "] function=%.*s source_op=%.*s candidate_id=%u stage=%.*s "
+          "outcome=%.*s projected_cost=%u exact_uses=%u cloned_packets=%u "
+          "rewritten_operands=%u preserves_baseline=%s\n",
+          row_index, (int)function_name.size, function_name.data,
+          (int)source_op_name.size, source_op_name.data, row->candidate_id,
+          (int)stage.size, stage.data, (int)outcome.size, outcome.data,
+          row->projected_recompute_cost, row->exact_use_count,
+          row->cloned_packet_count, row->rewritten_operand_count,
+          row->preserves_baseline ? "true" : "false"));
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_target_compile_report_format_source_low_memory_rows(
     const loom_target_compile_report_t* report,
     iree_string_builder_t* builder) {
@@ -968,6 +1154,18 @@ iree_status_t loom_target_compile_report_format_text_lowering_details(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_format_source_low_transform_rows(report,
                                                                   builder));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_source_low_residency_rows(report,
+                                                                  builder));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_source_low_residency_resource_rows(
+          report, builder));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_source_low_residency_reserve_rows(
+          report, builder));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_residency_candidate_rows(report,
+                                                                 builder));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_format_source_low_memory_rows(
       report, builder));
   IREE_RETURN_IF_ERROR(

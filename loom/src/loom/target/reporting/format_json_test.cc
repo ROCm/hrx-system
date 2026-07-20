@@ -316,6 +316,178 @@ TEST(CompileReportFormatTest, FormatsSourceLowTransformRowsJson) {
   loom_target_compile_report_deinitialize(&report);
 }
 
+TEST(CompileReportFormatTest, FormatsSourceLowResidencyRowsJson) {
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  report.requested_detail_flags =
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS;
+  loom_target_compile_report_source_low_residency_row_t row = {};
+  row.function_name = IREE_SVL("kernel");
+  row.source_op_name = IREE_SVL("scf.for");
+  row.source_op_kind = 42;
+  row.policy = IREE_SVL("preserve");
+  row.outcome = IREE_SVL("selected");
+  row.reason = IREE_SVL("residency_cliff");
+  row.baseline_tier = 4;
+  row.selected_tier = 4;
+  row.required_tier = 4;
+  row.candidate_count = 3;
+  row.selected_count = 2;
+  row.rejected_count = 1;
+  row.reserve_count = 2;
+  row.projection_complete = true;
+  IREE_ASSERT_OK(loom_target_compile_report_record_source_low_residency_row(
+      &report, &row));
+  loom_target_compile_report_source_low_residency_resource_row_t resource = {};
+  resource.function_name = IREE_SVL("kernel");
+  resource.source_op_name = IREE_SVL("scf.for");
+  resource.source_op_kind = 42;
+  resource.phase = IREE_SVL("selected");
+  resource.program_point = 17;
+  resource.resource_name = IREE_SVL("vgpr");
+  resource.resource_kind = IREE_SVL("direct");
+  resource.resource_id = 1;
+  resource.units = 112;
+  resource.tier = 4;
+  resource.next_better_tier = 0;
+  resource.next_worse_tier = 3;
+  resource.next_worse_cliff_units = 128;
+  resource.additional_units_to_next_worse_tier = 16;
+  resource.reduction_units_to_next_better_tier = 0;
+  resource.limiting = false;
+  IREE_ASSERT_OK(
+      loom_target_compile_report_record_source_low_residency_resource_row(
+          &report, &resource));
+  loom_target_compile_report_source_low_residency_reserve_row_t reserve = {};
+  reserve.function_name = IREE_SVL("kernel");
+  reserve.reserve_name = IREE_SVL("target_abi");
+  reserve.resource_name = IREE_SVL("sgpr");
+  reserve.resource_id = 0;
+  reserve.units = 8;
+  IREE_ASSERT_OK(
+      loom_target_compile_report_record_source_low_residency_reserve_row(
+          &report, &reserve));
+  loom_target_compile_report_residency_candidate_row_t candidate = {};
+  candidate.function_name = IREE_SVL("kernel");
+  candidate.source_op_name = IREE_SVL("scalar.addf");
+  candidate.source_op_kind = 43;
+  candidate.candidate_id = 7;
+  candidate.stage = IREE_SVL("exact");
+  candidate.outcome = IREE_SVL("restored");
+  candidate.projected_recompute_cost = 2;
+  candidate.exact_use_count = 3;
+  candidate.cloned_packet_count = 1;
+  candidate.rewritten_operand_count = 3;
+  candidate.preserves_baseline = true;
+  IREE_ASSERT_OK(loom_target_compile_report_record_residency_candidate_row(
+      &report, &candidate));
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+  const loom_target_compile_report_format_options_t summary_options = {
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+  };
+  IREE_ASSERT_OK(loom_target_compile_report_format_json(
+      &report, &summary_options, &stream));
+  iree_string_view_t root =
+      ParseJsonDocument(iree_string_builder_view(&builder));
+  iree_string_view_t source_low = LookupObject(root, IREE_SV("source_low"));
+  iree_string_view_t placements =
+      LookupObject(source_low, IREE_SV("residency_placements"));
+  ExpectObjectUint64Equals(placements, IREE_SV("count"), 1);
+  EXPECT_TRUE(
+      iree_string_view_is_empty(TryLookupObject(placements, IREE_SV("rows"))));
+  const iree_string_view_t candidate_summary =
+      LookupObject(source_low, IREE_SV("residency_candidates"));
+  ExpectObjectUint64Equals(candidate_summary, IREE_SV("count"), 1);
+  EXPECT_TRUE(iree_string_view_is_empty(
+      TryLookupObject(candidate_summary, IREE_SV("rows"))));
+  const iree_string_view_t resource_summary =
+      LookupObject(source_low, IREE_SV("residency_resources"));
+  ExpectObjectUint64Equals(resource_summary, IREE_SV("count"), 1);
+  const iree_string_view_t reserve_summary =
+      LookupObject(source_low, IREE_SV("residency_reserves"));
+  ExpectObjectUint64Equals(reserve_summary, IREE_SV("count"), 1);
+  iree_string_builder_deinitialize(&builder);
+
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_for_builder(&builder, &stream);
+  const loom_target_compile_report_format_options_t details_options = {
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+  };
+  IREE_ASSERT_OK(loom_target_compile_report_format_json(
+      &report, &details_options, &stream));
+  root = ParseJsonDocument(iree_string_builder_view(&builder));
+  source_low = LookupObject(root, IREE_SV("source_low"));
+  placements = LookupObject(source_low, IREE_SV("residency_placements"));
+  const iree_string_view_t placement =
+      LookupArrayElement(LookupObject(placements, IREE_SV("rows")), 0);
+  ExpectObjectValueEquals(placement, IREE_SV("function"), IREE_SV("kernel"));
+  ExpectObjectValueEquals(placement, IREE_SV("source_op"), IREE_SV("scf.for"));
+  ExpectObjectUint64Equals(placement, IREE_SV("source_op_kind"), 42);
+  ExpectObjectValueEquals(placement, IREE_SV("policy"), IREE_SV("preserve"));
+  ExpectObjectValueEquals(placement, IREE_SV("outcome"), IREE_SV("selected"));
+  ExpectObjectValueEquals(placement, IREE_SV("reason"),
+                          IREE_SV("residency_cliff"));
+  ExpectObjectUint64Equals(placement, IREE_SV("baseline_tier"), 4);
+  ExpectObjectUint64Equals(placement, IREE_SV("selected_tier"), 4);
+  ExpectObjectUint64Equals(placement, IREE_SV("required_tier"), 4);
+  ExpectObjectUint64Equals(placement, IREE_SV("candidate_count"), 3);
+  ExpectObjectUint64Equals(placement, IREE_SV("selected_count"), 2);
+  ExpectObjectUint64Equals(placement, IREE_SV("rejected_count"), 1);
+  ExpectObjectUint64Equals(placement, IREE_SV("reserve_count"), 2);
+  ExpectObjectValueEquals(placement, IREE_SV("projection_complete"),
+                          IREE_SV("true"));
+  const iree_string_view_t candidates =
+      LookupObject(source_low, IREE_SV("residency_candidates"));
+  const iree_string_view_t candidate_row =
+      LookupArrayElement(LookupObject(candidates, IREE_SV("rows")), 0);
+  ExpectObjectValueEquals(candidate_row, IREE_SV("function"),
+                          IREE_SV("kernel"));
+  ExpectObjectValueEquals(candidate_row, IREE_SV("source_op"),
+                          IREE_SV("scalar.addf"));
+  ExpectObjectUint64Equals(candidate_row, IREE_SV("candidate_id"), 7);
+  ExpectObjectValueEquals(candidate_row, IREE_SV("stage"), IREE_SV("exact"));
+  ExpectObjectValueEquals(candidate_row, IREE_SV("outcome"),
+                          IREE_SV("restored"));
+  ExpectObjectUint64Equals(candidate_row, IREE_SV("projected_recompute_cost"),
+                           2);
+  ExpectObjectUint64Equals(candidate_row, IREE_SV("exact_use_count"), 3);
+  ExpectObjectUint64Equals(candidate_row, IREE_SV("cloned_packet_count"), 1);
+  ExpectObjectUint64Equals(candidate_row, IREE_SV("rewritten_operand_count"),
+                           3);
+  ExpectObjectValueEquals(candidate_row, IREE_SV("preserves_baseline"),
+                          IREE_SV("true"));
+  const iree_string_view_t resources =
+      LookupObject(source_low, IREE_SV("residency_resources"));
+  const iree_string_view_t resource_row =
+      LookupArrayElement(LookupObject(resources, IREE_SV("rows")), 0);
+  ExpectObjectValueEquals(resource_row, IREE_SV("phase"), IREE_SV("selected"));
+  ExpectObjectUint64Equals(resource_row, IREE_SV("program_point"), 17);
+  ExpectObjectValueEquals(resource_row, IREE_SV("resource"), IREE_SV("vgpr"));
+  ExpectObjectValueEquals(resource_row, IREE_SV("resource_kind"),
+                          IREE_SV("direct"));
+  ExpectObjectUint64Equals(resource_row, IREE_SV("units"), 112);
+  ExpectObjectUint64Equals(resource_row, IREE_SV("next_worse_tier"), 3);
+  ExpectObjectUint64Equals(resource_row, IREE_SV("next_worse_cliff_units"),
+                           128);
+  ExpectObjectUint64Equals(resource_row,
+                           IREE_SV("additional_units_to_next_worse_tier"), 16);
+  const iree_string_view_t reserves =
+      LookupObject(source_low, IREE_SV("residency_reserves"));
+  const iree_string_view_t reserve_row =
+      LookupArrayElement(LookupObject(reserves, IREE_SV("rows")), 0);
+  ExpectObjectValueEquals(reserve_row, IREE_SV("reserve"),
+                          IREE_SV("target_abi"));
+  ExpectObjectValueEquals(reserve_row, IREE_SV("resource"), IREE_SV("sgpr"));
+  ExpectObjectUint64Equals(reserve_row, IREE_SV("units"), 8);
+  iree_string_builder_deinitialize(&builder);
+
+  loom_target_compile_report_deinitialize(&report);
+}
+
 TEST(CompileReportFormatTest, FormatsAndAggregatesLowPlanningStatistics) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
@@ -330,12 +502,40 @@ TEST(CompileReportFormatTest, FormatsAndAggregatesLowPlanningStatistics) {
     planning->allocation_run_count = i + 1;
     planning->repair.iteration_count = i + 2;
     planning->repair.diagnostic_replay_count = i + 3;
+    planning->residency.contract_count = i;
+    planning->residency.candidate_count = i + 4;
+    planning->residency.maximum_projected_required_tier = i + 1;
+    planning->residency.validation_count = i + 5;
+    planning->residency.minimum_observed_allocated_tier = 5 - i;
+    planning->residency.maximum_observed_tier_shortfall = i - 1;
+    planning->residency.repair_attempt_count = i + 6;
+    planning->residency.repair_count = i + 7;
+    planning->residency.failure_count = i - 1;
     planning->memory.frame_arena.used_bytes_high_water = i * 100;
     planning->memory.frame_arena.owned_bytes_high_water = i * 200;
     planning->memory.block_system_allocation_count = i;
     planning->memory.block_system_allocation_bytes = i * 32768;
     planning->memory.oversized_allocation_count = i + 4;
     planning->memory.oversized_allocation_bytes = i * 4096;
+    const bool satisfied = i == 1;
+    loom_target_compile_report_exact_residency_t exact_residency = {};
+    exact_residency.contract_count = 1;
+    exact_residency.evaluated_contract_count = 1;
+    exact_residency.minimum_contract_count = i == 2 ? 1u : 0u;
+    exact_residency.preserve_contract_count = i == 1 ? 1u : 0u;
+    exact_residency.satisfied_contract_count = satisfied ? 1u : 0u;
+    exact_residency.unsatisfied_contract_count = satisfied ? 0u : 1u;
+    exact_residency.repaired_contract_count = satisfied ? 1u : 0u;
+    exact_residency.projection_miss_count = i == 1 ? 1u : 0u;
+    exact_residency.candidate_count = i + 1;
+    exact_residency.attempted_candidate_count = i;
+    exact_residency.repair_count = satisfied ? 1u : 0u;
+    exact_residency.maximum_required_tier = (uint32_t)(i + 2);
+    exact_residency.maximum_minimum_tier = i == 2 ? 4u : 0u;
+    exact_residency.maximum_projected_baseline_tier = i == 1 ? 4u : 0u;
+    exact_residency.minimum_allocated_tier = satisfied ? 4u : 2u;
+    exact_residency.maximum_tier_shortfall = satisfied ? 0u : 2u;
+    loom_target_compile_report_record_exact_residency(&entry, &exact_residency);
     IREE_ASSERT_OK(
         loom_target_compile_report_record_entry_report(&report, &entry));
     loom_target_compile_report_deinitialize(&entry);
@@ -344,25 +544,63 @@ TEST(CompileReportFormatTest, FormatsAndAggregatesLowPlanningStatistics) {
   EXPECT_EQ(report.low_planning.frame_build_count, 3u);
   EXPECT_EQ(report.low_planning.allocation_run_count, 5u);
   EXPECT_EQ(report.low_planning.repair.iteration_count, 7u);
+  EXPECT_EQ(report.low_planning.residency.contract_count, 3u);
+  EXPECT_EQ(report.low_planning.residency.candidate_count, 11u);
+  EXPECT_EQ(report.low_planning.residency.maximum_projected_required_tier, 3u);
+  EXPECT_EQ(report.low_planning.residency.minimum_observed_allocated_tier, 3u);
+  EXPECT_EQ(report.low_planning.residency.maximum_observed_tier_shortfall, 1u);
   EXPECT_EQ(report.low_planning.memory.frame_arena.used_bytes_high_water, 200u);
   EXPECT_EQ(report.low_planning.memory.block_system_allocation_count, 3u);
+  EXPECT_EQ(report.exact_residency.contract_count, 2u);
+  EXPECT_EQ(report.exact_residency.evaluated_contract_count, 2u);
+  EXPECT_EQ(report.exact_residency.unevaluated_contract_count, 0u);
+  EXPECT_EQ(report.exact_residency.minimum_contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.preserve_contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.satisfied_contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.unsatisfied_contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.repaired_contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.projection_miss_count, 1u);
+  EXPECT_EQ(report.exact_residency.candidate_count, 5u);
+  EXPECT_EQ(report.exact_residency.attempted_candidate_count, 3u);
+  EXPECT_EQ(report.exact_residency.repair_count, 1u);
+  EXPECT_EQ(report.exact_residency.maximum_required_tier, 4u);
+  EXPECT_EQ(report.exact_residency.maximum_minimum_tier, 4u);
+  EXPECT_EQ(report.exact_residency.maximum_projected_baseline_tier, 4u);
+  EXPECT_EQ(report.exact_residency.minimum_allocated_tier, 2u);
+  EXPECT_EQ(report.exact_residency.maximum_tier_shortfall, 2u);
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
   const iree_string_view_t root =
       ParseJsonDocument(iree_string_builder_view(&builder));
+  ExpectObjectUint64Equals(root, IREE_SV("schema_version"),
+                           LOOM_TARGET_COMPILE_REPORT_JSON_SCHEMA_VERSION);
   const iree_string_view_t planning = LookupObject(root, IREE_SV("planning"));
   ExpectObjectUint64Equals(planning, IREE_SV("frame_build_count"), 3);
   ExpectObjectUint64Equals(planning, IREE_SV("allocation_run_count"), 5);
   const iree_string_view_t repair = LookupObject(planning, IREE_SV("repair"));
   ExpectObjectUint64Equals(repair, IREE_SV("iteration_count"), 7);
+  const iree_string_view_t residency =
+      LookupObject(planning, IREE_SV("residency"));
+  ExpectObjectUint64Equals(residency, IREE_SV("contract_count"), 3);
+  ExpectObjectUint64Equals(residency, IREE_SV("candidate_count"), 11);
+  ExpectObjectUint64Equals(residency,
+                           IREE_SV("maximum_projected_required_tier"), 3);
+  ExpectObjectUint64Equals(residency, IREE_SV("validation_count"), 13);
+  ExpectObjectUint64Equals(residency,
+                           IREE_SV("minimum_observed_allocated_tier"), 3);
+  ExpectObjectUint64Equals(residency,
+                           IREE_SV("maximum_observed_tier_shortfall"), 1);
+  ExpectObjectUint64Equals(residency, IREE_SV("repair_attempt_count"), 15);
+  ExpectObjectUint64Equals(residency, IREE_SV("repair_count"), 17);
+  ExpectObjectUint64Equals(residency, IREE_SV("failure_count"), 1);
   const iree_string_view_t memory = LookupObject(planning, IREE_SV("memory"));
   const iree_string_view_t frame_arena =
       LookupObject(memory, IREE_SV("frame_arena"));
@@ -375,6 +613,44 @@ TEST(CompileReportFormatTest, FormatsAndAggregatesLowPlanningStatistics) {
   ExpectObjectUint64Equals(system_allocations, IREE_SV("oversized_count"), 11);
   ExpectObjectUint64Equals(system_allocations, IREE_SV("oversized_bytes"),
                            12288);
+  const iree_string_view_t exact_residency =
+      LookupObject(root, IREE_SV("exact_residency"));
+  ExpectObjectUint64Equals(exact_residency, IREE_SV("contract_count"), 2);
+  ExpectObjectUint64Equals(exact_residency, IREE_SV("evaluated_contract_count"),
+                           2);
+  ExpectObjectUint64Equals(exact_residency,
+                           IREE_SV("unevaluated_contract_count"), 0);
+  ExpectObjectUint64Equals(exact_residency, IREE_SV("minimum_contract_count"),
+                           1);
+  ExpectObjectUint64Equals(exact_residency, IREE_SV("preserve_contract_count"),
+                           1);
+  ExpectObjectUint64Equals(exact_residency, IREE_SV("satisfied_contract_count"),
+                           1);
+  ExpectObjectUint64Equals(exact_residency,
+                           IREE_SV("unsatisfied_contract_count"), 1);
+  ExpectObjectUint64Equals(exact_residency, IREE_SV("maximum_required_tier"),
+                           4);
+  ExpectObjectUint64Equals(exact_residency, IREE_SV("maximum_minimum_tier"), 4);
+  ExpectObjectUint64Equals(exact_residency,
+                           IREE_SV("maximum_projected_baseline_tier"), 4);
+  ExpectObjectUint64Equals(exact_residency, IREE_SV("minimum_allocated_tier"),
+                           2);
+  const iree_string_view_t entries = LookupObject(root, IREE_SV("entries"));
+  const iree_string_view_t entry_rows = LookupObject(entries, IREE_SV("rows"));
+  const iree_string_view_t first_entry = LookupArrayElement(entry_rows, 0);
+  const iree_string_view_t first_exact_residency =
+      LookupObject(first_entry, IREE_SV("exact_residency"));
+  ExpectObjectUint64Equals(first_exact_residency,
+                           IREE_SV("minimum_allocated_tier"), 4);
+  ExpectObjectUint64Equals(first_exact_residency,
+                           IREE_SV("repaired_contract_count"), 1);
+  const iree_string_view_t second_entry = LookupArrayElement(entry_rows, 1);
+  const iree_string_view_t second_exact_residency =
+      LookupObject(second_entry, IREE_SV("exact_residency"));
+  ExpectObjectUint64Equals(second_exact_residency,
+                           IREE_SV("minimum_allocated_tier"), 2);
+  ExpectObjectUint64Equals(second_exact_residency,
+                           IREE_SV("unsatisfied_contract_count"), 1);
 
   iree_string_builder_deinitialize(&builder);
   loom_target_compile_report_deinitialize(&report);

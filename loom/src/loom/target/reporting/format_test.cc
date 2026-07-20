@@ -52,6 +52,48 @@ static iree_string_view_t LookupArrayElement(iree_string_view_t array,
   return value;
 }
 
+TEST(CompileReportFormatTest, FormatsResidencyCandidateRowsText) {
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  report.requested_detail_flags =
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS;
+  loom_target_compile_report_residency_candidate_row_t row = {};
+  row.function_name = IREE_SVL("kernel");
+  row.source_op_name = IREE_SVL("scalar.addf");
+  row.source_op_kind = 43;
+  row.candidate_id = 7;
+  row.stage = IREE_SVL("exact");
+  row.outcome = IREE_SVL("restored");
+  row.projected_recompute_cost = 2;
+  row.exact_use_count = 3;
+  row.cloned_packet_count = 1;
+  row.rewritten_operand_count = 3;
+  row.preserves_baseline = true;
+  IREE_ASSERT_OK(
+      loom_target_compile_report_record_residency_candidate_row(&report, &row));
+
+  const loom_target_compile_report_format_options_t options = {
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+  };
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(
+      loom_target_compile_report_format_text(&report, &options, &builder));
+  const iree_string_view_t text = iree_string_builder_view(&builder);
+  EXPECT_NE(iree_string_view_find(
+                text,
+                IREE_SV("residency_candidate[0] function=kernel "
+                        "source_op=scalar.addf candidate_id=7 stage=exact "
+                        "outcome=restored projected_cost=2 exact_uses=3 "
+                        "cloned_packets=1 rewritten_operands=3 "
+                        "preserves_baseline=true"),
+                0),
+            IREE_HOST_SIZE_MAX);
+
+  iree_string_builder_deinitialize(&builder);
+  loom_target_compile_report_deinitialize(&report);
+}
+
 TEST(CompileReportFormatTest, FormatsCoreReport) {
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());
@@ -137,6 +179,22 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   resources.occupancy_percent = 50;
   resources.limiting_resource = IREE_SVL("amdgpu.vgpr");
   loom_target_compile_report_record_target_resources(&report, &resources);
+  loom_target_compile_report_exact_residency_t exact_residency = {};
+  exact_residency.contract_count = 1;
+  exact_residency.evaluated_contract_count = 1;
+  exact_residency.minimum_contract_count = 1;
+  exact_residency.preserve_contract_count = 1;
+  exact_residency.satisfied_contract_count = 1;
+  exact_residency.repaired_contract_count = 1;
+  exact_residency.projection_miss_count = 1;
+  exact_residency.candidate_count = 3;
+  exact_residency.attempted_candidate_count = 2;
+  exact_residency.repair_count = 1;
+  exact_residency.maximum_required_tier = 4;
+  exact_residency.maximum_minimum_tier = 3;
+  exact_residency.maximum_projected_baseline_tier = 5;
+  exact_residency.minimum_allocated_tier = 4;
+  loom_target_compile_report_record_exact_residency(&report, &exact_residency);
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -159,6 +217,19 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
           text, IREE_SV("target_resources scalar_register_class=amdgpu.sgpr"),
           0),
       IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                text,
+                IREE_SV("exact_residency contracts=1 evaluated_contracts=1 "
+                        "unevaluated_contracts=0 minimum_contracts=1 "
+                        "preserve_contracts=1 satisfied=1 unsatisfied=0 "
+                        "repaired_contracts=1 projection_misses=1 candidates=3 "
+                        "attempted_candidates=2 repairs=1 "
+                        "maximum_required_tier=4 maximum_minimum_tier=3 "
+                        "maximum_projected_baseline_tier=5 "
+                        "minimum_allocated_tier=4 "
+                        "maximum_tier_shortfall=0"),
+                0),
+            IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
       iree_string_view_find(
           text, IREE_SV("economics memory per_workitem_issued_read_bytes=24"),
@@ -180,6 +251,17 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   const iree_string_view_t schedule = LookupObject(root, IREE_SV("schedule"));
   ExpectObjectUint64Equals(schedule, IREE_SV("node_count"), 5);
   ExpectObjectUint64Equals(schedule, IREE_SV("resource_use_count"), 2);
+  const iree_string_view_t exact_residency_json =
+      LookupObject(root, IREE_SV("exact_residency"));
+  ExpectObjectUint64Equals(exact_residency_json, IREE_SV("contract_count"), 1);
+  ExpectObjectUint64Equals(exact_residency_json,
+                           IREE_SV("evaluated_contract_count"), 1);
+  ExpectObjectUint64Equals(exact_residency_json,
+                           IREE_SV("satisfied_contract_count"), 1);
+  ExpectObjectUint64Equals(exact_residency_json,
+                           IREE_SV("attempted_candidate_count"), 2);
+  ExpectObjectUint64Equals(exact_residency_json,
+                           IREE_SV("minimum_allocated_tier"), 4);
   const iree_string_view_t workload_json =
       LookupObject(root, IREE_SV("workload"));
   const iree_string_view_t workgroup_size =

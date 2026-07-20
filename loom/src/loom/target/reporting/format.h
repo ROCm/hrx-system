@@ -17,6 +17,9 @@
 extern "C" {
 #endif
 
+// Version of the structured compile-report JSON schema.
+#define LOOM_TARGET_COMPILE_REPORT_JSON_SCHEMA_VERSION 1u
+
 typedef enum loom_target_compile_report_format_mode_e {
   // Does not format a compile report.
   LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_NONE = 0,
@@ -53,7 +56,9 @@ iree_status_t loom_target_compile_report_format_text(
     const loom_target_compile_report_format_options_t* options,
     iree_string_builder_t* builder);
 
-// Formats |report| as one structured JSON object into |stream|.
+// Formats |report| as one structured JSON object into |stream|. Every emitted
+// object begins with schema_version so consumers can reject incompatible
+// layouts before interpreting optional detail sections.
 //
 // SUMMARY mode emits stable summary fields, row counts, and the entry index.
 // DETAILS mode additionally emits copied row arrays such as pressure, spill,
