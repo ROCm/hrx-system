@@ -35,6 +35,8 @@ static void loom_movement_endpoint_initialize_none(
       .kind = LOOM_MOVEMENT_ENDPOINT_NONE,
       .value_id = LOOM_VALUE_ID_INVALID,
       .root_value_id = LOOM_VALUE_ID_INVALID,
+      .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
+      .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN,
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
   };
 }
@@ -298,6 +300,8 @@ static iree_status_t loom_movement_endpoint_for_view(
       .type = loom_module_value_type(analysis->module, view_value_id),
       .memory_space = region->memory_space,
       .root_value_id = region->root_value_id,
+      .alias_scope_id = region->alias_scope_id,
+      .nullability = region->nullability,
       .begin_byte_offset = region->begin_byte_offset,
       .byte_length = region->byte_length,
       .end_byte_offset = region->end_byte_offset,
@@ -327,6 +331,8 @@ static void loom_movement_endpoint_for_register(
       .type = loom_module_value_type(module, value_id),
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
       .root_value_id = LOOM_VALUE_ID_INVALID,
+      .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
+      .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN,
   };
 }
 

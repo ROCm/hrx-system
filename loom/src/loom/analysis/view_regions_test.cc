@@ -406,6 +406,55 @@ TEST_F(ViewRegionsTest, KeepsOverlappingAndDifferentRootViewsConservative) {
   EXPECT_FALSE(no_overlap);
 }
 
+TEST_F(ViewRegionsTest, ProvesDistinctComparableRootsDisjoint) {
+  loom_value_id_t first_buffer = DefineBufferArg();
+  loom_value_id_t second_buffer = DefineBufferArg();
+  loom_value_id_t buffers[] = {first_buffer, second_buffer};
+  loom_type_t buffer_types[] = {loom_type_buffer(), loom_type_buffer()};
+  loom_op_t* noalias_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_assume_noalias_build(
+      &builder_, buffers, IREE_ARRAYSIZE(buffers), buffer_types,
+      IREE_ARRAYSIZE(buffer_types), LOOM_LOCATION_UNKNOWN, &noalias_op));
+  loom_value_slice_t noalias_buffers =
+      loom_buffer_assume_noalias_results(noalias_op);
+  ASSERT_EQ(noalias_buffers.count, 2);
+
+  loom_value_id_t layout = BuildDenseLayout();
+  loom_value_id_t zero = loom_index_constant_result(BuildOffsetConstant(0));
+  loom_op_t* first_view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, noalias_buffers.values[0],
+                                        zero, ViewType1D(16, layout),
+                                        LOOM_LOCATION_UNKNOWN, &first_view_op));
+  loom_op_t* second_view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(
+      &builder_, noalias_buffers.values[1], zero, ViewType1D(16, layout),
+      LOOM_LOCATION_UNKNOWN, &second_view_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_view_region_table_t table = {0};
+  Analyze(&facts, &table);
+
+  const loom_view_region_t* first_region = nullptr;
+  IREE_ASSERT_OK(loom_view_region_table_get(
+      &table, loom_buffer_view_result(first_view_op), &first_region));
+  const loom_view_region_t* second_region = nullptr;
+  IREE_ASSERT_OK(loom_view_region_table_get(
+      &table, loom_buffer_view_result(second_view_op), &second_region));
+
+  ASSERT_NE(first_region, nullptr);
+  ASSERT_NE(second_region, nullptr);
+  EXPECT_EQ(first_region->root_value_id, first_buffer);
+  EXPECT_EQ(first_region->alias_scope_id, first_buffer);
+  EXPECT_EQ(second_region->root_value_id, second_buffer);
+  EXPECT_EQ(second_region->alias_scope_id, second_buffer);
+
+  bool no_overlap = false;
+  IREE_ASSERT_OK(loom_view_regions_prove_no_overlap(
+      &table, first_region, second_region, &no_overlap));
+  EXPECT_TRUE(no_overlap);
+}
+
 TEST_F(ViewRegionsTest, SubviewPreservesRootAndAddsLogicalOffset) {
   loom_value_id_t buffer = DefineBufferArg();
   loom_value_id_t base_offset = DefineOffsetArg();
@@ -434,6 +483,7 @@ TEST_F(ViewRegionsTest, SubviewPreservesRootAndAddsLogicalOffset) {
 
   ASSERT_NE(region, nullptr);
   EXPECT_EQ(region->root_value_id, buffer);
+  EXPECT_EQ(region->alias_scope_id, LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE);
   EXPECT_TRUE(loom_symbolic_expr_is_linear(&region->begin_byte_offset));
   ASSERT_EQ(region->begin_byte_offset.term_count, 1);
   EXPECT_EQ(region->begin_byte_offset.terms[0].value_id, base_offset);
