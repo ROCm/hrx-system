@@ -23,6 +23,7 @@
 #include "loom/ops/scf/residency.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/vector/ops.h"
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/reporting/report.h"
@@ -97,6 +98,7 @@ class PlaceLoopInvariantsTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_SCALAR, loom_scalar_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_SCF, loom_scf_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_VECTOR, loom_vector_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
 
     loom_test_low_descriptor_registry_initialize(&descriptor_registry_);
@@ -254,6 +256,18 @@ class PlaceLoopInvariantsTest : public ::testing::Test {
       const loom_op_t* op = nullptr;
       loom_block_for_each_op(block, op) {
         if (loom_scalar_cmpf_isa(op)) ++count;
+      }
+    }
+    return count;
+  }
+
+  static iree_host_size_t CountDirectSelect(const loom_region_t* region) {
+    iree_host_size_t count = 0;
+    const loom_block_t* block = nullptr;
+    loom_region_for_each_block(region, block) {
+      const loom_op_t* op = nullptr;
+      loom_block_for_each_op(block, op) {
+        if (loom_scf_select_isa(op)) ++count;
       }
     }
     return count;
@@ -1045,6 +1059,69 @@ func.def target(@test_target) @kernel(%start: index, %end: index, %step: index, 
   loom_op_t* loop = FindDirectFor(body);
   ASSERT_NE(loop, nullptr);
   EXPECT_EQ(CountDirectCmp(loom_scf_for_body(loop)), 0u);
+  EXPECT_EQ(FindDirectResidencyRequirement(body), nullptr);
+}
+
+TEST_F(PlaceLoopInvariantsTest,
+       KeepsInvariantWithPredicateUsesAtAuthoredBoundary) {
+  SetCliff(IREE_SV("test.f32"), 64);
+  ModulePtr module = Parse(R"(
+test.target<low_core> @test_target
+func.def target(@test_target) @kernel(%start: index, %end: index, %step: index, %lhs: f32, %rhs: f32, %value: f32) {
+  scf.for %iv = [%start to %end step %step] residency(preserve) {
+    %sum = scalar.addf %lhs, %rhs : f32
+    %assumed = scalar.assume %value [finite(%sum)] : f32
+    test.use %assumed : f32
+    scf.yield
+  }
+  func.return
+}
+)");
+  IREE_ASSERT_OK(Run(module.get()));
+
+  const loom_func_like_t function =
+      FindFunction(module.get(), IREE_SV("kernel"));
+  loom_region_t* body = loom_func_like_body(function);
+  EXPECT_EQ(CountDirectAddf(body), 0u);
+  loom_op_t* loop = FindDirectFor(body);
+  ASSERT_NE(loop, nullptr);
+  loom_region_t* loop_body = loom_scf_for_body(loop);
+  EXPECT_EQ(CountDirectAddf(loop_body), 1u);
+  loom_op_t* sum = loom_region_entry_block(loop_body)->first_op;
+  ASSERT_TRUE(loom_scalar_addf_isa(sum));
+  EXPECT_TRUE(loom_module_value_has_predicate_attribute_uses(
+      module.get(), loom_scalar_addf_result(sum)));
+  EXPECT_EQ(FindDirectResidencyRequirement(body), nullptr);
+}
+
+TEST_F(PlaceLoopInvariantsTest, KeepsInvariantWithTypeUsesAtAuthoredBoundary) {
+  SetCliff(IREE_SV("test.i32"), 64);
+  ModulePtr module = Parse(R"(
+test.target<low_core> @test_target
+func.def target(@test_target) @kernel(%start: index, %end: index, %step: index, %condition: i1, %two: index, %three: index, %value: i32) {
+  scf.for %iv = [%start to %end step %step] residency(preserve) {
+    %extent = scf.select %condition, %two, %three : index
+    %vector = vector.splat %value : vector<[%extent]xi32>
+    test.use %vector : vector<[%extent]xi32>
+    scf.yield
+  }
+  func.return
+}
+)");
+  IREE_ASSERT_OK(Run(module.get()));
+
+  const loom_func_like_t function =
+      FindFunction(module.get(), IREE_SV("kernel"));
+  loom_region_t* body = loom_func_like_body(function);
+  EXPECT_EQ(CountDirectSelect(body), 0u);
+  loom_op_t* loop = FindDirectFor(body);
+  ASSERT_NE(loop, nullptr);
+  loom_region_t* loop_body = loom_scf_for_body(loop);
+  EXPECT_EQ(CountDirectSelect(loop_body), 1u);
+  loom_op_t* extent = loom_region_entry_block(loop_body)->first_op;
+  ASSERT_TRUE(loom_scf_select_isa(extent));
+  EXPECT_TRUE(loom_module_value_has_type_uses(module.get(),
+                                              loom_scf_select_result(extent)));
   EXPECT_EQ(FindDirectResidencyRequirement(body), nullptr);
 }
 

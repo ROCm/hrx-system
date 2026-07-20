@@ -57,6 +57,7 @@ loom_cc_test(
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/ops/vector",
         "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target/reporting:report",
