@@ -32,7 +32,7 @@ def test_occupancy_generator_emits_data_source_only() -> None:
     assert "loom_target_residency_cliff_range_t" in source
     assert "loom_target_residency_derived_resource_t" in source
     assert "loom_target_residency_derived_member_t" in source
-    assert ".pressure_model =" in source
+    assert ".residency_model =" in source
     assert ".best_tier =" in source
     assert ".direct_resources =" in source
     assert ".names =" in source

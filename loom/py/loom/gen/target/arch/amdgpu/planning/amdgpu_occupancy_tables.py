@@ -529,7 +529,7 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
                 f"  .descriptor_set_ordinal = {_u16_expr(amdgpu_descriptor_set_ordinal(model.descriptor_set_key))},",
                 f"  .wave_size = {_u32_expr(model.wave_size)},",
                 f"  .max_waves_per_simd = {_u32_expr(model.max_waves_per_simd)},",
-                "  .pressure_model = {",
+                "  .residency_model = {",
                 f"    .best_tier = {_u32_expr(model.max_waves_per_simd)},",
                 "    .direct_resources = {",
                 f"      .names = kAmdgpu{suffix}ResidencyDirectResourceNames,",

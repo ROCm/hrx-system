@@ -148,11 +148,11 @@ static iree_status_t loom_amdgpu_occupancy_check_parse_emit_options(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_occupancy_check_resolve_pressure_model(
+static iree_status_t loom_amdgpu_occupancy_check_resolve_residency_model(
     const loom_check_emit_provider_request_t* request,
     iree_string_view_t function_symbol_name,
-    const loom_target_residency_model_t** out_pressure_model) {
-  *out_pressure_model = NULL;
+    const loom_target_residency_model_t** out_residency_model) {
+  *out_residency_model = NULL;
   loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
       .diagnostic_collector = request->diagnostic_collector,
       .module = request->module,
@@ -181,8 +181,8 @@ static iree_status_t loom_amdgpu_occupancy_check_resolve_pressure_model(
   if (target.descriptor_set == NULL) {
     return iree_ok_status();
   }
-  *out_pressure_model =
-      loom_amdgpu_occupancy_pressure_model(target.descriptor_set);
+  *out_residency_model =
+      loom_amdgpu_occupancy_residency_model(target.descriptor_set);
   return iree_ok_status();
 }
 
@@ -197,14 +197,14 @@ static iree_status_t loom_amdgpu_occupancy_check_emit_provider_execute(
   loom_low_emission_frame_t frame = {0};
   loom_low_storage_lease_provider_t storage_lease_provider = {0};
   loom_amdgpu_storage_lease_provider(&storage_lease_provider);
-  const loom_target_residency_model_t* pressure_model = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_check_resolve_pressure_model(
-      request, options.function_symbol_name, &pressure_model));
+  const loom_target_residency_model_t* residency_model = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_check_resolve_residency_model(
+      request, options.function_symbol_name, &residency_model));
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
       request, options.function_symbol_name, options.schedule_strategy,
       /*schedule_diagnostic_flags=*/0, options.allocation_budgets,
       options.allocation_budget_count, options.allocation_fixed_value_specs,
-      options.allocation_fixed_value_spec_count, pressure_model,
+      options.allocation_fixed_value_spec_count, residency_model,
       loom_low_schedule_pair_affinity_list_empty(),
       loom_low_schedule_structural_state_read_list_empty(),
       &storage_lease_provider,

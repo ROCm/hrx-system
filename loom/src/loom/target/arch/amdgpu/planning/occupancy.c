@@ -68,12 +68,12 @@ static uint32_t loom_amdgpu_occupancy_register_class_index(
   return class_index;
 }
 
-const loom_target_residency_model_t* loom_amdgpu_occupancy_pressure_model(
+const loom_target_residency_model_t* loom_amdgpu_occupancy_residency_model(
     const loom_low_descriptor_set_t* descriptor_set) {
   const loom_amdgpu_occupancy_model_t* model =
       loom_amdgpu_occupancy_select_model(
           descriptor_set->descriptor_set_ordinal);
-  return &model->pressure_model;
+  return &model->residency_model;
 }
 
 static void loom_amdgpu_occupancy_collect_allocations(
@@ -222,9 +222,10 @@ static iree_status_t loom_amdgpu_occupancy_finalize_limits(
     loom_amdgpu_occupancy_register_class_t* class_summaries,
     loom_amdgpu_occupancy_pressure_resource_t* pressure_resources,
     iree_arena_allocator_t* arena, loom_amdgpu_occupancy_table_t* table) {
-  const loom_target_residency_model_t* pressure_model = &model->pressure_model;
-  if (pressure_model->best_tier != table->max_waves_per_simd ||
-      pressure_model->direct_resources.resource_count !=
+  const loom_target_residency_model_t* residency_model =
+      &model->residency_model;
+  if (residency_model->best_tier != table->max_waves_per_simd ||
+      residency_model->direct_resources.resource_count !=
           model->descriptor_reg_class_count) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -232,12 +233,12 @@ static iree_status_t loom_amdgpu_occupancy_finalize_limits(
   }
 
   uint64_t* direct_resource_units = NULL;
-  if (pressure_model->direct_resources.resource_count != 0) {
+  if (residency_model->direct_resources.resource_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, pressure_model->direct_resources.resource_count,
+        arena, residency_model->direct_resources.resource_count,
         sizeof(*direct_resource_units), (void**)&direct_resource_units));
     memset(direct_resource_units, 0,
-           pressure_model->direct_resources.resource_count *
+           residency_model->direct_resources.resource_count *
                sizeof(*direct_resource_units));
   }
   for (iree_host_size_t i = 0; i < table->register_class_count; ++i) {
@@ -249,8 +250,8 @@ static iree_status_t loom_amdgpu_occupancy_finalize_limits(
 
   loom_target_residency_query_t residency_query;
   IREE_RETURN_IF_ERROR(loom_target_residency_query(
-      pressure_model, direct_resource_units,
-      pressure_model->direct_resources.resource_count, arena,
+      residency_model, direct_resource_units,
+      residency_model->direct_resources.resource_count, arena,
       &residency_query));
   IREE_ASSERT(residency_query.model_available);
   table->resident_waves_per_simd = residency_query.tier;
@@ -264,18 +265,18 @@ static iree_status_t loom_amdgpu_occupancy_finalize_limits(
         &model->register_classes[i];
     const loom_target_residency_cliff_range_t pressure_cliff_range =
         loom_target_residency_direct_resource_cliff_range(
-            &pressure_model->direct_resources,
+            &residency_model->direct_resources,
             class_model->descriptor_reg_class_id);
     const loom_target_residency_cliff_t* pressure_cliffs =
         pressure_cliff_range.count == 0
             ? NULL
-            : &pressure_model->direct_resources
+            : &residency_model->direct_resources
                    .cliffs[pressure_cliff_range.start];
     uint32_t allocated_units = 0;
     IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_apply_residency_evaluation(
         class_model->allocation_granularity,
         &residency_query.resources[class_model->descriptor_reg_class_id],
-        pressure_cliffs, pressure_cliff_range.count, pressure_model->best_tier,
+        pressure_cliffs, pressure_cliff_range.count, residency_model->best_tier,
         &allocated_units, &class_summary->rounded_units,
         &class_summary->wave_limit, &class_summary->next_cliff_units,
         &class_summary->units_until_next_cliff));
@@ -291,7 +292,7 @@ static iree_status_t loom_amdgpu_occupancy_finalize_limits(
   }
 
   const loom_target_residency_derived_resource_table_t* resource_table =
-      &pressure_model->derived_resources;
+      &residency_model->derived_resources;
   IREE_ASSERT_EQ(table->pressure_resource_count,
                  resource_table->resource_count);
   for (iree_host_size_t i = 0; i < table->pressure_resource_count; ++i) {
@@ -306,7 +307,7 @@ static iree_status_t loom_amdgpu_occupancy_finalize_limits(
     IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_apply_residency_evaluation(
         resource->allocation_granularity,
         &residency_query.resources[residency_query.direct_resource_count + i],
-        pressure_cliffs, resource->cliff_count, pressure_model->best_tier,
+        pressure_cliffs, resource->cliff_count, residency_model->best_tier,
         &pressure_resource->allocated_units, &pressure_resource->rounded_units,
         &pressure_resource->wave_limit, &pressure_resource->next_cliff_units,
         &pressure_resource->units_until_next_cliff));
@@ -368,7 +369,7 @@ iree_status_t loom_amdgpu_occupancy_build_target_resources(
   const loom_amdgpu_occupancy_model_t* model =
       loom_amdgpu_occupancy_select_model(processor->descriptor_set.ordinal);
   const loom_target_residency_derived_resource_table_t* resource_table =
-      &model->pressure_model.derived_resources;
+      &model->residency_model.derived_resources;
 
   loom_amdgpu_occupancy_register_class_t* register_classes = NULL;
   if (model->register_class_count > 0) {
@@ -515,7 +516,7 @@ iree_status_t loom_amdgpu_occupancy_build(
       loom_amdgpu_occupancy_select_model(
           allocation->target.descriptor_set->descriptor_set_ordinal);
   const loom_target_residency_derived_resource_table_t* resource_table =
-      &model->pressure_model.derived_resources;
+      &model->residency_model.derived_resources;
 
   loom_amdgpu_occupancy_register_class_t* register_classes = NULL;
   if (model->register_class_count > 0) {

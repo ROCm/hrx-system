@@ -60,7 +60,7 @@ iree_status_t QueryDirectResidency(const loom_amdgpu_occupancy_model_t* model,
                                    loom_target_residency_query_t* out_query) {
   std::vector<uint64_t> direct_units(model->descriptor_reg_class_count);
   direct_units[resource_id] = units;
-  return loom_target_residency_query(&model->pressure_model,
+  return loom_target_residency_query(&model->residency_model,
                                      direct_units.data(), direct_units.size(),
                                      arena, out_query);
 }
@@ -178,7 +178,7 @@ void ExpectOccupancyRegisterClass(const loom_amdgpu_occupancy_model_t* model,
   EXPECT_EQ(reg_class->allocation_granularity, expected_allocation_granularity)
       << ToString(expected_name);
   const loom_target_residency_direct_resource_table_t* pressure_cliffs =
-      &model->pressure_model.direct_resources;
+      &model->residency_model.direct_resources;
   const loom_target_residency_cliff_range_t cliff_range =
       loom_target_residency_direct_resource_cliff_range(
           pressure_cliffs, reg_class->descriptor_reg_class_id);
@@ -219,7 +219,7 @@ void ExpectOccupancyPressureResource(
     uint16_t expected_agpr_index,
     uint32_t expected_agpr_contribution_granularity) {
   const loom_target_residency_derived_resource_table_t* resource_table =
-      &model->pressure_model.derived_resources;
+      &model->residency_model.derived_resources;
   ASSERT_LT(index, resource_table->resource_count) << ToString(expected_name);
   ASSERT_LT(expected_vgpr_index, model->register_class_count);
   ASSERT_LT(expected_agpr_index, model->register_class_count);
@@ -488,10 +488,10 @@ TEST_F(AmdgpuRegistersTest, OccupancyPoolsStaySeparateFromAddressability) {
             c.descriptor_set_ordinal);
     ASSERT_NE(model, nullptr);
     EXPECT_EQ(model->descriptor_set_ordinal, c.descriptor_set_ordinal);
-    EXPECT_EQ(model->pressure_model.best_tier, model->max_waves_per_simd);
-    EXPECT_EQ(model->pressure_model.direct_resources.resource_count,
+    EXPECT_EQ(model->residency_model.best_tier, model->max_waves_per_simd);
+    EXPECT_EQ(model->residency_model.direct_resources.resource_count,
               model->descriptor_reg_class_count);
-    EXPECT_EQ(model->pressure_model.direct_resources.cliff_count,
+    EXPECT_EQ(model->residency_model.direct_resources.cliff_count,
               c.sgpr_pressure_cliff_count + c.vgpr_pressure_cliff_count +
                   c.agpr_pressure_cliff_count);
     ExpectOccupancyRegisterClass(
@@ -502,13 +502,13 @@ TEST_F(AmdgpuRegistersTest, OccupancyPoolsStaySeparateFromAddressability) {
         c.vgpr_allocation_granularity, c.vgpr_pressure_cliff_count);
     if (c.agpr_pool_units == 0) {
       EXPECT_EQ(model->register_class_count, 2u);
-      EXPECT_EQ(model->pressure_model.derived_resources.resource_count, 0u);
+      EXPECT_EQ(model->residency_model.derived_resources.resource_count, 0u);
     } else {
       ASSERT_EQ(model->register_class_count, 3u);
       ExpectOccupancyRegisterClass(
           model, 2, IREE_SV("amdgpu.agpr"), c.agpr_pool_units,
           c.agpr_allocation_granularity, c.agpr_pressure_cliff_count);
-      ASSERT_EQ(model->pressure_model.derived_resources.resource_count, 1u);
+      ASSERT_EQ(model->residency_model.derived_resources.resource_count, 1u);
       ExpectOccupancyPressureResource(
           model, 0, IREE_SV("amdgpu.vgpr_agpr"), c.combined_pool_units,
           c.combined_allocation_granularity, /*expected_vgpr_index=*/1,
@@ -565,7 +565,7 @@ TEST_F(AmdgpuRegistersTest, ResidencyModelsExposeExactVgprCliffBoundaries) {
     ASSERT_LT(vgpr_resource_id, model->descriptor_reg_class_count);
     ASSERT_EQ(
         ToString(
-            model->pressure_model.direct_resources.names[vgpr_resource_id]),
+            model->residency_model.direct_resources.names[vgpr_resource_id]),
         "amdgpu.vgpr");
 
     loom_target_residency_query_t before_query = {};

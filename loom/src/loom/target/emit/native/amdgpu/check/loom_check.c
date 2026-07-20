@@ -317,10 +317,10 @@ static iree_status_t loom_amdgpu_loom_check_lower_spill_traffic(
 static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
     const loom_check_emit_provider_request_t* request,
     iree_string_view_t function_symbol_name,
-    const loom_target_residency_model_t** out_pressure_model,
+    const loom_target_residency_model_t** out_residency_model,
     loom_low_schedule_pair_affinity_list_t* out_affinities,
     loom_low_schedule_structural_state_read_list_t* out_state_reads) {
-  *out_pressure_model = NULL;
+  *out_residency_model = NULL;
   *out_affinities = loom_low_schedule_pair_affinity_list_empty();
   *out_state_reads = loom_low_schedule_structural_state_read_list_empty();
   loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
@@ -351,8 +351,8 @@ static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
   if (target.descriptor_set == NULL) {
     return iree_ok_status();
   }
-  *out_pressure_model =
-      loom_amdgpu_occupancy_pressure_model(target.descriptor_set);
+  *out_residency_model =
+      loom_amdgpu_occupancy_residency_model(target.descriptor_set);
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_build_schedule_pair_affinities(
       &target, request->case_arena, out_affinities));
   return loom_amdgpu_descriptor_build_structural_state_reads(
@@ -387,19 +387,19 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
                                                   &options)
           ? &storage_lease_provider
           : NULL;
-  const loom_target_residency_model_t* pressure_model = NULL;
+  const loom_target_residency_model_t* residency_model = NULL;
   loom_low_schedule_pair_affinity_list_t schedule_pair_affinities =
       loom_low_schedule_pair_affinity_list_empty();
   loom_low_schedule_structural_state_read_list_t schedule_state_reads =
       loom_low_schedule_structural_state_read_list_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_loom_check_build_schedule_models(
-      request, options.function_symbol_name, &pressure_model,
+      request, options.function_symbol_name, &residency_model,
       &schedule_pair_affinities, &schedule_state_reads));
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
       request, options.function_symbol_name, options.schedule_strategy,
       options.schedule_diagnostic_flags, options.allocation_budgets,
       options.allocation_budget_count, options.allocation_fixed_value_specs,
-      options.allocation_fixed_value_spec_count, pressure_model,
+      options.allocation_fixed_value_spec_count, residency_model,
       schedule_pair_affinities, schedule_state_reads,
       selected_storage_lease_provider, &spill_free_options, &frame));
   if (request->diagnostic_collector != NULL &&

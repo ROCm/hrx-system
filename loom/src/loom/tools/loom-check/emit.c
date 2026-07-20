@@ -1098,12 +1098,13 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
         resolved_cliffs, pressure_cliff_spec_count, target.descriptor_set,
         analysis_arena, &pressure_cliffs, &best_tier));
   }
-  const loom_target_residency_model_t pressure_model = {
+  const loom_target_residency_model_t residency_model = {
       .best_tier = best_tier,
       .direct_resources = pressure_cliffs,
   };
   loom_low_schedule_options_t options = {
-      .pressure_model = pressure_cliff_spec_count != 0 ? &pressure_model : NULL,
+      .residency_model =
+          pressure_cliff_spec_count != 0 ? &residency_model : NULL,
       .allocation_budgets = budgets,
       .allocation_budget_count = budget_count,
       .emitter = emitter,
