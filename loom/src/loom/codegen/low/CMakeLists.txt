@@ -440,6 +440,56 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    residency_contract
+  HDRS
+    "residency_contract.h"
+  SRCS
+    "residency_contract.c"
+  DEPS
+    ::allocation
+    ::allocation_rematerialization
+    ::function
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::low
+    loom::rewrite::rewriter
+    loom::target::residency
+    loom::util::dominance
+    loom::util::walk
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    residency_contract_test
+  SRCS
+    "residency_contract_test.cc"
+  DEPS
+    ::descriptors
+    ::diagnostics
+    ::frame
+    ::residency_contract
+    ::storage_relation
+    ::target_binding
+    ::text_asm
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::error::error_defs
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::ops::test
+    loom::target::registers
+    loom::target::reporting::low
+    loom::target::residency
+    loom::target::test::low_registry
+    loom::testing::module_ptr
+)
+
+loom_cc_library(
+  NAME
     allocation_live_range_splitting
   HDRS
     "allocation_live_range_splitting.h"
@@ -651,6 +701,7 @@ loom_cc_library(
     ::memory_access_ir
     ::packet
     ::planning_statistics
+    ::residency_contract
     ::storage_lease
     iree::base
     iree::base::internal::arena

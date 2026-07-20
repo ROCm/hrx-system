@@ -90,6 +90,8 @@ KEYWORD_MAP: dict[str, str] = {
     "cluster_size": "LOOM_KW_CLUSTER_SIZE",
     "memory_access": "LOOM_KW_MEMORY_ACCESS",
     "residency": "LOOM_KW_RESIDENCY",
+    "captures": "LOOM_KW_CAPTURES",
+    "recipe": "LOOM_KW_RECIPE",
 }
 
 # Maps Region(..., syntax=...) names to C parser/printer selector IDs. The

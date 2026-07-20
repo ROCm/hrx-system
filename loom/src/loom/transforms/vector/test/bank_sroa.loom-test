@@ -329,3 +329,37 @@ func.def @aggregate_result_escape_is_rejected(%initial: vector<2x2x4xf32>) {
   test.use %result : vector<2x2x4xf32>
   func.return
 }
+
+// ====
+// RUN: pass sroa-vector-banks
+
+func.def @residency_candidate_feeds_scalarized_bank(%initial: vector<1x2x4xf32>, %increment: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.residency.require 3
+  %placed = scf.residency.candidate 7 1 %initial : vector<1x2x4xf32> {preserves_baseline = true}
+  %result = scf.for %i = [%zero to %one step %one](%bank = %placed : vector<1x2x4xf32>) -> (vector<1x2x4xf32>) {
+    %old = vector.extract %bank[0, 1] : vector<1x2x4xf32> -> vector<4xf32>
+    %next = vector.addf %old, %increment : vector<4xf32>
+    %updated = vector.insert %next into %bank[0, 1] : vector<4xf32>, vector<1x2x4xf32>
+    scf.yield %updated : vector<1x2x4xf32>
+  }
+  %result0 = vector.extract %result[0, 0] : vector<1x2x4xf32> -> vector<4xf32>
+  %result1 = vector.extract %result[0, 1] : vector<1x2x4xf32> -> vector<4xf32>
+  func.return %result0, %result1 : vector<4xf32>, vector<4xf32>
+}
+
+// ----
+func.def @residency_candidate_feeds_scalarized_bank(%initial: vector<1x2x4xf32>, %increment: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.residency.require 3
+  %placed = scf.residency.candidate 7 1 %initial : vector<1x2x4xf32> {preserves_baseline = true}
+  %placed_slot_0 = vector.extract %placed[0, 0] : vector<1x2x4xf32> -> vector<4xf32>
+  %placed_slot_1 = vector.extract %placed[0, 1] : vector<1x2x4xf32> -> vector<4xf32>
+  %result_slot_0, %result_slot_1 = scf.for %i = [%zero to %one step %one](%bank_slot_0 = %placed_slot_0 : vector<4xf32>, %bank_slot_1 = %placed_slot_1 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+    %next = vector.addf %bank_slot_1, %increment : vector<4xf32>
+    scf.yield %bank_slot_0, %next : vector<4xf32>, vector<4xf32>
+  }
+  func.return %result_slot_0, %result_slot_1 : vector<4xf32>, vector<4xf32>
+}

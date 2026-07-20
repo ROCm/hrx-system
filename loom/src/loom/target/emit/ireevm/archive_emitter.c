@@ -455,6 +455,9 @@ static iree_status_t loom_ireevm_archive_emit_function(
     if (state->report != NULL) {
       loom_target_compile_report_record_low_planning(state->report,
                                                      &planning_statistics);
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_record_low_exact_residency(state->report,
+                                                                &frame));
       if (frame.allocation.function_op != NULL) {
         IREE_RETURN_IF_ERROR(loom_target_compile_report_record_low_allocation(
             state->report, &frame.allocation));

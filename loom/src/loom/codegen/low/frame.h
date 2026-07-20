@@ -79,6 +79,26 @@ typedef struct loom_low_emission_frame_options_t {
   loom_low_planning_statistics_t* statistics;
 } loom_low_emission_frame_options_t;
 
+// Exact target-low outcome for one source-planner residency alternative.
+typedef struct loom_low_emission_frame_residency_candidate_t {
+  // Stable identity assigned by source placement before configured unrolling.
+  uint32_t candidate_id;
+  // Projected dynamic materialization cost used by source planning.
+  uint32_t projected_recompute_cost;
+  // Exact target-low operands covered by this materialization boundary.
+  uint32_t exact_use_count;
+  // Target-low packets cloned while attempting this alternative.
+  uint32_t cloned_packet_count;
+  // Exact target-low operands rewritten while attempting this alternative.
+  uint32_t rewritten_operand_count;
+  // True after exact allocation considered this alternative for repair.
+  bool attempted;
+  // True when exact repair recovered the recorded source placement.
+  bool restored;
+  // True when selecting this alternative protected its source baseline.
+  bool preserves_baseline;
+} loom_low_emission_frame_residency_candidate_t;
+
 // Emission-ready production frame for one prepared target-low function. The
 // frame and its nested tables borrow from the caller-provided module and arena.
 typedef struct loom_low_emission_frame_t {
@@ -88,10 +108,38 @@ typedef struct loom_low_emission_frame_t {
   const loom_op_t* function_op;
   // Resolved target context shared by the nested schedule/allocation tables.
   loom_low_resolved_target_t target;
+  // Target-owned residency policy used for source-to-exact validation.
+  const loom_target_residency_model_t* residency_model;
   // Schedule table for the prepared function.
   loom_low_schedule_table_t schedule;
   // Allocation table for the prepared function.
   loom_low_allocation_table_t allocation;
+  // True when source placement supplied an exact residency contract.
+  bool has_residency_contract;
+  // True when a complete physical allocation evaluated that contract.
+  bool residency_contract_evaluated;
+  // True when the contract carries an authored numeric minimum.
+  bool has_minimum_residency_requirement;
+  // True when the contract preserves an authored placement baseline.
+  bool preserves_residency_baseline;
+  // True when exact repair recovered and measured the authored baseline.
+  bool preserved_residency_baseline_resolved;
+  // Authored numeric minimum tier, or zero when absent.
+  uint32_t minimum_residency_tier;
+  // Projected source baseline tier used to trigger exact recovery.
+  uint32_t projected_residency_baseline_tier;
+  // Effective terminal target residency tier requirement.
+  uint32_t required_residency_tier;
+  // Exact target residency tier selected by final physical allocation.
+  uint32_t allocated_residency_tier;
+  // Number of finite materialization alternatives retained by the planner.
+  uint64_t residency_candidate_count;
+  // Arena-owned exact outcomes for each retained materialization alternative.
+  const loom_low_emission_frame_residency_candidate_t* residency_candidates;
+  // Number of retained alternatives considered during exact repair.
+  uint64_t attempted_residency_candidate_count;
+  // Number of retained alternatives that changed target-low IR.
+  uint64_t residency_repair_count;
   // Cumulative spill storage materialized while reaching this frame.
   uint64_t materialized_spill_storage_count;
   // Cumulative materialized spill storage byte size.

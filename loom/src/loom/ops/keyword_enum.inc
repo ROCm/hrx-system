@@ -83,3 +83,5 @@
   LOOM_KW_CLUSTER_SIZE = 74,  // "cluster_size"
   LOOM_KW_MEMORY_ACCESS = 75,  // "memory_access"
   LOOM_KW_RESIDENCY = 76,  // "residency"
+  LOOM_KW_CAPTURES = 77,  // "captures"
+  LOOM_KW_RECIPE = 78,  // "recipe"

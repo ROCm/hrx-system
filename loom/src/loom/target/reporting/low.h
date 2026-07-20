@@ -23,6 +23,11 @@ iree_status_t loom_target_compile_report_record_low_emission_frame(
     loom_target_compile_report_t* report,
     const loom_low_emission_frame_t* frame);
 
+// Records an exact residency outcome from an accepted or rejected frame.
+iree_status_t loom_target_compile_report_record_low_exact_residency(
+    loom_target_compile_report_t* report,
+    const loom_low_emission_frame_t* frame);
+
 // Records coarse planning work and memory statistics for one low function.
 // This accepts partial frames returned with user-facing diagnostics.
 void loom_target_compile_report_record_low_planning(

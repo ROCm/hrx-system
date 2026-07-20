@@ -17,6 +17,7 @@
 #include "loom/codegen/low/transforms/pipeline/place_loop_invariants.h"
 #include "loom/codegen/low/transforms/pipeline/source_to_low.h"
 #include "loom/codegen/low/transforms/pipeline/target_legalize.h"
+#include "loom/codegen/low/transforms/residency_recipes.h"
 #include "loom/sanitizer/pipeline_passes.h"
 #include "loom/sanitizer/race_insertion.h"
 #include "loom/transforms/cfg/branch_fusion.h"
@@ -385,6 +386,11 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .requirement_defs = kLowMaterializeAllocationRequirements,
         .requirement_count =
             IREE_ARRAYSIZE(kLowMaterializeAllocationRequirements),
+    },
+    {
+        .key = IREE_SVL("low-seal-residency-recipes"),
+        .info = loom_low_seal_residency_recipes_pass_info,
+        .function_run = loom_low_seal_residency_recipes_run,
     },
     {
         .key = IREE_SVL("low-select-operand-forms"),

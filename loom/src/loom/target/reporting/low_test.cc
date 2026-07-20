@@ -31,6 +31,178 @@ static const T* CompileReportRowAt(
   return NULL;
 }
 
+TEST(CompileReportLowTest, RecordsTerminalExactResidencyOutcomes) {
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+
+  loom_low_emission_frame_t repaired_frame = {};
+  repaired_frame.has_residency_contract = true;
+  repaired_frame.residency_contract_evaluated = true;
+  repaired_frame.required_residency_tier = 3;
+  repaired_frame.allocated_residency_tier = 4;
+  repaired_frame.residency_candidate_count = 5;
+  repaired_frame.attempted_residency_candidate_count = 2;
+  repaired_frame.residency_repair_count = 1;
+  IREE_ASSERT_OK(loom_target_compile_report_record_low_exact_residency(
+      &report, &repaired_frame));
+
+  loom_low_emission_frame_t rejected_frame = {};
+  rejected_frame.has_residency_contract = true;
+  rejected_frame.residency_contract_evaluated = true;
+  rejected_frame.required_residency_tier = 4;
+  rejected_frame.allocated_residency_tier = 2;
+  rejected_frame.residency_candidate_count = 3;
+  rejected_frame.attempted_residency_candidate_count = 3;
+  rejected_frame.residency_repair_count = 1;
+  IREE_ASSERT_OK(loom_target_compile_report_record_low_exact_residency(
+      &report, &rejected_frame));
+
+  EXPECT_TRUE(iree_any_bit_set(
+      report.detail_flags, LOOM_TARGET_COMPILE_REPORT_DETAIL_EXACT_RESIDENCY));
+  EXPECT_EQ(report.exact_residency.contract_count, 2u);
+  EXPECT_EQ(report.exact_residency.evaluated_contract_count, 2u);
+  EXPECT_EQ(report.exact_residency.unevaluated_contract_count, 0u);
+  EXPECT_EQ(report.exact_residency.satisfied_contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.unsatisfied_contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.repaired_contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.candidate_count, 8u);
+  EXPECT_EQ(report.exact_residency.attempted_candidate_count, 5u);
+  EXPECT_EQ(report.exact_residency.repair_count, 2u);
+  EXPECT_EQ(report.exact_residency.maximum_required_tier, 4u);
+  EXPECT_EQ(report.exact_residency.minimum_allocated_tier, 2u);
+  EXPECT_EQ(report.exact_residency.maximum_tier_shortfall, 2u);
+
+  loom_target_compile_report_deinitialize(&report);
+}
+
+TEST(CompileReportLowTest, RecordsResolvedBaselineProjectionMiss) {
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+
+  loom_low_emission_frame_t frame = {};
+  frame.has_residency_contract = true;
+  frame.residency_contract_evaluated = true;
+  frame.preserves_residency_baseline = true;
+  frame.preserved_residency_baseline_resolved = true;
+  frame.projected_residency_baseline_tier = 4;
+  frame.required_residency_tier = 2;
+  frame.allocated_residency_tier = 2;
+  frame.residency_candidate_count = 3;
+  frame.attempted_residency_candidate_count = 3;
+  frame.residency_repair_count = 2;
+  IREE_ASSERT_OK(
+      loom_target_compile_report_record_low_exact_residency(&report, &frame));
+
+  EXPECT_EQ(report.exact_residency.contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.preserve_contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.satisfied_contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.repaired_contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.projection_miss_count, 1u);
+  EXPECT_EQ(report.exact_residency.maximum_projected_baseline_tier, 4u);
+  EXPECT_EQ(report.exact_residency.maximum_required_tier, 2u);
+  EXPECT_EQ(report.exact_residency.minimum_allocated_tier, 2u);
+
+  loom_target_compile_report_deinitialize(&report);
+}
+
+TEST(CompileReportLowTest, DoesNotRejectUnevaluatedResidencyContract) {
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+
+  loom_low_emission_frame_t frame = {};
+  frame.has_residency_contract = true;
+  frame.has_minimum_residency_requirement = true;
+  frame.minimum_residency_tier = 3;
+  frame.required_residency_tier = 3;
+  frame.residency_candidate_count = 2;
+  IREE_ASSERT_OK(
+      loom_target_compile_report_record_low_exact_residency(&report, &frame));
+
+  EXPECT_EQ(report.exact_residency.contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.evaluated_contract_count, 0u);
+  EXPECT_EQ(report.exact_residency.unevaluated_contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.satisfied_contract_count, 0u);
+  EXPECT_EQ(report.exact_residency.unsatisfied_contract_count, 0u);
+  EXPECT_EQ(report.exact_residency.minimum_allocated_tier, 0u);
+  EXPECT_EQ(report.exact_residency.maximum_tier_shortfall, 0u);
+
+  loom_target_compile_report_deinitialize(&report);
+}
+
+TEST(CompileReportLowTest, RecordsExactResidencyCandidateOutcomes) {
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  report.requested_detail_flags =
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS;
+
+  loom_low_emission_frame_residency_candidate_t candidates[4] = {};
+  candidates[0].candidate_id = 7;
+  candidates[0].projected_recompute_cost = 2;
+  candidates[0].exact_use_count = 3;
+  candidates[0].preserves_baseline = true;
+  candidates[1].candidate_id = 8;
+  candidates[1].projected_recompute_cost = 3;
+  candidates[1].exact_use_count = 4;
+  candidates[1].cloned_packet_count = 1;
+  candidates[1].rewritten_operand_count = 4;
+  candidates[1].attempted = true;
+  candidates[1].restored = true;
+  candidates[1].preserves_baseline = true;
+  candidates[2].candidate_id = 9;
+  candidates[2].projected_recompute_cost = 1;
+  candidates[2].exact_use_count = 2;
+  candidates[2].rewritten_operand_count = 1;
+  candidates[2].attempted = true;
+  candidates[3].candidate_id = 10;
+  candidates[3].projected_recompute_cost = 1;
+  candidates[3].exact_use_count = 1;
+  candidates[3].attempted = true;
+  loom_low_emission_frame_t frame = {};
+  frame.has_residency_contract = true;
+  frame.residency_contract_evaluated = false;
+  frame.required_residency_tier = 2;
+  frame.allocated_residency_tier = 2;
+  frame.residency_candidate_count = IREE_ARRAYSIZE(candidates);
+  frame.residency_candidates = candidates;
+  IREE_ASSERT_OK(
+      loom_target_compile_report_record_low_exact_residency(&report, &frame));
+
+  ASSERT_EQ(report.residency_candidate_rows.count, 4u);
+  const auto* not_attempted =
+      CompileReportRowAt<loom_target_compile_report_residency_candidate_row_t>(
+          report.residency_candidate_rows, 0);
+  ASSERT_NE(not_attempted, nullptr);
+  EXPECT_EQ(not_attempted->candidate_id, 7u);
+  EXPECT_TRUE(iree_string_view_equal(not_attempted->stage, IREE_SV("exact")));
+  EXPECT_TRUE(
+      iree_string_view_equal(not_attempted->outcome, IREE_SV("not_attempted")));
+  EXPECT_TRUE(not_attempted->preserves_baseline);
+
+  const auto* restored =
+      CompileReportRowAt<loom_target_compile_report_residency_candidate_row_t>(
+          report.residency_candidate_rows, 1);
+  ASSERT_NE(restored, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(restored->outcome, IREE_SV("restored")));
+  EXPECT_EQ(restored->cloned_packet_count, 1u);
+  EXPECT_EQ(restored->rewritten_operand_count, 4u);
+
+  const auto* partial =
+      CompileReportRowAt<loom_target_compile_report_residency_candidate_row_t>(
+          report.residency_candidate_rows, 2);
+  ASSERT_NE(partial, nullptr);
+  EXPECT_TRUE(
+      iree_string_view_equal(partial->outcome, IREE_SV("partially_restored")));
+
+  const auto* ineligible =
+      CompileReportRowAt<loom_target_compile_report_residency_candidate_row_t>(
+          report.residency_candidate_rows, 3);
+  ASSERT_NE(ineligible, nullptr);
+  EXPECT_TRUE(
+      iree_string_view_equal(ineligible->outcome, IREE_SV("ineligible")));
+
+  loom_target_compile_report_deinitialize(&report);
+}
+
 TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   constexpr uint32_t kSourceAssignmentIndex = 0;
   constexpr uint32_t kResultAssignmentIndex = 1;
@@ -546,6 +718,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.feature_bits=*/{},
           /*.descriptor_set=*/&descriptor_set,
       },
+      /*.residency_model=*/nullptr,
       /*.schedule=*/schedule,
       /*.allocation=*/
       {
@@ -640,6 +813,19 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.coalesced_copy_count=*/3,
           /*.materialized_copy_count=*/1,
       },
+      /*.has_residency_contract=*/true,
+      /*.residency_contract_evaluated=*/true,
+      /*.has_minimum_residency_requirement=*/true,
+      /*.preserves_residency_baseline=*/false,
+      /*.preserved_residency_baseline_resolved=*/false,
+      /*.minimum_residency_tier=*/3,
+      /*.projected_residency_baseline_tier=*/0,
+      /*.required_residency_tier=*/3,
+      /*.allocated_residency_tier=*/4,
+      /*.residency_candidate_count=*/5,
+      /*.residency_candidates=*/nullptr,
+      /*.attempted_residency_candidate_count=*/2,
+      /*.residency_repair_count=*/1,
       /*.materialized_spill_storage_count=*/4,
       /*.materialized_spill_storage_bytes=*/40,
       /*.materialized_spill_store_count=*/5,
@@ -685,6 +871,8 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   EXPECT_TRUE(iree_all_bits_set(
       report.detail_flags,
       LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION_HIGH_WATER_ROWS));
+  EXPECT_TRUE(iree_all_bits_set(
+      report.detail_flags, LOOM_TARGET_COMPILE_REPORT_DETAIL_EXACT_RESIDENCY));
   EXPECT_TRUE(
       iree_string_view_equal(report.function_name, IREE_SV("<unnamed>")));
   EXPECT_EQ(report.schedule_node_count, 13u);
@@ -694,6 +882,10 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   EXPECT_EQ(report.allocation_materialized_spill_storage_count, 4u);
   EXPECT_EQ(report.allocation_materialized_spill_store_count, 5u);
   EXPECT_EQ(report.allocation_materialized_reload_count, 6u);
+  EXPECT_EQ(report.exact_residency.contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.satisfied_contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.repaired_contract_count, 1u);
+  EXPECT_EQ(report.exact_residency.minimum_allocated_tier, 4u);
   EXPECT_EQ(report.static_instruction_mix.descriptor_count, 8u);
   EXPECT_EQ(report.static_instruction_mix.vector_alu_count, 1u);
   EXPECT_EQ(report.static_instruction_mix.global_memory_count, 2u);

@@ -593,3 +593,16 @@ low.func.def target(@test_target) @asm_nested_if_malformed(%condition: reg<test.
   low.scf.if %condition bogus
   return
 }
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @residency_requirement_must_be_in_preamble(%condition: reg<test.i32>) {
+  low.scf.if %condition {
+    // ERROR@+1: STRUCTURE/031
+    low.residency.require 3
+    low.scf.yield
+  }
+  low.return
+}

@@ -67,6 +67,9 @@ uint16_t loom_low_storage_relation_count(const loom_module_t* module,
     case LOOM_OP_LOW_SCF_FOR:
       count += loom_low_scf_for_iter_args(op).count;
       break;
+    case LOOM_OP_LOW_RESIDENCY_CANDIDATE:
+      ++count;
+      break;
     default:
       IREE_ASSERT_UNREACHABLE(
           "op with storage-relation trait must have a low "
@@ -136,6 +139,34 @@ static void loom_low_storage_relation_get_copy(
                   : LOOM_LOW_STORAGE_RELATION_SAME_STORAGE,
       .cause = LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_COPY,
       .flags = LOOM_LOW_STORAGE_RELATION_FLAG_PREFERRED,
+  };
+}
+
+static void loom_low_storage_relation_get_residency_candidate(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_low_storage_relation_t* out_relation) {
+  const loom_value_id_t destination_value_id =
+      loom_low_residency_candidate_result(op);
+  const loom_value_id_t source_value_id =
+      loom_low_residency_candidate_source(op);
+  const uint32_t destination_unit_count =
+      loom_low_storage_relation_value_unit_count(module, destination_value_id);
+  const uint32_t source_unit_count =
+      loom_low_storage_relation_value_unit_count(module, source_value_id);
+  IREE_ASSERT_EQ(destination_unit_count, source_unit_count,
+                 "verified low.residency.candidate storage relation must use "
+                 "matching unit counts");
+  *out_relation = (loom_low_storage_relation_t){
+      .op = op,
+      .destination_value_id = destination_value_id,
+      .source_value_id = source_value_id,
+      .source_operand_index = 0,
+      .destination_unit_offset = 0,
+      .source_unit_offset = 0,
+      .unit_count = destination_unit_count,
+      .kind = LOOM_LOW_STORAGE_RELATION_SAME_STORAGE,
+      .cause = LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_RESIDENCY_CANDIDATE,
+      .flags = LOOM_LOW_STORAGE_RELATION_FLAG_HARD,
   };
 }
 
@@ -381,6 +412,11 @@ void loom_low_storage_relation_get(const loom_module_t* module,
     case LOOM_OP_LOW_SCF_FOR:
       loom_low_storage_relation_get_scf_for(module, op, relation_index,
                                             out_relation);
+      return;
+    case LOOM_OP_LOW_RESIDENCY_CANDIDATE:
+      IREE_ASSERT_EQ(relation_index, 0);
+      loom_low_storage_relation_get_residency_candidate(module, op,
+                                                        out_relation);
       return;
     default:
       IREE_ASSERT_UNREACHABLE(

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from loom.builder import TiedResultSpec, ValueRef
 from loom.builders import DialectBuilder
@@ -118,7 +119,9 @@ class ScfBuilder(DialectBuilder):
         candidate_id: int,
         recompute_cost: int,
         source: ValueRef,
+        captures: list[ValueRef] = ...,
         results: list[Type | TiedResultSpec],
+        source_witness: Any | None = ...,
         preserves_baseline: bool,
         name: str | None = ...,
         names: Sequence[str] | None = ...,

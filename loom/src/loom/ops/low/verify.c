@@ -1182,6 +1182,84 @@ static iree_status_t loom_low_verify_resource_op(
   return iree_ok_status();
 }
 
+iree_status_t loom_low_residency_require_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  const loom_op_t* function_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_verify_nested_under_low_entry(
+      module, op, IREE_SV("low executable"), emitter, &function_op));
+  loom_region_t* function_body = NULL;
+  if (loom_low_func_def_isa(function_op)) {
+    function_body = loom_low_func_def_body(function_op);
+  } else if (loom_low_kernel_def_isa(function_op)) {
+    function_body = loom_low_kernel_def_body(function_op);
+  }
+  const loom_block_t* entry_block =
+      loom_low_region_entry_block_or_null(function_body);
+  if (op->parent_op != function_op || op->parent_block != entry_block) {
+    return loom_low_emit_block_placement_error(
+        module, op, IREE_SV("the low entry block preamble"),
+        IREE_SV("a nested or non-entry block"), emitter);
+  }
+  const int64_t minimum = loom_low_residency_require_minimum(op);
+  if (minimum < -1 || (minimum >= 0 && (uint64_t)minimum > UINT32_MAX)) {
+    return loom_low_emit_attr_value_error(
+        op, loom_low_residency_require_minimum_ATTR_INDEX, IREE_SV("minimum"),
+        minimum,
+        IREE_SV("-1 or a target residency tier representable as uint32"),
+        emitter);
+  }
+  const bool preserve = loom_low_residency_require_preserve(op);
+  const int64_t projected_baseline =
+      loom_low_residency_require_projected_baseline(op);
+  if ((preserve && (projected_baseline <= 0 ||
+                    (uint64_t)projected_baseline > UINT32_MAX)) ||
+      (!preserve && projected_baseline != 0)) {
+    return loom_low_emit_attr_value_error(
+        op, loom_low_residency_require_projected_baseline_ATTR_INDEX,
+        IREE_SV("projected_baseline"), projected_baseline,
+        preserve ? IREE_SV("positive target tier representable as uint32")
+                 : IREE_SV("zero when preserve is absent"),
+        emitter);
+  }
+  if (minimum == -1 && !preserve) {
+    return loom_low_emit_attr_value_error(
+        op, loom_low_residency_require_minimum_ATTR_INDEX, IREE_SV("minimum"),
+        minimum, IREE_SV("nonnegative tier when preserve is absent"), emitter);
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_residency_candidate_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  (void)module;
+  const int64_t candidate_id = loom_low_residency_candidate_candidate_id(op);
+  if (candidate_id < 0 || (uint64_t)candidate_id > UINT32_MAX) {
+    return loom_low_emit_attr_value_error(
+        op, loom_low_residency_candidate_candidate_id_ATTR_INDEX,
+        IREE_SV("candidate_id"), candidate_id,
+        IREE_SV("nonnegative stable candidate ID representable as uint32"),
+        emitter);
+  }
+  const int64_t recompute_cost =
+      loom_low_residency_candidate_recompute_cost(op);
+  if (recompute_cost < 0 || (uint64_t)recompute_cost > UINT32_MAX) {
+    return loom_low_emit_attr_value_error(
+        op, loom_low_residency_candidate_recompute_cost_ATTR_INDEX,
+        IREE_SV("recompute_cost"), recompute_cost,
+        IREE_SV("nonnegative recompute cost representable as uint32"), emitter);
+  }
+  if (!loom_low_residency_candidate_sealed(op) &&
+      loom_low_residency_candidate_recipe(op).count != 0) {
+    return loom_low_emit_attr_value_error(
+        op, loom_low_residency_candidate_sealed_ATTR_INDEX, IREE_SV("sealed"),
+        0, IREE_SV("true when target-low recipe operands are present"),
+        emitter);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_verify_function_preamble(
     const loom_module_t* module, const loom_op_t* function_op,
     iree_diagnostic_emitter_t emitter) {
@@ -1205,6 +1283,16 @@ static iree_status_t loom_low_verify_function_preamble(
                                          IREE_SV("ordinary low packets"),
                                          emitter);
       }
+      continue;
+    }
+    if (loom_low_residency_require_isa(nested_op)) {
+      if (!preamble_open) {
+        return loom_low_emit_order_error(
+            module, nested_op, IREE_SV("before"),
+            IREE_SV("ordinary low packets and other residency requirements"),
+            emitter);
+      }
+      preamble_open = false;
       continue;
     }
     preamble_open = false;

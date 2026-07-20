@@ -287,6 +287,7 @@ loom_cc_library(
     loom::codegen::low::transforms::pipeline::place_loop_invariants
     loom::codegen::low::transforms::pipeline::source_to_low
     loom::codegen::low::transforms::pipeline::target_legalize
+    loom::codegen::low::transforms::residency_recipes
     loom::sanitizer::pipeline_passes
     loom::sanitizer::race_insertion
     loom::transforms::cfg::branch_fusion

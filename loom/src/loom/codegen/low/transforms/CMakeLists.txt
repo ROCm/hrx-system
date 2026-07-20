@@ -112,4 +112,24 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    residency_recipes
+  HDRS
+    "residency_recipes.h"
+  SRCS
+    "residency_recipes.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::function
+    loom::ir
+    loom::ops::low
+    loom::pass::types
+    loom::rewrite::rewriter
+    loom::util::dominance
+    loom::util::walk
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

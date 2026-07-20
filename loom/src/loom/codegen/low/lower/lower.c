@@ -28,6 +28,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/ops/scf/residency.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/target/low_descriptor_registry.h"
@@ -373,6 +374,7 @@ static bool loom_low_lower_op_is_structural(const loom_module_t* module,
     case LOOM_OP_KERNEL_RETURN:
     case LOOM_OP_SCF_FOR:
     case LOOM_OP_SCF_IF:
+    case LOOM_OP_SCF_RESIDENCY_REQUIRE:
     case LOOM_OP_SCF_YIELD:
       return true;
     default:
@@ -2303,6 +2305,32 @@ static iree_status_t loom_low_lower_emit_argument_resource_imports(
   return status;
 }
 
+static iree_status_t loom_low_lower_emit_residency_requirement(
+    loom_low_lower_context_t* context) {
+  const loom_block_t* source_entry_block = loom_region_const_entry_block(
+      loom_func_like_body(context->source_function));
+  const loom_op_t* source_op = source_entry_block->first_op;
+  if (source_op == NULL || !loom_scf_residency_require_isa(source_op)) {
+    return iree_ok_status();
+  }
+
+  loom_region_t* low_body = loom_low_lower_low_body(context);
+  loom_builder_ip_t saved_ip = loom_builder_enter_region(
+      &context->builder, context->low_func_op, low_body);
+  loom_builder_set_block(&context->builder, loom_region_entry_block(low_body));
+  loom_op_t* low_requirement_op = NULL;
+  iree_status_t status = loom_low_residency_require_build(
+      &context->builder, loom_scf_residency_require_minimum(source_op),
+      loom_scf_residency_require_preserve(source_op),
+      loom_scf_residency_require_projected_baseline(source_op),
+      source_op->location, &low_requirement_op);
+  if (iree_status_is_ok(status)) {
+    context->lowering.residency_requirement_op = source_op;
+  }
+  loom_builder_restore(&context->builder, saved_ip);
+  return status;
+}
+
 static iree_status_t loom_low_lower_emit_preamble(
     loom_low_lower_context_t* context) {
   if (context->policy->emit_preamble.fn == NULL) {
@@ -2395,6 +2423,46 @@ static iree_status_t loom_low_lower_bind_identity_results(
         context, source_operands[i], source_results[i]));
   }
   return iree_ok_status();
+}
+
+static iree_status_t loom_low_lower_emit_residency_candidate(
+    loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  const loom_value_id_t source = loom_scf_residency_candidate_source(source_op);
+  const loom_value_id_t result = loom_scf_residency_candidate_result(source_op);
+  IREE_RETURN_IF_ERROR(loom_scf_residency_candidate_validate_proven_source(
+      context->module, source_op));
+  loom_value_id_t low_source = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_lookup_value(context, source, &low_source));
+  const loom_type_t low_type =
+      loom_module_value_type(context->module, low_source);
+  if (!loom_type_is_register(low_type)) {
+    return loom_low_lower_bind_value(context, result, low_source);
+  }
+
+  const loom_value_slice_t source_captures =
+      loom_scf_residency_candidate_captures(source_op);
+  loom_value_id_t* low_captures = NULL;
+  if (source_captures.count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        &context->arena, source_captures.count, sizeof(*low_captures),
+        (void**)&low_captures));
+    for (iree_host_size_t i = 0; i < source_captures.count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+          context, source_captures.values[i], &low_captures[i]));
+    }
+  }
+
+  loom_op_t* low_marker_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_residency_candidate_build(
+      &context->builder, loom_scf_residency_candidate_candidate_id(source_op),
+      loom_scf_residency_candidate_recompute_cost(source_op), low_source,
+      low_type, low_captures, source_captures.count,
+      /*recipe=*/NULL, /*recipe_count=*/0,
+      loom_scf_residency_candidate_preserves_baseline(source_op),
+      /*sealed=*/false, source_op->location, &low_marker_op));
+  return loom_low_lower_bind_value(
+      context, result, loom_low_residency_candidate_result(low_marker_op));
 }
 
 static iree_status_t loom_low_lower_emit_region_ops(
@@ -2576,6 +2644,18 @@ static iree_status_t loom_low_lower_structural_op(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     bool* out_handled) {
   *out_handled = true;
+  if (loom_scf_residency_require_isa(source_op)) {
+    if (source_op != context->lowering.residency_requirement_op) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "source residency requirement must be the first operation in the "
+          "function entry block");
+    }
+    return iree_ok_status();
+  }
+  if (loom_scf_residency_candidate_isa(source_op)) {
+    return loom_low_lower_emit_residency_candidate(context, source_op);
+  }
   const loom_trait_flags_t traits =
       loom_op_effective_traits(context->module, source_op);
   if (loom_traits_are_fact_identity(traits)) {
@@ -3461,6 +3541,9 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
     }
     if (iree_status_is_ok(status) && context.result->error_count == 0) {
       status = loom_low_lower_emit_argument_resource_imports(&context);
+    }
+    if (iree_status_is_ok(status) && context.result->error_count == 0) {
+      status = loom_low_lower_emit_residency_requirement(&context);
     }
     if (iree_status_is_ok(status) && context.result->error_count == 0) {
       status = loom_low_lower_emit_entry_setup(&context);

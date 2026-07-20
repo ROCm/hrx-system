@@ -22,6 +22,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/pass/ops.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/scf/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/pass/registry.h"
@@ -65,6 +66,7 @@ class LowLowerPassTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_SCALAR, loom_scalar_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_SCF, loom_scf_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     loom_test_low_descriptor_registry_initialize(&registry_);
@@ -382,6 +384,103 @@ TEST_F(LowLowerPassTest, SourceToLowUsesInvocationTargetRef) {
       loom_low_func_def_target(add_symbol->defining_op);
   EXPECT_EQ(lowered_target.module_id, target_ref.module_id);
   EXPECT_EQ(lowered_target.symbol_id, target_ref.symbol_id);
+}
+
+TEST_F(LowLowerPassTest, SourceToLowPreservesResidencyRepairContract) {
+  ModulePtr module = Parse(IREE_SV(
+      "test.target<low_core> @test_target\n"
+      "func.def target(@test_target) @add(%lhs: i32, %rhs: i32) -> (i32) {\n"
+      "  scf.residency.require 3 {preserve = true, projected_baseline = 4}\n"
+      "  %sum = scalar.addi %lhs, %rhs : i32\n"
+      "  %placed = scf.residency.candidate 7 1 %sum, %lhs, %rhs : i32, "
+      "i32, i32 {preserves_baseline = true, source_witness = {attributes "
+      "= {}, instance_flags = 0, op_name = \"scalar.addi\", operand_count "
+      "= 2, region_count = 0, result_count = 1, result_index = 0, "
+      "successor_count = 0, tied_result_count = 0, version = 1}}\n"
+      "  func.return %placed : i32\n"
+      "}\n"));
+
+  DiagnosticEmissionCollector collector;
+  IREE_ASSERT_OK(RunSourceToLow(&policy_registry_, module.get(), &collector));
+  ASSERT_EQ(collector.count, 0)
+      << (collector.last_error != nullptr ? collector.last_error->error_id
+                                          : "missing error definition");
+
+  const loom_symbol_ref_t add_ref = FindSymbolRef(module.get(), IREE_SV("add"));
+  loom_op_t* low_func_op =
+      module->symbols.entries[add_ref.symbol_id].defining_op;
+  ASSERT_NE(low_func_op, nullptr);
+  ASSERT_TRUE(loom_low_func_def_isa(low_func_op));
+  iree_host_size_t requirement_count = 0;
+  iree_host_size_t candidate_count = 0;
+  loom_op_t* requirement_op = nullptr;
+  loom_op_t* candidate_op = nullptr;
+  loom_op_t* op = nullptr;
+  loom_block_for_each_op(
+      loom_region_entry_block(loom_low_func_def_body(low_func_op)), op) {
+    if (loom_low_residency_require_isa(op)) {
+      ++requirement_count;
+      requirement_op = op;
+    }
+    if (loom_low_residency_candidate_isa(op)) {
+      ++candidate_count;
+      candidate_op = op;
+    }
+  }
+  ASSERT_EQ(requirement_count, 1u);
+  ASSERT_NE(requirement_op, nullptr);
+  ASSERT_EQ(candidate_count, 1u);
+  ASSERT_NE(candidate_op, nullptr);
+  EXPECT_EQ(loom_low_residency_require_minimum(requirement_op), 3);
+  EXPECT_TRUE(loom_low_residency_require_preserve(requirement_op));
+  EXPECT_EQ(loom_low_residency_require_projected_baseline(requirement_op), 4);
+  EXPECT_EQ(loom_low_residency_candidate_candidate_id(candidate_op), 7);
+  EXPECT_EQ(loom_low_residency_candidate_recompute_cost(candidate_op), 1);
+  EXPECT_TRUE(loom_low_residency_candidate_preserves_baseline(candidate_op));
+  const loom_value_slice_t captures =
+      loom_low_residency_candidate_captures(candidate_op);
+  ASSERT_EQ(captures.count, 2u);
+  loom_block_t* entry_block =
+      loom_region_entry_block(loom_low_func_def_body(low_func_op));
+  ASSERT_EQ(entry_block->arg_count, 2u);
+  EXPECT_EQ(captures.values[0], loom_block_arg_id(entry_block, 0));
+  EXPECT_EQ(captures.values[1], loom_block_arg_id(entry_block, 1));
+  EXPECT_TRUE(loom_type_is_register(loom_module_value_type(
+      module.get(), loom_low_residency_candidate_result(candidate_op))));
+}
+
+TEST_F(LowLowerPassTest, SourceToLowRejectsChangedResidencySourceProducer) {
+  ModulePtr module = Parse(IREE_SV(
+      "test.target<low_core> @test_target\n"
+      "func.def target(@test_target) @add(%lhs: i32, %rhs: i32) -> (i32) {\n"
+      "  %sum = scalar.addi %lhs, %rhs : i32\n"
+      "  %placed = scf.residency.candidate 7 1 %sum, %lhs, %rhs : i32, "
+      "i32, i32 {source_witness = {attributes = {}, instance_flags = 0, "
+      "op_name = \"scalar.muli\", operand_count = 2, region_count = 0, "
+      "result_count = 1, result_index = 0, successor_count = 0, "
+      "tied_result_count = 0, version = 1}}\n"
+      "  func.return %placed : i32\n"
+      "}\n"));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        RunSourceToLow(&policy_registry_, module.get()));
+}
+
+TEST_F(LowLowerPassTest, SourceToLowRejectsChangedResidencySourceClosure) {
+  ModulePtr module = Parse(IREE_SV(
+      "test.target<low_core> @test_target\n"
+      "func.def target(@test_target) @add(%lhs: i32, %rhs: i32) -> (i32) {\n"
+      "  %sum = scalar.addi %lhs, %rhs : i32\n"
+      "  %placed = scf.residency.candidate 7 1 %sum, %rhs, %lhs : i32, "
+      "i32, i32 {source_witness = {attributes = {}, instance_flags = 0, "
+      "op_name = \"scalar.addi\", operand_count = 2, region_count = 0, "
+      "result_count = 1, result_index = 0, successor_count = 0, "
+      "tied_result_count = 0, version = 1}}\n"
+      "  func.return %placed : i32\n"
+      "}\n"));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        RunSourceToLow(&policy_registry_, module.get()));
 }
 
 TEST_F(LowLowerPassTest,

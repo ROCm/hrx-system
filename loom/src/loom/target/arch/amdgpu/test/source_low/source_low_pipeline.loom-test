@@ -249,6 +249,7 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
       cse
       low-select-operand-forms
       low-dce
+      low-seal-residency-recipes
     }
   }
 }

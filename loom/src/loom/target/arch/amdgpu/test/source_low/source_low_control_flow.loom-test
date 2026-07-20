@@ -2412,3 +2412,57 @@ low.kernel.def target(@wave64_target) workgroup_size(32, 1, 1) workgroup_count(3
   s_mov_b64_exec %83
   low.br ^_bb5
 }
+
+// ====
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+func.def target(@gfx1250_target) @nested_loop_invariant_bool(%parity: index, %outer_count: index, %inner_count: index) -> (i1) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %true = scalar.constant true : i1
+  %parity_bounded = index.assume %parity [range(%parity, 0, 3)] : index
+  %outer_count_bounded = index.assume %outer_count [range(%outer_count, 1, 16)] : index
+  %inner_count_bounded = index.assume %inner_count [range(%inner_count, 1, 16)] : index
+  %outer_result = scf.for %outer = [%zero to %outer_count_bounded step %one](%outer_acc = %true : i1) -> (i1) {
+    %inner_result = scf.for %inner = [%zero to %inner_count_bounded step %one](%inner_acc = %outer_acc : i1) -> (i1) {
+      %is_zero = index.cmp eq, %parity_bounded, %zero : index
+      %next = scalar.andi %inner_acc, %is_zero : i1
+      scf.yield %next : i1
+    }
+    scf.yield %inner_result : i1
+  }
+  func.return %outer_result : i1
+}
+
+// ----
+low.func.def target(@gfx1250_target) abi(hal_kernel) @nested_loop_invariant_bool(%parity_bounded: reg<amdgpu.sgpr>, %outer_count_bounded: reg<amdgpu.sgpr>, %inner_count_bounded: reg<amdgpu.sgpr>) -> (reg<amdgpu.scc>) asm<amdgpu.rdna4.gfx125x.core> {
+  low.residency.require -1 {preserve = true, projected_baseline = 16}
+  %zero = s_mov_b32 0
+  %one = s_mov_b32 1
+  %true = s_cmp_eq_i32 %zero, %zero
+  %44 = s_cmp_eq_i32 %parity_bounded, %zero
+  %is_zero = s_cselect_b32 %one, %zero, %44
+  %is_zero_residency$48 = low.residency.candidate 1 1 %is_zero : reg<amdgpu.sgpr> captures(%parity_bounded: reg<amdgpu.sgpr>, %zero: reg<amdgpu.sgpr>) {preserves_baseline = true}
+  low.br ^_bb1(%zero: reg<amdgpu.sgpr>, %true: reg<amdgpu.scc>)
+^_bb1(%outer: reg<amdgpu.sgpr>, %outer_acc: reg<amdgpu.scc>):
+  %49 = s_cmp_lt_i32 %outer, %outer_count_bounded
+  low.cond_br %49, ^_bb2, ^_bb6 : reg<amdgpu.scc>
+^_bb2:
+  %is_zero_residency$50 = low.residency.candidate 0 1 %is_zero_residency$48 : reg<amdgpu.sgpr> captures(%parity_bounded: reg<amdgpu.sgpr>, %zero: reg<amdgpu.sgpr>) {preserves_baseline = true}
+  low.br ^_bb3(%zero: reg<amdgpu.sgpr>, %outer_acc: reg<amdgpu.scc>)
+^_bb3(%inner: reg<amdgpu.sgpr>, %inner_acc: reg<amdgpu.scc>):
+  %51 = s_cmp_lt_i32 %inner, %inner_count_bounded
+  low.cond_br %51, ^_bb4, ^_bb5 : reg<amdgpu.scc>
+^_bb4:
+  %54 = s_cselect_b32 %one, %zero, %inner_acc
+  %55 = s_and_b32 %54, %is_zero_residency$50
+  %next = s_cmp_lg_i32 %55, %zero
+  %57 = s_add_u32 %inner, %one
+  low.br ^_bb3(%57: reg<amdgpu.sgpr>, %next: reg<amdgpu.scc>)
+^_bb5:
+  %58 = s_add_u32 %outer, %one
+  low.br ^_bb1(%58: reg<amdgpu.sgpr>, %inner_acc: reg<amdgpu.scc>)
+^_bb6:
+  return %outer_acc
+}

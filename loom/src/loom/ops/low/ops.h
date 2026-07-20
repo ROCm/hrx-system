@@ -43,7 +43,9 @@ enum {
   LOOM_OP_LOW_SCF_YIELD = LOOM_OP_KIND(LOOM_DIALECT_LOW, 20),
   LOOM_OP_LOW_SCF_IF = LOOM_OP_KIND(LOOM_DIALECT_LOW, 21),
   LOOM_OP_LOW_SCF_FOR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 22),
-  LOOM_OP_LOW_COUNT_ = 23,
+  LOOM_OP_LOW_RESIDENCY_REQUIRE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 23),
+  LOOM_OP_LOW_RESIDENCY_CANDIDATE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 24),
+  LOOM_OP_LOW_COUNT_ = 25,
 };
 
 // Function visibility. Absent (0) means private (module-internal).
@@ -748,6 +750,52 @@ iree_status_t loom_low_scf_for_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_low_scf_for_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_RESIDENCY_REQUIRE: Compiler-owned exact residency contract consumed before scheduling. Numeric minima remain hard floors while preserve contracts can recover the exact authored baseline from finite candidates.
+// low.residency.require 2
+LOOM_DEFINE_ISA(loom_low_residency_require_isa, LOOM_OP_LOW_RESIDENCY_REQUIRE)
+LOOM_DEFINE_ATTR_I64(loom_low_residency_require_minimum, 0)
+LOOM_DEFINE_ATTR_BOOL(loom_low_residency_require_preserve, 1)
+LOOM_DEFINE_ATTR_I64(loom_low_residency_require_projected_baseline, 2)
+iree_status_t loom_low_residency_require_build(
+    loom_builder_t* builder,
+    int64_t minimum,
+    bool preserve,
+    int64_t projected_baseline,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_residency_require_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_RESIDENCY_CANDIDATE: Compiler-owned identity boundary retaining one legal invariant rematerialization alternative until emission-frame construction.
+// %placed = low.residency.candidate 7 2 %value : reg<amdgpu.vgpr x1> recipe(%value : reg<amdgpu.vgpr x1>) {sealed = true}
+LOOM_DEFINE_ISA(loom_low_residency_candidate_isa, LOOM_OP_LOW_RESIDENCY_CANDIDATE)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_low_residency_candidate_source, 0)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_low_residency_candidate_captures, 1)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_low_residency_candidate_recipe, 2)
+LOOM_DEFINE_RESULT(loom_low_residency_candidate_result, 0)
+LOOM_DEFINE_ATTR_I64(loom_low_residency_candidate_candidate_id, 0)
+LOOM_DEFINE_ATTR_I64(loom_low_residency_candidate_recompute_cost, 1)
+LOOM_DEFINE_ATTR_BOOL(loom_low_residency_candidate_preserves_baseline, 2)
+LOOM_DEFINE_ATTR_BOOL(loom_low_residency_candidate_sealed, 3)
+iree_status_t loom_low_residency_candidate_build(
+    loom_builder_t* builder,
+    int64_t candidate_id,
+    int64_t recompute_cost,
+    loom_may_consume loom_value_id_t source,
+    loom_type_t result_type,
+    loom_may_consume const loom_value_id_t* captures,
+    iree_host_size_t captures_count,
+    loom_may_consume const loom_value_id_t* recipe,
+    iree_host_size_t recipe_count,
+    bool preserves_baseline,
+    bool sealed,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_residency_candidate_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

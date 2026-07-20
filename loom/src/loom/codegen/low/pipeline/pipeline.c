@@ -14,6 +14,8 @@ iree_status_t loom_low_pipeline_build_packetization_preparation(
   IREE_RETURN_IF_ERROR(
       loom_pass_ir_build_run(builder, IREE_SV("low-select-operand-forms"),
                              loom_named_attr_slice_empty(), &run_op));
-  return loom_pass_ir_build_run(builder, IREE_SV("low-dce"),
+  IREE_RETURN_IF_ERROR(loom_pass_ir_build_run(
+      builder, IREE_SV("low-dce"), loom_named_attr_slice_empty(), &run_op));
+  return loom_pass_ir_build_run(builder, IREE_SV("low-seal-residency-recipes"),
                                 loom_named_attr_slice_empty(), &run_op);
 }

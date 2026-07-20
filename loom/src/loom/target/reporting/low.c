@@ -20,6 +20,7 @@
 #include "loom/target/reporting/low_allocation.h"
 #include "loom/target/reporting/low_mix.h"
 #include "loom/target/reporting/low_names.h"
+#include "loom/target/residency.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/fact_table.h"
 
@@ -600,10 +601,194 @@ void loom_target_compile_report_record_low_planning(
   }
 }
 
+static iree_string_view_t
+loom_target_compile_report_exact_residency_candidate_outcome(
+    const loom_low_emission_frame_residency_candidate_t* candidate) {
+  if (!candidate->attempted) return IREE_SV("not_attempted");
+  if (candidate->restored) {
+    return candidate->rewritten_operand_count == 0
+               ? IREE_SV("already_at_boundary")
+               : IREE_SV("restored");
+  }
+  return candidate->rewritten_operand_count == 0
+             ? IREE_SV("ineligible")
+             : IREE_SV("partially_restored");
+}
+
+static iree_status_t
+loom_target_compile_report_record_low_exact_residency_resources(
+    loom_target_compile_report_t* report,
+    const loom_low_emission_frame_t* frame) {
+  if (!loom_target_compile_report_wants_details(
+          report, LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS) ||
+      !frame->residency_contract_evaluated) {
+    return iree_ok_status();
+  }
+  if (loom_target_residency_model_is_empty(frame->residency_model)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "evaluated exact residency contract has no target residency model");
+  }
+  if (frame->module == NULL || frame->module->arena.block_pool == NULL) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "exact residency resource reporting requires a module arena");
+  }
+  const iree_host_size_t direct_resource_count =
+      frame->residency_model->direct_resources.resource_count;
+  if (frame->allocation.assigned_extents.count != direct_resource_count) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "exact residency allocation resources do not match the target model");
+  }
+
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(frame->module->arena.block_pool, &arena);
+  uint64_t* direct_resource_units = NULL;
+  iree_status_t status = iree_arena_allocate_array(
+      &arena, direct_resource_count, sizeof(*direct_resource_units),
+      (void**)&direct_resource_units);
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < direct_resource_count; ++i) {
+      direct_resource_units[i] =
+          frame->allocation.assigned_extents.ends_by_reg_class[i];
+    }
+  }
+  loom_target_residency_query_t query = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_target_residency_query(frame->residency_model,
+                                         direct_resource_units,
+                                         direct_resource_count, &arena, &query);
+  }
+  if (iree_status_is_ok(status) &&
+      query.tier != frame->allocated_residency_tier) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "exact residency resource query selected tier %u but frame recorded "
+        "tier %u",
+        query.tier, frame->allocated_residency_tier);
+  }
+  const iree_string_view_t function_name =
+      frame->function_op != NULL
+          ? loom_low_diagnostic_function_name(frame->module, frame->function_op)
+          : iree_string_view_empty();
+  for (iree_host_size_t i = 0;
+       iree_status_is_ok(status) && i < query.resource_count; ++i) {
+    const loom_target_residency_resource_evaluation_t* resource =
+        &query.resources[i];
+    const bool has_next_worse = iree_any_bit_set(
+        resource->flags,
+        LOOM_TARGET_RESIDENCY_RESOURCE_EVALUATION_FLAG_HAS_NEXT_WORSE_TIER);
+    const loom_target_compile_report_source_low_residency_resource_row_t row = {
+        .function_name = function_name,
+        .phase = IREE_SV("exact"),
+        .resource_name = resource->name,
+        .resource_kind =
+            resource->kind == LOOM_TARGET_RESIDENCY_RESOURCE_KIND_DIRECT
+                ? IREE_SV("direct")
+                : IREE_SV("derived"),
+        .resource_id = resource->resource_id,
+        .units = resource->units,
+        .tier = resource->tier,
+        .next_better_tier =
+            query.has_next_better_tier ? query.next_better_tier : 0,
+        .next_worse_tier = has_next_worse ? resource->next_worse_tier : 0,
+        .next_worse_cliff_units =
+            has_next_worse ? resource->next_worse_cliff_units : 0,
+        .additional_units_to_next_worse_tier =
+            has_next_worse ? resource->additional_units_to_next_worse_tier : 0,
+        .reduction_units_to_next_better_tier =
+            resource->reduction_units_to_next_better_tier,
+        .limiting = iree_any_bit_set(
+            resource->flags,
+            LOOM_TARGET_RESIDENCY_RESOURCE_EVALUATION_FLAG_LIMITING),
+    };
+    status =
+        loom_target_compile_report_record_source_low_residency_resource_row(
+            report, &row);
+  }
+  iree_arena_deinitialize(&arena);
+  return status;
+}
+
+iree_status_t loom_target_compile_report_record_low_exact_residency(
+    loom_target_compile_report_t* report,
+    const loom_low_emission_frame_t* frame) {
+  if (!frame->has_residency_contract) return iree_ok_status();
+  const bool evaluated = frame->residency_contract_evaluated;
+  const bool satisfied = evaluated && frame->allocated_residency_tier >=
+                                          frame->required_residency_tier;
+  const loom_target_compile_report_exact_residency_t exact_residency = {
+      .contract_count = 1,
+      .evaluated_contract_count = evaluated ? 1 : 0,
+      .unevaluated_contract_count = evaluated ? 0 : 1,
+      .minimum_contract_count =
+          frame->has_minimum_residency_requirement ? 1 : 0,
+      .preserve_contract_count = frame->preserves_residency_baseline ? 1 : 0,
+      .satisfied_contract_count = satisfied ? 1 : 0,
+      .unsatisfied_contract_count = evaluated && !satisfied ? 1 : 0,
+      .repaired_contract_count =
+          satisfied && frame->residency_repair_count != 0 ? 1 : 0,
+      .projection_miss_count =
+          evaluated && frame->preserved_residency_baseline_resolved &&
+                  frame->allocated_residency_tier <
+                      frame->projected_residency_baseline_tier
+              ? 1
+              : 0,
+      .candidate_count = frame->residency_candidate_count,
+      .attempted_candidate_count = frame->attempted_residency_candidate_count,
+      .repair_count = frame->residency_repair_count,
+      .maximum_required_tier = frame->required_residency_tier,
+      .maximum_minimum_tier = frame->minimum_residency_tier,
+      .maximum_projected_baseline_tier =
+          frame->projected_residency_baseline_tier,
+      .minimum_allocated_tier = evaluated ? frame->allocated_residency_tier : 0,
+      .maximum_tier_shortfall =
+          evaluated && !satisfied
+              ? frame->required_residency_tier - frame->allocated_residency_tier
+              : 0,
+  };
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_record_low_exact_residency_resources(report,
+                                                                      frame));
+  if (loom_target_compile_report_wants_details(
+          report, LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS)) {
+    const iree_string_view_t function_name =
+        frame->module != NULL && frame->function_op != NULL
+            ? loom_low_diagnostic_function_name(frame->module,
+                                                frame->function_op)
+            : iree_string_view_empty();
+    for (uint64_t i = 0; i < frame->residency_candidate_count; ++i) {
+      const loom_low_emission_frame_residency_candidate_t* candidate =
+          &frame->residency_candidates[i];
+      const loom_target_compile_report_residency_candidate_row_t row = {
+          .function_name = function_name,
+          .candidate_id = candidate->candidate_id,
+          .stage = IREE_SV("exact"),
+          .outcome =
+              loom_target_compile_report_exact_residency_candidate_outcome(
+                  candidate),
+          .projected_recompute_cost = candidate->projected_recompute_cost,
+          .exact_use_count = candidate->exact_use_count,
+          .cloned_packet_count = candidate->cloned_packet_count,
+          .rewritten_operand_count = candidate->rewritten_operand_count,
+          .preserves_baseline = candidate->preserves_baseline,
+      };
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_record_residency_candidate_row(report,
+                                                                    &row));
+    }
+  }
+  loom_target_compile_report_record_exact_residency(report, &exact_residency);
+  return iree_ok_status();
+}
+
 iree_status_t loom_target_compile_report_record_low_emission_frame(
     loom_target_compile_report_t* report,
     const loom_low_emission_frame_t* frame) {
   loom_target_compile_report_record_low_frame_identity(report, frame);
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_record_low_exact_residency(report, frame));
   loom_low_allocation_value_scratch_t value_scratch = {0};
   IREE_RETURN_IF_ERROR(loom_low_allocation_acquire_value_scratch(
       &frame->allocation, &value_scratch));

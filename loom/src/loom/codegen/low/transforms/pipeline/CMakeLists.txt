@@ -145,6 +145,7 @@ loom_cc_test(
     loom::ops::low
     loom::ops::pass
     loom::ops::scalar
+    loom::ops::scf
     loom::ops::target
     loom::ops::test
     loom::pass::registry

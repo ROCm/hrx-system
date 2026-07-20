@@ -1189,6 +1189,9 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
     if (report != NULL) {
       loom_target_compile_report_record_low_planning(report,
                                                      &planning_statistics);
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_record_low_exact_residency(report,
+                                                                &frame));
       if (frame.allocation.function_op != NULL) {
         IREE_RETURN_IF_ERROR(loom_target_compile_report_record_low_allocation(
             report, &frame.allocation));

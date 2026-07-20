@@ -69,7 +69,7 @@ TEST_F(LowPipelineTest, BuildsPacketizationPreparationFragment) {
   loom_block_t* pipeline_body =
       loom_region_entry_block(loom_pass_pipeline_body(pipeline_op));
   ASSERT_NE(pipeline_body, nullptr);
-  ASSERT_EQ(pipeline_body->op_count, 4u);
+  ASSERT_EQ(pipeline_body->op_count, 5u);
 
   loom_op_t* cse_run = pipeline_body->first_op;
   ASSERT_TRUE(loom_pass_run_isa(cse_run));
@@ -85,6 +85,11 @@ TEST_F(LowPipelineTest, BuildsPacketizationPreparationFragment) {
   ASSERT_TRUE(loom_pass_run_isa(dce_run));
   EXPECT_TRUE(iree_string_view_equal(RunKey(module.get(), dce_run),
                                      IREE_SV("low-dce")));
+
+  loom_op_t* seal_recipes_run = dce_run->next_op;
+  ASSERT_TRUE(loom_pass_run_isa(seal_recipes_run));
+  EXPECT_TRUE(iree_string_view_equal(RunKey(module.get(), seal_recipes_run),
+                                     IREE_SV("low-seal-residency-recipes")));
   EXPECT_TRUE(loom_pass_yield_isa(pipeline_body->last_op));
 }
 

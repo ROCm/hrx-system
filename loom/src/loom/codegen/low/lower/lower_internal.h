@@ -177,6 +177,9 @@ typedef struct loom_low_lowering_frame_t {
   iree_host_size_t selected_plan_capacity;
   // Next selected plan consumed by the emission walk.
   iree_host_size_t selected_plan_emit_index;
+  // Source residency requirement emitted into the target-low preamble, or
+  // NULL when the function has no requirement.
+  const loom_op_t* residency_requirement_op;
   // Cached source-function CFG block execution counts for memory reports.
   uint64_t* source_block_execution_counts;
   // True when source_block_execution_counts has been initialized.

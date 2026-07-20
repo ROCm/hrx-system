@@ -87,6 +87,8 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING = 1u << 24,
   // Target-inserted native packet rows were recorded or counted.
   LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS = 1u << 25,
+  // Exact post-allocation residency contract outcomes were recorded.
+  LOOM_TARGET_COMPILE_REPORT_DETAIL_EXACT_RESIDENCY = 1u << 26,
 };
 
 typedef enum loom_target_compile_report_move_cause_e {
@@ -444,6 +446,45 @@ typedef struct loom_target_compile_report_target_resources_t {
   iree_string_view_t limiting_resource;
 } loom_target_compile_report_target_resources_t;
 
+// Exact post-allocation residency contract outcomes. A per-entry record
+// describes one target-low function; a module report aggregates its entries.
+typedef struct loom_target_compile_report_exact_residency_t {
+  // Number of functions carrying an exact residency contract.
+  uint64_t contract_count;
+  // Number of contracts evaluated against a complete physical allocation.
+  uint64_t evaluated_contract_count;
+  // Number of contracts not reached because target-low construction failed.
+  uint64_t unevaluated_contract_count;
+  // Number of contracts carrying an authored numeric minimum.
+  uint64_t minimum_contract_count;
+  // Number of contracts preserving an authored placement baseline.
+  uint64_t preserve_contract_count;
+  // Number of contracts satisfied by their terminal physical allocation.
+  uint64_t satisfied_contract_count;
+  // Number of contracts rejected by their terminal physical allocation.
+  uint64_t unsatisfied_contract_count;
+  // Number of contracts satisfied after at least one recorded repair.
+  uint64_t repaired_contract_count;
+  // Number of preserved baselines whose exact tier was below projection.
+  uint64_t projection_miss_count;
+  // Total finite materialization alternatives retained by the source planner.
+  uint64_t candidate_count;
+  // Total retained alternatives considered during exact repair.
+  uint64_t attempted_candidate_count;
+  // Total retained alternatives that changed target-low IR.
+  uint64_t repair_count;
+  // Strictest exact residency tier required by any contract.
+  uint32_t maximum_required_tier;
+  // Strictest authored numeric tier across all exact contracts.
+  uint32_t maximum_minimum_tier;
+  // Best projected source baseline tier across preserved contracts.
+  uint32_t maximum_projected_baseline_tier;
+  // Worst terminal physical-allocation tier across contracted functions.
+  uint32_t minimum_allocated_tier;
+  // Largest terminal tier deficit relative to an authored contract.
+  uint32_t maximum_tier_shortfall;
+} loom_target_compile_report_exact_residency_t;
+
 typedef uint8_t loom_target_compile_report_capability_value_kind_t;
 typedef enum loom_target_compile_report_capability_value_kind_e {
   // No capability value kind is available.
@@ -620,6 +661,8 @@ typedef struct loom_target_compile_report_entry_t {
   loom_target_compile_report_static_instruction_mix_t dynamic_instruction_mix;
   // Final target resource and occupancy summary.
   loom_target_compile_report_target_resources_t target_resources;
+  // Exact post-allocation residency contract outcomes for this entry.
+  loom_target_compile_report_exact_residency_t exact_residency;
   // Target wait-counter planning summary.
   loom_target_compile_report_wait_plan_t wait_plan;
   // Static launch workload facts for this entry.
@@ -1835,6 +1878,8 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_static_instruction_mix_t dynamic_instruction_mix;
   // Final target resource and occupancy summary.
   loom_target_compile_report_target_resources_t target_resources;
+  // Exact post-allocation residency contract outcomes across entries.
+  loom_target_compile_report_exact_residency_t exact_residency;
   // Target wait-counter planning summary.
   loom_target_compile_report_wait_plan_t wait_plan;
   // Static launch workload facts shared by all entries in this report.
@@ -2009,6 +2054,11 @@ void loom_target_compile_report_record_memory(
 void loom_target_compile_report_record_target_resources(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_target_resources_t* target_resources);
+
+// Records exact post-allocation residency contract outcomes.
+void loom_target_compile_report_record_exact_residency(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_exact_residency_t* exact_residency);
 
 // Records one register-class pressure summary for aggregate reporting.
 iree_status_t loom_target_compile_report_record_pressure_summary(

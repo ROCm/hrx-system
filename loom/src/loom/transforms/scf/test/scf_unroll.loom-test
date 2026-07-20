@@ -1326,6 +1326,121 @@ func.def @bare_unroll_dynamic_trip_count_rejected(%end: index) {
 
 // ====
 
+// One placement boundary remains shared while configured unrolling expands
+// every use that may later be rematerialized independently.
+func.def @unroll_preserves_residency_repair_boundary(%lhs: i32, %rhs: i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  scf.residency.require 3
+  %sum = test.addi %lhs, %rhs : i32
+  %placed = scf.residency.candidate 7 1 %sum : i32 {preserves_baseline = true}
+  scf.for %i = [%start to %end step %step] unroll {
+    test.use %placed : i32
+  }
+  func.return
+}
+
+// ----
+func.def @unroll_preserves_residency_repair_boundary(%lhs: i32, %rhs: i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  scf.residency.require 3
+  %sum = test.addi %lhs, %rhs : i32
+  %placed = scf.residency.candidate 7 1 %sum : i32 {preserves_baseline = true}
+  %i_0 = index.constant 0 : index
+  test.use %placed : i32
+  %i_1 = index.constant 1 : index
+  test.use %placed : i32
+  %i_2 = index.constant 2 : index
+  test.use %placed : i32
+  func.return
+}
+
+// ====
+
+// Strip-mining keeps one outer materialization boundary while both the
+// expanded main loop and the tail loop retain exact uses of that value.
+func.def @partial_interleaved_unroll_preserves_residency_repair_boundary(%lhs: i32, %rhs: i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 5 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  scf.residency.require 3
+  %sum = test.addi %lhs, %rhs : i32
+  %placed = scf.residency.candidate 7 1 %sum : i32 {preserves_baseline = true}
+  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {
+    test.use %placed : i32
+  }
+  func.return
+}
+
+// ----
+func.def @partial_interleaved_unroll_preserves_residency_repair_boundary(%lhs: i32, %rhs: i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 5 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  scf.residency.require 3
+  %sum = test.addi %lhs, %rhs : i32
+  %placed = scf.residency.candidate 7 1 %sum : i32 {preserves_baseline = true}
+  %9 = index.constant 2 : index
+  %10 = index.constant 4 : index
+  scf.for %i = [%start to %10 step %9] {
+    %12 = index.constant 1 : index
+    %i_1 = index.add %i, %12 : index
+    test.use %placed : i32
+    test.use %placed : i32
+  }
+  scf.for %i = [%10 to %end step %step] {
+    test.use %placed : i32
+  }
+  func.return
+}
+
+// ====
+
+// A boundary nested inside an unrolled loop is cloned with the exact inner
+// uses belonging to each materialization instance.
+func.def @outer_unroll_clones_nested_residency_boundary() {
+  %start = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  scf.residency.require 3
+  scf.for %outer = [%start to %end step %step] unroll {
+    %sum = index.add %outer, %start : index
+    %placed = scf.residency.candidate 7 1 %sum, %outer, %start : index, index, index {preserves_baseline = true, source_witness = {attributes = {}, instance_flags = 0, op_name = "index.add", operand_count = 2, region_count = 0, result_count = 1, result_index = 0, successor_count = 0, tied_result_count = 0, version = 1}}
+    scf.for %inner = [%start to %end step %step] {
+      test.use %outer, %inner, %placed : index, index, index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @outer_unroll_clones_nested_residency_boundary() {
+  %start = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  scf.residency.require 3
+  %outer_0 = index.constant 0 : index
+  %sum = index.add %outer_0, %start : index
+  %placed = scf.residency.candidate 7 1 %sum, %outer_0, %start : index, index, index {preserves_baseline = true, source_witness = {attributes = {}, instance_flags = 0, op_name = "index.add", operand_count = 2, region_count = 0, result_count = 1, result_index = 0, successor_count = 0, tied_result_count = 0, version = 1}}
+  scf.for %inner = [%start to %end step %step] {
+    test.use %outer_0, %inner, %placed : index, index, index
+  }
+  %outer_1 = index.constant 1 : index
+  %sum_1 = index.add %outer_1, %start : index
+  %placed_1 = scf.residency.candidate 7 1 %sum_1, %outer_1, %start : index, index, index {preserves_baseline = true, source_witness = {attributes = {}, instance_flags = 0, op_name = "index.add", operand_count = 2, region_count = 0, result_count = 1, result_index = 0, successor_count = 0, tied_result_count = 0, version = 1}}
+  scf.for %inner = [%start to %end step %step] {
+    test.use %outer_1, %inner, %placed_1 : index, index, index
+  }
+  func.return
+}
+
+// ====
+
 // Unrolling cannot erase a placement policy that has not made its decision.
 func.def @unroll_rejects_unconsumed_residency_minimum() {
   %start = index.constant 0 : index

@@ -1,0 +1,32 @@
+// A target-low support constant is canonicalized to a dominating packet before
+// the final recipe is sealed. The marker records the canonical producer as an
+// SSA recipe member instead of inferring membership from its block.
+// RUN: pass cse,low-seal-residency-recipes
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @seals_canonical_cross_block_producers(%input: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+  low.residency.require -1 {preserve = true, projected_baseline = 2}
+  %unit = test.const.i32 1
+  low.br ^body
+^body:
+  %local_unit = test.const.i32 1
+  %sum = test.add.i32 %input, %local_unit
+  %placed = low.residency.candidate 0 1 %sum : reg<test.i32> captures(%input : reg<test.i32>) {preserves_baseline = true}
+  %result = test.add.i32 %placed, %unit
+  return %result
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @seals_canonical_cross_block_producers(%input: reg<test.i32>) -> (reg<test.i32>) {
+  low.residency.require -1 {preserve = true, projected_baseline = 2}
+  %unit = low.const<test.const.i32> {i32_value = 1} : reg<test.i32>
+  low.br ^body
+^body:
+  %sum = low.op<test.add.i32>(%input, %unit) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %placed = low.residency.candidate 0 1 %sum : reg<test.i32> captures(%input: reg<test.i32>) recipe(%unit: reg<test.i32>, %sum: reg<test.i32>) {preserves_baseline = true, sealed = true}
+  %result = low.op<test.add.i32>(%placed, %unit) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %result : reg<test.i32>
+}

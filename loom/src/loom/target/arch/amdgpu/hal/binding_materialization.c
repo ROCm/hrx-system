@@ -166,6 +166,42 @@ static void loom_amdgpu_hal_binding_set_entry_insertion_point(
       loom_region_entry_block(loom_low_function_body(function_op)));
 }
 
+// Restores the low-function preamble boundary after ABI imports have been
+// expanded in place. low.residency.require follows live-ins and resources but
+// must precede every ordinary packet. Replacing a resource at its original
+// position can put the resulting kernarg load before that boundary, so move the
+// operandless requirement ahead of the first expanded packet once all imports
+// have been consumed.
+static iree_status_t
+loom_amdgpu_hal_binding_restore_residency_requirement_order(
+    loom_rewriter_t* rewriter, loom_op_t* function_op) {
+  loom_block_t* entry_block =
+      loom_region_entry_block(loom_low_function_body(function_op));
+  loom_op_t* requirement_op = NULL;
+  loom_op_t* op = NULL;
+  loom_block_for_each_op(entry_block, op) {
+    if (loom_low_residency_require_isa(op)) {
+      requirement_op = op;
+      break;
+    }
+  }
+  if (requirement_op == NULL) {
+    return iree_ok_status();
+  }
+
+  loom_block_for_each_op(entry_block, op) {
+    if (loom_low_live_in_isa(op) || loom_low_resource_isa(op)) {
+      continue;
+    }
+    if (op == requirement_op) {
+      return iree_ok_status();
+    }
+    return loom_rewriter_move_before(rewriter, requirement_op, op);
+  }
+  IREE_ASSERT_UNREACHABLE("residency requirement remains in its entry block");
+  IREE_BUILTIN_UNREACHABLE();
+}
+
 static iree_status_t loom_amdgpu_hal_binding_i64_attr(
     loom_module_t* module, iree_string_view_t name, int64_t value,
     loom_named_attr_t* out_attr) {
@@ -1070,6 +1106,10 @@ iree_status_t loom_amdgpu_hal_binding_materialize(
     status = loom_amdgpu_hal_binding_materialize_buffer_descriptors_with_types(
         &rewriter, function_op, target_bundle, descriptor_set, sgpr_type,
         sgpr_x2_type, &out_result->materialized_descriptor_count);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_amdgpu_hal_binding_restore_residency_requirement_order(
+        &rewriter, function_op);
   }
 
   out_result->changed =

@@ -140,6 +140,7 @@ loom_cc_test(
         "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/pass",
         "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/pass:registry",

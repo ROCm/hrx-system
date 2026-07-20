@@ -105,3 +105,20 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:arena",
     ],
 )
+
+loom_cc_library(
+    name = "residency_recipes",
+    srcs = ["residency_recipes.c"],
+    hdrs = ["residency_recipes.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:dominance",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)

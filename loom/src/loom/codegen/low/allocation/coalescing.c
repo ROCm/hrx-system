@@ -1794,6 +1794,15 @@ iree_status_t loom_low_allocation_coalescing_assign_structural_interval(
         }
         break;
       }
+      case LOOM_LOW_PLACEMENT_CAUSE_LOW_RESIDENCY_CANDIDATE: {
+        IREE_RETURN_IF_ERROR(
+            loom_low_allocation_coalescing_assign_relation_interval(
+                context, interval, relation, out_assigned));
+        if (*out_assigned) {
+          return iree_ok_status();
+        }
+        break;
+      }
       case LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT: {
         IREE_RETURN_IF_ERROR(
             loom_low_allocation_coalescing_assign_concat_interval(

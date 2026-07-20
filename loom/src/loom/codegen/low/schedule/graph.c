@@ -575,7 +575,9 @@ static bool loom_low_schedule_relation_is_structural_alias(
     const loom_low_schedule_storage_relation_t* relation) {
   return relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_COPY ||
          relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SLICE ||
-         relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_CONCAT;
+         relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_CONCAT ||
+         relation->cause ==
+             LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_RESIDENCY_CANDIDATE;
 }
 
 static iree_status_t loom_low_schedule_push_edge_source(

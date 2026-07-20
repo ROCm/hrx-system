@@ -1181,6 +1181,35 @@ ERR_BACKEND_046 = ErrorDef(
     ),
 )
 
+# ERR_BACKEND_047: Exact allocation could not satisfy residency policy.
+ERR_BACKEND_047 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=47,
+    severity=Severity.ERROR,
+    summary="Exact allocation failed the residency placement contract.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "allocated residency tier {allocated_tier} for '@{function_name}', "
+        "below required tier {required_tier}; {candidate_count} recorded "
+        "materialization alternative(s) were available and "
+        "{attempted_candidate_count} were attempted"
+    ),
+    params=(
+        ErrorParam("target_key", ParamKind.STRING),
+        ErrorParam("export_name", ParamKind.STRING),
+        ErrorParam("config_key", ParamKind.STRING),
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("allocated_tier", ParamKind.U32),
+        ErrorParam("required_tier", ParamKind.U32),
+        ErrorParam("candidate_count", ParamKind.U64),
+        ErrorParam("attempted_candidate_count", ParamKind.U64),
+    ),
+    fix_hint=(
+        "Choose a lower minimum tier, retain a rematerializable invariant "
+        "boundary, or reduce exact target resource pressure"
+    ),
+)
+
 ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_003,
     ERR_BACKEND_005,
@@ -1222,4 +1251,5 @@ ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_044,
     ERR_BACKEND_045,
     ERR_BACKEND_046,
+    ERR_BACKEND_047,
 )

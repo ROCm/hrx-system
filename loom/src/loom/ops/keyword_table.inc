@@ -83,3 +83,5 @@
     [LOOM_KW_CLUSTER_SIZE] = (const uint8_t*)"\x0c" "cluster_size",
     [LOOM_KW_MEMORY_ACCESS] = (const uint8_t*)"\x0d" "memory_access",
     [LOOM_KW_RESIDENCY] = (const uint8_t*)"\x09" "residency",
+    [LOOM_KW_CAPTURES] = (const uint8_t*)"\x08" "captures",
+    [LOOM_KW_RECIPE] = (const uint8_t*)"\x06" "recipe",

@@ -56,6 +56,8 @@ from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
     ATTR_TYPE_TYPE,
+    FACT_IDENTITY,
+    HINT,
     ISOLATED_FROM_ABOVE,
     PURE,
     REGISTER,
@@ -1385,6 +1387,119 @@ low_invoke = Op(
     ],
 )
 
+# ============================================================================
+# Compiler-owned residency placement contracts
+# ============================================================================
+
+low_residency_require = Op(
+    "low.residency.require",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Compiler-owned exact residency contract consumed before scheduling. "
+        "Numeric minima remain hard floors. Preserve validates the protected "
+        "source tier and recovers the exact authored boundary from finite "
+        "candidates after a projection miss."
+    ),
+    attrs=[
+        AttrDef(
+            "minimum",
+            ATTR_TYPE_I64,
+            doc="Authored hard tier floor, or -1 when no numeric floor exists.",
+        ),
+        AttrDef(
+            "preserve",
+            ATTR_TYPE_BOOL,
+            default=False,
+            elide_default=True,
+            doc="Whether exact allocation validates the protected source tier and recovers the authored boundary after a projection miss.",
+        ),
+        AttrDef(
+            "projected_baseline",
+            ATTR_TYPE_I64,
+            default=0,
+            elide_default=True,
+            doc="Projected source tier used to trigger exact baseline recovery.",
+        ),
+    ],
+    traits=[HINT],
+    verify="loom_low_residency_require_verify",
+    format=[Attr("minimum"), AttrDict()],
+    examples=[
+        "low.residency.require 2",
+        "low.residency.require -1 {preserve = true, projected_baseline = 4}",
+    ],
+)
+
+low_residency_candidate = Op(
+    "low.residency.candidate",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Compiler-owned identity boundary retaining one legal invariant rematerialization alternative until emission-frame construction."),
+    operands=[
+        Operand("source", REGISTER),
+        Operand(
+            "captures",
+            ANY,
+            variadic=True,
+            doc=("External target-low inputs that bound the producer slice authorized for exact rematerialization."),
+        ),
+        Operand(
+            "recipe",
+            REGISTER,
+            variadic=True,
+            doc=("SSA-tracked representative results for the sealed target-low producers authorized for exact rematerialization."),
+        ),
+    ],
+    attrs=[
+        AttrDef("candidate_id", ATTR_TYPE_I64, doc="Stable source candidate ID."),
+        AttrDef(
+            "recompute_cost",
+            ATTR_TYPE_I64,
+            doc="Projected number of dynamic materializations for this boundary.",
+        ),
+        AttrDef(
+            "preserves_baseline",
+            ATTR_TYPE_BOOL,
+            default=False,
+            elide_default=True,
+            doc="Whether this movement protects its authored placement tier.",
+        ),
+        AttrDef(
+            "sealed",
+            ATTR_TYPE_BOOL,
+            default=False,
+            elide_default=True,
+            doc="Whether final target-low preparation recorded the complete producer recipe.",
+        ),
+    ],
+    results=[Result("result", REGISTER)],
+    constraints=[SameType("source", "result")],
+    traits=[HINT, FACT_IDENTITY, STORAGE_RELATION],
+    verify="loom_low_residency_candidate_verify",
+    format=[
+        Attr("candidate_id"),
+        Attr("recompute_cost"),
+        Ref("source"),
+        COLON,
+        ResultType("result"),
+        OptionalGroup(
+            [kw("captures"), GLUE, LPAREN, TypedRefs("captures"), RPAREN],
+            anchor="captures",
+        ),
+        OptionalGroup(
+            [kw("recipe"), GLUE, LPAREN, TypedRefs("recipe"), RPAREN],
+            anchor="recipe",
+        ),
+        AttrDict(),
+    ],
+    examples=[
+        "%placed = low.residency.candidate 7 2 %value : reg<amdgpu.vgpr x1> recipe(%value : reg<amdgpu.vgpr x1>) {sealed = true}",
+        "%placed = low.residency.candidate 7 2 %value : reg<amdgpu.vgpr x1> captures(%base : reg<amdgpu.sgpr x2>, %offset : reg<amdgpu.sgpr>) recipe(%value : reg<amdgpu.vgpr x1>) {sealed = true}",
+        "%placed = low.residency.candidate 7 2 %value : reg<amdgpu.vgpr x1> recipe(%value : reg<amdgpu.vgpr x1>) {preserves_baseline = true, sealed = true}",
+    ],
+)
+
 ALL_LOW_OPS: tuple[Op, ...] = (
     low_func_def,
     low_kernel_def,
@@ -1409,4 +1524,6 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_scf_yield,
     low_scf_if,
     low_scf_for,
+    low_residency_require,
+    low_residency_candidate,
 )

@@ -249,6 +249,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/transforms:cfg_tuple_decomposition",
         "//loom/src/loom/codegen/low/transforms:dce",
         "//loom/src/loom/codegen/low/transforms:operand_forms",
+        "//loom/src/loom/codegen/low/transforms:residency_recipes",
         "//loom/src/loom/codegen/low/transforms/pipeline:place_loop_invariants",
         "//loom/src/loom/codegen/low/transforms/pipeline:source_to_low",
         "//loom/src/loom/codegen/low/transforms/pipeline:target_legalize",

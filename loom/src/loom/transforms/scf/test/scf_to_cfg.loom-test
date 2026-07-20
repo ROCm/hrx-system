@@ -303,3 +303,39 @@ func.def @rejects_unconsumed_residency_policy() {
   }
   func.return
 }
+
+// ====
+
+func.def @preserves_consumed_residency_boundaries(%lhs: i32, %rhs: i32) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  scf.residency.require 3
+  %sum = test.addi %lhs, %rhs : i32
+  %placed = scf.residency.candidate 7 1 %sum : i32 {preserves_baseline = true}
+  scf.for %i = [%zero to %four step %one] {
+    test.use %placed : i32
+  }
+  func.return
+}
+
+// ----
+func.def @preserves_consumed_residency_boundaries(%lhs: i32, %rhs: i32) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  scf.residency.require 3
+  %sum = test.addi %lhs, %rhs : i32
+  %placed = scf.residency.candidate 7 1 %sum : i32 {preserves_baseline = true}
+  cfg.br ^_bb1(%zero: index)
+^_bb1(%8: index):
+  %10 = index.cmp slt, %8, %four : index
+  cfg.cond_br %10, ^_bb2, ^_bb3
+^_bb2:
+  %i = index.assume %8 [range(%8, 0, 3)] : index
+  test.use %placed : i32
+  %11 = index.add %i, %one : index
+  cfg.br ^_bb1(%11: index)
+^_bb3:
+  func.return
+}

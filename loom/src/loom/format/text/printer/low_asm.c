@@ -73,6 +73,8 @@ static bool loom_print_low_asm_allows_canonical_structural_op(
   return iree_string_view_equal(op_name, IREE_SV("low.br")) ||
          iree_string_view_equal(op_name, IREE_SV("low.cond_br")) ||
          iree_string_view_equal(op_name, IREE_SV("low.func.call")) ||
+         iree_string_view_equal(op_name, IREE_SV("low.residency.require")) ||
+         iree_string_view_equal(op_name, IREE_SV("low.residency.candidate")) ||
          iree_string_view_equal(op_name, IREE_SV("low.scf.yield")) ||
          iree_string_view_equal(op_name, IREE_SV("low.scf.if")) ||
          iree_string_view_equal(op_name, IREE_SV("low.scf.for"));

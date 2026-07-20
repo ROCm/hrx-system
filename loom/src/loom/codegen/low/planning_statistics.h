@@ -51,6 +51,28 @@ typedef struct loom_low_planning_repair_statistics_t {
   uint64_t spill_materialization_batch_count;
 } loom_low_planning_repair_statistics_t;
 
+// Exact residency-contract work performed during target-low planning.
+typedef struct loom_low_planning_residency_statistics_t {
+  // Number of functions carrying a source-planner residency contract.
+  uint64_t contract_count;
+  // Number of finite rematerialization alternatives retained by contracts.
+  uint64_t candidate_count;
+  // Strictest projected tier requested before exact baseline recovery.
+  uint32_t maximum_projected_required_tier;
+  // Number of exact post-allocation tier evaluations.
+  uint64_t validation_count;
+  // Worst tier observed across every exact allocation attempt.
+  uint32_t minimum_observed_allocated_tier;
+  // Largest observed deficit relative to the then-current required tier.
+  uint32_t maximum_observed_tier_shortfall;
+  // Number of recorded candidates considered for exact repair.
+  uint64_t repair_attempt_count;
+  // Number of recorded candidates that rewrote at least one operand.
+  uint64_t repair_count;
+  // Number of contracts whose finite repair set could not satisfy the tier.
+  uint64_t failure_count;
+} loom_low_planning_residency_statistics_t;
+
 // Allocation economics across one target-low planning invocation.
 typedef struct loom_low_planning_memory_statistics_t {
   // Caller-owned arena retaining the accepted emission frame.
@@ -84,6 +106,8 @@ typedef struct loom_low_planning_statistics_t {
   uint64_t allocation_run_count;
   // IR-changing work performed while converging on the final frame.
   loom_low_planning_repair_statistics_t repair;
+  // Exact residency-contract validation and repair work.
+  loom_low_planning_residency_statistics_t residency;
   // Arena and system allocation economics for the planning invocation.
   loom_low_planning_memory_statistics_t memory;
 } loom_low_planning_statistics_t;

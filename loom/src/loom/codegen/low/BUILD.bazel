@@ -420,6 +420,52 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "residency_contract",
+    srcs = ["residency_contract.c"],
+    hdrs = ["residency_contract.h"],
+    deps = [
+        ":allocation",
+        ":allocation_rematerialization",
+        ":function",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:residency",
+        "//loom/src/loom/util:dominance",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "residency_contract_test",
+    srcs = ["residency_contract_test.cc"],
+    deps = [
+        ":descriptors",
+        ":diagnostics",
+        ":frame",
+        ":residency_contract",
+        ":storage_relation",
+        ":target_binding",
+        ":text_asm",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target:residency",
+        "//loom/src/loom/target/reporting:low",
+        "//loom/src/loom/target/test:low_registry",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "allocation_live_range_splitting",
     srcs = ["allocation_live_range_splitting.c"],
     hdrs = ["allocation_live_range_splitting.h"],
@@ -598,6 +644,7 @@ loom_cc_library(
         ":memory_access_ir",
         ":packet",
         ":planning_statistics",
+        ":residency_contract",
         ":storage_lease",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/error:emitter",

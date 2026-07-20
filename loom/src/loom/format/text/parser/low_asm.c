@@ -807,6 +807,10 @@ static bool loom_low_asm_token_is_canonical_op(loom_token_t token) {
           iree_string_view_equal(token.text, IREE_SV("low.cond_br")) ||
           iree_string_view_equal(token.text, IREE_SV("low.func.call")) ||
           iree_string_view_equal(token.text, IREE_SV("low.op")) ||
+          iree_string_view_equal(token.text,
+                                 IREE_SV("low.residency.require")) ||
+          iree_string_view_equal(token.text,
+                                 IREE_SV("low.residency.candidate")) ||
           iree_string_view_equal(token.text, IREE_SV("low.scf.yield")) ||
           iree_string_view_equal(token.text, IREE_SV("low.scf.if")) ||
           iree_string_view_equal(token.text, IREE_SV("low.scf.for")));

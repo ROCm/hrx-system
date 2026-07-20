@@ -60,6 +60,8 @@ typedef enum loom_low_placement_cause_bits_e {
   LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD = 7,
   // Scheduled target-packet pair location affinity.
   LOOM_LOW_PLACEMENT_CAUSE_SCHEDULE_PAIR_AFFINITY = 8,
+  // low.residency.candidate source/result identity.
+  LOOM_LOW_PLACEMENT_CAUSE_LOW_RESIDENCY_CANDIDATE = 9,
 } loom_low_placement_cause_bits_t;
 typedef uint8_t loom_low_placement_cause_t;
 

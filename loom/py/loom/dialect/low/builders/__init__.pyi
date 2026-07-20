@@ -302,3 +302,25 @@ class LowBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> list[ValueRef]: ...
+    def require(
+        self,
+        *,
+        minimum: int,
+        preserve: bool,
+        projected_baseline: int,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def candidate(
+        self,
+        *,
+        candidate_id: int,
+        recompute_cost: int,
+        source: ValueRef,
+        captures: list[ValueRef] = ...,
+        results: list[Type | TiedResultSpec],
+        preserves_baseline: bool,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

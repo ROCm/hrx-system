@@ -242,6 +242,8 @@ enum loom_amdgpu_source_value_analysis_bit_e {
   LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_REGISTER_SHAPE = 1u << 3,
   LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_SGPR_I1_BOOL = 1u << 4,
   LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_SCC_I1_BOOL = 1u << 5,
+  // Query-local recursion guard for exclusion-sensitive native-mask walks.
+  LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_NATIVE_I1_MASK_RECURSION = 1u << 6,
 };
 
 typedef struct loom_amdgpu_source_value_analysis_record_t {
@@ -471,15 +473,23 @@ static bool loom_amdgpu_source_value_analysis_begin_bit(
   return true;
 }
 
-static void loom_amdgpu_source_value_analysis_end_bit(
+static void loom_amdgpu_source_value_analysis_end_active_bit(
     loom_amdgpu_source_value_analysis_t* analysis,
     loom_value_id_t source_value_id,
-    loom_amdgpu_source_value_analysis_bits_t bit, bool value) {
+    loom_amdgpu_source_value_analysis_bits_t bit) {
   loom_amdgpu_source_value_analysis_record_t* record =
       loom_amdgpu_source_value_analysis_lookup(analysis, source_value_id);
   if (record != NULL) {
     record->active_bits &= (loom_amdgpu_source_value_analysis_bits_t)~bit;
   }
+}
+
+static void loom_amdgpu_source_value_analysis_end_bit(
+    loom_amdgpu_source_value_analysis_t* analysis,
+    loom_value_id_t source_value_id,
+    loom_amdgpu_source_value_analysis_bits_t bit, bool value) {
+  loom_amdgpu_source_value_analysis_end_active_bit(analysis, source_value_id,
+                                                   bit);
   loom_amdgpu_source_value_analysis_record_bit(analysis, source_value_id, bit,
                                                value);
 }
@@ -1670,7 +1680,21 @@ static bool loom_amdgpu_source_i1_value_has_cross_block_use(
   const loom_use_t* uses = loom_value_uses(value);
   for (uint32_t i = 0; i < value->use_count; ++i) {
     const loom_op_t* user_op = loom_use_user_op(uses[i]);
-    if (user_op != NULL && user_op->parent_block != defining_op->parent_block) {
+    if (user_op == NULL) {
+      continue;
+    }
+    if (user_op->parent_block != defining_op->parent_block) {
+      return true;
+    }
+    // Fact identities do not materialize a new boolean. A transient SCC value
+    // remains invalid when a transparent result eventually leaves this block,
+    // so propagate that durability demand back to the original producer.
+    loom_value_id_t identity_result = LOOM_VALUE_ID_INVALID;
+    if (loom_amdgpu_fact_identity_use_result(
+            module, user_op, loom_use_operand_index(uses[i]), source_value_id,
+            &identity_result) &&
+        loom_amdgpu_source_i1_value_has_cross_block_use(module,
+                                                        identity_result)) {
       return true;
     }
   }
@@ -1858,7 +1882,18 @@ static bool loom_amdgpu_source_value_can_lower_as_sgpr_i1_bool(
   return false;
 }
 
+// Exclusion-sensitive native-mask queries walk both producer identities and
+// consumer identities. The traversal therefore needs an active-path guard in
+// addition to the memoized top-level result: a chain of transparent placement
+// markers is acyclic as SSA, but following both directions makes it cyclic as
+// an analysis graph.
 static bool loom_amdgpu_source_value_is_native_i1_mask_excluding(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis,
+    loom_value_id_t source_value_id, loom_value_id_t excluded_value_id);
+
+static bool loom_amdgpu_source_value_is_native_i1_mask_impl(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
     loom_amdgpu_source_value_analysis_t* analysis,
@@ -1982,6 +2017,28 @@ static bool loom_amdgpu_source_value_is_native_i1_mask_excluding(
   return iree_any_bit_set(loom_amdgpu_source_producer_flags(defining_op->kind),
                           LOOM_AMDGPU_SOURCE_PRODUCER_RESULT1_NATIVE_I1_MASK) &&
          loom_value_def_index(value) == 1;
+}
+
+static bool loom_amdgpu_source_value_is_native_i1_mask_excluding(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis,
+    loom_value_id_t source_value_id, loom_value_id_t excluded_value_id) {
+  const loom_amdgpu_source_value_analysis_bits_t recursion_bit =
+      LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_NATIVE_I1_MASK_RECURSION;
+  if (!loom_amdgpu_source_value_analysis_begin_bit(analysis, source_value_id,
+                                                   recursion_bit)) {
+    // Revisiting a value through transparent producer/use identities adds no
+    // native-mask demand. The owning frame continues through the remaining
+    // non-cyclic uses and producers.
+    return false;
+  }
+  const bool value = loom_amdgpu_source_value_is_native_i1_mask_impl(
+      module, fact_table, view_regions, analysis, source_value_id,
+      excluded_value_id);
+  loom_amdgpu_source_value_analysis_end_active_bit(analysis, source_value_id,
+                                                   recursion_bit);
+  return value;
 }
 
 static bool loom_amdgpu_analyzed_source_value_can_lower_as_sgpr_i1_bool(

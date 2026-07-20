@@ -53,6 +53,8 @@ enum loom_low_storage_relation_cause_e {
   LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_FOR = 6,
   // low.scf.yield payload/result or backedge affinity.
   LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_YIELD = 7,
+  // low.residency.candidate source/result identity.
+  LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_RESIDENCY_CANDIDATE = 8,
 };
 typedef uint8_t loom_low_storage_relation_cause_t;
 

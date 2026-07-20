@@ -136,6 +136,7 @@ loom_cc_library(
     loom::ir
     loom::ops::low
     loom::target::registers
+    loom::target::residency
     loom::util::cfg_graph
     loom::util::fact_table
   PUBLIC

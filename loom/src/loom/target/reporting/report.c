@@ -588,6 +588,48 @@ void loom_target_compile_report_record_target_resources(
       report, &report->target_resources);
 }
 
+static void loom_target_compile_report_accumulate_exact_residency(
+    loom_target_compile_report_exact_residency_t* target,
+    const loom_target_compile_report_exact_residency_t* source) {
+  const bool target_has_evaluated = target->evaluated_contract_count != 0;
+  target->contract_count += source->contract_count;
+  target->evaluated_contract_count += source->evaluated_contract_count;
+  target->unevaluated_contract_count += source->unevaluated_contract_count;
+  target->minimum_contract_count += source->minimum_contract_count;
+  target->preserve_contract_count += source->preserve_contract_count;
+  target->satisfied_contract_count += source->satisfied_contract_count;
+  target->unsatisfied_contract_count += source->unsatisfied_contract_count;
+  target->repaired_contract_count += source->repaired_contract_count;
+  target->projection_miss_count += source->projection_miss_count;
+  target->candidate_count += source->candidate_count;
+  target->attempted_candidate_count += source->attempted_candidate_count;
+  target->repair_count += source->repair_count;
+  target->maximum_required_tier =
+      iree_max(target->maximum_required_tier, source->maximum_required_tier);
+  target->maximum_minimum_tier =
+      iree_max(target->maximum_minimum_tier, source->maximum_minimum_tier);
+  target->maximum_projected_baseline_tier =
+      iree_max(target->maximum_projected_baseline_tier,
+               source->maximum_projected_baseline_tier);
+  if (source->evaluated_contract_count != 0) {
+    target->minimum_allocated_tier =
+        target_has_evaluated ? iree_min(target->minimum_allocated_tier,
+                                        source->minimum_allocated_tier)
+                             : source->minimum_allocated_tier;
+  }
+  target->maximum_tier_shortfall =
+      iree_max(target->maximum_tier_shortfall, source->maximum_tier_shortfall);
+}
+
+void loom_target_compile_report_record_exact_residency(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_exact_residency_t* exact_residency) {
+  if (exact_residency->contract_count == 0) return;
+  report->detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_EXACT_RESIDENCY;
+  loom_target_compile_report_accumulate_exact_residency(
+      &report->exact_residency, exact_residency);
+}
+
 iree_status_t loom_target_compile_report_record_pressure_summary(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_pressure_summary_t* summary) {
@@ -1021,12 +1063,17 @@ static void loom_target_compile_report_merge_entry_summary(
       LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX);
   const bool report_had_low_planning = iree_any_bit_set(
       report->detail_flags, LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING);
+  const bool report_had_exact_residency = iree_any_bit_set(
+      report->detail_flags, LOOM_TARGET_COMPILE_REPORT_DETAIL_EXACT_RESIDENCY);
   const bool entry_has_dynamic_instruction_mix = iree_any_bit_set(
       entry_report->detail_flags,
       LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX);
   const bool entry_has_low_planning =
       iree_any_bit_set(entry_report->detail_flags,
                        LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING);
+  const bool entry_has_exact_residency =
+      iree_any_bit_set(entry_report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_EXACT_RESIDENCY);
   const bool entry_has_source_low_data =
       entry_report->source_low_selected_op_count != 0 ||
       entry_report->source_low_emitted_op_count != 0 ||
@@ -1089,6 +1136,9 @@ static void loom_target_compile_report_merge_entry_summary(
     report->static_instruction_mix = entry_report->static_instruction_mix;
     report->dynamic_instruction_mix = entry_report->dynamic_instruction_mix;
     report->target_resources = entry_report->target_resources;
+    if (entry_has_exact_residency) {
+      report->exact_residency = entry_report->exact_residency;
+    }
     report->wait_plan = entry_report->wait_plan;
     report->workload = entry_report->workload;
     report->target_insertion_summary = entry_report->target_insertion_summary;
@@ -1202,6 +1252,14 @@ static void loom_target_compile_report_merge_entry_summary(
     report->detail_flags &= ~LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING;
     report->low_planning = (loom_low_planning_statistics_t){0};
   }
+  if (entry_has_exact_residency) {
+    if (report_had_exact_residency) {
+      loom_target_compile_report_accumulate_exact_residency(
+          &report->exact_residency, &entry_report->exact_residency);
+    } else {
+      report->exact_residency = entry_report->exact_residency;
+    }
+  }
   report->math_legalization_rewritten_op_count +=
       entry_report->math_legalization_rewritten_op_count;
   report->math_legalization_rejected_op_count +=
@@ -1292,6 +1350,7 @@ loom_target_compile_report_entry_from_report(
       .static_instruction_mix = entry_report->static_instruction_mix,
       .dynamic_instruction_mix = entry_report->dynamic_instruction_mix,
       .target_resources = entry_report->target_resources,
+      .exact_residency = entry_report->exact_residency,
       .wait_plan = entry_report->wait_plan,
       .workload = entry_report->workload,
       .low_planning = entry_report->low_planning,
