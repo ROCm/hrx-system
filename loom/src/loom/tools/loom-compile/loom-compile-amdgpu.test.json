@@ -78,6 +78,219 @@
       ]
     },
     {
+      "name": "specializes configured fragment banks before gfx1250 lowering",
+      "steps": [
+        {
+          "name": "compile-1x1x1",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx1250_configured_fragment_bank.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--config=test.fragment_bank.m_fragments=1",
+              "--config=test.fragment_bank.n_fragments=1",
+              "--config=test.fragment_bank.k_fragments=1",
+              "--config=test.fragment_bank.workgroup_size=32",
+              "--config=test.fragment_bank.scratch_elements=32",
+              "--output={tmp}/configured_fragment_bank_1x1x1.hal",
+              "--emit-target-artifact={tmp}/configured_fragment_bank_1x1x1.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"key\":\"test.fragment_bank.m_fragments\",\"value\":\"1\"",
+                "\"key\":\"test.fragment_bank.n_fragments\",\"value\":\"1\"",
+                "\"key\":\"test.fragment_bank.k_fragments\",\"value\":\"1\"",
+                "\"wmma_count\":1",
+                "\"wmma_count\":2",
+                "\"private_memory_bytes\":0",
+                "\"allocation_spill_count\":0"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/configured_fragment_bank_1x1x1.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-2x1x2",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx1250_configured_fragment_bank.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--config=test.fragment_bank.m_fragments=2",
+              "--config=test.fragment_bank.n_fragments=1",
+              "--config=test.fragment_bank.k_fragments=2",
+              "--config=test.fragment_bank.workgroup_size=32",
+              "--config=test.fragment_bank.scratch_elements=32",
+              "--output={tmp}/configured_fragment_bank_2x1x2.hal",
+              "--emit-target-artifact={tmp}/configured_fragment_bank_2x1x2.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"key\":\"test.fragment_bank.m_fragments\",\"value\":\"2\"",
+                "\"key\":\"test.fragment_bank.n_fragments\",\"value\":\"1\"",
+                "\"key\":\"test.fragment_bank.k_fragments\",\"value\":\"2\"",
+                "\"wmma_count\":4",
+                "\"wmma_count\":8",
+                "\"private_memory_bytes\":0",
+                "\"allocation_spill_count\":0"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/configured_fragment_bank_2x1x2.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-8x4x2",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx1250_configured_fragment_bank.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--config=test.fragment_bank.m_fragments=8",
+              "--config=test.fragment_bank.n_fragments=4",
+              "--config=test.fragment_bank.k_fragments=2",
+              "--config=test.fragment_bank.workgroup_size=32",
+              "--config=test.fragment_bank.scratch_elements=32",
+              "--output={tmp}/configured_fragment_bank_8x4x2.hal",
+              "--emit-target-artifact={tmp}/configured_fragment_bank_8x4x2.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"key\":\"test.fragment_bank.m_fragments\",\"value\":\"8\"",
+                "\"key\":\"test.fragment_bank.n_fragments\",\"value\":\"4\"",
+                "\"key\":\"test.fragment_bank.k_fragments\",\"value\":\"2\"",
+                "\"wmma_count\":64",
+                "\"wmma_count\":128",
+                "\"private_memory_bytes\":0",
+                "\"allocation_spill_count\":0"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/configured_fragment_bank_8x4x2.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rejects invalid configured gfx1250 launch and storage contracts",
+      "steps": [
+        {
+          "name": "reject-scratch-smaller-than-workgroup",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx1250_configured_fragment_bank.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--config=test.fragment_bank.m_fragments=1",
+              "--config=test.fragment_bank.n_fragments=1",
+              "--config=test.fragment_bank.k_fragments=1",
+              "--config=test.fragment_bank.workgroup_size=64",
+              "--config=test.fragment_bank.scratch_elements=32",
+              "--output={tmp}/unused.hal"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": {
+              "unordered": [
+                "error [SUBRANGE/011]",
+                "origin + 1 <= view_bound",
+                "view_bound is 32"
+              ]
+            }
+          }
+        },
+        {
+          "name": "reject-oversized-workgroup",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx1250_configured_fragment_bank.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--config=test.fragment_bank.m_fragments=1",
+              "--config=test.fragment_bank.n_fragments=1",
+              "--config=test.fragment_bank.k_fragments=1",
+              "--config=test.fragment_bank.workgroup_size=2048",
+              "--config=test.fragment_bank.scratch_elements=2048",
+              "--output={tmp}/unused.hal"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": {
+              "unordered": [
+                "error [TARGET/024]",
+                "workgroup x size 2048 exceeds target limit 1024"
+              ]
+            }
+          }
+        },
+        {
+          "name": "reject-oversized-workgroup-storage",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/gfx1250_configured_fragment_bank.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--config=test.fragment_bank.m_fragments=1",
+              "--config=test.fragment_bank.n_fragments=1",
+              "--config=test.fragment_bank.k_fragments=1",
+              "--config=test.fragment_bank.workgroup_size=32",
+              "--config=test.fragment_bank.scratch_elements=100000",
+              "--output={tmp}/unused.hal"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": {
+              "unordered": [
+                "error [TARGET/051]",
+                "reserves 400000 byte(s) of workgroup storage",
+                "target limit 327680"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "reports gfx125x target-inserted address-state economics",
       "steps": [
         {
