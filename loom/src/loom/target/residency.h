@@ -220,6 +220,14 @@ typedef struct loom_target_residency_query_t {
   iree_host_size_t limiting_resource_count;
 } loom_target_residency_query_t;
 
+// Validated whole-model tier evaluator for repeated pressure queries.
+typedef struct loom_target_residency_evaluator_t {
+  // Immutable validated model, or NULL when residency is unavailable.
+  const loom_target_residency_model_t* model;
+  // Direct resource vector length required by |model|.
+  iree_host_size_t direct_resource_count;
+} loom_target_residency_evaluator_t;
+
 // Returns true when |table| contains no direct resources and no cliffs.
 static inline bool loom_target_residency_direct_resource_table_is_empty(
     const loom_target_residency_direct_resource_table_t* table) {
@@ -274,6 +282,35 @@ void loom_target_residency_evaluate_cliffs(
     const loom_target_residency_cliff_t* cliffs, iree_host_size_t cliff_count,
     uint32_t initial_tier, uint64_t units,
     loom_target_residency_cliff_evaluation_t* out_evaluation);
+
+// Validates |model| once and prepares a repeated whole-tier evaluator.
+//
+// A null model succeeds and creates an unavailable evaluator whose tier is
+// always zero.
+iree_status_t loom_target_residency_evaluator_initialize(
+    const loom_target_residency_model_t* model,
+    loom_target_residency_evaluator_t* out_evaluator);
+
+// Evaluates one direct-resource vector with a prepared evaluator.
+//
+// This performs no allocation and does not revalidate immutable model tables.
+// |direct_resource_units| must have exactly the count captured by initialize.
+iree_status_t loom_target_residency_evaluator_evaluate_tier(
+    const loom_target_residency_evaluator_t* evaluator,
+    const uint64_t* direct_resource_units,
+    iree_host_size_t direct_resource_unit_count, uint32_t* out_tier);
+
+// Evaluates only the whole-model residency tier without allocating storage.
+//
+// |direct_resource_units| is dense by direct resource ID and must exactly
+// match the model's direct resource count. A null model succeeds with tier zero
+// when no direct resource values are supplied. This is the hot-path query for
+// pressure sweeps; use |loom_target_residency_query| when transition distances
+// and limiting-resource diagnostics are required.
+iree_status_t loom_target_residency_evaluate_tier(
+    const loom_target_residency_model_t* model,
+    const uint64_t* direct_resource_units,
+    iree_host_size_t direct_resource_unit_count, uint32_t* out_tier);
 
 // Evaluates all resources and the resulting whole-model residency tier.
 //

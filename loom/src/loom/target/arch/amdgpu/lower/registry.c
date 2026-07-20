@@ -69,6 +69,7 @@
 #include "loom/target/arch/amdgpu/lower/value/vector_construct.h"
 #include "loom/target/arch/amdgpu/lower/value/vector_conversion.h"
 #include "loom/target/arch/amdgpu/lower/workgroup.h"
+#include "loom/target/arch/amdgpu/planning/occupancy_model.h"
 
 typedef struct loom_amdgpu_lower_dispatch_row_t
     loom_amdgpu_lower_dispatch_row_t;
@@ -1547,6 +1548,16 @@ static_assert(IREE_ARRAYSIZE(kAmdgpuRuleSets) ==
                   LOOM_AMDGPU_RULE_SET_INDEX_COUNT_,
               "AMDGPU rule-set index enum must match the rule-set table");
 
+static const loom_target_residency_model_t* loom_amdgpu_residency_model(
+    void* user_data,
+    const loom_target_contract_query_environment_t* environment) {
+  (void)user_data;
+  const loom_amdgpu_occupancy_model_t* occupancy_model =
+      loom_amdgpu_occupancy_model_for_descriptor_set_ordinal(
+          environment->descriptor_set->descriptor_set_ordinal);
+  return occupancy_model == NULL ? NULL : &occupancy_model->residency_model;
+}
+
 static const loom_low_lower_policy_t kAmdgpuLowLowerPolicy = {
     .name = IREE_SVL("amdgpu-register-lower"),
     .error_catalog = &loom_amdgpu_error_catalog,
@@ -1554,6 +1565,7 @@ static const loom_low_lower_policy_t kAmdgpuLowLowerPolicy = {
     .map_value = {.fn = loom_amdgpu_map_value, .user_data = NULL},
     .map_contract_value = {.fn = loom_amdgpu_map_contract_value,
                            .user_data = NULL},
+    .residency_model = {.fn = loom_amdgpu_residency_model, .user_data = NULL},
     .map_argument = {.fn = loom_amdgpu_map_argument, .user_data = NULL},
     .map_abi_layout = {.fn = loom_amdgpu_map_abi_layout, .user_data = NULL},
     .emit_preamble = {.fn = loom_amdgpu_emit_preamble, .user_data = NULL},
