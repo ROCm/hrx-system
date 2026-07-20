@@ -433,14 +433,15 @@ static iree_status_t FakeLocalExecutableIssueCall(
 }
 
 static const iree_hal_local_executable_vtable_t kFakeLocalExecutableVTable = {
-    {
-        FakeLocalExecutableDestroy,
-        FakeLocalExecutableFunctionCount,
-        FakeLocalExecutableFunctionInfo,
-        FakeLocalExecutableFunctionParameters,
-        FakeLocalExecutableLookupFunctionByName,
-    },
-    FakeLocalExecutableIssueCall,
+    .base =
+        {
+            .destroy = FakeLocalExecutableDestroy,
+            .function_count = FakeLocalExecutableFunctionCount,
+            .function_info = FakeLocalExecutableFunctionInfo,
+            .function_parameters = FakeLocalExecutableFunctionParameters,
+            .lookup_function_by_name = FakeLocalExecutableLookupFunctionByName,
+        },
+    .issue_call = FakeLocalExecutableIssueCall,
 };
 
 class LocalProfileRecorderTest : public ::testing::Test {

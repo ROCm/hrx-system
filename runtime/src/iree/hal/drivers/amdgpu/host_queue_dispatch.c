@@ -383,6 +383,11 @@ static iree_status_t iree_hal_amdgpu_host_queue_prepare_dispatch_plan(
 
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_lookup_dispatch_descriptor(
       queue, executable, export_ordinal, &out_plan->descriptor));
+  if (config.runtime_parameters) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
+            out_plan->descriptor, config));
+  }
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_select_dispatch_kernel_args(
       out_plan->descriptor, config, &out_plan->override_kernel_args,
       &out_plan->kernel_args));
@@ -533,8 +538,9 @@ static void iree_hal_amdgpu_host_queue_emplace_native_implicit_args(
 static void iree_hal_amdgpu_host_queue_emplace_dispatch_kernargs(
     const iree_hal_amdgpu_host_queue_dispatch_plan_t* plan,
     const uint32_t workgroup_count[3], uint32_t dynamic_workgroup_local_memory,
-    iree_const_byte_span_t constants, const uint64_t* binding_ptrs,
-    bool uses_custom_direct_arguments, void* kernarg_data) {
+    const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
+    const uint64_t* binding_ptrs, bool uses_custom_direct_arguments,
+    void* kernarg_data) {
   if (uses_custom_direct_arguments) {
     iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
         plan->custom_layout, constants.data, constants.data_length,
@@ -542,6 +548,10 @@ static void iree_hal_amdgpu_host_queue_emplace_dispatch_kernargs(
     iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
         plan->kernel_args, workgroup_count, dynamic_workgroup_local_memory,
         plan->custom_layout, kernarg_data);
+    if (config.runtime_parameters) {
+      iree_hal_amdgpu_executable_apply_runtime_parameter_patches(config,
+                                                                 kernarg_data);
+    }
     return;
   }
 
@@ -550,6 +560,10 @@ static void iree_hal_amdgpu_host_queue_emplace_dispatch_kernargs(
   iree_hal_amdgpu_host_queue_emplace_native_implicit_args(
       plan->kernel_args, workgroup_count, dynamic_workgroup_local_memory,
       plan->kernarg_layout, kernarg_data);
+  if (config.runtime_parameters) {
+    iree_hal_amdgpu_executable_apply_runtime_parameter_patches(config,
+                                                               kernarg_data);
+  }
 }
 
 static bool iree_hal_amdgpu_host_queue_should_profile_dispatch(
@@ -765,7 +779,7 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_dispatch_packets(
                                                : config.workgroup_count;
   iree_hal_amdgpu_host_queue_emplace_dispatch_kernargs(
       plan, target_workgroup_count, config.dynamic_workgroup_local_memory,
-      constants, binding_ptrs, uses_custom_direct_arguments,
+      config, constants, binding_ptrs, uses_custom_direct_arguments,
       dispatch_kernarg_data);
   iree_hsa_signal_t dispatch_completion_signal =
       profile_queue_device_event

@@ -154,6 +154,8 @@ struct iree_hal_amdgpu_pending_op_t {
       iree_hal_executable_function_t export_ordinal;
       // Dispatch workgroup configuration captured from queue_dispatch.
       iree_hal_dispatch_config_t config;
+      // Runtime parameter list owned by this deferred operation when present.
+      iree_hal_dispatch_runtime_parameter_list_t runtime_parameters;
       // Arena-owned copy of dispatch constants.
       iree_const_byte_span_t constants;
       // Arena-owned copy of dispatch buffer references.

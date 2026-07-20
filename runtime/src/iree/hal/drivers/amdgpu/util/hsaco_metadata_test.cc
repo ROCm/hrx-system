@@ -131,6 +131,7 @@ enum BuildKernelMetadataFlagBits : uint32_t {
   kBuildKernelMetadataOutOfRangeArg = 1u << 0,
   kBuildKernelMetadataUnknownValueKind = 1u << 1,
   kBuildKernelMetadataClusterDimensions = 1u << 2,
+  kBuildKernelMetadataPrintf = 1u << 3,
 };
 
 static std::vector<uint8_t> BuildKernelMetadata(
@@ -141,8 +142,9 @@ static std::vector<uint8_t> BuildKernelMetadata(
       (flags & kBuildKernelMetadataUnknownValueKind) != 0;
   const bool has_cluster_dimensions =
       (flags & kBuildKernelMetadataClusterDimensions) != 0;
+  const bool include_printf = (flags & kBuildKernelMetadataPrintf) != 0;
   std::vector<uint8_t> output;
-  AppendMsgPackMap(&output, 3);
+  AppendMsgPackMap(&output, include_printf ? 4 : 3);
 
   AppendMsgPackString(&output, IREE_SV("amdhsa.version"));
   AppendMsgPackArray(&output, 2);
@@ -156,13 +158,14 @@ static std::vector<uint8_t> BuildKernelMetadata(
 
   AppendMsgPackString(&output, IREE_SV("amdhsa.kernels"));
   AppendMsgPackArray(&output, 1);
-  AppendMsgPackMap(&output, 8 + (has_cluster_dimensions ? 1 : 0));
+  AppendMsgPackMap(&output, 9 + (has_cluster_dimensions ? 1 : 0));
   AppendStringField(&output, IREE_SV(".name"), IREE_SV("vector_add"));
   AppendStringField(&output, IREE_SV(".symbol"), IREE_SV("vector_add.kd"));
   AppendUintField(&output, IREE_SV(".kernarg_segment_size"), 24);
   AppendUintField(&output, IREE_SV(".kernarg_segment_align"), 8);
   AppendUintField(&output, IREE_SV(".group_segment_fixed_size"), 1024);
   AppendUintField(&output, IREE_SV(".private_segment_fixed_size"), 64);
+  AppendUintField(&output, IREE_SV(".max_flat_workgroup_size"), 256);
   AppendMsgPackString(&output, IREE_SV(".reqd_workgroup_size"));
   AppendMsgPackArray(&output, 3);
   AppendMsgPackUint(&output, 16);
@@ -214,6 +217,14 @@ static std::vector<uint8_t> BuildKernelMetadata(
   AppendUintField(&output, IREE_SV(".size"), out_of_range_arg ? 8 : 4);
   AppendStringField(&output, IREE_SV(".value_kind"), IREE_SV("by_value"));
   AppendUintField(&output, IREE_SV(".align"), 4);
+
+  if (include_printf) {
+    AppendMsgPackString(&output, IREE_SV("amdhsa.printf"));
+    AppendMsgPackArray(&output, 2);
+    AppendMsgPackString(&output,
+                        IREE_SV("0:0:8addc4c0362218ac,Hello World!\\n"));
+    AppendMsgPackString(&output, IREE_SV("0:0:1122334455667788,value=%d\\n"));
+  }
 
   return output;
 }
@@ -504,6 +515,7 @@ TEST(HsacoMetadataTest, ParsesValidMetadata) {
   EXPECT_EQ(kernel.kernarg_segment_alignment, 8);
   EXPECT_EQ(kernel.group_segment_fixed_size, 1024);
   EXPECT_EQ(kernel.private_segment_fixed_size, 64);
+  EXPECT_EQ(kernel.max_flat_workgroup_size, 256);
   ASSERT_TRUE(kernel.has_required_workgroup_size);
   EXPECT_EQ(kernel.required_workgroup_size[0], 16);
   EXPECT_EQ(kernel.required_workgroup_size[1], 4);
@@ -541,6 +553,24 @@ TEST(HsacoMetadataTest, ParsesValidMetadata) {
   EXPECT_EQ(kernel.args[3].size, 4);
   EXPECT_EQ(kernel.args[3].kind,
             IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_BY_VALUE);
+
+  iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);
+}
+
+TEST(HsacoMetadataTest, ParsesPrintfMetadata) {
+  std::vector<uint8_t> elf =
+      BuildElfWithMetadata(BuildKernelMetadata(kBuildKernelMetadataPrintf));
+
+  iree_hal_amdgpu_hsaco_metadata_t metadata;
+  IREE_ASSERT_OK(iree_hal_amdgpu_hsaco_metadata_initialize_from_elf(
+      ByteSpan(elf), iree_allocator_system(), &metadata));
+
+  ASSERT_EQ(metadata.printf_record_count, 2);
+  ASSERT_NE(metadata.printf_records, nullptr);
+  EXPECT_EQ(ToString(metadata.printf_records[0].value),
+            "0:0:8addc4c0362218ac,Hello World!\\n");
+  EXPECT_EQ(ToString(metadata.printf_records[1].value),
+            "0:0:1122334455667788,value=%d\\n");
 
   iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);
 }

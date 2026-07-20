@@ -187,6 +187,8 @@ iree_status_t iree_hal_amdgpu_physical_device_options_verify(
 // A physical device representing an HSA GPU agent.
 // May contain one or more HAL queues that map to HSA queues on the agent.
 typedef struct iree_hal_amdgpu_physical_device_t {
+  // HSA API handle used for physical-device-owned raw HSA allocations.
+  const iree_hal_amdgpu_libhsa_t* libhsa;
   // GPU agent.
   hsa_agent_t device_agent;
   // Ordinal of the GPU agent within the topology.
@@ -232,6 +234,9 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   iree_hal_amdgpu_memory_system_capabilities_t memory_system;
   // Clustered-dispatch limits reported for this GPU agent.
   iree_hal_amdgpu_workgroup_cluster_capabilities_t workgroup_cluster;
+  // True when this GPU's link to nearest host fine-grained memory supports
+  // native atomic transactions.
+  uint32_t host_native_atomic_supported : 1;
   // CPU-visible coarse-grained device-memory capability for this GPU.
   iree_hal_amdgpu_cpu_visible_device_coarse_memory_t
       cpu_visible_device_coarse_memory;

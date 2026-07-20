@@ -614,6 +614,10 @@ static hipError_t iree_hip_get_per_thread_stream_state(
   return hipSuccess;
 }
 
+// HIP reports a successful zero-size malloc by returning NULL. Keep just enough
+// thread-local state for hipMemPtrGetInfo(NULL, &size) to report that result.
+static IREE_THREAD_LOCAL bool iree_hip_zero_size_allocation_pending = false;
+
 static void iree_hip_thread_error_set(hipError_t error, bool sticky) {
   iree_hip_thread_error.last_error = error;
   iree_hip_thread_error.sticky = sticky;
@@ -1772,7 +1776,8 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->maxBlocksPerMultiProcessor = device_obj->max_blocks_per_multiprocessor;
   prop->accessPolicyMaxWindowSize = 0;
   prop->reservedSharedMemPerBlock = 0;
-  prop->hostNativeAtomicSupported = is_gfx1100 ? 1 : 0;
+  prop->hostNativeAtomicSupported =
+      device_obj->host_native_atomic_supported ? 1 : 0;
   prop->memoryPoolsSupported = is_gfx1100 ? 1 : 0;
   prop->hostRegisterSupported = 1;
   prop->hostRegisterReadOnlySupported = 1;
@@ -1947,6 +1952,9 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       break;
     case hipDeviceAttributeManagedMemory:
       *value = 1;
+      break;
+    case hipDeviceAttributeHostNativeAtomicSupported:
+      *value = device_obj->host_native_atomic_supported ? 1 : 0;
       break;
     case hipDeviceAttributeHostRegisterSupported:
       *value = 1;
@@ -2631,6 +2639,10 @@ HIPAPI hipError_t hipDeviceSynchronize(void) {
   }
 
   iree_status_t status = iree_hal_streaming_context_synchronize(context);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_context_symbol_map_synchronize_managed_data(
+        &context->symbol_map);
+  }
   hipError_t result = iree_status_to_hip_result(status);
   HIP_DEBUG_LOG(
       "[HIP_API] hipDeviceSynchronize() returned %d (sync_count=%d)\n", result,
@@ -4325,6 +4337,7 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  iree_hip_zero_size_allocation_pending = false;
 
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
@@ -4342,6 +4355,7 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
 
   if (size == 0) {
     *ptr = NULL;
+    iree_hip_zero_size_allocation_pending = true;
     IREE_TRACE_ZONE_END(z0);
     return hipSuccess;
   }
@@ -4491,6 +4505,11 @@ HIPAPI hipError_t hipMallocPitch(void** devPtr, size_t* pitch, size_t width,
 HIPAPI hipError_t hipFree(void* ptr) {
   HIP_DEBUG_LOG("[HIP_API] hipFree(%p)\n", ptr);
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (!ptr) {
+    iree_hip_zero_size_allocation_pending = false;
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
 
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
@@ -4635,6 +4654,11 @@ HIPAPI hipError_t hipMallocHost(void** ptr, size_t size) {
 // See also: hipMalloc, hipFreeHost, hipFreeAsync.
 HIPAPI hipError_t hipFreeHost(void* ptr) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (!ptr) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
   hipError_t init_result = iree_hip_ensure_context(&context);
@@ -5277,7 +5301,17 @@ HIPAPI hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr) {
 HIPAPI hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (!ptr || !size) {
+  if (!size) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (!ptr) {
+    if (iree_hip_zero_size_allocation_pending) {
+      iree_hip_zero_size_allocation_pending = false;
+      *size = 0;
+      IREE_TRACE_ZONE_END(z0);
+      return hipSuccess;
+    }
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -9970,6 +10004,10 @@ HIPAPI hipError_t hipStreamSynchronize(hipStream_t stream) {
 
     iree_status_t status =
         iree_hal_streaming_context_synchronize_legacy_default(context);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_context_symbol_map_synchronize_managed_data(
+          &context->symbol_map);
+    }
     hipError_t result = iree_status_to_hip_result(status);
     IREE_TRACE_ZONE_END(z0);
     return result;
@@ -9983,6 +10021,10 @@ HIPAPI hipError_t hipStreamSynchronize(hipStream_t stream) {
 
   iree_status_t status =
       iree_hal_streaming_stream_synchronize(streaming_stream);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_context_symbol_map_synchronize_managed_data(
+        &streaming_stream->context->symbol_map);
+  }
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -10471,6 +10513,10 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
   }
 
   iree_status_t status = iree_hal_streaming_event_synchronize(streaming_event);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_context_symbol_map_synchronize_managed_data(
+        &streaming_event->context->symbol_map);
+  }
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -13362,11 +13408,41 @@ HIPAPI hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t init_result = iree_hip_ensure_context(&context);
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
+  }
+  if (!ptr) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
   // Query each attribute individually using hipPointerGetAttribute.
   hipError_t result = hipSuccess;
   for (unsigned int i = 0; i < numAttributes; i++) {
-    hipError_t attr_result =
-        hipPointerGetAttribute(data[i], attributes[i], (hipDeviceptr_t)ptr);
+    hipError_t attr_result = hipSuccess;
+    if (!data[i]) {
+      attr_result = hipErrorInvalidValue;
+    } else if (attributes[i] == HIP_POINTER_ATTRIBUTE_HOST_POINTER) {
+      iree_hal_streaming_buffer_ref_t buffer_ref;
+      iree_hal_streaming_context_t* owner_context = NULL;
+      attr_result = iree_hip_lookup_streaming_range_with_owner(
+          context, ptr, 1, &owner_context, &buffer_ref);
+      if (attr_result == hipSuccess) {
+        *(void**)data[i] =
+            buffer_ref.buffer->host_ptr
+                ? (void*)((iree_host_size_t)buffer_ref.buffer->host_ptr +
+                          buffer_ref.offset)
+                : NULL;
+        iree_hal_streaming_context_release(owner_context);
+      }
+    } else {
+      attr_result =
+          hipPointerGetAttribute(data[i], attributes[i], (hipDeviceptr_t)ptr);
+    }
     if (attr_result != hipSuccess) {
       // Return the first error encountered.
       if (result == hipSuccess) {
@@ -21726,12 +21802,13 @@ HIPAPI hipError_t hipFreeAsync(void* ptr, hipStream_t stream) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(resolve_result);
   }
+  if (!ptr) {
+    iree_hip_zero_size_allocation_pending = false;
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
 
   if (stream_obj->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
-    if (!ptr) {
-      IREE_TRACE_ZONE_END(z0);
-      return hipSuccess;
-    }
     hipGraphNode_t node = NULL;
     hipError_t result = hipGraphAddMemFreeNode(
         &node, (hipGraph_t)stream_obj->capture_graph,
@@ -22556,11 +22633,12 @@ HIPAPI void __hipRegisterManagedVar(void* hipModule, void** pointer,
   iree_status_t status =
       iree_hal_streaming_global_symbol_registry_insert_managed_variable(
           registry, (iree_hal_streaming_module_registration_t*)hipModule,
-          managed_pointer ? managed_pointer : pointer, name, size, align);
+          managed_pointer ? managed_pointer : pointer, name, size, align,
+          managed_pointer);
   if (iree_status_is_ok(status) && (void*)pointer != managed_pointer) {
     status = iree_hal_streaming_global_symbol_registry_insert_managed_variable(
         registry, (iree_hal_streaming_module_registration_t*)hipModule, pointer,
-        name, size, align);
+        name, size, align, managed_pointer);
   }
   iree_status_ignore(status);
 }

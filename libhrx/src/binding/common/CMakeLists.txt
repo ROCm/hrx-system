@@ -13,6 +13,7 @@ iree_cc_library(
     "hrx_bridge.h"
     "internal.h"
     "kernel_arguments.h"
+    "printf_format.h"
     "tls.h"
   SRCS
     "context.c"
@@ -27,8 +28,10 @@ iree_cc_library(
     "mem_pool.c"
     "memory.c"
     "module.c"
+    "module_runtime_metadata.c"
     "peer.c"
     "registry.c"
+    "rocm_hostcall.c"
     "stream.c"
     "tls.c"
   DEPS
@@ -97,6 +100,19 @@ iree_cc_test(
     fat_binary_test
   SRCS
     "fat_binary_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    rocm_hostcall_test
+  SRCS
+    "rocm_hostcall_test.cc"
   DEPS
     ::common
     iree::base

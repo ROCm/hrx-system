@@ -31,9 +31,14 @@ typedef struct iree_hal_amdgpu_device_dispatch_kernarg_layout_t {
   // Fixed size in bytes of explicitly provided dispatch arguments, or zero
   // when the caller-provided byte count is dynamic.
   size_t explicit_kernarg_size;
-  // Offset in bytes of the implicit HIP/OpenCL suffix, if present.
+  // Offset in bytes of the implicit HIP/OpenCL suffix, if present. Metadata-
+  // derived fixed layouts require all visible arguments to end at or before
+  // this offset; interleaved visible/hidden/visible layouts are rejected while
+  // loading the executable.
   size_t implicit_args_offset;
-  // Total kernarg reservation size in bytes required for this dispatch.
+  // Total kernarg reservation size in bytes required for this dispatch. Fixed
+  // layouts cover the explicit prefix and any implicit suffix; zero means the
+  // caller-provided byte count determines the reservation size.
   size_t total_kernarg_size;
   // True if a HIP/OpenCL implicit args suffix is appended at
   // |implicit_args_offset| and must be populated during emplace.

@@ -79,6 +79,7 @@ HRX_DEPS = [
     "//runtime/src/iree/vm/bytecode:module",
 ] + iree_select({
     "//runtime/config/hal:driver_amdgpu": [
+        "//runtime/src/iree/hal/drivers/amdgpu:device_spec",
         "//runtime/src/iree/hal/drivers/amdgpu/registration",
     ],
     "//conditions:default": [],

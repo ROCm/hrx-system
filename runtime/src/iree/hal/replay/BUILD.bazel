@@ -20,6 +20,7 @@ iree_runtime_cc_library(
     hdrs = ["format.h"],
     deps = [
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
     ],
 )
 
@@ -148,6 +149,7 @@ iree_runtime_cc_test(
     deps = [
         ":execute",
         ":file_reader",
+        ":file_writer",
         ":recorder",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",

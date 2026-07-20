@@ -7,6 +7,188 @@
 #include <string.h>
 
 #include "common/internal.h"
+#include "iree/hal/buffer_transfer.h"
+
+//===----------------------------------------------------------------------===//
+// ROCm device runtime state
+//===----------------------------------------------------------------------===//
+
+// ROCm device libraries expect hidden_heap_v1 to point at a heap header with
+// fixed recordable-kind slots and an initial slab window. Streaming owns that
+// HIP runtime policy; HAL drivers only expose the metadata slot and patch the
+// supplied bytes into native launch arguments.
+#define IREE_HAL_STREAMING_ROCM_MALLOC_HEAP_SIZE (128 * 1024)
+#define IREE_HAL_STREAMING_ROCM_MALLOC_KIND_COUNT 16
+#define IREE_HAL_STREAMING_ROCM_MALLOC_NUM_SDATA 256
+#define IREE_HAL_STREAMING_ROCM_MALLOC_RECORDABLE_OFFSET 4096
+#define IREE_HAL_STREAMING_ROCM_MALLOC_RECORDABLE_STRIDE 128
+#define IREE_HAL_STREAMING_ROCM_MALLOC_INITIAL_SLABS_OFFSET 108544
+#define IREE_HAL_STREAMING_ROCM_MALLOC_INITIAL_SLAB_SIZE (2 * 1024 * 1024)
+static_assert(IREE_HAL_STREAMING_ROCM_MALLOC_RECORDABLE_OFFSET +
+                      IREE_HAL_STREAMING_ROCM_MALLOC_KIND_COUNT *
+                          IREE_HAL_STREAMING_ROCM_MALLOC_RECORDABLE_STRIDE <=
+                  IREE_HAL_STREAMING_ROCM_MALLOC_HEAP_SIZE,
+              "device malloc recordable table must fit in heap header");
+static_assert(IREE_HAL_STREAMING_ROCM_MALLOC_INITIAL_SLABS_OFFSET +
+                      3 * sizeof(uint64_t) <=
+                  IREE_HAL_STREAMING_ROCM_MALLOC_HEAP_SIZE,
+              "device malloc initial slab table must fit in heap header");
+
+static void iree_hal_streaming_rocm_store_u32(uint8_t* storage,
+                                              iree_host_size_t offset,
+                                              uint32_t value) {
+  memcpy(storage + offset, &value, sizeof(value));
+}
+
+static void iree_hal_streaming_rocm_store_u64(uint8_t* storage,
+                                              iree_host_size_t offset,
+                                              uint64_t value) {
+  memcpy(storage + offset, &value, sizeof(value));
+}
+
+static iree_status_t iree_hal_streaming_rocm_populate_malloc_heap_header(
+    void* heap_storage, uint64_t initial_slabs_device_ptr,
+    iree_device_size_t initial_slab_bytes) {
+  if (IREE_UNLIKELY(initial_slab_bytes >
+                    UINT64_MAX - initial_slabs_device_ptr)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "ROCm device malloc initial slab range overflow");
+  }
+
+  uint8_t* heap = (uint8_t*)heap_storage;
+  memset(heap, 0, IREE_HAL_STREAMING_ROCM_MALLOC_HEAP_SIZE);
+
+  for (uint32_t i = 0; i < IREE_HAL_STREAMING_ROCM_MALLOC_KIND_COUNT; ++i) {
+    const iree_host_size_t offset =
+        IREE_HAL_STREAMING_ROCM_MALLOC_RECORDABLE_OFFSET +
+        (iree_host_size_t)i * IREE_HAL_STREAMING_ROCM_MALLOC_RECORDABLE_STRIDE;
+    iree_hal_streaming_rocm_store_u32(heap, offset,
+                                      IREE_HAL_STREAMING_ROCM_MALLOC_NUM_SDATA);
+  }
+
+  const uint64_t initial_slabs_start = initial_slabs_device_ptr;
+  const uint64_t initial_slabs_end =
+      initial_slabs_start + (uint64_t)initial_slab_bytes;
+  iree_hal_streaming_rocm_store_u64(
+      heap, IREE_HAL_STREAMING_ROCM_MALLOC_INITIAL_SLABS_OFFSET,
+      initial_slabs_start);
+  iree_hal_streaming_rocm_store_u64(
+      heap,
+      IREE_HAL_STREAMING_ROCM_MALLOC_INITIAL_SLABS_OFFSET + sizeof(uint64_t),
+      initial_slabs_end);
+  iree_hal_streaming_rocm_store_u64(
+      heap,
+      IREE_HAL_STREAMING_ROCM_MALLOC_INITIAL_SLABS_OFFSET +
+          2 * sizeof(uint64_t),
+      initial_slabs_start);
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_streaming_rocm_allocate_device_buffer(
+    iree_hal_streaming_context_t* context, iree_hal_buffer_usage_t usage,
+    iree_device_size_t allocation_size, iree_hal_buffer_t** out_buffer,
+    uint64_t* out_device_ptr) {
+  *out_buffer = NULL;
+  *out_device_ptr = 0;
+
+  iree_hal_buffer_params_t params = {
+      .usage = usage | IREE_HAL_BUFFER_USAGE_SHARING_EXPORT,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .queue_affinity = context->queue_affinity,
+  };
+
+  iree_hal_buffer_t* buffer = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
+      context->device_allocator, params, allocation_size, &buffer));
+
+  iree_hal_external_buffer_t external_buffer;
+  iree_status_t status = iree_hal_allocator_export_buffer(
+      context->device_allocator, buffer,
+      IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+      IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external_buffer);
+  if (iree_status_is_ok(status)) {
+    *out_buffer = buffer;
+    *out_device_ptr = external_buffer.handle.device_allocation.ptr;
+  } else {
+    iree_hal_buffer_release(buffer);
+  }
+  return status;
+}
+
+static iree_status_t
+iree_hal_streaming_context_initialize_rocm_device_runtime_locked(
+    iree_hal_streaming_context_t* context) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  const iree_device_size_t requested_heap_size =
+      (iree_device_size_t)context->limits.malloc_heap_size;
+  const iree_device_size_t initial_slab_count = iree_device_size_ceil_div(
+      iree_max(
+          requested_heap_size,
+          (iree_device_size_t)IREE_HAL_STREAMING_ROCM_MALLOC_INITIAL_SLAB_SIZE),
+      IREE_HAL_STREAMING_ROCM_MALLOC_INITIAL_SLAB_SIZE);
+  iree_device_size_t initial_slab_bytes = 0;
+  if (IREE_UNLIKELY(!iree_device_size_checked_mul(
+          initial_slab_count,
+          (iree_device_size_t)IREE_HAL_STREAMING_ROCM_MALLOC_INITIAL_SLAB_SIZE,
+          &initial_slab_bytes))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "ROCm device malloc heap size overflow");
+  }
+
+  iree_hal_buffer_t* heap_buffer = NULL;
+  iree_hal_buffer_t* initial_slabs_buffer = NULL;
+  uint64_t heap_device_ptr = 0;
+  uint64_t initial_slabs_device_ptr = 0;
+  uint8_t* heap_header = NULL;
+
+  iree_status_t status = iree_hal_streaming_rocm_allocate_device_buffer(
+      context,
+      IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
+          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+      IREE_HAL_STREAMING_ROCM_MALLOC_HEAP_SIZE, &heap_buffer, &heap_device_ptr);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_rocm_allocate_device_buffer(
+        context, IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE, initial_slab_bytes,
+        &initial_slabs_buffer, &initial_slabs_device_ptr);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(context->host_allocator,
+                                   IREE_HAL_STREAMING_ROCM_MALLOC_HEAP_SIZE,
+                                   (void**)&heap_header);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_rocm_populate_malloc_heap_header(
+        heap_header, initial_slabs_device_ptr, initial_slab_bytes);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&context->direct_transfer_mutex);
+    status = iree_hal_device_transfer_h2d(
+        context->device, heap_header, heap_buffer, /*target_offset=*/0,
+        IREE_HAL_STREAMING_ROCM_MALLOC_HEAP_SIZE,
+        IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
+    iree_slim_mutex_unlock(&context->direct_transfer_mutex);
+  }
+
+  if (iree_status_is_ok(status)) {
+    context->rocm_device_runtime.malloc_heap_buffer = heap_buffer;
+    context->rocm_device_runtime.malloc_initial_slabs_buffer =
+        initial_slabs_buffer;
+    iree_atomic_store(&context->rocm_device_runtime.malloc_heap_device_ptr,
+                      heap_device_ptr, iree_memory_order_release);
+    heap_buffer = NULL;
+    initial_slabs_buffer = NULL;
+  }
+
+  iree_allocator_free(context->host_allocator, heap_header);
+  iree_hal_buffer_release(initial_slabs_buffer);
+  iree_hal_buffer_release(heap_buffer);
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
 
 //===----------------------------------------------------------------------===//
 // Global state
@@ -80,10 +262,16 @@ iree_status_t iree_hal_streaming_context_create(
   memset(&context->buffer_table, 0, sizeof(context->buffer_table));
   context->pageable_h2d_staging_buffer = NULL;
   context->pageable_h2d_staging_size = 0;
+  memset(&context->rocm_device_runtime, 0,
+         sizeof(context->rocm_device_runtime));
+  context->rocm_device_runtime.malloc_heap_device_ptr = IREE_ATOMIC_VAR_INIT(0);
+  context->rocm_device_runtime.hostcall_buffer_device_ptr =
+      IREE_ATOMIC_VAR_INIT(0);
   iree_atomic_store(&context->capture_stream_count, 0,
                     iree_memory_order_relaxed);
   context->host_allocator = host_allocator;
   iree_slim_mutex_initialize(&context->mutex);
+  iree_slim_mutex_initialize(&context->direct_transfer_mutex);
 
   // Initialize global list pointers.
   context->context_list_entry.next = NULL;
@@ -96,10 +284,10 @@ iree_status_t iree_hal_streaming_context_create(
       8;  // Pre-allocate for default stream + user streams.
   context->streams = NULL;
 
-  // Initialize default limits.
-  // These are typical defaults matching CUDA/HIP behavior.
+  // Initialize default limits. Buffered printf uses a per-dispatch FIFO sized
+  // for the ROCm device-library workitem debug record window.
   context->limits.stack_size = 1024;                        // 1KB default
-  context->limits.printf_fifo_size = 1024 * 1024;           // 1MB
+  context->limits.printf_fifo_size = 4 * 1024 * 1024;       // 4MB
   context->limits.malloc_heap_size = 8 * 1024 * 1024;       // 8MB
   context->limits.dev_runtime_sync_depth = 128;             // 128 levels
   context->limits.dev_runtime_pending_launch_count = 2048;  // 2048 launches
@@ -170,6 +358,10 @@ static void iree_hal_streaming_context_destroy(
   iree_status_ignore(iree_hal_streaming_context_synchronize(context));
 
   iree_hal_streaming_memory_release_pageable_staging(context);
+  iree_hal_streaming_context_deinitialize_rocm_hostcall_service(context);
+  iree_hal_buffer_release(
+      context->rocm_device_runtime.malloc_initial_slabs_buffer);
+  iree_hal_buffer_release(context->rocm_device_runtime.malloc_heap_buffer);
 
   // Deinitialize symbol map and unload any statically-registered modules that
   // were on-demand loaded for this context.
@@ -210,6 +402,7 @@ static void iree_hal_streaming_context_destroy(
   iree_hal_device_release(context->device);
 
   // Deinitialize synchronization.
+  iree_slim_mutex_deinitialize(&context->direct_transfer_mutex);
   iree_slim_mutex_deinitialize(&context->mutex);
 
   // Free context memory.
@@ -435,7 +628,14 @@ iree_status_t iree_hal_streaming_context_set_limit(
       context->limits.printf_fifo_size = value;
       break;
     case IREE_HAL_STREAMING_CONTEXT_LIMIT_MALLOC_HEAP_SIZE:
-      context->limits.malloc_heap_size = value;
+      if (context->rocm_device_runtime.malloc_heap_buffer &&
+          context->limits.malloc_heap_size != value) {
+        status =
+            iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                             "device malloc heap has already been initialized");
+      } else {
+        context->limits.malloc_heap_size = value;
+      }
       break;
     case IREE_HAL_STREAMING_CONTEXT_LIMIT_DEV_RUNTIME_SYNC_DEPTH:
       context->limits.dev_runtime_sync_depth = value;
@@ -457,7 +657,36 @@ iree_status_t iree_hal_streaming_context_set_limit(
   iree_slim_mutex_unlock(&context->mutex);
 
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
+}
+
+iree_status_t iree_hal_streaming_context_rocm_device_malloc_heap(
+    iree_hal_streaming_context_t* context, uint64_t* out_heap_device_ptr) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(out_heap_device_ptr);
+  *out_heap_device_ptr = 0;
+  const uint64_t cached_heap_device_ptr =
+      iree_hal_streaming_context_cached_rocm_malloc_heap(context);
+  if (cached_heap_device_ptr != 0) {
+    *out_heap_device_ptr = cached_heap_device_ptr;
+    return iree_ok_status();
+  }
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_slim_mutex_lock(&context->mutex);
+  iree_status_t status = iree_ok_status();
+  if (!context->rocm_device_runtime.malloc_heap_buffer) {
+    status = iree_hal_streaming_context_initialize_rocm_device_runtime_locked(
+        context);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_heap_device_ptr =
+        iree_hal_streaming_context_cached_rocm_malloc_heap(context);
+  }
+  iree_slim_mutex_unlock(&context->mutex);
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 iree_status_t iree_hal_streaming_context_enable_peer_access(

@@ -36,6 +36,27 @@ typedef enum iree_hal_streaming_graph_block_type_e {
 
 typedef void (*iree_hal_streaming_host_callback_t)(void* user_data);
 
+// HIP graph command order also orders memory side effects. The AMDGPU HAL
+// lowers these access scopes into AQL acquire/release fences between payloads.
+static iree_status_t iree_hal_streaming_graph_record_ordering_barrier(
+    iree_hal_command_buffer_t* command_buffer) {
+  static const iree_hal_memory_barrier_t memory_barrier = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+  };
+  return iree_hal_command_buffer_execution_barrier(
+      command_buffer,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &memory_barrier, 0, NULL);
+}
+
 // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER
 typedef struct iree_hal_streaming_graph_barrier_block_attrs_t {
   iree_hal_execute_flags_t flags;
@@ -665,14 +686,18 @@ iree_status_t iree_hal_streaming_graph_exec_create(
   iree_status_t status = iree_hal_resource_set_allocate(
       &context->device_entry->block_pool, &exec->resource_set);
   if (iree_status_is_ok(status) && exec->node_disabled_state_count > 0) {
-    status = iree_allocator_malloc(
-        host_allocator,
-        exec->node_disabled_state_count * sizeof(*exec->node_disabled_states),
-        (void**)&exec->node_disabled_states);
+    iree_host_size_t node_disabled_states_size = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+            exec->node_disabled_state_count,
+            sizeof(*exec->node_disabled_states), &node_disabled_states_size))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "node disabled-state size overflow");
+    } else {
+      status = iree_allocator_malloc(host_allocator, node_disabled_states_size,
+                                     (void**)&exec->node_disabled_states);
+    }
     if (iree_status_is_ok(status)) {
-      memset(exec->node_disabled_states, 0,
-             exec->node_disabled_state_count *
-                 sizeof(*exec->node_disabled_states));
+      memset(exec->node_disabled_states, 0, node_disabled_states_size);
     }
   }
   if (iree_status_is_ok(status)) {
@@ -880,18 +905,20 @@ iree_hal_streaming_graph_exec_flags(iree_hal_streaming_graph_exec_t* exec) {
 bool iree_hal_streaming_graph_exec_owns_node(
     iree_hal_streaming_graph_exec_t* exec,
     iree_hal_streaming_graph_node_t* node) {
-  return exec && node && node->graph == exec->graph &&
+  return exec && !exec->is_destroyed && node && node->graph == exec->graph &&
          node->node_index < exec->instantiated_node_count;
 }
 
 bool iree_hal_streaming_graph_exec_node_is_enabled(
     iree_hal_streaming_graph_exec_t* exec,
     iree_hal_streaming_graph_node_t* node) {
-  if (!iree_hal_streaming_graph_exec_owns_node(exec, node) ||
-      node->node_index >= exec->node_disabled_state_count) {
-    return false;
-  }
-  return exec->node_disabled_states[node->node_index] == 0;
+  if (!exec) return false;
+  iree_slim_mutex_lock(&exec->mutex);
+  const bool is_enabled = iree_hal_streaming_graph_exec_owns_node(exec, node) &&
+                          node->node_index < exec->node_disabled_state_count &&
+                          exec->node_disabled_states[node->node_index] == 0;
+  iree_slim_mutex_unlock(&exec->mutex);
+  return is_enabled;
 }
 
 iree_status_t iree_hal_streaming_graph_exec_set_node_enabled(
@@ -1357,10 +1384,8 @@ static iree_status_t iree_hal_streaming_graph_create_execute_block(
   // destruction waits for active streams, and stream-ordered destruction queues
   // the release after prior work.
   //
-  // TODO: limit queue affinity to the device being instantiated on, if scoped
-  // to a queue. Currently we are assuming we are targeting a single
-  // iree_hal_device_t but it should really be a pair of (iree_hal_device_t,
-  // queue_affinity_mask).
+  // Graph executables are bound to the context device. Queue affinity is
+  // selected when the executable is submitted to a stream.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_command_buffer_create(
               exec->context->device, IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
@@ -1439,8 +1464,8 @@ static bool iree_hal_streaming_node_index_set_test_hazard(
 }
 
 // Inserts |value| into the |set|.
-// If the set has reached capacity it is set to invalid and all future tests
-// will return a hazard.
+// If the set has reached capacity it is set to invalid and all later membership
+// queries conservatively report a hazard.
 static void iree_hal_streaming_node_index_set_insert(
     iree_hal_streaming_node_index_set_t* set, uint32_t value) {
   if (set->count >= IREE_ARRAYSIZE(set->values)) {
@@ -1498,8 +1523,8 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_command_buffer_begin(command_buffer));
 
-  // Scope the partition into a debug group.
-  // TODO: propagate graph information (name, origin, etc).
+  // Scope the partition into a debug group. Node-level debug labels carry
+  // operation detail.
   const iree_string_view_t label_name = iree_make_cstring_view("tbd_partition");
   const iree_hal_label_location_t* location = NULL;
   const iree_hal_label_color_t label_color = iree_hal_label_color_unspecified();
@@ -1534,10 +1559,8 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
               node, additional_edges, node_index_map, &barrier_index_set);
       if (preserve_sorted_order || has_dependency_hazard) {
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
-            z0, iree_hal_command_buffer_execution_barrier(
-                    command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-                    IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
-                    IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 0, NULL, 0, NULL));
+            z0,
+            iree_hal_streaming_graph_record_ordering_barrier(command_buffer));
         iree_hal_streaming_node_index_set_reset(&barrier_index_set);
       }
     }
@@ -1547,7 +1570,7 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
         const iree_hal_streaming_graph_kernel_node_attrs_t* attrs =
             &node->attrs.kernel;
         iree_hal_streaming_symbol_t* symbol = attrs->symbol;
-        const iree_hal_dispatch_config_t config = {
+        iree_hal_dispatch_config_t config = {
             .workgroup_size =
                 {
                     attrs->block_dim[0],
@@ -1562,10 +1585,30 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
                 },
             .dynamic_workgroup_local_memory = attrs->shared_memory_bytes,
         };
+        iree_hal_dispatch_runtime_parameter_list_t runtime_parameters;
         const iree_hal_dispatch_flags_t flags =
             attrs->bindings.count
                 ? IREE_HAL_DISPATCH_FLAG_NONE
                 : IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
+        // Graph executables record one reusable command buffer and may run
+        // concurrently. Buffered printf requires a distinct FIFO that remains
+        // live through each launch and is drained after that launch completes;
+        // recording a shared FIFO here would race, while omitting it passes a
+        // null pointer to device code.
+        if (symbol->runtime_services.printf_buffer.present) {
+          status = iree_make_status(
+              IREE_STATUS_UNIMPLEMENTED,
+              "graph kernel dispatch does not support buffered printf");
+          break;
+        }
+        if (iree_hal_streaming_symbol_uses_runtime_services(
+                symbol, /*enable_printf=*/false)) {
+          status = iree_hal_streaming_symbol_prepare_runtime_dispatch_config(
+              symbol, exec->context, /*enable_printf=*/false,
+              &runtime_parameters, &config,
+              /*out_printf_buffer=*/NULL);
+        }
+        if (!iree_status_is_ok(status)) break;
         status = iree_hal_command_buffer_dispatch(
             command_buffer, symbol->executable,
             iree_hal_executable_function_from_index(symbol->export_ordinal),
@@ -1662,9 +1705,8 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
   // We need semaphores at partition boundaries for synchronization.
   // Multi-stream partitions need join semaphores.
   //
-  // This currently allocates semaphores per block boundary. A future
-  // optimization can reduce this to the maximum layer size by advancing
-  // timeline values between partitions.
+  // Allocate semaphores per block boundary. Each boundary needs a stable
+  // timeline edge for the lifetime of the executable.
   uint32_t semaphore_count = 0;
   if (schedule.partition_count > 1) {
     for (iree_host_size_t i = 0; i < schedule.partition_count - 1; i++) {

@@ -134,6 +134,20 @@ typedef struct iree_hal_streaming_limits_t {
   size_t persisting_l2_cache_size;          // Persistent L2 cache size.
 } iree_hal_streaming_limits_t;
 
+// Per-context device-runtime storage for ROCm device libraries.
+typedef struct iree_hal_streaming_rocm_device_runtime_t {
+  // Device-local heap header buffer passed through hidden_heap_v1.
+  iree_hal_buffer_t* malloc_heap_buffer;
+  // Device-local initial slab storage referenced by the heap header.
+  iree_hal_buffer_t* malloc_initial_slabs_buffer;
+  // Non-zero after the immutable malloc heap and header are fully initialized.
+  iree_atomic_uint64_t malloc_heap_device_ptr;
+  // Lazily-created hostcall listener and queue-visible service buffer.
+  struct iree_hal_streaming_rocm_hostcall_service_t* hostcall_service;
+  // Non-zero after the hostcall listener and service buffer are ready.
+  iree_atomic_uint64_t hostcall_buffer_device_ptr;
+} iree_hal_streaming_rocm_device_runtime_t;
+
 // Tracks a module loaded into a context symbol map.
 typedef struct iree_hal_streaming_context_module_entry_t {
   // Module registration from the global registry (for identification).
@@ -147,8 +161,11 @@ typedef struct iree_hal_streaming_context_module_entry_t {
 typedef struct iree_hal_streaming_context_symbol_entry_t {
   // Host pointer key used by generated HIP registration code.
   void* key;
-  // Compiled symbol associated with the registration key.
+  // Context-local symbol resolved from the registered module.
   iree_hal_streaming_symbol_t* symbol;
+  // True when |symbol| backs managed host storage that must be refreshed after
+  // synchronization.
+  bool synchronize_managed_data_to_host;
 } iree_hal_streaming_context_symbol_entry_t;
 
 // Per-context cache of compiled symbols.
@@ -231,8 +248,13 @@ struct iree_hal_streaming_context_t {
   // Context resource limits.
   iree_hal_streaming_limits_t limits;
 
+  // Lazily-created ROCm device-runtime state used by loaded HIP modules.
+  iree_hal_streaming_rocm_device_runtime_t rocm_device_runtime;
+
   // Synchronization.
   iree_slim_mutex_t mutex;
+  // Serializes direct HAL device transfer calls issued outside command buffers.
+  iree_slim_mutex_t direct_transfer_mutex;
 
   // Host allocator.
   iree_allocator_t host_allocator;
@@ -264,6 +286,23 @@ static inline bool iree_hal_streaming_context_has_capture_streams(
     const iree_hal_streaming_context_t* context) {
   return iree_atomic_load(&context->capture_stream_count,
                           iree_memory_order_acquire) > 0;
+}
+
+// Returns the ready device-runtime heap address, or 0 while it is
+// uninitialized.
+static inline uint64_t iree_hal_streaming_context_cached_rocm_malloc_heap(
+    const iree_hal_streaming_context_t* context) {
+  return (uint64_t)iree_atomic_load(
+      &context->rocm_device_runtime.malloc_heap_device_ptr,
+      iree_memory_order_acquire);
+}
+
+// Returns the ready hostcall service-buffer address, or 0 while it is absent.
+static inline uint64_t iree_hal_streaming_context_cached_rocm_hostcall_buffer(
+    const iree_hal_streaming_context_t* context) {
+  return (uint64_t)iree_atomic_load(
+      &context->rocm_device_runtime.hostcall_buffer_device_ptr,
+      iree_memory_order_acquire);
 }
 
 static inline void iree_hal_streaming_context_enter_capture(
@@ -325,11 +364,17 @@ typedef struct iree_hal_streaming_device_t {
   iree_device_size_t free_memory;
   // True when cooperative launches are supported by the device.
   bool supports_cooperative_launch;
+  // True when host/device links support native system-scope atomics.
+  bool host_native_atomic_supported;
 
   // GCN architecture name (e.g., "gfx942:sramecc+:xnack-").
   char gcn_arch_name[64];
 
   // Device properties cache.
+  // Physical compute-unit count from the execution specification.
+  uint32_t raw_compute_unit_count;
+  // Maximum waves that can reside on one physical compute unit.
+  uint32_t maximum_resident_subgroup_count;
   uint32_t max_threads_per_block;
   uint32_t max_block_dim[3];
   uint32_t max_grid_dim[3];
@@ -612,6 +657,34 @@ static inline bool iree_hal_streaming_parameter_info_is_empty(
          parameters->copy_count == 0;
 }
 
+// Backend-native hidden runtime parameter slot.
+typedef struct iree_hal_streaming_runtime_parameter_slot_t {
+  // Byte offset in the backend-native launch argument storage.
+  uint32_t offset;
+  // Byte length of the runtime parameter storage.
+  uint32_t length;
+  // True when this slot was declared by executable metadata.
+  bool present;
+} iree_hal_streaming_runtime_parameter_slot_t;
+
+// Runtime service slots declared by one function symbol.
+typedef struct iree_hal_streaming_symbol_runtime_services_t {
+  // Hidden buffered-printf service slot.
+  iree_hal_streaming_runtime_parameter_slot_t printf_buffer;
+  // Hidden hostcall service slot.
+  iree_hal_streaming_runtime_parameter_slot_t hostcall_buffer;
+  // Hidden device-runtime heap slot.
+  iree_hal_streaming_runtime_parameter_slot_t heap_v1;
+} iree_hal_streaming_symbol_runtime_services_t;
+
+// Parsed printf format metadata retained at module scope.
+typedef struct iree_hal_streaming_printf_format_t {
+  // Lower 64 bits of the MD5 hash emitted in `amdhsa.printf`.
+  uint64_t hash;
+  // Format string borrowed from executable metadata storage.
+  iree_string_view_t format;
+} iree_hal_streaming_printf_format_t;
+
 // Symbol metadata structure.
 typedef struct iree_hal_streaming_symbol_t {
   // Parent module. Unowned.
@@ -633,6 +706,8 @@ typedef struct iree_hal_streaming_symbol_t {
 
   // Function parameter information used for argument packing and unpacking.
   iree_hal_streaming_parameter_info_t parameters;
+  // Hidden runtime services declared by function metadata.
+  iree_hal_streaming_symbol_runtime_services_t runtime_services;
 
   // Global/data attributes (only valid for GLOBAL/DATA types).
   // HAL executable global handle, when backed by an executable global.
@@ -644,6 +719,14 @@ typedef struct iree_hal_streaming_symbol_t {
   // Byte length of the global storage.
   iree_device_size_t size_bytes;
 } iree_hal_streaming_symbol_t;
+
+// Returns true when a dispatch must populate a backend-native runtime service.
+static inline bool iree_hal_streaming_symbol_uses_runtime_services(
+    const iree_hal_streaming_symbol_t* symbol, bool enable_printf) {
+  return (enable_printf && symbol->runtime_services.printf_buffer.present) ||
+         symbol->runtime_services.hostcall_buffer.present ||
+         symbol->runtime_services.heap_v1.present;
+}
 
 // Module containing compiled kernels.
 typedef struct iree_hal_streaming_module_t {
@@ -667,6 +750,10 @@ typedef struct iree_hal_streaming_module_t {
   iree_host_size_t global_count;
   // Capacity of the cached executable global symbols array.
   iree_host_size_t global_capacity;
+  // Number of parsed printf format records.
+  iree_host_size_t printf_format_count;
+  // Parsed printf format records keyed by metadata hash.
+  iree_hal_streaming_printf_format_t* printf_formats;
 
   // Context that loaded this module.
   iree_hal_streaming_context_t* context;
@@ -1432,6 +1519,21 @@ iree_status_t iree_hal_streaming_context_set_limit(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_context_limit_t limit, size_t value);
 
+// Returns a device pointer to the per-context ROCm device malloc heap.
+// Synchronization: the first request initializes under the context lock.
+iree_status_t iree_hal_streaming_context_rocm_device_malloc_heap(
+    iree_hal_streaming_context_t* context, uint64_t* out_heap_device_ptr);
+// Returns a context-owned ROCm hostcall service buffer device pointer.
+// Synchronization: the first request initializes under the context lock.
+iree_status_t iree_hal_streaming_context_rocm_hostcall_buffer(
+    iree_hal_streaming_context_t* context, uint64_t* out_buffer_device_ptr);
+// Calculates the power-of-two packet capacity required for one host queue.
+iree_status_t iree_hal_streaming_rocm_hostcall_calculate_packet_count(
+    const iree_hal_streaming_device_t* device, uint32_t* out_packet_count);
+// Shuts down any lazily-created ROCm hostcall service for |context|.
+void iree_hal_streaming_context_deinitialize_rocm_hostcall_service(
+    iree_hal_streaming_context_t* context);
+
 // Synchronization: none (configures peer access).
 iree_status_t iree_hal_streaming_context_enable_peer_access(
     iree_hal_streaming_context_t* context,
@@ -1516,6 +1618,30 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
     iree_hal_streaming_context_t* context,
     iree_hal_executable_load_flags_t load_flags, iree_const_byte_span_t image,
     iree_allocator_t host_allocator, iree_hal_streaming_module_t** out_module);
+
+// Initializes hidden runtime service and executable-level runtime metadata.
+iree_status_t iree_hal_streaming_module_initialize_runtime_metadata(
+    iree_hal_streaming_module_t* module);
+// Allocates and initializes a transient buffered-printf FIFO for one dispatch.
+iree_status_t iree_hal_streaming_symbol_create_printf_buffer(
+    iree_hal_streaming_symbol_t* symbol,
+    iree_hal_streaming_buffer_t** out_buffer);
+// Adds hidden runtime service pointers required by |symbol| to |config|.
+// |runtime_parameters| is caller-owned dispatch storage that must remain live
+// through command recording; |config| references it when it has patches.
+// When |enable_printf| is true, returns a transient printf FIFO in
+// |out_printf_buffer| that must be drained or released by the caller.
+iree_status_t iree_hal_streaming_symbol_prepare_runtime_dispatch_config(
+    iree_hal_streaming_symbol_t* symbol, iree_hal_streaming_context_t* context,
+    bool enable_printf,
+    iree_hal_dispatch_runtime_parameter_list_t* runtime_parameters,
+    iree_hal_dispatch_config_t* config,
+    iree_hal_streaming_buffer_t** out_printf_buffer);
+// Enqueues a stream-ordered drain and release for a transient printf buffer.
+// Takes ownership of |buffer| regardless of success.
+iree_status_t iree_hal_streaming_symbol_queue_printf_drain(
+    iree_hal_streaming_symbol_t* symbol, iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_buffer_t* buffer);
 
 // Loads module from a file at the given path.
 // Synchronization: none (creates new module).
@@ -1654,6 +1780,12 @@ iree_status_t iree_hal_streaming_launch_kernel(
 iree_status_t iree_hal_streaming_launch_host_function(
     iree_hal_streaming_stream_t* stream, void (*fn)(void*), void* user_data);
 
+// Enqueues a HAL host call at the current stream timeline point.
+// Synchronization: stream flush (flushes stream before enqueue).
+iree_status_t iree_hal_streaming_queue_host_call(
+    iree_hal_streaming_stream_t* stream, iree_hal_host_call_t call,
+    const uint64_t args[4], iree_hal_host_call_flags_t flags);
+
 //===----------------------------------------------------------------------===//
 // Event management
 //===----------------------------------------------------------------------===//
@@ -1762,6 +1894,20 @@ iree_status_t iree_hal_streaming_memory_allocate_host(
     iree_hal_streaming_host_register_flags_t flags,
     iree_hal_streaming_buffer_t** out_buffer);
 
+// Synchronization: none (allocates queue-visible host staging memory).
+iree_status_t iree_hal_streaming_memory_allocate_host_staging(
+    iree_hal_streaming_context_t* context, iree_host_size_t size,
+    iree_hal_streaming_buffer_t** out_buffer);
+
+// Synchronization: none (allocates host-visible device-runtime storage).
+iree_status_t iree_hal_streaming_memory_allocate_runtime_host(
+    iree_hal_streaming_context_t* context, iree_host_size_t size,
+    iree_hal_streaming_buffer_t** out_buffer);
+// Synchronization: none (allocates context-owned host-visible runtime storage).
+iree_status_t iree_hal_streaming_memory_allocate_context_runtime_host(
+    iree_hal_streaming_context_t* context, iree_host_size_t size,
+    iree_hal_streaming_buffer_t** out_buffer);
+
 // Synchronization: none (allocates host-visible device memory).
 iree_status_t iree_hal_streaming_memory_allocate_managed(
     iree_hal_streaming_context_t* context, iree_host_size_t size,
@@ -1787,6 +1933,11 @@ iree_status_t iree_hal_streaming_memory_wrap_buffer(
 // Releases a wrapper created with iree_hal_streaming_memory_wrap_buffer.
 // Synchronization: none (unregisters existing memory).
 void iree_hal_streaming_memory_release_wrapped_buffer(
+    iree_hal_streaming_buffer_t* buffer);
+
+// Releases a transient buffer whose stream-ordered users have completed.
+// Synchronization: caller-provided stream ordering.
+void iree_hal_streaming_memory_release_transient_buffer(
     iree_hal_streaming_buffer_t* buffer);
 
 // Synchronization: none (registers existing memory).
@@ -2145,8 +2296,12 @@ typedef struct iree_hal_streaming_symbol_registration_t {
     } function;
     // Variable-specific metadata (only valid if type == GLOBAL/DATA).
     struct {
+      // Registered variable size in bytes.
       size_t size;
+      // Required variable alignment in bytes.
       uint32_t alignment;
+      // Host storage used to initialize a managed variable, or NULL.
+      void* managed_initial_value;
     } variable;
   } params;
 } iree_hal_streaming_symbol_registration_t;
@@ -2225,7 +2380,8 @@ iree_status_t iree_hal_streaming_global_symbol_registry_insert_variable(
 iree_status_t iree_hal_streaming_global_symbol_registry_insert_managed_variable(
     iree_hal_streaming_global_symbol_registry_t* registry,
     iree_hal_streaming_module_registration_t* module, void* host_variable,
-    const char* device_name, size_t size, uint32_t alignment);
+    const char* device_name, size_t size, uint32_t alignment,
+    void* managed_initial_value);
 
 // Looks up the registration type for a host-side variable pointer.
 bool iree_hal_streaming_global_symbol_registry_query_variable(
@@ -2254,6 +2410,11 @@ void iree_hal_streaming_context_symbol_map_deinitialize(
 iree_status_t iree_hal_streaming_context_symbol_map_lookup(
     iree_hal_streaming_context_symbol_map_t* map, void* host_pointer,
     iree_hal_streaming_symbol_t** out_symbol);
+
+// Refreshes host storage for managed DATA symbols whose device backing storage
+// has been resolved in this context.
+iree_status_t iree_hal_streaming_context_symbol_map_synchronize_managed_data(
+    iree_hal_streaming_context_symbol_map_t* map);
 
 #ifdef __cplusplus
 }

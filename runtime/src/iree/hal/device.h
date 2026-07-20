@@ -22,6 +22,7 @@
 #include "iree/hal/event.h"
 #include "iree/hal/fence.h"
 #include "iree/hal/file.h"
+#include "iree/hal/host_notification.h"
 #include "iree/hal/memory/asan.h"
 #include "iree/hal/pool.h"
 #include "iree/hal/profile_options.h"
@@ -1130,6 +1131,13 @@ typedef struct iree_hal_device_vtable_t {
   iree_status_t(IREE_API_PTR* create_event)(
       iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
       iree_hal_event_flags_t flags, iree_hal_event_t** out_event);
+
+  // Device-writable, host-waitable notification constructor.
+  // Drivers without support assign
+  // iree_hal_host_notification_create_unimplemented.
+  iree_status_t(IREE_API_PTR* create_host_notification)(
+      iree_hal_device_t* device,
+      iree_hal_host_notification_t** out_notification);
 
   iree_status_t(IREE_API_PTR* load_executable)(
       iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,

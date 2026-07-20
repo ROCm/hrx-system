@@ -163,6 +163,9 @@ enum iree_hal_executable_function_flag_bits_e {
   // The workgroup size specified on the function info is the minimum size and
   // granularity and any dynamic workgroup size chosen must be a multiple.
   IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC = 1ull << 1,
+  // OpenCL/HIP uniform-workgroup-size metadata requires global work sizes to
+  // divide evenly by local workgroup sizes.
+  IREE_HAL_EXECUTABLE_FUNCTION_FLAG_UNIFORM_WORKGROUP_SIZE = 1ull << 2,
 };
 typedef uint64_t iree_hal_executable_function_flags_t;
 
@@ -179,10 +182,18 @@ typedef struct iree_hal_executable_function_info_t {
   uint16_t binding_count;
   // Total number of logical parameters.
   uint16_t parameter_count;
+  // Total number of backend-native runtime parameters.
+  uint16_t runtime_parameter_count;
   // Static or minimum workgroup size of the function.
   // If IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC is set then
   // any dynamic workgroup size must be a multiple of this value.
   uint32_t workgroup_size[3];
+  // Maximum total work-items per workgroup accepted by this function.
+  uint32_t max_workgroup_size;
+  // Fixed workgroup-local memory required by the function, in bytes.
+  uint32_t workgroup_local_memory_size;
+  // Fixed private memory required per work-item, in bytes.
+  uint32_t private_memory_size;
   // Occupancy information hinting at how this function should be scheduled.
   iree_hal_occupancy_info_t occupancy_info;
 } iree_hal_executable_function_info_t;
@@ -239,6 +250,28 @@ typedef struct iree_hal_executable_function_parameter_t {
   iree_string_view_t name;
 } iree_hal_executable_function_parameter_t;
 
+// Reflected information about an executable runtime parameter.
+//
+// Runtime parameters are backend-defined launch ABI values that are not part
+// of the user-visible function parameter list. They are declared by executable
+// metadata and supplied by an embedding runtime before dispatch.
+typedef struct iree_hal_executable_function_runtime_parameter_info_t {
+  // Runtime parameter name from executable metadata.
+  iree_string_view_t name;
+  // Byte offset in the backend-native launch argument storage.
+  uint32_t offset;
+  // Byte length of the runtime parameter storage.
+  uint32_t length;
+} iree_hal_executable_function_runtime_parameter_info_t;
+
+// Backend-defined executable-level runtime metadata record.
+typedef struct iree_hal_executable_runtime_metadata_record_t {
+  // Metadata collection name.
+  iree_string_view_t name;
+  // Record payload owned by the executable.
+  iree_string_view_t value;
+} iree_hal_executable_runtime_metadata_record_t;
+
 // Declares properties of an executable global variable.
 typedef struct iree_hal_executable_global_info_t {
   // Executable-local global name if available, otherwise empty.
@@ -282,6 +315,34 @@ IREE_API_EXPORT iree_status_t iree_hal_executable_function_parameters(
     iree_hal_executable_t* executable, iree_hal_executable_function_t function,
     iree_host_size_t capacity,
     iree_hal_executable_function_parameter_t* out_parameters);
+
+// Populates |out_parameters| with up to |capacity| backend-native runtime
+// parameters. Callers should allocate based on runtime_parameter_count in the
+// function info. Returned string storage is owned by |executable| and remains
+// valid while the executable remains live.
+IREE_API_EXPORT iree_status_t iree_hal_executable_function_runtime_parameters(
+    iree_hal_executable_t* executable, iree_hal_executable_function_t function,
+    iree_host_size_t capacity,
+    iree_hal_executable_function_runtime_parameter_info_t* out_parameters);
+
+// Returns the number of executable-level runtime metadata records named |name|.
+//
+// Returned records are backend-defined data decoded from executable metadata.
+// This is executable-level metadata; function-specific launch ABI slots are
+// exposed through iree_hal_executable_function_runtime_parameters.
+IREE_API_EXPORT iree_status_t iree_hal_executable_runtime_metadata_count(
+    iree_hal_executable_t* executable, iree_string_view_t name,
+    iree_host_size_t* out_count);
+
+// Populates |out_records| with up to |capacity| runtime metadata records.
+//
+// Callers should size |out_records| from
+// iree_hal_executable_runtime_metadata_count. Returned string storage is owned
+// by |executable| and remains valid while the executable remains live.
+IREE_API_EXPORT iree_status_t iree_hal_executable_runtime_metadata_records(
+    iree_hal_executable_t* executable, iree_string_view_t name,
+    iree_host_size_t capacity,
+    iree_hal_executable_runtime_metadata_record_t* out_records);
 
 // Finds the function with the given |name|.
 IREE_API_EXPORT iree_status_t iree_hal_executable_lookup_function_by_name(
@@ -344,6 +405,23 @@ typedef struct iree_hal_executable_vtable_t {
       iree_hal_executable_t* executable,
       iree_hal_executable_function_t function, iree_host_size_t capacity,
       iree_hal_executable_function_parameter_t* out_parameters);
+
+  iree_status_t(IREE_API_PTR* function_runtime_parameters)(
+      iree_hal_executable_t* executable,
+      iree_hal_executable_function_t function, iree_host_size_t capacity,
+      iree_hal_executable_function_runtime_parameter_info_t* out_parameters);
+
+  // Returns the number of executable-level runtime metadata records named
+  // |name|.
+  iree_status_t(IREE_API_PTR* runtime_metadata_count)(
+      iree_hal_executable_t* executable, iree_string_view_t name,
+      iree_host_size_t* out_count);
+
+  // Populates executable-level runtime metadata records named |name|.
+  iree_status_t(IREE_API_PTR* runtime_metadata_records)(
+      iree_hal_executable_t* executable, iree_string_view_t name,
+      iree_host_size_t capacity,
+      iree_hal_executable_runtime_metadata_record_t* out_records);
 
   iree_status_t(IREE_API_PTR* lookup_function_by_name)(
       iree_hal_executable_t* executable, iree_string_view_t name,
