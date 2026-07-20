@@ -291,6 +291,46 @@ func.def @rejects_source_overwrite_between_group_and_wait(%input: buffer) {
 
 // ====
 
+func.def @rejects_potentially_aliasing_source_write(%input: buffer, %other_input: buffer) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %other_global = buffer.assume.memory_space<global> %other_input : buffer
+  %source = buffer.view %global[%zero] : buffer -> view<16xi8, #dense>
+  %other = buffer.view %other_global[%zero] : buffer -> view<16xi8, #dense>
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<16xi8, #dense>
+  %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  %value = scalar.constant 1 : i8
+  // ERROR@+1: LOWERING/037 {op_name="view.store", phase_name="kernel-async-legality"}
+  view.store %value, %other[0] : i8, view<16xi8, #dense>
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+func.def @allows_noalias_source_write(%input: buffer, %other_input: buffer) {
+  %input_unique, %other_unique = buffer.assume.noalias %input, %other_input : buffer, buffer
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input_unique : buffer
+  %other_global = buffer.assume.memory_space<global> %other_unique : buffer
+  %source = buffer.view %global[%zero] : buffer -> view<16xi8, #dense>
+  %other = buffer.view %other_global[%zero] : buffer -> view<16xi8, #dense>
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<16xi8, #dense>
+  %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  %value = scalar.constant 1 : i8
+  view.store %value, %other[0] : i8, view<16xi8, #dense>
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
 func.def @allows_disjoint_source_write_before_wait(%input: buffer) {
   %zero = index.constant 0 : offset
   %sixteen = index.constant 16 : offset

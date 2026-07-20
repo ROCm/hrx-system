@@ -548,6 +548,8 @@ static iree_status_t loom_view_region_build_default(
       .view_value_id = value_id,
       .base_view_value_id = value_id,
       .root_value_id = reference.root_value_id,
+      .alias_scope_id = reference.alias_scope_id,
+      .nullability = reference.nullability,
       .begin_byte_offset = begin,
       .base_begin_byte_offset = begin,
       .projection_byte_offset = zero,
@@ -636,6 +638,8 @@ static iree_status_t loom_view_region_build_subview(
   IREE_RETURN_IF_ERROR(loom_view_region_expr_add(
       table, &source_region->begin_byte_offset, &additional_offset, &begin));
   out_region->root_value_id = source_region->root_value_id;
+  out_region->alias_scope_id = source_region->alias_scope_id;
+  out_region->nullability = source_region->nullability;
   out_region->base_view_value_id = source_region->base_view_value_id;
   out_region->base_begin_byte_offset = source_region->base_begin_byte_offset;
   IREE_RETURN_IF_ERROR(loom_view_region_expr_add(
@@ -668,6 +672,8 @@ static iree_status_t loom_view_region_build_refine(
       table, value_id, view_type, reference, out_region));
   if (!source_region) return iree_ok_status();
   out_region->root_value_id = source_region->root_value_id;
+  out_region->alias_scope_id = source_region->alias_scope_id;
+  out_region->nullability = source_region->nullability;
   out_region->base_view_value_id = source_region->base_view_value_id;
   out_region->base_begin_byte_offset = source_region->base_begin_byte_offset;
   out_region->projection_byte_offset = source_region->projection_byte_offset;
@@ -880,6 +886,20 @@ loom_view_access_flags_t loom_view_region_table_root_access_flags(
   return access_flags;
 }
 
+static bool loom_view_region_memory_spaces_are_disjoint(
+    loom_value_fact_memory_space_t left, loom_value_fact_memory_space_t right) {
+  if (left == right || left == LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN ||
+      right == LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN ||
+      left == LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC ||
+      right == LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC) {
+    return false;
+  }
+  return left == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP ||
+         right == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP ||
+         left == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE ||
+         right == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE;
+}
+
 iree_status_t loom_view_regions_prove_no_overlap(
     loom_view_region_table_t* table, const loom_view_region_t* left_region,
     const loom_view_region_t* right_region, bool* out_no_overlap) {
@@ -890,6 +910,13 @@ iree_status_t loom_view_regions_prove_no_overlap(
     return iree_ok_status();
   }
   if (left_region->root_value_id != right_region->root_value_id) {
+    if (loom_view_region_memory_spaces_are_disjoint(
+            left_region->memory_space, right_region->memory_space) ||
+        (left_region->alias_scope_id != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE &&
+         right_region->alias_scope_id != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE &&
+         left_region->alias_scope_id != right_region->alias_scope_id)) {
+      *out_no_overlap = true;
+    }
     return iree_ok_status();
   }
 

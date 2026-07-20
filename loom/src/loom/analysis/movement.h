@@ -157,6 +157,12 @@ typedef struct loom_movement_endpoint_t {
   // Storage root identity for view endpoints.
   loom_value_id_t root_value_id;
 
+  // Comparable alias scope for disjointness proofs, or NONE.
+  loom_value_fact_alias_scope_id_t alias_scope_id;
+
+  // Known nullability of the storage root.
+  loom_value_fact_reference_nullability_t nullability;
+
   // Symbolic begin byte offset relative to root_value_id.
   loom_symbolic_expr_t begin_byte_offset;
 

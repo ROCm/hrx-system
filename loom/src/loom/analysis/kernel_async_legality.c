@@ -405,6 +405,8 @@ static void loom_kernel_async_legality_endpoint_region(
   *out_region = (loom_view_region_t){
       .view_value_id = endpoint->value_id,
       .root_value_id = endpoint->root_value_id,
+      .alias_scope_id = endpoint->alias_scope_id,
+      .nullability = endpoint->nullability,
       .begin_byte_offset = endpoint->begin_byte_offset,
       .byte_length = endpoint->byte_length,
       .end_byte_offset = endpoint->end_byte_offset,
@@ -429,10 +431,6 @@ static iree_status_t loom_kernel_async_legality_endpoints_overlap(
     *out_overlap = true;
     return iree_ok_status();
   }
-  if (pending_endpoint->root_value_id != access_region->root_value_id) {
-    return iree_ok_status();
-  }
-
   loom_view_region_t pending_region = {0};
   loom_kernel_async_legality_endpoint_region(pending_endpoint, &pending_region);
   bool no_overlap = false;
