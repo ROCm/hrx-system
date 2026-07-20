@@ -1,29 +1,58 @@
 // RUN: pass licm
 
-// A chain of pure ops whose operands are all loop-invariant moves before the
-// loop in program order. The effectful sink stays in the loop body.
-func.def @hoists_invariant_chain(%n: index) {
+// A chain of speculatable ops whose operands are all loop-invariant moves
+// before the loop in program order. The effectful sink stays in the loop body.
+func.def @hoists_speculatable_invariant_chain(%n: index, %a: i32, %b: i32) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   scf.for %iv = [%zero to %n step %one] {
-    %a = test.constant 2 : i32
-    %b = test.constant 3 : i32
-    %sum = test.addi %a, %b : i32
-    test.use %sum : i32
+    %less = test.cmp lt, %a, %b : i32
+    %selected = scf.select %less, %a, %b : i32
+    test.use %selected : i32
     scf.yield
   }
   func.return
 }
 
 // ----
-func.def @hoists_invariant_chain(%n: index) {
+func.def @hoists_speculatable_invariant_chain(%n: index, %a: i32, %b: i32) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %a = test.constant 2 : i32
-  %b = test.constant 3 : i32
-  %sum = test.addi %a, %b : i32
+  %less = test.cmp lt, %a, %b : i32
+  %selected = scf.select %less, %a, %b : i32
   scf.for %iv = [%zero to %n step %one] {
-    test.use %sum : i32
+    test.use %selected : i32
+  }
+  func.return
+}
+
+// ====
+
+// PURE does not imply that an op can execute on a path where the loop body did
+// not run. test.addi intentionally lacks SAFE_TO_SPECULATE and stays inside a
+// loop whose trip count may be zero.
+func.def @keeps_non_speculatable_pure_op(%n: index, %value: i32) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.for %iv = [%zero to %n step %one] {
+    %doubled = test.addi %value, %value : i32
+    test.use %doubled : i32
+  }
+  func.return
+}
+
+// ====
+
+// Even an exact single-trip loop does not make arbitrary PURE work safe to
+// move before the loop: the move can reorder a trap ahead of observable work
+// earlier in the body.
+func.def @keeps_non_speculatable_after_effect_in_single_trip(%value: i32) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.for %iv = [%zero to %one step %one] {
+    test.use %value : i32
+    %doubled = test.addi %value, %value : i32
+    test.use %doubled : i32
   }
   func.return
 }
@@ -69,9 +98,9 @@ func.def @keeps_unknown_effects_inside_loop(%n: index, %value: i32) {
 
 // ====
 
-// A pure region op can move as a unit when its condition, branch computations,
-// yielded values, and result type references are all loop-invariant.
-func.def @hoists_pure_region_op(%cond: i1, %n: index, %a: i32, %b: i32) {
+// A PURE region op without a speculation contract stays under the loop
+// predicate even when all captures are loop-invariant.
+func.def @keeps_non_speculatable_region_op(%cond: i1, %n: index, %a: i32, %b: i32) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   scf.for %iv = [%zero to %n step %one] {
@@ -88,16 +117,16 @@ func.def @hoists_pure_region_op(%cond: i1, %n: index, %a: i32, %b: i32) {
 }
 
 // ----
-func.def @hoists_pure_region_op(%cond: i1, %n: index, %a: i32, %b: i32) {
+func.def @keeps_non_speculatable_region_op(%cond: i1, %n: index, %a: i32, %b: i32) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %selected = scf.if %cond -> (i32) {
-    %doubled = test.addi %a, %a : i32
-    scf.yield %doubled : i32
-  } else {
-    scf.yield %b : i32
-  }
   scf.for %iv = [%zero to %n step %one] {
+    %selected = scf.if %cond -> (i32) {
+      %doubled = test.addi %a, %a : i32
+      scf.yield %doubled : i32
+    } else {
+      scf.yield %b : i32
+    }
     test.use %selected : i32
   }
   func.return
@@ -105,15 +134,15 @@ func.def @hoists_pure_region_op(%cond: i1, %n: index, %a: i32, %b: i32) {
 
 // ====
 
-// Pure nested work can move out of the loop even when its parent region stays
-// in place because of nested effects.
-func.def @hoists_from_nested_pure_region(%cond: i1, %n: index, %value: i32) {
+// Speculatable nested work can cross both the conditional and loop predicates
+// even when its effectful parent region stays in place.
+func.def @hoists_from_nested_region(%cond: i1, %n: index, %a: i32, %b: i32) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   scf.for %iv = [%zero to %n step %one] {
     scf.if %cond {
-      %doubled = test.addi %value, %value : i32
-      test.use %doubled : i32
+      %less = test.cmp lt, %a, %b : i32
+      test.use %less : i1
       scf.yield
     } else {
       scf.yield
@@ -124,13 +153,13 @@ func.def @hoists_from_nested_pure_region(%cond: i1, %n: index, %value: i32) {
 }
 
 // ----
-func.def @hoists_from_nested_pure_region(%cond: i1, %n: index, %value: i32) {
+func.def @hoists_from_nested_region(%cond: i1, %n: index, %a: i32, %b: i32) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %doubled = test.addi %value, %value : i32
+  %less = test.cmp lt, %a, %b : i32
   scf.for %iv = [%zero to %n step %one] {
     scf.if %cond {
-      test.use %doubled : i32
+      test.use %less : i1
     } else {
     }
   }
@@ -167,26 +196,27 @@ func.def @keeps_type_ref_to_loop_local_layout(%buffer: buffer, %offset: offset, 
 
 // ====
 
-// scf.while uses the after region as its LoopLike body. Pure body ops whose
-// operands are available before the while op hoist in the same way as scf.for.
-func.def @hoists_from_while_after(%cond: i1, %init: i32) -> (i32) {
+// scf.while uses the after region as its LoopLike body. Speculatable body ops
+// whose operands are available before the while op hoist in the same way as
+// scf.for.
+func.def @hoists_from_while_after(%cond: i1, %init: i32, %limit: i32) -> (i32) {
   %result = scf.while(%before = %init : i32) -> (i32) {
     scf.condition %cond, %before : i1, i32
   } do(%body: i32) {
-    %sum = test.addi %init, %init : i32
-    test.use %sum : i32
+    %less = test.cmp lt, %init, %limit : i32
+    test.use %less : i1
     scf.yield %body : i32
   }
   func.return %result : i32
 }
 
 // ----
-func.def @hoists_from_while_after(%cond: i1, %init: i32) -> (i32) {
-  %sum = test.addi %init, %init : i32
+func.def @hoists_from_while_after(%cond: i1, %init: i32, %limit: i32) -> (i32) {
+  %less = test.cmp lt, %init, %limit : i32
   %result = scf.while(%before = %init : i32) -> (i32) {
     scf.condition %cond, %before : i1, i32
   } do(%body: i32) {
-    test.use %sum : i32
+    test.use %less : i1
     scf.yield %body : i32
   }
   func.return %result : i32

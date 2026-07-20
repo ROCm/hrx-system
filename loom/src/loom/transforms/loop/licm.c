@@ -23,7 +23,7 @@ LOOM_PASS_STATISTICS_DEFINE(loom_licm_statistics, loom_licm_statistics_t,
 
 static const loom_pass_info_t loom_licm_pass_info_storage = {
     .name = IREE_SVL("licm"),
-    .description = IREE_SVL("Hoist loop-invariant pure operations."),
+    .description = IREE_SVL("Hoist loop-invariant speculatable operations."),
     .kind = LOOM_PASS_FUNCTION,
     .statistic_layout = &loom_licm_statistics_layout,
 };
@@ -98,8 +98,11 @@ static iree_status_t loom_licm_op_is_hoistable(loom_licm_context_t* context,
                                                loom_op_t* loop_op,
                                                loom_op_t* candidate_op,
                                                bool* out_hoistable) {
-  return loom_motion_subtree_can_relocate_before(&context->motion, candidate_op,
-                                                 loop_op, out_hoistable);
+  // Moving before the loop may execute a candidate when the body never runs,
+  // and coalesces repeated body executions into one. Even an exact single-trip
+  // loop can move a potentially trapping op ahead of observable body work.
+  return loom_motion_subtree_can_speculate_before(
+      &context->motion, candidate_op, loop_op, out_hoistable);
 }
 
 static iree_status_t loom_licm_push_child_regions(
