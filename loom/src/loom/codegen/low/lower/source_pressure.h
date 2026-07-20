@@ -17,16 +17,6 @@
 extern "C" {
 #endif
 
-// One named conservative contribution not represented by source SSA values.
-typedef struct loom_low_source_pressure_reserve_t {
-  // Stable contributor name used by structured reports.
-  iree_string_view_t name;
-  // Resource units dense by residency-model direct resource ID.
-  const uint64_t* direct_resource_units;
-  // Number of entries in |direct_resource_units|.
-  iree_host_size_t direct_resource_count;
-} loom_low_source_pressure_reserve_t;
-
 typedef uint16_t loom_low_source_pressure_option_flags_t;
 enum loom_low_source_pressure_option_flag_bits_e {
   // The supplied contributors bound all non-source target storage pressure.
@@ -35,8 +25,11 @@ enum loom_low_source_pressure_option_flag_bits_e {
 
 // Options controlling one source pressure projection.
 typedef struct loom_low_source_pressure_options_t {
-  // Named target or lowering reserve contributors.
-  const loom_low_source_pressure_reserve_t* reserves;
+  // Nested function region whose execution defines the pressure scope. Null
+  // analyzes the whole function body.
+  const loom_region_t* region;
+  // Additional named reserve contributors supplied by the caller.
+  const loom_low_lower_pressure_reserve_t* reserves;
   // Number of entries in |reserves|.
   iree_host_size_t reserve_count;
   // Completeness claims for the supplied projection inputs.
@@ -63,6 +56,8 @@ enum loom_low_source_pressure_flag_bits_e {
 typedef struct loom_low_source_pressure_t {
   // Model availability and projection completeness bits.
   loom_low_source_pressure_flags_t flags;
+  // Target-owned model used to evaluate this pressure envelope, or NULL.
+  const loom_target_residency_model_t* residency_model;
   // Worst residency tier reached at any feasible structured program point.
   uint32_t minimum_tier;
   // Earliest program point attaining |minimum_tier|.
@@ -76,7 +71,7 @@ typedef struct loom_low_source_pressure_t {
   // Number of entries in each direct-resource vector.
   iree_host_size_t direct_resource_count;
   // Arena-owned copy of named reserve contributors.
-  const loom_low_source_pressure_reserve_t* reserves;
+  const loom_low_lower_pressure_reserve_t* reserves;
   // Number of entries in |reserves|.
   iree_host_size_t reserve_count;
   // Source values mapped to target register resources.
@@ -115,6 +110,20 @@ iree_status_t loom_low_source_pressure_analyze(
     const loom_low_lower_policy_t* policy,
     const loom_low_source_pressure_options_t* options,
     iree_arena_allocator_t* arena, loom_low_source_pressure_t* out_pressure);
+
+// Projects several nested function regions from one shared liveness and target
+// mapping analysis.
+//
+// Each null entry in |regions| selects the whole function body. The scoped
+// region in |options| is ignored because the explicit region array owns scope.
+// Output records may share immutable reserve contributor storage while their
+// peak and limiting resource vectors remain scope-specific.
+iree_status_t loom_low_source_pressure_analyze_regions(
+    const loom_target_contract_query_environment_t* environment,
+    const loom_low_lower_policy_t* policy,
+    const loom_low_source_pressure_options_t* options,
+    const loom_region_t* const* regions, iree_host_size_t region_count,
+    iree_arena_allocator_t* arena, loom_low_source_pressure_t* out_pressures);
 
 #ifdef __cplusplus
 }  // extern "C"

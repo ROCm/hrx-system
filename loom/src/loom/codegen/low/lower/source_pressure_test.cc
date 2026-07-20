@@ -121,8 +121,29 @@ static const loom_low_lower_policy_t kPolicy = {
     /*.source_type_supported=*/{},
     /*.map_value=*/{},
     /*.map_contract_value=*/{/*.fn=*/MapContractValue, /*.user_data=*/nullptr},
+    /*.pressure_reserves=*/{},
     /*.residency_model=*/{/*.fn=*/ResidencyModel, /*.user_data=*/nullptr},
 };
+
+static iree_status_t PressureReserves(
+    void* user_data,
+    const loom_target_contract_query_environment_t* environment,
+    loom_low_lower_pressure_reserve_list_t* out_reserves) {
+  (void)user_data;
+  (void)environment;
+  static const uint64_t kTargetAbiUnits[] = {2, 4};
+  static const loom_low_lower_pressure_reserve_t kReserves[] = {{
+      /*.name=*/IREE_SVL("target_abi"),
+      /*.direct_resource_units=*/kTargetAbiUnits,
+      /*.direct_resource_count=*/IREE_ARRAYSIZE(kTargetAbiUnits),
+  }};
+  *out_reserves = {
+      /*.values=*/kReserves,
+      /*.count=*/IREE_ARRAYSIZE(kReserves),
+      /*.flags=*/LOOM_LOW_LOWER_PRESSURE_RESERVE_FLAG_COMPLETE,
+  };
+  return iree_ok_status();
+}
 
 class SourcePressureTest : public ::testing::Test {
  protected:
@@ -178,7 +199,9 @@ class SourcePressureTest : public ::testing::Test {
 
   loom_low_source_pressure_t Analyze(
       loom_module_t* module, iree_string_view_t function_name,
-      const loom_low_source_pressure_options_t* options = nullptr) {
+      const loom_low_source_pressure_options_t* options = nullptr,
+      const loom_region_t* region = nullptr,
+      const loom_low_lower_policy_t* policy = &kPolicy) {
     const loom_target_contract_query_environment_t environment = {
         /*.module=*/module,
         /*.function=*/FindFunction(module, function_name),
@@ -187,9 +210,13 @@ class SourcePressureTest : public ::testing::Test {
         /*.target_ref=*/{},
         /*.descriptor_set=*/&descriptor_set_,
     };
+    loom_low_source_pressure_options_t scoped_options =
+        options != nullptr ? *options
+                           : loom_low_source_pressure_options_empty();
+    scoped_options.region = region;
     loom_low_source_pressure_t pressure;
     IREE_CHECK_OK(loom_low_source_pressure_analyze(
-        &environment, &kPolicy, options, &analysis_arena_, &pressure));
+        &environment, policy, &scoped_options, &analysis_arena_, &pressure));
     return pressure;
   }
 
@@ -225,6 +252,7 @@ func.def @branches(%condition: i1) {
 }
 )");
   const loom_low_source_pressure_options_t options = {
+      /*.region=*/{},
       /*.reserves=*/{},
       /*.reserve_count=*/{},
       /*.flags=*/LOOM_LOW_SOURCE_PRESSURE_OPTION_FLAG_RESERVES_COMPLETE,
@@ -237,6 +265,54 @@ func.def @branches(%condition: i1) {
   EXPECT_EQ(pressure.peak_direct_resource_units[0], 5u);
   EXPECT_EQ(pressure.peak_direct_resource_units[1], 5u);
   EXPECT_EQ(pressure.minimum_tier, 4u);
+  ASSERT_NE(pressure.minimum_tier_direct_resource_units, nullptr);
+  EXPECT_LT(pressure.minimum_tier_direct_resource_units[0] +
+                pressure.minimum_tier_direct_resource_units[1],
+            6u);
+}
+
+TEST_F(SourcePressureTest, JoinLiveValuesContributeOnEveryBranchPath) {
+  ModulePtr module = ParseModule(R"(
+func.def @branches(%condition: i1, %i_live: i32, %f_live: f32) -> (i32, f32) {
+  scf.if %condition {
+    %i0 = scalar.constant 1 : i32
+    %i1 = scalar.constant 2 : i32
+    %ir0 = scalar.addi %i0, %i1 : i32
+    %ir1 = scalar.addi %i0, %i1 : i32
+    %ir2 = scalar.addi %i0, %i1 : i32
+    %is0 = scalar.addi %ir0, %ir1 : i32
+    %is1 = scalar.addi %is0, %ir2 : i32
+    scf.yield
+  } else {
+    %f0 = scalar.constant 1.0 : f32
+    %f1 = scalar.constant 2.0 : f32
+    %fr0 = scalar.addf %f0, %f1 : f32
+    %fr1 = scalar.addf %f0, %f1 : f32
+    %fr2 = scalar.addf %f0, %f1 : f32
+    %fs0 = scalar.addf %fr0, %fr1 : f32
+    %fs1 = scalar.addf %fs0, %fr2 : f32
+    scf.yield
+  }
+  func.return %i_live, %f_live : i32, f32
+}
+)");
+  const loom_low_source_pressure_options_t options = {
+      /*.region=*/{},
+      /*.reserves=*/{},
+      /*.reserve_count=*/{},
+      /*.flags=*/LOOM_LOW_SOURCE_PRESSURE_OPTION_FLAG_RESERVES_COMPLETE,
+  };
+  const loom_low_source_pressure_t pressure =
+      Analyze(module.get(), IREE_SV("branches"), &options);
+
+  ASSERT_TRUE(loom_low_source_pressure_projection_complete(&pressure));
+  EXPECT_EQ(pressure.minimum_tier, 2u);
+  ASSERT_NE(pressure.minimum_tier_direct_resource_units, nullptr);
+  EXPECT_GT(pressure.minimum_tier_direct_resource_units[0], 0u);
+  EXPECT_GT(pressure.minimum_tier_direct_resource_units[1], 0u);
+  EXPECT_GE(pressure.minimum_tier_direct_resource_units[0] +
+                pressure.minimum_tier_direct_resource_units[1],
+            6u);
 }
 
 TEST_F(SourcePressureTest, SimultaneousClassesCrossDerivedResourceCliff) {
@@ -252,6 +328,7 @@ func.def @overlap(%i0: i32, %i1: i32, %f0: f32, %f1: f32) -> (i32, f32) {
 }
 )");
   const loom_low_source_pressure_options_t options = {
+      /*.region=*/{},
       /*.reserves=*/{},
       /*.reserve_count=*/{},
       /*.flags=*/LOOM_LOW_SOURCE_PRESSURE_OPTION_FLAG_RESERVES_COMPLETE,
@@ -293,7 +370,7 @@ func.def @empty() {
 }
 )");
   const uint64_t abi_units[] = {2, 4};
-  const loom_low_source_pressure_reserve_t reserves[] = {
+  const loom_low_lower_pressure_reserve_t reserves[] = {
       {
           /*.name=*/IREE_SVL("target_abi"),
           /*.direct_resource_units=*/abi_units,
@@ -301,6 +378,7 @@ func.def @empty() {
       },
   };
   const loom_low_source_pressure_options_t options = {
+      /*.region=*/{},
       /*.reserves=*/reserves,
       /*.reserve_count=*/IREE_ARRAYSIZE(reserves),
       /*.flags=*/LOOM_LOW_SOURCE_PRESSURE_OPTION_FLAG_RESERVES_COMPLETE,
@@ -316,6 +394,89 @@ func.def @empty() {
       iree_string_view_equal(pressure.reserves[0].name, IREE_SV("target_abi")));
   EXPECT_EQ(pressure.reserved_direct_resource_units[0], 2u);
   EXPECT_EQ(pressure.reserved_direct_resource_units[1], 4u);
+}
+
+TEST_F(SourcePressureTest, LoweringPolicySuppliesCompleteNamedReserves) {
+  ModulePtr module = ParseModule(R"(
+func.def @empty() {
+  func.return
+}
+)");
+  loom_low_lower_policy_t policy = kPolicy;
+  policy.pressure_reserves = {
+      /*.fn=*/PressureReserves,
+      /*.user_data=*/nullptr,
+  };
+  const uint64_t allocator_units[] = {1, 1};
+  const loom_low_lower_pressure_reserve_t caller_reserves[] = {{
+      /*.name=*/IREE_SVL("allocator_fragmentation"),
+      /*.direct_resource_units=*/allocator_units,
+      /*.direct_resource_count=*/IREE_ARRAYSIZE(allocator_units),
+  }};
+  const loom_low_source_pressure_options_t options = {
+      /*.region=*/{},
+      /*.reserves=*/caller_reserves,
+      /*.reserve_count=*/IREE_ARRAYSIZE(caller_reserves),
+  };
+  const loom_low_source_pressure_t pressure =
+      Analyze(module.get(), IREE_SV("empty"), &options, nullptr, &policy);
+
+  EXPECT_TRUE(loom_low_source_pressure_projection_complete(&pressure));
+  EXPECT_EQ(pressure.minimum_tier, 2u);
+  ASSERT_EQ(pressure.reserve_count, 2u);
+  EXPECT_TRUE(
+      iree_string_view_equal(pressure.reserves[0].name, IREE_SV("target_abi")));
+  EXPECT_TRUE(iree_string_view_equal(pressure.reserves[1].name,
+                                     IREE_SV("allocator_fragmentation")));
+  EXPECT_EQ(pressure.reserved_direct_resource_units[0], 3u);
+  EXPECT_EQ(pressure.reserved_direct_resource_units[1], 5u);
+}
+
+TEST_F(SourcePressureTest, ScopedRegionDoesNotInheritSiblingMinimum) {
+  ModulePtr module = ParseModule(R"(
+func.def @scopes(%start: index, %end: index, %step: index, %seed: i32, %live: i32) -> (i32) {
+  %result = scf.for %iv = [%start to %end step %step](%acc = %seed : i32) -> (i32) {
+    %next = scalar.addi %acc, %live : i32
+    scf.yield %next : i32
+  }
+  %f0 = scalar.constant 1.0 : f32
+  %f1 = scalar.constant 2.0 : f32
+  %fr0 = scalar.addf %f0, %f1 : f32
+  %fr1 = scalar.addf %f0, %f1 : f32
+  %fr2 = scalar.addf %f0, %f1 : f32
+  %fr3 = scalar.addf %f0, %f1 : f32
+  %fs0 = scalar.addf %fr0, %fr1 : f32
+  %fs1 = scalar.addf %fr2, %fr3 : f32
+  %fs2 = scalar.addf %fs0, %fs1 : f32
+  func.return %result : i32
+}
+)");
+  loom_func_like_t function = FindFunction(module.get(), IREE_SV("scopes"));
+  loom_op_t* loop_op =
+      loom_region_entry_block(loom_func_like_body(function))->first_op;
+  ASSERT_TRUE(loom_scf_for_isa(loop_op));
+
+  const loom_target_contract_query_environment_t environment = {
+      /*.module=*/module.get(),
+      /*.function=*/function,
+      /*.bundle=*/{},
+      /*.target_data=*/{},
+      /*.target_ref=*/{},
+      /*.descriptor_set=*/&descriptor_set_,
+  };
+  const loom_region_t* regions[] = {
+      nullptr,
+      loom_scf_for_body(loop_op),
+  };
+  loom_low_source_pressure_t pressures[IREE_ARRAYSIZE(regions)] = {};
+  IREE_ASSERT_OK(loom_low_source_pressure_analyze_regions(
+      &environment, &kPolicy, nullptr, regions, IREE_ARRAYSIZE(regions),
+      &analysis_arena_, pressures));
+
+  EXPECT_EQ(pressures[0].minimum_tier, 2u);
+  EXPECT_EQ(pressures[1].minimum_tier, 4u);
+  EXPECT_EQ(pressures[0].reserved_direct_resource_units,
+            pressures[1].reserved_direct_resource_units);
 }
 
 }  // namespace
