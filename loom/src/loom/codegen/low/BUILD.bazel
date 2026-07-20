@@ -58,12 +58,6 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "pressure",
-    hdrs = ["pressure.h"],
-    deps = ["//runtime/src/iree/base"],
-)
-
-loom_cc_library(
     name = "descriptor_traits",
     srcs = ["descriptor_traits.c"],
     hdrs = ["descriptor_traits.h"],
@@ -565,6 +559,7 @@ loom_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:residency",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
