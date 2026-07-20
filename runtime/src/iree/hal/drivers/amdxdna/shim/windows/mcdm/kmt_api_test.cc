@@ -885,6 +885,29 @@ TEST(KmtApiTest, CreateBufferPreservesPendingResidencyFenceForBothAbis) {
   }
 }
 
+TEST(KmtApiTest, PublishBufferCpuWritesValidatesRangeAndPreservesData) {
+  alignas(64) std::array<uint8_t, 256> storage = {};
+  std::fill(storage.begin(), storage.end(), 0x5a);
+  const auto expected = storage;
+
+  Buffer buffer = {};
+  buffer.cpu_ptr = storage.data();
+  buffer.size = storage.size();
+  Error error = {};
+
+  ASSERT_TRUE(PublishBufferCpuWrites(buffer, 3, 65, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(storage, expected);
+  EXPECT_TRUE(PublishBufferCpuWrites(buffer, buffer.size, 0, &error));
+
+  EXPECT_FALSE(PublishBufferCpuWrites(buffer, buffer.size, 1, &error));
+  EXPECT_FALSE(PublishBufferCpuWrites(buffer, 200, 64, &error));
+
+  buffer.cpu_ptr = nullptr;
+  EXPECT_FALSE(PublishBufferCpuWrites(buffer, 0, 1, &error));
+  EXPECT_TRUE(PublishBufferCpuWrites(buffer, 0, 0, &error));
+}
+
 TEST(KmtApiTest, BufferResidencyUsesNegotiatedPagingModel) {
   ResetFakes();
   KmtApi api = {};

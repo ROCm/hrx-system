@@ -286,6 +286,11 @@ void DestroyDevice(const KmtApi& api, Device* device);
 bool CreateBuffer(const KmtApi& api, const Device& device, BufferKind kind,
                   uint64_t size, Buffer* out_buffer, Error* out_error);
 
+// Makes CPU writes to a Lock2-mapped buffer visible before device execution.
+// Buffer ownership must synchronize all writers into the calling thread.
+bool PublishBufferCpuWrites(const Buffer& buffer, uint64_t offset,
+                            uint64_t length, Error* out_error);
+
 // Returns the miniport-facing child handle stored in an ERT_CMD_CHAIN entry.
 // The negotiated device contract selects the record shape inside this DDI.
 uint64_t GetPathBChainChildHandle(const Device& device, Buffer* buffer);

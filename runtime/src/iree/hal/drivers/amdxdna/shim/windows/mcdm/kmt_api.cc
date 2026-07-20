@@ -86,17 +86,17 @@ bool CheckStatusOrPending(const char* call_name, NTSTATUS status,
   return CheckStatus(call_name, status, out_error);
 }
 
-bool FlushCpuCacheRange(void* mapping, uint64_t mapping_size, uint64_t offset,
-                        uint64_t length, uint64_t granularity,
-                        Error* out_error) {
+bool PublishCpuWriteRange(void* mapping, uint64_t mapping_size,
+                          uint64_t offset, uint64_t length,
+                          uint64_t granularity, Error* out_error) {
   if (length == 0) return true;
   if (!mapping || granularity == 0 ||
       (granularity & (granularity - 1)) != 0) {
-    SetError(out_error, "invalid command-aperture CPU cache flush mapping");
+    SetError(out_error, "invalid CPU write publication mapping");
     return false;
   }
   if (offset > mapping_size || length > mapping_size - offset) {
-    SetError(out_error, "command-aperture CPU cache flush is out of bounds");
+    SetError(out_error, "CPU write publication range is out of bounds");
     return false;
   }
 
@@ -104,35 +104,36 @@ bool FlushCpuCacheRange(void* mapping, uint64_t mapping_size, uint64_t offset,
   const uint64_t write_end = offset + length;
   if (write_end >
       std::numeric_limits<uint64_t>::max() - (granularity - 1)) {
-    SetError(out_error, "command-aperture CPU cache flush range overflows");
+    SetError(out_error, "CPU write publication range overflows");
     return false;
   }
   const uint64_t end_offset =
       (write_end + granularity - 1) & ~(granularity - 1);
   if (end_offset > mapping_size) {
-    SetError(out_error, "command-aperture CPU cache flush slot is out of bounds");
+    SetError(out_error, "CPU write publication granule is out of bounds");
     return false;
   }
 
   constexpr uintptr_t kCpuCacheLineSize = 64;
   const uintptr_t mapping_address = reinterpret_cast<uintptr_t>(mapping);
   if (end_offset > std::numeric_limits<uintptr_t>::max() - mapping_address) {
-    SetError(out_error, "command-aperture CPU cache flush address overflows");
+    SetError(out_error, "CPU write publication address overflows");
     return false;
   }
   uintptr_t line =
       (mapping_address + static_cast<uintptr_t>(begin_offset)) &
       ~(kCpuCacheLineSize - 1);
   const uintptr_t end = mapping_address + static_cast<uintptr_t>(end_offset);
-  _mm_lfence();
+  // Publish only writes synchronized into this calling thread. Buffer ownership
+  // is responsible for excluding concurrent writers; a process-wide write
+  // buffer flush would hide violations of that contract and is unnecessary.
+  std::atomic_thread_fence(std::memory_order_seq_cst);
   while (line < end) {
     _mm_clflush(reinterpret_cast<void const*>(line));
     line += kCpuCacheLineSize;
   }
-  // XRT reaches HW-queue submission through a locked submit mutex after its
-  // clflush loop, which provides a full publication barrier. Keep that
-  // ordering contract local to this DDI boundary instead of relying on an
-  // incidental lock in the caller.
+  // Wait for every cache-line writeback before the caller publishes a packet or
+  // aperture descriptor to the hardware queue.
   _mm_mfence();
   return true;
 }
@@ -921,6 +922,12 @@ bool CreateBuffer(const KmtApi& api, const Device& device, BufferKind kind,
 
   *out_buffer = buffer;
   return true;
+}
+
+bool PublishBufferCpuWrites(const Buffer& buffer, uint64_t offset,
+                            uint64_t length, Error* out_error) {
+  return PublishCpuWriteRange(buffer.cpu_ptr, buffer.size, offset, length,
+                              /*granularity=*/1, out_error);
 }
 
 bool SyncBuffer(const KmtApi& api, const Device& device, const Buffer& buffer,
@@ -1851,7 +1858,7 @@ bool CommitPathBCodeWrite(const KmtApi& api, const Device& device,
   const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
   switch (abi.command_aperture_write_publish_mode) {
     case CommandApertureWritePublishMode::cpu_cache_flush:
-      return FlushCpuCacheRange(
+      return PublishCpuWriteRange(
           aperture.gpu_cpu_ptr, aperture.gpu_va_size, offset, length,
           abi.command_aperture_code_publish_granularity, out_error);
     case CommandApertureWritePublishMode::kmt_invalidate:

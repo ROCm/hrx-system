@@ -4,11 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <intrin.h>
-
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -128,31 +125,6 @@ uint32_t chain_slot_capacity(size_t exec_bo_size) {
   return exec_bo_size > header
              ? static_cast<uint32_t>((exec_bo_size - header) / sizeof(uint64_t))
              : 1;
-}
-
-void flush_host_writes_to_mcdm() {
-  std::atomic_thread_fence(std::memory_order_seq_cst);
-  FlushProcessWriteBuffers();
-}
-
-void sync_host_mapped_range_like_xrt(void* base, uint64_t offset,
-                                     uint64_t size) {
-  std::atomic_thread_fence(std::memory_order_seq_cst);
-  _mm_lfence();
-  if (!base || size == 0) return;
-
-  constexpr uintptr_t kCacheLineSize = 64;
-  const uintptr_t base_addr = reinterpret_cast<uintptr_t>(base);
-  if (offset > std::numeric_limits<uintptr_t>::max() - base_addr) return;
-  const uintptr_t begin = base_addr + static_cast<uintptr_t>(offset);
-  if (size > std::numeric_limits<uintptr_t>::max() - begin) return;
-  const uintptr_t end = begin + static_cast<uintptr_t>(size);
-  uintptr_t line = begin & ~(kCacheLineSize - 1);
-  while (line < end) {
-    _mm_clflush(reinterpret_cast<void const*>(line));
-    line += kCacheLineSize;
-  }
-  _mm_mfence();
 }
 
 iree_status_t status_from_mcdm_error(const char* label,
@@ -2038,9 +2010,13 @@ iree_status_t materialize_deferred_buffer(
     // A sync issued while this buffer was deferred could only order writes to
     // the temporary host storage. Publish the copy into the real KMT mapping
     // before any command can make the new device address visible to firmware.
-    sync_host_mapped_range_like_xrt(real_buffer.cpu_ptr, /*offset=*/0,
-                                    copy_size);
-    flush_host_writes_to_mcdm();
+    if (!mcdm::PublishBufferCpuWrites(real_buffer, /*offset=*/0, copy_size,
+                                      &error)) {
+      mcdm::DestroyBuffer(buffer->device->api, buffer->device->device,
+                          &real_buffer);
+      return status_from_mcdm_error(
+          "amdxdna Windows MCDM deferred BO publication failed", error);
+    }
   }
   const bool transfer_deferred_storage_to_mirror =
       buffer->host_mirror &&
@@ -2465,9 +2441,11 @@ iree_status_t iree_hal_amdxdna_native_buffer_sync(
                     buffer->host_mirror + sync_offset,
                     static_cast<size_t>(sync_size));
       }
-      sync_host_mapped_range_like_xrt(buffer->buffer.cpu_ptr, sync_offset,
-                                      sync_size);
-      flush_host_writes_to_mcdm();
+      if (!mcdm::PublishBufferCpuWrites(buffer->buffer, sync_offset, sync_size,
+                                        &error)) {
+        return status_from_mcdm_error(
+            "amdxdna Windows MCDM host BO publication failed", error);
+      }
       return iree_ok_status();
     }
     if (!mcdm::SyncBuffer(buffer->device->api, buffer->device->device,
@@ -2489,17 +2467,19 @@ iree_status_t iree_hal_amdxdna_native_buffer_sync(
     }
     return iree_ok_status();
   }
+  mcdm::Error error;
   if (direction == IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE) {
     // Cacheable and instruction BOs are written through their Lock2 mapping.
     // Publish the requested range after all packet and BO-table updates, just
     // as XRT's host-only BO sync does before run.start(). A process write
     // barrier alone does not evict dirty cache lines from that mapping.
-    sync_host_mapped_range_like_xrt(buffer->buffer.cpu_ptr, sync_offset,
-                                    sync_size);
-    flush_host_writes_to_mcdm();
+    if (!mcdm::PublishBufferCpuWrites(buffer->buffer, sync_offset, sync_size,
+                                      &error)) {
+      return status_from_mcdm_error(
+          "amdxdna Windows MCDM BO publication failed", error);
+    }
     return iree_ok_status();
   }
-  mcdm::Error error;
   if (!mcdm::SyncBuffer(buffer->device->api, buffer->device->device,
                         buffer->buffer, sync_offset, sync_size, &error)) {
     return status_from_mcdm_error("amdxdna Windows MCDM BO sync failed", error);
@@ -3139,8 +3119,11 @@ static iree_status_t iree_hal_amdxdna_native_submit_issue(
           command->exec_buffer,
           IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE));
     } else {
-      sync_host_mapped_range_like_xrt(command->exec_buffer->buffer.cpu_ptr,
-                                      /*offset=*/0, command_bytes);
+      if (!mcdm::PublishBufferCpuWrites(command->exec_buffer->buffer,
+                                        /*offset=*/0, command_bytes, &error)) {
+        return status_from_mcdm_error(
+            "amdxdna Windows MCDM exec BO publication failed", error);
+      }
     }
   }
   IREE_RETURN_IF_ERROR(
