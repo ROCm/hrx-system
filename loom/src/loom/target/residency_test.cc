@@ -184,38 +184,6 @@ TEST_F(ResidencyTest, CliffEvaluationUsesExactBoundaries) {
       LOOM_TARGET_RESIDENCY_CLIFF_EVALUATION_FLAG_HAS_WORSE_TIER));
 }
 
-TEST_F(ResidencyTest, TierEvaluationRequiresNoDiagnosticStorage) {
-  struct TestCase {
-    uint64_t vector_units;
-    uint64_t scalar_units;
-    uint32_t expected_tier;
-  };
-  const TestCase test_cases[] = {
-      {/*.vector_units=*/0, /*.scalar_units=*/0, /*.expected_tier=*/4},
-      {/*.vector_units=*/4, /*.scalar_units=*/2, /*.expected_tier=*/4},
-      // The derived shared resource crosses its first cliff even though neither
-      // direct resource does.
-      {/*.vector_units=*/4, /*.scalar_units=*/5, /*.expected_tier=*/2},
-      {/*.vector_units=*/5, /*.scalar_units=*/0, /*.expected_tier=*/2},
-      {/*.vector_units=*/9, /*.scalar_units=*/11, /*.expected_tier=*/0},
-  };
-  for (const TestCase& test_case : test_cases) {
-    const uint64_t direct_units[] = {test_case.vector_units,
-                                     test_case.scalar_units};
-    uint32_t tier = UINT32_MAX;
-    IREE_ASSERT_OK(loom_target_residency_evaluate_tier(
-        &kModel, direct_units, IREE_ARRAYSIZE(direct_units), &tier));
-    EXPECT_EQ(tier, test_case.expected_tier);
-  }
-}
-
-TEST_F(ResidencyTest, TierEvaluationMakesUnavailableModelExplicit) {
-  uint32_t tier = UINT32_MAX;
-  IREE_ASSERT_OK(
-      loom_target_residency_evaluate_tier(nullptr, nullptr, 0, &tier));
-  EXPECT_EQ(tier, 0u);
-}
-
 TEST_F(ResidencyTest, UnavailableModelIsExplicit) {
   loom_target_residency_query_t query;
   IREE_ASSERT_OK(

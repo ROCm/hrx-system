@@ -58,7 +58,6 @@ loom_cc_library(
     loom::target::low_descriptor_registry
     loom::target::low_legality
     loom::target::registers
-    loom::target::residency
     loom::target::types
     loom::util::cfg_graph
     loom::util::fact_table
@@ -86,42 +85,6 @@ loom_cc_library(
     loom::target::function_contract
     loom::target::types
   PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    source_pressure
-  HDRS
-    "source_pressure.h"
-  SRCS
-    "source_pressure.c"
-  DEPS
-    ::lower
-    iree::base
-    iree::base::internal::arena
-    loom::analysis::liveness
-    loom::analysis::view_regions
-    loom::ir
-    loom::util::adaptive_sort
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    source_pressure_test
-  SRCS
-    "source_pressure_test.cc"
-  DEPS
-    ::source_pressure
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::format::text::parser
-    loom::ir
-    loom::ops::func
-    loom::ops::scalar
-    loom::ops::scf
-    loom::testing::module_ptr
 )
 
 loom_cc_test(

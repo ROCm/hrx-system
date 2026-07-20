@@ -74,7 +74,6 @@ loom_cc_library(
         "//loom/src/loom/target:low_descriptor_registry",
         "//loom/src/loom/target:low_legality",
         "//loom/src/loom/target:registers",
-        "//loom/src/loom/target:residency",
         "//loom/src/loom/target:types",
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:fact_table",
@@ -105,42 +104,6 @@ loom_cc_library(
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
-loom_cc_library(
-    name = "source_pressure",
-    srcs = ["source_pressure.c"],
-    hdrs = ["source_pressure.h"],
-    visibility = [
-        "//loom/src/loom/codegen/low/transforms/pipeline:__pkg__",
-        "//loom/src/loom/transforms/loop:__pkg__",
-    ],
-    deps = [
-        ":lower",
-        "//loom/src/loom/analysis:liveness",
-        "//loom/src/loom/analysis:view_regions",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/util:adaptive_sort",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
-loom_cc_test(
-    name = "source_pressure_test",
-    srcs = ["source_pressure_test.cc"],
-    deps = [
-        ":source_pressure",
-        "//loom/src/loom/format/text:parser",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/func",
-        "//loom/src/loom/ops/scalar",
-        "//loom/src/loom/ops/scf",
-        "//loom/src/loom/testing:module_ptr",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
