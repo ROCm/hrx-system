@@ -736,6 +736,7 @@ vector_insert = Op(
     ],
     verify="loom_vector_insert_verify",
     facts="loom_vector_insert_facts",
+    canonicalize="loom_vector_insert_canonicalize",
     traits=[PURE],
     format=[
         Ref("value"),

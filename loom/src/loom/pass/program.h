@@ -34,6 +34,8 @@ typedef enum loom_pass_program_instruction_kind_e {
   LOOM_PASS_PROGRAM_INSTRUCTION_REPEAT = 3,
   LOOM_PASS_PROGRAM_INSTRUCTION_FAIL = 4,
   LOOM_PASS_PROGRAM_INSTRUCTION_HALT = 5,
+  LOOM_PASS_PROGRAM_INSTRUCTION_CALL = 6,
+  LOOM_PASS_PROGRAM_INSTRUCTION_IF_CHANGED = 7,
 } loom_pass_program_instruction_kind_t;
 
 typedef enum loom_pass_program_symbol_snapshot_kind_e {
@@ -148,6 +150,13 @@ typedef struct loom_pass_program_repeat_t {
   iree_host_size_t body_end;
 } loom_pass_program_repeat_t;
 
+typedef struct loom_pass_program_nested_body_t {
+  // First instruction in the nested body.
+  iree_host_size_t body_start;
+  // One-past-last instruction in the nested body.
+  iree_host_size_t body_end;
+} loom_pass_program_nested_body_t;
+
 typedef struct loom_pass_program_message_t {
   // Program-owned message text.
   iree_string_view_t message;
@@ -170,6 +179,10 @@ typedef struct loom_pass_program_instruction_t {
     loom_pass_program_where_t where;
     // Payload for LOOM_PASS_PROGRAM_INSTRUCTION_REPEAT.
     loom_pass_program_repeat_t repeat;
+    // Payload for LOOM_PASS_PROGRAM_INSTRUCTION_CALL.
+    loom_pass_program_nested_body_t call;
+    // Payload for LOOM_PASS_PROGRAM_INSTRUCTION_IF_CHANGED.
+    loom_pass_program_nested_body_t if_changed;
     // Payload for LOOM_PASS_PROGRAM_INSTRUCTION_FAIL/HALT.
     loom_pass_program_message_t message;
   };

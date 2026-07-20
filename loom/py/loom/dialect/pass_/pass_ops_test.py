@@ -29,6 +29,9 @@ class TestPassText:
     def test_pipeline_roundtrip(self) -> None:
         source = """pass.pipeline<module> @cleanup pipeline {
   canonicalize(max_iterations = 10)
+  if changed {
+    cse
+  }
   repeat until_converged(max_iterations = 8) {
     cse
     dce

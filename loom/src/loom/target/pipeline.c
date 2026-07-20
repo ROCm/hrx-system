@@ -253,6 +253,12 @@ static iree_status_t loom_target_pipeline_build_cleanup(
   return loom_target_pipeline_build_run(builder, IREE_SV("cse"));
 }
 
+static iree_status_t loom_target_pipeline_build_cleanup_body(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  return loom_target_pipeline_build_cleanup(builder);
+}
+
 static iree_status_t
 loom_target_pipeline_build_source_normalization_before_legalize(
     loom_builder_t* builder, void* user_data) {
@@ -287,6 +293,11 @@ loom_target_pipeline_build_cfg_source_finalization_after_legalize(
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_run(builder, IREE_SV("unroll-scf-for")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup(builder));
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_run(builder, IREE_SV("sroa-vector-banks")));
+  loom_op_t* if_changed_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_cleanup_body, NULL, &if_changed_op));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
       builder, IREE_SV("sink-single-use-reads")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(

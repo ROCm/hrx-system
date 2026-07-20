@@ -94,6 +94,16 @@ iree_status_t loom_pass_ir_build_repeat(
     loom_pass_ir_body_build_fn_t build_body, void* user_data,
     loom_op_t** out_repeat_op);
 
+// Appends a pass.if_changed and enters its body region. The caller must
+// eventually call loom_pass_ir_end_scope.
+iree_status_t loom_pass_ir_begin_if_changed(loom_builder_t* builder,
+                                            loom_pass_ir_scope_t* out_scope);
+
+// Appends a pass.if_changed and invokes |build_body| inside the body region.
+iree_status_t loom_pass_ir_build_if_changed(
+    loom_builder_t* builder, loom_pass_ir_body_build_fn_t build_body,
+    void* user_data, loom_op_t** out_if_changed_op);
+
 // Appends a pass.call to |callee|.
 iree_status_t loom_pass_ir_build_call(loom_builder_t* builder,
                                       loom_symbol_ref_t callee,

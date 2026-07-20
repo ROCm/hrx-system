@@ -17,6 +17,26 @@ package(
 )
 
 loom_cc_library(
+    name = "bank_sroa",
+    srcs = ["bank_sroa.c"],
+    hdrs = ["bank_sroa.h"],
+    deps = [
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:materialize",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "memory_footprint",
     srcs = ["memory_footprint.c"],
     hdrs = ["memory_footprint.h"],

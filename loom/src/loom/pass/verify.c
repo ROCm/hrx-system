@@ -484,6 +484,14 @@ static iree_status_t loom_pass_verify_repeat(
                                  loom_pass_repeat_body(op), call_stack);
 }
 
+static iree_status_t loom_pass_verify_if_changed(
+    loom_pass_verify_state_t* state, const loom_op_t* pipeline_op,
+    const loom_op_t* op, loom_pass_kind_t current_kind,
+    const loom_pass_verify_call_frame_t* call_stack) {
+  return loom_pass_verify_region(state, pipeline_op, current_kind,
+                                 loom_pass_if_changed_body(op), call_stack);
+}
+
 static iree_status_t loom_pass_verify_call(
     loom_pass_verify_state_t* state, const loom_op_t* op,
     loom_pass_kind_t current_kind,
@@ -562,9 +570,15 @@ static iree_status_t loom_pass_verify_region(
   IREE_RETURN_IF_ERROR(loom_pass_verify_region_shape(region));
   const loom_block_t* entry_block = loom_region_const_entry_block(region);
   const loom_op_t* last_op = entry_block->last_op;
+  const loom_op_t* previous_op = NULL;
   const loom_op_t* op = NULL;
   loom_block_for_each_op(entry_block, op) {
     if (op == last_op) break;
+    if (loom_pass_if_changed_isa(op) && previous_op == NULL) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "pass.if_changed requires a preceding sibling pipeline statement");
+    }
     switch (op->kind) {
       case LOOM_OP_PASS_FOR: {
         IREE_RETURN_IF_ERROR(loom_pass_verify_for(state, pipeline_op, op,
@@ -579,6 +593,11 @@ static iree_status_t loom_pass_verify_region(
       case LOOM_OP_PASS_REPEAT: {
         IREE_RETURN_IF_ERROR(loom_pass_verify_repeat(state, pipeline_op, op,
                                                      current_kind, call_stack));
+        break;
+      }
+      case LOOM_OP_PASS_IF_CHANGED: {
+        IREE_RETURN_IF_ERROR(loom_pass_verify_if_changed(
+            state, pipeline_op, op, current_kind, call_stack));
         break;
       }
       case LOOM_OP_PASS_CALL: {
@@ -617,6 +636,7 @@ static iree_status_t loom_pass_verify_region(
             current_kind == LOOM_PASS_MODULE ? "module" : "func");
       }
     }
+    previous_op = op;
   }
   return iree_ok_status();
 }
