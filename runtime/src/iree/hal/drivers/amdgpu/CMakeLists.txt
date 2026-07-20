@@ -36,6 +36,7 @@ iree_cc_library(
   SRCS
     "queue_affinity.c"
   DEPS
+    iree::async
     iree::base
     iree::hal
   PUBLIC

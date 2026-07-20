@@ -67,7 +67,21 @@ iree_hsa_fence_scope_t iree_hal_amdgpu_host_queue_wait_acquire_scope(
 
 iree_hsa_fence_scope_t iree_hal_amdgpu_host_queue_axis_acquire_scope(
     const iree_hal_amdgpu_host_queue_t* queue, iree_async_axis_t axis) {
-  return iree_async_axis_device_index(axis) == queue->device_ordinal
+  // Session, machine, domain, and logical-device identity occupy the upper
+  // 32 bits of a queue axis. Queue indices are flattened across physical
+  // devices, with each physical device owning one contiguous range.
+  if ((axis >> 32) != (queue->axis >> 32)) {
+    return IREE_HSA_FENCE_SCOPE_SYSTEM;
+  }
+  const iree_hal_amdgpu_logical_device_t* logical_device =
+      (const iree_hal_amdgpu_logical_device_t*)queue->logical_device;
+  const iree_host_size_t first_physical_queue_ordinal =
+      queue->queue_ordinal - queue->physical_queue_ordinal;
+  const iree_host_size_t candidate_queue_ordinal =
+      iree_async_axis_queue_index(axis);
+  return candidate_queue_ordinal >= first_physical_queue_ordinal &&
+                 candidate_queue_ordinal - first_physical_queue_ordinal <
+                     logical_device->system->topology.gpu_agent_queue_count
              ? IREE_HSA_FENCE_SCOPE_AGENT
              : IREE_HSA_FENCE_SCOPE_SYSTEM;
 }

@@ -39,6 +39,7 @@ iree_runtime_cc_library(
     srcs = ["queue_affinity.c"],
     hdrs = ["queue_affinity.h"],
     deps = [
+        "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],
