@@ -134,7 +134,7 @@ loom_low_allocation_unit_liveness_note_contiguous_part_uses_at_point(
         (uint32_t)(intersection_begin - relation_begin);
     const uint32_t source_unit_count =
         (uint32_t)(intersection_end - intersection_begin);
-    iree_bitmap_set(unit_liveness->values_with_edge_handoff_units,
+    iree_bitmap_set(unit_liveness->values_with_incomplete_storage_segments,
                     relation->source_ordinal);
     IREE_RETURN_IF_ERROR(
         loom_low_allocation_unit_liveness_note_unit_use_at_point(
@@ -286,10 +286,16 @@ loom_low_allocation_unit_liveness_note_early_clobber_operand_uses(
             op, early_clobber_result_index, operand_index)) {
       continue;
     }
+    loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
+    if (!loom_low_allocation_unit_liveness_value_ordinal_for_value(
+            value_domain, liveness, operands[operand_index], &value_ordinal)) {
+      continue;
+    }
+    iree_bitmap_set(unit_liveness->values_with_incomplete_storage_segments,
+                    value_ordinal);
     IREE_RETURN_IF_ERROR(
-        loom_low_allocation_unit_liveness_note_value_use_at_point(
-            unit_liveness, value_domain, liveness, operands[operand_index],
-            clobber_point));
+        loom_low_allocation_unit_liveness_note_value_ordinal_use_at_point(
+            unit_liveness, liveness, value_ordinal, clobber_point));
   }
   return iree_ok_status();
 }
@@ -569,18 +575,19 @@ iree_status_t loom_low_allocation_unit_liveness_initialize(
     for (iree_host_size_t i = 0; i < liveness->value_count; ++i) {
       out_unit_liveness->end_point_starts_by_value_ordinal[i] = UINT32_MAX;
     }
-    const iree_host_size_t edge_handoff_word_count =
+    const iree_host_size_t incomplete_segment_word_count =
         iree_bitmap_calculate_words(liveness->value_count);
-    uint64_t* edge_handoff_words = NULL;
+    uint64_t* incomplete_segment_words = NULL;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, edge_handoff_word_count, sizeof(*edge_handoff_words),
-        (void**)&edge_handoff_words));
-    memset(edge_handoff_words, 0,
-           edge_handoff_word_count * sizeof(*edge_handoff_words));
-    out_unit_liveness->values_with_edge_handoff_units = (iree_bitmap_t){
-        .bit_count = liveness->value_count,
-        .words = edge_handoff_words,
-    };
+        arena, incomplete_segment_word_count, sizeof(*incomplete_segment_words),
+        (void**)&incomplete_segment_words));
+    memset(incomplete_segment_words, 0,
+           incomplete_segment_word_count * sizeof(*incomplete_segment_words));
+    out_unit_liveness->values_with_incomplete_storage_segments =
+        (iree_bitmap_t){
+            .bit_count = liveness->value_count,
+            .words = incomplete_segment_words,
+        };
   }
 
   iree_host_size_t unit_end_point_count = 0;
@@ -667,7 +674,7 @@ loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
   IREE_ASSERT_ARGUMENT(unit_liveness);
   IREE_ASSERT_ARGUMENT(liveness);
   IREE_ASSERT_LT(value_ordinal, liveness->value_count);
-  if (iree_bitmap_test(unit_liveness->values_with_edge_handoff_units,
+  if (iree_bitmap_test(unit_liveness->values_with_incomplete_storage_segments,
                        value_ordinal)) {
     return (loom_liveness_segment_range_t){0};
   }
@@ -728,6 +735,8 @@ iree_status_t loom_low_allocation_unit_liveness_extend_for_tied_results(
           "allocation unit liveness");
     }
 
+    iree_bitmap_set(unit_liveness->values_with_incomplete_storage_segments,
+                    relation->source_ordinal);
     for (uint32_t unit_index = 0; unit_index < relation->unit_count;
          ++unit_index) {
       const iree_host_size_t source_unit_index =

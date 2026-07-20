@@ -31,9 +31,9 @@ typedef struct loom_low_allocation_unit_liveness_t {
   uint32_t* end_points;
   // Number of initialized records in |end_points|.
   iree_host_size_t end_point_count;
-  // Values whose concrete units remain live through a decomposed edge payload.
-  // Their semantic sparse segments are incomplete for storage conflicts.
-  iree_bitmap_t values_with_edge_handoff_units;
+  // Values whose concrete storage lifetime is not fully represented by their
+  // semantic sparse segments.
+  iree_bitmap_t values_with_incomplete_storage_segments;
 } loom_low_allocation_unit_liveness_t;
 
 // Initializes |out_unit_liveness| from value-granular liveness and IR use

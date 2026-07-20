@@ -187,9 +187,20 @@ TEST_F(LowAllocationUnitLivenessTest, ExtendsTiedResultSourceUnits) {
           /*.live_out_count=*/0,
       },
   };
-  const loom_liveness_analysis_t liveness = Liveness(
+  loom_liveness_analysis_t liveness = Liveness(
       value_domain.value_ids, value_domain.value_count, value_interval_indices,
       intervals, IREE_ARRAYSIZE(intervals), blocks, IREE_ARRAYSIZE(blocks));
+  const loom_liveness_segment_t segments[] = {
+      {/*.start_point=*/0, /*.end_point=*/1},
+      {/*.start_point=*/7, /*.end_point=*/8},
+  };
+  const loom_liveness_segment_range_t value_segment_ranges[] = {
+      {/*.start=*/0, /*.count=*/1},
+      {/*.start=*/1, /*.count=*/1},
+  };
+  liveness.segments = segments;
+  liveness.segment_count = IREE_ARRAYSIZE(segments);
+  liveness.value_segment_ranges = value_segment_ranges;
 
   loom_low_allocation_unit_liveness_t unit_liveness = {};
   IREE_ASSERT_OK(loom_low_allocation_unit_liveness_initialize(
@@ -200,6 +211,11 @@ TEST_F(LowAllocationUnitLivenessTest, ExtendsTiedResultSourceUnits) {
   EXPECT_EQ(unit_liveness.end_points[1], 1u);
   EXPECT_EQ(unit_liveness.end_points[2], 8u);
   EXPECT_EQ(unit_liveness.end_points[3], 8u);
+  EXPECT_EQ(
+      loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
+          &unit_liveness, &liveness, /*value_ordinal=*/0)
+          .count,
+      1u);
 
   const loom_low_placement_relation_t relations[] = {
       {
@@ -222,6 +238,11 @@ TEST_F(LowAllocationUnitLivenessTest, ExtendsTiedResultSourceUnits) {
       &unit_liveness, &liveness, &placement));
   EXPECT_EQ(unit_liveness.end_points[0], 8u);
   EXPECT_EQ(unit_liveness.end_points[1], 8u);
+  EXPECT_EQ(
+      loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
+          &unit_liveness, &liveness, /*value_ordinal=*/0)
+          .count,
+      0u);
 
   loom_local_value_domain_release(&value_domain);
   loom_module_free(module);
