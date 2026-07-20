@@ -500,7 +500,7 @@ loom_generated_cc_library(
     hdrs = ["occupancy_model.h"],
     generator = _AMDGPU_OCCUPANCY_TABLE_GENERATOR,
     source = "occupancy_model_tables.c",
-    visibility = _AMDGPU_ROOT_VISIBILITY,
+    visibility = _AMDGPU_ROOT_VISIBILITY + _AMDGPU_LOWER_VISIBILITY,
     deps = [
         "//loom/src/loom/target:residency",
         "//loom/src/loom/target/arch/amdgpu:target_info",
