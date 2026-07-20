@@ -42,6 +42,7 @@ from loom.dsl import (
     INTEGER,
     POOL,
     SYMBOL_DEFINE,
+    TERMINATOR,
     VECTOR,
     AliasResult,
     AttrDef,
@@ -49,6 +50,7 @@ from loom.dsl import (
     BitRangeWithinElementWidth,
     Borrow,
     CallLikeInterface,
+    Constraint,
     ContractFamily,
     Dialect,
     ElementWidthAtLeastAttr,
@@ -56,7 +58,9 @@ from loom.dsl import (
     EnumCase,
     EnumDef,
     HasParent,
+    IterArgsMatchResults,
     LiteralMatchesElementType,
+    LoopLikeInterface,
     MemoryAccessInterface,
     Op,
     OpCategory,
@@ -80,6 +84,8 @@ from loom.dsl import (
     TypeSemantic,
     UnpackedPayloadBitCountMatchesStorage,
     Writes,
+    YieldCountMatchesResults,
+    YieldTypesMatchResults,
 )
 from loom.gen.ops import model as c_table_model
 from loom.gen.ops.c_builders import generate_builders_c
@@ -1083,6 +1089,100 @@ def test_generate_tables_emits_call_like_interface() -> None:
     assert ".operand_offset = 0," in tables_c
     assert ".result_offset = 0," in tables_c
     assert ".kind = LOOM_CALL_LIKE_KIND_SEMANTIC," in tables_c
+
+
+def _make_counted_loop_op(
+    *,
+    body_arg_source: str | None = "iter_args",
+    step: str | None = "step",
+    constraints: list[Constraint] | None = None,
+) -> Op:
+    if constraints is None:
+        constraints = [
+            IterArgsMatchResults("iter_args", "results"),
+            YieldCountMatchesResults("body", "results"),
+            YieldTypesMatchResults("body", "results"),
+        ]
+    return Op(
+        "test.for",
+        group=Dialect("test"),
+        operands=[
+            Operand("lower_bound", INTEGER),
+            Operand("upper_bound", INTEGER),
+            Operand("step", INTEGER),
+            Operand("iter_args", ANY, variadic=True),
+        ],
+        results=[Result("results", ANY, variadic=True)],
+        regions=[
+            RegionDef(
+                "body",
+                single_block=True,
+                terminator="test.yield",
+                implicit_args=(("iv", "index"),),
+                arg_source=body_arg_source,
+            )
+        ],
+        interfaces=[
+            LoopLikeInterface(
+                body="body",
+                iter_args="iter_args",
+                iv="iv",
+                lower_bound="lower_bound",
+                upper_bound="upper_bound",
+                step=step,
+            )
+        ],
+        constraints=constraints,
+    )
+
+
+def _generate_counted_loop_tables(op: Op) -> str:
+    yield_op = Op(
+        "test.yield",
+        group=Dialect("test"),
+        operands=[Operand("values", ANY, variadic=True)],
+        traits=[TERMINATOR],
+    )
+    return generate_tables_c("test", 0, [yield_op, op])
+
+
+def test_generate_tables_emits_counted_loop_like_interface() -> None:
+    tables_c = _generate_counted_loop_tables(_make_counted_loop_op())
+
+    assert "static const loom_loop_like_vtable_t loom_test_for_loop_like" in tables_c
+    assert ".body_region_index = 0," in tables_c
+    assert ".condition_region_index = 255," in tables_c
+    assert ".iv_block_arg_index = 0," in tables_c
+    assert ".iter_args_operand_field_index = 3," in tables_c
+    assert ".lower_bound_operand_index = 0," in tables_c
+    assert ".upper_bound_operand_index = 1," in tables_c
+    assert ".step_operand_index = 2," in tables_c
+
+
+def test_generate_tables_rejects_loop_like_missing_yield_constraint() -> None:
+    op = _make_counted_loop_op(
+        constraints=[
+            IterArgsMatchResults("iter_args", "results"),
+            YieldCountMatchesResults("body", "results"),
+        ]
+    )
+
+    with _raises_value_error(r"LoopLikeInterface on 'test\.for': requires YieldTypesMatchResults"):
+        _generate_counted_loop_tables(op)
+
+
+def test_generate_tables_rejects_loop_like_partial_counted_range() -> None:
+    op = _make_counted_loop_op(step=None)
+
+    with _raises_value_error(r"LoopLikeInterface on 'test\.for': lower_bound, upper_bound, and step must be declared together"):
+        _generate_counted_loop_tables(op)
+
+
+def test_generate_tables_rejects_loop_like_unprojected_body_state() -> None:
+    op = _make_counted_loop_op(body_arg_source=None)
+
+    with _raises_value_error(r"LoopLikeInterface on 'test\.for': body 'body' must source carried arguments from 'iter_args'"):
+        _generate_counted_loop_tables(op)
 
 
 def test_generate_tables_memory_access_defaults_use_matching_fields() -> None:

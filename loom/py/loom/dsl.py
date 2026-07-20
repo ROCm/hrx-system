@@ -3439,11 +3439,19 @@ class TargetLikeInterface(NamedTuple):
 class LoopLikeInterface(NamedTuple):
     """Interface for loop-like ops that iterate a body region.
 
-    Each field is the name of a region, an implicit block argument,
-    or an operand on the op (or None where applicable). The generator
-    resolves names to indices and emits a loom_loop_like_vtable_t in
-    .rodata. Used by LICM, loop-invariant sinking, trip count
-    analysis, and loop transformation passes.
+    The variadic iter_args operand is the complete loop-carried state domain.
+    Implementing ops have one matching variadic result field and a required
+    single-block body whose carried block arguments follow any induction
+    variable. IterArgsMatchResults, YieldCountMatchesResults, and
+    YieldTypesMatchResults constraints verify the complete state cycle.
+
+    Each field is the name of a region, an implicit block argument, or an
+    operand on the op (or None where applicable). Exactly one control form is
+    present: either lower_bound, upper_bound, and step with an induction
+    variable, or a separate condition_region without an induction variable.
+    The generator resolves names to indices, validates the contract, and emits
+    a loom_loop_like_vtable_t in .rodata. Used by LICM, loop-invariant sinking,
+    trip count analysis, fact propagation, and loop transformation passes.
     """
 
     # Region name for the primary loop body. For scf.for this is the
