@@ -33,7 +33,6 @@ loom_generated_cc_library(
     generator = "//loom/py/loom/gen/ops:c_tables_scf_generator",
     deps = [
         "//loom/src/loom/analysis:availability",
-        "//loom/src/loom/analysis:motion",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",

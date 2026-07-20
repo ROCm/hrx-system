@@ -272,6 +272,51 @@ func.def @interleaved_disjoint_vector_stores_commute(%buffer: buffer) {
 
 // ====
 
+func.def @interleaved_noalias_vector_stores_commute(%left: buffer, %right: buffer) {
+  %left_unique, %right_unique = buffer.assume.noalias %left, %right : buffer, buffer
+  %zero = index.constant 0 : offset
+  %value0 = scalar.constant 1 : i32
+  %value1 = scalar.constant 2 : i32
+  %vec0 = vector.splat %value0 : vector<4xi32>
+  %vec1 = vector.splat %value1 : vector<4xi32>
+  %layout = encoding.layout.dense : encoding<layout>
+  %left_view = buffer.view %left_unique[%zero] : buffer -> view<4xi32, %layout>
+  %right_view = buffer.view %right_unique[%zero] : buffer -> view<4xi32, %layout>
+  %start = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%start to %end step %step] unroll schedule(interleaved) {
+    vector.store %vec0, %left_view[0] : vector<4xi32>, view<4xi32, %layout>
+    vector.store %vec1, %right_view[0] : vector<4xi32>, view<4xi32, %layout>
+  }
+  func.return
+}
+
+// ----
+func.def @interleaved_noalias_vector_stores_commute(%left: buffer, %right: buffer) {
+  %left_unique, %right_unique = buffer.assume.noalias %left, %right : buffer, buffer
+  %zero = index.constant 0 : offset
+  %value0 = scalar.constant 1 : i32
+  %value1 = scalar.constant 2 : i32
+  %vec0 = vector.splat %value0 : vector<4xi32>
+  %vec1 = vector.splat %value1 : vector<4xi32>
+  %layout = encoding.layout.dense : encoding<layout>
+  %left_view = buffer.view %left_unique[%zero] : buffer -> view<4xi32, %layout>
+  %right_view = buffer.view %right_unique[%zero] : buffer -> view<4xi32, %layout>
+  %start = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %i_0 = index.constant 0 : index
+  %i_1 = index.constant 1 : index
+  vector.store %vec0, %left_view[0] : vector<4xi32>, view<4xi32, %layout>
+  vector.store %vec0, %left_view[0] : vector<4xi32>, view<4xi32, %layout>
+  vector.store %vec1, %right_view[0] : vector<4xi32>, view<4xi32, %layout>
+  vector.store %vec1, %right_view[0] : vector<4xi32>, view<4xi32, %layout>
+  func.return
+}
+
+// ====
+
 func.def @interleaved_dynamic_base_vector_stores_commute(%buffer: buffer, %base: offset) {
   %value0 = scalar.constant 1 : i32
   %value1 = scalar.constant 2 : i32

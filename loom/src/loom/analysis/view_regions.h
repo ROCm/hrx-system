@@ -178,6 +178,17 @@ bool loom_view_region_table_try_lookup(const loom_view_region_table_t* table,
                                        loom_value_id_t value_id,
                                        const loom_view_region_t** out_region);
 
+// Derives the exact one-element byte region addressed by |static_indices| and
+// |dynamic_indices| within |view_value_id|. The returned region preserves the
+// storage root, alias scope, nullability, and memory space of the source view.
+// Unsupported element widths or malformed index lists return OK with
+// |out_derived| false. Nonlinear but well-formed addresses remain derived with
+// conservative symbolic begin/end expressions.
+iree_status_t loom_view_region_table_derive_element_region(
+    loom_view_region_table_t* table, loom_value_id_t view_value_id,
+    loom_attribute_t static_indices, loom_value_slice_t dynamic_indices,
+    loom_view_region_t* out_region, bool* out_derived);
+
 // Walks the table's local value domain region, constructs summaries for view
 // values, and derives per-view access flags from memory-operand descriptors.
 iree_status_t loom_view_region_table_analyze(loom_view_region_table_t* table);

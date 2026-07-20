@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
 #include "loom/ops/buffer/ops.h"
@@ -790,6 +791,70 @@ bool loom_view_region_table_try_lookup(const loom_view_region_table_t* table,
   }
   *out_region = &table->regions[region_id];
   return true;
+}
+
+iree_status_t loom_view_region_table_derive_element_region(
+    loom_view_region_table_t* table, loom_value_id_t view_value_id,
+    loom_attribute_t static_indices, loom_value_slice_t dynamic_indices,
+    loom_view_region_t* out_region, bool* out_derived) {
+  *out_region = (loom_view_region_t){0};
+  *out_derived = false;
+  if (!table || view_value_id >= table->module->values.count) {
+    return iree_ok_status();
+  }
+
+  const loom_view_region_t* source_region = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_view_region_table_get(table, view_value_id, &source_region));
+  if (!source_region || source_region->static_element_byte_count <= 0) {
+    return iree_ok_status();
+  }
+  const loom_type_t view_type =
+      loom_module_value_type(table->module, view_value_id);
+  if (static_indices.kind != LOOM_ATTR_I64_ARRAY ||
+      static_indices.count != loom_type_rank(view_type)) {
+    return iree_ok_status();
+  }
+  iree_host_size_t expected_dynamic_count = 0;
+  for (uint16_t i = 0; i < static_indices.count; ++i) {
+    expected_dynamic_count += static_indices.i64_array[i] == INT64_MIN;
+  }
+  if (dynamic_indices.count != expected_dynamic_count) {
+    return iree_ok_status();
+  }
+
+  loom_symbolic_expr_t additional_offset = {0};
+  IREE_RETURN_IF_ERROR(loom_view_region_additional_byte_offset_expr(
+      table, view_type, static_indices, dynamic_indices,
+      source_region->static_element_byte_count, &additional_offset));
+  loom_symbolic_expr_t begin = {0};
+  IREE_RETURN_IF_ERROR(loom_view_region_expr_add(
+      table, &source_region->begin_byte_offset, &additional_offset, &begin));
+  loom_symbolic_expr_t byte_length = {0};
+  loom_symbolic_expr_constant(source_region->static_element_byte_count,
+                              &byte_length);
+  loom_symbolic_expr_t end = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_view_region_expr_add(table, &begin, &byte_length, &end));
+  loom_symbolic_expr_t projection = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_view_region_expr_add(table, &source_region->projection_byte_offset,
+                                &additional_offset, &projection));
+
+  *out_region = *source_region;
+  out_region->region_id = LOOM_VIEW_REGION_ID_INVALID;
+  out_region->projection_byte_offset = projection;
+  out_region->begin_value_id = LOOM_VALUE_ID_INVALID;
+  out_region->begin_byte_offset = begin;
+  out_region->byte_length = byte_length;
+  out_region->end_byte_offset = end;
+  out_region->minimum_alignment =
+      iree_math_gcd_i64((int64_t)source_region->minimum_alignment,
+                        additional_offset.facts.known_divisor);
+  out_region->access_flags = 0;
+  loom_view_region_refresh_precision(out_region);
+  *out_derived = true;
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
