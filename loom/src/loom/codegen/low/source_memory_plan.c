@@ -1156,6 +1156,54 @@ bool loom_low_source_memory_access_plan_lane_byte_envelope(
   return true;
 }
 
+static bool loom_low_source_memory_access_plan_strided_interval(
+    const loom_low_source_memory_access_plan_t* plan, int64_t lane_begin_offset,
+    int64_t lane_end_offset, loom_low_strided_byte_interval_t* out_interval) {
+  *out_interval = (loom_low_strided_byte_interval_t){0};
+  if (plan->dynamic_term_count != 1 ||
+      plan->dynamic_terms[0].stride_value_count != 0) {
+    return false;
+  }
+  const int64_t signed_stride = plan->dynamic_terms[0].byte_stride;
+  if (signed_stride == 0 || signed_stride == INT64_MIN) {
+    return false;
+  }
+  const uint64_t stride_bytes =
+      (uint64_t)(signed_stride < 0 ? -signed_stride : signed_stride);
+  int64_t access_begin = 0;
+  int64_t access_end = 0;
+  if (!iree_checked_add_i64(plan->static_byte_offset, lane_begin_offset,
+                            &access_begin) ||
+      !iree_checked_add_i64(plan->static_byte_offset, lane_end_offset,
+                            &access_end) ||
+      access_end <= access_begin) {
+    return false;
+  }
+  int64_t signed_length_bytes = 0;
+  if (!iree_checked_sub_i64(access_end, access_begin, &signed_length_bytes) ||
+      signed_length_bytes <= 0) {
+    return false;
+  }
+  const uint64_t length_bytes = (uint64_t)signed_length_bytes;
+  if (length_bytes > stride_bytes) {
+    return false;
+  }
+  int64_t signed_begin_residue = access_begin % (int64_t)stride_bytes;
+  if (signed_begin_residue < 0) {
+    signed_begin_residue += (int64_t)stride_bytes;
+  }
+  const uint64_t begin_bytes = (uint64_t)signed_begin_residue;
+  if (begin_bytes > stride_bytes - length_bytes) {
+    return false;
+  }
+  *out_interval = (loom_low_strided_byte_interval_t){
+      .stride_bytes = stride_bytes,
+      .begin_bytes = begin_bytes,
+      .end_bytes = begin_bytes + length_bytes,
+  };
+  return true;
+}
+
 void loom_low_source_memory_access_plan_make_summary(
     const loom_low_source_memory_access_plan_t* plan,
     loom_low_byte_interval_t* out_interval,
@@ -1175,6 +1223,7 @@ void loom_low_source_memory_access_plan_make_summary(
 
   *out_interval = (loom_low_byte_interval_t){0};
   const loom_low_byte_interval_t* interval = NULL;
+  loom_low_strided_byte_interval_t strided_interval = {0};
   int64_t lane_begin_offset = 0;
   int64_t lane_end_offset = 0;
   if (loom_low_source_memory_access_plan_lane_byte_envelope(
@@ -1203,6 +1252,12 @@ void loom_low_source_memory_access_plan_make_summary(
     };
     precision_flags |= LOOM_LOW_MEMORY_ACCESS_PRECISION_INTERVAL;
     interval = out_interval;
+    if (iree_any_bit_set(precision_flags,
+                         LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT) &&
+        loom_low_source_memory_access_plan_strided_interval(
+            plan, lane_begin_offset, lane_end_offset, &strided_interval)) {
+      precision_flags |= LOOM_LOW_MEMORY_ACCESS_PRECISION_STRIDED_INTERVAL;
+    }
   }
 
   *out_summary = (loom_low_memory_access_summary_t){
@@ -1210,6 +1265,7 @@ void loom_low_source_memory_access_plan_make_summary(
       .alias_root_id = alias_root_id,
       .alias_group_id = LOOM_LOW_MEMORY_ALIAS_ID_NONE,
       .precision_flags = precision_flags,
+      .strided_interval = strided_interval,
       .byte_interval = interval,
   };
 }

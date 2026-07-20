@@ -218,6 +218,16 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "memory_access_test",
+    srcs = ["memory_access_test.cc"],
+    deps = [
+        ":memory_access",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "storage_relation",
     srcs = ["storage_relation.c"],

@@ -212,6 +212,17 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    memory_access_test
+  SRCS
+    "memory_access_test.cc"
+  DEPS
+    ::memory_access
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_library(
   NAME
     storage_relation

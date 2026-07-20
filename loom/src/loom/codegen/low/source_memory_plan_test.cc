@@ -713,6 +713,9 @@ TEST_F(SourceMemoryPlanTest, ExternalBufferArgHasNoComparableAliasScope) {
   loom_low_source_memory_access_plan_make_summary(&plan, &interval, &summary);
   EXPECT_FALSE(iree_any_bit_set(summary.precision_flags,
                                 LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT));
+  EXPECT_FALSE(
+      iree_any_bit_set(summary.precision_flags,
+                       LOOM_LOW_MEMORY_ACCESS_PRECISION_STRIDED_INTERVAL));
   EXPECT_EQ(summary.alias_root_id, LOOM_LOW_MEMORY_ALIAS_ID_NONE);
 }
 
@@ -746,6 +749,38 @@ TEST_F(SourceMemoryPlanTest, NoaliasBufferArgFeedsComparableAliasScope) {
   EXPECT_TRUE(iree_any_bit_set(summary.precision_flags,
                                LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT));
   EXPECT_EQ(summary.alias_root_id, plan.alias_scope_id);
+}
+
+TEST_F(SourceMemoryPlanTest, SummaryCapturesStridedPacketSlot) {
+  loom_low_source_memory_access_plan_t plan = {};
+  plan.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE;
+  plan.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
+  plan.alias_scope_id = 7;
+  plan.element_byte_count = 2;
+  plan.vector_lane_count = 8;
+  plan.vector_lane_byte_stride = 2;
+  plan.static_byte_offset = 16;
+  plan.dynamic_term_count = 1;
+  plan.dynamic_terms[0].byte_stride = 64;
+  plan.dynamic_terms[0].byte_facts = loom_value_facts_exact_i64(0);
+
+  loom_low_byte_interval_t interval = {};
+  loom_low_memory_access_summary_t summary = {};
+  loom_low_source_memory_access_plan_make_summary(&plan, &interval, &summary);
+  EXPECT_TRUE(
+      iree_any_bit_set(summary.precision_flags,
+                       LOOM_LOW_MEMORY_ACCESS_PRECISION_STRIDED_INTERVAL));
+  EXPECT_EQ(summary.strided_interval.stride_bytes, 64u);
+  EXPECT_EQ(summary.strided_interval.begin_bytes, 16u);
+  EXPECT_EQ(summary.strided_interval.end_bytes, 32u);
+
+  plan.static_byte_offset = 0;
+  loom_low_byte_interval_t preceding_interval = {};
+  loom_low_memory_access_summary_t preceding_summary = {};
+  loom_low_source_memory_access_plan_make_summary(&plan, &preceding_interval,
+                                                  &preceding_summary);
+  EXPECT_FALSE(
+      loom_low_memory_access_summaries_may_alias(&preceding_summary, &summary));
 }
 
 TEST_F(SourceMemoryPlanTest, StaticDenseScalarLoadUsesMemoryAccessFacet) {
