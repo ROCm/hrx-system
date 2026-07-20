@@ -112,17 +112,6 @@ iree_status_t loom_pass_repeat_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 
-// LOOM_OP_PASS_IF_CHANGED: Conditionally run a body after a mutation.
-// pass.if_changed pipeline {
-//   canonicalize
-// }
-LOOM_DEFINE_ISA(loom_pass_if_changed_isa, LOOM_OP_PASS_IF_CHANGED)
-LOOM_DEFINE_REGION(loom_pass_if_changed_body, 0)
-iree_status_t loom_pass_if_changed_build(
-    loom_builder_t* builder,
-    loom_location_id_t location,
-    loom_op_t** out_op);
-
 // LOOM_OP_PASS_CALL: Statically call another named pass pipeline.
 // pass.call @cleanup
 LOOM_DEFINE_ISA(loom_pass_call_isa, LOOM_OP_PASS_CALL)
@@ -169,6 +158,18 @@ iree_status_t loom_pass_halt_build(
 // pass.yield
 LOOM_DEFINE_ISA(loom_pass_yield_isa, LOOM_OP_PASS_YIELD)
 iree_status_t loom_pass_yield_build(
+    loom_builder_t* builder,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_PASS_IF_CHANGED: Execute a nested pipeline body when the immediately preceding sibling statement changed the current anchor.
+// pass.if_changed pipeline {
+//   canonicalize
+//   cse
+// }
+LOOM_DEFINE_ISA(loom_pass_if_changed_isa, LOOM_OP_PASS_IF_CHANGED)
+LOOM_DEFINE_REGION(loom_pass_if_changed_body, 0)
+iree_status_t loom_pass_if_changed_build(
     loom_builder_t* builder,
     loom_location_id_t location,
     loom_op_t** out_op);
