@@ -791,6 +791,18 @@ static iree_status_t loom_place_append_candidate(
   return iree_ok_status();
 }
 
+static bool loom_place_op_has_nonoperand_result_uses(
+    const loom_module_t* module, const loom_op_t* op) {
+  const loom_value_id_t* results = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    if (loom_module_value_has_predicate_attribute_uses(module, results[i]) ||
+        loom_module_value_has_type_uses(module, results[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Collects one simultaneous legality wave. Candidates are not moved while the
 // region tree is inspected, so a later operation cannot become available only
 // because an earlier lexical operation happened to be visited first.
@@ -815,11 +827,14 @@ static iree_status_t loom_place_collect_candidate_wave(
             &context->motion, loom_loop_like_cast(context->module, loop->op),
             op, &legality));
         if (loom_motion_loop_hoist_result_is_legal(&legality)) {
-          // Exact repair reconstructs finite expression recipes. Structured,
-          // successor-bearing, and tied operations remain at their authored
-          // boundary until an equally exact repair representation exists.
+          // Exact repair reconstructs finite expression recipes and redirects
+          // ordinary operand uses through their retained boundary. Structured,
+          // successor-bearing, and tied operations, plus results referenced by
+          // predicates or types, remain authored until the marker can represent
+          // them exactly.
           if (op->region_count != 0 || op->successor_count != 0 ||
-              op->tied_result_count != 0) {
+              op->tied_result_count != 0 ||
+              loom_place_op_has_nonoperand_result_uses(context->module, op)) {
             continue;
           }
           IREE_RETURN_IF_ERROR(loom_place_append_candidate(context, candidates,

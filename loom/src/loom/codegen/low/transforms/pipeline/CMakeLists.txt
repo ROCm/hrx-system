@@ -57,6 +57,7 @@ loom_cc_test(
     loom::ops::scf
     loom::ops::target
     loom::ops::test
+    loom::ops::vector
     loom::pass::value_facts
     loom::rewrite::rewriter
     loom::target::reporting::report
