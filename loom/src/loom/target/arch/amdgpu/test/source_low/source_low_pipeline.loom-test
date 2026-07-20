@@ -29,6 +29,7 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
     }
   }
   target-legalize(mode = "eager")
+  place-loop-invariants
   for func {
     where target {
       unroll-scf-for
@@ -94,6 +95,7 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
     }
   }
   target-legalize(mode = "eager")
+  place-loop-invariants
   for func {
     where target {
       unroll-scf-for
@@ -205,6 +207,7 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
     }
   }
   target-legalize(mode = "eager")
+  place-loop-invariants
   for func {
     where target {
       unroll-scf-for

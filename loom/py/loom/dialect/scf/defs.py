@@ -30,6 +30,7 @@ from loom.assembly import (
     LBRACKET,
     RBRACKET,
     Attr,
+    AttrDict,
     AttrTable,
     BindingList,
     BlockArgs,
@@ -47,9 +48,14 @@ from loom.assembly import (
 )
 from loom.dsl import (
     ANY,
+    ATTR_TYPE_ANY,
+    ATTR_TYPE_BOOL,
     ATTR_TYPE_ENUM,
+    ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
     DISTRIBUTION_TRANSFER,
+    FACT_IDENTITY,
+    HINT,
     I1,
     INDEX,
     PURE,
@@ -622,6 +628,109 @@ scf_switch = Op(
 )
 
 # ============================================================================
+# Compiler-owned residency placement contracts
+# ============================================================================
+
+scf_residency_require = Op(
+    "scf.residency.require",
+    group=scf_ops,
+    doc=(
+        "Compiler-owned exact residency contract for the enclosing function. "
+        "A nonnegative minimum is an authored hard floor. Preserve carries "
+        "the projected source baseline whose exact fallback is recovered by "
+        "the retained materialization candidates."
+    ),
+    attrs=[
+        AttrDef(
+            "minimum",
+            ATTR_TYPE_I64,
+            doc="Authored hard tier floor, or -1 when no numeric floor exists.",
+        ),
+        AttrDef(
+            "preserve",
+            ATTR_TYPE_BOOL,
+            default=False,
+            elide_default=True,
+            doc="Whether exact allocation validates the protected source tier and recovers the authored boundary after a projection miss.",
+        ),
+        AttrDef(
+            "projected_baseline",
+            ATTR_TYPE_I64,
+            default=0,
+            elide_default=True,
+            doc="Projected source tier used to trigger exact baseline recovery.",
+        ),
+    ],
+    traits=[HINT],
+    verify="loom_scf_residency_require_verify",
+    format=[Attr("minimum"), AttrDict()],
+    examples=[
+        "scf.residency.require 2",
+        "scf.residency.require -1 {preserve = true, projected_baseline = 4}",
+    ],
+)
+
+scf_residency_candidate = Op(
+    "scf.residency.candidate",
+    group=scf_ops,
+    doc=("Compiler-owned identity boundary recording a legal invariant materialization alternative for exact target-low residency repair."),
+    operands=[
+        Operand("source", ANY),
+        Operand(
+            "captures",
+            ANY,
+            variadic=True,
+            doc="Direct source-producer operands captured by the legality proof.",
+        ),
+    ],
+    attrs=[
+        AttrDef("candidate_id", ATTR_TYPE_I64, doc="Stable source candidate ID."),
+        AttrDef(
+            "recompute_cost",
+            ATTR_TYPE_I64,
+            doc="Projected number of dynamic materializations for this boundary.",
+        ),
+        AttrDef(
+            "source_witness",
+            ATTR_TYPE_ANY,
+            optional=True,
+            doc=("Exact compiler-owned source-producer dictionary captured when placement legality was proven."),
+        ),
+        AttrDef(
+            "preserves_baseline",
+            ATTR_TYPE_BOOL,
+            default=False,
+            elide_default=True,
+            doc="Whether this movement protects its authored placement tier.",
+        ),
+    ],
+    results=[Result("result", ANY)],
+    constraints=[SameType("source", "result")],
+    traits=[HINT, FACT_IDENTITY],
+    verify="loom_scf_residency_candidate_verify",
+    format=[
+        Attr("candidate_id"),
+        Attr("recompute_cost"),
+        Ref("source"),
+        OptionalGroup(
+            [COMMA, Refs("captures")],
+            anchor="captures",
+        ),
+        COLON,
+        ResultType("result"),
+        OptionalGroup(
+            [COMMA, TypesOf("captures")],
+            anchor="captures",
+        ),
+        AttrDict(),
+    ],
+    examples=[
+        "%placed = scf.residency.candidate 7 2 %value, %lhs, %rhs : f32, f32, f32",
+        "%placed = scf.residency.candidate 7 2 %value : f32 {preserves_baseline = true}",
+    ],
+)
+
+# ============================================================================
 # All ops
 # ============================================================================
 
@@ -634,4 +743,6 @@ ALL_SCF_OPS: tuple[Op, ...] = (
     scf_lookup,
     scf_condition,
     scf_while,
+    scf_residency_require,
+    scf_residency_candidate,
 )

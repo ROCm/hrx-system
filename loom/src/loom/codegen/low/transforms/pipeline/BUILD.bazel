@@ -17,6 +17,59 @@ _PIPELINE_VISIBILITY = [
 ]
 
 loom_cc_library(
+    name = "place_loop_invariants",
+    srcs = ["place_loop_invariants.c"],
+    hdrs = ["place_loop_invariants.h"],
+    visibility = _PIPELINE_VISIBILITY,
+    deps = [
+        "//loom/src/loom/analysis:motion",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/codegen/low/lower:source_pressure",
+        "//loom/src/loom/codegen/low/lower:source_selection",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:selection",
+        "//loom/src/loom/target/reporting:report",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "place_loop_invariants_test",
+    srcs = ["place_loop_invariants_test.cc"],
+    deps = [
+        ":place_loop_invariants",
+        "//loom/src/loom/codegen/low/lower:source_pressure",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target/reporting:report",
+        "//loom/src/loom/target/test:low_registry",
+        "//loom/src/loom/target/test:lower",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "source_to_low",
     srcs = ["source_to_low.c"],
     hdrs = ["source_to_low.h"],

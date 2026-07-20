@@ -17,6 +17,7 @@ loom_generated_cc_library(
   SRCS
     "canonicalize.c"
     "facts.c"
+    "residency.c"
     "type_transfer.c"
     "verify.c"
   GENERATED_SRC_FLAGS
@@ -27,9 +28,11 @@ loom_generated_cc_library(
     "tables.c"
   HDRS
     "ops.h"
+    "residency.h"
   ARGS
     "--dialect=scf"
   DEPS
+    iree::base
     iree::base::internal
     loom::analysis::availability
     loom::error::emitter

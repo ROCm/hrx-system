@@ -1126,6 +1126,115 @@ typedef struct loom_target_compile_report_source_low_transform_row_t {
   uint32_t inserted_barrier_op_count;
 } loom_target_compile_report_source_low_transform_row_t;
 
+// One target-informed loop-invariant placement decision.
+typedef struct loom_target_compile_report_source_low_residency_row_t {
+  // Source function symbol containing the planned loop.
+  iree_string_view_t function_name;
+  // Source operation mnemonic anchoring this placement decision.
+  iree_string_view_t source_op_name;
+  // Numeric source operation kind anchoring this placement decision.
+  uint32_t source_op_kind;
+  // Authored or implicit placement policy key.
+  iree_string_view_t policy;
+  // Stable placement outcome key.
+  iree_string_view_t outcome;
+  // Stable reason for the placement outcome.
+  iree_string_view_t reason;
+  // Residency tier of the authored placement in this loop scope.
+  uint32_t baseline_tier;
+  // Residency tier of the selected placement in this loop scope.
+  uint32_t selected_tier;
+  // Hard projected tier floor applied to this loop scope.
+  uint32_t required_tier;
+  // Legally movable invariant operations considered for this loop.
+  uint32_t candidate_count;
+  // Invariant operations selected outside this loop.
+  uint32_t selected_count;
+  // Legal invariant operations retained to preserve target residency.
+  uint32_t rejected_count;
+  // Named non-source pressure contributors applied by the projection.
+  uint32_t reserve_count;
+  // True when source values and named reserves bound all target pressure.
+  bool projection_complete;
+} loom_target_compile_report_source_low_residency_row_t;
+
+// One target resource evaluated at an authored or selected loop placement.
+typedef struct loom_target_compile_report_source_low_residency_resource_row_t {
+  // Source function symbol containing the planned loop.
+  iree_string_view_t function_name;
+  // Source operation mnemonic anchoring this placement decision.
+  iree_string_view_t source_op_name;
+  // Numeric source operation kind anchoring this placement decision.
+  uint32_t source_op_kind;
+  // Placement phase key: "baseline", "selected", or "exact".
+  iree_string_view_t phase;
+  // Structured liveness point witnessing a source tier; zero for exact rows.
+  uint32_t program_point;
+  // Stable target resource name.
+  iree_string_view_t resource_name;
+  // Resource table key: "direct" or "derived".
+  iree_string_view_t resource_kind;
+  // Resource ID local to |resource_kind|.
+  uint16_t resource_id;
+  // Directly supplied or target-derived resource units.
+  uint64_t units;
+  // Residency tier selected by this resource.
+  uint32_t tier;
+  // First better whole-model tier reachable by reducing resources, or zero.
+  uint32_t next_better_tier;
+  // Next tier this resource can reach that worsens whole-model residency.
+  uint32_t next_worse_tier;
+  // Absolute resource footprint at which |next_worse_tier| begins.
+  uint32_t next_worse_cliff_units;
+  // Additional units that would worsen whole-model residency.
+  uint64_t additional_units_to_next_worse_tier;
+  // Units this resource must shed to attain |next_better_tier|.
+  uint64_t reduction_units_to_next_better_tier;
+  // True when this resource attains the current worst residency tier.
+  bool limiting;
+} loom_target_compile_report_source_low_residency_resource_row_t;
+
+// One named non-source contribution to a direct residency resource.
+typedef struct loom_target_compile_report_source_low_residency_reserve_row_t {
+  // Source function symbol receiving the reserve contribution.
+  iree_string_view_t function_name;
+  // Stable policy- or caller-provided reserve name.
+  iree_string_view_t reserve_name;
+  // Stable target direct-resource name.
+  iree_string_view_t resource_name;
+  // Dense direct-resource ID.
+  uint16_t resource_id;
+  // Resource units contributed at every structured program point.
+  uint64_t units;
+} loom_target_compile_report_source_low_residency_reserve_row_t;
+
+// One source-planner residency alternative observed at source or target-low.
+// Rows with the same function and candidate ID describe the same alternative.
+typedef struct loom_target_compile_report_residency_candidate_row_t {
+  // Source or lowered function symbol containing this alternative.
+  iree_string_view_t function_name;
+  // Source operation mnemonic that produced this alternative, when available.
+  iree_string_view_t source_op_name;
+  // Numeric source operation kind, or zero in an exact target-low row.
+  uint32_t source_op_kind;
+  // Stable source-planner identity retained through target lowering.
+  uint32_t candidate_id;
+  // Reporting stage key: "source" or "exact".
+  iree_string_view_t stage;
+  // Stable stage outcome key.
+  iree_string_view_t outcome;
+  // Projected dynamic materialization cost used by source planning.
+  uint32_t projected_recompute_cost;
+  // Exact target-low operands covered by this alternative.
+  uint32_t exact_use_count;
+  // Target-low packets cloned while attempting exact repair.
+  uint32_t cloned_packet_count;
+  // Exact target-low operands rewritten while attempting repair.
+  uint32_t rewritten_operand_count;
+  // True when selecting the alternative protected the authored baseline.
+  bool preserves_baseline;
+} loom_target_compile_report_residency_candidate_row_t;
+
 // One invocation config binding materialized into the compiled module.
 typedef struct loom_target_compile_report_config_binding_row_t {
   // Config symbol name without the textual '@' sigil.
@@ -1769,6 +1878,14 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_row_list_t source_low_target_rows;
   // Owned source transform decision rows.
   loom_target_compile_report_row_list_t source_low_transform_rows;
+  // Owned source residency placement decision rows.
+  loom_target_compile_report_row_list_t source_low_residency_rows;
+  // Owned source residency resource-evaluation rows.
+  loom_target_compile_report_row_list_t source_low_residency_resource_rows;
+  // Owned named source residency reserve-contribution rows.
+  loom_target_compile_report_row_list_t source_low_residency_reserve_rows;
+  // Owned source-to-exact residency alternative rows.
+  loom_target_compile_report_row_list_t residency_candidate_rows;
   // Owned source-to-low selection summaries.
   loom_target_compile_report_row_list_t source_low_selection_summaries;
   // Owned emitted source-memory packet rows.
@@ -1993,6 +2110,28 @@ iree_status_t loom_target_compile_report_record_source_low_target_row(
 iree_status_t loom_target_compile_report_record_source_low_transform_row(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_source_low_transform_row_t* row);
+
+// Records one source residency placement decision row.
+iree_status_t loom_target_compile_report_record_source_low_residency_row(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_residency_row_t* row);
+
+// Records one source residency resource evaluation.
+iree_status_t
+loom_target_compile_report_record_source_low_residency_resource_row(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_residency_resource_row_t* row);
+
+// Records one named source residency reserve contribution.
+iree_status_t
+loom_target_compile_report_record_source_low_residency_reserve_row(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_residency_reserve_row_t* row);
+
+// Records one source or exact residency alternative row.
+iree_status_t loom_target_compile_report_record_residency_candidate_row(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_residency_candidate_row_t* row);
 
 // Records one emitted source-memory packet row.
 iree_status_t loom_target_compile_report_record_source_low_memory_row(

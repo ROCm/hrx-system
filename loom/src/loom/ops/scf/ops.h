@@ -27,7 +27,9 @@ enum {
   LOOM_OP_SCF_LOOKUP = LOOM_OP_KIND(LOOM_DIALECT_SCF, 5),
   LOOM_OP_SCF_CONDITION = LOOM_OP_KIND(LOOM_DIALECT_SCF, 6),
   LOOM_OP_SCF_WHILE = LOOM_OP_KIND(LOOM_DIALECT_SCF, 7),
-  LOOM_OP_SCF_COUNT_ = 8,
+  LOOM_OP_SCF_RESIDENCY_REQUIRE = LOOM_OP_KIND(LOOM_DIALECT_SCF, 8),
+  LOOM_OP_SCF_RESIDENCY_CANDIDATE = LOOM_OP_KIND(LOOM_DIALECT_SCF, 9),
+  LOOM_OP_SCF_COUNT_ = 10,
 };
 
 // Local scf.for unroll policy.
@@ -260,6 +262,49 @@ iree_status_t loom_scf_while_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_scf_while_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_SCF_RESIDENCY_REQUIRE: Compiler-owned exact residency contract for the enclosing function. A nonnegative minimum is an authored hard floor. Preserve carries the projected source baseline whose exact fallback is recovered by the retained materialization candidates.
+// scf.residency.require 2
+LOOM_DEFINE_ISA(loom_scf_residency_require_isa, LOOM_OP_SCF_RESIDENCY_REQUIRE)
+LOOM_DEFINE_ATTR_I64(loom_scf_residency_require_minimum, 0)
+LOOM_DEFINE_ATTR_BOOL(loom_scf_residency_require_preserve, 1)
+LOOM_DEFINE_ATTR_I64(loom_scf_residency_require_projected_baseline, 2)
+iree_status_t loom_scf_residency_require_build(
+    loom_builder_t* builder,
+    int64_t minimum,
+    bool preserve,
+    int64_t projected_baseline,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_scf_residency_require_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_SCF_RESIDENCY_CANDIDATE: Compiler-owned identity boundary recording a legal invariant materialization alternative for exact target-low residency repair.
+// %placed = scf.residency.candidate 7 2 %value, %lhs, %rhs : f32, f32, f32
+LOOM_DEFINE_ISA(loom_scf_residency_candidate_isa, LOOM_OP_SCF_RESIDENCY_CANDIDATE)
+LOOM_DEFINE_OPERAND(loom_scf_residency_candidate_source, 0)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_scf_residency_candidate_captures, 1)
+LOOM_DEFINE_RESULT(loom_scf_residency_candidate_result, 0)
+LOOM_DEFINE_ATTR_I64(loom_scf_residency_candidate_candidate_id, 0)
+LOOM_DEFINE_ATTR_I64(loom_scf_residency_candidate_recompute_cost, 1)
+LOOM_DEFINE_ATTR_ANY(loom_scf_residency_candidate_source_witness, 2)
+LOOM_DEFINE_ATTR_BOOL(loom_scf_residency_candidate_preserves_baseline, 3)
+iree_status_t loom_scf_residency_candidate_build(
+    loom_builder_t* builder,
+    int64_t candidate_id,
+    int64_t recompute_cost,
+    loom_may_consume loom_value_id_t source,
+    loom_may_consume const loom_value_id_t* captures,
+    iree_host_size_t captures_count,
+    loom_type_t result_type,
+    loom_optional loom_attribute_t source_witness,
+    bool preserves_baseline,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_scf_residency_candidate_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

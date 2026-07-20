@@ -384,3 +384,60 @@ iree_status_t loom_scf_switch_verify(const loom_module_t* module,
   }
   return iree_ok_status();
 }
+
+iree_status_t loom_scf_residency_require_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  (void)module;
+  const int64_t minimum = loom_scf_residency_require_minimum(op);
+  if (minimum < -1 || (minimum >= 0 && (uint64_t)minimum > UINT32_MAX)) {
+    return loom_scf_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("minimum"), minimum,
+        IREE_SV("-1 or a target residency tier representable as uint32"));
+  }
+  const bool preserve = loom_scf_residency_require_preserve(op);
+  const int64_t projected_baseline =
+      loom_scf_residency_require_projected_baseline(op);
+  if ((preserve && (projected_baseline <= 0 ||
+                    (uint64_t)projected_baseline > UINT32_MAX)) ||
+      (!preserve && projected_baseline != 0)) {
+    return loom_scf_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("projected_baseline"), projected_baseline,
+        preserve ? IREE_SV("positive target tier representable as uint32")
+                 : IREE_SV("zero when preserve is absent"));
+  }
+  if (minimum == -1 && !preserve) {
+    return loom_scf_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("minimum"), minimum,
+        IREE_SV("nonnegative tier when preserve is absent"));
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_scf_residency_candidate_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  (void)module;
+  const int64_t candidate_id = loom_scf_residency_candidate_candidate_id(op);
+  if (candidate_id < 0 || (uint64_t)candidate_id > UINT32_MAX) {
+    return loom_scf_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("candidate_id"), candidate_id,
+        IREE_SV("nonnegative stable candidate ID representable as uint32"));
+  }
+  const int64_t recompute_cost =
+      loom_scf_residency_candidate_recompute_cost(op);
+  if (recompute_cost < 0 || (uint64_t)recompute_cost > UINT32_MAX) {
+    return loom_scf_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("recompute_cost"), recompute_cost,
+        IREE_SV("nonnegative recompute cost representable as uint32"));
+  }
+  const loom_attribute_t source_witness =
+      loom_scf_residency_candidate_source_witness(op);
+  if (!loom_attr_is_absent(source_witness) &&
+      source_witness.kind != LOOM_ATTR_DICT) {
+    return loom_scf_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("source_witness"), source_witness.kind,
+        IREE_SV("dictionary or absent"));
+  }
+  return iree_ok_status();
+}

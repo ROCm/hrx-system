@@ -284,6 +284,7 @@ loom_cc_library(
     loom::codegen::low::transforms::cfg_tuple_decomposition
     loom::codegen::low::transforms::dce
     loom::codegen::low::transforms::operand_forms
+    loom::codegen::low::transforms::pipeline::place_loop_invariants
     loom::codegen::low::transforms::pipeline::source_to_low
     loom::codegen::low::transforms::pipeline::target_legalize
     loom::sanitizer::pipeline_passes

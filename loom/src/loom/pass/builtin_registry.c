@@ -14,6 +14,7 @@
 #include "loom/codegen/low/transforms/cfg_tuple_decomposition.h"
 #include "loom/codegen/low/transforms/dce.h"
 #include "loom/codegen/low/transforms/operand_forms.h"
+#include "loom/codegen/low/transforms/pipeline/place_loop_invariants.h"
 #include "loom/codegen/low/transforms/pipeline/source_to_low.h"
 #include "loom/codegen/low/transforms/pipeline/target_legalize.h"
 #include "loom/sanitizer/pipeline_passes.h"
@@ -405,6 +406,13 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .key = IREE_SVL("ownership-lifetime"),
         .info = loom_ownership_lifetime_pass_info,
         .module_run = loom_ownership_lifetime_run,
+    },
+    {
+        .key = IREE_SVL("place-loop-invariants"),
+        .info = loom_place_loop_invariants_pass_info,
+        .module_run = loom_place_loop_invariants_run,
+        .requirement_defs = kLowTargetLegalizeRequirements,
+        .requirement_count = IREE_ARRAYSIZE(kLowTargetLegalizeRequirements),
     },
     {
         .key = IREE_SVL("promote-private-fragments"),
