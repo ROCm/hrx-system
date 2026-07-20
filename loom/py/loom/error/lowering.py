@@ -519,6 +519,24 @@ ERR_LOWERING_048 = ErrorDef(
     ),
 )
 
+# ERR_LOWERING_049: Loop residency placement contract failed.
+ERR_LOWERING_049 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=49,
+    severity=Severity.ERROR,
+    summary="Loop residency placement contract failed.",
+    message=("{phase_name} cannot place invariants for {op_name}: {reason}"),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("phase_name", ParamKind.STRING),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Provide an exact nonnegative residency tier supported by the selected "
+        "target, or select a target with a residency model"
+    ),
+)
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -545,4 +563,5 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_046,
     ERR_LOWERING_047,
     ERR_LOWERING_048,
+    ERR_LOWERING_049,
 )

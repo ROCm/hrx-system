@@ -11,6 +11,62 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    place_loop_invariants
+  HDRS
+    "place_loop_invariants.h"
+  SRCS
+    "place_loop_invariants.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::motion
+    loom::codegen::low::descriptors
+    loom::codegen::low::lower
+    loom::codegen::low::lower::source_pressure
+    loom::codegen::low::lower::source_selection
+    loom::codegen::low::pipeline::pass_environment
+    loom::error::error_defs
+    loom::ir
+    loom::ops::op_defs
+    loom::ops::scf
+    loom::pass::types
+    loom::pass::value_facts
+    loom::rewrite::rewriter
+    loom::target::reporting::report
+    loom::target::selection
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    place_loop_invariants_test
+  SRCS
+    "place_loop_invariants_test.cc"
+  DEPS
+    ::place_loop_invariants
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::lower::source_pressure
+    loom::codegen::low::pipeline::pass_environment
+    loom::error::error_defs
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func
+    loom::ops::scalar
+    loom::ops::scf
+    loom::ops::target
+    loom::ops::test
+    loom::pass::value_facts
+    loom::rewrite::rewriter
+    loom::target::reporting::report
+    loom::target::test::low_registry
+    loom::target::test::lower
+    loom::testing::module_ptr
+)
+
+loom_cc_library(
+  NAME
     source_to_low
   HDRS
     "source_to_low.h"

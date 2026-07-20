@@ -377,6 +377,8 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
       user_data, &for_op));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_target_legalize(builder, IREE_SV("eager")));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
+      builder, IREE_SV("place-loop-invariants")));
   if (control_flow_lowering == LOOM_TARGET_CONTROL_FLOW_LOWERING_CFG) {
     IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
         builder,

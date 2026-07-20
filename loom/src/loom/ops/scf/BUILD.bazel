@@ -17,10 +17,14 @@ loom_generated_cc_library(
     srcs = [
         "canonicalize.c",
         "facts.c",
+        "residency.c",
         "type_transfer.c",
         "verify.c",
     ],
-    hdrs = ["ops.h"],
+    hdrs = [
+        "ops.h",
+        "residency.h",
+    ],
     args = ["--dialect=scf"],
     generated_src_flags = [
         "--builders",
@@ -41,6 +45,7 @@ loom_generated_cc_library(
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/rewrite:type_propagation",
         "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
     ],
 )

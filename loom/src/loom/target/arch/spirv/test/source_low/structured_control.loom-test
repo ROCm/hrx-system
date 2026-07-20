@@ -29,6 +29,7 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
     }
   }
   target-legalize(mode = "eager")
+  place-loop-invariants
   source-to-low(control-flow = "structured-low")
   for func {
     where target {
