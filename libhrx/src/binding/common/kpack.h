@@ -94,11 +94,12 @@ typedef bool (*iree_hal_streaming_kpack_target_callback_t)(
     iree_string_view_t target, void* user_data);
 
 // Invokes |callback| for each ISA target compatible with |agent_isa|, ordered
-// most-specific first: the full feature set, then every feature subset in
-// descending feature-bitmask order (each feature maps to a bit, earlier-listed
-// features to higher bits, so higher-priority features are retained longest),
-// then the bare processor. A callback returning true stops iteration early.
-// Empty input yields no candidates and succeeds.
+// most-specific first: candidates are ranked by descending feature count, and
+// within one count by descending feature-bitmask (each feature maps to a bit,
+// earlier-listed features to higher bits, so higher-priority features are
+// retained longest). The full feature set comes first and the bare processor
+// last. A callback returning true stops iteration early. Empty input yields no
+// candidates and succeeds.
 //
 // Fails with IREE_STATUS_OUT_OF_RANGE when |agent_isa| carries more subsettable
 // feature flags than the expansion holds, or a processor that does not fit

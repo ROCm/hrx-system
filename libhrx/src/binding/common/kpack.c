@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/base/api.h"
+#include "iree/base/internal/math.h"
 #include "iree/io/file_handle.h"
 
 #if defined(HRX_ENABLE_ZSTD)
@@ -428,34 +429,40 @@ iree_status_t iree_hal_streaming_kpack_for_each_compatible_target(
     return iree_ok_status();
   }
 
-  // Power set of features, descending mask (most specific first). Bit
-  // (n-1-i) selects features[i], so dropping from the high bits preserves the
+  // Power set of features in descending specificity: candidates carrying more
+  // features rank first, and within one cardinality the numerically larger mask
+  // ranks first. Bit (n-1-i) selects features[i], so the larger mask keeps
+  // earlier-listed features, dropping from the right first and preserving the
   // original feature order in each candidate.
   const uint32_t full_mask = (1u << n) - 1;
-  for (uint32_t mask = full_mask;; --mask) {
-    char buf[IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY];
-    memcpy(buf, processor.data, processor.size);
-    iree_host_size_t len = processor.size;
-    bool overflow = false;
-    for (iree_host_size_t i = 0; i < n; ++i) {
-      if (mask & (1u << (n - 1 - i))) {
-        if (len + 1 + features[i].size >= sizeof(buf)) {
-          // A single over-long candidate is skipped rather than failed: a
-          // shorter subset of the same target still resolves.
-          overflow = true;
-          break;
+  for (int cardinality = (int)n; cardinality >= 0; --cardinality) {
+    for (uint32_t mask = full_mask;; --mask) {
+      if ((int)iree_math_count_ones_u32(mask) == cardinality) {
+        char buf[IREE_HAL_STREAMING_KPACK_TARGET_CAPACITY];
+        memcpy(buf, processor.data, processor.size);
+        iree_host_size_t len = processor.size;
+        bool overflow = false;
+        for (iree_host_size_t i = 0; i < n; ++i) {
+          if (mask & (1u << (n - 1 - i))) {
+            if (len + 1 + features[i].size >= sizeof(buf)) {
+              // A single over-long candidate is skipped rather than failed: a
+              // shorter subset of the same target still resolves.
+              overflow = true;
+              break;
+            }
+            buf[len++] = ':';
+            memcpy(buf + len, features[i].data, features[i].size);
+            len += features[i].size;
+          }
         }
-        buf[len++] = ':';
-        memcpy(buf + len, features[i].data, features[i].size);
-        len += features[i].size;
+        if (!overflow) {
+          if (callback(iree_make_string_view(buf, len), user_data)) {
+            return iree_ok_status();
+          }
+        }
       }
+      if (mask == 0) break;
     }
-    if (!overflow) {
-      if (callback(iree_make_string_view(buf, len), user_data)) {
-        return iree_ok_status();
-      }
-    }
-    if (mask == 0) break;
   }
   return iree_ok_status();
 }

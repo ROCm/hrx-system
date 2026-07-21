@@ -512,6 +512,18 @@ TEST(KpackTargetMatch, MixedFeatureValues) {
             (Vec{"gfx942:sramecc-:xnack+", "gfx942:sramecc-", "gfx942:xnack+",
                  "gfx942"}));
 }
+// Candidates rank strictly by descending feature count, so every two-feature
+// subset precedes every one-feature subset. Real AMDGPU targets subset on two
+// features, where descending count and descending bitmask coincide; this
+// exercises the three-feature headroom the expansion accepts, where the two
+// orders diverge (the one-feature mask 4 is numerically larger than the
+// two-feature mask 3, yet must rank below it).
+TEST(KpackTargetMatch, ThreeFeaturesRankByDescendingCardinality) {
+  EXPECT_EQ(
+      ExpandTargets("gfx900:a+:b+:c+"),
+      (Vec{"gfx900:a+:b+:c+", "gfx900:a+:b+", "gfx900:a+:c+", "gfx900:b+:c+",
+           "gfx900:a+", "gfx900:b+", "gfx900:c+", "gfx900"}));
+}
 TEST(KpackTargetMatch, SingleFeature) {
   EXPECT_EQ(ExpandTargets("gfx942:xnack+"), (Vec{"gfx942:xnack+", "gfx942"}));
 }
@@ -1890,6 +1902,29 @@ TEST(KpackResolve, FeatureSubsetMatch) {
   IREE_ASSERT_OK(
       Resolve(metadata, 0, {"gfx942:sramecc+:xnack-"}, &out, &out_size));
   EXPECT_EQ(out_size, elf.size());
+  FreeBuffer(out);
+}
+
+// The arch candidate list is ranked most-specific-first, so a two-feature
+// archive key wins over a one-feature key even though the one-feature mask is
+// numerically larger. gfx900:a+:b+:c+ expands with gfx900:b+:c+ (two features)
+// ahead of gfx900:a+ (one feature), so the two-feature payload is selected.
+TEST(KpackResolve, MoreSpecificFeatureSubsetWinsOverLessSpecific) {
+  auto two = MakeMinimalAmdgpuElf(0x042);
+  auto one = MakeMinimalAmdgpuElf(0x041);
+  ASSERT_NE(two, one);  // distinct payloads distinguish which key was selected
+  auto archive = KpackBuilder(false)
+                     .Add("lib/x.so#0", "gfx900:b+:c+", two)
+                     .Add("lib/x.so#0", "gfx900:a+", one)
+                     .Build();
+  std::string path = WriteTempFile("feature_rank.kpack", archive);
+  auto metadata = MakeMetadata("lib/x.so", {path});
+
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  IREE_ASSERT_OK(Resolve(metadata, 0, {"gfx900:a+:b+:c+"}, &out, &out_size));
+  ASSERT_EQ(out_size, two.size());
+  EXPECT_EQ(0, memcmp(out, two.data(), two.size()));
   FreeBuffer(out);
 }
 
