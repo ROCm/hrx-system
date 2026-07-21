@@ -4,35 +4,88 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <stddef.h>
 #include <string.h>
 
+#include "common/direct_transfer.h"
 #include "common/internal.h"
-#include "iree/hal/buffer_transfer.h"
 
 //===----------------------------------------------------------------------===//
 // ROCm device runtime state
 //===----------------------------------------------------------------------===//
 
-// ROCm device libraries expect hidden_heap_v1 to point at a heap header with
-// fixed recordable-kind slots and an initial slab window. Streaming owns that
-// HIP runtime policy; HAL drivers only expose the metadata slot and patch the
-// supplied bytes into native launch arguments.
+// Device malloc's heap layout is defined by heap_t in the device library:
+// https://github.com/ROCm/llvm-project/blob/52226beb248fcdd136d084307a12207d2fc00220/amd/device-libs/ockl/src/dm.cl#L23-L179
+// This host mirror derives the initialized field offsets from that ABI instead
+// of embedding offsets computed from its cache-line-padded members.
 #define IREE_HAL_STREAMING_ROCM_MALLOC_HEAP_SIZE (128 * 1024)
 #define IREE_HAL_STREAMING_ROCM_MALLOC_KIND_COUNT 16
 #define IREE_HAL_STREAMING_ROCM_MALLOC_NUM_SDATA 256
-#define IREE_HAL_STREAMING_ROCM_MALLOC_RECORDABLE_OFFSET 4096
-#define IREE_HAL_STREAMING_ROCM_MALLOC_RECORDABLE_STRIDE 128
-#define IREE_HAL_STREAMING_ROCM_MALLOC_INITIAL_SLABS_OFFSET 108544
 #define IREE_HAL_STREAMING_ROCM_MALLOC_INITIAL_SLAB_SIZE (2 * 1024 * 1024)
-static_assert(IREE_HAL_STREAMING_ROCM_MALLOC_RECORDABLE_OFFSET +
+
+typedef struct iree_hal_streaming_rocm_malloc_cache_line_t {
+  // Storage for one atomic value and its device-library cache-line padding.
+  uint8_t storage[128];
+} iree_hal_streaming_rocm_malloc_cache_line_t;
+static_assert(sizeof(iree_hal_streaming_rocm_malloc_cache_line_t) == 128,
+              "device malloc cache-line record must be 128 bytes");
+
+typedef struct iree_hal_streaming_rocm_malloc_sdata_t {
+  // Device address of a second-level sdata array.
+  uint64_t array;
+  // Device address of the tracked slab.
+  uint64_t slab_address;
+  // Number of allocated blocks in the slab.
+  uint32_t used_block_count;
+  // Tail padding preserving the device structure alignment.
+  uint32_t padding;
+} iree_hal_streaming_rocm_malloc_sdata_t;
+static_assert(sizeof(iree_hal_streaming_rocm_malloc_sdata_t) == 24,
+              "device malloc slab record must be 24 bytes");
+
+typedef struct iree_hal_streaming_rocm_malloc_heap_prefix_t {
+  // Per-kind search cursors.
+  iree_hal_streaming_rocm_malloc_cache_line_t
+      starts[IREE_HAL_STREAMING_ROCM_MALLOC_KIND_COUNT];
+  // Per-kind allocated slab counts.
+  iree_hal_streaming_rocm_malloc_cache_line_t
+      allocated_counts[IREE_HAL_STREAMING_ROCM_MALLOC_KIND_COUNT];
+  // Per-kind recordable slab counts initialized by the host.
+  iree_hal_streaming_rocm_malloc_cache_line_t
+      recordable_counts[IREE_HAL_STREAMING_ROCM_MALLOC_KIND_COUNT];
+  // Per-kind most recent slab-allocation timestamps.
+  iree_hal_streaming_rocm_malloc_cache_line_t
+      allocation_times[IREE_HAL_STREAMING_ROCM_MALLOC_KIND_COUNT];
+  // Per-kind most recent recordable-growth timestamps.
+  iree_hal_streaming_rocm_malloc_cache_line_t
+      growth_times[IREE_HAL_STREAMING_ROCM_MALLOC_KIND_COUNT];
+  // First-level slab tracking records.
+  iree_hal_streaming_rocm_malloc_sdata_t
+      slab_data[IREE_HAL_STREAMING_ROCM_MALLOC_KIND_COUNT]
+               [IREE_HAL_STREAMING_ROCM_MALLOC_NUM_SDATA];
+  // Next address in the initial slab window.
+  uint64_t initial_slabs;
+  // End address of the initial slab window.
+  uint64_t initial_slabs_end;
+  // Start address of the initial slab window.
+  uint64_t initial_slabs_start;
+} iree_hal_streaming_rocm_malloc_heap_prefix_t;
+static_assert(
+    offsetof(iree_hal_streaming_rocm_malloc_heap_prefix_t, recordable_counts) ==
+        2 * IREE_HAL_STREAMING_ROCM_MALLOC_KIND_COUNT *
+            sizeof(iree_hal_streaming_rocm_malloc_cache_line_t),
+    "device malloc recordable-count offset must match the device ABI");
+static_assert(offsetof(iree_hal_streaming_rocm_malloc_heap_prefix_t,
+                       initial_slabs) ==
+                  5 * IREE_HAL_STREAMING_ROCM_MALLOC_KIND_COUNT *
+                          sizeof(iree_hal_streaming_rocm_malloc_cache_line_t) +
                       IREE_HAL_STREAMING_ROCM_MALLOC_KIND_COUNT *
-                          IREE_HAL_STREAMING_ROCM_MALLOC_RECORDABLE_STRIDE <=
+                          IREE_HAL_STREAMING_ROCM_MALLOC_NUM_SDATA *
+                          sizeof(iree_hal_streaming_rocm_malloc_sdata_t),
+              "device malloc initial-slab offset must match the device ABI");
+static_assert(sizeof(iree_hal_streaming_rocm_malloc_heap_prefix_t) <=
                   IREE_HAL_STREAMING_ROCM_MALLOC_HEAP_SIZE,
-              "device malloc recordable table must fit in heap header");
-static_assert(IREE_HAL_STREAMING_ROCM_MALLOC_INITIAL_SLABS_OFFSET +
-                      3 * sizeof(uint64_t) <=
-                  IREE_HAL_STREAMING_ROCM_MALLOC_HEAP_SIZE,
-              "device malloc initial slab table must fit in heap header");
+              "device malloc heap prefix must fit in its allocation");
 
 static void iree_hal_streaming_rocm_store_u32(uint8_t* storage,
                                               iree_host_size_t offset,
@@ -60,8 +113,10 @@ static iree_status_t iree_hal_streaming_rocm_populate_malloc_heap_header(
 
   for (uint32_t i = 0; i < IREE_HAL_STREAMING_ROCM_MALLOC_KIND_COUNT; ++i) {
     const iree_host_size_t offset =
-        IREE_HAL_STREAMING_ROCM_MALLOC_RECORDABLE_OFFSET +
-        (iree_host_size_t)i * IREE_HAL_STREAMING_ROCM_MALLOC_RECORDABLE_STRIDE;
+        offsetof(iree_hal_streaming_rocm_malloc_heap_prefix_t,
+                 recordable_counts) +
+        (iree_host_size_t)i *
+            sizeof(iree_hal_streaming_rocm_malloc_cache_line_t);
     iree_hal_streaming_rocm_store_u32(heap, offset,
                                       IREE_HAL_STREAMING_ROCM_MALLOC_NUM_SDATA);
   }
@@ -70,16 +125,17 @@ static iree_status_t iree_hal_streaming_rocm_populate_malloc_heap_header(
   const uint64_t initial_slabs_end =
       initial_slabs_start + (uint64_t)initial_slab_bytes;
   iree_hal_streaming_rocm_store_u64(
-      heap, IREE_HAL_STREAMING_ROCM_MALLOC_INITIAL_SLABS_OFFSET,
+      heap,
+      offsetof(iree_hal_streaming_rocm_malloc_heap_prefix_t, initial_slabs),
       initial_slabs_start);
   iree_hal_streaming_rocm_store_u64(
       heap,
-      IREE_HAL_STREAMING_ROCM_MALLOC_INITIAL_SLABS_OFFSET + sizeof(uint64_t),
+      offsetof(iree_hal_streaming_rocm_malloc_heap_prefix_t, initial_slabs_end),
       initial_slabs_end);
   iree_hal_streaming_rocm_store_u64(
       heap,
-      IREE_HAL_STREAMING_ROCM_MALLOC_INITIAL_SLABS_OFFSET +
-          2 * sizeof(uint64_t),
+      offsetof(iree_hal_streaming_rocm_malloc_heap_prefix_t,
+               initial_slabs_start),
       initial_slabs_start);
   return iree_ok_status();
 }
@@ -164,12 +220,9 @@ iree_hal_streaming_context_initialize_rocm_device_runtime_locked(
         heap_header, initial_slabs_device_ptr, initial_slab_bytes);
   }
   if (iree_status_is_ok(status)) {
-    iree_slim_mutex_lock(&context->direct_transfer_mutex);
-    status = iree_hal_device_transfer_h2d(
-        context->device, heap_header, heap_buffer, /*target_offset=*/0,
-        IREE_HAL_STREAMING_ROCM_MALLOC_HEAP_SIZE,
-        IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
-    iree_slim_mutex_unlock(&context->direct_transfer_mutex);
+    status = iree_hal_streaming_direct_transfer_h2d(
+        context, heap_header, heap_buffer, /*target_offset=*/0,
+        IREE_HAL_STREAMING_ROCM_MALLOC_HEAP_SIZE);
   }
 
   if (iree_status_is_ok(status)) {

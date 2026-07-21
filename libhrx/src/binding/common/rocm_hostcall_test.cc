@@ -4,10 +4,41 @@
 // See https://llvm.org/LICENSE.txt for license information.
 
 #include "common/internal.h"
+#include "common/rocm_hostcall_packet.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
+
+TEST(RocmHostcallTest, BoundsCyclicPacketChainsWithHostAllocationSize) {
+  iree_hal_streaming_hostcall_packet_header_t packet_headers[4] = {};
+  packet_headers[1].next = UINT64_C(0x101);
+
+  iree_hal_streaming_hostcall_packet_iterator_t iterator;
+  iree_hal_streaming_hostcall_packet_iterator_initialize(
+      packet_headers, IREE_ARRAYSIZE(packet_headers), UINT64_C(0x101),
+      &iterator);
+  uint32_t packet_index = 0;
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(packet_headers); ++i) {
+    ASSERT_TRUE(iree_hal_streaming_hostcall_packet_iterator_advance(
+        &iterator, &packet_index));
+    EXPECT_EQ(1u, packet_index);
+  }
+  EXPECT_FALSE(iree_hal_streaming_hostcall_packet_iterator_advance(
+      &iterator, &packet_index));
+}
+
+TEST(RocmHostcallTest, MasksTaggedPacketIndexesWithHostAllocationSize) {
+  iree_hal_streaming_hostcall_packet_header_t packet_headers[4] = {};
+  iree_hal_streaming_hostcall_packet_iterator_t iterator;
+  iree_hal_streaming_hostcall_packet_iterator_initialize(
+      packet_headers, IREE_ARRAYSIZE(packet_headers), UINT64_MAX, &iterator);
+
+  uint32_t packet_index = 0;
+  ASSERT_TRUE(iree_hal_streaming_hostcall_packet_iterator_advance(
+      &iterator, &packet_index));
+  EXPECT_EQ(3u, packet_index);
+}
 
 TEST(RocmHostcallTest, RoundsResidentWavesToPowerOfTwo) {
   iree_hal_streaming_device_t device = {};

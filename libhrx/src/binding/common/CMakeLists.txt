@@ -8,16 +8,20 @@ iree_cc_library(
   NAME
     common
   HDRS
+    "direct_transfer.h"
     "fat_binary.h"
     "graph.h"
     "hrx_bridge.h"
     "internal.h"
     "kernel_arguments.h"
+    "managed_global.h"
     "printf_format.h"
+    "rocm_hostcall_packet.h"
     "tls.h"
   SRCS
     "context.c"
     "device.c"
+    "direct_transfer.c"
     "event.c"
     "fat_binary.c"
     "graph.c"
@@ -25,11 +29,13 @@ iree_cc_library(
     "graph_exec.c"
     "init.c"
     "kernel_arguments.c"
+    "managed_global.c"
     "mem_pool.c"
     "memory.c"
     "module.c"
     "module_runtime_metadata.c"
     "peer.c"
+    "printf_format.c"
     "registry.c"
     "rocm_hostcall.c"
     "stream.c"
@@ -100,6 +106,19 @@ iree_cc_test(
     fat_binary_test
   SRCS
     "fat_binary_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    printf_format_test
+  SRCS
+    "printf_format_test.cc"
   DEPS
     ::common
     iree::base

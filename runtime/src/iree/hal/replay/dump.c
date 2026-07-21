@@ -1114,16 +1114,15 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           " function_ordinal=%" PRIu32 " flags=0x%08" PRIx32
           " workgroup_count=[%" PRIu32 ",%" PRIu32 ",%" PRIu32
           "] workgroup_size=[%" PRIu32 ",%" PRIu32 ",%" PRIu32
-          "] runtime_parameter_count=%u"
-          " wait_count=%" PRIu64 " signal_count=%" PRIu64
+          "] wait_count=%" PRIu64 " signal_count=%" PRIu64
           " constants_range=[%" PRIu64 ", +%" PRIu64
           "] bindings_range=[%" PRIu64 ", +%" PRIhsz "]",
           payload.executable_id, payload.queue_affinity,
           payload.function_ordinal, payload.flags, payload.workgroup_count[0],
           payload.workgroup_count[1], payload.workgroup_count[2],
           payload.workgroup_size[0], payload.workgroup_size[1],
-          payload.workgroup_size[2], payload.runtime_parameters.count,
-          payload.wait_semaphore_count, payload.signal_semaphore_count,
+          payload.workgroup_size[2], payload.wait_semaphore_count,
+          payload.signal_semaphore_count,
           payload_range->offset + constants_offset, payload.constants_length,
           payload_range->offset + bindings_offset, bindings_size));
       return iree_hal_replay_dump_append_text_buffer_ref(
@@ -1838,7 +1837,6 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           ",\"flags\":%" PRIu32 ",\"workgroup_count\":[%" PRIu32 ",%" PRIu32
           ",%" PRIu32 "],\"workgroup_size\":[%" PRIu32 ",%" PRIu32 ",%" PRIu32
           "],\"dynamic_workgroup_local_memory\":%" PRIu32
-          ",\"runtime_parameter_count\":%u"
           ",\"wait_semaphore_count\":%" PRIu64
           ",\"signal_semaphore_count\":%" PRIu64
           ",\"constants_length\":%" PRIu64 ",\"binding_count\":%" PRIu64,
@@ -1847,9 +1845,8 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           payload.workgroup_count[1], payload.workgroup_count[2],
           payload.workgroup_size[0], payload.workgroup_size[1],
           payload.workgroup_size[2], payload.dynamic_workgroup_local_memory,
-          payload.runtime_parameters.count, payload.wait_semaphore_count,
-          payload.signal_semaphore_count, payload.constants_length,
-          payload.binding_count));
+          payload.wait_semaphore_count, payload.signal_semaphore_count,
+          payload.constants_length, payload.binding_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
           builder, "workgroup_count_ref", &payload.workgroup_count_ref));
       iree_hal_replay_file_range_t wait_range =

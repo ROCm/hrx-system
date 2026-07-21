@@ -8,11 +8,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "common/direct_transfer.h"
 #include "common/internal.h"
+#include "common/managed_global.h"
 #include "iree/base/internal/math.h"
 #include "iree/base/threading/call_once.h"
 #include "iree/base/threading/mutex.h"
-#include "iree/hal/buffer_transfer.h"
 
 static void iree_hal_streaming_context_symbol_map_expunge_module(
     iree_hal_streaming_context_symbol_map_t* map,
@@ -60,31 +61,6 @@ static iree_status_t iree_hal_streaming_registry_checked_array_size(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_streaming_managed_device_name(
-    iree_allocator_t host_allocator, const char* device_name,
-    char** out_managed_device_name) {
-  IREE_ASSERT_ARGUMENT(device_name);
-  IREE_ASSERT_ARGUMENT(out_managed_device_name);
-  *out_managed_device_name = NULL;
-
-  static const char suffix[] = ".managed";
-  const iree_host_size_t name_length = (iree_host_size_t)strlen(device_name);
-  iree_host_size_t name_size = 0;
-  if (IREE_UNLIKELY(!iree_host_size_checked_add(name_length, sizeof(suffix),
-                                                &name_size))) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "managed symbol name size overflow");
-  }
-
-  char* managed_device_name = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, name_size,
-                                             (void**)&managed_device_name));
-  memcpy(managed_device_name, device_name, name_length);
-  memcpy(managed_device_name + name_length, suffix, sizeof(suffix));
-  *out_managed_device_name = managed_device_name;
-  return iree_ok_status();
-}
-
 static iree_status_t iree_hal_streaming_initialize_managed_global(
     iree_hal_streaming_context_symbol_map_t* map,
     const iree_hal_streaming_symbol_registration_t* registration,
@@ -112,35 +88,15 @@ static iree_status_t iree_hal_streaming_initialize_managed_global(
   iree_status_t status = iree_ok_status();
   if (registration->params.variable.managed_initial_value &&
       registration->params.variable.size > 0) {
-    status = iree_hal_device_transfer_h2d(
-        map->context->device,
-        registration->params.variable.managed_initial_value,
+    status = iree_hal_streaming_direct_transfer_h2d(
+        map->context, registration->params.variable.managed_initial_value,
         storage_symbol->global_buffer->buffer, /*target_offset=*/0,
-        registration->params.variable.size,
-        IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
+        registration->params.variable.size);
   }
   if (!iree_status_is_ok(status) || !pointer_symbol) return status;
-
-  if (!pointer_symbol->global_buffer ||
-      !pointer_symbol->global_buffer->buffer) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "managed pointer `%s` has no HAL buffer",
-                            registration->device_name);
-  }
-  if (pointer_symbol->size_bytes < sizeof(storage_symbol->device_address)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "managed pointer `%s` is too small (%" PRIu64 " bytes)",
-        registration->device_name, (uint64_t)pointer_symbol->size_bytes);
-  }
-
-  const iree_hal_streaming_deviceptr_t storage_device_address =
-      storage_symbol->device_address;
-  return iree_hal_device_transfer_h2d(
-      map->context->device, &storage_device_address,
-      pointer_symbol->global_buffer->buffer, /*target_offset=*/0,
-      sizeof(storage_device_address), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-      iree_infinite_timeout());
+  return iree_hal_streaming_managed_global_publish_pointer(
+      map->context, pointer_symbol, storage_symbol,
+      iree_make_cstring_view(registration->device_name));
 }
 
 static bool iree_hal_streaming_context_symbol_map_find_entry(
@@ -845,8 +801,9 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
           bool storage_found = false;
           iree_hal_streaming_symbol_t* storage_symbol = NULL;
           char* managed_device_name = NULL;
-          status = iree_hal_streaming_managed_device_name(
-              map->host_allocator, registration->symbols[i].device_name,
+          status = iree_hal_streaming_managed_global_storage_name(
+              map->host_allocator,
+              iree_make_cstring_view(registration->symbols[i].device_name),
               &managed_device_name);
           if (iree_status_is_ok(status)) {
             status = iree_hal_streaming_module_try_lookup_global_symbol(
@@ -903,7 +860,15 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
       const uint64_t hash =
           iree_hal_streaming_symbol_pointer_hash(symbol_host_ptr);
       uint32_t idx = hash & (map->capacity - 1);
+      bool inserted = false;
       for (iree_host_size_t j = 0; j < map->capacity; ++j) {
+        if (map->entries[idx].key == symbol_host_ptr) {
+          status = iree_make_status(
+              IREE_STATUS_ALREADY_EXISTS,
+              "host symbol pointer for `%.*s` is already registered",
+              (int)registered_name.size, registered_name.data);
+          break;
+        }
         if (map->entries[idx].key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY ||
             map->entries[idx].key ==
                 IREE_HAL_STREAMING_SYMBOL_MAP_TOMBSTONE_KEY) {
@@ -911,10 +876,18 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
           map->entries[idx].symbol = symbol;
           map->entries[idx].synchronize_managed_data_to_host =
               synchronize_managed_data_to_host;
+          if (synchronize_managed_data_to_host) {
+            ++map->managed_symbol_count;
+          }
           ++map->count;
+          inserted = true;
           break;
         }
         idx = (idx + 1) & (map->capacity - 1);
+      }
+      if (iree_status_is_ok(status) && !inserted) {
+        status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                  "symbol map has no free entries");
       }
     }
   }
@@ -924,6 +897,25 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
     entry->next = map->modules;
     map->modules = entry;
   } else {
+    // Loading is transactional: remove any symbols inserted before the first
+    // failure while their owning module is still alive.
+    for (iree_host_size_t i = 0; i < map->capacity; ++i) {
+      iree_hal_streaming_context_symbol_entry_t* symbol_entry =
+          &map->entries[i];
+      if (!iree_hal_streaming_symbol_map_is_valid_key(symbol_entry->key) ||
+          !symbol_entry->symbol ||
+          symbol_entry->symbol->module != entry->module) {
+        continue;
+      }
+      if (symbol_entry->synchronize_managed_data_to_host) {
+        IREE_ASSERT(map->managed_symbol_count > 0);
+        --map->managed_symbol_count;
+      }
+      symbol_entry->key = IREE_HAL_STREAMING_SYMBOL_MAP_TOMBSTONE_KEY;
+      symbol_entry->symbol = NULL;
+      symbol_entry->synchronize_managed_data_to_host = false;
+      --map->count;
+    }
     iree_hal_streaming_module_release(entry->module);
     iree_allocator_free(map->host_allocator, entry);
   }
@@ -972,6 +964,10 @@ static void iree_hal_streaming_context_symbol_map_expunge_module(
     for (iree_host_size_t j = 0; j < map->capacity; ++j) {
       if (map->entries[index].key == host_pointer) {
         // Found it - replace with tombstone.
+        if (map->entries[index].synchronize_managed_data_to_host) {
+          IREE_ASSERT(map->managed_symbol_count > 0);
+          --map->managed_symbol_count;
+        }
         map->entries[index].key = IREE_HAL_STREAMING_SYMBOL_MAP_TOMBSTONE_KEY;
         map->entries[index].symbol = NULL;
         map->entries[index].synchronize_managed_data_to_host = false;
@@ -995,6 +991,7 @@ static void iree_hal_streaming_context_symbol_map_expunge_module(
 iree_status_t iree_hal_streaming_context_symbol_map_synchronize_managed_data(
     iree_hal_streaming_context_symbol_map_t* map) {
   IREE_ASSERT_ARGUMENT(map);
+  if (map->managed_symbol_count == 0) return iree_ok_status();
 
   for (iree_hal_streaming_context_module_entry_t* module_entry = map->modules;
        module_entry; module_entry = module_entry->next) {
@@ -1034,10 +1031,9 @@ iree_status_t iree_hal_streaming_context_symbol_map_synchronize_managed_data(
             (uint64_t)symbol->size_bytes);
       }
 
-      IREE_RETURN_IF_ERROR(iree_hal_device_transfer_d2h(
-          map->context->device, symbol->global_buffer->buffer,
-          /*source_offset=*/0, host_target, byte_length,
-          IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+      IREE_RETURN_IF_ERROR(iree_hal_streaming_direct_transfer_d2h(
+          map->context, symbol->global_buffer->buffer, /*source_offset=*/0,
+          host_target, byte_length));
     }
   }
   return iree_ok_status();

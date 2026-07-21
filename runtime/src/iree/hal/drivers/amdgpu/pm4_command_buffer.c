@@ -849,14 +849,20 @@ iree_hal_amdgpu_pm4_command_buffer_materializes_profile_dispatch_timestamps(
       IREE_HAL_AMDGPU_PM4_COMMAND_BUFFER_FLAG_MATERIALIZE_PROFILE_DISPATCH_TIMESTAMPS);
 }
 
-static iree_status_t iree_hal_amdgpu_pm4_command_buffer_ensure_resource_set(
+static iree_status_t iree_hal_amdgpu_pm4_command_buffer_allocate_resource_set(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer) {
-  if (!iree_hal_amdgpu_pm4_command_buffer_retains_resources(command_buffer) ||
-      command_buffer->resource_set) {
-    return iree_ok_status();
-  }
+  if (command_buffer->resource_set) return iree_ok_status();
   return iree_hal_resource_set_allocate(command_buffer->resource_set_block_pool,
                                         &command_buffer->resource_set);
+}
+
+static iree_status_t iree_hal_amdgpu_pm4_command_buffer_ensure_resource_set(
+    iree_hal_amdgpu_pm4_command_buffer_t* command_buffer) {
+  if (!iree_hal_amdgpu_pm4_command_buffer_retains_resources(command_buffer)) {
+    return iree_ok_status();
+  }
+  return iree_hal_amdgpu_pm4_command_buffer_allocate_resource_set(
+      command_buffer);
 }
 
 static void iree_hal_amdgpu_pm4_dword_builder_initialize(
@@ -2370,7 +2376,22 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_retain_resource_once(
 
 static iree_status_t iree_hal_amdgpu_pm4_command_buffer_retain_dispatch(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
-    iree_hal_executable_t* executable, iree_hal_buffer_ref_list_t bindings) {
+    iree_hal_executable_t* executable, iree_hal_buffer_ref_list_t bindings,
+    const iree_hal_dispatch_config_t config) {
+  const iree_hal_dispatch_runtime_parameter_list_t* runtime_parameters =
+      config.runtime_parameters;
+  if (runtime_parameters) {
+    for (uint8_t i = 0; i < runtime_parameters->count; ++i) {
+      iree_hal_resource_t* resource = runtime_parameters->patches[i].resource;
+      if (!resource) continue;
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_pm4_command_buffer_allocate_resource_set(
+              command_buffer));
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_pm4_command_buffer_retain_resource_once(
+              command_buffer, resource));
+    }
+  }
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_pm4_command_buffer_ensure_resource_set(command_buffer));
   if (!command_buffer->resource_set) return iree_ok_status();
@@ -3267,7 +3288,7 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_record_dispatch(
   if (config.runtime_parameters) {
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
-            descriptor, config));
+            config, descriptor->kernarg_layout->kernarg_byte_length));
   }
   if (IREE_UNLIKELY(!descriptor->pm4_launch_state_valid)) {
     return iree_make_status(
@@ -3332,7 +3353,7 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_record_dispatch(
           descriptor, config, dispatch_thread_count));
 
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_command_buffer_retain_dispatch(
-      command_buffer, executable, bindings));
+      command_buffer, executable, bindings, config));
   if (IREE_UNLIKELY(descriptor->pm4_group_segment_fixed_size !=
                     descriptor->kernel_args.group_segment_size)) {
     return iree_make_status(

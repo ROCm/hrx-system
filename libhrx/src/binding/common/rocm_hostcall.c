@@ -4,16 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <limits.h>
-#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <wchar.h>
 
 #include "common/internal.h"
 #include "common/printf_format.h"
+#include "common/rocm_hostcall_packet.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/base/threading/thread.h"
 
@@ -21,37 +19,6 @@
 #define IREE_HAL_STREAMING_HOSTCALL_SERVICE_PRINTF 2u
 #define IREE_HAL_STREAMING_HOSTCALL_SERVICE_DEVMEM 3u
 #define IREE_HAL_STREAMING_HOSTCALL_SERVICE_SANITIZER 4u
-
-typedef struct iree_hal_streaming_hostcall_packet_header_t {
-  // Tagged pointer to the next packet in the intrusive stack.
-  uint64_t next;
-  // Bitmask of active lanes whose payload slots are valid.
-  uint64_t activemask;
-  // Device-library service identifier requested by the wave.
-  uint32_t service;
-  // Bit 0 is the ready flag. The device waits until the host clears it.
-  iree_atomic_uint32_t control;
-} iree_hal_streaming_hostcall_packet_header_t;
-
-typedef struct iree_hal_streaming_hostcall_payload_t {
-  // One eight-qword argument/return slot for each possible wave lane.
-  uint64_t slots[64][8];
-} iree_hal_streaming_hostcall_payload_t;
-
-typedef struct iree_hal_streaming_hostcall_buffer_header_t {
-  // Device address of the packet header array.
-  uint64_t headers;
-  // Device address of the packet payload array.
-  uint64_t payloads;
-  // HSA signal handle used by the device to notify the listener.
-  uint64_t doorbell;
-  // Tagged stack of packets available to device waves.
-  uint64_t free_stack;
-  // Tagged stack of packets awaiting host processing.
-  iree_atomic_uint64_t ready_stack;
-  // Mask used to extract packet indexes from tagged stack pointers.
-  uint64_t index_mask;
-} iree_hal_streaming_hostcall_buffer_header_t;
 
 typedef struct iree_hal_streaming_hostcall_message_t {
   // Accumulated qword payload for one in-flight device-library message.
@@ -86,6 +53,8 @@ typedef struct iree_hal_streaming_rocm_hostcall_service_t {
   iree_hal_streaming_hostcall_packet_header_t* packet_headers;
   // Host view of the packet payload array.
   iree_hal_streaming_hostcall_payload_t* packet_payloads;
+  // Immutable number of entries in the host packet arrays.
+  uint32_t packet_count;
   // Listener thread that processes packets while kernels are running.
   iree_thread_t* listener_thread;
   // Non-zero after shutdown requests the listener to exit.
@@ -314,275 +283,6 @@ static uint64_t iree_hal_streaming_hostcall_descriptor_set_field(
   return (descriptor & reset_mask) | (value << offset);
 }
 
-static iree_host_size_t iree_hal_streaming_hostcall_strnlen(
-    const char* data, iree_host_size_t data_length) {
-  iree_host_size_t length = 0;
-  while (length < data_length && data[length] != '\0') ++length;
-  return length;
-}
-
-static bool iree_hal_streaming_hostcall_printf_write(FILE* stream,
-                                                     int* out_count,
-                                                     const char* format, ...) {
-  va_list args;
-  va_start(args, format);
-  const int result = vfprintf(stream, format, args);
-  va_end(args);
-  if (result < 0) {
-    *out_count = result;
-    return false;
-  }
-  if (*out_count <= INT32_MAX - result) {
-    *out_count += result;
-  } else {
-    *out_count = INT32_MAX;
-  }
-  return true;
-}
-
-static bool iree_hal_streaming_hostcall_printf_write_bytes(
-    FILE* stream, int* out_count, const char* data, iree_host_size_t length) {
-  if (length == 0) return true;
-  if (IREE_UNLIKELY(length > (iree_host_size_t)INT32_MAX)) {
-    *out_count = -1;
-    return false;
-  }
-  if (fwrite(data, 1, length, stream) != length) {
-    *out_count = -1;
-    return false;
-  }
-  if (*out_count <= INT32_MAX - (int)length) {
-    *out_count += (int)length;
-  } else {
-    *out_count = INT32_MAX;
-  }
-  return true;
-}
-
-static const uint64_t* iree_hal_streaming_hostcall_printf_process_spec(
-    FILE* stream, int* out_count, const char* spec_begin,
-    iree_host_size_t spec_length, const uint64_t* argument,
-    const uint64_t* argument_end) {
-  if (IREE_UNLIKELY(spec_length >= 128)) return NULL;
-  char spec[128];
-  memcpy(spec, spec_begin, spec_length);
-  spec[spec_length] = '\0';
-
-  iree_hal_streaming_printf_spec_t parsed_spec;
-  if (IREE_UNLIKELY(!iree_hal_streaming_printf_parse_spec(spec, spec_length,
-                                                          &parsed_spec))) {
-    return NULL;
-  }
-  const int star_count = parsed_spec.star_count;
-  if (IREE_UNLIKELY(argument_end - argument < star_count)) return NULL;
-  int star0 = 0;
-  int star1 = 0;
-  if (star_count >= 1) star0 = (int)*argument++;
-  if (star_count >= 2) star1 = (int)*argument++;
-
-  if (argument == argument_end) return NULL;
-
-#define IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value)                         \
-  do {                                                                         \
-    if (star_count == 0) {                                                     \
-      iree_hal_streaming_hostcall_printf_write(stream, out_count, spec,        \
-                                               value);                         \
-    } else if (star_count == 1) {                                              \
-      iree_hal_streaming_hostcall_printf_write(stream, out_count, spec, star0, \
-                                               value);                         \
-    } else {                                                                   \
-      iree_hal_streaming_hostcall_printf_write(stream, out_count, spec, star0, \
-                                               star1, value);                  \
-    }                                                                          \
-  } while (0)
-
-  switch (parsed_spec.conversion) {
-    case 'd':
-    case 'i':
-    case 'o':
-    case 'u':
-    case 'x':
-    case 'X': {
-      const uint64_t raw_value = *argument++;
-      if (parsed_spec.is_signed_integer) {
-        switch (parsed_spec.length_modifier) {
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_DEFAULT:
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_H:
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_HH: {
-            const int value = (int)raw_value;
-            IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_L: {
-            const long value = (long)raw_value;
-            IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_LL: {
-            const long long value = (long long)raw_value;
-            IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_J: {
-            const intmax_t value = (intmax_t)raw_value;
-            IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_Z: {
-            const iree_hal_streaming_printf_signed_size_t value =
-                (iree_hal_streaming_printf_signed_size_t)raw_value;
-            IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_T: {
-            const ptrdiff_t value = (ptrdiff_t)raw_value;
-            IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-            break;
-          }
-        }
-      } else {
-        switch (parsed_spec.length_modifier) {
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_DEFAULT:
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_H:
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_HH: {
-            const unsigned int value = (unsigned int)raw_value;
-            IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_L: {
-            const unsigned long value = (unsigned long)raw_value;
-            IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_LL: {
-            const unsigned long long value = (unsigned long long)raw_value;
-            IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_J: {
-            const uintmax_t value = (uintmax_t)raw_value;
-            IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_Z: {
-            const size_t value = (size_t)raw_value;
-            IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_T: {
-            const iree_hal_streaming_printf_unsigned_ptrdiff_t value =
-                (iree_hal_streaming_printf_unsigned_ptrdiff_t)raw_value;
-            IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-            break;
-          }
-        }
-      }
-      break;
-    }
-    case 'c': {
-      if (parsed_spec.is_wide_character) {
-        const wint_t value = (wint_t)*argument++;
-        IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-      } else {
-        const int value = (int)*argument++;
-        IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-      }
-      break;
-    }
-    case 'f':
-    case 'F':
-    case 'e':
-    case 'E':
-    case 'g':
-    case 'G':
-    case 'a':
-    case 'A': {
-      double value = 0;
-      memcpy(&value, argument, sizeof(value));
-      ++argument;
-      IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-      break;
-    }
-    case 's': {
-      const char* value = (const char*)argument;
-      const iree_host_size_t available_bytes =
-          (iree_host_size_t)(argument_end - argument) * sizeof(uint64_t);
-      const iree_host_size_t string_length =
-          iree_hal_streaming_hostcall_strnlen(value, available_bytes);
-      if (IREE_UNLIKELY(string_length == available_bytes)) return NULL;
-      IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-      argument += (string_length + 1 + 7) / 8;
-      break;
-    }
-    case 'p': {
-      void* value = (void*)(uintptr_t)*argument++;
-      IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL(value);
-      break;
-    }
-    default:
-      return NULL;
-  }
-
-#undef IREE_HAL_STREAMING_HOSTCALL_PRINTF_CALL
-
-  return argument;
-}
-
-static int iree_hal_streaming_hostcall_printf_format(FILE* stream,
-                                                     const uint64_t* begin,
-                                                     const uint64_t* end) {
-  if (begin >= end) return -1;
-  const char* format = (const char*)begin;
-  const iree_host_size_t available_bytes =
-      (iree_host_size_t)(end - begin) * sizeof(uint64_t);
-  const iree_host_size_t format_length =
-      iree_hal_streaming_hostcall_strnlen(format, available_bytes);
-  if (format_length == available_bytes) return -1;
-
-  const uint64_t* argument = begin + ((format_length + 1 + 7) / 8);
-  int out_count = 0;
-  iree_host_size_t cursor = 0;
-  while (cursor < format_length) {
-    const char* percent = memchr(format + cursor, '%', format_length - cursor);
-    if (!percent) {
-      iree_hal_streaming_hostcall_printf_write_bytes(
-          stream, &out_count, format + cursor, format_length - cursor);
-      break;
-    }
-
-    const iree_host_size_t percent_offset =
-        (iree_host_size_t)(percent - format);
-    if (!iree_hal_streaming_hostcall_printf_write_bytes(
-            stream, &out_count, format + cursor, percent_offset - cursor)) {
-      break;
-    }
-
-    iree_host_size_t spec_end = percent_offset + 1;
-    if (spec_end < format_length && format[spec_end] == '%') {
-      if (!iree_hal_streaming_hostcall_printf_write_bytes(stream, &out_count,
-                                                          "%", 1)) {
-        break;
-      }
-      cursor = spec_end + 1;
-      continue;
-    }
-
-    static const char kConversionSpecifiers[] = "diouxXfFeEgGaAcspn";
-    while (spec_end < format_length &&
-           !strchr(kConversionSpecifiers, format[spec_end])) {
-      ++spec_end;
-    }
-    if (spec_end == format_length) break;
-    ++spec_end;
-
-    argument = iree_hal_streaming_hostcall_printf_process_spec(
-        stream, &out_count, percent, spec_end - percent_offset, argument, end);
-    if (out_count < 0 || !argument) break;
-    cursor = spec_end;
-  }
-  return out_count;
-}
-
 static bool iree_hal_streaming_hostcall_handle_printf(
     iree_hal_streaming_hostcall_message_table_t* table, uint64_t* payload) {
   enum {
@@ -632,6 +332,7 @@ static bool iree_hal_streaming_hostcall_handle_printf(
   if (!iree_status_is_ok(iree_hal_streaming_hostcall_message_append(
           table, message, payload + 1, (iree_host_size_t)length))) {
     payload[0] = (uint64_t)-1;
+    iree_hal_streaming_hostcall_message_discard(message);
     return false;
   }
 
@@ -650,8 +351,29 @@ static bool iree_hal_streaming_hostcall_handle_printf(
     iree_hal_streaming_hostcall_message_discard(message);
     return false;
   }
-  const int result = iree_hal_streaming_hostcall_printf_format(
-      stream, message->data + 1, message->data + message->count);
+  const uint8_t* message_bytes = (const uint8_t*)(message->data + 1);
+  iree_host_size_t message_length = 0;
+  int result = -1;
+  if (iree_host_size_checked_mul(message->count - 1, sizeof(uint64_t),
+                                 &message_length)) {
+    const char* format_end = memchr(message_bytes, '\0', message_length);
+    if (format_end) {
+      const iree_host_size_t format_length =
+          (iree_host_size_t)(format_end - (const char*)message_bytes);
+      const iree_host_size_t argument_offset = (format_length + 8u) & ~7u;
+      if (argument_offset <= message_length) {
+        iree_status_t status = iree_hal_streaming_printf_format(
+            stream,
+            iree_make_string_view((const char*)message_bytes, format_length),
+            message_bytes + argument_offset, message_length - argument_offset,
+            &result);
+        if (!iree_status_is_ok(status)) {
+          iree_status_ignore(status);
+          result = -1;
+        }
+      }
+    }
+  }
   fflush(stream);
   payload[0] = (uint64_t)(int64_t)result;
   payload[1] = 0;
@@ -690,11 +412,16 @@ static void iree_hal_streaming_hostcall_process_packets(
     iree_hal_streaming_rocm_hostcall_service_t* service) {
   uint64_t ready_stack = iree_atomic_exchange(
       &service->hostcall_buffer->ready_stack, 0, iree_memory_order_acquire);
-  for (uint64_t iter = ready_stack, next = 0; iter != 0; iter = next) {
-    const uint64_t packet_index = iter & service->hostcall_buffer->index_mask;
+  iree_hal_streaming_hostcall_packet_iterator_t iterator;
+  iree_hal_streaming_hostcall_packet_iterator_initialize(
+      service->packet_headers, service->packet_count, ready_stack, &iterator);
+  uint32_t packet_index = 0;
+  while (
+      !iree_atomic_load(&service->stop_requested, iree_memory_order_acquire) &&
+      iree_hal_streaming_hostcall_packet_iterator_advance(&iterator,
+                                                          &packet_index)) {
     iree_hal_streaming_hostcall_packet_header_t* header =
         &service->packet_headers[packet_index];
-    next = header->next;
 
     uint64_t activemask = header->activemask;
     while (activemask != 0) {
@@ -744,15 +471,17 @@ static void iree_hal_streaming_hostcall_buffer_initialize(
   service->packet_payloads =
       (iree_hal_streaming_hostcall_payload_t*)((uint8_t*)buffer->host_ptr +
                                                payloads_offset);
+  service->packet_count = packet_count;
+  const uint64_t packet_index_mask = packet_count - 1;
 
   service->hostcall_buffer->headers = buffer->device_ptr + headers_offset;
   service->hostcall_buffer->payloads = buffer->device_ptr + payloads_offset;
   service->hostcall_buffer->doorbell = doorbell_token;
-  service->hostcall_buffer->index_mask = packet_count - 1;
+  service->hostcall_buffer->index_mask = packet_index_mask;
   iree_atomic_store(&service->hostcall_buffer->ready_stack, 0,
                     iree_memory_order_relaxed);
 
-  uint64_t next = service->hostcall_buffer->index_mask + 1;
+  uint64_t next = packet_index_mask + 1;
   service->packet_headers[0].next = 0;
   for (uint32_t i = 1; i < packet_count; ++i) {
     service->packet_headers[i].next = next;

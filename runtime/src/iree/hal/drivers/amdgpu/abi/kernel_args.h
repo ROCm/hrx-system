@@ -247,7 +247,7 @@ typedef struct IREE_AMDGPU_ALIGNAS(8) iree_amdgpu_kernel_implicit_args_t {
   //
   // Represented in metadata as:
   //   hidden_heap_v1
-  uint64_t unused_heap_v1;
+  uint64_t heap_v1;
 
   // AQL queue handles are only used by OpenCL device-side enqueue and we do not
   // support that. We could, probably, by passing in our execution queue but

@@ -103,7 +103,7 @@ TEST(DispatchTest, EmplaceImplicitArgsWritesSuffix) {
   EXPECT_EQ(implicit_args->printf_buffer, nullptr);
   EXPECT_EQ(implicit_args->hostcall_buffer, nullptr);
   EXPECT_EQ(implicit_args->deprecated_multigrid_sync_arg, 0u);
-  EXPECT_EQ(implicit_args->unused_heap_v1, 0u);
+  EXPECT_EQ(implicit_args->heap_v1, 0u);
   EXPECT_EQ(implicit_args->unused_default_queue, 0u);
   EXPECT_EQ(implicit_args->unused_completion_action, 0u);
   EXPECT_EQ(implicit_args->dynamic_lds_size, 13u);

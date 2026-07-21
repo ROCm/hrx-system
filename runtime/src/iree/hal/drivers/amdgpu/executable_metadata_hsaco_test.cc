@@ -416,7 +416,7 @@ TEST(ExecutableMetadataHsacoTest,
                                  "hidden_hostcall_buffer")),
       MakeArg(
           ViewFromCodeObjectData(source_code_object_data, "heap"),
-          16 + offsetof(iree_amdgpu_kernel_implicit_args_t, unused_heap_v1), 8,
+          16 + offsetof(iree_amdgpu_kernel_implicit_args_t, heap_v1), 8,
           IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
           ViewFromCodeObjectData(source_code_object_data, "hidden_heap_v1")),
   };
@@ -450,7 +450,7 @@ TEST(ExecutableMetadataHsacoTest,
   ExpectRebasedView(loaded_code_object_data, args[1].value_kind,
                     metadata->runtime_parameters[1].name);
   EXPECT_EQ(metadata->runtime_parameters[1].offset,
-            16 + offsetof(iree_amdgpu_kernel_implicit_args_t, unused_heap_v1));
+            16 + offsetof(iree_amdgpu_kernel_implicit_args_t, heap_v1));
 
   iree_hal_amdgpu_executable_metadata_free(metadata);
 }

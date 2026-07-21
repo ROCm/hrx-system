@@ -477,6 +477,11 @@ typedef struct iree_hal_dispatch_runtime_parameter_patch_t {
   uint16_t reserved;
   // Runtime parameter bytes copied into launch argument storage.
   uint8_t data[IREE_HAL_DISPATCH_MAX_RUNTIME_PARAMETER_LENGTH];
+  // Optional resource referenced by the runtime value stored in |data|.
+  // Backends supporting runtime patches retain non-NULL resources until the
+  // dispatch completes, even when the command buffer otherwise borrows
+  // resource lifetimes.
+  iree_hal_resource_t* resource;
 } iree_hal_dispatch_runtime_parameter_patch_t;
 
 // Bounded per-dispatch backend-native runtime argument patch list.

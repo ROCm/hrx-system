@@ -163,11 +163,51 @@ static iree_status_t iree_hal_null_executable_global_buffer(
                           "invalid null executable global");
 }
 
+static iree_status_t iree_hal_null_executable_export_runtime_parameters(
+    iree_hal_executable_t* base_executable,
+    iree_hal_executable_function_t function, iree_host_size_t capacity,
+    iree_hal_executable_function_runtime_parameter_info_t* out_parameters) {
+  (void)base_executable;
+  (void)function;
+  (void)capacity;
+  (void)out_parameters;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "null executable runtime parameters are not supported");
+}
+
+static iree_status_t iree_hal_null_executable_runtime_metadata_count(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    iree_host_size_t* out_count) {
+  (void)base_executable;
+  (void)name;
+  *out_count = 0;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "null executable runtime metadata is not supported");
+}
+
+static iree_status_t iree_hal_null_executable_runtime_metadata_records(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    iree_host_size_t capacity,
+    iree_hal_executable_runtime_metadata_record_t* out_records) {
+  (void)base_executable;
+  (void)name;
+  (void)capacity;
+  (void)out_records;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "null executable runtime metadata is not supported");
+}
+
 static const iree_hal_executable_vtable_t iree_hal_null_executable_vtable = {
     .destroy = iree_hal_null_executable_destroy,
     .function_count = iree_hal_null_executable_export_count,
     .function_info = iree_hal_null_executable_export_info,
     .function_parameters = iree_hal_null_executable_export_parameters,
+    .function_runtime_parameters =
+        iree_hal_null_executable_export_runtime_parameters,
+    .runtime_metadata_count = iree_hal_null_executable_runtime_metadata_count,
+    .runtime_metadata_records =
+        iree_hal_null_executable_runtime_metadata_records,
     .lookup_function_by_name = iree_hal_null_executable_lookup_export_by_name,
     .try_lookup_global_by_name =
         iree_hal_null_executable_try_lookup_global_by_name,

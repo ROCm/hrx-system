@@ -9,7 +9,7 @@
 
 #include "common/fat_binary.h"
 #include "common/internal.h"
-#include "iree/hal/buffer_transfer.h"
+#include "common/managed_global.h"
 #include "iree/io/file_handle.h"
 
 //===----------------------------------------------------------------------===//
@@ -986,63 +986,6 @@ iree_status_t iree_hal_streaming_module_global_symbol(
                           (int)name_view.size, name_view.data);
 }
 
-static iree_status_t iree_hal_streaming_module_managed_device_name(
-    iree_hal_streaming_module_t* module, const char* device_name,
-    char** out_managed_device_name) {
-  IREE_ASSERT_ARGUMENT(module);
-  IREE_ASSERT_ARGUMENT(device_name);
-  IREE_ASSERT_ARGUMENT(out_managed_device_name);
-  *out_managed_device_name = NULL;
-
-  static const char suffix[] = ".managed";
-  const iree_host_size_t name_length = (iree_host_size_t)strlen(device_name);
-  iree_host_size_t name_size = 0;
-  if (IREE_UNLIKELY(!iree_host_size_checked_add(name_length, sizeof(suffix),
-                                                &name_size))) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "managed symbol name size overflow");
-  }
-
-  char* managed_device_name = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(module->host_allocator, name_size,
-                                             (void**)&managed_device_name));
-  memcpy(managed_device_name, device_name, name_length);
-  memcpy(managed_device_name + name_length, suffix, sizeof(suffix));
-  *out_managed_device_name = managed_device_name;
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_streaming_module_initialize_managed_pointer(
-    iree_hal_streaming_module_t* module,
-    iree_hal_streaming_symbol_t* pointer_symbol,
-    iree_hal_streaming_symbol_t* storage_symbol, const char* device_name) {
-  IREE_ASSERT_ARGUMENT(module);
-  IREE_ASSERT_ARGUMENT(pointer_symbol);
-  IREE_ASSERT_ARGUMENT(storage_symbol);
-  IREE_ASSERT_ARGUMENT(device_name);
-
-  if (!pointer_symbol->global_buffer ||
-      !pointer_symbol->global_buffer->buffer) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "managed pointer `%s` has no HAL buffer",
-                            device_name);
-  }
-  if (pointer_symbol->size_bytes < sizeof(storage_symbol->device_address)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "managed pointer `%s` is too small (%" PRIu64
-                            " bytes)",
-                            device_name, (uint64_t)pointer_symbol->size_bytes);
-  }
-
-  const iree_hal_streaming_deviceptr_t storage_device_address =
-      storage_symbol->device_address;
-  return iree_hal_device_transfer_h2d(
-      module->context->device, &storage_device_address,
-      pointer_symbol->global_buffer->buffer, /*target_offset=*/0,
-      sizeof(storage_device_address), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-      iree_infinite_timeout());
-}
-
 static iree_status_t iree_hal_streaming_module_elf_subspan(
     iree_const_byte_span_t elf, uint64_t offset64, uint64_t size64,
     const char* kind, iree_const_byte_span_t* out_span) {
@@ -1099,28 +1042,6 @@ static bool iree_hal_streaming_module_split_managed_name(
   return true;
 }
 
-static iree_status_t iree_hal_streaming_module_copy_cstring(
-    iree_hal_streaming_module_t* module, iree_string_view_t value,
-    char** out_string) {
-  IREE_ASSERT_ARGUMENT(module);
-  IREE_ASSERT_ARGUMENT(out_string);
-  *out_string = NULL;
-
-  iree_host_size_t size = 0;
-  if (!iree_host_size_checked_add(value.size, 1, &size)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "managed symbol name size overflow");
-  }
-
-  char* string = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(module->host_allocator, size, (void**)&string));
-  memcpy(string, value.data, value.size);
-  string[value.size] = '\0';
-  *out_string = string;
-  return iree_ok_status();
-}
-
 static iree_status_t iree_hal_streaming_module_initialize_managed_symbol_pair(
     iree_hal_streaming_module_t* module, iree_hal_executable_t* executable,
     iree_string_view_t pointer_name, iree_string_view_t storage_name) {
@@ -1146,13 +1067,8 @@ static iree_status_t iree_hal_streaming_module_initialize_managed_symbol_pair(
                             (int)storage_name.size, storage_name.data);
   }
 
-  char* pointer_name_string = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_module_copy_cstring(
-      module, pointer_name, &pointer_name_string));
-  iree_status_t status = iree_hal_streaming_module_initialize_managed_pointer(
-      module, pointer_symbol, storage_symbol, pointer_name_string);
-  iree_allocator_free(module->host_allocator, pointer_name_string);
-  return status;
+  return iree_hal_streaming_managed_global_publish_pointer(
+      module->context, pointer_symbol, storage_symbol, pointer_name);
 }
 
 static iree_status_t
@@ -1195,62 +1111,65 @@ iree_hal_streaming_module_initialize_managed_globals_from_elf(
   IREE_RETURN_IF_ERROR(iree_hal_streaming_module_elf_subspan(
       elf, header.shoff, section_headers_size, "section-header table",
       &section_headers_span));
-  const hrx_module_elf64_section_header_t* section_headers =
-      (const hrx_module_elf64_section_header_t*)section_headers_span.data;
-
   for (uint16_t section_index = 0; section_index < header.shnum;
        ++section_index) {
-    const hrx_module_elf64_section_header_t* symbol_table =
-        &section_headers[section_index];
-    if (symbol_table->type != HRX_MODULE_SHT_SYMTAB &&
-        symbol_table->type != HRX_MODULE_SHT_DYNSYM) {
+    hrx_module_elf64_section_header_t symbol_table;
+    memcpy(&symbol_table,
+           section_headers_span.data +
+               (iree_host_size_t)section_index * sizeof(symbol_table),
+           sizeof(symbol_table));
+    if (symbol_table.type != HRX_MODULE_SHT_SYMTAB &&
+        symbol_table.type != HRX_MODULE_SHT_DYNSYM) {
       continue;
     }
-    if (symbol_table->entry_size != sizeof(hrx_module_elf64_symbol_t)) {
+    if (symbol_table.entry_size != sizeof(hrx_module_elf64_symbol_t)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "unexpected ELF symbol-table entry size for managed-symbol scan");
     }
-    if (symbol_table->size % symbol_table->entry_size != 0) {
+    if (symbol_table.size % symbol_table.entry_size != 0) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "ELF symbol-table size is not a multiple of entry size");
     }
-    if (symbol_table->link >= header.shnum) {
+    if (symbol_table.link >= header.shnum) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "ELF symbol-table string-table link is invalid");
     }
 
     iree_const_byte_span_t symbol_table_span;
     IREE_RETURN_IF_ERROR(iree_hal_streaming_module_elf_subspan(
-        elf, symbol_table->offset, symbol_table->size, "symbol table",
+        elf, symbol_table.offset, symbol_table.size, "symbol table",
         &symbol_table_span));
-    const hrx_module_elf64_symbol_t* symbols =
-        (const hrx_module_elf64_symbol_t*)symbol_table_span.data;
 
-    const hrx_module_elf64_section_header_t* string_table =
-        &section_headers[symbol_table->link];
+    hrx_module_elf64_section_header_t string_table;
+    memcpy(&string_table,
+           section_headers_span.data +
+               (iree_host_size_t)symbol_table.link * sizeof(string_table),
+           sizeof(string_table));
     iree_const_byte_span_t string_table_span;
     IREE_RETURN_IF_ERROR(iree_hal_streaming_module_elf_subspan(
-        elf, string_table->offset, string_table->size, "string table",
+        elf, string_table.offset, string_table.size, "string table",
         &string_table_span));
 
     const iree_host_size_t symbol_count =
-        (iree_host_size_t)(symbol_table->size / symbol_table->entry_size);
+        (iree_host_size_t)(symbol_table.size / symbol_table.entry_size);
     for (iree_host_size_t i = 0; i < symbol_count; ++i) {
-      const hrx_module_elf64_symbol_t* symbol = &symbols[i];
-      const uint8_t binding = symbol->info >> 4;
-      const uint8_t type = symbol->info & 0x0F;
+      hrx_module_elf64_symbol_t symbol;
+      memcpy(&symbol, symbol_table_span.data + i * sizeof(symbol),
+             sizeof(symbol));
+      const uint8_t binding = symbol.info >> 4;
+      const uint8_t type = symbol.info & 0x0F;
       if ((binding != HRX_MODULE_STB_GLOBAL &&
            binding != HRX_MODULE_STB_WEAK) ||
           type != HRX_MODULE_STT_OBJECT ||
-          symbol->section_index == HRX_MODULE_SHN_UNDEF) {
+          symbol.section_index == HRX_MODULE_SHN_UNDEF) {
         continue;
       }
 
       iree_string_view_t storage_name = iree_string_view_empty();
       IREE_RETURN_IF_ERROR(iree_hal_streaming_module_elf_cstring_view(
-          string_table_span, symbol->name, &storage_name));
+          string_table_span, symbol.name, &storage_name));
       iree_string_view_t pointer_name = iree_string_view_empty();
       if (!iree_hal_streaming_module_split_managed_name(storage_name,
                                                         &pointer_name)) {
@@ -1307,8 +1226,9 @@ iree_status_t iree_hal_streaming_module_global(
       module, name, &found, &symbol));
 
   char* managed_device_name = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_module_managed_device_name(
-      module, name, &managed_device_name));
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_managed_global_storage_name(
+      module->host_allocator, iree_make_cstring_view(name),
+      &managed_device_name));
   bool managed_found = false;
   iree_hal_streaming_symbol_t* managed_symbol = NULL;
   iree_status_t status = iree_hal_streaming_module_try_lookup_global_symbol(
@@ -1318,8 +1238,9 @@ iree_status_t iree_hal_streaming_module_global(
 
   if (managed_found && managed_symbol) {
     if (found && symbol) {
-      IREE_RETURN_IF_ERROR(iree_hal_streaming_module_initialize_managed_pointer(
-          module, symbol, managed_symbol, name));
+      IREE_RETURN_IF_ERROR(iree_hal_streaming_managed_global_publish_pointer(
+          module->context, symbol, managed_symbol,
+          iree_make_cstring_view(name)));
     }
     symbol = managed_symbol;
     found = true;

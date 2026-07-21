@@ -98,8 +98,6 @@ typedef struct iree_hal_replay_plan_command_buffer_dispatch_t {
   uint32_t function_ordinal;
   // Dispatch grid and indirect-count configuration.
   iree_hal_dispatch_config_t config;
-  // Runtime parameter list retained for |config| during plan execution.
-  iree_hal_dispatch_runtime_parameter_list_t runtime_parameters;
   // Serialized indirect workgroup count buffer reference.
   iree_hal_replay_buffer_ref_payload_t workgroup_count_ref;
   // Inline constant bytes borrowed from the replay file.
@@ -2548,6 +2546,10 @@ static iree_status_t iree_hal_replay_executor_dispatch_layout(
     iree_host_size_t* out_constants_offset,
     iree_host_size_t* out_binding_payloads_offset,
     iree_host_size_t* out_binding_payloads_size) {
+  if (IREE_UNLIKELY(payload->reserved0 != 0)) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "replay dispatch reserved fields must be zero");
+  }
   iree_host_size_t wait_size = 0;
   iree_host_size_t signal_size = 0;
   iree_host_size_t constants_size = 0;
@@ -2596,17 +2598,6 @@ static iree_status_t iree_hal_replay_executor_dispatch_layout(
       offset != record->payload.data_length) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "replay dispatch payload length mismatch");
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_replay_executor_check_runtime_parameters(
-    const iree_hal_replay_dispatch_payload_t* payload) {
-  if (payload->runtime_parameters.count != 0) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "replay dispatch has backend-native runtime parameters without a "
-        "portable provider");
   }
   return iree_ok_status();
 }
@@ -2697,8 +2688,6 @@ static iree_status_t iree_hal_replay_plan_prepare_command_buffer_dispatch(
       sizeof(iree_hal_replay_dispatch_payload_t)));
   iree_hal_replay_dispatch_payload_t payload;
   memcpy(&payload, record->payload.data, sizeof(payload));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_replay_executor_check_runtime_parameters(&payload));
   if (payload.wait_semaphore_count != 0 ||
       payload.signal_semaphore_count != 0) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -2730,8 +2719,6 @@ static iree_status_t iree_hal_replay_plan_prepare_command_buffer_dispatch(
          sizeof(out_dispatch->config.workgroup_count));
   out_dispatch->config.dynamic_workgroup_local_memory =
       payload.dynamic_workgroup_local_memory;
-  out_dispatch->runtime_parameters = payload.runtime_parameters;
-  out_dispatch->config.runtime_parameters = &out_dispatch->runtime_parameters;
   out_dispatch->workgroup_count_ref = payload.workgroup_count_ref;
   out_dispatch->constants =
       iree_make_const_byte_span(record->payload.data + constants_offset,
@@ -2945,8 +2932,6 @@ static iree_status_t iree_hal_replay_executor_command_buffer_dispatch(
       sizeof(iree_hal_replay_dispatch_payload_t)));
   iree_hal_replay_dispatch_payload_t payload;
   memcpy(&payload, record->payload.data, sizeof(payload));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_replay_executor_check_runtime_parameters(&payload));
   if (payload.wait_semaphore_count != 0 ||
       payload.signal_semaphore_count != 0) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -2999,7 +2984,6 @@ static iree_status_t iree_hal_replay_executor_command_buffer_dispatch(
            sizeof(config.workgroup_count));
     config.dynamic_workgroup_local_memory =
         payload.dynamic_workgroup_local_memory;
-    config.runtime_parameters = &payload.runtime_parameters;
     iree_hal_executable_function_t function =
         iree_hal_executable_function_invalid();
     status = iree_hal_replay_executor_make_buffer_ref(
@@ -3029,8 +3013,6 @@ static iree_status_t iree_hal_replay_executor_queue_dispatch(
       sizeof(iree_hal_replay_dispatch_payload_t)));
   iree_hal_replay_dispatch_payload_t payload;
   memcpy(&payload, record->payload.data, sizeof(payload));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_replay_executor_check_runtime_parameters(&payload));
   iree_host_size_t wait_offset = 0;
   iree_host_size_t wait_size = 0;
   iree_host_size_t signal_offset = 0;
@@ -3091,7 +3073,6 @@ static iree_status_t iree_hal_replay_executor_queue_dispatch(
            sizeof(config.workgroup_count));
     config.dynamic_workgroup_local_memory =
         payload.dynamic_workgroup_local_memory;
-    config.runtime_parameters = &payload.runtime_parameters;
     iree_hal_executable_function_t function =
         iree_hal_executable_function_invalid();
     status = iree_hal_replay_executor_make_buffer_ref(

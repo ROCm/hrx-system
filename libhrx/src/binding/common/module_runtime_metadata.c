@@ -5,11 +5,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <inttypes.h>
-#include <limits.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <wchar.h>
 
 #include "common/internal.h"
 #include "common/printf_format.h"
@@ -245,303 +242,6 @@ static iree_status_t iree_hal_streaming_printf_find_format(
       hash);
 }
 
-static bool iree_hal_streaming_printf_write(FILE* stream, int* out_count,
-                                            const char* format, ...) {
-  va_list args;
-  va_start(args, format);
-  const int result = vfprintf(stream, format, args);
-  va_end(args);
-  if (result < 0) {
-    *out_count = result;
-    return false;
-  }
-  if (*out_count <= INT_MAX - result) {
-    *out_count += result;
-  } else {
-    *out_count = INT_MAX;
-  }
-  return true;
-}
-
-static bool iree_hal_streaming_printf_write_bytes(FILE* stream, int* out_count,
-                                                  const char* data,
-                                                  iree_host_size_t length) {
-  if (length == 0) return true;
-  if (IREE_UNLIKELY(length > (iree_host_size_t)INT_MAX)) {
-    *out_count = -1;
-    return false;
-  }
-  if (fwrite(data, 1, length, stream) != length) {
-    *out_count = -1;
-    return false;
-  }
-  if (*out_count <= INT_MAX - (int)length) {
-    *out_count += (int)length;
-  } else {
-    *out_count = INT_MAX;
-  }
-  return true;
-}
-
-static const uint8_t* iree_hal_streaming_printf_read_u64(
-    const uint8_t* argument, const uint8_t* argument_end, uint64_t* out_value) {
-  if (IREE_UNLIKELY((iree_host_size_t)(argument_end - argument) <
-                    sizeof(*out_value))) {
-    return NULL;
-  }
-  memcpy(out_value, argument, sizeof(*out_value));
-  return argument + sizeof(*out_value);
-}
-
-static const uint8_t* iree_hal_streaming_printf_process_spec(
-    FILE* stream, int* out_count, const char* spec_begin,
-    iree_host_size_t spec_length, const uint8_t* argument,
-    const uint8_t* argument_end) {
-  if (IREE_UNLIKELY(spec_length >= 128)) return NULL;
-  char spec[128];
-  memcpy(spec, spec_begin, spec_length);
-  spec[spec_length] = '\0';
-  iree_hal_streaming_printf_spec_t parsed_spec;
-  if (IREE_UNLIKELY(!iree_hal_streaming_printf_parse_spec(spec, spec_length,
-                                                          &parsed_spec))) {
-    return NULL;
-  }
-
-  const int star_count = parsed_spec.star_count;
-  int star0 = 0;
-  int star1 = 0;
-  uint64_t raw_value = 0;
-  if (star_count >= 1) {
-    argument =
-        iree_hal_streaming_printf_read_u64(argument, argument_end, &raw_value);
-    if (!argument) return NULL;
-    star0 = (int)raw_value;
-  }
-  if (star_count >= 2) {
-    argument =
-        iree_hal_streaming_printf_read_u64(argument, argument_end, &raw_value);
-    if (!argument) return NULL;
-    star1 = (int)raw_value;
-  }
-
-  const char conversion = parsed_spec.conversion;
-
-#define IREE_HAL_STREAMING_PRINTF_CALL(value)                                 \
-  do {                                                                        \
-    if (star_count == 0) {                                                    \
-      iree_hal_streaming_printf_write(stream, out_count, spec, value);        \
-    } else if (star_count == 1) {                                             \
-      iree_hal_streaming_printf_write(stream, out_count, spec, star0, value); \
-    } else {                                                                  \
-      iree_hal_streaming_printf_write(stream, out_count, spec, star0, star1,  \
-                                      value);                                 \
-    }                                                                         \
-  } while (0)
-
-  switch (conversion) {
-    case 'd':
-    case 'i':
-    case 'o':
-    case 'u':
-    case 'x':
-    case 'X': {
-      argument = iree_hal_streaming_printf_read_u64(argument, argument_end,
-                                                    &raw_value);
-      if (!argument) return NULL;
-      if (parsed_spec.is_signed_integer) {
-        switch (parsed_spec.length_modifier) {
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_DEFAULT:
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_H:
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_HH: {
-            const int value = (int)raw_value;
-            IREE_HAL_STREAMING_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_L: {
-            const long value = (long)raw_value;
-            IREE_HAL_STREAMING_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_LL: {
-            const long long value = (long long)raw_value;
-            IREE_HAL_STREAMING_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_J: {
-            const intmax_t value = (intmax_t)raw_value;
-            IREE_HAL_STREAMING_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_Z: {
-            const iree_hal_streaming_printf_signed_size_t value =
-                (iree_hal_streaming_printf_signed_size_t)raw_value;
-            IREE_HAL_STREAMING_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_T: {
-            const ptrdiff_t value = (ptrdiff_t)raw_value;
-            IREE_HAL_STREAMING_PRINTF_CALL(value);
-            break;
-          }
-        }
-      } else {
-        switch (parsed_spec.length_modifier) {
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_DEFAULT:
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_H:
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_HH: {
-            const unsigned int value = (unsigned int)raw_value;
-            IREE_HAL_STREAMING_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_L: {
-            const unsigned long value = (unsigned long)raw_value;
-            IREE_HAL_STREAMING_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_LL: {
-            const unsigned long long value = (unsigned long long)raw_value;
-            IREE_HAL_STREAMING_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_J: {
-            const uintmax_t value = (uintmax_t)raw_value;
-            IREE_HAL_STREAMING_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_Z: {
-            const size_t value = (size_t)raw_value;
-            IREE_HAL_STREAMING_PRINTF_CALL(value);
-            break;
-          }
-          case IREE_HAL_STREAMING_PRINTF_LENGTH_T: {
-            const iree_hal_streaming_printf_unsigned_ptrdiff_t value =
-                (iree_hal_streaming_printf_unsigned_ptrdiff_t)raw_value;
-            IREE_HAL_STREAMING_PRINTF_CALL(value);
-            break;
-          }
-        }
-      }
-      break;
-    }
-    case 'c': {
-      argument = iree_hal_streaming_printf_read_u64(argument, argument_end,
-                                                    &raw_value);
-      if (!argument) return NULL;
-      if (parsed_spec.is_wide_character) {
-        const wint_t value = (wint_t)raw_value;
-        IREE_HAL_STREAMING_PRINTF_CALL(value);
-      } else {
-        const int value = (int)raw_value;
-        IREE_HAL_STREAMING_PRINTF_CALL(value);
-      }
-      break;
-    }
-    case 'f':
-    case 'F':
-    case 'e':
-    case 'E':
-    case 'g':
-    case 'G':
-    case 'a':
-    case 'A': {
-      argument = iree_hal_streaming_printf_read_u64(argument, argument_end,
-                                                    &raw_value);
-      if (!argument) return NULL;
-      double value = 0;
-      memcpy(&value, &raw_value, sizeof(value));
-      IREE_HAL_STREAMING_PRINTF_CALL(value);
-      break;
-    }
-    case 's': {
-      const iree_host_size_t available_bytes =
-          (iree_host_size_t)(argument_end - argument);
-      const iree_host_size_t string_length = iree_hal_streaming_printf_strnlen(
-          (const char*)argument, available_bytes);
-      if (IREE_UNLIKELY(string_length == available_bytes)) return NULL;
-      const char* value = (const char*)argument;
-      IREE_HAL_STREAMING_PRINTF_CALL(value);
-      argument += iree_hal_streaming_printf_align8(string_length + 1);
-      if (IREE_UNLIKELY(argument > argument_end)) return NULL;
-      break;
-    }
-    case 'p': {
-      argument = iree_hal_streaming_printf_read_u64(argument, argument_end,
-                                                    &raw_value);
-      if (!argument) return NULL;
-      void* value = (void*)(uintptr_t)raw_value;
-      IREE_HAL_STREAMING_PRINTF_CALL(value);
-      break;
-    }
-    default:
-      return NULL;
-  }
-
-#undef IREE_HAL_STREAMING_PRINTF_CALL
-
-  return argument;
-}
-
-static iree_status_t iree_hal_streaming_printf_write_formatted(
-    FILE* stream, iree_string_view_t format, const uint8_t* arguments,
-    iree_host_size_t argument_length) {
-  const uint8_t* argument = arguments;
-  const uint8_t* argument_end = arguments + argument_length;
-  int out_count = 0;
-  iree_host_size_t cursor = 0;
-  while (cursor < format.size) {
-    const char* percent =
-        memchr(format.data + cursor, '%', format.size - cursor);
-    if (!percent) {
-      if (!iree_hal_streaming_printf_write_bytes(
-              stream, &out_count, format.data + cursor, format.size - cursor)) {
-        return iree_make_status(IREE_STATUS_UNKNOWN,
-                                "buffered printf output write failed");
-      }
-      return iree_ok_status();
-    }
-
-    const iree_host_size_t percent_offset =
-        (iree_host_size_t)(percent - format.data);
-    if (!iree_hal_streaming_printf_write_bytes(stream, &out_count,
-                                               format.data + cursor,
-                                               percent_offset - cursor)) {
-      return iree_make_status(IREE_STATUS_UNKNOWN,
-                              "buffered printf output write failed");
-    }
-
-    iree_host_size_t spec_end = percent_offset + 1;
-    if (spec_end < format.size && format.data[spec_end] == '%') {
-      if (!iree_hal_streaming_printf_write_bytes(stream, &out_count, "%", 1)) {
-        return iree_make_status(IREE_STATUS_UNKNOWN,
-                                "buffered printf output write failed");
-      }
-      cursor = spec_end + 1;
-      continue;
-    }
-
-    static const char kConversionSpecifiers[] = "diouxXfFeEgGaAcspn";
-    while (spec_end < format.size &&
-           !strchr(kConversionSpecifiers, format.data[spec_end])) {
-      ++spec_end;
-    }
-    if (IREE_UNLIKELY(spec_end == format.size)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "buffered printf format is unterminated");
-    }
-    ++spec_end;
-
-    argument = iree_hal_streaming_printf_process_spec(
-        stream, &out_count, percent, spec_end - percent_offset, argument,
-        argument_end);
-    if (IREE_UNLIKELY(out_count < 0 || !argument)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "buffered printf arguments are malformed");
-    }
-    cursor = spec_end;
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t iree_hal_streaming_printf_drain_constant_record(
     iree_hal_streaming_module_t* module, FILE* stream, const uint8_t* payload,
     iree_host_size_t payload_length) {
@@ -555,9 +255,10 @@ static iree_status_t iree_hal_streaming_printf_drain_constant_record(
   iree_string_view_t format = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(
       iree_hal_streaming_printf_find_format(module, hash, &format));
-  return iree_hal_streaming_printf_write_formatted(
+  int output_count = 0;
+  return iree_hal_streaming_printf_format(
       stream, format, payload + sizeof(uint64_t),
-      payload_length - sizeof(uint64_t));
+      payload_length - sizeof(uint64_t), &output_count);
 }
 
 static iree_status_t iree_hal_streaming_printf_drain_inline_record(
@@ -576,9 +277,10 @@ static iree_status_t iree_hal_streaming_printf_drain_inline_record(
   }
   const iree_string_view_t format =
       iree_make_string_view((const char*)payload, format_length);
-  return iree_hal_streaming_printf_write_formatted(
+  int output_count = 0;
+  return iree_hal_streaming_printf_format(
       stream, format, payload + argument_offset,
-      payload_length - argument_offset);
+      payload_length - argument_offset, &output_count);
 }
 
 static iree_status_t iree_hal_streaming_printf_drain(
@@ -709,13 +411,14 @@ static inline void
 iree_hal_streaming_dispatch_config_append_validated_runtime_pointer(
     iree_hal_dispatch_runtime_parameter_list_t* runtime_parameters,
     const iree_hal_streaming_runtime_parameter_slot_t* slot,
-    uint64_t device_ptr) {
+    uint64_t device_ptr, iree_hal_resource_t* resource) {
   iree_hal_dispatch_runtime_parameter_patch_t* patch =
       &runtime_parameters->patches[runtime_parameters->count++];
   patch->offset = slot->offset;
   patch->length = (uint16_t)slot->length;
   patch->reserved = 0;
   memcpy(patch->data, &device_ptr, sizeof(device_ptr));
+  patch->resource = resource;
 }
 
 iree_status_t iree_hal_streaming_symbol_prepare_runtime_dispatch_config(
@@ -745,7 +448,8 @@ iree_status_t iree_hal_streaming_symbol_prepare_runtime_dispatch_config(
     if (iree_status_is_ok(status)) {
       iree_hal_streaming_dispatch_config_append_validated_runtime_pointer(
           runtime_parameters, &symbol->runtime_services.printf_buffer,
-          printf_buffer->device_ptr);
+          printf_buffer->device_ptr,
+          (iree_hal_resource_t*)printf_buffer->buffer);
     }
   }
 
@@ -760,7 +464,7 @@ iree_status_t iree_hal_streaming_symbol_prepare_runtime_dispatch_config(
     if (iree_status_is_ok(status)) {
       iree_hal_streaming_dispatch_config_append_validated_runtime_pointer(
           runtime_parameters, &symbol->runtime_services.hostcall_buffer,
-          hostcall_buffer_device_ptr);
+          hostcall_buffer_device_ptr, /*resource=*/NULL);
     }
   }
 
@@ -774,7 +478,7 @@ iree_status_t iree_hal_streaming_symbol_prepare_runtime_dispatch_config(
     if (iree_status_is_ok(status)) {
       iree_hal_streaming_dispatch_config_append_validated_runtime_pointer(
           runtime_parameters, &symbol->runtime_services.heap_v1,
-          heap_device_ptr);
+          heap_device_ptr, /*resource=*/NULL);
     }
   }
 
@@ -840,7 +544,7 @@ static iree_hal_executable_t* iree_hal_streaming_module_executable_at(
   return module->executables ? module->executables[index] : module->executable;
 }
 
-static iree_status_t iree_hal_streaming_parse_printf_metadata_record(
+iree_status_t iree_hal_streaming_printf_parse_metadata_record(
     iree_string_view_t record, uint64_t* out_hash,
     iree_string_view_t* out_format) {
   *out_hash = 0;
@@ -874,6 +578,20 @@ static iree_status_t iree_hal_streaming_parse_printf_metadata_record(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_streaming_printf_metadata_count(
+    iree_hal_executable_t* executable, iree_host_size_t* out_count) {
+  iree_status_t status = iree_hal_executable_runtime_metadata_count(
+      executable, IREE_SV("amdhsa.printf"), out_count);
+  if (iree_status_is_unimplemented(status)) {
+    // Runtime metadata is an optional executable capability. Backends still
+    // provide a complete vtable and report the absent capability explicitly.
+    iree_status_ignore(status);
+    *out_count = 0;
+    return iree_ok_status();
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_streaming_module_append_printf_format(
     iree_hal_streaming_module_t* module, uint64_t hash,
     iree_string_view_t format) {
@@ -904,9 +622,8 @@ static iree_status_t iree_hal_streaming_module_initialize_printf_metadata(
   for (iree_host_size_t i = 0;
        iree_status_is_ok(status) && i < executable_count; ++i) {
     iree_host_size_t record_count = 0;
-    status = iree_hal_executable_runtime_metadata_count(
-        iree_hal_streaming_module_executable_at(module, i),
-        IREE_SV("amdhsa.printf"), &record_count);
+    status = iree_hal_streaming_printf_metadata_count(
+        iree_hal_streaming_module_executable_at(module, i), &record_count);
     if (!iree_status_is_ok(status)) break;
     if (!iree_host_size_checked_add(total_record_count, record_count,
                                     &total_record_count)) {
@@ -935,8 +652,8 @@ static iree_status_t iree_hal_streaming_module_initialize_printf_metadata(
     iree_hal_executable_t* executable =
         iree_hal_streaming_module_executable_at(module, i);
     iree_host_size_t record_count = 0;
-    status = iree_hal_executable_runtime_metadata_count(
-        executable, IREE_SV("amdhsa.printf"), &record_count);
+    status =
+        iree_hal_streaming_printf_metadata_count(executable, &record_count);
     if (!iree_status_is_ok(status) || record_count == 0) continue;
 
     iree_host_size_t records_size = 0;
@@ -957,7 +674,7 @@ static iree_status_t iree_hal_streaming_module_initialize_printf_metadata(
          ++j) {
       uint64_t hash = 0;
       iree_string_view_t format = iree_string_view_empty();
-      status = iree_hal_streaming_parse_printf_metadata_record(records[j].value,
+      status = iree_hal_streaming_printf_parse_metadata_record(records[j].value,
                                                                &hash, &format);
       if (iree_status_is_ok(status)) {
         status = iree_hal_streaming_module_append_printf_format(module, hash,

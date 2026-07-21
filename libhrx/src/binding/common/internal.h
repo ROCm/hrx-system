@@ -174,7 +174,11 @@ typedef struct iree_hal_streaming_context_symbol_entry_t {
 typedef struct iree_hal_streaming_context_symbol_map_t {
   // Hash table: host pointer -> compiled symbol on the context device.
   iree_hal_streaming_context_symbol_entry_t* entries;
+  // Number of entries whose managed host storage requires synchronization.
+  iree_host_size_t managed_symbol_count;
+  // Capacity of |entries|.
   iree_host_size_t capacity;
+  // Number of live entries in |entries|.
   iree_host_size_t count;
 
   // List of modules loaded into this context.

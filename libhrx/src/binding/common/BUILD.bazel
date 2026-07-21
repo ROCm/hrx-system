@@ -22,6 +22,7 @@ hrx_cc_library(
     srcs = [
         "context.c",
         "device.c",
+        "direct_transfer.c",
         "event.c",
         "fat_binary.c",
         "graph.c",
@@ -29,23 +30,28 @@ hrx_cc_library(
         "graph_exec.c",
         "init.c",
         "kernel_arguments.c",
+        "managed_global.c",
         "mem_pool.c",
         "memory.c",
         "module.c",
         "module_runtime_metadata.c",
         "peer.c",
+        "printf_format.c",
         "registry.c",
         "rocm_hostcall.c",
         "stream.c",
         "tls.c",
     ],
     hdrs = [
+        "direct_transfer.h",
         "fat_binary.h",
         "graph.h",
         "hrx_bridge.h",
         "internal.h",
         "kernel_arguments.h",
+        "managed_global.h",
         "printf_format.h",
+        "rocm_hostcall_packet.h",
         "tls.h",
     ],
     includes = [
@@ -106,6 +112,17 @@ hrx_cc_test(
 hrx_cc_test(
     name = "fat_binary_test",
     srcs = ["fat_binary_test.cc"],
+    deps = [
+        ":common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "printf_format_test",
+    srcs = ["printf_format_test.cc"],
     deps = [
         ":common",
         "//runtime/src/iree/base",

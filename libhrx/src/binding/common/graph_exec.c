@@ -36,6 +36,22 @@ typedef enum iree_hal_streaming_graph_block_type_e {
 
 typedef void (*iree_hal_streaming_host_callback_t)(void* user_data);
 
+iree_status_t iree_hal_streaming_graph_validate_symbol_runtime_services(
+    const iree_hal_streaming_symbol_t* symbol) {
+  IREE_ASSERT_ARGUMENT(symbol);
+  // Graph executables record one reusable command buffer and may run
+  // concurrently. Buffered printf requires a distinct FIFO that remains live
+  // through each launch and is drained after that launch completes. Recording
+  // a shared FIFO would race, while omitting it passes a null pointer to device
+  // code.
+  if (symbol->runtime_services.printf_buffer.present) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "graph kernel dispatch does not support buffered printf");
+  }
+  return iree_ok_status();
+}
+
 // HIP graph command order also orders memory side effects. The AMDGPU HAL
 // lowers these access scopes into AQL acquire/release fences between payloads.
 static iree_status_t iree_hal_streaming_graph_record_ordering_barrier(
@@ -1590,17 +1606,9 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
             attrs->bindings.count
                 ? IREE_HAL_DISPATCH_FLAG_NONE
                 : IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
-        // Graph executables record one reusable command buffer and may run
-        // concurrently. Buffered printf requires a distinct FIFO that remains
-        // live through each launch and is drained after that launch completes;
-        // recording a shared FIFO here would race, while omitting it passes a
-        // null pointer to device code.
-        if (symbol->runtime_services.printf_buffer.present) {
-          status = iree_make_status(
-              IREE_STATUS_UNIMPLEMENTED,
-              "graph kernel dispatch does not support buffered printf");
-          break;
-        }
+        status =
+            iree_hal_streaming_graph_validate_symbol_runtime_services(symbol);
+        if (!iree_status_is_ok(status)) break;
         if (iree_hal_streaming_symbol_uses_runtime_services(
                 symbol, /*enable_printf=*/false)) {
           status = iree_hal_streaming_symbol_prepare_runtime_dispatch_config(

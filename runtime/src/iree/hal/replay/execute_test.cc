@@ -369,52 +369,6 @@ static void CaptureMockExecutableLoad(iree_const_byte_span_t executable_data,
   iree_hal_replay_recorder_release(recorder);
 }
 
-static std::vector<uint8_t> MakeRawRuntimeParameterDispatchReplayFile() {
-  std::vector<uint8_t> storage(4096, 0);
-  iree_io_file_handle_t* file_handle = nullptr;
-  IREE_CHECK_OK(iree_io_file_handle_wrap_host_allocation(
-      IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
-      iree_make_byte_span(storage.data(), storage.size()),
-      iree_io_file_handle_release_callback_null(), iree_allocator_system(),
-      &file_handle));
-  iree_hal_replay_file_writer_t* writer = nullptr;
-  IREE_CHECK_OK(iree_hal_replay_file_writer_create(
-      file_handle, iree_allocator_system(), &writer));
-  iree_io_file_handle_release(file_handle);
-
-  iree_hal_replay_file_record_metadata_t session_metadata = {};
-  session_metadata.sequence_ordinal = 0;
-  session_metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_SESSION;
-  IREE_CHECK_OK(iree_hal_replay_file_writer_append_record(
-      writer, &session_metadata, 0, nullptr, nullptr));
-
-  iree_hal_replay_dispatch_payload_t payload = {};
-  payload.runtime_parameters.count = 1;
-  payload.runtime_parameters.patches[0].offset = 16;
-  payload.runtime_parameters.patches[0].length = sizeof(uint64_t);
-  const uint64_t raw_device_address = UINT64_C(0x0123456789ABCDEF);
-  memcpy(payload.runtime_parameters.patches[0].data, &raw_device_address,
-         sizeof(raw_device_address));
-  iree_const_byte_span_t payload_span =
-      iree_make_const_byte_span(&payload, sizeof(payload));
-  iree_hal_replay_file_record_metadata_t dispatch_metadata = {};
-  dispatch_metadata.sequence_ordinal = 1;
-  dispatch_metadata.device_id = 1;
-  dispatch_metadata.object_id = 1;
-  dispatch_metadata.related_object_id = 2;
-  dispatch_metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
-  dispatch_metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_DISPATCH;
-  dispatch_metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE;
-  dispatch_metadata.operation_code =
-      IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_DISPATCH;
-  IREE_CHECK_OK(iree_hal_replay_file_writer_append_record(
-      writer, &dispatch_metadata, 1, &payload_span, nullptr));
-
-  IREE_CHECK_OK(iree_hal_replay_file_writer_close(writer));
-  iree_hal_replay_file_writer_free(writer);
-  return storage;
-}
-
 static void CorruptFirstCapturedExecutableData(std::vector<uint8_t>* storage) {
   iree_const_byte_span_t file_contents =
       iree_make_const_byte_span(storage->data(), storage->size());
@@ -638,16 +592,6 @@ TEST(ReplayExecuteTest, UsesRecordedExecutableMetadataForSubstitution) {
                                               replay_group, &options,
                                               iree_allocator_system()));
   EXPECT_EQ(substitution_state.invocation_count, 1u);
-  iree_hal_device_group_release(replay_group);
-}
-
-TEST(ReplayExecuteTest, RejectsRawRuntimeParameterDispatchPayload) {
-  std::vector<uint8_t> storage = MakeRawRuntimeParameterDispatchReplayFile();
-  iree_hal_device_group_t* replay_group = CreateSyncDeviceGroup();
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
-                        iree_hal_replay_execute_file(
-                            GetCapturedFileContents(storage), replay_group,
-                            nullptr, iree_allocator_system()));
   iree_hal_device_group_release(replay_group);
 }
 

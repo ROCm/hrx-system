@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "common/direct_transfer.h"
 #include "common/graph.h"
 #include "common/internal.h"
 #include "iree/base/internal/atomics.h"
@@ -50,9 +51,8 @@ typedef struct iree_hal_streaming_d2h_transfer_t {
   iree_hal_buffer_t* src_buffer;
   // Byte offset into |src_buffer|.
   iree_device_size_t src_offset;
-  // Ordinary CPU staging memory used as the HAL direct-transfer destination.
-  void* staging;
-  // User host destination pointer.
+  // User host destination pointer. The stream-ordered host call runs only
+  // after earlier operations complete, so no intermediate staging is needed.
   void* dst;
   // Number of bytes to copy.
   iree_device_size_t size;
@@ -61,7 +61,6 @@ typedef struct iree_hal_streaming_d2h_transfer_t {
 static void iree_hal_streaming_d2h_transfer_release(
     iree_hal_streaming_d2h_transfer_t* transfer) {
   if (!transfer) return;
-  iree_allocator_free(iree_allocator_system(), transfer->staging);
   if (transfer->src_buffer) iree_hal_buffer_release(transfer->src_buffer);
   if (transfer->context) iree_hal_streaming_context_release(transfer->context);
   iree_allocator_free(iree_allocator_system(), transfer);
@@ -75,27 +74,9 @@ static iree_status_t iree_hal_streaming_d2h_transfer_host_call(
   iree_hal_streaming_d2h_transfer_t* transfer =
       (iree_hal_streaming_d2h_transfer_t*)user_data;
 
-  const iree_device_size_t d2h_chunk_size = 4 * 1024 * 1024;
-  uint8_t* staging_ptr = (uint8_t*)transfer->staging;
-  iree_device_size_t remaining = transfer->size;
-  iree_device_size_t chunk_offset = 0;
-  iree_status_t status = iree_ok_status();
-  iree_slim_mutex_lock(&transfer->context->direct_transfer_mutex);
-  while (remaining > 0 && iree_status_is_ok(status)) {
-    iree_device_size_t this_chunk =
-        remaining < d2h_chunk_size ? remaining : d2h_chunk_size;
-    status = iree_hal_device_transfer_d2h(
-        transfer->context->device, transfer->src_buffer,
-        transfer->src_offset + chunk_offset, staging_ptr + chunk_offset,
-        this_chunk, IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-        iree_infinite_timeout());
-    chunk_offset += this_chunk;
-    remaining -= this_chunk;
-  }
-  iree_slim_mutex_unlock(&transfer->context->direct_transfer_mutex);
-  if (iree_status_is_ok(status)) {
-    memcpy(transfer->dst, transfer->staging, transfer->size);
-  }
+  iree_status_t status = iree_hal_streaming_direct_transfer_d2h(
+      transfer->context, transfer->src_buffer, transfer->src_offset,
+      transfer->dst, transfer->size);
 
   iree_hal_streaming_d2h_transfer_release(transfer);
   return status;
@@ -114,12 +95,6 @@ static iree_status_t iree_hal_streaming_enqueue_d2h_transfer(
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       iree_allocator_system(), sizeof(*transfer), (void**)&transfer));
   memset(transfer, 0, sizeof(*transfer));
-  iree_status_t status = iree_allocator_malloc(
-      iree_allocator_system(), (iree_host_size_t)size, &transfer->staging);
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(iree_allocator_system(), transfer);
-    return status;
-  }
   transfer->context = context;
   transfer->src_buffer = src_ref.buffer->buffer;
   transfer->src_offset = src_ref.offset;
@@ -1934,23 +1909,8 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
   } else {
     // Small host-to-device transfers are faster through the direct blocking
     // path than paying temporary host-visible allocation overhead.
-    const iree_device_size_t h2d_chunk_size = 63 * 1024;
-    const uint8_t* src_ptr = (const uint8_t*)src;
-    iree_device_size_t remaining = size;
-    iree_device_size_t chunk_offset = 0;
-    iree_status_t direct_status = iree_ok_status();
-    iree_slim_mutex_lock(&context->direct_transfer_mutex);
-    while (remaining > 0 && iree_status_is_ok(direct_status)) {
-      iree_device_size_t this_chunk =
-          remaining < h2d_chunk_size ? remaining : h2d_chunk_size;
-      direct_status = iree_hal_device_transfer_h2d(
-          context->device, src_ptr + chunk_offset, dst_ref.buffer->buffer,
-          dst_ref.offset + chunk_offset, this_chunk,
-          IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
-      chunk_offset += this_chunk;
-      remaining -= this_chunk;
-    }
-    iree_slim_mutex_unlock(&context->direct_transfer_mutex);
+    iree_status_t direct_status = iree_hal_streaming_direct_transfer_h2d(
+        context, src, dst_ref.buffer->buffer, dst_ref.offset, size);
     IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, direct_status);
   }
 
@@ -2056,23 +2016,8 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
         z0, iree_hal_streaming_stream_synchronize(stream));
   }
 
-  const iree_device_size_t d2h_chunk_size = 4 * 1024 * 1024;
-  uint8_t* dst_ptr = (uint8_t*)dst;
-  iree_device_size_t remaining = size;
-  iree_device_size_t chunk_offset = 0;
-  iree_status_t direct_status = iree_ok_status();
-  iree_slim_mutex_lock(&context->direct_transfer_mutex);
-  while (remaining > 0 && iree_status_is_ok(direct_status)) {
-    iree_device_size_t this_chunk =
-        remaining < d2h_chunk_size ? remaining : d2h_chunk_size;
-    direct_status = iree_hal_device_transfer_d2h(
-        context->device, src_ref.buffer->buffer, src_ref.offset + chunk_offset,
-        dst_ptr + chunk_offset, this_chunk,
-        IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
-    chunk_offset += this_chunk;
-    remaining -= this_chunk;
-  }
-  iree_slim_mutex_unlock(&context->direct_transfer_mutex);
+  iree_status_t direct_status = iree_hal_streaming_direct_transfer_d2h(
+      context, src_ref.buffer->buffer, src_ref.offset, dst, size);
   if (iree_status_is_ok(direct_status)) {
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();

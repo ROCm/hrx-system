@@ -564,9 +564,7 @@ TEST(ReplayRecorderTest, MarksQueueDispatchRuntimeParametersUnsupported) {
   ASSERT_TRUE(FindCapturedQueueDispatchPayload(storage, &payload));
   ReplayRecordSummary summary = ParseReplayRecordSummary(storage);
   EXPECT_EQ(1u, summary.unsupported_queue_dispatch_record_count);
-  const iree_hal_dispatch_runtime_parameter_list_t empty_parameters = {};
-  EXPECT_EQ(0, memcmp(&payload.runtime_parameters, &empty_parameters,
-                      sizeof(empty_parameters)));
+  EXPECT_EQ(payload.reserved0, 0u);
 }
 
 TEST(ReplayRecorderTest,

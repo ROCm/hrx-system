@@ -692,6 +692,19 @@ iree_runtime_cc_benchmark(
 )
 
 iree_runtime_cc_test(
+    name = "host_notification_test",
+    srcs = ["host_notification_test.cc"],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "host_queue_pending_test",
     srcs = ["host_queue_pending_test.cc"],
     deps = [

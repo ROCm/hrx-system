@@ -104,10 +104,10 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
 void iree_hal_amdgpu_executable_apply_runtime_parameter_patches(
     const iree_hal_dispatch_config_t config, void* kernarg_data);
 
-// Validates the structural bounds of runtime parameter patches in |config|.
+// Validates runtime parameter patches against the kernarg image selected for
+// the dispatch. |kernarg_size| is the exact writable image length.
 iree_status_t iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
-    const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor,
-    const iree_hal_dispatch_config_t config);
+    const iree_hal_dispatch_config_t config, iree_host_size_t kernarg_size);
 
 // Creates a AMDGPU executable from a binary in memory. Each executable may
 // contain multiple entry points and be composed of several modules presented to

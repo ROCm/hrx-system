@@ -60,13 +60,6 @@ IREE_API_EXPORT iree_status_t iree_hal_executable_function_runtime_parameters(
     iree_hal_executable_function_runtime_parameter_info_t* out_parameters) {
   IREE_ASSERT_ARGUMENT(executable);
   IREE_ASSERT_ARGUMENT(out_parameters || capacity == 0);
-  if (!_VTABLE_DISPATCH(executable, function_runtime_parameters)) {
-    if (capacity != 0) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "executable does not expose runtime parameters");
-    }
-    return iree_ok_status();
-  }
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status =
       _VTABLE_DISPATCH(executable, function_runtime_parameters)(
@@ -81,9 +74,6 @@ IREE_API_EXPORT iree_status_t iree_hal_executable_runtime_metadata_count(
   IREE_ASSERT_ARGUMENT(executable);
   IREE_ASSERT_ARGUMENT(out_count);
   *out_count = 0;
-  if (!_VTABLE_DISPATCH(executable, runtime_metadata_count)) {
-    return iree_ok_status();
-  }
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status = _VTABLE_DISPATCH(executable, runtime_metadata_count)(
       executable, name, out_count);
@@ -97,9 +87,6 @@ IREE_API_EXPORT iree_status_t iree_hal_executable_runtime_metadata_records(
     iree_hal_executable_runtime_metadata_record_t* out_records) {
   IREE_ASSERT_ARGUMENT(executable);
   IREE_ASSERT_ARGUMENT(out_records || capacity == 0);
-  if (!_VTABLE_DISPATCH(executable, runtime_metadata_records)) {
-    return iree_ok_status();
-  }
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status = _VTABLE_DISPATCH(executable, runtime_metadata_records)(
       executable, name, capacity, out_records);

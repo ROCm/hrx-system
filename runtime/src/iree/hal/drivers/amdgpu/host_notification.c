@@ -73,8 +73,10 @@ static void iree_hal_amdgpu_host_notification_wake(
     iree_hal_host_notification_t* base_notification) {
   iree_hal_amdgpu_host_notification_t* notification =
       iree_hal_amdgpu_host_notification_cast(base_notification);
-  iree_hsa_signal_store_screlease(IREE_LIBHSA(&notification->libhsa),
-                                  notification->signal, 0);
+  // Change the current value instead of storing a fixed sentinel: a listener
+  // may be blocked on any value after processing earlier notifications.
+  iree_hsa_signal_add_screlease(IREE_LIBHSA(&notification->libhsa),
+                                notification->signal, 1);
 }
 
 static const iree_hal_host_notification_vtable_t

@@ -324,17 +324,23 @@ static void iree_hal_amdgpu_aql_command_buffer_discard_recording(
   iree_hal_amdgpu_aql_command_buffer_reset_resources(command_buffer);
 }
 
-static iree_status_t iree_hal_amdgpu_aql_command_buffer_ensure_resource_set(
+static iree_status_t iree_hal_amdgpu_aql_command_buffer_allocate_resource_set(
     iree_hal_amdgpu_aql_command_buffer_t* command_buffer) {
-  if (!iree_hal_amdgpu_aql_command_buffer_retains_resources(command_buffer) ||
-      command_buffer->resource_set) {
-    return iree_ok_status();
-  }
+  if (command_buffer->resource_set) return iree_ok_status();
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status = iree_hal_resource_set_allocate(
       command_buffer->block_pools.resource_set, &command_buffer->resource_set);
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+static iree_status_t iree_hal_amdgpu_aql_command_buffer_ensure_resource_set(
+    iree_hal_amdgpu_aql_command_buffer_t* command_buffer) {
+  if (!iree_hal_amdgpu_aql_command_buffer_retains_resources(command_buffer)) {
+    return iree_ok_status();
+  }
+  return iree_hal_amdgpu_aql_command_buffer_allocate_resource_set(
+      command_buffer);
 }
 
 static iree_hal_buffer_t*
@@ -2111,10 +2117,6 @@ iree_hal_amdgpu_aql_command_buffer_record_queue_kernel_objects(
     status = iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue(
         inputs->executable, inputs->export_ordinal, queue_affinity,
         &descriptor);
-    if (iree_status_is_ok(status) && inputs->config.runtime_parameters) {
-      status = iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
-          descriptor, inputs->config);
-    }
     if (iree_status_is_ok(status)) {
       queue_kernel_objects[physical_queue_ordinal] =
           descriptor->kernel_args.kernel_object;
@@ -2229,11 +2231,6 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_prepare_dispatch_plan(
         iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_device(
             inputs->executable, inputs->export_ordinal,
             command_buffer->device_ordinal, &out_plan->descriptor));
-    if (inputs->config.runtime_parameters) {
-      IREE_RETURN_IF_ERROR(
-          iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
-              out_plan->descriptor, inputs->config));
-    }
   }
 
   IREE_RETURN_IF_ERROR(
@@ -2348,7 +2345,8 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_prepare_dispatch_plan(
     }
     out_plan->kernarg_storage_mode =
         IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT;
-    return iree_ok_status();
+    return iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
+        inputs->config, out_plan->custom_layout->total_kernarg_size);
   }
 
   out_plan->kernarg_layout = out_plan->descriptor->kernarg_layout;
@@ -2383,12 +2381,26 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_prepare_dispatch_plan(
           command_buffer, inputs->bindings));
   out_plan->kernarg_block_count =
       iree_max(1u, out_plan->descriptor->kernarg_block_count);
-  return iree_ok_status();
+  return iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
+      inputs->config, out_plan->kernarg_layout->kernarg_byte_length);
 }
 
 static iree_status_t iree_hal_amdgpu_aql_command_buffer_retain_dispatch_inputs(
     iree_hal_amdgpu_aql_command_buffer_t* command_buffer,
     const iree_hal_amdgpu_aql_dispatch_inputs_t* inputs) {
+  const iree_hal_dispatch_runtime_parameter_list_t* runtime_parameters =
+      inputs->config.runtime_parameters;
+  if (runtime_parameters) {
+    for (uint8_t i = 0; i < runtime_parameters->count; ++i) {
+      iree_hal_resource_t* resource = runtime_parameters->patches[i].resource;
+      if (!resource) continue;
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_aql_command_buffer_allocate_resource_set(
+              command_buffer));
+      IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert(
+          command_buffer->resource_set, /*count=*/1, &resource));
+    }
+  }
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_aql_command_buffer_ensure_resource_set(command_buffer));
   if (!command_buffer->resource_set) return iree_ok_status();

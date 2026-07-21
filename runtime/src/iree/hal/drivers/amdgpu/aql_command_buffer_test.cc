@@ -11,6 +11,7 @@
 #include <memory>
 
 #include "iree/hal/drivers/amdgpu/abi/queue.h"
+#include "iree/hal/drivers/amdgpu/executable.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -95,6 +96,41 @@ TEST_F(AqlCommandBufferTest, UnrecordedCommandBufferHasNoProgram) {
   const iree_hal_amdgpu_aql_program_t* program =
       iree_hal_amdgpu_aql_command_buffer_program(command_buffer.get());
   EXPECT_EQ(program->first_block, nullptr);
+}
+
+TEST(DispatchRuntimeParameterTest, ValidatesSelectedKernargImageBounds) {
+  iree_hal_dispatch_runtime_parameter_list_t runtime_parameters = {};
+  runtime_parameters.count = 1;
+  runtime_parameters.patches[0].offset = 8;
+  runtime_parameters.patches[0].length = 8;
+  iree_hal_dispatch_config_t config = {};
+  config.runtime_parameters = &runtime_parameters;
+
+  IREE_EXPECT_OK(
+      iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
+          config, /*kernarg_size=*/16));
+  iree_status_t status =
+      iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
+          config, /*kernarg_size=*/12);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_OUT_OF_RANGE);
+  iree_status_ignore(status);
+}
+
+TEST(DispatchRuntimeParameterTest, RejectsOverlappingPatches) {
+  iree_hal_dispatch_runtime_parameter_list_t runtime_parameters = {};
+  runtime_parameters.count = 2;
+  runtime_parameters.patches[0].offset = 4;
+  runtime_parameters.patches[0].length = 8;
+  runtime_parameters.patches[1].offset = 8;
+  runtime_parameters.patches[1].length = 8;
+  iree_hal_dispatch_config_t config = {};
+  config.runtime_parameters = &runtime_parameters;
+
+  iree_status_t status =
+      iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
+          config, /*kernarg_size=*/16);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
+  iree_status_ignore(status);
 }
 
 TEST_F(AqlCommandBufferTest, EmptyRecordingHasReturnTerminator) {

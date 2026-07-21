@@ -21,7 +21,7 @@ extern "C" {
 #define IREE_HAL_REPLAY_FILE_MAGIC 0x50525249u
 
 // Major version of the IREE HAL replay file format.
-#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 3u
+#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 4u
 
 // Minor version of the IREE HAL replay file format.
 #define IREE_HAL_REPLAY_FILE_VERSION_MINOR 0u
@@ -584,9 +584,8 @@ typedef struct iree_hal_replay_dispatch_payload_t {
   iree_hal_replay_buffer_ref_payload_t workgroup_count_ref;
   // Dynamic workgroup-local memory size in bytes.
   uint32_t dynamic_workgroup_local_memory;
-  // Value copy of dispatch-local native runtime parameter patches and
-  // requirements.
-  iree_hal_dispatch_runtime_parameter_list_t runtime_parameters;
+  // Reserved for future dispatch metadata; must be zero.
+  uint32_t reserved0;
   // Number of wait semaphore timepoints following this header.
   uint64_t wait_semaphore_count;
   // Number of signal semaphore timepoints following the wait timepoints.

@@ -326,6 +326,26 @@ iree_hal_replay_recorder_executable_function_runtime_parameters(
           executable->base_executable, function, capacity, out_parameters));
 }
 
+static iree_status_t iree_hal_replay_recorder_executable_runtime_metadata_count(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    iree_host_size_t* out_count) {
+  iree_hal_replay_recorder_executable_t* executable =
+      iree_hal_replay_recorder_executable_cast(base_executable);
+  return iree_hal_executable_runtime_metadata_count(executable->base_executable,
+                                                    name, out_count);
+}
+
+static iree_status_t
+iree_hal_replay_recorder_executable_runtime_metadata_records(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    iree_host_size_t capacity,
+    iree_hal_executable_runtime_metadata_record_t* out_records) {
+  iree_hal_replay_recorder_executable_t* executable =
+      iree_hal_replay_recorder_executable_cast(base_executable);
+  return iree_hal_executable_runtime_metadata_records(
+      executable->base_executable, name, capacity, out_records);
+}
+
 static iree_status_t
 iree_hal_replay_recorder_executable_lookup_function_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
@@ -831,6 +851,10 @@ static const iree_hal_executable_vtable_t
             iree_hal_replay_recorder_executable_function_parameters,
         .function_runtime_parameters =
             iree_hal_replay_recorder_executable_function_runtime_parameters,
+        .runtime_metadata_count =
+            iree_hal_replay_recorder_executable_runtime_metadata_count,
+        .runtime_metadata_records =
+            iree_hal_replay_recorder_executable_runtime_metadata_records,
         .lookup_function_by_name =
             iree_hal_replay_recorder_executable_lookup_function_by_name,
         .try_lookup_global_by_name =

@@ -1184,18 +1184,6 @@ iree_hal_amdgpu_executable_primary_variant(
   return &executable->load_variants[0];
 }
 
-static iree_host_size_t iree_hal_amdgpu_executable_dispatch_kernarg_size(
-    const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor) {
-  const iree_host_size_t metadata_kernarg_size =
-      descriptor->kernarg_layout
-          ? descriptor->kernarg_layout->kernarg_byte_length
-          : 0;
-  const iree_host_size_t custom_kernarg_size =
-      descriptor->custom_kernarg_layout.total_kernarg_size;
-  return iree_max((iree_host_size_t)descriptor->kernel_args.kernarg_size,
-                  iree_max(metadata_kernarg_size, custom_kernarg_size));
-}
-
 void iree_hal_amdgpu_executable_apply_runtime_parameter_patches(
     const iree_hal_dispatch_config_t config, void* kernarg_data) {
   const iree_hal_dispatch_runtime_parameter_list_t* runtime_parameters =
@@ -1209,8 +1197,7 @@ void iree_hal_amdgpu_executable_apply_runtime_parameter_patches(
 }
 
 iree_status_t iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
-    const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor,
-    const iree_hal_dispatch_config_t config) {
+    const iree_hal_dispatch_config_t config, iree_host_size_t kernarg_size) {
   const iree_hal_dispatch_runtime_parameter_list_t* runtime_parameters =
       config.runtime_parameters;
   if (!runtime_parameters) return iree_ok_status();
@@ -1229,8 +1216,6 @@ iree_status_t iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
         runtime_parameters->count,
         IREE_HAL_DISPATCH_MAX_RUNTIME_PARAMETER_PATCHES);
   }
-  const iree_host_size_t kernarg_size =
-      iree_hal_amdgpu_executable_dispatch_kernarg_size(descriptor);
   for (uint8_t i = 0; i < runtime_parameters->count; ++i) {
     const iree_hal_dispatch_runtime_parameter_patch_t* patch =
         &runtime_parameters->patches[i];
