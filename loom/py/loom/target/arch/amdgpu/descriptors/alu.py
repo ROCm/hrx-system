@@ -4718,12 +4718,23 @@ def _v_cvt_pk_f16_packed8_overlay(
         descriptor_key=f"amdgpu.v_cvt_pk_f16_{source_type}.{source_semantics}",
         instruction_name=f"V_CVT_PK_F16_{source_type.upper()}",
         mnemonic=f"v_cvt_pk_f16_{source_type}",
-        encoding_name="ENC_VOP1",
+        encoding_name="ENC_VOP1_VGPR",
         semantic_tag=(f"convert.float.{source_type}.{source_semantics}x2.f16x2"),
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
-            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),
+            AmdgpuOperandOverlay(
+                "VSRC0",
+                _vgpr_operand(
+                    "input",
+                    register_part=_REG_PART_VGPR_LOW16,
+                    address_map_kind=OperandAddressMapKind.LOW_SUBSET,
+                    addressable_unit_count=(
+                        _D16_PARTIAL_REGISTER_ADDRESSABLE_UNIT_COUNT
+                    ),
+                ),
+                size_exception_reason=_PACKED8_SOURCE_SIZE_REASON,
+            ),
         ),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )

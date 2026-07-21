@@ -1966,7 +1966,7 @@ def _gfx1250_supplemental_vop1_source(
         order=2,
         field_name=field_name,
         data_format_name=data_format_name,
-        operand_type="OPR_SRC",
+        operand_type="OPR_VGPR",
         size_bits=32,
         is_input=True,
         is_output=False,
@@ -2102,20 +2102,20 @@ _GFX1250_SUPPLEMENTAL_INSTRUCTIONS = (
     ),
     _gfx1250_supplemental_instruction(
         name="V_CVT_PK_F16_FP8",
-        encoding_name="ENC_VOP1",
+        encoding_name="ENC_VOP1_VGPR",
         opcode=0xEB,
         operands=(
             _gfx1250_supplemental_vop1_result("FMT_NUM_PK2_F16"),
-            _gfx1250_supplemental_vop1_source("SRC0", "FMT_NUM_UINT"),
+            _gfx1250_supplemental_vop1_source("VSRC0", "FMT_NUM_UINT"),
         ),
     ),
     _gfx1250_supplemental_instruction(
         name="V_CVT_PK_F16_BF8",
-        encoding_name="ENC_VOP1",
+        encoding_name="ENC_VOP1_VGPR",
         opcode=0xED,
         operands=(
             _gfx1250_supplemental_vop1_result("FMT_NUM_PK2_F16"),
-            _gfx1250_supplemental_vop1_source("SRC0", "FMT_NUM_UINT"),
+            _gfx1250_supplemental_vop1_source("VSRC0", "FMT_NUM_UINT"),
         ),
     ),
     _gfx1250_supplemental_instruction(
