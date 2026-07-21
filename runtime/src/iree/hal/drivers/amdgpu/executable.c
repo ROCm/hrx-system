@@ -1184,6 +1184,102 @@ iree_hal_amdgpu_executable_primary_variant(
   return &executable->load_variants[0];
 }
 
+static iree_host_size_t iree_hal_amdgpu_executable_dispatch_kernarg_size(
+    const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor) {
+  const iree_host_size_t metadata_kernarg_size =
+      descriptor->kernarg_layout
+          ? descriptor->kernarg_layout->kernarg_byte_length
+          : 0;
+  const iree_host_size_t custom_kernarg_size =
+      descriptor->custom_kernarg_layout.total_kernarg_size;
+  return iree_max((iree_host_size_t)descriptor->kernel_args.kernarg_size,
+                  iree_max(metadata_kernarg_size, custom_kernarg_size));
+}
+
+void iree_hal_amdgpu_executable_apply_runtime_parameter_patches(
+    const iree_hal_dispatch_config_t config, void* kernarg_data) {
+  const iree_hal_dispatch_runtime_parameter_list_t* runtime_parameters =
+      config.runtime_parameters;
+  if (!runtime_parameters) return;
+  for (uint8_t i = 0; i < runtime_parameters->count; ++i) {
+    const iree_hal_dispatch_runtime_parameter_patch_t* patch =
+        &runtime_parameters->patches[i];
+    memcpy((uint8_t*)kernarg_data + patch->offset, patch->data, patch->length);
+  }
+}
+
+iree_status_t iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
+    const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor,
+    const iree_hal_dispatch_config_t config) {
+  const iree_hal_dispatch_runtime_parameter_list_t* runtime_parameters =
+      config.runtime_parameters;
+  if (!runtime_parameters) return iree_ok_status();
+  if (IREE_UNLIKELY(runtime_parameters->reserved[0] != 0 ||
+                    runtime_parameters->reserved[1] != 0 ||
+                    runtime_parameters->reserved[2] != 0)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU dispatch runtime parameter list has non-zero reserved bits");
+  }
+  if (IREE_UNLIKELY(runtime_parameters->count >
+                    IREE_HAL_DISPATCH_MAX_RUNTIME_PARAMETER_PATCHES)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AMDGPU dispatch runtime parameter patch count %u exceeds %u",
+        runtime_parameters->count,
+        IREE_HAL_DISPATCH_MAX_RUNTIME_PARAMETER_PATCHES);
+  }
+  const iree_host_size_t kernarg_size =
+      iree_hal_amdgpu_executable_dispatch_kernarg_size(descriptor);
+  for (uint8_t i = 0; i < runtime_parameters->count; ++i) {
+    const iree_hal_dispatch_runtime_parameter_patch_t* patch =
+        &runtime_parameters->patches[i];
+    if (IREE_UNLIKELY(patch->reserved != 0)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU dispatch runtime parameter patch[%u] has non-zero reserved "
+          "bits",
+          i);
+    }
+    if (IREE_UNLIKELY(patch->length == 0)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU dispatch runtime parameter patch[%u] has zero length", i);
+    }
+    if (IREE_UNLIKELY(patch->length >
+                      IREE_HAL_DISPATCH_MAX_RUNTIME_PARAMETER_LENGTH)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "AMDGPU dispatch runtime parameter patch[%u] length %u exceeds %u", i,
+          patch->length, IREE_HAL_DISPATCH_MAX_RUNTIME_PARAMETER_LENGTH);
+    }
+    const iree_host_size_t patch_end =
+        (iree_host_size_t)patch->offset + patch->length;
+    if (IREE_UNLIKELY(patch_end < patch->offset || patch_end > kernarg_size)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "AMDGPU dispatch runtime parameter patch[%u] range [%" PRIu32
+          ", %" PRIhsz ") exceeds kernarg size %" PRIhsz,
+          i, patch->offset, patch_end, kernarg_size);
+    }
+    for (uint8_t j = 0; j < i; ++j) {
+      const iree_hal_dispatch_runtime_parameter_patch_t* prior_patch =
+          &runtime_parameters->patches[j];
+      const iree_host_size_t prior_patch_end =
+          (iree_host_size_t)prior_patch->offset + prior_patch->length;
+      if (IREE_UNLIKELY(prior_patch->offset < patch_end &&
+                        patch->offset < prior_patch_end)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "AMDGPU dispatch runtime parameter patch[%u] overlaps patch[%u]", i,
+            j);
+      }
+    }
+  }
+
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_amdgpu_executable_select_queue_scope(
     const iree_hal_amdgpu_executable_t* executable,
     iree_hal_queue_affinity_t queue_affinity,
@@ -1573,19 +1669,39 @@ iree_hal_amdgpu_executable_initialize_dispatch_descriptors_for_device(
         custom_explicit_kernarg_sizes
             ? custom_explicit_kernarg_sizes[kernel_ordinal]
             : executable->host_kernel_args[kernel_ordinal].kernarg_size;
-    const uint16_t custom_implicit_args_offset =
+    uint16_t custom_implicit_args_offset =
         custom_implicit_args_offsets
             ? custom_implicit_args_offsets[kernel_ordinal]
             : UINT16_MAX;
     const iree_hal_amdgpu_kernarg_layout_t* kernarg_layout = NULL;
-    if (!executable->custom_direct_only_exports[kernel_ordinal]) {
+    const iree_hal_amdgpu_kernarg_layout_t* metadata_kernarg_layout = NULL;
+    const iree_hal_amdgpu_executable_export_t* metadata_export =
+        &dispatch_metadata->exports[kernel_ordinal];
+    if (executable->custom_direct_only_exports[kernel_ordinal]) {
+      if (iree_hal_amdgpu_kernarg_layout_ref_is_valid(
+              metadata_export->kernarg_layout)) {
+        IREE_RETURN_IF_ERROR(
+            iree_hal_amdgpu_executable_metadata_resolve_layout(
+                dispatch_metadata, metadata_export->kernarg_layout,
+                &metadata_kernarg_layout),
+            "resolving dispatch kernarg layout for export %" PRIhsz,
+            kernel_ordinal);
+        if (custom_implicit_args_offset == UINT16_MAX &&
+            iree_any_bit_set(
+                metadata_kernarg_layout->flags,
+                IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_IMPLICIT_ARGS)) {
+          custom_implicit_args_offset =
+              metadata_kernarg_layout->implicit_args_byte_offset;
+        }
+      }
+    } else {
       IREE_RETURN_IF_ERROR(
           iree_hal_amdgpu_executable_metadata_resolve_layout(
-              dispatch_metadata,
-              dispatch_metadata->exports[kernel_ordinal].kernarg_layout,
-              &kernarg_layout),
+              dispatch_metadata, metadata_export->kernarg_layout,
+              &metadata_kernarg_layout),
           "resolving dispatch kernarg layout for export %" PRIhsz,
           kernel_ordinal);
+      kernarg_layout = metadata_kernarg_layout;
     }
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
@@ -1802,6 +1918,9 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_export_infos(
     const bool custom_direct_only = iree_any_bit_set(
         metadata_export->flags,
         IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_CUSTOM_DIRECT_ONLY);
+    const bool uniform_workgroup_size = iree_any_bit_set(
+        metadata_export->flags,
+        IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_UNIFORM_WORKGROUP_SIZE);
 
     const iree_hal_amdgpu_kernarg_layout_t* layout = NULL;
     if (!custom_direct_only) {
@@ -1814,18 +1933,62 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_export_infos(
       IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_validate_workgroup_size(
           reflection->symbol_name, metadata_export->workgroup_size, limits));
     }
+    const uint32_t max_workgroup_size =
+        metadata_export->max_workgroup_size != 0
+            ? metadata_export->max_workgroup_size
+            : limits->max_workgroup_size;
+    if (IREE_UNLIKELY(max_workgroup_size > limits->max_workgroup_size)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU kernel `%.*s` max workgroup size %u exceeds device maximum "
+          "%u",
+          (int)reflection->symbol_name.size, reflection->symbol_name.data,
+          max_workgroup_size, limits->max_workgroup_size);
+    }
+    if (!requires_dispatch_workgroup_size &&
+        metadata_export->max_workgroup_size != 0) {
+      const uint64_t fixed_workgroup_size =
+          (uint64_t)metadata_export->workgroup_size[0] *
+          metadata_export->workgroup_size[1] *
+          metadata_export->workgroup_size[2];
+      if (IREE_UNLIKELY(fixed_workgroup_size > max_workgroup_size)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "AMDGPU kernel `%.*s` workgroup size total %" PRIu64
+            " exceeds kernel maximum %u",
+            (int)reflection->symbol_name.size, reflection->symbol_name.data,
+            fixed_workgroup_size, max_workgroup_size);
+      }
+    }
+    if (IREE_UNLIKELY(metadata_export->runtime_parameter_count > UINT16_MAX)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "AMDGPU kernel `%.*s` has %u runtime parameters; max is %u",
+          (int)reflection->symbol_name.size, reflection->symbol_name.data,
+          metadata_export->runtime_parameter_count, UINT16_MAX);
+    }
 
     executable->custom_direct_only_exports[i] = custom_direct_only;
     executable->export_parameter_offsets[i] = reflection->parameter_offset;
 
     memset(info, 0, sizeof(*info));
     info->name = reflection->name;
-    info->flags = requires_dispatch_workgroup_size
-                      ? IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC
-                      : IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE;
+    info->flags = IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE;
+    if (requires_dispatch_workgroup_size) {
+      info->flags |= IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC;
+    }
+    if (uniform_workgroup_size) {
+      info->flags |= IREE_HAL_EXECUTABLE_FUNCTION_FLAG_UNIFORM_WORKGROUP_SIZE;
+    }
     info->constant_byte_length = layout ? layout->constant_byte_length : 0;
     info->binding_count = layout ? layout->binding_count : 0;
     info->parameter_count = reflection->parameter_count;
+    info->runtime_parameter_count =
+        (uint16_t)metadata_export->runtime_parameter_count;
+    info->max_workgroup_size = max_workgroup_size;
+    info->workgroup_local_memory_size =
+        metadata_export->fixed_group_segment_size;
+    info->private_memory_size = metadata_export->fixed_private_segment_size;
     if (requires_dispatch_workgroup_size) {
       info->workgroup_size[0] = 1;
       info->workgroup_size[1] = 1;
@@ -2590,6 +2753,71 @@ static iree_status_t iree_hal_amdgpu_executable_export_parameters(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_amdgpu_executable_export_runtime_parameters(
+    iree_hal_executable_t* base_executable,
+    iree_hal_executable_function_t function, iree_host_size_t capacity,
+    iree_hal_executable_function_runtime_parameter_info_t* out_parameters) {
+  IREE_ASSERT_ARGUMENT(out_parameters || capacity == 0);
+  iree_hal_amdgpu_executable_t* executable =
+      iree_hal_amdgpu_executable_cast(base_executable);
+  if (IREE_UNLIKELY(!iree_hal_executable_function_is_index_in_range(
+          function, executable->kernel_count))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "function id %" PRIu64
+                            " out of range; executable has %" PRIhsz " exports",
+                            function.value, executable->kernel_count);
+  }
+  const uint32_t export_ordinal = iree_hal_executable_function_index(function);
+  const iree_hal_amdgpu_executable_export_t* export_info =
+      &executable->metadata->exports[export_ordinal];
+  const iree_host_size_t parameter_begin =
+      export_info->runtime_parameter_offset;
+  const iree_host_size_t parameter_count = export_info->runtime_parameter_count;
+  const iree_host_size_t copy_count = iree_min(capacity, parameter_count);
+  for (iree_host_size_t i = 0; i < copy_count; ++i) {
+    const iree_hal_amdgpu_executable_runtime_parameter_t* parameter =
+        &executable->metadata->runtime_parameters[parameter_begin + i];
+    out_parameters[i] = (iree_hal_executable_function_runtime_parameter_info_t){
+        .name = parameter->name,
+        .offset = parameter->offset,
+        .length = parameter->length,
+    };
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amdgpu_executable_runtime_metadata_count(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    iree_host_size_t* out_count) {
+  iree_hal_amdgpu_executable_t* executable =
+      iree_hal_amdgpu_executable_cast(base_executable);
+  *out_count = 0;
+  if (iree_string_view_equal(name, IREE_SV("amdhsa.printf"))) {
+    *out_count = executable->metadata->printf_record_count;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amdgpu_executable_runtime_metadata_records(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    iree_host_size_t capacity,
+    iree_hal_executable_runtime_metadata_record_t* out_records) {
+  iree_hal_amdgpu_executable_t* executable =
+      iree_hal_amdgpu_executable_cast(base_executable);
+  if (!iree_string_view_equal(name, IREE_SV("amdhsa.printf"))) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t copy_count =
+      iree_min(capacity, executable->metadata->printf_record_count);
+  for (iree_host_size_t i = 0; i < copy_count; ++i) {
+    out_records[i] = (iree_hal_executable_runtime_metadata_record_t){
+        .name = name,
+        .value = executable->metadata->printf_records[i],
+    };
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_amdgpu_executable_lookup_export_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
     iree_hal_executable_function_t* out_export_ordinal) {
@@ -2667,6 +2895,11 @@ static const iree_hal_executable_vtable_t iree_hal_amdgpu_executable_vtable = {
     .function_count = iree_hal_amdgpu_executable_export_count,
     .function_info = iree_hal_amdgpu_executable_export_info,
     .function_parameters = iree_hal_amdgpu_executable_export_parameters,
+    .function_runtime_parameters =
+        iree_hal_amdgpu_executable_export_runtime_parameters,
+    .runtime_metadata_count = iree_hal_amdgpu_executable_runtime_metadata_count,
+    .runtime_metadata_records =
+        iree_hal_amdgpu_executable_runtime_metadata_records,
     .lookup_function_by_name = iree_hal_amdgpu_executable_lookup_export_by_name,
     .try_lookup_global_by_name =
         iree_hal_amdgpu_executable_try_lookup_global_by_name,

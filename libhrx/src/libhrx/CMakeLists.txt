@@ -15,6 +15,7 @@ if(IREE_HAL_DRIVER_AMDGPU)
 endif()
 set(_hrx_static_platform_deps "")
 if(IREE_HAL_DRIVER_AMDGPU)
+  list(APPEND _hrx_static_platform_deps iree::hal::drivers::amdgpu::device_spec)
   list(APPEND _hrx_static_platform_deps iree::hal::drivers::amdgpu::registration)
 endif()
 iree_cc_library(
@@ -86,6 +87,7 @@ iree_cc_library(
 
 set(_hrx_platform_deps "")
 if(IREE_HAL_DRIVER_AMDGPU)
+  list(APPEND _hrx_platform_deps iree::hal::drivers::amdgpu::device_spec)
   list(APPEND _hrx_platform_deps iree::hal::drivers::amdgpu::registration)
 endif()
 iree_cc_library(
@@ -173,6 +175,7 @@ iree_cc_test(
 if(IREE_HAL_DRIVER_AMDGPU)
   target_link_libraries(libhrx_src_libhrx_hrx PRIVATE
     iree::hal::drivers::amdgpu::registration
+    iree::hal::drivers::amdgpu::device_spec
   )
   target_compile_definitions(libhrx_src_libhrx_hrx.objects PRIVATE
     HRX_HAS_IREE_AMDGPU_DRIVER

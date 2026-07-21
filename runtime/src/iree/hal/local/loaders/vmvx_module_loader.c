@@ -559,6 +559,7 @@ static iree_status_t iree_hal_vmvx_executable_export_info(
     iree_hal_executable_t* base_executable,
     iree_hal_executable_function_t function,
     iree_hal_executable_function_info_t* out_info) {
+  memset(out_info, 0, sizeof(*out_info));
   iree_hal_vmvx_executable_t* executable =
       (iree_hal_vmvx_executable_t*)base_executable;
   if (!iree_hal_executable_function_is_index_in_range(

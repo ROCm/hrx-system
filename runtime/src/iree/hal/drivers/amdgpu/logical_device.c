@@ -17,6 +17,7 @@
 #include "iree/hal/drivers/amdgpu/device_spec_builder.h"
 #include "iree/hal/drivers/amdgpu/executable.h"
 #include "iree/hal/drivers/amdgpu/feedback_state.h"
+#include "iree/hal/drivers/amdgpu/host_notification.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile_events.h"
 #include "iree/hal/drivers/amdgpu/physical_device.h"
@@ -1911,6 +1912,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_device_spec(
         physical_device->maximum_waves_per_compute_unit;
     physical_params->maximum_workgroup_local_memory_size =
         physical_device->group_segment_max_size;
+    physical_params->host_native_atomic_supported =
+        physical_device->host_native_atomic_supported;
   }
 
   uint64_t device_memory_capacity_bytes = 0;
@@ -3033,6 +3036,17 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_host_call(
                                   signal_semaphore_list, call, args, flags);
 }
 
+static iree_status_t iree_hal_amdgpu_logical_device_create_host_notification(
+    iree_hal_device_t* base_device,
+    iree_hal_host_notification_t** out_notification) {
+  iree_hal_amdgpu_logical_device_t* logical_device =
+      iree_hal_amdgpu_logical_device_cast(base_device);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_logical_device_check_failure(logical_device));
+  return iree_hal_amdgpu_host_notification_create(logical_device,
+                                                  out_notification);
+}
+
 static iree_status_t iree_hal_amdgpu_logical_device_queue_dispatch(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -3461,6 +3475,8 @@ static const iree_hal_device_vtable_t iree_hal_amdgpu_logical_device_vtable = {
     .create_command_buffer =
         iree_hal_amdgpu_logical_device_create_command_buffer,
     .create_event = iree_hal_amdgpu_logical_device_create_event,
+    .create_host_notification =
+        iree_hal_amdgpu_logical_device_create_host_notification,
     .load_executable = iree_hal_amdgpu_logical_device_load_executable,
     .import_file = iree_hal_amdgpu_logical_device_import_file,
     .create_semaphore = iree_hal_amdgpu_logical_device_create_semaphore,

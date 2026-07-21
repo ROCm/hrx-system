@@ -12,12 +12,28 @@ iree_add_all_subdirs()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
+    device_spec
+  HDRS
+    "device_spec.h"
+  SRCS
+    "device_spec.c"
+  DEPS
+    iree::base
+    iree::hal
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
     device_spec_builder
   HDRS
     "device_spec_builder.h"
   SRCS
     "device_spec_builder.c"
   DEPS
+    ::device_spec
     iree::base
     iree::hal
     iree::hal::executable::amdgpu::executable_target
@@ -215,6 +231,8 @@ iree_cc_library(
     "executable.h"
     "feedback_state.c"
     "feedback_state.h"
+    "host_notification.c"
+    "host_notification.h"
     "host_queue.c"
     "host_queue.h"
     "host_queue_blit.c"
@@ -365,6 +383,7 @@ iree_cc_library(
     "driver.h"
     "executable.h"
     "feedback_state.h"
+    "host_notification.h"
     "host_queue.h"
     "host_queue_blit.h"
     "host_queue_command_buffer.h"
@@ -439,6 +458,7 @@ iree_cc_test(
   SRCS
     "device_spec_test.cc"
   DEPS
+    ::device_spec
     ::device_spec_builder
     iree::base
     iree::hal

@@ -64,10 +64,9 @@ iree_status_t iree_hal_amdgpu_executable_target_supported(
 // Host-resident dispatch metadata precomputed for one executable export on one
 // physical device.
 //
-// Descriptors are immutable after executable creation and remain valid for the
-// lifetime of the executable. They intentionally duplicate the device-visible
-// kernel argument table in ordinary host memory so queue submission does not
-// read per-dispatch metadata from memory allocated for GPU visibility.
+// Descriptors remain valid for the lifetime of the executable. They contain
+// immutable launch metadata and validate the structural shape of runtime
+// parameter patches supplied by embedding runtimes.
 typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
   // Device-specific kernel arguments with a valid kernel_object for dispatch.
   iree_hal_amdgpu_device_kernel_args_t kernel_args;
@@ -102,7 +101,15 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
   bool pm4_launch_state_valid;
 } iree_hal_amdgpu_executable_dispatch_descriptor_t;
 
-// Creates an AMDGPU executable from a binary in memory. Each executable may
+void iree_hal_amdgpu_executable_apply_runtime_parameter_patches(
+    const iree_hal_dispatch_config_t config, void* kernarg_data);
+
+// Validates the structural bounds of runtime parameter patches in |config|.
+iree_status_t iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
+    const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor,
+    const iree_hal_dispatch_config_t config);
+
+// Creates a AMDGPU executable from a binary in memory. Each executable may
 // contain multiple entry points and be composed of several modules presented to
 // the HAL as a single instance. See iree_hal_executable_load_params_t for more
 // information about the lifetime of the resources referenced within.

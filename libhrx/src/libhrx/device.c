@@ -8,6 +8,33 @@
 
 #include "hrx_internal.h"
 
+#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
+#include "iree/hal/drivers/amdgpu/device_spec.h"
+#endif  // HRX_HAS_IREE_AMDGPU_DRIVER
+
+#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
+static hrx_status_t hrx_device_query_amdgpu_host_native_atomic_supported(
+    hrx_device_t device, bool* out_supported) {
+  *out_supported = false;
+  const iree_hal_device_spec_facet_t* facet =
+      iree_hal_amdgpu_device_spec_find_facet(
+          iree_hal_device_spec(device->hal_device));
+  if (!facet) {
+    return hrx_make_status(
+        HRX_STATUS_UNAVAILABLE,
+        "AMDGPU HAL device spec did not provide an AMDGPU facet");
+  }
+
+  iree_hal_amdgpu_device_spec_t amdgpu_spec;
+  iree_status_t status =
+      iree_hal_amdgpu_device_spec_decode_facet(facet, &amdgpu_spec);
+  if (!iree_status_is_ok(status)) return hrx_status_from_iree(status);
+  *out_supported = iree_all_bits_set(
+      amdgpu_spec.flags, IREE_HAL_AMDGPU_DEVICE_SPEC_FLAG_HOST_NATIVE_ATOMICS);
+  return hrx_ok_status();
+}
+#endif  // HRX_HAS_IREE_AMDGPU_DRIVER
+
 hrx_status_t hrx_device_query_total_memory_from_spec(
     hrx_device_t device, bool* out_known, iree_device_size_t* out_total) {
   if (!device || !out_known || !out_total) {
@@ -115,6 +142,19 @@ hrx_status_t hrx_device_get_property(hrx_device_t device,
       }
       *(uint32_t*)value = 0;  // Not available from local-task driver.
       return hrx_ok_status();
+    }
+    case HRX_DEVICE_PROPERTY_HOST_NATIVE_ATOMIC_SUPPORTED: {
+      if (value_size < sizeof(bool)) {
+        return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                               "buffer too small for bool");
+      }
+#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
+      return hrx_device_query_amdgpu_host_native_atomic_supported(device,
+                                                                  (bool*)value);
+#else
+      return hrx_make_status(HRX_STATUS_UNAVAILABLE,
+                             "host native atomic support is unavailable");
+#endif  // HRX_HAS_IREE_AMDGPU_DRIVER
     }
     default:
       return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,

@@ -401,19 +401,16 @@ static iree_status_t iree_hal_replay_dump_read_executable_metadata_header(
   }
   memcpy(out_header, record->payload.data + ranges->metadata_offset,
          sizeof(*out_header));
-  if (out_header->reserved1 != 0) {
-    return iree_make_status(IREE_STATUS_DATA_LOSS,
-                            "replay executable metadata reserved fields must "
-                            "be zero");
-  }
   if (out_header->function_count > IREE_HOST_SIZE_MAX ||
       out_header->parameter_count > IREE_HOST_SIZE_MAX ||
-      out_header->function_name_storage_length > IREE_HOST_SIZE_MAX) {
+      out_header->runtime_parameter_count > IREE_HOST_SIZE_MAX ||
+      out_header->name_storage_length > IREE_HOST_SIZE_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "replay executable metadata count overflow");
   }
   iree_host_size_t function_metadata_size = 0;
   iree_host_size_t parameter_metadata_size = 0;
+  iree_host_size_t runtime_parameter_metadata_size = 0;
   iree_host_size_t expected_length = 0;
   if (!iree_host_size_checked_mul(
           (iree_host_size_t)out_header->function_count,
@@ -423,14 +420,19 @@ static iree_status_t iree_hal_replay_dump_read_executable_metadata_header(
           (iree_host_size_t)out_header->parameter_count,
           sizeof(iree_hal_replay_executable_parameter_metadata_t),
           &parameter_metadata_size) ||
+      !iree_host_size_checked_mul(
+          (iree_host_size_t)out_header->runtime_parameter_count,
+          sizeof(iree_hal_replay_executable_runtime_parameter_metadata_t),
+          &runtime_parameter_metadata_size) ||
       !iree_host_size_checked_add(
           sizeof(iree_hal_replay_executable_metadata_header_t),
           function_metadata_size, &expected_length) ||
       !iree_host_size_checked_add(expected_length, parameter_metadata_size,
                                   &expected_length) ||
       !iree_host_size_checked_add(
-          expected_length,
-          (iree_host_size_t)out_header->function_name_storage_length,
+          expected_length, runtime_parameter_metadata_size, &expected_length) ||
+      !iree_host_size_checked_add(
+          expected_length, (iree_host_size_t)out_header->name_storage_length,
           &expected_length) ||
       expected_length != payload->executable_metadata_length) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
@@ -1025,9 +1027,11 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
         IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
             builder,
             " metadata_functions=%" PRIu64 " metadata_parameters=%" PRIu64
-            " metadata_function_name_storage_length=%" PRIu64,
+            " metadata_runtime_parameters=%" PRIu64
+            " metadata_name_storage_length=%" PRIu64,
             metadata_header.function_count, metadata_header.parameter_count,
-            metadata_header.function_name_storage_length));
+            metadata_header.runtime_parameter_count,
+            metadata_header.name_storage_length));
       }
       return iree_ok_status();
     }
@@ -1110,15 +1114,16 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           " function_ordinal=%" PRIu32 " flags=0x%08" PRIx32
           " workgroup_count=[%" PRIu32 ",%" PRIu32 ",%" PRIu32
           "] workgroup_size=[%" PRIu32 ",%" PRIu32 ",%" PRIu32
-          "] wait_count=%" PRIu64 " signal_count=%" PRIu64
+          "] runtime_parameter_count=%u"
+          " wait_count=%" PRIu64 " signal_count=%" PRIu64
           " constants_range=[%" PRIu64 ", +%" PRIu64
           "] bindings_range=[%" PRIu64 ", +%" PRIhsz "]",
           payload.executable_id, payload.queue_affinity,
           payload.function_ordinal, payload.flags, payload.workgroup_count[0],
           payload.workgroup_count[1], payload.workgroup_count[2],
           payload.workgroup_size[0], payload.workgroup_size[1],
-          payload.workgroup_size[2], payload.wait_semaphore_count,
-          payload.signal_semaphore_count,
+          payload.workgroup_size[2], payload.runtime_parameters.count,
+          payload.wait_semaphore_count, payload.signal_semaphore_count,
           payload_range->offset + constants_offset, payload.constants_length,
           payload_range->offset + bindings_offset, bindings_size));
       return iree_hal_replay_dump_append_text_buffer_ref(
@@ -1734,9 +1739,11 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
             builder,
             ",\"metadata_function_count\":%" PRIu64
             ",\"metadata_parameter_count\":%" PRIu64
-            ",\"metadata_function_name_storage_length\":%" PRIu64,
+            ",\"metadata_runtime_parameter_count\":%" PRIu64
+            ",\"metadata_name_storage_length\":%" PRIu64,
             metadata_header.function_count, metadata_header.parameter_count,
-            metadata_header.function_name_storage_length));
+            metadata_header.runtime_parameter_count,
+            metadata_header.name_storage_length));
       }
       return iree_string_builder_append_cstring(builder, "}");
     }
@@ -1831,6 +1838,7 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           ",\"flags\":%" PRIu32 ",\"workgroup_count\":[%" PRIu32 ",%" PRIu32
           ",%" PRIu32 "],\"workgroup_size\":[%" PRIu32 ",%" PRIu32 ",%" PRIu32
           "],\"dynamic_workgroup_local_memory\":%" PRIu32
+          ",\"runtime_parameter_count\":%u"
           ",\"wait_semaphore_count\":%" PRIu64
           ",\"signal_semaphore_count\":%" PRIu64
           ",\"constants_length\":%" PRIu64 ",\"binding_count\":%" PRIu64,
@@ -1839,8 +1847,9 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           payload.workgroup_count[1], payload.workgroup_count[2],
           payload.workgroup_size[0], payload.workgroup_size[1],
           payload.workgroup_size[2], payload.dynamic_workgroup_local_memory,
-          payload.wait_semaphore_count, payload.signal_semaphore_count,
-          payload.constants_length, payload.binding_count));
+          payload.runtime_parameters.count, payload.wait_semaphore_count,
+          payload.signal_semaphore_count, payload.constants_length,
+          payload.binding_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
           builder, "workgroup_count_ref", &payload.workgroup_count_ref));
       iree_hal_replay_file_range_t wait_range =

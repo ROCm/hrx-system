@@ -71,24 +71,19 @@ IREE_AMDGPU_STATIC_ASSERT(
 // OpenCL/HIP: (`amd::KernelParameterDescriptor`...)
 // https://github.com/ROCm/clr/blob/5da72f9d524420c43fe3eee44b11ac875d884e0f/rocclr/device/rocm/rocvirtual.cpp#L3197
 //
-// This complex construction was required once upon a time. The LLVM code
-// producing the kernargs layout and metadata handles these cases much more
-// simply by only ever truncating the implicit args at the last used field:
+// Earlier code-object metadata could describe a truncated implicit-argument
+// region ending at the last field the compiler proved was required:
 // https://github.com/llvm/llvm-project/blob/7f1b465c6ae476e59dc90652d58fc648932d23b1/llvm/lib/Target/AMDGPU/AMDGPUHSAMetadataStreamer.cpp#L389
 //
-// Then at some point in time someone was like "meh, who cares about optimizing"
-// and decided to include all of them always 🤦:
+// Newer compiler behavior may emit the full implicit-argument block whenever
+// any implicit argument is required:
 // https://github.com/llvm/llvm-project/blob/7f1b465c6ae476e59dc90652d58fc648932d23b1/llvm/lib/Target/AMDGPU/AMDGPUSubtarget.cpp#L299
 //
-// What this means in practice is that if any implicit arg is used then all will
-// be included and declared in the metadata even if only one is actually read by
-// the kernel -- there's no way for us to know. In the ideal case none of them
-// are read and the kernel function gets the `amdgpu-no-implicitarg-ptr` attr
-// so that all of them can be skipped. Otherwise we reserve the 256 bytes and
-// just splat them all in. This at least keeps our code simple relative to all
-// the implementations that enumerate the metadata and write args one at a time.
-// We really should try to force `amdgpu-no-implicitarg-ptr` when we generate
-// code, though.
+// In practice, metadata can declare the full block even when the kernel only
+// reads one field. The loader cannot infer which declared fields are live, so
+// any kernel with implicit arguments receives the full block. Kernels that do
+// not read implicit arguments should be compiled with
+// `amdgpu-no-implicitarg-ptr` so the block can be omitted entirely.
 //
 // For our bare-metal C runtime device code we have total freedom and don't use
 // any OpenCL/HIP-related things that would emit the implicit args.
@@ -152,7 +147,7 @@ typedef struct IREE_AMDGPU_ALIGNAS(8) iree_amdgpu_kernel_implicit_args_t {
   uint16_t grid_dims;  // + 64
 
   // Fixed-size buffer for `-mprintf-kind=buffered` support.
-  // By default LLVM uses `hostcall` but that's a mess and we avoid it.
+  // LLVM defaults to hostcall printf; buffered printf uses this slot instead.
   // `__printf_alloc` in the device library is used to grab this pointer, the
   // header DWORDs are manipulated, and the contents are written to the buffer.
   //
@@ -162,15 +157,12 @@ typedef struct IREE_AMDGPU_ALIGNAS(8) iree_amdgpu_kernel_implicit_args_t {
   //   uint8_t data[size];
   // } printf_buffer_t;
   //
-  // One of many disappointing parts of this scheme is that constant string
-  // values are interned, MD5 hashed, and stored *externally* in the amdhsa data
-  // blob. In order to print with any constant format string this data blob
-  // needs to be parsed, retained, and referenced every time a printf packet is
-  // processed. It would have been significantly better to embed the table in
-  // the ELF as a global constant instead as then we could reference it on both
-  // host and device and not need to parse the amdhsa blob.
+  // Constant format strings are interned, MD5 hashed, and stored externally in
+  // the amdhsa metadata blob. Host-side printf processing must retain the
+  // parsed metadata table for as long as queued printf packets may reference
+  // those format-string hashes.
   //
-  // The contents of the data buffer are best defined by the janky parser code:
+  // The contents of the data buffer are defined by the runtime parser:
   // https://github.com/ROCm/clr/blob/a2550e0a9ecaa8f371cb14d08904c51874c37cbe/rocclr/device/rocm/rocprintf.cpp#L454
   // Each printf consists of a control DWORD followed by 8-byte aligned
   // contents. Effectively:
@@ -196,30 +188,22 @@ typedef struct IREE_AMDGPU_ALIGNAS(8) iree_amdgpu_kernel_implicit_args_t {
   // Note that the documentation is incorrect about there being a version prefix
   // and it expects the first uint64_t to contain the format string bytes.
   //
-  // Note that in another disappointing display of rube-goldbergian development
-  // this implementation for some reason uses uint64_t for its data elements
-  // but never aligns it - meaning that consumer code must use unaligned loads
-  // in order to read the data. The CLR just copies it out each time. One could
-  // think that was for streaming (release the buffer contents early back to
-  // dispatches) but since they fully halt the world and synchronize after every
-  // dispatch containing a print none of that matters and it's just poor
-  // engineering.
+  // Packet data is logically organized as uint64_t elements, but the records
+  // may not be naturally aligned in the byte stream. Consumers must copy or
+  // otherwise perform unaligned-safe reads before interpreting argument words.
   //
   // The compiler emits strings in the delimited form of
   // `"0:0:<format_string_hash>,<actual_format_string>"`. Note that the first
   // two values should always be 0 and are delimited by `:` while the MD5 hash
-  // is delimited from the format string itself by `,`. There's some special
-  // handling in the CLR for `:` being in the format string because whoever
-  // wrote it did a find from the end instead of a prefix consume - there's
-  // special handling of \72 (`:`) and other weird things that I'm not sure is
-  // needed. Example from LLVM: `"0:0:8addc4c0362218ac,Hello World!:\n"`.
+  // is delimited from the format string itself by `,`. Format strings can
+  // contain escaped `:` characters; parsers should treat the two leading fields
+  // as fixed prefixes rather than searching for a final delimiter. Example
+  // from LLVM: `"0:0:8addc4c0362218ac,Hello World!:\n"`.
   //
-  // The hash is the lower 64 bits of the MD5 hash in hex but we don't care as
-  // it's just a semi-unique value we use to lookup the string formats. On load
-  // we sort and do a binary search instead of creating an std::map for every
-  // single print invocation like the CLR does. Just... wow.
+  // The hash is the lower 64 bits of the MD5 hash in hex. It is only used as
+  // the lookup key for the retained format-string table.
   //
-  // Handling the contents is also overtly complicated and poorly documented:
+  // Host-side formatting behavior is defined by:
   // https://github.com/ROCm/clr/blob/a2550e0a9ecaa8f371cb14d08904c51874c37cbe/rocclr/device/devhcprintf.cpp#L168
   //
   // See:
@@ -227,9 +211,8 @@ typedef struct IREE_AMDGPU_ALIGNAS(8) iree_amdgpu_kernel_implicit_args_t {
   // https://github.com/ROCm/llvm-project/blob/997363823fcc5ccc7b0cc572aad05ba08714bf5f/amd/device-libs/ockl/src/cprintf.cl#L17
   // https://github.com/ROCm/clr/blob/a2550e0a9ecaa8f371cb14d08904c51874c37cbe/rocclr/device/rocm/rocprintf.cpp#L393
   //
-  // Note that having a printf in a kernel causes the kernel to dispatch
-  // synchronously :facepalm:. We can't do the same and would need to emit
-  // flush packets (or something) into the control queue. What a mess.
+  // Host consumption of printf packets requires a stream-ordered drain point
+  // after any dispatch that may write this buffer.
   // https://github.com/ROCm/clr/blob/a2550e0a9ecaa8f371cb14d08904c51874c37cbe/rocclr/device/rocm/rocvirtual.cpp#L3644
   // https://github.com/ROCm/clr/blob/a2550e0a9ecaa8f371cb14d08904c51874c37cbe/rocclr/device/rocm/rocprintf.cpp#L428-L429
   //
@@ -237,12 +220,11 @@ typedef struct IREE_AMDGPU_ALIGNAS(8) iree_amdgpu_kernel_implicit_args_t {
   //   hidden_printf_buffer
   void* printf_buffer;  // + 72
 
-  // Used for ASAN, printf, and more modern device memory allocations.
-  // It's bizarre and only "documented" in code and I really hope we don't have
-  // to touch it. Note that due to some LLVM bug sometimes this will be included
-  // in the offset table for a kernel even if it is not used (the
-  // `amdgpu-no-hostcall-ptr` attribute is set). At this point I'm quite sure no
-  // one has ever actually inspected the files produced by the LLVM backend.
+  // Hostcall service buffer used by sanitizer, printf, and device-runtime
+  // services. Metadata can declare this slot even when the generated kernel
+  // does not read it, such as when `amdgpu-no-hostcall-ptr` is present; the
+  // slot's presence alone is not a reliable indication that dispatch requires a
+  // live hostcall service.
   //
   // Represented in metadata as:
   //   hidden_hostcall_buffer
@@ -255,11 +237,10 @@ typedef struct IREE_AMDGPU_ALIGNAS(8) iree_amdgpu_kernel_implicit_args_t {
   //   hidden_multigrid_sync_arg
   uint64_t deprecated_multigrid_sync_arg;
 
-  // Device memory heap pointer for device malloc/free.
-  // We don't support kernels using this as it requires too much goo for little
-  // payoff. The kernels we run shouldn't be malloc/freeing internally. If they
-  // do we will need to implement the heap API via hostcalls and other silly
-  // things that add a tremendous amount of complexity.
+  // Device-runtime heap pointer used by kernels that declare a
+  // hidden_heap_v1 metadata slot. This struct preserves the ABI position;
+  // language/runtime layers may patch a backend-specific heap pointer when
+  // they load an executable that needs one.
   //
   // See:
   // https://github.com/ROCm/llvm-project/blob/97753eeaa4c79c2db2dcd9f37b7989596a8d4f15/amd/device-libs/ockl/src/dm.cl#L192

@@ -457,6 +457,30 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_sanitizer(
                                                     &params->sanitizer);
 }
 
+static iree_status_t iree_hal_amdgpu_device_spec_populate_facet(
+    const iree_hal_amdgpu_device_spec_params_t* params,
+    iree_hal_device_spec_builder_t* builder) {
+  bool host_native_atomics_supported = true;
+  for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {
+    if (!params->physical_devices[i].host_native_atomic_supported) {
+      host_native_atomics_supported = false;
+      break;
+    }
+  }
+
+  iree_hal_amdgpu_device_spec_t amdgpu_spec = {
+      .flags = host_native_atomics_supported
+                   ? IREE_HAL_AMDGPU_DEVICE_SPEC_FLAG_HOST_NATIVE_ATOMICS
+                   : IREE_HAL_AMDGPU_DEVICE_SPEC_FLAG_NONE,
+  };
+  iree_hal_device_spec_facet_t facet = {
+      .schema_id = IREE_SV(IREE_HAL_AMDGPU_DEVICE_SPEC_SCHEMA_ID),
+      .schema_version = IREE_HAL_AMDGPU_DEVICE_SPEC_SCHEMA_VERSION,
+      .payload = iree_make_const_byte_span(&amdgpu_spec, sizeof(amdgpu_spec)),
+  };
+  return iree_hal_device_spec_builder_add_facet(builder, &facet);
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_amdgpu_device_spec_create(
     const iree_hal_amdgpu_device_spec_params_t* params,
     iree_allocator_t host_allocator, iree_hal_device_spec_t** out_spec) {
@@ -485,6 +509,9 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_device_spec_create(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_device_spec_populate_sanitizer(params, &builder);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_device_spec_populate_facet(params, &builder);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_spec_builder_finalize(&builder, out_spec);

@@ -32,6 +32,7 @@ iree_cc_library(
     "executable.h"
     "fence.h"
     "file.h"
+    "host_notification.h"
     "pool.h"
     "pool_set.h"
     "profile_metrics.h"
@@ -73,6 +74,7 @@ iree_cc_library(
     "executable.c"
     "fence.c"
     "file.c"
+    "host_notification.c"
     "pool.c"
     "pool_set.c"
     "profile_metrics.c"
@@ -100,6 +102,19 @@ iree_cc_test(
     device_test
   SRCS
     "device_test.cc"
+  DEPS
+    ::hal
+    iree::base
+    iree::hal::testing::mock_device
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    host_notification_test
+  SRCS
+    "host_notification_test.cc"
   DEPS
     ::hal
     iree::base

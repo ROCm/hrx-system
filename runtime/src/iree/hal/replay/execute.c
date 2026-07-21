@@ -98,6 +98,8 @@ typedef struct iree_hal_replay_plan_command_buffer_dispatch_t {
   uint32_t function_ordinal;
   // Dispatch grid and indirect-count configuration.
   iree_hal_dispatch_config_t config;
+  // Runtime parameter list retained for |config| during plan execution.
+  iree_hal_dispatch_runtime_parameter_list_t runtime_parameters;
   // Serialized indirect workgroup count buffer reference.
   iree_hal_replay_buffer_ref_payload_t workgroup_count_ref;
   // Inline constant bytes borrowed from the replay file.
@@ -772,15 +774,11 @@ static iree_status_t iree_hal_replay_executor_make_function_map_from_metadata(
   }
   iree_hal_replay_executable_metadata_header_t header;
   memcpy(&header, executable_metadata.data, sizeof(header));
-  if (IREE_UNLIKELY(header.reserved1 != 0)) {
-    return iree_make_status(IREE_STATUS_DATA_LOSS,
-                            "replay executable metadata reserved fields must "
-                            "be zero");
-  }
   if (IREE_UNLIKELY(header.function_count > IREE_HOST_SIZE_MAX ||
                     header.function_count > UINT32_MAX ||
                     header.parameter_count > IREE_HOST_SIZE_MAX ||
-                    header.function_name_storage_length > IREE_HOST_SIZE_MAX)) {
+                    header.runtime_parameter_count > IREE_HOST_SIZE_MAX ||
+                    header.name_storage_length > IREE_HOST_SIZE_MAX)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "replay executable metadata count overflow");
   }
@@ -788,30 +786,40 @@ static iree_status_t iree_hal_replay_executor_make_function_map_from_metadata(
       (iree_host_size_t)header.function_count;
   const iree_host_size_t captured_parameter_count =
       (iree_host_size_t)header.parameter_count;
+  const iree_host_size_t captured_runtime_parameter_count =
+      (iree_host_size_t)header.runtime_parameter_count;
   const iree_host_size_t captured_name_storage_length =
-      (iree_host_size_t)header.function_name_storage_length;
+      (iree_host_size_t)header.name_storage_length;
 
   iree_host_size_t function_metadata_size = 0;
   iree_host_size_t parameter_metadata_size = 0;
+  iree_host_size_t runtime_parameter_metadata_size = 0;
   iree_host_size_t expected_length = 0;
-  if (IREE_UNLIKELY(!iree_host_size_checked_mul(
-                        captured_function_count,
-                        sizeof(iree_hal_replay_executable_function_metadata_t),
-                        &function_metadata_size) ||
-                    !iree_host_size_checked_mul(
-                        captured_parameter_count,
-                        sizeof(iree_hal_replay_executable_parameter_metadata_t),
-                        &parameter_metadata_size) ||
-                    !iree_host_size_checked_add(
-                        sizeof(iree_hal_replay_executable_metadata_header_t),
-                        function_metadata_size, &expected_length) ||
-                    !iree_host_size_checked_add(expected_length,
-                                                parameter_metadata_size,
-                                                &expected_length) ||
-                    !iree_host_size_checked_add(expected_length,
-                                                captured_name_storage_length,
-                                                &expected_length) ||
-                    expected_length != executable_metadata.data_length)) {
+  if (IREE_UNLIKELY(
+          !iree_host_size_checked_mul(
+              captured_function_count,
+              sizeof(iree_hal_replay_executable_function_metadata_t),
+              &function_metadata_size) ||
+          !iree_host_size_checked_mul(
+              captured_parameter_count,
+              sizeof(iree_hal_replay_executable_parameter_metadata_t),
+              &parameter_metadata_size) ||
+          !iree_host_size_checked_mul(
+              captured_runtime_parameter_count,
+              sizeof(iree_hal_replay_executable_runtime_parameter_metadata_t),
+              &runtime_parameter_metadata_size) ||
+          !iree_host_size_checked_add(
+              sizeof(iree_hal_replay_executable_metadata_header_t),
+              function_metadata_size, &expected_length) ||
+          !iree_host_size_checked_add(expected_length, parameter_metadata_size,
+                                      &expected_length) ||
+          !iree_host_size_checked_add(expected_length,
+                                      runtime_parameter_metadata_size,
+                                      &expected_length) ||
+          !iree_host_size_checked_add(expected_length,
+                                      captured_name_storage_length,
+                                      &expected_length) ||
+          expected_length != executable_metadata.data_length)) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "replay executable metadata length mismatch");
   }
@@ -821,20 +829,27 @@ static iree_status_t iree_hal_replay_executor_make_function_map_from_metadata(
       sizeof(iree_hal_replay_executable_metadata_header_t);
   const uint8_t* parameter_metadata_data =
       function_metadata_data + function_metadata_size;
+  const uint8_t* runtime_parameter_metadata_data =
+      parameter_metadata_data + parameter_metadata_size;
   const iree_hal_replay_executable_function_metadata_t* function_metadata =
       (const iree_hal_replay_executable_function_metadata_t*)
           function_metadata_data;
   const iree_hal_replay_executable_parameter_metadata_t* parameter_metadata =
       (const iree_hal_replay_executable_parameter_metadata_t*)
           parameter_metadata_data;
-  const char* name_storage =
-      (const char*)(parameter_metadata_data + parameter_metadata_size);
+  const iree_hal_replay_executable_runtime_parameter_metadata_t*
+      runtime_parameter_metadata =
+          (const iree_hal_replay_executable_runtime_parameter_metadata_t*)
+              runtime_parameter_metadata_data;
+  const char* name_storage = (const char*)(runtime_parameter_metadata_data +
+                                           runtime_parameter_metadata_size);
 
   iree_hal_executable_function_t* function_map = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_allocate_function_map(
       executor, captured_function_count, &function_map));
 
   iree_host_size_t parameter_index = 0;
+  iree_host_size_t runtime_parameter_index = 0;
   iree_host_size_t name_offset = 0;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
@@ -843,6 +858,9 @@ static iree_status_t iree_hal_replay_executor_make_function_map_from_metadata(
         &function_metadata[i];
     if (IREE_UNLIKELY(captured->parameter_count >
                           captured_parameter_count - parameter_index ||
+                      captured->runtime_parameter_count >
+                          captured_runtime_parameter_count -
+                              runtime_parameter_index ||
                       captured->name_length >
                           captured_name_storage_length - name_offset)) {
       status = iree_make_status(IREE_STATUS_DATA_LOSS,
@@ -921,6 +939,15 @@ static iree_status_t iree_hal_replay_executor_make_function_map_from_metadata(
           (uint32_t)loaded_info.parameter_count, loaded_info.workgroup_size[0],
           loaded_info.workgroup_size[1], loaded_info.workgroup_size[2]);
     }
+    if (iree_status_is_ok(status) && captured->runtime_parameter_count !=
+                                         loaded_info.runtime_parameter_count) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "replay executable %" PRIu64 " function %" PRIhsz
+          " runtime parameter count mismatch: captured=%u loaded=%u",
+          executable_id, i, (uint32_t)captured->runtime_parameter_count,
+          (uint32_t)loaded_info.runtime_parameter_count);
+    }
 
     iree_hal_executable_function_parameter_t* loaded_parameters = NULL;
     if (iree_status_is_ok(status) && captured->parameter_count != 0) {
@@ -982,12 +1009,84 @@ static iree_status_t iree_hal_replay_executor_make_function_map_from_metadata(
     }
     parameter_index += captured->parameter_count;
     iree_allocator_free(executor->host_allocator, loaded_parameters);
+
+    iree_hal_executable_function_runtime_parameter_info_t*
+        loaded_runtime_parameters = NULL;
+    if (iree_status_is_ok(status) && captured->runtime_parameter_count != 0) {
+      iree_host_size_t runtime_parameter_size = 0;
+      if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+              captured->runtime_parameter_count,
+              sizeof(iree_hal_executable_function_runtime_parameter_info_t),
+              &runtime_parameter_size))) {
+        status = iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "executable runtime parameter metadata is too large");
+      }
+      if (iree_status_is_ok(status)) {
+        status = iree_allocator_malloc(executor->host_allocator,
+                                       runtime_parameter_size,
+                                       (void**)&loaded_runtime_parameters);
+      }
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_executable_function_runtime_parameters(
+            executable, function, captured->runtime_parameter_count,
+            loaded_runtime_parameters);
+      }
+    }
+    for (iree_host_size_t j = 0;
+         j < captured->runtime_parameter_count && iree_status_is_ok(status);
+         ++j) {
+      const iree_hal_replay_executable_runtime_parameter_metadata_t*
+          captured_parameter =
+              &runtime_parameter_metadata[runtime_parameter_index + j];
+      if (IREE_UNLIKELY(captured_parameter->reserved0 != 0)) {
+        status = iree_make_status(
+            IREE_STATUS_DATA_LOSS,
+            "replay executable runtime parameter metadata reserved fields must "
+            "be zero");
+        break;
+      }
+      if (IREE_UNLIKELY(captured_parameter->name_length == 0 ||
+                        captured_parameter->name_length >
+                            captured_name_storage_length - name_offset)) {
+        status = iree_make_status(
+            IREE_STATUS_DATA_LOSS,
+            "replay executable runtime parameter metadata name is invalid");
+        break;
+      }
+      const iree_string_view_t captured_parameter_name = iree_make_string_view(
+          name_storage + name_offset, captured_parameter->name_length);
+      name_offset += captured_parameter->name_length;
+      const iree_hal_executable_function_runtime_parameter_info_t*
+          loaded_parameter = &loaded_runtime_parameters[j];
+      if (!iree_string_view_equal(captured_parameter_name,
+                                  loaded_parameter->name) ||
+          captured_parameter->offset != loaded_parameter->offset ||
+          captured_parameter->length != loaded_parameter->length) {
+        status = iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "replay executable %" PRIu64 " function %" PRIhsz
+            " runtime parameter %" PRIhsz
+            " ABI mismatch: captured=(name='%.*s' offset=%u length=%u) "
+            "loaded=(name='%.*s' offset=%u length=%u)",
+            executable_id, i, j, (int)captured_parameter_name.size,
+            captured_parameter_name.data, (uint32_t)captured_parameter->offset,
+            (uint32_t)captured_parameter->length,
+            (int)loaded_parameter->name.size, loaded_parameter->name.data,
+            (uint32_t)loaded_parameter->offset,
+            (uint32_t)loaded_parameter->length);
+      }
+    }
+    runtime_parameter_index += captured->runtime_parameter_count;
+    iree_allocator_free(executor->host_allocator, loaded_runtime_parameters);
     if (iree_status_is_ok(status)) {
       function_map[i] = function;
     }
   }
   if (iree_status_is_ok(status) &&
       IREE_UNLIKELY(parameter_index != captured_parameter_count ||
+                    runtime_parameter_index !=
+                        captured_runtime_parameter_count ||
                     name_offset != captured_name_storage_length)) {
     status = iree_make_status(IREE_STATUS_DATA_LOSS,
                               "replay executable metadata count mismatch");
@@ -2501,6 +2600,17 @@ static iree_status_t iree_hal_replay_executor_dispatch_layout(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_replay_executor_check_runtime_parameters(
+    const iree_hal_replay_dispatch_payload_t* payload) {
+  if (payload->runtime_parameters.count != 0) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "replay dispatch has backend-native runtime parameters without a "
+        "portable provider");
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_replay_plan_prepare_scope(
     const iree_hal_replay_file_record_t* record,
     iree_hal_replay_scope_event_type_t event_type,
@@ -2587,6 +2697,8 @@ static iree_status_t iree_hal_replay_plan_prepare_command_buffer_dispatch(
       sizeof(iree_hal_replay_dispatch_payload_t)));
   iree_hal_replay_dispatch_payload_t payload;
   memcpy(&payload, record->payload.data, sizeof(payload));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_replay_executor_check_runtime_parameters(&payload));
   if (payload.wait_semaphore_count != 0 ||
       payload.signal_semaphore_count != 0) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -2618,6 +2730,8 @@ static iree_status_t iree_hal_replay_plan_prepare_command_buffer_dispatch(
          sizeof(out_dispatch->config.workgroup_count));
   out_dispatch->config.dynamic_workgroup_local_memory =
       payload.dynamic_workgroup_local_memory;
+  out_dispatch->runtime_parameters = payload.runtime_parameters;
+  out_dispatch->config.runtime_parameters = &out_dispatch->runtime_parameters;
   out_dispatch->workgroup_count_ref = payload.workgroup_count_ref;
   out_dispatch->constants =
       iree_make_const_byte_span(record->payload.data + constants_offset,
@@ -2831,6 +2945,8 @@ static iree_status_t iree_hal_replay_executor_command_buffer_dispatch(
       sizeof(iree_hal_replay_dispatch_payload_t)));
   iree_hal_replay_dispatch_payload_t payload;
   memcpy(&payload, record->payload.data, sizeof(payload));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_replay_executor_check_runtime_parameters(&payload));
   if (payload.wait_semaphore_count != 0 ||
       payload.signal_semaphore_count != 0) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -2883,6 +2999,7 @@ static iree_status_t iree_hal_replay_executor_command_buffer_dispatch(
            sizeof(config.workgroup_count));
     config.dynamic_workgroup_local_memory =
         payload.dynamic_workgroup_local_memory;
+    config.runtime_parameters = &payload.runtime_parameters;
     iree_hal_executable_function_t function =
         iree_hal_executable_function_invalid();
     status = iree_hal_replay_executor_make_buffer_ref(
@@ -2912,6 +3029,8 @@ static iree_status_t iree_hal_replay_executor_queue_dispatch(
       sizeof(iree_hal_replay_dispatch_payload_t)));
   iree_hal_replay_dispatch_payload_t payload;
   memcpy(&payload, record->payload.data, sizeof(payload));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_replay_executor_check_runtime_parameters(&payload));
   iree_host_size_t wait_offset = 0;
   iree_host_size_t wait_size = 0;
   iree_host_size_t signal_offset = 0;
@@ -2972,6 +3091,7 @@ static iree_status_t iree_hal_replay_executor_queue_dispatch(
            sizeof(config.workgroup_count));
     config.dynamic_workgroup_local_memory =
         payload.dynamic_workgroup_local_memory;
+    config.runtime_parameters = &payload.runtime_parameters;
     iree_hal_executable_function_t function =
         iree_hal_executable_function_invalid();
     status = iree_hal_replay_executor_make_buffer_ref(
@@ -3484,6 +3604,7 @@ static iree_status_t iree_hal_replay_executor_replay_operation(
     case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_INFO:
     case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_PARAMETERS:
     case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_LOOKUP_FUNCTION_BY_NAME:
+    case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_RUNTIME_PARAMETERS:
     case IREE_HAL_REPLAY_OPERATION_CODE_BUFFER_MAP_RANGE:
       return iree_ok_status();
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_LOAD_EXECUTABLE:

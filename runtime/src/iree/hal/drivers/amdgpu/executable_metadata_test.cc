@@ -18,6 +18,8 @@ TEST(ExecutableMetadataTest, AllocatesHotAndColdTables) {
   iree_hal_amdgpu_executable_metadata_counts_t counts = {
       /*.export_count=*/2,
       /*.parameter_count=*/3,
+      /*.runtime_parameter_count=*/1,
+      /*.printf_record_count=*/2,
       /*.layout_blob_byte_length=*/128,
   };
 
@@ -30,6 +32,10 @@ TEST(ExecutableMetadataTest, AllocatesHotAndColdTables) {
   EXPECT_NE(metadata->reflection, nullptr);
   EXPECT_EQ(metadata->parameter_count, 3);
   EXPECT_NE(metadata->parameters, nullptr);
+  EXPECT_EQ(metadata->runtime_parameter_count, 1);
+  EXPECT_NE(metadata->runtime_parameters, nullptr);
+  EXPECT_EQ(metadata->printf_record_count, 2);
+  EXPECT_NE(metadata->printf_records, nullptr);
   EXPECT_EQ(metadata->layout_blob_capacity, 128);
   EXPECT_EQ(metadata->layout_blob_used, 0);
   EXPECT_NE(metadata->layout_blob, nullptr);
@@ -48,6 +54,8 @@ TEST(ExecutableMetadataTest, AppendsAndResolvesLayout) {
   iree_hal_amdgpu_executable_metadata_counts_t counts = {
       /*.export_count=*/1,
       /*.parameter_count=*/{},
+      /*.runtime_parameter_count=*/{},
+      /*.printf_record_count=*/{},
       /*.layout_blob_byte_length=*/layout_byte_length,
   };
   iree_hal_amdgpu_executable_metadata_t* metadata = nullptr;
@@ -103,6 +111,8 @@ TEST(ExecutableMetadataTest, RejectsLayoutBlobOverflow) {
   iree_hal_amdgpu_executable_metadata_counts_t counts = {
       /*.export_count=*/1,
       /*.parameter_count=*/{},
+      /*.runtime_parameter_count=*/{},
+      /*.printf_record_count=*/{},
       /*.layout_blob_byte_length=*/8,
   };
   iree_hal_amdgpu_executable_metadata_t* metadata = nullptr;
@@ -126,6 +136,8 @@ TEST(ExecutableMetadataTest, RejectsInvalidLayoutReference) {
   iree_hal_amdgpu_executable_metadata_counts_t counts = {
       /*.export_count=*/1,
       /*.parameter_count=*/{},
+      /*.runtime_parameter_count=*/{},
+      /*.printf_record_count=*/{},
       /*.layout_blob_byte_length=*/16,
   };
   iree_hal_amdgpu_executable_metadata_t* metadata = nullptr;

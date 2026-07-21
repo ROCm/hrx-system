@@ -460,6 +460,36 @@ IREE_API_EXPORT iree_string_view_t iree_hal_collective_op_format(
 IREE_API_EXPORT iree_device_size_t iree_hal_collective_element_byte_count(
     iree_hal_collective_element_type_t element_type);
 
+// Maximum backend-native runtime argument patches carried by one dispatch.
+#define IREE_HAL_DISPATCH_MAX_RUNTIME_PARAMETER_PATCHES 4
+
+// Maximum byte length of one backend-native runtime argument patch.
+#define IREE_HAL_DISPATCH_MAX_RUNTIME_PARAMETER_LENGTH 16
+
+// Backend-native launch argument patch applied after the normal HAL ABI has
+// materialized a dispatch's kernarg storage.
+typedef struct iree_hal_dispatch_runtime_parameter_patch_t {
+  // Byte offset in backend-native launch argument storage.
+  uint32_t offset;
+  // Byte length copied from |data|.
+  uint16_t length;
+  // Reserved for alignment and future flags. Must be zero.
+  uint16_t reserved;
+  // Runtime parameter bytes copied into launch argument storage.
+  uint8_t data[IREE_HAL_DISPATCH_MAX_RUNTIME_PARAMETER_LENGTH];
+} iree_hal_dispatch_runtime_parameter_patch_t;
+
+// Bounded per-dispatch backend-native runtime argument patch list.
+typedef struct iree_hal_dispatch_runtime_parameter_list_t {
+  // Number of valid entries in |patches|.
+  uint8_t count;
+  // Reserved for alignment and future flags. Must be zero.
+  uint8_t reserved[3];
+  // Dispatch-local runtime argument patches.
+  iree_hal_dispatch_runtime_parameter_patch_t
+      patches[IREE_HAL_DISPATCH_MAX_RUNTIME_PARAMETER_PATCHES];
+} iree_hal_dispatch_runtime_parameter_list_t;
+
 // Configuration defining how a dispatch is performed.
 typedef struct iree_hal_dispatch_config_t {
   // Optional workgroup size for targets that have workgroup sizes specified by
@@ -489,7 +519,32 @@ typedef struct iree_hal_dispatch_config_t {
   // This is added on top of the static workgroup local memory declared by the
   // function metadata.
   uint32_t dynamic_workgroup_local_memory;
+  // Optional backend-native runtime parameter patches for this dispatch. The
+  // list is borrowed for the duration of the dispatch call.
+  // Command buffers and queues that retain dispatches must clone the list into
+  // their own command storage before returning.
+  const iree_hal_dispatch_runtime_parameter_list_t* runtime_parameters;
 } iree_hal_dispatch_config_t;
+
+// Returns true when |config| carries backend-native runtime parameter state.
+static inline bool iree_hal_dispatch_config_has_runtime_parameters(
+    iree_hal_dispatch_config_t config) {
+  return config.runtime_parameters && config.runtime_parameters->count != 0;
+}
+
+// Clones |source| and, when present, its borrowed runtime parameter list into
+// |runtime_parameter_storage|. Use this at command and queue boundaries that
+// retain a dispatch beyond the call that supplied its configuration.
+static inline void iree_hal_dispatch_config_clone(
+    iree_hal_dispatch_config_t source,
+    iree_hal_dispatch_runtime_parameter_list_t* runtime_parameter_storage,
+    iree_hal_dispatch_config_t* out_config) {
+  *out_config = source;
+  if (source.runtime_parameters) {
+    *runtime_parameter_storage = *source.runtime_parameters;
+    out_config->runtime_parameters = runtime_parameter_storage;
+  }
+}
 
 // Creates a default dispatch config with the given static workgroup count.
 static inline iree_hal_dispatch_config_t iree_hal_make_static_dispatch_config(

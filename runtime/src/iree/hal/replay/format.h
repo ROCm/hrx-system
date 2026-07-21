@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "iree/base/api.h"
+#include "iree/hal/command_buffer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -149,6 +150,7 @@ enum iree_hal_replay_operation_code_e {
   IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_INFO = 501u,
   IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_PARAMETERS = 502u,
   IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_LOOKUP_FUNCTION_BY_NAME = 503u,
+  IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_RUNTIME_PARAMETERS = 504u,
 };
 
 // Producer-defined payload schema stored in record headers.
@@ -361,10 +363,10 @@ typedef struct iree_hal_replay_executable_metadata_header_t {
   uint64_t function_count;
   // Total number of parameter metadata records after all function records.
   uint64_t parameter_count;
-  // Total byte length of function names following all parameter records.
-  uint64_t function_name_storage_length;
-  // Reserved for future executable metadata; must be zero.
-  uint64_t reserved1;
+  // Total byte length of function and runtime parameter names after records.
+  uint64_t name_storage_length;
+  // Total number of runtime parameter metadata records after parameters.
+  uint64_t runtime_parameter_count;
 } iree_hal_replay_executable_metadata_header_t;
 
 // Captured executable function reflection used to validate substitutions.
@@ -381,6 +383,8 @@ typedef struct iree_hal_replay_executable_function_metadata_t {
   uint16_t parameter_count;
   // Byte length of this function's name in the trailing name storage.
   uint16_t name_length;
+  // Number of runtime parameter metadata records for this function.
+  uint16_t runtime_parameter_count;
 } iree_hal_replay_executable_function_metadata_t;
 
 // Captured executable function parameter reflection.
@@ -398,6 +402,18 @@ typedef struct iree_hal_replay_executable_parameter_metadata_t {
   // Reserved for future parameter metadata; must be zero.
   uint8_t reserved0;
 } iree_hal_replay_executable_parameter_metadata_t;
+
+// Captured backend-native runtime parameter ABI metadata.
+typedef struct iree_hal_replay_executable_runtime_parameter_metadata_t {
+  // Byte offset in backend-native launch argument storage.
+  uint32_t offset;
+  // Byte length of the runtime parameter.
+  uint32_t length;
+  // Byte length of the parameter name in the trailing name storage.
+  uint16_t name_length;
+  // Reserved for future metadata; must be zero.
+  uint16_t reserved0;
+} iree_hal_replay_executable_runtime_parameter_metadata_t;
 
 // Payload describing a captured semaphore object.
 typedef struct iree_hal_replay_semaphore_object_payload_t {
@@ -568,8 +584,9 @@ typedef struct iree_hal_replay_dispatch_payload_t {
   iree_hal_replay_buffer_ref_payload_t workgroup_count_ref;
   // Dynamic workgroup-local memory size in bytes.
   uint32_t dynamic_workgroup_local_memory;
-  // Reserved for future dispatch metadata; must be zero.
-  uint32_t reserved0;
+  // Value copy of dispatch-local native runtime parameter patches and
+  // requirements.
+  iree_hal_dispatch_runtime_parameter_list_t runtime_parameters;
   // Number of wait semaphore timepoints following this header.
   uint64_t wait_semaphore_count;
   // Number of signal semaphore timepoints following the wait timepoints.

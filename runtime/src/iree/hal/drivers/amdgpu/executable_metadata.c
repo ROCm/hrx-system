@@ -25,6 +25,9 @@ iree_status_t iree_hal_amdgpu_executable_metadata_storage_size(
                         iree_hal_amdgpu_executable_reflection_t, NULL),
       IREE_STRUCT_FIELD(counts->parameter_count,
                         iree_hal_executable_function_parameter_t, NULL),
+      IREE_STRUCT_FIELD(counts->runtime_parameter_count,
+                        iree_hal_amdgpu_executable_runtime_parameter_t, NULL),
+      IREE_STRUCT_FIELD(counts->printf_record_count, iree_string_view_t, NULL),
       IREE_STRUCT_FIELD_ALIGNED(counts->layout_blob_byte_length, uint8_t,
                                 iree_alignof(iree_hal_amdgpu_kernarg_layout_t),
                                 NULL));
@@ -43,6 +46,8 @@ iree_status_t iree_hal_amdgpu_executable_metadata_allocate(
   iree_host_size_t exports_offset = 0;
   iree_host_size_t reflection_offset = 0;
   iree_host_size_t parameters_offset = 0;
+  iree_host_size_t runtime_parameters_offset = 0;
+  iree_host_size_t printf_records_offset = 0;
   iree_host_size_t layout_blob_offset = 0;
   iree_host_size_t total_size = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -57,6 +62,11 @@ iree_status_t iree_hal_amdgpu_executable_metadata_allocate(
               IREE_STRUCT_FIELD(counts->parameter_count,
                                 iree_hal_executable_function_parameter_t,
                                 &parameters_offset),
+              IREE_STRUCT_FIELD(counts->runtime_parameter_count,
+                                iree_hal_amdgpu_executable_runtime_parameter_t,
+                                &runtime_parameters_offset),
+              IREE_STRUCT_FIELD(counts->printf_record_count, iree_string_view_t,
+                                &printf_records_offset),
               IREE_STRUCT_FIELD_ALIGNED(
                   counts->layout_blob_byte_length, uint8_t,
                   iree_alignof(iree_hal_amdgpu_kernarg_layout_t),
@@ -86,6 +96,17 @@ iree_status_t iree_hal_amdgpu_executable_metadata_allocate(
         counts->parameter_count
             ? (iree_hal_executable_function_parameter_t*)(storage_base +
                                                           parameters_offset)
+            : NULL;
+    metadata->runtime_parameter_count = counts->runtime_parameter_count;
+    metadata->runtime_parameters =
+        counts->runtime_parameter_count
+            ? (iree_hal_amdgpu_executable_runtime_parameter_t*)(storage_base +
+                                                                runtime_parameters_offset)
+            : NULL;
+    metadata->printf_record_count = counts->printf_record_count;
+    metadata->printf_records =
+        counts->printf_record_count
+            ? (iree_string_view_t*)(storage_base + printf_records_offset)
             : NULL;
     metadata->layout_blob_capacity = counts->layout_blob_byte_length;
     metadata->layout_blob = counts->layout_blob_byte_length

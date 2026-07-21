@@ -30,6 +30,7 @@ static void CreateDeviceSpecForProcessor(
       /*.wavefront_size=*/wavefront_size,
       /*.maximum_waves_per_compute_unit=*/64,
       /*.maximum_workgroup_local_memory_size=*/64 * 1024,
+      /*.host_native_atomic_supported=*/true,
       /*.flags=*/IREE_HAL_AMDGPU_DEVICE_SPEC_PHYSICAL_DEVICE_FLAG_UUID |
           IREE_HAL_AMDGPU_DEVICE_SPEC_PHYSICAL_DEVICE_FLAG_PCI_ADDRESS,
   };
@@ -99,6 +100,14 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
             64ull * 1024ull * 1024ull * 1024ull);
   EXPECT_FALSE(iree_all_bits_set(
       memory->heaps[0].flags, IREE_HAL_MEMORY_HEAP_SPEC_FLAG_CAPACITY_UNKNOWN));
+
+  const iree_hal_device_spec_facet_t* facet =
+      iree_hal_amdgpu_device_spec_find_facet(device_spec);
+  ASSERT_NE(facet, nullptr);
+  iree_hal_amdgpu_device_spec_t amdgpu_spec;
+  IREE_ASSERT_OK(iree_hal_amdgpu_device_spec_decode_facet(facet, &amdgpu_spec));
+  EXPECT_TRUE(iree_all_bits_set(
+      amdgpu_spec.flags, IREE_HAL_AMDGPU_DEVICE_SPEC_FLAG_HOST_NATIVE_ATOMICS));
 
   const iree_hal_device_executable_spec_t* executables =
       iree_hal_device_spec_executables(device_spec);

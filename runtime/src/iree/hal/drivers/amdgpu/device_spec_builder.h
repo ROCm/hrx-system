@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/allocator.h"
+#include "iree/hal/drivers/amdgpu/device_spec.h"
 #include "iree/hal/executable/amdgpu/target_id.h"
 #include "iree/hal/utils/device_spec_builder.h"
 
@@ -49,6 +50,9 @@ typedef struct iree_hal_amdgpu_device_spec_physical_device_params_t {
   uint32_t maximum_waves_per_compute_unit;
   // Maximum workgroup local-memory byte length.
   uint32_t maximum_workgroup_local_memory_size;
+  // True when the GPU link to nearest host fine-grained memory supports native
+  // atomic transactions.
+  uint32_t host_native_atomic_supported : 1;
   // Optional physical-device parameter flags.
   iree_hal_amdgpu_device_spec_physical_device_flags_t flags;
 } iree_hal_amdgpu_device_spec_physical_device_params_t;

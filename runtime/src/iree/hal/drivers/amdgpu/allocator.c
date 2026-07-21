@@ -515,6 +515,7 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
   iree_hal_memory_type_t memory_type = 0;
   // Sharing hints do not affect HSA pool selection.
   const iree_hal_buffer_usage_t sharing_usage =
+      IREE_HAL_BUFFER_USAGE_SHARING_EXPORT |
       IREE_HAL_BUFFER_USAGE_SHARING_REPLICATE |
       IREE_HAL_BUFFER_USAGE_SHARING_CONCURRENT |
       IREE_HAL_BUFFER_USAGE_SHARING_IMMUTABLE;
@@ -743,6 +744,7 @@ static iree_status_t iree_hal_amdgpu_allocator_query_memory_heaps(
 
   // Sharing hints do not affect HSA pool selection.
   const iree_hal_buffer_usage_t sharing_usage =
+      IREE_HAL_BUFFER_USAGE_SHARING_EXPORT |
       IREE_HAL_BUFFER_USAGE_SHARING_REPLICATE |
       IREE_HAL_BUFFER_USAGE_SHARING_CONCURRENT |
       IREE_HAL_BUFFER_USAGE_SHARING_IMMUTABLE;

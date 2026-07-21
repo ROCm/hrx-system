@@ -72,6 +72,8 @@ typedef struct iree_hal_amdgpu_pm4_dispatch_record_t {
   uint64_t executable_id;
   // Dispatch workgroup counts.
   uint32_t workgroup_count[3];
+  // Dispatch-local native runtime parameters retained until materialization.
+  iree_hal_dispatch_runtime_parameter_list_t runtime_parameters;
   // DISPATCH_DIRECT thread dimensions.
   uint32_t dispatch_thread_count[3];
   // HAL command ordinal within this command buffer.
@@ -2154,7 +2156,7 @@ static void iree_hal_amdgpu_pm4_command_buffer_write_implicit_args(
     const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
     const iree_hal_dispatch_config_t config,
     iree_amdgpu_kernel_implicit_args_t* implicit_args) {
-  memset(implicit_args, 0, sizeof(*implicit_args));
+  memset(implicit_args, 0, IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE);
   implicit_args->block_count[0] = config.workgroup_count[0];
   implicit_args->block_count[1] = config.workgroup_count[1];
   implicit_args->block_count[2] = config.workgroup_count[2];
@@ -2256,6 +2258,10 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_write_template(
                                                   ->implicit_args_byte_offset);
     iree_hal_amdgpu_pm4_command_buffer_write_implicit_args(kernel_args, config,
                                                            implicit_args);
+  }
+  if (config.runtime_parameters) {
+    iree_hal_amdgpu_executable_apply_runtime_parameter_patches(config,
+                                                               template_bytes);
   }
   return iree_ok_status();
 }
@@ -2638,6 +2644,9 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_append_dispatch_record(
   record->workgroup_count[0] = config.workgroup_count[0];
   record->workgroup_count[1] = config.workgroup_count[1];
   record->workgroup_count[2] = config.workgroup_count[2];
+  if (config.runtime_parameters) {
+    record->runtime_parameters = *config.runtime_parameters;
+  }
   record->dispatch_thread_count[0] = dispatch_thread_count[0];
   record->dispatch_thread_count[1] = dispatch_thread_count[1];
   record->dispatch_thread_count[2] = dispatch_thread_count[2];
@@ -2719,6 +2728,8 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_dispatch(
       .workgroup_count = {record->workgroup_count[0],
                           record->workgroup_count[1],
                           record->workgroup_count[2]},
+      .runtime_parameters =
+          record->runtime_parameters.count ? &record->runtime_parameters : NULL,
   };
 
   if (iree_any_bit_set(
@@ -3252,6 +3263,11 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_record_dispatch(
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "clustered AMDGPU dispatch requires an AQL command buffer");
+  }
+  if (config.runtime_parameters) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
+            descriptor, config));
   }
   if (IREE_UNLIKELY(!descriptor->pm4_launch_state_valid)) {
     return iree_make_status(

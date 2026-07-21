@@ -190,6 +190,7 @@ typedef enum hrx_device_property_t {
   HRX_DEVICE_PROPERTY_MAX_SHARED_MEMORY,
   HRX_DEVICE_PROPERTY_CLOCK_RATE,
   HRX_DEVICE_PROPERTY_PCI_BUS_ID,
+  HRX_DEVICE_PROPERTY_HOST_NATIVE_ATOMIC_SUPPORTED,
 } hrx_device_property_t;
 
 // Memory type bitfield. Values match iree_hal_memory_type_t.

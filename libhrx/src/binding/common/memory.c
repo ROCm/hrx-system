@@ -43,6 +43,102 @@ static void iree_hal_streaming_host_memcpy_callback(void* user_data) {
   memcpy(callback_data->dst, callback_data->src, callback_data->count);
 }
 
+typedef struct iree_hal_streaming_d2h_transfer_t {
+  // Context retained while the host call performs the direct D2H transfer.
+  iree_hal_streaming_context_t* context;
+  // Source HAL buffer retained until the host call finishes reading it.
+  iree_hal_buffer_t* src_buffer;
+  // Byte offset into |src_buffer|.
+  iree_device_size_t src_offset;
+  // Ordinary CPU staging memory used as the HAL direct-transfer destination.
+  void* staging;
+  // User host destination pointer.
+  void* dst;
+  // Number of bytes to copy.
+  iree_device_size_t size;
+} iree_hal_streaming_d2h_transfer_t;
+
+static void iree_hal_streaming_d2h_transfer_release(
+    iree_hal_streaming_d2h_transfer_t* transfer) {
+  if (!transfer) return;
+  iree_allocator_free(iree_allocator_system(), transfer->staging);
+  if (transfer->src_buffer) iree_hal_buffer_release(transfer->src_buffer);
+  if (transfer->context) iree_hal_streaming_context_release(transfer->context);
+  iree_allocator_free(iree_allocator_system(), transfer);
+}
+
+static iree_status_t iree_hal_streaming_d2h_transfer_host_call(
+    void* user_data, const uint64_t args[4],
+    iree_hal_host_call_context_t* call_context) {
+  (void)args;
+  (void)call_context;
+  iree_hal_streaming_d2h_transfer_t* transfer =
+      (iree_hal_streaming_d2h_transfer_t*)user_data;
+
+  const iree_device_size_t d2h_chunk_size = 4 * 1024 * 1024;
+  uint8_t* staging_ptr = (uint8_t*)transfer->staging;
+  iree_device_size_t remaining = transfer->size;
+  iree_device_size_t chunk_offset = 0;
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&transfer->context->direct_transfer_mutex);
+  while (remaining > 0 && iree_status_is_ok(status)) {
+    iree_device_size_t this_chunk =
+        remaining < d2h_chunk_size ? remaining : d2h_chunk_size;
+    status = iree_hal_device_transfer_d2h(
+        transfer->context->device, transfer->src_buffer,
+        transfer->src_offset + chunk_offset, staging_ptr + chunk_offset,
+        this_chunk, IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
+        iree_infinite_timeout());
+    chunk_offset += this_chunk;
+    remaining -= this_chunk;
+  }
+  iree_slim_mutex_unlock(&transfer->context->direct_transfer_mutex);
+  if (iree_status_is_ok(status)) {
+    memcpy(transfer->dst, transfer->staging, transfer->size);
+  }
+
+  iree_hal_streaming_d2h_transfer_release(transfer);
+  return status;
+}
+
+static iree_status_t iree_hal_streaming_enqueue_d2h_transfer(
+    iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_buffer_ref_t src_ref, void* dst,
+    iree_device_size_t size) {
+  if (IREE_UNLIKELY(size > IREE_HOST_SIZE_MAX)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "D2H transfer size overflows host size");
+  }
+
+  iree_hal_streaming_d2h_transfer_t* transfer = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      iree_allocator_system(), sizeof(*transfer), (void**)&transfer));
+  memset(transfer, 0, sizeof(*transfer));
+  iree_status_t status = iree_allocator_malloc(
+      iree_allocator_system(), (iree_host_size_t)size, &transfer->staging);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(iree_allocator_system(), transfer);
+    return status;
+  }
+  transfer->context = context;
+  transfer->src_buffer = src_ref.buffer->buffer;
+  transfer->src_offset = src_ref.offset;
+  transfer->dst = dst;
+  transfer->size = size;
+  iree_hal_streaming_context_retain(context);
+  iree_hal_buffer_retain(transfer->src_buffer);
+
+  uint64_t args[4] = {0, 0, 0, 0};
+  iree_hal_host_call_t call = iree_hal_make_host_call(
+      iree_hal_streaming_d2h_transfer_host_call, transfer);
+  iree_status_t queue_status = iree_hal_streaming_queue_host_call(
+      stream, call, args, IREE_HAL_HOST_CALL_FLAG_NONE);
+  if (!iree_status_is_ok(queue_status)) {
+    iree_hal_streaming_d2h_transfer_release(transfer);
+  }
+  return queue_status;
+}
+
 static void iree_hal_streaming_buffer_free(iree_hal_streaming_buffer_t* buffer);
 
 static void iree_hal_streaming_memory_account_device_free(
@@ -338,6 +434,13 @@ iree_status_t iree_hal_streaming_memory_wrap_buffer(
 }
 
 void iree_hal_streaming_memory_release_wrapped_buffer(
+    iree_hal_streaming_buffer_t* buffer) {
+  if (!buffer) return;
+  hrx_buffer_table_remove(&buffer->context->buffer_table, buffer->device_ptr);
+  iree_hal_streaming_buffer_free(buffer);
+}
+
+void iree_hal_streaming_memory_release_transient_buffer(
     iree_hal_streaming_buffer_t* buffer) {
   if (!buffer) return;
   hrx_buffer_table_remove(&buffer->context->buffer_table, buffer->device_ptr);
@@ -924,6 +1027,9 @@ static iree_status_t iree_hal_streaming_memory_allocate_host_with_context_mode(
         IREE_STATUS_UNAVAILABLE,
         "host allocation did not export a host-visible pointer");
   }
+  if (iree_status_is_ok(status)) {
+    memset(wrapper->host_ptr, 0, allocation_size);
+  }
 
   if (iree_status_is_ok(status)) {
     wrapper->imported_host_allocation = false;
@@ -939,13 +1045,115 @@ static iree_status_t iree_hal_streaming_memory_allocate_host_with_context_mode(
   return status;
 }
 
+static iree_status_t
+iree_hal_streaming_memory_allocate_owned_host_import_with_context_mode(
+    iree_hal_streaming_context_t* context, iree_host_size_t size,
+    iree_hal_streaming_host_register_flags_t flags,
+    iree_hal_buffer_usage_t usage, iree_device_size_t min_alignment,
+    iree_hal_streaming_buffer_context_ownership_t context_ownership,
+    iree_hal_streaming_buffer_t** out_buffer) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(out_buffer);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  *out_buffer = NULL;
+
+  const iree_host_size_t allocation_size = iree_max(size, (iree_host_size_t)8);
+  const iree_host_size_t host_alignment =
+      iree_max((iree_host_size_t)min_alignment, (iree_host_size_t)4096);
+  void* host_ptr = NULL;
+  iree_status_t status = iree_allocator_malloc_aligned(
+      context->host_allocator, allocation_size, host_alignment,
+      /*offset=*/0, &host_ptr);
+  if (iree_status_is_ok(status)) {
+    memset(host_ptr, 0, allocation_size);
+  }
+
+  iree_hal_buffer_t* buffer = NULL;
+  if (iree_status_is_ok(status)) {
+    iree_hal_buffer_params_t params = {
+        .usage = usage,
+        .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+        .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+        .min_alignment = host_alignment,
+    };
+    iree_hal_external_buffer_t external_buffer = {
+        .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
+        .flags = IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE,
+        .size = allocation_size,
+        .handle.host_allocation.ptr = host_ptr,
+    };
+    status = iree_hal_allocator_import_buffer(
+        context->device_allocator, params, &external_buffer,
+        iree_hal_buffer_release_callback_null(), &buffer);
+  }
+
+  iree_hal_streaming_buffer_t* wrapper = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_buffer_wrap(
+        context, buffer,
+        (int)(IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+              IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE),
+        host_ptr, /*allocation_pool=*/NULL, context_ownership, &wrapper);
+  }
+  iree_hal_buffer_release(buffer);
+
+  if (iree_status_is_ok(status)) {
+    wrapper->owns_host_ptr = true;
+    wrapper->imported_host_allocation = false;
+    wrapper->host_register_flags = flags;
+    *out_buffer = wrapper;
+    host_ptr = NULL;
+  } else {
+    if (wrapper) {
+      hrx_buffer_table_remove(&context->buffer_table, wrapper->device_ptr);
+      iree_hal_streaming_buffer_free(wrapper);
+    }
+  }
+  iree_allocator_free_aligned(context->host_allocator, host_ptr);
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 iree_status_t iree_hal_streaming_memory_allocate_host(
     iree_hal_streaming_context_t* context, iree_host_size_t size,
     iree_hal_streaming_host_register_flags_t flags,
     iree_hal_streaming_buffer_t** out_buffer) {
-  return iree_hal_streaming_memory_allocate_host_with_context_mode(
+  return iree_hal_streaming_memory_allocate_owned_host_import_with_context_mode(
       context, size, flags, IREE_HAL_BUFFER_USAGE_DEFAULT,
       /*min_alignment=*/64, IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED,
+      out_buffer);
+}
+
+iree_status_t iree_hal_streaming_memory_allocate_host_staging(
+    iree_hal_streaming_context_t* context, iree_host_size_t size,
+    iree_hal_streaming_buffer_t** out_buffer) {
+  return iree_hal_streaming_memory_allocate_host_with_context_mode(
+      context, size, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
+      IREE_HAL_BUFFER_USAGE_DEFAULT,
+      /*min_alignment=*/64, IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED,
+      out_buffer);
+}
+
+iree_status_t iree_hal_streaming_memory_allocate_runtime_host(
+    iree_hal_streaming_context_t* context, iree_host_size_t size,
+    iree_hal_streaming_buffer_t** out_buffer) {
+  return iree_hal_streaming_memory_allocate_host_with_context_mode(
+      context, size, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
+      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+      /*min_alignment=*/64, IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED,
+      out_buffer);
+}
+
+iree_status_t iree_hal_streaming_memory_allocate_context_runtime_host(
+    iree_hal_streaming_context_t* context, iree_host_size_t size,
+    iree_hal_streaming_buffer_t** out_buffer) {
+  return iree_hal_streaming_memory_allocate_host_with_context_mode(
+      context, size, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
+      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+      /*min_alignment=*/64, IREE_HAL_STREAMING_BUFFER_CONTEXT_BORROWED,
       out_buffer);
 }
 
@@ -1024,12 +1232,13 @@ iree_status_t iree_hal_streaming_memory_allocate_managed(
   const iree_host_size_t allocation_size = iree_max(size, (iree_host_size_t)8);
   iree_hal_streaming_buffer_t* buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_memory_allocate_host_with_context_mode(
-              context, allocation_size,
-              (iree_hal_streaming_host_register_flags_t)allocation_flags,
-              IREE_HAL_BUFFER_USAGE_DEFAULT,
-              /*min_alignment=*/4096,
-              IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED, &buffer));
+      z0,
+      iree_hal_streaming_memory_allocate_owned_host_import_with_context_mode(
+          context, allocation_size,
+          (iree_hal_streaming_host_register_flags_t)allocation_flags,
+          IREE_HAL_BUFFER_USAGE_DEFAULT,
+          /*min_alignment=*/4096, IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED,
+          &buffer));
   iree_status_t status = iree_ok_status();
   if (iree_status_is_ok(status)) {
     buffer->is_managed = true;
@@ -1538,6 +1747,48 @@ static iree_status_t iree_hal_streaming_enqueue_buffer_copy(
   return status;
 }
 
+static iree_status_t iree_hal_streaming_enqueue_host_update(
+    iree_hal_streaming_stream_t* stream, const void* src,
+    iree_hal_streaming_buffer_ref_t dst_ref, iree_device_size_t size) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(src);
+  if (!dst_ref.buffer || !dst_ref.buffer->buffer) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "host update destination is not a device buffer");
+  }
+  iree_device_size_t range_end = 0;
+  if (IREE_UNLIKELY(
+          !iree_device_size_checked_add(dst_ref.offset, size, &range_end) ||
+          range_end > dst_ref.buffer->size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "host update exceeds destination buffer range");
+  }
+
+  const uint8_t* src_ptr = (const uint8_t*)src;
+  iree_device_size_t remaining = size;
+  iree_device_size_t chunk_offset = 0;
+  iree_slim_mutex_lock(&stream->mutex);
+  iree_status_t status = iree_hal_streaming_stream_begin_locked(stream);
+  while (remaining > 0 && iree_status_is_ok(status)) {
+    const iree_device_size_t this_chunk =
+        remaining < IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE
+            ? remaining
+            : IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE;
+    const iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
+        dst_ref.buffer->buffer, dst_ref.offset + chunk_offset, this_chunk);
+    status = iree_hal_command_buffer_update_buffer(
+        stream->command_buffer, src_ptr + chunk_offset, 0, target_ref,
+        IREE_HAL_UPDATE_FLAG_NONE);
+    chunk_offset += this_chunk;
+    remaining -= this_chunk;
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+  return status;
+}
+
 //===----------------------------------------------------------------------===//
 // Memory copy helper functions
 //===----------------------------------------------------------------------===//
@@ -1615,6 +1866,7 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
     return iree_ok_status();
   }
 
+  const iree_device_size_t staging_threshold = 256 * 1024;
   if (stream) {
     iree_hal_streaming_buffer_ref_t src_ref;
     iree_status_t src_status = iree_hal_streaming_memory_lookup(
@@ -1631,11 +1883,16 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
       return queue_status;
     }
     iree_status_ignore(src_status);
+    if (size <= staging_threshold) {
+      iree_status_t queue_status =
+          iree_hal_streaming_enqueue_host_update(stream, src, dst_ref, size);
+      IREE_TRACE_ZONE_END(z0);
+      return queue_status;
+    }
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_streaming_stream_synchronize(stream));
   }
 
-  const iree_device_size_t staging_threshold = 256 * 1024;
   if (size >= staging_threshold) {
     iree_hal_streaming_stream_t* copy_stream =
         stream ? stream : context->default_stream;
@@ -1681,17 +1938,20 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
     const uint8_t* src_ptr = (const uint8_t*)src;
     iree_device_size_t remaining = size;
     iree_device_size_t chunk_offset = 0;
-    while (remaining > 0) {
+    iree_status_t direct_status = iree_ok_status();
+    iree_slim_mutex_lock(&context->direct_transfer_mutex);
+    while (remaining > 0 && iree_status_is_ok(direct_status)) {
       iree_device_size_t this_chunk =
           remaining < h2d_chunk_size ? remaining : h2d_chunk_size;
-      iree_status_t chunk_status = iree_hal_device_transfer_h2d(
+      direct_status = iree_hal_device_transfer_h2d(
           context->device, src_ptr + chunk_offset, dst_ref.buffer->buffer,
           dst_ref.offset + chunk_offset, this_chunk,
           IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, chunk_status);
       chunk_offset += this_chunk;
       remaining -= this_chunk;
     }
+    iree_slim_mutex_unlock(&context->direct_transfer_mutex);
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, direct_status);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -1783,8 +2043,11 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
             IREE_STATUS_INVALID_ARGUMENT,
             "device-to-host destination is not host memory");
       }
-      iree_status_t queue_status = iree_hal_streaming_enqueue_buffer_copy(
-          stream, src_ref, dst_ref, size);
+      iree_status_t queue_status =
+          dst_ref.buffer->buffer ? iree_hal_streaming_enqueue_buffer_copy(
+                                       stream, src_ref, dst_ref, size)
+                                 : iree_hal_streaming_enqueue_d2h_transfer(
+                                       context, stream, src_ref, dst, size);
       IREE_TRACE_ZONE_END(z0);
       return queue_status;
     }
@@ -1798,6 +2061,7 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
   iree_device_size_t remaining = size;
   iree_device_size_t chunk_offset = 0;
   iree_status_t direct_status = iree_ok_status();
+  iree_slim_mutex_lock(&context->direct_transfer_mutex);
   while (remaining > 0 && iree_status_is_ok(direct_status)) {
     iree_device_size_t this_chunk =
         remaining < d2h_chunk_size ? remaining : d2h_chunk_size;
@@ -1808,6 +2072,7 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
     chunk_offset += this_chunk;
     remaining -= this_chunk;
   }
+  iree_slim_mutex_unlock(&context->direct_transfer_mutex);
   if (iree_status_is_ok(direct_status)) {
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
