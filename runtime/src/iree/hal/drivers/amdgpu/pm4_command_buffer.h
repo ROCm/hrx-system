@@ -11,6 +11,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amdgpu/abi/command_buffer.h"
+#include "iree/hal/drivers/amdgpu/abi/kernel_args.h"
 #include "iree/hal/drivers/amdgpu/abi/timestamp.h"
 #include "iree/hal/drivers/amdgpu/profile_metadata.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
@@ -245,6 +246,18 @@ void iree_hal_amdgpu_pm4_command_buffer_cancel_publication_reference(
 // waited on the publication signal has retired.
 void iree_hal_amdgpu_pm4_command_buffer_retire_publication_reference(
     iree_hal_command_buffer_t* command_buffer, iree_status_code_t status_code);
+
+// Populates the HIP/OpenCL implicit-args window at |implicit_args| from
+// |kernel_args| and |config|, zeroing the full reserved
+// IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE window first. |implicit_args| must
+// reference at least that many writable bytes. This is the implicit-args writer
+// the PM4 command buffer uses inside a dispatch template; it is exposed so the
+// cross-emitter equivalence test can pin it byte-for-byte (including the
+// undeclared window bytes) against the device and AQL implicit writers.
+void iree_hal_amdgpu_pm4_command_buffer_emplace_implicit_args(
+    const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
+    iree_hal_dispatch_config_t config,
+    iree_amdgpu_kernel_implicit_args_t* implicit_args);
 
 #ifdef __cplusplus
 }  // extern "C"

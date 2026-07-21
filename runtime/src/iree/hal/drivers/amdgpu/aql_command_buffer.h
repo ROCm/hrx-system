@@ -10,9 +10,12 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/amdgpu/abi/command_buffer.h"
+#include "iree/hal/drivers/amdgpu/abi/kernel_args.h"
 #include "iree/hal/drivers/amdgpu/abi/tsan.h"
 #include "iree/hal/drivers/amdgpu/aql_prepublished_kernarg_storage.h"
 #include "iree/hal/drivers/amdgpu/aql_program_builder.h"
+#include "iree/hal/drivers/amdgpu/device/dispatch.h"
 #include "iree/hal/drivers/amdgpu/profile_metadata.h"
 
 #ifdef __cplusplus
@@ -119,6 +122,18 @@ const uint8_t* iree_hal_amdgpu_aql_command_buffer_rodata(
 void* iree_hal_amdgpu_aql_command_buffer_prepublished_kernarg(
     iree_hal_command_buffer_t* command_buffer, uint32_t byte_offset,
     uint32_t length);
+
+// Writes a custom-direct dispatch kernarg tail into |tail_payload|: the
+// caller-supplied |constants| are copied (clamped by |layout|), the gap up to
+// any implicit suffix is zeroed, and when |layout->has_implicit_args| is set
+// the implicit suffix at |layout->implicit_args_offset| is populated from
+// |kernel_args| and |config|. |tail_payload| must reference at least
+// |layout->total_kernarg_size| writable bytes.
+iree_status_t iree_hal_amdgpu_aql_command_buffer_emplace_custom_direct_tail(
+    const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
+    const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* layout,
+    iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
+    uint8_t* tail_payload);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -1766,6 +1766,11 @@ static void iree_hal_amdgpu_aql_command_buffer_write_implicit_args(
     const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
     const iree_hal_dispatch_config_t config,
     iree_amdgpu_kernel_implicit_args_t* implicit_args) {
+  // Zero the reserved implicit-args window (not sizeof the struct, which has a
+  // deprecated trailer past the reservation) so the writer is self-contained
+  // and every undeclared field is deterministically zero. Mirrors the device,
+  // PM4, and host-queue implicit writers.
+  memset(implicit_args, 0, IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE);
   implicit_args->block_count[0] = config.workgroup_count[0];
   implicit_args->block_count[1] = config.workgroup_count[1];
   implicit_args->block_count[2] = config.workgroup_count[2];
@@ -1811,6 +1816,17 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_write_dispatch_tail(
                               "mode %u",
                               kernarg_storage_mode);
   }
+}
+
+iree_status_t iree_hal_amdgpu_aql_command_buffer_emplace_custom_direct_tail(
+    const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
+    const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* layout,
+    iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
+    uint8_t* tail_payload) {
+  return iree_hal_amdgpu_aql_command_buffer_write_dispatch_tail(
+      kernel_args, layout, config, constants,
+      IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT,
+      tail_payload);
 }
 
 static iree_status_t

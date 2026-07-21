@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "iree/base/threading/mutex.h"
+#include "iree/hal/drivers/amdgpu/abi/kernel_args.h"
 #include "iree/hal/drivers/amdgpu/abi/kernel_descriptor.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/device/dispatch.h"
@@ -2154,7 +2155,11 @@ static void iree_hal_amdgpu_pm4_command_buffer_write_implicit_args(
     const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
     const iree_hal_dispatch_config_t config,
     iree_amdgpu_kernel_implicit_args_t* implicit_args) {
-  memset(implicit_args, 0, sizeof(*implicit_args));
+  // Zero the reserved implicit-args window, not sizeof(the struct): the struct
+  // carries deprecated GFX8/pre-GFX9 trailer fields past the reservation, so
+  // sizeof would overrun the kernarg template. This matches the device, AQL,
+  // and host-queue implicit writers.
+  memset(implicit_args, 0, IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE);
   implicit_args->block_count[0] = config.workgroup_count[0];
   implicit_args->block_count[1] = config.workgroup_count[1];
   implicit_args->block_count[2] = config.workgroup_count[2];
@@ -2165,6 +2170,14 @@ static void iree_hal_amdgpu_pm4_command_buffer_write_implicit_args(
   implicit_args->printf_buffer = NULL;
   implicit_args->hostcall_buffer = NULL;
   implicit_args->dynamic_lds_size = config.dynamic_workgroup_local_memory;
+}
+
+void iree_hal_amdgpu_pm4_command_buffer_emplace_implicit_args(
+    const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
+    iree_hal_dispatch_config_t config,
+    iree_amdgpu_kernel_implicit_args_t* implicit_args) {
+  iree_hal_amdgpu_pm4_command_buffer_write_implicit_args(kernel_args, config,
+                                                         implicit_args);
 }
 
 static iree_status_t

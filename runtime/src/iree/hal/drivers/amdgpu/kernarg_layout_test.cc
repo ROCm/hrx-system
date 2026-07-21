@@ -10,6 +10,7 @@
 #include <cstring>
 #include <vector>
 
+#include "iree/hal/drivers/amdgpu/abi/kernel_args.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -320,6 +321,89 @@ TEST(KernargLayoutTest, RejectsConstantSourceGaps) {
   };
   std::vector<uint8_t> storage = AllocateStorage(
       /*binding_count=*/0, IREE_ARRAYSIZE(constant_spans));
+
+  EXPECT_THAT(
+      Status(iree_hal_amdgpu_kernarg_layout_initialize(
+          &params, storage.size(),
+          reinterpret_cast<iree_hal_amdgpu_kernarg_layout_t*>(storage.data()))),
+      StatusIs(StatusCode::kInvalidArgument));
+}
+
+TEST(KernargLayoutTest, RejectsImplicitArgsSuffixBeyondLayoutLimit) {
+  // The offset alone is within the reservation (16 <= 116) so the offset bound
+  // check passes, but the full fixed implicit suffix (16 + 124 = 140) overruns
+  // the 116-byte reservation and must be rejected.
+  iree_hal_amdgpu_kernarg_layout_params_t params = {
+      /*.kernarg_byte_length=*/116,
+      /*.kernarg_alignment=*/8,
+      /*.constant_byte_length=*/{},
+      /*.implicit_args_byte_offset=*/16,
+  };
+  std::vector<uint8_t> storage = AllocateStorage(/*binding_count=*/0,
+                                                 /*constant_span_count=*/0);
+
+  EXPECT_THAT(
+      Status(iree_hal_amdgpu_kernarg_layout_initialize(
+          &params, storage.size(),
+          reinterpret_cast<iree_hal_amdgpu_kernarg_layout_t*>(storage.data()))),
+      StatusIs(StatusCode::kOutOfRange));
+}
+
+TEST(KernargLayoutTest, AcceptsImplicitArgsSuffixExactlyFillingLayout) {
+  // The reservation covers exactly the offset plus the full implicit suffix, so
+  // the suffix-bound check must accept it.
+  const iree_host_size_t implicit_args_byte_offset = 16;
+  const iree_host_size_t kernarg_byte_length =
+      implicit_args_byte_offset + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE;
+  iree_hal_amdgpu_kernarg_layout_params_t params = {
+      /*.kernarg_byte_length=*/kernarg_byte_length,
+      /*.kernarg_alignment=*/8,
+      /*.constant_byte_length=*/{},
+      /*.implicit_args_byte_offset=*/implicit_args_byte_offset,
+  };
+  std::vector<uint8_t> storage = AllocateStorage(/*binding_count=*/0,
+                                                 /*constant_span_count=*/0);
+  iree_hal_amdgpu_kernarg_layout_t* layout =
+      reinterpret_cast<iree_hal_amdgpu_kernarg_layout_t*>(storage.data());
+
+  IREE_ASSERT_OK(iree_hal_amdgpu_kernarg_layout_initialize(
+      &params, storage.size(), layout));
+  EXPECT_EQ(layout->implicit_args_byte_offset, implicit_args_byte_offset);
+}
+
+TEST(KernargLayoutTest, RejectsImplicitArgsOffsetBeyondLayout) {
+  // The implicit offset itself is past the end of the reservation (24 > 16), so
+  // the offset-bound check must reject before the suffix-bound check.
+  iree_hal_amdgpu_kernarg_layout_params_t params = {
+      /*.kernarg_byte_length=*/16,
+      /*.kernarg_alignment=*/8,
+      /*.constant_byte_length=*/{},
+      /*.implicit_args_byte_offset=*/24,
+  };
+  std::vector<uint8_t> storage = AllocateStorage(/*binding_count=*/0,
+                                                 /*constant_span_count=*/0);
+
+  EXPECT_THAT(
+      Status(iree_hal_amdgpu_kernarg_layout_initialize(
+          &params, storage.size(),
+          reinterpret_cast<iree_hal_amdgpu_kernarg_layout_t*>(storage.data()))),
+      StatusIs(StatusCode::kOutOfRange));
+}
+
+TEST(KernargLayoutTest, RejectsMisalignedImplicitArgsOffset) {
+  // The offset (20) and the full implicit suffix (20 + 124 = 144) both fit
+  // within the 144-byte reservation, so only the 8-byte-alignment requirement
+  // on the implicit offset can reject this layout.
+  const iree_host_size_t implicit_args_byte_offset = 20;
+  iree_hal_amdgpu_kernarg_layout_params_t params = {
+      /*.kernarg_byte_length=*/
+      implicit_args_byte_offset + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
+      /*.kernarg_alignment=*/8,
+      /*.constant_byte_length=*/{},
+      /*.implicit_args_byte_offset=*/implicit_args_byte_offset,
+  };
+  std::vector<uint8_t> storage = AllocateStorage(/*binding_count=*/0,
+                                                 /*constant_span_count=*/0);
 
   EXPECT_THAT(
       Status(iree_hal_amdgpu_kernarg_layout_initialize(

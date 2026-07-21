@@ -127,6 +127,7 @@ iree_cc_library(
     "kernarg_layout.c"
   DEPS
     iree::base
+    iree::hal::drivers::amdgpu::abi
   PUBLIC
 )
 endif()
@@ -650,6 +651,32 @@ iree_cc_test(
   DEPS
     ::kernarg_layout
     iree::base
+    iree::hal::drivers::amdgpu::abi
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    kernarg_emitter_equivalence_test
+  SRCS
+    "kernarg_emitter_equivalence_test.cc"
+  DEPS
+    ::amdgpu
+    ::headers
+    iree::base
+    iree::hal
+    iree::hal::drivers::amdgpu::abi
+    iree::hal::drivers::amdgpu::device::dispatch
+    iree::hal::drivers::amdgpu::device::headers
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
@@ -694,6 +721,32 @@ iree_cc_test(
     ::kernarg_layout
     iree::base
     iree::hal::drivers::amdgpu::abi
+    iree::hal::drivers::amdgpu::util::hsaco_metadata
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    kernarg_golden_test
+  SRCS
+    "kernarg_golden_test.cc"
+  DEPS
+    ::executable_metadata
+    ::executable_metadata_hsaco
+    ::kernarg_layout
+    iree::base
+    iree::hal::drivers::amdgpu::abi
+    iree::hal::drivers::amdgpu::device::dispatch
+    iree::hal::drivers::amdgpu::device::headers
     iree::hal::drivers::amdgpu::util::hsaco_metadata
     iree::testing::gtest
     iree::testing::gtest_main
