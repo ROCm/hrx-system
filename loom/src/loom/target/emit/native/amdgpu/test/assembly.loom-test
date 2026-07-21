@@ -1684,7 +1684,7 @@ low.func.def target(@gfx11_target) @gfx11_s_load_offset_only(%kernarg: reg<amdgp
 }
 
 // ----
-  s_load_dwordx2 s[2:3], s[0:1] offset:32
+  s_load_dwordx2 s[0:1], s[0:1] offset:32
   s_endpgm
 
 // ====
@@ -1697,7 +1697,7 @@ low.func.def target(@gfx11_target) @gfx11_s_load_offset_only_x8(%kernarg: reg<am
 }
 
 // ----
-  s_load_dwordx8 s[8:15], s[0:1] offset:32
+  s_load_dwordx8 s[0:7], s[0:1] offset:32
   s_endpgm
 
 // ====
@@ -2279,18 +2279,18 @@ low.func.def target(@gfx942_target) @gfx942_sgpr_spill_reload(%value: reg<amdgpu
   s_mov_b64_exec_read s[2:3]
   s_mov_b64 exec, -1
   v_mov_b32_copy v0, s0
-  s_mov_b32_m0_imm m0, 0
+  s_mov_b32 m0, 0
   scratch_store_b32 off, v0, off offset:0 nt:0 sc0:0 sc1:0
   v_mov_b32_copy v0, s1
-  s_mov_b32_m0_imm m0, 0
+  s_mov_b32 m0, 0
   scratch_store_b32 off, v0, off offset:4 nt:0 sc0:0 sc1:0
   s_mov_b64 exec, s[2:3]
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_mov_b32_m0_imm m0, 0
+  s_mov_b32 m0, 0
   scratch_load_b32 v0, off, off offset:0 nt:0 sc0:0 sc1:0
   v_readfirstlane_b32 s2, v0
-  s_mov_b32_m0_imm m0, 0
+  s_mov_b32 m0, 0
   scratch_load_b32 v0, off, off offset:4 nt:0 sc0:0 sc1:0
   v_readfirstlane_b32 s3, v0
   s_mov_b64 exec, s[0:1]
@@ -2310,12 +2310,12 @@ low.func.def target(@gfx942_target) @gfx942_vgpr_spill_reload(%value: reg<amdgpu
 // ----
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_mov_b32_m0_imm m0, 0
+  s_mov_b32 m0, 0
   scratch_store_b64 off, v[0:1], off offset:0 nt:0 sc0:0 sc1:0
   s_mov_b64 exec, s[0:1]
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_mov_b32_m0_imm m0, 0
+  s_mov_b32 m0, 0
   scratch_load_b64 v[0:1], off, off offset:0 nt:0 sc0:0 sc1:0
   s_mov_b64 exec, s[0:1]
   s_endpgm
@@ -2335,20 +2335,20 @@ low.func.def target(@gfx942_target) @gfx942_sgpr_spill_reload_waits(%value: reg<
   s_mov_b64_exec_read s[2:3]
   s_mov_b64 exec, -1
   v_mov_b32_copy v0, s0
-  s_mov_b32_m0_imm m0, 0
+  s_mov_b32 m0, 0
   scratch_store_b32 off, v0, off offset:0 nt:0 sc0:0 sc1:0
   v_mov_b32_copy v1, s1
-  s_mov_b32_m0_imm m0, 0
+  s_mov_b32 m0, 0
   scratch_store_b32 off, v1, off offset:4 nt:0 sc0:0 sc1:0
   s_mov_b64 exec, s[2:3]
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
+  s_mov_b32 m0, 0
   s_waitcnt vmcnt(0) lgkmcnt(15)
-  s_mov_b32_m0_imm m0, 0
   scratch_load_b32 v2, off, off offset:0 nt:0 sc0:0 sc1:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   v_readfirstlane_b32 s2, v2
-  s_mov_b32_m0_imm m0, 0
+  s_mov_b32 m0, 0
   scratch_load_b32 v2, off, off offset:4 nt:0 sc0:0 sc1:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   v_readfirstlane_b32 s3, v2
@@ -2712,15 +2712,17 @@ low.func.def target(@gfx11_target) @gfx11_b96_memory(%resource: reg<amdgpu.sgpr 
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_ds_read_dead_result_early_clobber waits=none fixed=%addr:physical_register:0:1
+// RUN: emit amdgpu-assembly @gfx11_ds_read_dead_result_aliases_address waits=none fixed=%addr:physical_register:0:1
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_ds_read_dead_result_early_clobber(%addr: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@gfx11_target) @gfx11_ds_read_dead_result_aliases_address(%addr: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
   %loaded = ds_read_b32 %addr
   return
 }
 
+// A DS read consumes its address when issued, so a dead address can share the
+// result register without an early-clobber restriction.
 // ----
-  ds_read_b32 v1, v0 offset:0
+  ds_read_b32 v0, v0 offset:0
   s_endpgm
 
 // ====
@@ -2929,7 +2931,7 @@ low.func.def target(@gfx12_target) @gfx12_smem_wide_loads(%base: reg<amdgpu.sgpr
   s_buffer_load_b96 s[8:10], s[4:7], s2 offset:8
   s_buffer_load_b512 s[16:31], s[4:7], s2 offset:16
   s_load_i8 s3, s[0:1], s2 offset:20
-  s_load_u16 s3, s[0:1], s2 offset:24
+  s_load_u16 s0, s[0:1], s2 offset:24
   s_buffer_load_u8 s0, s[4:7], s2 offset:28
   s_buffer_load_i16 s0, s[4:7], s2 offset:32
   s_endpgm
@@ -3877,6 +3879,6 @@ low.func.def target(@gfx11_target) @gfx11_wait_before_storage_reserve(%kernarg: 
 // The storage reservation emits no instruction, but wait planning may use it
 // as an ordering anchor. Assembly must visit the anchor just like encoding.
 // ----
-  s_load_dwordx8 s[8:15], s[0:1] offset:0
+  s_load_dwordx8 s[0:7], s[0:1] offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_endpgm

@@ -133,11 +133,6 @@ bool loom_amdgpu_descriptor_set_can_emit_vgpr_compare_immediate(
     loom_amdgpu_descriptor_ref_t src1_inline_descriptor_ref,
     uint32_t immediate);
 
-// Returns true when a descriptor row has an implicit resource operand.
-bool loom_amdgpu_descriptor_has_implicit_resource_operand(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor);
-
 // Resolves one optional explicit packet descriptor and its immediate names.
 iree_status_t loom_amdgpu_resolve_explicit_packet_plan(
     loom_low_lower_context_t* context,

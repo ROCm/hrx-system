@@ -241,11 +241,6 @@ iree_status_t loom_amdgpu_make_vgpr_range_type(
     loom_low_lower_context_t* context, uint32_t unit_count,
     loom_type_t* out_type);
 
-// Builds the register type for a descriptor row's implicit resource operand.
-iree_status_t loom_amdgpu_make_descriptor_row_implicit_resource_type(
-    loom_low_lower_context_t* context, const loom_low_descriptor_t* descriptor,
-    loom_type_t* out_type);
-
 // Returns whether a low register type belongs to the requested AMDGPU register
 // class.
 bool loom_amdgpu_low_type_is_register_class(loom_low_lower_context_t* context,

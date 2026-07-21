@@ -1199,16 +1199,6 @@ def _m0_implicit_resource(field_name: str = "m0") -> Operand:
     )
 
 
-def _m0_clobber(field_name: str = "m0") -> Operand:
-    return Operand(
-        field_name,
-        OperandRole.IMPLICIT,
-        _M0_ALT,
-        flags=(OperandFlag.IMPLICIT,),
-        unit_count=1,
-    )
-
-
 def _m0_result(field_name: str = "dst") -> Operand:
     return Operand(
         field_name,
@@ -2853,17 +2843,6 @@ def _implicit_m0_input(
     )
 
 
-def _implicit_m0_clobber() -> AmdgpuImplicitOperandOverlay:
-    return AmdgpuImplicitOperandOverlay(
-        operand_type="OPR_SDST_M0",
-        descriptor_operand=_m0_clobber(),
-        data_format_name="FMT_NUM_B32",
-        size_bits=32,
-        is_input=True,
-        is_output=False,
-    )
-
-
 __all__ = (
     "AMDGPU_ATOMIC_DESCRIPTOR_CATEGORY",
     "AMDGPU_CACHE_DESCRIPTOR_CATEGORY",
@@ -3264,13 +3243,11 @@ __all__ = (
     "_ignore_global_write_memory",
     "_ignore_scratch_memory",
     "_ignore_workgroup_memory",
-    "_implicit_m0_clobber",
     "_implicit_m0_input",
     "_instruction_encoding_opcode",
     "_is_exec_state_read",
     "_is_mode_state_read",
     "_literal_operand_form",
-    "_m0_clobber",
     "_m0_implicit_resource",
     "_m0_result",
     "_mode_state_read",

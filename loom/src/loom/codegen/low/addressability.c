@@ -18,7 +18,7 @@ typedef struct loom_low_addressability_packet_field_t {
   loom_value_ordinal_t value_ordinal;
   // Field reference for source diagnostics.
   loom_diagnostic_field_ref_t field_ref;
-  // True when the descriptor operand maps to an explicit packet value.
+  // True when the descriptor operand maps to an SSA packet value.
   bool has_value;
 } loom_low_addressability_packet_field_t;
 
@@ -43,36 +43,32 @@ static iree_status_t loom_low_addressability_packet_field_for_operand(
                             descriptor_operand_index,
                             descriptor->operand_count);
   }
+  const loom_low_operand_t* descriptor_operand =
+      &descriptor_set
+           ->operands[descriptor->operand_start + descriptor_operand_index];
   if (descriptor_operand_index < descriptor->result_count) {
-    if (descriptor_operand_index >= packet->node->result_count) {
+    const uint16_t result_index = descriptor_operand->source_value_index;
+    if (result_index >= packet->node->result_count) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "addressability descriptor result index %" PRIu16
                               " exceeds packet result count %" PRIu16,
-                              descriptor_operand_index,
-                              packet->node->result_count);
+                              result_index, packet->node->result_count);
     }
     const loom_value_ordinal_t* result_ordinals =
         loom_low_schedule_node_const_result_ordinals(packet->node);
     *out_field = (loom_low_addressability_packet_field_t){
-        .value_ordinal = result_ordinals[descriptor_operand_index],
+        .value_ordinal = result_ordinals[result_index],
         .field_ref = loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_RESULT,
-                                               descriptor_operand_index),
+                                               result_index),
         .has_value = true,
     };
     return iree_ok_status();
   }
-  if (!loom_low_descriptor_operand_maps_to_explicit_packet_operand(
+  if (!loom_low_descriptor_operand_maps_to_packet_operand(
           descriptor_set, descriptor, descriptor_operand_index)) {
     return iree_ok_status();
   }
-  uint16_t packet_operand_index = 0;
-  for (uint16_t i = descriptor->result_count; i < descriptor_operand_index;
-       ++i) {
-    if (loom_low_descriptor_operand_maps_to_explicit_packet_operand(
-            descriptor_set, descriptor, i)) {
-      ++packet_operand_index;
-    }
-  }
+  const uint16_t packet_operand_index = descriptor_operand->source_value_index;
   if (packet_operand_index >= packet->node->operand_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "addressability descriptor operand index %" PRIu16

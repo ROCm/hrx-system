@@ -21,6 +21,55 @@ classes:
 
 // ====
 
+// RUN: emit low-allocation-json @ordinary_packet_reuses_dead_input test.i32=8
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @ordinary_packet_reuses_dead_input(
+    %lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>) ->
+    (reg<test.i32 x4>) {
+  %sum = low.op<test.add.v4i32>(%lhs, %rhs) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  low.return %sum : reg<test.i32 x4>
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"ordinary_packet_reuses_dead_input","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":3,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":0,"name":"lhs","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":1,"unit_count":4,"location":{"kind":"target_id","base":0,"count":4}},{"index":1,"value":{"id":1,"name":"rhs","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":1,"unit_count":4,"location":{"kind":"target_id","base":4,"count":4}},{"index":2,"value":{"id":3,"name":"sum","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":1,"end_point":2,"unit_count":4,"location":{"kind":"target_id","base":0,"count":4}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
+// RUN: emit low-allocation-json @early_clobber_preserves_input test.i32=8
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @early_clobber_preserves_input(
+    %source: reg<test.i32 x4>) -> (reg<test.i32 x4>) {
+  %result = low.op<test.early_clobber.v4i32>(%source) :
+      (reg<test.i32 x4>) -> reg<test.i32 x4>
+  low.return %result : reg<test.i32 x4>
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"early_clobber_preserves_input","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":2,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":0,"name":"source","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":2,"unit_count":4,"location":{"kind":"target_id","base":0,"count":4}},{"index":1,"value":{"id":2,"name":"result","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":1,"end_point":2,"unit_count":4,"location":{"kind":"target_id","base":4,"count":4}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
+// RUN: emit low-allocation-json @early_tied_reuses_input test.i32=4
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @early_tied_reuses_input(
+    %source: reg<test.i32 x4>) -> (reg<test.i32 x4>) {
+  %result = low.op<test.early_tied.v4i32>(%source) :
+      (reg<test.i32 x4>) -> %source as reg<test.i32 x4>
+  low.return %result : reg<test.i32 x4>
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"early_tied_reuses_input","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":2,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":0,"name":"source","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":2,"unit_count":4,"location":{"kind":"target_id","base":0,"count":4}},{"index":1,"value":{"id":2,"name":"result","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":1,"end_point":2,"unit_count":4,"location":{"kind":"target_id","base":0,"count":4}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
 // RUN: emit low-allocation-json @branch_concat_destination_layout
 
 test.target<low_core> @test_target

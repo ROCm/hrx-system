@@ -42,7 +42,6 @@ def _ds_read_overlay(
         immediates=(_ds_offset_immediate(),),
         fixed_encoding_fields=_ds_fixed_fields_without_offset1(fixed_encoding_fields),
         effects=(_workgroup_memory_effect(EffectKind.READ, width_bits),),
-        constraints=_EARLY_CLOBBER_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     )
 
@@ -70,7 +69,6 @@ def _ds_read_u16_overlay(
         immediates=(_ds_offset_immediate(),),
         fixed_encoding_fields=_ds_fixed_fields_without_offset1(fixed_encoding_fields),
         effects=(_workgroup_memory_effect(EffectKind.READ, 16),),
-        constraints=_EARLY_CLOBBER_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     )
 
@@ -111,7 +109,6 @@ def _ds_load_u16_d16_overlays(
                 named_immediates=True,
             ),
             effects=(_workgroup_memory_effect(EffectKind.READ, 16),),
-            constraints=_EARLY_CLOBBER_RESULT_CONSTRAINTS,
             flags=(DescriptorFlag.SIDE_EFFECTING,),
         ),
         AmdgpuDescriptorOverlay(
@@ -156,10 +153,7 @@ def _ds_load_u16_d16_overlays(
                 named_immediates=True,
             ),
             effects=(_workgroup_memory_effect(EffectKind.READ, 16),),
-            constraints=(
-                Constraint(ConstraintKind.TIED, 0, 1),
-                *_EARLY_CLOBBER_RESULT_CONSTRAINTS,
-            ),
+            constraints=(Constraint(ConstraintKind.TIED, 0, 1),),
             flags=(DescriptorFlag.SIDE_EFFECTING,),
         ),
     )
@@ -265,7 +259,6 @@ def _ds_read2_overlay(
         ),
         fixed_encoding_fields=fixed_encoding_fields,
         effects=(_workgroup_memory_effect(EffectKind.READ, element_width_bits * 2),),
-        constraints=_EARLY_CLOBBER_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     )
 
@@ -791,7 +784,6 @@ def _ds_transpose_read_overlay(
         immediates=(_ds_crosslane_offset_immediate(),),
         fixed_encoding_fields=fixed_encoding_fields,
         effects=(_workgroup_memory_effect(EffectKind.READ, width_bits),),
-        constraints=_EARLY_CLOBBER_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     )
 

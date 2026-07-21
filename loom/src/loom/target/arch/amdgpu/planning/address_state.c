@@ -52,9 +52,15 @@ static iree_status_t loom_amdgpu_address_state_operand_assignment(
     const loom_low_schedule_node_t* node, uint16_t descriptor_operand_index,
     const loom_low_allocation_assignment_t** out_assignment) {
   *out_assignment = NULL;
+  const loom_low_descriptor_set_t* descriptor_set =
+      schedule->target.descriptor_set;
+  const loom_low_operand_t* operand =
+      &descriptor_set->operands[node->descriptor->operand_start +
+                                descriptor_operand_index];
   const uint16_t result_count = node->descriptor->result_count;
   if (descriptor_operand_index < result_count) {
-    if (descriptor_operand_index >= node->result_count) {
+    const uint16_t result_index = operand->source_value_index;
+    if (result_index >= node->result_count) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "AMDGPU target-state descriptor result %" PRIu16
                               " has no matching schedule result",
@@ -63,35 +69,23 @@ static iree_status_t loom_amdgpu_address_state_operand_assignment(
     const loom_value_ordinal_t* result_ordinals =
         loom_low_schedule_node_const_result_ordinals(node);
     *out_assignment = loom_low_allocation_assignment_for_value_ordinal(
-        allocation, result_ordinals[descriptor_operand_index], NULL);
+        allocation, result_ordinals[result_index], NULL);
     return iree_ok_status();
   }
 
-  const loom_low_descriptor_set_t* descriptor_set =
-      schedule->target.descriptor_set;
-  uint16_t packet_operand_ordinal = 0;
-  for (uint16_t i = result_count; i < node->descriptor->operand_count; ++i) {
-    const loom_low_operand_t* operand =
-        &descriptor_set
-             ->operands[node->descriptor->operand_start + (uint32_t)i];
-    if (!loom_low_operand_role_is_packet_operand(operand->role)) {
-      continue;
+  if (loom_low_operand_role_is_packet_operand(operand->role)) {
+    const uint16_t packet_operand_index = operand->source_value_index;
+    if (packet_operand_index >= node->operand_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "AMDGPU target-state descriptor operand %" PRIu16
+                              " has no matching schedule operand",
+                              descriptor_operand_index);
     }
-    if (i == descriptor_operand_index) {
-      if (packet_operand_ordinal >= node->operand_count) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "AMDGPU target-state descriptor operand %" PRIu16
-            " has no matching schedule operand",
-            descriptor_operand_index);
-      }
-      const loom_value_ordinal_t* operand_ordinals =
-          loom_low_schedule_node_const_operand_ordinals(node);
-      *out_assignment = loom_low_allocation_assignment_for_value_ordinal(
-          allocation, operand_ordinals[packet_operand_ordinal], NULL);
-      return iree_ok_status();
-    }
-    ++packet_operand_ordinal;
+    const loom_value_ordinal_t* operand_ordinals =
+        loom_low_schedule_node_const_operand_ordinals(node);
+    *out_assignment = loom_low_allocation_assignment_for_value_ordinal(
+        allocation, operand_ordinals[packet_operand_index], NULL);
+    return iree_ok_status();
   }
 
   return iree_make_status(IREE_STATUS_OUT_OF_RANGE,

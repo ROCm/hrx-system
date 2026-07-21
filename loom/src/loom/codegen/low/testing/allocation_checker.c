@@ -154,9 +154,23 @@ static iree_status_t loom_low_allocation_checker_schedule(
       continue;
     }
 
-    uint32_t program_point = liveness_block->start_point;
+    uint32_t operation_index = liveness_block->operation_start;
+    const uint32_t operation_end =
+        operation_index + liveness_block->operation_count;
     for (uint32_t ordinal = 0; ordinal < schedule_block->scheduled_node_count;
          ++ordinal) {
+      while (
+          operation_index < operation_end &&
+          liveness->operation_points[operation_index].parent_operation_index !=
+              UINT32_MAX) {
+        ++operation_index;
+      }
+      const loom_liveness_operation_point_t* operation_point =
+          operation_index < operation_end
+              ? &liveness->operation_points[operation_index++]
+              : NULL;
+      const uint32_t program_point =
+          operation_point != NULL ? operation_point->start_point : UINT32_MAX;
       const iree_host_size_t scheduled_index =
           schedule_block->scheduled_node_start + ordinal;
       const uint32_t node_index =
@@ -171,7 +185,8 @@ static iree_status_t loom_low_allocation_checker_schedule(
       const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
       if (seen[node_index] || node->block_index != block_index ||
           node->scheduled_ordinal != ordinal ||
-          node->block != schedule_block->block) {
+          node->block != schedule_block->block || operation_point == NULL ||
+          operation_point->op != node->op) {
         loom_low_allocation_checker_record(
             checker, LOOM_LOW_ALLOCATION_CHECK_VIOLATION_SCHEDULE_STRUCTURE,
             node_index, (uint32_t)scheduled_index, LOOM_VALUE_ID_INVALID,
@@ -179,23 +194,17 @@ static iree_status_t loom_low_allocation_checker_schedule(
       }
       seen[node_index] = 1;
       checker->node_program_points[node_index] = program_point;
-      uint32_t span = 0;
-      IREE_RETURN_IF_ERROR(
-          loom_liveness_analysis_op_point_span(liveness, node->op, &span));
-      if (program_point > UINT32_MAX - span) {
-        loom_low_allocation_checker_record(
-            checker, LOOM_LOW_ALLOCATION_CHECK_VIOLATION_SCHEDULE_STRUCTURE,
-            node_index, UINT32_MAX, LOOM_VALUE_ID_INVALID,
-            LOOM_VALUE_ID_INVALID, program_point);
-        break;
-      }
-      program_point += span;
     }
-    if (program_point != liveness_block->end_point) {
+    while (operation_index < operation_end &&
+           liveness->operation_points[operation_index].parent_operation_index !=
+               UINT32_MAX) {
+      ++operation_index;
+    }
+    if (operation_index != operation_end) {
       loom_low_allocation_checker_record(
           checker, LOOM_LOW_ALLOCATION_CHECK_VIOLATION_SCHEDULE_STRUCTURE,
           (uint32_t)block_index, UINT32_MAX, LOOM_VALUE_ID_INVALID,
-          LOOM_VALUE_ID_INVALID, program_point);
+          LOOM_VALUE_ID_INVALID, liveness_block->end_point);
     }
   }
   for (iree_host_size_t i = 0; i < schedule->node_count; ++i) {

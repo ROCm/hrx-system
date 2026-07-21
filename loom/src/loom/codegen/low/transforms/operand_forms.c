@@ -265,7 +265,6 @@ static bool loom_low_descriptor_packet_operand_indices_for_select(
     uint16_t* out_false_operand_index) {
   *out_true_operand_index = UINT16_MAX;
   *out_false_operand_index = UINT16_MAX;
-  uint16_t packet_operand_index = 0;
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
     const loom_low_operand_t* operand =
@@ -276,12 +275,11 @@ static bool loom_low_descriptor_packet_operand_indices_for_select(
     }
     if (loom_low_operand_field_is(descriptor_set, operand,
                                   IREE_SV("true_value"))) {
-      *out_true_operand_index = packet_operand_index;
+      *out_true_operand_index = operand->source_value_index;
     } else if (loom_low_operand_field_is(descriptor_set, operand,
                                          IREE_SV("false_value"))) {
-      *out_false_operand_index = packet_operand_index;
+      *out_false_operand_index = operand->source_value_index;
     }
-    ++packet_operand_index;
   }
   return *out_true_operand_index != UINT16_MAX &&
          *out_false_operand_index != UINT16_MAX;
@@ -364,21 +362,6 @@ static iree_status_t loom_low_select_operand_forms_function_has_candidate(
     }
   }
   return iree_ok_status();
-}
-
-static uint16_t loom_low_descriptor_packet_operand_index(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor,
-    uint16_t descriptor_operand_index) {
-  uint16_t packet_operand_index = 0;
-  for (uint16_t i = descriptor->result_count; i < descriptor_operand_index;
-       ++i) {
-    if (loom_low_descriptor_operand_maps_to_explicit_packet_operand(
-            descriptor_set, descriptor, i)) {
-      ++packet_operand_index;
-    }
-  }
-  return packet_operand_index;
 }
 
 typedef struct loom_low_select_operand_form_destructive_info_t {
@@ -577,10 +560,12 @@ static iree_status_t loom_low_descriptor_build_tied_results(
     if (constraint->kind != LOOM_LOW_CONSTRAINT_KIND_TIED) {
       continue;
     }
+    const loom_low_operand_t* tied_operand =
+        &descriptor_set->operands[descriptor->operand_start +
+                                  constraint->rhs_operand_index];
     tied_results[tied_result_index++] = (loom_tied_result_t){
         .result_index = constraint->lhs_operand_index,
-        .operand_index = loom_low_descriptor_packet_operand_index(
-            descriptor_set, descriptor, constraint->rhs_operand_index),
+        .operand_index = tied_operand->source_value_index,
         .has_type_change = false,
     };
   }
@@ -713,10 +698,10 @@ static iree_status_t loom_low_select_operand_form_can_rewrite_destructive(
     if (constraint->kind != LOOM_LOW_CONSTRAINT_KIND_DESTRUCTIVE) {
       continue;
     }
-    const uint16_t tied_packet_operand_index =
-        loom_low_descriptor_packet_operand_index(descriptor_set,
-                                                 replacement_descriptor,
-                                                 constraint->rhs_operand_index);
+    const loom_low_operand_t* tied_operand =
+        &descriptor_set->operands[replacement_descriptor->operand_start +
+                                  constraint->rhs_operand_index];
+    const uint16_t tied_packet_operand_index = tied_operand->source_value_index;
     IREE_ASSERT(tied_packet_operand_index < operand_count);
     const uint16_t source_packet_operand_index =
         descriptor_set->operand_form_operand_indices[form->operand_map_start +

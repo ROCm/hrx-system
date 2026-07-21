@@ -228,7 +228,7 @@ static iree_status_t loom_amdgpu_sanitizer_race_build_m0_const_u32(
     loom_location_id_t location, loom_value_id_t* out_value) {
   *out_value = LOOM_VALUE_ID_INVALID;
   loom_type_t m0_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_make_descriptor_implicit_resource_type(
+  IREE_RETURN_IF_ERROR(loom_low_build_descriptor_implicit_resource_type(
       descriptor_set, consumer_descriptor, &m0_type));
   const loom_low_descriptor_t* descriptor = NULL;
   loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;

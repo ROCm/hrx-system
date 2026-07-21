@@ -851,16 +851,16 @@ static iree_status_t loom_low_verify_descriptor_packet_field(
       descriptor_set, descriptor_operand->field_name_string_offset);
 
   if (descriptor_operand_index < descriptor->result_count) {
-    if (descriptor_operand_index >= op->result_count) {
+    const uint16_t result_index = descriptor_operand->source_value_index;
+    if (result_index >= op->result_count) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "low packet result index %" PRIu16
                               " exceeds op result count %" PRIu16,
-                              descriptor_operand_index, op->result_count);
+                              result_index, op->result_count);
     }
-    const loom_value_id_t value_id =
-        loom_op_const_results(op)[descriptor_operand_index];
-    out_field->field_ref = loom_diagnostic_field_ref(
-        LOOM_DIAGNOSTIC_FIELD_RESULT, descriptor_operand_index);
+    const loom_value_id_t value_id = loom_op_const_results(op)[result_index];
+    out_field->field_ref =
+        loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_RESULT, result_index);
     out_field->value_id = value_id;
     out_field->type = loom_module_value_type(module, value_id);
     return iree_ok_status();
@@ -873,22 +873,7 @@ static iree_status_t loom_low_verify_descriptor_packet_field(
                             descriptor_operand_index);
   }
 
-  uint16_t packet_operand_index = 0;
-  for (uint16_t i = descriptor->result_count; i < descriptor_operand_index;
-       ++i) {
-    const uint32_t preceding_operand_row = descriptor->operand_start + i;
-    if (preceding_operand_row >= descriptor_set->operand_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "low descriptor operand row %" PRIu32
-                              " is out of range",
-                              preceding_operand_row);
-    }
-    const loom_low_operand_t* preceding_operand =
-        &descriptor_set->operands[preceding_operand_row];
-    if (preceding_operand->role != LOOM_LOW_OPERAND_ROLE_IMPLICIT) {
-      ++packet_operand_index;
-    }
-  }
+  const uint16_t packet_operand_index = descriptor_operand->source_value_index;
   if (packet_operand_index >= op->operand_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "low packet operand index %" PRIu16
@@ -1445,14 +1430,14 @@ static bool loom_low_verify_descriptor_declares_tied_result(
   if (descriptor == NULL || tied.result_index >= descriptor->result_count) {
     return false;
   }
-  const uint16_t expected_operand_index =
-      descriptor->result_count + tied.operand_index;
-  if (expected_operand_index >= descriptor->operand_count) return false;
   uint16_t tied_operand_index = LOOM_LOW_ID_NONE;
-  return loom_low_verify_descriptor_tied_operand_index(
-             descriptor_set, descriptor, tied.result_index,
-             &tied_operand_index) &&
-         tied_operand_index == expected_operand_index;
+  if (!loom_low_verify_descriptor_tied_operand_index(
+          descriptor_set, descriptor, tied.result_index, &tied_operand_index)) {
+    return false;
+  }
+  const loom_low_operand_t* tied_operand =
+      &descriptor_set->operands[descriptor->operand_start + tied_operand_index];
+  return tied_operand->source_value_index == tied.operand_index;
 }
 
 static iree_status_t loom_low_verify_descriptor_register_parts(

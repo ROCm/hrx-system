@@ -469,6 +469,7 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
   iree_host_size_t hazard_use_capacity = 0;
   bool has_state_reg_class = false;
   bool has_resource_uses = false;
+  iree_host_size_t max_descriptor_operand_count = 0;
   const loom_low_descriptor_set_t* descriptor_set =
       state->target.descriptor_set;
   const iree_host_size_t reg_class_count = descriptor_set->reg_class_count;
@@ -536,6 +537,10 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
   IREE_RETURN_IF_ERROR(loom_low_schedule_verify_structural_state_reads(state));
   for (iree_host_size_t node_index = 0; node_index < node_count; ++node_index) {
     const loom_low_schedule_node_t* node = &state->nodes[node_index];
+    if (node->descriptor != NULL) {
+      max_descriptor_operand_count =
+          iree_max(max_descriptor_operand_count, node->operand_count);
+    }
     const loom_low_schedule_class_t* schedule_class = node->schedule_class;
     has_resource_uses |=
         schedule_class != NULL && schedule_class->issue_use_count != 0;
@@ -555,6 +560,13 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
                               "low schedule hazard-use capacity exceeds host "
                               "size");
     }
+  }
+  if (max_descriptor_operand_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(state->arena, max_descriptor_operand_count,
+                                  sizeof(*state->descriptor_operands.indices),
+                                  (void**)&state->descriptor_operands.indices));
+    state->descriptor_operands.capacity = max_descriptor_operand_count;
   }
   if (node_count != 0 && descriptor_set->schedule_class_count != 0) {
     const uint32_t schedule_class_count = descriptor_set->schedule_class_count;

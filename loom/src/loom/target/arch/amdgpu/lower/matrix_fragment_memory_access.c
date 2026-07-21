@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "loom/codegen/low/descriptors.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -216,9 +217,9 @@ iree_status_t loom_amdgpu_emit_fragment_load_packet(
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
       context, packet->descriptor_ref, &descriptor));
   loom_value_id_t low_m0 = LOOM_VALUE_ID_INVALID;
-  if (loom_amdgpu_descriptor_has_implicit_resource_operand(
+  if (loom_low_descriptor_implicit_resource_operand(
           loom_low_lower_context_descriptor_set(context),
-          descriptor.descriptor)) {
+          descriptor.descriptor) != NULL) {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_emit_m0_u32(context, source_op, &descriptor, 0, &low_m0));
   }
@@ -289,9 +290,9 @@ iree_status_t loom_amdgpu_emit_fragment_store_packet(
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
       context, packet->descriptor_ref, &descriptor));
   loom_value_id_t low_m0 = LOOM_VALUE_ID_INVALID;
-  if (loom_amdgpu_descriptor_has_implicit_resource_operand(
+  if (loom_low_descriptor_implicit_resource_operand(
           loom_low_lower_context_descriptor_set(context),
-          descriptor.descriptor)) {
+          descriptor.descriptor) != NULL) {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_emit_m0_u32(context, source_op, &descriptor, 0, &low_m0));
   }

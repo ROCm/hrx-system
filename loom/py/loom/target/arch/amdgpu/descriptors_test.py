@@ -108,13 +108,6 @@ from loom.target.arch.amdgpu.descriptors.control import (
     _s_delay_alu_descriptor,
     _s_set_vgpr_msb_descriptor,
 )
-from loom.target.arch.amdgpu.descriptors.memory import (
-    _s_buffer_load_64_overlay,
-    _s_buffer_load_dword_overlay,
-    _s_load_dword_overlay,
-    _s_load_dwordx2_overlay,
-    _s_load_dwordx4_overlay,
-)
 from loom.target.arch.amdgpu.descriptors.tensor import (
     _s_wait_tensorcnt_descriptor,
     _tensor_load_to_lds_descriptor,
@@ -3148,22 +3141,6 @@ def test_mad_mix_descriptors_cover_cdna_half_lane_forms() -> None:
             )
 
 
-def test_scalar_memory_loads_early_clobber_results() -> None:
-    for descriptor in (
-        _s_buffer_load_dword_overlay(),
-        _s_buffer_load_64_overlay(),
-        _s_load_dword_overlay(),
-        _s_load_dwordx2_overlay(),
-        _s_load_dwordx4_overlay(),
-    ):
-        assert tuple(constraint.kind for constraint in descriptor.constraints) == (
-            ConstraintKind.EARLY_CLOBBER,
-        )
-        assert tuple(
-            constraint.lhs_operand_index for constraint in descriptor.constraints
-        ) == (0,)
-
-
 def test_dpp_control_domain_covers_only_architectural_encodings() -> None:
     expected_values = {
         *range(0x100),
@@ -4665,19 +4642,36 @@ def test_cdna_smem_dwordx4_store_and_scratch_descriptors_cover_xml() -> None:
             assert descriptors[buffer_store_key].schedule_class == _SCHEDULE_SMEM_STORE
 
 
+def test_cdna_scratch_m0_operands_are_state_reads() -> None:
+    for overlay_builder in (_gfx940_core_overlays, _gfx950_core_overlays):
+        m0_rows = [
+            (descriptor, implicit_operand)
+            for descriptor in overlay_builder()
+            if descriptor.semantic_tag is not None
+            and descriptor.semantic_tag.startswith("memory.stack.")
+            for implicit_operand in descriptor.implicit_operands
+            if implicit_operand.operand_type == "OPR_SDST_M0"
+        ]
+
+        assert m0_rows
+        for _, implicit_operand in m0_rows:
+            assert implicit_operand.is_input
+            assert not implicit_operand.is_output
+            operand = implicit_operand.descriptor_operand
+            assert operand is not None
+            assert operand.field_name == "m0"
+            assert operand.role is OperandRole.RESOURCE
+            assert OperandFlag.IMPLICIT in operand.flags
+            assert OperandFlag.STATE_READ in operand.flags
+            assert OperandFlag.STATE_WRITE not in operand.flags
+
+
 def test_gfx940_scratch_memory_forms_cover_spill_packets() -> None:
     descriptors = {
         descriptor.descriptor_key: descriptor for descriptor in _gfx940_core_overlays()
     }
 
     load_descriptor = descriptors["amdgpu.scratch_load_b32_offset_only"]
-    assert any(
-        operand.operand_type == "OPR_SDST_M0"
-        and operand.descriptor_operand is not None
-        and operand.descriptor_operand.field_name == "m0"
-        and operand.descriptor_operand.role is OperandRole.IMPLICIT
-        for operand in load_descriptor.implicit_operands
-    )
     load_forms = load_descriptor.asm_forms
     assert load_forms is not None
     load_form = load_forms[0]
@@ -4692,13 +4686,6 @@ def test_gfx940_scratch_memory_forms_cover_spill_packets() -> None:
     )
 
     store_descriptor = descriptors["amdgpu.scratch_store_b32_offset_only"]
-    assert any(
-        operand.operand_type == "OPR_SDST_M0"
-        and operand.descriptor_operand is not None
-        and operand.descriptor_operand.field_name == "m0"
-        and operand.descriptor_operand.role is OperandRole.IMPLICIT
-        for operand in store_descriptor.implicit_operands
-    )
     store_forms = store_descriptor.asm_forms
     assert store_forms is not None
     store_form = store_forms[0]

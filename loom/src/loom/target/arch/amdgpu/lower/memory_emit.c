@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "loom/codegen/low/descriptors.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cache.h"
@@ -381,9 +382,9 @@ static iree_status_t loom_amdgpu_emit_memory_packet(
 static bool loom_amdgpu_memory_descriptor_has_implicit_resource_operand(
     loom_low_lower_context_t* context,
     const loom_amdgpu_memory_packet_plan_t* packet) {
-  return loom_amdgpu_descriptor_has_implicit_resource_operand(
-      loom_low_lower_context_descriptor_set(context),
-      packet->access.descriptor);
+  return loom_low_descriptor_implicit_resource_operand(
+             loom_low_lower_context_descriptor_set(context),
+             packet->access.descriptor) != NULL;
 }
 
 static iree_status_t loom_amdgpu_emit_memory_implicit_m0(

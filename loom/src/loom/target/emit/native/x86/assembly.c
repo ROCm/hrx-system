@@ -453,8 +453,12 @@ static iree_status_t loom_x86_append_asm_form_value(
                             "x86 assembly asm-form operand field unexpectedly "
                             "names a descriptor result");
   }
-  const uint16_t operand_index =
-      descriptor_operand_index - descriptor->result_count;
+  const loom_low_descriptor_set_t* descriptor_set =
+      context->schedule->target.descriptor_set;
+  const loom_low_operand_t* descriptor_operand =
+      &descriptor_set
+           ->operands[descriptor->operand_start + descriptor_operand_index];
+  const uint16_t operand_index = descriptor_operand->source_value_index;
   if (operand_index >= op->operand_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "x86 assembly asm-form operand field does not "

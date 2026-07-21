@@ -44,6 +44,7 @@ from loom.target.low_descriptors import (
     NativeAsmValue,
     NativeAsmValueKind,
     Operand,
+    OperandFlag,
     OperandForm,
     OperandFormImmediateAction,
     OperandRole,
@@ -105,6 +106,8 @@ _MEMORY_INSTRUCTION_CLASSES = frozenset(
         InstructionClass.GENERIC_MEMORY,
     }
 )
+
+_DERIVED_OPERAND_FLAGS = frozenset((OperandFlag.TIED, OperandFlag.EARLY_CLOBBER))
 
 _INSTRUCTION_CLASS_IMPLICATIONS = {
     InstructionClass.SMFMAC: (InstructionClass.MFMA,),
@@ -203,7 +206,9 @@ def _derive_instruction_classes(
     return tuple(instruction_class for instruction_class in InstructionClass if instruction_class in classes)
 
 
-def _derive_descriptor_flags(descriptor: Descriptor) -> Descriptor:
+def derive_descriptor_projections(descriptor: Descriptor) -> Descriptor:
+    """Projects validated descriptor constraints onto compact runtime flags."""
+
     has_barrier_effect = any(effect.kind is EffectKind.BARRIER for effect in descriptor.effects)
     has_barrier_flag = DescriptorFlag.BARRIER in descriptor.flags
     if has_barrier_flag and not has_barrier_effect:
@@ -218,7 +223,41 @@ def _derive_descriptor_flags(descriptor: Descriptor) -> Descriptor:
         derived_flags.append(DescriptorFlag.BARRIER)
     if has_early_clobber_constraint and not has_early_clobber_flag:
         derived_flags.append(DescriptorFlag.EARLY_CLOBBER)
-    return replace(descriptor, flags=tuple(derived_flags))
+
+    operand_flags: list[list[OperandFlag]] = []
+    for operand in descriptor.operands:
+        authored_projection_flags = _DERIVED_OPERAND_FLAGS.intersection(operand.flags)
+        if authored_projection_flags:
+            names = ", ".join(sorted(flag.name.lower() for flag in authored_projection_flags))
+            raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' authors derived projection flag(s): {names}")
+        operand_flags.append(list(operand.flags))
+
+    for constraint in descriptor.constraints:
+        if constraint.kind is ConstraintKind.TIED:
+            for operand_index in (
+                constraint.lhs_operand_index,
+                constraint.rhs_operand_index,
+            ):
+                assert operand_index is not None
+                if OperandFlag.TIED not in operand_flags[operand_index]:
+                    operand_flags[operand_index].append(OperandFlag.TIED)
+        elif constraint.kind is ConstraintKind.EARLY_CLOBBER:
+            flags = operand_flags[constraint.lhs_operand_index]
+            if OperandFlag.EARLY_CLOBBER not in flags:
+                flags.append(OperandFlag.EARLY_CLOBBER)
+
+    return replace(
+        descriptor,
+        flags=tuple(derived_flags),
+        operands=tuple(
+            replace(operand, flags=tuple(flags))
+            for operand, flags in zip(
+                descriptor.operands,
+                operand_flags,
+                strict=True,
+            )
+        ),
+    )
 
 
 def _dedupe_by_name[T](items: Sequence[T], get_name: Callable[[T], str]) -> dict[str, T]:
@@ -749,7 +788,22 @@ def compile_descriptor_set(
     enum_domain_inputs = _dedupe_by_name(spec.enum_domains, lambda item: item.name)
     _dedupe_by_name(spec.descriptors, lambda item: item.key)
 
-    selected_descriptors = [_derive_descriptor_flags(descriptor) for descriptor in _select_descriptors(spec, allowlist)]
+    result_counts_by_descriptor: dict[str, int] = {}
+    rematerializable_results_by_descriptor: dict[str, tuple[int, ...]] = {}
+    source_value_indices_by_descriptor: dict[str, tuple[int | None, ...]] = {}
+    projected_descriptors_by_key: dict[str, Descriptor] = {}
+    for descriptor in spec.descriptors:
+        result_count = validation.validate_descriptor_operands(descriptor)
+        result_counts_by_descriptor[descriptor.key] = result_count
+        source_value_indices_by_descriptor[descriptor.key] = validation.descriptor_operand_source_value_indices(
+            descriptor,
+            result_count,
+        )
+        rematerializable_results_by_descriptor[descriptor.key] = validation.validate_descriptor_constraints(descriptor)
+        projected_descriptors_by_key[descriptor.key] = derive_descriptor_projections(descriptor)
+    validation.validate_physical_descriptor_set(spec)
+
+    selected_descriptors = [projected_descriptors_by_key[descriptor.key] for descriptor in _select_descriptors(spec, allowlist)]
     if not selected_descriptors:
         raise ValueError(f"descriptor set '{spec.key}' selected no descriptors")
     validation.validate_descriptor_asm_surface(spec, selected_descriptors)
@@ -768,11 +822,8 @@ def compile_descriptor_set(
     used_resource_names: set[str] = set()
     used_schedule_names: set[str] = set()
     used_enum_domain_names: set[str] = set()
-    rematerializable_results_by_descriptor: dict[str, tuple[int, ...]] = {}
-
     for descriptor in selected_descriptors:
-        result_count = validation.validate_descriptor_operands(descriptor)
-        rematerializable_results_by_descriptor[descriptor.key] = validation.validate_descriptor_constraints(descriptor)
+        result_count = result_counts_by_descriptor[descriptor.key]
         validation.validate_descriptor_encoding_fields(descriptor)
         validation.validate_descriptor_storage_leases(descriptor, result_count)
         if descriptor.encoding_id < 0 or descriptor.encoding_id > LOW_DESCRIPTOR_ENCODING_ID_NONE:
@@ -1008,6 +1059,7 @@ def compile_descriptor_set(
     effect_group_starts: dict[tuple[Effect, ...], int] = {}
     storage_lease_group_starts: dict[tuple[StorageLease, ...], int] = {}
     operands: list[Operand] = []
+    operand_source_value_indices: list[int | None] = []
     operand_alt_starts: list[int] = []
     operand_rematerializable: list[bool] = []
     immediates: list[Immediate] = []
@@ -1063,6 +1115,7 @@ def compile_descriptor_set(
     for descriptor in selected_descriptors:
         operand_start = len(operands)
         rematerializable_result_set = set(rematerializable_results_by_descriptor[descriptor.key])
+        operand_source_value_indices.extend(source_value_indices_by_descriptor[descriptor.key])
         for operand_index, operand in enumerate(descriptor.operands):
             alt_group: tuple[tuple[int | None, tuple[RegClassAltFlag, ...]], ...] = tuple(
                 (
@@ -1134,7 +1187,7 @@ def compile_descriptor_set(
             {
                 "operand_start": operand_start,
                 "operand_count": len(descriptor.operands),
-                "result_count": validation.validate_descriptor_operands(descriptor),
+                "result_count": result_counts_by_descriptor[descriptor.key],
                 "immediate_start": immediate_start,
                 "immediate_count": len(descriptor.immediates),
                 "effect_start": effect_start,
@@ -1178,6 +1231,7 @@ def compile_descriptor_set(
         string_pool=string_pool,
         reg_class_alts=reg_class_alts,
         operands=operands,
+        operand_source_value_indices=operand_source_value_indices,
         operand_alt_starts=operand_alt_starts,
         operand_rematerializable=operand_rematerializable,
         immediates=immediates,

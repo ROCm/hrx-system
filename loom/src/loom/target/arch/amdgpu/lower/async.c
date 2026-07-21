@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "loom/codegen/low/builder.h"
 #include "loom/ir/facts.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/target/arch/amdgpu/lower/candidates/async_gather_candidates.h"

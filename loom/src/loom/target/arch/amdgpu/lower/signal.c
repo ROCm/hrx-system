@@ -161,7 +161,7 @@ static iree_status_t loom_amdgpu_signal_build_m0_const_u32(
     loom_location_id_t location, loom_value_id_t* out_value) {
   *out_value = LOOM_VALUE_ID_INVALID;
   loom_type_t m0_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_make_descriptor_implicit_resource_type(
+  IREE_RETURN_IF_ERROR(loom_low_build_descriptor_implicit_resource_type(
       descriptor_set, consumer_descriptor, &m0_type));
   return loom_amdgpu_signal_build_const_u32(
       builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32_M0_IMM,

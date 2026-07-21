@@ -178,92 +178,6 @@ TEST(LowAllocationLiveRangeTest, ChecksBlockObservableOverlap) {
       /*rhs_end_point=*/9));
 }
 
-TEST(LowAllocationLiveRangeTest, MapsOperationProgramPoints) {
-  loom_block_t block = {};
-  loom_op_t first_op = {};
-  loom_op_t second_op = {};
-  block.first_op = &first_op;
-  block.last_op = &second_op;
-  block.op_count = 2;
-  first_op.parent_block = &block;
-  first_op.next_op = &second_op;
-  second_op.parent_block = &block;
-  second_op.prev_op = &first_op;
-
-  const loom_liveness_block_info_t blocks[] = {
-      {
-          /*.block=*/&block,
-          /*.start_point=*/10,
-          /*.end_point=*/12,
-          /*.live_in_values=*/nullptr,
-          /*.live_in_count=*/0,
-          /*.live_out_values=*/nullptr,
-          /*.live_out_count=*/0,
-      },
-  };
-  loom_liveness_analysis_t liveness = Liveness(blocks, IREE_ARRAYSIZE(blocks));
-
-  uint32_t program_point = UINT32_MAX;
-  IREE_ASSERT_OK(loom_low_allocation_live_range_op_program_point(
-      &liveness, &first_op, &program_point));
-  EXPECT_EQ(program_point, 10u);
-  IREE_ASSERT_OK(loom_low_allocation_live_range_op_program_point(
-      &liveness, &second_op, &program_point));
-  EXPECT_EQ(program_point, 11u);
-}
-
-TEST(LowAllocationLiveRangeTest, MapsExplicitOperationProgramPoints) {
-  loom_region_t region = {};
-  loom_block_t block = {};
-  loom_op_t first_op = {};
-  loom_op_t second_op = {};
-  region.block_count = 1;
-  region.blocks = region.inline_blocks;
-  region.inline_blocks[0] = &block;
-  block.parent_region = &region;
-  block.region_index = 0;
-  block.first_op = &first_op;
-  block.last_op = &second_op;
-  block.op_count = 2;
-  first_op.parent_block = &block;
-  first_op.next_op = &second_op;
-  second_op.parent_block = &block;
-  second_op.prev_op = &first_op;
-
-  const loom_liveness_block_info_t blocks[] = {
-      {
-          /*.block=*/&block,
-          /*.start_point=*/20,
-          /*.end_point=*/22,
-          /*.live_in_values=*/nullptr,
-          /*.live_in_count=*/0,
-          /*.live_out_values=*/nullptr,
-          /*.live_out_count=*/0,
-      },
-  };
-  loom_liveness_analysis_t liveness = Liveness(blocks, IREE_ARRAYSIZE(blocks));
-  const loom_op_t* ordered_ops[] = {&second_op, &first_op};
-  const loom_liveness_block_order_t block_orders[] = {
-      {
-          /*.block=*/&block,
-          /*.ops=*/ordered_ops,
-          /*.op_count=*/IREE_ARRAYSIZE(ordered_ops),
-      },
-  };
-  const loom_liveness_order_t order = {
-      /*.blocks=*/block_orders,
-      /*.block_count=*/IREE_ARRAYSIZE(block_orders),
-  };
-
-  uint32_t program_point = UINT32_MAX;
-  IREE_ASSERT_OK(loom_low_allocation_live_range_ordered_op_program_point(
-      &liveness, &region, order, &second_op, &program_point));
-  EXPECT_EQ(program_point, 20u);
-  IREE_ASSERT_OK(loom_low_allocation_live_range_ordered_op_program_point(
-      &liveness, &region, order, &first_op, &program_point));
-  EXPECT_EQ(program_point, 21u);
-}
-
 TEST(LowAllocationLiveRangeTest, IndexesExplicitOperationProgramPoints) {
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(/*block_size=*/4096, iree_allocator_system(),
@@ -302,22 +216,18 @@ TEST(LowAllocationLiveRangeTest, IndexesExplicitOperationProgramPoints) {
   };
   loom_liveness_analysis_t liveness = Liveness(blocks, IREE_ARRAYSIZE(blocks));
   liveness.region = &region;
-  const loom_op_t* ordered_ops[] = {&second_op, &first_op};
-  const loom_liveness_block_order_t block_orders[] = {
-      {
-          /*.block=*/&block,
-          /*.ops=*/ordered_ops,
-          /*.op_count=*/IREE_ARRAYSIZE(ordered_ops),
-      },
+  const loom_liveness_operation_point_t operation_points[] = {
+      {/*.op=*/&second_op, /*.parent_operation_index=*/UINT32_MAX,
+       /*.start_point=*/20},
+      {/*.op=*/&first_op, /*.parent_operation_index=*/UINT32_MAX,
+       /*.start_point=*/21},
   };
-  const loom_liveness_order_t order = {
-      /*.blocks=*/block_orders,
-      /*.block_count=*/IREE_ARRAYSIZE(block_orders),
-  };
+  liveness.operation_points = operation_points;
+  liveness.operation_count = IREE_ARRAYSIZE(operation_points);
 
   loom_low_allocation_op_point_index_t index = {};
-  IREE_ASSERT_OK(loom_low_allocation_op_point_index_initialize(&liveness, order,
-                                                               &arena, &index));
+  IREE_ASSERT_OK(
+      loom_low_allocation_op_point_index_initialize(&liveness, &arena, &index));
 
   uint32_t program_point = UINT32_MAX;
   IREE_ASSERT_OK(loom_low_allocation_op_point_index_lookup(&index, &second_op,
@@ -392,22 +302,20 @@ TEST(LowAllocationLiveRangeTest, IndexesNestedOperationProgramPoints) {
   loom_liveness_analysis_t liveness = Liveness(blocks, IREE_ARRAYSIZE(blocks));
   liveness.region = &root_region;
   liveness.flags = LOOM_LIVENESS_ANALYSIS_FLAG_REGION_TREE;
-  const loom_op_t* ordered_ops[] = {&parent_op.op, &first_op};
-  const loom_liveness_block_order_t block_orders[] = {
-      {
-          /*.block=*/&root_block,
-          /*.ops=*/ordered_ops,
-          /*.op_count=*/IREE_ARRAYSIZE(ordered_ops),
-      },
+  const loom_liveness_operation_point_t operation_points[] = {
+      {/*.op=*/&parent_op.op, /*.parent_operation_index=*/UINT32_MAX,
+       /*.start_point=*/20},
+      {/*.op=*/&child_op, /*.parent_operation_index=*/0,
+       /*.start_point=*/21},
+      {/*.op=*/&first_op, /*.parent_operation_index=*/UINT32_MAX,
+       /*.start_point=*/23},
   };
-  const loom_liveness_order_t order = {
-      /*.blocks=*/block_orders,
-      /*.block_count=*/IREE_ARRAYSIZE(block_orders),
-  };
+  liveness.operation_points = operation_points;
+  liveness.operation_count = IREE_ARRAYSIZE(operation_points);
 
   loom_low_allocation_op_point_index_t index = {};
-  IREE_ASSERT_OK(loom_low_allocation_op_point_index_initialize(&liveness, order,
-                                                               &arena, &index));
+  IREE_ASSERT_OK(
+      loom_low_allocation_op_point_index_initialize(&liveness, &arena, &index));
 
   uint32_t program_point = UINT32_MAX;
   IREE_ASSERT_OK(loom_low_allocation_op_point_index_lookup(

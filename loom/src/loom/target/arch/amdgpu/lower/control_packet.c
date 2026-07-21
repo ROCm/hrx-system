@@ -105,7 +105,7 @@ static iree_status_t loom_amdgpu_control_packet_build_m0_const_u32(
   (void)opcode_id;
 
   loom_type_t m0_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_make_descriptor_implicit_resource_type(
+  IREE_RETURN_IF_ERROR(loom_low_build_descriptor_implicit_resource_type(
       descriptor_set, consumer_descriptor, &m0_type));
   return loom_amdgpu_control_packet_build_const_u32(
       builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32_M0_IMM,
