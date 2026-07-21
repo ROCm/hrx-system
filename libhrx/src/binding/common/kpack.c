@@ -883,15 +883,18 @@ iree_status_t iree_hal_streaming_kpack_expand_gfxarch(
   return iree_ok_status();
 }
 
-// Lexically normalizes "." / ".." components of |path| into |out|. Preserves a
-// leading '/'. No filesystem access.
+// Simplifies "." components, duplicate '/' separators, and a trailing '/' of
+// |path| into |out|, preserving a leading '/'. These are identity-preserving
+// under POSIX pathname resolution regardless of any preceding symlink, so
+// collapsing them names the same file. ".." is copied literally, not collapsed:
+// its meaning depends on what the preceding component resolves to, so folding
+// "dir/.." away here would name a different file than the kernel resolves at
+// open time whenever "dir" is a symlink. It is left for the kernel to resolve.
+// No filesystem access.
 static iree_status_t kpack_normalize_path(iree_string_view_t path, char* out,
                                           iree_host_size_t out_capacity) {
   const bool is_absolute = path.size > 0 && path.data[0] == '/';
   iree_host_size_t out_len = 0;
-  // Offsets into |out| where each retained, poppable component begins.
-  iree_host_size_t comp_start[256];
-  iree_host_size_t comp_count = 0;
 
 #define KPACK_PUT(ch)                                            \
   do {                                                           \
@@ -917,30 +920,13 @@ static iree_status_t kpack_normalize_path(iree_string_view_t path, char* out,
     if (iree_string_view_equal(comp, IREE_SV("."))) {
       continue;
     }
-    if (iree_string_view_equal(comp, IREE_SV(".."))) {
-      if (comp_count > 0) {
-        out_len = comp_start[--comp_count];  // drop last component + its '/'
-      } else if (!is_absolute) {
-        // Cannot ascend above a relative root; keep the "..".
-        KPACK_PUT('.');
-        KPACK_PUT('.');
-        KPACK_PUT('/');
-      }
-      // Absolute root: ".." stays at root (ignored).
-      continue;
-    }
-    if (comp_count >= IREE_ARRAYSIZE(comp_start)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "kpack path has too many components");
-    }
-    comp_start[comp_count++] = out_len;
     for (iree_host_size_t k = 0; k < comp.size; ++k) KPACK_PUT(comp.data[k]);
     KPACK_PUT('/');
   }
 
   // Strip a single trailing '/' (but keep a lone root "/").
   if (out_len > 1 && out[out_len - 1] == '/') --out_len;
-  if (out_len == 0) KPACK_PUT('.');  // fully-cancelled relative path
+  if (out_len == 0) KPACK_PUT('.');  // path named only "." components
   out[out_len] = '\0';
 #undef KPACK_PUT
   return iree_ok_status();

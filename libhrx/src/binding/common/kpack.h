@@ -195,17 +195,18 @@ iree_status_t iree_hal_streaming_kpack_archive_get_kernel(
 // Path resolution and mapping queries
 //===----------------------------------------------------------------------===//
 
-// Resolves |relative| against the directory containing |base_path| with lexical
-// "." / ".." normalization (no symlink resolution / filesystem access). An
-// absolute |relative| is normalized and returned as-is. Writes a NUL-terminated
-// path into |out|.
+// Resolves |relative| against the directory containing |base_path|, simplifying
+// "." components, duplicate '/' separators, and a trailing '/' (a leading '/'
+// is preserved). ".." is left in place: it does not commute with symlink
+// resolution, so collapsing it here could name a different file than the kernel
+// resolves at open time. No symlink resolution or filesystem access. An
+// absolute |relative| is normalized the same way and returned without joining
+// |base_path|. Writes a NUL-terminated path into |out|.
 //
 // Fails with IREE_STATUS_OUT_OF_RANGE when a path does not fit the buffer
 // holding it: the normalized result and its NUL terminator against
 // |out_capacity|, or |base_path|'s directory joined with |relative| against the
-// buffer that join is staged in. Also IREE_STATUS_OUT_OF_RANGE when the
-// normalized path retains more components than the normalizer tracks, since
-// each is a ".." target and dropping one would resolve the wrong path.
+// buffer that join is staged in.
 iree_status_t iree_hal_streaming_kpack_resolve_relative_path(
     iree_string_view_t base_path, iree_string_view_t relative, char* out,
     iree_host_size_t out_capacity);
@@ -296,7 +297,7 @@ iree_status_t iree_hal_streaming_kpack_query_mapping(
 //     that carries more subsettable ISA feature flags than the expansion holds
 //     or whose processor does not fit a target candidate buffer, a backing path
 //     longer than the resolver's path buffer, or a search path that overruns
-//     that buffer or its component limit once formed and expanded.
+//     that buffer once formed and expanded.
 //   IREE_STATUS_UNAVAILABLE when ROCM_KPACK_DISABLE is set.
 //   IREE_STATUS_NOT_FOUND when |hipk_metadata| lies in no readable mapping, or
 //     when no reachable archive holds a code object matching |target_archs|.

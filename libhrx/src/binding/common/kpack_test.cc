@@ -839,21 +839,55 @@ std::string ResolveRel(const char* base, const char* rel) {
 }
 
 TEST(KpackPath, ResolveSiblingArchive) {
+  // ".." is preserved for the kernel to resolve; only "." and separators are
+  // simplified. "/usr/lib/.." physically names "/usr", so this reaches the
+  // sibling .kpack directory when no symlink intervenes.
   EXPECT_EQ(ResolveRel("/usr/lib/libfoo.so", "../.kpack/foo.kpack"),
-            "/usr/.kpack/foo.kpack");
+            "/usr/lib/../.kpack/foo.kpack");
 }
 TEST(KpackPath, ResolveSameDir) {
   EXPECT_EQ(ResolveRel("/opt/rocm/lib/libhip.so", "foo.kpack"),
             "/opt/rocm/lib/foo.kpack");
 }
-TEST(KpackPath, ResolveCollapsesDotSegments) {
-  EXPECT_EQ(ResolveRel("/a/b/c.so", "./d/../e.kpack"), "/a/b/e.kpack");
+TEST(KpackPath, ResolveCollapsesDotKeepsDotDot) {
+  // "." collapses; ".." is preserved (collapsing it would not commute with a
+  // symlink at "d").
+  EXPECT_EQ(ResolveRel("/a/b/c.so", "./d/../e.kpack"), "/a/b/d/../e.kpack");
 }
 TEST(KpackPath, ResolveAbsoluteRelativePassthrough) {
   EXPECT_EQ(ResolveRel("/a/b/c.so", "/abs/d.kpack"), "/abs/d.kpack");
 }
-TEST(KpackPath, ResolveAbsoluteWithDotDot) {
-  EXPECT_EQ(ResolveRel("/a/b/c.so", "/abs/x/../d.kpack"), "/abs/d.kpack");
+TEST(KpackPath, ResolveAbsolutePreservesDotDot) {
+  EXPECT_EQ(ResolveRel("/a/b/c.so", "/abs/x/../d.kpack"), "/abs/x/../d.kpack");
+}
+// An absolute spelling whose ".." follows a symlink still names the file the
+// caller meant, because ".." is left for the kernel: realpath of the resolved
+// spelling equals realpath of the archive it targets. A lexical ".." collapse
+// would instead yield "base/sub/real/a.kpack", which does not exist.
+TEST(KpackPath, ResolvePreservesDotDotAcrossSymlink) {
+  const std::string base =
+      std::string(::testing::TempDir()) + "/kpack_path_symlink";
+  const std::string real = base + "/real";
+  const std::string sub = base + "/sub";
+  ASSERT_TRUE(EnsureDirectory(base));
+  ASSERT_TRUE(EnsureDirectory(real));
+  ASSERT_TRUE(EnsureDirectory(sub));
+  WriteFile(real + "/a.kpack", MakeMinimalAmdgpuElf());
+  const std::string link = sub + "/link";
+  unlink(link.c_str());  // may survive an earlier run
+  ASSERT_EQ(symlink(real.c_str(), link.c_str()), 0);
+
+  const std::string spelling = link + "/../real/a.kpack";
+  std::string resolved = ResolveRel("/ignored", spelling.c_str());
+
+  char* real_resolved = realpath(resolved.c_str(), nullptr);
+  char* real_target = realpath((real + "/a.kpack").c_str(), nullptr);
+  ASSERT_NE(real_resolved, nullptr)
+      << "resolved spelling names nothing: " << resolved;
+  ASSERT_NE(real_target, nullptr);
+  EXPECT_STREQ(real_resolved, real_target);
+  free(real_resolved);
+  free(real_target);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1571,6 +1605,41 @@ TEST(KpackResolve, SymlinkedParentSpellingResolves) {
   FreeBuffer(out);
 }
 
+// The embedded search path flows through resolve_relative_path rather than the
+// ROCM_KPACK_PATH override, so an embedded spelling whose ".." follows a
+// symlink must reach the real archive. Collapsing ".." lexically would name a
+// nonexistent file and the resolve would miss. The spelling is absolute because
+// heap-allocated test metadata has no backing file, so a relative embedded path
+// is rejected before resolution; an absolute one still traverses the same
+// normalize as a relative path would.
+TEST(KpackResolve, EmbeddedSymlinkedParentSpellingResolves) {
+  auto elf = MakeMinimalAmdgpuElf();
+  auto archive = KpackBuilder(false).Add("lib/x.so#0", "gfx900", elf).Build();
+  const std::string base =
+      std::string(::testing::TempDir()) + "/kpack_embedded_symlink";
+  const std::string real = base + "/real";
+  const std::string sub = base + "/sub";
+  ASSERT_TRUE(EnsureDirectory(base));
+  ASSERT_TRUE(EnsureDirectory(real));
+  ASSERT_TRUE(EnsureDirectory(sub));
+  WriteFile(real + "/a.kpack", archive);
+  const std::string link = sub + "/link";
+  unlink(link.c_str());  // may survive an earlier run
+  ASSERT_EQ(symlink(real.c_str(), link.c_str()), 0);
+
+  // "sub/link/.." is |base|, so this names the archive; collapsing it lexically
+  // yields "sub/real/a.kpack", where nothing exists.
+  const std::string spelling = link + "/../real/a.kpack";
+  ASSERT_EQ(access(spelling.c_str(), R_OK), 0);
+  auto metadata = MakeMetadata("lib/x.so", {spelling});
+
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  IREE_ASSERT_OK(Resolve(metadata, 0, {"gfx900"}, &out, &out_size));
+  EXPECT_EQ(out_size, elf.size());
+  FreeBuffer(out);
+}
+
 // A directory on the search path names something, so it is reported rather than
 // skipped. Mapping a directory fails with the same NOT_FOUND that a path naming
 // nothing produces, so the code alone cannot carry the diagnosis and the
@@ -2119,11 +2188,22 @@ TEST(KpackResolve, LexicallyCollidingSpellingsOfDifferentFilesAreBothSearched) {
   unlink(link.c_str());  // may survive an earlier run
   ASSERT_EQ(symlink((directory_a + "/sub").c_str(), link.c_str()), 0);
 
-  // "B/link/.." is "A", so this second spelling names "A/x.kpack" while
-  // collapsing to "B/x.kpack" — the first spelling exactly.
+  // "B/link/.." is "A", so this second spelling physically names "A/x.kpack".
+  // A naive lexical ".." collapse would fold it to "B/x.kpack" — the first
+  // spelling exactly — yet they are distinct strings naming different files.
+  // The resolver preserves "..", so dedup on the verbatim spelling opens and
+  // searches both; folding |spelling_a| onto |spelling_b| would lose A's
+  // answer.
   const std::string spelling_b = directory_b + "/x.kpack";
   const std::string spelling_a = link + "/../x.kpack";
-  ASSERT_EQ(ResolveRel("/ignored", spelling_a.c_str()), spelling_b);
+  ASSERT_NE(spelling_a, spelling_b);
+  char* real_a = realpath(spelling_a.c_str(), nullptr);
+  char* real_match = realpath((directory_a + "/x.kpack").c_str(), nullptr);
+  ASSERT_NE(real_a, nullptr);
+  ASSERT_NE(real_match, nullptr);
+  EXPECT_STREQ(real_a, real_match);
+  free(real_a);
+  free(real_match);
 
   auto metadata = MakeMetadata("lib/x.so", {"/nonexistent/none.kpack"});
   setenv("ROCM_KPACK_PATH", JoinPathList({spelling_b, spelling_a}).c_str(), 1);
