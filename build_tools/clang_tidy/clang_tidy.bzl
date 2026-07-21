@@ -17,6 +17,13 @@ load(
     "iree_cc_source_files",
 )
 
+# clang-tidy always parses through Clang even when Bazel's configured compile
+# action uses GCC. Keep target semantic flags intact but omit GCC driver flags
+# that Clang rejects before it can analyze the source.
+_CLANG_TIDY_UNSUPPORTED_COMPILE_ARGS = {
+    "-fno-canonical-system-headers": None,
+}
+
 IreeClangTidyInfo = provider(
     doc = "clang-tidy artifacts collected from configured C/C++ targets.",
     fields = {
@@ -125,7 +132,11 @@ def _run_clang_tidy_action(ctx, target, cc_toolchain, feature_configuration, sou
     else:
         args.add("--warnings-as-errors=%s" % ctx.attr._warnings_as_errors)
     args.add("--")
-    args.add_all(compile_command.compile_args)
+    args.add_all([
+        arg
+        for arg in compile_command.compile_args
+        if arg not in _CLANG_TIDY_UNSUPPORTED_COMPILE_ARGS
+    ])
 
     compilation_context = target[CcInfo].compilation_context
     inputs = depset(
