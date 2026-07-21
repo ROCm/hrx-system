@@ -300,6 +300,7 @@ def _s_mul_i32_rhs_inline_overlay() -> AmdgpuDescriptorOverlay:
         ),
         asm_forms=_asm(
             mnemonic="s_mul_i32_rhs_inline",
+            native_assembly_mnemonic="s_mul_i32",
             results=("dst",),
             operands=("lhs",),
             immediates=("imm32",),
@@ -435,6 +436,7 @@ def _s_binary_u32_rhs_inline_overlay(
         implicit_operands=(_SCC_CLOBBER_OUTPUT,),
         asm_forms=_asm(
             mnemonic=f"{mnemonic}_rhs_inline",
+            native_assembly_mnemonic=mnemonic,
             results=("dst",),
             operands=("lhs",),
             immediates=("imm32",),
