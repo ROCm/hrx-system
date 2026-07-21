@@ -1534,7 +1534,7 @@ low.func.def target(@gfx11_target) @gfx11_salu_shift_inline(%value: reg<amdgpu.s
 }
 
 // ----
-  s_lshl_b32_rhs_inline s0, s0, 4
+  s_lshl_b32 s0, s0, 4
   s_endpgm
 
 // ====
@@ -1547,7 +1547,7 @@ low.func.def target(@gfx11_target) @gfx11_salu_add_inline(%position: reg<amdgpu.
 }
 
 // ----
-  s_add_u32_rhs_inline s0, s0, 3
+  s_add_u32 s0, s0, 3
   s_endpgm
 
 // ====
@@ -1560,7 +1560,59 @@ low.func.def target(@gfx11_target) @gfx11_salu_mul_inline(%value: reg<amdgpu.sgp
 }
 
 // ----
-  s_mul_i32_rhs_inline s0, s0, 12
+  s_mul_i32 s0, s0, 12
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_salu_sub_inline waits=none
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_salu_sub_inline(%value: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+  %difference = s_sub_u32_rhs_inline %value, 7
+  return
+}
+
+// ----
+  s_sub_u32 s0, s0, 7
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_salu_and_inline waits=none
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_salu_and_inline(%value: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+  %masked = s_and_b32_rhs_inline %value, 15
+  return
+}
+
+// ----
+  s_and_b32 s0, s0, 15
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_salu_lshr_inline waits=none
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_salu_lshr_inline(%value: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+  %shifted = s_lshr_b32_rhs_inline %value, 8
+  return
+}
+
+// ----
+  s_lshr_b32 s0, s0, 8
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_salu_ashr_inline waits=none
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_salu_ashr_inline(%value: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+  %shifted = s_ashr_i32_rhs_inline %value, 31
+  return
+}
+
+// ----
+  s_ashr_i32 s0, s0, 31
   s_endpgm
 
 // ====
