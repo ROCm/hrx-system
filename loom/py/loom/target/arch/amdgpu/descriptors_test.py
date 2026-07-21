@@ -2602,6 +2602,26 @@ def test_gfx1250_packed_bf16_descriptors_are_arch_scoped() -> None:
     assert fma_descriptor.fixed_encoding_fields == (("OPSEL_HI", 0x7),)
 
 
+def test_gfx1250_packed_fp8_to_f16_sources_use_low_half_window() -> None:
+    descriptors = {
+        descriptor.descriptor_key: descriptor for descriptor in _gfx1250_core_overlays()
+    }
+    for descriptor_key in (
+        "amdgpu.v_cvt_pk_f16_fp8.ocp",
+        "amdgpu.v_cvt_pk_f16_bf8.ocp",
+    ):
+        descriptor = descriptors[descriptor_key]
+        assert descriptor.encoding_name == "ENC_VOP1_VGPR"
+        source = descriptor.operands[1]
+        assert source.xml_field_name == "VSRC0"
+        assert source.descriptor_operand.register_part == _REG_PART_VGPR_LOW16
+        assert (
+            source.descriptor_operand.address_map_kind
+            is OperandAddressMapKind.LOW_SUBSET
+        )
+        assert source.descriptor_operand.addressable_unit_count == 128
+
+
 def test_packed_binary_descriptors_pin_lane_container_widths() -> None:
     packed_keys = (
         "amdgpu.v_pk_mul_f16",

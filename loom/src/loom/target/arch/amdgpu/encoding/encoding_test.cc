@@ -267,6 +267,68 @@ TEST(AmdgpuEncodingTest, ReportsGeneratedTableFormatSupport) {
       nullptr, LOOM_AMDGPU_ENCODING_FORMAT_VOP1));
 }
 
+TEST(AmdgpuEncodingTest, PacksGfx125XPackedFp8Vop1Words) {
+  LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
+      table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X,
+      "amdgpu.rdna4.gfx125x.core");
+  struct {
+    uint16_t opcode;
+    uint16_t destination;
+    uint16_t source;
+    uint32_t expected_word;
+  } cases[] = {
+      {0xEB, 0, 1, UINT32_C(0x7e00eb01)},
+      {0xEB, 126, 127, UINT32_C(0x7efceb7f)},
+      {0xED, 4, 5, UINT32_C(0x7e08ed05)},
+      {0xED, 127, 126, UINT32_C(0x7efeed7e)},
+  };
+  for (const auto& test_case : cases) {
+    const loom_amdgpu_encoding_field_value_t field_values[] = {
+        {
+            /*.field_id=*/LOOM_AMDGPU_ENCODING_FIELD_VDST,
+            /*.reserved=*/{},
+            /*.value=*/test_case.destination,
+        },
+        {
+            /*.field_id=*/LOOM_AMDGPU_ENCODING_FIELD_VSRC0,
+            /*.reserved=*/{},
+            /*.value=*/test_case.source,
+        },
+    };
+    loom_amdgpu_encoding_packet_t packet = {};
+    IREE_ASSERT_OK(loom_amdgpu_encoding_pack(
+        table, LOOM_AMDGPU_ENCODING_FORMAT_VOP1_VGPR, test_case.opcode,
+        field_values, IREE_ARRAYSIZE(field_values), &packet));
+    EXPECT_EQ(packet.word_count, 1u);
+    EXPECT_EQ(packet.bit_count, 32u);
+    EXPECT_EQ(packet.words[0], test_case.expected_word);
+  }
+}
+
+TEST(AmdgpuEncodingTest, RejectsGfx125XPackedFp8HighSource) {
+  LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
+      table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X,
+      "amdgpu.rdna4.gfx125x.core");
+  const loom_amdgpu_encoding_field_value_t field_values[] = {
+      {
+          /*.field_id=*/LOOM_AMDGPU_ENCODING_FIELD_VDST,
+          /*.reserved=*/{},
+          /*.value=*/0,
+      },
+      {
+          /*.field_id=*/LOOM_AMDGPU_ENCODING_FIELD_VSRC0,
+          /*.reserved=*/{},
+          /*.value=*/128,
+      },
+  };
+  loom_amdgpu_encoding_packet_t packet = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      loom_amdgpu_encoding_pack(table, LOOM_AMDGPU_ENCODING_FORMAT_VOP1_VGPR,
+                                /*opcode=*/0xEB, field_values,
+                                IREE_ARRAYSIZE(field_values), &packet));
+}
+
 TEST(AmdgpuEncodingTest, NamesVopdFormats) {
   EXPECT_TRUE(iree_string_view_equal(
       loom_amdgpu_encoding_format_name(LOOM_AMDGPU_ENCODING_FORMAT_VOPDXY),
@@ -309,6 +371,9 @@ TEST(AmdgpuEncodingTest, NamesScalarLiteralFormats) {
 }
 
 TEST(AmdgpuEncodingTest, NamesGfx1250SupplementalFormats) {
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_amdgpu_encoding_format_name(LOOM_AMDGPU_ENCODING_FORMAT_VOP1_VGPR),
+      IREE_SV("vop1_vgpr")));
   EXPECT_TRUE(
       iree_string_view_equal(loom_amdgpu_encoding_format_name(
                                  LOOM_AMDGPU_ENCODING_FORMAT_VOP3P_LITERAL),

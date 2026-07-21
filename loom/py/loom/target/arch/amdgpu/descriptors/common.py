@@ -1385,13 +1385,20 @@ def _vgpr_result(
 
 
 def _vgpr_operand(
-    field_name: str, *, units: int = 1, register_part: str | None = None
+    field_name: str,
+    *,
+    units: int = 1,
+    register_part: str | None = None,
+    address_map_kind: OperandAddressMapKind = OperandAddressMapKind.DIRECT,
+    addressable_unit_count: int = 0,
 ) -> Operand:
     return Operand(
         field_name,
         OperandRole.OPERAND,
         _VGPR_ALT,
         unit_count=units,
+        address_map_kind=address_map_kind,
+        addressable_unit_count=addressable_unit_count,
         register_part=register_part,
     )
 

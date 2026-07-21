@@ -314,5 +314,35 @@ TEST_F(AmdgpuEncodingTest, EncodesGfx1250ClusterAsyncPacket) {
   }
 }
 
+TEST_F(AmdgpuEncodingTest, EncodesGfx1250PackedFp8Conversions) {
+  static const char kFunctionSource[] =
+      "low.func.def target(@gfx_target) @convert_packed_fp8("
+      "%fp8: reg<amdgpu.vgpr>, %bf8: reg<amdgpu.vgpr>) "
+      "asm<amdgpu.rdna4.gfx125x.core> {\n"
+      "  %fp16 = v_cvt_pk_f16_fp8 %fp8\n"
+      "  %bf16 = v_cvt_pk_f16_bf8 %bf8\n"
+      "  return\n"
+      "}\n";
+
+  TestArena arena;
+  loom_amdgpu_encoded_instruction_stream_t stream = {};
+  IREE_ASSERT_OK(
+      EncodeFunction("gfx1250", kFunctionSource, arena.arena(), &stream));
+
+  static const uint32_t kExpectedWords[] = {
+      0x7e00eb00u,
+      0x7e00ed01u,
+      0xbfb00000u,
+  };
+  EXPECT_EQ(stream.instruction_count, 3u);
+  EXPECT_EQ(stream.native_insertion_count, 0u);
+  ASSERT_EQ(stream.text.data_length, sizeof(kExpectedWords));
+  for (size_t i = 0; i < IREE_ARRAYSIZE(kExpectedWords); ++i) {
+    EXPECT_EQ(LoadLeU32(stream.text.data, i * sizeof(uint32_t)),
+              kExpectedWords[i])
+        << "word " << i;
+  }
+}
+
 }  // namespace
 }  // namespace loom

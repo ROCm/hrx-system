@@ -247,6 +247,8 @@ iree_string_view_t loom_amdgpu_encoding_format_name(uint16_t encoding_format) {
       return IREE_SV("vscratch");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOP1:
       return IREE_SV("vop1");
+    case LOOM_AMDGPU_ENCODING_FORMAT_VOP1_VGPR:
+      return IREE_SV("vop1_vgpr");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOP1_LITERAL:
       return IREE_SV("vop1_literal");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOP1_DPP:

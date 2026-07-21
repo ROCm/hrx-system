@@ -132,6 +132,25 @@ def _rdna4_vop3px2_supplemental_encoding() -> AmdgpuIsaEncoding:
     )
 
 
+def _gfx125x_vop1_vgpr_supplemental_encoding() -> AmdgpuIsaEncoding:
+    # VSRC0[7] selects the high 16-bit half of v[0:127], not v[128:255].
+    # Loom allocates packed 16-bit values in the low half of a whole VGPR, so
+    # this supported form fixes the selector to zero and exposes the register
+    # index as a seven-bit field.
+    return AmdgpuIsaEncoding(
+        name="ENC_VOP1_VGPR",
+        order=0,
+        bit_count=32,
+        identifier_mask=(0x7F << 25) | (1 << 16) | (1 << 7),
+        identifier_values=(0x3F << 25,),
+        fields=(
+            _field("OP", _bit_range(8, 8)),
+            _field("VSRC0", _bit_range(0, 7)),
+            _field("VDST", _bit_range(17, 8)),
+        ),
+    )
+
+
 def _supplemental_fields_by_encoding(
     target: str,
 ) -> dict[str, tuple[AmdgpuIsaEncodingField, ...]]:
@@ -145,6 +164,7 @@ def _supplemental_fields_by_encoding(
 
 _SUPPLEMENTAL_ENCODING_BUILDERS = {
     "ENC_VOP3PX2": _rdna4_vop3px2_supplemental_encoding,
+    "ENC_VOP1_VGPR": _gfx125x_vop1_vgpr_supplemental_encoding,
 }
 
 
