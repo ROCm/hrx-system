@@ -92,6 +92,7 @@ iree_cc_library(
     ::defs
     iree::base
     iree::base::internal
+    iree::base::threading
   PUBLIC
 )
 endif()

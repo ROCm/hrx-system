@@ -97,6 +97,7 @@ iree_runtime_cc_library(
         ":defs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
     ],
 )
 
