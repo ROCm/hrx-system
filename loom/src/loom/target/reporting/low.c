@@ -564,9 +564,6 @@ iree_status_t loom_target_compile_report_record_low_lowering(
             source_row->issued_write_unknown_width_count,
         .dynamic_stride_bytes = source_row->dynamic_stride_bytes,
         .vector_lane_stride_bytes = source_row->vector_lane_stride_bytes,
-        .bank_stride_words = source_row->bank_stride_words,
-        .bank_conflict_degree = source_row->bank_conflict_degree,
-        .bank_conflict_kind = source_row->bank_conflict_kind,
         .storage_element_format = source_row->storage_element_format,
         .storage_scale_format = source_row->storage_scale_format,
         .storage_secondary_scale_format =

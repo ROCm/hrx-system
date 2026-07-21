@@ -1265,12 +1265,6 @@ typedef struct loom_target_compile_report_source_low_memory_row_t {
   uint32_t dynamic_stride_bytes;
   // Byte stride between adjacent source vector lanes.
   uint32_t vector_lane_stride_bytes;
-  // Distance between adjacent workitems in target bank words.
-  uint32_t bank_stride_words;
-  // Estimated bank conflict degree across one bank cycle, or zero if unknown.
-  uint32_t bank_conflict_degree;
-  // Stable target-owned bank-conflict classification key.
-  iree_string_view_t bank_conflict_kind;
   // Logical storage element format recovered from source encoding facts.
   iree_string_view_t storage_element_format;
   // Primary scale format recovered from source encoding facts.

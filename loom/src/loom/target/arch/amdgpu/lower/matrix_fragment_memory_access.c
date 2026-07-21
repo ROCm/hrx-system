@@ -175,9 +175,6 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
       .issued_write_unknown_width_count = issued.write_unknown_width_count,
       .dynamic_stride_bytes = plan->address_layout.linear_lane_byte_stride,
       .vector_lane_stride_bytes = plan->element_byte_count,
-      .bank_stride_words = 0,
-      .bank_conflict_degree = 0,
-      .bank_conflict_kind = iree_string_view_empty(),
   };
   loom_amdgpu_memory_report_row_populate_storage_schema(context, &plan->source,
                                                         &row);

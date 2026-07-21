@@ -2,7 +2,7 @@
 
 amdgpu.target<gfx1100> @target
 
-kernel.def target(@target) @static_lds_bank_pattern_unknown() {
+kernel.def target(@target) @static_lds_address_fields() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch() {
@@ -11,13 +11,13 @@ kernel.def target(@target) @static_lds_bank_pattern_unknown() {
   %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
   %scratch_view = buffer.view %scratch[%zero] : buffer -> view<1xi32, #dense>
   %one = vector.constant 1 : vector<1xi32>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="none", fallback_reason="dynamic_term_count", static_offset_bytes="0", dynamic_stride_bytes="0", bank_conflict_kind="bank-pattern-unknown"}
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="none", fallback_reason="dynamic_term_count", static_offset_bytes="0", dynamic_stride_bytes="0"}
   vector.store %one, %scratch_view[0] : vector<1xi32>, view<1xi32, #dense>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @static_lds_bank_pattern_unknown() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @static_lds_address_fields() asm<amdgpu.rdna3.core> {
   %6 = storage {byte_alignment = 4, byte_length = 4} : low.storage<workgroup>
   %one = v_mov_b32 1
   %9 = v_mov_b32 0
@@ -40,11 +40,11 @@ kernel.def target(@target) @addtid_byte_stride_selected_reason_fields() {
   %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi8, #dense>
   %one = vector.constant 1 : vector<4xi8>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_addtid_b32", address_form="ds_addtid", dynamic_term_kind="vaddr", fallback_reason="selected", static_offset_bytes="0", dynamic_stride_bytes="1", bank_conflict_kind="subword-bank-conflict-risk"}
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_addtid_b32", address_form="ds_addtid", dynamic_term_kind="vaddr", fallback_reason="selected", static_offset_bytes="0", dynamic_stride_bytes="1"}
   vector.store %one, %scratch_view[%lane] : vector<4xi8>, view<64xi8, #dense>
-  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_addtid_b32", address_form="ds_addtid", dynamic_term_kind="vaddr", fallback_reason="selected", static_offset_bytes="0", dynamic_stride_bytes="1", bank_conflict_kind="subword-bank-conflict-risk"}
+  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_addtid_b32", address_form="ds_addtid", dynamic_term_kind="vaddr", fallback_reason="selected", static_offset_bytes="0", dynamic_stride_bytes="1"}
   %loaded = vector.load %scratch_view[%lane] : view<64xi8, #dense> -> vector<4xi8>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_addtid_b32", address_form="ds_addtid", dynamic_term_kind="vaddr", fallback_reason="selected", static_offset_bytes="0", dynamic_stride_bytes="1", bank_conflict_kind="subword-bank-conflict-risk"}
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_addtid_b32", address_form="ds_addtid", dynamic_term_kind="vaddr", fallback_reason="selected", static_offset_bytes="0", dynamic_stride_bytes="1"}
   vector.store %loaded, %scratch_view[%lane] : vector<4xi8>, view<64xi8, #dense>
   kernel.return
 }
@@ -77,11 +77,11 @@ kernel.def target(@target) @addtid_element_stride_reason_fields() {
   %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xi32, #dense>
   %one = vector.constant 1 : vector<1xi32>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="dynamic_stride_bytes", static_offset_bytes="0", dynamic_stride_bytes="4", bank_conflict_kind="bank-conflict-free"}
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="dynamic_stride_bytes", static_offset_bytes="0", dynamic_stride_bytes="4"}
   vector.store %one, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
-  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="dynamic_stride_bytes", static_offset_bytes="0", dynamic_stride_bytes="4", bank_conflict_kind="bank-conflict-free"}
+  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="dynamic_stride_bytes", static_offset_bytes="0", dynamic_stride_bytes="4"}
   %loaded = vector.load %scratch_view[%lane] : view<32xi32, #dense> -> vector<1xi32>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="dynamic_stride_bytes", static_offset_bytes="0", dynamic_stride_bytes="4", bank_conflict_kind="bank-conflict-free"}
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="dynamic_stride_bytes", static_offset_bytes="0", dynamic_stride_bytes="4"}
   vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
   kernel.return
 }
@@ -113,11 +113,11 @@ kernel.def target(@target) @addtid_cross_wave_reason_fields() {
   %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
   %one = vector.constant 1 : vector<1xi32>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", static_offset_bytes="0", dynamic_stride_bytes="4", bank_conflict_kind="bank-conflict-free"}
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", static_offset_bytes="0", dynamic_stride_bytes="4"}
   vector.store %one, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
-  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", static_offset_bytes="0", dynamic_stride_bytes="4", bank_conflict_kind="bank-conflict-free"}
+  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", static_offset_bytes="0", dynamic_stride_bytes="4"}
   %loaded = vector.load %scratch_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", static_offset_bytes="0", dynamic_stride_bytes="4", bank_conflict_kind="bank-conflict-free"}
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", static_offset_bytes="0", dynamic_stride_bytes="4"}
   vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
   kernel.return
 }
@@ -152,13 +152,13 @@ kernel.def target(@target) @addtid_dynamic_stride_reason_fields() {
   %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
   %one = vector.constant 1 : vector<1xi32>
   %other = vector.constant 2 : vector<1xi32>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="dynamic_stride_bytes", static_offset_bytes="0", dynamic_stride_bytes="4", bank_conflict_kind="bank-conflict-free"}
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="dynamic_stride_bytes", static_offset_bytes="0", dynamic_stride_bytes="4"}
   vector.store %one, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="dynamic_stride_bytes", static_offset_bytes="0", dynamic_stride_bytes="8", bank_conflict_kind="bank-conflict-risk"}
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="dynamic_stride_bytes", static_offset_bytes="0", dynamic_stride_bytes="8"}
   vector.store %other, %scratch_view[%scaled_lane] : vector<1xi32>, view<64xi32, #dense>
-  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="dynamic_stride_bytes", static_offset_bytes="0", dynamic_stride_bytes="4", bank_conflict_kind="bank-conflict-free"}
+  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="dynamic_stride_bytes", static_offset_bytes="0", dynamic_stride_bytes="4"}
   %loaded = vector.load %scratch_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="dynamic_stride_bytes", static_offset_bytes="0", dynamic_stride_bytes="8", bank_conflict_kind="bank-conflict-risk"}
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="dynamic_stride_bytes", static_offset_bytes="0", dynamic_stride_bytes="8"}
   vector.store %loaded, %scratch_view[%scaled_lane] : vector<1xi32>, view<64xi32, #dense>
   kernel.return
 }
@@ -193,7 +193,7 @@ kernel.def target(@target) @addtid_payload_width_reason_fields() {
   %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32x4xi32, #dense>
   %one = vector.constant 1 : vector<4xi32>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="payload_width", static_offset_bytes="0", dynamic_stride_bytes="16", bank_conflict_kind="bank-conflict-risk"}
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="payload_width", static_offset_bytes="0", dynamic_stride_bytes="16"}
   vector.store %one, %scratch_view[%lane, 0] : vector<4xi32>, view<32x4xi32, #dense>
   kernel.return
 }
@@ -240,7 +240,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 amdgpu.target<gfx1100> @target
 
-kernel.def target(@target) @multi_term_lds_bank_pattern_unknown() {
+kernel.def target(@target) @multi_term_lds_address_fields() {
   %c1 = index.constant 1 : index
   %c4 = index.constant 4 : index
   %c8 = index.constant 8 : index
@@ -253,13 +253,13 @@ kernel.def target(@target) @multi_term_lds_bank_pattern_unknown() {
   %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch_view = buffer.view %scratch[%zero] : buffer -> view<8x4xi32, #dense>
   %one = vector.constant 1 : vector<1xi32>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="multiple", fallback_reason="multidimensional_workgroup", static_offset_bytes="0", dynamic_stride_bytes="0", bank_conflict_kind="bank-pattern-unknown"}
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="multiple", fallback_reason="multidimensional_workgroup", static_offset_bytes="0", dynamic_stride_bytes="0"}
   vector.store %one, %scratch_view[%lane_x, %lane_y] : vector<1xi32>, view<8x4xi32, #dense>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @multi_term_lds_bank_pattern_unknown() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @multi_term_lds_address_fields() asm<amdgpu.rdna3.core> {
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
   %lane_x = v_and_b32_lit %packed_tid, 1023
   %12 = v_lshrrev_b32_src0_inline %packed_tid, 10
@@ -277,7 +277,7 @@ low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) 
 
 amdgpu.target<gfx1100> @target
 
-kernel.def target(@target) @lds_read2_write2_structured_bank_fields() {
+kernel.def target(@target) @lds_read2_write2_structured_fields() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
@@ -290,16 +290,16 @@ kernel.def target(@target) @lds_read2_write2_structured_bank_fields() {
   %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64x4xi32, %layout>
   %output_view = buffer.view %output[%zero] : buffer -> view<64x2xi32, #dense>
   %one = vector.constant 1 : vector<2xi32>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write2_b32", address_form="ds_2addr", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", static_offset_bytes="0", dynamic_stride_bytes="32", bank_conflict_kind="bank-conflict-risk"}
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write2_b32", address_form="ds_2addr", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", static_offset_bytes="0", dynamic_stride_bytes="32"}
   vector.store %one, %scratch_view[%tid, 0] : vector<2xi32>, view<64x4xi32, %layout>
-  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read2_b32", address_form="ds_2addr", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", static_offset_bytes="0", dynamic_stride_bytes="32", bank_conflict_kind="bank-conflict-risk"}
+  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read2_b32", address_form="ds_2addr", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", static_offset_bytes="0", dynamic_stride_bytes="32"}
   %loaded = vector.load %scratch_view[%tid, 0] : view<64x4xi32, %layout> -> vector<2xi32>
   vector.store %loaded, %output_view[%tid, 0] : vector<2xi32>, view<64x2xi32, #dense>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_read2_write2_structured_bank_fields() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_read2_write2_structured_fields() asm<amdgpu.rdna3.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %14 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>

@@ -556,8 +556,6 @@ static iree_status_t loom_target_compile_report_format_source_low_memory_rows(
           loom_target_compile_report_text_non_empty(row->dynamic_term_kind);
       const iree_string_view_t fallback_reason =
           loom_target_compile_report_text_non_empty(row->fallback_reason);
-      const iree_string_view_t bank_conflict_kind =
-          loom_target_compile_report_text_non_empty(row->bank_conflict_kind);
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           "COMPILE-REPORT: source_low_memory[%" PRIhsz
@@ -596,8 +594,7 @@ static iree_status_t loom_target_compile_report_format_source_low_memory_rows(
           "vector_lanes=%u issued_read_bytes=%u issued_write_bytes=%u "
           "issued_read_unknown_widths=%u issued_write_unknown_widths=%u "
           "dynamic_stride_bytes=%u "
-          "vector_lane_stride_bytes=%u bank_stride_words=%u "
-          "bank_conflict_degree=%u bank_conflict_kind=%.*s\n",
+          "vector_lane_stride_bytes=%u\n",
           (int)address_form.size, address_form.data,
           (int)dynamic_term_kind.size, dynamic_term_kind.data,
           (int)fallback_reason.size, fallback_reason.data,
@@ -605,9 +602,7 @@ static iree_status_t loom_target_compile_report_format_source_low_memory_rows(
           row->vector_lane_count, row->issued_read_byte_count,
           row->issued_write_byte_count, row->issued_read_unknown_width_count,
           row->issued_write_unknown_width_count, row->dynamic_stride_bytes,
-          row->vector_lane_stride_bytes, row->bank_stride_words,
-          row->bank_conflict_degree, (int)bank_conflict_kind.size,
-          bank_conflict_kind.data));
+          row->vector_lane_stride_bytes));
     }
   }
   return iree_ok_status();
