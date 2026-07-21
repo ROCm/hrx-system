@@ -233,9 +233,7 @@ iree_status_t loom_target_low_legality_record_memory_access(
     iree_string_view_t dynamic_term_kind, iree_string_view_t fallback_reason,
     iree_string_view_t decision, int64_t static_offset_bytes,
     uint32_t element_bytes, uint32_t vector_lanes,
-    uint32_t dynamic_stride_bytes, uint32_t vector_lane_stride_bytes,
-    uint32_t bank_stride_words, uint32_t bank_conflict_degree,
-    iree_string_view_t bank_conflict_kind) {
+    uint32_t dynamic_stride_bytes, uint32_t vector_lane_stride_bytes) {
   loom_diagnostic_param_t params[] = {
       loom_param_string(
           loom_target_low_legality_target_key(context->options->bundle)),
@@ -256,9 +254,6 @@ iree_status_t loom_target_low_legality_record_memory_access(
       loom_param_u32(vector_lanes),
       loom_param_u32(dynamic_stride_bytes),
       loom_param_u32(vector_lane_stride_bytes),
-      loom_param_u32(bank_stride_words),
-      loom_param_u32(bank_conflict_degree),
-      loom_param_string(bank_conflict_kind),
   };
   return loom_target_low_legality_emit(context, op, LOOM_ERR_BACKEND_017,
                                        params, IREE_ARRAYSIZE(params));

@@ -531,13 +531,6 @@ loom_target_compile_report_format_source_low_memory_row_json(
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
       &object, IREE_SV("vector_lane_stride_bytes"),
       row->vector_lane_stride_bytes));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-      &object, IREE_SV("bank_stride_words"), row->bank_stride_words));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-      &object, IREE_SV("bank_conflict_degree"), row->bank_conflict_degree));
-  IREE_RETURN_IF_ERROR(
-      loom_target_compile_report_json_write_optional_string_field(
-          &object, IREE_SV("bank_conflict_kind"), row->bank_conflict_kind));
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_format_source_low_memory_storage_json(
           row, &object));

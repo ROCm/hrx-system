@@ -269,9 +269,7 @@ iree_status_t loom_target_low_legality_record_memory_access(
     iree_string_view_t dynamic_term_kind, iree_string_view_t fallback_reason,
     iree_string_view_t decision, int64_t static_offset_bytes,
     uint32_t element_bytes, uint32_t vector_lanes,
-    uint32_t dynamic_stride_bytes, uint32_t vector_lane_stride_bytes,
-    uint32_t bank_stride_words, uint32_t bank_conflict_degree,
-    iree_string_view_t bank_conflict_kind);
+    uint32_t dynamic_stride_bytes, uint32_t vector_lane_stride_bytes);
 
 // Emits ERR_BACKEND_040 for a source memory cache-policy decision.
 iree_status_t loom_target_low_legality_record_memory_cache_policy(
