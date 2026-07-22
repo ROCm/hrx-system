@@ -158,18 +158,18 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
 
   loom_target_compile_report_t* report = &capture.report;
   report->artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_VM_ARCHIVE;
-  report->backend_name = IREE_SV("amdgpu-hal");
-  report->target_family_name = IREE_SV("amdgpu");
-  report->target_key = IREE_SV("gfx1100");
+  report->backend_name = IREE_SV("test-hal");
+  report->target_family_name = IREE_SV("test");
+  report->target_key = IREE_SV("test-target");
   report->function_name = IREE_SV("candidate_kernel");
   const loom_target_compile_report_target_capability_row_t capability_row = {
       /*.function_name=*/report->function_name,
       /*.target_family_name=*/report->target_family_name,
-      /*.namespace_name=*/IREE_SV("amdgpu"),
+      /*.namespace_name=*/IREE_SV("test"),
       /*.key=*/IREE_SV("matrix_feature_profile"),
       /*.value_kind=*/LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_STRING,
       /*.value_u64=*/0,
-      /*.value_string=*/IREE_SV("wmma-gfx11"),
+      /*.value_string=*/IREE_SV("test-profile"),
   };
   IREE_ASSERT_OK(loom_target_compile_report_record_target_capability_row(
       report, &capability_row));
@@ -255,11 +255,11 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
   ExpectStatusObject(LookupObject(compile_report, IREE_SV("status")),
                      IREE_STATUS_OK, iree_string_view_empty());
   ExpectObjectValueEquals(compile_report, IREE_SV("backend"),
-                          IREE_SV("amdgpu-hal"));
+                          IREE_SV("test-hal"));
   ExpectObjectValueEquals(compile_report, IREE_SV("target_family"),
-                          IREE_SV("amdgpu"));
+                          IREE_SV("test"));
   ExpectObjectValueEquals(compile_report, IREE_SV("target_key"),
-                          IREE_SV("gfx1100"));
+                          IREE_SV("test-target"));
   ExpectObjectValueEquals(compile_report, IREE_SV("function"),
                           IREE_SV("candidate_kernel"));
 
@@ -306,11 +306,11 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
   iree_string_view_t first_capability_row = iree_string_view_empty();
   IREE_ASSERT_OK(iree_json_array_get(rows, 0, &first_capability_row));
   ExpectObjectValueEquals(first_capability_row, IREE_SV("namespace"),
-                          IREE_SV("amdgpu"));
+                          IREE_SV("test"));
   ExpectObjectValueEquals(first_capability_row, IREE_SV("key"),
                           IREE_SV("matrix_feature_profile"));
   ExpectObjectValueEquals(first_capability_row, IREE_SV("value_string"),
-                          IREE_SV("wmma-gfx11"));
+                          IREE_SV("test-profile"));
 
   iree_string_builder_deinitialize(&builder);
   loom_run_compile_report_capture_deinitialize(&capture);

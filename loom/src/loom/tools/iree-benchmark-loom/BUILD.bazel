@@ -79,10 +79,6 @@ _IREE_BENCHMARK_LOOM_TARGET_DEPS = (
     _SPIRV_VULKAN_TARGET_DEPS
 )
 
-_AMDGPU_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
-    "//loom/config/execute:amdgpu_hal",
-])
-
 _SPIRV_VULKAN_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/execute:spirv_vulkan_hal",
 ])
@@ -297,24 +293,6 @@ iree_execution_test_suite(
     ],
     manifests = ["iree-benchmark-loom.test.json"],
     tags = ["hostonly"],
-    tools = {
-        "iree-benchmark-loom": ":iree-benchmark-loom",
-    },
-)
-
-iree_execution_test_suite(
-    name = "amdgpu_execution_test",
-    data = [
-        "//loom/src/loom/tools/iree-test-loom:testdata/amdgpu_hal_actual.loom",
-    ],
-    manifests = ["iree-benchmark-loom_amdgpu.test.json"],
-    tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
-        "manual",
-        "requires-gpu-amd",
-        "runtime-resource=amd-gpu",
-    ],
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
     tools = {
         "iree-benchmark-loom": ":iree-benchmark-loom",
     },

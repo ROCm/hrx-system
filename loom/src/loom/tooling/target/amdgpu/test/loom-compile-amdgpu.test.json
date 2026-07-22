@@ -509,7 +509,7 @@
           "run": {
             "tool": "loom-compile",
             "args": [
-              "{srcdir}/../iree-test-loom/testdata/amdgpu_unused_kernargs.loom",
+              "{srcdir}/amdgpu_unused_kernargs.loom",
               "--backend=amdgpu-hal",
               "--target=gfx1100",
               "--output={tmp}/amdgpu_unused_kernargs_gfx1100.hal",
@@ -532,7 +532,7 @@
           "run": {
             "tool": "loom-compile",
             "args": [
-              "{srcdir}/../iree-test-loom/testdata/amdgpu_unused_kernargs.loom",
+              "{srcdir}/amdgpu_unused_kernargs.loom",
               "--backend=amdgpu-hal",
               "--target=gfx1250",
               "--output={tmp}/amdgpu_unused_kernargs_gfx1250.hal",
@@ -1613,6 +1613,36 @@
           }
         }
       ]
+    },
+    {
+      "name": "reports AMDGPU pass diagnostic failure status",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/amdgpu_bad_return.loom",
+          "--pipeline=canonicalize",
+          "--output={tmp}/unused.vmfb",
+          "--compile-report=summary",
+          "--compile-report-output=-"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "contains": [
+          "\"status\":{\"code\":9,\"name\":\"FAILED_PRECONDITION\"}"
+        ],
+        "not_contains": [
+          "\"status\":{\"code\":0,\"name\":\"OK\"}"
+        ]
+      },
+      "stderr": {
+        "contains": [
+          "yielded value has type",
+          "but expected"
+        ]
+      }
     },
     {
       "name": "reports terminal no-artifact AMDGPU failure status",

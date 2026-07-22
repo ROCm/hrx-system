@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "emits textual LLVMIR for AMDGCN kernel low IR",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/amdgcn_kernel.loom",
+          "--backend=llvmir-text",
+          "--pipeline=none",
+          "--output=-"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "target triple = \"amdgcn-amd-amdhsa\"",
+          "define amdgpu_kernel void @dispatch(ptr addrspace(1) inreg noundef %input)",
+          "\"amdgpu-flat-work-group-size\"=\"1,1024\""
+        ]
+      }
+    }
+  ]
+}

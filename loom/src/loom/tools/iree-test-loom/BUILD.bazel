@@ -20,10 +20,6 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-exports_files([
-    "testdata/amdgpu_unused_kernargs.loom",
-])
-
 _AMDGPU_TARGET_COPTS = iree_select({
     "//loom/config/target:amdgpu_artifacts": [
         "-DIREE_TEST_LOOM_HAVE_AMDGPU=1",
@@ -82,16 +78,6 @@ _IREE_TEST_LOOM_TARGET_DEPS = (
     _SPIRV_VULKAN_TARGET_DEPS
 )
 
-_AMDGPU_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
-    "//loom/config/execute:amdgpu_hal",
-])
-
-_AMDGPU_EXECUTION_TEST_TAGS = [
-    "iree-run-requirement=runtime.resource.amd_gpu",
-    "requires-gpu-amd",
-    "runtime-resource=amd-gpu",
-]
-
 _SPIRV_VULKAN_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/execute:spirv_vulkan_hal",
 ])
@@ -144,49 +130,6 @@ iree_execution_test_suite(
     ],
     manifests = ["iree-test-loom.test.json"],
     tags = ["hostonly"],
-    tools = {
-        "iree-test-loom": ":iree-test-loom",
-    },
-)
-
-iree_execution_test_suite(
-    name = "amdgpu_execution_test",
-    data = [
-        "testdata/amdgpu_compile_rejection.loom",
-        "testdata/amdgpu_hal_actual.loom",
-        "testdata/amdgpu_unused_kernargs.loom",
-        "testdata/generated_tensor_cases.loom",
-    ],
-    manifests = ["iree-test-loom_amdgpu.test.json"],
-    tags = _AMDGPU_EXECUTION_TEST_TAGS,
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
-    tools = {
-        "iree-test-loom": ":iree-test-loom",
-    },
-)
-
-# Host TSAN and AMDGPU ASAN require incompatible process address-space layouts.
-iree_execution_test_suite(
-    name = "amdgpu_asan_execution_test",
-    data = [
-        "//loom/src/loom/test/corpus/sanitizer:amdgpu_asan_actual.loom",
-    ],
-    manifests = ["iree-test-loom_amdgpu_asan.test.json"],
-    tags = _AMDGPU_EXECUTION_TEST_TAGS + ["notsan"],
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
-    tools = {
-        "iree-test-loom": ":iree-test-loom",
-    },
-)
-
-iree_execution_test_suite(
-    name = "amdgpu_tsan_execution_test",
-    data = [
-        "//loom/src/loom/test/corpus/sanitizer:amdgpu_tsan_actual.loom",
-    ],
-    manifests = ["iree-test-loom_amdgpu_tsan.test.json"],
-    tags = _AMDGPU_EXECUTION_TEST_TAGS,
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
     tools = {
         "iree-test-loom": ":iree-test-loom",
     },

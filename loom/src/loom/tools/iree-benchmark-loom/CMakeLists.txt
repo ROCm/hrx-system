@@ -257,24 +257,6 @@ iree_execution_test_suite(
     "hostonly"
 )
 
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_execution_test_suite(
-  NAME
-    amdgpu_execution_test
-  MANIFESTS
-    "iree-benchmark-loom_amdgpu.test.json"
-  TOOLS
-    "iree-benchmark-loom=::iree-benchmark-loom"
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/amdgpu_hal_actual.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
 iree_execution_test_suite(
   NAME

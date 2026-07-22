@@ -11,10 +11,10 @@
         "contains": {
           "unordered": [
             "## loom-compile",
-            "--backend=amdgpu-hal",
+            "--backend=",
             "--compile-report=summary",
             "--artifact-manifest=summary",
-            "--emit-target-artifact=kernel.hsaco",
+            "--emit-target-artifact=",
             "--dump-ir-after-all",
             "Prepared-low reproducers",
             "--pipeline=none",
@@ -286,48 +286,6 @@
             "contains": [
               "\"artifact_kind\":\"vm-archive\"",
               "\"status\":{\"code\":0,\"name\":\"OK\"}"
-            ]
-          }
-        }
-      ]
-    },
-    {
-      "name": "reports pass diagnostic failure status",
-      "steps": [
-        {
-          "name": "write-source",
-          "write": {
-            "path": "{tmp}/bad_return.loom",
-            "text": "amdgpu.target<gfx1100> @target\n\nlow.func.def target(@target) @bad_return(%predicate: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) {\n  low.return %predicate : reg<amdgpu.sgpr x2>\n}\n"
-          }
-        },
-        {
-          "name": "compile",
-          "run": {
-            "tool": "loom-compile",
-            "args": [
-              "{tmp}/bad_return.loom",
-              "--pipeline=canonicalize",
-              "--output={tmp}/unused.vmfb",
-              "--compile-report=summary",
-              "--compile-report-output=-"
-            ]
-          },
-          "exit": {
-            "nonzero": true
-          },
-          "stdout": {
-            "contains": [
-              "\"status\":{\"code\":9,\"name\":\"FAILED_PRECONDITION\"}"
-            ],
-            "not_contains": [
-              "\"status\":{\"code\":0,\"name\":\"OK\"}"
-            ]
-          },
-          "stderr": {
-            "contains": [
-              "yielded value has type",
-              "but expected"
             ]
           }
         }

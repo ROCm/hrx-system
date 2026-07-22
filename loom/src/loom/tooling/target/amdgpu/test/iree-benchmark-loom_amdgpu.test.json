@@ -6,7 +6,7 @@
       "run": {
         "tool": "iree-benchmark-loom",
         "args": [
-          "{srcdir}/../iree-test-loom/testdata/amdgpu_hal_actual.loom",
+          "{srcdir}/amdgpu_hal_actual.loom",
           "--benchmark=@store_i32_latency",
           "--device=amdgpu",
           "--measure=dispatch_complete",
@@ -39,7 +39,7 @@
       "run": {
         "tool": "iree-benchmark-loom",
         "args": [
-          "{srcdir}/../iree-test-loom/testdata/amdgpu_hal_actual.loom",
+          "{srcdir}/amdgpu_hal_actual.loom",
           "--benchmark=@store_then_double_i32_latency",
           "--device=amdgpu",
           "--measure=dispatch_complete",

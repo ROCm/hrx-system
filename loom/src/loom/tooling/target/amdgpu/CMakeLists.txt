@@ -88,4 +88,123 @@ loom_cc_test(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+iree_execution_test_suite(
+  NAME
+    loom_compile_execution_test
+  MANIFESTS
+    "test/loom-compile-amdgpu.test.json"
+  TOOLS
+    "loom-compile=loom::tools::loom-compile"
+  DATA
+    "test/amdgpu_bad_return.loom"
+    "test/amdgpu_unused_kernargs.loom"
+    "test/gfx1250_configured_fragment_bank.loom"
+    "test/gfx1250_extended_vgpr.loom"
+    "test/gfx1250_tied_accumulators.loom"
+    "test/gfx12_wmma_bf16_f32.loom"
+    "test/report_carried_loop_memory_economics_amdgpu.loom"
+    "test/report_complex_loop_memory_economics_amdgpu.loom"
+    "test/report_dispatch_memory_economics_amdgpu.loom"
+    "test/report_loop_matrix_mix_amdgpu.loom"
+    "test/report_loop_memory_economics_amdgpu.loom"
+    "test/report_materialized_fragment_spills_amdgpu.loom"
+    "test/report_private_memory_mix_amdgpu.loom"
+    "test/report_target_insertions_uncountable_amdgpu.loom"
+    "test/selected_root_amdgpu.loom"
+    "test/target_family_template_provider_amdgpu.loom"
+  LABELS
+    "hostonly"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+iree_execution_test_suite(
+  NAME
+    loom_opt_execution_test
+  MANIFESTS
+    "test/loom-opt-amdgpu.test.json"
+  TOOLS
+    "loom-opt=loom::tools::loom-opt"
+  DATA
+    "test/amdgpu_bad_return.loom"
+    "test/loom_opt_f32_arith.loom"
+  LABELS
+    "hostonly"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_execution_test_suite(
+  NAME
+    iree_test_loom_execution_test
+  MANIFESTS
+    "test/iree-test-loom_amdgpu.test.json"
+  TOOLS
+    "iree-test-loom=loom::tools::iree-test-loom"
+  DATA
+    "test/amdgpu_compile_rejection.loom"
+    "test/amdgpu_hal_actual.loom"
+    "test/amdgpu_unused_kernargs.loom"
+    "test/generated_tensor_cases.loom"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_execution_test_suite(
+  NAME
+    iree_test_loom_asan_execution_test
+  MANIFESTS
+    "test/iree-test-loom_amdgpu_asan.test.json"
+  TOOLS
+    "iree-test-loom=loom::tools::iree-test-loom"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/sanitizer/amdgpu_asan_actual.loom"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+    "notsan"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_execution_test_suite(
+  NAME
+    iree_test_loom_tsan_execution_test
+  MANIFESTS
+    "test/iree-test-loom_amdgpu_tsan.test.json"
+  TOOLS
+    "iree-test-loom=loom::tools::iree-test-loom"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/sanitizer/amdgpu_tsan_actual.loom"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_execution_test_suite(
+  NAME
+    iree_benchmark_loom_execution_test
+  MANIFESTS
+    "test/iree-benchmark-loom_amdgpu.test.json"
+  TOOLS
+    "iree-benchmark-loom=loom::tools::iree-benchmark-loom"
+  DATA
+    "test/amdgpu_hal_actual.loom"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+    "manual"
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

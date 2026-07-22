@@ -344,9 +344,21 @@ iree_executable_test(
         )
         self.assertEqual(
             functions._convert_select_condition(
+                "//loom/config/target:llvmir_amdgpu_target_env"
+            ),
+            "LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU",
+        )
+        self.assertEqual(
+            functions._convert_select_condition(
                 "//loom/config/target:llvmir_artifacts"
             ),
             "LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR",
+        )
+        self.assertEqual(
+            functions._convert_select_condition(
+                "//loom/config/target:llvmir_x86_target_env"
+            ),
+            "LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86",
         )
         self.assertEqual(
             functions._convert_select_condition(
