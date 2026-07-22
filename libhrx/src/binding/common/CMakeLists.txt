@@ -13,6 +13,7 @@ iree_cc_library(
     "hrx_bridge.h"
     "internal.h"
     "kernel_arguments.h"
+    "kpack.h"
     "tls.h"
   SRCS
     "context.c"
@@ -24,6 +25,7 @@ iree_cc_library(
     "graph_exec.c"
     "init.c"
     "kernel_arguments.c"
+    "kpack.c"
     "mem_pool.c"
     "memory.c"
     "module.c"
@@ -105,6 +107,21 @@ iree_cc_test(
     libhrx_defs
 )
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    kpack_test
+  SRCS
+    "kpack_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+endif()
+
 iree_cc_binary_benchmark(
   NAME
     buffer_table_benchmark
@@ -159,6 +176,19 @@ if(HRX_ENABLE_ZSTD)
     target_link_options(libhrx_src_binding_common_common PUBLIC
       ${HRX_ZSTD_LDFLAGS_OTHER}
     )
+    # Let the kpack unit test compile and run its zstd-per-kernel round-trip
+    # (KpackArchive.ZstdGetKernelRoundTrips), which is HRX_ENABLE_ZSTD-gated.
+    if(TARGET libhrx_src_binding_common_kpack_test)
+      target_compile_definitions(libhrx_src_binding_common_kpack_test PRIVATE
+        HRX_ENABLE_ZSTD=1
+      )
+      target_include_directories(libhrx_src_binding_common_kpack_test PRIVATE
+        ${HRX_ZSTD_INCLUDE_DIRS}
+      )
+      target_compile_options(libhrx_src_binding_common_kpack_test PRIVATE
+        ${HRX_ZSTD_CFLAGS_OTHER}
+      )
+    endif()
     message(STATUS
       "hrx-runtime: CCOB zstd decompression ENABLED "
       "(libzstd ${HRX_ZSTD_VERSION})"

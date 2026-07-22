@@ -29,6 +29,7 @@ hrx_cc_library(
         "graph_exec.c",
         "init.c",
         "kernel_arguments.c",
+        "kpack.c",
         "mem_pool.c",
         "memory.c",
         "module.c",
@@ -43,6 +44,7 @@ hrx_cc_library(
         "hrx_bridge.h",
         "internal.h",
         "kernel_arguments.h",
+        "kpack.h",
         "tls.h",
     ],
     includes = [
@@ -103,6 +105,22 @@ hrx_cc_test(
 hrx_cc_test(
     name = "fat_binary_test",
     srcs = ["fat_binary_test.cc"],
+    deps = [
+        ":common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "kpack_test",
+    srcs = ["kpack_test.cc"],
+    # The test builds its fixtures from POSIX facilities (mmap/mprotect guard
+    # pages, /proc/self/maps, mode-bit permissions, symlinks) and exercises the
+    # Linux-only resolution path; the resolver itself reports UNIMPLEMENTED off
+    # Linux, so there is nothing for this suite to assert on other platforms.
+    target_compatible_with = ["@platforms//os:linux"],
     deps = [
         ":common",
         "//runtime/src/iree/base",
