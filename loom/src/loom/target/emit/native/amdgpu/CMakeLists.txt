@@ -76,6 +76,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::planning::packet_plan
     loom::target::arch::amdgpu::planning::storage_lease
     loom::target::arch::amdgpu::planning::vopd_plan
+    loom::target::arch::amdgpu::target_info
     loom::tools::loom-check::execute
   TESTONLY
   PUBLIC
@@ -92,6 +93,7 @@ loom_check_test_suite(
     "test/assembly_cluster.loom-test"
     "test/assembly_q8.loom-test"
     "test/assembly_wmma.loom-test"
+    "test/hal_kernel_library.loom-test"
     "test/packet.loom-test"
     "test/packet_json.loom-test"
     "test/vopd_plan.loom-test"

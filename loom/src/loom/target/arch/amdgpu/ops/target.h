@@ -34,6 +34,11 @@ loom_amdgpu_gfx1250_revision_t
 loom_amdgpu_target_record_effective_gfx1250_revision(
     const loom_module_t* module, const loom_op_t* target_op);
 
+// Returns the gfx1250 revision explicitly required by |target_op|, or
+// UNSPECIFIED when the target record remains refinable by a selected profile.
+loom_amdgpu_gfx1250_revision_t
+loom_amdgpu_target_record_explicit_gfx1250_revision(const loom_op_t* target_op);
+
 // Builds a compact AMDGPU target record for |profile|.
 //
 // The target kind is derived from the processor descriptor-set family. When

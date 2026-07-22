@@ -1,0 +1,7 @@
+// RUN: emit amdgpu-kernel-assembly profile=gfx1250:b0
+
+// ERROR@+1: AMDGPU/048 {target_name="a0", target_revision="a0", selected_processor="gfx1250", selected_revision="b0"}
+amdgpu.target<gfx1250> @a0 {gfx1250_revision = a0}
+low.kernel.def target(@a0) workgroup_size(32, 1, 1) @reject_revision_relabeling() asm<amdgpu.rdna4.gfx125x.core> {
+  return
+}

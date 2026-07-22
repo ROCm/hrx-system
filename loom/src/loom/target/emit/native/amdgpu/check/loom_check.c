@@ -17,6 +17,7 @@
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
 #include "loom/target/arch/amdgpu/planning/storage_lease.h"
 #include "loom/target/arch/amdgpu/planning/vopd_plan.h"
+#include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/assembly.h"
 #include "loom/target/emit/native/amdgpu/encoding.h"
 #include "loom/target/emit/native/amdgpu/hal_kernel_library.h"
@@ -370,9 +371,75 @@ static bool loom_amdgpu_loom_check_is_kernel_assembly_target(
          iree_string_view_equal(target_name, IREE_SV("amdgpu-kernel-asm"));
 }
 
+static iree_status_t loom_amdgpu_loom_check_parse_kernel_target_profile(
+    iree_string_view_t option_text, loom_amdgpu_target_profile_t* out_profile,
+    const loom_amdgpu_target_profile_t** out_selected_profile) {
+  *out_profile = (loom_amdgpu_target_profile_t){0};
+  *out_selected_profile = NULL;
+  option_text = iree_string_view_trim(option_text);
+  if (iree_string_view_is_empty(option_text)) {
+    return iree_ok_status();
+  }
+
+  iree_string_view_t option = iree_string_view_empty();
+  iree_string_view_t remaining = iree_string_view_empty();
+  iree_string_view_split(option_text, ' ', &option, &remaining);
+  if (!iree_string_view_is_empty(iree_string_view_trim(remaining))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU kernel assembly accepts at most one target profile option");
+  }
+  iree_string_view_t option_name = iree_string_view_empty();
+  iree_string_view_t profile_name = iree_string_view_empty();
+  iree_string_view_split(option, '=', &option_name, &profile_name);
+  if (!iree_string_view_equal(option_name, IREE_SV("profile")) ||
+      iree_string_view_is_empty(profile_name)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU kernel assembly expected "
+                            "'profile=<processor>[:a0|b0]'");
+  }
+
+  iree_string_view_t processor_name = iree_string_view_empty();
+  iree_string_view_t revision_name = iree_string_view_empty();
+  iree_string_view_split(profile_name, ':', &processor_name, &revision_name);
+  const loom_amdgpu_processor_info_t* processor = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_target_info_lookup_processor(processor_name, &processor));
+
+  loom_amdgpu_gfx1250_revision_t revision =
+      LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED;
+  if (!iree_string_view_is_empty(revision_name)) {
+    if (!iree_string_view_equal(processor_name, IREE_SV("gfx1250"))) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU kernel assembly silicon revisions require gfx1250");
+    }
+    if (iree_string_view_equal(revision_name, IREE_SV("a0"))) {
+      revision = LOOM_AMDGPU_GFX1250_REVISION_A0;
+    } else if (iree_string_view_equal(revision_name, IREE_SV("b0"))) {
+      revision = LOOM_AMDGPU_GFX1250_REVISION_B0;
+    } else {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "AMDGPU kernel assembly expected gfx1250 "
+                              "revision 'a0' or 'b0'");
+    }
+  }
+  *out_profile = (loom_amdgpu_target_profile_t){
+      .processor = processor,
+      .gfx1250_revision = revision,
+  };
+  *out_selected_profile = out_profile;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_loom_check_emit_hal_kernel_assembly(
     const loom_check_emit_provider_request_t* request) {
+  loom_amdgpu_target_profile_t target_profile = {0};
+  const loom_amdgpu_target_profile_t* selected_profile = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_loom_check_parse_kernel_target_profile(
+      request->target_options, &target_profile, &selected_profile));
   const loom_amdgpu_hal_kernel_library_options_t options = {
+      .target_profile = selected_profile,
       .diagnostic_sink =
           {
               .fn = loom_check_diagnostic_collector_sink,

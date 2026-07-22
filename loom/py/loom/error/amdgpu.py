@@ -1089,6 +1089,29 @@ ERR_AMDGPU_047 = ErrorDef(
     fix_hint=("Apply the named gfx1250 A0 legalization before native emission"),
 )
 
+# ERR_AMDGPU_048: gfx1250 target revision conflicts with selected profile.
+ERR_AMDGPU_048 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=48,
+    severity=Severity.ERROR,
+    summary="gfx1250 target revision conflicts with selected profile.",
+    message=(
+        "AMDGPU target '@{target_name}' requires gfx1250 revision "
+        "'{target_revision}', but selected processor '{selected_processor}' "
+        "uses revision '{selected_revision}'"
+    ),
+    params=(
+        ErrorParam("target_name", ParamKind.STRING),
+        ErrorParam("target_revision", ParamKind.STRING),
+        ErrorParam("selected_processor", ParamKind.STRING),
+        ErrorParam("selected_revision", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Select the required gfx1250 revision or use a target record without "
+        "a fixed stepping"
+    ),
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_003,
@@ -1136,4 +1159,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_045,
     ERR_AMDGPU_046,
     ERR_AMDGPU_047,
+    ERR_AMDGPU_048,
 )

@@ -142,6 +142,40 @@ loom_amdgpu_hal_kernel_library_emit_descriptor_set_mismatch(
       LOOM_ERR_AMDGPU_005, params, IREE_ARRAYSIZE(params));
 }
 
+static iree_string_view_t loom_amdgpu_hal_kernel_library_gfx1250_revision_name(
+    loom_amdgpu_gfx1250_revision_t revision) {
+  switch (revision) {
+    case LOOM_AMDGPU_GFX1250_REVISION_A0:
+      return IREE_SV("a0");
+    case LOOM_AMDGPU_GFX1250_REVISION_B0:
+      return IREE_SV("b0");
+    case LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED:
+    default:
+      return IREE_SV("unspecified");
+  }
+}
+
+static iree_status_t
+loom_amdgpu_hal_kernel_library_emit_gfx1250_revision_conflict(
+    const loom_module_t* module, const loom_target_entry_t* entry,
+    loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
+    loom_amdgpu_gfx1250_revision_t target_revision,
+    const loom_amdgpu_target_profile_t* selected_profile) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_amdgpu_hal_kernel_library_symbol_name(
+          module, entry->target_ref)),
+      loom_param_string(loom_amdgpu_hal_kernel_library_gfx1250_revision_name(
+          target_revision)),
+      loom_param_string(selected_profile->processor->name),
+      loom_param_string(loom_amdgpu_hal_kernel_library_gfx1250_revision_name(
+          selected_profile->gfx1250_revision)),
+  };
+  return loom_amdgpu_hal_kernel_library_emit(
+      diagnostic_emitter,
+      loom_amdgpu_hal_kernel_library_target_record_op(entry),
+      LOOM_ERR_AMDGPU_048, params, IREE_ARRAYSIZE(params));
+}
+
 static iree_status_t loom_amdgpu_hal_kernel_library_apply_target_profile(
     loom_module_t* module, loom_target_entry_t* entry,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
@@ -165,6 +199,15 @@ static iree_status_t loom_amdgpu_hal_kernel_library_apply_target_profile(
     return loom_amdgpu_hal_kernel_library_emit_descriptor_set_mismatch(
         entry, diagnostic_emitter, processor,
         entry->bundle_storage.bundle.name);
+  }
+
+  const loom_amdgpu_gfx1250_revision_t target_revision =
+      loom_amdgpu_target_record_explicit_gfx1250_revision(entry->target_op);
+  if (target_revision != LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED &&
+      (!iree_string_view_equal(processor->name, IREE_SV("gfx1250")) ||
+       target_revision != target_profile->gfx1250_revision)) {
+    return loom_amdgpu_hal_kernel_library_emit_gfx1250_revision_conflict(
+        module, entry, diagnostic_emitter, target_revision, target_profile);
   }
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_target_record_set_profile(

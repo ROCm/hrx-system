@@ -148,7 +148,7 @@ const loom_amdgpu_processor_info_t* loom_amdgpu_target_record_processor(
       loom_amdgpu_target_record_processor_name(module, target_op));
 }
 
-static loom_amdgpu_gfx1250_revision_t
+loom_amdgpu_gfx1250_revision_t
 loom_amdgpu_target_record_explicit_gfx1250_revision(
     const loom_op_t* target_op) {
   const loom_attribute_t revision_attr = loom_op_const_attrs(
