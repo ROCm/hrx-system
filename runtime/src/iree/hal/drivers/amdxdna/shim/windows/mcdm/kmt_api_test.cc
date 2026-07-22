@@ -644,27 +644,56 @@ TEST(KmtApiTest, NegotiatesLegacyV3AbiAfterCompactShapeIsRejected) {
   EXPECT_TRUE(g_query_data_was_zero[1]);
 }
 
-TEST(KmtApiTest, NegotiatesCompactAbiWithOneXrtCompatibleQuery) {
+TEST(KmtApiTest, NegotiatesLegacyAbiWhenBothQueryShapesAreAccepted) {
   ResetFakes();
   g_query_outputs[0][1] = 2;
+  g_query_outputs[1][1] = 2;
   KmtApi api = {};
   api.query_adapter_info = FakeQueryAdapterInfo;
-  McdmAbi abi = McdmAbi::legacy;
+  McdmAbi abi = McdmAbi::compact;
   Error error = {};
 
   ASSERT_TRUE(QueryMcdmAbi(api, 0x5678, &abi, &error))
       << ErrorMessage(&error);
-  EXPECT_EQ(abi, McdmAbi::compact);
-  ASSERT_EQ(g_query_count, 1u);
+  EXPECT_EQ(abi, McdmAbi::legacy);
+  ASSERT_EQ(g_query_count, 2u);
   EXPECT_EQ(g_query_sizes[0], 3u * sizeof(uint32_t));
+  EXPECT_EQ(g_query_sizes[1], 2u * sizeof(uint32_t));
   EXPECT_EQ(g_query_adapters[0], 0x5678u);
+  EXPECT_EQ(g_query_adapters[1], 0x5678u);
   EXPECT_EQ(g_query_types[0], KMTQAITYPE_UMDRIVERPRIVATE);
+  EXPECT_EQ(g_query_types[1], KMTQAITYPE_UMDRIVERPRIVATE);
   EXPECT_TRUE(g_query_data_was_zero[0]);
+  EXPECT_TRUE(g_query_data_was_zero[1]);
 }
 
-TEST(KmtApiTest, NegotiatesCompactV3AbiWithOneXrtCompatibleQuery) {
+TEST(KmtApiTest, NegotiatesLegacyV3AbiWhenBothQueryShapesAreAccepted) {
   ResetFakes();
   g_query_outputs[0][1] = 3;
+  g_query_outputs[1][1] = 3;
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbi abi = McdmAbi::compact;
+  Error error = {};
+
+  ASSERT_TRUE(QueryMcdmAbi(api, 0x5678, &abi, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(abi, McdmAbi::legacy);
+  ASSERT_EQ(g_query_count, 2u);
+  EXPECT_EQ(g_query_sizes[0], 3u * sizeof(uint32_t));
+  EXPECT_EQ(g_query_sizes[1], 2u * sizeof(uint32_t));
+  EXPECT_EQ(g_query_adapters[0], 0x5678u);
+  EXPECT_EQ(g_query_adapters[1], 0x5678u);
+  EXPECT_EQ(g_query_types[0], KMTQAITYPE_UMDRIVERPRIVATE);
+  EXPECT_EQ(g_query_types[1], KMTQAITYPE_UMDRIVERPRIVATE);
+  EXPECT_TRUE(g_query_data_was_zero[0]);
+  EXPECT_TRUE(g_query_data_was_zero[1]);
+}
+
+TEST(KmtApiTest, NegotiatesCompactAbiWhenLegacyShapeIsRejected) {
+  ResetFakes();
+  g_query_outputs[0][1] = 2;
+  g_query_statuses[1] = static_cast<NTSTATUS>(0xC0000023u);
   KmtApi api = {};
   api.query_adapter_info = FakeQueryAdapterInfo;
   McdmAbi abi = McdmAbi::legacy;
@@ -673,11 +702,24 @@ TEST(KmtApiTest, NegotiatesCompactV3AbiWithOneXrtCompatibleQuery) {
   ASSERT_TRUE(QueryMcdmAbi(api, 0x5678, &abi, &error))
       << ErrorMessage(&error);
   EXPECT_EQ(abi, McdmAbi::compact);
-  ASSERT_EQ(g_query_count, 1u);
+  ASSERT_EQ(g_query_count, 2u);
   EXPECT_EQ(g_query_sizes[0], 3u * sizeof(uint32_t));
-  EXPECT_EQ(g_query_adapters[0], 0x5678u);
-  EXPECT_EQ(g_query_types[0], KMTQAITYPE_UMDRIVERPRIVATE);
-  EXPECT_TRUE(g_query_data_was_zero[0]);
+  EXPECT_EQ(g_query_sizes[1], 2u * sizeof(uint32_t));
+}
+
+TEST(KmtApiTest, NegotiatesCompactV3AbiWhenLegacyShapeIsRejected) {
+  ResetFakes();
+  g_query_outputs[0][1] = 3;
+  g_query_statuses[1] = static_cast<NTSTATUS>(0xC0000023u);
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbi abi = McdmAbi::legacy;
+  Error error = {};
+
+  ASSERT_TRUE(QueryMcdmAbi(api, 0x5678, &abi, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(abi, McdmAbi::compact);
+  ASSERT_EQ(g_query_count, 2u);
 }
 
 TEST(KmtApiTest, RejectsUnknownTwoDwordAbiIdentity) {
@@ -717,6 +759,7 @@ TEST(KmtApiTest, RejectsUnknownThreeDwordAbiIdentity) {
   ResetFakes();
   g_query_outputs[0][1] = 2;
   g_query_outputs[0][2] = 1;
+  g_query_statuses[1] = static_cast<NTSTATUS>(0xC0000023u);
   KmtApi api = {};
   api.query_adapter_info = FakeQueryAdapterInfo;
   McdmAbi abi = McdmAbi::legacy;
@@ -726,7 +769,22 @@ TEST(KmtApiTest, RejectsUnknownThreeDwordAbiIdentity) {
   EXPECT_NE(std::strstr(ErrorMessage(&error),
                         "unsupported three-dword MCDM identity"),
             nullptr);
-  EXPECT_EQ(g_query_count, 1u);
+  EXPECT_EQ(g_query_count, 2u);
+}
+
+TEST(KmtApiTest, RejectsInconsistentAcceptedAbiIdentities) {
+  ResetFakes();
+  g_query_outputs[0][1] = 2;
+  g_query_outputs[1][1] = 3;
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbi abi = McdmAbi::legacy;
+  Error error = {};
+
+  EXPECT_FALSE(QueryMcdmAbi(api, 0x5678, &abi, &error));
+  EXPECT_NE(std::strstr(ErrorMessage(&error), "inconsistent MCDM identities"),
+            nullptr);
+  EXPECT_EQ(g_query_count, 2u);
 }
 
 TEST(KmtApiTest, RejectsUnknownAbiQueryFailure) {

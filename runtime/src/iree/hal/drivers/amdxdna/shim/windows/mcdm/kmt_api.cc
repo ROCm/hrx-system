@@ -325,64 +325,82 @@ void QueryDriverStorePathForWarmup(const KmtApi& api, D3DKMT_HANDLE adapter) {
 bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
                   Error* out_error) {
   // Negotiate on both the accepted query shape and its returned protocol
-  // identity. Unknown identities fail closed instead of inheriting a packet
-  // layout from a driver-version heuristic.
+  // identity. Some legacy drivers accept an oversized three-DWORD query and
+  // zero-fill the extra DWORD, making {0, 2, 0} and {0, 3, 0} ambiguous by
+  // themselves. Compact drivers reject the two-DWORD shape with
+  // STATUS_BUFFER_TOO_SMALL, while legacy drivers accept it. Unknown or
+  // inconsistent combinations fail closed.
   constexpr uint32_t kLegacyV2Identity[2] = {0, 2};
   constexpr uint32_t kLegacyV3Identity[2] = {0, 3};
   constexpr uint32_t kCompactIdentity[3] = {0, 2, 0};
   constexpr uint32_t kCompactV3Identity[3] = {0, 3, 0};
-  uint32_t private_data[3] = {};
+  uint32_t compact_data[3] = {};
   D3DKMT_QUERYADAPTERINFO query = {};
   query.hAdapter = adapter;
   query.Type = KMTQAITYPE_UMDRIVERPRIVATE;
-  query.pPrivateDriverData = private_data;
-  // Probe the newest known contract first. XRT 2.21 issues exactly one
-  // three-DWORD query on compact drivers; starting with the legacy shape makes
-  // those drivers process a failed query before any device/context is created.
-  // Fall back only when the driver explicitly rejects the larger shape.
-  query.PrivateDriverDataSize = sizeof(private_data);
-  NTSTATUS status = api.query_adapter_info(&query);
-  if (status == 0) {
-    const bool is_compact_v2 =
-        std::memcmp(private_data, kCompactIdentity,
-                    sizeof(kCompactIdentity)) == 0;
-    const bool is_compact_v3 =
-        std::memcmp(private_data, kCompactV3Identity,
-                    sizeof(kCompactV3Identity)) == 0;
-    if (!is_compact_v2 && !is_compact_v3) {
-      SetErrorFormat(out_error,
-                     "unsupported three-dword MCDM identity {%u, %u, %u}",
-                     private_data[0], private_data[1], private_data[2]);
-      return false;
-    }
-    *out_abi = McdmAbi::compact;
-    return true;
-  }
-  if (status != kStatusBufferTooSmall) {
+  query.pPrivateDriverData = compact_data;
+  query.PrivateDriverDataSize = sizeof(compact_data);
+  NTSTATUS compact_status = api.query_adapter_info(&query);
+  if (compact_status != 0 && compact_status != kStatusBufferTooSmall) {
     return CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE compact)",
-                       status, out_error);
+                       compact_status, out_error);
   }
 
-  std::memset(private_data, 0, sizeof(private_data));
-  query.PrivateDriverDataSize = 2 * sizeof(uint32_t);
-  status = api.query_adapter_info(&query);
-  if (!CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE legacy)", status,
-                   out_error)) {
-    return false;
+  uint32_t legacy_data[2] = {};
+  query.pPrivateDriverData = legacy_data;
+  query.PrivateDriverDataSize = sizeof(legacy_data);
+  NTSTATUS legacy_status = api.query_adapter_info(&query);
+  if (legacy_status != 0 && legacy_status != kStatusBufferTooSmall) {
+    return CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE legacy)",
+                       legacy_status, out_error);
   }
+
+  const bool is_compact_v2 =
+      std::memcmp(compact_data, kCompactIdentity,
+                  sizeof(kCompactIdentity)) == 0;
+  const bool is_compact_v3 =
+      std::memcmp(compact_data, kCompactV3Identity,
+                  sizeof(kCompactV3Identity)) == 0;
   const bool is_legacy_v2 =
-      std::memcmp(private_data, kLegacyV2Identity,
+      std::memcmp(legacy_data, kLegacyV2Identity,
                   sizeof(kLegacyV2Identity)) == 0;
   const bool is_legacy_v3 =
-      std::memcmp(private_data, kLegacyV3Identity,
+      std::memcmp(legacy_data, kLegacyV3Identity,
                   sizeof(kLegacyV3Identity)) == 0;
-  if (!is_legacy_v2 && !is_legacy_v3) {
-    SetErrorFormat(out_error,
-                   "unsupported two-dword MCDM identity {%u, %u}",
-                   private_data[0], private_data[1]);
+
+  if (legacy_status == 0) {
+    if (!is_legacy_v2 && !is_legacy_v3) {
+      SetErrorFormat(out_error,
+                     "unsupported two-dword MCDM identity {%u, %u}",
+                     legacy_data[0], legacy_data[1]);
+      return false;
+    }
+    if (compact_status == 0 &&
+        ((!is_compact_v2 && !is_compact_v3) ||
+         std::memcmp(compact_data, legacy_data, sizeof(legacy_data)) != 0)) {
+      SetErrorFormat(out_error,
+                     "inconsistent MCDM identities {%u, %u, %u} and {%u, %u}",
+                     compact_data[0], compact_data[1], compact_data[2],
+                     legacy_data[0], legacy_data[1]);
+      return false;
+    }
+    *out_abi = McdmAbi::legacy;
+    return true;
+  }
+
+  if (compact_status == kStatusBufferTooSmall) {
+    SetError(out_error,
+             "MCDM driver rejected both three-dword and two-dword identity "
+             "queries");
     return false;
   }
-  *out_abi = McdmAbi::legacy;
+  if (!is_compact_v2 && !is_compact_v3) {
+    SetErrorFormat(out_error,
+                   "unsupported three-dword MCDM identity {%u, %u, %u}",
+                   compact_data[0], compact_data[1], compact_data[2]);
+    return false;
+  }
+  *out_abi = McdmAbi::compact;
   return true;
 }
 
