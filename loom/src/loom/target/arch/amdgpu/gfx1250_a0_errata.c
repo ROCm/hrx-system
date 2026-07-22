@@ -48,6 +48,11 @@ static const loom_amdgpu_gfx1250_a0_erratum_t kWmmaScaleErratum = {
     .legalization_key = IREE_SVL("legalize_scaled_wmma"),
 };
 
+static const loom_amdgpu_gfx1250_a0_erratum_t kLowPrecisionSwmmacErratum = {
+    .erratum_key = IREE_SVL("gfx1250.a0.swmmac_fp8_bf8"),
+    .legalization_key = IREE_SVL("lower_low_precision_swmmac_for_a0"),
+};
+
 static const loom_amdgpu_gfx1250_a0_erratum_t kIntegerMatrixSpacingErratum = {
     .erratum_key = IREE_SVL("gfx1250.a0.integer_matrix_coexecution"),
     .legalization_key = IREE_SVL("enforce_integer_matrix_spacing"),
@@ -112,6 +117,16 @@ loom_amdgpu_gfx1250_a0_erratum_for_descriptor(
     case LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_SCALE_F32_16X16X128_F8F6F4_F8_F8:
     case LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_SCALE_F32_32X16X128_F4:
       return &kWmmaScaleErratum;
+
+    case LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_F16_16X16X128_BF8_BF8:
+    case LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_F16_16X16X128_BF8_FP8:
+    case LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_F16_16X16X128_FP8_BF8:
+    case LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_F16_16X16X128_FP8_FP8:
+    case LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_F32_16X16X128_BF8_BF8:
+    case LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_F32_16X16X128_BF8_FP8:
+    case LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_F32_16X16X128_FP8_BF8:
+    case LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_F32_16X16X128_FP8_FP8:
+      return &kLowPrecisionSwmmacErratum;
 
     case LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_I32_16X16X128_IU8:
     case LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_I32_16X16X32_IU4:
