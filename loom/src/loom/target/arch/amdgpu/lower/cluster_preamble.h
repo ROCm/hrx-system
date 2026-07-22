@@ -42,9 +42,15 @@ uint32_t loom_amdgpu_cluster_preamble_size_dimension(
     const loom_target_workgroup_cluster_size_t* size,
     loom_kernel_dimension_t dimension);
 
-// Reports whether the current function uses the clustered launch-state ABI.
-iree_status_t loom_amdgpu_cluster_preamble_is_active(
-    loom_low_lower_context_t* context, bool* out_is_active);
+// Reports whether the selected target carries workgroup identity in the
+// gfx1250 launch-state TTMPs. Ordinary and clustered dispatches both do so.
+iree_status_t loom_amdgpu_cluster_preamble_uses_launch_state(
+    loom_low_lower_context_t* context, bool* out_uses_launch_state);
+
+// Reports whether the current function uses an extended clustered-dispatch
+// packet. Only a statically nontrivial cluster selects that packet ABI.
+iree_status_t loom_amdgpu_cluster_preamble_uses_clustered_dispatch(
+    loom_low_lower_context_t* context, bool* out_uses_clustered_dispatch);
 
 // Imports the fixed clustered launch-state registers required by |demands|.
 iree_status_t loom_amdgpu_cluster_preamble_emit_live_ins(

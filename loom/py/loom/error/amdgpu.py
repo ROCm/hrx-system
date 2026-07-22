@@ -1027,6 +1027,27 @@ ERR_AMDGPU_044 = ErrorDef(
     ),
 )
 
+# ERR_AMDGPU_045: AMDGPU HAL-kernel ABI fixed live-ins overlap.
+ERR_AMDGPU_045 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=45,
+    severity=Severity.ERROR,
+    summary="AMDGPU HAL-kernel ABI fixed live-ins overlap.",
+    message=(
+        "AMDGPU HAL-kernel ABI live-in source '{source_name}' and "
+        "'{conflicting_source_name}' both require fixed SGPR {fixed_location}"
+    ),
+    params=(
+        ErrorParam("source_name", ParamKind.STRING),
+        ErrorParam("conflicting_source_name", ParamKind.STRING),
+        ErrorParam("fixed_location", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Use one live-in source that represents all fields imported from the "
+        "fixed register"
+    ),
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_003,
@@ -1071,4 +1092,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_042,
     ERR_AMDGPU_043,
     ERR_AMDGPU_044,
+    ERR_AMDGPU_045,
 )
