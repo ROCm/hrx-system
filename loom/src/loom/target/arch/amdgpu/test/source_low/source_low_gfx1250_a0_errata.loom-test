@@ -162,7 +162,20 @@ func.def target(@target) @a0_k64_matrix_selection(%lhs_data: vector<8xi32>, %rhs
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<8xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
-  // ERROR@+1: AMDGPU/047 {function_name="a0_k64_matrix_selection", descriptor_name="amdgpu.v_wmma_f32_16x16x64_fp8_fp8", revision="a0", erratum_key="gfx1250.a0.wmma_f32_k64_fp8_bf8", legalization_key="prefix_wmma_k64_with_neutral_regular_scale"}
+  // ERROR@+1: AMDGPU/047 {function_name="a0_k64_matrix_selection", descriptor_name="amdgpu.v_wmma_f32_16x16x64_fp8_fp8", revision="a0", erratum_key="gfx1250.a0.wmma_k64_fp8_bf8", legalization_key="prefix_wmma_k64_with_neutral_regular_scale"}
   %result = vector.mma %lhs, %rhs, %init : vector<8xi32>, vector<8xi32>, vector<8xf32>
   func.return %result : vector<8xf32>
+}
+
+func.def target(@target) @a0_k64_f16_matrix_selection(%lhs_data: vector<8xi32>, %rhs_data: vector<8xi32>, %init_data: vector<8xf16>) -> (vector<8xf16>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 64 : index
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=32, payload_registers=8> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<8xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<8xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf16>
+  // ERROR@+1: AMDGPU/047 {function_name="a0_k64_f16_matrix_selection", descriptor_name="amdgpu.v_wmma_f16_16x16x64_fp8_fp8", revision="a0", erratum_key="gfx1250.a0.wmma_k64_fp8_bf8", legalization_key="prefix_wmma_k64_with_neutral_regular_scale"}
+  %result = vector.mma %lhs, %rhs, %init : vector<8xi32>, vector<8xi32>, vector<8xf16>
+  func.return %result : vector<8xf16>
 }
