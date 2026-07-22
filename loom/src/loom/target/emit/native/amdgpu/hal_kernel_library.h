@@ -16,6 +16,7 @@
 #include "iree/base/api.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/ir.h"
+#include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
 #include "loom/target/provider.h"
 #include "loom/target/reporting/artifact_manifest_collect.h"
@@ -28,11 +29,10 @@ extern "C" {
 #endif
 
 typedef struct loom_amdgpu_hal_kernel_library_options_t {
-  // Optional AMDHSA processor name such as `gfx1100` overriding the selected
-  // target record's processor. This preserves the target record's
-  // descriptor-set family while letting JIT runners specialize to the concrete
-  // HAL device ISA.
-  iree_string_view_t processor;
+  // Optional concrete AMDGPU profile overriding selected target records. This
+  // preserves each record's descriptor-set family while letting JIT runners
+  // specialize to the HAL device processor and silicon revision.
+  const loom_amdgpu_target_profile_t* target_profile;
   // Optional runtime/device target selection applied to compatible module
   // target records before entry selection, verification, scheduling, and
   // allocation.

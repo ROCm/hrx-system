@@ -9,6 +9,7 @@
 from loom.assembly import AttrDict, SymbolRef, TemplateParam
 from loom.dialect.target import target_record_attrs
 from loom.dsl import (
+    ATTR_TYPE_ENUM,
     ATTR_TYPE_STRING,
     SYMBOL_DEFINE,
     AttrDef,
@@ -40,6 +41,18 @@ AmdgpuTargetKind = EnumDef(
     doc="AMDGPU target row selected by amdgpu.target.",
 )
 
+AmdgpuGfx1250Revision = EnumDef(
+    "AmdgpuGfx1250Revision",
+    [
+        EnumCase("a0", 1, doc="gfx1250 A0 silicon behavior and errata."),
+        EnumCase("b0", 2, doc="gfx1250 B0 silicon behavior."),
+    ],
+    doc="gfx1250 silicon revision selected by amdgpu.target.",
+    c_type="loom_amdgpu_gfx1250_revision_t",
+    c_const_prefix="LOOM_AMDGPU_GFX1250_REVISION",
+    c_include="loom/target/arch/amdgpu/target_info.h",
+)
+
 amdgpu_target = Op(
     "amdgpu.target",
     group=amdgpu_ops,
@@ -66,6 +79,12 @@ amdgpu_target = Op(
     attrs=[
         *target_record_attrs(AmdgpuTargetKind),
         AttrDef("processor", ATTR_TYPE_STRING, optional=True),
+        AttrDef(
+            "gfx1250_revision",
+            ATTR_TYPE_ENUM,
+            enum_def=AmdgpuGfx1250Revision,
+            optional=True,
+        ),
     ],
     verify="loom_amdgpu_target_record_verify",
     format=[
@@ -77,6 +96,7 @@ amdgpu_target = Op(
         "amdgpu.target<gfx1100> @gfx11",
         "amdgpu.target<gfx942> @gfx942 {subgroup_size = 64}",
         "amdgpu.target<gfx950> @gfx950 {subgroup_size = 64}",
+        "amdgpu.target<gfx1250> @gfx1250 {gfx1250_revision = a0}",
     ],
 )
 

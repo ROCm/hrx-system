@@ -12,17 +12,30 @@
 /// @file
 /// AMDGPU target profile facts.
 ///
-/// The current AMDGPU public profile is intentionally compact: it selects one
-/// concrete AMDGPU processor row such as `gfx1100` or `gfx942`. The processor
-/// row determines the descriptor-family target bundle, native HSACO support,
-/// default wavefront size, HSA target id, and target-record family used by
-/// compilation and emission. Live HSA/HIP/HRX adapters should derive this
-/// processor string from their runtime agent query and then create a normal
+/// The AMDGPU public profile selects one concrete processor row such as
+/// `gfx1100` or `gfx942` and any silicon identity required to compile for that
+/// row. The processor determines the descriptor-family target bundle, native
+/// HSACO support, default wavefront size, HSA target id, and target-record
+/// family used by compilation and emission. Live HSA/HIP/HRX adapters should
+/// derive these facts from their runtime agent query and then create a normal
 /// `loomc_target_profile_t`.
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/// gfx1250 silicon revision selected by an AMDGPU target profile.
+typedef enum loomc_amdgpu_gfx1250_revision_e {
+  /// Uses the default revision for the selected processor. gfx1250 defaults to
+  /// B0; the value has no effect on other processors.
+  LOOMC_AMDGPU_GFX1250_REVISION_DEFAULT = 0,
+
+  /// Selects gfx1250 A0 silicon behavior and errata.
+  LOOMC_AMDGPU_GFX1250_REVISION_A0 = 1,
+
+  /// Selects gfx1250 B0 silicon behavior.
+  LOOMC_AMDGPU_GFX1250_REVISION_B0 = 2,
+} loomc_amdgpu_gfx1250_revision_t;
 
 /// AMDGPU processor profile creation options.
 typedef struct loomc_amdgpu_profile_options_t {
@@ -43,6 +56,10 @@ typedef struct loomc_amdgpu_profile_options_t {
 
   /// AMDGPU processor name, such as `gfx1100`, `gfx1150`, or `gfx942`.
   loomc_string_view_t processor;
+
+  /// gfx1250 silicon revision. Explicit A0/B0 values require processor
+  /// `gfx1250`; DEFAULT selects B0 for gfx1250 and is ignored otherwise.
+  loomc_amdgpu_gfx1250_revision_t gfx1250_revision;
 } loomc_amdgpu_profile_options_t;
 
 /// Creates an AMDGPU target profile from a concrete processor name.
@@ -69,6 +86,16 @@ LOOMC_API_EXPORT loomc_status_t loomc_target_profile_create_amdgpu(
 /// profile API.
 LOOMC_API_EXPORT loomc_string_view_t
 loomc_amdgpu_target_profile_processor(const loomc_target_profile_t* profile);
+
+/// Returns the gfx1250 revision selected by an AMDGPU target profile.
+///
+/// @param profile AMDGPU target profile to query.
+/// @return A0 or B0 for gfx1250 profiles. DEFAULT is returned when `profile`
+/// is `NULL`, was not created by the AMDGPU profile API, or selects another
+/// processor.
+LOOMC_API_EXPORT loomc_amdgpu_gfx1250_revision_t
+loomc_amdgpu_target_profile_gfx1250_revision(
+    const loomc_target_profile_t* profile);
 
 /// Extracts an AMDGPU processor name from an HSA ISA target id.
 ///

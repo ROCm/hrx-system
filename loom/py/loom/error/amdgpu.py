@@ -1048,6 +1048,24 @@ ERR_AMDGPU_045 = ErrorDef(
     ),
 )
 
+# ERR_AMDGPU_046: gfx1250 revision targets a different processor.
+ERR_AMDGPU_046 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=46,
+    severity=Severity.ERROR,
+    summary="gfx1250 revision targets a different processor.",
+    message=(
+        "AMDGPU target '@{target_name}' selects gfx1250 revision "
+        "'{revision}' for processor '{processor}'"
+    ),
+    params=(
+        ErrorParam("target_name", ParamKind.STRING),
+        ErrorParam("revision", ParamKind.STRING),
+        ErrorParam("processor", ParamKind.STRING),
+    ),
+    fix_hint=("Remove the gfx1250 revision or select the gfx1250 processor"),
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_003,
@@ -1093,4 +1111,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_043,
     ERR_AMDGPU_044,
     ERR_AMDGPU_045,
+    ERR_AMDGPU_046,
 )
