@@ -313,7 +313,7 @@
               "unordered": [
                 "\"status\":{\"code\":0,\"name\":\"OK\"}",
                 "\"target_key\":\"gfx1250\"",
-                "\"instruction_count\":741",
+                "\"instruction_count\":744",
                 "\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":296",
                 "\"target_insertions\":{\"static_packet_count\":37,\"exact_dynamic_packet_count\":37,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":37,\"row_count\":37",
                 "\"packet_key\":\"amdgpu.s_set_vgpr_msb\"",
@@ -351,7 +351,7 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx1250\"",
-                "\"instruction_count\":509",
+                "\"instruction_count\":512",
                 "\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":352",
                 "\"target_insertions\":{\"static_packet_count\":14,\"exact_dynamic_packet_count\":14,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":44,\"row_count\":14",
                 "\"dynamic_instruction_mix\":{\"descriptor_count\":",
@@ -385,7 +385,7 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx1251\"",
-                "\"instruction_count\":741",
+                "\"instruction_count\":744",
                 "\"target_insertions\":{\"static_packet_count\":37,\"exact_dynamic_packet_count\":37,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":37,\"row_count\":37"
               ]
             }
@@ -416,7 +416,7 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx1251\"",
-                "\"instruction_count\":509",
+                "\"instruction_count\":512",
                 "\"target_insertions\":{\"static_packet_count\":14,\"exact_dynamic_packet_count\":14,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":44,\"row_count\":14"
               ]
             }
@@ -451,7 +451,7 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx1250\"",
-                "\"instruction_count\":685",
+                "\"instruction_count\":688",
                 "\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":264",
                 "\"target_insertions\":{\"static_packet_count\":6,\"exact_dynamic_packet_count\":0,\"unknown_dynamic_packet_count\":6,\"dynamic_packet_count\":null,\"row_count\":6",
                 "\"packet_key\":\"amdgpu.s_set_vgpr_msb\"",
@@ -487,7 +487,7 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx1251\"",
-                "\"instruction_count\":685",
+                "\"instruction_count\":688",
                 "\"target_insertions\":{\"static_packet_count\":6,\"exact_dynamic_packet_count\":0,\"unknown_dynamic_packet_count\":6,\"dynamic_packet_count\":null,\"row_count\":6"
               ]
             }

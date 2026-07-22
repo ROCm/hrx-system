@@ -321,6 +321,9 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx1250Processor) {
             LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250);
   EXPECT_TRUE(iree_any_bit_set(
       processor->flags, LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE));
+  EXPECT_TRUE(
+      iree_any_bit_set(processor->flags,
+                       LOOM_AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE));
   ExpectSchedulingBits(processor, LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU);
 }
 
