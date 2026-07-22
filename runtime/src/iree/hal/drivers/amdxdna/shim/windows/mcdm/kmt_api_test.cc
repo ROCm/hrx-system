@@ -722,9 +722,40 @@ TEST(KmtApiTest, NegotiatesCompactV3AbiWhenLegacyShapeIsRejected) {
   ASSERT_EQ(g_query_count, 2u);
 }
 
+TEST(KmtApiTest, NegotiatesCompactV4AbiWhenLegacyShapeIsRejected) {
+  ResetFakes();
+  g_query_outputs[0][1] = 4;
+  g_query_statuses[1] = static_cast<NTSTATUS>(0xC0000023u);
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbi abi = McdmAbi::legacy;
+  Error error = {};
+
+  ASSERT_TRUE(QueryMcdmAbi(api, 0x5678, &abi, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(abi, McdmAbi::compact);
+  ASSERT_EQ(g_query_count, 2u);
+}
+
+TEST(KmtApiTest, NegotiatesLegacyV4AbiWhenCompactShapeIsRejected) {
+  ResetFakes();
+  g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
+  g_query_outputs[1][1] = 4;
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbi abi = McdmAbi::legacy;
+  Error error = {};
+
+  ASSERT_TRUE(QueryMcdmAbi(api, 0x1234, &abi, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(abi, McdmAbi::legacy);
+  EXPECT_EQ(g_query_count, 2u);
+}
+
 TEST(KmtApiTest, RejectsUnknownTwoDwordAbiIdentity) {
   ResetFakes();
   g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
+  g_query_outputs[1][0] = 1;
   g_query_outputs[1][1] = 4;
   KmtApi api = {};
   api.query_adapter_info = FakeQueryAdapterInfo;

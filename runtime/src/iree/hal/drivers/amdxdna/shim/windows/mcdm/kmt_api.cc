@@ -332,8 +332,10 @@ bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
   // inconsistent combinations fail closed.
   constexpr uint32_t kLegacyV2Identity[2] = {0, 2};
   constexpr uint32_t kLegacyV3Identity[2] = {0, 3};
+  constexpr uint32_t kLegacyV4Identity[2] = {0, 4};
   constexpr uint32_t kCompactIdentity[3] = {0, 2, 0};
   constexpr uint32_t kCompactV3Identity[3] = {0, 3, 0};
+  constexpr uint32_t kCompactV4Identity[3] = {0, 4, 0};
   uint32_t compact_data[3] = {};
   D3DKMT_QUERYADAPTERINFO query = {};
   query.hAdapter = adapter;
@@ -361,22 +363,28 @@ bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
   const bool is_compact_v3 =
       std::memcmp(compact_data, kCompactV3Identity,
                   sizeof(kCompactV3Identity)) == 0;
+  const bool is_compact_v4 =
+      std::memcmp(compact_data, kCompactV4Identity,
+                  sizeof(kCompactV4Identity)) == 0;
   const bool is_legacy_v2 =
       std::memcmp(legacy_data, kLegacyV2Identity,
                   sizeof(kLegacyV2Identity)) == 0;
   const bool is_legacy_v3 =
       std::memcmp(legacy_data, kLegacyV3Identity,
                   sizeof(kLegacyV3Identity)) == 0;
+  const bool is_legacy_v4 =
+      std::memcmp(legacy_data, kLegacyV4Identity,
+                  sizeof(kLegacyV4Identity)) == 0;
 
   if (legacy_status == 0) {
-    if (!is_legacy_v2 && !is_legacy_v3) {
+    if (!is_legacy_v2 && !is_legacy_v3 && !is_legacy_v4) {
       SetErrorFormat(out_error,
                      "unsupported two-dword MCDM identity {%u, %u}",
                      legacy_data[0], legacy_data[1]);
       return false;
     }
     if (compact_status == 0 &&
-        ((!is_compact_v2 && !is_compact_v3) ||
+        ((!is_compact_v2 && !is_compact_v3 && !is_compact_v4) ||
          std::memcmp(compact_data, legacy_data, sizeof(legacy_data)) != 0)) {
       SetErrorFormat(out_error,
                      "inconsistent MCDM identities {%u, %u, %u} and {%u, %u}",
@@ -384,6 +392,8 @@ bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
                      legacy_data[0], legacy_data[1]);
       return false;
     }
+    // v4 drivers on some platforms (e.g. Krackan + 32.0.203.329) report only
+    // the legacy two-dword identity; they still use the legacy packet layout.
     *out_abi = McdmAbi::legacy;
     return true;
   }
@@ -394,7 +404,7 @@ bool QueryMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter, McdmAbi* out_abi,
              "queries");
     return false;
   }
-  if (!is_compact_v2 && !is_compact_v3) {
+  if (!is_compact_v2 && !is_compact_v3 && !is_compact_v4) {
     SetErrorFormat(out_error,
                    "unsupported three-dword MCDM identity {%u, %u, %u}",
                    compact_data[0], compact_data[1], compact_data[2]);
