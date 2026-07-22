@@ -28,6 +28,11 @@ static const loom_amdgpu_gfx1250_a0_erratum_t kTensorMulticastErratum = {
     .legalization_key = IREE_SVL("clear_and_restore_tensor_multicast_mask"),
 };
 
+static const loom_amdgpu_gfx1250_a0_erratum_t kWmmaK64Erratum = {
+    .erratum_key = IREE_SVL("gfx1250.a0.wmma_f32_k64_fp8_bf8"),
+    .legalization_key = IREE_SVL("prefix_wmma_k64_with_neutral_regular_scale"),
+};
+
 static const loom_amdgpu_gfx1250_a0_erratum_t kWmmaK128Erratum = {
     .erratum_key = IREE_SVL("gfx1250.a0.wmma_k128_fp8_bf8"),
     .legalization_key = IREE_SVL("split_wmma_k128_to_regular_scale_k64"),
@@ -78,6 +83,12 @@ loom_amdgpu_gfx1250_a0_erratum_for_descriptor(
     case LOOM_AMDGPU_DESCRIPTOR_REF_TENSOR_LOAD_TO_LDS_D2:
     case LOOM_AMDGPU_DESCRIPTOR_REF_TENSOR_LOAD_TO_LDS_D4:
       return &kTensorMulticastErratum;
+
+    case LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_F32_16X16X64_BF8_BF8:
+    case LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_F32_16X16X64_BF8_FP8:
+    case LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_F32_16X16X64_FP8_BF8:
+    case LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_F32_16X16X64_FP8_FP8:
+      return &kWmmaK64Erratum;
 
     case LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_F16_16X16X128_BF8_BF8:
     case LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_F16_16X16X128_BF8_FP8:
