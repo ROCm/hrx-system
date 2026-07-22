@@ -553,7 +553,7 @@ class CiTest(unittest.TestCase):
 
     def test_amdgpu_gfx120x_quarantines_tsan_execution(self):
         xfail_target = (
-            "-//loom/src/loom/tools/iree-test-loom:amdgpu_tsan_execution_test"
+            "-//loom/src/loom/tooling/target/amdgpu:iree_test_loom_tsan_execution_test"
         )
         gfx120x_args = ci.parse_arguments(
             [

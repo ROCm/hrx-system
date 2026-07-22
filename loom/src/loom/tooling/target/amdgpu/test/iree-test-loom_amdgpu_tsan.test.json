@@ -6,7 +6,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/../../test/corpus/sanitizer/amdgpu_tsan_actual.loom",
+          "{srcdir}/../../../../test/corpus/sanitizer/amdgpu_tsan_actual.loom",
           "--case=@tsan_workgroup_write_race_case",
           "--device=amdgpu",
           "--sanitizer=tsan",
@@ -32,7 +32,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/../../test/corpus/sanitizer/amdgpu_tsan_actual.loom",
+          "{srcdir}/../../../../test/corpus/sanitizer/amdgpu_tsan_actual.loom",
           "--case=@tsan_workgroup_barrier_safe_write_case",
           "--device=amdgpu",
           "--sanitizer=tsan",

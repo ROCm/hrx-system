@@ -1,0 +1,5 @@
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target(@target) @bad_return(%predicate: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) {
+  low.return %predicate : reg<amdgpu.sgpr x2>
+}

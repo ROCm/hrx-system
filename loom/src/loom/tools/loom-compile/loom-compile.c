@@ -47,6 +47,12 @@
 #ifndef LOOM_COMPILE_HAVE_LLVMIR
 #define LOOM_COMPILE_HAVE_LLVMIR 0
 #endif  // LOOM_COMPILE_HAVE_LLVMIR
+#ifndef LOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV
+#define LOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV 0
+#endif  // LOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV
+#ifndef LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
+#define LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV 0
+#endif  // LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
 
 typedef struct loom_compile_diagnostic_sink_t {
   // Parsed module used for full type rendering.
@@ -117,9 +123,13 @@ static iree_status_t loom_compile_diagnostic_sink(
 #endif  // LOOM_COMPILE_HAVE_SPIRV_VULKAN
 #if LOOM_COMPILE_HAVE_LLVMIR
 #include "loom/target/arch/llvmir/provider.h"
-#include "loom/target/emit/llvmir/amdgpu/target_env.h"
 #include "loom/target/emit/llvmir/artifact_emitter.h"
+#if LOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV
+#include "loom/target/emit/llvmir/amdgpu/target_env.h"
+#endif  // LOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV
+#if LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
 #include "loom/target/emit/llvmir/x86/target_env.h"
+#endif  // LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
 #endif  // LOOM_COMPILE_HAVE_LLVMIR
 
 IREE_FLAG(string, backend, "vm",
@@ -847,12 +857,17 @@ static iree_status_t loom_compile_emit_target(
 #if LOOM_COMPILE_HAVE_LLVMIR
   const loom_llvmir_target_profile_provider_t*
       llvmir_target_profile_providers[] = {
+#if LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
           loom_llvmir_x86_target_profile_provider(),
+#endif  // LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
+#if LOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV
           loom_llvmir_amdgpu_target_profile_provider(),
+#endif  // LOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV
+          NULL,
       };
   const loom_llvmir_target_profile_registry_t llvmir_target_profile_registry = {
       .providers = llvmir_target_profile_providers,
-      .provider_count = IREE_ARRAYSIZE(llvmir_target_profile_providers),
+      .provider_count = IREE_ARRAYSIZE(llvmir_target_profile_providers) - 1,
   };
   loom_llvmir_artifact_emitter_options_t llvmir_options = {0};
   const void* option_chain = NULL;

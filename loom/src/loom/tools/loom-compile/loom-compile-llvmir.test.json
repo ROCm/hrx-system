@@ -103,37 +103,6 @@
       ]
     },
     {
-      "name": "emits textual LLVMIR for AMDGCN kernel low IR",
-      "steps": [
-        {
-          "name": "write-source",
-          "write": {
-            "path": "{tmp}/amdgcn_kernel.loom",
-            "text": "llvmir.target<object> @target {\n  triple = \"amdgcn-amd-amdhsa\"\n}\n\nlow.kernel.def target(@target) workgroup_size(64, 1, 1) @dispatch() asm<llvmir.generic.core> {\n  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>\n  %value = load.i32 %input, 4\n  return\n}\n"
-          }
-        },
-        {
-          "name": "compile",
-          "run": {
-            "tool": "loom-compile",
-            "args": [
-              "{tmp}/amdgcn_kernel.loom",
-              "--backend=llvmir-text",
-              "--pipeline=none",
-              "--output=-"
-            ]
-          },
-          "stdout": {
-            "contains": [
-              "target triple = \"amdgcn-amd-amdhsa\"",
-              "define amdgpu_kernel void @dispatch(ptr addrspace(1) inreg noundef %input)",
-              "\"amdgpu-flat-work-group-size\"=\"1,1024\""
-            ]
-          }
-        }
-      ]
-    },
-    {
       "name": "rejects HAL sidecar path for LLVMIR emitters",
       "steps": [
         {

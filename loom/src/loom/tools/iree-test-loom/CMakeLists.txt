@@ -93,67 +93,6 @@ iree_execution_test_suite(
     "hostonly"
 )
 
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_execution_test_suite(
-  NAME
-    amdgpu_execution_test
-  MANIFESTS
-    "iree-test-loom_amdgpu.test.json"
-  TOOLS
-    "iree-test-loom=::iree-test-loom"
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/amdgpu_compile_rejection.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/amdgpu_hal_actual.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/amdgpu_unused_kernargs.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/generated_tensor_cases.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-  RESOURCE_GROUP
-    loom-amdgpu-tests
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_execution_test_suite(
-  NAME
-    amdgpu_asan_execution_test
-  MANIFESTS
-    "iree-test-loom_amdgpu_asan.test.json"
-  TOOLS
-    "iree-test-loom=::iree-test-loom"
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/sanitizer/amdgpu_asan_actual.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-    "notsan"
-  RESOURCE_GROUP
-    loom-amdgpu-tests
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_execution_test_suite(
-  NAME
-    amdgpu_tsan_execution_test
-  MANIFESTS
-    "iree-test-loom_amdgpu_tsan.test.json"
-  TOOLS
-    "iree-test-loom=::iree-test-loom"
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/sanitizer/amdgpu_tsan_actual.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-  RESOURCE_GROUP
-    loom-amdgpu-tests
-)
-endif()
-
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
 iree_execution_test_suite(
   NAME

@@ -9,7 +9,7 @@
 
 iree_add_all_subdirs()
 
-if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
     intrinsics
@@ -24,7 +24,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
 loom_generated_textual_header(
   NAME
     target_profiles_gen
@@ -37,7 +37,7 @@ loom_generated_textual_header(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
     target_env

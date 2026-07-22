@@ -22,6 +22,12 @@ endif()
 if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
   list(APPEND _loom_compile_platform_copts "-DLOOM_COMPILE_HAVE_LLVMIR=1")
 endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _loom_compile_platform_copts "-DLOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV=1")
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
+  list(APPEND _loom_compile_platform_copts "-DLOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV=1")
+endif()
 set(_loom_compile_platform_deps "")
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
   list(APPEND _loom_compile_platform_deps loom::target::arch::amdgpu::provider)
@@ -37,8 +43,12 @@ if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN)
 endif()
 if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
   list(APPEND _loom_compile_platform_deps loom::target::arch::llvmir::provider)
-  list(APPEND _loom_compile_platform_deps loom::target::emit::llvmir::amdgpu::target_env)
   list(APPEND _loom_compile_platform_deps loom::target::emit::llvmir::artifact_emitter)
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _loom_compile_platform_deps loom::target::emit::llvmir::amdgpu::target_env)
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
   list(APPEND _loom_compile_platform_deps loom::target::emit::llvmir::x86::target_env)
 endif()
 loom_cc_binary(
@@ -92,37 +102,6 @@ iree_execution_test_suite(
   LABELS
     "hostonly"
 )
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-iree_execution_test_suite(
-  NAME
-    amdgpu_execution_test
-  MANIFESTS
-    "loom-compile-amdgpu.test.json"
-  TOOLS
-    "loom-compile=::loom-compile"
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/amdgpu_unused_kernargs.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/gfx1250_configured_fragment_bank.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/gfx1250_extended_vgpr.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/gfx1250_tied_accumulators.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/gfx12_wmma_bf16_f32.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/report_carried_loop_memory_economics_amdgpu.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/report_complex_loop_memory_economics_amdgpu.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/report_dispatch_memory_economics_amdgpu.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/report_lds_occupancy_amdgpu.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/report_loop_matrix_mix_amdgpu.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/report_loop_memory_economics_amdgpu.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/report_materialized_fragment_spills_amdgpu.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/report_private_memory_mix_amdgpu.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/report_target_insertions_uncountable_amdgpu.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/report_workgroup_occupancy_amdgpu.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/selected_root_amdgpu.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/target_family_template_provider_amdgpu.loom"
-  LABELS
-    "hostonly"
-)
-endif()
 
 if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
 iree_execution_test_suite(

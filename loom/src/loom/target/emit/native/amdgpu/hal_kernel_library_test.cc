@@ -134,6 +134,24 @@ bool HasWaitCounter(const loom_target_compile_report_t& report,
   return false;
 }
 
+bool HasEntry(const loom_target_compile_report_t& report,
+              const char* function_name) {
+  const iree_string_view_t expected_name =
+      iree_make_cstring_view(function_name);
+  for (const loom_target_compile_report_vec_t* vec = report.entry_rows.head;
+       vec != nullptr; vec = vec->next) {
+    const loom_target_compile_report_entry_t* rows =
+        static_cast<const loom_target_compile_report_entry_t*>(
+            loom_target_compile_report_vec_const_rows(vec));
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      if (iree_string_view_equal(rows[i].function_name, expected_name)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 uint32_t LoadLeU32(const uint8_t* bytes, size_t offset) {
   return (uint32_t)bytes[offset] | ((uint32_t)bytes[offset + 1] << 8) |
          ((uint32_t)bytes[offset + 2] << 16) |
@@ -1037,11 +1055,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsAllCompatibleKernels) {
   loom_module_t* module = nullptr;
   ASSERT_NO_FATAL_FAILURE(ParseGfx11MultiKernel(&module));
 
-  loom_target_artifact_manifest_collect_options_t artifact_manifest_options;
-  loom_target_artifact_manifest_collect_options_initialize(
-      &artifact_manifest_options);
-  artifact_manifest_options.mode = LOOM_TARGET_ARTIFACT_MANIFEST_MODE_SUMMARY;
-
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
@@ -1052,11 +1067,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsAllCompatibleKernels) {
       /*.diagnostic_sink=*/capture.sink(),
       /*.source_resolver=*/{},
       /*.max_errors=*/20,
-      /*.report=*/nullptr,
-      /*.capture_target_listing=*/false,
-      /*.artifact_name=*/{},
-      /*.artifact_manifest_identifier=*/{},
-      /*.artifact_manifest=*/artifact_manifest_options,
+      /*.report=*/&report,
   };
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
@@ -1067,21 +1078,24 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsAllCompatibleKernels) {
   ASSERT_NE(library.hsaco_data, nullptr);
   std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
                     library.hsaco_data_length);
-  EXPECT_NE(hsaco.find("first_kernel.kd"), std::string::npos);
-  EXPECT_NE(hsaco.find("second_kernel.kd"), std::string::npos);
-
-  ASSERT_NE(library.artifact_manifest.contents.data, nullptr);
-  std::string manifest(
-      reinterpret_cast<const char*>(library.artifact_manifest.contents.data),
-      library.artifact_manifest.contents.data_length);
-  size_t first_manifest_position = manifest.find("\"name\":\"first_kernel\"");
-  size_t second_manifest_position = manifest.find("\"name\":\"second_kernel\"");
-  ASSERT_NE(first_manifest_position, std::string::npos) << manifest;
-  ASSERT_NE(second_manifest_position, std::string::npos) << manifest;
-  EXPECT_LT(first_manifest_position, second_manifest_position) << manifest;
+  const std::vector<Section> sections = ReadSections(hsaco);
+  const Section& dynamic_symbol_table = FindSection(sections, ".dynsym");
+  const Section& dynamic_string_table = FindSection(sections, ".dynstr");
+  EXPECT_GT(FindDynamicSymbol(hsaco, dynamic_symbol_table, dynamic_string_table,
+                              "first_kernel")
+                .size,
+            0u);
+  EXPECT_GT(FindDynamicSymbol(hsaco, dynamic_symbol_table, dynamic_string_table,
+                              "second_kernel")
+                .size,
+            0u);
+  EXPECT_EQ(report.entry_rows.count, 2u);
+  EXPECT_TRUE(HasEntry(report, "first_kernel"));
+  EXPECT_TRUE(HasEntry(report, "second_kernel"));
 
   loom_amdgpu_hal_kernel_library_deinitialize(&library,
                                               iree_allocator_system());
+  loom_target_compile_report_deinitialize(&report);
   loom_module_free(module);
 }
 
