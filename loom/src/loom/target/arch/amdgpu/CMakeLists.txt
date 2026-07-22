@@ -253,19 +253,23 @@ loom_cc_library(
   NAME
     low_verify
   HDRS
+    "gfx1250_a0_errata.h"
     "low_verify.h"
   SRCS
+    "gfx1250_a0_errata.c"
     "low_verify.c"
   DEPS
     ::error_defs
     ::low_aliases
     iree::base
+    loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
     loom::codegen::low::packet
     loom::codegen::low::verify
     loom::error::error_defs
     loom::target::arch::amdgpu::encoding
     loom::target::arch::amdgpu::ops
+    loom::target::arch::amdgpu::refs::target_refs
   PUBLIC
 )
 endif()
