@@ -56,6 +56,9 @@ typedef struct loom_amdgpu_hal_kernel_abi_source_info_t {
   uint8_t unit_count;
   // Coordinate dimension for workgroup/workitem roles, or NO_DIMENSION.
   uint8_t dimension;
+  // Workgroup-coordinate launch state required when importing this source.
+  loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flags_t
+      launch_workgroup_id_flags;
   // Fixed SGPR location for FIXED_SGPR sources, or UINT16_MAX.
   uint16_t fixed_location;
 } loom_amdgpu_hal_kernel_abi_source_info_t;
@@ -69,10 +72,12 @@ typedef struct loom_amdgpu_hal_kernel_abi_source_info_t {
       .reg_class = LOOM_AMDGPU_HAL_KERNEL_ABI_REG_CLASS_##source_reg_class,   \
       .unit_count = source_unit_count,                                        \
       .dimension = source_dimension,                                          \
+      .launch_workgroup_id_flags = 0,                                         \
       .fixed_location = UINT16_MAX,                                           \
   }
 
-#define LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(kind, location) \
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(kind, location, \
+                                                          launch_flags)   \
   [LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_##kind] = {                          \
       .stable_id = LOOM_AMDGPU_HAL_KERNEL_ABI_##kind##_SOURCE_ID,         \
       .name = IREE_SVL(LOOM_AMDGPU_HAL_KERNEL_ABI_##kind##_SOURCE),       \
@@ -80,6 +85,7 @@ typedef struct loom_amdgpu_hal_kernel_abi_source_info_t {
       .reg_class = LOOM_AMDGPU_HAL_KERNEL_ABI_REG_CLASS_SGPR,             \
       .unit_count = 1,                                                    \
       .dimension = LOOM_AMDGPU_HAL_KERNEL_ABI_NO_DIMENSION,               \
+      .launch_workgroup_id_flags = launch_flags,                          \
       .fixed_location = location,                                         \
   }
 
@@ -115,9 +121,33 @@ static const loom_amdgpu_hal_kernel_abi_source_info_t
         LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(
             M0, M0, NONE, 1, LOOM_AMDGPU_HAL_KERNEL_ABI_NO_DIMENSION),
         LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(
-            CLUSTER_WORKGROUP_INFO, 114),
-        LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(CLUSTER_ID_YZ, 115),
-        LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(CLUSTER_ID_X, 117),
+            CLUSTER_WORKGROUP_INFO, 114,
+            LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_KNOWN_FLAGS),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(
+            CLUSTER_ID_YZ, 115,
+            LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_KNOWN_FLAGS),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(
+            CLUSTER_ID_X, 117,
+            LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_X),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(
+            CLUSTER_ID_Y, 115,
+            LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_X |
+                LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Y),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(
+            CLUSTER_ID_Z, 115,
+            LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_X |
+                LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Z),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(
+            CLUSTER_WORKGROUP_INFO_X, 114,
+            LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_X),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(
+            CLUSTER_WORKGROUP_INFO_XY, 114,
+            LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_X |
+                LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Y),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO(
+            CLUSTER_WORKGROUP_INFO_XZ, 114,
+            LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_X |
+                LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Z),
 };
 
 #undef LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO
@@ -220,6 +250,14 @@ loom_amdgpu_hal_kernel_abi_live_in_source_kind(const loom_module_t* module,
   }
   return loom_amdgpu_hal_kernel_abi_source_kind_from_stable_id(
       (uint64_t)loom_low_live_in_source_id(def_op));
+}
+
+loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flags_t
+loom_amdgpu_hal_kernel_abi_source_launch_workgroup_id_flags(
+    loom_amdgpu_hal_kernel_abi_source_kind_t source_kind) {
+  const loom_amdgpu_hal_kernel_abi_source_info_t* source_info =
+      loom_amdgpu_hal_kernel_abi_source_info_from_kind(source_kind);
+  return source_info == NULL ? 0 : source_info->launch_workgroup_id_flags;
 }
 
 static iree_status_t loom_amdgpu_hal_kernel_abi_reg_class_id(
@@ -550,6 +588,28 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_emit_live_in_duplicate(
   }};
   return loom_amdgpu_hal_kernel_abi_emit(
       emitter, live_in_op, LOOM_ERR_AMDGPU_015, params, IREE_ARRAYSIZE(params),
+      related, IREE_ARRAYSIZE(related), max_errors, result);
+}
+
+static iree_status_t loom_amdgpu_hal_kernel_abi_emit_fixed_live_in_overlap(
+    const loom_op_t* live_in_op, const loom_op_t* conflicting_op,
+    iree_string_view_t source_name, iree_string_view_t conflicting_source_name,
+    uint16_t fixed_location, uint32_t max_errors,
+    iree_diagnostic_emitter_t emitter,
+    loom_amdgpu_hal_kernel_abi_verify_result_t* result) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(source_name),
+      loom_param_string(conflicting_source_name),
+      loom_param_u32(fixed_location),
+  };
+  const loom_diagnostic_related_op_t related[] = {{
+      .label = IREE_SV("conflicting live-in"),
+      .op = conflicting_op,
+      .field_ref = loom_diagnostic_field_ref(
+          LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, loom_low_live_in_source_ATTR_INDEX),
+  }};
+  return loom_amdgpu_hal_kernel_abi_emit(
+      emitter, live_in_op, LOOM_ERR_AMDGPU_045, params, IREE_ARRAYSIZE(params),
       related, IREE_ARRAYSIZE(related), max_errors, result);
 }
 
@@ -1313,6 +1373,26 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_verify_live_ins(
     }
 
     const iree_host_size_t source_index = (iree_host_size_t)source_kind;
+    if (source_info->role ==
+        LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_ROLE_FIXED_SGPR) {
+      for (iree_host_size_t i = 1;
+           i < IREE_ARRAYSIZE(kLoomAmdgpuHalKernelAbiSourceInfos); ++i) {
+        const loom_amdgpu_hal_kernel_abi_source_info_t* conflicting_info =
+            &kLoomAmdgpuHalKernelAbiSourceInfos[i];
+        if (i == source_index || live_in_ops[i] == NULL ||
+            conflicting_info->role !=
+                LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_ROLE_FIXED_SGPR ||
+            conflicting_info->fixed_location != source_info->fixed_location) {
+          continue;
+        }
+        IREE_RETURN_IF_ERROR(
+            loom_amdgpu_hal_kernel_abi_emit_fixed_live_in_overlap(
+                live_in_op, live_in_ops[i], source_info->name,
+                conflicting_info->name, source_info->fixed_location, max_errors,
+                emitter, result));
+        break;
+      }
+    }
     if (source_info->role !=
             LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_ROLE_PACKED_WORKITEM_ID &&
         live_in_ops[source_index] != NULL) {

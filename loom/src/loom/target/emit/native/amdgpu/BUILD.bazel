@@ -83,6 +83,7 @@ loom_cc_library(
     deps = [
         ":assembly",
         ":encoding",
+        ":hal_kernel_library",
         ":spill_lowering",
         "//loom/src/loom/codegen/low:allocation_json",
         "//loom/src/loom/codegen/low:frame",
@@ -234,6 +235,7 @@ loom_cc_library(
         "//loom/src/loom/target:launch",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/target/arch/amdgpu/target_id",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

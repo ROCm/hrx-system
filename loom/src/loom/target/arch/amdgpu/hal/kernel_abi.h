@@ -94,6 +94,33 @@ extern "C" {
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_SOURCE_ID \
   UINT64_C(0x7A5A999A4B91578F)
 
+// Stable low.live_in source spelling for gfx1250 TTMP6 when only the x
+// cluster-local workgroup coordinate is enabled.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_X_SOURCE \
+  "amdgpu.cluster_workgroup_info.x"
+
+// Stable low.live_in source ID for x-only packed cluster workgroup state.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_X_SOURCE_ID \
+  UINT64_C(0x11B87FDAAA3D6151)
+
+// Stable low.live_in source spelling for gfx1250 TTMP6 when the x and y
+// cluster-local workgroup coordinates are enabled.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_XY_SOURCE \
+  "amdgpu.cluster_workgroup_info.xy"
+
+// Stable low.live_in source ID for x/y packed cluster workgroup state.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_XY_SOURCE_ID \
+  UINT64_C(0x59E2688F464C16F8)
+
+// Stable low.live_in source spelling for gfx1250 TTMP6 when the x and z
+// cluster-local workgroup coordinates are enabled.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_XZ_SOURCE \
+  "amdgpu.cluster_workgroup_info.xz"
+
+// Stable low.live_in source ID for x/z packed cluster workgroup state.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_XZ_SOURCE_ID \
+  UINT64_C(0x59E26B8F464C1C11)
+
 // Stable low.live_in source spelling for cluster_id.y/z in gfx1250 TTMP7.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_YZ_SOURCE "amdgpu.cluster_id_yz"
 
@@ -101,12 +128,43 @@ extern "C" {
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_YZ_SOURCE_ID \
   UINT64_C(0x5CC9CA25D8E49D3B)
 
+// Stable low.live_in source spelling for cluster_id.y in gfx1250 TTMP7.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_Y_SOURCE "amdgpu.cluster_id_y"
+
+// Stable low.live_in source ID for cluster_id.y.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_Y_SOURCE_ID \
+  UINT64_C(0x68A4B9A3B10CE223)
+
+// Stable low.live_in source spelling for cluster_id.z in gfx1250 TTMP7.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_Z_SOURCE "amdgpu.cluster_id_z"
+
+// Stable low.live_in source ID for cluster_id.z.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_Z_SOURCE_ID \
+  UINT64_C(0x68A4BAA3B10CE3D6)
+
 // Stable low.live_in source spelling for cluster_id.x in gfx1250 TTMP9.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_X_SOURCE "amdgpu.cluster_id_x"
 
 // Stable low.live_in source ID for cluster_id.x.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_X_SOURCE_ID \
   UINT64_C(0x68A4B8A3B10CE070)
+
+typedef enum loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flag_bits_e {
+  // Dispatch must initialize the x workgroup-coordinate launch state.
+  LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_X = 1u << 0,
+  // Dispatch must initialize the y workgroup-coordinate launch state.
+  LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Y = 1u << 1,
+  // Dispatch must initialize the z workgroup-coordinate launch state.
+  LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Z = 1u << 2,
+  // Workgroup-coordinate launch-state flags known by the AMDGPU HAL ABI.
+  LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_KNOWN_FLAGS =
+      LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_X |
+      LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Y |
+      LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Z,
+} loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flag_bits_t;
+
+// Bitset of loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flag_bits_t values.
+typedef uint32_t loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flags_t;
 
 // Stable low.live_in source spelling for workitem_id.x in v0.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_X_SOURCE "amdgpu.workitem_id.x"
@@ -173,6 +231,11 @@ typedef enum loom_amdgpu_hal_kernel_abi_source_kind_e {
   LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_WORKGROUP_INFO = 13,
   LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_ID_YZ = 14,
   LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_ID_X = 15,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_ID_Y = 16,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_ID_Z = 17,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_WORKGROUP_INFO_X = 18,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_WORKGROUP_INFO_XY = 19,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_WORKGROUP_INFO_XZ = 20,
 } loom_amdgpu_hal_kernel_abi_source_kind_t;
 
 // Returns the stable low.live_in source spelling for |source_kind|, or an
@@ -305,6 +368,12 @@ loom_amdgpu_hal_kernel_abi_source_kind_t
 loom_amdgpu_hal_kernel_abi_live_in_source_kind(const loom_module_t* module,
                                                loom_value_id_t value_id);
 
+// Returns the gfx1250 launch workgroup-ID requirements implied by
+// |source_kind|, or zero for a source outside the launch-state ABI.
+loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flags_t
+loom_amdgpu_hal_kernel_abi_source_launch_workgroup_id_flags(
+    loom_amdgpu_hal_kernel_abi_source_kind_t source_kind);
+
 // Finds AMDGPU ABI live-ins that require fixed physical locations during
 // allocation.
 //
@@ -313,7 +382,8 @@ loom_amdgpu_hal_kernel_abi_live_in_source_kind(const loom_module_t* module,
 // consumes two SGPRs starting at the next available user-SGPR location.
 // workgroup_id.x/y/z live-ins use the SGPRs immediately following enabled user
 // SGPRs. Unpacked workitem_id.x/y/z live-ins use v0/v1/v2, and packed
-// workitem-id live-ins use v0 when present.
+// workitem-id live-ins use v0 when present. gfx1250 cluster launch-state
+// live-ins use the architected TTMP6, TTMP7, and TTMP9 locations.
 //
 // The function must already have passed
 // loom_amdgpu_hal_kernel_abi_verify_low. Status is reserved for allocation and

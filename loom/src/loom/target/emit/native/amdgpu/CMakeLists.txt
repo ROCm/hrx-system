@@ -62,6 +62,7 @@ loom_cc_library(
   DEPS
     ::assembly
     ::encoding
+    ::hal_kernel_library
     ::spill_lowering
     iree::base
     loom::codegen::low::allocation_json
@@ -258,6 +259,7 @@ loom_cc_library(
     loom::ir
     loom::ops::low
     loom::target::arch::amdgpu::hal::kernel_abi
+    loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::launch
