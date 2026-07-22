@@ -209,6 +209,7 @@ static loomc_status_t create_target_profile_and_selection(
       .structure_size = sizeof(profile_options),
       .identifier = loomc_make_cstring_view("offline-amdgpu"),
       .processor = loomc_make_cstring_view(state->processor),
+      .gfx1250_revision = LOOMC_AMDGPU_GFX1250_REVISION_DEFAULT,
   };
   loomc_status_t status = loomc_target_profile_create_amdgpu(
       state->target_environment, &profile_options, loomc_allocator_system(),

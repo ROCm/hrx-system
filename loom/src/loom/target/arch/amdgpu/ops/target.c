@@ -54,6 +54,32 @@ static iree_status_t loom_amdgpu_target_record_emit_wavefront_size_unsupported(
                                         params, IREE_ARRAYSIZE(params));
 }
 
+static iree_string_view_t loom_amdgpu_gfx1250_revision_name(
+    loom_amdgpu_gfx1250_revision_t revision) {
+  switch (revision) {
+    case LOOM_AMDGPU_GFX1250_REVISION_A0:
+      return IREE_SV("a0");
+    case LOOM_AMDGPU_GFX1250_REVISION_B0:
+      return IREE_SV("b0");
+    default:
+      return IREE_SV("unspecified");
+  }
+}
+
+static iree_status_t
+loom_amdgpu_target_record_emit_gfx1250_revision_processor_mismatch(
+    const loom_module_t* module, iree_diagnostic_emitter_t emitter,
+    const loom_op_t* op, loom_amdgpu_gfx1250_revision_t revision,
+    iree_string_view_t processor_name) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_amdgpu_target_record_symbol_name(module, op)),
+      loom_param_string(loom_amdgpu_gfx1250_revision_name(revision)),
+      loom_param_string(processor_name),
+  };
+  return loom_amdgpu_target_record_emit(emitter, op, LOOM_ERR_AMDGPU_046,
+                                        params, IREE_ARRAYSIZE(params));
+}
+
 iree_string_view_t loom_amdgpu_target_record_processor_name(
     const loom_op_t* target_op) {
   const loom_amdgpu_target_record_info_t* target_info =
@@ -69,8 +95,59 @@ const loom_amdgpu_processor_info_t* loom_amdgpu_target_record_processor(
       loom_amdgpu_target_record_processor_name(target_op));
 }
 
-iree_status_t loom_amdgpu_target_record_build_for_processor(
-    loom_builder_t* builder, const loom_amdgpu_processor_info_t* processor,
+static loom_amdgpu_gfx1250_revision_t
+loom_amdgpu_target_record_explicit_gfx1250_revision(
+    const loom_op_t* target_op) {
+  const loom_attribute_t revision_attr = loom_op_const_attrs(
+      target_op)[loom_amdgpu_target_gfx1250_revision_ATTR_INDEX];
+  return loom_attr_is_absent(revision_attr)
+             ? LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED
+             : (loom_amdgpu_gfx1250_revision_t)loom_attr_as_enum(revision_attr);
+}
+
+loom_amdgpu_gfx1250_revision_t
+loom_amdgpu_target_record_effective_gfx1250_revision(
+    const loom_op_t* target_op) {
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_record_processor(target_op);
+  if (processor == NULL ||
+      !iree_string_view_equal(processor->name, IREE_SV("gfx1250"))) {
+    return LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED;
+  }
+  const loom_amdgpu_gfx1250_revision_t explicit_revision =
+      loom_amdgpu_target_record_explicit_gfx1250_revision(target_op);
+  return explicit_revision == LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED
+             ? LOOM_AMDGPU_GFX1250_REVISION_B0
+             : explicit_revision;
+}
+
+static iree_status_t loom_amdgpu_target_profile_validate(
+    const loom_amdgpu_target_profile_t* profile) {
+  if (profile == NULL || profile->processor == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU target profile requires a processor row");
+  }
+  const bool is_gfx1250 =
+      iree_string_view_equal(profile->processor->name, IREE_SV("gfx1250"));
+  if (is_gfx1250 &&
+      profile->gfx1250_revision != LOOM_AMDGPU_GFX1250_REVISION_A0 &&
+      profile->gfx1250_revision != LOOM_AMDGPU_GFX1250_REVISION_B0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "gfx1250 target profile requires an A0 or B0 silicon revision");
+  }
+  if (!is_gfx1250 &&
+      profile->gfx1250_revision != LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "gfx1250 silicon revision cannot qualify processor '%.*s'",
+        (int)profile->processor->name.size, profile->processor->name.data);
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_target_record_build_for_profile(
+    loom_builder_t* builder, const loom_amdgpu_target_profile_t* profile,
     loom_symbol_ref_t symbol, loom_location_id_t location,
     loom_op_t** out_target_op) {
   if (builder == NULL || out_target_op == NULL) {
@@ -79,11 +156,8 @@ iree_status_t loom_amdgpu_target_record_build_for_processor(
                             "builder and output pointers");
   }
   *out_target_op = NULL;
-  if (processor == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU target record builder requires a "
-                            "processor row");
-  }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_target_profile_validate(profile));
+  const loom_amdgpu_processor_info_t* processor = profile->processor;
 
   const loom_amdgpu_target_record_info_t* target_record =
       loom_amdgpu_target_record_info_for_processor(processor->name);
@@ -93,11 +167,16 @@ iree_status_t loom_amdgpu_target_record_build_for_processor(
                             (int)processor->name.size, processor->name.data);
   }
 
+  loom_amdgpu_target_build_flags_t build_flags = 0;
+  if (profile->gfx1250_revision != LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED) {
+    build_flags |= LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_GFX1250_REVISION;
+  }
   return loom_amdgpu_target_build(
-      builder, 0, (loom_amdgpu_target_kind_t)target_record->target_kind, symbol,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      LOOM_STRING_ID_INVALID, 0, 0, LOOM_STRING_ID_INVALID, 0, location,
-      out_target_op);
+      builder, build_flags,
+      (loom_amdgpu_target_kind_t)target_record->target_kind, symbol, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      LOOM_STRING_ID_INVALID, 0, 0, LOOM_STRING_ID_INVALID, 0,
+      (uint8_t)profile->gfx1250_revision, location, out_target_op);
 }
 
 static uint32_t loom_amdgpu_target_record_default_wavefront_size(
@@ -130,15 +209,6 @@ static bool loom_amdgpu_target_record_effective_wavefront_size(
   return true;
 }
 
-void loom_amdgpu_target_record_retarget_processor(
-    loom_op_t* target_op, const loom_amdgpu_processor_info_t* processor) {
-  const loom_amdgpu_target_record_info_t* target_record =
-      loom_amdgpu_target_record_info_for_processor(processor->name);
-  IREE_ASSERT(target_record != NULL);
-  loom_op_attrs(target_op)[loom_amdgpu_target_kind_ATTR_INDEX] =
-      loom_attr_enum((uint8_t)target_record->target_kind);
-}
-
 iree_status_t loom_amdgpu_target_record_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {
@@ -146,6 +216,14 @@ iree_status_t loom_amdgpu_target_record_verify(
 
   const loom_amdgpu_processor_info_t* processor =
       loom_amdgpu_target_record_processor(op);
+
+  const loom_amdgpu_gfx1250_revision_t explicit_revision =
+      loom_amdgpu_target_record_explicit_gfx1250_revision(op);
+  if (explicit_revision != LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED &&
+      !iree_string_view_equal(processor->name, IREE_SV("gfx1250"))) {
+    return loom_amdgpu_target_record_emit_gfx1250_revision_processor_mismatch(
+        module, emitter, op, explicit_revision, processor->name);
+  }
 
   uint32_t wavefront_size = 0;
   if (loom_amdgpu_target_record_effective_wavefront_size(op, processor,

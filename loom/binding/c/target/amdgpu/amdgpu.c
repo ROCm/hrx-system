@@ -21,8 +21,7 @@ static char loomc_amdgpu_profile_payload_type;
 
 static void loomc_amdgpu_profile_payload_deinitialize(
     void* payload, loomc_allocator_t allocator) {
-  (void)payload;
-  (void)allocator;
+  loomc_allocator_free(allocator, payload);
 }
 
 static loomc_status_t loomc_amdgpu_validate_string_view(
@@ -62,6 +61,47 @@ static loomc_status_t loomc_amdgpu_profile_options_validate(
   if (loomc_string_view_is_empty(options->processor)) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "AMDGPU profile options require processor");
+  }
+  switch (options->gfx1250_revision) {
+    case LOOMC_AMDGPU_GFX1250_REVISION_DEFAULT:
+    case LOOMC_AMDGPU_GFX1250_REVISION_A0:
+    case LOOMC_AMDGPU_GFX1250_REVISION_B0:
+      break;
+    default:
+      return loomc_make_status(
+          LOOMC_STATUS_INVALID_ARGUMENT,
+          "AMDGPU profile options contain an unknown gfx1250 revision");
+  }
+  return loomc_ok_status();
+}
+
+static loomc_status_t loomc_amdgpu_profile_resolve_gfx1250_revision(
+    const loomc_amdgpu_profile_options_t* options,
+    const loom_amdgpu_processor_info_t* processor,
+    loom_amdgpu_gfx1250_revision_t* out_revision) {
+  *out_revision = LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED;
+  const bool is_gfx1250 =
+      iree_string_view_equal(processor->name, IREE_SV("gfx1250"));
+  switch (options->gfx1250_revision) {
+    case LOOMC_AMDGPU_GFX1250_REVISION_DEFAULT:
+      *out_revision = is_gfx1250 ? LOOM_AMDGPU_GFX1250_REVISION_B0
+                                 : LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED;
+      return loomc_ok_status();
+    case LOOMC_AMDGPU_GFX1250_REVISION_A0:
+      *out_revision = LOOM_AMDGPU_GFX1250_REVISION_A0;
+      break;
+    case LOOMC_AMDGPU_GFX1250_REVISION_B0:
+      *out_revision = LOOM_AMDGPU_GFX1250_REVISION_B0;
+      break;
+    default:
+      return loomc_make_status(
+          LOOMC_STATUS_INVALID_ARGUMENT,
+          "AMDGPU profile options contain an unknown gfx1250 revision");
+  }
+  if (!is_gfx1250) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "explicit gfx1250 revision requires processor 'gfx1250'");
   }
   return loomc_ok_status();
 }
@@ -316,9 +356,20 @@ loomc_status_t loomc_target_profile_create_amdgpu(
         "AMDGPU processor has no Loom target bundle for its descriptor set");
   }
 
+  loom_amdgpu_gfx1250_revision_t gfx1250_revision =
+      LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED;
+  LOOMC_RETURN_IF_ERROR(loomc_amdgpu_profile_resolve_gfx1250_revision(
+      options, processor, &gfx1250_revision));
+  loom_amdgpu_target_profile_t* target_profile = NULL;
+  LOOMC_RETURN_IF_ERROR(loomc_allocator_malloc(
+      allocator, sizeof(*target_profile), (void**)&target_profile));
+  *target_profile = (loom_amdgpu_target_profile_t){
+      .processor = processor,
+      .gfx1250_revision = gfx1250_revision,
+  };
   const loom_target_selection_t selection = {
       .bundle = target_bundle,
-      .data = (void*)processor,
+      .data = target_profile,
   };
   const loomc_target_profile_options_t profile_options = {
       .type = LOOMC_STRUCTURE_TYPE_TARGET_PROFILE_OPTIONS,
@@ -329,17 +380,38 @@ loomc_status_t loomc_target_profile_create_amdgpu(
   };
   return loomc_target_profile_create_from_selection(
       target_environment, &profile_options, selection,
-      &loomc_amdgpu_profile_payload_type, (void*)processor,
+      &loomc_amdgpu_profile_payload_type, target_profile,
       loomc_amdgpu_profile_payload_deinitialize, allocator, out_profile);
 }
 
 loomc_string_view_t loomc_amdgpu_target_profile_processor(
     const loomc_target_profile_t* profile) {
-  const loom_amdgpu_processor_info_t* processor =
-      (const loom_amdgpu_processor_info_t*)loomc_target_profile_payload(
+  const loom_amdgpu_target_profile_t* target_profile =
+      (const loom_amdgpu_target_profile_t*)loomc_target_profile_payload(
           profile, &loomc_amdgpu_profile_payload_type);
-  return processor ? loomc_string_view_from_iree(processor->name)
-                   : loomc_string_view_empty();
+  return target_profile != NULL && target_profile->processor != NULL
+             ? loomc_string_view_from_iree(target_profile->processor->name)
+             : loomc_string_view_empty();
+}
+
+loomc_amdgpu_gfx1250_revision_t loomc_amdgpu_target_profile_gfx1250_revision(
+    const loomc_target_profile_t* profile) {
+  const loom_amdgpu_target_profile_t* target_profile =
+      (const loom_amdgpu_target_profile_t*)loomc_target_profile_payload(
+          profile, &loomc_amdgpu_profile_payload_type);
+  if (target_profile == NULL || target_profile->processor == NULL ||
+      !iree_string_view_equal(target_profile->processor->name,
+                              IREE_SV("gfx1250"))) {
+    return LOOMC_AMDGPU_GFX1250_REVISION_DEFAULT;
+  }
+  switch (target_profile->gfx1250_revision) {
+    case LOOM_AMDGPU_GFX1250_REVISION_A0:
+      return LOOMC_AMDGPU_GFX1250_REVISION_A0;
+    case LOOM_AMDGPU_GFX1250_REVISION_B0:
+      return LOOMC_AMDGPU_GFX1250_REVISION_B0;
+    default:
+      return LOOMC_AMDGPU_GFX1250_REVISION_DEFAULT;
+  }
 }
 
 loomc_status_t loomc_amdgpu_processor_from_hsa_isa_name(
