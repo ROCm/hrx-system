@@ -31,6 +31,7 @@ loom_amdgpu_metadata_kernel_t MinimalMetadataKernel() {
       /*.has_required_workgroup_size=*/false,
       /*.workgroup_cluster_size=*/{},
       /*.has_workgroup_cluster_size=*/false,
+      /*.gfx1250_revision=*/LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED,
   };
 }
 

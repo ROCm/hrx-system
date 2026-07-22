@@ -110,6 +110,7 @@ loom_cc_library(
     "metadata.c"
   DEPS
     iree::base
+    loom::target::arch::amdgpu::target_info
     loom::target::types
   PUBLIC
 )
@@ -311,6 +312,7 @@ loom_cc_library(
     loom::ir
     loom::ops::low
     loom::target::arch::amdgpu::hal::kernel_abi
+    loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info

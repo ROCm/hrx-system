@@ -242,6 +242,7 @@ loom_amdgpu_metadata_kernel_t MinimalKernel(iree_string_view_t name,
       /*.has_required_workgroup_size=*/true,
       /*.workgroup_cluster_size=*/{},
       /*.has_workgroup_cluster_size=*/false,
+      /*.gfx1250_revision=*/LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED,
       /*.arguments=*/nullptr,
       /*.argument_count=*/0,
   };
@@ -788,6 +789,9 @@ TEST(AmdgpuHsacoTest, WritesSupportedProcessorCodeObjectFlags) {
     loom_amdgpu_metadata_kernel_t metadata =
         MinimalKernel(IREE_SV("loom_kernel"), IREE_SV("loom_kernel.kd"));
     metadata.wavefront_size = processor->wavefront.default_size;
+    if (iree_string_view_equal(processor->name, IREE_SV("gfx1250"))) {
+      metadata.gfx1250_revision = LOOM_AMDGPU_GFX1250_REVISION_B0;
+    }
     const loom_amdgpu_hsaco_kernel_t kernel = {
         /*.metadata=*/metadata,
         /*.descriptor_options=*/{},

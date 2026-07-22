@@ -115,6 +115,7 @@ cluster_identity_abi:
         - 2
         - 2
         - 2
+      .gfx1250_revision: B0
       .args: []
 .end_amdgpu_metadata
 
@@ -213,6 +214,7 @@ cluster_local_x_only:
         - 2
         - 2
         - 2
+      .gfx1250_revision: B0
       .args: []
 .end_amdgpu_metadata
 
@@ -311,6 +313,7 @@ cluster_local_y_only:
         - 2
         - 2
         - 2
+      .gfx1250_revision: B0
       .args: []
 .end_amdgpu_metadata
 
@@ -409,6 +412,7 @@ cluster_local_z_only:
         - 2
         - 2
         - 2
+      .gfx1250_revision: B0
       .args: []
 .end_amdgpu_metadata
 
@@ -504,6 +508,7 @@ empty_cluster:
         - 2
         - 2
         - 2
+      .gfx1250_revision: B0
       .args: []
 .end_amdgpu_metadata
 
@@ -601,6 +606,7 @@ flat_cluster_workgroup_id:
         - 2
         - 2
         - 2
+      .gfx1250_revision: B0
       .args: []
 .end_amdgpu_metadata
 
@@ -712,6 +718,7 @@ ordinary_workgroup_x:
         - 64
         - 1
         - 1
+      .gfx1250_revision: B0
       .args: []
 .end_amdgpu_metadata
 
@@ -806,6 +813,7 @@ ordinary_workgroup_y:
         - 64
         - 1
         - 1
+      .gfx1250_revision: B0
       .args: []
 .end_amdgpu_metadata
 
@@ -813,7 +821,7 @@ ordinary_workgroup_y:
 
 // RUN: emit amdgpu-kernel-assembly
 
-amdgpu.target<gfx1250> @target
+amdgpu.target<gfx1250> @target {gfx1250_revision = a0}
 low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 2) @ordinary_workgroup_z() asm<amdgpu.rdna4.gfx125x.core> {
   %packed_z = live_in<amdgpu.cluster_id_z> : reg<amdgpu.sgpr>
   %value = s_lshr_b32_rhs_inline %packed_z, 16
@@ -900,5 +908,6 @@ ordinary_workgroup_z:
         - 64
         - 1
         - 1
+      .gfx1250_revision: A0
       .args: []
 .end_amdgpu_metadata

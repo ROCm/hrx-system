@@ -123,6 +123,7 @@ loom_cc_library(
     hdrs = ["metadata.h"],
     deps = [
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
         "//runtime/src/iree/base",
     ],
 )
@@ -277,6 +278,7 @@ loom_cc_library(
         "//loom/src/loom/target:launch",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
+        "//loom/src/loom/target/arch/amdgpu/ops",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/target/arch/amdgpu/target_id",
         "//runtime/src/iree/base",

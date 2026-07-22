@@ -13,6 +13,7 @@
 #include "loom/codegen/low/packet.h"
 #include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/emit/native/amdgpu/kernel_entry.h"
@@ -818,6 +819,9 @@ iree_status_t loom_amdgpu_kernel_record_build(
               .has_required_workgroup_size = has_required_workgroup_size,
               .workgroup_cluster_size = workgroup_cluster_size,
               .has_workgroup_cluster_size = has_workgroup_cluster_size,
+              .gfx1250_revision =
+                  loom_amdgpu_target_record_effective_gfx1250_revision(
+                      schedule->module, schedule->target.target_op),
               .arguments = arguments,
               .argument_count = abi_layout->parameter_count,
           },
