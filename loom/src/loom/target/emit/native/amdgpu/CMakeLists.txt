@@ -247,6 +247,7 @@ loom_cc_library(
     "kernel_record.c"
   DEPS
     ::descriptor
+    ::kernel_entry
     ::metadata
     ::preflight
     ::storage_layout
@@ -319,6 +320,23 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_cc_library(
   NAME
+    kernel_entry
+  HDRS
+    "kernel_entry.h"
+  SRCS
+    "kernel_entry.c"
+  DEPS
+    ::text_fixup
+    iree::base
+    iree::base::internal::arena
+    loom::target::arch::amdgpu::target_info
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_library(
+  NAME
     kernel_assembly
   HDRS
     "kernel_assembly.h"
@@ -326,6 +344,7 @@ loom_cc_library(
     "kernel_assembly.c"
   DEPS
     ::assembly
+    ::kernel_entry
     ::kernel_record
     ::metadata
     iree::base
@@ -333,6 +352,23 @@ loom_cc_library(
     loom::codegen::low::schedule
     loom::target::arch::amdgpu::hal::kernel_abi
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_test(
+  NAME
+    kernel_entry_test
+  SRCS
+    "kernel_entry_test.cc"
+  DEPS
+    ::kernel_entry
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
 )
 endif()
 
@@ -347,6 +383,7 @@ loom_cc_library(
   DEPS
     ::encoding
     ::hsaco
+    ::kernel_entry
     ::kernel_record
     iree::base
     iree::base::internal::arena

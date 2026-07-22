@@ -127,9 +127,11 @@ AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS = {
 
 AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION = 1 << 0
 AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE = 1 << 1
+AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE = 1 << 2
 AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS = (
     AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
     | AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE
+    | AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
 )
 AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES = 64 * 1024
 AMDGPU_CDNA4_MAX_WORKGROUP_STORAGE_BYTES = 160 * 1024
@@ -833,7 +835,11 @@ def gfx125x_processor_info(
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor=processor,
-        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION | processor_flags,
+        flags=(
+            AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
+            | AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
+            | processor_flags
+        ),
         descriptor_set_key=descriptor_set_key,
         elf_machine_flags=elf_machine_flags,
         elf_feature_flags=elf_feature_flags,

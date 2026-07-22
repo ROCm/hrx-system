@@ -223,6 +223,7 @@ loom_cc_library(
     hdrs = ["kernel_record.h"],
     deps = [
         ":descriptor",
+        ":kernel_entry",
         ":metadata",
         ":preflight",
         ":storage_layout",
@@ -281,17 +282,41 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "kernel_entry",
+    srcs = ["kernel_entry.c"],
+    hdrs = ["kernel_entry.h"],
+    deps = [
+        ":text_fixup",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "kernel_assembly",
     srcs = ["kernel_assembly.c"],
     hdrs = ["kernel_assembly.h"],
     deps = [
         ":assembly",
+        ":kernel_entry",
         ":kernel_record",
         ":metadata",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "kernel_entry_test",
+    srcs = ["kernel_entry_test.cc"],
+    deps = [
+        ":kernel_entry",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -302,6 +327,7 @@ loom_cc_library(
     deps = [
         ":encoding",
         ":hsaco",
+        ":kernel_entry",
         ":kernel_record",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low/schedule",

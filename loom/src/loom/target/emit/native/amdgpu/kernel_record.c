@@ -15,6 +15,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
+#include "loom/target/emit/native/amdgpu/kernel_entry.h"
 #include "loom/target/emit/native/amdgpu/preflight.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
 #include "loom/target/launch.h"
@@ -755,9 +756,18 @@ iree_status_t loom_amdgpu_kernel_record_build(
       loom_amdgpu_kernel_descriptor_workitem_id_mode_from_flags(
           descriptor_flags, &system_vgpr_workitem_id));
 
-  const uint32_t next_free_sgpr = preflight->next_free_sgpr > user_sgpr_count
-                                      ? preflight->next_free_sgpr
-                                      : user_sgpr_count;
+  const loom_amdgpu_kernel_entry_envelope_t* entry_envelope =
+      loom_amdgpu_kernel_entry_envelope_for_processor(processor);
+  uint32_t next_free_sgpr = preflight->next_free_sgpr > user_sgpr_count
+                                ? preflight->next_free_sgpr
+                                : user_sgpr_count;
+  if (entry_envelope->minimum_sgpr_count > next_free_sgpr) {
+    next_free_sgpr = entry_envelope->minimum_sgpr_count;
+  }
+  uint32_t next_free_vgpr = preflight->next_free_vgpr;
+  if (entry_envelope->minimum_vgpr_count > next_free_vgpr) {
+    next_free_vgpr = entry_envelope->minimum_vgpr_count;
+  }
 
   iree_string_view_t target_id = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_amdhsa_target_id_format(
@@ -801,7 +811,7 @@ iree_status_t loom_amdgpu_kernel_record_build(
               .private_segment_fixed_size =
                   (uint32_t)segment_usage.private_segment_fixed_size,
               .sgpr_count = next_free_sgpr,
-              .vgpr_count = preflight->next_free_vgpr,
+              .vgpr_count = next_free_vgpr,
               .max_flat_workgroup_size = max_flat_workgroup_size,
               .required_workgroup_size = hal_kernel->required_workgroup_size,
               .has_required_workgroup_size = has_required_workgroup_size,

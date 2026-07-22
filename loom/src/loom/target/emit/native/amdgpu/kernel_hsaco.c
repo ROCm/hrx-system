@@ -12,6 +12,7 @@
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
 #include "loom/target/emit/native/amdgpu/encoding.h"
 #include "loom/target/emit/native/amdgpu/hsaco.h"
+#include "loom/target/emit/native/amdgpu/kernel_entry.h"
 #include "loom/target/emit/native/amdgpu/kernel_record.h"
 
 iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
@@ -48,6 +49,21 @@ iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
         schedule, allocation, &stream, scratch_arena));
   }
 
+  const loom_amdgpu_kernel_entry_envelope_t* entry_envelope =
+      loom_amdgpu_kernel_entry_envelope_for_processor(record.processor);
+  iree_const_byte_span_t kernel_text = iree_const_byte_span_empty();
+  const loom_amdgpu_hsaco_text_fixup_t* kernel_text_fixups = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_entry_prepend_text(
+      entry_envelope, stream.text, stream.text_fixups, stream.text_fixup_count,
+      &kernel_text, &kernel_text_fixups, scratch_arena));
+  uint64_t kernel_instruction_count = 0;
+  if (!iree_checked_add_u64(stream.instruction_count,
+                            entry_envelope->instruction_count,
+                            &kernel_instruction_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU kernel entry instruction count overflowed");
+  }
+
   const loom_amdgpu_hsaco_kernel_t kernel = {
       .metadata = record.metadata,
       .descriptor_options =
@@ -55,8 +71,8 @@ iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
               .flags = record.descriptor_flags,
               .user_sgpr_count = record.user_sgpr_count,
           },
-      .text = stream.text,
-      .text_fixups = stream.text_fixups,
+      .text = kernel_text,
+      .text_fixups = kernel_text_fixups,
       .text_fixup_count = stream.text_fixup_count,
   };
   loom_amdgpu_occupancy_target_resources_t target_resources = {0};
@@ -89,9 +105,9 @@ iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
       .native_insertion_count = stream.native_insertion_count,
       .summary =
           {
-              .instruction_count = stream.instruction_count,
-              .text_byte_count = stream.text.data_length,
-              .text_storage_byte_count = stream.text.data_length,
+              .instruction_count = kernel_instruction_count,
+              .text_byte_count = kernel_text.data_length,
+              .text_storage_byte_count = kernel_text.data_length,
               .private_segment_fixed_size =
                   record.metadata.private_segment_fixed_size,
               .group_segment_fixed_size =

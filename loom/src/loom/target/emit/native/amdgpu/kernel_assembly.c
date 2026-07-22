@@ -9,6 +9,7 @@
 #include <inttypes.h>
 
 #include "loom/target/emit/native/amdgpu/assembly.h"
+#include "loom/target/emit/native/amdgpu/kernel_entry.h"
 #include "loom/target/emit/native/amdgpu/kernel_record.h"
 #include "loom/target/emit/native/amdgpu/metadata.h"
 
@@ -266,6 +267,10 @@ static iree_status_t loom_amdgpu_kernel_assembly_emit(
       (int)record.symbol.size, record.symbol.data, (int)record.symbol.size,
       record.symbol.data, (int)record.symbol.size, record.symbol.data,
       (int)record.symbol.size, record.symbol.data));
+  const loom_amdgpu_kernel_entry_envelope_t* entry_envelope =
+      loom_amdgpu_kernel_entry_envelope_for_processor(record.processor);
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_string(builder, entry_envelope->assembly));
   const struct loom_amdgpu_packet_plan_t* packet_plan =
       options ? options->packet_plan : NULL;
   if (packet_plan != NULL) {

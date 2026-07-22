@@ -621,6 +621,64 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsGfx942Kernel) {
   EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
 }
 
+TEST_F(AmdgpuHalKernelLibraryTest, EmitsGfx1250HardwareEntryEnvelope) {
+  const loom_amdgpu_processor_info_t* processor = nullptr;
+  IREE_ASSERT_OK(
+      loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx1250"), &processor));
+  ASSERT_NE(processor, nullptr);
+  if (!IsProcessorDescriptorSetLinked(processor)) {
+    GTEST_SKIP() << "amdgpu.rdna4.gfx125x.core is not linked in this build";
+  }
+  loom_module_t* module = nullptr;
+  ASSERT_NO_FATAL_FAILURE(ParseKernelForProcessor(processor, &module));
+
+  DiagnosticCapture capture;
+  loom_amdgpu_hal_kernel_library_t library = {};
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      /*.target_selection=*/{},
+      /*.runtime_globals=*/{},
+      /*.data_symbols=*/{},
+      /*.data_symbol_count=*/{},
+      /*.diagnostic_sink=*/capture.sink(),
+      /*.source_resolver=*/{},
+      /*.max_errors=*/20,
+  };
+  bool emitted = false;
+  IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
+      module, &options, iree_allocator_system(), &emitted, &library));
+
+  EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
+  EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
+  ASSERT_NE(library.hsaco_data, nullptr);
+  const std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
+                          library.hsaco_data_length);
+  const std::vector<Section> sections = ReadSections(hsaco);
+  const Section& dynamic_symbol_table = FindSection(sections, ".dynsym");
+  const Section& dynamic_string_table = FindSection(sections, ".dynstr");
+  const Section& text = FindSection(sections, ".text");
+  const DynamicSymbol entry = FindDynamicSymbol(
+      hsaco, dynamic_symbol_table, dynamic_string_table, "loom_kernel");
+  static const uint8_t kExpectedEntryText[] = {
+      0x00, 0x40, 0x17, 0xee, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x7e, 0x41, 0x06, 0x80, 0xb9,
+      0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xb0, 0xbf,
+  };
+  ASSERT_EQ(entry.section_index, text.index);
+  ASSERT_GE(entry.value, text.address);
+  ASSERT_LE(entry.value - text.address, text.size);
+  ASSERT_EQ(entry.size, sizeof(kExpectedEntryText));
+  const size_t entry_file_offset =
+      (size_t)(text.offset + (entry.value - text.address));
+  ASSERT_LE(entry_file_offset + sizeof(kExpectedEntryText), hsaco.size());
+  EXPECT_EQ(hsaco.substr(entry_file_offset, sizeof(kExpectedEntryText)),
+            std::string(reinterpret_cast<const char*>(kExpectedEntryText),
+                        sizeof(kExpectedEntryText)));
+
+  loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                              iree_allocator_system());
+  loom_module_free(module);
+}
+
 TEST_F(AmdgpuHalKernelLibraryTest, EmitsDynamicLocalSizeKernel) {
   loom_module_t* module = nullptr;
   ASSERT_NO_FATAL_FAILURE(ParseGfx11DynamicHalKernel(&module));
@@ -1106,14 +1164,14 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsRequestedRuntimeGlobals) {
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest,
-       EmitsCallerDataSymbolsAndRel32AddressMaterialization) {
+       EmitsGfx1250CallerDataSymbolsAndRel32AddressMaterialization) {
   static constexpr char kSiteSymbolName[] = "loom_sanitizer_sites";
   static const uint8_t kSiteRecords[] = {
       0x00, 0x02, 0x03, 0x02, 0x01, 0x01, 0x00, 0x00,
       0x00, 0x01, 0x01, 0x06, 0x01, 0x01, 0x00, 0x00,
   };
   static const char kSource[] =
-      "amdgpu.target<gfx11-generic> @gfx_target\n"
+      "amdgpu.target<gfx1250> @gfx_target\n"
       "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
       "@loom_kernel() {\n"
       "  %pc = low.op<amdgpu.s_getpc_b64>() : () -> "
@@ -1190,11 +1248,11 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   EXPECT_EQ(feedback.size,
             LOOM_AMDGPU_RUNTIME_GLOBAL_FEEDBACK_CONFIG_BYTE_LENGTH);
 
-  const uint64_t base_pc_address = text.address + 4u;
+  const uint64_t base_pc_address = text.address + 28u;
   const uint64_t site_delta = site.value + 8u - base_pc_address;
-  ASSERT_LE(text.offset + 20u, hsaco.size());
-  EXPECT_EQ(LoadLeU32(hsaco, (size_t)text.offset + 8u), (uint32_t)site_delta);
-  EXPECT_EQ(LoadLeU32(hsaco, (size_t)text.offset + 16u),
+  ASSERT_LE(text.offset + 44u, hsaco.size());
+  EXPECT_EQ(LoadLeU32(hsaco, (size_t)text.offset + 32u), (uint32_t)site_delta);
+  EXPECT_EQ(LoadLeU32(hsaco, (size_t)text.offset + 40u),
             (uint32_t)(site_delta >> 32));
 
   loom_amdgpu_hal_kernel_library_deinitialize(&library,

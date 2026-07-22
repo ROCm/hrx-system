@@ -30,6 +30,9 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @c
 .p2align 8
 .type cluster_identity_abi,@function
 cluster_identity_abi:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
   s_and_b32 s0, ttmp6, 15
   s_lshl1_add_u32 s0, ttmp9, s0
   s_and_b32 s1, 65535, ttmp7
@@ -66,7 +69,7 @@ cluster_identity_abi:
   .amdhsa_system_sgpr_workgroup_id_z 1
   .amdhsa_system_sgpr_workgroup_info 0
   .amdhsa_system_vgpr_workitem_id 0
-  .amdhsa_next_free_vgpr 0
+  .amdhsa_next_free_vgpr 1
   .amdhsa_next_free_sgpr 4
   .amdhsa_reserve_vcc 0
   .amdhsa_float_round_mode_32 0
@@ -102,7 +105,7 @@ cluster_identity_abi:
       .kernarg_segment_align: 8
       .wavefront_size: 32
       .sgpr_count: 4
-      .vgpr_count: 0
+      .vgpr_count: 1
       .max_flat_workgroup_size: 64
       .reqd_workgroup_size:
         - 64
@@ -152,6 +155,9 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @c
 .p2align 8
 .type cluster_local_x_only,@function
 cluster_local_x_only:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
   s_and_b32 s0, ttmp6, 15
   s_endpgm
 .Lfunc_end0:
@@ -177,8 +183,8 @@ cluster_local_x_only:
   .amdhsa_system_sgpr_workgroup_id_z 0
   .amdhsa_system_sgpr_workgroup_info 0
   .amdhsa_system_vgpr_workitem_id 0
-  .amdhsa_next_free_vgpr 0
-  .amdhsa_next_free_sgpr 1
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
   .amdhsa_reserve_vcc 0
   .amdhsa_float_round_mode_32 0
   .amdhsa_float_round_mode_16_64 0
@@ -212,8 +218,8 @@ cluster_local_x_only:
       .private_segment_fixed_size: 0
       .kernarg_segment_align: 8
       .wavefront_size: 32
-      .sgpr_count: 1
-      .vgpr_count: 0
+      .sgpr_count: 2
+      .vgpr_count: 1
       .max_flat_workgroup_size: 64
       .reqd_workgroup_size:
         - 64
@@ -247,6 +253,9 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @c
 .p2align 8
 .type cluster_local_y_only,@function
 cluster_local_y_only:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
   s_bfe_u32 s0, 262148, ttmp6
   s_endpgm
 .Lfunc_end0:
@@ -272,8 +281,8 @@ cluster_local_y_only:
   .amdhsa_system_sgpr_workgroup_id_z 0
   .amdhsa_system_sgpr_workgroup_info 0
   .amdhsa_system_vgpr_workitem_id 0
-  .amdhsa_next_free_vgpr 0
-  .amdhsa_next_free_sgpr 1
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
   .amdhsa_reserve_vcc 0
   .amdhsa_float_round_mode_32 0
   .amdhsa_float_round_mode_16_64 0
@@ -307,8 +316,8 @@ cluster_local_y_only:
       .private_segment_fixed_size: 0
       .kernarg_segment_align: 8
       .wavefront_size: 32
-      .sgpr_count: 1
-      .vgpr_count: 0
+      .sgpr_count: 2
+      .vgpr_count: 1
       .max_flat_workgroup_size: 64
       .reqd_workgroup_size:
         - 64
@@ -342,6 +351,9 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @c
 .p2align 8
 .type cluster_local_z_only,@function
 cluster_local_z_only:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
   s_bfe_u32 s0, 262152, ttmp6
   s_endpgm
 .Lfunc_end0:
@@ -367,8 +379,8 @@ cluster_local_z_only:
   .amdhsa_system_sgpr_workgroup_id_z 1
   .amdhsa_system_sgpr_workgroup_info 0
   .amdhsa_system_vgpr_workitem_id 0
-  .amdhsa_next_free_vgpr 0
-  .amdhsa_next_free_sgpr 1
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
   .amdhsa_reserve_vcc 0
   .amdhsa_float_round_mode_32 0
   .amdhsa_float_round_mode_16_64 0
@@ -402,8 +414,8 @@ cluster_local_z_only:
       .private_segment_fixed_size: 0
       .kernarg_segment_align: 8
       .wavefront_size: 32
-      .sgpr_count: 1
-      .vgpr_count: 0
+      .sgpr_count: 2
+      .vgpr_count: 1
       .max_flat_workgroup_size: 64
       .reqd_workgroup_size:
         - 64
@@ -435,6 +447,9 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @e
 .p2align 8
 .type empty_cluster,@function
 empty_cluster:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
   s_endpgm
 .Lfunc_end0:
 .size empty_cluster, .Lfunc_end0-empty_cluster
@@ -459,8 +474,8 @@ empty_cluster:
   .amdhsa_system_sgpr_workgroup_id_z 0
   .amdhsa_system_sgpr_workgroup_info 0
   .amdhsa_system_vgpr_workitem_id 0
-  .amdhsa_next_free_vgpr 0
-  .amdhsa_next_free_sgpr 0
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
   .amdhsa_reserve_vcc 0
   .amdhsa_float_round_mode_32 0
   .amdhsa_float_round_mode_16_64 0
@@ -494,8 +509,8 @@ empty_cluster:
       .private_segment_fixed_size: 0
       .kernarg_segment_align: 8
       .wavefront_size: 32
-      .sgpr_count: 0
-      .vgpr_count: 0
+      .sgpr_count: 2
+      .vgpr_count: 1
       .max_flat_workgroup_size: 64
       .reqd_workgroup_size:
         - 64
@@ -528,6 +543,9 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @f
 .p2align 8
 .type flat_cluster_workgroup_id,@function
 flat_cluster_workgroup_id:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
   s_getreg_b32 s0, hwreg(HW_REG_IB_STS2, 21, 4)
   s_endpgm
 .Lfunc_end0:
@@ -553,8 +571,8 @@ flat_cluster_workgroup_id:
   .amdhsa_system_sgpr_workgroup_id_z 1
   .amdhsa_system_sgpr_workgroup_info 0
   .amdhsa_system_vgpr_workitem_id 0
-  .amdhsa_next_free_vgpr 0
-  .amdhsa_next_free_sgpr 1
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
   .amdhsa_reserve_vcc 0
   .amdhsa_float_round_mode_32 0
   .amdhsa_float_round_mode_16_64 0
@@ -588,8 +606,8 @@ flat_cluster_workgroup_id:
       .private_segment_fixed_size: 0
       .kernarg_segment_align: 8
       .wavefront_size: 32
-      .sgpr_count: 1
-      .vgpr_count: 0
+      .sgpr_count: 2
+      .vgpr_count: 1
       .max_flat_workgroup_size: 64
       .reqd_workgroup_size:
         - 64
@@ -639,6 +657,9 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1)
 .p2align 8
 .type ordinary_workgroup_x,@function
 ordinary_workgroup_x:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
   s_mov_b32 s0, 1
   s_add_u32 s0, ttmp9, s0
   s_endpgm
@@ -665,8 +686,8 @@ ordinary_workgroup_x:
   .amdhsa_system_sgpr_workgroup_id_z 0
   .amdhsa_system_sgpr_workgroup_info 0
   .amdhsa_system_vgpr_workitem_id 0
-  .amdhsa_next_free_vgpr 0
-  .amdhsa_next_free_sgpr 1
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
   .amdhsa_reserve_vcc 0
   .amdhsa_float_round_mode_32 0
   .amdhsa_float_round_mode_16_64 0
@@ -700,8 +721,8 @@ ordinary_workgroup_x:
       .private_segment_fixed_size: 0
       .kernarg_segment_align: 8
       .wavefront_size: 32
-      .sgpr_count: 1
-      .vgpr_count: 0
+      .sgpr_count: 2
+      .vgpr_count: 1
       .max_flat_workgroup_size: 64
       .reqd_workgroup_size:
         - 64
@@ -731,6 +752,9 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 3, 1)
 .p2align 8
 .type ordinary_workgroup_y,@function
 ordinary_workgroup_y:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
   s_and_b32 s0, 65535, ttmp7
   s_endpgm
 .Lfunc_end0:
@@ -756,8 +780,8 @@ ordinary_workgroup_y:
   .amdhsa_system_sgpr_workgroup_id_z 0
   .amdhsa_system_sgpr_workgroup_info 0
   .amdhsa_system_vgpr_workitem_id 0
-  .amdhsa_next_free_vgpr 0
-  .amdhsa_next_free_sgpr 1
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
   .amdhsa_reserve_vcc 0
   .amdhsa_float_round_mode_32 0
   .amdhsa_float_round_mode_16_64 0
@@ -791,8 +815,8 @@ ordinary_workgroup_y:
       .private_segment_fixed_size: 0
       .kernarg_segment_align: 8
       .wavefront_size: 32
-      .sgpr_count: 1
-      .vgpr_count: 0
+      .sgpr_count: 2
+      .vgpr_count: 1
       .max_flat_workgroup_size: 64
       .reqd_workgroup_size:
         - 64
@@ -822,6 +846,9 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 2)
 .p2align 8
 .type ordinary_workgroup_z,@function
 ordinary_workgroup_z:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
   s_lshr_b32 s0, ttmp7, 16
   s_endpgm
 .Lfunc_end0:
@@ -847,8 +874,8 @@ ordinary_workgroup_z:
   .amdhsa_system_sgpr_workgroup_id_z 1
   .amdhsa_system_sgpr_workgroup_info 0
   .amdhsa_system_vgpr_workitem_id 0
-  .amdhsa_next_free_vgpr 0
-  .amdhsa_next_free_sgpr 1
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
   .amdhsa_reserve_vcc 0
   .amdhsa_float_round_mode_32 0
   .amdhsa_float_round_mode_16_64 0
@@ -882,8 +909,8 @@ ordinary_workgroup_z:
       .private_segment_fixed_size: 0
       .kernarg_segment_align: 8
       .wavefront_size: 32
-      .sgpr_count: 1
-      .vgpr_count: 0
+      .sgpr_count: 2
+      .vgpr_count: 1
       .max_flat_workgroup_size: 64
       .reqd_workgroup_size:
         - 64
