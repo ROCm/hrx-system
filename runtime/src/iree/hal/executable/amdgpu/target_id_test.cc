@@ -79,6 +79,14 @@ TEST(TargetIdTest, ParsesKnownFeatureSupport) {
   EXPECT_EQ(target_id.sramecc, IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY);
   EXPECT_EQ(target_id.xnack, IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY);
 
+  target_id = ParseTargetId("gfx1250");
+  EXPECT_EQ(target_id.gfx1250_b0_specific,
+            IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY);
+
+  target_id = ParseTargetId("gfx1251");
+  EXPECT_EQ(target_id.gfx1250_b0_specific,
+            IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_UNSUPPORTED);
+
   target_id = ParseTargetId("gfx1030");
   EXPECT_EQ(target_id.sramecc,
             IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_UNSUPPORTED);
@@ -101,6 +109,43 @@ TEST(TargetIdTest, ParsesHsaIsaNameWithFeatureSuffixes) {
   EXPECT_EQ(target_id.sramecc, IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON);
   EXPECT_EQ(target_id.xnack, IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF);
   EXPECT_EQ(FormatTargetId(&target_id), "gfx942:sramecc+:xnack-");
+}
+
+TEST(TargetIdTest, ParsesGfx1250RevisionFeature) {
+  auto target_id =
+      ParseTargetId("gfx1250:gfx1250-b0-specific-", kArchFeatureParseFlags);
+  EXPECT_EQ(target_id.gfx1250_b0_specific,
+            IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF);
+  EXPECT_EQ(FormatTargetId(&target_id), "gfx1250:gfx1250-b0-specific-");
+
+  target_id =
+      ParseTargetId("gfx1250:gfx1250-b0-specific+", kArchFeatureParseFlags);
+  EXPECT_EQ(target_id.gfx1250_b0_specific,
+            IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON);
+  EXPECT_EQ(FormatTargetId(&target_id), "gfx1250:gfx1250-b0-specific+");
+}
+
+TEST(TargetIdTest, AppliesGfx1250AsicRevision) {
+  auto target_id = ParseTargetId("gfx1250");
+  IREE_ASSERT_OK(iree_hal_amdgpu_target_id_apply_asic_revision(0, &target_id));
+  EXPECT_EQ(target_id.gfx1250_b0_specific,
+            IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF);
+
+  target_id = ParseTargetId("gfx1250");
+  IREE_ASSERT_OK(iree_hal_amdgpu_target_id_apply_asic_revision(1, &target_id));
+  EXPECT_EQ(target_id.gfx1250_b0_specific,
+            IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON);
+
+  target_id =
+      ParseTargetId("gfx1250:gfx1250-b0-specific-", kArchFeatureParseFlags);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_hal_amdgpu_target_id_apply_asic_revision(1, &target_id));
+
+  target_id = ParseTargetId("gfx1100");
+  IREE_ASSERT_OK(iree_hal_amdgpu_target_id_apply_asic_revision(0, &target_id));
+  EXPECT_EQ(target_id.gfx1250_b0_specific,
+            IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_UNSUPPORTED);
 }
 
 TEST(TargetIdTest, RejectsUnsupportedSyntax) {
@@ -127,6 +172,10 @@ TEST(TargetIdTest, RejectsUnsupportedSyntax) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_amdgpu_target_id_parse(IREE_SV("gfx942:wavefrontsize64+"),
+                                      kArchFeatureParseFlags, &target_id));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amdgpu_target_id_parse(IREE_SV("gfx1251:gfx1250-b0-specific+"),
                                       kArchFeatureParseFlags, &target_id));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -167,6 +216,15 @@ TEST(TargetIdTest, LooksUpCodeObjectTarget) {
             IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON);
   EXPECT_EQ(code_object_target_id.xnack,
             IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF);
+
+  target_id =
+      ParseTargetId("gfx1250:gfx1250-b0-specific-", kArchFeatureParseFlags);
+  IREE_ASSERT_OK(iree_hal_amdgpu_target_id_lookup_code_object_target(
+      &target_id, &code_object_target_id));
+  EXPECT_TRUE(iree_string_view_equal(code_object_target_id.processor,
+                                     IREE_SV("gfx12-5-generic")));
+  EXPECT_EQ(code_object_target_id.gfx1250_b0_specific,
+            IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY);
 
   target_id = ParseTargetId("gfx908");
   IREE_ASSERT_OK(iree_hal_amdgpu_target_id_lookup_code_object_target(
@@ -272,6 +330,20 @@ TEST(TargetIdTest, ChecksFeatureCompatibility) {
   EXPECT_EQ(iree_hal_amdgpu_target_id_check_compatible(&code_object_target_id,
                                                        &agent_target_id),
             IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE);
+
+  code_object_target_id =
+      ParseTargetId("gfx1250:gfx1250-b0-specific+", kArchFeatureParseFlags);
+  agent_target_id =
+      ParseTargetId("gfx1250:gfx1250-b0-specific-", kArchFeatureParseFlags);
+  EXPECT_TRUE(iree_any_bit_set(
+      iree_hal_amdgpu_target_id_check_compatible(&code_object_target_id,
+                                                 &agent_target_id),
+      IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GFX1250_REVISION));
+
+  code_object_target_id = ParseTargetId("gfx1250");
+  EXPECT_EQ(iree_hal_amdgpu_target_id_check_compatible(&code_object_target_id,
+                                                       &agent_target_id),
+            IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE);
 }
 
 TEST(TargetIdTest, FormatsCompatibilityReasons) {
@@ -279,9 +351,10 @@ TEST(TargetIdTest, FormatsCompatibilityReasons) {
   IREE_ASSERT_OK(iree_hal_amdgpu_target_compatibility_format(
       IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GENERIC_FAMILY |
           IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_SRAMECC |
-          IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_XNACK,
+          IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_XNACK |
+          IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GFX1250_REVISION,
       sizeof(buffer), buffer, /*out_buffer_length=*/nullptr));
-  EXPECT_STREQ(buffer, "generic family, sramecc, xnack");
+  EXPECT_STREQ(buffer, "generic family, sramecc, xnack, gfx1250 revision");
 }
 
 }  // namespace

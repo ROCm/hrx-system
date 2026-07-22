@@ -59,6 +59,8 @@ typedef struct iree_hal_amdgpu_target_id_t {
   iree_hal_amdgpu_target_feature_state_t sramecc;
   // XNACK selector state.
   iree_hal_amdgpu_target_feature_state_t xnack;
+  // gfx1250 B0-specific instruction and scheduling behavior selector state.
+  iree_hal_amdgpu_target_feature_state_t gfx1250_b0_specific;
   // Borrowed processor name without feature suffixes or HSA triple prefix.
   iree_string_view_t processor;
 } iree_hal_amdgpu_target_id_t;
@@ -90,6 +92,8 @@ typedef enum iree_hal_amdgpu_target_compatibility_bits_e {
   IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_SRAMECC = 1u << 3,
   // Explicit XNACK mode does not match the agent.
   IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_XNACK = 1u << 4,
+  // gfx1250 A0/B0-specific behavior does not match the agent.
+  IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GFX1250_REVISION = 1u << 5,
 } iree_hal_amdgpu_target_compatibility_bits_t;
 typedef uint32_t iree_hal_amdgpu_target_compatibility_t;
 
@@ -123,6 +127,14 @@ iree_status_t iree_hal_amdgpu_target_id_parse(
 // Parses an HSA ISA name reported by HSA_ISA_INFO_NAME.
 iree_status_t iree_hal_amdgpu_target_id_parse_hsa_isa_name(
     iree_string_view_t value, iree_hal_amdgpu_target_id_t* out_target_id);
+
+// Applies the HSA-reported physical ASIC revision to |target_id|.
+//
+// gfx1250 ASIC revision 0 selects A0 behavior and revisions greater than zero
+// select B0-specific behavior. Other processors are unchanged. An explicitly
+// qualified gfx1250 target that contradicts |asic_revision| is rejected.
+iree_status_t iree_hal_amdgpu_target_id_apply_asic_revision(
+    uint32_t asic_revision, iree_hal_amdgpu_target_id_t* target_id);
 
 // Formats |target_id| into canonical AMDGPU target-ID syntax.
 //

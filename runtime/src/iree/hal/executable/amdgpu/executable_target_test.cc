@@ -62,6 +62,43 @@ TEST(ExecutableTargetTest, SelectsFeatureQualifiedExactTarget) {
   iree_hal_device_spec_release(device_spec);
 }
 
+TEST(ExecutableTargetTest, AdvertisesGfx1250RevisionOnExactTarget) {
+  iree_hal_amdgpu_target_id_t target_id;
+  IREE_ASSERT_OK(iree_hal_amdgpu_target_id_parse(
+      IREE_SV("gfx1250"), IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_NONE,
+      &target_id));
+  IREE_ASSERT_OK(iree_hal_amdgpu_target_id_apply_asic_revision(0, &target_id));
+
+  iree_hal_device_spec_builder_t builder;
+  iree_hal_device_spec_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(iree_hal_amdgpu_device_spec_builder_add_executable_targets(
+      &builder, &target_id, /*physical_device_affinity=*/1ull));
+  iree_hal_device_spec_t* device_spec = NULL;
+  IREE_ASSERT_OK(iree_hal_device_spec_builder_finalize(&builder, &device_spec));
+  iree_hal_device_spec_builder_deinitialize(&builder);
+
+  const iree_hal_device_executable_spec_t* executable_spec =
+      iree_hal_device_spec_executables(device_spec);
+  ASSERT_EQ(executable_spec->target_count, 2u);
+  EXPECT_TRUE(iree_string_view_equal(executable_spec->targets[0].target_key,
+                                     IREE_SV("gfx1250:gfx1250-b0-specific-")));
+  EXPECT_TRUE(iree_string_view_equal(executable_spec->targets[1].target_key,
+                                     IREE_SV("gfx12-5-generic")));
+
+  iree_hal_executable_target_selection_result_t result;
+  IREE_ASSERT_OK(iree_hal_amdgpu_device_spec_select_executable_target(
+      device_spec, IREE_SV("gfx1250:gfx1250-b0-specific-"),
+      /*physical_device_affinity=*/1ull, &result));
+  EXPECT_EQ(result.outcome,
+            IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED);
+  IREE_ASSERT_OK(iree_hal_amdgpu_device_spec_select_executable_target(
+      device_spec, IREE_SV("gfx1250:gfx1250-b0-specific+"),
+      /*physical_device_affinity=*/1ull, &result));
+  EXPECT_EQ(result.outcome,
+            IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH);
+  iree_hal_device_spec_release(device_spec);
+}
+
 TEST(ExecutableTargetTest, SelectsFeatureQualifiedGenericTarget) {
   iree_hal_device_spec_t* device_spec = NULL;
   CreateDeviceSpecWithFeatureQualifiedTargets(&device_spec);
