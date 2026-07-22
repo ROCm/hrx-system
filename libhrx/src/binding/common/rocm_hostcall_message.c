@@ -209,8 +209,10 @@ bool iree_hal_streaming_hostcall_message_handle_printf(
   iree_hal_streaming_hostcall_message_t* message = NULL;
   if (begin) {
     uint64_t message_id = 0;
-    if (!iree_status_is_ok(iree_hal_streaming_hostcall_message_allocate(
-            table, &message_id, &message))) {
+    iree_status_t status = iree_hal_streaming_hostcall_message_allocate(
+        table, &message_id, &message);
+    if (!iree_status_is_ok(status)) {
+      iree_status_ignore(status);
       payload[0] = (uint64_t)-1;
       return false;
     }
@@ -228,8 +230,10 @@ bool iree_hal_streaming_hostcall_message_handle_printf(
     }
   }
 
-  if (!iree_status_is_ok(iree_hal_streaming_hostcall_message_append(
-          table, message, payload + 1, (iree_host_size_t)length))) {
+  iree_status_t status = iree_hal_streaming_hostcall_message_append(
+      table, message, payload + 1, (iree_host_size_t)length);
+  if (!iree_status_is_ok(status)) {
+    iree_status_ignore(status);
     payload[0] = (uint64_t)-1;
     iree_hal_streaming_hostcall_message_discard(table, message);
     return false;

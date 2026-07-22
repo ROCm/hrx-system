@@ -139,6 +139,16 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "command_buffer_test",
+    srcs = ["command_buffer_test.cc"],
+    deps = [
+        ":hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "host_notification_test",
     srcs = ["host_notification_test.cc"],
     deps = [

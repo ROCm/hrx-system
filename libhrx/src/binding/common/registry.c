@@ -33,6 +33,15 @@ static void iree_hal_streaming_context_symbol_map_expunge_module(
 // Indicates a deleted entry (linear scan must proceed).
 #define IREE_HAL_STREAMING_SYMBOL_MAP_TOMBSTONE_KEY ((void*)1)
 
+typedef struct iree_hal_streaming_managed_sync_record_t {
+  // Retained managed storage buffer copied to the host target.
+  iree_hal_buffer_t* buffer;
+  // Registered host storage receiving the synchronized contents.
+  void* host_target;
+  // Number of bytes copied from |buffer| to |host_target|.
+  iree_device_size_t byte_length;
+} iree_hal_streaming_managed_sync_record_t;
+
 static inline bool iree_hal_streaming_symbol_map_is_valid_key(void* key) {
   return key != IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY &&
          key != IREE_HAL_STREAMING_SYMBOL_MAP_TOMBSTONE_KEY;
@@ -821,7 +830,10 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
             if (!iree_status_is_ok(status)) break;
             found = true;
             symbol = storage_symbol;
-            synchronize_managed_data_to_host = true;
+            synchronize_managed_data_to_host =
+                registration->symbols[i]
+                        .params.variable.managed_initial_value != NULL &&
+                registration->symbols[i].params.variable.size != 0;
           }
           break;
         }
@@ -994,12 +1006,31 @@ iree_status_t iree_hal_streaming_context_symbol_map_synchronize_managed_data(
     iree_hal_streaming_context_symbol_map_t* map) {
   IREE_ASSERT_ARGUMENT(map);
   iree_hal_streaming_global_symbol_registry_t* registry = map->registry;
-  iree_slim_mutex_lock(&registry->mutex);
 
+  iree_hal_streaming_managed_sync_record_t* records = NULL;
+  iree_host_size_t record_count = 0;
+  iree_host_size_t record_capacity = 0;
   iree_status_t status = iree_ok_status();
+
+  // Registrations and context-map entries may be resized or removed while a
+  // transfer is in flight. Snapshot scalar transfer data and retain each HAL
+  // buffer under the registry lock, then perform device work without holding
+  // the process-wide registry critical section.
+  iree_slim_mutex_lock(&registry->mutex);
+  record_capacity = map->managed_symbol_count;
+  if (record_capacity != 0) {
+    iree_host_size_t records_size = 0;
+    status = iree_hal_streaming_registry_checked_array_size(
+        record_capacity, sizeof(records[0]), "managed sync records",
+        &records_size);
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_malloc(map->host_allocator, records_size,
+                                     (void**)&records);
+    }
+  }
+
   for (iree_hal_streaming_context_module_entry_t* module_entry = map->modules;
-       map->managed_symbol_count != 0 && iree_status_is_ok(status) &&
-       module_entry;
+       record_capacity != 0 && iree_status_is_ok(status) && module_entry;
        module_entry = module_entry->next) {
     iree_hal_streaming_module_registration_t* registration =
         module_entry->registration;
@@ -1040,12 +1071,39 @@ iree_status_t iree_hal_streaming_context_symbol_map_synchronize_managed_data(
         break;
       }
 
-      status = iree_hal_streaming_direct_transfer_d2h(
-          map->context, symbol->global_buffer->buffer, /*source_offset=*/0,
-          host_target, byte_length);
+      if (IREE_UNLIKELY(record_count >= record_capacity)) {
+        status =
+            iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                             "managed symbol map count changed while locked");
+        break;
+      }
+      iree_hal_buffer_t* buffer = symbol->global_buffer->buffer;
+      iree_hal_buffer_retain(buffer);
+      records[record_count++] = (iree_hal_streaming_managed_sync_record_t){
+          .buffer = buffer,
+          .host_target = host_target,
+          .byte_length = (iree_device_size_t)byte_length,
+      };
     }
   }
+  if (iree_status_is_ok(status) && record_count != record_capacity) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "managed symbol map expected %" PRIhsz
+                              " entries but found %" PRIhsz,
+                              record_capacity, record_count);
+  }
   iree_slim_mutex_unlock(&registry->mutex);
+
+  for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < record_count;
+       ++i) {
+    status = iree_hal_streaming_direct_transfer_d2h(
+        map->context, records[i].buffer, /*source_offset=*/0,
+        records[i].host_target, records[i].byte_length);
+  }
+  for (iree_host_size_t i = 0; i < record_count; ++i) {
+    iree_hal_buffer_release(records[i].buffer);
+  }
+  iree_allocator_free(map->host_allocator, records);
   return status;
 }
 

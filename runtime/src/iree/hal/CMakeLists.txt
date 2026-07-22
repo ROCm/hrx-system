@@ -112,6 +112,17 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    command_buffer_test
+  SRCS
+    "command_buffer_test.cc"
+  DEPS
+    ::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     host_notification_test
   SRCS
     "host_notification_test.cc"

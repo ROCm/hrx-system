@@ -545,6 +545,7 @@ static inline void iree_hal_dispatch_config_clone(
     iree_hal_dispatch_runtime_parameter_list_t* runtime_parameter_storage,
     iree_hal_dispatch_config_t* out_config) {
   *out_config = source;
+  *runtime_parameter_storage = (iree_hal_dispatch_runtime_parameter_list_t){0};
   if (source.runtime_parameters) {
     *runtime_parameter_storage = *source.runtime_parameters;
     out_config->runtime_parameters = runtime_parameter_storage;
