@@ -32,6 +32,11 @@ const loom_amdgpu_processor_info_t* loom_amdgpu_target_processor_from_op(
 const loom_amdgpu_processor_info_t* loom_amdgpu_target_processor_from_ref(
     const loom_module_t* module, loom_symbol_ref_t target_ref);
 
+// Returns the effective gfx1250 revision selected by |target_ref|. Other
+// processors and invalid references return UNSPECIFIED.
+loom_amdgpu_gfx1250_revision_t loom_amdgpu_target_gfx1250_revision_from_ref(
+    const loom_module_t* module, loom_symbol_ref_t target_ref);
+
 // Returns the AMDGPU processor selected by a resolved low target, or NULL.
 const loom_amdgpu_processor_info_t*
 loom_amdgpu_target_processor_from_resolved_target(

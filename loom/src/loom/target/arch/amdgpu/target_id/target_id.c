@@ -33,6 +33,20 @@ const loom_amdgpu_processor_info_t* loom_amdgpu_target_processor_from_ref(
   return loom_amdgpu_target_processor_from_op(module, symbol->defining_op);
 }
 
+loom_amdgpu_gfx1250_revision_t loom_amdgpu_target_gfx1250_revision_from_ref(
+    const loom_module_t* module, loom_symbol_ref_t target_ref) {
+  if (!loom_symbol_ref_is_valid(target_ref) || target_ref.module_id != 0 ||
+      target_ref.symbol_id >= module->symbols.count) {
+    return LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED;
+  }
+  const loom_symbol_t* symbol = &module->symbols.entries[target_ref.symbol_id];
+  if (symbol->defining_op == NULL) {
+    return LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED;
+  }
+  return loom_amdgpu_target_record_effective_gfx1250_revision(
+      module, symbol->defining_op);
+}
+
 const loom_amdgpu_processor_info_t*
 loom_amdgpu_target_processor_from_resolved_target(
     const loom_module_t* module, const loom_low_resolved_target_t* target) {

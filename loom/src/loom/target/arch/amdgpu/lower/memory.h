@@ -147,6 +147,7 @@ bool loom_amdgpu_memory_access_plan_select(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_view_region_table_t* view_regions,
     loom_func_like_t source_function, const loom_target_bundle_t* bundle,
+    loom_symbol_ref_t target_ref,
     const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     const loom_op_t* source_op,
     loom_low_source_memory_access_plan_t* out_source,

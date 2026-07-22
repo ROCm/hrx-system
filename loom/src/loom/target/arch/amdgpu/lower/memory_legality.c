@@ -100,7 +100,8 @@ iree_status_t loom_amdgpu_low_legality_verify_memory(
   if (!loom_amdgpu_memory_access_plan_select(
           module, loom_target_low_legality_fact_table(context), descriptor_set,
           view_regions, loom_target_low_legality_function(context), bundle,
-          alloca_layout, op, &source, &plan, &source_diagnostic, &diagnostic)) {
+          loom_target_low_legality_target_ref(context), alloca_layout, op,
+          &source, &plan, &source_diagnostic, &diagnostic)) {
     bool handled = false;
     if (diagnostic.rejection_bits != 0) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_memory_access_rejection_diagnostic(
