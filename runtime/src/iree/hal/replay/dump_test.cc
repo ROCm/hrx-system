@@ -152,7 +152,7 @@ static std::vector<uint8_t> MakeExecutableLoadReplayFileStorage() {
   iree_hal_replay_executable_metadata_header_t metadata_header = {};
   metadata_header.function_count = 1;
   const char function_name[] = "main";
-  metadata_header.function_name_storage_length = sizeof(function_name) - 1;
+  metadata_header.name_storage_length = sizeof(function_name) - 1;
   iree_hal_replay_executable_function_metadata_t function_metadata = {};
   function_metadata.binding_count = 2;
   function_metadata.workgroup_size[0] = 3;
@@ -208,7 +208,7 @@ TEST(ReplayDumpTest, EmitsTextSummary) {
   IREE_ASSERT_OK(
       DumpReplayToString(MakeReplayFileContents(storage), &options, &output));
 
-  EXPECT_THAT(output, HasSubstr("IREE HAL replay v3.0"));
+  EXPECT_THAT(output, HasSubstr("IREE HAL replay v4.0"));
   EXPECT_THAT(output, HasSubstr("summary:"));
   EXPECT_THAT(output, HasSubstr("hermetic: yes"));
   EXPECT_THAT(output, HasSubstr("strict_replay_supported: yes"));
@@ -282,6 +282,7 @@ TEST(ReplayDumpTest, EmitsExecutableMetadataRanges) {
   EXPECT_THAT(text_output, HasSubstr("metadata_range=["));
   EXPECT_THAT(text_output, HasSubstr("metadata_functions=1"));
   EXPECT_THAT(text_output, HasSubstr("metadata_parameters=0"));
+  EXPECT_THAT(text_output, HasSubstr("metadata_runtime_parameters=0"));
 
   options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
   std::string jsonl_output;
@@ -292,6 +293,8 @@ TEST(ReplayDumpTest, EmitsExecutableMetadataRanges) {
   EXPECT_THAT(jsonl_output, HasSubstr("\"metadata_range\""));
   EXPECT_THAT(jsonl_output, HasSubstr("\"metadata_function_count\":1"));
   EXPECT_THAT(jsonl_output, HasSubstr("\"metadata_parameter_count\":0"));
+  EXPECT_THAT(jsonl_output,
+              HasSubstr("\"metadata_runtime_parameter_count\":0"));
 }
 
 TEST(ReplayDumpTest, EmitsBufferRangeDataRanges) {

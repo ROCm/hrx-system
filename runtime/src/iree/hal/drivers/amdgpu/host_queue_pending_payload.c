@@ -449,7 +449,12 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_dispatch(
   }
   op->dispatch.executable = executable;
   op->dispatch.export_ordinal = export_ordinal;
-  op->dispatch.config = config;
+  iree_hal_dispatch_config_clone(config, &op->dispatch.runtime_parameters,
+                                 &op->dispatch.config);
+  for (iree_host_size_t i = 0; i < op->dispatch.runtime_parameters.count; ++i) {
+    iree_hal_amdgpu_pending_op_retain(
+        op, op->dispatch.runtime_parameters.patches[i].resource);
+  }
   op->dispatch.flags = flags;
 
   iree_status_t status = iree_ok_status();

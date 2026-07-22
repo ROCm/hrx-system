@@ -82,6 +82,8 @@ typedef struct iree_hal_amdgpu_hsaco_metadata_kernel_t {
   uint32_t group_segment_fixed_size;
   // Fixed private segment size from `.private_segment_fixed_size`.
   uint32_t private_segment_fixed_size;
+  // Maximum total work-items per workgroup from `.max_flat_workgroup_size`.
+  uint32_t max_flat_workgroup_size;
   // Required workgroup size from `.reqd_workgroup_size`, if present.
   uint32_t required_workgroup_size[3];
   // True when |required_workgroup_size| was present.
@@ -91,6 +93,8 @@ typedef struct iree_hal_amdgpu_hsaco_metadata_kernel_t {
   uint8_t workgroup_cluster_size[3];
   // True when |workgroup_cluster_size| was present.
   bool has_workgroup_cluster_size;
+  // True when `.uniform_work_group_size` is present and non-zero.
+  bool uniform_workgroup_size;
   // Number of argument records in |args|.
   iree_host_size_t arg_count;
   // Argument records borrowed from the owning metadata object.
@@ -104,6 +108,20 @@ typedef struct iree_hal_amdgpu_hsaco_metadata_elf_kernel_symbol_t {
   // Kernel descriptor symbol name used to resolve the HSA kernel object.
   iree_string_view_t symbol_name;
 } iree_hal_amdgpu_hsaco_metadata_elf_kernel_symbol_t;
+
+// Global object declaration discovered in the ELF symbol table.
+typedef struct iree_hal_amdgpu_hsaco_metadata_elf_global_symbol_t {
+  // Global object name borrowed from the ELF string table.
+  iree_string_view_t name;
+  // Declared global object byte length.
+  iree_device_size_t byte_length;
+} iree_hal_amdgpu_hsaco_metadata_elf_global_symbol_t;
+
+// Raw `amdhsa.printf` metadata record.
+typedef struct iree_hal_amdgpu_hsaco_metadata_printf_record_t {
+  // Record payload borrowed from the metadata blob.
+  iree_string_view_t value;
+} iree_hal_amdgpu_hsaco_metadata_printf_record_t;
 
 // Decoded AMDGPU code object metadata.
 //
@@ -131,10 +149,18 @@ typedef struct iree_hal_amdgpu_hsaco_metadata_t {
   // ELF-only kernel symbols. These are not reflected metadata and must only be
   // used by custom-direct native kernarg launch paths.
   iree_hal_amdgpu_hsaco_metadata_elf_kernel_symbol_t* elf_kernel_symbols;
+  // Number of raw `amdhsa.printf` metadata records.
+  iree_host_size_t printf_record_count;
+  // Raw `amdhsa.printf` metadata records.
+  iree_hal_amdgpu_hsaco_metadata_printf_record_t* printf_records;
   // Total number of decoded argument records.
   iree_host_size_t arg_count;
   // Contiguous argument storage referenced by |kernels|.
   iree_hal_amdgpu_hsaco_metadata_arg_t* args;
+  // Number of global object declarations discovered in ELF symbol tables.
+  iree_host_size_t elf_global_symbol_count;
+  // ELF global object declarations.
+  iree_hal_amdgpu_hsaco_metadata_elf_global_symbol_t* elf_global_symbols;
 } iree_hal_amdgpu_hsaco_metadata_t;
 
 // Initializes |out_metadata| from a raw AMDGPU ELF code object.

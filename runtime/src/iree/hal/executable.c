@@ -54,6 +54,46 @@ IREE_API_EXPORT iree_status_t iree_hal_executable_function_parameters(
   return status;
 }
 
+IREE_API_EXPORT iree_status_t iree_hal_executable_function_runtime_parameters(
+    iree_hal_executable_t* executable, iree_hal_executable_function_t function,
+    iree_host_size_t capacity,
+    iree_hal_executable_function_runtime_parameter_info_t* out_parameters) {
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_parameters || capacity == 0);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_status_t status =
+      _VTABLE_DISPATCH(executable, function_runtime_parameters)(
+          executable, function, capacity, out_parameters);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_executable_runtime_metadata_count(
+    iree_hal_executable_t* executable, iree_string_view_t name,
+    iree_host_size_t* out_count) {
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_count);
+  *out_count = 0;
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_status_t status = _VTABLE_DISPATCH(executable, runtime_metadata_count)(
+      executable, name, out_count);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_executable_runtime_metadata_records(
+    iree_hal_executable_t* executable, iree_string_view_t name,
+    iree_host_size_t capacity,
+    iree_hal_executable_runtime_metadata_record_t* out_records) {
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_records || capacity == 0);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_status_t status = _VTABLE_DISPATCH(executable, runtime_metadata_records)(
+      executable, name, capacity, out_records);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_executable_lookup_function_by_name(
     iree_hal_executable_t* executable, iree_string_view_t name,
     iree_hal_executable_function_t* out_function) {
@@ -64,6 +104,24 @@ IREE_API_EXPORT iree_status_t iree_hal_executable_lookup_function_by_name(
       executable, name, out_function);
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_executable_global_count(
+    iree_hal_executable_t* executable, iree_host_size_t* out_count) {
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_count);
+  *out_count = 0;
+  return _VTABLE_DISPATCH(executable, global_count)(executable, out_count);
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_executable_global_info_by_index(
+    iree_hal_executable_t* executable, iree_host_size_t index,
+    iree_hal_executable_global_info_t* out_info) {
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_info);
+  memset(out_info, 0, sizeof(*out_info));
+  return _VTABLE_DISPATCH(executable, global_info_by_index)(executable, index,
+                                                            out_info);
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_executable_try_lookup_global_by_name(

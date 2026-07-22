@@ -267,4 +267,16 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
   EXPECT_EQ(0u, node.attrs.kernel.constants.data_length);
 }
 
+TEST(GraphTest, RejectsBufferedPrintfRuntimeForReusableCommandBuffers) {
+  iree_hal_streaming_symbol_t symbol = {};
+  symbol.runtime_services.printf_buffer.present = true;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_hal_streaming_graph_validate_symbol_runtime_services(&symbol));
+
+  symbol.runtime_services.printf_buffer.present = false;
+  IREE_EXPECT_OK(
+      iree_hal_streaming_graph_validate_symbol_runtime_services(&symbol));
+}
+
 }  // namespace

@@ -48,6 +48,24 @@ static uint32_t iree_hal_streaming_u32_or_default(uint64_t value,
   return (uint32_t)value;
 }
 
+static iree_status_t iree_hal_streaming_query_host_native_atomic_supported(
+    hrx_device_t hrx_device, bool* out_supported) {
+  *out_supported = false;
+  bool supported = false;
+  hrx_status_t status = hrx_device_get_property(
+      hrx_device, HRX_DEVICE_PROPERTY_HOST_NATIVE_ATOMIC_SUPPORTED, &supported,
+      sizeof(supported));
+  if (hrx_status_is_ok(status)) {
+    *out_supported = supported;
+    return iree_ok_status();
+  }
+  if (hrx_status_code(status) == HRX_STATUS_UNAVAILABLE) {
+    hrx_status_ignore(status);
+    return iree_ok_status();
+  }
+  return hrx_to_iree_status(status);
+}
+
 // Queries device info and populates device properties.
 static iree_status_t iree_hal_streaming_query_device_info(
     iree_hal_streaming_device_t* device) {
@@ -129,6 +147,11 @@ static iree_status_t iree_hal_streaming_query_device_info(
   // TODO: Query from actual device properties.
   // Cooperative launch requires Pascal (SM 6.0) or newer.
   device->supports_cooperative_launch = (device->compute_capability_major >= 6);
+  bool host_native_atomic_supported = false;
+  status = iree_hal_streaming_query_host_native_atomic_supported(
+      device->hrx_device, &host_native_atomic_supported);
+  if (!iree_status_is_ok(status)) return status;
+  device->host_native_atomic_supported = host_native_atomic_supported;
 
   device->max_threads_per_block = iree_hal_streaming_u32_or_default(
       launch ? launch->maximum_workgroup_invocations : 0, 1024);
@@ -149,8 +172,9 @@ static iree_status_t iree_hal_streaming_query_device_info(
     device->warp_size = 32;
   }
 
-  uint32_t multiprocessor_count = iree_hal_streaming_u32_or_default(
-      execution ? execution->unit_count : 0, 80);
+  device->raw_compute_unit_count = execution ? execution->unit_count : 0;
+  uint32_t multiprocessor_count =
+      iree_hal_streaming_u32_or_default(device->raw_compute_unit_count, 80);
   // IREE/HSA reports raw compute units, while HIP reports RDNA devices in
   // WGP-like units. Keep this HIP-compatible because rocBLAS/hipBLASLt query
   // the physical multiprocessor count when selecting GEMM solutions.
@@ -159,6 +183,9 @@ static iree_status_t iree_hal_streaming_query_device_info(
     multiprocessor_count /= 2;
   }
   device->multiprocessor_count = multiprocessor_count;
+
+  device->maximum_resident_subgroup_count =
+      execution ? execution->maximum_resident_subgroup_count : 0;
 
   device->max_threads_per_multiprocessor = iree_hal_streaming_u32_or_default(
       execution ? execution->maximum_resident_invocation_count : 0, 2048);

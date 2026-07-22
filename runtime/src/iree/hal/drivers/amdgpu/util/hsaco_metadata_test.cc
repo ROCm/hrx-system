@@ -131,6 +131,7 @@ enum BuildKernelMetadataFlagBits : uint32_t {
   kBuildKernelMetadataOutOfRangeArg = 1u << 0,
   kBuildKernelMetadataUnknownValueKind = 1u << 1,
   kBuildKernelMetadataClusterDimensions = 1u << 2,
+  kBuildKernelMetadataPrintf = 1u << 3,
 };
 
 static std::vector<uint8_t> BuildKernelMetadata(
@@ -141,8 +142,9 @@ static std::vector<uint8_t> BuildKernelMetadata(
       (flags & kBuildKernelMetadataUnknownValueKind) != 0;
   const bool has_cluster_dimensions =
       (flags & kBuildKernelMetadataClusterDimensions) != 0;
+  const bool include_printf = (flags & kBuildKernelMetadataPrintf) != 0;
   std::vector<uint8_t> output;
-  AppendMsgPackMap(&output, 3);
+  AppendMsgPackMap(&output, include_printf ? 4 : 3);
 
   AppendMsgPackString(&output, IREE_SV("amdhsa.version"));
   AppendMsgPackArray(&output, 2);
@@ -156,13 +158,14 @@ static std::vector<uint8_t> BuildKernelMetadata(
 
   AppendMsgPackString(&output, IREE_SV("amdhsa.kernels"));
   AppendMsgPackArray(&output, 1);
-  AppendMsgPackMap(&output, 8 + (has_cluster_dimensions ? 1 : 0));
+  AppendMsgPackMap(&output, 9 + (has_cluster_dimensions ? 1 : 0));
   AppendStringField(&output, IREE_SV(".name"), IREE_SV("vector_add"));
   AppendStringField(&output, IREE_SV(".symbol"), IREE_SV("vector_add.kd"));
   AppendUintField(&output, IREE_SV(".kernarg_segment_size"), 24);
   AppendUintField(&output, IREE_SV(".kernarg_segment_align"), 8);
   AppendUintField(&output, IREE_SV(".group_segment_fixed_size"), 1024);
   AppendUintField(&output, IREE_SV(".private_segment_fixed_size"), 64);
+  AppendUintField(&output, IREE_SV(".max_flat_workgroup_size"), 256);
   AppendMsgPackString(&output, IREE_SV(".reqd_workgroup_size"));
   AppendMsgPackArray(&output, 3);
   AppendMsgPackUint(&output, 16);
@@ -214,6 +217,14 @@ static std::vector<uint8_t> BuildKernelMetadata(
   AppendUintField(&output, IREE_SV(".size"), out_of_range_arg ? 8 : 4);
   AppendStringField(&output, IREE_SV(".value_kind"), IREE_SV("by_value"));
   AppendUintField(&output, IREE_SV(".align"), 4);
+
+  if (include_printf) {
+    AppendMsgPackString(&output, IREE_SV("amdhsa.printf"));
+    AppendMsgPackArray(&output, 2);
+    AppendMsgPackString(&output,
+                        IREE_SV("0:0:8addc4c0362218ac,Hello World!\\n"));
+    AppendMsgPackString(&output, IREE_SV("0:0:1122334455667788,value=%d\\n"));
+  }
 
   return output;
 }
@@ -398,18 +409,21 @@ static void AlignVector(std::vector<uint8_t>* output, size_t alignment) {
 
 static void AppendElf64Symbol(std::vector<uint8_t>* output,
                               uint32_t name_offset, uint8_t info,
-                              uint16_t section_index = 1) {
+                              uint16_t section_index = 1,
+                              uint64_t byte_length = 0) {
   size_t symbol_offset = output->size();
   output->resize(symbol_offset + 24, 0);
   StoreU32LE(output, symbol_offset + 0, name_offset);
   (*output)[symbol_offset + 4] = info;
   StoreU16LE(output, symbol_offset + 6, section_index);
+  StoreU64LE(output, symbol_offset + 16, byte_length);
 }
 
 static std::vector<uint8_t> AddSyntheticCandidateSymbolSection(
     std::vector<uint8_t> elf, uint8_t descriptor_info = 0x11,
     uint16_t function_section_index = 1) {
   constexpr uint8_t kGlobalFunction = 0x12;  // STB_GLOBAL | STT_FUNC.
+  constexpr uint8_t kGlobalObject = 0x11;    // STB_GLOBAL | STT_OBJECT.
   constexpr size_t kSectionHeaderSize = 64;
 
   const size_t string_offset = elf.size();
@@ -423,6 +437,10 @@ static std::vector<uint8_t> AddSyntheticCandidateSymbolSection(
   const char kDescriptorName[] = "extra_kernel.kd";
   elf.insert(elf.end(), kDescriptorName,
              kDescriptorName + sizeof(kDescriptorName));
+  const uint32_t global_name_offset =
+      static_cast<uint32_t>(elf.size() - string_offset);
+  const char kGlobalName[] = "managed_value.managed";
+  elf.insert(elf.end(), kGlobalName, kGlobalName + sizeof(kGlobalName));
   const size_t string_size = elf.size() - string_offset;
 
   AlignVector(&elf, 8);
@@ -431,6 +449,8 @@ static std::vector<uint8_t> AddSyntheticCandidateSymbolSection(
   AppendElf64Symbol(&elf, function_name_offset, kGlobalFunction,
                     function_section_index);
   AppendElf64Symbol(&elf, descriptor_name_offset, descriptor_info);
+  AppendElf64Symbol(&elf, global_name_offset, kGlobalObject,
+                    /*section_index=*/1, /*byte_length=*/4096);
   const size_t symbol_size = elf.size() - symbol_offset;
 
   AlignVector(&elf, 8);
@@ -504,6 +524,7 @@ TEST(HsacoMetadataTest, ParsesValidMetadata) {
   EXPECT_EQ(kernel.kernarg_segment_alignment, 8);
   EXPECT_EQ(kernel.group_segment_fixed_size, 1024);
   EXPECT_EQ(kernel.private_segment_fixed_size, 64);
+  EXPECT_EQ(kernel.max_flat_workgroup_size, 256);
   ASSERT_TRUE(kernel.has_required_workgroup_size);
   EXPECT_EQ(kernel.required_workgroup_size[0], 16);
   EXPECT_EQ(kernel.required_workgroup_size[1], 4);
@@ -541,6 +562,24 @@ TEST(HsacoMetadataTest, ParsesValidMetadata) {
   EXPECT_EQ(kernel.args[3].size, 4);
   EXPECT_EQ(kernel.args[3].kind,
             IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_BY_VALUE);
+
+  iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);
+}
+
+TEST(HsacoMetadataTest, ParsesPrintfMetadata) {
+  std::vector<uint8_t> elf =
+      BuildElfWithMetadata(BuildKernelMetadata(kBuildKernelMetadataPrintf));
+
+  iree_hal_amdgpu_hsaco_metadata_t metadata;
+  IREE_ASSERT_OK(iree_hal_amdgpu_hsaco_metadata_initialize_from_elf(
+      ByteSpan(elf), iree_allocator_system(), &metadata));
+
+  ASSERT_EQ(metadata.printf_record_count, 2);
+  ASSERT_NE(metadata.printf_records, nullptr);
+  EXPECT_EQ(ToString(metadata.printf_records[0].value),
+            "0:0:8addc4c0362218ac,Hello World!\\n");
+  EXPECT_EQ(ToString(metadata.printf_records[1].value),
+            "0:0:1122334455667788,value=%d\\n");
 
   iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);
 }
@@ -663,6 +702,10 @@ TEST(HsacoMetadataTest, DiscoversElfSymbolsWithoutSynthesizingKernels) {
   EXPECT_EQ(ToString(metadata.elf_kernel_symbols[0].name), "extra_kernel");
   EXPECT_EQ(ToString(metadata.elf_kernel_symbols[0].symbol_name),
             "extra_kernel.kd");
+  ASSERT_EQ(metadata.elf_global_symbol_count, 1);
+  EXPECT_EQ(ToString(metadata.elf_global_symbols[0].name),
+            "managed_value.managed");
+  EXPECT_EQ(metadata.elf_global_symbols[0].byte_length, 4096);
 
   iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);
 }

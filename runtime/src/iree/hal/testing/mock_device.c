@@ -29,9 +29,13 @@ typedef struct iree_hal_mock_executable_function_record_t {
   uint8_t native_abi_offset;
   // Native ABI byte size for the optional reflected buffer binding.
   uint16_t parameter_size;
+  // Number of runtime parameter records for this function.
+  uint8_t runtime_parameter_count;
+  // Reserved byte; must be zero.
+  uint8_t reserved;
 } iree_hal_mock_executable_function_record_t;
 
-static_assert(sizeof(iree_hal_mock_executable_function_record_t) == 10,
+static_assert(sizeof(iree_hal_mock_executable_function_record_t) == 12,
               "mock executable metadata must have a stable byte layout");
 
 typedef struct iree_hal_mock_executable_parameter_metadata_t {
@@ -41,22 +45,33 @@ typedef struct iree_hal_mock_executable_parameter_metadata_t {
   uint16_t size;
 } iree_hal_mock_executable_parameter_metadata_t;
 
-typedef struct iree_hal_mock_executable_t {
-  iree_hal_resource_t resource;
-  iree_allocator_t host_allocator;
-  iree_host_size_t function_count;
-  // Function metadata records indexed by executable function ordinal.
-  iree_hal_executable_function_info_t functions[];
-} iree_hal_mock_executable_t;
+typedef struct iree_hal_mock_executable_runtime_parameter_record_t {
+  // Byte offset in the mock backend-native argument storage.
+  uint8_t offset;
+  // Byte length of the runtime parameter.
+  uint8_t length;
+  // Byte length of the parameter name in the trailing name storage.
+  uint8_t name_length;
+  // Reserved byte; must be zero.
+  uint8_t reserved;
+} iree_hal_mock_executable_runtime_parameter_record_t;
 
-static iree_hal_mock_executable_parameter_metadata_t*
-iree_hal_mock_executable_parameter_metadata(
-    iree_hal_mock_executable_t* executable) {
-  return (
-      iree_hal_mock_executable_parameter_metadata_t*)(executable->functions +
-                                                      executable
-                                                          ->function_count);
-}
+typedef struct iree_hal_mock_executable_t {
+  // HAL resource header.
+  iree_hal_resource_t resource;
+  // Allocator used for this executable's contiguous storage.
+  iree_allocator_t host_allocator;
+  // Number of functions in |functions|.
+  iree_host_size_t function_count;
+  // Per-function records reflected by function_info.
+  iree_hal_executable_function_info_t* functions;
+  // Native binding parameter metadata indexed by executable function ordinal.
+  iree_hal_mock_executable_parameter_metadata_t* parameter_metadata;
+  // Function-indexed offsets into |runtime_parameters|.
+  iree_host_size_t* runtime_parameter_offsets;
+  // Runtime parameter records grouped by function.
+  iree_hal_executable_function_runtime_parameter_info_t* runtime_parameters;
+} iree_hal_mock_executable_t;
 
 static const iree_hal_executable_vtable_t iree_hal_mock_executable_vtable;
 
@@ -94,16 +109,32 @@ static iree_status_t iree_hal_mock_executable_create(
         IREE_STATUS_INVALID_ARGUMENT,
         "mock executable function metadata length mismatch");
   }
-  iree_const_byte_span_t name_storage = iree_make_const_byte_span(
-      function_data.data + function_record_data_length,
-      function_data.data_length - function_record_data_length);
-
   const iree_hal_mock_executable_function_record_t* function_records =
       (const iree_hal_mock_executable_function_record_t*)function_data.data;
+  iree_host_size_t runtime_parameter_count = 0;
+  iree_host_size_t function_name_storage_length = 0;
   iree_host_size_t expected_name_storage_length = 0;
   for (iree_host_size_t i = 0; i < function_count; ++i) {
     const iree_hal_mock_executable_function_record_t* record =
         &function_records[i];
+    if (IREE_UNLIKELY(record->reserved != 0)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "mock executable function metadata reserved byte must be zero");
+    }
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(
+            runtime_parameter_count, record->runtime_parameter_count,
+            &runtime_parameter_count))) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "mock executable runtime parameter count "
+                              "overflow");
+    }
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(
+            function_name_storage_length, record->name_length,
+            &function_name_storage_length))) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "mock executable function name storage overflow");
+    }
     if (IREE_UNLIKELY(!iree_host_size_checked_add(
             expected_name_storage_length, record->name_length,
             &expected_name_storage_length))) {
@@ -111,13 +142,54 @@ static iree_status_t iree_hal_mock_executable_create(
                               "mock executable function name storage overflow");
     }
   }
+  iree_host_size_t runtime_parameter_record_data_length = 0;
+  if (IREE_UNLIKELY(
+          !iree_host_size_checked_mul(
+              runtime_parameter_count,
+              sizeof(iree_hal_mock_executable_runtime_parameter_record_t),
+              &runtime_parameter_record_data_length) ||
+          runtime_parameter_record_data_length >
+              function_data.data_length - function_record_data_length)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "mock executable runtime parameter metadata length mismatch");
+  }
+  const iree_hal_mock_executable_runtime_parameter_record_t* runtime_parameter_records =
+      (const iree_hal_mock_executable_runtime_parameter_record_t*)(function_data
+                                                                       .data +
+                                                                   function_record_data_length);
+  iree_const_byte_span_t name_storage = iree_make_const_byte_span(
+      function_data.data + function_record_data_length +
+          runtime_parameter_record_data_length,
+      function_data.data_length - function_record_data_length -
+          runtime_parameter_record_data_length);
+  for (iree_host_size_t i = 0; i < runtime_parameter_count; ++i) {
+    const iree_hal_mock_executable_runtime_parameter_record_t* record =
+        &runtime_parameter_records[i];
+    if (IREE_UNLIKELY(record->reserved != 0)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "mock executable runtime parameter metadata reserved byte must be "
+          "zero");
+    }
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(
+            expected_name_storage_length, record->name_length,
+            &expected_name_storage_length))) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "mock executable runtime parameter name storage overflow");
+    }
+  }
   if (IREE_UNLIKELY(expected_name_storage_length != name_storage.data_length)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "mock executable function name length mismatch");
+                            "mock executable name storage length mismatch");
   }
 
   iree_host_size_t function_info_size = 0;
   iree_host_size_t parameter_metadata_size = 0;
+  iree_host_size_t runtime_parameter_offset_count = 0;
+  iree_host_size_t runtime_parameter_offset_size = 0;
+  iree_host_size_t runtime_parameter_info_size = 0;
   iree_host_size_t total_size = 0;
   if (IREE_UNLIKELY(
           !iree_host_size_checked_mul(
@@ -127,8 +199,21 @@ static iree_status_t iree_hal_mock_executable_create(
               function_count,
               sizeof(iree_hal_mock_executable_parameter_metadata_t),
               &parameter_metadata_size) ||
+          !iree_host_size_checked_add(function_count, 1,
+                                      &runtime_parameter_offset_count) ||
+          !iree_host_size_checked_mul(runtime_parameter_offset_count,
+                                      sizeof(iree_host_size_t),
+                                      &runtime_parameter_offset_size) ||
+          !iree_host_size_checked_mul(
+              runtime_parameter_count,
+              sizeof(iree_hal_executable_function_runtime_parameter_info_t),
+              &runtime_parameter_info_size) ||
           !iree_host_size_checked_add(sizeof(iree_hal_mock_executable_t),
                                       function_info_size, &total_size) ||
+          !iree_host_size_checked_add(total_size, runtime_parameter_offset_size,
+                                      &total_size) ||
+          !iree_host_size_checked_add(total_size, runtime_parameter_info_size,
+                                      &total_size) ||
           !iree_host_size_checked_add(total_size, parameter_metadata_size,
                                       &total_size) ||
           !iree_host_size_checked_add(total_size, name_storage.data_length,
@@ -145,13 +230,27 @@ static iree_status_t iree_hal_mock_executable_create(
   executable->host_allocator = host_allocator;
   executable->function_count = function_count;
 
-  char* executable_name_storage = (char*)executable + sizeof(*executable) +
-                                  function_info_size + parameter_metadata_size;
+  uint8_t* executable_storage = (uint8_t*)executable + sizeof(*executable);
+  executable->functions =
+      (iree_hal_executable_function_info_t*)executable_storage;
+  executable_storage += function_info_size;
+  executable->runtime_parameter_offsets = (iree_host_size_t*)executable_storage;
+  executable_storage += runtime_parameter_offset_size;
+  executable->runtime_parameters =
+      (iree_hal_executable_function_runtime_parameter_info_t*)
+          executable_storage;
+  executable_storage += runtime_parameter_info_size;
+  executable->parameter_metadata =
+      (iree_hal_mock_executable_parameter_metadata_t*)executable_storage;
+  executable_storage += parameter_metadata_size;
+  char* executable_name_storage = (char*)executable_storage;
   if (name_storage.data_length != 0) {
     memcpy(executable_name_storage, name_storage.data,
            name_storage.data_length);
   }
   iree_host_size_t name_offset = 0;
+  iree_host_size_t runtime_parameter_name_offset = function_name_storage_length;
+  iree_host_size_t runtime_parameter_index = 0;
   for (iree_host_size_t i = 0; i < function_count; ++i) {
     const iree_hal_mock_executable_function_record_t* record =
         &function_records[i];
@@ -163,15 +262,33 @@ static iree_status_t iree_hal_mock_executable_create(
         record->constant_count * sizeof(uint32_t);
     executable->functions[i].binding_count = record->binding_count;
     executable->functions[i].parameter_count = record->parameter_size ? 1 : 0;
+    executable->functions[i].runtime_parameter_count =
+        record->runtime_parameter_count;
     executable->functions[i].workgroup_size[0] = record->workgroup_size[0];
     executable->functions[i].workgroup_size[1] = record->workgroup_size[1];
     executable->functions[i].workgroup_size[2] = record->workgroup_size[2];
-    iree_hal_mock_executable_parameter_metadata(executable)[i] =
+    executable->parameter_metadata[i] =
         (iree_hal_mock_executable_parameter_metadata_t){
             .native_abi_offset = record->native_abi_offset,
             .size = record->parameter_size,
         };
+    executable->runtime_parameter_offsets[i] = runtime_parameter_index;
+    for (iree_host_size_t j = 0; j < record->runtime_parameter_count; ++j) {
+      const iree_hal_mock_executable_runtime_parameter_record_t*
+          runtime_parameter_record =
+              &runtime_parameter_records[runtime_parameter_index];
+      iree_hal_executable_function_runtime_parameter_info_t* runtime_parameter =
+          &executable->runtime_parameters[runtime_parameter_index++];
+      runtime_parameter->name = iree_make_string_view(
+          executable_name_storage + runtime_parameter_name_offset,
+          runtime_parameter_record->name_length);
+      runtime_parameter_name_offset += runtime_parameter_record->name_length;
+      runtime_parameter->offset = runtime_parameter_record->offset;
+      runtime_parameter->length = runtime_parameter_record->length;
+    }
   }
+  executable->runtime_parameter_offsets[function_count] =
+      runtime_parameter_index;
 
   *out_executable = (iree_hal_executable_t*)executable;
   return iree_ok_status();
@@ -221,8 +338,7 @@ static iree_status_t iree_hal_mock_executable_function_parameters(
   const uint32_t function_ordinal =
       iree_hal_executable_function_index(function);
   const iree_hal_mock_executable_parameter_metadata_t* parameter_metadata =
-      &iree_hal_mock_executable_parameter_metadata(
-          executable)[function_ordinal];
+      &executable->parameter_metadata[function_ordinal];
   if (!parameter_metadata->size) return iree_ok_status();
   if (capacity < 1 || !out_parameters) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -236,6 +352,32 @@ static iree_status_t iree_hal_mock_executable_function_parameters(
       .native_abi_offset = parameter_metadata->native_abi_offset,
       .name = iree_string_view_empty(),
   };
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_mock_executable_function_runtime_parameters(
+    iree_hal_executable_t* base_executable,
+    iree_hal_executable_function_t function, iree_host_size_t capacity,
+    iree_hal_executable_function_runtime_parameter_info_t* out_parameters) {
+  IREE_ASSERT_ARGUMENT(out_parameters || capacity == 0);
+  iree_hal_mock_executable_t* executable =
+      iree_hal_mock_executable_cast(base_executable);
+  if (!iree_hal_executable_function_is_index_in_range(
+          function, executable->function_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE);
+  }
+  const uint32_t function_ordinal =
+      iree_hal_executable_function_index(function);
+  const iree_host_size_t parameter_begin =
+      executable->runtime_parameter_offsets[function_ordinal];
+  const iree_host_size_t parameter_count =
+      executable->runtime_parameter_offsets[function_ordinal + 1] -
+      parameter_begin;
+  const iree_host_size_t copy_count = iree_min(capacity, parameter_count);
+  if (copy_count > 0) {
+    memcpy(out_parameters, executable->runtime_parameters + parameter_begin,
+           copy_count * sizeof(*out_parameters));
+  }
   return iree_ok_status();
 }
 
@@ -264,6 +406,26 @@ static iree_status_t iree_hal_mock_executable_try_lookup_global_by_name(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_mock_executable_global_count(
+    iree_hal_executable_t* base_executable, iree_host_size_t* out_count) {
+  (void)base_executable;
+  *out_count = 0;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "mock executable global enumeration is not supported");
+}
+
+static iree_status_t iree_hal_mock_executable_global_info_by_index(
+    iree_hal_executable_t* base_executable, iree_host_size_t index,
+    iree_hal_executable_global_info_t* out_info) {
+  (void)base_executable;
+  (void)index;
+  memset(out_info, 0, sizeof(*out_info));
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "mock executable global enumeration is not supported");
+}
+
 static iree_status_t iree_hal_mock_executable_global_info(
     iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
     iree_hal_executable_global_info_t* out_info) {
@@ -283,16 +445,45 @@ static iree_status_t iree_hal_mock_executable_global_buffer(
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
 }
 
+static iree_status_t iree_hal_mock_executable_runtime_metadata_count(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    iree_host_size_t* out_count) {
+  (void)base_executable;
+  (void)name;
+  *out_count = 0;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "mock executable runtime metadata is not supported");
+}
+
+static iree_status_t iree_hal_mock_executable_runtime_metadata_records(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    iree_host_size_t capacity,
+    iree_hal_executable_runtime_metadata_record_t* out_records) {
+  (void)base_executable;
+  (void)name;
+  (void)capacity;
+  (void)out_records;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "mock executable runtime metadata is not supported");
+}
+
 static const iree_hal_executable_vtable_t iree_hal_mock_executable_vtable = {
     .destroy = iree_hal_mock_executable_destroy,
     .function_count = iree_hal_mock_executable_function_count,
     .function_info = iree_hal_mock_executable_function_info,
     .function_parameters = iree_hal_mock_executable_function_parameters,
+    .function_runtime_parameters =
+        iree_hal_mock_executable_function_runtime_parameters,
+    .runtime_metadata_count = iree_hal_mock_executable_runtime_metadata_count,
+    .runtime_metadata_records =
+        iree_hal_mock_executable_runtime_metadata_records,
     .lookup_function_by_name = iree_hal_mock_executable_lookup_function_by_name,
     .try_lookup_global_by_name =
         iree_hal_mock_executable_try_lookup_global_by_name,
     .global_info = iree_hal_mock_executable_global_info,
     .global_buffer = iree_hal_mock_executable_global_buffer,
+    .global_count = iree_hal_mock_executable_global_count,
+    .global_info_by_index = iree_hal_mock_executable_global_info_by_index,
 };
 
 //===----------------------------------------------------------------------===//
@@ -736,6 +927,7 @@ static const iree_hal_device_vtable_t iree_hal_mock_device_vtable = {
     .create_channel = iree_hal_mock_device_create_channel,
     .create_command_buffer = iree_hal_mock_device_create_command_buffer,
     .create_event = iree_hal_mock_device_create_event,
+    .create_host_notification = iree_hal_host_notification_create_unimplemented,
     .load_executable = iree_hal_mock_device_load_executable,
     .import_file = iree_hal_mock_device_import_file,
     .create_semaphore = iree_hal_mock_device_create_semaphore,

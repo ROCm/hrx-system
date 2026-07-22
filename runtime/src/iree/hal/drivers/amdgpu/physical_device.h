@@ -232,6 +232,9 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   iree_hal_amdgpu_memory_system_capabilities_t memory_system;
   // Clustered-dispatch limits reported for this GPU agent.
   iree_hal_amdgpu_workgroup_cluster_capabilities_t workgroup_cluster;
+  // True when this GPU's link to nearest host fine-grained memory supports
+  // native atomic transactions.
+  uint32_t host_native_atomic_supported : 1;
   // CPU-visible coarse-grained device-memory capability for this GPU.
   iree_hal_amdgpu_cpu_visible_device_coarse_memory_t
       cpu_visible_device_coarse_memory;

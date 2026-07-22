@@ -9,6 +9,7 @@
 
 #include "common/fat_binary.h"
 #include "common/internal.h"
+#include "common/managed_global.h"
 #include "iree/io/file_handle.h"
 
 //===----------------------------------------------------------------------===//
@@ -415,6 +416,8 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
 
 static void iree_hal_streaming_module_destroy(
     iree_hal_streaming_module_t* module);
+static iree_status_t iree_hal_streaming_module_initialize_managed_globals(
+    iree_hal_streaming_module_t* module);
 
 static iree_status_t iree_hal_streaming_module_load_executable(
     iree_hal_streaming_context_t* context,
@@ -511,7 +514,16 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
     status = iree_hal_streaming_module_extract_metadata(module);
   }
 
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_module_initialize_runtime_metadata(module);
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_module_initialize_managed_globals(module);
+  }
+
   iree_hal_streaming_fat_binary_extract_reset(&fat_extract);
+
   if (iree_status_is_ok(status)) {
     *out_module = module;
   } else {
@@ -572,6 +584,7 @@ static void iree_hal_streaming_module_destroy(
 
   // Release symbol metadata.
   iree_allocator_free(module->host_allocator, module->symbols);
+  iree_allocator_free(module->host_allocator, module->printf_formats);
 
   // Release cached executable globals while both the context pointer map and
   // executable-owned global buffers are still live.
@@ -675,6 +688,20 @@ iree_hal_streaming_module_find_global_locked(
   return NULL;
 }
 
+static iree_hal_streaming_symbol_t*
+iree_hal_streaming_module_find_global_for_executable_locked(
+    iree_hal_streaming_module_t* module, iree_hal_executable_t* executable,
+    iree_string_view_t name) {
+  for (iree_host_size_t i = 0; i < module->global_count; ++i) {
+    iree_hal_streaming_symbol_t* symbol = module->globals[i];
+    if (symbol->executable == executable &&
+        iree_hal_streaming_module_symbol_name_matches(symbol->name, name)) {
+      return symbol;
+    }
+  }
+  return NULL;
+}
+
 static iree_status_t iree_hal_streaming_module_grow_globals_locked(
     iree_hal_streaming_module_t* module, iree_host_size_t minimum_capacity) {
   if (minimum_capacity <= module->global_capacity) return iree_ok_status();
@@ -736,6 +763,44 @@ static iree_status_t iree_hal_streaming_module_create_global_symbol_locked(
     iree_allocator_free(module->host_allocator, symbol);
     iree_hal_streaming_memory_release_wrapped_buffer(streaming_buffer);
   }
+  return status;
+}
+
+static iree_status_t
+iree_hal_streaming_module_try_lookup_global_symbol_for_executable(
+    iree_hal_streaming_module_t* module, iree_hal_executable_t* executable,
+    iree_string_view_t name, bool* out_found,
+    iree_hal_streaming_symbol_t** out_global) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_found);
+  IREE_ASSERT_ARGUMENT(out_global);
+  *out_found = false;
+  *out_global = NULL;
+
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&module->global_mutex);
+
+  iree_hal_streaming_symbol_t* cached_symbol =
+      iree_hal_streaming_module_find_global_for_executable_locked(
+          module, executable, name);
+  if (cached_symbol) {
+    *out_found = true;
+    *out_global = cached_symbol;
+  } else {
+    iree_hal_executable_global_t global_handle =
+        iree_hal_executable_global_invalid();
+    bool found = false;
+    status = iree_hal_executable_try_lookup_global_by_name(
+        executable, name, &found, &global_handle);
+    if (iree_status_is_ok(status) && found) {
+      status = iree_hal_streaming_module_create_global_symbol_locked(
+          module, executable, global_handle, out_global);
+      if (iree_status_is_ok(status)) *out_found = true;
+    }
+  }
+
+  iree_slim_mutex_unlock(&module->global_mutex);
   return status;
 }
 
@@ -818,6 +883,99 @@ iree_status_t iree_hal_streaming_module_global_symbol(
                           (int)name_view.size, name_view.data);
 }
 
+static bool iree_hal_streaming_module_split_managed_name(
+    iree_string_view_t name, iree_string_view_t* out_base_name) {
+  IREE_ASSERT_ARGUMENT(out_base_name);
+  *out_base_name = iree_string_view_empty();
+
+  static const iree_string_view_t suffix = IREE_SVL(".managed");
+  if (!iree_string_view_ends_with(name, suffix) || name.size == suffix.size) {
+    return false;
+  }
+  *out_base_name = iree_make_string_view(name.data, name.size - suffix.size);
+  return true;
+}
+
+static iree_status_t iree_hal_streaming_module_initialize_managed_symbol_pair(
+    iree_hal_streaming_module_t* module, iree_hal_executable_t* executable,
+    iree_string_view_t pointer_name, iree_string_view_t storage_name) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(executable);
+
+  bool pointer_found = false;
+  iree_hal_streaming_symbol_t* pointer_symbol = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_streaming_module_try_lookup_global_symbol_for_executable(
+          module, executable, pointer_name, &pointer_found, &pointer_symbol));
+  if (!pointer_found || !pointer_symbol) return iree_ok_status();
+
+  bool storage_found = false;
+  iree_hal_streaming_symbol_t* storage_symbol = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_streaming_module_try_lookup_global_symbol_for_executable(
+          module, executable, storage_name, &storage_found, &storage_symbol));
+  if (!storage_found || !storage_symbol) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "managed storage `%.*s` was declared but not "
+                            "resolved by the executable",
+                            (int)storage_name.size, storage_name.data);
+  }
+
+  return iree_hal_streaming_managed_global_publish_pointer(
+      module->context, pointer_symbol, storage_symbol, pointer_name);
+}
+
+static iree_status_t
+iree_hal_streaming_module_initialize_managed_globals_for_executable(
+    iree_hal_streaming_module_t* module, iree_hal_executable_t* executable) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(executable);
+
+  iree_host_size_t global_count = 0;
+  iree_status_t status =
+      iree_hal_executable_global_count(executable, &global_count);
+  if (iree_status_is_unimplemented(status)) {
+    // Global enumeration is an optional executable capability. Backends still
+    // provide a complete vtable and report the absent capability explicitly.
+    iree_status_ignore(status);
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(status);
+
+  for (iree_host_size_t i = 0; i < global_count; ++i) {
+    iree_hal_executable_global_info_t global_info;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_executable_global_info_by_index(executable, i, &global_info));
+    iree_string_view_t pointer_name = iree_string_view_empty();
+    if (!iree_hal_streaming_module_split_managed_name(global_info.name,
+                                                      &pointer_name)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(
+        iree_hal_streaming_module_initialize_managed_symbol_pair(
+            module, executable, pointer_name, global_info.name));
+  }
+
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_streaming_module_initialize_managed_globals(
+    iree_hal_streaming_module_t* module) {
+  IREE_ASSERT_ARGUMENT(module);
+
+  const iree_host_size_t executable_count =
+      module->executables ? module->executable_count : 1;
+  for (iree_host_size_t i = 0; i < executable_count; ++i) {
+    iree_hal_executable_t* executable =
+        module->executables ? module->executables[i] : module->executable;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_streaming_module_initialize_managed_globals_for_executable(
+            module, executable));
+  }
+
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_streaming_module_global(
     iree_hal_streaming_module_t* module, const char* name,
     iree_hal_streaming_deviceptr_t* out_device_ptr,
@@ -828,9 +986,35 @@ iree_status_t iree_hal_streaming_module_global(
   *out_device_ptr = 0;
   if (out_size) *out_size = 0;
 
+  bool found = false;
   iree_hal_streaming_symbol_t* symbol = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_streaming_module_global_symbol(module, name, &symbol));
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_module_try_lookup_global_symbol(
+      module, name, &found, &symbol));
+
+  char* managed_device_name = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_managed_global_storage_name(
+      module->host_allocator, iree_make_cstring_view(name),
+      &managed_device_name));
+  bool managed_found = false;
+  iree_hal_streaming_symbol_t* managed_symbol = NULL;
+  iree_status_t status = iree_hal_streaming_module_try_lookup_global_symbol(
+      module, managed_device_name, &managed_found, &managed_symbol);
+  iree_allocator_free(module->host_allocator, managed_device_name);
+  IREE_RETURN_IF_ERROR(status);
+
+  if (managed_found && managed_symbol) {
+    // Managed pointer globals are published while the executable is loaded.
+    // Queries return the storage allocation without rewriting module state.
+    symbol = managed_symbol;
+    found = true;
+  }
+  if (!found || !symbol) {
+    iree_string_view_t name_view =
+        iree_string_view_trim(iree_make_cstring_view(name));
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "global '%.*s' not found in module",
+                            (int)name_view.size, name_view.data);
+  }
 
   *out_device_ptr = symbol->device_address;
   if (out_size) *out_size = symbol->size_bytes;

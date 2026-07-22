@@ -324,17 +324,23 @@ static void iree_hal_amdgpu_aql_command_buffer_discard_recording(
   iree_hal_amdgpu_aql_command_buffer_reset_resources(command_buffer);
 }
 
-static iree_status_t iree_hal_amdgpu_aql_command_buffer_ensure_resource_set(
+static iree_status_t iree_hal_amdgpu_aql_command_buffer_allocate_resource_set(
     iree_hal_amdgpu_aql_command_buffer_t* command_buffer) {
-  if (!iree_hal_amdgpu_aql_command_buffer_retains_resources(command_buffer) ||
-      command_buffer->resource_set) {
-    return iree_ok_status();
-  }
+  if (command_buffer->resource_set) return iree_ok_status();
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status = iree_hal_resource_set_allocate(
       command_buffer->block_pools.resource_set, &command_buffer->resource_set);
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+static iree_status_t iree_hal_amdgpu_aql_command_buffer_ensure_resource_set(
+    iree_hal_amdgpu_aql_command_buffer_t* command_buffer) {
+  if (!iree_hal_amdgpu_aql_command_buffer_retains_resources(command_buffer)) {
+    return iree_ok_status();
+  }
+  return iree_hal_amdgpu_aql_command_buffer_allocate_resource_set(
+      command_buffer);
 }
 
 static iree_hal_buffer_t*
@@ -1766,6 +1772,7 @@ static void iree_hal_amdgpu_aql_command_buffer_write_implicit_args(
     const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
     const iree_hal_dispatch_config_t config,
     iree_amdgpu_kernel_implicit_args_t* implicit_args) {
+  memset(implicit_args, 0, IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE);
   implicit_args->block_count[0] = config.workgroup_count[0];
   implicit_args->block_count[1] = config.workgroup_count[1];
   implicit_args->block_count[2] = config.workgroup_count[2];
@@ -1802,6 +1809,17 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_write_dispatch_tail(
                                                   layout->implicit_args_offset);
         iree_hal_amdgpu_aql_command_buffer_write_implicit_args(
             kernel_args, config, implicit_args);
+        const iree_host_size_t implicit_args_end =
+            layout->implicit_args_offset +
+            IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE;
+        if (layout->total_kernarg_size > implicit_args_end) {
+          memset(tail_payload + implicit_args_end, 0,
+                 layout->total_kernarg_size - implicit_args_end);
+        }
+      }
+      if (config.runtime_parameters) {
+        iree_hal_amdgpu_executable_apply_runtime_parameter_patches(
+            config, tail_payload);
       }
       return iree_ok_status();
     }
@@ -1862,6 +1880,10 @@ iree_hal_amdgpu_aql_command_buffer_record_prepublished_dispatch_kernargs(
         iree_hal_amdgpu_aql_command_buffer_write_implicit_args(
             kernel_args, config, implicit_args);
       }
+      if (config.runtime_parameters) {
+        iree_hal_amdgpu_executable_apply_runtime_parameter_patches(
+            config, kernarg_data);
+      }
     }
   }
   if (iree_status_is_ok(status)) {
@@ -1917,6 +1939,10 @@ iree_hal_amdgpu_aql_command_buffer_write_inline_dispatch_kernargs(
                                                     ->implicit_args_byte_offset);
       iree_hal_amdgpu_aql_command_buffer_write_implicit_args(
           kernel_args, config, implicit_args);
+    }
+    if (config.runtime_parameters) {
+      iree_hal_amdgpu_executable_apply_runtime_parameter_patches(config,
+                                                                 kernarg_data);
     }
   }
   return status;
@@ -2319,7 +2345,8 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_prepare_dispatch_plan(
     }
     out_plan->kernarg_storage_mode =
         IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT;
-    return iree_ok_status();
+    return iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
+        inputs->config, out_plan->custom_layout->total_kernarg_size);
   }
 
   out_plan->kernarg_layout = out_plan->descriptor->kernarg_layout;
@@ -2354,12 +2381,26 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_prepare_dispatch_plan(
           command_buffer, inputs->bindings));
   out_plan->kernarg_block_count =
       iree_max(1u, out_plan->descriptor->kernarg_block_count);
-  return iree_ok_status();
+  return iree_hal_amdgpu_executable_validate_dispatch_runtime_parameters(
+      inputs->config, out_plan->kernarg_layout->kernarg_byte_length);
 }
 
 static iree_status_t iree_hal_amdgpu_aql_command_buffer_retain_dispatch_inputs(
     iree_hal_amdgpu_aql_command_buffer_t* command_buffer,
     const iree_hal_amdgpu_aql_dispatch_inputs_t* inputs) {
+  const iree_hal_dispatch_runtime_parameter_list_t* runtime_parameters =
+      inputs->config.runtime_parameters;
+  if (runtime_parameters) {
+    for (uint8_t i = 0; i < runtime_parameters->count; ++i) {
+      iree_hal_resource_t* resource = runtime_parameters->patches[i].resource;
+      if (!resource) continue;
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_aql_command_buffer_allocate_resource_set(
+              command_buffer));
+      IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert(
+          command_buffer->resource_set, /*count=*/1, &resource));
+    }
+  }
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_aql_command_buffer_ensure_resource_set(command_buffer));
   if (!command_buffer->resource_set) return iree_ok_status();

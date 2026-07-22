@@ -9,6 +9,13 @@
 
 #include "common/fat_binary.h"
 #include "common/hrx_bridge.h"
+#include "common/memory.h"
+#include "common/module_runtime_metadata.h"
+#include "common/registry.h"
+#include "common/rocm_device_heap.h"
+#include "common/rocm_device_runtime.h"
+#include "common/rocm_hostcall.h"
+#include "common/stream.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
@@ -147,8 +154,11 @@ typedef struct iree_hal_streaming_context_module_entry_t {
 typedef struct iree_hal_streaming_context_symbol_entry_t {
   // Host pointer key used by generated HIP registration code.
   void* key;
-  // Compiled symbol associated with the registration key.
+  // Context-local symbol resolved from the registered module.
   iree_hal_streaming_symbol_t* symbol;
+  // True when |symbol| backs managed host storage that must be refreshed after
+  // synchronization.
+  bool synchronize_managed_data_to_host;
 } iree_hal_streaming_context_symbol_entry_t;
 
 // Per-context cache of compiled symbols.
@@ -157,7 +167,11 @@ typedef struct iree_hal_streaming_context_symbol_entry_t {
 typedef struct iree_hal_streaming_context_symbol_map_t {
   // Hash table: host pointer -> compiled symbol on the context device.
   iree_hal_streaming_context_symbol_entry_t* entries;
+  // Number of entries whose managed host storage requires synchronization.
+  iree_host_size_t managed_symbol_count;
+  // Capacity of |entries|.
   iree_host_size_t capacity;
+  // Number of live entries in |entries|.
   iree_host_size_t count;
 
   // List of modules loaded into this context.
@@ -231,8 +245,13 @@ struct iree_hal_streaming_context_t {
   // Context resource limits.
   iree_hal_streaming_limits_t limits;
 
+  // Lazily-created ROCm device-runtime state used by loaded HIP modules.
+  iree_hal_streaming_rocm_device_runtime_t rocm_device_runtime;
+
   // Synchronization.
   iree_slim_mutex_t mutex;
+  // Serializes direct HAL device transfer calls issued outside command buffers.
+  iree_slim_mutex_t direct_transfer_mutex;
 
   // Host allocator.
   iree_allocator_t host_allocator;
@@ -325,11 +344,17 @@ typedef struct iree_hal_streaming_device_t {
   iree_device_size_t free_memory;
   // True when cooperative launches are supported by the device.
   bool supports_cooperative_launch;
+  // True when host/device links support native system-scope atomics.
+  bool host_native_atomic_supported;
 
   // GCN architecture name (e.g., "gfx942:sramecc+:xnack-").
   char gcn_arch_name[64];
 
   // Device properties cache.
+  // Physical compute-unit count from the execution specification.
+  uint32_t raw_compute_unit_count;
+  // Maximum waves that can reside on one physical compute unit.
+  uint32_t maximum_resident_subgroup_count;
   uint32_t max_threads_per_block;
   uint32_t max_block_dim[3];
   uint32_t max_grid_dim[3];
@@ -633,6 +658,8 @@ typedef struct iree_hal_streaming_symbol_t {
 
   // Function parameter information used for argument packing and unpacking.
   iree_hal_streaming_parameter_info_t parameters;
+  // Hidden runtime services declared by function metadata.
+  iree_hal_streaming_symbol_runtime_services_t runtime_services;
 
   // Global/data attributes (only valid for GLOBAL/DATA types).
   // HAL executable global handle, when backed by an executable global.
@@ -667,6 +694,10 @@ typedef struct iree_hal_streaming_module_t {
   iree_host_size_t global_count;
   // Capacity of the cached executable global symbols array.
   iree_host_size_t global_capacity;
+  // Number of parsed printf format records.
+  iree_host_size_t printf_format_count;
+  // Parsed printf format records keyed by metadata hash.
+  iree_hal_streaming_printf_format_t* printf_formats;
 
   // Context that loaded this module.
   iree_hal_streaming_context_t* context;
@@ -2145,8 +2176,12 @@ typedef struct iree_hal_streaming_symbol_registration_t {
     } function;
     // Variable-specific metadata (only valid if type == GLOBAL/DATA).
     struct {
+      // Registered variable size in bytes.
       size_t size;
+      // Required variable alignment in bytes.
       uint32_t alignment;
+      // Host storage used to initialize a managed variable, or NULL.
+      void* managed_initial_value;
     } variable;
   } params;
 } iree_hal_streaming_symbol_registration_t;
@@ -2225,7 +2260,8 @@ iree_status_t iree_hal_streaming_global_symbol_registry_insert_variable(
 iree_status_t iree_hal_streaming_global_symbol_registry_insert_managed_variable(
     iree_hal_streaming_global_symbol_registry_t* registry,
     iree_hal_streaming_module_registration_t* module, void* host_variable,
-    const char* device_name, size_t size, uint32_t alignment);
+    const char* device_name, size_t size, uint32_t alignment,
+    void* managed_initial_value);
 
 // Looks up the registration type for a host-side variable pointer.
 bool iree_hal_streaming_global_symbol_registry_query_variable(

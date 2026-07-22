@@ -162,6 +162,11 @@ bool iree_hal_streaming_graph_exec_owns_node(
     iree_hal_streaming_graph_exec_t* exec,
     iree_hal_streaming_graph_node_t* node);
 
+// Validates that |symbol|'s runtime services can be bound safely by a reusable
+// graph command buffer.
+iree_status_t iree_hal_streaming_graph_validate_symbol_runtime_services(
+    const iree_hal_streaming_symbol_t* symbol);
+
 // Augmented node for sorting and partitioning.
 typedef struct iree_hal_streaming_graph_sort_node_t {
   // Pointer to original node.

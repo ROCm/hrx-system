@@ -309,6 +309,44 @@ static iree_status_t iree_hal_replay_recorder_executable_function_parameters(
 }
 
 static iree_status_t
+iree_hal_replay_recorder_executable_function_runtime_parameters(
+    iree_hal_executable_t* base_executable,
+    iree_hal_executable_function_t function, iree_host_size_t capacity,
+    iree_hal_executable_function_runtime_parameter_info_t* out_parameters) {
+  iree_hal_replay_recorder_executable_t* executable =
+      iree_hal_replay_recorder_executable_cast(base_executable);
+  iree_hal_replay_pending_record_t pending_record;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_recorder_executable_begin_operation(
+      executable,
+      IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_RUNTIME_PARAMETERS,
+      IREE_HAL_REPLAY_PAYLOAD_TYPE_NONE, &pending_record));
+  return iree_hal_replay_recorder_end_operation(
+      &pending_record,
+      iree_hal_executable_function_runtime_parameters(
+          executable->base_executable, function, capacity, out_parameters));
+}
+
+static iree_status_t iree_hal_replay_recorder_executable_runtime_metadata_count(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    iree_host_size_t* out_count) {
+  iree_hal_replay_recorder_executable_t* executable =
+      iree_hal_replay_recorder_executable_cast(base_executable);
+  return iree_hal_executable_runtime_metadata_count(executable->base_executable,
+                                                    name, out_count);
+}
+
+static iree_status_t
+iree_hal_replay_recorder_executable_runtime_metadata_records(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    iree_host_size_t capacity,
+    iree_hal_executable_runtime_metadata_record_t* out_records) {
+  iree_hal_replay_recorder_executable_t* executable =
+      iree_hal_replay_recorder_executable_cast(base_executable);
+  return iree_hal_executable_runtime_metadata_records(
+      executable->base_executable, name, capacity, out_records);
+}
+
+static iree_status_t
 iree_hal_replay_recorder_executable_lookup_function_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
     iree_hal_executable_function_t* out_function) {
@@ -335,6 +373,23 @@ iree_hal_replay_recorder_executable_try_lookup_global_by_name(
   *out_found = false;
   *out_global = iree_hal_executable_global_invalid();
   return iree_ok_status();
+}
+
+static iree_status_t iree_hal_replay_recorder_executable_global_count(
+    iree_hal_executable_t* base_executable, iree_host_size_t* out_count) {
+  iree_hal_replay_recorder_executable_t* executable =
+      iree_hal_replay_recorder_executable_cast(base_executable);
+  return iree_hal_executable_global_count(executable->base_executable,
+                                          out_count);
+}
+
+static iree_status_t iree_hal_replay_recorder_executable_global_info_by_index(
+    iree_hal_executable_t* base_executable, iree_host_size_t index,
+    iree_hal_executable_global_info_t* out_info) {
+  iree_hal_replay_recorder_executable_t* executable =
+      iree_hal_replay_recorder_executable_cast(base_executable);
+  return iree_hal_executable_global_info_by_index(executable->base_executable,
+                                                  index, out_info);
 }
 
 static iree_status_t iree_hal_replay_recorder_executable_global_info(
@@ -444,7 +499,8 @@ static iree_status_t iree_hal_replay_recorder_capture_executable_metadata(
   }
   iree_status_t status = iree_ok_status();
   iree_host_size_t parameter_count = 0;
-  iree_host_size_t function_name_storage_size = 0;
+  iree_host_size_t runtime_parameter_count = 0;
+  iree_host_size_t name_storage_size = 0;
   for (iree_host_size_t i = 0; i < function_count && iree_status_is_ok(status);
        ++i) {
     status = iree_hal_executable_function_info(
@@ -486,11 +542,20 @@ static iree_status_t iree_hal_replay_recorder_capture_executable_metadata(
     }
     if (iree_status_is_ok(status)) {
       if (IREE_UNLIKELY(!iree_host_size_checked_add(
-              function_name_storage_size, function_infos[i].name.size,
-              &function_name_storage_size))) {
-        status =
-            iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                             "executable function name storage size overflow");
+              runtime_parameter_count,
+              function_infos[i].runtime_parameter_count,
+              &runtime_parameter_count))) {
+        status = iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "executable runtime parameter metadata count overflow");
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      if (IREE_UNLIKELY(!iree_host_size_checked_add(name_storage_size,
+                                                    function_infos[i].name.size,
+                                                    &name_storage_size))) {
+        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "executable name storage size overflow");
       }
     }
   }
@@ -534,9 +599,82 @@ static iree_status_t iree_hal_replay_recorder_capture_executable_metadata(
     return status;
   }
 
+  iree_hal_executable_function_runtime_parameter_info_t* runtime_parameters =
+      NULL;
+  iree_host_size_t runtime_parameter_info_size = 0;
+  if (runtime_parameter_count > 0) {
+    if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+            runtime_parameter_count, sizeof(*runtime_parameters),
+            &runtime_parameter_info_size))) {
+      iree_allocator_free(host_allocator, parameters);
+      iree_allocator_free(host_allocator, function_infos);
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "executable runtime parameter metadata size overflow");
+    }
+    status = iree_allocator_malloc(host_allocator, runtime_parameter_info_size,
+                                   (void**)&runtime_parameters);
+    if (!iree_status_is_ok(status)) {
+      iree_allocator_free(host_allocator, parameters);
+      iree_allocator_free(host_allocator, function_infos);
+      return status;
+    }
+  }
+
+  iree_host_size_t runtime_parameter_index = 0;
+  for (iree_host_size_t i = 0; i < function_count && iree_status_is_ok(status);
+       ++i) {
+    const iree_host_size_t function_runtime_parameter_count =
+        function_infos[i].runtime_parameter_count;
+    if (function_runtime_parameter_count == 0) continue;
+    status = iree_hal_executable_function_runtime_parameters(
+        executable, iree_hal_executable_function_from_index((uint32_t)i),
+        function_runtime_parameter_count,
+        runtime_parameters + runtime_parameter_index);
+    for (iree_host_size_t j = 0;
+         j < function_runtime_parameter_count && iree_status_is_ok(status);
+         ++j) {
+      const iree_hal_executable_function_runtime_parameter_info_t* parameter =
+          &runtime_parameters[runtime_parameter_index + j];
+      if (IREE_UNLIKELY(iree_string_view_is_empty(parameter->name))) {
+        status = iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "replay recording requires a name for runtime parameter %" PRIhsz
+            " of executable function %" PRIhsz,
+            j, i);
+      }
+      if (iree_status_is_ok(status) &&
+          IREE_UNLIKELY(parameter->name.size > UINT16_MAX)) {
+        status = iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "executable runtime parameter name length overflow");
+      }
+      if (iree_status_is_ok(status) &&
+          IREE_UNLIKELY(!iree_host_size_checked_add(
+              name_storage_size, parameter->name.size, &name_storage_size))) {
+        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "executable name storage size overflow");
+      }
+    }
+    runtime_parameter_index += function_runtime_parameter_count;
+  }
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(runtime_parameter_index != runtime_parameter_count)) {
+    status = iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "executable runtime parameter reflection count changed during capture");
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(host_allocator, runtime_parameters);
+    iree_allocator_free(host_allocator, parameters);
+    iree_allocator_free(host_allocator, function_infos);
+    return status;
+  }
+
   iree_host_size_t metadata_size = 0;
   iree_host_size_t function_metadata_size = 0;
   iree_host_size_t parameter_metadata_size = 0;
+  iree_host_size_t runtime_parameter_metadata_size = 0;
   if (IREE_UNLIKELY(
           !iree_host_size_checked_mul(
               function_count,
@@ -546,13 +684,20 @@ static iree_status_t iree_hal_replay_recorder_capture_executable_metadata(
               parameter_count,
               sizeof(iree_hal_replay_executable_parameter_metadata_t),
               &parameter_metadata_size) ||
+          !iree_host_size_checked_mul(
+              runtime_parameter_count,
+              sizeof(iree_hal_replay_executable_runtime_parameter_metadata_t),
+              &runtime_parameter_metadata_size) ||
           !iree_host_size_checked_add(
               sizeof(iree_hal_replay_executable_metadata_header_t),
               function_metadata_size, &metadata_size) ||
           !iree_host_size_checked_add(metadata_size, parameter_metadata_size,
                                       &metadata_size) ||
-          !iree_host_size_checked_add(metadata_size, function_name_storage_size,
+          !iree_host_size_checked_add(
+              metadata_size, runtime_parameter_metadata_size, &metadata_size) ||
+          !iree_host_size_checked_add(metadata_size, name_storage_size,
                                       &metadata_size))) {
+    iree_allocator_free(host_allocator, runtime_parameters);
     iree_allocator_free(host_allocator, parameters);
     iree_allocator_free(host_allocator, function_infos);
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -568,7 +713,8 @@ static iree_status_t iree_hal_replay_recorder_capture_executable_metadata(
         (iree_hal_replay_executable_metadata_header_t*)metadata_storage;
     header->function_count = function_count;
     header->parameter_count = parameter_count;
-    header->function_name_storage_length = function_name_storage_size;
+    header->name_storage_length = name_storage_size;
+    header->runtime_parameter_count = runtime_parameter_count;
     iree_hal_replay_executable_function_metadata_t* function_metadata =
         (iree_hal_replay_executable_function_metadata_t*)(metadata_storage +
                                                           sizeof(*header));
@@ -576,12 +722,19 @@ static iree_status_t iree_hal_replay_recorder_capture_executable_metadata(
         (iree_hal_replay_executable_parameter_metadata_t*)(metadata_storage +
                                                            sizeof(*header) +
                                                            function_metadata_size);
-    uint8_t* function_name_storage = metadata_storage + sizeof(*header) +
-                                     function_metadata_size +
-                                     parameter_metadata_size;
+    iree_hal_replay_executable_runtime_parameter_metadata_t* runtime_parameter_metadata =
+        (iree_hal_replay_executable_runtime_parameter_metadata_t*)(metadata_storage +
+                                                                   sizeof(
+                                                                       *header) +
+                                                                   function_metadata_size +
+                                                                   parameter_metadata_size);
+    uint8_t* name_storage = metadata_storage + sizeof(*header) +
+                            function_metadata_size + parameter_metadata_size +
+                            runtime_parameter_metadata_size;
 
     parameter_index = 0;
-    iree_host_size_t function_name_offset = 0;
+    runtime_parameter_index = 0;
+    iree_host_size_t name_offset = 0;
     for (iree_host_size_t i = 0; i < function_count; ++i) {
       function_metadata[i].flags = function_infos[i].flags;
       function_metadata[i].workgroup_size[0] =
@@ -595,10 +748,12 @@ static iree_status_t iree_hal_replay_recorder_capture_executable_metadata(
       function_metadata[i].binding_count = function_infos[i].binding_count;
       function_metadata[i].parameter_count = function_infos[i].parameter_count;
       function_metadata[i].name_length = (uint16_t)function_infos[i].name.size;
+      function_metadata[i].runtime_parameter_count =
+          function_infos[i].runtime_parameter_count;
       if (!iree_string_view_is_empty(function_infos[i].name)) {
-        memcpy(function_name_storage + function_name_offset,
-               function_infos[i].name.data, function_infos[i].name.size);
-        function_name_offset += function_infos[i].name.size;
+        memcpy(name_storage + name_offset, function_infos[i].name.data,
+               function_infos[i].name.size);
+        name_offset += function_infos[i].name.size;
       }
       for (iree_host_size_t j = 0; j < function_infos[i].parameter_count; ++j) {
         const iree_hal_executable_function_parameter_t* parameter =
@@ -615,10 +770,24 @@ static iree_status_t iree_hal_replay_recorder_capture_executable_metadata(
         parameter_metadata->size = parameter->size;
         ++parameter_metadata;
       }
+      for (iree_host_size_t j = 0;
+           j < function_infos[i].runtime_parameter_count; ++j) {
+        const iree_hal_executable_function_runtime_parameter_info_t* parameter =
+            &runtime_parameters[runtime_parameter_index++];
+        runtime_parameter_metadata->offset = parameter->offset;
+        runtime_parameter_metadata->length = parameter->length;
+        runtime_parameter_metadata->name_length =
+            (uint16_t)parameter->name.size;
+        memcpy(name_storage + name_offset, parameter->name.data,
+               parameter->name.size);
+        name_offset += parameter->name.size;
+        ++runtime_parameter_metadata;
+      }
     }
     *out_storage = iree_make_byte_span(metadata_storage, metadata_size);
     *out_metadata = iree_make_const_byte_span(metadata_storage, metadata_size);
   }
+  iree_allocator_free(host_allocator, runtime_parameters);
   iree_allocator_free(host_allocator, parameters);
   iree_allocator_free(host_allocator, function_infos);
   return status;
@@ -697,10 +866,19 @@ static const iree_hal_executable_vtable_t
         .function_info = iree_hal_replay_recorder_executable_function_info,
         .function_parameters =
             iree_hal_replay_recorder_executable_function_parameters,
+        .function_runtime_parameters =
+            iree_hal_replay_recorder_executable_function_runtime_parameters,
+        .runtime_metadata_count =
+            iree_hal_replay_recorder_executable_runtime_metadata_count,
+        .runtime_metadata_records =
+            iree_hal_replay_recorder_executable_runtime_metadata_records,
         .lookup_function_by_name =
             iree_hal_replay_recorder_executable_lookup_function_by_name,
         .try_lookup_global_by_name =
             iree_hal_replay_recorder_executable_try_lookup_global_by_name,
         .global_info = iree_hal_replay_recorder_executable_global_info,
         .global_buffer = iree_hal_replay_recorder_executable_global_buffer,
+        .global_count = iree_hal_replay_recorder_executable_global_count,
+        .global_info_by_index =
+            iree_hal_replay_recorder_executable_global_info_by_index,
 };

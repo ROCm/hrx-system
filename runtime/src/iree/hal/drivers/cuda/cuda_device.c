@@ -1256,6 +1256,7 @@ static const iree_hal_device_vtable_t iree_hal_cuda_device_vtable = {
     .create_channel = iree_hal_cuda_device_create_channel,
     .create_command_buffer = iree_hal_cuda_device_create_command_buffer,
     .create_event = iree_hal_cuda_device_create_event,
+    .create_host_notification = iree_hal_host_notification_create_unimplemented,
     .load_executable = iree_hal_cuda_device_load_executable,
     .import_file = iree_hal_cuda_device_import_file,
     .create_semaphore = iree_hal_cuda_device_create_semaphore,

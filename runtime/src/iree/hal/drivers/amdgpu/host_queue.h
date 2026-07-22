@@ -144,10 +144,11 @@ IREE_ASYNC_FIXED_FRONTIER_TYPE(iree_hal_amdgpu_host_queue_frontier_t,
 #define IREE_HAL_AMDGPU_HOST_QUEUE_DISPATCH_SCRATCH_BINDING_CAPACITY 256u
 
 // Maximum number of operation resources retained by one direct queue_dispatch:
-// the executable, one optional indirect-parameter buffer, plus one resource per
-// direct buffer binding.
+// the executable, one optional indirect-parameter buffer, native runtime patch
+// resources, plus one resource per direct buffer binding.
 #define IREE_HAL_AMDGPU_HOST_QUEUE_DISPATCH_SCRATCH_RESOURCE_CAPACITY \
-  (2u + IREE_HAL_AMDGPU_HOST_QUEUE_DISPATCH_SCRATCH_BINDING_CAPACITY)
+  (2u + IREE_HAL_DISPATCH_MAX_RUNTIME_PARAMETER_PATCHES +             \
+   IREE_HAL_AMDGPU_HOST_QUEUE_DISPATCH_SCRATCH_BINDING_CAPACITY)
 
 // Host-driven queue with per-queue epoch signal and wait-backed
 // notification ring. Embeds iree_hal_amdgpu_virtual_queue_t at offset 0.

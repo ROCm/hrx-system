@@ -16,8 +16,12 @@
 //===----------------------------------------------------------------------===//
 
 typedef struct iree_hal_amdgpu_hsaco_kernel_load_plan_t {
+  // Export flags derived while scanning kernel metadata.
+  iree_hal_amdgpu_executable_export_flags_t export_flags;
   // Number of reflected HAL-visible parameter records.
   iree_host_size_t parameter_count;
+  // Number of hidden runtime parameter records.
+  iree_host_size_t runtime_parameter_count;
   // Number of HAL binding pointers consumed by the native layout.
   iree_host_size_t binding_count;
   // Number of HAL dispatch-constant spans consumed by the native layout.
@@ -112,6 +116,11 @@ static bool iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(
          kind == IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN_NONE;
 }
 
+static bool iree_hal_amdgpu_hsaco_metadata_arg_kind_is_runtime_parameter(
+    iree_hal_amdgpu_hsaco_metadata_arg_kind_t kind) {
+  return kind == IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN;
+}
+
 static iree_status_t iree_hal_amdgpu_hsaco_load_plan_check_u16(
     iree_string_view_t symbol_name, iree_string_view_t field_name,
     iree_host_size_t value) {
@@ -163,6 +172,10 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_analyze_kernel(
     }
 
     if (iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(arg->kind)) {
+      if (iree_hal_amdgpu_hsaco_metadata_arg_kind_is_runtime_parameter(
+              arg->kind)) {
+        ++out_load_plan->runtime_parameter_count;
+      }
       hidden_args_offset =
           iree_min(hidden_args_offset, (iree_host_size_t)arg->offset);
       continue;
@@ -307,6 +320,8 @@ iree_status_t iree_hal_amdgpu_executable_metadata_calculate_hsaco_counts(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AMDGPU metadata export count overflow");
   }
+  out_counts->printf_record_count = hsaco_metadata->printf_record_count;
+  out_counts->global_count = hsaco_metadata->elf_global_symbol_count;
 
   for (iree_host_size_t i = 0; i < hsaco_metadata->kernel_count; ++i) {
     iree_hal_amdgpu_hsaco_kernel_load_plan_t load_plan;
@@ -325,6 +340,20 @@ iree_status_t iree_hal_amdgpu_executable_metadata_calculate_hsaco_counts(
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
           "AMDGPU metadata parameter count exceeds reflection offset range");
+    }
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(
+            out_counts->runtime_parameter_count,
+            load_plan.runtime_parameter_count,
+            &out_counts->runtime_parameter_count))) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "AMDGPU metadata runtime parameter count overflow");
+    }
+    if (IREE_UNLIKELY(out_counts->runtime_parameter_count > UINT32_MAX)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "AMDGPU metadata runtime parameter count exceeds reflection offset "
+          "range");
     }
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_hsaco_load_plan_add_layout_capacity(
         load_plan.layout_byte_length, &out_counts->layout_blob_byte_length));
@@ -389,6 +418,48 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_populate_layout_tables(
   };
   return iree_hal_amdgpu_kernarg_layout_initialize(
       &params, layout_storage_capacity, layout);
+}
+
+static iree_status_t
+iree_hal_amdgpu_hsaco_load_plan_populate_runtime_parameters(
+    const iree_hal_amdgpu_hsaco_metadata_kernel_t* kernel,
+    const iree_hal_amdgpu_hsaco_loaded_code_object_rebase_t* rebase,
+    iree_host_size_t capacity,
+    iree_hal_amdgpu_executable_runtime_parameter_t* out_runtime_parameters) {
+  iree_host_size_t runtime_parameter_count = 0;
+  for (iree_host_size_t i = 0; i < kernel->arg_count; ++i) {
+    const iree_hal_amdgpu_hsaco_metadata_arg_t* arg = &kernel->args[i];
+    if (!iree_hal_amdgpu_hsaco_metadata_arg_kind_is_runtime_parameter(
+            arg->kind)) {
+      continue;
+    }
+    if (IREE_UNLIKELY(runtime_parameter_count >= capacity)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "AMDGPU runtime parameter population exceeded planned capacity");
+    }
+    if (IREE_UNLIKELY(arg->offset > UINT16_MAX || arg->size > UINT16_MAX)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "AMDGPU runtime parameter `%.*s` exceeds supported offset/length "
+          "range",
+          (int)arg->value_kind.size, arg->value_kind.data);
+    }
+    iree_hal_amdgpu_executable_runtime_parameter_t* runtime_parameter =
+        &out_runtime_parameters[runtime_parameter_count++];
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_hsaco_loaded_code_object_rebase_string_view(
+            rebase, "runtime parameter name", arg->value_kind,
+            &runtime_parameter->name));
+    runtime_parameter->offset = (uint16_t)arg->offset;
+    runtime_parameter->length = (uint16_t)arg->size;
+  }
+  if (IREE_UNLIKELY(runtime_parameter_count != capacity)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "AMDGPU runtime parameter population count changed");
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amdgpu_hsaco_load_plan_populate_parameters(
@@ -479,10 +550,13 @@ iree_status_t iree_hal_amdgpu_executable_metadata_populate_from_hsaco(
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_executable_metadata_calculate_hsaco_counts(hsaco_metadata,
                                                                  &counts));
-  if (IREE_UNLIKELY(metadata->export_count != counts.export_count ||
-                    metadata->parameter_count < counts.parameter_count ||
-                    metadata->layout_blob_capacity <
-                        counts.layout_blob_byte_length)) {
+  if (IREE_UNLIKELY(
+          metadata->export_count != counts.export_count ||
+          metadata->parameter_count < counts.parameter_count ||
+          metadata->runtime_parameter_count < counts.runtime_parameter_count ||
+          metadata->printf_record_count < counts.printf_record_count ||
+          metadata->global_count != counts.global_count ||
+          metadata->layout_blob_capacity < counts.layout_blob_byte_length)) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "AMDGPU executable metadata storage does not match HSACO counts");
@@ -506,8 +580,25 @@ iree_status_t iree_hal_amdgpu_executable_metadata_populate_from_hsaco(
       iree_hal_amdgpu_hsaco_loaded_code_object_rebase_string_view(
           &rebase, "target", hsaco_metadata->target, &metadata->target));
   metadata->code_object_data = loaded_code_object_data;
+  for (iree_host_size_t i = 0; i < hsaco_metadata->printf_record_count; ++i) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_hsaco_loaded_code_object_rebase_string_view(
+            &rebase, "printf record", hsaco_metadata->printf_records[i].value,
+            &metadata->printf_records[i]));
+  }
+  for (iree_host_size_t i = 0; i < hsaco_metadata->elf_global_symbol_count;
+       ++i) {
+    const iree_hal_amdgpu_hsaco_metadata_elf_global_symbol_t* source_global =
+        &hsaco_metadata->elf_global_symbols[i];
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_hsaco_loaded_code_object_rebase_string_view(
+            &rebase, "ELF global name", source_global->name,
+            &metadata->globals[i].name));
+    metadata->globals[i].byte_length = source_global->byte_length;
+  }
 
   iree_host_size_t parameter_offset = 0;
+  iree_host_size_t runtime_parameter_offset = 0;
   for (iree_host_size_t i = 0; i < hsaco_metadata->kernel_count; ++i) {
     const iree_hal_amdgpu_hsaco_metadata_kernel_t* kernel =
         &hsaco_metadata->kernels[i];
@@ -531,12 +622,20 @@ iree_status_t iree_hal_amdgpu_executable_metadata_populate_from_hsaco(
     reflection->parameter_count = (uint32_t)load_plan.parameter_count;
 
     iree_hal_amdgpu_executable_export_t* export_info = &metadata->exports[i];
-    export_info->flags = IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_NONE;
+    export_info->flags = load_plan.export_flags;
+    export_info->runtime_parameter_offset = (uint32_t)runtime_parameter_offset;
+    export_info->runtime_parameter_count =
+        (uint32_t)load_plan.runtime_parameter_count;
     export_info->fixed_group_segment_size = kernel->group_segment_fixed_size;
     export_info->fixed_private_segment_size =
         kernel->private_segment_fixed_size;
+    export_info->max_workgroup_size = kernel->max_flat_workgroup_size;
     export_info->max_dynamic_workgroup_local_memory =
         UINT32_MAX - kernel->group_segment_fixed_size;
+    if (kernel->uniform_workgroup_size) {
+      export_info->flags |=
+          IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_UNIFORM_WORKGROUP_SIZE;
+    }
     iree_hal_amdgpu_hsaco_load_plan_populate_workgroup_size(kernel,
                                                             export_info);
     iree_hal_amdgpu_hsaco_load_plan_populate_workgroup_cluster_size(
@@ -561,7 +660,16 @@ iree_status_t iree_hal_amdgpu_executable_metadata_populate_from_hsaco(
                                       : NULL),
         "populating reflected parameters for kernel `%.*s`",
         (int)kernel->symbol_name.size, kernel->symbol_name.data);
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_hsaco_load_plan_populate_runtime_parameters(
+            kernel, &rebase, load_plan.runtime_parameter_count,
+            load_plan.runtime_parameter_count
+                ? &metadata->runtime_parameters[runtime_parameter_offset]
+                : NULL),
+        "populating runtime parameters for kernel `%.*s`",
+        (int)kernel->symbol_name.size, kernel->symbol_name.data);
     parameter_offset += load_plan.parameter_count;
+    runtime_parameter_offset += load_plan.runtime_parameter_count;
   }
 
   for (iree_host_size_t i = 0; i < hsaco_metadata->elf_kernel_symbol_count;
@@ -586,6 +694,12 @@ iree_status_t iree_hal_amdgpu_executable_metadata_populate_from_hsaco(
     return iree_make_status(
         IREE_STATUS_INTERNAL,
         "AMDGPU metadata parameter population count changed");
+  }
+  if (IREE_UNLIKELY(runtime_parameter_offset !=
+                    counts.runtime_parameter_count)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "AMDGPU metadata runtime parameter population count changed");
   }
   return iree_ok_status();
 }

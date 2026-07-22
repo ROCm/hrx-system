@@ -65,6 +65,21 @@ static iree_hal_device_group_t* CreateMockDeviceGroup() {
   return group;
 }
 
+static iree_hal_device_group_t* CreateMockExecutableDeviceGroup() {
+  iree_hal_mock_device_options_t options;
+  iree_hal_mock_device_options_initialize(&options);
+  options.identifier = iree_make_cstring_view("mock-executable");
+  options.executable_loading_enabled = true;
+
+  iree_hal_device_t* device = nullptr;
+  IREE_CHECK_OK(
+      iree_hal_mock_device_create(&options, iree_allocator_system(), &device));
+  iree_hal_device_t* devices[] = {device};
+  iree_hal_device_group_t* group = CreateDeviceGroup(1, devices);
+  iree_hal_device_release(device);
+  return group;
+}
+
 static iree_hal_device_t* CreateSyncDevice(const char* identifier) {
   iree_async_proactor_pool_t* proactor_pool = nullptr;
   IREE_CHECK_OK(iree_async_proactor_pool_create(
@@ -118,6 +133,55 @@ static iree_hal_replay_recorder_t* CreateHostAllocationRecorder(
   return recorder;
 }
 
+static iree_hal_executable_t* PrepareMockExecutable(iree_hal_device_t* device) {
+  static const uint8_t kExecutableData[] = {
+      1,
+      0,
+      0,
+      0,  // Function count.
+      // Constant count, binding count, flags, workgroup size, name length,
+      // native ABI offset, parameter size, runtime parameter count, reserved.
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      4,
+      0,
+      0,
+      0,
+      0,
+      0,
+      'm',
+      'a',
+      'i',
+      'n',
+  };
+  const iree_hal_executable_target_selection_t target_selection = {
+      /*.family=*/IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY),
+      /*.target_key=*/IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY),
+      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_VIRTUAL,
+      /*.physical_device_affinity=*/1,
+  };
+  const iree_hal_executable_target_selection_result_t target_result =
+      iree_hal_device_spec_select_executable_target(
+          iree_hal_device_spec(device), &target_selection);
+  IREE_ASSERT_EQ(target_result.outcome,
+                 IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED);
+
+  iree_hal_executable_load_params_t load_params;
+  iree_hal_executable_load_params_initialize(&load_params);
+  load_params.executable_data =
+      iree_make_const_byte_span(kExecutableData, sizeof(kExecutableData));
+
+  iree_hal_executable_t* executable = nullptr;
+  IREE_CHECK_OK(iree_hal_device_load_executable(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target, &load_params,
+      &executable));
+  return executable;
+}
+
 #if IREE_FILE_IO_ENABLE && \
     (defined(IREE_PLATFORM_ANDROID) || defined(IREE_PLATFORM_LINUX))
 iree::testing::TempFilePath WriteTempFile(iree_const_byte_span_t contents) {
@@ -160,6 +224,7 @@ struct ReplayRecordSummary {
   iree_host_size_t unsupported_import_buffer_record_count = 0;
   iree_host_size_t unsupported_export_buffer_record_count = 0;
   iree_host_size_t unsupported_host_call_record_count = 0;
+  iree_host_size_t unsupported_queue_dispatch_record_count = 0;
   iree_host_size_t buffer_range_data_payload_count = 0;
   iree_host_size_t import_buffer_payload_count = 0;
   uint64_t import_buffer_captured_data_length = 0;
@@ -307,7 +372,8 @@ static ReplayRecordSummary ParseReplayRecordSummary(
         }
         EXPECT_EQ((uint32_t)IREE_STATUS_OK, record.header.status_code);
         break;
-      case IREE_HAL_REPLAY_FILE_RECORD_TYPE_UNSUPPORTED:
+      case IREE_HAL_REPLAY_FILE_RECORD_TYPE_UNSUPPORTED: {
+        bool queue_dispatch = false;
         if (record.header.operation_code ==
             IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_IMPORT_BUFFER) {
           ++summary.unsupported_import_buffer_record_count;
@@ -317,15 +383,55 @@ static ReplayRecordSummary ParseReplayRecordSummary(
         } else if (record.header.operation_code ==
                    IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_HOST_CALL) {
           ++summary.unsupported_host_call_record_count;
+        } else if (record.header.operation_code ==
+                   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_DISPATCH) {
+          ++summary.unsupported_queue_dispatch_record_count;
+          queue_dispatch = true;
         }
-        EXPECT_EQ((uint32_t)IREE_STATUS_OK, record.header.status_code);
+        if (queue_dispatch) {
+          EXPECT_EQ((uint32_t)IREE_STATUS_UNIMPLEMENTED,
+                    record.header.status_code);
+        } else {
+          EXPECT_EQ((uint32_t)IREE_STATUS_OK, record.header.status_code);
+        }
         break;
+      }
       default:
         break;
     }
   }
 
   return summary;
+}
+
+static bool FindCapturedQueueDispatchPayload(
+    const std::vector<uint8_t>& storage,
+    iree_hal_replay_dispatch_payload_t* out_payload) {
+  iree_hal_replay_file_header_t file_header;
+  iree_host_size_t offset = 0;
+  IREE_CHECK_OK(iree_hal_replay_file_parse_header(
+      iree_make_const_byte_span(storage.data(), storage.size()), &file_header,
+      &offset));
+  const iree_const_byte_span_t file_contents = iree_make_const_byte_span(
+      storage.data(), (iree_host_size_t)file_header.file_length);
+  while (offset < file_contents.data_length) {
+    iree_hal_replay_file_record_t record;
+    IREE_CHECK_OK(iree_hal_replay_file_parse_record(file_contents, offset,
+                                                    &record, &offset));
+    if (record.header.operation_code !=
+            IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_DISPATCH ||
+        record.header.payload_type != IREE_HAL_REPLAY_PAYLOAD_TYPE_DISPATCH) {
+      continue;
+    }
+    if (record.payload.data_length < sizeof(*out_payload)) {
+      ADD_FAILURE() << "captured dispatch payload is short";
+      return false;
+    }
+    memcpy(out_payload, record.payload.data, sizeof(*out_payload));
+    return true;
+  }
+  ADD_FAILURE() << "expected a captured queue dispatch";
+  return false;
 }
 
 static iree_status_t CountHostCall(void* user_data, const uint64_t args[4],
@@ -410,6 +516,55 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsHostCallAsUnsupported) {
 
   ReplayRecordSummary summary = ParseReplayRecordSummary(storage);
   EXPECT_EQ(1u, summary.unsupported_host_call_record_count);
+}
+
+TEST(ReplayRecorderTest, MarksQueueDispatchRuntimeParametersUnsupported) {
+  std::vector<uint8_t> storage(32768, 0);
+  iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
+
+  iree_hal_device_group_t* source_group = CreateMockExecutableDeviceGroup();
+  iree_hal_device_group_t* wrapped_group = nullptr;
+  IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
+      recorder, source_group, iree_allocator_system(), &wrapped_group));
+  iree_hal_device_t* wrapped_device =
+      iree_hal_device_group_device_at(wrapped_group, 0);
+  iree_hal_executable_t* executable = PrepareMockExecutable(wrapped_device);
+
+  iree_hal_dispatch_runtime_parameter_list_t runtime_parameters = {};
+  runtime_parameters.count = 2;
+  runtime_parameters.patches[0].offset = 16;
+  runtime_parameters.patches[0].length = sizeof(uint64_t);
+  const uint64_t first_value = UINT64_C(0x0123456789ABCDEF);
+  memcpy(runtime_parameters.patches[0].data, &first_value, sizeof(first_value));
+  runtime_parameters.patches[1].offset = 40;
+  runtime_parameters.patches[1].length = sizeof(uint32_t);
+  const uint32_t second_value = UINT32_C(0x76543210);
+  memcpy(runtime_parameters.patches[1].data, &second_value,
+         sizeof(second_value));
+  const iree_hal_dispatch_config_t config = {
+      .workgroup_count = {1, 1, 1},
+      .runtime_parameters = &runtime_parameters,
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_hal_device_queue_dispatch(
+          wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY,
+          iree_hal_semaphore_list_empty(), iree_hal_semaphore_list_empty(),
+          executable, iree_hal_executable_function_from_index(0), config,
+          iree_const_byte_span_empty(), iree_hal_buffer_ref_list_empty(),
+          IREE_HAL_DISPATCH_FLAG_NONE));
+
+  iree_hal_executable_release(executable);
+  IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
+  iree_hal_replay_recorder_release(recorder);
+  iree_hal_device_group_release(wrapped_group);
+  iree_hal_device_group_release(source_group);
+
+  iree_hal_replay_dispatch_payload_t payload = {};
+  ASSERT_TRUE(FindCapturedQueueDispatchPayload(storage, &payload));
+  ReplayRecordSummary summary = ParseReplayRecordSummary(storage);
+  EXPECT_EQ(1u, summary.unsupported_queue_dispatch_record_count);
+  EXPECT_EQ(payload.reserved0, 0u);
 }
 
 TEST(ReplayRecorderTest,

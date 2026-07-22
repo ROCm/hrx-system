@@ -404,6 +404,40 @@ static iree_status_t FakeLocalExecutableFunctionParameters(
   return iree_ok_status();
 }
 
+static iree_status_t FakeLocalExecutableFunctionRuntimeParameters(
+    iree_hal_executable_t* executable,
+    iree_hal_executable_function_t function_ordinal, iree_host_size_t capacity,
+    iree_hal_executable_function_runtime_parameter_info_t* out_parameters) {
+  (void)executable;
+  (void)function_ordinal;
+  (void)capacity;
+  (void)out_parameters;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "runtime parameters are not supported");
+}
+
+static iree_status_t FakeLocalExecutableRuntimeMetadataCount(
+    iree_hal_executable_t* executable, iree_string_view_t name,
+    iree_host_size_t* out_count) {
+  (void)executable;
+  (void)name;
+  *out_count = 0;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "runtime metadata is not supported");
+}
+
+static iree_status_t FakeLocalExecutableRuntimeMetadataRecords(
+    iree_hal_executable_t* executable, iree_string_view_t name,
+    iree_host_size_t capacity,
+    iree_hal_executable_runtime_metadata_record_t* out_records) {
+  (void)executable;
+  (void)name;
+  (void)capacity;
+  (void)out_records;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "runtime metadata is not supported");
+}
+
 static iree_status_t FakeLocalExecutableLookupFunctionByName(
     iree_hal_executable_t* executable, iree_string_view_t name,
     iree_hal_executable_function_t* out_function_ordinal) {
@@ -433,14 +467,20 @@ static iree_status_t FakeLocalExecutableIssueCall(
 }
 
 static const iree_hal_local_executable_vtable_t kFakeLocalExecutableVTable = {
-    {
-        FakeLocalExecutableDestroy,
-        FakeLocalExecutableFunctionCount,
-        FakeLocalExecutableFunctionInfo,
-        FakeLocalExecutableFunctionParameters,
-        FakeLocalExecutableLookupFunctionByName,
-    },
-    FakeLocalExecutableIssueCall,
+    .base =
+        {
+            .destroy = FakeLocalExecutableDestroy,
+            .function_count = FakeLocalExecutableFunctionCount,
+            .function_info = FakeLocalExecutableFunctionInfo,
+            .function_parameters = FakeLocalExecutableFunctionParameters,
+            .function_runtime_parameters =
+                FakeLocalExecutableFunctionRuntimeParameters,
+            .runtime_metadata_count = FakeLocalExecutableRuntimeMetadataCount,
+            .runtime_metadata_records =
+                FakeLocalExecutableRuntimeMetadataRecords,
+            .lookup_function_by_name = FakeLocalExecutableLookupFunctionByName,
+        },
+    .issue_call = FakeLocalExecutableIssueCall,
 };
 
 class LocalProfileRecorderTest : public ::testing::Test {

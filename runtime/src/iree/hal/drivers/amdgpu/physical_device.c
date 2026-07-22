@@ -7,6 +7,7 @@
 #include "iree/hal/drivers/amdgpu/physical_device.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/notification.h"
@@ -48,6 +49,8 @@
 static_assert(IREE_HAL_AMDGPU_PHYSICAL_DEVICE_GROUP_SEGMENT_MAX_SIZE_DEFAULT !=
                   0,
               "group segment max size default must be non-zero");
+
+#define IREE_HAL_AMDGPU_PHYSICAL_DEVICE_MAX_HOST_LINK_HOPS 16
 
 typedef struct iree_hal_amdgpu_agent_first_isa_t {
   // Number of ISAs seen during iteration.
@@ -553,6 +556,58 @@ iree_hal_amdgpu_physical_device_query_svm_direct_host_access(
 }
 
 static iree_status_t
+iree_hal_amdgpu_physical_device_query_host_native_atomic_support(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
+    hsa_amd_memory_pool_t host_fine_memory_pool,
+    bool* out_host_native_atomic_supported) {
+  IREE_ASSERT_ARGUMENT(libhsa);
+  IREE_ASSERT_ARGUMENT(out_host_native_atomic_supported);
+  *out_host_native_atomic_supported = false;
+  if (!host_fine_memory_pool.handle) return iree_ok_status();
+
+  // Host-native atomics are an optional host/device link property. If the HSA
+  // runtime cannot report link information for the nearest host fine-grained
+  // pool, leave the capability disabled instead of failing device creation.
+  uint32_t hop_count = 0;
+  hsa_status_t hsa_status = iree_hsa_amd_agent_memory_pool_get_info_raw(
+      libhsa, device_agent, host_fine_memory_pool,
+      HSA_AMD_AGENT_MEMORY_POOL_INFO_NUM_LINK_HOPS, &hop_count);
+  if (hsa_status != HSA_STATUS_SUCCESS) return iree_ok_status();
+  if (hop_count == 0) {
+    *out_host_native_atomic_supported = true;
+    return iree_ok_status();
+  }
+  if (IREE_UNLIKELY(hop_count >
+                    IREE_HAL_AMDGPU_PHYSICAL_DEVICE_MAX_HOST_LINK_HOPS)) {
+    // LINK_INFO writes hop_count entries into a caller-sized array with no
+    // separate byte-count argument, so overly large topologies cannot be
+    // queried by this bounded cold probe.
+    return iree_ok_status();
+  }
+
+  hsa_amd_memory_pool_link_info_t
+      link_hops[IREE_HAL_AMDGPU_PHYSICAL_DEVICE_MAX_HOST_LINK_HOPS];
+  memset(link_hops, 0, sizeof(link_hops[0]) * hop_count);
+  hsa_status = iree_hsa_amd_agent_memory_pool_get_info_raw(
+      libhsa, device_agent, host_fine_memory_pool,
+      HSA_AMD_AGENT_MEMORY_POOL_INFO_LINK_INFO, link_hops);
+  if (hsa_status != HSA_STATUS_SUCCESS) return iree_ok_status();
+  // HIP exposes native host atomics as a single device property, not as
+  // per-hop or per-width capabilities. Only advertise it when the whole
+  // reported host path supports both 32-bit and 64-bit atomic transactions.
+  bool host_native_atomic_supported = true;
+  for (uint32_t i = 0; i < hop_count; ++i) {
+    if (!link_hops[i].atomic_support_32bit ||
+        !link_hops[i].atomic_support_64bit) {
+      host_native_atomic_supported = false;
+      break;
+    }
+  }
+  *out_host_native_atomic_supported = host_native_atomic_supported;
+  return iree_ok_status();
+}
+
+static iree_status_t
 iree_hal_amdgpu_physical_device_initialize_cpu_visible_device_coarse_memory(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
     hsa_amd_memory_pool_t device_coarse_memory_pool,
@@ -997,6 +1052,14 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
     status = iree_hal_amdgpu_physical_device_query_global_memory_pools(
         libhsa, device_agent, options->suppress_device_fine_memory,
         &coarse_block_memory_pool, &fine_block_memory_pool);
+  }
+  if (iree_status_is_ok(status)) {
+    bool host_native_atomic_supported = false;
+    status = iree_hal_amdgpu_physical_device_query_host_native_atomic_support(
+        libhsa, device_agent, host_memory_pools->fine_pool,
+        &host_native_atomic_supported);
+    out_physical_device->host_native_atomic_supported =
+        host_native_atomic_supported ? 1u : 0u;
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_physical_device_preallocate_host_pool(

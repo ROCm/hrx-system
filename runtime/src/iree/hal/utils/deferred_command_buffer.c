@@ -688,6 +688,8 @@ typedef struct iree_hal_cmd_dispatch_t {
   iree_hal_executable_t* executable;
   iree_hal_executable_function_t export_ordinal;
   iree_hal_dispatch_config_t config;
+  // Runtime parameter list retained by this deferred dispatch.
+  iree_hal_dispatch_runtime_parameter_list_t runtime_parameters;
   iree_const_byte_span_t constants;
   iree_hal_buffer_ref_list_t bindings;
   iree_hal_dispatch_flags_t flags;
@@ -729,7 +731,13 @@ static iree_status_t iree_hal_deferred_command_buffer_dispatch(
       (void**)&cmd));
   cmd->executable = executable;
   cmd->export_ordinal = export_ordinal;
-  memcpy(&cmd->config, &config, sizeof(cmd->config));
+  iree_hal_dispatch_config_clone(config, &cmd->runtime_parameters,
+                                 &cmd->config);
+  IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert_strided(
+      command_buffer->resource_set, cmd->runtime_parameters.count,
+      cmd->runtime_parameters.patches,
+      offsetof(iree_hal_dispatch_runtime_parameter_patch_t, resource),
+      sizeof(cmd->runtime_parameters.patches[0])));
   cmd->flags = flags;
 
   uint8_t* cmd_base = (uint8_t*)cmd;

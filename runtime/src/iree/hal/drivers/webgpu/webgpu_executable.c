@@ -389,6 +389,24 @@ static iree_status_t iree_hal_webgpu_executable_try_lookup_global_by_name(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_webgpu_executable_global_count(
+    iree_hal_executable_t* base_executable, iree_host_size_t* out_count) {
+  (void)base_executable;
+  *out_count = 0;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "WebGPU executable globals are not enumerable");
+}
+
+static iree_status_t iree_hal_webgpu_executable_global_info_by_index(
+    iree_hal_executable_t* base_executable, iree_host_size_t index,
+    iree_hal_executable_global_info_t* out_info) {
+  (void)base_executable;
+  (void)index;
+  memset(out_info, 0, sizeof(*out_info));
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "WebGPU executable globals are not enumerable");
+}
+
 static iree_status_t iree_hal_webgpu_executable_global_info(
     iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
     iree_hal_executable_global_info_t* out_info) {
@@ -410,15 +428,59 @@ static iree_status_t iree_hal_webgpu_executable_global_buffer(
                           "invalid WebGPU executable global");
 }
 
+static iree_status_t iree_hal_webgpu_executable_function_runtime_parameters(
+    iree_hal_executable_t* base_executable,
+    iree_hal_executable_function_t function, iree_host_size_t capacity,
+    iree_hal_executable_function_runtime_parameter_info_t* out_parameters) {
+  (void)base_executable;
+  (void)function;
+  (void)capacity;
+  (void)out_parameters;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "WebGPU executable runtime parameters are not supported");
+}
+
+static iree_status_t iree_hal_webgpu_executable_runtime_metadata_count(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    iree_host_size_t* out_count) {
+  (void)base_executable;
+  (void)name;
+  *out_count = 0;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "WebGPU executable runtime metadata is not supported");
+}
+
+static iree_status_t iree_hal_webgpu_executable_runtime_metadata_records(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    iree_host_size_t capacity,
+    iree_hal_executable_runtime_metadata_record_t* out_records) {
+  (void)base_executable;
+  (void)name;
+  (void)capacity;
+  (void)out_records;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "WebGPU executable runtime metadata is not supported");
+}
+
 static const iree_hal_executable_vtable_t iree_hal_webgpu_executable_vtable = {
     .destroy = iree_hal_webgpu_executable_destroy,
     .function_count = iree_hal_webgpu_executable_function_count,
     .function_info = iree_hal_webgpu_executable_function_info,
     .function_parameters = iree_hal_webgpu_executable_function_parameters,
+    .function_runtime_parameters =
+        iree_hal_webgpu_executable_function_runtime_parameters,
+    .runtime_metadata_count = iree_hal_webgpu_executable_runtime_metadata_count,
+    .runtime_metadata_records =
+        iree_hal_webgpu_executable_runtime_metadata_records,
     .lookup_function_by_name =
         iree_hal_webgpu_executable_lookup_function_by_name,
     .try_lookup_global_by_name =
         iree_hal_webgpu_executable_try_lookup_global_by_name,
     .global_info = iree_hal_webgpu_executable_global_info,
     .global_buffer = iree_hal_webgpu_executable_global_buffer,
+    .global_count = iree_hal_webgpu_executable_global_count,
+    .global_info_by_index = iree_hal_webgpu_executable_global_info_by_index,
 };

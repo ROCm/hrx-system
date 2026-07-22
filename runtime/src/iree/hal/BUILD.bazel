@@ -65,6 +65,7 @@ iree_runtime_cc_library(
         "executable.c",
         "fence.c",
         "file.c",
+        "host_notification.c",
         "pool.c",
         "pool_set.c",
         "profile_metrics.c",
@@ -95,6 +96,7 @@ iree_runtime_cc_library(
         "executable.h",
         "fence.h",
         "file.h",
+        "host_notification.h",
         "pool.h",
         "pool_set.h",
         "profile_metrics.h",
@@ -127,6 +129,18 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "device_test",
     srcs = ["device_test.cc"],
+    deps = [
+        ":hal",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "host_notification_test",
+    srcs = ["host_notification_test.cc"],
     deps = [
         ":hal",
         "//runtime/src/iree/base",

@@ -1677,6 +1677,11 @@ static iree_status_t iree_hal_replay_device_queue_dispatch(
         IREE_HAL_REPLAY_PAYLOAD_TYPE_DISPATCH, &pending_record);
   }
   if (iree_status_is_ok(status)) {
+    if (iree_hal_dispatch_config_has_runtime_parameters(config)) {
+      // Backend-native parameters can contain live device addresses without an
+      // object reference that a replay executor can resolve in a new context.
+      iree_hal_replay_recorder_mark_unsupported(&pending_record);
+    }
     status = iree_hal_replay_recorder_end_operation_with_payload(
         &pending_record,
         iree_hal_device_queue_dispatch(
@@ -2011,6 +2016,7 @@ static const iree_hal_device_vtable_t iree_hal_replay_device_vtable = {
     .create_channel = iree_hal_replay_device_create_channel,
     .create_command_buffer = iree_hal_replay_device_create_command_buffer,
     .create_event = iree_hal_replay_device_create_event,
+    .create_host_notification = iree_hal_host_notification_create_unimplemented,
     .load_executable = iree_hal_replay_device_load_executable,
     .import_file = iree_hal_replay_device_import_file,
     .create_semaphore = iree_hal_replay_device_create_semaphore,

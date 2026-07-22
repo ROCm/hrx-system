@@ -191,6 +191,8 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "executable.function_parameters";
     case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_LOOKUP_FUNCTION_BY_NAME:
       return "executable.lookup_function_by_name";
+    case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_RUNTIME_PARAMETERS:
+      return "executable.function_runtime_parameters";
     default:
       return "unknown";
   }

@@ -882,6 +882,11 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_dispatch(
         IREE_HAL_REPLAY_PAYLOAD_TYPE_DISPATCH, &pending_record);
   }
   if (iree_status_is_ok(status)) {
+    if (iree_hal_dispatch_config_has_runtime_parameters(config)) {
+      // Backend-native parameters can contain live device addresses without an
+      // object reference that a replay executor can resolve in a new context.
+      iree_hal_replay_recorder_mark_unsupported(&pending_record);
+    }
     status = iree_hal_replay_recorder_end_operation_with_payload(
         &pending_record,
         iree_hal_command_buffer_dispatch(

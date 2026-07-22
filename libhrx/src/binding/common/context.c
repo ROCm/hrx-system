@@ -80,10 +80,16 @@ iree_status_t iree_hal_streaming_context_create(
   memset(&context->buffer_table, 0, sizeof(context->buffer_table));
   context->pageable_h2d_staging_buffer = NULL;
   context->pageable_h2d_staging_size = 0;
+  memset(&context->rocm_device_runtime, 0,
+         sizeof(context->rocm_device_runtime));
+  context->rocm_device_runtime.malloc_heap_device_ptr = IREE_ATOMIC_VAR_INIT(0);
+  context->rocm_device_runtime.hostcall_buffer_device_ptr =
+      IREE_ATOMIC_VAR_INIT(0);
   iree_atomic_store(&context->capture_stream_count, 0,
                     iree_memory_order_relaxed);
   context->host_allocator = host_allocator;
   iree_slim_mutex_initialize(&context->mutex);
+  iree_slim_mutex_initialize(&context->direct_transfer_mutex);
 
   // Initialize global list pointers.
   context->context_list_entry.next = NULL;
@@ -96,10 +102,10 @@ iree_status_t iree_hal_streaming_context_create(
       8;  // Pre-allocate for default stream + user streams.
   context->streams = NULL;
 
-  // Initialize default limits.
-  // These are typical defaults matching CUDA/HIP behavior.
+  // Initialize default limits. Buffered printf uses a per-dispatch FIFO sized
+  // for the ROCm device-library workitem debug record window.
   context->limits.stack_size = 1024;                        // 1KB default
-  context->limits.printf_fifo_size = 1024 * 1024;           // 1MB
+  context->limits.printf_fifo_size = 4 * 1024 * 1024;       // 4MB
   context->limits.malloc_heap_size = 8 * 1024 * 1024;       // 8MB
   context->limits.dev_runtime_sync_depth = 128;             // 128 levels
   context->limits.dev_runtime_pending_launch_count = 2048;  // 2048 launches
@@ -170,6 +176,10 @@ static void iree_hal_streaming_context_destroy(
   iree_status_ignore(iree_hal_streaming_context_synchronize(context));
 
   iree_hal_streaming_memory_release_pageable_staging(context);
+  iree_hal_streaming_context_deinitialize_rocm_hostcall_service(context);
+  iree_hal_buffer_release(
+      context->rocm_device_runtime.malloc_initial_slabs_buffer);
+  iree_hal_buffer_release(context->rocm_device_runtime.malloc_heap_buffer);
 
   // Deinitialize symbol map and unload any statically-registered modules that
   // were on-demand loaded for this context.
@@ -210,6 +220,7 @@ static void iree_hal_streaming_context_destroy(
   iree_hal_device_release(context->device);
 
   // Deinitialize synchronization.
+  iree_slim_mutex_deinitialize(&context->direct_transfer_mutex);
   iree_slim_mutex_deinitialize(&context->mutex);
 
   // Free context memory.
@@ -435,7 +446,14 @@ iree_status_t iree_hal_streaming_context_set_limit(
       context->limits.printf_fifo_size = value;
       break;
     case IREE_HAL_STREAMING_CONTEXT_LIMIT_MALLOC_HEAP_SIZE:
-      context->limits.malloc_heap_size = value;
+      if (context->rocm_device_runtime.malloc_heap_buffer &&
+          context->limits.malloc_heap_size != value) {
+        status =
+            iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                             "device malloc heap has already been initialized");
+      } else {
+        context->limits.malloc_heap_size = value;
+      }
       break;
     case IREE_HAL_STREAMING_CONTEXT_LIMIT_DEV_RUNTIME_SYNC_DEPTH:
       context->limits.dev_runtime_sync_depth = value;
@@ -457,7 +475,7 @@ iree_status_t iree_hal_streaming_context_set_limit(
   iree_slim_mutex_unlock(&context->mutex);
 
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 iree_status_t iree_hal_streaming_context_enable_peer_access(

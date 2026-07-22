@@ -40,6 +40,8 @@ typedef enum iree_hal_amdgpu_executable_export_flag_bits_e {
       1u << 0,
   // Export can only be launched with caller-provided native kernargs.
   IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_CUSTOM_DIRECT_ONLY = 1u << 1,
+  // OpenCL/HIP kernel requires every workgroup to have the same size.
+  IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_UNIFORM_WORKGROUP_SIZE = 1u << 2,
 } iree_hal_amdgpu_executable_export_flag_bits_t;
 typedef uint32_t iree_hal_amdgpu_executable_export_flags_t;
 
@@ -70,8 +72,14 @@ typedef struct iree_hal_amdgpu_executable_metadata_counts_t {
   iree_host_size_t export_count;
   // Number of reflected HAL parameter records.
   iree_host_size_t parameter_count;
+  // Number of hidden runtime parameter records.
+  iree_host_size_t runtime_parameter_count;
+  // Number of raw `amdhsa.printf` metadata records.
+  iree_host_size_t printf_record_count;
   // Total byte capacity required for immutable kernarg layout records.
   iree_host_size_t layout_blob_byte_length;
+  // Number of executable global declarations.
+  iree_host_size_t global_count;
 } iree_hal_amdgpu_executable_metadata_counts_t;
 
 // Cold reflected metadata for one executable export.
@@ -85,6 +93,16 @@ typedef struct iree_hal_amdgpu_executable_reflection_t {
   // Number of parameter records for this export.
   uint32_t parameter_count;
 } iree_hal_amdgpu_executable_reflection_t;
+
+// Hidden runtime parameter declared by executable metadata.
+typedef struct iree_hal_amdgpu_executable_runtime_parameter_t {
+  // Runtime parameter name from native executable metadata.
+  iree_string_view_t name;
+  // Native byte offset in the kernarg segment.
+  uint16_t offset;
+  // Byte length of the runtime parameter storage.
+  uint16_t length;
+} iree_hal_amdgpu_executable_runtime_parameter_t;
 
 // Hot provider-neutral metadata for one executable export.
 typedef struct iree_hal_amdgpu_executable_export_t {
@@ -100,10 +118,16 @@ typedef struct iree_hal_amdgpu_executable_export_t {
   uint32_t fixed_group_segment_size;
   // Fixed private segment byte size reported by executable metadata.
   uint32_t fixed_private_segment_size;
+  // Maximum total work-items per workgroup accepted by this export.
+  uint32_t max_workgroup_size;
   // Maximum dynamic group-memory byte count accepted for this export.
   uint32_t max_dynamic_workgroup_local_memory;
   // Native kernarg layout record for normal metadata-described dispatch.
   iree_hal_amdgpu_kernarg_layout_ref_t kernarg_layout;
+  // First runtime parameter record for this export.
+  uint32_t runtime_parameter_offset;
+  // Number of runtime parameter records for this export.
+  uint32_t runtime_parameter_count;
 } iree_hal_amdgpu_executable_export_t;
 
 // Provider-neutral executable metadata populated during executable load.
@@ -126,6 +150,18 @@ typedef struct iree_hal_amdgpu_executable_metadata_t {
   iree_host_size_t parameter_count;
   // Reflected HAL parameter records for all exports.
   iree_hal_executable_function_parameter_t* parameters;
+  // Number of hidden runtime parameter records.
+  iree_host_size_t runtime_parameter_count;
+  // Hidden runtime parameter records for all exports.
+  iree_hal_amdgpu_executable_runtime_parameter_t* runtime_parameters;
+  // Number of raw `amdhsa.printf` metadata records.
+  iree_host_size_t printf_record_count;
+  // Raw `amdhsa.printf` metadata records.
+  iree_string_view_t* printf_records;
+  // Number of executable global declarations.
+  iree_host_size_t global_count;
+  // Executable global declarations.
+  iree_hal_executable_global_info_t* globals;
   // Total byte capacity of layout_blob.
   iree_host_size_t layout_blob_capacity;
   // Number of bytes already allocated from layout_blob.
