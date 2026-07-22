@@ -1018,6 +1018,29 @@ ERR_AMDGPU_046 = ErrorDef(
     fix_hint=("Remove the gfx1250 revision or select the gfx1250 processor"),
 )
 
+# ERR_AMDGPU_047: gfx1250 A0 packet requires stepping legalization.
+ERR_AMDGPU_047 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=47,
+    severity=Severity.ERROR,
+    summary="gfx1250 A0 packet requires stepping legalization.",
+    message=(
+        "AMDGPU descriptor '{descriptor_name}' in '@{function_name}' is not "
+        "legal for gfx1250 revision '{revision}' in descriptor set "
+        "'{descriptor_set_name}': erratum '{erratum_key}' requires "
+        "legalization '{legalization_key}'"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("descriptor_name", ParamKind.STRING),
+        ErrorParam("descriptor_set_name", ParamKind.STRING),
+        ErrorParam("revision", ParamKind.STRING),
+        ErrorParam("erratum_key", ParamKind.STRING),
+        ErrorParam("legalization_key", ParamKind.STRING),
+    ),
+    fix_hint=("Apply the named gfx1250 A0 legalization before native emission"),
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_006,
@@ -1061,4 +1084,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_044,
     ERR_AMDGPU_045,
     ERR_AMDGPU_046,
+    ERR_AMDGPU_047,
 )
