@@ -47,6 +47,13 @@ typedef struct iree_hal_amdgpu_agent_isa_target_t {
   iree_hal_amdgpu_target_id_t target_id;
 } iree_hal_amdgpu_agent_isa_target_t;
 
+// Public HSA AMD agent attribute used to distinguish ASIC revisions. The local
+// name keeps this driver buildable against older HSA SDK headers while using
+// the stable numeric ABI accepted by hsa_agent_get_info.
+enum {
+  IREE_HAL_AMDGPU_AGENT_INFO_ASIC_REVISION = 0xA012,
+};
+
 static hsa_status_t iree_hal_amdgpu_iterate_agent_isa(hsa_isa_t isa,
                                                       void* user_data) {
   iree_hal_amdgpu_agent_available_isas_t* isas =
@@ -68,7 +75,7 @@ static iree_status_t iree_hal_amdgpu_query_agent_available_isas(
 }
 
 static iree_status_t iree_hal_amdgpu_query_agent_isa_target(
-    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_isa_t isa,
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent, hsa_isa_t isa,
     iree_hal_amdgpu_agent_isa_target_t* out_isa_target) {
   memset(out_isa_target, 0, sizeof(*out_isa_target));
   out_isa_target->isa = isa;
@@ -88,20 +95,31 @@ static iree_status_t iree_hal_amdgpu_query_agent_isa_target(
                                                  out_isa_target->name_buffer));
   out_isa_target->name = iree_make_string_view(out_isa_target->name_buffer,
                                                name_length - /*NUL*/ 1);
-  return iree_hal_amdgpu_target_id_parse_hsa_isa_name(
-      out_isa_target->name, &out_isa_target->target_id);
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_parse_hsa_isa_name(
+      out_isa_target->name, &out_isa_target->target_id));
+  if (iree_string_view_equal(out_isa_target->target_id.processor,
+                             IREE_SV("gfx1250"))) {
+    uint32_t asic_revision = 0;
+    IREE_RETURN_IF_ERROR(iree_hsa_agent_get_info(
+        IREE_LIBHSA(libhsa), agent,
+        (hsa_agent_info_t)IREE_HAL_AMDGPU_AGENT_INFO_ASIC_REVISION,
+        &asic_revision));
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_apply_asic_revision(
+        asic_revision, &out_isa_target->target_id));
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amdgpu_verify_isas_equal(
     const iree_hal_amdgpu_libhsa_t* libhsa, iree_host_size_t agent_a_ordinal,
-    hsa_isa_t isa_a, iree_host_size_t agent_b_ordinal, hsa_isa_t isa_b,
-    iree_host_size_t isa_ordinal) {
+    hsa_agent_t agent_a, hsa_isa_t isa_a, iree_host_size_t agent_b_ordinal,
+    hsa_agent_t agent_b, hsa_isa_t isa_b, iree_host_size_t isa_ordinal) {
   iree_hal_amdgpu_agent_isa_target_t target_a;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_query_agent_isa_target(libhsa, isa_a, &target_a));
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_query_agent_isa_target(
+      libhsa, agent_a, isa_a, &target_a));
   iree_hal_amdgpu_agent_isa_target_t target_b;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_query_agent_isa_target(libhsa, isa_b, &target_b));
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_query_agent_isa_target(
+      libhsa, agent_b, isa_b, &target_b));
 
   iree_hal_amdgpu_target_compatibility_t mismatch =
       IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE;
@@ -127,6 +145,10 @@ static iree_status_t iree_hal_amdgpu_verify_isas_equal(
   }
   if (target_a.target_id.xnack != target_b.target_id.xnack) {
     mismatch |= IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_XNACK;
+  }
+  if (target_a.target_id.gfx1250_b0_specific !=
+      target_b.target_id.gfx1250_b0_specific) {
+    mismatch |= IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GFX1250_REVISION;
   }
   if (mismatch != IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE) {
     char target_a_string[128] = {0};
@@ -191,8 +213,9 @@ iree_status_t iree_hal_amdgpu_verify_device_isa_commonality(
     for (iree_host_size_t j = 0; j < expected_isas.count; ++j) {
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0, iree_hal_amdgpu_verify_isas_equal(
-                  libhsa, /*agent_a_ordinal=*/0, expected_isas.values[j],
-                  /*agent_b_ordinal=*/i, available_isas.values[j],
+                  libhsa, /*agent_a_ordinal=*/0, topology->gpu_agents[0],
+                  expected_isas.values[j], /*agent_b_ordinal=*/i,
+                  topology->gpu_agents[i], available_isas.values[j],
                   /*isa_ordinal=*/j));
     }
   }
@@ -231,7 +254,7 @@ iree_status_t iree_hal_amdgpu_executable_target_supported(
   for (iree_host_size_t i = 0; i < available_isas.count; ++i) {
     iree_hal_amdgpu_agent_isa_target_t isa_target;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_query_agent_isa_target(
-        libhsa, available_isas.values[i], &isa_target));
+        libhsa, device_agent, available_isas.values[i], &isa_target));
     if (iree_hal_amdgpu_target_id_check_compatible(&requested_target_id,
                                                    &isa_target.target_id) ==
         IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE) {
@@ -342,7 +365,7 @@ static iree_status_t iree_hal_amdgpu_executable_preflight_agent_code_object(
   for (iree_host_size_t i = 0; i < available_isas.count; ++i) {
     iree_hal_amdgpu_agent_isa_target_t isa_target;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_query_agent_isa_target(
-        libhsa, available_isas.values[i], &isa_target));
+        libhsa, device_agent, available_isas.values[i], &isa_target));
     const iree_hal_amdgpu_target_compatibility_t compatibility =
         iree_hal_amdgpu_target_id_check_compatible(code_object_target_id,
                                                    &isa_target.target_id);
@@ -2299,8 +2322,9 @@ iree_status_t iree_hal_amdgpu_executable_create(
                                               &limits));
 
   iree_hal_amdgpu_agent_isa_target_t agent_isa_target;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_amdgpu_query_agent_isa_target(
-                                            libhsa, isa, &agent_isa_target));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_amdgpu_query_agent_isa_target(libhsa, any_device_agent, isa,
+                                                 &agent_isa_target));
   const iree_hal_amdgpu_gfxip_version_t gfxip_version =
       agent_isa_target.target_id.version;
 

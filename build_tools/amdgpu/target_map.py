@@ -76,6 +76,7 @@ EXACT_TARGET_CODE_OBJECTS = (
 
 FEATURE_SRAMECC = "sramecc"
 FEATURE_XNACK = "xnack"
+FEATURE_GFX1250_B0_SPECIFIC = "gfx1250-b0-specific"
 
 # Feature support follows ROCr's ISA registry. A target absent from a feature
 # set does not support that feature; supported targets may still select an
@@ -97,6 +98,7 @@ TARGET_FEATURE_SUPPORT = {
     "gfx1011": (FEATURE_XNACK,),
     "gfx1012": (FEATURE_XNACK,),
     "gfx1013": (FEATURE_XNACK,),
+    "gfx1250": (FEATURE_GFX1250_B0_SPECIFIC,),
 }
 
 ELF_MACHINE_PROCESSORS = (
@@ -560,6 +562,9 @@ def render_target_id_inl(repo_root):
     feature_flag_names = {
         FEATURE_SRAMECC: "IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_SRAMECC",
         FEATURE_XNACK: "IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_XNACK",
+        FEATURE_GFX1250_B0_SPECIFIC: (
+            "IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_GFX1250_B0_SPECIFIC"
+        ),
     }
     processor_info_rows, supports_wavefront_size = import_loom_target_info(repo_root)
     processor_infos = {info.processor: info for info in processor_info_rows}

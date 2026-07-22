@@ -80,6 +80,13 @@ static bool iree_hal_amdgpu_parse_hex_digit(char c, uint32_t* out_value) {
   return false;
 }
 
+// Public HSA AMD agent attribute used to distinguish ASIC revisions. The local
+// name keeps this driver buildable against older HSA SDK headers while using
+// the stable numeric ABI accepted by hsa_agent_get_info.
+enum {
+  IREE_HAL_AMDGPU_AGENT_INFO_ASIC_REVISION = 0xA012,
+};
+
 static iree_status_t iree_hal_amdgpu_query_agent_target_id(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
     iree_host_size_t target_id_processor_capacity,
@@ -116,6 +123,15 @@ static iree_status_t iree_hal_amdgpu_query_agent_target_id(
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_parse_hsa_isa_name(
       iree_make_string_view(isa_name_buffer, isa_name_length - /*NUL*/ 1),
       &target_id));
+  if (iree_string_view_equal(target_id.processor, IREE_SV("gfx1250"))) {
+    uint32_t asic_revision = 0;
+    IREE_RETURN_IF_ERROR(iree_hsa_agent_get_info(
+        IREE_LIBHSA(libhsa), agent,
+        (hsa_agent_info_t)IREE_HAL_AMDGPU_AGENT_INFO_ASIC_REVISION,
+        &asic_revision));
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_apply_asic_revision(
+        asic_revision, &target_id));
+  }
   if (target_id.processor.size >= target_id_processor_capacity) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "target ID processor storage too small");
