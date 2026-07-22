@@ -406,6 +406,26 @@ static iree_status_t iree_hal_mock_executable_try_lookup_global_by_name(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_mock_executable_global_count(
+    iree_hal_executable_t* base_executable, iree_host_size_t* out_count) {
+  (void)base_executable;
+  *out_count = 0;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "mock executable global enumeration is not supported");
+}
+
+static iree_status_t iree_hal_mock_executable_global_info_by_index(
+    iree_hal_executable_t* base_executable, iree_host_size_t index,
+    iree_hal_executable_global_info_t* out_info) {
+  (void)base_executable;
+  (void)index;
+  memset(out_info, 0, sizeof(*out_info));
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "mock executable global enumeration is not supported");
+}
+
 static iree_status_t iree_hal_mock_executable_global_info(
     iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
     iree_hal_executable_global_info_t* out_info) {
@@ -462,6 +482,8 @@ static const iree_hal_executable_vtable_t iree_hal_mock_executable_vtable = {
         iree_hal_mock_executable_try_lookup_global_by_name,
     .global_info = iree_hal_mock_executable_global_info,
     .global_buffer = iree_hal_mock_executable_global_buffer,
+    .global_count = iree_hal_mock_executable_global_count,
+    .global_info_by_index = iree_hal_mock_executable_global_info_by_index,
 };
 
 //===----------------------------------------------------------------------===//

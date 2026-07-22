@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "common/module_runtime_metadata.h"
+
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
@@ -18,6 +20,13 @@
 //===----------------------------------------------------------------------===//
 // Runtime Parameter Slots
 //===----------------------------------------------------------------------===//
+
+bool iree_hal_streaming_symbol_uses_runtime_services(
+    const iree_hal_streaming_symbol_t* symbol, bool enable_printf) {
+  return (enable_printf && symbol->runtime_services.printf_buffer.present) ||
+         symbol->runtime_services.hostcall_buffer.present ||
+         symbol->runtime_services.heap_v1.present;
+}
 
 static iree_status_t iree_hal_streaming_module_set_runtime_service_slot(
     iree_string_view_t name,
@@ -456,7 +465,8 @@ iree_status_t iree_hal_streaming_symbol_prepare_runtime_dispatch_config(
   if (iree_status_is_ok(status) &&
       symbol->runtime_services.hostcall_buffer.present) {
     uint64_t hostcall_buffer_device_ptr =
-        iree_hal_streaming_context_cached_rocm_hostcall_buffer(context);
+        iree_hal_streaming_rocm_device_runtime_cached_hostcall_buffer(
+            &context->rocm_device_runtime);
     if (hostcall_buffer_device_ptr == 0) {
       status = iree_hal_streaming_context_rocm_hostcall_buffer(
           context, &hostcall_buffer_device_ptr);
@@ -470,7 +480,8 @@ iree_status_t iree_hal_streaming_symbol_prepare_runtime_dispatch_config(
 
   if (iree_status_is_ok(status) && symbol->runtime_services.heap_v1.present) {
     uint64_t heap_device_ptr =
-        iree_hal_streaming_context_cached_rocm_malloc_heap(context);
+        iree_hal_streaming_rocm_device_runtime_cached_heap(
+            &context->rocm_device_runtime);
     if (heap_device_ptr == 0) {
       status = iree_hal_streaming_context_rocm_device_malloc_heap(
           context, &heap_device_ptr);
@@ -542,40 +553,6 @@ static iree_host_size_t iree_hal_streaming_module_executable_count(
 static iree_hal_executable_t* iree_hal_streaming_module_executable_at(
     const iree_hal_streaming_module_t* module, iree_host_size_t index) {
   return module->executables ? module->executables[index] : module->executable;
-}
-
-iree_status_t iree_hal_streaming_printf_parse_metadata_record(
-    iree_string_view_t record, uint64_t* out_hash,
-    iree_string_view_t* out_format) {
-  *out_hash = 0;
-  *out_format = iree_string_view_empty();
-
-  if (!iree_string_view_consume_prefix(&record, IREE_SV("0:0:"))) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "printf metadata record must start with fixed `0:0:` fields");
-  }
-  iree_host_size_t comma = iree_string_view_find_char(record, ',', 0);
-  if (comma == IREE_STRING_VIEW_NPOS || comma == 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "printf metadata record is missing hash/format delimiter");
-  }
-  iree_string_view_t hash_text = iree_string_view_substr(record, 0, comma);
-  if (hash_text.size > 16) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "printf metadata hash exceeds 64 bits");
-  }
-  uint64_t hash = 0;
-  if (!iree_string_view_atoi_uint64_base(hash_text, 16, &hash)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "printf metadata hash is not hexadecimal");
-  }
-
-  *out_hash = hash;
-  *out_format =
-      iree_string_view_substr(record, comma + 1, IREE_STRING_VIEW_NPOS);
-  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_streaming_printf_metadata_count(

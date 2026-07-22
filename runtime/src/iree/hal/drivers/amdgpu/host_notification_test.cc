@@ -54,13 +54,15 @@ TEST_F(HostNotificationTest, WakeReleasesBlockedWait) {
 
   uint64_t observed_value = IREE_HAL_HOST_NOTIFICATION_INITIAL_VALUE;
   std::thread waiter([&]() {
-    observed_value = iree_hal_host_notification_wait(
-        notification, IREE_HAL_HOST_NOTIFICATION_INITIAL_VALUE);
+    while (observed_value == IREE_HAL_HOST_NOTIFICATION_INITIAL_VALUE) {
+      observed_value =
+          iree_hal_host_notification_wait(notification, observed_value);
+    }
   });
   iree_hal_host_notification_wake(notification);
   waiter.join();
 
-  EXPECT_EQ(IREE_HAL_HOST_NOTIFICATION_INITIAL_VALUE + 1, observed_value);
+  EXPECT_NE(IREE_HAL_HOST_NOTIFICATION_INITIAL_VALUE, observed_value);
   iree_hal_host_notification_release(notification);
 }
 

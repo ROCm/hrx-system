@@ -409,18 +409,21 @@ static void AlignVector(std::vector<uint8_t>* output, size_t alignment) {
 
 static void AppendElf64Symbol(std::vector<uint8_t>* output,
                               uint32_t name_offset, uint8_t info,
-                              uint16_t section_index = 1) {
+                              uint16_t section_index = 1,
+                              uint64_t byte_length = 0) {
   size_t symbol_offset = output->size();
   output->resize(symbol_offset + 24, 0);
   StoreU32LE(output, symbol_offset + 0, name_offset);
   (*output)[symbol_offset + 4] = info;
   StoreU16LE(output, symbol_offset + 6, section_index);
+  StoreU64LE(output, symbol_offset + 16, byte_length);
 }
 
 static std::vector<uint8_t> AddSyntheticCandidateSymbolSection(
     std::vector<uint8_t> elf, uint8_t descriptor_info = 0x11,
     uint16_t function_section_index = 1) {
   constexpr uint8_t kGlobalFunction = 0x12;  // STB_GLOBAL | STT_FUNC.
+  constexpr uint8_t kGlobalObject = 0x11;    // STB_GLOBAL | STT_OBJECT.
   constexpr size_t kSectionHeaderSize = 64;
 
   const size_t string_offset = elf.size();
@@ -434,6 +437,10 @@ static std::vector<uint8_t> AddSyntheticCandidateSymbolSection(
   const char kDescriptorName[] = "extra_kernel.kd";
   elf.insert(elf.end(), kDescriptorName,
              kDescriptorName + sizeof(kDescriptorName));
+  const uint32_t global_name_offset =
+      static_cast<uint32_t>(elf.size() - string_offset);
+  const char kGlobalName[] = "managed_value.managed";
+  elf.insert(elf.end(), kGlobalName, kGlobalName + sizeof(kGlobalName));
   const size_t string_size = elf.size() - string_offset;
 
   AlignVector(&elf, 8);
@@ -442,6 +449,8 @@ static std::vector<uint8_t> AddSyntheticCandidateSymbolSection(
   AppendElf64Symbol(&elf, function_name_offset, kGlobalFunction,
                     function_section_index);
   AppendElf64Symbol(&elf, descriptor_name_offset, descriptor_info);
+  AppendElf64Symbol(&elf, global_name_offset, kGlobalObject,
+                    /*section_index=*/1, /*byte_length=*/4096);
   const size_t symbol_size = elf.size() - symbol_offset;
 
   AlignVector(&elf, 8);
@@ -693,6 +702,10 @@ TEST(HsacoMetadataTest, DiscoversElfSymbolsWithoutSynthesizingKernels) {
   EXPECT_EQ(ToString(metadata.elf_kernel_symbols[0].name), "extra_kernel");
   EXPECT_EQ(ToString(metadata.elf_kernel_symbols[0].symbol_name),
             "extra_kernel.kd");
+  ASSERT_EQ(metadata.elf_global_symbol_count, 1);
+  EXPECT_EQ(ToString(metadata.elf_global_symbols[0].name),
+            "managed_value.managed");
+  EXPECT_EQ(metadata.elf_global_symbols[0].byte_length, 4096);
 
   iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);
 }

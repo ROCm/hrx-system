@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "common/memory.h"
+
 #include "common/direct_transfer.h"
 #include "common/graph.h"
 #include "common/internal.h"
@@ -1039,9 +1041,6 @@ iree_hal_streaming_memory_allocate_owned_host_import_with_context_mode(
   iree_status_t status = iree_allocator_malloc_aligned(
       context->host_allocator, allocation_size, host_alignment,
       /*offset=*/0, &host_ptr);
-  if (iree_status_is_ok(status)) {
-    memset(host_ptr, 0, allocation_size);
-  }
 
   iree_hal_buffer_t* buffer = NULL;
   if (iree_status_is_ok(status)) {

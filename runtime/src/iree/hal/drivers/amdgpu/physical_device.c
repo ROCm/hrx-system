@@ -419,7 +419,6 @@ static iree_status_t iree_hal_amdgpu_physical_device_initialize_identity(
   // Zeroing allows deinitialization to run after any partial initialization
   // failure below.
   memset(out_physical_device, 0, sizeof(*out_physical_device));
-  out_physical_device->libhsa = libhsa;
   out_physical_device->device_agent = device_agent;
   out_physical_device->device_ordinal = device_ordinal;
   out_physical_device->host_memory_pools = *host_memory_pools;

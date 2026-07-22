@@ -375,6 +375,23 @@ iree_hal_replay_recorder_executable_try_lookup_global_by_name(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_replay_recorder_executable_global_count(
+    iree_hal_executable_t* base_executable, iree_host_size_t* out_count) {
+  iree_hal_replay_recorder_executable_t* executable =
+      iree_hal_replay_recorder_executable_cast(base_executable);
+  return iree_hal_executable_global_count(executable->base_executable,
+                                          out_count);
+}
+
+static iree_status_t iree_hal_replay_recorder_executable_global_info_by_index(
+    iree_hal_executable_t* base_executable, iree_host_size_t index,
+    iree_hal_executable_global_info_t* out_info) {
+  iree_hal_replay_recorder_executable_t* executable =
+      iree_hal_replay_recorder_executable_cast(base_executable);
+  return iree_hal_executable_global_info_by_index(executable->base_executable,
+                                                  index, out_info);
+}
+
 static iree_status_t iree_hal_replay_recorder_executable_global_info(
     iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
     iree_hal_executable_global_info_t* out_info) {
@@ -861,4 +878,7 @@ static const iree_hal_executable_vtable_t
             iree_hal_replay_recorder_executable_try_lookup_global_by_name,
         .global_info = iree_hal_replay_recorder_executable_global_info,
         .global_buffer = iree_hal_replay_recorder_executable_global_buffer,
+        .global_count = iree_hal_replay_recorder_executable_global_count,
+        .global_info_by_index =
+            iree_hal_replay_recorder_executable_global_info_by_index,
 };

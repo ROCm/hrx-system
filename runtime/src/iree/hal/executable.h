@@ -349,6 +349,23 @@ IREE_API_EXPORT iree_status_t iree_hal_executable_lookup_function_by_name(
     iree_hal_executable_t* executable, iree_string_view_t name,
     iree_hal_executable_function_t* out_function);
 
+// Returns the number of global variable declarations in |executable|.
+//
+// Implementations that can resolve globals by name but cannot enumerate their
+// executable format return IREE_STATUS_UNIMPLEMENTED.
+IREE_API_EXPORT iree_status_t iree_hal_executable_global_count(
+    iree_hal_executable_t* executable, iree_host_size_t* out_count);
+
+// Returns declaration information for the global at |index|.
+//
+// Indices are dense in [0, global_count). Returned string storage is owned by
+// |executable| and remains valid while the executable remains live. This does
+// not resolve the declaration to a device-specific global handle; callers use
+// iree_hal_executable_try_lookup_global_by_name when they need storage.
+IREE_API_EXPORT iree_status_t iree_hal_executable_global_info_by_index(
+    iree_hal_executable_t* executable, iree_host_size_t index,
+    iree_hal_executable_global_info_t* out_info);
+
 // Finds the executable global variable with the given |name|.
 //
 // The returned global is an executable-local handle. It remains valid while the
@@ -438,6 +455,13 @@ typedef struct iree_hal_executable_vtable_t {
   iree_status_t(IREE_API_PTR* global_buffer)(
       iree_hal_executable_t* executable, iree_hal_executable_global_t global,
       iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer);
+
+  iree_status_t(IREE_API_PTR* global_count)(iree_hal_executable_t* executable,
+                                            iree_host_size_t* out_count);
+
+  iree_status_t(IREE_API_PTR* global_info_by_index)(
+      iree_hal_executable_t* executable, iree_host_size_t index,
+      iree_hal_executable_global_info_t* out_info);
 } iree_hal_executable_vtable_t;
 IREE_HAL_ASSERT_VTABLE_LAYOUT(iree_hal_executable_vtable_t);
 

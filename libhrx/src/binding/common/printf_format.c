@@ -24,6 +24,40 @@ static iree_host_size_t iree_hal_streaming_printf_align8(
   return (value + 7u) & ~(iree_host_size_t)7u;
 }
 
+iree_status_t iree_hal_streaming_printf_parse_metadata_record(
+    iree_string_view_t record, uint64_t* out_hash,
+    iree_string_view_t* out_format) {
+  *out_hash = 0;
+  *out_format = iree_string_view_empty();
+
+  if (!iree_string_view_consume_prefix(&record, IREE_SV("0:0:"))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "printf metadata record must start with fixed `0:0:` fields");
+  }
+  iree_host_size_t comma = iree_string_view_find_char(record, ',', 0);
+  if (comma == IREE_STRING_VIEW_NPOS || comma == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "printf metadata record is missing hash/format delimiter");
+  }
+  iree_string_view_t hash_text = iree_string_view_substr(record, 0, comma);
+  if (hash_text.size > 16) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "printf metadata hash exceeds 64 bits");
+  }
+  uint64_t hash = 0;
+  if (!iree_string_view_atoi_uint64_base(hash_text, 16, &hash)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "printf metadata hash is not hexadecimal");
+  }
+
+  *out_hash = hash;
+  *out_format =
+      iree_string_view_substr(record, comma + 1, IREE_STRING_VIEW_NPOS);
+  return iree_ok_status();
+}
+
 static bool iree_hal_streaming_printf_write(FILE* stream, int* out_count,
                                             const char* format, ...) {
   va_list args;

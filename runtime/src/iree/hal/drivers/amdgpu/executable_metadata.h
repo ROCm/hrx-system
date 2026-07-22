@@ -78,6 +78,8 @@ typedef struct iree_hal_amdgpu_executable_metadata_counts_t {
   iree_host_size_t printf_record_count;
   // Total byte capacity required for immutable kernarg layout records.
   iree_host_size_t layout_blob_byte_length;
+  // Number of executable global declarations.
+  iree_host_size_t global_count;
 } iree_hal_amdgpu_executable_metadata_counts_t;
 
 // Cold reflected metadata for one executable export.
@@ -156,6 +158,10 @@ typedef struct iree_hal_amdgpu_executable_metadata_t {
   iree_host_size_t printf_record_count;
   // Raw `amdhsa.printf` metadata records.
   iree_string_view_t* printf_records;
+  // Number of executable global declarations.
+  iree_host_size_t global_count;
+  // Executable global declarations.
+  iree_hal_executable_global_info_t* globals;
   // Total byte capacity of layout_blob.
   iree_host_size_t layout_blob_capacity;
   // Number of bytes already allocated from layout_blob.

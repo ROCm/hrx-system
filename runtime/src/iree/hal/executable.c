@@ -106,6 +106,24 @@ IREE_API_EXPORT iree_status_t iree_hal_executable_lookup_function_by_name(
   return status;
 }
 
+IREE_API_EXPORT iree_status_t iree_hal_executable_global_count(
+    iree_hal_executable_t* executable, iree_host_size_t* out_count) {
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_count);
+  *out_count = 0;
+  return _VTABLE_DISPATCH(executable, global_count)(executable, out_count);
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_executable_global_info_by_index(
+    iree_hal_executable_t* executable, iree_host_size_t index,
+    iree_hal_executable_global_info_t* out_info) {
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_info);
+  memset(out_info, 0, sizeof(*out_info));
+  return _VTABLE_DISPATCH(executable, global_info_by_index)(executable, index,
+                                                            out_info);
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_executable_try_lookup_global_by_name(
     iree_hal_executable_t* executable, iree_string_view_t name, bool* out_found,
     iree_hal_executable_global_t* out_global) {

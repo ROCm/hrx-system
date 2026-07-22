@@ -733,6 +733,11 @@ static iree_status_t iree_hal_deferred_command_buffer_dispatch(
   cmd->export_ordinal = export_ordinal;
   iree_hal_dispatch_config_clone(config, &cmd->runtime_parameters,
                                  &cmd->config);
+  IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert_strided(
+      command_buffer->resource_set, cmd->runtime_parameters.count,
+      cmd->runtime_parameters.patches,
+      offsetof(iree_hal_dispatch_runtime_parameter_patch_t, resource),
+      sizeof(cmd->runtime_parameters.patches[0])));
   cmd->flags = flags;
 
   uint8_t* cmd_base = (uint8_t*)cmd;

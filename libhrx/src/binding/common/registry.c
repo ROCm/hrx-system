@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "common/registry.h"
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -991,13 +993,18 @@ static void iree_hal_streaming_context_symbol_map_expunge_module(
 iree_status_t iree_hal_streaming_context_symbol_map_synchronize_managed_data(
     iree_hal_streaming_context_symbol_map_t* map) {
   IREE_ASSERT_ARGUMENT(map);
-  if (map->managed_symbol_count == 0) return iree_ok_status();
+  iree_hal_streaming_global_symbol_registry_t* registry = map->registry;
+  iree_slim_mutex_lock(&registry->mutex);
 
+  iree_status_t status = iree_ok_status();
   for (iree_hal_streaming_context_module_entry_t* module_entry = map->modules;
-       module_entry; module_entry = module_entry->next) {
+       map->managed_symbol_count != 0 && iree_status_is_ok(status) &&
+       module_entry;
+       module_entry = module_entry->next) {
     iree_hal_streaming_module_registration_t* registration =
         module_entry->registration;
-    for (iree_host_size_t i = 0; i < registration->symbol_count; ++i) {
+    for (iree_host_size_t i = 0;
+         iree_status_is_ok(status) && i < registration->symbol_count; ++i) {
       iree_hal_streaming_symbol_registration_t* symbol_registration =
           &registration->symbols[i];
       if (symbol_registration->type != IREE_HAL_STREAMING_SYMBOL_TYPE_DATA) {
@@ -1018,25 +1025,28 @@ iree_status_t iree_hal_streaming_context_symbol_map_synchronize_managed_data(
 
       iree_hal_streaming_symbol_t* symbol = entry->symbol;
       if (!symbol || !symbol->global_buffer || !symbol->global_buffer->buffer) {
-        return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                                "managed symbol `%s` has no HAL buffer",
-                                symbol_registration->device_name);
+        status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                  "managed symbol `%s` has no HAL buffer",
+                                  symbol_registration->device_name);
+        break;
       }
       if (byte_length > (size_t)symbol->size_bytes) {
-        return iree_make_status(
+        status = iree_make_status(
             IREE_STATUS_OUT_OF_RANGE,
             "managed symbol `%s` is too small (%zu requested, %" PRIu64
             " available)",
             symbol_registration->device_name, byte_length,
             (uint64_t)symbol->size_bytes);
+        break;
       }
 
-      IREE_RETURN_IF_ERROR(iree_hal_streaming_direct_transfer_d2h(
+      status = iree_hal_streaming_direct_transfer_d2h(
           map->context, symbol->global_buffer->buffer, /*source_offset=*/0,
-          host_target, byte_length));
+          host_target, byte_length);
     }
   }
-  return iree_ok_status();
+  iree_slim_mutex_unlock(&registry->mutex);
+  return status;
 }
 
 iree_status_t iree_hal_streaming_context_symbol_map_lookup(

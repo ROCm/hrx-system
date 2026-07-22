@@ -321,6 +321,7 @@ iree_status_t iree_hal_amdgpu_executable_metadata_calculate_hsaco_counts(
                             "AMDGPU metadata export count overflow");
   }
   out_counts->printf_record_count = hsaco_metadata->printf_record_count;
+  out_counts->global_count = hsaco_metadata->elf_global_symbol_count;
 
   for (iree_host_size_t i = 0; i < hsaco_metadata->kernel_count; ++i) {
     iree_hal_amdgpu_hsaco_kernel_load_plan_t load_plan;
@@ -554,6 +555,7 @@ iree_status_t iree_hal_amdgpu_executable_metadata_populate_from_hsaco(
           metadata->parameter_count < counts.parameter_count ||
           metadata->runtime_parameter_count < counts.runtime_parameter_count ||
           metadata->printf_record_count < counts.printf_record_count ||
+          metadata->global_count != counts.global_count ||
           metadata->layout_blob_capacity < counts.layout_blob_byte_length)) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -583,6 +585,16 @@ iree_status_t iree_hal_amdgpu_executable_metadata_populate_from_hsaco(
         iree_hal_amdgpu_hsaco_loaded_code_object_rebase_string_view(
             &rebase, "printf record", hsaco_metadata->printf_records[i].value,
             &metadata->printf_records[i]));
+  }
+  for (iree_host_size_t i = 0; i < hsaco_metadata->elf_global_symbol_count;
+       ++i) {
+    const iree_hal_amdgpu_hsaco_metadata_elf_global_symbol_t* source_global =
+        &hsaco_metadata->elf_global_symbols[i];
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_hsaco_loaded_code_object_rebase_string_view(
+            &rebase, "ELF global name", source_global->name,
+            &metadata->globals[i].name));
+    metadata->globals[i].byte_length = source_global->byte_length;
   }
 
   iree_host_size_t parameter_offset = 0;

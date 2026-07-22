@@ -2821,6 +2821,27 @@ static iree_status_t iree_hal_amdgpu_executable_lookup_export_by_name(
                           (int)name.size, name.data);
 }
 
+static iree_status_t iree_hal_amdgpu_executable_global_count(
+    iree_hal_executable_t* base_executable, iree_host_size_t* out_count) {
+  iree_hal_amdgpu_executable_t* executable =
+      iree_hal_amdgpu_executable_cast(base_executable);
+  *out_count = executable->metadata->global_count;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amdgpu_executable_global_info_by_index(
+    iree_hal_executable_t* base_executable, iree_host_size_t index,
+    iree_hal_executable_global_info_t* out_info) {
+  iree_hal_amdgpu_executable_t* executable =
+      iree_hal_amdgpu_executable_cast(base_executable);
+  if (IREE_UNLIKELY(index >= executable->metadata->global_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU executable global index out of range");
+  }
+  *out_info = executable->metadata->globals[index];
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_amdgpu_executable_try_lookup_global_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
     bool* out_found, iree_hal_executable_global_t* out_global) {
@@ -2890,4 +2911,6 @@ static const iree_hal_executable_vtable_t iree_hal_amdgpu_executable_vtable = {
         iree_hal_amdgpu_executable_try_lookup_global_by_name,
     .global_info = iree_hal_amdgpu_executable_global_info,
     .global_buffer = iree_hal_amdgpu_executable_global_buffer,
+    .global_count = iree_hal_amdgpu_executable_global_count,
+    .global_info_by_index = iree_hal_amdgpu_executable_global_info_by_index,
 };

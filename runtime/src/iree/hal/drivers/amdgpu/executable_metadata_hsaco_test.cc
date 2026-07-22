@@ -465,6 +465,11 @@ TEST(ExecutableMetadataHsacoTest, PopulatesElfOnlyCustomDirectExport) {
       /*.symbol_name=*/
       ViewFromCodeObjectData(source_code_object_data, "direct.kd"),
   };
+  iree_hal_amdgpu_hsaco_metadata_elf_global_symbol_t global = {
+      /*.name=*/
+      ViewFromCodeObjectData(source_code_object_data, "global_buffer"),
+      /*.byte_length=*/256,
+  };
   iree_hal_amdgpu_hsaco_metadata_t hsaco_metadata = {
       /*.host_allocator=*/{},
       /*.elf_data=*/source_code_object_data,
@@ -476,6 +481,12 @@ TEST(ExecutableMetadataHsacoTest, PopulatesElfOnlyCustomDirectExport) {
       /*.kernels=*/{},
       /*.elf_kernel_symbol_count=*/1,
       /*.elf_kernel_symbols=*/&symbol,
+      /*.printf_record_count=*/{},
+      /*.printf_records=*/{},
+      /*.arg_count=*/{},
+      /*.args=*/{},
+      /*.elf_global_symbol_count=*/1,
+      /*.elf_global_symbols=*/&global,
   };
 
   iree_hal_amdgpu_executable_metadata_counts_t counts;
@@ -483,6 +494,7 @@ TEST(ExecutableMetadataHsacoTest, PopulatesElfOnlyCustomDirectExport) {
       &hsaco_metadata, &counts));
   EXPECT_EQ(counts.export_count, 1);
   EXPECT_EQ(counts.parameter_count, 0);
+  EXPECT_EQ(counts.global_count, 1);
   EXPECT_EQ(counts.layout_blob_byte_length, 0);
 
   iree_hal_amdgpu_executable_metadata_t* metadata =
@@ -493,6 +505,10 @@ TEST(ExecutableMetadataHsacoTest, PopulatesElfOnlyCustomDirectExport) {
                     metadata->reflection[0].name);
   ExpectRebasedView(loaded_code_object_data, symbol.symbol_name,
                     metadata->reflection[0].symbol_name);
+  ASSERT_EQ(metadata->global_count, 1);
+  ExpectRebasedView(loaded_code_object_data, global.name,
+                    metadata->globals[0].name);
+  EXPECT_EQ(metadata->globals[0].byte_length, 256);
   EXPECT_TRUE(iree_all_bits_set(
       metadata->exports[0].flags,
       IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_CUSTOM_DIRECT_ONLY |

@@ -3,7 +3,10 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 
+#include "common/rocm_hostcall.h"
+
 #include "common/internal.h"
+#include "common/rocm_hostcall_message.h"
 #include "common/rocm_hostcall_packet.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -38,6 +41,68 @@ TEST(RocmHostcallTest, MasksTaggedPacketIndexesWithHostAllocationSize) {
   ASSERT_TRUE(iree_hal_streaming_hostcall_packet_iterator_advance(
       &iterator, &packet_index));
   EXPECT_EQ(3u, packet_index);
+}
+
+TEST(RocmHostcallTest, RejectsMessagesOverAllocationLimit) {
+  iree_hal_streaming_hostcall_message_table_t table;
+  iree_hal_streaming_hostcall_message_table_initialize(iree_allocator_system(),
+                                                       &table);
+
+  constexpr iree_host_size_t kFragmentQwordCount = 7;
+  constexpr iree_host_size_t kMaximumQwordCount =
+      IREE_HAL_STREAMING_HOSTCALL_MAX_MESSAGE_BYTES / sizeof(uint64_t);
+  uint64_t payload[8] = {};
+  payload[0] = (kFragmentQwordCount << 5) | 1u;
+  ASSERT_TRUE(
+      iree_hal_streaming_hostcall_message_handle_printf(&table, payload));
+  const uint64_t continuation_descriptor = payload[0];
+
+  const iree_host_size_t successful_fragment_count =
+      kMaximumQwordCount / kFragmentQwordCount;
+  for (iree_host_size_t i = 1; i < successful_fragment_count; ++i) {
+    payload[0] = continuation_descriptor;
+    ASSERT_TRUE(
+        iree_hal_streaming_hostcall_message_handle_printf(&table, payload));
+  }
+  payload[0] = continuation_descriptor;
+  EXPECT_FALSE(
+      iree_hal_streaming_hostcall_message_handle_printf(&table, payload));
+  EXPECT_EQ(UINT64_MAX, payload[0]);
+
+  iree_hal_streaming_hostcall_message_table_deinitialize(&table);
+}
+
+TEST(RocmHostcallTest, RejectsUnknownMessageId) {
+  iree_hal_streaming_hostcall_message_table_t table;
+  iree_hal_streaming_hostcall_message_table_initialize(iree_allocator_system(),
+                                                       &table);
+
+  uint64_t payload[8] = {};
+  payload[0] = UINT64_C(42) << 8;
+  EXPECT_FALSE(
+      iree_hal_streaming_hostcall_message_handle_printf(&table, payload));
+  EXPECT_EQ(UINT64_MAX, payload[0]);
+
+  iree_hal_streaming_hostcall_message_table_deinitialize(&table);
+}
+
+TEST(RocmHostcallTest, ReusesDiscardedMessageIds) {
+  iree_hal_streaming_hostcall_message_table_t table;
+  iree_hal_streaming_hostcall_message_table_initialize(iree_allocator_system(),
+                                                       &table);
+
+  uint64_t payload[8] = {};
+  payload[0] = 3u;
+  EXPECT_FALSE(
+      iree_hal_streaming_hostcall_message_handle_printf(&table, payload));
+  ASSERT_EQ(1u, table.count);
+
+  payload[0] = 1u;
+  EXPECT_TRUE(
+      iree_hal_streaming_hostcall_message_handle_printf(&table, payload));
+  EXPECT_EQ(1u, table.count);
+
+  iree_hal_streaming_hostcall_message_table_deinitialize(&table);
 }
 
 TEST(RocmHostcallTest, RoundsResidentWavesToPowerOfTwo) {

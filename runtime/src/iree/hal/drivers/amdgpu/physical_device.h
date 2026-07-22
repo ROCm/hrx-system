@@ -187,8 +187,6 @@ iree_status_t iree_hal_amdgpu_physical_device_options_verify(
 // A physical device representing an HSA GPU agent.
 // May contain one or more HAL queues that map to HSA queues on the agent.
 typedef struct iree_hal_amdgpu_physical_device_t {
-  // HSA API handle used for physical-device-owned raw HSA allocations.
-  const iree_hal_amdgpu_libhsa_t* libhsa;
   // GPU agent.
   hsa_agent_t device_agent;
   // Ordinal of the GPU agent within the topology.

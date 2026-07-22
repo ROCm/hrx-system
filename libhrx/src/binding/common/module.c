@@ -13,107 +13,6 @@
 #include "iree/io/file_handle.h"
 
 //===----------------------------------------------------------------------===//
-// AMDGPU ELF symbol scanning
-//===----------------------------------------------------------------------===//
-
-#define HRX_MODULE_ELF_MAGIC_INT 0x464c457fu  // 0x7f 'E' 'L' 'F'
-#define HRX_MODULE_ELFCLASS64 2
-#define HRX_MODULE_ELFDATA2LSB 1
-#define HRX_MODULE_SHT_SYMTAB 2
-#define HRX_MODULE_SHT_DYNSYM 11
-#define HRX_MODULE_STB_GLOBAL 1
-#define HRX_MODULE_STB_WEAK 2
-#define HRX_MODULE_STT_OBJECT 1
-#define HRX_MODULE_SHN_UNDEF 0
-
-typedef struct hrx_module_elf64_header_t {
-  // ELF ident bytes.
-  uint8_t magic[4];
-  // ELF class; HRX only accepts ELFCLASS64 here.
-  uint8_t elf_class;
-  // ELF data encoding; HRX only accepts little-endian here.
-  uint8_t elf_data;
-  // ELF ident version byte.
-  uint8_t elf_version;
-  // ELF OS ABI byte.
-  uint8_t osabi;
-  // ELF ABI version byte.
-  uint8_t abiversion;
-  // Remaining ELF ident padding.
-  uint8_t padding[7];
-  // ELF object type.
-  uint16_t type;
-  // ELF target machine.
-  uint16_t machine;
-  // ELF object version.
-  uint32_t version;
-  // Entry point address.
-  uint64_t entry;
-  // Program header table file offset.
-  uint64_t phoff;
-  // Section header table file offset.
-  uint64_t shoff;
-  // Target-specific ELF flags.
-  uint32_t flags;
-  // ELF header byte size.
-  uint16_t ehsize;
-  // Program header entry byte size.
-  uint16_t phentsize;
-  // Program header entry count.
-  uint16_t phnum;
-  // Section header entry byte size.
-  uint16_t shentsize;
-  // Section header entry count.
-  uint16_t shnum;
-  // Section-name string table section index.
-  uint16_t shstrndx;
-} hrx_module_elf64_header_t;
-static_assert(sizeof(hrx_module_elf64_header_t) == 64,
-              "ELF64 header must be 64 bytes");
-
-typedef struct hrx_module_elf64_section_header_t {
-  // Section name string-table offset.
-  uint32_t name;
-  // Section type.
-  uint32_t type;
-  // Section flags.
-  uint64_t flags;
-  // Section virtual address.
-  uint64_t address;
-  // Section file offset.
-  uint64_t offset;
-  // Section byte length.
-  uint64_t size;
-  // Section-specific linked section index.
-  uint32_t link;
-  // Section-specific extra info.
-  uint32_t info;
-  // Section alignment.
-  uint64_t address_alignment;
-  // Entry byte size for table sections.
-  uint64_t entry_size;
-} hrx_module_elf64_section_header_t;
-static_assert(sizeof(hrx_module_elf64_section_header_t) == 64,
-              "ELF64 section header must be 64 bytes");
-
-typedef struct hrx_module_elf64_symbol_t {
-  // Symbol name string-table offset.
-  uint32_t name;
-  // Symbol binding/type byte.
-  uint8_t info;
-  // Symbol visibility byte.
-  uint8_t other;
-  // Defining section index.
-  uint16_t section_index;
-  // Symbol value.
-  uint64_t value;
-  // Symbol byte size.
-  uint64_t size;
-} hrx_module_elf64_symbol_t;
-static_assert(sizeof(hrx_module_elf64_symbol_t) == 24,
-              "ELF64 symbol must be 24 bytes");
-
-//===----------------------------------------------------------------------===//
 // Module management
 //===----------------------------------------------------------------------===//
 
@@ -518,8 +417,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
 static void iree_hal_streaming_module_destroy(
     iree_hal_streaming_module_t* module);
 static iree_status_t iree_hal_streaming_module_initialize_managed_globals(
-    iree_hal_streaming_module_t* module,
-    const iree_hal_streaming_fat_binary_extract_t* fat_extract);
+    iree_hal_streaming_module_t* module);
 
 static iree_status_t iree_hal_streaming_module_load_executable(
     iree_hal_streaming_context_t* context,
@@ -621,8 +519,7 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
   }
 
   if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_module_initialize_managed_globals(module,
-                                                                  &fat_extract);
+    status = iree_hal_streaming_module_initialize_managed_globals(module);
   }
 
   iree_hal_streaming_fat_binary_extract_reset(&fat_extract);
@@ -986,49 +883,6 @@ iree_status_t iree_hal_streaming_module_global_symbol(
                           (int)name_view.size, name_view.data);
 }
 
-static iree_status_t iree_hal_streaming_module_elf_subspan(
-    iree_const_byte_span_t elf, uint64_t offset64, uint64_t size64,
-    const char* kind, iree_const_byte_span_t* out_span) {
-  IREE_ASSERT_ARGUMENT(kind);
-  IREE_ASSERT_ARGUMENT(out_span);
-  memset(out_span, 0, sizeof(*out_span));
-
-  if (offset64 > IREE_HOST_SIZE_MAX || size64 > IREE_HOST_SIZE_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "ELF %s range is too large", kind);
-  }
-  const iree_host_size_t offset = (iree_host_size_t)offset64;
-  const iree_host_size_t size = (iree_host_size_t)size64;
-  if (offset > elf.data_length || size > elf.data_length - offset) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "ELF %s range is out of bounds", kind);
-  }
-  *out_span = iree_make_const_byte_span(elf.data + offset, size);
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_streaming_module_elf_cstring_view(
-    iree_const_byte_span_t string_table, uint32_t offset,
-    iree_string_view_t* out_string) {
-  IREE_ASSERT_ARGUMENT(out_string);
-  *out_string = iree_string_view_empty();
-
-  if (offset >= string_table.data_length) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "ELF string-table offset is out of bounds");
-  }
-  const char* data = (const char*)string_table.data + offset;
-  const iree_host_size_t capacity = string_table.data_length - offset;
-  for (iree_host_size_t i = 0; i < capacity; ++i) {
-    if (data[i] == '\0') {
-      *out_string = iree_make_string_view(data, i);
-      return iree_ok_status();
-    }
-  }
-  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                          "ELF string-table entry is unterminated");
-}
-
 static bool iree_hal_streaming_module_split_managed_name(
     iree_string_view_t name, iree_string_view_t* out_base_name) {
   IREE_ASSERT_ARGUMENT(out_base_name);
@@ -1072,139 +926,51 @@ static iree_status_t iree_hal_streaming_module_initialize_managed_symbol_pair(
 }
 
 static iree_status_t
-iree_hal_streaming_module_initialize_managed_globals_from_elf(
-    iree_hal_streaming_module_t* module, iree_hal_executable_t* executable,
-    iree_const_byte_span_t elf) {
+iree_hal_streaming_module_initialize_managed_globals_for_executable(
+    iree_hal_streaming_module_t* module, iree_hal_executable_t* executable) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(executable);
 
-  if (elf.data_length < sizeof(hrx_module_elf64_header_t)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "ELF data too small for managed-symbol scan");
+  iree_host_size_t global_count = 0;
+  iree_status_t status =
+      iree_hal_executable_global_count(executable, &global_count);
+  if (iree_status_is_unimplemented(status)) {
+    // Global enumeration is an optional executable capability. Backends still
+    // provide a complete vtable and report the absent capability explicitly.
+    iree_status_ignore(status);
+    return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(status);
 
-  hrx_module_elf64_header_t header;
-  memcpy(&header, elf.data, sizeof(header));
-  uint32_t magic = 0;
-  memcpy(&magic, header.magic, sizeof(magic));
-  if (magic != HRX_MODULE_ELF_MAGIC_INT ||
-      header.elf_class != HRX_MODULE_ELFCLASS64 ||
-      header.elf_data != HRX_MODULE_ELFDATA2LSB) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unsupported ELF for managed-symbol scan");
-  }
-  if (header.shentsize != sizeof(hrx_module_elf64_section_header_t)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "unexpected ELF section-header size for managed-symbol scan");
-  }
-
-  iree_host_size_t section_headers_size = 0;
-  if (!iree_host_size_checked_mul((iree_host_size_t)header.shentsize,
-                                  (iree_host_size_t)header.shnum,
-                                  &section_headers_size)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "ELF section-header table size overflow");
-  }
-
-  iree_const_byte_span_t section_headers_span;
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_module_elf_subspan(
-      elf, header.shoff, section_headers_size, "section-header table",
-      &section_headers_span));
-  for (uint16_t section_index = 0; section_index < header.shnum;
-       ++section_index) {
-    hrx_module_elf64_section_header_t symbol_table;
-    memcpy(&symbol_table,
-           section_headers_span.data +
-               (iree_host_size_t)section_index * sizeof(symbol_table),
-           sizeof(symbol_table));
-    if (symbol_table.type != HRX_MODULE_SHT_SYMTAB &&
-        symbol_table.type != HRX_MODULE_SHT_DYNSYM) {
+  for (iree_host_size_t i = 0; i < global_count; ++i) {
+    iree_hal_executable_global_info_t global_info;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_executable_global_info_by_index(executable, i, &global_info));
+    iree_string_view_t pointer_name = iree_string_view_empty();
+    if (!iree_hal_streaming_module_split_managed_name(global_info.name,
+                                                      &pointer_name)) {
       continue;
     }
-    if (symbol_table.entry_size != sizeof(hrx_module_elf64_symbol_t)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "unexpected ELF symbol-table entry size for managed-symbol scan");
-    }
-    if (symbol_table.size % symbol_table.entry_size != 0) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "ELF symbol-table size is not a multiple of entry size");
-    }
-    if (symbol_table.link >= header.shnum) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "ELF symbol-table string-table link is invalid");
-    }
-
-    iree_const_byte_span_t symbol_table_span;
-    IREE_RETURN_IF_ERROR(iree_hal_streaming_module_elf_subspan(
-        elf, symbol_table.offset, symbol_table.size, "symbol table",
-        &symbol_table_span));
-
-    hrx_module_elf64_section_header_t string_table;
-    memcpy(&string_table,
-           section_headers_span.data +
-               (iree_host_size_t)symbol_table.link * sizeof(string_table),
-           sizeof(string_table));
-    iree_const_byte_span_t string_table_span;
-    IREE_RETURN_IF_ERROR(iree_hal_streaming_module_elf_subspan(
-        elf, string_table.offset, string_table.size, "string table",
-        &string_table_span));
-
-    const iree_host_size_t symbol_count =
-        (iree_host_size_t)(symbol_table.size / symbol_table.entry_size);
-    for (iree_host_size_t i = 0; i < symbol_count; ++i) {
-      hrx_module_elf64_symbol_t symbol;
-      memcpy(&symbol, symbol_table_span.data + i * sizeof(symbol),
-             sizeof(symbol));
-      const uint8_t binding = symbol.info >> 4;
-      const uint8_t type = symbol.info & 0x0F;
-      if ((binding != HRX_MODULE_STB_GLOBAL &&
-           binding != HRX_MODULE_STB_WEAK) ||
-          type != HRX_MODULE_STT_OBJECT ||
-          symbol.section_index == HRX_MODULE_SHN_UNDEF) {
-        continue;
-      }
-
-      iree_string_view_t storage_name = iree_string_view_empty();
-      IREE_RETURN_IF_ERROR(iree_hal_streaming_module_elf_cstring_view(
-          string_table_span, symbol.name, &storage_name));
-      iree_string_view_t pointer_name = iree_string_view_empty();
-      if (!iree_hal_streaming_module_split_managed_name(storage_name,
-                                                        &pointer_name)) {
-        continue;
-      }
-
-      IREE_RETURN_IF_ERROR(
-          iree_hal_streaming_module_initialize_managed_symbol_pair(
-              module, executable, pointer_name, storage_name));
-    }
+    IREE_RETURN_IF_ERROR(
+        iree_hal_streaming_module_initialize_managed_symbol_pair(
+            module, executable, pointer_name, global_info.name));
   }
 
   return iree_ok_status();
 }
 
 static iree_status_t iree_hal_streaming_module_initialize_managed_globals(
-    iree_hal_streaming_module_t* module,
-    const iree_hal_streaming_fat_binary_extract_t* fat_extract) {
+    iree_hal_streaming_module_t* module) {
   IREE_ASSERT_ARGUMENT(module);
-  IREE_ASSERT_ARGUMENT(fat_extract);
 
-  if (fat_extract->match_count == 0) return iree_ok_status();
-  if (module->executables &&
-      module->executable_count != fat_extract->match_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "module executable count does not match extracted ELF count");
-  }
-
-  for (iree_host_size_t i = 0; i < fat_extract->match_count; ++i) {
+  const iree_host_size_t executable_count =
+      module->executables ? module->executable_count : 1;
+  for (iree_host_size_t i = 0; i < executable_count; ++i) {
     iree_hal_executable_t* executable =
         module->executables ? module->executables[i] : module->executable;
     IREE_RETURN_IF_ERROR(
-        iree_hal_streaming_module_initialize_managed_globals_from_elf(
-            module, executable, fat_extract->matches[i].data));
+        iree_hal_streaming_module_initialize_managed_globals_for_executable(
+            module, executable));
   }
 
   return iree_ok_status();
@@ -1237,11 +1003,8 @@ iree_status_t iree_hal_streaming_module_global(
   IREE_RETURN_IF_ERROR(status);
 
   if (managed_found && managed_symbol) {
-    if (found && symbol) {
-      IREE_RETURN_IF_ERROR(iree_hal_streaming_managed_global_publish_pointer(
-          module->context, symbol, managed_symbol,
-          iree_make_cstring_view(name)));
-    }
+    // Managed pointer globals are published while the executable is loaded.
+    // Queries return the storage allocation without rewriting module state.
     symbol = managed_symbol;
     found = true;
   }

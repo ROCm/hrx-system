@@ -57,10 +57,12 @@ IREE_API_EXPORT void iree_hal_host_notification_release(
 IREE_API_EXPORT uint64_t iree_hal_host_notification_device_token(
     iree_hal_host_notification_t* notification);
 
-// Waits until the notification's value differs from |observed_value|.
+// Waits for a notification and returns the current notification value.
 //
-// This is an unbounded wait. Callers that need to stop a listener must arrange
-// an independent stop condition and call iree_hal_host_notification_wake.
+// Implementations may return with |observed_value| unchanged. Callers must
+// recheck their protocol predicate after every return. Callers that need to
+// stop a listener must arrange an independent stop condition and call
+// iree_hal_host_notification_wake.
 IREE_API_EXPORT uint64_t iree_hal_host_notification_wait(
     iree_hal_host_notification_t* notification, uint64_t observed_value);
 

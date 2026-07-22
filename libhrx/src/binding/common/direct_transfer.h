@@ -16,15 +16,17 @@ extern "C" {
 
 typedef struct iree_hal_streaming_context_t iree_hal_streaming_context_t;
 
-// Performs a blocking host-to-device transfer serialized against every other
-// direct transfer issued by |context|.
+// Performs a blocking host-to-device transfer serialized against other direct
+// transfers issued through |context|'s internal staging and managed-global
+// paths. Cross-context and direct device-to-device copies use other paths.
 iree_status_t iree_hal_streaming_direct_transfer_h2d(
     iree_hal_streaming_context_t* context, const void* source,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length);
 
-// Performs a blocking device-to-host transfer serialized against every other
-// direct transfer issued by |context|.
+// Performs a blocking device-to-host transfer serialized against other direct
+// transfers issued through |context|'s internal staging and managed-global
+// paths. Cross-context and direct device-to-device copies use other paths.
 iree_status_t iree_hal_streaming_direct_transfer_d2h(
     iree_hal_streaming_context_t* context, iree_hal_buffer_t* source_buffer,
     iree_device_size_t source_offset, void* target, iree_device_size_t length);
