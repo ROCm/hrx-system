@@ -3176,6 +3176,11 @@ static iree_status_t iree_hal_amdxdna_native_submit_all_issue(
   size_t descriptor_sizes[kMaxPathBPendingParents] = {};
   size_t code_cursor = 0;
   for (iree_host_size_t i = 0; i < command_count; ++i) {
+    // The command aperture is shared staging storage, not command-owned
+    // backing. Other cached chains may have overwritten these offsets since
+    // this parent last ran, so retain the native parent and children but
+    // restage their code and descriptors for every batch submission.
+    commands[i]->pathb_chain_prepared_valid = false;
     IREE_RETURN_IF_ERROR(get_pathb_chain_region_sizes(
         commands[i], &code_sizes[i], &descriptor_sizes[i]));
     const size_t code_base = align_up_size(code_cursor, 0x1000);
