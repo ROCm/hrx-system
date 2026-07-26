@@ -357,22 +357,7 @@ static iree_status_t loom_amdgpu_assignment_field_value(
     const loom_low_allocation_assignment_t* assignment,
     const loom_low_operand_t* operand, uint64_t* out_value) {
   *out_value = 0;
-  if (assignment->location_count != operand->unit_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU native encoding value %" PRIu32 " has %" PRIu32
-        " assigned registers but descriptor field needs %" PRIu16,
-        assignment->value_id, assignment->location_count, operand->unit_count);
-  }
-  const uint64_t last_register =
-      (uint64_t)assignment->location_base + assignment->location_count - 1u;
   if (assignment->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
-    if (last_register > 127) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU native encoding SGPR range s[%" PRIu32
-                              ":%" PRIu64 "] is out of range",
-                              assignment->location_base, last_register);
-    }
     *out_value = assignment->location_base;
     return iree_ok_status();
   }
@@ -409,37 +394,21 @@ static void loom_amdgpu_push_encoding_field_value(
   ++*field_value_count;
 }
 
-static iree_status_t loom_amdgpu_descriptor_single_fixed_encoding_field_u16(
+static uint16_t loom_amdgpu_descriptor_single_fixed_encoding_field_u16(
     const loom_amdgpu_encode_state_t* state,
-    const loom_low_descriptor_t* descriptor, uint16_t* out_value) {
-  *out_value = 0;
-  if (descriptor->encoding_field_value_count != 1) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU native encoding descriptor does not have exactly one fixed "
-        "field");
-  }
+    const loom_low_descriptor_t* descriptor) {
   const loom_low_descriptor_set_t* descriptor_set =
       state->schedule->target.descriptor_set;
   const loom_low_encoding_field_value_t* field_value =
       &descriptor_set
            ->encoding_field_values[descriptor->encoding_field_value_start];
-  if (field_value->value > UINT16_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU native encoding fixed field value %" PRIu64
-                            " is not a u16",
-                            field_value->value);
-  }
-  *out_value = (uint16_t)field_value->value;
-  return iree_ok_status();
+  return (uint16_t)field_value->value;
 }
 
-static iree_status_t loom_amdgpu_descriptor_operand_field_already_encoded(
+static bool loom_amdgpu_descriptor_operand_field_already_encoded(
     const loom_amdgpu_encode_state_t* state,
     const loom_low_packet_view_t* packet, uint16_t operand_index,
-    const loom_low_operand_t* operand, uint64_t value,
-    bool* out_already_encoded) {
-  *out_already_encoded = false;
+    const loom_low_operand_t* operand) {
   const loom_low_descriptor_set_t* descriptor_set =
       state->schedule->target.descriptor_set;
   const loom_low_operand_t* operands =
@@ -450,32 +419,9 @@ static iree_status_t loom_amdgpu_descriptor_operand_field_already_encoded(
     if (previous->encoding_field_id != operand->encoding_field_id) {
       continue;
     }
-    if (!loom_low_descriptor_operands_are_tied(descriptor_set,
-                                               packet->descriptor,
-                                               previous_index, operand_index)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AMDGPU native encoding descriptor has repeated field id %" PRIu16
-          " without a tied constraint",
-          operand->encoding_field_id);
-    }
-    const loom_low_allocation_assignment_t* previous_assignment =
-        loom_low_packet_descriptor_operand_assignment(state->allocation, packet,
-                                                      previous_index);
-    uint64_t previous_value = 0;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_assignment_field_value(
-        state, previous_assignment, previous, &previous_value));
-    if (previous_value != value) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU native encoding tied descriptor operands for field id "
-          "%" PRIu16 " were assigned different registers",
-          operand->encoding_field_id);
-    }
-    *out_already_encoded = true;
-    return iree_ok_status();
+    return true;
   }
-  return iree_ok_status();
+  return false;
 }
 
 static uint32_t loom_amdgpu_descriptor_immediate_row(
@@ -862,8 +808,8 @@ static iree_status_t loom_amdgpu_encode_sop1_s_mov_b32(
   if (packet->descriptor == state->descriptors.s_mov_b32) {
     sdst = loom_amdgpu_packet_descriptor_operand_sgpr(state, packet, 0);
   } else {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_single_fixed_encoding_field_u16(
-        state, packet->descriptor, &sdst));
+    sdst = loom_amdgpu_descriptor_single_fixed_encoding_field_u16(
+        state, packet->descriptor);
   }
   uint32_t imm32 = 0;
   IREE_RETURN_IF_ERROR(
@@ -1486,18 +1432,16 @@ static iree_status_t loom_amdgpu_encode_generic_descriptor_packet(
     if (operand->encoding_field_id == 0) {
       continue;
     }
+    if (loom_amdgpu_descriptor_operand_field_already_encoded(state, packet, i,
+                                                             operand)) {
+      continue;
+    }
     const loom_low_allocation_assignment_t* assignment =
         loom_low_packet_descriptor_operand_assignment(state->allocation, packet,
                                                       i);
     uint64_t value = 0;
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_assignment_field_value(state, assignment, operand, &value));
-    bool already_encoded = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_operand_field_already_encoded(
-        state, packet, i, operand, value, &already_encoded));
-    if (already_encoded) {
-      continue;
-    }
     loom_amdgpu_push_encoding_field_value(field_values, &field_value_count,
                                           operand->encoding_field_id, value);
   }
