@@ -231,7 +231,6 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/encoding",
         "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
-        "//loom/src/loom/target/emit/native:fragment",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -302,7 +301,6 @@ loom_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/target/arch/amdgpu:error_defs",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
-        "//loom/src/loom/target/emit/native:fragment",
         "//runtime/src/iree/base",
     ],
 )
