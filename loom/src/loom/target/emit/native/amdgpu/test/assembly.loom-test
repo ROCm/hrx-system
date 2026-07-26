@@ -1971,6 +1971,27 @@ low.func.def target(@gfx1250_target) @gfx1250_s_delay_alu() asm<amdgpu.rdna4.gfx
 
 // ====
 
+// RUN: emit amdgpu-assembly @gfx1250_vgpr_msb_d16_low_result_clears_dst waits=auto strategy=resource-stall fixed=%index:physical_register:12:1 fixed=%address:physical_register:268:1 fixed=%loaded:physical_register:2:1 fixed=%extended:physical_register:3:1
+amdgpu.target<gfx1250> @gfx1250_target
+low.func.def target(@gfx1250_target) @gfx1250_vgpr_msb_d16_low_result_clears_dst(%index: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
+  %address = v_lshlrev_b32_src0_inline %index, 1
+  %loaded = global_load_d16_b16_saddr %address, %base
+  %extended = v_lshlrev_b32_src0_16_low16 %loaded
+  return
+}
+
+// ----
+  s_set_vgpr_msb 64
+  v_lshlrev_b32 v268, 1, v12
+  s_set_vgpr_msb 16385
+  global_load_d16_b16 v2, v12, s[0:1] offset:0
+  s_wait_loadcnt loadcnt(0)
+  v_lshlrev_b32 v3, 16, v2
+  s_set_vgpr_msb 256
+  s_endpgm
+
+// ====
+
 // RUN: emit amdgpu-assembly @gfx1250_vgpr_msb_valu waits=auto strategy=source fixed=%lhs:physical_register:512:1 fixed=%rhs:physical_register:768:1 fixed=%sum:physical_register:513:1
 amdgpu.target<gfx1250> @gfx1250_target
 low.func.def target(@gfx1250_target) @gfx1250_vgpr_msb_valu(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {

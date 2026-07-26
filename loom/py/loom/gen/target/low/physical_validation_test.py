@@ -475,7 +475,7 @@ def test_physical_descriptor_set_rejects_incompatible_address_windows() -> None:
         compiler.compile_descriptor_set(_descriptor_set(descriptor))
 
 
-def test_physical_descriptor_set_rejects_shared_target_state_slot() -> None:
+def test_physical_descriptor_set_rejects_shared_address_state_slot() -> None:
     descriptor = _descriptor(
         "test.bad.shared.state.slot",
         (
@@ -483,7 +483,7 @@ def test_physical_descriptor_set_rejects_shared_target_state_slot() -> None:
                 "dst",
                 OperandRole.RESULT,
                 "test.phys",
-                address_map_kind=OperandAddressMapKind.TARGET_STATE,
+                address_map_kind=OperandAddressMapKind.LOW_SUBSET,
                 addressable_unit_count=8,
                 address_state_slot=1,
             ),
@@ -501,7 +501,7 @@ def test_physical_descriptor_set_rejects_shared_target_state_slot() -> None:
     with pytest.raises(
         ValueError,
         match=(
-            r"assigns target-state slot 1 to multiple untied physical "
+            r"assigns address-state slot 1 to multiple untied physical "
             r"components"
         ),
     ):
@@ -560,7 +560,7 @@ def test_physical_descriptor_set_rejects_inconsistent_target_state_window() -> N
         compiler.compile_descriptor_set(_descriptor_set(*descriptors))
 
 
-def test_physical_descriptor_set_rejects_target_state_slot_overflow() -> None:
+def test_physical_descriptor_set_rejects_address_state_slot_overflow() -> None:
     descriptor = _descriptor(
         "test.bad.state.slot",
         (
@@ -568,7 +568,7 @@ def test_physical_descriptor_set_rejects_target_state_slot_overflow() -> None:
                 "dst",
                 OperandRole.RESULT,
                 "test.phys",
-                address_map_kind=OperandAddressMapKind.TARGET_STATE,
+                address_map_kind=OperandAddressMapKind.LOW_SUBSET,
                 addressable_unit_count=8,
                 address_state_slot=16,
             ),
