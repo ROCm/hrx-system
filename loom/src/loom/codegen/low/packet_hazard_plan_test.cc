@@ -187,6 +187,34 @@ iree_status_t EmptyResidualHazardQuery(
   return iree_ok_status();
 }
 
+struct HazardQueryAudit {
+  iree_host_size_t query_count = 0;
+  iree_host_size_t next_packet_index = 0;
+  uint32_t queried_packet_mask = 0;
+};
+
+iree_status_t AuditEmptyResidualHazardQuery(
+    void* user_data, const loom_low_schedule_table_t* schedule,
+    const loom_low_allocation_table_t* allocation,
+    const loom_low_packet_progress_table_t* progress,
+    const loom_low_packet_view_t* packet,
+    loom_low_packet_hazard_plan_emit_fn_t emit, void* emit_user_data) {
+  (void)schedule;
+  (void)allocation;
+  (void)progress;
+  (void)emit;
+  (void)emit_user_data;
+  HazardQueryAudit* audit = static_cast<HazardQueryAudit*>(user_data);
+  if (packet->packet_index != audit->next_packet_index) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "hazard packets queried out of order");
+  }
+  ++audit->query_count;
+  ++audit->next_packet_index;
+  audit->queried_packet_mask |= 1u << packet->packet_index;
+  return iree_ok_status();
+}
+
 iree_status_t SyntheticResidualHazardQuery(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
@@ -221,6 +249,7 @@ iree_status_t SyntheticResidualHazardQuery(
 TEST_F(LowPacketHazardPlanTest, RecordsResidualActionsWithPacketIdentity) {
   const loom_low_packet_progress_provider_t progress_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/1,
       /*.query=*/SyntheticProgressQuery,
   };
   loom_low_packet_progress_table_t progress = {};
@@ -229,6 +258,7 @@ TEST_F(LowPacketHazardPlanTest, RecordsResidualActionsWithPacketIdentity) {
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/1,
       /*.query=*/SyntheticResidualHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
@@ -267,6 +297,7 @@ TEST_F(LowPacketHazardPlanTest,
        EmitsAllocatorStorageReleaseActionsWithObservedProgress) {
   const loom_low_packet_progress_provider_t progress_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/1,
       /*.query=*/SyntheticProgressQuery,
   };
   loom_low_packet_progress_table_t progress = {};
@@ -320,6 +351,7 @@ TEST_F(LowPacketHazardPlanTest,
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/0,
       /*.query=*/EmptyResidualHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
@@ -344,6 +376,64 @@ TEST_F(LowPacketHazardPlanTest,
   EXPECT_EQ(record.required_progress, 3u);
   EXPECT_EQ(record.observed_progress, 1u);
   EXPECT_EQ(record.residual_progress, 2u);
+}
+
+TEST_F(LowPacketHazardPlanTest, RejectsCombinedEventCountOverflow) {
+  const loom_low_storage_lease_record_t storage_leases[1] = {
+      {
+          /*.packet_index=*/0,
+          /*.node_index=*/0,
+          /*.block_index=*/0,
+          /*.scheduled_ordinal=*/0,
+          /*.kind=*/{},
+          /*.attachment=*/{},
+          /*.attachment_index=*/{},
+          /*.unit_offset=*/{},
+          /*.unit_count=*/{},
+          /*.release_scope=*/{},
+          /*.release_class_id=*/kSyntheticProgressPipe,
+          /*.release_class_name=*/IREE_SV("synthetic.pipe"),
+          /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
+          /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
+          /*.release_reason_id=*/kSyntheticHazardStorageRelease,
+          /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
+      },
+  };
+  const loom_low_storage_release_action_t storage_release_actions[1] = {
+      {
+          /*.insertion_packet_index=*/2,
+          /*.insertion_node_index=*/2,
+          /*.block_index=*/0,
+          /*.scheduled_ordinal=*/2,
+          /*.release_class_id=*/kSyntheticProgressPipe,
+          /*.release_class_name=*/IREE_SV("synthetic.pipe"),
+          /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
+          /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
+          /*.release_reason_id=*/kSyntheticHazardStorageRelease,
+          /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
+          /*.required_progress=*/1,
+          /*.lease_record_index=*/0,
+      },
+  };
+  state_.allocation.storage_leases = {
+      /*.schedule=*/&state_.schedule,
+      /*.records=*/storage_leases,
+      /*.record_count=*/IREE_ARRAYSIZE(storage_leases),
+  };
+  state_.allocation.storage_release_actions = storage_release_actions;
+  state_.allocation.storage_release_action_count =
+      IREE_ARRAYSIZE(storage_release_actions);
+
+  const loom_low_packet_hazard_plan_provider_t hazard_provider = {
+      /*.user_data=*/{},
+      /*.event_count=*/IREE_HOST_SIZE_MAX,
+      /*.query=*/EmptyResidualHazardQuery,
+  };
+  loom_low_packet_hazard_plan_t plan = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_low_packet_hazard_plan_build(
+                            &packets_, &state_.allocation, /*progress=*/nullptr,
+                            &hazard_provider, &arena_, &plan));
 }
 
 iree_status_t SyntheticAggregateResidualHazardQuery(
@@ -380,6 +470,7 @@ TEST_F(LowPacketHazardPlanTest,
        RecordsAggregateResidualActionsWithoutProducerIdentity) {
   const loom_low_packet_progress_provider_t progress_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/1,
       /*.query=*/SyntheticProgressQuery,
   };
   loom_low_packet_progress_table_t progress = {};
@@ -388,6 +479,7 @@ TEST_F(LowPacketHazardPlanTest,
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/1,
       /*.query=*/SyntheticAggregateResidualHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
@@ -453,6 +545,7 @@ iree_status_t SyntheticScheduleOnlyDiagnosticQuery(
 TEST_F(LowPacketHazardPlanTest, SupportsScheduleOnlyDiagnostics) {
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/3,
       /*.query=*/SyntheticScheduleOnlyDiagnosticQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
@@ -481,6 +574,51 @@ TEST_F(LowPacketHazardPlanTest, SupportsScheduleOnlyDiagnostics) {
   EXPECT_EQ(plan.records[2].residual_progress, 3u);
 }
 
+TEST_F(LowPacketHazardPlanTest, QueriesProviderExactlyOncePerPacket) {
+  HazardQueryAudit audit;
+  const loom_low_packet_hazard_plan_provider_t hazard_provider = {
+      /*.user_data=*/&audit,
+      /*.event_count=*/0,
+      /*.query=*/AuditEmptyResidualHazardQuery,
+  };
+  loom_low_packet_hazard_plan_t plan = {};
+  IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
+      &packets_, /*allocation=*/nullptr, /*progress=*/nullptr, &hazard_provider,
+      &arena_, &plan));
+
+  EXPECT_EQ(audit.query_count, state_.schedule.scheduled_node_count);
+  EXPECT_EQ(audit.next_packet_index, state_.schedule.scheduled_node_count);
+  EXPECT_EQ(audit.queried_packet_mask, 0b111u);
+}
+
+TEST_F(LowPacketHazardPlanTest, RejectsUnderdeclaredTargetEventCount) {
+  const loom_low_packet_hazard_plan_provider_t hazard_provider = {
+      /*.user_data=*/{},
+      /*.event_count=*/2,
+      /*.query=*/SyntheticScheduleOnlyDiagnosticQuery,
+  };
+  loom_low_packet_hazard_plan_t plan = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_low_packet_hazard_plan_build(&packets_, /*allocation=*/nullptr,
+                                        /*progress=*/nullptr, &hazard_provider,
+                                        &arena_, &plan));
+}
+
+TEST_F(LowPacketHazardPlanTest, RejectsOverdeclaredTargetEventCount) {
+  const loom_low_packet_hazard_plan_provider_t hazard_provider = {
+      /*.user_data=*/{},
+      /*.event_count=*/4,
+      /*.query=*/SyntheticScheduleOnlyDiagnosticQuery,
+  };
+  loom_low_packet_hazard_plan_t plan = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_low_packet_hazard_plan_build(&packets_, /*allocation=*/nullptr,
+                                        /*progress=*/nullptr, &hazard_provider,
+                                        &arena_, &plan));
+}
+
 iree_status_t InvalidResidualHazardQuery(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
@@ -502,6 +640,7 @@ iree_status_t InvalidResidualHazardQuery(
 TEST_F(LowPacketHazardPlanTest, RejectsInvalidResidualProgress) {
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/3,
       /*.query=*/InvalidResidualHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
@@ -534,6 +673,7 @@ iree_status_t InvalidDiagnosticResidualHazardQuery(
 TEST_F(LowPacketHazardPlanTest, RejectsDiagnosticResidualFields) {
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/3,
       /*.query=*/InvalidDiagnosticResidualHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
@@ -574,6 +714,7 @@ iree_status_t MissingActionIdentityHazardQuery(
 TEST_F(LowPacketHazardPlanTest, RejectsMissingActionIdentity) {
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/3,
       /*.query=*/MissingActionIdentityHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
@@ -614,6 +755,7 @@ iree_status_t InvalidDiagnosticActionHazardQuery(
 TEST_F(LowPacketHazardPlanTest, RejectsDiagnosticActionIdentity) {
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/3,
       /*.query=*/InvalidDiagnosticActionHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
@@ -647,6 +789,7 @@ iree_status_t LoopCarriedProducerHazardQuery(
 TEST_F(LowPacketHazardPlanTest, RecordsLoopCarriedProducerAfterInsertion) {
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/1,
       /*.query=*/LoopCarriedProducerHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};

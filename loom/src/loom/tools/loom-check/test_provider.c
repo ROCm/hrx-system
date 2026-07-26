@@ -63,6 +63,10 @@ typedef struct loom_check_test_synthetic_hazard_context_t {
   loom_value_id_t producer_value_id;
   // SSA result defined by |consumer_node_index|.
   loom_value_id_t consumer_value_id;
+  // Exact number of descriptor progress events in the packet sequence.
+  iree_host_size_t progress_event_count;
+  // Exact number of synthetic target hazard events.
+  iree_host_size_t hazard_event_count;
 } loom_check_test_synthetic_hazard_context_t;
 
 static bool loom_check_test_synthetic_hazard_matches(
@@ -167,35 +171,34 @@ static iree_status_t loom_check_test_synthetic_hazard_parse_emit_options(
 }
 
 static iree_status_t loom_check_test_synthetic_hazard_find_pair(
-    const loom_low_schedule_table_t* schedule,
+    const loom_low_packet_sequence_t* packets,
     loom_check_test_synthetic_hazard_context_t* context) {
   context->producer_node_index = LOOM_LOW_SCHEDULE_NODE_NONE;
   context->consumer_node_index = LOOM_LOW_SCHEDULE_NODE_NONE;
   context->producer_value_id = LOOM_VALUE_ID_INVALID;
   context->consumer_value_id = LOOM_VALUE_ID_INVALID;
+  context->progress_event_count = 0;
   for (iree_host_size_t packet_index = 0;
-       packet_index < loom_low_packet_count(schedule); ++packet_index) {
-    uint32_t node_index = LOOM_LOW_SCHEDULE_NODE_NONE;
-    IREE_RETURN_IF_ERROR(
-        loom_low_packet_node_index_at(schedule, packet_index, &node_index));
-    if (node_index >= schedule->node_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "synthetic hazard packet index %" PRIhsz
-                              " references out-of-range node %" PRIu32,
-                              packet_index, node_index);
-    }
-    const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
+       packet_index < loom_low_packet_sequence_count(packets); ++packet_index) {
+    const loom_low_packet_view_t packet =
+        loom_low_packet_sequence_at(packets, packet_index);
+    context->progress_event_count += packet.descriptor != NULL;
+    const loom_low_schedule_node_t* node = packet.node;
     if (node->kind != LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR ||
         node->op->result_count == 0) {
       continue;
     }
     if (context->producer_node_index == LOOM_LOW_SCHEDULE_NODE_NONE) {
-      context->producer_node_index = node_index;
+      context->producer_node_index = packet.node_index;
       context->producer_value_id = loom_op_const_results(node->op)[0];
       continue;
     }
-    context->consumer_node_index = node_index;
-    context->consumer_value_id = loom_op_const_results(node->op)[0];
+    if (context->consumer_node_index == LOOM_LOW_SCHEDULE_NODE_NONE) {
+      context->consumer_node_index = packet.node_index;
+      context->consumer_value_id = loom_op_const_results(node->op)[0];
+    }
+  }
+  if (context->consumer_node_index != LOOM_LOW_SCHEDULE_NODE_NONE) {
     return iree_ok_status();
   }
   return iree_make_status(
@@ -221,6 +224,8 @@ static iree_status_t loom_check_test_synthetic_hazard_query(
     const loom_low_packet_progress_table_t* progress,
     const loom_low_packet_view_t* packet,
     loom_low_packet_hazard_plan_emit_fn_t emit, void* emit_user_data) {
+  (void)schedule;
+  (void)allocation;
   (void)progress;
   const loom_check_test_synthetic_hazard_context_t* context =
       (const loom_check_test_synthetic_hazard_context_t*)user_data;
@@ -234,24 +239,7 @@ static iree_status_t loom_check_test_synthetic_hazard_query(
   if (packet->node_index != context->consumer_node_index) {
     return iree_ok_status();
   }
-  if (allocation == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "synthetic hazard physical-overlap predicate requires allocation");
-  }
-
-  const loom_low_allocation_assignment_t* producer_assignment =
-      loom_low_allocation_try_map_active_value_assignment(
-          allocation, context->producer_value_id,
-          /*out_assignment_index=*/NULL);
-  const loom_low_allocation_assignment_t* consumer_assignment =
-      loom_low_allocation_try_map_active_value_assignment(
-          allocation, context->consumer_value_id,
-          /*out_assignment_index=*/NULL);
-  const loom_low_descriptor_set_t* descriptor_set =
-      schedule->target.descriptor_set;
-  if (!loom_low_allocation_storage_assignment_ranges_overlap(
-          descriptor_set, producer_assignment, consumer_assignment)) {
+  if (context->hazard_event_count == 0) {
     return iree_ok_status();
   }
 
@@ -319,21 +307,39 @@ static iree_status_t loom_check_test_synthetic_hazard_execute(
   loom_check_test_synthetic_hazard_context_t context = {
       .test_case = options.test_case,
   };
-  IREE_RETURN_IF_ERROR(
-      loom_check_test_synthetic_hazard_find_pair(&frame.schedule, &context));
 
   loom_low_packet_sequence_t packets = {0};
   IREE_RETURN_IF_ERROR(loom_low_allocated_packet_sequence_initialize(
       &frame.schedule, &frame.allocation, &packets));
+  IREE_RETURN_IF_ERROR(
+      loom_check_test_synthetic_hazard_find_pair(&packets, &context));
   loom_low_allocation_value_scratch_t scratch = {0};
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_acquire_value_scratch(&frame.allocation, &scratch));
+  if (context.test_case == LOOM_CHECK_TEST_SYNTHETIC_HAZARD_CASE_MISSING) {
+    context.hazard_event_count = 1;
+  } else {
+    const loom_low_allocation_assignment_t* producer_assignment =
+        loom_low_allocation_try_map_active_value_assignment(
+            &frame.allocation, context.producer_value_id,
+            /*out_assignment_index=*/NULL);
+    const loom_low_allocation_assignment_t* consumer_assignment =
+        loom_low_allocation_try_map_active_value_assignment(
+            &frame.allocation, context.consumer_value_id,
+            /*out_assignment_index=*/NULL);
+    context.hazard_event_count =
+        loom_low_allocation_storage_assignment_ranges_overlap(
+            frame.schedule.target.descriptor_set, producer_assignment,
+            consumer_assignment);
+  }
   const loom_low_packet_progress_provider_t progress_provider = {
+      .event_count = context.progress_event_count,
       .query = loom_check_test_synthetic_hazard_progress_query,
   };
   loom_low_packet_progress_table_t progress = {0};
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       .user_data = &context,
+      .event_count = context.hazard_event_count,
       .query = loom_check_test_synthetic_hazard_query,
   };
   loom_low_packet_hazard_plan_t plan = {0};

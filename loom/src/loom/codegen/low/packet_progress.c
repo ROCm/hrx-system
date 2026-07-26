@@ -24,7 +24,7 @@ typedef struct loom_low_packet_progress_build_state_t {
   loom_low_packet_progress_record_t* records;
   // Maximum entries available in |records|.
   iree_host_size_t record_capacity;
-  // Number of records counted or populated so far.
+  // Number of records populated so far.
   iree_host_size_t record_count;
 } loom_low_packet_progress_build_state_t;
 
@@ -64,29 +64,16 @@ static iree_status_t loom_low_packet_progress_validate_event(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_packet_progress_count_event(
-    void* user_data, const loom_low_packet_progress_event_t* event) {
-  loom_low_packet_progress_build_state_t* state =
-      (loom_low_packet_progress_build_state_t*)user_data;
-  IREE_RETURN_IF_ERROR(loom_low_packet_progress_validate_event(event));
-  iree_host_size_t next_record_count = 0;
-  if (!iree_host_size_checked_add(state->record_count, 1, &next_record_count)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "packet progress record count exceeds host size");
-  }
-  state->record_count = next_record_count;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_low_packet_progress_append_event(
     void* user_data, const loom_low_packet_progress_event_t* event) {
   loom_low_packet_progress_build_state_t* state =
       (loom_low_packet_progress_build_state_t*)user_data;
   IREE_RETURN_IF_ERROR(loom_low_packet_progress_validate_event(event));
   if (state->record_count >= state->record_capacity) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "packet progress provider emitted inconsistent record count");
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "packet progress provider declared %" PRIhsz
+                            " event(s) but attempted to emit more",
+                            state->record_capacity);
   }
   const loom_low_packet_view_t* packet = state->current_packet;
   state->records[state->record_count++] = (loom_low_packet_progress_record_t){
@@ -102,18 +89,17 @@ static iree_status_t loom_low_packet_progress_append_event(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_packet_progress_run_pass(
-    loom_low_packet_progress_build_state_t* state,
-    loom_low_packet_progress_emit_fn_t emit) {
+static iree_status_t loom_low_packet_progress_query_packets(
+    loom_low_packet_progress_build_state_t* state) {
   for (iree_host_size_t packet_index = 0;
        packet_index < loom_low_packet_sequence_count(state->packets);
        ++packet_index) {
     const loom_low_packet_view_t packet =
         loom_low_packet_sequence_at(state->packets, packet_index);
     state->current_packet = &packet;
-    IREE_RETURN_IF_ERROR(
-        state->provider->query(state->provider->user_data, state->schedule,
-                               state->allocation, &packet, emit, state));
+    IREE_RETURN_IF_ERROR(state->provider->query(
+        state->provider->user_data, state->schedule, state->allocation, &packet,
+        loom_low_packet_progress_append_event, state));
     state->current_packet = NULL;
   }
   return iree_ok_status();
@@ -142,34 +128,29 @@ iree_status_t loom_low_packet_progress_build(
       .schedule = schedule,
       .allocation = allocation,
       .provider = provider,
+      .record_capacity = provider->event_count,
   };
-  IREE_RETURN_IF_ERROR(loom_low_packet_progress_run_pass(
-      &state, loom_low_packet_progress_count_event));
-  const iree_host_size_t record_capacity = state.record_count;
 
   loom_low_packet_progress_record_t* records = NULL;
-  if (record_capacity != 0) {
+  if (state.record_capacity != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, record_capacity, sizeof(*records), (void**)&records));
+        arena, state.record_capacity, sizeof(*records), (void**)&records));
   }
 
   state.records = records;
-  state.record_capacity = record_capacity;
-  state.record_count = 0;
-  IREE_RETURN_IF_ERROR(loom_low_packet_progress_run_pass(
-      &state, loom_low_packet_progress_append_event));
-  if (state.record_count != record_capacity) {
+  IREE_RETURN_IF_ERROR(loom_low_packet_progress_query_packets(&state));
+  if (state.record_count != state.record_capacity) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "packet progress provider emitted %" PRIhsz
-                            " record(s) after counting %" PRIhsz,
-                            state.record_count, record_capacity);
+                            "packet progress provider declared %" PRIhsz
+                            " event(s) but emitted %" PRIhsz,
+                            state.record_capacity, state.record_count);
   }
 
   *out_table = (loom_low_packet_progress_table_t){
       .schedule = schedule,
       .allocation = allocation,
       .records = records,
-      .record_count = record_capacity,
+      .record_count = state.record_capacity,
   };
   return iree_ok_status();
 }

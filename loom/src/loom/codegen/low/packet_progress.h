@@ -54,9 +54,9 @@ typedef iree_status_t (*loom_low_packet_progress_emit_fn_t)(
 
 // Queries target progress events for one scheduled packet.
 //
-// The builder may call this function more than once for the same packet while
-// sizing and populating the output table. Implementations must be pure for a
-// given packet and target state.
+// The builder calls this function exactly once for each scheduled packet in
+// increasing packet-index order. Implementations may advance monotonic state
+// in |user_data| across calls.
 typedef iree_status_t (*loom_low_packet_progress_query_fn_t)(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
@@ -67,6 +67,9 @@ typedef iree_status_t (*loom_low_packet_progress_query_fn_t)(
 typedef struct loom_low_packet_progress_provider_t {
   // Target-owned context passed to |query|.
   void* user_data;
+  // Exact number of progress events emitted across all scheduled packets.
+  // Providers establish this without replaying |query|.
+  iree_host_size_t event_count;
   // Progress query callback.
   loom_low_packet_progress_query_fn_t query;
 } loom_low_packet_progress_provider_t;
