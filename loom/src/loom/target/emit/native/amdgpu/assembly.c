@@ -2632,18 +2632,7 @@ static iree_status_t loom_amdgpu_append_storage_address_packet(
   IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_resolve_reference(
       context->schedule->module, context->schedule->function_op,
       loom_low_storage_address_storage(op), &reference));
-  const int64_t signed_offset = loom_low_storage_address_offset(op);
-  if (signed_offset < 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU assembly low.storage.address offset must be non-negative");
-  }
-  const uint64_t offset = (uint64_t)signed_offset;
-  if (offset >= reference.byte_length) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU assembly low.storage.address offset "
-                            "exceeds storage reference size");
-  }
+  const uint64_t offset = (uint64_t)loom_low_storage_address_offset(op);
   uint64_t byte_offset = reference.reservation.byte_offset;
   if (byte_offset > UINT32_MAX ||
       reference.byte_offset > UINT32_MAX - byte_offset) {
@@ -2660,12 +2649,6 @@ static iree_status_t loom_amdgpu_append_storage_address_packet(
 
   const loom_low_allocation_assignment_t* assignment =
       loom_amdgpu_map_assignment(context, loom_low_storage_address_result(op));
-  if (assignment->descriptor_reg_class_id != LOOM_AMDGPU_REG_CLASS_ID_VGPR ||
-      assignment->location_count != 1) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU assembly low.storage.address result must "
-                            "be one VGPR");
-  }
   loom_amdgpu_assembly_move_state_t move_state = {
       .context = context,
       .emit_state = emit_state,

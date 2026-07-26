@@ -391,6 +391,17 @@ low.func.def target(@test_target) @slot_roundtrip(%input: reg<test.i32>) -> (reg
 
 test.target<low_core> @test_target
 
+low.func.def target(@test_target) @storage_address_requires_register_result() {
+  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<scratch>
+  // ERROR@+1: TYPE/004 {result_name="result", actual_type="i32", expected_constraint="register"}
+  %addr = low.storage.address %storage : low.storage<scratch> -> i32
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 low.func.def target(@test_target) @resource_negative_extent() -> (reg<test.ptr>) {
   // ERROR@+1: STRUCTURE/014 {attr_name="extent", actual_value="-1", expected_constraint=">= 0"}
   %binding = low.resource<native_pointer> {index = 0, source_type = buffer, extent = -1} : reg<test.ptr>

@@ -276,6 +276,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amdgpu/encoding",
         "//loom/src/loom/target/arch/amdgpu/ops",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",

@@ -869,14 +869,8 @@ static iree_status_t loom_amdgpu_encode_vgpr_move_location(
 }
 
 static iree_status_t loom_amdgpu_encode_vgpr_move_immediate(
-    loom_amdgpu_encode_state_t* state,
-    const loom_low_allocation_assignment_t* destination, uint32_t imm32) {
-  if (destination->descriptor_reg_class_id != LOOM_AMDGPU_REG_CLASS_ID_VGPR ||
-      destination->location_count != 1) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU native encoding immediate move result "
-                            "must be one VGPR");
-  }
+    loom_amdgpu_encode_state_t* state, uint32_t destination_register,
+    uint32_t imm32) {
   if (state->encoding_table == NULL ||
       state->encoding_table->vector_source_vgpr_count == 0) {
     return iree_make_status(
@@ -886,9 +880,9 @@ static iree_status_t loom_amdgpu_encode_vgpr_move_immediate(
         (int)state->target->key.size, state->target->key.data);
   }
   const uint32_t window = state->encoding_table->vector_source_vgpr_count;
-  const uint32_t destination_bank = destination->location_base / window;
+  const uint32_t destination_bank = destination_register / window;
   const uint16_t destination_low_register =
-      (uint16_t)(destination->location_base % window);
+      (uint16_t)(destination_register % window);
   uint8_t mask = 0;
   uint8_t value = 0;
   loom_amdgpu_vgpr_msb_insert_requirement(LOOM_AMDGPU_VGPR_MSB_SLOT_DST,
@@ -1717,19 +1711,7 @@ static iree_status_t loom_amdgpu_encode_storage_address_packet(
   IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_lookup_reference(
       state->storage_layout, state->schedule->module,
       loom_low_storage_address_storage(op), &reference));
-  const int64_t signed_offset = loom_low_storage_address_offset(op);
-  if (signed_offset < 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU native encoding low.storage.address offset must be "
-        "non-negative");
-  }
-  const uint64_t offset = (uint64_t)signed_offset;
-  if (offset >= reference.byte_length) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU native encoding low.storage.address "
-                            "offset exceeds storage reference size");
-  }
+  const uint64_t offset = (uint64_t)loom_low_storage_address_offset(op);
   uint64_t byte_offset = reference.reservation.byte_offset;
   if (byte_offset > UINT32_MAX ||
       reference.byte_offset > UINT32_MAX - byte_offset) {
@@ -1747,7 +1729,7 @@ static iree_status_t loom_amdgpu_encode_storage_address_packet(
       loom_amdgpu_map_assignment(state->allocation,
                                  loom_low_storage_address_result(op));
   return loom_amdgpu_encode_vgpr_move_immediate(
-      state, assignment, (uint32_t)(byte_offset + offset));
+      state, assignment->location_base, (uint32_t)(byte_offset + offset));
 }
 
 static bool loom_amdgpu_wait_packet_matches_packet(
