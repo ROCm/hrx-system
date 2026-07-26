@@ -8,12 +8,14 @@
 
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/packet.h"
+#include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/gfx1250_a0_errata.h"
 #include "loom/target/arch/amdgpu/low_aliases.h"
 #include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/ops/target.h"
+#include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 typedef struct loom_amdgpu_low_verify_state_t {
   // Target resolved for the current function.
@@ -206,6 +208,37 @@ static iree_status_t loom_amdgpu_low_verify_dpp_control(
                                       params, IREE_ARRAYSIZE(params));
 }
 
+static iree_status_t loom_amdgpu_low_verify_storage_address(
+    loom_low_verify_context_t* context,
+    const loom_amdgpu_low_verify_state_t* state, const loom_op_t* op) {
+  if (!loom_low_storage_address_isa(op)) {
+    return iree_ok_status();
+  }
+  const loom_module_t* module = loom_low_verify_context_module(context);
+  const loom_value_id_t result = loom_low_storage_address_result(op);
+  const loom_type_t result_type = loom_module_value_type(module, result);
+  if (loom_low_register_type_descriptor_set_stable_id(result_type) ==
+          state->target->descriptor_set->stable_id &&
+      loom_low_register_type_class_id(result_type) ==
+          LOOM_AMDGPU_REG_CLASS_ID_VGPR &&
+      loom_low_register_type_unit_count(result_type) == 1) {
+    return iree_ok_status();
+  }
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_low_diagnostic_target_key(state->target)),
+      loom_param_string(loom_low_diagnostic_export_name(state->target)),
+      loom_param_string(loom_low_diagnostic_config_key(state->target)),
+      loom_param_string(state->function_name),
+      loom_param_string(loom_low_diagnostic_operation_name(module, op)),
+      loom_param_string(loom_low_diagnostic_value_name(module, result)),
+      loom_param_type(result_type),
+      loom_param_u32(LOOM_AMDGPU_REG_CLASS_ID_VGPR),
+      loom_param_u32(1),
+  };
+  return loom_low_verify_context_emit(context, op, LOOM_ERR_AMDGPU_049, params,
+                                      IREE_ARRAYSIZE(params));
+}
+
 static iree_status_t loom_amdgpu_low_verify_op(
     const loom_low_verify_provider_t* provider,
     loom_low_verify_context_t* context, void* provider_state,
@@ -213,8 +246,12 @@ static iree_status_t loom_amdgpu_low_verify_op(
   (void)provider;
   loom_amdgpu_low_verify_state_t* state =
       (loom_amdgpu_low_verify_state_t*)provider_state;
-  if (state == NULL || packet->kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE ||
-      loom_low_verify_context_should_stop(context)) {
+  if (state == NULL || loom_low_verify_context_should_stop(context)) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_low_verify_storage_address(context, state, packet->op));
+  if (packet->kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
     return iree_ok_status();
   }
   if (packet->descriptor != NULL) {
