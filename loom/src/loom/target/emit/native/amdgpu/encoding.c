@@ -2058,9 +2058,15 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
   iree_host_size_t immediate_name_id_count = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_immediate_name_ids(
       schedule, &immediate_name_ids, &immediate_name_id_count, arena));
-  loom_amdgpu_storage_layout_t storage_layout;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_build(
-      schedule->module, schedule->function_op, arena, &storage_layout));
+  loom_amdgpu_storage_layout_t derived_storage_layout;
+  const loom_amdgpu_storage_layout_t* storage_layout =
+      options ? options->storage_layout : NULL;
+  if (storage_layout == NULL) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_build(
+        schedule->module, schedule->function_op, arena,
+        &derived_storage_layout));
+    storage_layout = &derived_storage_layout;
+  }
   const loom_amdgpu_native_descriptor_refs_t descriptors = {
       .s_mov_b32 = loom_amdgpu_descriptor_ref_descriptor(
           schedule->target.descriptor_set,
@@ -2098,7 +2104,7 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
       .allocation = allocation,
       .target = target,
       .encoding_table = encoding_table,
-      .storage_layout = &storage_layout,
+      .storage_layout = storage_layout,
       .immediate_name_ids = immediate_name_ids,
       .immediate_name_id_count = immediate_name_id_count,
       .address_state = address_state,
@@ -2135,7 +2141,7 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
       .allocation = allocation,
       .target = target,
       .encoding_table = encoding_table,
-      .storage_layout = &storage_layout,
+      .storage_layout = storage_layout,
       .immediate_name_ids = immediate_name_ids,
       .immediate_name_id_count = immediate_name_id_count,
       .address_state = address_state,

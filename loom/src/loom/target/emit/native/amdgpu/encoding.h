@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/schedule/types.h"
+#include "loom/target/emit/native/amdgpu/storage_layout.h"
 #include "loom/target/emit/native/amdgpu/text_fixup.h"
 
 #ifdef __cplusplus
@@ -45,6 +46,8 @@ typedef struct loom_amdgpu_native_insertion_t {
 typedef struct loom_amdgpu_encode_instruction_stream_options_t {
   // Optional target-owned packet plan applied during native encoding.
   const struct loom_amdgpu_packet_plan_t* packet_plan;
+  // Optional function-local storage layout shared with kernel metadata.
+  const loom_amdgpu_storage_layout_t* storage_layout;
 } loom_amdgpu_encode_instruction_stream_options_t;
 
 typedef struct loom_amdgpu_encoded_instruction_stream_t {

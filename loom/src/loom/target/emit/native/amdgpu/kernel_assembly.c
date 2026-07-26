@@ -271,18 +271,12 @@ static iree_status_t loom_amdgpu_kernel_assembly_emit(
       loom_amdgpu_kernel_entry_envelope_for_processor(record.processor);
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_string(builder, entry_envelope->assembly));
-  const struct loom_amdgpu_packet_plan_t* packet_plan =
-      options ? options->packet_plan : NULL;
-  if (packet_plan != NULL) {
-    const loom_amdgpu_assembly_fragment_options_t assembly_options = {
-        .packet_plan = packet_plan,
-    };
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_assembly_fragment_with_options(
-        schedule, allocation, &assembly_options, builder, scratch_arena));
-  } else {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_assembly_fragment(
-        schedule, allocation, builder, scratch_arena));
-  }
+  const loom_amdgpu_assembly_fragment_options_t assembly_options = {
+      .packet_plan = options ? options->packet_plan : NULL,
+      .storage_layout = &record.storage_layout,
+  };
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_assembly_fragment_with_options(
+      schedule, allocation, &assembly_options, builder, scratch_arena));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder,
       ".Lfunc_end0:\n"

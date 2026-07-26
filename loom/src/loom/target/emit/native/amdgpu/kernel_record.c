@@ -242,14 +242,13 @@ static iree_status_t loom_amdgpu_kernel_record_validate_function_shape(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_kernel_record_collect_segment_usage(
+static iree_status_t loom_amdgpu_kernel_record_build_storage_layout(
     const loom_module_t* module, const loom_op_t* function_op,
-    loom_amdgpu_storage_layout_segment_sizes_t* out_usage) {
-  *out_usage = (loom_amdgpu_storage_layout_segment_sizes_t){0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_collect_segment_sizes(
-      module, function_op, out_usage));
-  if (out_usage->group_segment_fixed_size > UINT32_MAX ||
-      out_usage->private_segment_fixed_size > UINT32_MAX) {
+    iree_arena_allocator_t* arena, loom_amdgpu_storage_layout_t* out_layout) {
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_storage_layout_build(module, function_op, arena, out_layout));
+  if (out_layout->segment_sizes.group_segment_fixed_size > UINT32_MAX ||
+      out_layout->segment_sizes.private_segment_fixed_size > UINT32_MAX) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "AMDGPU kernel emission fixed segment sizes exceed metadata limits");
@@ -719,9 +718,9 @@ iree_status_t loom_amdgpu_kernel_record_build(
     abi_layout = &derived_abi_layout;
   }
 
-  loom_amdgpu_storage_layout_segment_sizes_t segment_usage = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_collect_segment_usage(
-      schedule->module, schedule->function_op, &segment_usage));
+  loom_amdgpu_storage_layout_t storage_layout = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build_storage_layout(
+      schedule->module, schedule->function_op, scratch_arena, &storage_layout));
   loom_amdgpu_kernel_record_hidden_user_sgprs_t hidden_user_sgprs = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_collect_hidden_user_sgprs(
       allocation, abi_layout, &hidden_user_sgprs));
@@ -799,6 +798,7 @@ iree_status_t loom_amdgpu_kernel_record_build(
       .target_id = target_id,
       .processor = processor,
       .abi_layout = *abi_layout,
+      .storage_layout = storage_layout,
       .metadata =
           {
               .name = symbol,
@@ -807,10 +807,11 @@ iree_status_t loom_amdgpu_kernel_record_build(
               .kernarg_segment_alignment =
                   abi_layout->kernarg_segment_alignment,
               .wavefront_size = wavefront_size,
-              .group_segment_fixed_size =
-                  (uint32_t)segment_usage.group_segment_fixed_size,
+              .group_segment_fixed_size = (uint32_t)storage_layout.segment_sizes
+                                              .group_segment_fixed_size,
               .private_segment_fixed_size =
-                  (uint32_t)segment_usage.private_segment_fixed_size,
+                  (uint32_t)
+                      storage_layout.segment_sizes.private_segment_fixed_size,
               .sgpr_count = next_free_sgpr,
               .vgpr_count = next_free_vgpr,
               .max_flat_workgroup_size = max_flat_workgroup_size,
