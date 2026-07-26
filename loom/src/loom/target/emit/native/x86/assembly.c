@@ -1045,9 +1045,8 @@ static iree_status_t loom_x86_append_move(
 static iree_status_t loom_x86_emit_edge_copy_group(
     const loom_native_assembly_packet_context_t* context,
     const loom_low_allocation_edge_copy_group_t* group) {
-  iree_host_size_t move_count = 0;
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_edge_copy_units(
-      context->allocation, group, &move_count));
+  const iree_host_size_t move_count =
+      loom_low_move_sequence_edge_copy_unit_count(context->allocation, group);
   if (move_count == 0) {
     return iree_ok_status();
   }
@@ -1057,10 +1056,10 @@ static iree_status_t loom_x86_emit_edge_copy_group(
   loom_low_move_location_t* temporaries = NULL;
   IREE_RETURN_IF_ERROR(loom_low_move_sequence_scratch_reserve_temporaries(
       context->move_scratch, group->temporary_count, &temporaries));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_populate_edge_copy_units(
-      context->allocation, group, moves, move_count));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_populate_edge_copy_temporaries(
-      context->allocation, group, temporaries, group->temporary_count));
+  loom_low_move_sequence_populate_edge_copy_units(context->allocation, group,
+                                                  moves);
+  loom_low_move_sequence_populate_edge_copy_temporaries(context->allocation,
+                                                        group, temporaries);
   loom_x86_assembly_move_state_t move_state = {
       .context = context,
   };

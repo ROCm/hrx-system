@@ -1023,9 +1023,8 @@ static iree_status_t loom_amdgpu_packet_move_temporaries(
   }
   IREE_RETURN_IF_ERROR(loom_low_move_sequence_scratch_reserve_temporaries(
       state->move_scratch, group->temporary_count, out_temporary_locations));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_populate_packet_move_temporaries(
-      state->allocation, group, *out_temporary_locations,
-      group->temporary_count));
+  loom_low_move_sequence_populate_packet_move_temporaries(
+      state->allocation, group, *out_temporary_locations);
   *out_temporary_location_count = group->temporary_count;
   return iree_ok_status();
 }
@@ -1033,9 +1032,8 @@ static iree_status_t loom_amdgpu_packet_move_temporaries(
 static iree_status_t loom_amdgpu_encode_edge_copy_group(
     loom_amdgpu_encode_state_t* state,
     const loom_low_allocation_edge_copy_group_t* group) {
-  iree_host_size_t move_count = 0;
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_edge_copy_units(
-      state->allocation, group, &move_count));
+  const iree_host_size_t move_count =
+      loom_low_move_sequence_edge_copy_unit_count(state->allocation, group);
   if (move_count == 0) {
     return iree_ok_status();
   }
@@ -1045,10 +1043,10 @@ static iree_status_t loom_amdgpu_encode_edge_copy_group(
   loom_low_move_location_t* temporaries = NULL;
   IREE_RETURN_IF_ERROR(loom_low_move_sequence_scratch_reserve_temporaries(
       state->move_scratch, group->temporary_count, &temporaries));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_populate_edge_copy_units(
-      state->allocation, group, moves, move_count));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_populate_edge_copy_temporaries(
-      state->allocation, group, temporaries, group->temporary_count));
+  loom_low_move_sequence_populate_edge_copy_units(state->allocation, group,
+                                                  moves);
+  loom_low_move_sequence_populate_edge_copy_temporaries(state->allocation,
+                                                        group, temporaries);
   return loom_amdgpu_encode_move_sequence(state, move_count, temporaries,
                                           group->temporary_count);
 }
@@ -1060,20 +1058,15 @@ static iree_status_t loom_amdgpu_encode_copy_packet(
       loom_amdgpu_map_assignment(state->allocation, loom_low_copy_source(op));
   const loom_low_allocation_assignment_t* result_assignment =
       loom_amdgpu_map_assignment(state->allocation, loom_low_copy_result(op));
-  if (source_assignment->location_count != result_assignment->location_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU native encoding copy requires matching register ranges");
-  }
   const uint32_t register_count = source_assignment->location_count;
   loom_low_move_t* moves = NULL;
   IREE_RETURN_IF_ERROR(loom_low_move_sequence_scratch_reserve_moves(
       state->move_scratch, register_count, &moves));
   for (uint32_t i = 0; i < register_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_low_move_location_from_assignment_unit(
-        result_assignment, i, &moves[i].destination));
-    IREE_RETURN_IF_ERROR(loom_low_move_location_from_assignment_unit(
-        source_assignment, i, &moves[i].source));
+    moves[i].destination =
+        loom_low_move_location_from_assignment_unit(result_assignment, i);
+    moves[i].source =
+        loom_low_move_location_from_assignment_unit(source_assignment, i);
   }
   loom_low_move_location_t* temporaries = NULL;
   iree_host_size_t temporary_count = 0;
@@ -1086,9 +1079,8 @@ static iree_status_t loom_amdgpu_encode_copy_packet(
 static iree_status_t loom_amdgpu_encode_slice_packet(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
   const loom_op_t* op = packet->node->op;
-  iree_host_size_t move_count = 0;
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_slice_units(
-      state->allocation, op, &move_count));
+  const iree_host_size_t move_count =
+      loom_low_move_sequence_slice_unit_count(state->allocation, op);
   if (move_count == 0) {
     return iree_ok_status();
   }
@@ -1096,8 +1088,7 @@ static iree_status_t loom_amdgpu_encode_slice_packet(
   loom_low_move_t* moves = NULL;
   IREE_RETURN_IF_ERROR(loom_low_move_sequence_scratch_reserve_moves(
       state->move_scratch, move_count, &moves));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_populate_slice_units(
-      state->allocation, op, moves, move_count));
+  loom_low_move_sequence_populate_slice_units(state->allocation, op, moves);
   loom_low_move_location_t* temporaries = NULL;
   iree_host_size_t temporary_count = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_move_temporaries(
@@ -1109,9 +1100,8 @@ static iree_status_t loom_amdgpu_encode_slice_packet(
 static iree_status_t loom_amdgpu_encode_concat_packet(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
   const loom_op_t* op = packet->node->op;
-  iree_host_size_t move_count = 0;
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_concat_units(
-      state->allocation, op, &move_count));
+  const iree_host_size_t move_count =
+      loom_low_move_sequence_concat_unit_count(state->allocation, op);
   if (move_count == 0) {
     return iree_ok_status();
   }
@@ -1119,8 +1109,7 @@ static iree_status_t loom_amdgpu_encode_concat_packet(
   loom_low_move_t* moves = NULL;
   IREE_RETURN_IF_ERROR(loom_low_move_sequence_scratch_reserve_moves(
       state->move_scratch, move_count, &moves));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_populate_concat_units(
-      state->allocation, op, moves, move_count));
+  loom_low_move_sequence_populate_concat_units(state->allocation, op, moves);
   loom_low_move_location_t* temporaries = NULL;
   iree_host_size_t temporary_count = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_move_temporaries(
