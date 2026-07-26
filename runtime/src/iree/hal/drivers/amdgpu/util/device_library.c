@@ -90,13 +90,14 @@ static const iree_file_toc_t* iree_hal_amdgpu_device_library_find_file_for_arch(
 }
 
 static iree_status_t iree_hal_amdgpu_device_library_find_file_for_target(
-    const iree_hal_amdgpu_target_id_t* target_id,
+    const iree_hal_amdgpu_target_id_t* physical_target_id,
+    const iree_hal_amdgpu_target_id_t* isa_target_id,
     const iree_file_toc_t** out_file_toc) {
   *out_file_toc = NULL;
   iree_hal_amdgpu_device_library_target_candidate_list_t candidates = {0};
   IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_device_library_target_candidates_from_target(
-          target_id, &candidates));
+      iree_hal_amdgpu_device_library_target_candidates_from_agent_isa(
+          physical_target_id, isa_target_id, &candidates));
   for (iree_host_size_t i = 0; i < candidates.count; ++i) {
     const iree_file_toc_t* file_toc =
         iree_hal_amdgpu_device_library_find_file_for_arch(
@@ -125,7 +126,8 @@ static iree_status_t iree_hal_amdgpu_device_library_select_file(
         iree_hal_amdgpu_agent_target_isa_at(agent_target, i);
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_amdgpu_device_library_find_file_for_target(
-                &isa_target->target_id, &best_file_toc));
+                &agent_target->primary_isa.target_id, &isa_target->target_id,
+                &best_file_toc));
   }
 
   // If we found a matching file return that for loading. It should work but is

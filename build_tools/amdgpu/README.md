@@ -6,9 +6,10 @@ code objects. The center of gravity is target selection, not any one runtime
 package:
 
 - `target_map.py` is the source of truth for exact GPU architectures,
-  code-object targets, and family selectors.
+  code-object targets, qualified device-binary artifacts, and family selectors.
 - `selectors.bzl` and `selectors.cmake` validate selectors and expand them to
-  either exact HSA ISA targets or compatible code-object targets.
+  exact HSA ISA targets, compatible code-object targets, or the complete
+  device-binary artifact set.
 - `binary.bzl` and `binary.cmake` build C sources into AMDGPU ELF shared
   objects with clang, `llvm-link`, `lld`, and optionally `llvm-objcopy`.
 
@@ -22,11 +23,15 @@ Selectors accepted by the shared helpers fall into three groups:
 | Code-object target | `gfx9-4-generic` | LLVM `-march` value used to build one compatible code object. |
 | Family selector | `gfx94X-all`, `dgpu-all`, `igpu-all` | TheRock-style selector that expands through exact targets. |
 
-There are two expansion modes:
+There are three expansion modes:
 
 - `code-object` expands any selector to the smallest known compatible set of
   code-object targets. Runtime builtin blobs and libhrx CTS HSACOs use this
   mode so `gfx942` and `gfx94X-all` both select `gfx9-4-generic`.
+- `device-binary` preserves the code-object fallback set and prepends any
+  exact-target artifacts required for safe runtime selection. This is the mode
+  for embedded support libraries whose codegen requirements can vary within a
+  code-object family.
 - `exact` expands selectors to exact HSA ISA targets. This mode is for tools or
   tests that must name precise device architectures.
 
@@ -47,7 +52,9 @@ The current generic-family map is:
 not folded into `gfx11-generic` because LLVM models them as separate processors
 outside the `gfx11-generic` compatibility set today. `gfx12-5-generic` is
 available as an explicit selector, but consumers decide whether it belongs in
-their default checked-in artifact sets.
+their default checked-in artifact sets. The `device-binary` expansion also
+includes `gfx1250-a0` because the generic gfx12.5 artifact is B0-qualified and
+cannot safely serve that physical revision.
 
 ## Generated Files
 
@@ -59,24 +66,26 @@ Running `target_map.py` emits generated fragments consumed by multiple layers:
 | `build_tools/amdgpu/target_map.cmake` | CMake selector helpers. |
 | `build_tools/amdgpu/elf_machine_map.inl` | C/C++ ELF machine decode tables for runtime, libhrx, and Loom. |
 | `build_tools/amdgpu/target_map.h` | C/C++ tests that need exact-to-code-object lookup. |
-| `runtime/src/iree/hal/executable/amdgpu/target_id_map.inl` | Runtime AMDGPU device-library lookup. |
+| `runtime/src/iree/hal/executable/amdgpu/target_id_map.inl` | Runtime target-ID mappings and processor facts. |
+| `runtime/src/iree/hal/drivers/amdgpu/util/device_library_target_map.inl` | Runtime qualified device-library artifact lookup. |
 
 The generated files are checked in. The presubmit check runs:
 
 ```bash
-python build_tools/amdgpu/target_map.py --check
+python3 build_tools/amdgpu/target_map.py --check
 ```
 
-Architecture updates start in `EXACT_TARGET_CODE_OBJECTS` and
-`TARGET_FAMILIES` in `target_map.py`. The evidence to check before changing the
-map is TheRock's `cmake/therock_amdgpu_targets.cmake` for selector and family
-membership, and LLVM AMDGPU generic processor documentation/tablegen data for
-generic code-object compatibility.
+Architecture updates start in `EXACT_TARGET_CODE_OBJECTS`,
+`DEVICE_BINARY_VARIANTS`, and `TARGET_FAMILIES` in `target_map.py`. The
+evidence to check before changing the map is TheRock's
+`cmake/therock_amdgpu_targets.cmake` for selector and family membership, and
+LLVM AMDGPU generic processor documentation/tablegen data for generic
+code-object compatibility and variant codegen options.
 
 After editing the map:
 
 ```bash
-python build_tools/amdgpu/target_map.py
+python3 build_tools/amdgpu/target_map.py
 buildifier build_tools/amdgpu/BUILD.bazel build_tools/amdgpu/*.bzl
 ```
 
@@ -185,7 +194,7 @@ mechanics. Runtime, libhrx, and future Loom code should own their policy:
 
 - default selector lists;
 - whether a selector enables a test suite or only provides data;
-- artifact naming and installation layout;
+- artifact installation and packaging layout;
 - whether source-built artifacts are required or optional.
 
 That split keeps this package usable by several products without turning it

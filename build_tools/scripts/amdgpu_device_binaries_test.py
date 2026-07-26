@@ -132,6 +132,93 @@ class AmdgpuDeviceBinariesTest(unittest.TestCase):
             ),
         )
 
+    def test_device_binary_expansion_preserves_exact_variants_before_fallbacks(self):
+        expected = ["gfx1250-a0", "gfx12-5-generic"]
+        self.assertEqual(
+            expected,
+            amdgpu_device_binaries.expand_target_selections(["gfx1250"]),
+        )
+        self.assertEqual(
+            expected,
+            amdgpu_device_binaries.expand_target_selections(["gfx12-5-generic"]),
+        )
+        self.assertEqual(
+            expected,
+            amdgpu_device_binaries.expand_target_selections(["gfx125X-all"]),
+        )
+        self.assertEqual(
+            ["gfx12-5-generic"],
+            amdgpu_device_binaries.expand_target_selections(["gfx1251"]),
+        )
+
+    def test_device_binary_expansion_deduplicates_artifacts(self):
+        self.assertEqual(
+            ["gfx1250-a0", "gfx12-5-generic"],
+            amdgpu_device_binaries.expand_target_selections(
+                ["gfx1250", "gfx12-5-generic", "gfx125X-all"]
+            ),
+        )
+
+    def test_resolve_device_binary_targets_rejects_public_selectors(self):
+        with self.assertRaisesRegex(
+            RuntimeError, "unknown AMDGPU device binary target.*gfx1250"
+        ):
+            amdgpu_device_binaries.resolve_device_binary_targets(["gfx1250"])
+
+    def test_gfx1250_a0_build_applies_revision_options_to_both_codegen_stages(
+        self,
+    ):
+        target = amdgpu_device_binaries.resolve_device_binary_targets(["gfx1250-a0"])[0]
+        self.assertEqual(
+            target.target_ids,
+            ("gfx1250:gfx1250-b0-specific-",),
+        )
+        toolchain = amdgpu_device_binaries.Toolchain(
+            clang=Path("/tools/clang"),
+            llvm_link=Path("/tools/llvm-link"),
+            lld=Path("/tools/lld"),
+            llvm_objcopy=Path("/tools/llvm-objcopy"),
+            clang_resource_include=Path("/tools/include"),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            with mock.patch.object(
+                amdgpu_device_binaries, "run_command"
+            ) as run_command:
+                output = amdgpu_device_binaries.build_target(
+                    target=target,
+                    source_paths=[Path("/source/device.c")],
+                    repo_root=Path("/source"),
+                    binary_root=None,
+                    output_dir=output_dir,
+                    toolchain=toolchain,
+                    minimize=False,
+                    keep_intermediates=False,
+                    extra_copts=["-user-compile-option"],
+                    linkopts=["-user-link-option"],
+                    verbose=False,
+                    dry_run=True,
+                )
+
+        commands = [call.args[0] for call in run_command.call_args_list]
+        compile_command = next(
+            command for command in commands if "-emit-llvm" in command
+        )
+        link_command = next(
+            command for command in commands if command[0] == "/tools/lld"
+        )
+        self.assertIn("-march=gfx1250", compile_command)
+        self.assertLess(
+            compile_command.index("-user-compile-option"),
+            compile_command.index("-amdgpu-gfx1250-b0-specific=false"),
+        )
+        self.assertLess(
+            link_command.index("-user-link-option"),
+            link_command.index("-plugin-opt=-amdgpu-gfx1250-b0-specific=false"),
+        )
+        self.assertEqual(output["target"], "gfx1250-a0")
+        self.assertEqual(output["path"], "amdgcn-amd-amdhsa--gfx1250-a0.so")
+
 
 if __name__ == "__main__":
     unittest.main()

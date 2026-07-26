@@ -586,6 +586,8 @@ iree_cc_library(
     device_library_target
   HDRS
     "device_library_target.h"
+  TEXTUAL_HDRS
+    "device_library_target_map.inl"
   SRCS
     "device_library_target.c"
   DEPS

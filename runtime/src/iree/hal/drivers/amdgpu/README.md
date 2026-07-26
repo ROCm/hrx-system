@@ -223,8 +223,9 @@ iree-bazel-build --//runtime/src/iree/hal/drivers/amdgpu:targets=igpu-all //runt
 
 By default Bazel uses the checked-in prebuilt blobs. Developers editing the HAL
 device kernels can opt into live source rebuilds with
-`--config=amdgpu_device_binaries_source_rocm` or
-`--config=amdgpu_device_binaries_source_llvm_project`.
+`--//runtime/src/iree/hal/drivers/amdgpu/device/binaries:build_mode=source`
+and select the producer with
+`--repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm` or `llvm-project`.
 
 See
 [`build_tools/amdgpu/README.md`](../../../../../../build_tools/amdgpu/README.md)
