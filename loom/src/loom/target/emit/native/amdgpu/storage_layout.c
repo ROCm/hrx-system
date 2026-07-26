@@ -55,11 +55,6 @@ static iree_status_t loom_amdgpu_storage_layout_project_reservation(
   IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_segment_size_ptr(
       &projection->sizes, low_reservation->space, &segment_size));
 
-  if (!iree_is_power_of_two_uint64(low_reservation->byte_alignment)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU storage layout alignment must be a power of two");
-  }
   uint64_t aligned_segment_size = 0;
   if (!iree_checked_align_u64(*segment_size, low_reservation->byte_alignment,
                               &aligned_segment_size)) {
@@ -81,11 +76,7 @@ static iree_status_t loom_amdgpu_storage_layout_project_reservation(
       .byte_alignment = low_reservation->byte_alignment,
   };
   if (projection->records != NULL) {
-    if (projection->record_count >= projection->record_capacity) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU storage layout record count changed while building");
-    }
+    IREE_ASSERT_LT(projection->record_count, projection->record_capacity);
     projection->records[projection->record_count] =
         (loom_amdgpu_storage_layout_record_t){
             .storage_value_id = storage_value_id,
@@ -148,11 +139,7 @@ iree_status_t loom_amdgpu_storage_layout_build(
   IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_project(
       module, function_op, records, count_projection.record_count,
       LOOM_VALUE_ID_INVALID, NULL, &build_projection));
-  if (build_projection.record_count != count_projection.record_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU storage layout record count changed while building");
-  }
+  IREE_ASSERT_EQ(build_projection.record_count, count_projection.record_count);
   *out_layout = (loom_amdgpu_storage_layout_t){
       .segment_sizes = build_projection.sizes,
       .records = records,
