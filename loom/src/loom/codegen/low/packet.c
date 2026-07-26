@@ -54,6 +54,11 @@ loom_named_attr_slice_t loom_low_packet_attrs(
 iree_status_t loom_low_packet_validate_tables(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation) {
+  if (schedule == NULL || allocation == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "schedule and allocation tables are required for packet access");
+  }
   if (schedule->module == NULL || schedule->function_op == NULL ||
       allocation->module == NULL || allocation->function_op == NULL) {
     return iree_make_status(
@@ -72,6 +77,170 @@ iree_status_t loom_low_packet_validate_tables(
         "schedule and allocation tables must use the same descriptor set");
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_low_packet_sequence_initialize(
+    const loom_low_schedule_table_t* schedule,
+    loom_low_packet_sequence_t* out_sequence) {
+  if (out_sequence == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "packet sequence output is required");
+  }
+  *out_sequence = (loom_low_packet_sequence_t){0};
+  if (schedule == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "schedule is required for packet sequence");
+  }
+  if (schedule->module == NULL || schedule->function_op == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "packet sequence schedule must name a low function");
+  }
+  if (schedule->error_count != 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "packet sequence requires a successful schedule; schedule has %" PRIu32
+        " error(s)",
+        schedule->error_count);
+  }
+  if (schedule->block_count > UINT32_MAX || schedule->node_count > UINT32_MAX ||
+      schedule->scheduled_node_count > UINT32_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "packet sequence block, node, and packet counts must fit in u32");
+  }
+  if (schedule->block_count != 0 && schedule->blocks == NULL) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "packet sequence has blocks but no block table");
+  }
+  if (schedule->node_count != 0 && schedule->nodes == NULL) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "packet sequence has nodes but no node table");
+  }
+  if (schedule->scheduled_node_count != 0 &&
+      schedule->scheduled_node_indices == NULL) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "packet sequence has packets but no packet-to-node table");
+  }
+  if (schedule->scheduled_node_count != schedule->node_count) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "successful packet sequence has %" PRIhsz
+                            " packet(s) for %" PRIhsz " node(s)",
+                            schedule->scheduled_node_count,
+                            schedule->node_count);
+  }
+
+  iree_host_size_t expected_node_start = 0;
+  iree_host_size_t expected_packet_start = 0;
+  for (iree_host_size_t block_index = 0; block_index < schedule->block_count;
+       ++block_index) {
+    const loom_low_schedule_block_t* block = &schedule->blocks[block_index];
+    if (block->block == NULL) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "packet sequence block %" PRIhsz " has no source block", block_index);
+    }
+    if (block->node_start != expected_node_start ||
+        block->scheduled_node_start != expected_packet_start) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "packet sequence block %" PRIhsz
+                              " starts at node %" PRIu32 " and packet %" PRIu32
+                              "; expected node %" PRIhsz " and packet %" PRIhsz,
+                              block_index, block->node_start,
+                              block->scheduled_node_start, expected_node_start,
+                              expected_packet_start);
+    }
+    if (block->scheduled_node_count != block->node_count) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "successful packet sequence block %" PRIhsz " has %" PRIu32
+          " packet(s) for %" PRIu32 " node(s)",
+          block_index, block->scheduled_node_count, block->node_count);
+    }
+    iree_host_size_t block_node_end = 0;
+    iree_host_size_t block_packet_end = 0;
+    if (!iree_host_size_checked_add(expected_node_start, block->node_count,
+                                    &block_node_end) ||
+        !iree_host_size_checked_add(expected_packet_start,
+                                    block->scheduled_node_count,
+                                    &block_packet_end) ||
+        block_node_end > schedule->node_count ||
+        block_packet_end > schedule->scheduled_node_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "packet sequence block %" PRIhsz
+                              " extends beyond the node or packet table",
+                              block_index);
+    }
+    for (uint32_t scheduled_ordinal = 0;
+         scheduled_ordinal < block->scheduled_node_count; ++scheduled_ordinal) {
+      const iree_host_size_t packet_index =
+          expected_packet_start + scheduled_ordinal;
+      const uint32_t node_index =
+          schedule->scheduled_node_indices[packet_index];
+      if (node_index < block->node_start || node_index >= block_node_end) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "packet sequence block %" PRIhsz
+                                " packet %" PRIhsz " references node %" PRIu32
+                                " outside its node span",
+                                block_index, packet_index, node_index);
+      }
+      const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
+      if (node->block != block->block || node->block_index != block_index ||
+          node->scheduled_ordinal != scheduled_ordinal) {
+        return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "packet sequence packet %" PRIhsz
+                                " does not match node %" PRIu32 " block order",
+                                packet_index, node_index);
+      }
+      if (node->descriptor != NULL &&
+          loom_low_descriptor_set_descriptor_ordinal(
+              schedule->target.descriptor_set, node->descriptor) ==
+              LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "packet sequence packet %" PRIhsz
+            " references a descriptor outside its descriptor set",
+            packet_index);
+      }
+    }
+    expected_node_start = block_node_end;
+    expected_packet_start = block_packet_end;
+  }
+  if (expected_node_start != schedule->node_count ||
+      expected_packet_start != schedule->scheduled_node_count) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "packet sequence blocks cover %" PRIhsz " of %" PRIhsz
+        " node(s) and %" PRIhsz " of %" PRIhsz " packet(s)",
+        expected_node_start, schedule->node_count, expected_packet_start,
+        schedule->scheduled_node_count);
+  }
+
+  *out_sequence = (loom_low_packet_sequence_t){
+      .schedule = schedule,
+  };
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_allocated_packet_sequence_initialize(
+    const loom_low_schedule_table_t* schedule,
+    const loom_low_allocation_table_t* allocation,
+    loom_low_packet_sequence_t* out_sequence) {
+  if (out_sequence == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "packet sequence output is required");
+  }
+  *out_sequence = (loom_low_packet_sequence_t){0};
+  IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
+  if (allocation->error_count != 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "allocated packet sequence requires a successful allocation; "
+        "allocation has %" PRIu32 " error(s)",
+        allocation->error_count);
+  }
+  return loom_low_packet_sequence_initialize(schedule, out_sequence);
 }
 
 static iree_status_t loom_low_packet_validate_asm_form_ordinal(
@@ -121,6 +290,8 @@ static iree_status_t loom_low_packet_descriptor_ordinal(
 iree_status_t loom_low_packet_validate_asm_form_table(
     const loom_low_schedule_table_t* schedule,
     const loom_low_packet_asm_form_table_t* asm_forms) {
+  loom_low_packet_sequence_t packets = {0};
+  IREE_RETURN_IF_ERROR(loom_low_packet_sequence_initialize(schedule, &packets));
   if (schedule->module != asm_forms->module ||
       schedule->function_op != asm_forms->function_op) {
     return iree_make_status(
@@ -152,19 +323,11 @@ iree_status_t loom_low_packet_validate_asm_form_table(
     if (asm_form_ordinal == LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
       continue;
     }
-    uint32_t node_index = LOOM_LOW_SCHEDULE_NODE_NONE;
-    IREE_RETURN_IF_ERROR(
-        loom_low_packet_node_index_at(schedule, packet_index, &node_index));
-    if (node_index >= schedule->node_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "selected asm-form packet %" PRIhsz
-                              " references node %" PRIu32,
-                              packet_index, node_index);
-    }
-    const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
+    const loom_low_packet_view_t packet =
+        loom_low_packet_sequence_at(&packets, packet_index);
     uint32_t descriptor_ordinal = LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
     IREE_RETURN_IF_ERROR(loom_low_packet_descriptor_ordinal(
-        schedule, node, &descriptor_ordinal));
+        schedule, packet.node, &descriptor_ordinal));
     if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "selected asm form ordinal %" PRIu32

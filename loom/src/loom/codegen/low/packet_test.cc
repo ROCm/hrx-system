@@ -132,6 +132,205 @@ TEST(LowPacketTest, ViewsScheduledPackets) {
   EXPECT_EQ(packet.descriptor, &state.descriptors[1]);
 }
 
+TEST(LowPacketTest, ValidatedSequenceViewsScheduledPackets) {
+  PacketTestState state;
+  InitializePacketTestState(&state);
+
+  loom_low_packet_sequence_t sequence = {};
+  IREE_ASSERT_OK(loom_low_allocated_packet_sequence_initialize(
+      &state.schedule, &state.allocation, &sequence));
+  EXPECT_EQ(sequence.schedule, &state.schedule);
+  EXPECT_EQ(loom_low_packet_sequence_count(&sequence), 2u);
+
+  loom_low_packet_view_t packet = loom_low_packet_sequence_at(&sequence, 0);
+  EXPECT_EQ(packet.packet_index, 0u);
+  EXPECT_EQ(packet.node_index, 1u);
+  EXPECT_EQ(packet.node, &state.nodes[1]);
+  EXPECT_EQ(packet.descriptor, nullptr);
+
+  packet = loom_low_packet_sequence_at_block_ordinal(&sequence, 0, 1);
+  EXPECT_EQ(packet.packet_index, 1u);
+  EXPECT_EQ(packet.node_index, 0u);
+  EXPECT_EQ(packet.node, &state.nodes[0]);
+  EXPECT_EQ(packet.descriptor, &state.descriptors[1]);
+}
+
+TEST(LowPacketTest, RejectsIncompleteSequenceTables) {
+  {
+    SCOPED_TRACE("missing block table");
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    state.schedule.blocks = nullptr;
+    loom_low_packet_sequence_t sequence = {.schedule = &state.schedule};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_low_packet_sequence_initialize(&state.schedule, &sequence));
+    EXPECT_EQ(sequence.schedule, nullptr);
+  }
+  {
+    SCOPED_TRACE("missing node table");
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    state.schedule.nodes = nullptr;
+    loom_low_packet_sequence_t sequence = {.schedule = &state.schedule};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_low_packet_sequence_initialize(&state.schedule, &sequence));
+    EXPECT_EQ(sequence.schedule, nullptr);
+  }
+  {
+    SCOPED_TRACE("missing packet-to-node table");
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    state.schedule.scheduled_node_indices = nullptr;
+    loom_low_packet_sequence_t sequence = {.schedule = &state.schedule};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_low_packet_sequence_initialize(&state.schedule, &sequence));
+    EXPECT_EQ(sequence.schedule, nullptr);
+  }
+}
+
+TEST(LowPacketTest, RejectsIncoherentSequencePartition) {
+  {
+    SCOPED_TRACE("missing source block");
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    state.blocks[0].block = nullptr;
+    loom_low_packet_sequence_t sequence = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_low_packet_sequence_initialize(&state.schedule, &sequence));
+  }
+  {
+    SCOPED_TRACE("packet and node count mismatch");
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    state.schedule.scheduled_node_count = 1;
+    loom_low_packet_sequence_t sequence = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_low_packet_sequence_initialize(&state.schedule, &sequence));
+  }
+  {
+    SCOPED_TRACE("block extends beyond tables");
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    state.blocks[0].node_count = 3;
+    state.blocks[0].scheduled_node_count = 3;
+    loom_low_packet_sequence_t sequence = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        loom_low_packet_sequence_initialize(&state.schedule, &sequence));
+  }
+  {
+    SCOPED_TRACE("block start mismatch");
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    state.blocks[0].scheduled_node_start = 1;
+    loom_low_packet_sequence_t sequence = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_low_packet_sequence_initialize(&state.schedule, &sequence));
+  }
+  {
+    SCOPED_TRACE("block node and packet count mismatch");
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    state.blocks[0].scheduled_node_count = 1;
+    loom_low_packet_sequence_t sequence = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_low_packet_sequence_initialize(&state.schedule, &sequence));
+  }
+  {
+    SCOPED_TRACE("blocks do not cover packet sequence");
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    state.schedule.block_count = 0;
+    loom_low_packet_sequence_t sequence = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_low_packet_sequence_initialize(&state.schedule, &sequence));
+  }
+}
+
+TEST(LowPacketTest, RejectsIncoherentSequenceMapping) {
+  {
+    SCOPED_TRACE("packet references invalid node");
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    state.scheduled_node_indices[0] = 2;
+    loom_low_packet_sequence_t sequence = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        loom_low_packet_sequence_initialize(&state.schedule, &sequence));
+  }
+  {
+    SCOPED_TRACE("node source block mismatch");
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    loom_block_t other_block = {};
+    state.nodes[1].block = &other_block;
+    loom_low_packet_sequence_t sequence = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_low_packet_sequence_initialize(&state.schedule, &sequence));
+  }
+  {
+    SCOPED_TRACE("node block index mismatch");
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    state.nodes[1].block_index = 1;
+    loom_low_packet_sequence_t sequence = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_low_packet_sequence_initialize(&state.schedule, &sequence));
+  }
+  {
+    SCOPED_TRACE("node scheduled ordinal mismatch");
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    state.nodes[1].scheduled_ordinal = 1;
+    loom_low_packet_sequence_t sequence = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_low_packet_sequence_initialize(&state.schedule, &sequence));
+  }
+  {
+    SCOPED_TRACE("descriptor outside target descriptor set");
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    loom_low_descriptor_t other_descriptor = {};
+    state.nodes[0].descriptor = &other_descriptor;
+    loom_low_packet_sequence_t sequence = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        loom_low_packet_sequence_initialize(&state.schedule, &sequence));
+  }
+}
+
+TEST(LowPacketTest, RejectsFailedSequenceTables) {
+  {
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    state.schedule.error_count = 1;
+    loom_low_packet_sequence_t sequence = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_low_packet_sequence_initialize(&state.schedule, &sequence));
+  }
+  {
+    PacketTestState state;
+    InitializePacketTestState(&state);
+    state.allocation.error_count = 1;
+    loom_low_packet_sequence_t sequence = {};
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                          loom_low_allocated_packet_sequence_initialize(
+                              &state.schedule, &state.allocation, &sequence));
+  }
+}
+
 TEST(LowPacketTest, ViewsBlockScheduledOrdinals) {
   PacketTestState state;
   InitializePacketTestState(&state);
@@ -332,6 +531,11 @@ TEST(LowPacketTest, RejectsMismatchedTables) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_low_packet_validate_tables(&state.schedule, &state.allocation));
+  loom_low_packet_sequence_t sequence = {.schedule = &state.schedule};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_allocated_packet_sequence_initialize(
+                            &state.schedule, &state.allocation, &sequence));
+  EXPECT_EQ(sequence.schedule, nullptr);
 }
 
 TEST(LowPacketTest, RejectsUnnamedTableFunction) {

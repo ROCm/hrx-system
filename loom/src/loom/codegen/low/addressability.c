@@ -227,13 +227,15 @@ iree_status_t loom_low_addressability_validate_allocated_packets(
     iree_diagnostic_emitter_t emitter,
     loom_low_addressability_validation_result_t* out_result) {
   *out_result = (loom_low_addressability_validation_result_t){0};
-  IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
-  const iree_host_size_t packet_count = loom_low_packet_count(schedule);
+  loom_low_packet_sequence_t packets = {0};
+  IREE_RETURN_IF_ERROR(loom_low_allocated_packet_sequence_initialize(
+      schedule, allocation, &packets));
+  const iree_host_size_t packet_count =
+      loom_low_packet_sequence_count(&packets);
   for (iree_host_size_t packet_index = 0; packet_index < packet_count;
        ++packet_index) {
-    loom_low_packet_view_t packet = {0};
-    IREE_RETURN_IF_ERROR(
-        loom_low_packet_view_at(schedule, allocation, packet_index, &packet));
+    const loom_low_packet_view_t packet =
+        loom_low_packet_sequence_at(&packets, packet_index);
     IREE_RETURN_IF_ERROR(loom_low_addressability_validate_packet(
         schedule, allocation, &packet, emitter, out_result));
   }

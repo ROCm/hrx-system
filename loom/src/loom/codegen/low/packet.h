@@ -46,6 +46,76 @@ typedef struct loom_low_packet_view_t {
   const loom_low_descriptor_t* descriptor;
 } loom_low_packet_view_t;
 
+// Validated borrowed view over one successful scheduled-packet sequence.
+//
+// Initialize this at a production boundary before using the infallible indexed
+// accessors below. The source schedule and its arena storage must remain live
+// and immutable for the lifetime of the sequence.
+typedef struct loom_low_packet_sequence_t {
+  // Schedule whose packet mapping was validated.
+  const loom_low_schedule_table_t* schedule;
+} loom_low_packet_sequence_t;
+
+// Validates the packet mapping in |schedule| and initializes |out_sequence|.
+// Failed or partial schedules cannot produce a sequence.
+iree_status_t loom_low_packet_sequence_initialize(
+    const loom_low_schedule_table_t* schedule,
+    loom_low_packet_sequence_t* out_sequence);
+
+// Validates the packet mapping and matching allocation table before
+// initializing |out_sequence|.
+iree_status_t loom_low_allocated_packet_sequence_initialize(
+    const loom_low_schedule_table_t* schedule,
+    const loom_low_allocation_table_t* allocation,
+    loom_low_packet_sequence_t* out_sequence);
+
+// Returns the number of packets in |sequence|.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_host_size_t
+loom_low_packet_sequence_count(const loom_low_packet_sequence_t* sequence) {
+  IREE_ASSERT_ARGUMENT(sequence);
+  IREE_ASSERT_ARGUMENT(sequence->schedule);
+  return sequence->schedule->scheduled_node_count;
+}
+
+// Returns the packet at |packet_index| after sequence validation.
+//
+// |packet_index| must be derived from the sequence or otherwise proven in
+// range. Use the checked packet-index helpers for caller-derived indices.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_low_packet_view_t
+loom_low_packet_sequence_at(const loom_low_packet_sequence_t* sequence,
+                            iree_host_size_t packet_index) {
+  IREE_ASSERT_ARGUMENT(sequence);
+  const loom_low_schedule_table_t* schedule = sequence->schedule;
+  IREE_ASSERT_ARGUMENT(schedule);
+  IREE_ASSERT_LT(packet_index, schedule->scheduled_node_count);
+  const uint32_t node_index = schedule->scheduled_node_indices[packet_index];
+  IREE_ASSERT_LT(node_index, schedule->node_count);
+  const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
+  return (loom_low_packet_view_t){
+      /*.packet_index=*/packet_index,
+      /*.node_index=*/node_index,
+      /*.node=*/node,
+      /*.descriptor=*/node->descriptor,
+  };
+}
+
+// Returns the packet at |scheduled_ordinal| in |block_index| after sequence
+// validation. Both indices must be derived from the sequence.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_low_packet_view_t
+loom_low_packet_sequence_at_block_ordinal(
+    const loom_low_packet_sequence_t* sequence, uint32_t block_index,
+    uint32_t scheduled_ordinal) {
+  IREE_ASSERT_ARGUMENT(sequence);
+  const loom_low_schedule_table_t* schedule = sequence->schedule;
+  IREE_ASSERT_ARGUMENT(schedule);
+  IREE_ASSERT_LT(block_index, schedule->block_count);
+  const loom_low_schedule_block_t* block = &schedule->blocks[block_index];
+  IREE_ASSERT_LT(scheduled_ordinal, block->scheduled_node_count);
+  const iree_host_size_t packet_index =
+      (iree_host_size_t)block->scheduled_node_start + scheduled_ordinal;
+  return loom_low_packet_sequence_at(sequence, packet_index);
+}
+
 // Returns the named descriptor-attribute slice for |packet|, or an empty slice
 // for structural packets.
 loom_named_attr_slice_t loom_low_packet_attrs(

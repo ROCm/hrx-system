@@ -10,6 +10,8 @@
 #include <string.h>
 
 typedef struct loom_low_packet_progress_build_state_t {
+  // Validated packet sequence being queried.
+  const loom_low_packet_sequence_t* packets;
   // Schedule table being walked.
   const loom_low_schedule_table_t* schedule;
   // Allocation table paired with |schedule|.
@@ -104,10 +106,10 @@ static iree_status_t loom_low_packet_progress_run_pass(
     loom_low_packet_progress_build_state_t* state,
     loom_low_packet_progress_emit_fn_t emit) {
   for (iree_host_size_t packet_index = 0;
-       packet_index < loom_low_packet_count(state->schedule); ++packet_index) {
-    loom_low_packet_view_t packet = {0};
-    IREE_RETURN_IF_ERROR(loom_low_packet_view_at(
-        state->schedule, state->allocation, packet_index, &packet));
+       packet_index < loom_low_packet_sequence_count(state->packets);
+       ++packet_index) {
+    const loom_low_packet_view_t packet =
+        loom_low_packet_sequence_at(state->packets, packet_index);
     state->current_packet = &packet;
     IREE_RETURN_IF_ERROR(
         state->provider->query(state->provider->user_data, state->schedule,
@@ -124,9 +126,12 @@ iree_status_t loom_low_packet_progress_build(
     iree_arena_allocator_t* arena,
     loom_low_packet_progress_table_t* out_table) {
   memset(out_table, 0, sizeof(*out_table));
-  IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
+  loom_low_packet_sequence_t packets = {0};
+  IREE_RETURN_IF_ERROR(loom_low_allocated_packet_sequence_initialize(
+      schedule, allocation, &packets));
 
   loom_low_packet_progress_build_state_t state = {
+      .packets = &packets,
       .schedule = schedule,
       .allocation = allocation,
       .provider = provider,
