@@ -287,6 +287,22 @@ typedef struct loom_amdgpu_vopd_rejection_component_t {
   uint32_t literal_u32;
 } loom_amdgpu_vopd_rejection_component_t;
 
+// Final native-emission facts for one component of a planned VOPD packet.
+typedef struct loom_amdgpu_vopd_component_t {
+  // VOPD operation id encoded in this component slot.
+  uint16_t op;
+  // Destination VGPR encoded in this component slot.
+  uint16_t vdst;
+  // First explicit source VGPR, or zero when the component has no VGPR SRC0.
+  uint16_t src0;
+  // Second explicit source VGPR, or zero when the component has no VGPR VSRC1.
+  uint16_t vsrc1;
+  // Unified architectural selector encoded in the component SRC0 field.
+  uint16_t src0_selector;
+  // Component immediate payload, or zero when the form has no immediate.
+  uint32_t immediate_u32;
+} loom_amdgpu_vopd_component_t;
+
 // One native VOPD packet replacing two schedule-visible component packets.
 typedef struct loom_amdgpu_vopd_pair_t {
   // Why this VOPD pair was formed.
@@ -301,22 +317,10 @@ typedef struct loom_amdgpu_vopd_pair_t {
   uint32_t first_node_index;
   // Schedule node index for the Y component.
   uint32_t second_node_index;
-  // VOPD operation id encoded in the X slot.
-  uint16_t op_x;
-  // VOPD operation id encoded in the Y slot.
-  uint16_t op_y;
-  // Destination VGPR encoded in the X slot.
-  uint16_t x_vdst;
-  // First explicit source VGPR encoded in the X slot.
-  uint16_t x_src0;
-  // Second explicit source VGPR encoded in the X slot.
-  uint16_t x_vsrc1;
-  // Destination VGPR encoded in the Y slot.
-  uint16_t y_vdst;
-  // First explicit source VGPR encoded in the Y slot.
-  uint16_t y_src0;
-  // Second explicit source VGPR encoded in the Y slot.
-  uint16_t y_vsrc1;
+  // Final X-slot component emission facts.
+  loom_amdgpu_vopd_component_t x;
+  // Final Y-slot component emission facts.
+  loom_amdgpu_vopd_component_t y;
   // Pair-local payload and encoding flags.
   loom_amdgpu_vopd_pair_flags_t flags;
   // Shared literal payload when LOOM_AMDGPU_VOPD_PAIR_FLAG_LITERAL is set.
