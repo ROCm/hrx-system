@@ -37,6 +37,7 @@ from loom.target.arch.amdgpu.encoding import (  # noqa: E402
     AMDGPU_ENCODING_FORMAT_FLAT,
     AMDGPU_ENCODING_FORMAT_IDS,
     AMDGPU_ENCODING_FORMAT_MUBUF,
+    AMDGPU_ENCODING_FORMAT_SOP2_LITERAL,
     AMDGPU_ENCODING_FORMAT_VBUFFER,
     AMDGPU_ENCODING_FORMAT_VFLAT,
     AMDGPU_ENCODING_FORMAT_VGLOBAL,
@@ -55,6 +56,7 @@ from loom.target.low_descriptors import (  # noqa: E402
     Descriptor,
     DescriptorSet,
     Immediate,
+    ImmediateFlag,
     ImmediateKind,
     OperandFlag,
     OperandRole,
@@ -181,6 +183,12 @@ _XCNT_IMPLICIT_DRAIN_DESCRIPTOR_KEY_PREFIXES = (
 
 _DST_SEL_ENCODING_FIELD_ID = AMDGPU_ENCODING_FIELD_IDS["DST_SEL"]
 _LITERAL_ENCODING_FIELD_ID = AMDGPU_ENCODING_FIELD_IDS["LITERAL"]
+_REL32_SYMBOL_IMMEDIATE_SLOT = 0
+_REL32_BYTE_OFFSET_IMMEDIATE_SLOT = 1
+_REL32_DESCRIPTOR_KEYS = (
+    "amdgpu.s_add_u32.rhs_symbol_rel32_lo",
+    "amdgpu.s_addc_u32.rhs_symbol_rel32_hi",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,12 +315,33 @@ def _validate_canonical_asm_operand_count(
         raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' descriptor '{descriptor_key}' canonical asm form has {operand_count} operand(s); expected one of: {accepted}")
 
 
+def _validate_rel32_descriptor_contract(
+    descriptor_set: DescriptorSet,
+    descriptor_key: str,
+) -> None:
+    descriptor = _descriptor_by_key(descriptor_set, descriptor_key)
+    if descriptor.encoding_format_id != AMDGPU_ENCODING_FORMAT_SOP2_LITERAL:
+        raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' rel32 descriptor '{descriptor_key}' must use SOP2 literal encoding")
+    if len(descriptor.operands) < 2 or descriptor.operands[0].role is not OperandRole.RESULT or descriptor.operands[1].role is not OperandRole.OPERAND:
+        raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' rel32 descriptor '{descriptor_key}' must begin with one result and the PC lhs operand")
+    if len(descriptor.immediates) != 2:
+        raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' rel32 descriptor '{descriptor_key}' must have symbol and byte_offset immediates")
+    symbol = descriptor.immediates[_REL32_SYMBOL_IMMEDIATE_SLOT]
+    if symbol.kind is not ImmediateKind.ORDINAL or ImmediateFlag.SYMBOLIC not in symbol.flags or ImmediateFlag.RELATIVE not in symbol.flags or symbol.encoding_field_id != _LITERAL_ENCODING_FIELD_ID:
+        raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' rel32 descriptor '{descriptor_key}' symbol immediate must be a symbolic relative literal")
+    byte_offset = descriptor.immediates[_REL32_BYTE_OFFSET_IMMEDIATE_SLOT]
+    if byte_offset.field_name != "byte_offset" or byte_offset.kind is not ImmediateKind.UNSIGNED or byte_offset.encoding_field_id != 0:
+        raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' rel32 descriptor '{descriptor_key}' byte_offset immediate must be an unencoded unsigned value")
+
+
 def _validate_lowering_descriptor_contracts(descriptor_set: DescriptorSet) -> None:
     for descriptor_key in _SYSTEM_MEMORY_GLOBAL_LOAD_DESCRIPTOR_KEYS:
         _validate_canonical_asm_operand_count(descriptor_set, descriptor_key, (2, 3))
     for descriptor_key in _SANITIZER_ACCESS_FLAT_LOAD_DESCRIPTOR_KEYS:
         _validate_canonical_asm_operand_count(descriptor_set, descriptor_key, (1, 2))
     _validate_spill_lowering_descriptor_contracts(descriptor_set)
+    for descriptor_key in _REL32_DESCRIPTOR_KEYS:
+        _validate_rel32_descriptor_contract(descriptor_set, descriptor_key)
 
 
 def _validate_spill_lowering_descriptor_contracts(
@@ -594,6 +623,8 @@ def _emit_tables_header() -> str:
         "#define LOOM_AMDGPU_DESCRIPTOR_REF_NONE UINT16_MAX",
         f"#define LOOM_AMDGPU_DESCRIPTOR_REF_COUNT {_u16_literal(len(descriptor_ref_keys))}",
         f"#define LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT {_u16_literal(len(sorted_descriptor_set_infos()))}",
+        f"#define LOOM_AMDGPU_REL32_SYMBOL_IMMEDIATE_SLOT {_u16_literal(_REL32_SYMBOL_IMMEDIATE_SLOT)}",
+        f"#define LOOM_AMDGPU_REL32_BYTE_OFFSET_IMMEDIATE_SLOT {_u16_literal(_REL32_BYTE_OFFSET_IMMEDIATE_SLOT)}",
         "",
     ]
     lines.extend(f"#define {_descriptor_ref_constant_name(key)} {_u16_literal(index)}" for index, key in enumerate(descriptor_ref_keys))
