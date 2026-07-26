@@ -68,20 +68,18 @@ typedef struct loom_amdgpu_assembly_emit_state_t {
   uint16_t packet_delay_alu_immediate;
 } loom_amdgpu_assembly_emit_state_t;
 
-static iree_status_t loom_amdgpu_descriptor_key(
-    const loom_native_assembly_packet_context_t* context,
-    iree_string_view_t* out_key) {
+static iree_string_view_t loom_amdgpu_descriptor_key(
+    const loom_native_assembly_packet_context_t* context) {
   return loom_native_assembly_descriptor_string(
       context->schedule->target.descriptor_set,
-      context->packet->descriptor->key_string_offset, out_key);
+      context->packet->descriptor->key_string_offset);
 }
 
 static iree_status_t loom_amdgpu_append_mnemonic(
     const loom_native_assembly_packet_context_t* context) {
-  iree_string_view_t mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
+  const iree_string_view_t mnemonic = loom_native_assembly_descriptor_string(
       context->schedule->target.descriptor_set,
-      context->packet->descriptor->mnemonic_string_offset, &mnemonic));
+      context->packet->descriptor->mnemonic_string_offset);
   return iree_string_builder_append_string(context->builder, mnemonic);
 }
 
@@ -346,9 +344,8 @@ static iree_status_t loom_amdgpu_read_packet_immediate_i64(
     const loom_low_immediate_t* immediate, int64_t* out_value) {
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
-  iree_string_view_t name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-      descriptor_set, immediate->field_name_string_offset, &name));
+  const iree_string_view_t name = loom_native_assembly_descriptor_string(
+      descriptor_set, immediate->field_name_string_offset);
   const loom_named_attr_t* attr = loom_native_assembly_find_attr(
       context->schedule->module, loom_amdgpu_packet_attrs(context), name);
   if (attr == NULL) {
@@ -410,9 +407,8 @@ static iree_status_t loom_amdgpu_append_packet_immediate(
     const loom_low_immediate_t* immediate) {
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
-  iree_string_view_t name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-      descriptor_set, immediate->field_name_string_offset, &name));
+  const iree_string_view_t name = loom_native_assembly_descriptor_string(
+      descriptor_set, immediate->field_name_string_offset);
   if (immediate->kind == LOOM_LOW_IMMEDIATE_KIND_ORDINAL &&
       iree_all_bits_set(immediate->flags, LOOM_LOW_IMMEDIATE_FLAG_SYMBOLIC)) {
     const loom_named_attr_t* attr = loom_native_assembly_find_attr(
@@ -455,9 +451,8 @@ static iree_status_t loom_amdgpu_read_packet_immediate_by_name_i64(
     IREE_ASSERT(descriptor_set->immediates != NULL);
     const loom_low_immediate_t* immediate =
         &descriptor_set->immediates[immediate_index];
-    iree_string_view_t name = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-        descriptor_set, immediate->field_name_string_offset, &name));
+    const iree_string_view_t name = loom_native_assembly_descriptor_string(
+        descriptor_set, immediate->field_name_string_offset);
     if (iree_string_view_equal(name, field_name)) {
       return loom_amdgpu_read_packet_immediate_i64(context, immediate,
                                                    out_value);
@@ -628,9 +623,8 @@ static iree_status_t loom_amdgpu_append_packet_immediate_named_modifier(
     return iree_ok_status();
   }
 
-  iree_string_view_t name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-      descriptor_set, native_value->literal_string_offset, &name));
+  const iree_string_view_t name = loom_native_assembly_descriptor_string(
+      descriptor_set, native_value->literal_string_offset);
   switch (native_value->target_format_id) {
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST: {
       IREE_ASSERT(native_value->bit_width > 0 && native_value->bit_width < 64);
@@ -793,16 +787,14 @@ static iree_status_t loom_amdgpu_find_packet_immediate(
   for (uint16_t i = 0; i < descriptor->immediate_count; ++i) {
     const loom_low_immediate_t* immediate =
         &descriptor_set->immediates[descriptor->immediate_start + i];
-    iree_string_view_t name = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-        descriptor_set, immediate->field_name_string_offset, &name));
+    const iree_string_view_t name = loom_native_assembly_descriptor_string(
+        descriptor_set, immediate->field_name_string_offset);
     if (iree_string_view_equal(name, field_name)) {
       *out_immediate = immediate;
       return iree_ok_status();
     }
   }
-  iree_string_view_t descriptor_key = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_key(context, &descriptor_key));
+  const iree_string_view_t descriptor_key = loom_amdgpu_descriptor_key(context);
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "AMDGPU assembly descriptor '%.*s' has no immediate "
                           "attribute '%.*s'",
@@ -897,8 +889,7 @@ static iree_status_t loom_amdgpu_lookup_canonical_asm_form(
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
   if (descriptor->canonical_asm_form_ordinal ==
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
-    iree_string_view_t key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_key(context, &key));
+    const iree_string_view_t key = loom_amdgpu_descriptor_key(context);
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU assembly descriptor '%.*s' has no canonical asm form",
@@ -914,9 +905,9 @@ static iree_status_t loom_amdgpu_lookup_canonical_asm_form(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_asm_form_native_mnemonic(
+static iree_string_view_t loom_amdgpu_asm_form_native_mnemonic(
     const loom_native_assembly_packet_context_t* context,
-    const loom_low_asm_form_t* form, iree_string_view_t* out_mnemonic) {
+    const loom_low_asm_form_t* form) {
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
   loom_bstring_table_offset_t string_offset = form->mnemonic_string_offset;
@@ -924,8 +915,7 @@ static iree_status_t loom_amdgpu_asm_form_native_mnemonic(
       LOOM_LOW_STRING_OFFSET_NONE) {
     string_offset = form->native_assembly_mnemonic_string_offset;
   }
-  return loom_native_assembly_descriptor_string(descriptor_set, string_offset,
-                                                out_mnemonic);
+  return loom_native_assembly_descriptor_string(descriptor_set, string_offset);
 }
 
 static iree_status_t loom_amdgpu_append_descriptor_value_list(
@@ -1146,9 +1136,8 @@ static iree_status_t loom_amdgpu_append_native_asm_form_value(
       context->schedule->target.descriptor_set;
   switch (value->kind) {
     case LOOM_LOW_NATIVE_ASM_VALUE_KIND_LITERAL: {
-      iree_string_view_t literal = iree_string_view_empty();
-      IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-          descriptor_set, value->literal_string_offset, &literal));
+      const iree_string_view_t literal = loom_native_assembly_descriptor_string(
+          descriptor_set, value->literal_string_offset);
       return iree_string_builder_append_string(context->builder, literal);
     }
     case LOOM_LOW_NATIVE_ASM_VALUE_KIND_RESULT:
@@ -1247,9 +1236,9 @@ static iree_status_t loom_amdgpu_append_asm_form_immediates(
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_append_asm_form_separator(context, in_list));
     if (asm_immediate->name_string_offset != LOOM_LOW_STRING_OFFSET_NONE) {
-      iree_string_view_t spelling = iree_string_view_empty();
-      IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-          descriptor_set, asm_immediate->name_string_offset, &spelling));
+      const iree_string_view_t spelling =
+          loom_native_assembly_descriptor_string(
+              descriptor_set, asm_immediate->name_string_offset);
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           context->builder, "%.*s(", (int)spelling.size, spelling.data));
       IREE_RETURN_IF_ERROR(
@@ -1269,9 +1258,8 @@ static iree_status_t loom_amdgpu_append_canonical_asm_form_packet(
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
   const loom_low_asm_form_t* form = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_canonical_asm_form(context, &form));
-  iree_string_view_t mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_asm_form_native_mnemonic(context, form, &mnemonic));
+  const iree_string_view_t mnemonic =
+      loom_amdgpu_asm_form_native_mnemonic(context, form);
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_string(context->builder, mnemonic));
   bool in_list = false;
@@ -1316,9 +1304,8 @@ static iree_status_t loom_amdgpu_append_memory_immediate_suffixes(
   for (uint16_t i = 0; i < descriptor->immediate_count; ++i) {
     const loom_low_immediate_t* immediate =
         &descriptor_set->immediates[descriptor->immediate_start + i];
-    iree_string_view_t name = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-        descriptor_set, immediate->field_name_string_offset, &name));
+    const iree_string_view_t name = loom_native_assembly_descriptor_string(
+        descriptor_set, immediate->field_name_string_offset);
     int64_t value = 0;
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_read_packet_immediate_i64(context, immediate, &value));
@@ -1363,9 +1350,8 @@ static iree_status_t loom_amdgpu_try_append_native_memory_packet(
     return iree_ok_status();
   }
   *out_matched = true;
-  iree_string_view_t mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_asm_form_native_mnemonic(context, form, &mnemonic));
+  const iree_string_view_t mnemonic =
+      loom_amdgpu_asm_form_native_mnemonic(context, form);
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_string(context->builder, mnemonic));
   bool in_list = false;
@@ -1395,9 +1381,8 @@ static iree_status_t loom_amdgpu_append_memory_packet(
   } else {
     const loom_low_asm_form_t* form = NULL;
     IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_canonical_asm_form(context, &form));
-    iree_string_view_t mnemonic = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_asm_form_native_mnemonic(context, form, &mnemonic));
+    const iree_string_view_t mnemonic =
+        loom_amdgpu_asm_form_native_mnemonic(context, form);
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_string(context->builder, mnemonic));
     bool in_list = false;
@@ -1841,8 +1826,7 @@ loom_amdgpu_descriptor_packet_route_flags(
 
 static iree_status_t loom_amdgpu_append_unsupported_read_write_packet(
     const loom_native_assembly_packet_context_t* context) {
-  iree_string_view_t key = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_key(context, &key));
+  const iree_string_view_t key = loom_amdgpu_descriptor_key(context);
   return iree_make_status(
       IREE_STATUS_FAILED_PRECONDITION,
       "AMDGPU assembly descriptor '%.*s' has both read and write effects",
@@ -2052,9 +2036,8 @@ static iree_status_t loom_amdgpu_append_materialized_wait_packet(
   }
   const loom_low_descriptor_t* descriptor =
       loom_low_descriptor_set_descriptor_at(descriptor_set, descriptor_ordinal);
-  iree_string_view_t mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-      descriptor_set, descriptor->mnemonic_string_offset, &mnemonic));
+  const iree_string_view_t mnemonic = loom_native_assembly_descriptor_string(
+      descriptor_set, descriptor->mnemonic_string_offset);
 
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, "  "));
@@ -2158,10 +2141,9 @@ static iree_status_t loom_amdgpu_append_address_state_before_packet(
                               "AMDGPU address-state plan requires a missing "
                               "s_set_vgpr_msb descriptor");
     }
-    iree_string_view_t mnemonic = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
+    const iree_string_view_t mnemonic = loom_native_assembly_descriptor_string(
         context->schedule->target.descriptor_set,
-        descriptor->mnemonic_string_offset, &mnemonic));
+        descriptor->mnemonic_string_offset);
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         context->builder, "  %.*s %" PRIu16 "\n", (int)mnemonic.size,
         mnemonic.data, transition->mode_immediate));
@@ -2429,10 +2411,9 @@ static iree_status_t loom_amdgpu_append_vgpr_msb_mode(
           state->context->schedule->target.descriptor_set,
           LOOM_AMDGPU_DESCRIPTOR_REF_S_SET_VGPR_MSB);
   IREE_ASSERT(descriptor != NULL);
-  iree_string_view_t mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
+  const iree_string_view_t mnemonic = loom_native_assembly_descriptor_string(
       state->context->schedule->target.descriptor_set,
-      descriptor->mnemonic_string_offset, &mnemonic));
+      descriptor->mnemonic_string_offset);
   const uint16_t immediate =
       (uint16_t)(((uint16_t)state->emit_state->current_vgpr_msb_mode << 8) |
                  new_mode);
@@ -2873,8 +2854,7 @@ static iree_status_t loom_amdgpu_validate_assembly_packet_shape(
       descriptor->immediate_count == shape->immediate_count) {
     return iree_ok_status();
   }
-  iree_string_view_t key = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_key(context, &key));
+  const iree_string_view_t key = loom_amdgpu_descriptor_key(context);
   return iree_make_status(
       IREE_STATUS_FAILED_PRECONDITION,
       "AMDGPU assembly %s descriptor '%.*s' has unsupported shape",
@@ -2982,8 +2962,7 @@ static bool loom_amdgpu_match_source_immediate_asm_form(
 
 static iree_status_t loom_amdgpu_source_immediate_unsupported_shape(
     const loom_native_assembly_packet_context_t* context) {
-  iree_string_view_t key = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_key(context, &key));
+  const iree_string_view_t key = loom_amdgpu_descriptor_key(context);
   return iree_make_status(
       IREE_STATUS_FAILED_PRECONDITION,
       "AMDGPU assembly source-immediate descriptor '%.*s' has unsupported "
@@ -3485,10 +3464,9 @@ static iree_status_t loom_amdgpu_append_vopd_pair_packet(
 
 static iree_status_t loom_amdgpu_try_append_mnemonic_dispatch_packet(
     const loom_native_assembly_packet_context_t* context, bool* out_matched) {
-  iree_string_view_t mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
+  const iree_string_view_t mnemonic = loom_native_assembly_descriptor_string(
       context->schedule->target.descriptor_set,
-      context->packet->descriptor->mnemonic_string_offset, &mnemonic));
+      context->packet->descriptor->mnemonic_string_offset);
   return loom_amdgpu_try_append_mnemonic_rule_packet(context, mnemonic,
                                                      out_matched);
 }
@@ -3509,10 +3487,10 @@ static iree_status_t loom_amdgpu_try_append_canonical_asm_form_dispatch_packet(
     // to the final canonical fallback after route-specific dispatchers run.
     return iree_ok_status();
   }
-  iree_string_view_t canonical_mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-      context->schedule->target.descriptor_set,
-      canonical_form->mnemonic_string_offset, &canonical_mnemonic));
+  const iree_string_view_t canonical_mnemonic =
+      loom_native_assembly_descriptor_string(
+          context->schedule->target.descriptor_set,
+          canonical_form->mnemonic_string_offset);
   return loom_amdgpu_try_append_asm_form_rule_packet(
       context, canonical_mnemonic, out_matched);
 }
@@ -3749,11 +3727,10 @@ static iree_status_t loom_amdgpu_verify_assembly_target(
     const loom_low_schedule_table_t* schedule) {
   if (schedule->target.descriptor_set->target_stable_id !=
       LOOM_AMDGPU_TARGET_STABLE_ID) {
-    iree_string_view_t target_key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-        schedule->target.descriptor_set,
-        schedule->target.descriptor_set->target_key_string_offset,
-        &target_key));
+    const iree_string_view_t target_key =
+        loom_native_assembly_descriptor_string(
+            schedule->target.descriptor_set,
+            schedule->target.descriptor_set->target_key_string_offset);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "AMDGPU assembly emitter received target '%.*s'",
                             (int)target_key.size, target_key.data);

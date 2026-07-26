@@ -20,15 +20,10 @@ iree_string_view_t loom_native_assembly_module_string(
   return module->strings.entries[string_id];
 }
 
-iree_status_t loom_native_assembly_descriptor_string(
+iree_string_view_t loom_native_assembly_descriptor_string(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_bstring_table_offset_t string_offset, iree_string_view_t* out_string) {
-  *out_string = loom_low_descriptor_set_string(descriptor_set, string_offset);
-  if (iree_string_view_is_empty(*out_string)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "native assembly descriptor string is empty");
-  }
-  return iree_ok_status();
+    loom_bstring_table_offset_t string_offset) {
+  return loom_low_descriptor_set_string(descriptor_set, string_offset);
 }
 
 const loom_named_attr_t* loom_native_assembly_find_attr(
