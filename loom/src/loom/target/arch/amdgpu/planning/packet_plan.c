@@ -41,24 +41,20 @@ iree_status_t loom_amdgpu_packet_plan_build(
                             "schedule, allocation, and arena are required for "
                             "AMDGPU packet planning");
   }
-  loom_low_packet_sequence_t packets = {0};
-  IREE_RETURN_IF_ERROR(loom_low_allocated_packet_sequence_initialize(
-      schedule, allocation, &packets));
-
   *out_plan = (loom_amdgpu_packet_plan_t){
       .schedule = schedule,
       .allocation = allocation,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_plan_build(
-      &packets, allocation, arena, &out_plan->address_state));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_build(&packets, allocation, arena,
+      schedule, allocation, arena, &out_plan->address_state));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_build(schedule, allocation, arena,
                                                    &out_plan->wait_plan));
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_plan_build(
       &out_plan->wait_plan, arena, &out_plan->wait_packets));
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_plan_build(
-      &packets, allocation, arena, &out_plan->wait_states));
+      schedule, allocation, arena, &out_plan->wait_states));
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_plan_build(
-      &packets, allocation, &out_plan->address_state, &out_plan->wait_packets,
+      schedule, allocation, &out_plan->address_state, &out_plan->wait_packets,
       &out_plan->wait_states, arena, &out_plan->vopd_plan));
   return loom_amdgpu_packet_plan_verify_address_state_vopd(out_plan);
 }

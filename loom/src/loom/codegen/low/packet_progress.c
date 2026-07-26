@@ -10,8 +10,6 @@
 #include <string.h>
 
 typedef struct loom_low_packet_progress_build_state_t {
-  // Validated packet sequence being queried.
-  const loom_low_packet_sequence_t* packets;
   // Schedule table being walked.
   const loom_low_schedule_table_t* schedule;
   // Allocation table paired with |schedule|.
@@ -92,10 +90,9 @@ static iree_status_t loom_low_packet_progress_append_event(
 static iree_status_t loom_low_packet_progress_query_packets(
     loom_low_packet_progress_build_state_t* state) {
   for (iree_host_size_t packet_index = 0;
-       packet_index < loom_low_packet_sequence_count(state->packets);
-       ++packet_index) {
+       packet_index < loom_low_packet_count(state->schedule); ++packet_index) {
     const loom_low_packet_view_t packet =
-        loom_low_packet_sequence_at(state->packets, packet_index);
+        loom_low_packet_at(state->schedule, packet_index);
     state->current_packet = &packet;
     IREE_RETURN_IF_ERROR(state->provider->query(
         state->provider->user_data, state->schedule, state->allocation, &packet,
@@ -106,25 +103,14 @@ static iree_status_t loom_low_packet_progress_query_packets(
 }
 
 iree_status_t loom_low_packet_progress_build(
-    const loom_low_packet_sequence_t* packets,
+    const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_progress_provider_t* provider,
     iree_arena_allocator_t* arena,
     loom_low_packet_progress_table_t* out_table) {
-  if (packets == NULL || packets->schedule == NULL || allocation == NULL ||
-      provider == NULL || provider->query == NULL || arena == NULL ||
-      out_table == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "packets, allocation, provider, arena, and output table are required "
-        "for packet progress");
-  }
   memset(out_table, 0, sizeof(*out_table));
-  const loom_low_schedule_table_t* schedule = packets->schedule;
-  IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
 
   loom_low_packet_progress_build_state_t state = {
-      .packets = packets,
       .schedule = schedule,
       .allocation = allocation,
       .provider = provider,

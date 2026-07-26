@@ -36,7 +36,6 @@ class AmdgpuVopdPlanVerifyTest : public ::testing::Test {
                                loom_amdgpu_vopd_packet_t* packets,
                                iree_host_size_t packet_count) {
     loom_amdgpu_vopd_plan_t plan = {};
-    plan.packet_sequence.schedule = &schedule_;
     plan.schedule = &schedule_;
     plan.allocation = &allocation_;
     plan.pairs = pairs;

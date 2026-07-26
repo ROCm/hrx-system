@@ -10,8 +10,6 @@
 #include <string.h>
 
 typedef struct loom_low_packet_hazard_plan_build_state_t {
-  // Validated packet sequence being queried.
-  const loom_low_packet_sequence_t* packets;
   // Schedule table being walked.
   const loom_low_schedule_table_t* schedule;
   // Optional allocation table paired with |schedule|.
@@ -64,27 +62,22 @@ static bool loom_low_packet_hazard_plan_record_kind_is_diagnostic(
   return kind != LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION;
 }
 
-static iree_status_t loom_low_packet_hazard_plan_producer_packet_index(
+static void loom_low_packet_hazard_plan_producer_packet_index(
     const loom_low_schedule_table_t* schedule, uint32_t producer_node_index,
     iree_host_size_t* out_packet_index, uint32_t* out_scheduled_ordinal) {
   *out_packet_index = LOOM_LOW_PACKET_HAZARD_PLAN_PACKET_NONE;
   *out_scheduled_ordinal = LOOM_LOW_PACKET_HAZARD_PLAN_ORDINAL_NONE;
   if (producer_node_index == LOOM_LOW_SCHEDULE_NODE_NONE) {
-    return iree_ok_status();
+    return;
   }
-  if (producer_node_index >= schedule->node_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "hazard plan producer node %" PRIu32
-                            " is out of range for %" PRIhsz " node(s)",
-                            producer_node_index, schedule->node_count);
-  }
+  IREE_ASSERT_LT(producer_node_index, schedule->node_count);
   const loom_low_schedule_node_t* producer =
       &schedule->nodes[producer_node_index];
-  IREE_RETURN_IF_ERROR(loom_low_packet_index_at_block_ordinal(
-      schedule, producer->block_index, producer->scheduled_ordinal,
-      out_packet_index));
+  const loom_low_schedule_block_t* block =
+      &schedule->blocks[producer->block_index];
+  *out_packet_index = (iree_host_size_t)block->scheduled_node_start +
+                      producer->scheduled_ordinal;
   *out_scheduled_ordinal = producer->scheduled_ordinal;
-  return iree_ok_status();
 }
 
 static iree_status_t loom_low_packet_hazard_plan_validate_event(
@@ -157,9 +150,9 @@ static iree_status_t loom_low_packet_hazard_plan_append_validated_event(
       LOOM_LOW_PACKET_HAZARD_PLAN_PACKET_NONE;
   uint32_t producer_scheduled_ordinal =
       LOOM_LOW_PACKET_HAZARD_PLAN_ORDINAL_NONE;
-  IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_producer_packet_index(
+  loom_low_packet_hazard_plan_producer_packet_index(
       state->schedule, event->producer_node_index, &producer_packet_index,
-      &producer_scheduled_ordinal));
+      &producer_scheduled_ordinal);
   state->records[state->record_count++] =
       (loom_low_packet_hazard_plan_record_t){
           .kind = event->kind,
@@ -374,10 +367,9 @@ static iree_status_t loom_low_packet_hazard_plan_emit_storage_release_actions(
 static iree_status_t loom_low_packet_hazard_plan_query_packets(
     loom_low_packet_hazard_plan_build_state_t* state) {
   for (iree_host_size_t packet_index = 0;
-       packet_index < loom_low_packet_sequence_count(state->packets);
-       ++packet_index) {
+       packet_index < loom_low_packet_count(state->schedule); ++packet_index) {
     const loom_low_packet_view_t packet =
-        loom_low_packet_sequence_at(state->packets, packet_index);
+        loom_low_packet_at(state->schedule, packet_index);
     state->current_packet = &packet;
     IREE_RETURN_IF_ERROR(state->provider->query(
         state->provider->user_data, state->schedule, state->allocation,
@@ -391,34 +383,14 @@ static iree_status_t loom_low_packet_hazard_plan_query_packets(
 }
 
 iree_status_t loom_low_packet_hazard_plan_build(
-    const loom_low_packet_sequence_t* packets,
+    const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_progress_table_t* progress,
     const loom_low_packet_hazard_plan_provider_t* provider,
     iree_arena_allocator_t* arena, loom_low_packet_hazard_plan_t* out_plan) {
-  if (packets == NULL || packets->schedule == NULL || provider == NULL ||
-      provider->query == NULL || arena == NULL || out_plan == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "packets, provider, arena, and output plan are required for packet "
-        "hazard planning");
-  }
   memset(out_plan, 0, sizeof(*out_plan));
-  const loom_low_schedule_table_t* schedule = packets->schedule;
-  if (allocation != NULL) {
-    IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
-  }
-  if (progress != NULL && progress->schedule != schedule) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "hazard plan progress table must use schedule");
-  }
-  if (progress != NULL && progress->allocation != allocation) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "hazard plan progress table must use allocation");
-  }
 
   loom_low_packet_hazard_plan_build_state_t state = {
-      .packets = packets,
       .schedule = schedule,
       .allocation = allocation,
       .progress = progress,

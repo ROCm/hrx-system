@@ -82,17 +82,7 @@ static iree_status_t loom_native_fragment_validate_physical_allocations(
 
 iree_status_t loom_native_fragment_validate_emission_inputs(
     const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    loom_low_packet_sequence_t* out_packets) {
-  if (out_packets == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "native fragment packet sequence output is required");
-  }
-  *out_packets = (loom_low_packet_sequence_t){0};
-  loom_low_packet_sequence_t packets = {0};
-  IREE_RETURN_IF_ERROR(loom_low_allocated_packet_sequence_initialize(
-      schedule, allocation, &packets));
+    const loom_low_allocation_table_t* allocation) {
   if (allocation->spill_plan_count != 0 || allocation->spill_count != 0) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -104,6 +94,5 @@ iree_status_t loom_native_fragment_validate_emission_inputs(
   IREE_RETURN_IF_ERROR(
       loom_native_fragment_validate_physical_allocations(allocation));
   IREE_RETURN_IF_ERROR(loom_native_fragment_validate_void_returns(schedule));
-  *out_packets = packets;
   return iree_ok_status();
 }
