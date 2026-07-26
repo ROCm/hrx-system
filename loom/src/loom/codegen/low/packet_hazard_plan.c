@@ -32,8 +32,10 @@ typedef struct loom_low_packet_hazard_plan_build_state_t {
   iree_host_size_t target_record_count;
   // Storage-release actions grouped by insertion packet.
   loom_low_storage_release_action_index_t storage_release_action_index;
-  // Packet progress records grouped by progress class.
-  loom_low_packet_progress_class_index_t progress_class_index;
+  // Packet progress records chained by progress class.
+  loom_low_packet_progress_class_chain_index_t progress_class_chain_index;
+  // Optional prefix range index for repeated long progress queries.
+  loom_low_packet_progress_class_range_index_t progress_class_range_index;
   // Exact number of generic allocation storage-release records.
   iree_host_size_t storage_release_record_capacity;
   // Number of generic allocation storage-release records populated so far.
@@ -214,6 +216,60 @@ static iree_status_t loom_low_packet_hazard_plan_append_storage_release_event(
   return iree_ok_status();
 }
 
+static uint32_t loom_low_packet_hazard_plan_storage_release_observed_progress(
+    const loom_low_packet_hazard_plan_build_state_t* state,
+    const loom_low_storage_release_action_t* action,
+    const loom_low_storage_lease_record_t* lease_record) {
+  if (state->progress_class_range_index.progress != NULL) {
+    return loom_low_packet_progress_class_range_index_observed_progress(
+        &state->progress_class_range_index, lease_record->packet_index,
+        action->insertion_packet_index, action->release_class_id);
+  }
+  return loom_low_packet_progress_class_chain_index_observed_progress(
+      &state->progress_class_chain_index, lease_record->packet_index,
+      action->insertion_packet_index, action->release_class_id);
+}
+
+static bool loom_low_packet_hazard_plan_should_build_progress_class_range_index(
+    const loom_low_packet_hazard_plan_build_state_t* state) {
+  const loom_low_packet_progress_class_chain_index_t* chain_index =
+      &state->progress_class_chain_index;
+  if (chain_index->progress == NULL ||
+      chain_index->progress->record_count == 0) {
+    return false;
+  }
+
+  // The prefix index adds two complete progress-record passes plus two binary
+  // bounds per query. Require the chains' reachable-record upper bound to
+  // exceed four complete table passes. This leaves amortization headroom even
+  // when packet bounds or RESET records terminate some chain walks early.
+  const uint64_t amortization_record_pass_count = 4;
+  const loom_low_allocation_table_t* allocation = state->allocation;
+  if (allocation->storage_release_action_count <=
+      amortization_record_pass_count) {
+    return false;
+  }
+  const uint64_t reachable_record_threshold =
+      (uint64_t)chain_index->progress->record_count *
+      amortization_record_pass_count;
+  uint64_t reachable_record_count = 0;
+  for (iree_host_size_t i = 0; i < allocation->storage_release_action_count;
+       ++i) {
+    const loom_low_packet_progress_class_chain_entry_t* class_entry =
+        loom_low_packet_progress_class_chain_index_lookup(
+            chain_index,
+            allocation->storage_release_actions[i].release_class_id);
+    if (class_entry == NULL) continue;
+    if (reachable_record_count >
+        UINT64_MAX - (uint64_t)class_entry->record_count) {
+      return true;
+    }
+    reachable_record_count += class_entry->record_count;
+    if (reachable_record_count > reachable_record_threshold) return true;
+  }
+  return false;
+}
+
 static iree_status_t loom_low_packet_hazard_plan_prepare_storage_releases(
     loom_low_packet_hazard_plan_build_state_t* state,
     iree_arena_allocator_t* transient_arena) {
@@ -231,8 +287,14 @@ static iree_status_t loom_low_packet_hazard_plan_prepare_storage_releases(
       allocation->storage_release_action_count,
       LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_PACKET, packet_count,
       transient_arena, &state->storage_release_action_index));
-  IREE_RETURN_IF_ERROR(loom_low_packet_progress_class_index_build(
-      state->progress, transient_arena, &state->progress_class_index));
+  IREE_RETURN_IF_ERROR(loom_low_packet_progress_class_chain_index_build(
+      state->progress, transient_arena, &state->progress_class_chain_index));
+  if (loom_low_packet_hazard_plan_should_build_progress_class_range_index(
+          state)) {
+    IREE_RETURN_IF_ERROR(loom_low_packet_progress_class_range_index_build(
+        &state->progress_class_chain_index, transient_arena,
+        &state->progress_class_range_index));
+  }
   for (iree_host_size_t i = 0; i < allocation->storage_release_action_count;
        ++i) {
     const loom_low_storage_release_action_t* action =
@@ -247,9 +309,8 @@ static iree_status_t loom_low_packet_hazard_plan_prepare_storage_releases(
     const loom_low_storage_lease_record_t* lease_record =
         &allocation->storage_leases.records[action->lease_record_index];
     const uint32_t observed_progress =
-        loom_low_packet_progress_class_index_observed_progress(
-            &state->progress_class_index, lease_record->packet_index,
-            action->insertion_packet_index, action->release_class_id);
+        loom_low_packet_hazard_plan_storage_release_observed_progress(
+            state, action, lease_record);
     state->storage_release_observed_progress[i] = observed_progress;
     if (observed_progress < action->required_progress) {
       iree_host_size_t next_record_capacity = 0;

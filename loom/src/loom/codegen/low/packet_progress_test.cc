@@ -322,29 +322,32 @@ TEST_F(LowPacketProgressTest, IndexesRecordsByProgressClass) {
   IREE_ASSERT_OK(loom_low_packet_progress_build(&packets_, &state_.allocation,
                                                 &provider, &arena_, &table));
 
-  loom_low_packet_progress_class_index_t index = {};
-  IREE_ASSERT_OK(
-      loom_low_packet_progress_class_index_build(&table, &arena_, &index));
+  loom_low_packet_progress_class_chain_index_t index = {};
+  IREE_ASSERT_OK(loom_low_packet_progress_class_chain_index_build(
+      &table, &arena_, &index));
 
-  const loom_low_packet_progress_class_index_entry_t* pipe =
-      loom_low_packet_progress_class_index_lookup(&index,
-                                                  kSyntheticProgressPipe);
+  const loom_low_packet_progress_class_chain_entry_t* pipe =
+      loom_low_packet_progress_class_chain_index_lookup(&index,
+                                                        kSyntheticProgressPipe);
   ASSERT_NE(pipe, nullptr);
   EXPECT_EQ(pipe->first_record_index, 0u);
+  EXPECT_EQ(pipe->record_count, 2u);
   ASSERT_NE(index.next_record_indices, nullptr);
   EXPECT_EQ(index.next_record_indices[0], 2u);
   EXPECT_EQ(index.next_record_indices[2],
             LOOM_LOW_PACKET_PROGRESS_RECORD_INDEX_NONE);
 
-  const loom_low_packet_progress_class_index_entry_t* scoreboard =
-      loom_low_packet_progress_class_index_lookup(&index,
-                                                  kSyntheticProgressScoreboard);
+  const loom_low_packet_progress_class_chain_entry_t* scoreboard =
+      loom_low_packet_progress_class_chain_index_lookup(
+          &index, kSyntheticProgressScoreboard);
   ASSERT_NE(scoreboard, nullptr);
   EXPECT_EQ(scoreboard->first_record_index, 1u);
+  EXPECT_EQ(scoreboard->record_count, 1u);
   EXPECT_EQ(index.next_record_indices[1],
             LOOM_LOW_PACKET_PROGRESS_RECORD_INDEX_NONE);
 
-  EXPECT_EQ(loom_low_packet_progress_class_index_lookup(&index, 99), nullptr);
+  EXPECT_EQ(loom_low_packet_progress_class_chain_index_lookup(&index, 99),
+            nullptr);
 }
 
 TEST_F(LowPacketProgressTest, QueriesObservedProgressForClassRange) {
@@ -371,30 +374,101 @@ TEST_F(LowPacketProgressTest, QueriesObservedProgressForClassRange) {
       /*.records=*/records,
       /*.record_count=*/IREE_ARRAYSIZE(records),
   };
-  loom_low_packet_progress_class_index_t index = {};
-  IREE_ASSERT_OK(
-      loom_low_packet_progress_class_index_build(&table, &arena_, &index));
+  loom_low_packet_progress_class_chain_index_t chain_index = {};
+  IREE_ASSERT_OK(loom_low_packet_progress_class_chain_index_build(
+      &table, &arena_, &chain_index));
+  loom_low_packet_progress_class_range_index_t range_index = {};
+  IREE_ASSERT_OK(loom_low_packet_progress_class_range_index_build(
+      &chain_index, &arena_, &range_index));
 
-  EXPECT_EQ(loom_low_packet_progress_class_index_observed_progress(
-                &index, /*start_packet_index=*/0, /*end_packet_index=*/3,
-                kSyntheticProgressPipe),
-            3u);
-  EXPECT_EQ(loom_low_packet_progress_class_index_observed_progress(
-                &index, /*start_packet_index=*/0, /*end_packet_index=*/5,
-                kSyntheticProgressPipe),
-            UINT32_MAX);
-  EXPECT_EQ(loom_low_packet_progress_class_index_observed_progress(
-                &index, /*start_packet_index=*/4, /*end_packet_index=*/7,
-                kSyntheticProgressPipe),
-            UINT32_MAX);
-  EXPECT_EQ(loom_low_packet_progress_class_index_observed_progress(
-                &index, /*start_packet_index=*/0, /*end_packet_index=*/7,
-                kSyntheticProgressScoreboard),
-            99u);
-  EXPECT_EQ(loom_low_packet_progress_class_index_observed_progress(
-                &index, /*start_packet_index=*/0, /*end_packet_index=*/7,
-                /*progress_class_id=*/99),
-            0u);
+  const auto expect_observed_progress = [&](iree_host_size_t start_packet_index,
+                                            iree_host_size_t end_packet_index,
+                                            uint16_t progress_class_id,
+                                            uint32_t expected_progress) {
+    EXPECT_EQ(loom_low_packet_progress_class_chain_index_observed_progress(
+                  &chain_index, start_packet_index, end_packet_index,
+                  progress_class_id),
+              expected_progress);
+    EXPECT_EQ(loom_low_packet_progress_class_range_index_observed_progress(
+                  &range_index, start_packet_index, end_packet_index,
+                  progress_class_id),
+              expected_progress);
+  };
+  expect_observed_progress(/*start_packet_index=*/0,
+                           /*end_packet_index=*/3, kSyntheticProgressPipe, 3);
+  expect_observed_progress(/*start_packet_index=*/0,
+                           /*end_packet_index=*/5, kSyntheticProgressPipe,
+                           UINT32_MAX);
+  expect_observed_progress(/*start_packet_index=*/4,
+                           /*end_packet_index=*/7, kSyntheticProgressPipe,
+                           UINT32_MAX);
+  expect_observed_progress(/*start_packet_index=*/0,
+                           /*end_packet_index=*/7, kSyntheticProgressScoreboard,
+                           99);
+  expect_observed_progress(/*start_packet_index=*/0,
+                           /*end_packet_index=*/7,
+                           /*progress_class_id=*/99, 0);
+  expect_observed_progress(/*start_packet_index=*/5,
+                           /*end_packet_index=*/5, kSyntheticProgressPipe, 0);
+
+  const loom_low_packet_progress_class_range_entry_t* pipe =
+      loom_low_packet_progress_class_range_index_lookup(&range_index,
+                                                        kSyntheticProgressPipe);
+  ASSERT_NE(pipe, nullptr);
+  EXPECT_EQ(pipe->record_start, 0u);
+  EXPECT_EQ(pipe->record_count, 6u);
+  const uint32_t expected_pipe_progress_record_indices[] = {0, 2, 3, 4, 5, 6};
+  for (uint32_t i = 0; i < pipe->record_count; ++i) {
+    EXPECT_EQ(range_index.records[pipe->record_start + i].progress_record_index,
+              expected_pipe_progress_record_indices[i]);
+  }
+
+  // Building the range index cannot repurpose or invalidate the source chain.
+  const loom_low_packet_progress_class_chain_entry_t* chain_pipe =
+      loom_low_packet_progress_class_chain_index_lookup(&chain_index,
+                                                        kSyntheticProgressPipe);
+  ASSERT_NE(chain_pipe, nullptr);
+  EXPECT_EQ(chain_pipe->first_record_index, 0u);
+  EXPECT_EQ(chain_pipe->record_count, 6u);
+  EXPECT_EQ(chain_index.next_record_indices[0], 2u);
+}
+
+TEST_F(LowPacketProgressTest, RejectsMalformedChainWhenBuildingRangeIndex) {
+  const loom_low_packet_progress_record_t records[] = {
+      MakeProgressRecord(0, kSyntheticProgressPipe, IREE_SV("synthetic.pipe"),
+                         LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 1),
+      MakeProgressRecord(1, kSyntheticProgressScoreboard,
+                         IREE_SV("synthetic.scoreboard"),
+                         LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 1),
+  };
+  const loom_low_packet_progress_table_t table = {
+      /*.schedule=*/&state_.schedule,
+      /*.allocation=*/&state_.allocation,
+      /*.records=*/records,
+      /*.record_count=*/IREE_ARRAYSIZE(records),
+  };
+  const loom_low_packet_progress_class_chain_entry_t classes[] = {
+      {
+          /*.progress_class_id=*/kSyntheticProgressPipe,
+          /*.first_record_index=*/0,
+          /*.record_count=*/2,
+      },
+  };
+  const uint32_t next_record_indices[] = {
+      1,
+      LOOM_LOW_PACKET_PROGRESS_RECORD_INDEX_NONE,
+  };
+  const loom_low_packet_progress_class_chain_index_t chain_index = {
+      /*.progress=*/&table,
+      /*.classes=*/classes,
+      /*.class_count=*/IREE_ARRAYSIZE(classes),
+      /*.next_record_indices=*/next_record_indices,
+  };
+
+  loom_low_packet_progress_class_range_index_t range_index = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_low_packet_progress_class_range_index_build(
+                            &chain_index, &arena_, &range_index));
 }
 
 iree_status_t InvalidProgressQuery(

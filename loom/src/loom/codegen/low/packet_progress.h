@@ -107,24 +107,60 @@ typedef struct loom_low_packet_progress_table_t {
 } loom_low_packet_progress_table_t;
 
 // Sparse record-chain entry for one progress class.
-typedef struct loom_low_packet_progress_class_index_entry_t {
+typedef struct loom_low_packet_progress_class_chain_entry_t {
   // Target-owned progress-class identifier.
   uint16_t progress_class_id;
   // First progress record with |progress_class_id|, or RECORD_INDEX_NONE.
   uint32_t first_record_index;
-} loom_low_packet_progress_class_index_entry_t;
+  // Number of progress records in this class.
+  uint32_t record_count;
+} loom_low_packet_progress_class_chain_entry_t;
 
 // Sparse first/next chain index over packet-progress records by progress class.
-typedef struct loom_low_packet_progress_class_index_t {
+typedef struct loom_low_packet_progress_class_chain_index_t {
   // Borrowed progress table being indexed.
   const loom_low_packet_progress_table_t* progress;
   // Dense progress-class entries with at least one record.
-  const loom_low_packet_progress_class_index_entry_t* classes;
+  const loom_low_packet_progress_class_chain_entry_t* classes;
   // Number of entries in |classes|.
   uint32_t class_count;
   // Next progress record for the same class, or RECORD_INDEX_NONE.
   const uint32_t* next_record_indices;
-} loom_low_packet_progress_class_index_t;
+} loom_low_packet_progress_class_chain_index_t;
+
+// Contiguous prefix-range entry for one progress class.
+typedef struct loom_low_packet_progress_class_range_entry_t {
+  // Target-owned progress-class identifier.
+  uint16_t progress_class_id;
+  // First summary record for this class.
+  uint32_t record_start;
+  // Number of summary records in this class.
+  uint32_t record_count;
+} loom_low_packet_progress_class_range_entry_t;
+
+// Prefix summary for one packet-progress record in a class range.
+typedef struct loom_low_packet_progress_class_range_record_t {
+  // Source progress record index.
+  uint32_t progress_record_index;
+  // Number of RESET records through this entry in the class range.
+  uint32_t cumulative_reset_count;
+  // ADVANCE units through this entry in the class range.
+  uint64_t cumulative_advance_units;
+} loom_low_packet_progress_class_range_record_t;
+
+// Contiguous per-class prefix index for repeated packet-range queries.
+typedef struct loom_low_packet_progress_class_range_index_t {
+  // Borrowed progress table being indexed.
+  const loom_low_packet_progress_table_t* progress;
+  // Dense progress-class ranges with at least one record.
+  const loom_low_packet_progress_class_range_entry_t* classes;
+  // Number of entries in |classes|.
+  uint32_t class_count;
+  // Progress records grouped by class with prefix summaries.
+  const loom_low_packet_progress_class_range_record_t* records;
+  // Number of entries in |records|.
+  uint32_t record_count;
+} loom_low_packet_progress_class_range_index_t;
 
 // Builds target progress records for |packets| using |provider|.
 // |allocation| must describe the same function and target as the validated
@@ -136,23 +172,48 @@ iree_status_t loom_low_packet_progress_build(
     iree_arena_allocator_t* arena, loom_low_packet_progress_table_t* out_table);
 
 // Builds a stable-order record-chain index by progress class.
-iree_status_t loom_low_packet_progress_class_index_build(
+iree_status_t loom_low_packet_progress_class_chain_index_build(
     const loom_low_packet_progress_table_t* progress,
     iree_arena_allocator_t* arena,
-    loom_low_packet_progress_class_index_t* out_index);
+    loom_low_packet_progress_class_chain_index_t* out_index);
 
-// Returns the index entry for |progress_class_id|, or NULL if absent.
-const loom_low_packet_progress_class_index_entry_t*
-loom_low_packet_progress_class_index_lookup(
-    const loom_low_packet_progress_class_index_t* index,
+// Returns the chain entry for |progress_class_id|, or NULL if absent.
+const loom_low_packet_progress_class_chain_entry_t*
+loom_low_packet_progress_class_chain_index_lookup(
+    const loom_low_packet_progress_class_chain_index_t* index,
     uint16_t progress_class_id);
 
 // Returns progress units completed after |start_packet_index| and before
 // |end_packet_index| for |progress_class_id|. A RESET completes all progress
 // preceding it and returns UINT32_MAX. Missing progress/index/class data
 // returns 0.
-uint32_t loom_low_packet_progress_class_index_observed_progress(
-    const loom_low_packet_progress_class_index_t* index,
+uint32_t loom_low_packet_progress_class_chain_index_observed_progress(
+    const loom_low_packet_progress_class_chain_index_t* index,
+    iree_host_size_t start_packet_index, iree_host_size_t end_packet_index,
+    uint16_t progress_class_id);
+
+// Builds contiguous per-class prefix ranges from a validated chain index.
+//
+// The source chain remains unchanged and usable after this call. Prefix ranges
+// cost two complete progress-record passes to construct and are intended for
+// consumers whose repeated chain queries amortize that work.
+iree_status_t loom_low_packet_progress_class_range_index_build(
+    const loom_low_packet_progress_class_chain_index_t* chain_index,
+    iree_arena_allocator_t* arena,
+    loom_low_packet_progress_class_range_index_t* out_index);
+
+// Returns the range entry for |progress_class_id|, or NULL if absent.
+const loom_low_packet_progress_class_range_entry_t*
+loom_low_packet_progress_class_range_index_lookup(
+    const loom_low_packet_progress_class_range_index_t* index,
+    uint16_t progress_class_id);
+
+// Returns progress units completed after |start_packet_index| and before
+// |end_packet_index| using prefix range summaries. A RESET completes all
+// progress preceding it and returns UINT32_MAX. Missing
+// progress/index/class data returns 0.
+uint32_t loom_low_packet_progress_class_range_index_observed_progress(
+    const loom_low_packet_progress_class_range_index_t* index,
     iree_host_size_t start_packet_index, iree_host_size_t end_packet_index,
     uint16_t progress_class_id);
 
