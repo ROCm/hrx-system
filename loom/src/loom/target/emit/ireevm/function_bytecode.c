@@ -69,6 +69,8 @@ typedef struct loom_ireevm_bytecode_writer_t {
 } loom_ireevm_bytecode_writer_t;
 
 typedef struct loom_ireevm_emit_state_t {
+  // Validated packet sequence being emitted.
+  const loom_low_packet_sequence_t* packets;
   // Schedule table being emitted.
   const loom_low_schedule_table_t* schedule;
   // Allocation table supplying VM register ordinals.
@@ -1038,8 +1040,10 @@ static iree_status_t loom_ireevm_emit_packet(
 
 static iree_status_t loom_ireevm_validate_tables(
     const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation) {
-  IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
+    const loom_low_allocation_table_t* allocation,
+    loom_low_packet_sequence_t* out_packets) {
+  IREE_RETURN_IF_ERROR(loom_low_allocated_packet_sequence_initialize(
+      schedule, allocation, out_packets));
   if (schedule->target.descriptor_set != loom_ireevm_core_descriptor_set()) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "VM bytecode emission requires ireevm.core");
@@ -1073,9 +1077,8 @@ static iree_status_t loom_ireevm_emit_function_body(
     for (uint32_t i = 0; i < block->scheduled_node_count; ++i) {
       iree_host_size_t packet_index =
           (iree_host_size_t)block->scheduled_node_start + i;
-      loom_low_packet_view_t packet = {0};
-      IREE_RETURN_IF_ERROR(loom_low_packet_view_at(
-          state->schedule, state->allocation, packet_index, &packet));
+      const loom_low_packet_view_t packet =
+          loom_low_packet_sequence_at(state->packets, packet_index);
       IREE_RETURN_IF_ERROR(loom_ireevm_emit_packet(state, &packet));
     }
     iree_host_size_t block_length =
@@ -1107,9 +1110,12 @@ iree_status_t loom_ireevm_emit_function_bytecode(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "VM bytecode emission requires a module plan");
   }
-  IREE_RETURN_IF_ERROR(loom_ireevm_validate_tables(schedule, allocation));
+  loom_low_packet_sequence_t packets = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_ireevm_validate_tables(schedule, allocation, &packets));
 
   loom_ireevm_emit_state_t state = {
+      .packets = &packets,
       .schedule = schedule,
       .allocation = allocation,
       .module_plan = module_plan,

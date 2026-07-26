@@ -3736,10 +3736,8 @@ static iree_status_t loom_amdgpu_append_vopd_or_descriptor_packet(
   IREE_ASSERT(vopd_packet->role == LOOM_AMDGPU_VOPD_PACKET_ROLE_FIRST);
   const loom_amdgpu_vopd_pair_t* pair =
       &state->vopd_plan->pairs[vopd_packet->pair_index];
-  loom_low_packet_view_t second_packet = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_low_packet_view_at(context->schedule, context->allocation,
-                              pair->second_packet_index, &second_packet));
+  const loom_low_packet_view_t second_packet = loom_low_packet_sequence_at(
+      context->packet_sequence, pair->second_packet_index);
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_movable_vopd_second_wait_states(
       state, context, &second_packet));
   return loom_amdgpu_append_vopd_pair_packet(context, &second_packet, pair);

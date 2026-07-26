@@ -28,10 +28,12 @@ extern "C" {
 // register values and edge-copy temporaries must have physical locations, and
 // allocation must contain no unmaterialized spill plans or spill-slot
 // assignments. Target-owned emitters remain responsible for their target
-// identity and instruction descriptor contracts.
+// identity and instruction descriptor contracts. On success, |out_packets|
+// receives the validated sequence for infallible emitter traversal.
 iree_status_t loom_native_fragment_validate_emission_inputs(
     const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation);
+    const loom_low_allocation_table_t* allocation,
+    loom_low_packet_sequence_t* out_packets);
 
 #ifdef __cplusplus
 }  // extern "C"
