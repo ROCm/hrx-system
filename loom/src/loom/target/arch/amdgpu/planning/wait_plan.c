@@ -3219,7 +3219,7 @@ static iree_status_t loom_amdgpu_wait_plan_build_hazard_action_index(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_wait_plan_emit_counter_progress(
+static void loom_amdgpu_wait_plan_emit_counter_progress(
     loom_low_packet_progress_emit_fn_t emit, void* emit_user_data,
     uint16_t counter_id, loom_low_packet_progress_action_t action,
     uint32_t units) {
@@ -3230,10 +3230,10 @@ static iree_status_t loom_amdgpu_wait_plan_emit_counter_progress(
       .action = action,
       .units = units,
   };
-  return emit(emit_user_data, &event);
+  emit(emit_user_data, &event);
 }
 
-static iree_status_t loom_amdgpu_wait_plan_emit_counter_progress_mask(
+static void loom_amdgpu_wait_plan_emit_counter_progress_mask(
     loom_low_packet_progress_emit_fn_t emit, void* emit_user_data,
     uint32_t counter_mask, loom_low_packet_progress_action_t action,
     uint32_t units) {
@@ -3242,13 +3242,12 @@ static iree_status_t loom_amdgpu_wait_plan_emit_counter_progress_mask(
       continue;
     }
     const uint16_t counter_id = loom_amdgpu_wait_counter_id_from_slot(slot);
-    IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_emit_counter_progress(
-        emit, emit_user_data, counter_id, action, units));
+    loom_amdgpu_wait_plan_emit_counter_progress(emit, emit_user_data,
+                                                counter_id, action, units);
   }
-  return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_wait_plan_progress_query(
+static void loom_amdgpu_wait_plan_progress_query(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_view_t* packet,
@@ -3261,20 +3260,20 @@ static iree_status_t loom_amdgpu_wait_plan_progress_query(
       &builder->node_states[packet->node_index];
   const loom_amdgpu_wait_frontier_node_t* frontier_node =
       &builder->frontier_nodes[packet->node_index];
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_emit_counter_progress_mask(
+  loom_amdgpu_wait_plan_emit_counter_progress_mask(
       emit, emit_user_data,
       node_state->explicit_wait_counter_mask |
           node_state->implicit_wait_counter_mask,
-      LOOM_LOW_PACKET_PROGRESS_ACTION_RESET, 0));
+      LOOM_LOW_PACKET_PROGRESS_ACTION_RESET, 0);
   const uint32_t producer_counter_mask =
       frontier_node->read_counter_mask | frontier_node->write_counter_mask |
       node_state->trans_result_counter_mask | node_state->source_counter_mask;
-  return loom_amdgpu_wait_plan_emit_counter_progress_mask(
+  loom_amdgpu_wait_plan_emit_counter_progress_mask(
       emit, emit_user_data, producer_counter_mask,
       LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 1);
 }
 
-static iree_status_t loom_amdgpu_wait_plan_emit_hazard_action(
+static void loom_amdgpu_wait_plan_emit_hazard_action(
     const loom_amdgpu_wait_plan_action_t* action,
     loom_low_packet_hazard_plan_emit_fn_t emit, void* emit_user_data) {
   const uint32_t observed_progress = action->target_count;
@@ -3301,10 +3300,10 @@ static iree_status_t loom_amdgpu_wait_plan_emit_hazard_action(
       .observed_progress = observed_progress,
       .residual_progress = residual_progress,
   };
-  return emit(emit_user_data, &event);
+  emit(emit_user_data, &event);
 }
 
-static iree_status_t loom_amdgpu_wait_plan_hazard_query(
+static void loom_amdgpu_wait_plan_hazard_query(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_progress_table_t* progress,
@@ -3316,7 +3315,7 @@ static iree_status_t loom_amdgpu_wait_plan_hazard_query(
   const loom_amdgpu_wait_plan_builder_t* builder =
       (const loom_amdgpu_wait_plan_builder_t*)user_data;
   if (builder->first_hazard_action_by_node == NULL) {
-    return iree_ok_status();
+    return;
   }
   for (uint32_t action_index =
            builder->first_hazard_action_by_node[packet->node_index];
@@ -3324,10 +3323,8 @@ static iree_status_t loom_amdgpu_wait_plan_hazard_query(
        action_index = builder->next_hazard_action[action_index]) {
     const loom_amdgpu_wait_plan_action_t* action =
         &builder->actions[action_index];
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_wait_plan_emit_hazard_action(action, emit, emit_user_data));
+    loom_amdgpu_wait_plan_emit_hazard_action(action, emit, emit_user_data);
   }
-  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_wait_plan_build_common_tables(

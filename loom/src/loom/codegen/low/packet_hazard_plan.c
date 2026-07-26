@@ -26,8 +26,6 @@ typedef struct loom_low_packet_hazard_plan_build_state_t {
   iree_host_size_t record_capacity;
   // Number of records populated so far across all event sources.
   iree_host_size_t record_count;
-  // Number of target-provider records populated so far.
-  iree_host_size_t target_record_count;
   // Storage-release actions grouped by insertion packet.
   loom_low_storage_release_action_index_t storage_release_action_index;
   // Packet progress records chained by progress class.
@@ -36,31 +34,9 @@ typedef struct loom_low_packet_hazard_plan_build_state_t {
   loom_low_packet_progress_class_range_index_t progress_class_range_index;
   // Exact number of generic allocation storage-release records.
   iree_host_size_t storage_release_record_capacity;
-  // Number of generic allocation storage-release records populated so far.
-  iree_host_size_t storage_release_record_count;
   // Observed progress indexed by allocation storage-release action.
   uint32_t* storage_release_observed_progress;
 } loom_low_packet_hazard_plan_build_state_t;
-
-static bool loom_low_packet_hazard_plan_record_kind_is_valid(
-    loom_low_packet_hazard_plan_record_kind_t kind) {
-  return kind == LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION ||
-         kind == LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_MISSING_TARGET_DATA ||
-         kind ==
-             LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_UNSUPPORTED_PRE_ALLOCATION ||
-         kind == LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_IMPOSSIBLE_SATISFACTION;
-}
-
-static bool loom_low_packet_hazard_plan_record_kind_has_residual_progress(
-    loom_low_packet_hazard_plan_record_kind_t kind) {
-  return kind == LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION ||
-         kind == LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_IMPOSSIBLE_SATISFACTION;
-}
-
-static bool loom_low_packet_hazard_plan_record_kind_is_diagnostic(
-    loom_low_packet_hazard_plan_record_kind_t kind) {
-  return kind != LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION;
-}
 
 static void loom_low_packet_hazard_plan_producer_packet_index(
     const loom_low_schedule_table_t* schedule, uint32_t producer_node_index,
@@ -80,71 +56,10 @@ static void loom_low_packet_hazard_plan_producer_packet_index(
   *out_scheduled_ordinal = producer->scheduled_ordinal;
 }
 
-static iree_status_t loom_low_packet_hazard_plan_validate_event(
-    const loom_low_packet_hazard_plan_event_t* event) {
-  if (!loom_low_packet_hazard_plan_record_kind_is_valid(event->kind)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "hazard plan event has invalid kind %u",
-                            (unsigned)event->kind);
-  }
-  if (event->reason_id == LOOM_LOW_PACKET_HAZARD_PLAN_REASON_NONE ||
-      iree_string_view_is_empty(event->reason_name)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "hazard plan event must have a target reason id and name");
-  }
-  const bool has_action =
-      event->action_id != LOOM_LOW_PACKET_HAZARD_PLAN_ACTION_NONE ||
-      !iree_string_view_is_empty(event->action_name);
-  if (event->kind == LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION) {
-    if (event->action_id == LOOM_LOW_PACKET_HAZARD_PLAN_ACTION_NONE ||
-        iree_string_view_is_empty(event->action_name)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "hazard plan action event must have a target action id and name");
-    }
-  } else if (has_action) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "hazard plan diagnostic event cannot have a target action");
-  }
-  if (!loom_low_packet_hazard_plan_record_kind_has_residual_progress(
-          event->kind)) {
-    if (event->producer_node_index != LOOM_LOW_SCHEDULE_NODE_NONE ||
-        event->progress_class_id != LOOM_LOW_PACKET_PROGRESS_CLASS_NONE ||
-        !iree_string_view_is_empty(event->progress_class_name) ||
-        event->required_progress != 0 || event->observed_progress != 0 ||
-        event->residual_progress != 0) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "hazard plan diagnostic event cannot have residual progress fields");
-    }
-    return iree_ok_status();
-  }
-  if (event->progress_class_id == LOOM_LOW_PACKET_PROGRESS_CLASS_NONE ||
-      iree_string_view_is_empty(event->progress_class_name)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "hazard plan residual event must have a progress class id and name");
-  }
-  if (event->observed_progress >= event->required_progress) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "hazard plan residual event already satisfies required progress");
-  }
-  const uint32_t residual_progress =
-      event->required_progress - event->observed_progress;
-  if (event->residual_progress != residual_progress) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "hazard plan residual event has inconsistent residual progress");
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_packet_hazard_plan_append_validated_event(
+static void loom_low_packet_hazard_plan_append_event(
     loom_low_packet_hazard_plan_build_state_t* state,
     const loom_low_packet_hazard_plan_event_t* event) {
+  IREE_ASSERT_LT(state->record_count, state->record_capacity);
   const loom_low_packet_view_t* packet = state->current_packet;
   iree_host_size_t producer_packet_index =
       LOOM_LOW_PACKET_HAZARD_PLAN_PACKET_NONE;
@@ -173,40 +88,19 @@ static iree_status_t loom_low_packet_hazard_plan_append_validated_event(
           .observed_progress = event->observed_progress,
           .residual_progress = event->residual_progress,
       };
-  return iree_ok_status();
 }
 
-static iree_status_t loom_low_packet_hazard_plan_append_target_event(
+static void loom_low_packet_hazard_plan_append_target_event(
     void* user_data, const loom_low_packet_hazard_plan_event_t* event) {
   loom_low_packet_hazard_plan_build_state_t* state =
       (loom_low_packet_hazard_plan_build_state_t*)user_data;
-  IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_validate_event(event));
-  if (state->target_record_count >= state->provider->event_count) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "hazard plan provider declared %" PRIhsz
-                            " event(s) but attempted to emit more",
-                            state->provider->event_count);
-  }
-  IREE_RETURN_IF_ERROR(
-      loom_low_packet_hazard_plan_append_validated_event(state, event));
-  ++state->target_record_count;
-  return iree_ok_status();
+  loom_low_packet_hazard_plan_append_event(state, event);
 }
 
-static iree_status_t loom_low_packet_hazard_plan_append_storage_release_event(
+static void loom_low_packet_hazard_plan_append_storage_release_event(
     loom_low_packet_hazard_plan_build_state_t* state,
     const loom_low_packet_hazard_plan_event_t* event) {
-  IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_validate_event(event));
-  if (state->storage_release_record_count >=
-      state->storage_release_record_capacity) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "hazard plan storage-release count changed during construction");
-  }
-  IREE_RETURN_IF_ERROR(
-      loom_low_packet_hazard_plan_append_validated_event(state, event));
-  ++state->storage_release_record_count;
-  return iree_ok_status();
+  loom_low_packet_hazard_plan_append_event(state, event);
 }
 
 static uint32_t loom_low_packet_hazard_plan_storage_release_observed_progress(
@@ -319,12 +213,12 @@ static iree_status_t loom_low_packet_hazard_plan_prepare_storage_releases(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_packet_hazard_plan_emit_storage_release_actions(
+static void loom_low_packet_hazard_plan_emit_storage_release_actions(
     loom_low_packet_hazard_plan_build_state_t* state) {
   const loom_low_allocation_table_t* allocation = state->allocation;
   if (allocation == NULL ||
       state->storage_release_action_index.first_action_indices == NULL) {
-    return iree_ok_status();
+    return;
   }
   const loom_low_storage_release_action_index_t* index =
       &state->storage_release_action_index;
@@ -357,29 +251,24 @@ static iree_status_t loom_low_packet_hazard_plan_emit_storage_release_actions(
         .observed_progress = observed_progress,
         .residual_progress = residual_progress,
     };
-    IREE_RETURN_IF_ERROR(
-        loom_low_packet_hazard_plan_append_storage_release_event(state,
-                                                                 &event));
+    loom_low_packet_hazard_plan_append_storage_release_event(state, &event);
   }
-  return iree_ok_status();
 }
 
-static iree_status_t loom_low_packet_hazard_plan_query_packets(
+static void loom_low_packet_hazard_plan_query_packets(
     loom_low_packet_hazard_plan_build_state_t* state) {
   for (iree_host_size_t packet_index = 0;
        packet_index < loom_low_packet_count(state->schedule); ++packet_index) {
     const loom_low_packet_view_t packet =
         loom_low_packet_at(state->schedule, packet_index);
     state->current_packet = &packet;
-    IREE_RETURN_IF_ERROR(state->provider->query(
-        state->provider->user_data, state->schedule, state->allocation,
-        state->progress, &packet,
-        loom_low_packet_hazard_plan_append_target_event, state));
-    IREE_RETURN_IF_ERROR(
-        loom_low_packet_hazard_plan_emit_storage_release_actions(state));
+    state->provider->query(state->provider->user_data, state->schedule,
+                           state->allocation, state->progress, &packet,
+                           loom_low_packet_hazard_plan_append_target_event,
+                           state);
+    loom_low_packet_hazard_plan_emit_storage_release_actions(state);
     state->current_packet = NULL;
   }
-  return iree_ok_status();
 }
 
 iree_status_t loom_low_packet_hazard_plan_build(
@@ -416,22 +305,8 @@ iree_status_t loom_low_packet_hazard_plan_build(
 
   if (iree_status_is_ok(status)) {
     state.records = records;
-    status = loom_low_packet_hazard_plan_query_packets(&state);
-  }
-  if (iree_status_is_ok(status) &&
-      state.target_record_count != provider->event_count) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "hazard plan provider declared %" PRIhsz
-                              " event(s) but emitted %" PRIhsz,
-                              provider->event_count, state.target_record_count);
-  }
-  if (iree_status_is_ok(status) && state.storage_release_record_count !=
-                                       state.storage_release_record_capacity) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "hazard plan expected %" PRIhsz
-                              " storage-release event(s) but emitted %" PRIhsz,
-                              state.storage_release_record_capacity,
-                              state.storage_release_record_count);
+    loom_low_packet_hazard_plan_query_packets(&state);
+    IREE_ASSERT_EQ(state.record_count, state.record_capacity);
   }
 
   if (iree_status_is_ok(status)) {

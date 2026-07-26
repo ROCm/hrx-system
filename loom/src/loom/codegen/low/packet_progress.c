@@ -6,7 +6,6 @@
 
 #include "loom/codegen/low/packet_progress.h"
 
-#include <inttypes.h>
 #include <string.h>
 
 typedef struct loom_low_packet_progress_build_state_t {
@@ -26,53 +25,11 @@ typedef struct loom_low_packet_progress_build_state_t {
   iree_host_size_t record_count;
 } loom_low_packet_progress_build_state_t;
 
-static bool loom_low_packet_progress_action_is_valid(
-    loom_low_packet_progress_action_t action) {
-  return action == LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE ||
-         action == LOOM_LOW_PACKET_PROGRESS_ACTION_RESET;
-}
-
-static iree_status_t loom_low_packet_progress_validate_event(
-    const loom_low_packet_progress_event_t* event) {
-  if (event->progress_class_id == LOOM_LOW_PACKET_PROGRESS_CLASS_NONE) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "packet progress event has no progress class");
-  }
-  if (iree_string_view_is_empty(event->progress_class_name)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "packet progress event has no stable progress class name");
-  }
-  if (!loom_low_packet_progress_action_is_valid(event->action)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "packet progress event has invalid action %u",
-                            (unsigned)event->action);
-  }
-  if (event->action == LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE &&
-      event->units == 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "packet progress advance event must have non-zero units");
-  }
-  if (event->action == LOOM_LOW_PACKET_PROGRESS_ACTION_RESET &&
-      event->units != 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "packet progress reset event cannot advance units");
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_packet_progress_append_event(
+static void loom_low_packet_progress_append_event(
     void* user_data, const loom_low_packet_progress_event_t* event) {
   loom_low_packet_progress_build_state_t* state =
       (loom_low_packet_progress_build_state_t*)user_data;
-  IREE_RETURN_IF_ERROR(loom_low_packet_progress_validate_event(event));
-  if (state->record_count >= state->record_capacity) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "packet progress provider declared %" PRIhsz
-                            " event(s) but attempted to emit more",
-                            state->record_capacity);
-  }
+  IREE_ASSERT_LT(state->record_count, state->record_capacity);
   const loom_low_packet_view_t* packet = state->current_packet;
   state->records[state->record_count++] = (loom_low_packet_progress_record_t){
       .packet_index = packet->packet_index,
@@ -84,22 +41,20 @@ static iree_status_t loom_low_packet_progress_append_event(
       .action = event->action,
       .units = event->units,
   };
-  return iree_ok_status();
 }
 
-static iree_status_t loom_low_packet_progress_query_packets(
+static void loom_low_packet_progress_query_packets(
     loom_low_packet_progress_build_state_t* state) {
   for (iree_host_size_t packet_index = 0;
        packet_index < loom_low_packet_count(state->schedule); ++packet_index) {
     const loom_low_packet_view_t packet =
         loom_low_packet_at(state->schedule, packet_index);
     state->current_packet = &packet;
-    IREE_RETURN_IF_ERROR(state->provider->query(
-        state->provider->user_data, state->schedule, state->allocation, &packet,
-        loom_low_packet_progress_append_event, state));
+    state->provider->query(state->provider->user_data, state->schedule,
+                           state->allocation, &packet,
+                           loom_low_packet_progress_append_event, state);
     state->current_packet = NULL;
   }
-  return iree_ok_status();
 }
 
 iree_status_t loom_low_packet_progress_build(
@@ -124,13 +79,8 @@ iree_status_t loom_low_packet_progress_build(
   }
 
   state.records = records;
-  IREE_RETURN_IF_ERROR(loom_low_packet_progress_query_packets(&state));
-  if (state.record_count != state.record_capacity) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "packet progress provider declared %" PRIhsz
-                            " event(s) but emitted %" PRIhsz,
-                            state.record_capacity, state.record_count);
-  }
+  loom_low_packet_progress_query_packets(&state);
+  IREE_ASSERT_EQ(state.record_count, state.record_capacity);
 
   *out_table = (loom_low_packet_progress_table_t){
       .schedule = schedule,

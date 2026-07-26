@@ -71,7 +71,8 @@ typedef struct loom_low_packet_hazard_plan_event_t {
 } loom_low_packet_hazard_plan_event_t;
 
 // Emits one target hazard-plan event for the packet currently being queried.
-typedef iree_status_t (*loom_low_packet_hazard_plan_emit_fn_t)(
+// Provider construction has already reserved exact storage for every event.
+typedef void (*loom_low_packet_hazard_plan_emit_fn_t)(
     void* user_data, const loom_low_packet_hazard_plan_event_t* event);
 
 // Queries target residual hazard events for one scheduled packet.
@@ -80,8 +81,9 @@ typedef iree_status_t (*loom_low_packet_hazard_plan_emit_fn_t)(
 // when the target policy does not need packet-progress facts. The builder calls
 // this function exactly once for each scheduled packet in increasing
 // packet-index order. Implementations may advance monotonic state in
-// |user_data| across calls.
-typedef iree_status_t (*loom_low_packet_hazard_plan_query_fn_t)(
+// |user_data| across calls. Fallible target analysis must complete before
+// provider construction; this callback only projects compiler-owned facts.
+typedef void (*loom_low_packet_hazard_plan_query_fn_t)(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_progress_table_t* progress,
@@ -156,7 +158,8 @@ typedef struct loom_low_packet_hazard_plan_t {
 } loom_low_packet_hazard_plan_t;
 
 // Builds target residual hazard records for |schedule| using |provider|.
-// |allocation| may be NULL for schedule-only policies.
+// |allocation| may be NULL for schedule-only policies. Provider projection is
+// infallible.
 iree_status_t loom_low_packet_hazard_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
