@@ -140,15 +140,15 @@ iree_string_view_t loom_amdgpu_wait_plan_reason_name(
 iree_string_view_t loom_amdgpu_wait_plan_residual_action_name(
     uint16_t action_id);
 
-// Builds an AMDGPU wait-counter plan from a scheduled low function. When
+// Builds an AMDGPU wait-counter plan from a validated packet sequence. When
 // |allocation| is provided, the plan also materializes target storage-release
 // actions requested by allocation, such as outstanding memory reads whose
 // destination registers have not yet been written and memory packets whose
 // scalar or vector sources have not yet been consumed by the memory pipe. The
-// caller must keep |schedule|, |allocation|, and |arena| immutable/alive for as
-// long as |out_plan| is used.
+// caller must keep the schedule certified by |packets| and |allocation|
+// immutable and |arena| alive for as long as |out_plan| is used.
 iree_status_t loom_amdgpu_wait_plan_build(
-    const loom_low_schedule_table_t* schedule,
+    const loom_low_packet_sequence_t* packets,
     const loom_low_allocation_table_t* allocation,
     iree_arena_allocator_t* arena, loom_amdgpu_wait_plan_t* out_plan);
 

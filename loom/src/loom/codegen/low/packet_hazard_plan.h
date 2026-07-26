@@ -149,9 +149,11 @@ typedef struct loom_low_packet_hazard_plan_t {
   iree_host_size_t record_count;
 } loom_low_packet_hazard_plan_t;
 
-// Builds target residual hazard records for |schedule| using |provider|.
+// Builds target residual hazard records for |packets| using |provider|.
+// |allocation| may be NULL for schedule-only policies; when present it must
+// describe the same function and target as the validated packet sequence.
 iree_status_t loom_low_packet_hazard_plan_build(
-    const loom_low_schedule_table_t* schedule,
+    const loom_low_packet_sequence_t* packets,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_progress_table_t* progress,
     const loom_low_packet_hazard_plan_provider_t* provider,

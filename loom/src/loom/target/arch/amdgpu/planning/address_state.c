@@ -240,16 +240,17 @@ static void loom_amdgpu_address_state_append_transition(
 }
 
 iree_status_t loom_amdgpu_address_state_plan_build(
-    const loom_low_schedule_table_t* schedule,
+    const loom_low_packet_sequence_t* packets,
     const loom_low_allocation_table_t* allocation,
     iree_arena_allocator_t* arena, loom_amdgpu_address_state_plan_t* out_plan) {
-  if (schedule == NULL || allocation == NULL || arena == NULL ||
-      out_plan == NULL) {
+  if (packets == NULL || packets->schedule == NULL || allocation == NULL ||
+      arena == NULL || out_plan == NULL) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "schedule, allocation, arena, and output plan are required for "
+        "packets, allocation, arena, and output plan are required for "
         "AMDGPU address-state planning");
   }
+  const loom_low_schedule_table_t* schedule = packets->schedule;
   IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
   *out_plan = (loom_amdgpu_address_state_plan_t){
       .schedule = schedule,
@@ -287,18 +288,11 @@ iree_status_t loom_amdgpu_address_state_plan_build(
     uint32_t terminator_node_index = LOOM_LOW_SCHEDULE_NODE_NONE;
     for (uint32_t scheduled_ordinal = 0;
          scheduled_ordinal < block->scheduled_node_count; ++scheduled_ordinal) {
-      const iree_host_size_t packet_index =
-          (iree_host_size_t)block->scheduled_node_start + scheduled_ordinal;
-      const uint32_t node_index =
-          schedule->scheduled_node_indices[packet_index];
-      if (node_index >= schedule->node_count) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "AMDGPU address-state schedule references node %" PRIu32
-            " but schedule has %" PRIhsz " nodes",
-            node_index, schedule->node_count);
-      }
-      const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
+      const loom_low_packet_view_t packet =
+          loom_low_packet_sequence_at_block_ordinal(
+              packets, (uint32_t)block_index, scheduled_ordinal);
+      const uint32_t node_index = packet.node_index;
+      const loom_low_schedule_node_t* node = packet.node;
       if (iree_any_bit_set(node->traits, LOOM_TRAIT_TERMINATOR)) {
         terminator = node;
         terminator_node_index = node_index;
