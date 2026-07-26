@@ -6,7 +6,6 @@
 
 #include "loom/codegen/low/packet_hazard_plan.h"
 
-#include <inttypes.h>
 #include <string.h>
 
 typedef struct loom_low_packet_hazard_plan_build_state_t {
@@ -186,13 +185,8 @@ static iree_status_t loom_low_packet_hazard_plan_prepare_storage_releases(
        ++i) {
     const loom_low_storage_release_action_t* action =
         &allocation->storage_release_actions[i];
-    if (action->lease_record_index >= allocation->storage_leases.record_count) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "storage release action references lease record %" PRIu32
-          " but allocation has %" PRIhsz " lease record(s)",
-          action->lease_record_index, allocation->storage_leases.record_count);
-    }
+    IREE_ASSERT_LT(action->lease_record_index,
+                   allocation->storage_leases.record_count);
     const loom_low_storage_lease_record_t* lease_record =
         &allocation->storage_leases.records[action->lease_record_index];
     const uint32_t observed_progress =
@@ -200,14 +194,7 @@ static iree_status_t loom_low_packet_hazard_plan_prepare_storage_releases(
             state, action, lease_record);
     state->storage_release_observed_progress[i] = observed_progress;
     if (observed_progress < action->required_progress) {
-      iree_host_size_t next_record_capacity = 0;
-      if (!iree_host_size_checked_add(state->storage_release_record_capacity, 1,
-                                      &next_record_capacity)) {
-        return iree_make_status(
-            IREE_STATUS_RESOURCE_EXHAUSTED,
-            "storage-release hazard record count exceeds host size");
-      }
-      state->storage_release_record_capacity = next_record_capacity;
+      ++state->storage_release_record_capacity;
     }
   }
   return iree_ok_status();

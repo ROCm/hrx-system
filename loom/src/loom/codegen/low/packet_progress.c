@@ -124,11 +124,6 @@ iree_status_t loom_low_packet_progress_class_chain_index_build(
   if (progress == NULL || progress->record_count == 0) {
     return iree_ok_status();
   }
-  if (arena == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "packet-progress class index requires an arena for non-empty tables");
-  }
   if (progress->record_count > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "packet-progress record count exceeds uint32_t");
@@ -221,27 +216,10 @@ iree_status_t loom_low_packet_progress_class_range_index_build(
     const loom_low_packet_progress_class_chain_index_t* chain_index,
     iree_arena_allocator_t* arena,
     loom_low_packet_progress_class_range_index_t* out_index) {
-  if (chain_index == NULL || out_index == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "packet-progress chain and output range index are required");
-  }
   memset(out_index, 0, sizeof(*out_index));
   const loom_low_packet_progress_table_t* progress = chain_index->progress;
   if (progress == NULL || progress->record_count == 0) {
     return iree_ok_status();
-  }
-  if (arena == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "packet-progress range index requires an arena for non-empty tables");
-  }
-  if (progress->record_count > UINT32_MAX || chain_index->classes == NULL ||
-      chain_index->next_record_indices == NULL ||
-      chain_index->class_count == 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "packet-progress chain index is incomplete or out of range");
   }
 
   loom_low_packet_progress_class_range_entry_t* classes = NULL;
@@ -256,13 +234,6 @@ iree_status_t loom_low_packet_progress_class_range_index_build(
        ++class_index) {
     const loom_low_packet_progress_class_chain_entry_t* chain_entry =
         &chain_index->classes[class_index];
-    if (chain_entry->record_count == 0 ||
-        chain_entry->record_count >
-            (uint32_t)progress->record_count - range_record_count) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "packet-progress chain class has an invalid record count");
-    }
     classes[class_index] = (loom_low_packet_progress_class_range_entry_t){
         .progress_class_id = chain_entry->progress_class_id,
         .record_start = range_record_count,
@@ -270,45 +241,12 @@ iree_status_t loom_low_packet_progress_class_range_index_build(
     };
 
     uint32_t progress_record_index = chain_entry->first_record_index;
-    uint32_t preceding_progress_record_index =
-        LOOM_LOW_PACKET_PROGRESS_RECORD_INDEX_NONE;
     for (uint32_t i = 0; i < chain_entry->record_count; ++i) {
-      if (progress_record_index >= progress->record_count) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "packet-progress chain contains an invalid record index");
-      }
-      const loom_low_packet_progress_record_t* progress_record =
-          &progress->records[progress_record_index];
-      if (progress_record->progress_class_id !=
-          chain_entry->progress_class_id) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "packet-progress chain contains a record from another class");
-      }
-      if (preceding_progress_record_index !=
-              LOOM_LOW_PACKET_PROGRESS_RECORD_INDEX_NONE &&
-          progress_record_index <= preceding_progress_record_index) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "packet-progress chain is not in stable record order");
-      }
       records[range_record_count++].progress_record_index =
           progress_record_index;
-      preceding_progress_record_index = progress_record_index;
       progress_record_index =
           chain_index->next_record_indices[progress_record_index];
     }
-    if (progress_record_index != LOOM_LOW_PACKET_PROGRESS_RECORD_INDEX_NONE) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "packet-progress chain contains more records than declared");
-    }
-  }
-  if (range_record_count != progress->record_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "packet-progress chains do not cover the progress table exactly");
   }
 
   for (uint32_t class_index = 0; class_index < chain_index->class_count;
@@ -325,13 +263,8 @@ iree_status_t loom_low_packet_progress_class_range_index_build(
           &progress->records[range_record->progress_record_index];
       if (progress_record->action == LOOM_LOW_PACKET_PROGRESS_ACTION_RESET) {
         ++cumulative_reset_count;
-      } else if (progress_record->action ==
-                 LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE) {
-        cumulative_advance_units += progress_record->units;
       } else {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "packet-progress chain contains an invalid progress action");
+        cumulative_advance_units += progress_record->units;
       }
       range_record->cumulative_reset_count = cumulative_reset_count;
       range_record->cumulative_advance_units = cumulative_advance_units;

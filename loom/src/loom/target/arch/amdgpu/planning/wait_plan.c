@@ -439,23 +439,12 @@ static iree_status_t loom_amdgpu_wait_plan_build_storage_release_action_index(
     return iree_ok_status();
   }
   const loom_low_schedule_table_t* schedule = builder->schedule;
-  IREE_RETURN_IF_ERROR(loom_low_storage_release_action_index_build(
+  return loom_low_storage_release_action_index_build(
       allocation->storage_release_actions,
       allocation->storage_release_action_count,
       LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_NODE,
       schedule->node_count, builder->arena,
-      &builder->storage_release_action_index));
-  for (iree_host_size_t i = 0; i < allocation->storage_release_action_count;
-       ++i) {
-    const loom_low_storage_release_action_t* action =
-        &allocation->storage_release_actions[i];
-    IREE_ASSERT_LT(action->insertion_node_index, schedule->node_count);
-    const loom_low_schedule_node_t* node =
-        &schedule->nodes[action->insertion_node_index];
-    IREE_ASSERT_EQ(action->block_index, node->block_index);
-    IREE_ASSERT_EQ(action->scheduled_ordinal, node->scheduled_ordinal);
-  }
-  return iree_ok_status();
+      &builder->storage_release_action_index);
 }
 
 static iree_status_t loom_amdgpu_wait_plan_allocate(
@@ -3199,18 +3188,8 @@ static iree_status_t loom_amdgpu_wait_plan_build_hazard_action_index(
     if (!loom_amdgpu_wait_plan_action_is_residual_hazard(action)) {
       continue;
     }
-    iree_host_size_t next_hazard_event_count = 0;
-    if (!iree_host_size_checked_add(builder->hazard_event_count, 1,
-                                    &next_hazard_event_count)) {
-      return iree_make_status(
-          IREE_STATUS_RESOURCE_EXHAUSTED,
-          "AMDGPU wait-plan hazard event count exceeds host size");
-    }
-    builder->hazard_event_count = next_hazard_event_count;
+    ++builder->hazard_event_count;
     IREE_ASSERT_LT(action->node_index, schedule->node_count);
-    const loom_low_schedule_node_t* node = &schedule->nodes[action->node_index];
-    IREE_ASSERT_EQ(action->block_index, node->block_index);
-    IREE_ASSERT_EQ(action->scheduled_ordinal, node->scheduled_ordinal);
     builder->next_hazard_action[action_index] =
         builder->first_hazard_action_by_node[action->node_index];
     builder->first_hazard_action_by_node[action->node_index] = action_index;
