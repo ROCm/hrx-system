@@ -148,6 +148,29 @@ TEST(TargetIdTest, AppliesGfx1250AsicRevision) {
             IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_UNSUPPORTED);
 }
 
+TEST(TargetIdTest, EqualityComparesStructuredIdentityByValue) {
+  std::string first_storage = "gfx942:sramecc+:xnack-";
+  const auto first =
+      ParseTargetId(first_storage.c_str(), kArchFeatureParseFlags);
+  std::string second_storage = "gfx942:sramecc+:xnack-";
+  const auto second =
+      ParseTargetId(second_storage.c_str(), kArchFeatureParseFlags);
+  EXPECT_TRUE(iree_hal_amdgpu_target_id_equal(&first, &second));
+
+  const auto different_feature =
+      ParseTargetId("gfx942:sramecc+:xnack+", kArchFeatureParseFlags);
+  EXPECT_FALSE(iree_hal_amdgpu_target_id_equal(&first, &different_feature));
+
+  auto different_revision = ParseTargetId("gfx1250");
+  IREE_ASSERT_OK(
+      iree_hal_amdgpu_target_id_apply_asic_revision(0, &different_revision));
+  auto b0_revision = ParseTargetId("gfx1250");
+  IREE_ASSERT_OK(
+      iree_hal_amdgpu_target_id_apply_asic_revision(1, &b0_revision));
+  EXPECT_FALSE(
+      iree_hal_amdgpu_target_id_equal(&different_revision, &b0_revision));
+}
+
 TEST(TargetIdTest, RejectsUnsupportedSyntax) {
   iree_hal_amdgpu_target_id_t target_id;
   IREE_EXPECT_STATUS_IS(

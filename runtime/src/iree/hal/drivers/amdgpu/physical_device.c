@@ -49,23 +49,6 @@ static_assert(IREE_HAL_AMDGPU_PHYSICAL_DEVICE_GROUP_SEGMENT_MAX_SIZE_DEFAULT !=
                   0,
               "group segment max size default must be non-zero");
 
-typedef struct iree_hal_amdgpu_agent_first_isa_t {
-  // Number of ISAs seen during iteration.
-  uint32_t count;
-  // First ISA returned by the HSA agent iterator.
-  hsa_isa_t value;
-} iree_hal_amdgpu_agent_first_isa_t;
-
-static hsa_status_t iree_hal_amdgpu_record_first_isa(hsa_isa_t isa,
-                                                     void* user_data) {
-  iree_hal_amdgpu_agent_first_isa_t* first_isa =
-      (iree_hal_amdgpu_agent_first_isa_t*)user_data;
-  if (first_isa->count++ == 0) {
-    first_isa->value = isa;
-  }
-  return HSA_STATUS_SUCCESS;
-}
-
 static bool iree_hal_amdgpu_parse_hex_digit(char c, uint32_t* out_value) {
   if (c >= '0' && c <= '9') {
     *out_value = (uint32_t)(c - '0');
@@ -78,71 +61,6 @@ static bool iree_hal_amdgpu_parse_hex_digit(char c, uint32_t* out_value) {
     return true;
   }
   return false;
-}
-
-// Public HSA AMD agent attribute used to distinguish ASIC revisions. The local
-// name keeps this driver buildable against older HSA SDK headers while using
-// the stable numeric ABI accepted by hsa_agent_get_info.
-enum {
-  IREE_HAL_AMDGPU_AGENT_INFO_ASIC_REVISION = 0xA012,
-};
-
-static iree_status_t iree_hal_amdgpu_query_agent_target_id(
-    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
-    iree_host_size_t target_id_processor_capacity,
-    char* target_id_processor_storage,
-    iree_hal_amdgpu_target_id_t* out_target_id) {
-  IREE_ASSERT_ARGUMENT(libhsa);
-  IREE_ASSERT_ARGUMENT(target_id_processor_storage);
-  IREE_ASSERT_ARGUMENT(out_target_id);
-
-  iree_hal_amdgpu_agent_first_isa_t first_isa;
-  memset(&first_isa, 0, sizeof(first_isa));
-  IREE_RETURN_IF_ERROR(iree_hsa_agent_iterate_isas(
-      IREE_LIBHSA(libhsa), agent, iree_hal_amdgpu_record_first_isa,
-      &first_isa));
-  if (first_isa.count == 0) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "GPU agent has no reported HSA ISA");
-  }
-
-  char isa_name_buffer[128] = {0};
-  uint32_t isa_name_length = 0;
-  IREE_RETURN_IF_ERROR(
-      iree_hsa_isa_get_info_alt(IREE_LIBHSA(libhsa), first_isa.value,
-                                HSA_ISA_INFO_NAME_LENGTH, &isa_name_length));
-  if (isa_name_length == 0 ||
-      isa_name_length > IREE_ARRAYSIZE(isa_name_buffer)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "ISA name length invalid: %u", isa_name_length);
-  }
-  IREE_RETURN_IF_ERROR(
-      iree_hsa_isa_get_info_alt(IREE_LIBHSA(libhsa), first_isa.value,
-                                HSA_ISA_INFO_NAME, isa_name_buffer));
-  iree_hal_amdgpu_target_id_t target_id;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_parse_hsa_isa_name(
-      iree_make_string_view(isa_name_buffer, isa_name_length - /*NUL*/ 1),
-      &target_id));
-  if (iree_string_view_equal(target_id.processor, IREE_SV("gfx1250"))) {
-    uint32_t asic_revision = 0;
-    IREE_RETURN_IF_ERROR(iree_hsa_agent_get_info(
-        IREE_LIBHSA(libhsa), agent,
-        (hsa_agent_info_t)IREE_HAL_AMDGPU_AGENT_INFO_ASIC_REVISION,
-        &asic_revision));
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_apply_asic_revision(
-        asic_revision, &target_id));
-  }
-  if (target_id.processor.size >= target_id_processor_capacity) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "target ID processor storage too small");
-  }
-  memcpy(target_id_processor_storage, target_id.processor.data,
-         target_id.processor.size);
-  target_id_processor_storage[target_id.processor.size] = 0;
-  target_id.processor = iree_make_string_view(target_id_processor_storage,
-                                              target_id.processor.size);
-  *out_target_id = target_id;
-  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amdgpu_query_agent_uuid(
@@ -936,16 +854,20 @@ iree_hal_amdgpu_physical_device_initialize_device_library_and_blit_context(
 
 static iree_status_t
 iree_hal_amdgpu_physical_device_initialize_vendor_packet_strategy(
-    iree_hal_amdgpu_libhsa_t* libhsa,
+    const iree_hal_amdgpu_system_t* system,
     const iree_hal_amdgpu_physical_device_options_t* options,
     hsa_agent_t device_agent,
     iree_hal_amdgpu_physical_device_t* out_physical_device) {
-  iree_hal_amdgpu_target_id_t target_id;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_query_agent_target_id(
-      libhsa, device_agent,
-      sizeof(out_physical_device->isa.target_id_processor),
-      out_physical_device->isa.target_id_processor, &target_id));
-  iree_hal_amdgpu_gfxip_version_t gfxip_version = target_id.version;
+  const iree_hal_amdgpu_agent_target_t* agent_target =
+      &system->gpu_agent_targets[out_physical_device->device_ordinal];
+  if (IREE_UNLIKELY(agent_target->agent.handle != device_agent.handle)) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "system GPU target ordinal %" PRIhsz
+                            " does not match physical HSA agent",
+                            out_physical_device->device_ordinal);
+  }
+  const iree_hal_amdgpu_gfxip_version_t gfxip_version =
+      agent_target->primary_isa.target_id.version;
 
   iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities =
       iree_hal_amdgpu_select_vendor_packet_capabilities(gfxip_version);
@@ -962,7 +884,7 @@ iree_hal_amdgpu_physical_device_initialize_vendor_packet_strategy(
     wait_barrier_strategy = iree_hal_amdgpu_select_wait_barrier_strategy(
         vendor_packet_capabilities);
   }
-  out_physical_device->isa.target_id = target_id;
+  out_physical_device->agent_target = agent_target;
   out_physical_device->vendor_packet_capabilities = vendor_packet_capabilities;
   out_physical_device->wait_barrier_strategy = wait_barrier_strategy;
   out_physical_device->pm4_timestamp_strategy = pm4_timestamp_strategy;
@@ -1068,14 +990,15 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_physical_device_initialize_vendor_packet_strategy(
-        libhsa, options, device_agent, out_physical_device);
+        system, options, device_agent, out_physical_device);
   }
   if (iree_status_is_ok(status)) {
     status =
         iree_hal_amdgpu_physical_device_initialize_cpu_visible_device_coarse_memory(
             libhsa, device_agent, coarse_block_memory_pool,
             &out_physical_device->hdp_flush,
-            out_physical_device->isa.target_id.version, &system->topology,
+            out_physical_device->agent_target->primary_isa.target_id.version,
+            &system->topology,
             &out_physical_device->cpu_visible_device_coarse_memory);
   }
   if (iree_status_is_ok(status)) {

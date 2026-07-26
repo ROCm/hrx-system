@@ -16,10 +16,16 @@
 namespace iree::hal::amdgpu {
 namespace {
 
-static std::vector<std::string> CandidateValues(const char* isa_name) {
+static std::vector<std::string> CandidateValues(const char* target_name,
+                                                uint32_t asic_revision = 0) {
+  iree_hal_amdgpu_target_id_t target_id;
+  IREE_CHECK_OK(iree_hal_amdgpu_target_id_parse_hsa_isa_name(
+      iree_make_cstring_view(target_name), &target_id));
+  IREE_CHECK_OK(
+      iree_hal_amdgpu_target_id_apply_asic_revision(asic_revision, &target_id));
   iree_hal_amdgpu_device_library_target_candidate_list_t candidates = {0};
-  IREE_CHECK_OK(iree_hal_amdgpu_device_library_target_candidates_from_isa(
-      iree_make_cstring_view(isa_name), &candidates));
+  IREE_CHECK_OK(iree_hal_amdgpu_device_library_target_candidates_from_target(
+      &target_id, &candidates));
   std::vector<std::string> values;
   values.reserve(candidates.count);
   for (iree_host_size_t i = 0; i < candidates.count; ++i) {
@@ -44,9 +50,10 @@ TEST(DeviceLibraryTargetTest,
 TEST(DeviceLibraryTargetTest, IncludesGfx12_5GenericFallback) {
   const auto values = CandidateValues("amdgcn-amd-amdhsa--gfx1250");
 
-  ASSERT_EQ(values.size(), 2u);
-  EXPECT_EQ(values[0], "gfx1250");
-  EXPECT_EQ(values[1], "gfx12-5-generic");
+  ASSERT_EQ(values.size(), 3u);
+  EXPECT_EQ(values[0], "gfx1250:gfx1250-b0-specific-");
+  EXPECT_EQ(values[1], "gfx1250");
+  EXPECT_EQ(values[2], "gfx12-5-generic");
 }
 
 TEST(DeviceLibraryTargetTest, MatchesOnlyWholeFileArchSegments) {

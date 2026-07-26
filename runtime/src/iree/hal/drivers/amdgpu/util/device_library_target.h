@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMDGPU_UTIL_DEVICE_LIBRARY_TARGET_H_
 
 #include "iree/base/api.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,9 +39,10 @@ typedef struct iree_hal_amdgpu_device_library_target_candidate_list_t {
 bool iree_hal_amdgpu_device_library_target_matches_file_arch(
     iree_string_view_t file_arch, iree_string_view_t target);
 
-// Builds ordered device-library target candidates for an HSA ISA name.
-iree_status_t iree_hal_amdgpu_device_library_target_candidates_from_isa(
-    iree_string_view_t isa_name,
+// Builds ordered device-library target candidates for a qualified physical
+// target identity.
+iree_status_t iree_hal_amdgpu_device_library_target_candidates_from_target(
+    const iree_hal_amdgpu_target_id_t* target_id,
     iree_hal_amdgpu_device_library_target_candidate_list_t* out_candidates);
 
 #ifdef __cplusplus
