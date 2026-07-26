@@ -3646,10 +3646,9 @@ static iree_status_t loom_amdgpu_append_stateful_descriptor_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
   loom_amdgpu_assembly_emit_state_t* state =
       (loom_amdgpu_assembly_emit_state_t*)user_data;
-  loom_amdgpu_address_state_requirement_t requirement = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_query_requirement(
-      context->schedule, context->allocation, context->packet->node,
-      &requirement));
+  const loom_amdgpu_address_state_requirement_t requirement =
+      loom_amdgpu_address_state_requirement_for_packet(context->allocation,
+                                                       context->packet);
   const uint8_t current_mode = state == NULL ? 0 : state->current_vgpr_msb_mode;
   if ((current_mode & requirement.mask) !=
       (requirement.value & requirement.mask)) {

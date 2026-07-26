@@ -157,11 +157,11 @@ class AmdgpuAddressStateTest : public ::testing::Test {
         assignment_indices_by_value_ordinal_;
   }
 
-  loom_amdgpu_address_state_requirement_t Requirement(uint32_t node_index) {
-    loom_amdgpu_address_state_requirement_t requirement = {};
-    IREE_EXPECT_OK(loom_amdgpu_address_state_query_requirement(
-        &schedule_, &allocation_, &nodes_[node_index], &requirement));
-    return requirement;
+  loom_amdgpu_address_state_requirement_t Requirement(uint32_t packet_index) {
+    const loom_low_packet_view_t packet =
+        loom_low_packet_at(&schedule_, packet_index);
+    return loom_amdgpu_address_state_requirement_for_packet(&allocation_,
+                                                            &packet);
   }
 
   iree_status_t BuildPlan(loom_amdgpu_address_state_plan_t* out_plan) {
@@ -253,8 +253,7 @@ TEST_F(AmdgpuAddressStateTest, ProducesNoTransitionsForLowVgprWindow) {
 }
 
 TEST_F(AmdgpuAddressStateTest, StructuralPacketsHaveNoDescriptorRequirement) {
-  nodes_[0].kind = LOOM_LOW_SCHEDULE_NODE_STRUCTURAL;
-  const loom_amdgpu_address_state_requirement_t requirement = Requirement(0);
+  const loom_amdgpu_address_state_requirement_t requirement = Requirement(2);
   EXPECT_EQ(requirement.mask, 0u);
   EXPECT_EQ(requirement.value, 0u);
 }
