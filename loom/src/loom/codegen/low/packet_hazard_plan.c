@@ -291,19 +291,22 @@ static iree_status_t loom_low_packet_hazard_plan_run_pass(
 }
 
 iree_status_t loom_low_packet_hazard_plan_build(
-    const loom_low_schedule_table_t* schedule,
+    const loom_low_packet_sequence_t* packets,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_progress_table_t* progress,
     const loom_low_packet_hazard_plan_provider_t* provider,
     iree_arena_allocator_t* arena, loom_low_packet_hazard_plan_t* out_plan) {
+  if (packets == NULL || packets->schedule == NULL || provider == NULL ||
+      provider->query == NULL || arena == NULL || out_plan == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "packets, provider, arena, and output plan are required for packet "
+        "hazard planning");
+  }
   memset(out_plan, 0, sizeof(*out_plan));
-  loom_low_packet_sequence_t packets = {0};
+  const loom_low_schedule_table_t* schedule = packets->schedule;
   if (allocation != NULL) {
-    IREE_RETURN_IF_ERROR(loom_low_allocated_packet_sequence_initialize(
-        schedule, allocation, &packets));
-  } else {
-    IREE_RETURN_IF_ERROR(
-        loom_low_packet_sequence_initialize(schedule, &packets));
+    IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
   }
   if (progress != NULL && progress->schedule != schedule) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -315,7 +318,7 @@ iree_status_t loom_low_packet_hazard_plan_build(
   }
 
   loom_low_packet_hazard_plan_build_state_t state = {
-      .packets = &packets,
+      .packets = packets,
       .schedule = schedule,
       .allocation = allocation,
       .progress = progress,

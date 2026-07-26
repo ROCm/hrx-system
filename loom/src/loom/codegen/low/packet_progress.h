@@ -123,9 +123,11 @@ typedef struct loom_low_packet_progress_class_index_t {
   const uint32_t* next_record_indices;
 } loom_low_packet_progress_class_index_t;
 
-// Builds target progress records for |schedule| using |provider|.
+// Builds target progress records for |packets| using |provider|.
+// |allocation| must describe the same function and target as the validated
+// packet sequence.
 iree_status_t loom_low_packet_progress_build(
-    const loom_low_schedule_table_t* schedule,
+    const loom_low_packet_sequence_t* packets,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_progress_provider_t* provider,
     iree_arena_allocator_t* arena, loom_low_packet_progress_table_t* out_table);

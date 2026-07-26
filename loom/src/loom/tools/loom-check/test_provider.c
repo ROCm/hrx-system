@@ -322,6 +322,9 @@ static iree_status_t loom_check_test_synthetic_hazard_execute(
   IREE_RETURN_IF_ERROR(
       loom_check_test_synthetic_hazard_find_pair(&frame.schedule, &context));
 
+  loom_low_packet_sequence_t packets = {0};
+  IREE_RETURN_IF_ERROR(loom_low_allocated_packet_sequence_initialize(
+      &frame.schedule, &frame.allocation, &packets));
   loom_low_allocation_value_scratch_t scratch = {0};
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_acquire_value_scratch(&frame.allocation, &scratch));
@@ -335,12 +338,12 @@ static iree_status_t loom_check_test_synthetic_hazard_execute(
   };
   loom_low_packet_hazard_plan_t plan = {0};
   iree_status_t status = loom_low_packet_progress_build(
-      &frame.schedule, &frame.allocation, &progress_provider,
-      request->case_arena, &progress);
+      &packets, &frame.allocation, &progress_provider, request->case_arena,
+      &progress);
   if (iree_status_is_ok(status)) {
-    status = loom_low_packet_hazard_plan_build(
-        &frame.schedule, &frame.allocation, &progress, &hazard_provider,
-        request->case_arena, &plan);
+    status = loom_low_packet_hazard_plan_build(&packets, &frame.allocation,
+                                               &progress, &hazard_provider,
+                                               request->case_arena, &plan);
   }
   loom_low_allocation_release_value_scratch(&scratch);
   IREE_RETURN_IF_ERROR(status);

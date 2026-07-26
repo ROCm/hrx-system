@@ -24,8 +24,8 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/string_builder.h"
 #include "loom/codegen/low/allocation.h"
+#include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/packet_hazard_plan.h"
-#include "loom/codegen/low/schedule/types.h"
 #include "loom/target/arch/amdgpu/planning/matrix_wait_states.h"
 
 #ifdef __cplusplus
@@ -129,10 +129,10 @@ iree_string_view_t loom_amdgpu_wait_state_action_name(
     loom_amdgpu_wait_state_action_t action);
 
 // Builds fixed AMDGPU wait-state insertions from a scheduled and allocated low
-// function. The caller must keep |schedule| and |allocation| immutable and
-// |arena| alive for as long as |out_plan| is used.
+// function. The caller must keep the schedule certified by |packets| and
+// |allocation| immutable and |arena| alive for as long as |out_plan| is used.
 iree_status_t loom_amdgpu_wait_state_plan_build(
-    const loom_low_schedule_table_t* schedule,
+    const loom_low_packet_sequence_t* packets,
     const loom_low_allocation_table_t* allocation,
     iree_arena_allocator_t* arena, loom_amdgpu_wait_state_plan_t* out_plan);
 

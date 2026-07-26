@@ -279,6 +279,8 @@ typedef struct loom_amdgpu_delay_alu_accumulator_t {
 } loom_amdgpu_delay_alu_accumulator_t;
 
 typedef struct loom_amdgpu_wait_state_builder_t {
+  // Validated scheduled packet sequence being analyzed.
+  const loom_low_packet_sequence_t* packets;
   // Schedule table being analyzed.
   const loom_low_schedule_table_t* schedule;
   // Allocation table being analyzed.
@@ -2143,7 +2145,7 @@ static iree_status_t loom_amdgpu_wait_state_build_progress(
       .user_data = builder,
       .query = loom_amdgpu_wait_state_progress_query,
   };
-  return loom_low_packet_progress_build(builder->schedule, builder->allocation,
+  return loom_low_packet_progress_build(builder->packets, builder->allocation,
                                         &provider, builder->arena,
                                         &builder->progress);
 }
@@ -2200,7 +2202,7 @@ static iree_status_t loom_amdgpu_wait_state_build_hazard_plan(
       .query = loom_amdgpu_wait_state_hazard_query,
   };
   return loom_low_packet_hazard_plan_build(
-      builder->schedule, builder->allocation, &builder->progress, &provider,
+      builder->packets, builder->allocation, &builder->progress, &provider,
       builder->arena, &builder->hazard_plan);
 }
 
@@ -2232,10 +2234,9 @@ static iree_status_t loom_amdgpu_wait_state_plan_build_with_scratch(
         &builder->schedule->blocks[block_index];
     for (uint32_t scheduled_ordinal = 0;
          scheduled_ordinal < block->scheduled_node_count; ++scheduled_ordinal) {
-      loom_low_packet_view_t packet = {0};
-      IREE_RETURN_IF_ERROR(loom_low_packet_view_at_block_ordinal(
-          builder->schedule, builder->allocation, (uint32_t)block_index,
-          scheduled_ordinal, &packet));
+      const loom_low_packet_view_t packet =
+          loom_low_packet_sequence_at_block_ordinal(
+              builder->packets, (uint32_t)block_index, scheduled_ordinal);
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_wait_state_apply_packet(builder, &packet));
     }
@@ -2246,16 +2247,23 @@ static iree_status_t loom_amdgpu_wait_state_plan_build_with_scratch(
 }
 
 iree_status_t loom_amdgpu_wait_state_plan_build(
-    const loom_low_schedule_table_t* schedule,
+    const loom_low_packet_sequence_t* packets,
     const loom_low_allocation_table_t* allocation,
     iree_arena_allocator_t* arena, loom_amdgpu_wait_state_plan_t* out_plan) {
   *out_plan = (loom_amdgpu_wait_state_plan_t){0};
+  if (packets == NULL || packets->schedule == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "validated packets are required for AMDGPU wait-state planning");
+  }
+  const loom_low_schedule_table_t* schedule = packets->schedule;
   IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
 
   loom_low_allocation_value_scratch_t scratch = {0};
   iree_status_t status =
       loom_low_allocation_acquire_value_scratch(allocation, &scratch);
   loom_amdgpu_wait_state_builder_t builder = {
+      .packets = packets,
       .schedule = schedule,
       .allocation = allocation,
       .descriptor_set = schedule->target.descriptor_set,

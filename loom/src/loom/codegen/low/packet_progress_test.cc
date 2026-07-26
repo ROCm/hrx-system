@@ -40,6 +40,8 @@ class LowPacketProgressTest : public ::testing::Test {
                                      &block_pool_);
     iree_arena_initialize(&block_pool_, &arena_);
     InitializePacketProgressTestState(&state_);
+    IREE_ASSERT_OK(loom_low_allocated_packet_sequence_initialize(
+        &state_.schedule, &state_.allocation, &packets_));
   }
 
   void TearDown() override {
@@ -100,6 +102,7 @@ class LowPacketProgressTest : public ::testing::Test {
   iree_arena_block_pool_t block_pool_;
   iree_arena_allocator_t arena_;
   PacketProgressTestState state_;
+  loom_low_packet_sequence_t packets_ = {};
 };
 
 iree_status_t EmitEvent(loom_low_packet_progress_emit_fn_t emit,
@@ -175,8 +178,8 @@ TEST_F(LowPacketProgressTest, BuildsSyntheticTargetProgressRecords) {
       /*.query=*/SyntheticProgressQuery,
   };
   loom_low_packet_progress_table_t table = {};
-  IREE_ASSERT_OK(loom_low_packet_progress_build(
-      &state_.schedule, &state_.allocation, &provider, &arena_, &table));
+  IREE_ASSERT_OK(loom_low_packet_progress_build(&packets_, &state_.allocation,
+                                                &provider, &arena_, &table));
 
   ASSERT_EQ(table.schedule, &state_.schedule);
   ASSERT_EQ(table.allocation, &state_.allocation);
@@ -216,10 +219,26 @@ TEST_F(LowPacketProgressTest, BuildsEmptyProgressTable) {
       /*.query=*/EmptyProgressQuery,
   };
   loom_low_packet_progress_table_t table = {};
-  IREE_ASSERT_OK(loom_low_packet_progress_build(
-      &state_.schedule, &state_.allocation, &provider, &arena_, &table));
+  IREE_ASSERT_OK(loom_low_packet_progress_build(&packets_, &state_.allocation,
+                                                &provider, &arena_, &table));
   EXPECT_EQ(table.record_count, 0u);
   EXPECT_EQ(table.records, nullptr);
+}
+
+TEST_F(LowPacketProgressTest, RejectsAllocationForAnotherFunction) {
+  loom_op_t other_function = {};
+  loom_low_allocation_table_t other_allocation = state_.allocation;
+  other_allocation.function_op = &other_function;
+  const loom_low_packet_progress_provider_t provider = {
+      /*.user_data=*/{},
+      /*.query=*/EmptyProgressQuery,
+  };
+  loom_low_packet_progress_table_t table = {};
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_low_packet_progress_build(&packets_, &other_allocation, &provider,
+                                     &arena_, &table));
 }
 
 TEST_F(LowPacketProgressTest, IndexesRecordsByProgressClass) {
@@ -228,8 +247,8 @@ TEST_F(LowPacketProgressTest, IndexesRecordsByProgressClass) {
       /*.query=*/SyntheticProgressQuery,
   };
   loom_low_packet_progress_table_t table = {};
-  IREE_ASSERT_OK(loom_low_packet_progress_build(
-      &state_.schedule, &state_.allocation, &provider, &arena_, &table));
+  IREE_ASSERT_OK(loom_low_packet_progress_build(&packets_, &state_.allocation,
+                                                &provider, &arena_, &table));
 
   loom_low_packet_progress_class_index_t index = {};
   IREE_ASSERT_OK(
@@ -328,8 +347,8 @@ TEST_F(LowPacketProgressTest, RejectsInvalidProgressEvents) {
   loom_low_packet_progress_table_t table = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_low_packet_progress_build(&state_.schedule, &state_.allocation,
-                                     &provider, &arena_, &table));
+      loom_low_packet_progress_build(&packets_, &state_.allocation, &provider,
+                                     &arena_, &table));
 }
 
 }  // namespace
