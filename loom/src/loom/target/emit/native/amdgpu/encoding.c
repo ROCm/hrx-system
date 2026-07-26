@@ -1655,9 +1655,9 @@ static iree_status_t loom_amdgpu_try_encode_special_descriptor_packet(
 
 static iree_status_t loom_amdgpu_prepare_descriptor_packet_encoding(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
-  loom_amdgpu_address_state_requirement_t requirement = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_query_requirement(
-      state->schedule, state->allocation, packet->node, &requirement));
+  const loom_amdgpu_address_state_requirement_t requirement =
+      loom_amdgpu_address_state_requirement_for_packet(state->allocation,
+                                                       packet);
   if ((state->current_vgpr_msb_mode & requirement.mask) !=
       (requirement.value & requirement.mask)) {
     return iree_make_status(

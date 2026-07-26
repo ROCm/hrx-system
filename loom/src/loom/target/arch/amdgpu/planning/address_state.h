@@ -52,18 +52,19 @@ typedef struct loom_amdgpu_address_state_plan_t {
   iree_host_size_t transition_count;
 } loom_amdgpu_address_state_plan_t;
 
-// Resolves the address-state bits required by |node| under |allocation|.
-// Structural packets return an empty requirement; their target-generated move
-// sequences manage and restore address state inside native emission.
-iree_status_t loom_amdgpu_address_state_query_requirement(
-    const loom_low_schedule_table_t* schedule,
+// Returns the address-state bits required by a verified |packet| from an
+// addressability-accepted emission frame. Structural packets return an empty
+// requirement; their target-generated move sequences manage and restore
+// address state inside native emission.
+loom_amdgpu_address_state_requirement_t
+loom_amdgpu_address_state_requirement_for_packet(
     const loom_low_allocation_table_t* allocation,
-    const loom_low_schedule_node_t* node,
-    loom_amdgpu_address_state_requirement_t* out_requirement);
+    const loom_low_packet_view_t* packet);
 
-// Builds concrete S_SET_VGPR_MSB insertions in scheduled order. Generated
-// transitions are a post-allocation packet overlay: they do not mutate low IR,
-// reschedule the function, or invalidate the allocation that selected them.
+// Builds concrete S_SET_VGPR_MSB insertions for an addressability-accepted
+// emission frame in scheduled order. Generated transitions are a
+// post-allocation packet overlay: they do not mutate low IR, reschedule the
+// function, or invalidate the allocation that selected them.
 iree_status_t loom_amdgpu_address_state_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
