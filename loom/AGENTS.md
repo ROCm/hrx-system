@@ -107,6 +107,30 @@ compatibility, feature coverage, and impossible operand forms are generation
 time checks. Runtime code evaluates user-dependent facts, resolves descriptor
 availability, emits diagnostics, and walks compact trusted data.
 
+## Compiler Trust Boundary
+
+The `loomc` API and command-line tools own external input validation. Parsing,
+verification, target selection, and explicit API preconditions establish facts
+that later JIT stages consume as trusted compiler state. Successful schedules,
+allocations, emission frames, and target packet plans are not untrusted inputs
+merely because their declarations live in non-static headers.
+
+Internal transforms and fact queries expose that ownership in their signatures:
+an infallible query returns its value, and an infallible transform returns
+`void`. An `iree_status_t` below the public boundary identifies a possible
+failure owned by that operation, such as arena allocation, output growth,
+user-dependent target support, or a representational format limit. Rechecking
+producer-owned table bounds, assignment presence, op shape, or cross-stage
+identity as recoverable statuses both adds hot-path work and disguises compiler
+bugs as runtime conditions.
+
+Debug assertions mark only non-obvious memory or encoding joins where violating
+a producer invariant would otherwise cause unsafe access or silent corruption.
+They are not the default replacement for deleted validation. Malformed
+schedule, allocation, or packet-plan fixtures are not useful consumer coverage;
+tests exercise authored input through the real verification and compilation
+boundary and check failures at the stage that owns them.
+
 ## Cleaning Existing Code
 
 Existing generators are in scope for cleanup when they violate these boundaries.

@@ -6,9 +6,8 @@
 
 // Shared native assembly-fragment formatting over low packet tables.
 //
-// This layer is intentionally small: it owns native-fragment contract
-// validation, scheduled packet iteration, block labels, and
-// descriptor/attribute lookup helpers.
+// This layer is intentionally small: it owns scheduled packet iteration, block
+// labels, and descriptor/attribute lookup helpers.
 // Target packages own instruction syntax, register spelling, ABI/prologue
 // policy, and any future handoff to assemblers or external validators.
 
