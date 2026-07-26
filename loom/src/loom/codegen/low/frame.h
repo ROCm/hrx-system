@@ -7,9 +7,9 @@
 // Target-independent emission frame construction for low functions.
 //
 // The emission frame is the shared producer contract for low emitters: it runs
-// the scheduler and allocator over one prepared target-low function, verifies
-// that their tables describe the same target function, and returns the
-// arena-owned frame that packet emitters consume. It assumes ordinary pass
+// the scheduler and allocator over one prepared target-low function and returns
+// the arena-owned frame that packet emitters consume. Its nested tables are
+// compiler-owned state from that single construction. It assumes ordinary pass
 // pipelines have already prepared the low IR. This layer does not run
 // optimization passes, emit bytes, text, JSON, or target artifacts; each target
 // emitter owns those artifact decisions.

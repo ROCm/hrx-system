@@ -171,7 +171,7 @@ static iree_status_t loom_check_test_synthetic_hazard_parse_emit_options(
 }
 
 static iree_status_t loom_check_test_synthetic_hazard_find_pair(
-    const loom_low_packet_sequence_t* packets,
+    const loom_low_schedule_table_t* schedule,
     loom_check_test_synthetic_hazard_context_t* context) {
   context->producer_node_index = LOOM_LOW_SCHEDULE_NODE_NONE;
   context->consumer_node_index = LOOM_LOW_SCHEDULE_NODE_NONE;
@@ -179,9 +179,9 @@ static iree_status_t loom_check_test_synthetic_hazard_find_pair(
   context->consumer_value_id = LOOM_VALUE_ID_INVALID;
   context->progress_event_count = 0;
   for (iree_host_size_t packet_index = 0;
-       packet_index < loom_low_packet_sequence_count(packets); ++packet_index) {
+       packet_index < loom_low_packet_count(schedule); ++packet_index) {
     const loom_low_packet_view_t packet =
-        loom_low_packet_sequence_at(packets, packet_index);
+        loom_low_packet_at(schedule, packet_index);
     context->progress_event_count += packet.descriptor != NULL;
     const loom_low_schedule_node_t* node = packet.node;
     if (node->kind != LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR ||
@@ -308,11 +308,8 @@ static iree_status_t loom_check_test_synthetic_hazard_execute(
       .test_case = options.test_case,
   };
 
-  loom_low_packet_sequence_t packets = {0};
-  IREE_RETURN_IF_ERROR(loom_low_allocated_packet_sequence_initialize(
-      &frame.schedule, &frame.allocation, &packets));
   IREE_RETURN_IF_ERROR(
-      loom_check_test_synthetic_hazard_find_pair(&packets, &context));
+      loom_check_test_synthetic_hazard_find_pair(&frame.schedule, &context));
   loom_low_allocation_value_scratch_t scratch = {0};
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_acquire_value_scratch(&frame.allocation, &scratch));
@@ -344,12 +341,12 @@ static iree_status_t loom_check_test_synthetic_hazard_execute(
   };
   loom_low_packet_hazard_plan_t plan = {0};
   iree_status_t status = loom_low_packet_progress_build(
-      &packets, &frame.allocation, &progress_provider, request->case_arena,
-      &progress);
+      &frame.schedule, &frame.allocation, &progress_provider,
+      request->case_arena, &progress);
   if (iree_status_is_ok(status)) {
-    status = loom_low_packet_hazard_plan_build(&packets, &frame.allocation,
-                                               &progress, &hazard_provider,
-                                               request->case_arena, &plan);
+    status = loom_low_packet_hazard_plan_build(
+        &frame.schedule, &frame.allocation, &progress, &hazard_provider,
+        request->case_arena, &plan);
   }
   loom_low_allocation_release_value_scratch(&scratch);
   IREE_RETURN_IF_ERROR(status);

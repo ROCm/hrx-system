@@ -55,8 +55,6 @@ typedef struct loom_amdgpu_native_descriptor_refs_t {
 } loom_amdgpu_native_descriptor_refs_t;
 
 typedef struct loom_amdgpu_encode_state_t {
-  // Validated packet sequence being encoded.
-  const loom_low_packet_sequence_t* packets;
   // Schedule table being encoded.
   const loom_low_schedule_table_t* schedule;
   // Allocation table supplying physical locations.
@@ -2255,7 +2253,7 @@ static iree_status_t loom_amdgpu_try_encode_vopd_packet(
   const loom_amdgpu_vopd_pair_t* pair =
       &state->vopd_plan->pairs[vopd_packet->pair_index];
   const loom_low_packet_view_t second_packet =
-      loom_low_packet_sequence_at(state->packets, pair->second_packet_index);
+      loom_low_packet_at(state->schedule, pair->second_packet_index);
   IREE_RETURN_IF_ERROR(loom_amdgpu_encode_movable_vopd_second_wait_states(
       state, &second_packet));
   return loom_amdgpu_encode_vopd_pair(state, packet, &second_packet, pair);
@@ -2917,7 +2915,7 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_into_state(
       const iree_host_size_t packet_index =
           block->scheduled_node_start + scheduled_ordinal;
       const loom_low_packet_view_t packet =
-          loom_low_packet_sequence_at(state->packets, packet_index);
+          loom_low_packet_at(state->schedule, packet_index);
       state->current_packet = &packet;
       iree_status_t status = loom_amdgpu_encode_packet(state, &packet);
       state->current_packet = NULL;
@@ -2961,9 +2959,8 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
     loom_amdgpu_encoded_instruction_stream_t* out_stream,
     iree_arena_allocator_t* arena) {
   *out_stream = (loom_amdgpu_encoded_instruction_stream_t){0};
-  loom_low_packet_sequence_t packets = {0};
-  IREE_RETURN_IF_ERROR(loom_native_fragment_validate_emission_inputs(
-      schedule, allocation, &packets));
+  IREE_RETURN_IF_ERROR(
+      loom_native_fragment_validate_emission_inputs(schedule, allocation));
   const loom_amdgpu_packet_plan_t* packet_plan =
       options ? options->packet_plan : NULL;
   IREE_RETURN_IF_ERROR(
@@ -3014,7 +3011,6 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
   loom_low_move_sequence_scratch_t move_scratch = {0};
   loom_low_move_sequence_scratch_initialize(arena, &move_scratch);
   loom_amdgpu_encode_state_t sizing_state = {
-      .packets = &packets,
       .schedule = schedule,
       .allocation = allocation,
       .target = target,
@@ -3052,7 +3048,6 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
         sizeof(native_insertions[0]), (void**)&native_insertions);
   }
   loom_amdgpu_encode_state_t writing_state = {
-      .packets = &packets,
       .schedule = schedule,
       .allocation = allocation,
       .target = target,

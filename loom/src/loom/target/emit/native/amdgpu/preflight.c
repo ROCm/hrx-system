@@ -250,9 +250,8 @@ iree_status_t loom_amdgpu_native_preflight_analyze(
     const loom_amdgpu_native_preflight_options_t* options,
     loom_amdgpu_native_preflight_t* out_preflight) {
   *out_preflight = (loom_amdgpu_native_preflight_t){0};
-  loom_low_packet_sequence_t packets = {0};
-  IREE_RETURN_IF_ERROR(loom_native_fragment_validate_emission_inputs(
-      schedule, allocation, &packets));
+  IREE_RETURN_IF_ERROR(
+      loom_native_fragment_validate_emission_inputs(schedule, allocation));
   *out_preflight = (loom_amdgpu_native_preflight_t){
       .schedule = schedule,
       .allocation = allocation,

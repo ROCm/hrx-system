@@ -64,9 +64,8 @@ iree_status_t loom_amdgpu_address_state_query_requirement(
 // Builds concrete S_SET_VGPR_MSB insertions in scheduled order. Generated
 // transitions are a post-allocation packet overlay: they do not mutate low IR,
 // reschedule the function, or invalidate the allocation that selected them.
-// |allocation| must describe the schedule certified by |packets|.
 iree_status_t loom_amdgpu_address_state_plan_build(
-    const loom_low_packet_sequence_t* packets,
+    const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     iree_arena_allocator_t* arena, loom_amdgpu_address_state_plan_t* out_plan);
 

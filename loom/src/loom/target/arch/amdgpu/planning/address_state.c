@@ -240,18 +240,9 @@ static void loom_amdgpu_address_state_append_transition(
 }
 
 iree_status_t loom_amdgpu_address_state_plan_build(
-    const loom_low_packet_sequence_t* packets,
+    const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     iree_arena_allocator_t* arena, loom_amdgpu_address_state_plan_t* out_plan) {
-  if (packets == NULL || packets->schedule == NULL || allocation == NULL ||
-      arena == NULL || out_plan == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "packets, allocation, arena, and output plan are required for "
-        "AMDGPU address-state planning");
-  }
-  const loom_low_schedule_table_t* schedule = packets->schedule;
-  IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
   *out_plan = (loom_amdgpu_address_state_plan_t){
       .schedule = schedule,
       .allocation = allocation,
@@ -288,9 +279,8 @@ iree_status_t loom_amdgpu_address_state_plan_build(
     uint32_t terminator_node_index = LOOM_LOW_SCHEDULE_NODE_NONE;
     for (uint32_t scheduled_ordinal = 0;
          scheduled_ordinal < block->scheduled_node_count; ++scheduled_ordinal) {
-      const loom_low_packet_view_t packet =
-          loom_low_packet_sequence_at_block_ordinal(
-              packets, (uint32_t)block_index, scheduled_ordinal);
+      const loom_low_packet_view_t packet = loom_low_packet_at_block_ordinal(
+          schedule, (uint32_t)block_index, scheduled_ordinal);
       const uint32_t node_index = packet.node_index;
       const loom_low_schedule_node_t* node = packet.node;
       if (iree_any_bit_set(node->traits, LOOM_TRAIT_TERMINATOR)) {

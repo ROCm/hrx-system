@@ -176,8 +176,6 @@ static_assert((uint32_t)LOOM_AMDGPU_WAIT_XCNT_GROUP_SMEM ==
               "XCNT SMEM group encodings must agree with the CFG frontier");
 
 typedef struct loom_amdgpu_wait_plan_builder_t {
-  // Validated scheduled packet sequence being analyzed.
-  const loom_low_packet_sequence_t* packets;
   // Schedule table being analyzed.
   const loom_low_schedule_table_t* schedule;
   // Optional physical assignment table for post-allocation hazards.
@@ -3341,7 +3339,7 @@ static iree_status_t loom_amdgpu_wait_plan_build_common_tables(
         .query = loom_amdgpu_wait_plan_progress_query,
     };
     IREE_RETURN_IF_ERROR(loom_low_packet_progress_build(
-        builder->packets, builder->allocation, &progress_provider,
+        builder->schedule, builder->allocation, &progress_provider,
         builder->arena, &builder->progress));
     progress = &builder->progress;
   }
@@ -3352,25 +3350,16 @@ static iree_status_t loom_amdgpu_wait_plan_build_common_tables(
       .query = loom_amdgpu_wait_plan_hazard_query,
   };
   return loom_low_packet_hazard_plan_build(
-      builder->packets, builder->allocation, progress, &hazard_provider,
+      builder->schedule, builder->allocation, progress, &hazard_provider,
       builder->arena, &builder->hazard_plan);
 }
 
 iree_status_t loom_amdgpu_wait_plan_build(
-    const loom_low_packet_sequence_t* packets,
+    const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     iree_arena_allocator_t* arena, loom_amdgpu_wait_plan_t* out_plan) {
-  IREE_ASSERT_ARGUMENT(packets);
-  IREE_ASSERT_ARGUMENT(packets->schedule);
-  IREE_ASSERT_ARGUMENT(arena);
-  IREE_ASSERT_ARGUMENT(out_plan);
-  const loom_low_schedule_table_t* schedule = packets->schedule;
-  if (allocation != NULL) {
-    IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
-  }
   *out_plan = (loom_amdgpu_wait_plan_t){0};
   loom_amdgpu_wait_plan_builder_t builder = {
-      .packets = packets,
       .schedule = schedule,
       .allocation = allocation,
       .arena = arena,

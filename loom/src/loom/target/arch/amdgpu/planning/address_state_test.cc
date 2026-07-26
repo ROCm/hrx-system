@@ -165,11 +165,8 @@ class AmdgpuAddressStateTest : public ::testing::Test {
   }
 
   iree_status_t BuildPlan(loom_amdgpu_address_state_plan_t* out_plan) {
-    loom_low_packet_sequence_t packets = {};
-    IREE_RETURN_IF_ERROR(loom_low_allocated_packet_sequence_initialize(
-        &schedule_, &allocation_, &packets));
-    return loom_amdgpu_address_state_plan_build(&packets, &allocation_, &arena_,
-                                                out_plan);
+    return loom_amdgpu_address_state_plan_build(&schedule_, &allocation_,
+                                                &arena_, out_plan);
   }
 
   iree_arena_block_pool_t block_pool_;

@@ -52,8 +52,6 @@ class LowPacketHazardPlanTest : public ::testing::Test {
                                      &block_pool_);
     iree_arena_initialize(&block_pool_, &arena_);
     InitializePacketHazardPlanTestState(&state_);
-    IREE_ASSERT_OK(loom_low_allocated_packet_sequence_initialize(
-        &state_.schedule, &state_.allocation, &packets_));
   }
 
   void TearDown() override {
@@ -112,7 +110,6 @@ class LowPacketHazardPlanTest : public ::testing::Test {
   iree_arena_block_pool_t block_pool_;
   iree_arena_allocator_t arena_;
   PacketHazardPlanTestState state_;
-  loom_low_packet_sequence_t packets_ = {};
 };
 
 iree_status_t EmitHazardEvent(
@@ -253,8 +250,9 @@ TEST_F(LowPacketHazardPlanTest, RecordsResidualActionsWithPacketIdentity) {
       /*.query=*/SyntheticProgressQuery,
   };
   loom_low_packet_progress_table_t progress = {};
-  IREE_ASSERT_OK(loom_low_packet_progress_build(
-      &packets_, &state_.allocation, &progress_provider, &arena_, &progress));
+  IREE_ASSERT_OK(
+      loom_low_packet_progress_build(&state_.schedule, &state_.allocation,
+                                     &progress_provider, &arena_, &progress));
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
@@ -263,8 +261,8 @@ TEST_F(LowPacketHazardPlanTest, RecordsResidualActionsWithPacketIdentity) {
   };
   loom_low_packet_hazard_plan_t plan = {};
   IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
-      &packets_, &state_.allocation, &progress, &hazard_provider, &arena_,
-      &plan));
+      &state_.schedule, &state_.allocation, &progress, &hazard_provider,
+      &arena_, &plan));
 
   ASSERT_EQ(plan.schedule, &state_.schedule);
   ASSERT_EQ(plan.allocation, &state_.allocation);
@@ -301,8 +299,9 @@ TEST_F(LowPacketHazardPlanTest,
       /*.query=*/SyntheticProgressQuery,
   };
   loom_low_packet_progress_table_t progress = {};
-  IREE_ASSERT_OK(loom_low_packet_progress_build(
-      &packets_, &state_.allocation, &progress_provider, &arena_, &progress));
+  IREE_ASSERT_OK(
+      loom_low_packet_progress_build(&state_.schedule, &state_.allocation,
+                                     &progress_provider, &arena_, &progress));
 
   const loom_low_storage_lease_record_t storage_leases[1] = {
       {
@@ -356,8 +355,8 @@ TEST_F(LowPacketHazardPlanTest,
   };
   loom_low_packet_hazard_plan_t plan = {};
   IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
-      &packets_, &state_.allocation, &progress, &hazard_provider, &arena_,
-      &plan));
+      &state_.schedule, &state_.allocation, &progress, &hazard_provider,
+      &arena_, &plan));
 
   ASSERT_EQ(plan.record_count, 1u);
   const loom_low_packet_hazard_plan_record_t& record = plan.records[0];
@@ -385,8 +384,9 @@ TEST_F(LowPacketHazardPlanTest, SatisfiedStorageReleaseRetainsNoPlanStorage) {
       /*.query=*/SyntheticProgressQuery,
   };
   loom_low_packet_progress_table_t progress = {};
-  IREE_ASSERT_OK(loom_low_packet_progress_build(
-      &packets_, &state_.allocation, &progress_provider, &arena_, &progress));
+  IREE_ASSERT_OK(
+      loom_low_packet_progress_build(&state_.schedule, &state_.allocation,
+                                     &progress_provider, &arena_, &progress));
 
   const loom_low_storage_lease_record_t storage_leases[1] = {
       {
@@ -444,8 +444,8 @@ TEST_F(LowPacketHazardPlanTest, SatisfiedStorageReleaseRetainsNoPlanStorage) {
       arena_.total_allocation_size;
   loom_low_packet_hazard_plan_t plan = {};
   IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
-      &packets_, &state_.allocation, &progress, &hazard_provider, &arena_,
-      &plan));
+      &state_.schedule, &state_.allocation, &progress, &hazard_provider,
+      &arena_, &plan));
 
   EXPECT_EQ(plan.record_count, 0u);
   EXPECT_EQ(plan.records, nullptr);
@@ -461,8 +461,9 @@ TEST_F(LowPacketHazardPlanTest,
       /*.query=*/SyntheticProgressQuery,
   };
   loom_low_packet_progress_table_t progress = {};
-  IREE_ASSERT_OK(loom_low_packet_progress_build(
-      &packets_, &state_.allocation, &progress_provider, &arena_, &progress));
+  IREE_ASSERT_OK(
+      loom_low_packet_progress_build(&state_.schedule, &state_.allocation,
+                                     &progress_provider, &arena_, &progress));
 
   const loom_low_storage_lease_record_t storage_leases[1] = {
       {
@@ -517,8 +518,8 @@ TEST_F(LowPacketHazardPlanTest,
   };
   loom_low_packet_hazard_plan_t plan = {};
   IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
-      &packets_, &state_.allocation, &progress, &hazard_provider, &arena_,
-      &plan));
+      &state_.schedule, &state_.allocation, &progress, &hazard_provider,
+      &arena_, &plan));
 
   ASSERT_EQ(plan.record_count, IREE_ARRAYSIZE(storage_release_actions));
   for (uint32_t i = 0; i < plan.record_count; ++i) {
@@ -582,10 +583,11 @@ TEST_F(LowPacketHazardPlanTest, RejectsCombinedEventCountOverflow) {
       /*.query=*/EmptyResidualHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        loom_low_packet_hazard_plan_build(
-                            &packets_, &state_.allocation, /*progress=*/nullptr,
-                            &hazard_provider, &arena_, &plan));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_low_packet_hazard_plan_build(&state_.schedule, &state_.allocation,
+                                        /*progress=*/nullptr, &hazard_provider,
+                                        &arena_, &plan));
 }
 
 iree_status_t SyntheticAggregateResidualHazardQuery(
@@ -626,8 +628,9 @@ TEST_F(LowPacketHazardPlanTest,
       /*.query=*/SyntheticProgressQuery,
   };
   loom_low_packet_progress_table_t progress = {};
-  IREE_ASSERT_OK(loom_low_packet_progress_build(
-      &packets_, &state_.allocation, &progress_provider, &arena_, &progress));
+  IREE_ASSERT_OK(
+      loom_low_packet_progress_build(&state_.schedule, &state_.allocation,
+                                     &progress_provider, &arena_, &progress));
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
@@ -636,8 +639,8 @@ TEST_F(LowPacketHazardPlanTest,
   };
   loom_low_packet_hazard_plan_t plan = {};
   IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
-      &packets_, &state_.allocation, &progress, &hazard_provider, &arena_,
-      &plan));
+      &state_.schedule, &state_.allocation, &progress, &hazard_provider,
+      &arena_, &plan));
 
   ASSERT_EQ(plan.record_count, 1u);
   const loom_low_packet_hazard_plan_record_t& record = plan.records[0];
@@ -702,8 +705,8 @@ TEST_F(LowPacketHazardPlanTest, SupportsScheduleOnlyDiagnostics) {
   };
   loom_low_packet_hazard_plan_t plan = {};
   IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
-      &packets_, /*allocation=*/nullptr, /*progress=*/nullptr, &hazard_provider,
-      &arena_, &plan));
+      &state_.schedule, /*allocation=*/nullptr, /*progress=*/nullptr,
+      &hazard_provider, &arena_, &plan));
 
   ASSERT_EQ(plan.allocation, nullptr);
   ASSERT_EQ(plan.record_count, 3u);
@@ -735,8 +738,8 @@ TEST_F(LowPacketHazardPlanTest, QueriesProviderExactlyOncePerPacket) {
   };
   loom_low_packet_hazard_plan_t plan = {};
   IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
-      &packets_, /*allocation=*/nullptr, /*progress=*/nullptr, &hazard_provider,
-      &arena_, &plan));
+      &state_.schedule, /*allocation=*/nullptr, /*progress=*/nullptr,
+      &hazard_provider, &arena_, &plan));
 
   EXPECT_EQ(audit.query_count, state_.schedule.scheduled_node_count);
   EXPECT_EQ(audit.next_packet_index, state_.schedule.scheduled_node_count);
@@ -752,9 +755,9 @@ TEST_F(LowPacketHazardPlanTest, RejectsUnderdeclaredTargetEventCount) {
   loom_low_packet_hazard_plan_t plan = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
-      loom_low_packet_hazard_plan_build(&packets_, /*allocation=*/nullptr,
-                                        /*progress=*/nullptr, &hazard_provider,
-                                        &arena_, &plan));
+      loom_low_packet_hazard_plan_build(
+          &state_.schedule, /*allocation=*/nullptr,
+          /*progress=*/nullptr, &hazard_provider, &arena_, &plan));
 }
 
 TEST_F(LowPacketHazardPlanTest, RejectsOverdeclaredTargetEventCount) {
@@ -766,9 +769,9 @@ TEST_F(LowPacketHazardPlanTest, RejectsOverdeclaredTargetEventCount) {
   loom_low_packet_hazard_plan_t plan = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
-      loom_low_packet_hazard_plan_build(&packets_, /*allocation=*/nullptr,
-                                        /*progress=*/nullptr, &hazard_provider,
-                                        &arena_, &plan));
+      loom_low_packet_hazard_plan_build(
+          &state_.schedule, /*allocation=*/nullptr,
+          /*progress=*/nullptr, &hazard_provider, &arena_, &plan));
 }
 
 iree_status_t InvalidResidualHazardQuery(
@@ -798,7 +801,7 @@ TEST_F(LowPacketHazardPlanTest, RejectsInvalidResidualProgress) {
   loom_low_packet_hazard_plan_t plan = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_low_packet_hazard_plan_build(&packets_, &state_.allocation,
+      loom_low_packet_hazard_plan_build(&state_.schedule, &state_.allocation,
                                         /*progress=*/nullptr, &hazard_provider,
                                         &arena_, &plan));
 }
@@ -831,7 +834,7 @@ TEST_F(LowPacketHazardPlanTest, RejectsDiagnosticResidualFields) {
   loom_low_packet_hazard_plan_t plan = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_low_packet_hazard_plan_build(&packets_, &state_.allocation,
+      loom_low_packet_hazard_plan_build(&state_.schedule, &state_.allocation,
                                         /*progress=*/nullptr, &hazard_provider,
                                         &arena_, &plan));
 }
@@ -872,7 +875,7 @@ TEST_F(LowPacketHazardPlanTest, RejectsMissingActionIdentity) {
   loom_low_packet_hazard_plan_t plan = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_low_packet_hazard_plan_build(&packets_, &state_.allocation,
+      loom_low_packet_hazard_plan_build(&state_.schedule, &state_.allocation,
                                         /*progress=*/nullptr, &hazard_provider,
                                         &arena_, &plan));
 }
@@ -913,7 +916,7 @@ TEST_F(LowPacketHazardPlanTest, RejectsDiagnosticActionIdentity) {
   loom_low_packet_hazard_plan_t plan = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_low_packet_hazard_plan_build(&packets_, &state_.allocation,
+      loom_low_packet_hazard_plan_build(&state_.schedule, &state_.allocation,
                                         /*progress=*/nullptr, &hazard_provider,
                                         &arena_, &plan));
 }
@@ -946,8 +949,8 @@ TEST_F(LowPacketHazardPlanTest, RecordsLoopCarriedProducerAfterInsertion) {
   };
   loom_low_packet_hazard_plan_t plan = {};
   IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
-      &packets_, &state_.allocation, /*progress=*/nullptr, &hazard_provider,
-      &arena_, &plan));
+      &state_.schedule, &state_.allocation, /*progress=*/nullptr,
+      &hazard_provider, &arena_, &plan));
 
   ASSERT_EQ(plan.record_count, 1u);
   const loom_low_packet_hazard_plan_record_t& record = plan.records[0];

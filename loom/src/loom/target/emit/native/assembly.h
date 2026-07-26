@@ -27,8 +27,6 @@ extern "C" {
 #endif
 
 typedef struct loom_native_assembly_packet_context_t {
-  // Validated sequence containing the current packet.
-  const loom_low_packet_sequence_t* packet_sequence;
   // Schedule table being formatted.
   const loom_low_schedule_table_t* schedule;
   // Allocation table supplying physical locations.
