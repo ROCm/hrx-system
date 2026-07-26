@@ -370,6 +370,20 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_target_id_apply_asic_revision(
   return iree_ok_status();
 }
 
+IREE_API_EXPORT bool iree_hal_amdgpu_target_id_equal(
+    const iree_hal_amdgpu_target_id_t* lhs,
+    const iree_hal_amdgpu_target_id_t* rhs) {
+  IREE_ASSERT_ARGUMENT(lhs);
+  IREE_ASSERT_ARGUMENT(rhs);
+  return lhs->kind == rhs->kind && lhs->version.major == rhs->version.major &&
+         lhs->version.minor == rhs->version.minor &&
+         lhs->version.stepping == rhs->version.stepping &&
+         lhs->generic_version == rhs->generic_version &&
+         lhs->sramecc == rhs->sramecc && lhs->xnack == rhs->xnack &&
+         lhs->gfx1250_b0_specific == rhs->gfx1250_b0_specific &&
+         iree_string_view_equal(lhs->processor, rhs->processor);
+}
+
 typedef struct iree_hal_amdgpu_target_id_formatter_t {
   // Caller-provided output buffer; NULL when only querying required length.
   char* buffer;

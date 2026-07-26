@@ -136,6 +136,13 @@ iree_status_t iree_hal_amdgpu_target_id_parse_hsa_isa_name(
 iree_status_t iree_hal_amdgpu_target_id_apply_asic_revision(
     uint32_t asic_revision, iree_hal_amdgpu_target_id_t* target_id);
 
+// Returns true when |lhs| and |rhs| describe the same target identity.
+//
+// Borrowed string storage addresses are ignored; processor names and all
+// structured target properties are compared by value.
+bool iree_hal_amdgpu_target_id_equal(const iree_hal_amdgpu_target_id_t* lhs,
+                                     const iree_hal_amdgpu_target_id_t* rhs);
+
 // Formats |target_id| into canonical AMDGPU target-ID syntax.
 //
 // If |buffer_capacity| is insufficient, |out_buffer_length| still receives the

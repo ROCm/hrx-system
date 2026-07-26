@@ -6,8 +6,6 @@
 
 #include "iree/hal/drivers/amdgpu/util/device_library_target.h"
 
-#include "iree/hal/executable/amdgpu/target_id.h"
-
 bool iree_hal_amdgpu_device_library_target_matches_file_arch(
     iree_string_view_t file_arch, iree_string_view_t target) {
   if (iree_string_view_is_empty(target)) return false;
@@ -65,29 +63,26 @@ iree_hal_amdgpu_device_library_target_append_target_id_candidate(
       iree_make_string_view(target_id_buffer, target_id_length), candidates);
 }
 
-iree_status_t iree_hal_amdgpu_device_library_target_candidates_from_isa(
-    iree_string_view_t isa_name,
+iree_status_t iree_hal_amdgpu_device_library_target_candidates_from_target(
+    const iree_hal_amdgpu_target_id_t* target_id,
     iree_hal_amdgpu_device_library_target_candidate_list_t* out_candidates) {
+  IREE_ASSERT_ARGUMENT(target_id);
   IREE_ASSERT_ARGUMENT(out_candidates);
   memset(out_candidates, 0, sizeof(*out_candidates));
-
-  iree_hal_amdgpu_target_id_t agent_target_id;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_target_id_parse_hsa_isa_name(isa_name, &agent_target_id));
 
   // Try the most specific runtime binary names first. Direct arch names beat
   // code-object target fallbacks because a concrete code object is preferable
   // to a family-generic code object when both are bundled into the runtime.
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_device_library_target_append_target_id_candidate(
-          &agent_target_id, out_candidates));
+          target_id, out_candidates));
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_device_library_target_append_unique_candidate(
-          agent_target_id.processor, out_candidates));
-  if (agent_target_id.kind == IREE_HAL_AMDGPU_TARGET_KIND_EXACT) {
+          target_id->processor, out_candidates));
+  if (target_id->kind == IREE_HAL_AMDGPU_TARGET_KIND_EXACT) {
     iree_hal_amdgpu_target_id_t code_object_target_id;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_lookup_code_object_target(
-        &agent_target_id, &code_object_target_id));
+        target_id, &code_object_target_id));
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_device_library_target_append_target_id_candidate(
             &code_object_target_id, out_candidates));

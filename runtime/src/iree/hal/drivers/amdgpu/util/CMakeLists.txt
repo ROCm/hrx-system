@@ -107,6 +107,42 @@ iree_cc_library(
 endif()
 
 if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    agent_target
+  HDRS
+    "agent_target.h"
+  SRCS
+    "agent_target.c"
+  DEPS
+    ::libhsa
+    iree::base
+    iree::hal::executable::amdgpu::target_id
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    agent_target_test
+  SRCS
+    "agent_target_test.cc"
+  DEPS
+    ::agent_target
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
     topology_test
@@ -475,6 +511,7 @@ iree_cc_library(
   SRCS
     "device_library.c"
   DEPS
+    ::agent_target
     ::device_library_target
     ::libhsa
     ::loaded_code_object
@@ -523,6 +560,7 @@ iree_cc_library(
     util
   DEPS
     ::affinity
+    ::agent_target
     ::block_pool
     ::device_library
     ::device_library_target
