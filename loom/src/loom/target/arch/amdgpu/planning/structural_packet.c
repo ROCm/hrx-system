@@ -36,10 +36,6 @@ static iree_status_t loom_amdgpu_structural_packet_analyze_copy(
     out_info->flags |= LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_FORWARDS_DEPENDENCIES;
     return iree_ok_status();
   }
-  if (source_assignment->location_count != result_assignment->location_count) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU low.copy allocation is malformed");
-  }
   if (loom_low_allocation_assignment_location_range_equal(source_assignment,
                                                           result_assignment)) {
     out_info->flags |= LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_FORWARDS_DEPENDENCIES;
@@ -59,13 +55,11 @@ static iree_status_t loom_amdgpu_structural_packet_analyze_units(
   iree_host_size_t move_count = 0;
   switch (packet_move_kind) {
     case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_SLICE: {
-      IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_slice_units(
-          allocation, op, &move_count));
+      move_count = loom_low_move_sequence_slice_unit_count(allocation, op);
       break;
     }
     case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_CONCAT: {
-      IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_concat_units(
-          allocation, op, &move_count));
+      move_count = loom_low_move_sequence_concat_unit_count(allocation, op);
       break;
     }
     case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_NONE:
