@@ -21,7 +21,7 @@ struct loom_target_low_packet_diagnostic_context_t {
 static iree_status_t loom_target_low_packet_diagnostics_verify_options(
     const loom_low_emission_frame_t* frame,
     const loom_target_low_packet_diagnostics_options_t* options,
-    loom_target_low_packet_diagnostics_result_t* out_result) {
+    loom_low_packet_sequence_t* out_packets) {
   const loom_target_low_packet_diagnostic_flags_t unknown_flags =
       options->diagnostic_flags & ~LOOM_TARGET_LOW_PACKET_DIAGNOSTIC_ALL;
   if (unknown_flags != 0) {
@@ -29,7 +29,8 @@ static iree_status_t loom_target_low_packet_diagnostics_verify_options(
                             "unknown target-low packet diagnostic flags 0x%08x",
                             unknown_flags);
   }
-  return loom_low_packet_validate_tables(&frame->schedule, &frame->allocation);
+  return loom_low_allocated_packet_sequence_initialize(
+      &frame->schedule, &frame->allocation, out_packets);
 }
 
 static iree_status_t loom_target_low_packet_diagnostics_emit(
@@ -124,8 +125,9 @@ iree_status_t loom_target_low_packet_diagnostics_emit_function(
     const loom_low_emission_frame_t* frame,
     const loom_target_low_packet_diagnostics_options_t* options,
     loom_target_low_packet_diagnostics_result_t* out_result) {
+  loom_low_packet_sequence_t packets = {0};
   IREE_RETURN_IF_ERROR(loom_target_low_packet_diagnostics_verify_options(
-      frame, options, out_result));
+      frame, options, &packets));
   *out_result = (loom_target_low_packet_diagnostics_result_t){0};
   if (options->diagnostic_flags == 0 ||
       loom_target_low_packet_diagnostic_provider_list_is_empty(
@@ -138,12 +140,12 @@ iree_status_t loom_target_low_packet_diagnostics_emit_function(
       .options = options,
       .result = out_result,
   };
-  const iree_host_size_t packet_count = loom_low_packet_count(&frame->schedule);
+  const iree_host_size_t packet_count =
+      loom_low_packet_sequence_count(&packets);
   for (iree_host_size_t packet_index = 0; packet_index < packet_count;
        ++packet_index) {
-    loom_low_packet_view_t packet = {0};
-    IREE_RETURN_IF_ERROR(loom_low_packet_view_at(
-        &frame->schedule, &frame->allocation, packet_index, &packet));
+    const loom_low_packet_view_t packet =
+        loom_low_packet_sequence_at(&packets, packet_index);
     for (iree_host_size_t provider_index = 0;
          provider_index < options->provider_list.count; ++provider_index) {
       const loom_target_low_packet_diagnostic_provider_t* provider =
