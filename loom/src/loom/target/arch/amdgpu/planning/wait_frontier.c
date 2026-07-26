@@ -8,16 +8,18 @@
 
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/util/cfg_graph.h"
 
 enum {
-  LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT = LOOM_LOW_MEMORY_SPACE_WASM_MEMORY + 1u,
-  LOOM_AMDGPU_WAIT_MEMORY_READ_SPACE_SHIFT = 0,
-  LOOM_AMDGPU_WAIT_MEMORY_WRITE_SPACE_SHIFT = 8,
   LOOM_AMDGPU_WAIT_FRONTIER_BLOCK_FLAG_QUEUED = 1u << 0,
   LOOM_AMDGPU_WAIT_FRONTIER_BLOCK_FLAG_RESOLVED = 1u << 1,
   LOOM_AMDGPU_WAIT_VMEM_RESULT_STATE_FLAG_PENDING = 1u << 0,
+  LOOM_AMDGPU_WAIT_MEMORY_SPACE_FLAG_MASK =
+      ((1u << LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT) - 1u)
+      << LOOM_LOW_MEMORY_SPACE_GENERIC,
+  LOOM_AMDGPU_WAIT_MEMORY_WRITE_COUNTER_SHIFT = 8,
   LOOM_AMDGPU_WAIT_VMEM_RESULT_BITS_PER_UNIT = 4,
   LOOM_AMDGPU_WAIT_VMEM_RESULT_UNITS_PER_WORD =
       64 / LOOM_AMDGPU_WAIT_VMEM_RESULT_BITS_PER_UNIT,
@@ -26,8 +28,13 @@ enum {
 
 static_assert(LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT <= 8,
               "memory-space frontier flags must fit in one byte");
+static_assert(LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT <= 8,
+              "memory frontier counter masks must fit in one byte");
+static_assert(LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL ==
+                  (1u << LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT) - 1u,
+              "memory frontier counter masks must use dense low bits");
 static_assert(sizeof(loom_amdgpu_wait_memory_state_t) ==
-                  sizeof(uint16_t) * LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT,
+                  LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT * sizeof(uint16_t),
               "memory frontier state must not acquire padding");
 static_assert(LOOM_AMDGPU_VMEM_RESULT_ORDER_CLASS_COUNT - 1 ==
                   LOOM_AMDGPU_WAIT_VMEM_RESULT_BITS_PER_UNIT,
@@ -44,20 +51,21 @@ static bool loom_amdgpu_wait_memory_state_union_changed(
     loom_amdgpu_wait_memory_state_t* target,
     const loom_amdgpu_wait_memory_state_t* source) {
   bool changed = false;
-  for (uint32_t slot = 0; slot < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT; ++slot) {
-    const uint16_t access_space_flags =
-        target->counter_access_space_flags[slot] |
-        source->counter_access_space_flags[slot];
-    changed |= access_space_flags != target->counter_access_space_flags[slot];
-    target->counter_access_space_flags[slot] = access_space_flags;
+  for (uint32_t space = 0; space < LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT;
+       ++space) {
+    const uint16_t access_counter_masks = target->access_counter_masks[space] |
+                                          source->access_counter_masks[space];
+    changed |= access_counter_masks != target->access_counter_masks[space];
+    target->access_counter_masks[space] = access_counter_masks;
   }
   return changed;
 }
 
 static bool loom_amdgpu_wait_memory_state_is_empty(
     const loom_amdgpu_wait_memory_state_t* state) {
-  for (uint32_t slot = 0; slot < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT; ++slot) {
-    if (state->counter_access_space_flags[slot] != 0) return false;
+  for (uint32_t space = 0; space < LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT;
+       ++space) {
+    if (state->access_counter_masks[space] != 0) return false;
   }
   return true;
 }
@@ -193,11 +201,41 @@ static void loom_amdgpu_wait_storage_lease_state_drain_xcnt_groups(
 
 static void loom_amdgpu_wait_memory_state_drain(
     loom_amdgpu_wait_memory_state_t* state, uint32_t counter_mask) {
-  for (uint32_t slot = 0; slot < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT; ++slot) {
-    if (iree_any_bit_set(counter_mask,
-                         loom_amdgpu_wait_counter_mask_from_slot(slot))) {
-      state->counter_access_space_flags[slot] = 0;
+  if (counter_mask == 0) return;
+  const uint8_t retained_counter_mask = (uint8_t)~counter_mask;
+  const uint16_t retained_access_counter_masks =
+      (uint16_t)retained_counter_mask |
+      ((uint16_t)retained_counter_mask
+       << LOOM_AMDGPU_WAIT_MEMORY_WRITE_COUNTER_SHIFT);
+  for (uint32_t space = 0; space < LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT;
+       ++space) {
+    state->access_counter_masks[space] &= retained_access_counter_masks;
+  }
+}
+
+static void loom_amdgpu_wait_memory_state_add_access(
+    loom_amdgpu_wait_memory_state_t* state,
+    loom_amdgpu_wait_memory_space_flags_t producer_space_flags,
+    uint16_t access_counter_masks) {
+  if (producer_space_flags == 0 || access_counter_masks == 0) return;
+  IREE_ASSERT_EQ(
+      (uint32_t)producer_space_flags & ~LOOM_AMDGPU_WAIT_MEMORY_SPACE_FLAG_MASK,
+      0u);
+  producer_space_flags >>= LOOM_LOW_MEMORY_SPACE_GENERIC;
+  state->access_counter_masks[0] |= access_counter_masks;
+  if (iree_any_bit_set(producer_space_flags, 1u)) {
+    for (uint32_t space_index = 1;
+         space_index < LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT; ++space_index) {
+      state->access_counter_masks[space_index] |= access_counter_masks;
     }
+    return;
+  }
+  while (producer_space_flags != 0) {
+    const uint32_t space_index =
+        (uint32_t)iree_math_count_trailing_zeros_u32(producer_space_flags);
+    IREE_ASSERT_LT(space_index, LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT);
+    state->access_counter_masks[space_index] |= access_counter_masks;
+    producer_space_flags &= producer_space_flags - 1;
   }
 }
 
@@ -205,19 +243,16 @@ static void loom_amdgpu_wait_memory_state_add_node(
     loom_amdgpu_wait_memory_state_t* state,
     const loom_amdgpu_wait_frontier_node_t* node, uint32_t read_counter_mask,
     uint32_t write_counter_mask) {
-  for (uint32_t slot = 0; slot < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT; ++slot) {
-    const uint32_t counter_mask = loom_amdgpu_wait_counter_mask_from_slot(slot);
-    uint16_t access_space_flags = 0;
-    if (iree_any_bit_set(read_counter_mask, counter_mask)) {
-      access_space_flags |= (uint16_t)node->read_space_flags
-                            << LOOM_AMDGPU_WAIT_MEMORY_READ_SPACE_SHIFT;
-    }
-    if (iree_any_bit_set(write_counter_mask, counter_mask)) {
-      access_space_flags |= (uint16_t)node->write_space_flags
-                            << LOOM_AMDGPU_WAIT_MEMORY_WRITE_SPACE_SHIFT;
-    }
-    state->counter_access_space_flags[slot] |= access_space_flags;
-  }
+  if ((read_counter_mask | write_counter_mask) == 0) return;
+  IREE_ASSERT_EQ((read_counter_mask | write_counter_mask) &
+                     ~LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL,
+                 0u);
+  loom_amdgpu_wait_memory_state_add_access(state, node->read_space_flags,
+                                           (uint8_t)read_counter_mask);
+  loom_amdgpu_wait_memory_state_add_access(
+      state, node->write_space_flags,
+      (uint16_t)(uint8_t)write_counter_mask
+          << LOOM_AMDGPU_WAIT_MEMORY_WRITE_COUNTER_SHIFT);
 }
 
 static uint8_t loom_amdgpu_wait_vmem_result_order_class_flag(
@@ -825,16 +860,6 @@ void loom_amdgpu_wait_frontier_begin_block(
   }
 }
 
-static bool loom_amdgpu_wait_memory_spaces_may_alias(
-    loom_amdgpu_wait_memory_space_flags_t left,
-    loom_amdgpu_wait_memory_space_flags_t right) {
-  if (left == 0 || right == 0) return false;
-  const loom_amdgpu_wait_memory_space_flags_t generic_flag =
-      loom_amdgpu_wait_memory_space_flag(LOOM_LOW_MEMORY_SPACE_GENERIC);
-  return iree_any_bit_set(left | right, generic_flag) ||
-         iree_any_bit_set(left, right);
-}
-
 uint32_t loom_amdgpu_wait_frontier_memory_query(
     const loom_amdgpu_wait_frontier_t* frontier,
     loom_amdgpu_wait_memory_space_flags_t space_flags,
@@ -842,27 +867,26 @@ uint32_t loom_amdgpu_wait_frontier_memory_query(
   IREE_ASSERT_ARGUMENT(frontier);
   IREE_ASSERT(frontier->active_block_index < frontier->schedule->block_count);
   if (space_flags == 0 || access_flags == 0) return 0;
+  IREE_ASSERT_EQ(
+      (uint32_t)space_flags & ~LOOM_AMDGPU_WAIT_MEMORY_SPACE_FLAG_MASK, 0u);
+  space_flags >>= LOOM_LOW_MEMORY_SPACE_GENERIC;
   uint32_t counter_mask = 0;
-  for (uint32_t slot = 0; slot < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT; ++slot) {
-    const uint16_t packed_space_flags =
-        frontier->memory.active_state.counter_access_space_flags[slot];
-    loom_amdgpu_wait_memory_space_flags_t producer_space_flags = 0;
+  while (space_flags != 0) {
+    const uint32_t space_index =
+        (uint32_t)iree_math_count_trailing_zeros_u32(space_flags);
+    IREE_ASSERT_LT(space_index, LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT);
+    const uint16_t access_counter_masks =
+        frontier->memory.active_state.access_counter_masks[space_index];
     if (iree_any_bit_set(access_flags,
                          LOOM_AMDGPU_WAIT_MEMORY_ACCESS_FLAG_READ)) {
-      producer_space_flags |=
-          (loom_amdgpu_wait_memory_space_flags_t)(packed_space_flags >>
-                                                  LOOM_AMDGPU_WAIT_MEMORY_READ_SPACE_SHIFT);
+      counter_mask |= (uint32_t)(uint8_t)access_counter_masks;
     }
     if (iree_any_bit_set(access_flags,
                          LOOM_AMDGPU_WAIT_MEMORY_ACCESS_FLAG_WRITE)) {
-      producer_space_flags |=
-          (loom_amdgpu_wait_memory_space_flags_t)(packed_space_flags >>
-                                                  LOOM_AMDGPU_WAIT_MEMORY_WRITE_SPACE_SHIFT);
+      counter_mask |= (uint32_t)(access_counter_masks >>
+                                 LOOM_AMDGPU_WAIT_MEMORY_WRITE_COUNTER_SHIFT);
     }
-    if (loom_amdgpu_wait_memory_spaces_may_alias(producer_space_flags,
-                                                 space_flags)) {
-      counter_mask |= loom_amdgpu_wait_counter_mask_from_slot(slot);
-    }
+    space_flags &= space_flags - 1;
   }
   return counter_mask;
 }

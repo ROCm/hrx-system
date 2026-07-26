@@ -598,6 +598,27 @@ low.func.def target(@target) @cross_block_generic_read_aliases_global_write(%fla
   s_endpgm
 
 // ====
+// RUN: emit amdgpu-assembly @cross_block_global_write_aliases_generic_read strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @cross_block_global_write_aliases_generic_read(%store_addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %flat_addr: reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  global_store_b32_saddr %store_addr, %value, %output
+  low.br ^load
+^load:
+  %unused = flat_load_dwordx2 %flat_addr
+  return
+}
+
+// A flat access may resolve to global memory, so the generic-space read must
+// alias the concrete global write and drain VMEM writes before the load.
+// ----
+  global_store_b32 v0, v1, s[0:1] offset:0
+.Lbb1:
+  s_waitcnt_vscnt vscnt(0)
+  flat_load_dwordx2 v[2:3], v[2:3], off offset:0
+  s_endpgm
+
+// ====
 // RUN: emit amdgpu-wait-counter-plan-json @cross_block_disjoint_memory_spaces strategy=source
 
 amdgpu.target<gfx1100> @target

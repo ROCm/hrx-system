@@ -192,6 +192,7 @@ loom_cc_library(
   DEPS
     ::wait_counters
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::codegen::low::allocation::table
     loom::codegen::low::memory_access
