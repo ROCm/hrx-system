@@ -424,111 +424,19 @@ static iree_status_t loom_amdgpu_encode_vgpr_msb_requirement(
   return loom_amdgpu_encode_vgpr_msb_mode(state, new_mode);
 }
 
-static iree_status_t loom_amdgpu_assignment_vgpr_low_register(
-    const loom_amdgpu_encode_state_t* state,
+static uint16_t loom_amdgpu_assignment_vgpr_low_register(
     const loom_low_allocation_assignment_t* assignment,
-    const loom_low_operand_t* operand, uint16_t* out_register) {
-  *out_register = 0;
-  if (state->encoding_table == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU native encoding descriptor set '%.*s' has no encoding table "
-        "for VGPR operand encoding",
-        (int)state->target->key.size, state->target->key.data);
-  }
-  if (assignment->descriptor_reg_class_id != LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU native encoding value %" PRIu32
-                            " must be a VGPR",
-                            assignment->value_id);
-  }
-  if (assignment->location_count != operand->unit_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU native encoding value %" PRIu32 " has %" PRIu32
-        " assigned registers but descriptor field needs %" PRIu16,
-        assignment->value_id, assignment->location_count, operand->unit_count);
-  }
-  if (assignment->location_count == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU native encoding VGPR value %" PRIu32
-                            " has an empty register assignment",
-                            assignment->value_id);
-  }
-  const uint64_t assigned_end =
-      (uint64_t)assignment->location_base + assignment->location_count;
-  const uint64_t assigned_last = assigned_end - 1u;
+    const loom_low_operand_t* operand) {
   uint32_t low_register = assignment->location_base;
-  switch (operand->address_map_kind) {
-    case LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE: {
-      const uint32_t addressable_unit_count = operand->addressable_unit_count;
-      if (addressable_unit_count == 0) {
-        return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                                "AMDGPU native encoding target-state VGPR "
-                                "operand has no addressable window size");
-      }
-      if (assignment->location_base / addressable_unit_count !=
-          assigned_last / addressable_unit_count) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "AMDGPU native encoding VGPR range v[%" PRIu32 ":%" PRIu64
-            "] crosses a %" PRIu32 "-register target-state window",
-            assignment->location_base, assigned_last, addressable_unit_count);
-      }
-      low_register = assignment->location_base % addressable_unit_count;
-      break;
-    }
-    case LOOM_LOW_OPERAND_ADDRESS_MAP_LOW_SUBSET: {
-      const uint32_t addressable_unit_count = operand->addressable_unit_count;
-      if (addressable_unit_count == 0) {
-        return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                                "AMDGPU native encoding low-subset VGPR "
-                                "operand has no addressable subset size");
-      }
-      if (assigned_end > addressable_unit_count) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "AMDGPU native encoding VGPR range v[%" PRIu32 ":%" PRIu64
-            "] exceeds the low %" PRIu32 " register subset",
-            assignment->location_base, assigned_last, addressable_unit_count);
-      }
-      break;
-    }
-    case LOOM_LOW_OPERAND_ADDRESS_MAP_DIRECT:
-    default:
-      break;
+  if (operand->address_map_kind == LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE) {
+    low_register %= operand->addressable_unit_count;
   }
-  const uint64_t encoded_end =
-      (uint64_t)low_register + assignment->location_count;
-  if (encoded_end > state->encoding_table->vector_source_vgpr_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU native encoding VGPR low range v[%" PRIu32
-                            ":%" PRIu64 "] exceeds the %" PRIu16
-                            "-register instruction field",
-                            low_register, encoded_end - 1u,
-                            state->encoding_table->vector_source_vgpr_count);
-  }
-  if (low_register > UINT16_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU native encoding VGPR low index %" PRIu32
-                            " exceeds u16",
-                            low_register);
-  }
-  *out_register = (uint16_t)low_register;
-  return iree_ok_status();
+  return (uint16_t)low_register;
 }
 
-static iree_status_t loom_amdgpu_packet_descriptor_operand_vgpr_low_register(
+static uint16_t loom_amdgpu_packet_descriptor_operand_vgpr_low_register(
     const loom_amdgpu_encode_state_t* state,
-    const loom_low_packet_view_t* packet, uint16_t descriptor_operand_index,
-    uint16_t* out_register) {
-  *out_register = 0;
-  if (descriptor_operand_index >= packet->descriptor->operand_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU native encoding descriptor operand "
-                            "%" PRIu16 " is out of range",
-                            descriptor_operand_index);
-  }
+    const loom_low_packet_view_t* packet, uint16_t descriptor_operand_index) {
   const loom_low_descriptor_set_t* descriptor_set =
       state->schedule->target.descriptor_set;
   const loom_low_operand_t* operand =
@@ -537,8 +445,7 @@ static iree_status_t loom_amdgpu_packet_descriptor_operand_vgpr_low_register(
   const loom_low_allocation_assignment_t* assignment =
       loom_low_packet_descriptor_operand_assignment(state->allocation, packet,
                                                     descriptor_operand_index);
-  return loom_amdgpu_assignment_vgpr_low_register(state, assignment, operand,
-                                                  out_register);
+  return loom_amdgpu_assignment_vgpr_low_register(assignment, operand);
 }
 
 static iree_status_t loom_amdgpu_assignment_field_value(
@@ -566,10 +473,7 @@ static iree_status_t loom_amdgpu_assignment_field_value(
     return iree_ok_status();
   }
   if (assignment->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
-    uint16_t low_register = 0;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_assignment_vgpr_low_register(
-        state, assignment, operand, &low_register));
-    *out_value = low_register;
+    *out_value = loom_amdgpu_assignment_vgpr_low_register(assignment, operand);
     if (loom_amdgpu_encoding_field_uses_unified_source(
             operand->encoding_field_id)) {
       *out_value += state->encoding_table->vector_source_vgpr0;
@@ -1104,9 +1008,8 @@ static iree_status_t loom_amdgpu_encode_sop1_s_mov_b32(
 static iree_status_t loom_amdgpu_encode_vop1_v_mov_b32(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
   IREE_ASSERT(packet->descriptor == state->descriptors.v_mov_b32);
-  uint16_t vdst = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_packet_descriptor_operand_vgpr_low_register(
-      state, packet, 0, &vdst));
+  const uint16_t vdst =
+      loom_amdgpu_packet_descriptor_operand_vgpr_low_register(state, packet, 0);
   uint32_t imm32 = 0;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_read_immediate_u32(state, packet, 0, &imm32));
@@ -1609,12 +1512,11 @@ static iree_status_t loom_amdgpu_try_encode_vop2_u32_vgpr_packet(
     return iree_ok_status();
   }
 
-  uint16_t vdst = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_packet_descriptor_operand_vgpr_low_register(
-      state, packet, 0, &vdst));
-  uint16_t vsrc1 = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_packet_descriptor_operand_vgpr_low_register(
-      state, packet, packet->descriptor->result_count, &vsrc1));
+  const uint16_t vdst =
+      loom_amdgpu_packet_descriptor_operand_vgpr_low_register(state, packet, 0);
+  const uint16_t vsrc1 =
+      loom_amdgpu_packet_descriptor_operand_vgpr_low_register(
+          state, packet, packet->descriptor->result_count);
   loom_amdgpu_encoding_packet_t encoded_packet;
   IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_vop2_u32_vgpr(
       state->encoding_table, packet->descriptor->encoding_id, vdst, literal,

@@ -212,29 +212,8 @@ static iree_status_t loom_amdgpu_append_descriptor_assignment(
       operand->address_map_kind != LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE) {
     return loom_amdgpu_append_assignment(context, assignment);
   }
-  const uint32_t addressable_unit_count = operand->addressable_unit_count;
-  if (addressable_unit_count == 0) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU assembly target-state VGPR operand has no "
-                            "addressable window size");
-  }
-  if (assignment->location_count == 0) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU assembly target-state VGPR operand has an "
-                            "empty assignment");
-  }
-  const uint64_t assigned_last =
-      (uint64_t)assignment->location_base + assignment->location_count - 1u;
-  if (assignment->location_base / addressable_unit_count !=
-      assigned_last / addressable_unit_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU assembly target-state VGPR range v[%" PRIu32 ":%" PRIu64
-        "] crosses a %" PRIu32 "-register window",
-        assignment->location_base, assigned_last, addressable_unit_count);
-  }
   return loom_amdgpu_append_register_range_units(
-      context, "v", assignment->location_base % addressable_unit_count,
+      context, "v", assignment->location_base % operand->addressable_unit_count,
       assignment->location_count);
 }
 
