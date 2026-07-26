@@ -22,13 +22,13 @@ static iree_status_t loom_amdgpu_address_state_insert_slot_bank(
       slot > LOOM_AMDGPU_VGPR_MSB_SLOT_DST) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU target-state operand has invalid VGPR-MSB slot %u",
+        "AMDGPU address-state operand has invalid VGPR-MSB slot %u",
         (unsigned)slot);
   }
   if (bank > 3) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU target-state operand requires VGPR-MSB bank %" PRIu32, bank);
+        "AMDGPU address-state operand requires VGPR-MSB bank %" PRIu32, bank);
   }
   const uint8_t shift = loom_amdgpu_vgpr_msb_slot_shift(slot);
   const uint8_t slot_mask = (uint8_t)(0x3u << shift);
@@ -62,7 +62,7 @@ static iree_status_t loom_amdgpu_address_state_operand_assignment(
     const uint16_t result_index = operand->source_value_index;
     if (result_index >= node->result_count) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU target-state descriptor result %" PRIu16
+                              "AMDGPU address-state descriptor result %" PRIu16
                               " has no matching schedule result",
                               descriptor_operand_index);
     }
@@ -77,7 +77,7 @@ static iree_status_t loom_amdgpu_address_state_operand_assignment(
     const uint16_t packet_operand_index = operand->source_value_index;
     if (packet_operand_index >= node->operand_count) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU target-state descriptor operand %" PRIu16
+                              "AMDGPU address-state descriptor operand %" PRIu16
                               " has no matching schedule operand",
                               descriptor_operand_index);
     }
@@ -89,7 +89,7 @@ static iree_status_t loom_amdgpu_address_state_operand_assignment(
   }
 
   return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                          "AMDGPU target-state descriptor operand %" PRIu16
+                          "AMDGPU address-state descriptor operand %" PRIu16
                           " has no matching schedule operand",
                           descriptor_operand_index);
 }
@@ -118,9 +118,22 @@ iree_status_t loom_amdgpu_address_state_query_requirement(
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const loom_low_operand_t* operand =
         &descriptor_set->operands[descriptor->operand_start + (uint32_t)i];
-    if (operand->address_map_kind !=
-        LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE) {
+    if (operand->address_state_slot == 0) {
+      if (operand->address_map_kind ==
+          LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "AMDGPU target-state operand has no VGPR-MSB slot");
+      }
       continue;
+    }
+    if (operand->address_map_kind !=
+            LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE &&
+        operand->address_map_kind != LOOM_LOW_OPERAND_ADDRESS_MAP_LOW_SUBSET) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU address-state operand uses unsupported address map %u",
+          (unsigned)operand->address_map_kind);
     }
     const loom_low_allocation_assignment_t* assignment = NULL;
     IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_operand_assignment(
@@ -134,29 +147,45 @@ iree_status_t loom_amdgpu_address_state_query_requirement(
     if (assignment->location_count != operand->unit_count) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU target-state operand has %" PRIu32
+          "AMDGPU address-state operand has %" PRIu32
           " assigned VGPRs but descriptor requires %" PRIu16,
           assignment->location_count, operand->unit_count);
     }
-    if (assignment->location_count == 0 ||
-        operand->addressable_unit_count != LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU target-state operand must use a non-empty %u-VGPR window",
-          LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE);
+    if (assignment->location_count == 0) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "AMDGPU address-state operand is empty");
     }
     const uint64_t assigned_last =
         (uint64_t)assignment->location_base + assignment->location_count - 1u;
-    if (assignment->location_base / LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE !=
-        assigned_last / LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU target-state VGPR range v[%" PRIu32
-                              ":%" PRIu64 "] crosses a %u-register window",
-                              assignment->location_base, assigned_last,
-                              LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE);
+    uint32_t bank = 0;
+    if (operand->address_map_kind ==
+        LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE) {
+      if (operand->addressable_unit_count != LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "AMDGPU target-state operand must use a %u-VGPR window",
+            LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE);
+      }
+      if (assignment->location_base / LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE !=
+          assigned_last / LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "AMDGPU target-state VGPR range v[%" PRIu32
+                                ":%" PRIu64 "] crosses a %u-register window",
+                                assignment->location_base, assigned_last,
+                                LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE);
+      }
+      bank = assignment->location_base / LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE;
+    } else if (operand->addressable_unit_count == 0 ||
+               operand->addressable_unit_count >
+                   LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE ||
+               assigned_last >= operand->addressable_unit_count) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "AMDGPU low-subset address-state VGPR range v[%" PRIu32 ":%" PRIu64
+          "] exceeds its low %" PRIu16 "-register subset",
+          assignment->location_base, assigned_last,
+          operand->addressable_unit_count);
     }
-    const uint32_t bank =
-        assignment->location_base / LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE;
     IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_insert_slot_bank(
         (loom_amdgpu_vgpr_msb_slot_t)operand->address_state_slot, bank,
         out_requirement));

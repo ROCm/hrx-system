@@ -309,6 +309,11 @@ def validate_physical_descriptor_set(
                 limits.maximum_component_unit_count,
                 descriptor_key=descriptor.key,
             )
+            if operand.address_state_slot != 0:
+                maximum_address_state_slot = max(
+                    maximum_address_state_slot,
+                    operand.address_state_slot,
+                )
             if operand.address_map_kind is OperandAddressMapKind.TARGET_STATE:
                 previous_window = address_state_slot_windows.setdefault(
                     operand.address_state_slot,
@@ -316,10 +321,6 @@ def validate_physical_descriptor_set(
                 )
                 if previous_window != operand.addressable_unit_count:
                     raise ValueError(f"descriptor set '{descriptor_set.key}' address-state slot {operand.address_state_slot} has inconsistent window width")
-                maximum_address_state_slot = max(
-                    maximum_address_state_slot,
-                    operand.address_state_slot,
-                )
             physical_rows.append((operand_index, operand, physical_classes))
 
         rows_by_component: dict[int, list[tuple[int, Operand, tuple[RegClass, ...]]]] = {}
@@ -329,12 +330,12 @@ def validate_physical_descriptor_set(
         address_state_slot_components: dict[int, int] = {}
         for component_root, component_rows in rows_by_component.items():
             for _, operand, _ in component_rows:
-                if operand.address_map_kind is not OperandAddressMapKind.TARGET_STATE:
+                if operand.address_state_slot == 0:
                     continue
                 previous_root = address_state_slot_components.setdefault(operand.address_state_slot, component_root)
                 if previous_root != component_root:
                     raise ValueError(
-                        f"descriptor set '{descriptor_set.key}' descriptor '{descriptor.key}' assigns target-state slot {operand.address_state_slot} to multiple untied physical components"
+                        f"descriptor set '{descriptor_set.key}' descriptor '{descriptor.key}' assigns address-state slot {operand.address_state_slot} to multiple untied physical components"
                     )
 
         components: list[_PhysicalComponent] = []
@@ -640,10 +641,7 @@ def validate_descriptor_operands(descriptor: Descriptor) -> int:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' bounded address map covers fewer units than the operand consumes")
             if not any(reg_alt.reg_class is not None for reg_alt in operand.reg_alts):
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' bounded address map requires a concrete register-class alternative")
-            if operand.address_map_kind is OperandAddressMapKind.LOW_SUBSET:
-                if operand.address_state_slot != 0:
-                    raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' low-subset address map must not set an address state slot")
-            elif operand.address_state_slot == 0:
+            if operand.address_map_kind is OperandAddressMapKind.TARGET_STATE and operand.address_state_slot == 0:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' target-state address map must set an address state slot")
         else:
             raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' has unknown address map kind '{operand.address_map_kind}'")
