@@ -198,54 +198,6 @@ static iree_status_t loom_amdgpu_append_assignment(
       (int)register_class.size, register_class.data);
 }
 
-static iree_status_t loom_amdgpu_descriptor_operand_assignment(
-    const loom_native_assembly_packet_context_t* context,
-    uint16_t descriptor_operand_index,
-    const loom_low_allocation_assignment_t** out_assignment) {
-  *out_assignment = NULL;
-  const loom_low_descriptor_t* descriptor = context->packet->descriptor;
-  const loom_op_t* op = context->packet->node->op;
-  if (descriptor_operand_index >= descriptor->operand_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU assembly descriptor operand %" PRIu16
-                            " is out of range",
-                            descriptor_operand_index);
-  }
-  if (descriptor_operand_index < descriptor->result_count) {
-    if (descriptor_operand_index >= op->result_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU assembly descriptor result %" PRIu16
-                              " has no matching SSA result",
-                              descriptor_operand_index);
-    }
-    *out_assignment = loom_amdgpu_map_assignment(
-        context, loom_op_const_results(op)[descriptor_operand_index]);
-    return iree_ok_status();
-  }
-
-  const loom_low_descriptor_set_t* descriptor_set =
-      context->schedule->target.descriptor_set;
-  const loom_low_operand_t* operand =
-      &descriptor_set
-           ->operands[descriptor->operand_start + descriptor_operand_index];
-  if (loom_low_operand_role_is_packet_operand(operand->role)) {
-    const uint16_t packet_operand_index = operand->source_value_index;
-    if (packet_operand_index >= op->operand_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU assembly descriptor operand %" PRIu16
-                              " maps outside the packet operands",
-                              descriptor_operand_index);
-    }
-    *out_assignment = loom_amdgpu_map_assignment(
-        context, loom_op_const_operands(op)[packet_operand_index]);
-    return iree_ok_status();
-  }
-  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                          "AMDGPU assembly descriptor operand %" PRIu16
-                          " does not name an explicit packet value",
-                          descriptor_operand_index);
-}
-
 static iree_status_t loom_amdgpu_append_descriptor_assignment(
     const loom_native_assembly_packet_context_t* context,
     uint16_t descriptor_operand_index) {
@@ -255,9 +207,9 @@ static iree_status_t loom_amdgpu_append_descriptor_assignment(
   const loom_low_operand_t* operand =
       &descriptor_set
            ->operands[descriptor->operand_start + descriptor_operand_index];
-  const loom_low_allocation_assignment_t* assignment = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_operand_assignment(
-      context, descriptor_operand_index, &assignment));
+  const loom_low_allocation_assignment_t* assignment =
+      loom_low_packet_descriptor_operand_assignment(
+          context->allocation, context->packet, descriptor_operand_index);
   if (assignment->descriptor_reg_class_id != LOOM_AMDGPU_REG_CLASS_ID_VGPR ||
       operand->address_map_kind != LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE) {
     return loom_amdgpu_append_assignment(context, assignment);
