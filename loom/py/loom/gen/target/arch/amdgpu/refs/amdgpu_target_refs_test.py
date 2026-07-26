@@ -16,6 +16,7 @@ from loom.target.arch.amdgpu.encoding import (
     AMDGPU_ENCODING_FIELD_IDS,
     AMDGPU_ENCODING_FORMAT_IDS,
     AMDGPU_ENCODING_FORMAT_MUBUF,
+    AMDGPU_ENCODING_FORMAT_SOP2_LITERAL,
     AMDGPU_ENCODING_FORMAT_VOP1_SDWA,
 )
 from loom.target.low_descriptors import (
@@ -23,6 +24,7 @@ from loom.target.low_descriptors import (
     Descriptor,
     DescriptorSet,
     Immediate,
+    ImmediateFlag,
     ImmediateKind,
     IssueUse,
     LatencyKind,
@@ -123,6 +125,19 @@ def _descriptor_set(*descriptors: Descriptor) -> DescriptorSet:
 
 
 def _valid_contract_descriptors() -> tuple[Descriptor, ...]:
+    rel32_operands = (
+        Operand("dst", OperandRole.RESULT, ()),
+        Operand("lhs", OperandRole.OPERAND, ()),
+    )
+    rel32_immediates = (
+        Immediate(
+            "symbol",
+            ImmediateKind.ORDINAL,
+            flags=(ImmediateFlag.SYMBOLIC, ImmediateFlag.RELATIVE),
+            encoding_field_id=AMDGPU_ENCODING_FIELD_IDS["LITERAL"],
+        ),
+        Immediate("byte_offset", ImmediateKind.UNSIGNED),
+    )
     return (
         _descriptor(
             "amdgpu.global_load_b32_saddr",
@@ -135,6 +150,18 @@ def _valid_contract_descriptors() -> tuple[Descriptor, ...]:
         _descriptor(
             "amdgpu.flat_load_u8",
             (AsmForm(operands=("addr",)),),
+        ),
+        _descriptor(
+            "amdgpu.s_add_u32.rhs_symbol_rel32_lo",
+            encoding_format_id=AMDGPU_ENCODING_FORMAT_SOP2_LITERAL,
+            operands=rel32_operands,
+            immediates=rel32_immediates,
+        ),
+        _descriptor(
+            "amdgpu.s_addc_u32.rhs_symbol_rel32_hi",
+            encoding_format_id=AMDGPU_ENCODING_FORMAT_SOP2_LITERAL,
+            operands=rel32_operands,
+            immediates=rel32_immediates,
         ),
     )
 
@@ -431,5 +458,28 @@ def test_lowering_descriptor_contracts_reject_bad_operand_count() -> None:
                     "amdgpu.flat_load_u8",
                     (AsmForm(operands=("addr", "m0", "extra")),),
                 ),
+                *_valid_contract_descriptors()[3:],
+            )
+        )
+
+
+def test_lowering_descriptor_contracts_reject_bad_rel32_shape() -> None:
+    with _raises_value_error("rel32 descriptor.*symbol immediate must be a symbolic relative literal"):
+        amdgpu_target_refs._validate_lowering_descriptor_contracts(
+            _descriptor_set(
+                *_valid_contract_descriptors()[:3],
+                _descriptor(
+                    "amdgpu.s_add_u32.rhs_symbol_rel32_lo",
+                    encoding_format_id=AMDGPU_ENCODING_FORMAT_SOP2_LITERAL,
+                    operands=(
+                        Operand("dst", OperandRole.RESULT, ()),
+                        Operand("lhs", OperandRole.OPERAND, ()),
+                    ),
+                    immediates=(
+                        Immediate("symbol", ImmediateKind.ORDINAL),
+                        Immediate("byte_offset", ImmediateKind.UNSIGNED),
+                    ),
+                ),
+                _valid_contract_descriptors()[4],
             )
         )
