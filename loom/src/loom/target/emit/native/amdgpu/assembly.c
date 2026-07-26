@@ -2018,26 +2018,8 @@ static iree_status_t loom_amdgpu_append_materialized_wait_packet(
     const loom_amdgpu_wait_packet_plan_t* wait_packets) {
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
-  const uint32_t descriptor_ordinal =
-      loom_low_descriptor_set_descriptor_ordinal(descriptor_set,
-                                                 wait_packet->descriptor);
-  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU wait packet descriptor row does not belong to the selected "
-        "descriptor set");
-  }
-  if (wait_packet->immediate_start > wait_packets->immediate_count ||
-      wait_packet->immediate_count >
-          wait_packets->immediate_count - wait_packet->immediate_start) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU wait packet immediate range is out of range");
-  }
-  const loom_low_descriptor_t* descriptor =
-      loom_low_descriptor_set_descriptor_at(descriptor_set, descriptor_ordinal);
   const iree_string_view_t mnemonic = loom_native_assembly_descriptor_string(
-      descriptor_set, descriptor->mnemonic_string_offset);
+      descriptor_set, wait_packet->descriptor->mnemonic_string_offset);
 
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, "  "));
@@ -2052,14 +2034,6 @@ static iree_status_t loom_amdgpu_append_materialized_wait_packet(
         immediate->name.data, immediate->value));
   }
   return iree_string_builder_append_cstring(context->builder, "\n");
-}
-
-static bool loom_amdgpu_wait_packet_is_before_node(
-    const loom_amdgpu_wait_packet_t* wait_packet,
-    const loom_low_schedule_node_t* node) {
-  return wait_packet->block_index < node->block_index ||
-         (wait_packet->block_index == node->block_index &&
-          wait_packet->scheduled_ordinal < node->scheduled_ordinal);
 }
 
 static iree_status_t loom_amdgpu_prepare_packet(
@@ -2147,16 +2121,9 @@ static iree_status_t loom_amdgpu_append_wait_packets_before_packet(
   if (state->wait_packets == NULL) {
     return iree_ok_status();
   }
-  const loom_low_schedule_node_t* node = context->packet->node;
   while (state->next_wait_packet_index < state->wait_packets->packet_count) {
     const loom_amdgpu_wait_packet_t* wait_packet =
         &state->wait_packets->packets[state->next_wait_packet_index];
-    if (loom_amdgpu_wait_packet_is_before_node(wait_packet, node)) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU wait packet plan contains an insertion point before the "
-          "current scheduled packet");
-    }
     if (!loom_amdgpu_wait_packet_matches_packet(wait_packet, context->packet)) {
       return iree_ok_status();
     }
@@ -2165,14 +2132,6 @@ static iree_status_t loom_amdgpu_append_wait_packets_before_packet(
     ++state->next_wait_packet_index;
   }
   return iree_ok_status();
-}
-
-static bool loom_amdgpu_wait_state_is_before_node(
-    const loom_amdgpu_wait_state_t* wait_state,
-    const loom_low_schedule_node_t* node) {
-  return wait_state->block_index < node->block_index ||
-         (wait_state->block_index == node->block_index &&
-          wait_state->scheduled_ordinal < node->scheduled_ordinal);
 }
 
 static bool loom_amdgpu_wait_state_matches_packet(
@@ -2250,16 +2209,9 @@ static iree_status_t loom_amdgpu_append_wait_states_before_packet(
   if (state->wait_states == NULL) {
     return iree_ok_status();
   }
-  const loom_low_schedule_node_t* node = context->packet->node;
   while (state->next_wait_state_index < state->wait_states->state_count) {
     const loom_amdgpu_wait_state_t* wait_state =
         &state->wait_states->states[state->next_wait_state_index];
-    if (loom_amdgpu_wait_state_is_before_node(wait_state, node)) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU wait-state plan contains an insertion point before the "
-          "current scheduled packet");
-    }
     if (!loom_amdgpu_wait_state_matches_packet(wait_state, context->packet)) {
       return iree_ok_status();
     }
@@ -3830,19 +3782,12 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
                    address_state->transition_count);
   }
   IREE_ASSERT_EQ(emit_state.current_vgpr_msb_mode, 0);
-  if (wait_packets != NULL &&
-      emit_state.next_wait_packet_index != wait_packets->packet_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU assembly wait packet plan contains an unmatched insertion "
-        "point");
+  if (wait_packets != NULL) {
+    IREE_ASSERT_EQ(emit_state.next_wait_packet_index,
+                   wait_packets->packet_count);
   }
-  if (wait_states != NULL &&
-      emit_state.next_wait_state_index != wait_states->state_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU assembly wait-state plan contains an unmatched insertion "
-        "point");
+  if (wait_states != NULL) {
+    IREE_ASSERT_EQ(emit_state.next_wait_state_index, wait_states->state_count);
   }
   return iree_ok_status();
 }
