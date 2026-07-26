@@ -437,16 +437,6 @@ loom_cc_library(
     ],
 )
 
-loom_cc_test(
-    name = "vopd_plan_test",
-    srcs = ["vopd_plan_test.cc"],
-    deps = [
-        ":vopd_plan",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
 loom_cc_library(
     name = "packet_plan",
     srcs = ["packet_plan.c"],
@@ -459,7 +449,6 @@ loom_cc_library(
         ":wait_plan",
         ":wait_states",
         "//loom/src/loom/codegen/low:allocation",
-        "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low/schedule",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

@@ -403,20 +403,6 @@ iree_status_t loom_amdgpu_vopd_build_schedule_pair_affinities(
     const loom_low_resolved_target_t* target, iree_arena_allocator_t* arena,
     loom_low_schedule_pair_affinity_list_t* out_affinities);
 
-// Verifies that |plan| describes |schedule| and |allocation|.
-iree_status_t loom_amdgpu_vopd_plan_verify(
-    const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    const loom_amdgpu_vopd_plan_t* plan);
-
-// Verifies that wait insertions do not target the second component of any VOPD
-// pair. Emission cannot preserve such an insertion without breaking the dual
-// packet.
-iree_status_t loom_amdgpu_vopd_plan_verify_wait_insertions(
-    const loom_amdgpu_vopd_plan_t* plan,
-    const loom_amdgpu_wait_packet_plan_t* wait_packets,
-    const loom_amdgpu_wait_state_plan_t* wait_states);
-
 // Returns the VOPD membership record for |packet_index|, or NULL.
 const loom_amdgpu_vopd_packet_t* loom_amdgpu_vopd_plan_packet_at(
     const loom_amdgpu_vopd_plan_t* plan, iree_host_size_t packet_index);

@@ -2963,8 +2963,6 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
       loom_native_fragment_validate_emission_inputs(schedule, allocation));
   const loom_amdgpu_packet_plan_t* packet_plan =
       options ? options->packet_plan : NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_packet_plan_verify(schedule, allocation, packet_plan));
   const loom_amdgpu_address_state_plan_t* address_state =
       packet_plan ? &packet_plan->address_state : NULL;
   const loom_amdgpu_wait_packet_plan_t* wait_packets =
