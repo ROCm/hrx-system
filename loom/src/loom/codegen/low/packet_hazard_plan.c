@@ -24,14 +24,20 @@ typedef struct loom_low_packet_hazard_plan_build_state_t {
   const loom_low_packet_view_t* current_packet;
   // Mutable output record storage during the populate pass.
   loom_low_packet_hazard_plan_record_t* records;
-  // Maximum entries available in |records|.
+  // Maximum entries available in |records| across all event sources.
   iree_host_size_t record_capacity;
-  // Number of records counted or populated so far.
+  // Number of records populated so far across all event sources.
   iree_host_size_t record_count;
+  // Number of target-provider records populated so far.
+  iree_host_size_t target_record_count;
   // Storage-release actions grouped by insertion packet.
   loom_low_storage_release_action_index_t storage_release_action_index;
   // Packet progress records grouped by progress class.
   loom_low_packet_progress_class_index_t progress_class_index;
+  // Exact number of generic allocation storage-release records.
+  iree_host_size_t storage_release_record_capacity;
+  // Number of generic allocation storage-release records populated so far.
+  iree_host_size_t storage_release_record_count;
 } loom_low_packet_hazard_plan_build_state_t;
 
 static bool loom_low_packet_hazard_plan_record_kind_is_valid(
@@ -139,30 +145,9 @@ static iree_status_t loom_low_packet_hazard_plan_validate_event(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_packet_hazard_plan_count_event(
-    void* user_data, const loom_low_packet_hazard_plan_event_t* event) {
-  loom_low_packet_hazard_plan_build_state_t* state =
-      (loom_low_packet_hazard_plan_build_state_t*)user_data;
-  IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_validate_event(event));
-  iree_host_size_t next_record_count = 0;
-  if (!iree_host_size_checked_add(state->record_count, 1, &next_record_count)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "hazard plan record count exceeds host size");
-  }
-  state->record_count = next_record_count;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_packet_hazard_plan_append_event(
-    void* user_data, const loom_low_packet_hazard_plan_event_t* event) {
-  loom_low_packet_hazard_plan_build_state_t* state =
-      (loom_low_packet_hazard_plan_build_state_t*)user_data;
-  IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_validate_event(event));
-  if (state->record_count >= state->record_capacity) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "hazard plan provider emitted inconsistent record count");
-  }
+static iree_status_t loom_low_packet_hazard_plan_append_validated_event(
+    loom_low_packet_hazard_plan_build_state_t* state,
+    const loom_low_packet_hazard_plan_event_t* event) {
   const loom_low_packet_view_t* packet = state->current_packet;
   iree_host_size_t producer_packet_index =
       LOOM_LOW_PACKET_HAZARD_PLAN_PACKET_NONE;
@@ -194,8 +179,40 @@ static iree_status_t loom_low_packet_hazard_plan_append_event(
   return iree_ok_status();
 }
 
-static iree_status_t
-loom_low_packet_hazard_plan_build_storage_release_action_index(
+static iree_status_t loom_low_packet_hazard_plan_append_target_event(
+    void* user_data, const loom_low_packet_hazard_plan_event_t* event) {
+  loom_low_packet_hazard_plan_build_state_t* state =
+      (loom_low_packet_hazard_plan_build_state_t*)user_data;
+  IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_validate_event(event));
+  if (state->target_record_count >= state->provider->event_count) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "hazard plan provider declared %" PRIhsz
+                            " event(s) but attempted to emit more",
+                            state->provider->event_count);
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_low_packet_hazard_plan_append_validated_event(state, event));
+  ++state->target_record_count;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_low_packet_hazard_plan_append_storage_release_event(
+    loom_low_packet_hazard_plan_build_state_t* state,
+    const loom_low_packet_hazard_plan_event_t* event) {
+  IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_validate_event(event));
+  if (state->storage_release_record_count >=
+      state->storage_release_record_capacity) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "hazard plan storage-release count changed during construction");
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_low_packet_hazard_plan_append_validated_event(state, event));
+  ++state->storage_release_record_count;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_low_packet_hazard_plan_prepare_storage_releases(
     loom_low_packet_hazard_plan_build_state_t* state,
     iree_arena_allocator_t* arena) {
   const loom_low_allocation_table_t* allocation = state->allocation;
@@ -221,13 +238,28 @@ loom_low_packet_hazard_plan_build_storage_release_action_index(
           " but allocation has %" PRIhsz " lease record(s)",
           action->lease_record_index, allocation->storage_leases.record_count);
     }
+    const loom_low_storage_lease_record_t* lease_record =
+        &allocation->storage_leases.records[action->lease_record_index];
+    const uint32_t observed_progress =
+        loom_low_packet_progress_class_index_observed_progress(
+            &state->progress_class_index, lease_record->packet_index,
+            action->insertion_packet_index, action->release_class_id);
+    if (observed_progress < action->required_progress) {
+      iree_host_size_t next_record_capacity = 0;
+      if (!iree_host_size_checked_add(state->storage_release_record_capacity, 1,
+                                      &next_record_capacity)) {
+        return iree_make_status(
+            IREE_STATUS_RESOURCE_EXHAUSTED,
+            "storage-release hazard record count exceeds host size");
+      }
+      state->storage_release_record_capacity = next_record_capacity;
+    }
   }
   return iree_ok_status();
 }
 
 static iree_status_t loom_low_packet_hazard_plan_emit_storage_release_actions(
-    loom_low_packet_hazard_plan_build_state_t* state,
-    loom_low_packet_hazard_plan_emit_fn_t emit) {
+    loom_low_packet_hazard_plan_build_state_t* state) {
   const loom_low_allocation_table_t* allocation = state->allocation;
   if (allocation == NULL ||
       state->storage_release_action_index.first_action_indices == NULL) {
@@ -266,14 +298,15 @@ static iree_status_t loom_low_packet_hazard_plan_emit_storage_release_actions(
         .observed_progress = observed_progress,
         .residual_progress = residual_progress,
     };
-    IREE_RETURN_IF_ERROR(emit(state, &event));
+    IREE_RETURN_IF_ERROR(
+        loom_low_packet_hazard_plan_append_storage_release_event(state,
+                                                                 &event));
   }
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_packet_hazard_plan_run_pass(
-    loom_low_packet_hazard_plan_build_state_t* state,
-    loom_low_packet_hazard_plan_emit_fn_t emit) {
+static iree_status_t loom_low_packet_hazard_plan_query_packets(
+    loom_low_packet_hazard_plan_build_state_t* state) {
   for (iree_host_size_t packet_index = 0;
        packet_index < loom_low_packet_sequence_count(state->packets);
        ++packet_index) {
@@ -282,9 +315,10 @@ static iree_status_t loom_low_packet_hazard_plan_run_pass(
     state->current_packet = &packet;
     IREE_RETURN_IF_ERROR(state->provider->query(
         state->provider->user_data, state->schedule, state->allocation,
-        state->progress, &packet, emit, state));
+        state->progress, &packet,
+        loom_low_packet_hazard_plan_append_target_event, state));
     IREE_RETURN_IF_ERROR(
-        loom_low_packet_hazard_plan_emit_storage_release_actions(state, emit));
+        loom_low_packet_hazard_plan_emit_storage_release_actions(state));
     state->current_packet = NULL;
   }
   return iree_ok_status();
@@ -325,28 +359,35 @@ iree_status_t loom_low_packet_hazard_plan_build(
       .provider = provider,
   };
   IREE_RETURN_IF_ERROR(
-      loom_low_packet_hazard_plan_build_storage_release_action_index(&state,
-                                                                     arena));
-  IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_run_pass(
-      &state, loom_low_packet_hazard_plan_count_event));
-  const iree_host_size_t record_capacity = state.record_count;
+      loom_low_packet_hazard_plan_prepare_storage_releases(&state, arena));
+  if (!iree_host_size_checked_add(provider->event_count,
+                                  state.storage_release_record_capacity,
+                                  &state.record_capacity)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "hazard plan record count exceeds host size");
+  }
 
   loom_low_packet_hazard_plan_record_t* records = NULL;
-  if (record_capacity != 0) {
+  if (state.record_capacity != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, record_capacity, sizeof(*records), (void**)&records));
+        arena, state.record_capacity, sizeof(*records), (void**)&records));
   }
 
   state.records = records;
-  state.record_capacity = record_capacity;
-  state.record_count = 0;
-  IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_run_pass(
-      &state, loom_low_packet_hazard_plan_append_event));
-  if (state.record_count != record_capacity) {
+  IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_query_packets(&state));
+  if (state.target_record_count != provider->event_count) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "hazard plan provider emitted %" PRIhsz
-                            " record(s) after counting %" PRIhsz,
-                            state.record_count, record_capacity);
+                            "hazard plan provider declared %" PRIhsz
+                            " event(s) but emitted %" PRIhsz,
+                            provider->event_count, state.target_record_count);
+  }
+  if (state.storage_release_record_count !=
+      state.storage_release_record_capacity) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "hazard plan expected %" PRIhsz
+                            " storage-release event(s) but emitted %" PRIhsz,
+                            state.storage_release_record_capacity,
+                            state.storage_release_record_count);
   }
 
   *out_plan = (loom_low_packet_hazard_plan_t){
@@ -354,7 +395,7 @@ iree_status_t loom_low_packet_hazard_plan_build(
       .allocation = allocation,
       .progress = progress,
       .records = records,
-      .record_count = record_capacity,
+      .record_count = state.record_capacity,
   };
   return iree_ok_status();
 }
