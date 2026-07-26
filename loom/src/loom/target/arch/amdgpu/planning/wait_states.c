@@ -2130,7 +2130,7 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_wait_state_progress_query(
+static void loom_amdgpu_wait_state_progress_query(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_view_t* packet,
@@ -2142,7 +2142,7 @@ static iree_status_t loom_amdgpu_wait_state_progress_query(
   const uint32_t instruction_count =
       builder->packet_instruction_counts[packet->packet_index];
   if (instruction_count == 0) {
-    return iree_ok_status();
+    return;
   }
   const loom_low_packet_progress_event_t event = {
       .progress_class_id =
@@ -2152,7 +2152,7 @@ static iree_status_t loom_amdgpu_wait_state_progress_query(
       .action = LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE,
       .units = instruction_count,
   };
-  return emit(emit_user_data, &event);
+  emit(emit_user_data, &event);
 }
 
 static iree_status_t loom_amdgpu_wait_state_build_progress(
@@ -2175,7 +2175,7 @@ static bool loom_amdgpu_wait_state_matches_packet(
          wait_state->node_index == packet->node_index;
 }
 
-static iree_status_t loom_amdgpu_wait_state_hazard_query(
+static void loom_amdgpu_wait_state_hazard_query(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_progress_table_t* progress,
@@ -2207,9 +2207,8 @@ static iree_status_t loom_amdgpu_wait_state_hazard_query(
         .observed_progress = wait_state->observed_cycle_count,
         .residual_progress = wait_state->cycle_count,
     };
-    IREE_RETURN_IF_ERROR(emit(emit_user_data, &event));
+    emit(emit_user_data, &event);
   }
-  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_wait_state_build_hazard_plan(

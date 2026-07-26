@@ -206,7 +206,7 @@ static iree_status_t loom_check_test_synthetic_hazard_find_pair(
       "synthetic hazard plan requires two descriptor packets with results");
 }
 
-static iree_status_t loom_check_test_synthetic_hazard_emit_missing(
+static void loom_check_test_synthetic_hazard_emit_missing(
     loom_low_packet_hazard_plan_emit_fn_t emit, void* emit_user_data) {
   const loom_low_packet_hazard_plan_event_t event = {
       .kind = LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_MISSING_TARGET_DATA,
@@ -215,10 +215,10 @@ static iree_status_t loom_check_test_synthetic_hazard_emit_missing(
       .producer_node_index = LOOM_LOW_SCHEDULE_NODE_NONE,
       .progress_class_id = LOOM_LOW_PACKET_PROGRESS_CLASS_NONE,
   };
-  return emit(emit_user_data, &event);
+  emit(emit_user_data, &event);
 }
 
-static iree_status_t loom_check_test_synthetic_hazard_query(
+static void loom_check_test_synthetic_hazard_query(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_progress_table_t* progress,
@@ -231,16 +231,15 @@ static iree_status_t loom_check_test_synthetic_hazard_query(
       (const loom_check_test_synthetic_hazard_context_t*)user_data;
   if (context->test_case == LOOM_CHECK_TEST_SYNTHETIC_HAZARD_CASE_MISSING) {
     if (packet->packet_index == 0) {
-      return loom_check_test_synthetic_hazard_emit_missing(emit,
-                                                           emit_user_data);
+      loom_check_test_synthetic_hazard_emit_missing(emit, emit_user_data);
     }
-    return iree_ok_status();
+    return;
   }
   if (packet->node_index != context->consumer_node_index) {
-    return iree_ok_status();
+    return;
   }
   if (context->hazard_event_count == 0) {
-    return iree_ok_status();
+    return;
   }
 
   const loom_low_packet_hazard_plan_event_t event = {
@@ -256,10 +255,10 @@ static iree_status_t loom_check_test_synthetic_hazard_query(
       .observed_progress = 0,
       .residual_progress = 2,
   };
-  return emit(emit_user_data, &event);
+  emit(emit_user_data, &event);
 }
 
-static iree_status_t loom_check_test_synthetic_hazard_progress_query(
+static void loom_check_test_synthetic_hazard_progress_query(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_view_t* packet,
@@ -268,7 +267,7 @@ static iree_status_t loom_check_test_synthetic_hazard_progress_query(
   (void)schedule;
   (void)allocation;
   if (packet->descriptor == NULL) {
-    return iree_ok_status();
+    return;
   }
   const loom_low_packet_progress_event_t event = {
       .progress_class_id = LOOM_CHECK_TEST_SYNTHETIC_PROGRESS_CLASS_ISSUE,
@@ -276,7 +275,7 @@ static iree_status_t loom_check_test_synthetic_hazard_progress_query(
       .action = LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE,
       .units = 1,
   };
-  return emit(emit_user_data, &event);
+  emit(emit_user_data, &event);
 }
 
 static iree_status_t loom_check_test_synthetic_hazard_execute(

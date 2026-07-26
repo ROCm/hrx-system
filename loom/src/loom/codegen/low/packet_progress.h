@@ -49,15 +49,17 @@ typedef struct loom_low_packet_progress_event_t {
 } loom_low_packet_progress_event_t;
 
 // Emits one target progress event for the packet currently being queried.
-typedef iree_status_t (*loom_low_packet_progress_emit_fn_t)(
+// Provider construction has already reserved exact storage for every event.
+typedef void (*loom_low_packet_progress_emit_fn_t)(
     void* user_data, const loom_low_packet_progress_event_t* event);
 
 // Queries target progress events for one scheduled packet.
 //
 // The builder calls this function exactly once for each scheduled packet in
 // increasing packet-index order. Implementations may advance monotonic state
-// in |user_data| across calls.
-typedef iree_status_t (*loom_low_packet_progress_query_fn_t)(
+// in |user_data| across calls. Fallible target analysis must complete before
+// provider construction; this callback only projects compiler-owned facts.
+typedef void (*loom_low_packet_progress_query_fn_t)(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_view_t* packet,
@@ -162,7 +164,8 @@ typedef struct loom_low_packet_progress_class_range_index_t {
   uint32_t record_count;
 } loom_low_packet_progress_class_range_index_t;
 
-// Builds target progress records for |schedule| using |provider|.
+// Builds target progress records for |schedule| using |provider|. Provider
+// projection is infallible.
 iree_status_t loom_low_packet_progress_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,

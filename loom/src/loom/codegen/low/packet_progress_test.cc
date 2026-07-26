@@ -102,18 +102,17 @@ class LowPacketProgressTest : public ::testing::Test {
   PacketProgressTestState state_;
 };
 
-iree_status_t EmitEvent(loom_low_packet_progress_emit_fn_t emit,
-                        void* emit_user_data, uint16_t progress_class_id,
-                        iree_string_view_t progress_class_name,
-                        loom_low_packet_progress_action_t action,
-                        uint32_t units) {
+void EmitEvent(loom_low_packet_progress_emit_fn_t emit, void* emit_user_data,
+               uint16_t progress_class_id,
+               iree_string_view_t progress_class_name,
+               loom_low_packet_progress_action_t action, uint32_t units) {
   const loom_low_packet_progress_event_t event = {
       /*.progress_class_id=*/progress_class_id,
       /*.progress_class_name=*/progress_class_name,
       /*.action=*/action,
       /*.units=*/units,
   };
-  return emit(emit_user_data, &event);
+  emit(emit_user_data, &event);
 }
 
 loom_low_packet_progress_record_t MakeProgressRecord(
@@ -132,41 +131,41 @@ loom_low_packet_progress_record_t MakeProgressRecord(
   };
 }
 
-iree_status_t SyntheticProgressQuery(
-    void* user_data, const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    const loom_low_packet_view_t* packet,
-    loom_low_packet_progress_emit_fn_t emit, void* emit_user_data) {
+void SyntheticProgressQuery(void* user_data,
+                            const loom_low_schedule_table_t* schedule,
+                            const loom_low_allocation_table_t* allocation,
+                            const loom_low_packet_view_t* packet,
+                            loom_low_packet_progress_emit_fn_t emit,
+                            void* emit_user_data) {
   (void)user_data;
   (void)schedule;
   (void)allocation;
   if (packet->node_index == 0) {
-    return EmitEvent(emit, emit_user_data, kSyntheticProgressPipe,
-                     IREE_SV("synthetic.pipe"),
-                     LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 2);
+    EmitEvent(emit, emit_user_data, kSyntheticProgressPipe,
+              IREE_SV("synthetic.pipe"),
+              LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 2);
+    return;
   }
-  IREE_RETURN_IF_ERROR(EmitEvent(emit, emit_user_data,
-                                 kSyntheticProgressScoreboard,
-                                 IREE_SV("synthetic.scoreboard"),
-                                 LOOM_LOW_PACKET_PROGRESS_ACTION_RESET, 0));
-  return EmitEvent(emit, emit_user_data, kSyntheticProgressPipe,
-                   IREE_SV("synthetic.pipe"),
-                   LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 1);
+  EmitEvent(emit, emit_user_data, kSyntheticProgressScoreboard,
+            IREE_SV("synthetic.scoreboard"),
+            LOOM_LOW_PACKET_PROGRESS_ACTION_RESET, 0);
+  EmitEvent(emit, emit_user_data, kSyntheticProgressPipe,
+            IREE_SV("synthetic.pipe"), LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE,
+            1);
 }
 
-iree_status_t EmptyProgressQuery(void* user_data,
-                                 const loom_low_schedule_table_t* schedule,
-                                 const loom_low_allocation_table_t* allocation,
-                                 const loom_low_packet_view_t* packet,
-                                 loom_low_packet_progress_emit_fn_t emit,
-                                 void* emit_user_data) {
+void EmptyProgressQuery(void* user_data,
+                        const loom_low_schedule_table_t* schedule,
+                        const loom_low_allocation_table_t* allocation,
+                        const loom_low_packet_view_t* packet,
+                        loom_low_packet_progress_emit_fn_t emit,
+                        void* emit_user_data) {
   (void)user_data;
   (void)schedule;
   (void)allocation;
   (void)packet;
   (void)emit;
   (void)emit_user_data;
-  return iree_ok_status();
 }
 
 struct ProgressQueryAudit {
@@ -175,24 +174,21 @@ struct ProgressQueryAudit {
   uint32_t queried_packet_mask = 0;
 };
 
-iree_status_t AuditEmptyProgressQuery(
-    void* user_data, const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    const loom_low_packet_view_t* packet,
-    loom_low_packet_progress_emit_fn_t emit, void* emit_user_data) {
+void AuditEmptyProgressQuery(void* user_data,
+                             const loom_low_schedule_table_t* schedule,
+                             const loom_low_allocation_table_t* allocation,
+                             const loom_low_packet_view_t* packet,
+                             loom_low_packet_progress_emit_fn_t emit,
+                             void* emit_user_data) {
   (void)schedule;
   (void)allocation;
   (void)emit;
   (void)emit_user_data;
   ProgressQueryAudit* audit = static_cast<ProgressQueryAudit*>(user_data);
-  if (packet->packet_index != audit->next_packet_index) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "progress packets queried out of order");
-  }
+  EXPECT_EQ(packet->packet_index, audit->next_packet_index);
   ++audit->query_count;
   ++audit->next_packet_index;
   audit->queried_packet_mask |= 1u << packet->packet_index;
-  return iree_ok_status();
 }
 
 TEST_F(LowPacketProgressTest, BuildsSyntheticTargetProgressRecords) {
@@ -264,32 +260,6 @@ TEST_F(LowPacketProgressTest, QueriesProviderExactlyOncePerPacket) {
   EXPECT_EQ(audit.query_count, state_.schedule.scheduled_node_count);
   EXPECT_EQ(audit.next_packet_index, state_.schedule.scheduled_node_count);
   EXPECT_EQ(audit.queried_packet_mask, 0b11u);
-}
-
-TEST_F(LowPacketProgressTest, RejectsUnderdeclaredEventCount) {
-  const loom_low_packet_progress_provider_t provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/2,
-      /*.query=*/SyntheticProgressQuery,
-  };
-  loom_low_packet_progress_table_t table = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      loom_low_packet_progress_build(&state_.schedule, &state_.allocation,
-                                     &provider, &arena_, &table));
-}
-
-TEST_F(LowPacketProgressTest, RejectsOverdeclaredEventCount) {
-  const loom_low_packet_progress_provider_t provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/4,
-      /*.query=*/SyntheticProgressQuery,
-  };
-  loom_low_packet_progress_table_t table = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      loom_low_packet_progress_build(&state_.schedule, &state_.allocation,
-                                     &provider, &arena_, &table));
 }
 
 TEST_F(LowPacketProgressTest, IndexesRecordsByProgressClass) {
@@ -449,33 +419,6 @@ TEST_F(LowPacketProgressTest, RejectsMalformedChainWhenBuildingRangeIndex) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         loom_low_packet_progress_class_range_index_build(
                             &chain_index, &arena_, &range_index));
-}
-
-iree_status_t InvalidProgressQuery(
-    void* user_data, const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    const loom_low_packet_view_t* packet,
-    loom_low_packet_progress_emit_fn_t emit, void* emit_user_data) {
-  (void)user_data;
-  (void)schedule;
-  (void)allocation;
-  (void)packet;
-  return EmitEvent(emit, emit_user_data, kSyntheticProgressPipe,
-                   IREE_SV("synthetic.pipe"),
-                   LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 0);
-}
-
-TEST_F(LowPacketProgressTest, RejectsInvalidProgressEvents) {
-  const loom_low_packet_progress_provider_t provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/1,
-      /*.query=*/InvalidProgressQuery,
-  };
-  loom_low_packet_progress_table_t table = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_low_packet_progress_build(&state_.schedule, &state_.allocation,
-                                     &provider, &arena_, &table));
 }
 
 }  // namespace
