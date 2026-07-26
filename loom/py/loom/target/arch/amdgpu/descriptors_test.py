@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -1508,6 +1509,25 @@ def test_gfx125x_target_state_validation_requires_window_size() -> None:
         lambda: _with_gfx125x_vgpr_msb_address_states(
             _descriptor_set(_s_set_vgpr_msb_descriptor(), descriptor)
         ),
+    )
+
+
+def test_gfx125x_target_state_validation_requires_encodable_vgpr_capacity() -> None:
+    descriptor_set = replace(
+        _descriptor_set(_s_set_vgpr_msb_descriptor()),
+        reg_classes=(
+            RegClass(
+                "amdgpu.vgpr",
+                32,
+                SpillSlotSpace.SCRATCH,
+                allocatable_count=1025,
+            ),
+        ),
+    )
+
+    _expect_value_error_contains(
+        "4-bank S_SET_VGPR_MSB capacity of 1024 registers",
+        lambda: _with_gfx125x_vgpr_msb_address_states(descriptor_set),
     )
 
 
