@@ -85,6 +85,34 @@ loom_low_packet_at_block_ordinal(const loom_low_schedule_table_t* schedule,
   return loom_low_packet_at(schedule, packet_index);
 }
 
+// Returns the allocation assignment for a descriptor operand in a verified
+// packet from a successful allocation. The packet and allocation must describe
+// the same immutable low function.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_allocation_assignment_t*
+loom_low_packet_descriptor_operand_assignment(
+    const loom_low_allocation_table_t* allocation,
+    const loom_low_packet_view_t* packet, uint16_t descriptor_operand_index) {
+  const loom_low_descriptor_t* descriptor = packet->descriptor;
+  const loom_low_descriptor_set_t* descriptor_set =
+      allocation->target.descriptor_set;
+  const loom_low_operand_t* descriptor_operand =
+      &descriptor_set
+           ->operands[descriptor->operand_start + descriptor_operand_index];
+  const loom_op_t* op = packet->node->op;
+  if (descriptor_operand_index < descriptor->result_count) {
+    const uint16_t result_index = descriptor_operand->source_value_index;
+    IREE_ASSERT_LT(result_index, op->result_count);
+    return loom_low_allocation_map_active_value_assignment(
+        allocation, loom_op_const_results(op)[result_index], NULL);
+  }
+  const uint16_t packet_operand_index =
+      loom_low_descriptor_operand_packet_index(descriptor_set, descriptor,
+                                               descriptor_operand_index);
+  IREE_ASSERT_LT(packet_operand_index, op->operand_count);
+  return loom_low_allocation_map_active_value_assignment(
+      allocation, loom_op_const_operands(op)[packet_operand_index], NULL);
+}
+
 // Returns the named descriptor-attribute slice for |packet|, or an empty slice
 // for structural packets.
 loom_named_attr_slice_t loom_low_packet_attrs(

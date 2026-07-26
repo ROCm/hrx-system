@@ -424,49 +424,6 @@ static iree_status_t loom_amdgpu_encode_vgpr_msb_requirement(
   return loom_amdgpu_encode_vgpr_msb_mode(state, new_mode);
 }
 
-static iree_status_t loom_amdgpu_packet_descriptor_operand_assignment(
-    const loom_amdgpu_encode_state_t* state,
-    const loom_low_packet_view_t* packet, uint16_t descriptor_operand_index,
-    const loom_low_allocation_assignment_t** out_assignment) {
-  *out_assignment = NULL;
-  const loom_op_t* op = packet->node->op;
-  if (descriptor_operand_index < packet->descriptor->result_count) {
-    if (descriptor_operand_index >= op->result_count) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU native encoding result descriptor operand %" PRIu16
-          " has no matching SSA result",
-          descriptor_operand_index);
-    }
-    *out_assignment = loom_amdgpu_map_assignment(
-        state->allocation, loom_op_const_results(op)[descriptor_operand_index]);
-    return iree_ok_status();
-  }
-
-  const loom_low_descriptor_set_t* descriptor_set =
-      state->schedule->target.descriptor_set;
-  const loom_low_operand_t* operand =
-      &descriptor_set->operands[packet->descriptor->operand_start +
-                                descriptor_operand_index];
-  if (loom_low_operand_role_is_packet_operand(operand->role)) {
-    const uint16_t packet_operand_index = operand->source_value_index;
-    if (packet_operand_index >= op->operand_count) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU native encoding descriptor operand %" PRIu16
-          " has no matching SSA operand",
-          descriptor_operand_index);
-    }
-    *out_assignment = loom_amdgpu_map_assignment(
-        state->allocation, loom_op_const_operands(op)[packet_operand_index]);
-    return iree_ok_status();
-  }
-  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                          "AMDGPU native encoding descriptor operand %" PRIu16
-                          " does not name an explicit packet value",
-                          descriptor_operand_index);
-}
-
 static iree_status_t loom_amdgpu_assignment_vgpr_low_register(
     const loom_amdgpu_encode_state_t* state,
     const loom_low_allocation_assignment_t* assignment,
@@ -577,9 +534,9 @@ static iree_status_t loom_amdgpu_packet_descriptor_operand_vgpr_low_register(
   const loom_low_operand_t* operand =
       &descriptor_set->operands[packet->descriptor->operand_start +
                                 descriptor_operand_index];
-  const loom_low_allocation_assignment_t* assignment = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_packet_descriptor_operand_assignment(
-      state, packet, descriptor_operand_index, &assignment));
+  const loom_low_allocation_assignment_t* assignment =
+      loom_low_packet_descriptor_operand_assignment(state->allocation, packet,
+                                                    descriptor_operand_index);
   return loom_amdgpu_assignment_vgpr_low_register(state, assignment, operand,
                                                   out_register);
 }
@@ -699,9 +656,9 @@ static iree_status_t loom_amdgpu_descriptor_operand_field_already_encoded(
           " without a tied constraint",
           operand->encoding_field_id);
     }
-    const loom_low_allocation_assignment_t* previous_assignment = NULL;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_packet_descriptor_operand_assignment(
-        state, packet, previous_index, &previous_assignment));
+    const loom_low_allocation_assignment_t* previous_assignment =
+        loom_low_packet_descriptor_operand_assignment(state->allocation, packet,
+                                                      previous_index);
     uint64_t previous_value = 0;
     IREE_RETURN_IF_ERROR(loom_amdgpu_assignment_field_value(
         state, previous_assignment, previous, &previous_value));
@@ -1023,9 +980,9 @@ static iree_status_t loom_amdgpu_packet_lhs_pc_base(
     uint64_t* out_base_pc_byte_offset) {
   *out_base_pc_byte_offset = 0;
   const uint16_t lhs_operand_index = packet->descriptor->result_count;
-  const loom_low_allocation_assignment_t* assignment = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_packet_descriptor_operand_assignment(
-      state, packet, lhs_operand_index, &assignment));
+  const loom_low_allocation_assignment_t* assignment =
+      loom_low_packet_descriptor_operand_assignment(state->allocation, packet,
+                                                    lhs_operand_index);
   uint32_t sgpr_base = 0;
   uint32_t sgpr_count = 0;
   IREE_RETURN_IF_ERROR(
@@ -1768,9 +1725,9 @@ static iree_status_t loom_amdgpu_encode_generic_descriptor_packet(
     if (operand->encoding_field_id == 0) {
       continue;
     }
-    const loom_low_allocation_assignment_t* assignment = NULL;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_packet_descriptor_operand_assignment(
-        state, packet, i, &assignment));
+    const loom_low_allocation_assignment_t* assignment =
+        loom_low_packet_descriptor_operand_assignment(state->allocation, packet,
+                                                      i);
     uint64_t value = 0;
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_assignment_field_value(state, assignment, operand, &value));
@@ -1953,9 +1910,9 @@ static iree_status_t loom_amdgpu_update_vgpr_msb_mode_after_descriptor(
 static iree_status_t loom_amdgpu_invalidate_pc_registers_after_descriptor(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
   for (uint16_t i = 0; i < packet->descriptor->result_count; ++i) {
-    const loom_low_allocation_assignment_t* assignment = NULL;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_packet_descriptor_operand_assignment(
-        state, packet, i, &assignment));
+    const loom_low_allocation_assignment_t* assignment =
+        loom_low_packet_descriptor_operand_assignment(state->allocation, packet,
+                                                      i);
     if (assignment->descriptor_reg_class_id != LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
       continue;
     }
@@ -1980,9 +1937,9 @@ static iree_status_t loom_amdgpu_record_pc_registers_after_descriptor(
                             "AMDGPU native encoding s_getpc_b64 descriptor "
                             "must have one result");
   }
-  const loom_low_allocation_assignment_t* assignment = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_packet_descriptor_operand_assignment(
-      state, packet, 0, &assignment));
+  const loom_low_allocation_assignment_t* assignment =
+      loom_low_packet_descriptor_operand_assignment(state->allocation, packet,
+                                                    0);
   uint32_t sgpr_base = 0;
   uint32_t sgpr_count = 0;
   IREE_RETURN_IF_ERROR(
