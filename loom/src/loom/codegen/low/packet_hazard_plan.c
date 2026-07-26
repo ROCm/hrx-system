@@ -10,6 +10,8 @@
 #include <string.h>
 
 typedef struct loom_low_packet_hazard_plan_build_state_t {
+  // Validated packet sequence being queried.
+  const loom_low_packet_sequence_t* packets;
   // Schedule table being walked.
   const loom_low_schedule_table_t* schedule;
   // Optional allocation table paired with |schedule|.
@@ -50,34 +52,6 @@ static bool loom_low_packet_hazard_plan_record_kind_has_residual_progress(
 static bool loom_low_packet_hazard_plan_record_kind_is_diagnostic(
     loom_low_packet_hazard_plan_record_kind_t kind) {
   return kind != LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION;
-}
-
-static iree_status_t loom_low_packet_hazard_plan_schedule_view_at(
-    const loom_low_schedule_table_t* schedule, iree_host_size_t packet_index,
-    loom_low_packet_view_t* out_packet) {
-  memset(out_packet, 0, sizeof(*out_packet));
-  const uint32_t node_index = schedule->scheduled_node_indices[packet_index];
-
-  const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
-  *out_packet = (loom_low_packet_view_t){
-      .packet_index = packet_index,
-      .node_index = node_index,
-      .node = node,
-      .descriptor = node->descriptor,
-  };
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_packet_hazard_plan_view_at(
-    const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    iree_host_size_t packet_index, loom_low_packet_view_t* out_packet) {
-  if (allocation != NULL) {
-    return loom_low_packet_view_at(schedule, allocation, packet_index,
-                                   out_packet);
-  }
-  return loom_low_packet_hazard_plan_schedule_view_at(schedule, packet_index,
-                                                      out_packet);
 }
 
 static iree_status_t loom_low_packet_hazard_plan_producer_packet_index(
@@ -301,10 +275,10 @@ static iree_status_t loom_low_packet_hazard_plan_run_pass(
     loom_low_packet_hazard_plan_build_state_t* state,
     loom_low_packet_hazard_plan_emit_fn_t emit) {
   for (iree_host_size_t packet_index = 0;
-       packet_index < loom_low_packet_count(state->schedule); ++packet_index) {
-    loom_low_packet_view_t packet = {0};
-    IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_view_at(
-        state->schedule, state->allocation, packet_index, &packet));
+       packet_index < loom_low_packet_sequence_count(state->packets);
+       ++packet_index) {
+    const loom_low_packet_view_t packet =
+        loom_low_packet_sequence_at(state->packets, packet_index);
     state->current_packet = &packet;
     IREE_RETURN_IF_ERROR(state->provider->query(
         state->provider->user_data, state->schedule, state->allocation,
@@ -323,8 +297,13 @@ iree_status_t loom_low_packet_hazard_plan_build(
     const loom_low_packet_hazard_plan_provider_t* provider,
     iree_arena_allocator_t* arena, loom_low_packet_hazard_plan_t* out_plan) {
   memset(out_plan, 0, sizeof(*out_plan));
+  loom_low_packet_sequence_t packets = {0};
   if (allocation != NULL) {
-    IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
+    IREE_RETURN_IF_ERROR(loom_low_allocated_packet_sequence_initialize(
+        schedule, allocation, &packets));
+  } else {
+    IREE_RETURN_IF_ERROR(
+        loom_low_packet_sequence_initialize(schedule, &packets));
   }
   if (progress != NULL && progress->schedule != schedule) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -336,6 +315,7 @@ iree_status_t loom_low_packet_hazard_plan_build(
   }
 
   loom_low_packet_hazard_plan_build_state_t state = {
+      .packets = &packets,
       .schedule = schedule,
       .allocation = allocation,
       .progress = progress,

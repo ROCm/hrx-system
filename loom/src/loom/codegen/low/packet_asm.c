@@ -15,6 +15,8 @@
 #include "loom/util/stream.h"
 
 typedef struct loom_low_packet_asm_state_t {
+  // Validated packet sequence being rendered.
+  const loom_low_packet_sequence_t* packets;
   // Schedule table being rendered.
   const loom_low_schedule_table_t* schedule;
   // Allocation table supplying locations for SSA values.
@@ -449,9 +451,8 @@ static iree_status_t loom_low_packet_asm_append_block(
   for (uint32_t i = 0; i < block->scheduled_node_count; ++i) {
     const iree_host_size_t packet_index =
         (iree_host_size_t)block->scheduled_node_start + i;
-    loom_low_packet_view_t packet = {0};
-    IREE_RETURN_IF_ERROR(loom_low_packet_view_at(schedule, state->allocation,
-                                                 packet_index, &packet));
+    const loom_low_packet_view_t packet =
+        loom_low_packet_sequence_at(state->packets, packet_index);
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "  "));
     IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_packet(state, &packet));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
@@ -464,7 +465,9 @@ iree_status_t loom_low_packet_asm_format(
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_asm_options_t* options,
     iree_string_builder_t* builder) {
-  IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
+  loom_low_packet_sequence_t packets = {0};
+  IREE_RETURN_IF_ERROR(loom_low_allocated_packet_sequence_initialize(
+      schedule, allocation, &packets));
   if (options->selected_asm_forms != NULL) {
     IREE_RETURN_IF_ERROR(loom_low_packet_validate_asm_form_table(
         schedule, options->selected_asm_forms));
@@ -474,6 +477,7 @@ iree_status_t loom_low_packet_asm_format(
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_acquire_value_scratch(allocation, &value_scratch));
   loom_low_packet_asm_state_t state = {
+      .packets = &packets,
       .schedule = schedule,
       .allocation = allocation,
       .selected_asm_forms = options->selected_asm_forms,

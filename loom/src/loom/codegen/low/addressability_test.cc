@@ -54,6 +54,7 @@ struct AddressabilityTestState {
   loom_op_t function_op = {};
   loom_op_t packet_op = {};
   loom_block_t block = {};
+  loom_low_schedule_block_t blocks[1] = {};
   loom_low_schedule_node_t nodes[1] = {};
   uint32_t scheduled_node_indices[1] = {};
   loom_low_schedule_table_t schedule = {};
@@ -157,6 +158,9 @@ void InitializeAddressabilityTestState(
 
   state->nodes[0].op = &state->packet_op;
   state->nodes[0].block = &state->block;
+  state->nodes[0].block_index = 0;
+  state->nodes[0].source_ordinal = 0;
+  state->nodes[0].scheduled_ordinal = 0;
   state->nodes[0].kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR;
   state->nodes[0].descriptor = &state->descriptors[0];
   state->nodes[0].operand_count = 1;
@@ -165,10 +169,19 @@ void InitializeAddressabilityTestState(
       loom_low_schedule_node_value_ordinals(&state->nodes[0]);
   value_ordinals[0] = 1;
   value_ordinals[1] = 0;
+  state->blocks[0] = (loom_low_schedule_block_t){
+      /*.block=*/&state->block,
+      /*.node_start=*/0,
+      /*.node_count=*/1,
+      /*.scheduled_node_start=*/0,
+      /*.scheduled_node_count=*/1,
+  };
   state->scheduled_node_indices[0] = 0;
   state->schedule.module = &state->module;
   state->schedule.function_op = &state->function_op;
   state->schedule.target.descriptor_set = &state->descriptor_set;
+  state->schedule.blocks = state->blocks;
+  state->schedule.block_count = IREE_ARRAYSIZE(state->blocks);
   state->schedule.nodes = state->nodes;
   state->schedule.node_count = IREE_ARRAYSIZE(state->nodes);
   state->schedule.scheduled_node_indices = state->scheduled_node_indices;
