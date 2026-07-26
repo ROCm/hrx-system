@@ -98,19 +98,30 @@ loom_low_packet_descriptor_operand_assignment(
   const loom_low_operand_t* descriptor_operand =
       &descriptor_set
            ->operands[descriptor->operand_start + descriptor_operand_index];
-  const loom_op_t* op = packet->node->op;
   if (descriptor_operand_index < descriptor->result_count) {
     const uint16_t result_index = descriptor_operand->source_value_index;
-    IREE_ASSERT_LT(result_index, op->result_count);
-    return loom_low_allocation_map_active_value_assignment(
-        allocation, loom_op_const_results(op)[result_index], NULL);
+    IREE_ASSERT_LT(result_index, packet->node->result_count);
+    const loom_value_ordinal_t value_ordinal =
+        loom_low_schedule_node_const_result_ordinals(
+            packet->node)[result_index];
+    const loom_low_allocation_assignment_t* assignment =
+        loom_low_allocation_assignment_for_value_ordinal(allocation,
+                                                         value_ordinal, NULL);
+    IREE_ASSERT(assignment != NULL);
+    return assignment;
   }
   const uint16_t packet_operand_index =
       loom_low_descriptor_operand_packet_index(descriptor_set, descriptor,
                                                descriptor_operand_index);
-  IREE_ASSERT_LT(packet_operand_index, op->operand_count);
-  return loom_low_allocation_map_active_value_assignment(
-      allocation, loom_op_const_operands(op)[packet_operand_index], NULL);
+  IREE_ASSERT_LT(packet_operand_index, packet->node->operand_count);
+  const loom_value_ordinal_t value_ordinal =
+      loom_low_schedule_node_const_operand_ordinals(
+          packet->node)[packet_operand_index];
+  const loom_low_allocation_assignment_t* assignment =
+      loom_low_allocation_assignment_for_value_ordinal(allocation,
+                                                       value_ordinal, NULL);
+  IREE_ASSERT(assignment != NULL);
+  return assignment;
 }
 
 // Returns the named descriptor-attribute slice for |packet|, or an empty slice
