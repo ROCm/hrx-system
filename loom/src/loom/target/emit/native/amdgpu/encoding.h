@@ -62,17 +62,19 @@ typedef struct loom_amdgpu_encoded_instruction_stream_t {
   iree_host_size_t native_insertion_count;
 } loom_amdgpu_encoded_instruction_stream_t;
 
-// Encodes one scheduled and allocated AMDGPU target-low function into an
-// arena-owned instruction byte stream. The returned bytes are only the
-// executable text payload; kernel descriptors, metadata, ELF sections, and
-// relocations are emitted by later native code-object layers. Values must be
-// physically allocated and unspilled.
+// Encodes one AMDGPU target-low function from an addressability-accepted
+// emission frame into an arena-owned instruction byte stream. The returned
+// bytes are only the executable text payload; kernel descriptors, metadata,
+// ELF sections, and relocations are emitted by later native code-object layers.
+// Values must be physically allocated and unspilled. This entry emits no
+// packet-plan insertions; frames that require them use the options form below.
 iree_status_t loom_amdgpu_encode_instruction_stream(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     iree_const_byte_span_t* out_text, iree_arena_allocator_t* arena);
 
-// Encodes one instruction stream with target-owned insertion plans.
+// Encodes one instruction stream with target-owned insertion plans built from
+// the same emission frame.
 iree_status_t loom_amdgpu_encode_instruction_stream_with_options(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
@@ -86,8 +88,8 @@ iree_status_t loom_amdgpu_encode_instruction_stream_result(
     loom_amdgpu_encoded_instruction_stream_t* out_stream,
     iree_arena_allocator_t* arena);
 
-// Encodes one instruction stream with target-owned insertion plans and returns
-// text plus relocation fixups.
+// Encodes one instruction stream with target-owned insertion plans built from
+// the same emission frame and returns text plus relocation fixups.
 iree_status_t loom_amdgpu_encode_instruction_stream_result_with_options(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
