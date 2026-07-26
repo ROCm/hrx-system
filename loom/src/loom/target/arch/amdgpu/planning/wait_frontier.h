@@ -23,6 +23,13 @@ extern "C" {
 // One bit for each normalized low memory space.
 typedef uint8_t loom_amdgpu_wait_memory_space_flags_t;
 
+enum {
+  // Number of normalized memory-space alias classes from GENERIC through
+  // WASM_MEMORY.
+  LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT =
+      LOOM_LOW_MEMORY_SPACE_WASM_MEMORY - LOOM_LOW_MEMORY_SPACE_GENERIC + 1u,
+};
+
 typedef enum loom_amdgpu_wait_memory_access_flag_bits_e {
   // Outstanding asynchronous reads.
   LOOM_AMDGPU_WAIT_MEMORY_ACCESS_FLAG_READ = 1u << 0,
@@ -59,11 +66,11 @@ typedef struct loom_amdgpu_wait_frontier_node_t {
   loom_amdgpu_vmem_result_order_class_t vmem_result_order_class;
 } loom_amdgpu_wait_frontier_node_t;
 
-// Outstanding memory-space flags grouped by target counter and access kind.
+// Outstanding counter masks indexed by aliasing consumer memory space.
 typedef struct loom_amdgpu_wait_memory_state_t {
-  // Packed read and write space flags indexed by target counter slot. Read
-  // flags occupy the low byte and write flags occupy the high byte.
-  uint16_t counter_access_space_flags[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT];
+  // Packed read counters in the low byte and write counters in the high byte
+  // for each normalized consumer space.
+  uint16_t access_counter_masks[LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT];
 } loom_amdgpu_wait_memory_state_t;
 
 // Cross-block wait frontier for one scheduled function.
