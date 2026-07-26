@@ -1429,7 +1429,7 @@ static iree_status_t loom_amdgpu_try_encode_special_descriptor_packet(
   }
 }
 
-static iree_status_t loom_amdgpu_prepare_descriptor_packet_encoding(
+static iree_status_t loom_amdgpu_verify_unplanned_descriptor_address_state(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
   const loom_amdgpu_address_state_requirement_t requirement =
       loom_amdgpu_address_state_requirement_for_packet(state->allocation,
@@ -1570,8 +1570,10 @@ static iree_status_t loom_amdgpu_encode_generic_descriptor_packet(
 
 static iree_status_t loom_amdgpu_encode_regular_descriptor_packet(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_prepare_descriptor_packet_encoding(state, packet));
+  if (state->address_state == NULL) {
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_verify_unplanned_descriptor_address_state(state, packet));
+  }
 
   bool encoded = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_try_encode_special_descriptor_packet(
@@ -2079,14 +2081,6 @@ static iree_status_t loom_amdgpu_encode_wait_packets_before_packet(
   return iree_ok_status();
 }
 
-static bool loom_amdgpu_address_state_is_before_node(
-    const loom_amdgpu_address_state_transition_t* transition,
-    const loom_low_schedule_node_t* node) {
-  return transition->block_index < node->block_index ||
-         (transition->block_index == node->block_index &&
-          transition->scheduled_ordinal < node->scheduled_ordinal);
-}
-
 static bool loom_amdgpu_address_state_matches_packet(
     const loom_amdgpu_address_state_transition_t* transition,
     const loom_low_packet_view_t* packet) {
@@ -2105,23 +2099,10 @@ static iree_status_t loom_amdgpu_encode_address_state_before_packet(
          state->address_state->transition_count) {
     const loom_amdgpu_address_state_transition_t* transition =
         &state->address_state->transitions[state->next_address_state_index];
-    if (loom_amdgpu_address_state_is_before_node(transition, packet->node)) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU address-state plan contains an insertion point before the "
-          "current scheduled packet");
-    }
     if (!loom_amdgpu_address_state_matches_packet(transition, packet)) {
       return iree_ok_status();
     }
-    const uint8_t previous_mode = (uint8_t)(transition->mode_immediate >> 8);
     const uint8_t new_mode = (uint8_t)(transition->mode_immediate & 0xFFu);
-    if (state->current_vgpr_msb_mode != previous_mode) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU address-state transition previous mode does not match the "
-          "native encoding stream");
-    }
     IREE_RETURN_IF_ERROR(loom_amdgpu_encode_vgpr_msb_mode(state, new_mode));
     ++state->next_address_state_index;
   }
@@ -2282,19 +2263,19 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_into_state(
       state->current_packet = NULL;
       IREE_RETURN_IF_ERROR(status);
     }
-    if (state->current_vgpr_msb_mode != 0) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU native encoding block left VGPR-MSB address state active");
+    if (state->address_state == NULL) {
+      if (state->current_vgpr_msb_mode != 0) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "AMDGPU native encoding block left VGPR-MSB address state active");
+      }
+    } else {
+      IREE_ASSERT_EQ(state->current_vgpr_msb_mode, 0);
     }
   }
-  if (state->address_state != NULL &&
-      state->next_address_state_index !=
-          state->address_state->transition_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU native encoding address-state plan contains an unmatched "
-        "insertion point");
+  if (state->address_state != NULL) {
+    IREE_ASSERT_EQ(state->next_address_state_index,
+                   state->address_state->transition_count);
   }
   if (state->wait_packets != NULL &&
       state->next_wait_packet_index != state->wait_packets->packet_count) {
