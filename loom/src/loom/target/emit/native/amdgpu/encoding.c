@@ -130,28 +130,17 @@ static iree_string_view_t loom_amdgpu_descriptor_string(
   return loom_low_descriptor_set_string(descriptor_set, string_offset);
 }
 
-static iree_status_t loom_amdgpu_append_u32(loom_amdgpu_encode_state_t* state,
-                                            uint32_t value) {
-  iree_host_size_t next_length = 0;
-  if (!iree_host_size_checked_add(state->length, sizeof(value), &next_length)) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "AMDGPU encoded instruction stream length overflowed");
-  }
+static void loom_amdgpu_append_u32(loom_amdgpu_encode_state_t* state,
+                                   uint32_t value) {
   if (state->data != NULL) {
-    if (state->capacity < state->length ||
-        state->capacity - state->length < sizeof(value)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU encoded instruction stream overflowed "
-                              "its planned byte length");
-    }
+    IREE_ASSERT(state->length <= state->capacity &&
+                sizeof(value) <= state->capacity - state->length);
     state->data[state->length + 0] = (uint8_t)(value & 0xFFu);
     state->data[state->length + 1] = (uint8_t)((value >> 8) & 0xFFu);
     state->data[state->length + 2] = (uint8_t)((value >> 16) & 0xFFu);
     state->data[state->length + 3] = (uint8_t)((value >> 24) & 0xFFu);
   }
-  state->length = next_length;
-  return iree_ok_status();
+  state->length += sizeof(value);
 }
 
 static uint64_t loom_amdgpu_low_bit_mask(uint16_t bit_count) {
@@ -286,38 +275,21 @@ static void loom_amdgpu_propagate_pc_register(loom_amdgpu_encode_state_t* state,
   state->pc_registers[destination_sgpr] = state->pc_registers[source_sgpr];
 }
 
-static iree_status_t loom_amdgpu_append_encoding_packet(
+static void loom_amdgpu_append_encoding_packet(
     loom_amdgpu_encode_state_t* state,
     const loom_amdgpu_encoding_packet_t* packet) {
-  if (state->instruction_count == UINT64_MAX) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "AMDGPU native instruction count overflowed");
-  }
   for (uint16_t i = 0; i < packet->word_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_append_u32(state, packet->words[i]));
+    loom_amdgpu_append_u32(state, packet->words[i]);
   }
   ++state->instruction_count;
-  return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_record_native_insertion(
+static void loom_amdgpu_record_native_insertion(
     loom_amdgpu_encode_state_t* state, loom_amdgpu_native_insertion_kind_t kind,
     uint16_t immediate) {
-  if (state->current_packet == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU native insertion has no scheduled packet boundary");
-  }
-  if (state->native_insertion_count == IREE_HOST_SIZE_MAX) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "AMDGPU native insertion count overflowed");
-  }
   if (state->native_insertions != NULL) {
-    if (state->native_insertion_count >= state->native_insertion_capacity) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU native insertion stream exceeded its planned capacity");
-    }
+    IREE_ASSERT_LT(state->native_insertion_count,
+                   state->native_insertion_capacity);
     const loom_low_schedule_node_t* node = state->current_packet->node;
     state->native_insertions[state->native_insertion_count] =
         (loom_amdgpu_native_insertion_t){
@@ -329,7 +301,6 @@ static iree_status_t loom_amdgpu_record_native_insertion(
         };
   }
   ++state->native_insertion_count;
-  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_encode_vgpr_msb_mode(
@@ -344,10 +315,9 @@ static iree_status_t loom_amdgpu_encode_vgpr_msb_mode(
   IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_sopp_simm16(
       state->encoding_table, state->descriptors.set_vgpr_msb->encoding_id,
       immediate, &encoded_packet));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_append_encoding_packet(state, &encoded_packet));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_record_native_insertion(
-      state, LOOM_AMDGPU_NATIVE_INSERTION_ADDRESS_STATE, immediate));
+  loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  loom_amdgpu_record_native_insertion(
+      state, LOOM_AMDGPU_NATIVE_INSERTION_ADDRESS_STATE, immediate);
   state->current_vgpr_msb_mode = new_mode;
   return iree_ok_status();
 }
@@ -783,25 +753,14 @@ static iree_status_t loom_amdgpu_find_rel32_text_fixup_immediates(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_append_text_fixup(
+static void loom_amdgpu_append_text_fixup(
     loom_amdgpu_encode_state_t* state,
     const loom_amdgpu_hsaco_text_fixup_t* fixup) {
   if (state->text_fixups != NULL) {
-    if (state->text_fixup_count >= state->text_fixup_capacity) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU native encoding wrote more text fixups "
-                              "than planned");
-    }
+    IREE_ASSERT_LT(state->text_fixup_count, state->text_fixup_capacity);
     state->text_fixups[state->text_fixup_count] = *fixup;
   }
-  iree_host_size_t next_count = 0;
-  if (!iree_host_size_checked_add(state->text_fixup_count, 1, &next_count)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "AMDGPU native encoding text fixup count "
-                            "overflowed");
-  }
-  state->text_fixup_count = next_count;
-  return iree_ok_status();
+  ++state->text_fixup_count;
 }
 
 static iree_status_t loom_amdgpu_packet_lhs_pc_base(
@@ -918,7 +877,8 @@ static iree_status_t loom_amdgpu_encode_sop1_s_mov_b32(
   loom_amdgpu_encoding_packet_t encoded_packet;
   IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_mov_b32_u32(
       state->encoding_table, sdst, imm32, &encoded_packet));
-  return loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_encode_vop1_v_mov_b32(
@@ -932,7 +892,8 @@ static iree_status_t loom_amdgpu_encode_vop1_v_mov_b32(
   loom_amdgpu_encoding_packet_t encoded_packet;
   IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_v_mov_b32_u32(
       state->encoding_table, vdst, imm32, &encoded_packet));
-  return loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_encode_s_mov_b32_register(
@@ -948,8 +909,7 @@ static iree_status_t loom_amdgpu_encode_s_mov_b32_register(
   loom_amdgpu_encoding_packet_t encoded_packet;
   IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_mov_b32_sgpr(
       state->encoding_table, sdst, ssrc0, &encoded_packet));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_append_encoding_packet(state, &encoded_packet));
+  loom_amdgpu_append_encoding_packet(state, &encoded_packet);
   loom_amdgpu_propagate_pc_register(state, sdst, ssrc0);
   return iree_ok_status();
 }
@@ -967,7 +927,8 @@ static iree_status_t loom_amdgpu_encode_v_mov_b32_register(
   loom_amdgpu_encoding_packet_t encoded_packet;
   IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_v_mov_b32_vgpr(
       state->encoding_table, vdst, src0, &encoded_packet));
-  return loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_encode_v_mov_b32_u32(
@@ -983,7 +944,8 @@ static iree_status_t loom_amdgpu_encode_v_mov_b32_u32(
   loom_amdgpu_encoding_packet_t encoded_packet;
   IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_v_mov_b32_u32(
       state->encoding_table, vdst, imm32, &encoded_packet));
-  return loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_encode_vgpr_move_location(
@@ -1232,7 +1194,8 @@ static iree_status_t loom_amdgpu_encode_sopp_simm16(
   loom_amdgpu_encoding_packet_t encoded_packet;
   IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_sopp_simm16(
       state->encoding_table, opcode, immediate, &encoded_packet));
-  return loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_encode_s_nop_cycles(
@@ -1433,8 +1396,7 @@ static iree_status_t loom_amdgpu_try_encode_vop2_u32_vgpr_packet(
   IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_vop2_u32_vgpr(
       state->encoding_table, packet->descriptor->encoding_id, vdst, literal,
       vsrc1, &encoded_packet));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_append_encoding_packet(state, &encoded_packet));
+  loom_amdgpu_append_encoding_packet(state, &encoded_packet);
   *out_encoded = true;
   return iree_ok_status();
 }
@@ -1600,9 +1562,10 @@ static iree_status_t loom_amdgpu_encode_generic_descriptor_packet(
         .target_symbol = rel32_target_symbol,
         .target_symbol_byte_offset = rel32_target_symbol_byte_offset,
     };
-    IREE_RETURN_IF_ERROR(loom_amdgpu_append_text_fixup(state, &fixup));
+    loom_amdgpu_append_text_fixup(state, &fixup);
   }
-  return loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_encode_regular_descriptor_packet(
@@ -1641,7 +1604,8 @@ static iree_status_t loom_amdgpu_encode_vopd_pair(
     IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_vopdxy(
         state->encoding_table, &fields, &encoded_packet));
   }
-  return loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_try_encode_vopd_packet(
@@ -2050,7 +2014,8 @@ static iree_status_t loom_amdgpu_encode_generic_wait_packet(
       state->encoding_table, descriptor->encoding_format_id,
       descriptor->encoding_id, field_values, field_value_count,
       &encoded_packet));
-  return loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_encode_wait_packet(
@@ -2465,46 +2430,24 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
   if (iree_status_is_ok(status) && sizing_state.length != 0) {
     status = loom_amdgpu_encode_instruction_stream_into_state(&writing_state);
   }
-  if (iree_status_is_ok(status) &&
-      writing_state.length != sizing_state.length) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "AMDGPU native encoding wrote %" PRIhsz
-                              " bytes after planning %" PRIhsz,
-                              writing_state.length, sizing_state.length);
-  }
-  if (iree_status_is_ok(status) &&
-      writing_state.text_fixup_count != sizing_state.text_fixup_count) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "AMDGPU native encoding wrote %" PRIhsz
-                              " text fixups after planning %" PRIhsz,
-                              writing_state.text_fixup_count,
-                              sizing_state.text_fixup_count);
-  }
-  if (iree_status_is_ok(status) &&
-      writing_state.instruction_count != sizing_state.instruction_count) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "AMDGPU native encoding wrote %" PRIu64
-                              " instructions after planning %" PRIu64,
-                              writing_state.instruction_count,
-                              sizing_state.instruction_count);
-  }
-  if (iree_status_is_ok(status) && writing_state.native_insertion_count !=
-                                       sizing_state.native_insertion_count) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "AMDGPU native encoding wrote %" PRIhsz
-                              " insertions after planning %" PRIhsz,
-                              writing_state.native_insertion_count,
-                              sizing_state.native_insertion_count);
-  }
-  if (iree_status_is_ok(status) && sizing_state.length != 0) {
-    *out_stream = (loom_amdgpu_encoded_instruction_stream_t){
-        .text = iree_make_const_byte_span(data, writing_state.length),
-        .instruction_count = writing_state.instruction_count,
-        .text_fixups = text_fixups,
-        .text_fixup_count = writing_state.text_fixup_count,
-        .native_insertions = native_insertions,
-        .native_insertion_count = writing_state.native_insertion_count,
-    };
+  if (iree_status_is_ok(status)) {
+    IREE_ASSERT_EQ(writing_state.length, sizing_state.length);
+    IREE_ASSERT_EQ(writing_state.instruction_count,
+                   sizing_state.instruction_count);
+    IREE_ASSERT_EQ(writing_state.text_fixup_count,
+                   sizing_state.text_fixup_count);
+    IREE_ASSERT_EQ(writing_state.native_insertion_count,
+                   sizing_state.native_insertion_count);
+    if (sizing_state.length != 0) {
+      *out_stream = (loom_amdgpu_encoded_instruction_stream_t){
+          .text = iree_make_const_byte_span(data, writing_state.length),
+          .instruction_count = writing_state.instruction_count,
+          .text_fixups = text_fixups,
+          .text_fixup_count = writing_state.text_fixup_count,
+          .native_insertions = native_insertions,
+          .native_insertion_count = writing_state.native_insertion_count,
+      };
+    }
   }
   loom_low_allocation_release_value_scratch(&scratch);
   return status;
