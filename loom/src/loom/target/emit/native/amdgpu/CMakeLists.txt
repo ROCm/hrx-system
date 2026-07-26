@@ -234,7 +234,6 @@ loom_cc_library(
     loom::target::arch::amdgpu::planning::packet_plan
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_info
-    loom::target::emit::native::fragment
   PUBLIC
 )
 endif()
@@ -290,7 +289,6 @@ loom_cc_library(
     loom::error::error_defs
     loom::target::arch::amdgpu::error_defs
     loom::target::arch::amdgpu::refs::target_refs
-    loom::target::emit::native::fragment
   PUBLIC
 )
 endif()

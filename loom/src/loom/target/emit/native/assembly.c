@@ -10,7 +10,6 @@
 
 #include "loom/ir/context.h"
 #include "loom/ops/low/ops.h"
-#include "loom/target/emit/native/fragment.h"
 
 iree_string_view_t loom_native_assembly_module_string(
     const loom_module_t* module, loom_string_id_t string_id) {
@@ -228,9 +227,6 @@ iree_status_t loom_native_assembly_format_fragment(
     const loom_low_allocation_table_t* allocation,
     const loom_native_assembly_format_options_t* options,
     iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
-  IREE_RETURN_IF_ERROR(
-      loom_native_fragment_validate_emission_inputs(schedule, allocation));
-
   loom_low_allocation_value_scratch_t value_scratch = {0};
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_acquire_value_scratch(allocation, &value_scratch));

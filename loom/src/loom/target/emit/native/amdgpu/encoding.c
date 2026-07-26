@@ -21,7 +21,6 @@
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/register_class.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
-#include "loom/target/emit/native/fragment.h"
 
 #define LOOM_AMDGPU_MAX_PACKET_FIELD_VALUES 32u
 #define LOOM_AMDGPU_SGPR_COUNT 128u
@@ -2959,8 +2958,6 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
     loom_amdgpu_encoded_instruction_stream_t* out_stream,
     iree_arena_allocator_t* arena) {
   *out_stream = (loom_amdgpu_encoded_instruction_stream_t){0};
-  IREE_RETURN_IF_ERROR(
-      loom_native_fragment_validate_emission_inputs(schedule, allocation));
   const loom_amdgpu_packet_plan_t* packet_plan =
       options ? options->packet_plan : NULL;
   const loom_amdgpu_address_state_plan_t* address_state =
