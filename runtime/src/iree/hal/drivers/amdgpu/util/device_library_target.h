@@ -39,10 +39,15 @@ typedef struct iree_hal_amdgpu_device_library_target_candidate_list_t {
 bool iree_hal_amdgpu_device_library_target_matches_file_arch(
     iree_string_view_t file_arch, iree_string_view_t target);
 
-// Builds ordered device-library target candidates for a qualified physical
-// target identity.
-iree_status_t iree_hal_amdgpu_device_library_target_candidates_from_target(
-    const iree_hal_amdgpu_target_id_t* target_id,
+// Builds ordered device-library candidates for one reported agent ISA.
+//
+// |physical_target_id| is the highest-priority identity of the physical agent
+// and qualifies stepping-specific artifact selection. |isa_target_id| is one
+// entry from that agent's priority-ordered ISA set. An incompatible fallback
+// ISA produces an empty candidate list.
+iree_status_t iree_hal_amdgpu_device_library_target_candidates_from_agent_isa(
+    const iree_hal_amdgpu_target_id_t* physical_target_id,
+    const iree_hal_amdgpu_target_id_t* isa_target_id,
     iree_hal_amdgpu_device_library_target_candidate_list_t* out_candidates);
 
 #ifdef __cplusplus

@@ -404,6 +404,7 @@ iree_runtime_cc_library(
     name = "device_library_target",
     srcs = ["device_library_target.c"],
     hdrs = ["device_library_target.h"],
+    textual_hdrs = ["device_library_target_map.inl"],
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal/executable/amdgpu:target_id",

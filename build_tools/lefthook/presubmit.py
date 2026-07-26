@@ -1180,7 +1180,7 @@ def run_build_filename_check(paths: list[str]) -> bool:
 
 
 def run_bazel_to_cmake(fix: bool, verbose: bool) -> bool:
-    command = ["python", "build_tools/bazel_to_cmake/bazel_to_cmake.py"]
+    command = [sys.executable, "build_tools/bazel_to_cmake/bazel_to_cmake.py"]
     command.append("--stage-updates" if fix else "--check")
     return run_command(command, "Bazel-to-CMake", verbose)
 
@@ -1189,11 +1189,12 @@ def run_amdgpu_target_map(paths: list[str], fix: bool, verbose: bool) -> bool:
     relevant_prefixes = (
         "build_tools/amdgpu/elf_machine_map.inl",
         "build_tools/amdgpu/target_map.",
+        "runtime/src/iree/hal/drivers/amdgpu/util/device_library_target_map.inl",
         "runtime/src/iree/hal/executable/amdgpu/target_id_map.inl",
     )
     if not any(path.startswith(relevant_prefixes) for path in paths):
         return skip_step("AMDGPU target map", "no AMDGPU target-map inputs")
-    command = ["python", "build_tools/amdgpu/target_map.py"]
+    command = [sys.executable, "build_tools/amdgpu/target_map.py"]
     if not fix:
         command.append("--check")
     ok = run_command(command, "AMDGPU target map", verbose)
@@ -1204,6 +1205,7 @@ def run_amdgpu_target_map(paths: list[str], fix: bool, verbose: bool) -> bool:
                 "build_tools/amdgpu/target_map.bzl",
                 "build_tools/amdgpu/target_map.cmake",
                 "build_tools/amdgpu/target_map.h",
+                "runtime/src/iree/hal/drivers/amdgpu/util/device_library_target_map.inl",
                 "runtime/src/iree/hal/executable/amdgpu/target_id_map.inl",
             ],
             verbose,

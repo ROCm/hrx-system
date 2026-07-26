@@ -99,7 +99,7 @@ function(_iree_hal_amdgpu_append_generator_flag out_args flag value)
   endif()
 endfunction()
 
-function(_iree_hal_amdgpu_source_generator_args out_args targets_arg)
+function(_iree_hal_amdgpu_source_generator_args out_args device_binary_targets_arg)
   set(_args
     "${Python3_EXECUTABLE}"
     "${IREE_SOURCE_DIR}/build_tools/scripts/amdgpu_device_binaries.py"
@@ -109,8 +109,8 @@ function(_iree_hal_amdgpu_source_generator_args out_args targets_arg)
     "${IREE_BINARY_DIR}"
     "--output-dir"
     "${CMAKE_CURRENT_BINARY_DIR}"
-    "--targets"
-    "${targets_arg}"
+    "--device-binary-targets"
+    "${device_binary_targets_arg}"
   )
 
   _iree_hal_amdgpu_append_generator_flag(
@@ -204,7 +204,7 @@ set(_BITCODE_HDRS
 
 iree_amdgpu_expand_target_selectors(
   _DEVICE_BINARY_TARGETS
-  "${IREE_AMDGPU_TARGET_EXPANSION_CODE_OBJECT}"
+  "${IREE_AMDGPU_TARGET_EXPANSION_DEVICE_BINARY}"
   ${IREE_HAL_AMDGPU_TARGETS}
 )
 
