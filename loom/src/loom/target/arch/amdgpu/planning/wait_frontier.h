@@ -113,6 +113,15 @@ typedef struct loom_amdgpu_wait_frontier_t {
     iree_host_size_t lease_count;
     // Number of packed state words per block.
     iree_host_size_t word_count;
+    // Lease membership grouped by release counter.
+    struct {
+      // Inline words for a one-word storage frontier.
+      uint64_t inline_words[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT];
+      // Words indexed by AMDGPU wait-counter slot. Points into |inline_words|
+      // for one-word frontiers and otherwise into the arena; present whenever
+      // |active_words| is present.
+      uint64_t* words;
+    } release_membership;
     // Conservative transitive outgoing words for every block.
     uint64_t* static_outgoing_words;
     // Refined outgoing words recorded after each processed block.
@@ -140,7 +149,8 @@ loom_amdgpu_wait_memory_space_flags_t loom_amdgpu_wait_memory_space_flag(
     loom_low_memory_space_t memory_space);
 
 // Initializes bounded cross-block state from the schedule CFG, allocation,
-// and node classifications. All retained storage is owned by |arena|.
+// and node classifications. Dynamically retained storage is owned by |arena|;
+// inline state lives in |out_frontier|.
 iree_status_t loom_amdgpu_wait_frontier_initialize(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,

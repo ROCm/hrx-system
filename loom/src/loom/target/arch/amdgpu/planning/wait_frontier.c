@@ -83,6 +83,14 @@ loom_amdgpu_wait_frontier_const_storage_lease_block_words(
   return states + block_index * frontier->storage_leases.word_count;
 }
 
+static const uint64_t*
+loom_amdgpu_wait_frontier_const_storage_lease_counter_words(
+    const loom_amdgpu_wait_frontier_t* frontier, uint32_t counter_slot) {
+  IREE_ASSERT_LT(counter_slot, LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT);
+  return frontier->storage_leases.release_membership.words +
+         counter_slot * frontier->storage_leases.word_count;
+}
+
 static bool loom_amdgpu_wait_storage_lease_state_union_changed(
     uint64_t* target, const uint64_t* source, iree_host_size_t word_count) {
   bool changed = false;
@@ -129,23 +137,6 @@ static void loom_amdgpu_wait_storage_lease_state_clear(
   words[word_index] &= ~(UINT64_C(1) << bit_index);
 }
 
-static bool loom_amdgpu_wait_frontier_storage_lease_has_counter(
-    const loom_amdgpu_wait_frontier_t* frontier, iree_host_size_t lease_index,
-    uint32_t counter_mask) {
-  IREE_ASSERT_LT(lease_index, frontier->storage_leases.lease_count);
-  const loom_low_allocation_storage_lease_t* lease =
-      &frontier->allocation->storage_lease_instances[lease_index];
-  IREE_ASSERT_LT(lease->lease_record_index,
-                 frontier->allocation->storage_leases.record_count);
-  const loom_low_storage_lease_record_t* record =
-      &frontier->allocation->storage_leases.records[lease->lease_record_index];
-  return record->release_scope ==
-             LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS &&
-         loom_amdgpu_wait_counter_id_is_valid(record->release_class_id) &&
-         iree_any_bit_set(counter_mask, loom_amdgpu_wait_counter_mask(
-                                            record->release_class_id));
-}
-
 static loom_amdgpu_wait_xcnt_group_flags_t
 loom_amdgpu_wait_frontier_storage_lease_xcnt_group(
     const loom_amdgpu_wait_frontier_t* frontier, iree_host_size_t lease_index) {
@@ -168,16 +159,18 @@ loom_amdgpu_wait_frontier_storage_lease_xcnt_group(
 static void loom_amdgpu_wait_storage_lease_state_drain(
     const loom_amdgpu_wait_frontier_t* frontier, uint64_t* words,
     uint32_t counter_mask) {
-  for (iree_host_size_t lease_index = 0;
-       lease_index < frontier->storage_leases.lease_count; ++lease_index) {
-    if (loom_amdgpu_wait_frontier_storage_lease_has_counter(
-            frontier, lease_index, counter_mask)) {
-      const iree_host_size_t word_index =
-          lease_index / LOOM_AMDGPU_WAIT_STORAGE_LEASES_PER_WORD;
-      const uint32_t bit_index =
-          (uint32_t)(lease_index % LOOM_AMDGPU_WAIT_STORAGE_LEASES_PER_WORD);
-      words[word_index] &= ~(UINT64_C(1) << bit_index);
+  counter_mask &= LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL;
+  while (counter_mask != 0) {
+    const uint32_t counter_slot =
+        (uint32_t)iree_math_count_trailing_zeros_u32(counter_mask);
+    const uint64_t* release_counter_words =
+        loom_amdgpu_wait_frontier_const_storage_lease_counter_words(
+            frontier, counter_slot);
+    for (iree_host_size_t word_index = 0;
+         word_index < frontier->storage_leases.word_count; ++word_index) {
+      words[word_index] &= ~release_counter_words[word_index];
     }
+    counter_mask &= counter_mask - 1;
   }
 }
 
@@ -688,6 +681,44 @@ iree_status_t loom_amdgpu_wait_frontier_initialize(
     memset(out_frontier->storage_leases.active_words, 0,
            out_frontier->storage_leases.word_count *
                sizeof(*out_frontier->storage_leases.active_words));
+    const iree_host_size_t release_counter_word_count =
+        LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT *
+        out_frontier->storage_leases.word_count;
+    if (out_frontier->storage_leases.word_count == 1) {
+      out_frontier->storage_leases.release_membership.words =
+          out_frontier->storage_leases.release_membership.inline_words;
+    } else {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          arena, release_counter_word_count,
+          sizeof(*out_frontier->storage_leases.release_membership.words),
+          (void**)&out_frontier->storage_leases.release_membership.words));
+      memset(
+          out_frontier->storage_leases.release_membership.words, 0,
+          release_counter_word_count *
+              sizeof(*out_frontier->storage_leases.release_membership.words));
+    }
+    for (iree_host_size_t lease_index = 0;
+         lease_index < out_frontier->storage_leases.lease_count;
+         ++lease_index) {
+      const loom_low_allocation_storage_lease_t* lease =
+          &allocation->storage_lease_instances[lease_index];
+      IREE_ASSERT_LT(lease->lease_record_index,
+                     allocation->storage_leases.record_count);
+      const loom_low_storage_lease_record_t* record =
+          &allocation->storage_leases.records[lease->lease_record_index];
+      if (record->release_scope !=
+              LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS ||
+          !loom_amdgpu_wait_counter_id_is_valid(record->release_class_id)) {
+        continue;
+      }
+      const uint32_t counter_slot =
+          loom_amdgpu_wait_counter_slot_from_id(record->release_class_id);
+      uint64_t* release_counter_words =
+          out_frontier->storage_leases.release_membership.words +
+          counter_slot * out_frontier->storage_leases.word_count;
+      loom_amdgpu_wait_storage_lease_state_set(release_counter_words,
+                                               lease_index);
+    }
   }
 
   if (!has_cross_block_state ||
