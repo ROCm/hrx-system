@@ -42,6 +42,8 @@ typedef enum loom_amdgpu_native_asm_immediate_format_e {
 } loom_amdgpu_native_asm_immediate_format_t;
 
 typedef struct loom_amdgpu_assembly_emit_state_t {
+  // Function-local storage layout shared by all storage-address packets.
+  const loom_amdgpu_storage_layout_t* storage_layout;
   // Address-state plan consumed in scheduled insertion order.
   const loom_amdgpu_address_state_plan_t* address_state;
   // Wait-packet plan consumed in scheduled insertion order.
@@ -2629,8 +2631,8 @@ static iree_status_t loom_amdgpu_append_storage_address_packet(
       (loom_amdgpu_assembly_emit_state_t*)user_data;
   const loom_op_t* op = context->packet->node->op;
   loom_amdgpu_storage_layout_reference_t reference;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_resolve_reference(
-      context->schedule->module, context->schedule->function_op,
+  IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_lookup_reference(
+      emit_state->storage_layout, context->schedule->module,
       loom_low_storage_address_storage(op), &reference));
   const uint64_t offset = (uint64_t)loom_low_storage_address_offset(op);
   uint64_t byte_offset = reference.reservation.byte_offset;
@@ -3670,29 +3672,8 @@ iree_status_t loom_amdgpu_emit_assembly_fragment(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_verify_assembly_target(schedule));
-  loom_amdgpu_assembly_emit_state_t emit_state = {
-      .current_block_index = LOOM_LOW_PACKET_INDEX_NONE,
-  };
-  const loom_native_assembly_format_options_t options =
-      loom_amdgpu_assembly_options(
-          &emit_state,
-          (loom_native_assembly_append_packet_callback_t){
-              .fn = loom_amdgpu_prepare_packet,
-              .user_data = &emit_state,
-          },
-          (loom_native_assembly_append_packet_callback_t){
-              .fn = loom_amdgpu_append_stateful_descriptor_packet,
-              .user_data = &emit_state,
-          });
-  IREE_RETURN_IF_ERROR(loom_native_assembly_format_fragment(
-      schedule, allocation, &options, builder, scratch_arena));
-  if (emit_state.current_vgpr_msb_mode != 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU assembly left VGPR-MSB address state active at function end");
-  }
-  return iree_ok_status();
+  return loom_amdgpu_emit_assembly_fragment_with_options(
+      schedule, allocation, /*options=*/NULL, builder, scratch_arena);
 }
 
 iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
@@ -3701,6 +3682,15 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
     const loom_amdgpu_assembly_fragment_options_t* options,
     iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
   IREE_RETURN_IF_ERROR(loom_amdgpu_verify_assembly_target(schedule));
+  loom_amdgpu_storage_layout_t derived_storage_layout;
+  const loom_amdgpu_storage_layout_t* storage_layout =
+      options ? options->storage_layout : NULL;
+  if (storage_layout == NULL) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_build(
+        schedule->module, schedule->function_op, scratch_arena,
+        &derived_storage_layout));
+    storage_layout = &derived_storage_layout;
+  }
   const loom_amdgpu_packet_plan_t* packet_plan =
       options ? options->packet_plan : NULL;
   const loom_amdgpu_address_state_plan_t* address_state =
@@ -3713,6 +3703,7 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
       packet_plan ? &packet_plan->vopd_plan : NULL;
 
   loom_amdgpu_assembly_emit_state_t emit_state = {
+      .storage_layout = storage_layout,
       .address_state = address_state,
       .wait_packets = wait_packets,
       .wait_states = wait_states,

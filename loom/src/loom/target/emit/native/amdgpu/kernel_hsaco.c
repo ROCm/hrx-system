@@ -35,19 +35,13 @@ iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
       schedule, allocation, &record_options, &record, scratch_arena));
 
   loom_amdgpu_encoded_instruction_stream_t stream = {0};
-  const loom_amdgpu_packet_plan_t* packet_plan =
-      options ? options->packet_plan : NULL;
-  if (packet_plan != NULL) {
-    const loom_amdgpu_encode_instruction_stream_options_t encode_options = {
-        .packet_plan = packet_plan,
-    };
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_encode_instruction_stream_result_with_options(
-            schedule, allocation, &encode_options, &stream, scratch_arena));
-  } else {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_encode_instruction_stream_result(
-        schedule, allocation, &stream, scratch_arena));
-  }
+  const loom_amdgpu_encode_instruction_stream_options_t encode_options = {
+      .packet_plan = options ? options->packet_plan : NULL,
+      .storage_layout = &record.storage_layout,
+  };
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_encode_instruction_stream_result_with_options(
+          schedule, allocation, &encode_options, &stream, scratch_arena));
 
   const loom_amdgpu_kernel_entry_envelope_t* entry_envelope =
       loom_amdgpu_kernel_entry_envelope_for_processor(record.processor);
