@@ -453,6 +453,83 @@ TEST_F(LowPacketHazardPlanTest, SatisfiedStorageReleaseRetainsNoPlanStorage) {
   EXPECT_EQ(arena_.total_allocation_size, retained_owned_bytes_before);
 }
 
+TEST_F(LowPacketHazardPlanTest,
+       PreservesStorageReleaseRowsWhenRangeIndexAmortizes) {
+  const loom_low_packet_progress_provider_t progress_provider = {
+      /*.user_data=*/{},
+      /*.event_count=*/1,
+      /*.query=*/SyntheticProgressQuery,
+  };
+  loom_low_packet_progress_table_t progress = {};
+  IREE_ASSERT_OK(loom_low_packet_progress_build(
+      &packets_, &state_.allocation, &progress_provider, &arena_, &progress));
+
+  const loom_low_storage_lease_record_t storage_leases[1] = {
+      {
+          /*.packet_index=*/0,
+          /*.node_index=*/0,
+          /*.block_index=*/0,
+          /*.scheduled_ordinal=*/0,
+          /*.kind=*/{},
+          /*.attachment=*/{},
+          /*.attachment_index=*/{},
+          /*.unit_offset=*/{},
+          /*.unit_count=*/{},
+          /*.release_scope=*/{},
+          /*.release_class_id=*/kSyntheticProgressPipe,
+          /*.release_class_name=*/IREE_SV("synthetic.pipe"),
+          /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
+          /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
+          /*.release_reason_id=*/kSyntheticHazardStorageRelease,
+          /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
+      },
+  };
+  loom_low_storage_release_action_t storage_release_actions[6] = {};
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(storage_release_actions); ++i) {
+    storage_release_actions[i] = {
+        /*.insertion_packet_index=*/2,
+        /*.insertion_node_index=*/2,
+        /*.block_index=*/0,
+        /*.scheduled_ordinal=*/2,
+        /*.release_class_id=*/kSyntheticProgressPipe,
+        /*.release_class_name=*/IREE_SV("synthetic.pipe"),
+        /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
+        /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
+        /*.release_reason_id=*/kSyntheticHazardStorageRelease,
+        /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
+        /*.required_progress=*/i + 2,
+        /*.lease_record_index=*/0,
+    };
+  }
+  state_.allocation.storage_leases = {
+      /*.schedule=*/&state_.schedule,
+      /*.records=*/storage_leases,
+      /*.record_count=*/IREE_ARRAYSIZE(storage_leases),
+  };
+  state_.allocation.storage_release_actions = storage_release_actions;
+  state_.allocation.storage_release_action_count =
+      IREE_ARRAYSIZE(storage_release_actions);
+
+  const loom_low_packet_hazard_plan_provider_t hazard_provider = {
+      /*.user_data=*/{},
+      /*.event_count=*/0,
+      /*.query=*/EmptyResidualHazardQuery,
+  };
+  loom_low_packet_hazard_plan_t plan = {};
+  IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
+      &packets_, &state_.allocation, &progress, &hazard_provider, &arena_,
+      &plan));
+
+  ASSERT_EQ(plan.record_count, IREE_ARRAYSIZE(storage_release_actions));
+  for (uint32_t i = 0; i < plan.record_count; ++i) {
+    EXPECT_EQ(plan.records[i].consumer_node_index, 2u);
+    EXPECT_EQ(plan.records[i].insertion_packet_index, 2u);
+    EXPECT_EQ(plan.records[i].required_progress, i + 2);
+    EXPECT_EQ(plan.records[i].observed_progress, 1u);
+    EXPECT_EQ(plan.records[i].residual_progress, i + 1);
+  }
+}
+
 TEST_F(LowPacketHazardPlanTest, RejectsCombinedEventCountOverflow) {
   const loom_low_storage_lease_record_t storage_leases[1] = {
       {
