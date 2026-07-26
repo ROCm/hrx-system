@@ -38,6 +38,8 @@ typedef struct loom_low_packet_hazard_plan_build_state_t {
   iree_host_size_t storage_release_record_capacity;
   // Number of generic allocation storage-release records populated so far.
   iree_host_size_t storage_release_record_count;
+  // Observed progress indexed by allocation storage-release action.
+  uint32_t* storage_release_observed_progress;
 } loom_low_packet_hazard_plan_build_state_t;
 
 static bool loom_low_packet_hazard_plan_record_kind_is_valid(
@@ -214,19 +216,23 @@ static iree_status_t loom_low_packet_hazard_plan_append_storage_release_event(
 
 static iree_status_t loom_low_packet_hazard_plan_prepare_storage_releases(
     loom_low_packet_hazard_plan_build_state_t* state,
-    iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* transient_arena) {
   const loom_low_allocation_table_t* allocation = state->allocation;
   if (allocation == NULL || allocation->storage_release_action_count == 0) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      transient_arena, allocation->storage_release_action_count,
+      sizeof(*state->storage_release_observed_progress),
+      (void**)&state->storage_release_observed_progress));
   const iree_host_size_t packet_count = loom_low_packet_count(state->schedule);
   IREE_RETURN_IF_ERROR(loom_low_storage_release_action_index_build(
       allocation->storage_release_actions,
       allocation->storage_release_action_count,
       LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_PACKET, packet_count,
-      arena, &state->storage_release_action_index));
+      transient_arena, &state->storage_release_action_index));
   IREE_RETURN_IF_ERROR(loom_low_packet_progress_class_index_build(
-      state->progress, arena, &state->progress_class_index));
+      state->progress, transient_arena, &state->progress_class_index));
   for (iree_host_size_t i = 0; i < allocation->storage_release_action_count;
        ++i) {
     const loom_low_storage_release_action_t* action =
@@ -244,6 +250,7 @@ static iree_status_t loom_low_packet_hazard_plan_prepare_storage_releases(
         loom_low_packet_progress_class_index_observed_progress(
             &state->progress_class_index, lease_record->packet_index,
             action->insertion_packet_index, action->release_class_id);
+    state->storage_release_observed_progress[i] = observed_progress;
     if (observed_progress < action->required_progress) {
       iree_host_size_t next_record_capacity = 0;
       if (!iree_host_size_checked_add(state->storage_release_record_capacity, 1,
@@ -277,9 +284,7 @@ static iree_status_t loom_low_packet_hazard_plan_emit_storage_release_actions(
     const loom_low_storage_lease_record_t* lease_record =
         &allocation->storage_leases.records[action->lease_record_index];
     const uint32_t observed_progress =
-        loom_low_packet_progress_class_index_observed_progress(
-            &state->progress_class_index, lease_record->packet_index,
-            action->insertion_packet_index, action->release_class_id);
+        state->storage_release_observed_progress[action_index];
     if (observed_progress >= action->required_progress) {
       continue;
     }
@@ -358,44 +363,53 @@ iree_status_t loom_low_packet_hazard_plan_build(
       .progress = progress,
       .provider = provider,
   };
-  IREE_RETURN_IF_ERROR(
-      loom_low_packet_hazard_plan_prepare_storage_releases(&state, arena));
-  if (!iree_host_size_checked_add(provider->event_count,
+  iree_arena_allocator_t transient_arena;
+  iree_arena_initialize(arena->block_pool, &transient_arena);
+  iree_status_t status = loom_low_packet_hazard_plan_prepare_storage_releases(
+      &state, &transient_arena);
+  if (iree_status_is_ok(status) &&
+      !iree_host_size_checked_add(provider->event_count,
                                   state.storage_release_record_capacity,
                                   &state.record_capacity)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "hazard plan record count exceeds host size");
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "hazard plan record count exceeds host size");
   }
 
   loom_low_packet_hazard_plan_record_t* records = NULL;
-  if (state.record_capacity != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, state.record_capacity, sizeof(*records), (void**)&records));
+  if (iree_status_is_ok(status) && state.record_capacity != 0) {
+    status = iree_arena_allocate_array(arena, state.record_capacity,
+                                       sizeof(*records), (void**)&records);
   }
 
-  state.records = records;
-  IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_query_packets(&state));
-  if (state.target_record_count != provider->event_count) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "hazard plan provider declared %" PRIhsz
-                            " event(s) but emitted %" PRIhsz,
-                            provider->event_count, state.target_record_count);
+  if (iree_status_is_ok(status)) {
+    state.records = records;
+    status = loom_low_packet_hazard_plan_query_packets(&state);
   }
-  if (state.storage_release_record_count !=
-      state.storage_release_record_capacity) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "hazard plan expected %" PRIhsz
-                            " storage-release event(s) but emitted %" PRIhsz,
-                            state.storage_release_record_capacity,
-                            state.storage_release_record_count);
+  if (iree_status_is_ok(status) &&
+      state.target_record_count != provider->event_count) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "hazard plan provider declared %" PRIhsz
+                              " event(s) but emitted %" PRIhsz,
+                              provider->event_count, state.target_record_count);
+  }
+  if (iree_status_is_ok(status) && state.storage_release_record_count !=
+                                       state.storage_release_record_capacity) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "hazard plan expected %" PRIhsz
+                              " storage-release event(s) but emitted %" PRIhsz,
+                              state.storage_release_record_capacity,
+                              state.storage_release_record_count);
   }
 
-  *out_plan = (loom_low_packet_hazard_plan_t){
-      .schedule = schedule,
-      .allocation = allocation,
-      .progress = progress,
-      .records = records,
-      .record_count = state.record_capacity,
-  };
-  return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    *out_plan = (loom_low_packet_hazard_plan_t){
+        .schedule = schedule,
+        .allocation = allocation,
+        .progress = progress,
+        .records = records,
+        .record_count = state.record_capacity,
+    };
+  }
+  iree_arena_deinitialize(&transient_arena);
+  return status;
 }
