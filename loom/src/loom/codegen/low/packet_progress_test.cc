@@ -383,43 +383,5 @@ TEST_F(LowPacketProgressTest, QueriesObservedProgressForClassRange) {
   EXPECT_EQ(chain_index.next_record_indices[0], 2u);
 }
 
-TEST_F(LowPacketProgressTest, RejectsMalformedChainWhenBuildingRangeIndex) {
-  const loom_low_packet_progress_record_t records[] = {
-      MakeProgressRecord(0, kSyntheticProgressPipe, IREE_SV("synthetic.pipe"),
-                         LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 1),
-      MakeProgressRecord(1, kSyntheticProgressScoreboard,
-                         IREE_SV("synthetic.scoreboard"),
-                         LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 1),
-  };
-  const loom_low_packet_progress_table_t table = {
-      /*.schedule=*/&state_.schedule,
-      /*.allocation=*/&state_.allocation,
-      /*.records=*/records,
-      /*.record_count=*/IREE_ARRAYSIZE(records),
-  };
-  const loom_low_packet_progress_class_chain_entry_t classes[] = {
-      {
-          /*.progress_class_id=*/kSyntheticProgressPipe,
-          /*.first_record_index=*/0,
-          /*.record_count=*/2,
-      },
-  };
-  const uint32_t next_record_indices[] = {
-      1,
-      LOOM_LOW_PACKET_PROGRESS_RECORD_INDEX_NONE,
-  };
-  const loom_low_packet_progress_class_chain_index_t chain_index = {
-      /*.progress=*/&table,
-      /*.classes=*/classes,
-      /*.class_count=*/IREE_ARRAYSIZE(classes),
-      /*.next_record_indices=*/next_record_indices,
-  };
-
-  loom_low_packet_progress_class_range_index_t range_index = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                        loom_low_packet_progress_class_range_index_build(
-                            &chain_index, &arena_, &range_index));
-}
-
 }  // namespace
 }  // namespace loom

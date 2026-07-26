@@ -193,7 +193,7 @@ uint32_t loom_low_packet_progress_class_chain_index_observed_progress(
     iree_host_size_t start_packet_index, iree_host_size_t end_packet_index,
     uint16_t progress_class_id);
 
-// Builds contiguous per-class prefix ranges from a validated chain index.
+// Builds contiguous per-class prefix ranges from a chain index.
 //
 // The source chain remains unchanged and usable after this call. Prefix ranges
 // cost two complete progress-record passes to construct and are intended for
