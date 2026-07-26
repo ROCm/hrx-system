@@ -569,6 +569,10 @@ def _emit_source(
         encodings,
         _partitioned_fields_by_encoding(encodings, instructions, operand_types),
     )
+    maximum_format_field_count = max(
+        (compiled_format.field_count for compiled_format in compiled_formats),
+        default=0,
+    )
     v_mov_b32_opcode = _instruction_opcode(
         instructions,
         instruction_name="V_MOV_B32",
@@ -593,6 +597,11 @@ def _emit_source(
         f'#include "{public_header}"',
         "",
         "#include <stdint.h>",
+        "",
+        "static_assert(",
+        "    LOOM_AMDGPU_ENCODING_PACKET_FIELD_VALUE_CAPACITY >=",
+        f"        {maximum_format_field_count},",
+        '    "AMDGPU packet field workspace is too small for this target");',
         "",
     ]
     lines.extend(f"const loom_amdgpu_encoding_table_t* {table_view.table_function}(void);" for table_view in table_views if table_view.table_function != table_function)

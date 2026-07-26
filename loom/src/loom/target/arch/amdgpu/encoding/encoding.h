@@ -21,6 +21,10 @@ extern "C" {
 #endif
 
 #define LOOM_AMDGPU_ENCODING_MAX_WORD_COUNT 4u
+// Maximum encoding fields staged while packing one descriptor packet.
+// Generated target encoding tables prove that every format fits this
+// workspace at build time.
+#define LOOM_AMDGPU_ENCODING_PACKET_FIELD_VALUE_CAPACITY 32u
 // Sentinel passed to loom_amdgpu_encoding_pack when the descriptor supplies all
 // opcode-like fields through explicit encoding field values.
 #define LOOM_AMDGPU_ENCODING_OPCODE_NONE UINT16_MAX
