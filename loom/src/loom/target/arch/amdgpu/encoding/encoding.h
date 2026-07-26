@@ -319,6 +319,8 @@ typedef enum loom_amdgpu_vgpr_msb_slot_e {
 enum {
   // Number of low VGPR indices addressed by one S_SET_VGPR_MSB selector bank.
   LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE = 256,
+  // Number of banks encoded by each S_SET_VGPR_MSB selector.
+  LOOM_AMDGPU_VGPR_MSB_BANK_COUNT = 4,
 };
 
 // Returns the two-bit S_SET_VGPR_MSB mode shift for a non-NONE |slot|.

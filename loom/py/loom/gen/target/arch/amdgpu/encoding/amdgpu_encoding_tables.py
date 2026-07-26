@@ -34,6 +34,7 @@ from loom.target.arch.amdgpu.encoding import (  # noqa: E402
     AMDGPU_ENCODING_FIELD_IDS,
     AMDGPU_ENCODING_FORMAT_IDS,
     AMDGPU_ENCODING_FORMAT_XML_NAMES_BY_ID,
+    AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE,
     AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_COUNT,
     AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_OFFSET,
     amdgpu_encoding_field_name,
@@ -823,6 +824,16 @@ def _emit_source(
         '    "AMDGPU packet field workspace is too small for this target");',
         "",
     ]
+    if target == "rdna4_gfx125x":
+        lines.extend(
+            [
+                "static_assert(",
+                "    LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE ==",
+                f"        {AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE},",
+                '    "gfx125x descriptor and native encoding VGPR windows disagree");',
+                "",
+            ]
+        )
     lines.extend(f"const loom_amdgpu_encoding_table_t* {table_view.table_function}(void);" for table_view in table_views if table_view.table_function != table_function)
     if len(table_views) > 1:
         lines.append("")
@@ -1019,6 +1030,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         name_pattern=re.compile(r"v([0-9]+)"),
         description="OPR_SRC VGPR",
     )
+    if args.target == "rdna4_gfx125x" and vector_source_vgpr_count != AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE:
+        raise ValueError(f"{spec.source_name}: OPR_SRC exposes {vector_source_vgpr_count} VGPRs; gfx125x S_SET_VGPR_MSB expects {AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE}")
     table_prefix = _table_prefix_for_target(args.target)
     table_function = _table_function_for_target(args.target)
     args.header.parent.mkdir(parents=True, exist_ok=True)

@@ -2294,32 +2294,15 @@ typedef struct loom_amdgpu_assembly_move_state_t {
   uint32_t emitted_count;
 } loom_amdgpu_assembly_move_state_t;
 
-static iree_status_t loom_amdgpu_vgpr_msb_insert_requirement(
+static void loom_amdgpu_vgpr_msb_insert_requirement(
     loom_amdgpu_vgpr_msb_slot_t slot, uint32_t bank, uint8_t* mask,
     uint8_t* value) {
-  if (slot == LOOM_AMDGPU_VGPR_MSB_SLOT_NONE) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU VGPR-MSB assembly state has no encoding "
-                            "slot");
-  }
-  if (bank > 3) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU VGPR-MSB assembly state bank %" PRIu32
-                            " exceeds the two-bit selector range",
-                            bank);
-  }
+  IREE_ASSERT_LT(bank, LOOM_AMDGPU_VGPR_MSB_BANK_COUNT);
   const uint8_t shift = loom_amdgpu_vgpr_msb_slot_shift(slot);
   const uint8_t slot_mask = (uint8_t)(0x3u << shift);
   const uint8_t slot_value = (uint8_t)(bank << shift);
-  if ((*mask & slot_mask) != 0 && (*value & slot_mask) != slot_value) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU VGPR-MSB assembly state requires conflicting banks for one "
-        "encoding slot");
-  }
   *mask |= slot_mask;
   *value = (uint8_t)((*value & ~slot_mask) | slot_value);
-  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_append_move_line_prefix(
@@ -2383,12 +2366,12 @@ static iree_status_t loom_amdgpu_append_move(
     uint8_t mask = 0;
     uint8_t value = 0;
     if (destination->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_vgpr_msb_insert_requirement(
-          LOOM_AMDGPU_VGPR_MSB_SLOT_DST, destination_bank, &mask, &value));
+      loom_amdgpu_vgpr_msb_insert_requirement(LOOM_AMDGPU_VGPR_MSB_SLOT_DST,
+                                              destination_bank, &mask, &value);
     }
     if (source->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_vgpr_msb_insert_requirement(
-          LOOM_AMDGPU_VGPR_MSB_SLOT_SRC0, source_bank, &mask, &value));
+      loom_amdgpu_vgpr_msb_insert_requirement(LOOM_AMDGPU_VGPR_MSB_SLOT_SRC0,
+                                              source_bank, &mask, &value);
     }
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_append_vgpr_msb_requirement(state, mask, value));
@@ -2494,8 +2477,8 @@ static iree_status_t loom_amdgpu_emit_edge_copy_group(
       context->move_scratch, group->temporary_count, &temporaries));
   loom_low_move_sequence_populate_edge_copy_units(context->allocation, group,
                                                   moves);
-  loom_low_move_sequence_populate_edge_copy_temporaries(
-      context->allocation, group, temporaries);
+  loom_low_move_sequence_populate_edge_copy_temporaries(context->allocation,
+                                                        group, temporaries);
   loom_amdgpu_assembly_move_state_t move_state = {
       .context = context,
       .emit_state = emit_state,
@@ -2668,9 +2651,9 @@ static iree_status_t loom_amdgpu_append_storage_address_packet(
   const uint32_t window = LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE;
   uint8_t mask = 0;
   uint8_t value = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vgpr_msb_insert_requirement(
-      LOOM_AMDGPU_VGPR_MSB_SLOT_DST, assignment->location_base / window, &mask,
-      &value));
+  loom_amdgpu_vgpr_msb_insert_requirement(LOOM_AMDGPU_VGPR_MSB_SLOT_DST,
+                                          assignment->location_base / window,
+                                          &mask, &value);
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_append_vgpr_msb_requirement(&move_state, mask, value));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_move_line_prefix(&move_state));
