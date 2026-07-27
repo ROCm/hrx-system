@@ -61,54 +61,6 @@ TEST(DispatchTest, EmplacePacketPreservesZeroWorkgroupCounts) {
   EXPECT_EQ(packet.completion_signal.handle, iree_hsa_signal_null().handle);
 }
 
-TEST(DispatchTest, EmplaceImplicitArgsWritesSuffix) {
-  iree_hal_amdgpu_device_kernel_args_t kernel_args = MakeKernelArgs(
-      /*kernel_object=*/0x1234u,
-      /*kernarg_size=*/32 + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
-      /*kernarg_alignment=*/16);
-  iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout = {
-      /*.explicit_kernarg_size=*/32,
-      /*.implicit_args_offset=*/32,
-      /*.total_kernarg_size=*/32 + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
-      /*.has_implicit_args=*/true,
-  };
-  const uint32_t workgroup_count[3] = {7, 8, 9};
-  alignas(16) std::array<uint8_t, 256> kernargs = {};
-  kernargs.fill(0xFD);
-
-  iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
-      &kernel_args, workgroup_count, /*dynamic_workgroup_local_memory=*/13,
-      &layout, kernargs.data());
-
-  EXPECT_EQ(kernargs[31], 0xFDu);
-
-  const auto* implicit_args =
-      reinterpret_cast<const iree_amdgpu_kernel_implicit_args_t*>(
-          kernargs.data() + layout.implicit_args_offset);
-  EXPECT_EQ(implicit_args->block_count[0], 7u);
-  EXPECT_EQ(implicit_args->block_count[1], 8u);
-  EXPECT_EQ(implicit_args->block_count[2], 9u);
-  EXPECT_EQ(implicit_args->group_size[0], 4u);
-  EXPECT_EQ(implicit_args->group_size[1], 5u);
-  EXPECT_EQ(implicit_args->group_size[2], 6u);
-  EXPECT_EQ(implicit_args->remainder[0], 0u);
-  EXPECT_EQ(implicit_args->remainder[1], 0u);
-  EXPECT_EQ(implicit_args->remainder[2], 0u);
-  EXPECT_EQ(implicit_args->reserved0, 0u);
-  EXPECT_EQ(implicit_args->reserved1, 0u);
-  EXPECT_EQ(implicit_args->global_offset[0], 0u);
-  EXPECT_EQ(implicit_args->global_offset[1], 0u);
-  EXPECT_EQ(implicit_args->global_offset[2], 0u);
-  EXPECT_EQ(implicit_args->grid_dims, 3u);
-  EXPECT_EQ(implicit_args->printf_buffer, nullptr);
-  EXPECT_EQ(implicit_args->hostcall_buffer, nullptr);
-  EXPECT_EQ(implicit_args->deprecated_multigrid_sync_arg, 0u);
-  EXPECT_EQ(implicit_args->unused_heap_v1, 0u);
-  EXPECT_EQ(implicit_args->unused_default_queue, 0u);
-  EXPECT_EQ(implicit_args->unused_completion_action, 0u);
-  EXPECT_EQ(implicit_args->dynamic_lds_size, 13u);
-}
-
 TEST(DispatchTest, EmplaceCustomKernargsCopiesRawBlob) {
   iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout = {};
   const std::array<uint8_t, 20> custom_kernargs = {

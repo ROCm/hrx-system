@@ -341,6 +341,85 @@ TEST(ExecutableMetadataHsacoTest, PopulatesImplicitArgsSuffixLayout) {
   iree_hal_amdgpu_executable_metadata_free(metadata);
 }
 
+// Regression gate against a transposed implicit-field mapping: a kernel
+// declaring the full hidden block must record each hidden arg's native offset
+// in the matching per-field slot of the layout. Every field uses a distinct
+// offset, so any value_kind-to-field transposition in record_implicit_field
+// would surface here rather than passing every coarse existing check.
+TEST(ExecutableMetadataHsacoTest, RecordsPerFieldImplicitOffsets) {
+  const iree_const_byte_span_t source_code_object_data = SourceCodeObjectData();
+  std::vector<uint8_t> loaded_code_object_storage = MakeLoadedCodeObjectData();
+  const iree_const_byte_span_t loaded_code_object_data =
+      LoadedCodeObjectData(loaded_code_object_storage);
+  // Explicit args must belong to the code object so their names rebase; hidden
+  // args are skipped by rebasing, so their value_kind literals drive the
+  // per-field recording under test.
+  std::vector<iree_hal_amdgpu_hsaco_metadata_arg_t> args = {
+      MakeArg(ViewFromCodeObjectData(source_code_object_data, "buffer"), 0, 8,
+              IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_GLOBAL_BUFFER,
+              ViewFromCodeObjectData(source_code_object_data, "global_buffer")),
+      MakeArg(ViewFromCodeObjectData(source_code_object_data, "value"), 8, 4,
+              IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_BY_VALUE,
+              ViewFromCodeObjectData(source_code_object_data, "by_value")),
+      MakeArg(IREE_SV("bcx"), 16, 4,
+              IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
+              IREE_SV("hidden_block_count_x")),
+      MakeArg(IREE_SV("bcy"), 20, 4,
+              IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
+              IREE_SV("hidden_block_count_y")),
+      MakeArg(IREE_SV("bcz"), 24, 4,
+              IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
+              IREE_SV("hidden_block_count_z")),
+      MakeArg(IREE_SV("gsx"), 28, 2,
+              IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
+              IREE_SV("hidden_group_size_x")),
+      MakeArg(IREE_SV("gsy"), 30, 2,
+              IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
+              IREE_SV("hidden_group_size_y")),
+      MakeArg(IREE_SV("gsz"), 32, 2,
+              IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
+              IREE_SV("hidden_group_size_z")),
+      MakeArg(IREE_SV("gd"), 34, 2,
+              IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
+              IREE_SV("hidden_grid_dims")),
+      MakeArg(IREE_SV("lds"), 36, 4,
+              IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
+              IREE_SV("hidden_dynamic_lds_size")),
+  };
+  iree_hal_amdgpu_hsaco_metadata_kernel_t kernel =
+      MakeKernel(ViewFromCodeObjectData(source_code_object_data, "implicit"),
+                 ViewFromCodeObjectData(source_code_object_data, "implicit.kd"),
+                 /*kernarg_segment_size=*/40, args);
+  iree_hal_amdgpu_hsaco_metadata_t hsaco_metadata = {
+      /*.host_allocator=*/{},
+      /*.elf_data=*/source_code_object_data,
+      /*.message_pack_data=*/{},
+      /*.target=*/{},
+      /*.reflection_name_storage_size=*/{},
+      /*.arg_name_storage_size=*/{},
+      /*.kernel_count=*/1,
+      /*.kernels=*/&kernel,
+  };
+
+  iree_hal_amdgpu_executable_metadata_t* metadata =
+      AllocateAndPopulate(&hsaco_metadata, loaded_code_object_data);
+  const iree_hal_amdgpu_kernarg_layout_t* layout = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdgpu_executable_metadata_resolve_layout(
+      metadata, metadata->exports[0].kernarg_layout, &layout));
+
+  EXPECT_EQ(layout->implicit_args_byte_offset, 16);
+  EXPECT_EQ(layout->implicit_args.block_count_offset[0], 16);
+  EXPECT_EQ(layout->implicit_args.block_count_offset[1], 20);
+  EXPECT_EQ(layout->implicit_args.block_count_offset[2], 24);
+  EXPECT_EQ(layout->implicit_args.group_size_offset[0], 28);
+  EXPECT_EQ(layout->implicit_args.group_size_offset[1], 30);
+  EXPECT_EQ(layout->implicit_args.group_size_offset[2], 32);
+  EXPECT_EQ(layout->implicit_args.grid_dims_offset, 34);
+  EXPECT_EQ(layout->implicit_args.dynamic_lds_size_offset, 36);
+
+  iree_hal_amdgpu_executable_metadata_free(metadata);
+}
+
 TEST(ExecutableMetadataHsacoTest, PopulatesElfOnlyCustomDirectExport) {
   const iree_const_byte_span_t source_code_object_data = SourceCodeObjectData();
   std::vector<uint8_t> loaded_code_object_storage = MakeLoadedCodeObjectData();
@@ -483,6 +562,38 @@ TEST(ExecutableMetadataHsacoTest, RejectsHiddenArgsBeforeVisibleArgsEnd) {
   };
   iree_hal_amdgpu_hsaco_metadata_kernel_t kernel =
       MakeKernel(IREE_SV("bad"), IREE_SV("bad.kd"), 24, args);
+  iree_hal_amdgpu_hsaco_metadata_t hsaco_metadata = {
+      /*.host_allocator=*/{},
+      /*.elf_data=*/{},
+      /*.message_pack_data=*/{},
+      /*.target=*/{},
+      /*.reflection_name_storage_size=*/{},
+      /*.arg_name_storage_size=*/{},
+      /*.kernel_count=*/1,
+      /*.kernels=*/&kernel,
+  };
+  iree_hal_amdgpu_executable_metadata_counts_t counts;
+
+  EXPECT_THAT(Status(iree_hal_amdgpu_executable_metadata_calculate_hsaco_counts(
+                  &hsaco_metadata, &counts)),
+              StatusIs(StatusCode::kInvalidArgument));
+}
+
+// A recognized hidden field whose declared byte size does not match the ABI
+// (here hidden_block_count_x as 8 bytes instead of uint32) must be rejected by
+// record_implicit_field, so a mistyped code object cannot silently mispatch the
+// synthesized implicit arguments.
+TEST(ExecutableMetadataHsacoTest, RejectsImplicitFieldWithUnexpectedSize) {
+  std::vector<iree_hal_amdgpu_hsaco_metadata_arg_t> args = {
+      MakeArg(IREE_SV("buffer"), 0, 8,
+              IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_GLOBAL_BUFFER,
+              IREE_SV("global_buffer")),
+      MakeArg(IREE_SV("bcx"), 8, 8,
+              IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
+              IREE_SV("hidden_block_count_x")),
+  };
+  iree_hal_amdgpu_hsaco_metadata_kernel_t kernel =
+      MakeKernel(IREE_SV("bad"), IREE_SV("bad.kd"), 16, args);
   iree_hal_amdgpu_hsaco_metadata_t hsaco_metadata = {
       /*.host_allocator=*/{},
       /*.elf_data=*/{},
