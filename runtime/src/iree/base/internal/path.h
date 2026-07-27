@@ -44,16 +44,17 @@ iree_status_t iree_file_path_join(iree_string_view_t lhs,
                                   iree_string_view_t rhs,
                                   iree_allocator_t allocator, char** out_path);
 
-// Splits |path| into the dirname and basename at the final `/`.
+// Splits |path| into the dirname and basename at the final platform path
+// separator. Windows paths accept both `/` and `\`.
 void iree_file_path_split(iree_string_view_t path,
                           iree_string_view_t* out_dirname,
                           iree_string_view_t* out_basename);
 
 // Gets the directory name component of a file |path| (everything before the
-// final `/`).
+// final platform path separator).
 iree_string_view_t iree_file_path_dirname(iree_string_view_t path);
 
-// Returns the part of the |path| after the final `/`.
+// Returns the part of the |path| after the final platform path separator.
 iree_string_view_t iree_file_path_basename(iree_string_view_t path);
 
 // Returns the parts of the basename of path, split on the final `.`.
