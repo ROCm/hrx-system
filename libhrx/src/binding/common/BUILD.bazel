@@ -28,28 +28,33 @@ hrx_cc_library(
         "graph_analysis.c",
         "graph_exec.c",
         "init.c",
+        "kernel_arguments.c",
+        "kpack.c",
         "mem_pool.c",
         "memory.c",
         "module.c",
         "peer.c",
         "registry.c",
         "stream.c",
+        "tls.c",
     ],
     hdrs = [
         "fat_binary.h",
         "graph.h",
         "hrx_bridge.h",
         "internal.h",
-    ],
-    copts = [
-        "-Wno-unused-variable",
+        "kernel_arguments.h",
+        "kpack.h",
+        "tls.h",
     ],
     includes = [
         "..",
         "../../../include",
         "../../libhrx",
     ],
+    textual_hdrs = ["//build_tools/amdgpu:elf_machine_map.inl"],
     deps = [
+        "//build_tools:pthreads",
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -64,11 +69,60 @@ hrx_cc_library(
 )
 
 hrx_cc_test(
+    name = "tls_test",
+    srcs = ["tls_test.cc"],
+    deps = [
+        ":common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "graph_test",
+    srcs = ["graph_test.cc"],
+    deps = [
+        ":common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "buffer_table_test",
     srcs = ["buffer_table_test.cc"],
     deps = [
         ":common",
         "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "fat_binary_test",
+    srcs = ["fat_binary_test.cc"],
+    deps = [
+        ":common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "kpack_test",
+    srcs = ["kpack_test.cc"],
+    # The test builds its fixtures from POSIX facilities (mmap/mprotect guard
+    # pages, /proc/self/maps, mode-bit permissions, symlinks) and exercises the
+    # Linux-only resolution path; the resolver itself reports UNIMPLEMENTED off
+    # Linux, so there is nothing for this suite to assert on other platforms.
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":common",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

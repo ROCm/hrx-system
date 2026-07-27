@@ -1,0 +1,74 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = [
+        "//loom/src/loom/pass:__pkg__",
+        "//loom/src/loom/pass/testing:__pkg__",
+        "//loom/src/loom/target/test:__pkg__",
+        "//loom/src/loom/tools/loom-check:__pkg__",
+    ],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "registry",
+    testonly = True,
+    srcs = ["registry.c"],
+    hdrs = ["registry.h"],
+    deps = [
+        "//loom/src/loom/analysis:ownership_lifetime",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/pass:environment",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:report",
+        "//loom/src/loom/pass:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "harness",
+    testonly = True,
+    srcs = ["harness.cc"],
+    hdrs = ["harness.h"],
+    deps = [
+        ":registry",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/pass",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/pass:environment",
+        "//loom/src/loom/pass:interpreter",
+        "//loom/src/loom/pass:program",
+        "//loom/src/loom/pass:report",
+        "//loom/src/loom/pass:tooling",
+        "//loom/src/loom/pass:verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+loom_cc_test(
+    name = "registry_test",
+    srcs = ["registry_test.cc"],
+    deps = [
+        ":harness",
+        ":registry",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass/testing:registry_verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

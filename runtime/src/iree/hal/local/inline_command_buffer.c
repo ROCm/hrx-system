@@ -36,7 +36,7 @@ typedef struct iree_hal_inline_command_buffer_t {
   struct {
     // Cached and initialized dispatch state reused for all dispatches.
     // Individual dispatches must populate the dynamically changing fields like
-    // constant_count and binding_count.
+    // constants and binding_count.
     iree_alignas(64) iree_hal_executable_dispatch_state_v0_t dispatch_state;
     // Persistent storage for binding pointers used by dispatch_state.
     void* binding_ptr_storage[IREE_HAL_EXECUTABLE_MAX_BINDING_COUNT];
@@ -488,16 +488,17 @@ static iree_status_t iree_hal_inline_command_buffer_dispatch(
   if (IREE_UNLIKELY((constants.data_length % sizeof(uint32_t)) != 0)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "constants must be 4-byte aligned");
-  } else if (IREE_UNLIKELY(constants.data_length !=
-                           dispatch_attrs.constant_count * sizeof(uint32_t))) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "constant count mismatch, expected %u but was provided %" PRIhsz,
-        (uint32_t)dispatch_attrs.constant_count,
-        constants.data_length / sizeof(uint32_t));
   }
-  dispatch_state->constant_count = dispatch_attrs.constant_count;
-  dispatch_state->constants = (const uint32_t*)constants.data;
+  const iree_host_size_t expected_constant_length =
+      dispatch_attrs.constant_byte_length;
+  if (IREE_UNLIKELY(constants.data_length != expected_constant_length)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "constant byte length mismatch, expected %" PRIhsz
+                            " but was provided %" PRIhsz,
+                            expected_constant_length, constants.data_length);
+  }
+  dispatch_state->constants = (iree_hal_executable_const_byte_span_v0_t){
+      constants.data, constants.data_length};
 
   // Produce the dense binding list based on the declared bindings used.
   //

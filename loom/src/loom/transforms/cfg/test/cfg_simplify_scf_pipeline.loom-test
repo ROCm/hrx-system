@@ -1,0 +1,31 @@
+// RUN: pass scf-to-cfg,cfg-simplify
+
+func.def @folds_lowered_switch_constant_case(%a: i32, %b: i32) -> (i32) {
+  %selector = index.constant 2 : index
+  %result = scf.switch %selector -> (i32) {
+    case 0 {
+      %case0 = test.addi %a, %a : i32
+      scf.yield %case0 : i32
+    }
+    case 2 {
+      %case2 = test.addi %a, %b : i32
+      scf.yield %case2 : i32
+    }
+    default {
+      %fallback = test.addi %b, %b : i32
+      scf.yield %fallback : i32
+    }
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @folds_lowered_switch_constant_case(%a: i32, %b: i32) -> (i32) {
+  %selector = index.constant 2 : index
+  %9 = index.constant 0 : index
+  %10 = index.cmp eq, %selector, %9 : index
+  %11 = index.constant 2 : index
+  %12 = index.cmp eq, %selector, %11 : index
+  %case2 = test.addi %a, %b : i32
+  func.return %case2 : i32
+}

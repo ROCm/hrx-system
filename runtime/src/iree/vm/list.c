@@ -163,10 +163,11 @@ IREE_API_EXPORT iree_status_t iree_vm_list_initialize(
   iree_host_size_t required_storage_size =
       storage_offset + iree_host_align(capacity * element_size, 8);
   if (storage.data_length < required_storage_size) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "storage buffer underflow: provided=%" PRIhsz
-                            " < required=%" PRIhsz,
-                            storage.data_length, required_storage_size);
+    IREE_RETURN_AND_END_ZONE(
+        z0, iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                             "storage buffer underflow: provided=%" PRIhsz
+                             " < required=%" PRIhsz,
+                             storage.data_length, required_storage_size));
   }
   memset(storage.data, 0, required_storage_size);
 

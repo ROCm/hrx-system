@@ -1,0 +1,9 @@
+test.split_func @projected(%arg: i32, %other: index) {
+  test.use %arg : i32
+  test.use %other : index
+  test.yield
+} launch {
+  test.use %arg : i32
+  test.use %other : index
+  test.yield
+}

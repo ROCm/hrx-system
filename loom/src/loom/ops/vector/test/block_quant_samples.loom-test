@@ -1,0 +1,464 @@
+// RUN: verify
+
+// Q4_0 stores one f16 scale plus 16 bytes of nibble-packed weights for a
+// 32-element block. This is one four-byte chunk of the qs field.
+//
+// Packed bytes: 0x10, 0x32, 0x54, 0x76
+// Low nibbles:  0, 2, 4, 6
+// High nibbles: 1, 3, 5, 7
+// Q4_0 logical order is all lows followed by all highs, with a -8 bias.
+// Expected signed codes: -8, -6, -4, -2, -7, -5, -3, -1
+func.def @q4_0_reference_chunk() -> (i1) {
+  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  test.use %schema : encoding<schema>
+
+  %b0 = scalar.constant 0x10 : i8
+  %b1 = scalar.constant 0x32 : i8
+  %b2 = scalar.constant 0x54 : i8
+  %b3 = scalar.constant 0x76 : i8
+  %qs = vector.from_elements %b0, %b1, %b2, %b3 : vector<4xi8>
+
+  %lo = vector.bitfield.extractu %qs {offset = 0, width = 4} : vector<4xi8> -> vector<4xi8>
+  %hi = vector.bitfield.extractu %qs {offset = 4, width = 4} : vector<4xi8> -> vector<4xi8>
+  %codes = vector.concat<0> %lo, %hi : vector<4xi8>, vector<4xi8> -> vector<8xi8>
+  %bias = vector.constant -8 : vector<8xi8>
+  %signed = vector.addi %codes, %bias : vector<8xi8>
+
+  %e0 = scalar.constant -8 : i8
+  %e1 = scalar.constant -6 : i8
+  %e2 = scalar.constant -4 : i8
+  %e3 = scalar.constant -2 : i8
+  %e4 = scalar.constant -7 : i8
+  %e5 = scalar.constant -5 : i8
+  %e6 = scalar.constant -3 : i8
+  %e7 = scalar.constant -1 : i8
+  %expected = vector.from_elements %e0, %e1, %e2, %e3, %e4, %e5, %e6, %e7 : vector<8xi8>
+  %matches = vector.cmpi eq, %signed, %expected : vector<8xi8> -> vector<8xi1>
+  %true = scalar.constant 1 : i1
+  %ok = vector.reduce<andi> %matches, %true : vector<8xi1>, i1
+  func.return %ok : i1
+}
+
+// ====
+
+// Q8_0 stores one f16 scale plus 32 signed i8 weights. This sample keeps the
+// scale as a scalar value so the reference lanes can be spelled exactly.
+//
+// Quantized lanes: -3, -1, 2, 7
+// Scale: 0.5
+// Expected f16 lanes: -1.5, -0.5, 1.0, 3.5
+func.def @q8_0_reference_chunk() -> (i1) {
+  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  test.use %schema : encoding<schema>
+
+  %q0 = scalar.constant -3 : i8
+  %q1 = scalar.constant -1 : i8
+  %q2 = scalar.constant 2 : i8
+  %q3 = scalar.constant 7 : i8
+  %q = vector.from_elements %q0, %q1, %q2, %q3 : vector<4xi8>
+
+  %scale = scalar.constant 0.5 : f16
+  %scalev = vector.splat %scale : vector<4xf16>
+  %qf = vector.sitofp %q : vector<4xi8> to vector<4xf16>
+  %decoded = vector.mulf %qf, %scalev : vector<4xf16>
+
+  %e0 = scalar.constant -1.5 : f16
+  %e1 = scalar.constant -0.5 : f16
+  %e2 = scalar.constant 1.0 : f16
+  %e3 = scalar.constant 3.5 : f16
+  %expected = vector.from_elements %e0, %e1, %e2, %e3 : vector<4xf16>
+  %matches = vector.cmpf oeq, %decoded, %expected : vector<4xf16> -> vector<4xi1>
+  %true = scalar.constant 1 : i1
+  %ok = vector.reduce<andi> %matches, %true : vector<4xi1>, i1
+  func.return %ok : i1
+}
+
+// ====
+
+// Integer byte dot products should stay as grouped register operations once a
+// lowering path chooses a DP4A/VNNI-style substrate instead of scalarizing early.
+//
+// Lhs lanes: -3, -1, 2, 7
+// Rhs lanes: 4, 5, -2, 1
+// Acc lane: 10
+// Expected mathematical lane: 10 + (-12) + (-5) + (-4) + 7 = -4
+func.def @q8_0_dot4_reference_chunk() -> (vector<1xi32>) {
+  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  test.use %schema : encoding<schema>
+
+  %a0 = scalar.constant -3 : i8
+  %a1 = scalar.constant -1 : i8
+  %a2 = scalar.constant 2 : i8
+  %a3 = scalar.constant 7 : i8
+  %lhs = vector.from_elements %a0, %a1, %a2, %a3 : vector<4xi8>
+
+  %b0 = scalar.constant 4 : i8
+  %b1 = scalar.constant 5 : i8
+  %b2 = scalar.constant -2 : i8
+  %b3 = scalar.constant 1 : i8
+  %rhs = vector.from_elements %b0, %b1, %b2, %b3 : vector<4xi8>
+
+  %acc = vector.constant 10 : vector<1xi32>
+  %dot = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ====
+
+// Q6_K-like chunks combine low nibbles with a side stream containing two high
+// bits per lane. The full ggml block has more scale/min structure; this sample
+// isolates the register bit assembly that must lower cleanly.
+//
+// Low bytes:       0x10, 0x32, 0x54, 0x76
+// High-bit bytes:  0x24, 0x1B
+// High 2-bit lanes from the side stream:
+//   0, 1, 2, 0, 3, 2, 1, 0
+// Interleaved 6-bit unsigned lanes:
+//   0, 49, 18, 35, 36, 21, 6, 7
+// Expected signed lanes after -32 bias:
+//   -32, 17, -14, 3, 4, -11, -26, -25
+func.def @q6_k_reference_chunk() -> (i1) {
+  %schema = encoding.define #ggml_q6_k<block_elems=256, storage_bytes=210> : encoding<schema>
+  test.use %schema : encoding<schema>
+
+  %l0 = scalar.constant 0x10 : i8
+  %l1 = scalar.constant 0x32 : i8
+  %l2 = scalar.constant 0x54 : i8
+  %l3 = scalar.constant 0x76 : i8
+  %low_packed = vector.from_elements %l0, %l1, %l2, %l3 : vector<4xi8>
+
+  %h0 = scalar.constant 0x24 : i8
+  %h1 = scalar.constant 0x1B : i8
+  %high_packed = vector.from_elements %h0, %h1 : vector<2xi8>
+
+  %lo4 = vector.bitfield.extractu %low_packed {offset = 0, width = 4} : vector<4xi8> -> vector<4xi8>
+  %hi4 = vector.bitfield.extractu %low_packed {offset = 4, width = 4} : vector<4xi8> -> vector<4xi8>
+  %high2 = vector.bitunpacku<2> %high_packed : vector<2xi8> -> vector<8xi8>
+  %lo2 = vector.slice %high2[0] : vector<8xi8> -> vector<4xi8>
+  %hi2 = vector.slice %high2[4] : vector<8xi8> -> vector<4xi8>
+  %lo6 = vector.bitfield.insert %lo2 into %lo4 {offset = 4, width = 2} : vector<4xi8>, vector<4xi8>
+  %hi6 = vector.bitfield.insert %hi2 into %hi4 {offset = 4, width = 2} : vector<4xi8>, vector<4xi8>
+  %codes = vector.interleave<0> %lo6, %hi6 : vector<4xi8>, vector<4xi8> -> vector<8xi8>
+  %bias = vector.constant -32 : vector<8xi8>
+  %signed = vector.addi %codes, %bias : vector<8xi8>
+
+  %e0 = scalar.constant -32 : i8
+  %e1 = scalar.constant 17 : i8
+  %e2 = scalar.constant -14 : i8
+  %e3 = scalar.constant 3 : i8
+  %e4 = scalar.constant 4 : i8
+  %e5 = scalar.constant -11 : i8
+  %e6 = scalar.constant -26 : i8
+  %e7 = scalar.constant -25 : i8
+  %expected = vector.from_elements %e0, %e1, %e2, %e3, %e4, %e5, %e6, %e7 : vector<8xi8>
+  %matches = vector.cmpi eq, %signed, %expected : vector<8xi8> -> vector<8xi1>
+  %true = scalar.constant 1 : i1
+  %ok = vector.reduce<andi> %matches, %true : vector<8xi1>, i1
+  func.return %ok : i1
+}
+
+// ====
+
+// IQ/grid-like formats decode compact codes through an explicit per-block
+// table. The table is a register value, not a hidden attribute lookup.
+//
+// Packed 4-bit codes: 0x10, 0x32 -> code lanes 0, 1, 2, 3.
+// Expected lanes are the first four entries of the explicit grid.
+func.def @iq_grid_reference_chunk() -> (i1) {
+  %schema = encoding.define #ggml_iq_grid<code_bits=4, grid_elems=16> : encoding<schema>
+  test.use %schema : encoding<schema>
+
+  %p0 = scalar.constant 0x10 : i8
+  %p1 = scalar.constant 0x32 : i8
+  %packed = vector.from_elements %p0, %p1 : vector<2xi8>
+  %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+
+  %g0 = scalar.constant -1.0 : f16
+  %g1 = scalar.constant -0.5 : f16
+  %g2 = scalar.constant 0.5 : f16
+  %g3 = scalar.constant 1.0 : f16
+  %g4 = scalar.constant -1.5 : f16
+  %g5 = scalar.constant -0.75 : f16
+  %g6 = scalar.constant 0.75 : f16
+  %g7 = scalar.constant 1.5 : f16
+  %g8 = scalar.constant -2.0 : f16
+  %g9 = scalar.constant -0.25 : f16
+  %g10 = scalar.constant 0.25 : f16
+  %g11 = scalar.constant 2.0 : f16
+  %g12 = scalar.constant -3.0 : f16
+  %g13 = scalar.constant -0.125 : f16
+  %g14 = scalar.constant 0.125 : f16
+  %g15 = scalar.constant 3.0 : f16
+  %grid = vector.from_elements %g0, %g1, %g2, %g3, %g4, %g5, %g6, %g7, %g8, %g9, %g10, %g11, %g12, %g13, %g14, %g15 : vector<16xf16>
+  %decoded = vector.table.lookup %grid[%codes] : vector<16xf16>, vector<4xi8> -> vector<4xf16>
+  %expected = vector.from_elements %g0, %g1, %g2, %g3 : vector<4xf16>
+  %matches = vector.cmpf oeq, %decoded, %expected : vector<4xf16> -> vector<4xi1>
+  %true = scalar.constant 1 : i1
+  %ok = vector.reduce<andi> %matches, %true : vector<4xi1>, i1
+  func.return %ok : i1
+}
+
+// ====
+
+// Encoded KV cache pages are still physical byte views. The schema says how a
+// record can be decoded, but the memory operation below only moves i8 bytes.
+// BSR/page descriptors are ordinary index views over the same slabs.
+func.def @turboquant_kv_page_views(%transient: buffer, %params: buffer, %kv_offset: offset, %thresholds_offset: offset, %centroids_offset: offset, %row_ptr_offset: offset, %col_idx_offset: offset, %page: index, %head: index, %token: index, %max_pages: index, %heads: index, %page_size: index, %rows_plus_one: index, %nnz: index) -> (vector<40xi8>) {
+  %dense = encoding.layout.dense : encoding<layout>
+  %thresholds = buffer.view %params[%thresholds_offset] : buffer -> view<3xf32, %dense>
+  %centroids = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
+  %signs = vector.constant false : vector<128xi1>
+  %qjl_matrix = vector.constant 0.0 : vector<64x128xf32>
+  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
+  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %qjl_matrix : vector<64x128xf32>} : encoding<transform>
+  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=128, pack_order="lsb0", qjl_rows=64, record_bytes=40, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroids : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %thresholds : view<3xf32, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
+  %storage = encoding.define #physical_storage {layout = %dense : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %kv_pages = buffer.view %transient[%kv_offset] : buffer -> view<[%max_pages]x2x[%heads]x[%page_size]x40xi8, %storage>
+  %row_ptr = buffer.view %transient[%row_ptr_offset] : buffer -> view<[%rows_plus_one]xindex, %dense>
+  %col_idx = buffer.view %transient[%col_idx_offset] : buffer -> view<[%nnz]xindex, %dense>
+  test.use %row_ptr : view<[%rows_plus_one]xindex, %dense>
+  test.use %col_idx : view<[%nnz]xindex, %dense>
+  %record = vector.load %kv_pages[%page, 0, %head, %token, 0] : view<[%max_pages]x2x[%heads]x[%page_size]x40xi8, %storage> -> vector<40xi8>
+  vector.store %record, %kv_pages[%page, 0, %head, %token, 0] : vector<40xi8>, view<[%max_pages]x2x[%heads]x[%page_size]x40xi8, %storage>
+  func.return %record : vector<40xi8>
+}
+
+// ====
+
+// Online scalar quantizer encode uses explicit ordered thresholds. A reference
+// lowering compares each input lane with every threshold and counts passed
+// thresholds: tie=lower counts threshold < value, while tie=upper counts
+// threshold <= value. Targets can match that compare-and-count shape to vector
+// compares plus mask popcount or add trees without recovering intent from
+// arithmetic soup.
+func.def @turboquant_threshold_encode_reference(%values: vector<4xf16>, %params: buffer, %thresholds_offset: offset, %centroids_offset: offset) -> (vector<4xi8>) {
+  %dense = encoding.layout.dense : encoding<layout>
+  %threshold_view = buffer.view %params[%thresholds_offset] : buffer -> view<3xf16, %dense>
+  %centroid_view = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
+  %signs = vector.constant false : vector<4xi1>
+  %qjl_matrix = vector.constant 0.0 : vector<8x4xf32>
+  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=4, output_elems=4> {signs = %signs : vector<4xi1>} : encoding<transform>
+  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=4, output_elems=8> {matrix = %qjl_matrix : vector<8x4xf32>} : encoding<transform>
+  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=4, pack_order="lsb0", qjl_rows=8, record_bytes=2, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroid_view : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %threshold_view : view<3xf16, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
+  test.use %schema : encoding<schema>
+
+  %t0 = scalar.constant -1.0 : f16
+  %t1 = scalar.constant 0.0 : f16
+  %t2 = scalar.constant 1.0 : f16
+  %thresholds = vector.from_elements %t0, %t1, %t2 : vector<3xf16>
+  %codes = vector.table.quantize %values, %thresholds {nan = zero, tie = lower} : vector<4xf16>, vector<3xf16> -> vector<4xi8>
+  func.return %codes : vector<4xi8>
+}
+
+// ====
+
+// Reference decode keeps the table lookup visible instead of hiding it inside a
+// load. A fused target kernel should match before this expansion when possible.
+func.def @turboquant_decode_reference(%packed_codes: vector<1xi8>, %params: buffer, %thresholds_offset: offset, %centroids_offset: offset) -> (vector<4xf16>) {
+  %dense = encoding.layout.dense : encoding<layout>
+  %threshold_view = buffer.view %params[%thresholds_offset] : buffer -> view<3xf16, %dense>
+  %centroid_view = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
+  %signs = vector.constant false : vector<4xi1>
+  %qjl_matrix = vector.constant 0.0 : vector<8x4xf32>
+  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=4, output_elems=4> {signs = %signs : vector<4xi1>} : encoding<transform>
+  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=4, output_elems=8> {matrix = %qjl_matrix : vector<8x4xf32>} : encoding<transform>
+  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=4, pack_order="lsb0", qjl_rows=8, record_bytes=2, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroid_view : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %threshold_view : view<3xf16, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
+  test.use %schema : encoding<schema>
+
+  %codes = vector.bitunpacku<2> %packed_codes : vector<1xi8> -> vector<4xi8>
+  %c0 = scalar.constant -1.5 : f16
+  %c1 = scalar.constant -0.5 : f16
+  %c2 = scalar.constant 0.5 : f16
+  %c3 = scalar.constant 1.5 : f16
+  %centroids = vector.from_elements %c0, %c1, %c2, %c3 : vector<4xf16>
+  %decoded = vector.table.lookup %centroids[%codes] : vector<4xf16>, vector<4xi8> -> vector<4xf16>
+  func.return %decoded : vector<4xf16>
+}
+
+// ====
+
+// The scalar-quantized contribution to an attention logit is an ordinary dot
+// after reference decode. P0 lowering should match the encoded tile contract
+// before expanding to this shape, but this remains the portable fallback.
+func.def @turboquant_logit_reference(%query: vector<4xf16>, %packed_codes: vector<1xi8>, %params: buffer, %thresholds_offset: offset, %centroids_offset: offset) -> (f32) {
+  %dense = encoding.layout.dense : encoding<layout>
+  %threshold_view = buffer.view %params[%thresholds_offset] : buffer -> view<3xf16, %dense>
+  %centroid_view = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
+  %signs = vector.constant false : vector<4xi1>
+  %qjl_matrix = vector.constant 0.0 : vector<8x4xf32>
+  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=4, output_elems=4> {signs = %signs : vector<4xi1>} : encoding<transform>
+  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=4, output_elems=8> {matrix = %qjl_matrix : vector<8x4xf32>} : encoding<transform>
+  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=4, pack_order="lsb0", qjl_rows=8, record_bytes=2, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroid_view : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %threshold_view : view<3xf16, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
+  test.use %schema : encoding<schema>
+
+  %codes = vector.bitunpacku<2> %packed_codes : vector<1xi8> -> vector<4xi8>
+  %c0 = scalar.constant -1.5 : f16
+  %c1 = scalar.constant -0.5 : f16
+  %c2 = scalar.constant 0.5 : f16
+  %c3 = scalar.constant 1.5 : f16
+  %centroids = vector.from_elements %c0, %c1, %c2, %c3 : vector<4xf16>
+  %decoded = vector.table.lookup %centroids[%codes] : vector<4xf16>, vector<4xi8> -> vector<4xf16>
+  %q32 = vector.extf %query : vector<4xf16> to vector<4xf32>
+  %d32 = vector.extf %decoded : vector<4xf16> to vector<4xf32>
+  %zero = scalar.constant 0.0 : f32
+  %logit = vector.dotf %q32, %d32, %zero : vector<4xf32>, vector<4xf32>, f32
+  func.return %logit : f32
+}
+
+// ====
+
+// FP4-style formats can use the same table path when the packed value is not a
+// first-class numeric scalar type. This keeps experimental nibble formats out
+// of the core type system.
+//
+// Packed 4-bit codes: 0x20, 0x31 -> code lanes 0, 2, 1, 3.
+func.def @fp4_table_reference_chunk() -> (i1) {
+  %schema = encoding.define #loom_fp4_table<code_bits=4, table_elems=16> : encoding<schema>
+  test.use %schema : encoding<schema>
+
+  %p0 = scalar.constant 0x20 : i8
+  %p1 = scalar.constant 0x31 : i8
+  %packed = vector.from_elements %p0, %p1 : vector<2xi8>
+  %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+
+  %v0 = scalar.constant 0.0 : f16
+  %v1 = scalar.constant 0.5 : f16
+  %v2 = scalar.constant -0.5 : f16
+  %v3 = scalar.constant 1.0 : f16
+  %v4 = scalar.constant -1.0 : f16
+  %v5 = scalar.constant 1.5 : f16
+  %v6 = scalar.constant -1.5 : f16
+  %v7 = scalar.constant 2.0 : f16
+  %v8 = scalar.constant -2.0 : f16
+  %v9 = scalar.constant 3.0 : f16
+  %v10 = scalar.constant -3.0 : f16
+  %v11 = scalar.constant 4.0 : f16
+  %v12 = scalar.constant -4.0 : f16
+  %v13 = scalar.constant 6.0 : f16
+  %v14 = scalar.constant -6.0 : f16
+  %v15 = scalar.constant 8.0 : f16
+  %table = vector.from_elements %v0, %v1, %v2, %v3, %v4, %v5, %v6, %v7, %v8, %v9, %v10, %v11, %v12, %v13, %v14, %v15 : vector<16xf16>
+  %decoded = vector.table.lookup %table[%codes] : vector<16xf16>, vector<4xi8> -> vector<4xf16>
+  %expected = vector.from_elements %v0, %v2, %v1, %v3 : vector<4xf16>
+  %matches = vector.cmpf oeq, %decoded, %expected : vector<4xf16> -> vector<4xi1>
+  %true = scalar.constant 1 : i1
+  %ok = vector.reduce<andi> %matches, %true : vector<4xi1>, i1
+  func.return %ok : i1
+}
+
+// ====
+
+// Real numeric FP8 storage should use the primitive f8 element type. The decode
+// path is an ordinary register bitcast followed by a widening float conversion;
+// format-specific FP8 variants that are not primitive scalar types should stay
+// encoded as integer bytes plus an explicit table or arithmetic expansion.
+func.def @fp8_e4m3_storage_reinterpret(%bytes: vector<4xi8>) -> (vector<4xf16>) {
+  %schema = encoding.define #ieee_fp8_e4m3<storage_bits=8> : encoding<schema>
+  test.use %schema : encoding<schema>
+
+  %fp8 = vector.bitcast %bytes : vector<4xi8> to vector<4xf8E4M3>
+  %decoded = vector.extf %fp8 : vector<4xf8E4M3> to vector<4xf16>
+  func.return %decoded : vector<4xf16>
+}
+
+// ====
+
+// Binary sketch dot products stay explicit: xor finds sign disagreements,
+// ctpop counts them in packed bytes, and scalar arithmetic maps Hamming
+// distance to a {-1,+1} dot score for 128 one-bit lanes.
+func.def @binary_sketch_dot_reference(%lhs_bits: vector<16xi8>, %rhs_bits: vector<16xi8>) -> (i32) {
+  %diff = vector.xori %lhs_bits, %rhs_bits : vector<16xi8>
+  %byte_counts = vector.ctpopi %diff : vector<16xi8>
+  %counts = vector.extui %byte_counts : vector<16xi8> to vector<16xi32>
+  %zero = scalar.constant 0 : i32
+  %hamming = vector.reduce<addi> %counts, %zero : vector<16xi32>, i32
+  %two = scalar.constant 2 : i32
+  %total = scalar.constant 128 : i32
+  %twice_hamming = scalar.muli %hamming, %two : i32
+  %dot = scalar.subi %total, %twice_hamming : i32
+  func.return %dot : i32
+}
+
+// ====
+
+// Recursive polar transforms can stay in ordinary register IR: each level
+// converts adjacent x/y pairs into a radius stream plus an angle stream, then
+// recurses on the radius stream. The 16-lane encoded layout below is:
+//
+//   [root radius, root angle, level-2 angles, level-4 angles, level-8 angles]
+//
+// That keeps every code stream explicit while preserving the reversible tree
+// shape a target matcher needs before fallback scalarization.
+func.def @polar_recursive_encode_16_reference(%v: vector<16xf32>) -> (vector<16xf32>) {
+  %x8, %y8 = vector.deinterleave<0> %v : vector<16xf32> -> vector<8xf32>, vector<8xf32>
+  %xx8 = vector.mulf %x8, %x8 : vector<8xf32>
+  %yy8 = vector.mulf %y8, %y8 : vector<8xf32>
+  %sum8 = vector.addf %xx8, %yy8 : vector<8xf32>
+  %radius8 = vector.sqrtf %sum8 : vector<8xf32>
+  %angle8 = vector.atan2f %y8, %x8 : vector<8xf32>
+
+  %x4, %y4 = vector.deinterleave<0> %radius8 : vector<8xf32> -> vector<4xf32>, vector<4xf32>
+  %xx4 = vector.mulf %x4, %x4 : vector<4xf32>
+  %yy4 = vector.mulf %y4, %y4 : vector<4xf32>
+  %sum4 = vector.addf %xx4, %yy4 : vector<4xf32>
+  %radius4 = vector.sqrtf %sum4 : vector<4xf32>
+  %angle4 = vector.atan2f %y4, %x4 : vector<4xf32>
+
+  %x2, %y2 = vector.deinterleave<0> %radius4 : vector<4xf32> -> vector<2xf32>, vector<2xf32>
+  %xx2 = vector.mulf %x2, %x2 : vector<2xf32>
+  %yy2 = vector.mulf %y2, %y2 : vector<2xf32>
+  %sum2 = vector.addf %xx2, %yy2 : vector<2xf32>
+  %radius2 = vector.sqrtf %sum2 : vector<2xf32>
+  %angle2 = vector.atan2f %y2, %x2 : vector<2xf32>
+
+  %x1, %y1 = vector.deinterleave<0> %radius2 : vector<2xf32> -> vector<1xf32>, vector<1xf32>
+  %xx1 = vector.mulf %x1, %x1 : vector<1xf32>
+  %yy1 = vector.mulf %y1, %y1 : vector<1xf32>
+  %sum1 = vector.addf %xx1, %yy1 : vector<1xf32>
+  %radius1 = vector.sqrtf %sum1 : vector<1xf32>
+  %angle1 = vector.atan2f %y1, %x1 : vector<1xf32>
+
+  %root = vector.concat<0> %radius1, %angle1 : vector<1xf32>, vector<1xf32> -> vector<2xf32>
+  %tree2 = vector.concat<0> %root, %angle2 : vector<2xf32>, vector<2xf32> -> vector<4xf32>
+  %tree4 = vector.concat<0> %tree2, %angle4 : vector<4xf32>, vector<4xf32> -> vector<8xf32>
+  %encoded = vector.concat<0> %tree4, %angle8 : vector<8xf32>, vector<8xf32> -> vector<16xf32>
+  func.return %encoded : vector<16xf32>
+}
+
+// ====
+
+// Decode walks the same layout in reverse. Each angle stream reconstructs the
+// next radius stream with cos/sin and interleave until the original 16 logical
+// lanes are recovered.
+func.def @polar_recursive_decode_16_reference(%encoded: vector<16xf32>) -> (vector<16xf32>) {
+  %radius1 = vector.slice %encoded[0] : vector<16xf32> -> vector<1xf32>
+  %angle1 = vector.slice %encoded[1] : vector<16xf32> -> vector<1xf32>
+  %angle2 = vector.slice %encoded[2] : vector<16xf32> -> vector<2xf32>
+  %angle4 = vector.slice %encoded[4] : vector<16xf32> -> vector<4xf32>
+  %angle8 = vector.slice %encoded[8] : vector<16xf32> -> vector<8xf32>
+
+  %cos1 = vector.cosf %angle1 : vector<1xf32>
+  %sin1 = vector.sinf %angle1 : vector<1xf32>
+  %x1 = vector.mulf %radius1, %cos1 : vector<1xf32>
+  %y1 = vector.mulf %radius1, %sin1 : vector<1xf32>
+  %radius2 = vector.interleave<0> %x1, %y1 : vector<1xf32>, vector<1xf32> -> vector<2xf32>
+
+  %cos2 = vector.cosf %angle2 : vector<2xf32>
+  %sin2 = vector.sinf %angle2 : vector<2xf32>
+  %x2 = vector.mulf %radius2, %cos2 : vector<2xf32>
+  %y2 = vector.mulf %radius2, %sin2 : vector<2xf32>
+  %radius4 = vector.interleave<0> %x2, %y2 : vector<2xf32>, vector<2xf32> -> vector<4xf32>
+
+  %cos4 = vector.cosf %angle4 : vector<4xf32>
+  %sin4 = vector.sinf %angle4 : vector<4xf32>
+  %x4 = vector.mulf %radius4, %cos4 : vector<4xf32>
+  %y4 = vector.mulf %radius4, %sin4 : vector<4xf32>
+  %radius8 = vector.interleave<0> %x4, %y4 : vector<4xf32>, vector<4xf32> -> vector<8xf32>
+
+  %cos8 = vector.cosf %angle8 : vector<8xf32>
+  %sin8 = vector.sinf %angle8 : vector<8xf32>
+  %x8 = vector.mulf %radius8, %cos8 : vector<8xf32>
+  %y8 = vector.mulf %radius8, %sin8 : vector<8xf32>
+  %decoded = vector.interleave<0> %x8, %y8 : vector<8xf32>, vector<8xf32> -> vector<16xf32>
+  func.return %decoded : vector<16xf32>
+}

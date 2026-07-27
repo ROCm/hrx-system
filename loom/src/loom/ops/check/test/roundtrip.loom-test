@@ -1,0 +1,55 @@
+// RUN: roundtrip
+
+// A correctness case is a program: it materializes inputs, calls the function
+// under test, obtains expected values, and checks ordinary SSA results.
+func.decl @scale(%input: tensor<4xf32>) -> (tensor<4xf32>)
+
+check.case public @scale_case {
+  %seed = check.param.seed base(1282371437) count(4) name("seed") : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<4xf32>
+  %actual = func.call @scale(%input) : (tensor<4xf32>) -> (tensor<4xf32>)
+  %expected = check.oracle.call<reference.scalar> callee(@scale) inputs(%input) : (tensor<4xf32>) -> (tensor<4xf32>)
+  %expected_contract = check.oracle.call<reference.tiled_matmul> {accumulator = "i32", lhs = "u8", result = "i32", rhs = "u8"} callee(@scale) inputs(%input) : (tensor<4xf32>) -> (tensor<4xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<4xf32>
+  test.use %expected_contract : tensor<4xf32>
+  check.return
+}
+
+check.benchmark<@scale_case> @scale_latency {seed = 1282371438}
+
+// ====
+
+// Standard generator/file/expectation ops use fixed clauses, not generic bags.
+check.case @fixture_case {
+  %m = check.param.range po2 bounds(1 to 64) name("m") : index
+  %n = check.param.choice values([16, 24, 32, 64]) name("n") : index
+  %seed = check.param.seed base(4660) count(8) name("seed") : i64
+  %scalar = check.literal value(42) : i32
+  %iota = check.generate.iota offset(0) step(1) : tensor<[%m]x4xi32>
+  %fill = check.generate.fill value(17) : tensor<[%m]x4xi32>
+  %uniform = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<[%n]xf32>
+  %expected = check.file.read.npy path("fixtures/vector.npy") : tensor<[%n]xf32>
+  check.expect.equal actual(%scalar) expected(%scalar) : i32
+  check.expect.bitwise actual(%uniform) expected(%expected) : tensor<[%n]xf32>
+  check.expect.shape value(%iota) shape([%m, 4]) : tensor<[%m]x4xi32>
+  check.file.write.npy value(%uniform) path("outputs/vector.actual.npy") mode(on_failure) : tensor<[%n]xf32>
+  test.use %fill : tensor<[%m]x4xi32>
+  check.return
+}
+
+check.benchmark<@fixture_case>
+
+check.benchmark<@fixture_case> @fixture_m16_n24 {m = 16, n = 24}
+
+// ====
+
+// Open provider spaces are still cold structural dispatch points.
+check.case @provider_case {
+  check.requires<target.feature> {feature = "test.feature"}
+  check.skip_if<device.memory> {max_bytes = 1024} reason("tiny device")
+  %actual = check.literal value(1) : i32
+  %expected = check.literal value(1) : i32
+  check.expect<topk.equal> actual(%actual) expected(%expected) {k = 1} : i32
+  check.expect.event<device> {count = 1, severity = "error", tsan = {access_length = 4, check = "data_race", current_access = "write", memory = "workgroup", prior_access = "write"}, type = "tsan_report"}
+  check.return
+}

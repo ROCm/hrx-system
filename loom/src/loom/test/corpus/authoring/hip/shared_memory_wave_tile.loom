@@ -1,0 +1,181 @@
+// HIP -> Loom wave-sized shared-memory lane recipe.
+//
+// HIP concept tags: `__shared__`, `threadIdx.x`, `__syncthreads`, LDS,
+// wave-sized workgroups, static shared-memory offsets.
+//
+// Position: a wave-sized `scratch[threadIdx.x]` access is the canonical shape
+// that AMDGPU may lower through DS_ADDTID. Keep this as a correctness case so
+// the optimization is tied to address semantics, not just asm prettiness.
+kernel.def @shared_memory_wave_i32_roundtrip() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane : index to i32
+  %bias = scalar.constant 7 : i32
+  %value = scalar.addi %lane_i32, %bias : i32
+  %scratch_bytes = index.constant 128 : offset
+
+  // HIP concept:
+  //   __shared__ int scratch[32];
+  //   scratch[threadIdx.x] = threadIdx.x + 7;
+  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<32xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xi32, #dense>
+  view.store %value, %scratch_view[%lane] : i32, view<32xi32, #dense>
+
+  // HIP concept:
+  //   __syncthreads();
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+
+  // HIP concept:
+  //   output[threadIdx.x] = scratch[threadIdx.x];
+  %roundtrip = view.load %scratch_view[%lane] : view<32xi32, #dense> -> i32
+  view.store %roundtrip, %output_view[%lane] : i32, view<32xi32, #dense>
+  kernel.return
+}
+
+kernel.def @shared_memory_wave_i32_roundtrip_static_offset() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %four = index.constant 4 : index
+  %scratch_index = index.add %lane, %four : index
+  %lane_i32 = index.cast %lane : index to i32
+  %bias = scalar.constant 11 : i32
+  %value = scalar.addi %lane_i32, %bias : i32
+  %scratch_bytes = index.constant 160 : offset
+
+  // HIP concept:
+  //   __shared__ int scratch[40];
+  //   scratch[threadIdx.x + 4] = threadIdx.x + 11;
+  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<40xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xi32, #dense>
+  view.store %value, %scratch_view[%scratch_index] : i32, view<40xi32, #dense>
+
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+
+  %roundtrip = view.load %scratch_view[%scratch_index] : view<40xi32, #dense> -> i32
+  view.store %roundtrip, %output_view[%lane] : i32, view<32xi32, #dense>
+  kernel.return
+}
+
+kernel.def @shared_memory_wave_i32_partial_lane_roundtrip() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane : index to i32
+  %bias = scalar.constant 19 : i32
+  %value = scalar.addi %lane_i32, %bias : i32
+  %half_wave = index.constant 16 : index
+  %is_active_lane = index.cmp ult, %lane, %half_wave : index
+  %scratch_bytes = index.constant 128 : offset
+
+  // HIP concept:
+  //   if (threadIdx.x < 16) {
+  //     scratch[threadIdx.x] = threadIdx.x + 19;
+  //     output[threadIdx.x] = scratch[threadIdx.x];
+  //   } else {
+  //     output[threadIdx.x] = threadIdx.x + 19;
+  //   }
+  //
+  // The divergent scratch path keeps the per-lane address contract intact:
+  // masked execution changes EXEC, not the byte address interpreted by LDS.
+  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<32xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xi32, #dense>
+  %result = scf.if %is_active_lane -> (i32) {
+    view.store %value, %scratch_view[%lane] : i32, view<32xi32, #dense>
+    %roundtrip = view.load %scratch_view[%lane] : view<32xi32, #dense> -> i32
+    scf.yield %roundtrip : i32
+  } else {
+    scf.yield %value : i32
+  }
+  view.store %result, %output_view[%lane] : i32, view<32xi32, #dense>
+  kernel.return
+}
+
+kernel.def @shared_memory_cross_wave_i32_roundtrip_two_regions() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 128 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %onehundredtwentyeight = index.constant 128 : index
+  %second_region_index = index.add %lane, %onehundredtwentyeight : index
+  %scratch_bytes = index.constant 1024 : offset
+
+  %input_view = buffer.view %input[%base] : buffer -> view<256xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<256xi32, #dense>
+
+  // HIP concept:
+  //   __shared__ int scratch[256];
+  //   scratch[threadIdx.x] = input[threadIdx.x];
+  //   scratch[threadIdx.x + 128] = input[threadIdx.x + 128];
+  //
+  // This spans four wave32 waves. AMDGPU DS_ADDTID uses the hardware lane id,
+  // not the full workitem id, so the compiler must materialize the LDS byte
+  // address instead of selecting addtid for these accesses.
+  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<256xi32, #dense>
+  %word0 = vector.load %input_view[%lane] : view<256xi32, #dense> -> vector<1xi32>
+  %word1 = vector.load %input_view[%second_region_index] : view<256xi32, #dense> -> vector<1xi32>
+  vector.store %word0, %scratch_view[%lane] : vector<1xi32>, view<256xi32, #dense>
+  vector.store %word1, %scratch_view[%second_region_index] : vector<1xi32>, view<256xi32, #dense>
+
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+
+  %roundtrip0 = vector.load %scratch_view[%lane] : view<256xi32, #dense> -> vector<1xi32>
+  %roundtrip1 = vector.load %scratch_view[%second_region_index] : view<256xi32, #dense> -> vector<1xi32>
+  vector.store %roundtrip0, %output_view[%lane] : vector<1xi32>, view<256xi32, #dense>
+  vector.store %roundtrip1, %output_view[%second_region_index] : vector<1xi32>, view<256xi32, #dense>
+  kernel.return
+}
+
+check.case @case_shared_memory_wave_i32_roundtrip {
+  %output = check.generate.fill value(0) : tensor<32xi32>
+  %expected = check.generate.iota offset(7) step(1) : tensor<32xi32>
+  func.call @shared_memory_wave_i32_roundtrip(%output) : (tensor<32xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
+  check.return
+}
+
+check.case @case_shared_memory_wave_i32_roundtrip_static_offset {
+  %output = check.generate.fill value(0) : tensor<32xi32>
+  %expected = check.generate.iota offset(11) step(1) : tensor<32xi32>
+  func.call @shared_memory_wave_i32_roundtrip_static_offset(%output) : (tensor<32xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
+  check.return
+}
+
+check.case @case_shared_memory_wave_i32_partial_lane_roundtrip {
+  %output = check.generate.fill value(0) : tensor<32xi32>
+  %expected = check.generate.iota offset(19) step(1) : tensor<32xi32>
+  func.call @shared_memory_wave_i32_partial_lane_roundtrip(%output) : (tensor<32xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
+  check.return
+}
+
+check.case @case_shared_memory_cross_wave_i32_roundtrip_two_regions {
+  %input = check.generate.iota offset(1) step(1) : tensor<256xi32>
+  %output = check.generate.fill value(0) : tensor<256xi32>
+  %expected = check.generate.iota offset(1) step(1) : tensor<256xi32>
+  func.call @shared_memory_cross_wave_i32_roundtrip_two_regions(%input, %output) : (tensor<256xi32>, tensor<256xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<256xi32>
+  check.return
+}
+
+check.benchmark<@case_shared_memory_wave_i32_roundtrip> @bench_shared_memory_wave_i32_roundtrip
+check.benchmark<@case_shared_memory_wave_i32_roundtrip_static_offset> @bench_shared_memory_wave_i32_roundtrip_static_offset
+check.benchmark<@case_shared_memory_wave_i32_partial_lane_roundtrip> @bench_shared_memory_wave_i32_partial_lane_roundtrip
+check.benchmark<@case_shared_memory_cross_wave_i32_roundtrip_two_regions> @bench_shared_memory_cross_wave_i32_roundtrip_two_regions

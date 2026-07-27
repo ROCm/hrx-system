@@ -1,0 +1,45 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_dot_wide.loom-test
+// RUN: emit source-low output=low
+
+x86.target<packed_dot> @target
+func.def target(@target) @bf16_dot2_256(%lhs: vector<16xbf16>, %rhs: vector<16xbf16>, %acc: vector<8xf32>) -> (vector<8xf32>) {
+  %dot = vector.dot2f %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  func.return %dot : vector<8xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @bf16_dot2_256(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %acc: reg<x86.ymm>) -> (reg<x86.ymm>) asm<x86.packed_dot.core> {
+  %9 = copy %acc : reg<x86.ymm> -> reg<x86.ymm>
+  %dot = avx512_bf16.vdpbf16ps.ymm %9, %lhs, %rhs
+  return %dot
+}
+
+// ====
+
+x86.target<packed_dot> @target
+func.def target(@target) @dot4i_u8s8_256(%lhs: vector<32xi8>, %rhs: vector<32xi8>, %acc: vector<8xi32>) -> (vector<8xi32>) {
+  %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<32xi8>, vector<32xi8>, vector<8xi32>
+  func.return %dot : vector<8xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @dot4i_u8s8_256(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %acc: reg<x86.ymm>) -> (reg<x86.ymm>) asm<x86.packed_dot.core> {
+  %9 = copy %acc : reg<x86.ymm> -> reg<x86.ymm>
+  %dot = avx_vnni.vpdpbusd.ymm %9, %lhs, %rhs
+  return %dot
+}
+
+// ====
+
+x86.target<packed_dot> @target
+func.def target(@target) @dot4i_s8s8_256(%lhs: vector<32xi8>, %rhs: vector<32xi8>, %acc: vector<8xi32>) -> (vector<8xi32>) {
+  %dot = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<32xi8>, vector<32xi8>, vector<8xi32>
+  func.return %dot : vector<8xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @dot4i_s8s8_256(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %acc: reg<x86.ymm>) -> (reg<x86.ymm>) asm<x86.packed_dot.core> {
+  %9 = copy %acc : reg<x86.ymm> -> reg<x86.ymm>
+  %dot = avx_vnni_int8.vpdpbssd.ymm %9, %lhs, %rhs
+  return %dot
+}

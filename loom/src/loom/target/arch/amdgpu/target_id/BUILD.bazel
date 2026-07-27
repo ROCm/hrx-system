@@ -1,0 +1,44 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_AMDGPU_LOWER_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/lower:__pkg__"]
+
+_AMDGPU_NATIVE_VISIBILITY = ["//loom/src/loom/target/emit/native/amdgpu:__pkg__"]
+
+_AMDGPU_PLANNING_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/planning:__pkg__"]
+
+_AMDGPU_TOOLING_VISIBILITY = ["//loom/src/loom/tooling/target/amdgpu:__pkg__"]
+
+loom_cc_library(
+    name = "target_id",
+    srcs = ["target_id.c"],
+    hdrs = ["target_id.h"],
+    visibility = (
+        _AMDGPU_LOWER_VISIBILITY +
+        _AMDGPU_NATIVE_VISIBILITY +
+        _AMDGPU_PLANNING_VISIBILITY +
+        _AMDGPU_TOOLING_VISIBILITY
+    ),
+    deps = [
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/ops",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)

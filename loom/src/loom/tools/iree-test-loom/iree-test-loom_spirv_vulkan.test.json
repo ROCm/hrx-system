@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "runs spirv vulkan scalar case",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/spirv_vulkan_hal_actual.loom",
+          "--case=@double_i32_at_byte_offset_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"double_i32_at_byte_offset_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan cooperative f16 case",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/spirv_vulkan_coop_hal_actual.loom",
+          "--case=@dense_projection_tiled_f16_128_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"dense_projection_tiled_f16_128_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan cooperative u8 case",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/spirv_vulkan_coop_u8_hal_actual.loom",
+          "--case=@dense_projection_tiled_u8_128_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          {
+            "regex": "\"case\":\"dense_projection_tiled_u8_128_case\".*(\"passed\":true|\"code\":\"requirement_not_satisfied\",\"provider_code\":\"cooperative_matrix_row_unavailable\")"
+          }
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan quantized case",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/spirv_vulkan_quantized_hal_actual.loom",
+          "--case=@quantized_projection_u8_scalar_128_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"quantized_projection_u8_scalar_128_case\"",
+          "\"passed\":true"
+        ]
+      }
+    }
+  ]
+}

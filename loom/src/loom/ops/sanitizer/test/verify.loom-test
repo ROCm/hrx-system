@@ -1,0 +1,199 @@
+// RUN: verify
+
+func.def @access_index_count_mismatch(%layout: encoding<layout>, %view: view<4x4xf32, %layout>, %row: index) {
+  // ERROR@+1: SUBRANGE/001 "view" "1" "2"
+  sanitizer.assert.access<read> %view[%row] : view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @access_static_index_out_of_bounds(%layout: encoding<layout>, %view: view<4x4xf32, %layout>) {
+  // ERROR@+1: SUBRANGE/004
+  sanitizer.assert.access<write> %view[4, 0] : view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @access_static_extent_count_mismatch(%layout: encoding<layout>, %view: view<4x4xf32, %layout>, %row: index) {
+  // ERROR@+1: SUBRANGE/003 "static_extents" "1" "2"
+  sanitizer.assert.access<read> %view[%row, 0] {static_extents = [4]} : view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @access_static_extent_must_be_positive(%layout: encoding<layout>, %view: view<4x4xf32, %layout>, %row: index) {
+  // ERROR@+1: STRUCTURE/014 "static_extents" "0" "positive extent"
+  sanitizer.assert.access<read> %view[%row, 0] {static_extents = [1, 0]} : view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @access_static_extent_out_of_bounds(%layout: encoding<layout>, %view: view<4x4xf32, %layout>) {
+  // ERROR@+1: SUBRANGE/004
+  sanitizer.assert.access<read> %view[3, 1] {static_extents = [1, 4]} : view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @accesses_static_count_must_be_positive(%layout: encoding<layout>, %view: view<4x4xf32, %layout>, %row: index) {
+  // ERROR@+1: STRUCTURE/014 "static_count" "0" "positive count"
+  sanitizer.assert.accesses<read> %view[%row, 0] {static_count = 0, static_extents = [1, 4], static_strides = [1, 0]} : view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @accesses_static_extent_count_mismatch(%layout: encoding<layout>, %view: view<4x4xf32, %layout>, %row: index) {
+  // ERROR@+1: SUBRANGE/003 "static_extents" "1" "2"
+  sanitizer.assert.accesses<read> %view[%row, 0] {static_count = 4, static_extents = [4], static_strides = [1, 0]} : view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @accesses_static_stride_count_mismatch(%layout: encoding<layout>, %view: view<4x4xf32, %layout>, %row: index) {
+  // ERROR@+1: SUBRANGE/003 "static_strides" "1" "2"
+  sanitizer.assert.accesses<read> %view[%row, 0] {static_count = 4, static_extents = [1, 4], static_strides = [1]} : view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @accesses_static_stride_must_be_non_negative(%layout: encoding<layout>, %view: view<4x4xf32, %layout>, %row: index) {
+  // ERROR@+1: STRUCTURE/014 "static_strides" "-1" "non-negative stride"
+  sanitizer.assert.accesses<read> %view[%row, 0] {static_count = 4, static_extents = [1, 4], static_strides = [-1, 0]} : view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @accesses_repeated_accesses_need_non_zero_stride(%layout: encoding<layout>, %view: view<4x4xf32, %layout>, %row: index) {
+  // ERROR@+1: STRUCTURE/014 "static_strides" "0" "non-zero stride for repeated accesses"
+  sanitizer.assert.accesses<read> %view[%row, 0] {static_count = 2, static_extents = [1, 4], static_strides = [0, 0]} : view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @accesses_static_repeated_extent_out_of_bounds(%layout: encoding<layout>, %view: view<4x4xf32, %layout>) {
+  // ERROR@+1: SUBRANGE/004
+  sanitizer.assert.accesses<read> %view[2, 0] {static_count = 3, static_extents = [1, 4], static_strides = [1, 0]} : view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @race_access_index_count_mismatch(%layout: encoding<layout>, %view: view<4x4xf32, %layout>, %row: index) {
+  // ERROR@+1: SUBRANGE/001 "view" "1" "2"
+  sanitizer.race.access<read> %view[%row] : view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @race_access_static_index_out_of_bounds(%layout: encoding<layout>, %view: view<4x4xf32, %layout>) {
+  // ERROR@+1: SUBRANGE/004
+  sanitizer.race.access<write> %view[4, 0] : view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @race_access_atomic_requires_ordering(%layout: encoding<layout>, %view: view<4xf32, %layout>, %i: index) {
+  // ERROR@+1: STRUCTURE/014 "ordering" "0" "present when atomic is true"
+  sanitizer.race.access<write> %view[%i] {atomic = true, scope = workgroup} : view<4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @race_access_nonatomic_rejects_ordering(%layout: encoding<layout>, %view: view<4xf32, %layout>, %i: index) {
+  // ERROR@+1: STRUCTURE/014 "ordering" "0" "absent when atomic is false"
+  sanitizer.race.access<read> %view[%i] {ordering = relaxed} : view<4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @race_sync_rejects_relaxed_ordering() {
+  // ERROR@+1: STRUCTURE/014 "ordering" "0" "acquire, release, acq_rel, or seq_cst ordering"
+  sanitizer.race.sync<workgroup> {ordering = relaxed, scope = workgroup}
+  func.return
+}
+
+// ====
+
+func.def @count_mismatch(%x: index) -> (index, index) {
+  // ERROR@+1: STRUCTURE/013 "values" "1" "results" "2"
+  %a, %b = sanitizer.assert.value %x [ge(%x, 0)] : index, index
+  func.return %a, %b : index, index
+}
+
+// ====
+
+func.def @predicate_value_must_be_assert_operand(%x: index, %y: index) -> (index) {
+  // ERROR@+1: STRUCTURE/032 "predicates[0].arg[1]" "an asserted value operand"
+  %checked = sanitizer.assert.value %x [lt(%x, %y)] : index
+  func.return %checked : index
+}
+
+// ====
+
+func.def @integer_predicate_rejects_float(%x: f32) -> (f32) {
+  // ERROR@+1: TYPE/003 "predicates[0].arg[0]" "f32" "integer, index, or offset value"
+  %checked = sanitizer.assert.value %x [ge(%x, 0)] : f32
+  func.return %checked : f32
+}
+
+// ====
+
+func.def @float_predicate_rejects_integer(%x: index) -> (index) {
+  // ERROR@+1: TYPE/003 "predicates[0].arg[0]" "index" "floating-point value"
+  %checked = sanitizer.assert.value %x [finite(%x)] : index
+  func.return %checked : index
+}
+
+// ====
+
+func.def @op_predicate_value_must_be_assert_operand(%x: index, %y: index) {
+  // ERROR@+1: STRUCTURE/032 "predicates[0].arg[1]" "an assertion operand"
+  sanitizer.assert.op %x [lt(%x, %y)] : index
+  func.return
+}
+
+// ====
+
+func.def @op_integer_predicate_rejects_float(%x: f32) {
+  // ERROR@+1: TYPE/003 "predicates[0].arg[0]" "f32" "integer, index, or offset value"
+  sanitizer.assert.op %x [ge(%x, 0)] : f32
+  func.return
+}
+
+// ====
+
+func.def @op_float_predicate_rejects_integer(%x: index) {
+  // ERROR@+1: TYPE/003 "predicates[0].arg[0]" "index" "floating-point value"
+  sanitizer.assert.op %x [finite(%x)] : index
+  func.return
+}
+
+// ====
+
+func.def @layout_missing_result_layout(%m: index, %layout: encoding<layout>, %view: view<[%m]xf32, %layout>) -> (view<16xf32>) {
+  // ERROR@+1: ENCODING/001 "result type layout" "view type"
+  %checked = sanitizer.assert.layout %view : view<[%m]xf32, %layout> -> view<16xf32>
+  func.return %checked : view<16xf32>
+}
+
+// ====
+
+func.def @layout_static_dimension_mismatch(%layout: encoding<layout>, %view: view<4xf32, %layout>) -> (view<8xf32, %layout>) {
+  // ERROR@+1: SHAPE/001 "source static dimension" "4" "result static dimension" "8"
+  %checked = sanitizer.assert.layout %view : view<4xf32, %layout> -> view<8xf32, %layout>
+  func.return %checked : view<8xf32, %layout>
+}

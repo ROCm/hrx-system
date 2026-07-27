@@ -1,0 +1,6 @@
+build
+runtime/build
+.tmp
+.venv
+.beads
+history

@@ -18,12 +18,27 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from build_tools.bazel import compile_commands_merge
 from build_tools.devtools import fuzz
 from build_tools.devtools.command_plan import quote_command
-from build_tools.devtools.environment import REPO_ROOT
+from build_tools.devtools.environment import (
+    LOCAL_TMP_ROOT,
+    REPO_ROOT,
+)
 
-BAZEL_TRY_ROOT = REPO_ROOT / ".iree-bazel-try"
+LOCAL_STATE_ROOT = REPO_ROOT / ".iree"
+BAZEL_TRY_ROOT = LOCAL_STATE_ROOT / "bazel-try"
+BAZEL_TRY_LABEL_ROOT = "//.iree/bazel-try"
+BAZEL_COMPILE_COMMANDS_ROOT = LOCAL_TMP_ROOT / "iree-bazel-compile-commands"
 DEFAULT_TRY_BINARY_NAME = "snippet"
+DEFAULT_COMPILE_COMMANDS_OUTPUT = REPO_ROOT / "compile_commands.json"
+DEFAULT_COMPILE_COMMANDS_TARGETS = ("//runtime/...", "//libhrx/...", "//loom/...")
+COMPILE_COMMANDS_ASPECT = (
+    "//build_tools/bazel:compile_commands.bzl%collect_compile_commands_aspect"
+)
+CLANG_TIDY_ASPECT = "//build_tools/clang_tidy:clang_tidy.bzl%collect_clang_tidy_aspect"
+CLANG_TIDY_OUTPUT_GROUP = "iree_clang_tidy_reports"
+CLANG_TIDY_REPO_ENV = "--repo_env=IREE_CLANG_TIDY_LLVM=auto"
 HEADER_ROOTS: tuple[tuple[str, Path], ...] = (
     ("iree/", REPO_ROOT / "runtime/src"),
     ("loom/", REPO_ROOT / "loom/src"),
@@ -62,6 +77,15 @@ class BazelTryCommand:
     keep: bool = False
     bazel_args: list[str] = field(default_factory=list)
     program_args: list[str] = field(default_factory=list)
+    run_cwd: Path = field(default_factory=Path.cwd)
+
+
+@dataclass(frozen=True)
+class BazelCompileCommandsCommand:
+    targets: list[str] = field(default_factory=list)
+    bazel_args: list[str] = field(default_factory=list)
+    output: Path = DEFAULT_COMPILE_COMMANDS_OUTPUT
+    keep: bool = False
     run_cwd: Path = field(default_factory=Path.cwd)
 
 
@@ -191,6 +215,81 @@ def parse_bazel_try_args(
     )
 
 
+def parse_bazel_compile_commands_args(
+    arguments: list[str], *, run_cwd: Path | None = None
+) -> BazelCompileCommandsCommand:
+    tool_args = forwarded_tool_args(arguments)
+    targets = []
+    bazel_args = []
+    output = DEFAULT_COMPILE_COMMANDS_OUTPUT
+    keep = False
+    command_cwd = run_cwd or Path.cwd()
+
+    index = 0
+    while index < len(tool_args):
+        arg = tool_args[index]
+        if arg in ("-o", "--output"):
+            index += 1
+            if index >= len(tool_args):
+                raise ValueError(f"{arg} requires a path")
+            output = Path(tool_args[index])
+        elif arg.startswith("--output="):
+            output = Path(arg.split("=", 1)[1])
+        elif arg in ("-k", "--keep"):
+            keep = True
+        elif is_negative_bazel_target_pattern(arg):
+            targets.append(arg)
+        elif arg.startswith("-"):
+            bazel_args.append(arg)
+        else:
+            targets.append(arg)
+        index += 1
+
+    if not output.is_absolute():
+        output = command_cwd / output
+    if not targets:
+        targets = list(DEFAULT_COMPILE_COMMANDS_TARGETS)
+    elif all(is_negative_bazel_target_pattern(target) for target in targets):
+        targets = [*DEFAULT_COMPILE_COMMANDS_TARGETS, *targets]
+
+    return BazelCompileCommandsCommand(
+        targets=targets,
+        bazel_args=bazel_args,
+        output=output,
+        keep=keep,
+        run_cwd=command_cwd,
+    )
+
+
+def forwarded_tool_args(arguments: list[str]) -> list[str]:
+    if arguments and arguments[0] == "--":
+        return arguments[1:]
+    return arguments
+
+
+def clang_tidy_build_argv(
+    bazel: str,
+    targets: list[str],
+    *,
+    keep_going: bool = False,
+) -> list[str]:
+    argv = [bazel, "build"]
+    if keep_going:
+        argv.append("--keep_going")
+    argv += [
+        CLANG_TIDY_REPO_ENV,
+        f"--aspects={CLANG_TIDY_ASPECT}",
+        f"--output_groups={CLANG_TIDY_OUTPUT_GROUP}",
+        "--",
+        *targets,
+    ]
+    return argv
+
+
+def is_negative_bazel_target_pattern(arg: str) -> bool:
+    return arg.startswith(("-//", "-@"))
+
+
 def normalize_language(value: str) -> str:
     if value in ("c", "C"):
         return "c"
@@ -317,6 +416,18 @@ def cleanup_try_scratch(scratch_dir: Path) -> None:
     shutil.rmtree(scratch_dir, ignore_errors=True)
     try:
         BAZEL_TRY_ROOT.rmdir()
+    except OSError:
+        pass
+    try:
+        LOCAL_STATE_ROOT.rmdir()
+    except OSError:
+        pass
+
+
+def cleanup_compile_commands_scratch(scratch_dir: Path) -> None:
+    shutil.rmtree(scratch_dir, ignore_errors=True)
+    try:
+        BAZEL_COMPILE_COMMANDS_ROOT.rmdir()
     except OSError:
         pass
 
@@ -575,6 +686,83 @@ class BazelFuzzStep:
 
 
 @dataclass(frozen=True)
+class BazelCompileCommandsStep:
+    bazel: str
+    command: BazelCompileCommandsCommand
+    env: dict[str, str] | None = None
+
+    def describe(self) -> str:
+        scratch = BAZEL_COMPILE_COMMANDS_ROOT / "run-<pid>"
+        lines = [
+            "# bazel compile-commands",
+            quote_command(self.aspect_build_argv(scratch / "build_events.json")),
+            "merge compile command fragments from "
+            + quote_command([str(scratch / "build_events.json")]),
+            "write " + quote_command([str(self.command.output)]),
+        ]
+        return "\n".join(lines)
+
+    def run(self, verbose: bool = False) -> int:
+        scratch_dir = BAZEL_COMPILE_COMMANDS_ROOT / f"run-{os.getpid()}"
+        if scratch_dir.exists():
+            shutil.rmtree(scratch_dir)
+        scratch_dir.mkdir(parents=True)
+        build_events_path = scratch_dir / "build_events.json"
+        try:
+            build_result = run_quietly(
+                self.aspect_build_argv(build_events_path),
+                cwd=REPO_ROOT,
+                env=self.env,
+                verbose=verbose,
+            )
+            if build_result != 0:
+                return build_result
+            command_directory = bazel_execution_root(
+                bazel=self.bazel,
+                cwd=REPO_ROOT,
+                env=self.env,
+            )
+            if command_directory is None:
+                print(
+                    "dev.py: could not resolve Bazel execution root",
+                    file=sys.stderr,
+                )
+                return 1
+            fragment_paths = compile_commands_merge.fragment_paths_from_bep(
+                build_events_path,
+            )
+            if not fragment_paths:
+                print(
+                    "dev.py: no C/C++ compile command fragments were produced",
+                    file=sys.stderr,
+                )
+                return 1
+            compile_commands_merge.write_merged_compile_commands(
+                output_path=self.command.output,
+                fragment_paths=fragment_paths,
+                command_directory=command_directory,
+            )
+            print(self.command.output)
+            return 0
+        finally:
+            if not self.command.keep:
+                cleanup_compile_commands_scratch(scratch_dir)
+
+    def aspect_build_argv(self, build_events_path: Path) -> list[str]:
+        return [
+            self.bazel,
+            "build",
+            *self.command.bazel_args,
+            f"--aspects={COMPILE_COMMANDS_ASPECT}",
+            "--output_groups=" + compile_commands_merge.COMPILE_COMMANDS_OUTPUT_GROUP,
+            f"--build_event_json_file={build_events_path}",
+            "--ui_event_filters=-info",
+            "--",
+            *self.command.targets,
+        ]
+
+
+@dataclass(frozen=True)
 class BazelTryStep:
     bazel: str
     command: BazelTryCommand
@@ -582,7 +770,7 @@ class BazelTryStep:
 
     def describe(self) -> str:
         scratch = BAZEL_TRY_ROOT / "run-<pid>"
-        label = "//.iree-bazel-try/run-<pid>:snippet"
+        label = f"{BAZEL_TRY_LABEL_ROOT}/run-<pid>:snippet"
         lines = [
             f"# write {scratch}/BUILD.bazel",
             quote_command([self.bazel, "build", *self.command.bazel_args, label]),
@@ -615,7 +803,9 @@ class BazelTryStep:
                 deps=deps,
                 testonly=True,
             )
-            label = f"//.iree-bazel-try/{scratch_dir.name}:{DEFAULT_TRY_BINARY_NAME}"
+            label = (
+                f"{BAZEL_TRY_LABEL_ROOT}/{scratch_dir.name}:{DEFAULT_TRY_BINARY_NAME}"
+            )
             build_result = run_quietly(
                 [self.bazel, "build", *self.command.bazel_args, label],
                 cwd=REPO_ROOT,

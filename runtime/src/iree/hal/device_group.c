@@ -32,14 +32,8 @@ struct iree_hal_device_group_t {
   // Retained devices. Order defines topology indices (device i = devices[i]).
   iree_hal_device_t* devices[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
 
-  // Cached driver name for each device (backed by the device's own storage,
-  // valid for the device's lifetime).
-  iree_string_view_t driver_names[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
-
   // Immutable topology matrix built during creation.
-  // Embedded (not heap-allocated) so devices can hold a stable pointer to it
-  // for the group's lifetime.
-  iree_hal_topology_t topology;
+  iree_hal_topology_t* topology;
 };
 
 IREE_API_EXPORT iree_status_t iree_hal_device_group_create_from_device(
@@ -70,6 +64,7 @@ static void iree_hal_device_group_destroy(iree_hal_device_group_t* group) {
     iree_hal_device_release(group->devices[i]);
   }
   iree_async_frontier_tracker_release(group->frontier_tracker);
+  iree_hal_topology_destroy(group->topology, group->host_allocator);
 
   iree_allocator_t host_allocator = group->host_allocator;
   iree_allocator_free(host_allocator, group);
@@ -107,7 +102,7 @@ IREE_API_EXPORT iree_hal_device_t* iree_hal_device_group_device_at(
 IREE_API_EXPORT const iree_hal_topology_t* iree_hal_device_group_topology(
     const iree_hal_device_group_t* group) {
   IREE_ASSERT_ARGUMENT(group);
-  return &group->topology;
+  return group->topology;
 }
 
 //===----------------------------------------------------------------------===//
@@ -202,6 +197,20 @@ static void iree_hal_device_group_compute_bitmaps(
   }
 }
 
+static bool iree_hal_device_group_specs_have_same_driver_backend(
+    const iree_hal_device_spec_t* source_spec,
+    const iree_hal_device_spec_t* destination_spec) {
+  const iree_hal_device_identity_spec_t* source_identity =
+      iree_hal_device_spec_identity(source_spec);
+  const iree_hal_device_identity_spec_t* destination_identity =
+      iree_hal_device_spec_identity(destination_spec);
+  return !iree_string_view_is_empty(source_identity->driver_id) &&
+         iree_string_view_equal(source_identity->driver_id,
+                                destination_identity->driver_id) &&
+         iree_string_view_equal(source_identity->backend_id,
+                                destination_identity->backend_id);
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_device_group_create_with_replacements(
     iree_hal_device_group_t* source_group,
     iree_hal_device_group_replacement_callback_t replacement_callback,
@@ -232,7 +241,8 @@ IREE_API_EXPORT iree_status_t iree_hal_device_group_create_with_replacements(
   group->device_count = device_count;
   group->frontier_tracker = source_group->frontier_tracker;
   iree_async_frontier_tracker_retain(group->frontier_tracker);
-  group->topology = source_group->topology;
+  status = iree_hal_topology_clone(source_group->topology, host_allocator,
+                                   &group->topology);
 
   for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
        ++i) {
@@ -250,7 +260,6 @@ IREE_API_EXPORT iree_status_t iree_hal_device_group_create_with_replacements(
     } else {
       iree_hal_device_release(replacement_device);
     }
-    group->driver_names[i] = source_group->driver_names[i];
   }
 
   iree_host_size_t assigned_device_count = 0;
@@ -259,9 +268,9 @@ IREE_API_EXPORT iree_status_t iree_hal_device_group_create_with_replacements(
     iree_hal_device_topology_info_t topology_info;
     memset(&topology_info, 0, sizeof(topology_info));
     topology_info.topology_index = (uint32_t)i;
-    topology_info.topology = &group->topology;
+    topology_info.topology = group->topology;
     topology_info.self_edge =
-        iree_hal_topology_query_edge(&group->topology, (uint32_t)i, (uint32_t)i)
+        iree_hal_topology_query_edge(group->topology, (uint32_t)i, (uint32_t)i)
             .lo;
     topology_info.frontier.tracker = group->frontier_tracker;
     topology_info.frontier.base_axis = iree_async_axis_make_queue(
@@ -269,7 +278,7 @@ IREE_API_EXPORT iree_status_t iree_hal_device_group_create_with_replacements(
         iree_async_frontier_tracker_machine_index(group->frontier_tracker),
         (uint8_t)i, /*queue_index=*/0);
 
-    iree_hal_device_group_compute_bitmaps(&group->topology, (uint32_t)i,
+    iree_hal_device_group_compute_bitmaps(group->topology, (uint32_t)i,
                                           &topology_info);
 
     status =
@@ -325,25 +334,24 @@ IREE_API_EXPORT iree_status_t iree_hal_device_group_builder_finalize(
   group->frontier_tracker = builder->frontier_tracker;
   builder->frontier_tracker = NULL;
 
-  // Retain all devices and cache driver names.
+  const iree_hal_device_spec_t*
+      device_specs[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
+
+  // Retain all devices and fetch their cached immutable specs.
   for (iree_host_size_t i = 0; i < device_count; ++i) {
     group->devices[i] = builder->devices[i];
     iree_hal_device_retain(group->devices[i]);
-    group->driver_names[i] = iree_hal_device_id(group->devices[i]);
+    device_specs[i] = iree_hal_device_spec(group->devices[i]);
+    if (IREE_UNLIKELY(!device_specs[i])) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "device %" PRIhsz " must provide a cached immutable spec", i);
+      break;
+    }
   }
 
   // Invalidate the builder now — we've taken everything we need.
   memset(builder, 0, sizeof(*builder));
-
-  // Query capabilities from all devices.
-  iree_hal_device_capabilities_t
-      capabilities[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
-  memset(capabilities, 0, sizeof(capabilities));
-  for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
-       ++i) {
-    status =
-        iree_hal_device_query_capabilities(group->devices[i], &capabilities[i]);
-  }
 
   // Build topology.
   iree_hal_topology_builder_t topology_builder;
@@ -357,15 +365,14 @@ IREE_API_EXPORT iree_status_t iree_hal_device_group_builder_finalize(
          j < (uint32_t)device_count && iree_status_is_ok(status); ++j) {
       if (i == j) continue;  // Self-edges are pre-initialized.
 
-      // Compute base edge from capabilities.
-      iree_hal_topology_edge_t edge = iree_hal_topology_edge_from_capabilities(
-          &capabilities[i], &capabilities[j], group->driver_names[i],
-          group->driver_names[j]);
+      iree_hal_topology_edge_t edge = iree_hal_topology_edge_from_device_specs(
+          device_specs[i], device_specs[j]);
 
-      // Allow same-driver devices to refine the edge with hardware-specific
-      // knowledge (e.g., NVLink topology, Infinity Fabric link widths).
-      if (iree_string_view_equal(group->driver_names[i],
-                                 group->driver_names[j])) {
+      // Specs carry serializable facts. Same driver/backend pairs may still
+      // prove native synchronization, peer access, DMA, coherency, or link
+      // costs from live process-local backend handles.
+      if (iree_hal_device_group_specs_have_same_driver_backend(
+              device_specs[i], device_specs[j])) {
         status = iree_hal_device_refine_topology_edge(group->devices[i],
                                                       group->devices[j], &edge);
         if (!iree_status_is_ok(status)) break;
@@ -376,17 +383,10 @@ IREE_API_EXPORT iree_status_t iree_hal_device_group_builder_finalize(
     }
   }
 
-  // Set NUMA nodes from queried capabilities.
-  for (uint32_t i = 0; i < (uint32_t)device_count && iree_status_is_ok(status);
-       ++i) {
-    status = iree_hal_topology_builder_set_numa_node(&topology_builder, i,
-                                                     capabilities[i].numa_node);
-  }
-
   // Finalize topology.
   if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_topology_builder_finalize(&topology_builder, &group->topology);
+    status = iree_hal_topology_builder_finalize_with_device_specs(
+        &topology_builder, device_specs, host_allocator, &group->topology);
   }
 
   // Assign topology info to each device.
@@ -396,9 +396,9 @@ IREE_API_EXPORT iree_status_t iree_hal_device_group_builder_finalize(
     iree_hal_device_topology_info_t topology_info;
     memset(&topology_info, 0, sizeof(topology_info));
     topology_info.topology_index = (uint32_t)i;
-    topology_info.topology = &group->topology;
+    topology_info.topology = group->topology;
     topology_info.self_edge =
-        iree_hal_topology_query_edge(&group->topology, (uint32_t)i, (uint32_t)i)
+        iree_hal_topology_query_edge(group->topology, (uint32_t)i, (uint32_t)i)
             .lo;
     topology_info.frontier.tracker = group->frontier_tracker;
     topology_info.frontier.base_axis = iree_async_axis_make_queue(
@@ -406,7 +406,7 @@ IREE_API_EXPORT iree_status_t iree_hal_device_group_builder_finalize(
         iree_async_frontier_tracker_machine_index(group->frontier_tracker),
         (uint8_t)i, /*queue_index=*/0);
 
-    iree_hal_device_group_compute_bitmaps(&group->topology, (uint32_t)i,
+    iree_hal_device_group_compute_bitmaps(group->topology, (uint32_t)i,
                                           &topology_info);
 
     status =

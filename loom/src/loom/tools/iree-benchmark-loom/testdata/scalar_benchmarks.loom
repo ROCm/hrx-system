@@ -1,0 +1,18 @@
+check.case @scalar_equal {
+  %actual = check.literal value(42) : i32
+  %expected = check.literal value(42) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
+
+check.benchmark<@scalar_equal> @scalar_equal_latency
+check.benchmark<@scalar_equal> @scalar_equal_dispatch_latency
+
+check.case @sampled_choice {
+  %value = check.param.choice values([5, 7]) name("value") : i32
+  check.expect.equal actual(%value) expected(%value) : i32
+  check.return
+}
+
+check.benchmark<@sampled_choice> @sampled_choice_latency
+check.benchmark<@sampled_choice> @sampled_choice_value7 {value = 7}

@@ -87,16 +87,21 @@ enum iree_hal_pool_acquire_result_e {
 // iree_hal_pool_release_reservation().
 //
 // This is a pure value type (32 bytes, no ownership). It lives on the stack
-// during queue submission or is stored in the buffer that wraps it. The pool
-// knows how to interpret its fields; callers treat it as opaque.
+// during queue submission or is stored in the buffer that wraps it. The offset
+// and byte length describe the user-visible range that may be materialized as
+// a HAL buffer. Concrete pools may reserve additional backing bytes for
+// alignment, block-granularity allocation, guard regions, sanitizer redzones,
+// or other provider-specific metadata; those bytes are owned by the pool and
+// must not be inferred from this public value.
 typedef struct iree_hal_pool_reservation_t {
-  // Offset within the pool's managed range.
+  // Offset of the user-visible range within the pool's managed range.
   iree_device_size_t offset;
 
-  // Actual allocated length in bytes. May exceed the requested length due to
-  // alignment rounding or because the block could not be split (the remainder
-  // would have been smaller than the minimum block size).
-  iree_device_size_t length;
+  // User-visible byte length of the reservation. May exceed the requested size
+  // due to alignment rounding or because a concrete pool exposes an entire
+  // unsplit block, but it does not include hidden backing bytes such as
+  // sanitizer redzones.
+  iree_device_size_t byte_length;
 
   // Pool-internal opaque handle for returning the block on release.
   // Interpretation is strategy-specific: a TLSF release-node pointer,
@@ -207,15 +212,14 @@ typedef struct iree_hal_pool_capabilities_t {
   // that isn't host-visible can't serve MAPPING usage.
   iree_hal_buffer_usage_t supported_usage;
 
-  // Minimum allocation size in bytes. Fixed-block pools use their block size.
-  // Suballocating pools may round internally and report 0 or 1 when they have
-  // no practical lower bound.
+  // Minimum user-visible allocation size in bytes. Suballocating pools may
+  // round internally and report 0 or 1 when they have no practical lower bound.
   iree_device_size_t min_allocation_size;
 
-  // Strategy-specific maximum single reservation in bytes. Fixed-block pools
-  // use their block size, TLSF pools use their slab size, and pass-through
-  // pools report 0 for no strategy limit. Budgets are reported separately and
-  // enforced by acquire_reservation().
+  // Strategy-specific maximum single user-visible reservation in bytes.
+  // Fixed-block pools use their block size, TLSF pools use their slab size, and
+  // pass-through pools report 0 for no strategy limit. Budgets are reported
+  // separately and enforced by acquire_reservation().
   iree_device_size_t max_allocation_size;
 } iree_hal_pool_capabilities_t;
 
@@ -223,10 +227,12 @@ typedef struct iree_hal_pool_capabilities_t {
 // be momentarily inconsistent under concurrent modifications. Querying stats
 // is O(1) with no internal walks or locks.
 typedef struct iree_hal_pool_stats_t {
-  // Total bytes currently occupied by live reservations.
+  // Total backing bytes currently charged to live reservations. This may
+  // exceed the sum of reservation byte lengths due to allocation granularity,
+  // hidden guard regions, sanitizer redzones, or other pool-owned overhead.
   iree_device_size_t bytes_reserved;
 
-  // Total bytes in free blocks or available for reservation.
+  // Total backing bytes in free blocks or otherwise available for reservation.
   iree_device_size_t bytes_free;
 
   // Total physical memory committed (slabs or VMM pages).
@@ -334,11 +340,12 @@ static inline iree_hal_pool_epoch_query_t iree_hal_pool_epoch_query_null(void) {
 // └─────────────────────┘      └────────────────┘      └──────────────────────┘
 //
 //   1. acquire_reservation() at submit time: finds a free block, checks death
-//      frontier dominance, returns a reservation with offset and length.
+//      frontier dominance, returns a reservation with offset and byte length.
 //   2. materialize_reservation() without ownership transfer: creates a
 //      backing buffer view whose lifetime is independent from the reservation.
-//   3. release_reservation() at dealloca submit time: returns the block to
-//      the pool's free list, tagged with a death frontier.
+//   3. release_reservation() at the queue implementation's dealloca retirement
+//      point: returns the block to pool reuse metadata, tagged with a death
+//      frontier.
 //
 // Synchronous allocation:
 //   iree_hal_pool_allocate_buffer(): calls acquire_reservation() +
@@ -362,10 +369,12 @@ IREE_API_EXPORT void iree_hal_pool_release(iree_hal_pool_t* pool);
 
 // Acquires a reservation from the pool for a future allocation.
 //
-// |size| is the minimum number of bytes needed. |alignment| is the required
-// alignment for the returned offset (must be a power of two and > 0). The
-// actual allocated length may exceed |size| due to alignment rounding or
-// block splitting constraints.
+// |size| is the minimum number of user-visible bytes needed. |alignment| is
+// the required alignment for the returned offset (must be a power of two and
+// > 0). The returned reservation byte length may exceed |size| due to
+// alignment rounding or block splitting constraints, but it does not expose
+// hidden backing bytes reserved by the pool for provider metadata, guard
+// regions, or sanitizer redzones.
 //
 // |requester_frontier| is the queue scheduler's current causal position, used
 // for death frontier dominance checking. Pass NULL to skip dominance checking
@@ -407,13 +416,20 @@ IREE_API_EXPORT iree_status_t iree_hal_pool_acquire_reservation(
 // |reservation| is the reservation returned by a prior
 // iree_hal_pool_acquire_reservation() call on this pool. |death_frontier| is
 // the causal snapshot to attach to the freed block; typically the queue's
-// frontier at dealloca submit time. Pass NULL for an empty frontier (the block
-// is immediately available for zero-sync reuse by any requester).
+// dealloca completion frontier. Pass NULL for an empty frontier (the block is
+// immediately available for zero-sync reuse by any requester).
 //
-// The reservation's offset is returned to the pool's free list immediately.
-// The memory is available for future acquire_reservation() calls from that
-// point forward, even though the GPU may still be executing prior work;
-// death frontier dominance checking gates actual reuse safety.
+// The reservation's offset is returned to the pool's reuse metadata
+// immediately. The range may be considered by future acquire_reservation()
+// calls from that point forward, even though device work may still be executing
+// prior accesses; death frontier dominance checking gates actual reuse safety.
+//
+// Target-specific deallocation effects that change device-visible memory state
+// are not implied by this bookkeeping call. Queue-ordered users that need
+// sanitizer poisoning, guard-page changes, VMM unmapping, or similar effects
+// must perform those effects after queue_dealloca waits are satisfied and
+// before queue_dealloca signals are published, or at an equivalent proven
+// lifetime boundary on synchronous targets.
 //
 // Publishes the pool's notification epoch. Releases that occur with no known
 // waiter may skip platform wake work; waiters use an observe-check-wait
@@ -444,7 +460,9 @@ IREE_API_EXPORT void iree_hal_pool_release_reservation(
 // The concrete pool owns reservation bookkeeping and release callbacks, but
 // provider-specific buffer materialization must flow through that pool's slab
 // provider. Generic pools must not dereference slab payload fields directly;
-// they pass a slab plus offset range to iree_hal_slab_provider_wrap_buffer().
+// they pass the reservation's user-visible slab offset and byte range to
+// iree_hal_slab_provider_wrap_buffer(). Hidden backing bytes remain owned by
+// the concrete pool/provider and are not materialized through this API.
 IREE_API_EXPORT iree_status_t iree_hal_pool_materialize_reservation(
     iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
     const iree_hal_pool_reservation_t* reservation,

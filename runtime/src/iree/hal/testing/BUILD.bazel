@@ -20,5 +20,6 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
     ],
 )

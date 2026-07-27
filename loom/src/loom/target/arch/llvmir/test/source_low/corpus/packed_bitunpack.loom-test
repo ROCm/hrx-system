@@ -1,0 +1,244 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_bitunpack.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32_to_u8x4_bitunpack(%packed: vector<1xi32>) -> (vector<4xi32>) {
+  %unpacked = vector.bitunpacku<8> %packed : vector<1xi32> -> vector<4xi32>
+  func.return %unpacked : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32_to_u8x4_bitunpack(%packed: reg<llvmir.i32>) -> (reg<llvmir.i32 x4>) asm<llvmir.generic.core> {
+  %29 = const.i32 255
+  %30 = and.i32 %packed, %29
+  %31 = const.i32 8
+  %32 = lshr.i32 %packed, %31
+  %33 = and.i32 %32, %29
+  %34 = const.i32 16
+  %35 = lshr.i32 %packed, %34
+  %36 = and.i32 %35, %29
+  %37 = const.i32 24
+  %38 = lshr.i32 %packed, %37
+  %39 = and.i32 %38, %29
+  %unpacked = from_elements.v4i32 %30, %33, %36, %39
+  return %unpacked
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32_to_s8x4_bitunpack(%packed: vector<1xi32>) -> (vector<4xi32>) {
+  %unpacked = vector.bitunpacks<8> %packed : vector<1xi32> -> vector<4xi32>
+  func.return %unpacked : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32_to_s8x4_bitunpack(%packed: reg<llvmir.i32>) -> (reg<llvmir.i32 x4>) asm<llvmir.generic.core> {
+  %45 = const.i32 255
+  %46 = and.i32 %packed, %45
+  %47 = const.i32 24
+  %48 = shl.i32 %46, %47
+  %49 = ashr.i32 %48, %47
+  %50 = const.i32 8
+  %51 = lshr.i32 %packed, %50
+  %52 = and.i32 %51, %45
+  %53 = shl.i32 %52, %47
+  %54 = ashr.i32 %53, %47
+  %55 = const.i32 16
+  %56 = lshr.i32 %packed, %55
+  %57 = and.i32 %56, %45
+  %58 = shl.i32 %57, %47
+  %59 = ashr.i32 %58, %47
+  %60 = lshr.i32 %packed, %47
+  %61 = and.i32 %60, %45
+  %62 = shl.i32 %61, %47
+  %63 = ashr.i32 %62, %47
+  %unpacked = from_elements.v4i32 %49, %54, %59, %63
+  return %unpacked
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32_to_u4x8_bitunpack(%packed: vector<1xi32>) -> (vector<8xi32>) {
+  %unpacked = vector.bitunpacku<4> %packed : vector<1xi32> -> vector<8xi32>
+  func.return %unpacked : vector<8xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32_to_u4x8_bitunpack(%packed: reg<llvmir.i32>) -> (reg<llvmir.i32 x8>) asm<llvmir.generic.core> {
+  %53 = const.i32 15
+  %54 = and.i32 %packed, %53
+  %55 = const.i32 4
+  %56 = lshr.i32 %packed, %55
+  %57 = and.i32 %56, %53
+  %58 = const.i32 8
+  %59 = lshr.i32 %packed, %58
+  %60 = and.i32 %59, %53
+  %61 = const.i32 12
+  %62 = lshr.i32 %packed, %61
+  %63 = and.i32 %62, %53
+  %64 = const.i32 16
+  %65 = lshr.i32 %packed, %64
+  %66 = and.i32 %65, %53
+  %67 = const.i32 20
+  %68 = lshr.i32 %packed, %67
+  %69 = and.i32 %68, %53
+  %70 = const.i32 24
+  %71 = lshr.i32 %packed, %70
+  %72 = and.i32 %71, %53
+  %73 = const.i32 28
+  %74 = lshr.i32 %packed, %73
+  %75 = and.i32 %74, %53
+  %unpacked = from_elements.v8i32 %54, %57, %60, %63, %66, %69, %72, %75
+  return %unpacked
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i8x2_to_u2x8_bitunpack(%packed: vector<2xi8>) -> (vector<8xi32>) {
+  %unpacked = vector.bitunpacku<2> %packed : vector<2xi8> -> vector<8xi32>
+  func.return %unpacked : vector<8xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i8x2_to_u2x8_bitunpack(%packed: reg<llvmir.i8 x2>) -> (reg<llvmir.i32 x8>) asm<llvmir.generic.core> {
+  %54 = extract.v2i8 %packed, 0
+  %55 = zext.i8.i32 %54
+  %56 = const.i32 3
+  %57 = and.i32 %55, %56
+  %58 = const.i32 2
+  %59 = lshr.i32 %55, %58
+  %60 = and.i32 %59, %56
+  %61 = const.i32 4
+  %62 = lshr.i32 %55, %61
+  %63 = and.i32 %62, %56
+  %64 = const.i32 6
+  %65 = lshr.i32 %55, %64
+  %66 = extract.v2i8 %packed, 1
+  %67 = zext.i8.i32 %66
+  %68 = and.i32 %67, %56
+  %69 = lshr.i32 %67, %58
+  %70 = and.i32 %69, %56
+  %71 = lshr.i32 %67, %61
+  %72 = and.i32 %71, %56
+  %73 = lshr.i32 %67, %64
+  %unpacked = from_elements.v8i32 %57, %60, %63, %65, %68, %70, %72, %73
+  return %unpacked
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32_to_u8x4_bitunpack_i8_result(%packed: vector<1xi32>) -> (vector<4xi8>) {
+  %unpacked = vector.bitunpacku<8> %packed : vector<1xi32> -> vector<4xi8>
+  func.return %unpacked : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32_to_u8x4_bitunpack_i8_result(%packed: reg<llvmir.i32>) -> (reg<llvmir.i8 x4>) asm<llvmir.generic.core> {
+  %33 = const.i32 255
+  %34 = and.i32 %packed, %33
+  %35 = trunc.i32.i8 %34
+  %36 = const.i32 8
+  %37 = lshr.i32 %packed, %36
+  %38 = and.i32 %37, %33
+  %39 = trunc.i32.i8 %38
+  %40 = const.i32 16
+  %41 = lshr.i32 %packed, %40
+  %42 = and.i32 %41, %33
+  %43 = trunc.i32.i8 %42
+  %44 = const.i32 24
+  %45 = lshr.i32 %packed, %44
+  %46 = and.i32 %45, %33
+  %47 = trunc.i32.i8 %46
+  %unpacked = from_elements.v4i8 %35, %39, %43, %47
+  return %unpacked
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i8x2_to_u4x4_bitunpack_i8_result(%packed: vector<2xi8>) -> (vector<4xi8>) {
+  %unpacked = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+  func.return %unpacked : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i8x2_to_u4x4_bitunpack_i8_result(%packed: reg<llvmir.i8 x2>) -> (reg<llvmir.i8 x4>) asm<llvmir.generic.core> {
+  %34 = extract.v2i8 %packed, 0
+  %35 = zext.i8.i32 %34
+  %36 = const.i32 15
+  %37 = and.i32 %35, %36
+  %38 = trunc.i32.i8 %37
+  %39 = const.i32 4
+  %40 = lshr.i32 %35, %39
+  %41 = trunc.i32.i8 %40
+  %42 = extract.v2i8 %packed, 1
+  %43 = zext.i8.i32 %42
+  %44 = and.i32 %43, %36
+  %45 = trunc.i32.i8 %44
+  %46 = lshr.i32 %43, %39
+  %47 = trunc.i32.i8 %46
+  %unpacked = from_elements.v4i8 %38, %41, %45, %47
+  return %unpacked
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i8x2_to_s4x4_bitunpack_i8_result(%packed: vector<2xi8>) -> (vector<4xi8>) {
+  %unpacked = vector.bitunpacks<4> %packed : vector<2xi8> -> vector<4xi8>
+  func.return %unpacked : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i8x2_to_s4x4_bitunpack_i8_result(%packed: reg<llvmir.i8 x2>) -> (reg<llvmir.i8 x4>) asm<llvmir.generic.core> {
+  %50 = extract.v2i8 %packed, 0
+  %51 = zext.i8.i32 %50
+  %52 = const.i32 15
+  %53 = and.i32 %51, %52
+  %54 = const.i32 28
+  %55 = shl.i32 %53, %54
+  %56 = ashr.i32 %55, %54
+  %57 = trunc.i32.i8 %56
+  %58 = const.i32 4
+  %59 = lshr.i32 %51, %58
+  %60 = shl.i32 %59, %54
+  %61 = ashr.i32 %60, %54
+  %62 = trunc.i32.i8 %61
+  %63 = extract.v2i8 %packed, 1
+  %64 = zext.i8.i32 %63
+  %65 = and.i32 %64, %52
+  %66 = shl.i32 %65, %54
+  %67 = ashr.i32 %66, %54
+  %68 = trunc.i32.i8 %67
+  %69 = lshr.i32 %64, %58
+  %70 = shl.i32 %69, %54
+  %71 = ashr.i32 %70, %54
+  %72 = trunc.i32.i8 %71
+  %unpacked = from_elements.v4i8 %57, %62, %68, %72
+  return %unpacked
+}

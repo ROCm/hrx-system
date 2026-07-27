@@ -1,0 +1,173 @@
+// RUN: verify
+
+// Valid IR with no annotations — no diagnostics expected.
+func.def @clean(%x: f32) -> (f32) {
+  func.return %x : f32
+}
+
+// ====
+
+// Unknown op name produces PARSE/006.
+func.def @unknown_op() {
+  // ERROR@+1: PARSE/006
+  bogus.nonexistent
+}
+
+// ====
+
+// Referencing an undefined SSA value produces PARSE/001.
+func.def @undefined_value() -> (i32) {
+  // ERROR@+1: PARSE/001
+  func.return %nonexistent : i32
+}
+
+// ====
+
+// Annotation with no domain (wildcard) matches any error.
+func.def @wildcard() {
+  // ERROR@+1:
+  bogus.nonexistent
+}
+
+// ====
+
+// Annotation with domain but no code (wildcard) matches any code in that domain.
+func.def @wildcard_code() {
+  // ERROR@+1: PARSE
+  bogus.nonexistent
+}
+
+// ====
+
+// Annotation with substring that must appear in the diagnostic message.
+func.def @substring() {
+  // ERROR@+1: PARSE/006 "bogus.nonexistent"
+  bogus.nonexistent
+}
+
+// ====
+
+// Negative offset targets the line above.
+func.def @negative_offset() {
+  bogus.nonexistent
+  // ERROR@-1: PARSE/006
+}
+
+// ====
+
+// Multiple errors across separate functions. Each function produces one
+// parse error; error recovery within a single block body consumes
+// subsequent ops, so separate functions are needed for independent errors.
+func.def @multiple_error_a() {
+  // ERROR@+1: PARSE/006
+  bogus.first
+}
+func.def @multiple_error_b() {
+  // ERROR@+1: PARSE/006
+  bogus.second
+}
+
+// ====
+
+// Type error caught by verifier, not parser. test.addi requires INTEGER
+// operands and result but receives f32. Three diagnostics: TYPE/003 for each
+// named operand field and TYPE/004 for the named result field.
+func.def @type_mismatch(%a: f32, %b: f32) -> (f32) {
+  // ERROR@+3: TYPE/003 "lhs"
+  // ERROR@+2: TYPE/003 "rhs"
+  // ERROR@+1: TYPE/004 "result"
+  %r = test.addi %a, %b : f32
+  func.return %r : f32
+}
+
+// ====
+
+// Type error with wildcard domain — matches any domain.
+func.def @type_wildcard(%a: f32, %b: f32) -> (f32) {
+  // ERROR@+3:
+  // ERROR@+2:
+  // ERROR@+1:
+  %r = test.addi %a, %b : f32
+  func.return %r : f32
+}
+
+// ====
+
+// Type error with substring match on the constraint name.
+func.def @type_substring(%a: f32, %b: f32) -> (f32) {
+  // ERROR@+3: TYPE/003 "integer"
+  // ERROR@+2: TYPE/003 "integer"
+  // ERROR@+1: TYPE/004 "integer"
+  %r = test.addi %a, %b : f32
+  func.return %r : f32
+}
+
+// ====
+
+// Non-symbol-defining op at module level is rejected by the verifier.
+// ERROR@+1: STRUCTURE/011 "test.constant"
+%c = test.constant 42 : i32
+
+// ====
+
+// test.constant result element type and payload kind must agree.
+func.def @test_constant_float_payload_kind() {
+  // ERROR@+1: TYPE/005 "value"
+  %c = test.constant 1 : tile<4xf32>
+  func.return
+}
+
+// ====
+
+// test.constant only supports scalar/tile/tensor/vector element-bearing results.
+func.def @test_constant_result_type_kind() {
+  // ERROR@+1: TYPE/004 "scalar/tile/tensor/vector"
+  %c = test.constant 0 : encoding
+  func.return
+}
+
+// ====
+
+// Vector constants are register-value constants with scalar element payloads.
+func.def @test_constant_vector_payload_kind() {
+  %c = test.constant 1 : vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Verifying a moderately sized block must not grow module location storage on
+// every parsed op. This catches accidental exponential table growth.
+func.def @many_locations() {
+  %v00 = test.constant 0 : i32
+  %v01 = test.constant 1 : i32
+  %v02 = test.constant 2 : i32
+  %v03 = test.constant 3 : i32
+  %v04 = test.constant 4 : i32
+  %v05 = test.constant 5 : i32
+  %v06 = test.constant 6 : i32
+  %v07 = test.constant 7 : i32
+  %v08 = test.constant 8 : i32
+  %v09 = test.constant 9 : i32
+  %v10 = test.constant 10 : i32
+  %v11 = test.constant 11 : i32
+  %v12 = test.constant 12 : i32
+  %v13 = test.constant 13 : i32
+  %v14 = test.constant 14 : i32
+  %v15 = test.constant 15 : i32
+  %v16 = test.constant 16 : i32
+  %v17 = test.constant 17 : i32
+  %v18 = test.constant 18 : i32
+  %v19 = test.constant 19 : i32
+  %v20 = test.constant 20 : i32
+  %v21 = test.constant 21 : i32
+  %v22 = test.constant 22 : i32
+  %v23 = test.constant 23 : i32
+  %v24 = test.constant 24 : i32
+  %v25 = test.constant 25 : i32
+  %v26 = test.constant 26 : i32
+  %v27 = test.constant 27 : i32
+  %v28 = test.constant 28 : i32
+  %v29 = test.constant 29 : i32
+  func.return
+}

@@ -235,14 +235,16 @@ iree_status_t iree_hal_cmd_build_dispatch(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "constants must be 4-byte aligned");
   }
-  if (IREE_UNLIKELY(constants.data_length !=
-                    dispatch_attrs.constant_count * sizeof(uint32_t))) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "constant count mismatch, expected %u but was provided %" PRIhsz,
-        (uint32_t)dispatch_attrs.constant_count,
-        constants.data_length / sizeof(uint32_t));
+  const iree_host_size_t expected_constant_length =
+      dispatch_attrs.constant_byte_length;
+  if (IREE_UNLIKELY(constants.data_length != expected_constant_length)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "constant byte length mismatch, expected %" PRIhsz
+                            " but was provided %" PRIhsz,
+                            expected_constant_length, constants.data_length);
   }
+  const iree_host_size_t constant_count =
+      dispatch_attrs.constant_byte_length / sizeof(uint32_t);
 
   // Validate bindings.
   if (IREE_UNLIKELY(binding_count != dispatch_attrs.binding_count)) {
@@ -255,7 +257,7 @@ iree_status_t iree_hal_cmd_build_dispatch(
   // Compute command size: fixed header + trailing constants, 8-byte aligned.
   iree_host_size_t cmd_bytes =
       iree_host_align(offsetof(iree_hal_cmd_dispatch_t, constants) +
-                          dispatch_attrs.constant_count * sizeof(uint32_t),
+                          dispatch_attrs.constant_byte_length,
                       8);
 
   // Compute tile count from static workgroup count. Indirect dispatches compute
@@ -290,7 +292,7 @@ iree_status_t iree_hal_cmd_build_dispatch(
       (uint16_t)(builder->total_binding_count - total_binding_count);
 
   // Fill dispatch command fields.
-  cmd->constant_count = dispatch_attrs.constant_count;
+  cmd->constant_count = (uint8_t)constant_count;
   cmd->binding_count = dispatch_attrs.binding_count;
   cmd->binding_data_base = binding_data_base;
   cmd->executable = local_executable;
@@ -322,9 +324,8 @@ iree_status_t iree_hal_cmd_build_dispatch(
       config.dynamic_workgroup_local_memory;
 
   // Copy constants into the FAM.
-  if (dispatch_attrs.constant_count > 0) {
-    memcpy(cmd->constants, constants.data,
-           dispatch_attrs.constant_count * sizeof(uint32_t));
+  if (dispatch_attrs.constant_byte_length > 0) {
+    memcpy(cmd->constants, constants.data, dispatch_attrs.constant_byte_length);
   }
 
   // Pre-fill fixup data_indices. Caller resolves bindings.

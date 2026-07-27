@@ -1,0 +1,169 @@
+// RUN: roundtrip
+
+// Scalar constant.
+global.constant @pi : f32 = 3.14159265358979
+
+// ====
+
+// Typed constant with dynamic dims and predicates.
+global.constant @weights : tile<[%m]x[%k]xf32> where [mul(%m, 16)]
+
+// ====
+
+// Variable with dynamic dims.
+global.variable @kv_cache : tile<[%s]x[%d]xf32>
+
+// ====
+
+// Variable with equal dims (structural constraint).
+global.variable @square : tile<[%n]x[%n]xf32>
+
+// ====
+
+// Scalar variable.
+global.variable @step_count : index = 0
+
+// ====
+
+// Boolean variable with an explicit false default.
+global.variable @enabled : i1 = false
+
+// ====
+
+// Read-only artifact payload.
+global.rodata @loom_sanitizer_sites = bytes("4c53495401000000"), align 8
+
+// ====
+
+// Empty read-only artifact payload with natural alignment.
+global.rodata @empty_rodata = bytes("")
+
+// ====
+
+// Load from scalar global.
+global.constant @c_pi : f32
+
+func.def @use_pi() -> (f32) {
+  %v = global.load @c_pi : f32
+  func.return %v : f32
+}
+
+// ====
+
+// Store to scalar global.
+global.variable @counter : index
+
+func.def @increment(%new_value: index) {
+  global.store %new_value, @counter : index
+  func.return
+}
+
+// ====
+
+// Load with dynamic dims — %m and %k are co-results.
+global.constant @w : tile<[%m]x[%k]xf32>
+
+func.def @load_with_dims() {
+  %tile, %m, %k = global.load @w : tile<[%m]x[%k]xf32>
+  func.return
+}
+
+// ====
+
+// Load with equal dims — both reference the same co-result.
+global.variable @sq : tile<[%n]x[%n]xf32>
+
+func.def @load_equal_dims() {
+  %tile, %n = global.load @sq : tile<[%n]x[%n]xf32>
+  func.return
+}
+
+// ====
+
+// Constant with static encoding.
+global.constant @q_weights : tile<[%m]x[%k]xi8, #q8_0<block=32>>
+
+// ====
+
+// Load from encoded global — encoding is static, dims are co-results.
+global.constant @qw : tile<[%m]x[%k]xi8, #q8_0<block=32>>
+
+func.def @load_encoded() {
+  %tile, %m, %k = global.load @qw : tile<[%m]x[%k]xi8, #q8_0<block=32>>
+  func.return
+}
+
+// ====
+
+// Load with SSA encoding — %enc is an encoding-typed co-result.
+global.constant @dyn_enc : tile<[%m]xf32, %enc>
+
+func.def @load_ssa_encoding() {
+  %tile, %m, %enc = global.load @dyn_enc : tile<[%m]xf32, %enc>
+  test.use %tile, %m, %enc : tile<[%m]xf32, %enc>, index, encoding
+  func.return
+}
+
+// ====
+
+// Load with dim and encoding co-results.
+global.constant @dyn_enc2 : tile<[%m]x[%k]xi8, %enc>
+
+func.def @load_dims_and_encoding() {
+  %tile, %m, %k, %enc = global.load @dyn_enc2 : tile<[%m]x[%k]xi8, %enc>
+  test.use %tile, %m, %k, %enc : tile<[%m]x[%k]xi8, %enc>, index, index, encoding
+  func.return
+}
+
+// ====
+
+// Equal dims with SSA encoding.
+global.variable @dyn_sq : tile<[%n]x[%n]xf32, %enc>
+
+func.def @load_equal_dims_encoding() {
+  %tile, %n, %enc = global.load @dyn_sq : tile<[%n]x[%n]xf32, %enc>
+  test.use %tile, %n, %enc : tile<[%n]x[%n]xf32, %enc>, index, encoding
+  func.return
+}
+
+// ====
+
+// Static dims with SSA encoding co-result.
+global.constant @static_dyn_enc : tile<4x8xf32, %enc>
+
+func.def @load_static_dims_encoding() {
+  %tile, %enc = global.load @static_dyn_enc : tile<4x8xf32, %enc>
+  test.use %tile, %enc : tile<4x8xf32, %enc>, encoding
+  func.return
+}
+
+// ====
+
+// Store to global with static encoding.
+global.variable @q_state : tile<[%n]xi8, #q8_0<block=32>>
+
+func.def @store_encoded(%n: index, %tile: tile<[%n]xi8, #q8_0<block=32>>) {
+  global.store %tile, @q_state : tile<[%n]xi8, #q8_0<block=32>>
+  func.return
+}
+
+// ====
+
+// Initializer storing to a constant global.
+global.constant @table : tile<16x32xf32>
+
+func.def initializer @init_table() {
+  %t = test.constant 0.0 : tile<16x32xf32>
+  global.store %t, @table : tile<16x32xf32>
+  func.return
+}
+
+// ====
+
+// Deinitializer loading from a variable global.
+global.variable @state : f32
+
+func.def deinitializer @cleanup_state() {
+  %s = global.load @state : f32
+  func.return
+}

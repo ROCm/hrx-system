@@ -1,0 +1,59 @@
+// RUN: emit source-low output=pipeline control-flow=structured-low
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @structured_pipeline_probe(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ----
+pass.pipeline<module> @__loom_check_source_low pipeline {
+  for func {
+    where target {
+      legalize-math
+      normalize-kernel-resources
+      promote-private-fragments
+      canonicalize
+      cse
+    }
+  }
+  select-templates(mode = "final")
+  inline-callables
+  target-legalize(mode = "eager")
+  for func {
+    where target {
+      vector-memory-to-scalar
+      linearize-view-accesses
+      canonicalize
+      cse
+    }
+  }
+  target-legalize(mode = "eager")
+  source-to-low(control-flow = "structured-low")
+  for func {
+    where target {
+      low-decompose-cfg-tuples
+      canonicalize
+      cse
+      low-dce
+    }
+  }
+}
+
+// ====
+// RUN: pass source-to-low{control-flow=structured-low}
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @rejects_unsupported_structured_region_op(%selector: index, %a: i32, %b: i32) -> (i32) {
+  // ERROR@+1: TARGET/030 {op_name="scf.switch", region_count="2"}
+  %result = scf.switch %selector -> (i32) {
+    case 0 {
+      scf.yield %a : i32
+    }
+    default {
+      scf.yield %b : i32
+    }
+  }
+  func.return %result : i32
+}

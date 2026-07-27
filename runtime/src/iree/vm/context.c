@@ -332,10 +332,8 @@ static void iree_vm_context_release_modules(iree_vm_context_t* context,
 
   // Release modules now that there are no import tables remaining.
   for (int i = (int)end; i >= (int)start; --i) {
-    if (context->list.modules[i]) {
-      iree_vm_module_release(context->list.modules[i]);
-      context->list.modules[i] = NULL;
-    }
+    iree_vm_module_release(context->list.modules[i]);
+    context->list.modules[i] = NULL;
   }
 
   IREE_TRACE_ZONE_END(z0);

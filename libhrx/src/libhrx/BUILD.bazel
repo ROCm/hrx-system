@@ -5,7 +5,12 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:select.bzl", "iree_select")
-load("//libhrx/build_tools/bazel:cc.bzl", "hrx_cc_library", "hrx_cc_shared_library")
+load(
+    "//libhrx/build_tools/bazel:cc.bzl",
+    "hrx_cc_library",
+    "hrx_cc_shared_library",
+    "hrx_cc_test",
+)
 
 package(
     default_visibility = ["//visibility:public"],
@@ -19,8 +24,12 @@ HRX_SRCS = [
     "buffer_table.c",
     "buffer_view.c",
     "device.c",
+    "event.c",
     "executable.c",
     "fence.c",
+    "graph.c",
+    "graph_analysis.c",
+    "graph_exec.c",
     "host_allocator.c",
     "mem_pool.c",
     "module.c",
@@ -51,10 +60,13 @@ HRX_DEPS = [
     "//runtime/src/iree/async",
     "//runtime/src/iree/base",
     "//runtime/src/iree/base:core_headers",
+    "//runtime/src/iree/base/internal",
     "//runtime/src/iree/base/internal:arena",
     "//runtime/src/iree/base/threading",
     "//runtime/src/iree/async/util:proactor_pool",
     "//runtime/src/iree/hal",
+    "//runtime/src/iree/hal/executable/amdgpu:executable_target",
+    "//runtime/src/iree/hal/memory:tlsf_pool",
     "//runtime/src/iree/hal/drivers/local_task:task_driver",
     "//runtime/src/iree/hal/local/loaders/registration",
     "//runtime/src/iree/hal/utils:profile_file",
@@ -79,15 +91,15 @@ HRX_AMDGPU_COPTS = iree_select({
     "//conditions:default": [],
 })
 
-# Bazel dependents use this normal library target; bazel_to_cmake maps it to
-# the generated shared target so CMake does not build a second public HRX lib.
+# Static implementation library for in-tree integrations that directly compose
+# with private HRX surfaces. External consumers use the shared :hrx target.
 hrx_cc_library(
     name = "hrx_static",
     srcs = HRX_SRCS,
     hdrs = HRX_HDRS,
     copts = HRX_AMDGPU_COPTS,
+    defines = ["HRX_STATIC"],
     includes = HRX_INCLUDES,
-    tags = ["skip-bazel_to_cmake"],
     deps = HRX_DEPS,
 )
 
@@ -100,4 +112,16 @@ hrx_cc_shared_library(
     ] + HRX_AMDGPU_COPTS,
     includes = HRX_INCLUDES,
     deps = HRX_DEPS,
+)
+
+hrx_cc_test(
+    name = "pool_test",
+    srcs = ["pool_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )

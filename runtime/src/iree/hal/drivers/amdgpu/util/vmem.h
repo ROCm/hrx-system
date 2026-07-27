@@ -43,9 +43,10 @@ typedef enum iree_hal_amdgpu_vmem_access_mode_e {
 // MEMORY_TYPE_* enumerants; this local enum keeps that upstream namespace leak
 // out of the rest of the driver.
 typedef enum iree_hal_amdgpu_vmem_memory_type_e {
-  // Default vmem allocation mode for device-local pools.
+  // Default vmem allocation mode for the selected memory pool.
   IREE_HAL_AMDGPU_VMEM_MEMORY_TYPE_DEFAULT = 0,
-  // Pinned host allocation mode for CPU memory pools.
+  // Pinned allocation mode for memory pools that support the HSA
+  // AllocatePinned flag.
   IREE_HAL_AMDGPU_VMEM_MEMORY_TYPE_PINNED_HOST = 1,
 } iree_hal_amdgpu_vmem_memory_type_t;
 
@@ -71,6 +72,13 @@ iree_status_t iree_hal_amdgpu_find_fine_global_memory_pool(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
     hsa_amd_memory_pool_t* out_pool);
 
+// Queries whether a fine-grained memory pool is available on the |agent|.
+// Returns errors from HSA enumeration, but reports a missing pool through
+// |out_available| instead of returning NOT_FOUND.
+iree_status_t iree_hal_amdgpu_query_fine_global_memory_pool(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
+    bool* out_available, hsa_amd_memory_pool_t* out_pool);
+
 // Tries to find a coarse-grained memory pool on the |agent|.
 // Returns true and populates |out_pool| if found, false otherwise.
 bool iree_hal_amdgpu_try_find_coarse_global_memory_pool(
@@ -82,6 +90,28 @@ bool iree_hal_amdgpu_try_find_coarse_global_memory_pool(
 bool iree_hal_amdgpu_try_find_fine_global_memory_pool(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
     hsa_amd_memory_pool_t* out_pool);
+
+// Translates a local AMDGPU VMM memory type to the HSA extension enum used by
+// hsa_amd_vmem_handle_create.
+iree_status_t iree_hal_amdgpu_vmem_translate_memory_type(
+    iree_hal_amdgpu_vmem_memory_type_t memory_type,
+    hsa_amd_memory_type_t* out_hsa_memory_type);
+
+// Queries the recommended HSA VMM allocation granule for |memory_pool|.
+iree_status_t iree_hal_amdgpu_vmem_query_alloc_granule(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_amd_memory_pool_t memory_pool,
+    iree_device_size_t* out_allocation_granule);
+
+// Builds HSA VMM access descriptors for |topology| and |access_mode|.
+//
+// |access_descs| must have capacity for |topology->all_agent_count| entries.
+// |out_access_desc_count| receives the initialized descriptor count.
+iree_status_t iree_hal_amdgpu_vmem_build_access_descs_for_topology(
+    const iree_hal_amdgpu_topology_t* topology, hsa_agent_t local_agent,
+    iree_hal_amdgpu_vmem_access_mode_t access_mode,
+    iree_host_size_t access_desc_capacity,
+    hsa_amd_memory_access_desc_t* access_descs,
+    iree_host_size_t* out_access_desc_count);
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_vmem_ringbuffer_t
@@ -126,10 +156,7 @@ typedef struct iree_hal_amdgpu_vmem_ringbuffer_t {
 
 // Initializes a ringbuffer by allocating the physical and virtual memory of at
 // least the requested |min_capacity| with at least 64 byte alignment.
-// |memory_type| selects the HSA allocation mode for the selected pool; callers
-// allocating from host CPU pools should use
-// IREE_HAL_AMDGPU_VMEM_MEMORY_TYPE_PINNED_HOST while device-local pools
-// generally use IREE_HAL_AMDGPU_VMEM_MEMORY_TYPE_DEFAULT.
+// |memory_type| selects the HSA allocation mode for the selected pool.
 // |access_descs| will be used to setup accessibility.
 iree_status_t iree_hal_amdgpu_vmem_ringbuffer_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t local_agent,

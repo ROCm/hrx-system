@@ -1,0 +1,9 @@
+// RUN: pass vector-to-scalar
+
+func.def @oversized_static_vector_store_rejected(%output: buffer, %value: vector<65536xf32>) {
+  %zero = index.constant 0 : offset
+  %output_view = buffer.view %output[%zero] : buffer -> view<65536xf32, #dense>
+  // ERROR@+1: SHAPE/007 {op_name="vector.store", pass_name="vector-to-scalar", vector_type="vector<65536xf32>"}
+  vector.store %value, %output_view[0] : vector<65536xf32>, view<65536xf32, #dense>
+  func.return
+}

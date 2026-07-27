@@ -24,6 +24,30 @@
 
 IREE_HAL_API_RETAIN_RELEASE(device);
 
+IREE_API_EXPORT iree_status_t iree_hal_device_create_params_verify(
+    const iree_hal_device_create_params_t* params) {
+  IREE_ASSERT_ARGUMENT(params);
+  if (IREE_UNLIKELY(!params->proactor_pool)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "HAL device creation requires a valid proactor pool");
+  }
+  if (IREE_UNLIKELY(!iree_hal_device_event_sink_is_valid(params->event_sink))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "HAL device creation requires a valid device event sink");
+  }
+  if (IREE_UNLIKELY(params->runtime_features &
+                    ~IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAGS_KNOWN)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "HAL device creation requested unknown runtime "
+                            "feature flags 0x%" PRIx64,
+                            params->runtime_features &
+                                ~IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAGS_KNOWN);
+  }
+  return iree_ok_status();
+}
+
 IREE_API_EXPORT iree_string_view_t
 iree_hal_device_id(iree_hal_device_t* device) {
   IREE_ASSERT_ARGUMENT(device);
@@ -42,10 +66,12 @@ IREE_API_EXPORT iree_hal_allocator_t* iree_hal_device_allocator(
   return _VTABLE_DISPATCH(device, device_allocator)(device);
 }
 
-IREE_API_EXPORT void iree_hal_device_replace_allocator(
+IREE_API_EXPORT iree_status_t iree_hal_device_replace_allocator(
     iree_hal_device_t* device, iree_hal_allocator_t* new_allocator) {
   IREE_ASSERT_ARGUMENT(device);
-  _VTABLE_DISPATCH(device, replace_device_allocator)(device, new_allocator);
+  IREE_ASSERT_ARGUMENT(new_allocator);
+  return _VTABLE_DISPATCH(device, replace_device_allocator)(device,
+                                                            new_allocator);
 }
 
 IREE_API_EXPORT void iree_hal_device_replace_channel_provider(
@@ -63,22 +89,95 @@ iree_status_t iree_hal_device_trim(iree_hal_device_t* device) {
   return status;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_device_query_i64(
-    iree_hal_device_t* device, iree_string_view_t category,
-    iree_string_view_t key, int64_t* out_value) {
+IREE_API_EXPORT const iree_hal_device_spec_t* iree_hal_device_spec(
+    iree_hal_device_t* device) {
   IREE_ASSERT_ARGUMENT(device);
-  IREE_ASSERT_ARGUMENT(out_value);
-  return _VTABLE_DISPATCH(device, query_i64)(device, category, key, out_value);
+  return _VTABLE_DISPATCH(device, device_spec)(device);
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_device_query_capabilities(
+IREE_API_EXPORT void iree_hal_device_observation_initialize(
+    iree_hal_device_observation_flags_t requested_flags,
+    iree_hal_device_observation_t* out_observation) {
+  IREE_ASSERT_ARGUMENT(out_observation);
+  memset(out_observation, 0, sizeof(*out_observation));
+  out_observation->requested_flags = requested_flags;
+  out_observation->sample_time_ns = iree_time_now();
+}
+
+IREE_API_EXPORT void iree_hal_device_observation_set_memory_total(
+    iree_device_size_t total_bytes,
+    iree_hal_device_observation_t* out_observation) {
+  IREE_ASSERT_ARGUMENT(out_observation);
+  out_observation->provided_flags |= IREE_HAL_DEVICE_OBSERVATION_FLAG_MEMORY;
+  out_observation->memory.flags |=
+      IREE_HAL_DEVICE_MEMORY_OBSERVATION_FLAG_TOTAL_BYTES;
+  out_observation->memory.total_bytes = total_bytes;
+}
+
+IREE_API_EXPORT void iree_hal_device_observation_set_memory_available(
+    iree_device_size_t available_bytes,
+    iree_hal_device_observation_t* out_observation) {
+  IREE_ASSERT_ARGUMENT(out_observation);
+  out_observation->provided_flags |= IREE_HAL_DEVICE_OBSERVATION_FLAG_MEMORY;
+  out_observation->memory.flags |=
+      IREE_HAL_DEVICE_MEMORY_OBSERVATION_FLAG_AVAILABLE_BYTES;
+  out_observation->memory.available_bytes = available_bytes;
+}
+
+IREE_API_EXPORT iree_status_t
+iree_hal_device_observation_populate_memory_total_from_spec(
+    const iree_hal_device_spec_t* device_spec,
+    iree_hal_device_observation_t* out_observation) {
+  IREE_ASSERT_ARGUMENT(out_observation);
+  if (!device_spec) return iree_ok_status();
+
+  const iree_hal_device_memory_spec_t* memory =
+      iree_hal_device_spec_memory(device_spec);
+  iree_device_size_t total_bytes = 0;
+  bool has_known_capacity = false;
+  for (iree_host_size_t i = 0; i < memory->heap_count; ++i) {
+    const iree_hal_memory_heap_spec_t* heap = &memory->heaps[i];
+    if (iree_all_bits_set(heap->flags,
+                          IREE_HAL_MEMORY_HEAP_SPEC_FLAG_CAPACITY_UNKNOWN)) {
+      continue;
+    }
+    if (IREE_UNLIKELY(heap->capacity_bytes > IREE_DEVICE_SIZE_MAX)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "memory heap capacity %" PRIu64
+                              " exceeds the representable device size",
+                              heap->capacity_bytes);
+    }
+    if (IREE_UNLIKELY(!iree_device_size_checked_add(
+            total_bytes, (iree_device_size_t)heap->capacity_bytes,
+            &total_bytes))) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "memory heap capacity sum overflowed");
+    }
+    has_known_capacity = true;
+  }
+  if (has_known_capacity) {
+    iree_hal_device_observation_set_memory_total(total_bytes, out_observation);
+  }
+  return iree_ok_status();
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_device_sample_observation(
     iree_hal_device_t* device,
-    iree_hal_device_capabilities_t* out_capabilities) {
+    iree_hal_device_observation_flags_t requested_flags,
+    iree_hal_device_observation_t* out_observation) {
   IREE_ASSERT_ARGUMENT(device);
-  IREE_ASSERT_ARGUMENT(out_capabilities);
+  IREE_ASSERT_ARGUMENT(out_observation);
+  if (IREE_UNLIKELY(iree_any_bit_set(requested_flags,
+                                     ~IREE_HAL_DEVICE_OBSERVATION_FLAG_ALL))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "unsupported device observation flags 0x%016" PRIx64, requested_flags);
+  }
   IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_RETURN_IF_ERROR(
-      _VTABLE_DISPATCH(device, query_capabilities)(device, out_capabilities));
+  iree_hal_device_observation_initialize(requested_flags, out_observation);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, _VTABLE_DISPATCH(device, sample_observation)(device, requested_flags,
+                                                       out_observation));
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -131,6 +230,42 @@ IREE_API_EXPORT iree_status_t iree_hal_device_query_queue_pool_backend(
   }
   return _VTABLE_DISPATCH(device, query_queue_pool_backend)(
       device, queue_affinity, out_backend);
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_device_load_executable(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* params,
+    iree_hal_executable_t** out_executable) {
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(params);
+  IREE_ASSERT_ARGUMENT(out_executable);
+  *out_executable = NULL;
+  if (IREE_UNLIKELY(iree_hal_device_spec_executable_target_ordinal(
+                        iree_hal_device_spec(device), target) ==
+                    IREE_HOST_SIZE_MAX)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "executable target must be borrowed from the device spec");
+  }
+  if (IREE_UNLIKELY(iree_const_byte_span_is_empty(params->executable_data))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "executable data must not be empty");
+  }
+  if (IREE_UNLIKELY(!params->executable_data.data)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "executable data pointer must not be NULL");
+  }
+  if (IREE_UNLIKELY(params->constant_count != 0 && !params->constants)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "executable constants are required when constant count is nonzero");
+  }
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_status_t status = _VTABLE_DISPATCH(device, load_executable)(
+      device, queue_affinity, target, params, out_executable);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_device_queue_alloca(
@@ -529,10 +664,14 @@ IREE_API_EXPORT iree_status_t iree_hal_device_profiling_begin(
     for (iree_host_size_t i = 0; i < options->counter_set_count; ++i) {
       const iree_hal_profile_counter_set_selection_t* counter_set =
           &options->counter_sets[i];
-      if (counter_set->counter_name_count == 0 || !counter_set->counter_names) {
+      if (counter_set->counter_name_count == 0) {
+        continue;
+      }
+      if (!counter_set->counter_names) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "hardware counter set %" PRIhsz
-                                " must request at least one counter name",
+                                " names counters but has no counter_names "
+                                "array",
                                 i);
       }
       for (iree_host_size_t j = 0; j < counter_set->counter_name_count; ++j) {
@@ -546,12 +685,6 @@ IREE_API_EXPORT iree_status_t iree_hal_device_profiling_begin(
         }
       }
     }
-  }
-  if (iree_hal_device_profiling_options_requests_counters(options) &&
-      options->counter_set_count == 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "counter profiling requires at least one counter set selection");
   }
 
   const bool data_requested =

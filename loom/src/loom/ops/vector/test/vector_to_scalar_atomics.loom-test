@@ -1,0 +1,300 @@
+// RUN: pass vector-to-scalar
+
+func.def @atomic_reduce_static(%buffer: buffer, %byte_offset: offset, %value: vector<2xi32>, %offsets: vector<2xindex>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xi32, %layout>
+  vector.atomic.reduce<addi> %value, %view[3][%offsets] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex>
+  func.return
+}
+
+// ----
+func.def @atomic_reduce_static(%buffer: buffer, %byte_offset: offset, %value: vector<2xi32>, %offsets: vector<2xindex>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xi32, %layout>
+  %6 = vector.extract %value[0] : vector<2xi32> -> i32
+  %7 = vector.extract %offsets[0] : vector<2xindex> -> index
+  %8 = index.constant 3 : index
+  %9 = index.add %8, %7 : index
+  view.atomic.reduce<addi> %6, %view[%9] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : i32, view<8xi32, %layout>
+  %10 = vector.extract %value[1] : vector<2xi32> -> i32
+  %11 = vector.extract %offsets[1] : vector<2xindex> -> index
+  %12 = index.constant 3 : index
+  %13 = index.add %12, %11 : index
+  view.atomic.reduce<addi> %10, %view[%13] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : i32, view<8xi32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @atomic_reduce_mask_static(%buffer: buffer, %byte_offset: offset, %value: vector<2xf32>, %offsets: vector<2xi32>, %mask: vector<2xi1>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32, %layout>
+  vector.atomic.reduce.mask<addf> %value, %view[3][%offsets], %mask {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = device} : vector<2xf32>, view<8xf32, %layout>, vector<2xi32>, vector<2xi1>
+  func.return
+}
+
+// ----
+func.def @atomic_reduce_mask_static(%buffer: buffer, %byte_offset: offset, %value: vector<2xf32>, %offsets: vector<2xi32>, %mask: vector<2xi1>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32, %layout>
+  %7 = vector.extract %mask[0] : vector<2xi1> -> i1
+  scf.if %7 {
+    %8 = vector.extract %value[0] : vector<2xf32> -> f32
+    %9 = vector.extract %offsets[0] : vector<2xi32> -> i32
+    %10 = index.cast %9 : i32 to index
+    %11 = index.constant 3 : index
+    %12 = index.add %11, %10 : index
+    view.atomic.reduce<addf> %8, %view[%12] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = device} : f32, view<8xf32, %layout>
+  } else {
+  }
+  %13 = vector.extract %mask[1] : vector<2xi1> -> i1
+  scf.if %13 {
+    %14 = vector.extract %value[1] : vector<2xf32> -> f32
+    %15 = vector.extract %offsets[1] : vector<2xi32> -> i32
+    %16 = index.cast %15 : i32 to index
+    %17 = index.constant 3 : index
+    %18 = index.add %17, %16 : index
+    view.atomic.reduce<addf> %14, %view[%18] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = device} : f32, view<8xf32, %layout>
+  } else {
+  }
+  func.return
+}
+
+// ====
+
+func.def @atomic_rmw_static(%buffer: buffer, %byte_offset: offset, %value: vector<2xi32>, %offsets: vector<2xindex>) -> (vector<2xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xi32, %layout>
+  %old = vector.atomic.rmw<xchgi> %value, %view[3][%offsets] {cache_scope = device, cache_temporal = non_temporal, ordering = acq_rel, scope = workgroup} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex>
+  func.return %old : vector<2xi32>
+}
+
+// ----
+func.def @atomic_rmw_static(%buffer: buffer, %byte_offset: offset, %value: vector<2xi32>, %offsets: vector<2xindex>) -> (vector<2xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xi32, %layout>
+  %8 = vector.extract %value[0] : vector<2xi32> -> i32
+  %9 = vector.extract %offsets[0] : vector<2xindex> -> index
+  %10 = index.constant 3 : index
+  %11 = index.add %10, %9 : index
+  %12 = view.atomic.rmw<xchgi> %8, %view[%11] {cache_scope = device, cache_temporal = non_temporal, ordering = acq_rel, scope = workgroup} : i32, view<8xi32, %layout> -> i32
+  %13 = vector.extract %value[1] : vector<2xi32> -> i32
+  %14 = vector.extract %offsets[1] : vector<2xindex> -> index
+  %15 = index.constant 3 : index
+  %16 = index.add %15, %14 : index
+  %17 = view.atomic.rmw<xchgi> %13, %view[%16] {cache_scope = device, cache_temporal = non_temporal, ordering = acq_rel, scope = workgroup} : i32, view<8xi32, %layout> -> i32
+  %old = vector.from_elements %12, %17 : vector<2xi32>
+  func.return %old : vector<2xi32>
+}
+
+// ====
+
+func.def @atomic_rmw_mask_static(%buffer: buffer, %byte_offset: offset, %value: vector<2xf32>, %offsets: vector<2xi32>, %mask: vector<2xi1>, %passthrough: vector<2xf32>) -> (vector<2xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32, %layout>
+  %old = vector.atomic.rmw.mask<addf> %value, %view[3][%offsets], %mask, %passthrough {cache_scope = device, cache_temporal = non_temporal, ordering = seq_cst, scope = device} : vector<2xf32>, view<8xf32, %layout>, vector<2xi32>, vector<2xi1>, vector<2xf32>
+  func.return %old : vector<2xf32>
+}
+
+// ----
+func.def @atomic_rmw_mask_static(%buffer: buffer, %byte_offset: offset, %value: vector<2xf32>, %offsets: vector<2xi32>, %mask: vector<2xi1>, %passthrough: vector<2xf32>) -> (vector<2xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32, %layout>
+  %10 = vector.extract %mask[0] : vector<2xi1> -> i1
+  %11 = scf.if %10 -> (f32) {
+    %12 = vector.extract %value[0] : vector<2xf32> -> f32
+    %13 = vector.extract %offsets[0] : vector<2xi32> -> i32
+    %14 = index.cast %13 : i32 to index
+    %15 = index.constant 3 : index
+    %16 = index.add %15, %14 : index
+    %17 = view.atomic.rmw<addf> %12, %view[%16] {cache_scope = device, cache_temporal = non_temporal, ordering = seq_cst, scope = device} : f32, view<8xf32, %layout> -> f32
+    scf.yield %17 : f32
+  } else {
+    %18 = vector.extract %passthrough[0] : vector<2xf32> -> f32
+    scf.yield %18 : f32
+  }
+  %19 = vector.extract %mask[1] : vector<2xi1> -> i1
+  %20 = scf.if %19 -> (f32) {
+    %21 = vector.extract %value[1] : vector<2xf32> -> f32
+    %22 = vector.extract %offsets[1] : vector<2xi32> -> i32
+    %23 = index.cast %22 : i32 to index
+    %24 = index.constant 3 : index
+    %25 = index.add %24, %23 : index
+    %26 = view.atomic.rmw<addf> %21, %view[%25] {cache_scope = device, cache_temporal = non_temporal, ordering = seq_cst, scope = device} : f32, view<8xf32, %layout> -> f32
+    scf.yield %26 : f32
+  } else {
+    %27 = vector.extract %passthrough[1] : vector<2xf32> -> f32
+    scf.yield %27 : f32
+  }
+  %old = vector.from_elements %11, %20 : vector<2xf32>
+  func.return %old : vector<2xf32>
+}
+
+// ====
+
+func.def @atomic_reduce_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %value: vector<[%n]xi32>, %offsets: vector<[%n]xindex>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xi32, %layout>
+  vector.atomic.reduce<addi> %value, %view[%origin][%offsets] {ordering = relaxed, scope = workgroup} : vector<[%n]xi32>, view<[%n]xi32, %layout>, vector<[%n]xindex>
+  func.return
+}
+
+// ----
+func.def @atomic_reduce_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %value: vector<[%n]xi32>, %offsets: vector<[%n]xindex>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xi32, %layout>
+  %8 = index.constant 0 : index
+  %9 = index.constant 1 : index
+  scf.for %10 = [%8 to %n step %9] {
+    %11 = vector.extract %value[%10] : vector<[%n]xi32> -> i32
+    %12 = vector.extract %offsets[%10] : vector<[%n]xindex> -> index
+    %13 = index.add %origin, %12 : index
+    view.atomic.reduce<addi> %11, %view[%13] {ordering = relaxed, scope = workgroup} : i32, view<[%n]xi32, %layout>
+  }
+  func.return
+}
+
+// ====
+
+func.def @atomic_reduce_mask_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %value: vector<[%n]xf32>, %offsets: vector<[%n]xindex>, %mask: vector<[%n]xi1>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xf32, %layout>
+  vector.atomic.reduce.mask<addf> %value, %view[%origin][%offsets], %mask {ordering = release, scope = device} : vector<[%n]xf32>, view<[%n]xf32, %layout>, vector<[%n]xindex>, vector<[%n]xi1>
+  func.return
+}
+
+// ----
+func.def @atomic_reduce_mask_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %value: vector<[%n]xf32>, %offsets: vector<[%n]xindex>, %mask: vector<[%n]xi1>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xf32, %layout>
+  %9 = index.constant 0 : index
+  %10 = index.constant 1 : index
+  scf.for %11 = [%9 to %n step %10] {
+    %12 = vector.extract %mask[%11] : vector<[%n]xi1> -> i1
+    scf.if %12 {
+      %13 = vector.extract %value[%11] : vector<[%n]xf32> -> f32
+      %14 = vector.extract %offsets[%11] : vector<[%n]xindex> -> index
+      %15 = index.add %origin, %14 : index
+      view.atomic.reduce<addf> %13, %view[%15] {ordering = release, scope = device} : f32, view<[%n]xf32, %layout>
+    } else {
+    }
+  }
+  func.return
+}
+
+// ====
+
+func.def @atomic_rmw_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %value: vector<[%n]xi32>, %offsets: vector<[%n]xindex>) -> (vector<[%n]xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xi32, %layout>
+  %old = vector.atomic.rmw<addi> %value, %view[%origin][%offsets] {ordering = acq_rel, scope = workgroup} : vector<[%n]xi32>, view<[%n]xi32, %layout>, vector<[%n]xindex>
+  func.return %old : vector<[%n]xi32>
+}
+
+// ----
+func.def @atomic_rmw_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %value: vector<[%n]xi32>, %offsets: vector<[%n]xindex>) -> (vector<[%n]xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xi32, %layout>
+  %10 = vector.constant 0 : vector<[%n]xi32>
+  %11 = index.constant 0 : index
+  %12 = index.constant 1 : index
+  %old = scf.for %13 = [%11 to %n step %12](%14 = %10 : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
+    %16 = vector.extract %value[%13] : vector<[%n]xi32> -> i32
+    %17 = vector.extract %offsets[%13] : vector<[%n]xindex> -> index
+    %18 = index.add %origin, %17 : index
+    %19 = view.atomic.rmw<addi> %16, %view[%18] {ordering = acq_rel, scope = workgroup} : i32, view<[%n]xi32, %layout> -> i32
+    %20 = vector.insert %19 into %14[%13] : i32, vector<[%n]xi32>
+    scf.yield %20 : vector<[%n]xi32>
+  }
+  func.return %old : vector<[%n]xi32>
+}
+
+// ====
+
+func.def @atomic_rmw_mask_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %value: vector<[%n]xf32>, %offsets: vector<[%n]xindex>, %mask: vector<[%n]xi1>, %passthrough: vector<[%n]xf32>) -> (vector<[%n]xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xf32, %layout>
+  %old = vector.atomic.rmw.mask<addf> %value, %view[%origin][%offsets], %mask, %passthrough {ordering = acq_rel, scope = device} : vector<[%n]xf32>, view<[%n]xf32, %layout>, vector<[%n]xindex>, vector<[%n]xi1>, vector<[%n]xf32>
+  func.return %old : vector<[%n]xf32>
+}
+
+// ----
+func.def @atomic_rmw_mask_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %value: vector<[%n]xf32>, %offsets: vector<[%n]xindex>, %mask: vector<[%n]xi1>, %passthrough: vector<[%n]xf32>) -> (vector<[%n]xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xf32, %layout>
+  %12 = index.constant 0 : index
+  %13 = index.constant 1 : index
+  %old = scf.for %14 = [%12 to %n step %13](%15 = %passthrough : vector<[%n]xf32>) -> (vector<[%n]xf32>) {
+    %17 = vector.extract %mask[%14] : vector<[%n]xi1> -> i1
+    %18 = scf.if %17 -> (f32) {
+      %19 = vector.extract %value[%14] : vector<[%n]xf32> -> f32
+      %20 = vector.extract %offsets[%14] : vector<[%n]xindex> -> index
+      %21 = index.add %origin, %20 : index
+      %22 = view.atomic.rmw<addf> %19, %view[%21] {ordering = acq_rel, scope = device} : f32, view<[%n]xf32, %layout> -> f32
+      scf.yield %22 : f32
+    } else {
+      %23 = vector.extract %passthrough[%14] : vector<[%n]xf32> -> f32
+      scf.yield %23 : f32
+    }
+    %24 = vector.insert %18 into %15[%14] : f32, vector<[%n]xf32>
+    scf.yield %24 : vector<[%n]xf32>
+  }
+  func.return %old : vector<[%n]xf32>
+}
+
+// ====
+
+func.def @atomic_cmpxchg_static(%buffer: buffer, %byte_offset: offset, %expected: vector<2xi32>, %replacement: vector<2xi32>, %offsets: vector<2xindex>) -> (vector<2xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xi32, %layout>
+  %old = vector.atomic.cmpxchg %expected, %replacement, %view[3][%offsets] {cache_scope = device, cache_temporal = non_temporal, failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex> -> vector<2xi32>
+  func.return %old : vector<2xi32>
+}
+
+// ----
+func.def @atomic_cmpxchg_static(%buffer: buffer, %byte_offset: offset, %expected: vector<2xi32>, %replacement: vector<2xi32>, %offsets: vector<2xindex>) -> (vector<2xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xi32, %layout>
+  %9 = vector.extract %expected[0] : vector<2xi32> -> i32
+  %10 = vector.extract %replacement[0] : vector<2xi32> -> i32
+  %11 = vector.extract %offsets[0] : vector<2xindex> -> index
+  %12 = index.constant 3 : index
+  %13 = index.add %12, %11 : index
+  %14 = view.atomic.cmpxchg %9, %10, %view[%13] {cache_scope = device, cache_temporal = non_temporal, failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<8xi32, %layout> -> i32
+  %15 = vector.extract %expected[1] : vector<2xi32> -> i32
+  %16 = vector.extract %replacement[1] : vector<2xi32> -> i32
+  %17 = vector.extract %offsets[1] : vector<2xindex> -> index
+  %18 = index.constant 3 : index
+  %19 = index.add %18, %17 : index
+  %20 = view.atomic.cmpxchg %15, %16, %view[%19] {cache_scope = device, cache_temporal = non_temporal, failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<8xi32, %layout> -> i32
+  %old = vector.from_elements %14, %20 : vector<2xi32>
+  func.return %old : vector<2xi32>
+}
+
+// ====
+
+func.def @atomic_cmpxchg_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %expected: vector<[%n]xi32>, %replacement: vector<[%n]xi32>, %offsets: vector<[%n]xindex>) -> (vector<[%n]xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xi32, %layout>
+  %old = vector.atomic.cmpxchg %expected, %replacement, %view[%origin][%offsets] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : vector<[%n]xi32>, view<[%n]xi32, %layout>, vector<[%n]xindex> -> vector<[%n]xi32>
+  func.return %old : vector<[%n]xi32>
+}
+
+// ----
+func.def @atomic_cmpxchg_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %expected: vector<[%n]xi32>, %replacement: vector<[%n]xi32>, %offsets: vector<[%n]xindex>) -> (vector<[%n]xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xi32, %layout>
+  %11 = vector.constant 0 : vector<[%n]xi32>
+  %12 = index.constant 0 : index
+  %13 = index.constant 1 : index
+  %old = scf.for %14 = [%12 to %n step %13](%15 = %11 : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
+    %17 = vector.extract %expected[%14] : vector<[%n]xi32> -> i32
+    %18 = vector.extract %replacement[%14] : vector<[%n]xi32> -> i32
+    %19 = vector.extract %offsets[%14] : vector<[%n]xindex> -> index
+    %20 = index.add %origin, %19 : index
+    %21 = view.atomic.cmpxchg %17, %18, %view[%20] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : i32, view<[%n]xi32, %layout> -> i32
+    %22 = vector.insert %21 into %15[%14] : i32, vector<[%n]xi32>
+    scf.yield %22 : vector<[%n]xi32>
+  }
+  func.return %old : vector<[%n]xi32>
+}

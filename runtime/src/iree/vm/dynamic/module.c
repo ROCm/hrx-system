@@ -223,7 +223,15 @@ static iree_status_t iree_vm_dynamic_module_create(
       module, instance, export_name, param_count, params);
 
   // Populate base interface to route to our thunks.
-  iree_vm_module_initialize(&module->interface, module);
+  iree_status_t initialize_status =
+      iree_vm_module_initialize(&module->interface, module);
+  if (!iree_status_is_ok(initialize_status)) {
+    iree_vm_module_release(module->user_module);
+    iree_dynamic_library_release(module->handle);
+    iree_allocator_free(allocator, module);
+    IREE_TRACE_ZONE_END(z0);
+    return iree_status_join(status, initialize_status);
+  }
   module->interface.destroy = iree_vm_dynamic_module_destroy;
   module->interface.name = iree_vm_dynamic_module_name;
   module->interface.signature = iree_vm_dynamic_module_signature;

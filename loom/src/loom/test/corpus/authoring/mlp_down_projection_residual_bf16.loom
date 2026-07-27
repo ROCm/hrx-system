@@ -1,0 +1,76 @@
+// The down-projection kernel calls this concrete per-row dot helper for each
+// output row handled by the workgroup.
+func.def inline @bf16_dot32(%input_values: vector<32xf32>, %weight_values: vector<32xbf16>) -> (f32) {
+  %zero_f32 = scalar.constant 0.0 : f32
+  %weight_f32 = vector.extf %weight_values : vector<32xbf16> to vector<32xf32>
+  %products = vector.mulf<reassoc|nnan|ninf|nsz> %input_values, %weight_f32 : vector<32xf32>
+  %sum = vector.reduce<addf, reassoc|nnan|ninf|nsz> %products, %zero_f32 : vector<32xf32>, f32
+  func.return %sum : f32
+}
+
+kernel.def @mlp_down_projection_residual_bf16(%rows: index) {
+  %row_block = index.constant 2 : index
+  %row_count = index.assume %rows [range(%rows, 2, 3584), mul(%rows, 2)] : index
+  %row_tiles = index.div %row_count, %row_block : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 592 : index
+  kernel.launch.config workgroups(%row_tiles, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%rows: index, %input: buffer, %down_weight: buffer, %residual: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row_count = index.assume %rows [range(%rows, 2, 3584), mul(%rows, 2)] : index
+  %row_tile = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %row_block = index.constant 2 : index
+  %row_offset_1 = index.constant 1 : index
+  %vector_width = index.constant 32 : index
+
+  %leader = index.constant 0 : index
+  %row_base0 = index.madd %row_tile, %row_block, %leader : index
+  %row_base = index.assume %row_base0 [mul(%row_base0, 2)] : index
+  %row1_0 = index.add %row_base, %row_offset_1 : index
+  %input_base0 = index.mul %lane, %vector_width : index
+  %input_base = index.assume %input_base0 [mul(%input_base0, 32)] : index
+
+  %zero_vector = vector.constant 0.0 : vector<2xf32>
+  %input_noalias, %down_weight_noalias, %residual_noalias, %output_noalias = buffer.assume.noalias %input, %down_weight, %residual, %output : buffer, buffer, buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<18944xf32, #dense>
+  %down_weight_view = buffer.view %down_weight_noalias[%base] : buffer -> view<[%row_count]x18944xbf16, #dense>
+  %residual_view = buffer.view %residual_noalias[%base] : buffer -> view<[%row_count]xf32, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%row_count]xf32, #dense>
+  %input_values = vector.load %input_view[%input_base] : view<18944xf32, #dense> -> vector<32xf32>
+  %weight_bf16_0 = vector.load %down_weight_view[%row_base, %input_base] : view<[%row_count]x18944xbf16, #dense> -> vector<32xbf16>
+  %sum0 = func.call @bf16_dot32(%input_values, %weight_bf16_0) : (vector<32xf32>, vector<32xbf16>) -> (f32)
+  %weight_bf16_1 = vector.load %down_weight_view[%row1_0, %input_base] : view<[%row_count]x18944xbf16, #dense> -> vector<32xbf16>
+  %sum1 = func.call @bf16_dot32(%input_values, %weight_bf16_1) : (vector<32xf32>, vector<32xbf16>) -> (f32)
+  %dot0 = kernel.workgroup.reduce<addf> %sum0 : f32
+  %dot1 = kernel.workgroup.reduce<addf> %sum1 : f32
+  %residual_value0 = view.load %residual_view[%row_base] : view<[%row_count]xf32, #dense> -> f32
+  %result0 = scalar.addf<reassoc|nnan|ninf|nsz> %residual_value0, %dot0 : f32
+  %residual_value1 = view.load %residual_view[%row1_0] : view<[%row_count]xf32, #dense> -> f32
+  %result1 = scalar.addf<reassoc|nnan|ninf|nsz> %residual_value1, %dot1 : f32
+  %is_leader = index.cmp eq, %lane, %leader : index
+  scf.if %is_leader {
+    %out0 = vector.insert %result0 into %zero_vector[0] : f32, vector<2xf32>
+    %out1 = vector.insert %result1 into %out0[1] : f32, vector<2xf32>
+    vector.store %out1, %output_view[%row_base] : vector<2xf32>, view<[%row_count]xf32, #dense>
+    scf.yield
+  }
+  kernel.return
+}
+
+check.case public @mlp_down_projection_residual_case {
+  // Sweep a minimal decode-like row pair and the full projection while keeping
+  // the source a single kernel with dynamic row-shaped buffers.
+  %rows = check.param.choice values([2, 3584]) name("rows") : index
+  %input = check.generate.iota offset(-0.25) step(0.000244140625) : tensor<18944xf32>
+  %down_weight = check.generate.fill value(0.0) : tensor<[%rows]x18944xbf16>
+  %residual = check.generate.iota offset(-1.0) step(0.00048828125) : tensor<[%rows]xf32>
+  %output = check.generate.fill value(0.0) : tensor<[%rows]xf32>
+  func.call @mlp_down_projection_residual_bf16(%rows, %input, %down_weight, %residual, %output) : (index, tensor<18944xf32>, tensor<[%rows]x18944xbf16>, tensor<[%rows]xf32>, tensor<[%rows]xf32>)
+  check.expect.close actual(%output) expected(%residual) atol(0.0) rtol(0.0) nan(same) : tensor<[%rows]xf32>
+  check.return
+}
+
+check.benchmark<@mlp_down_projection_residual_case>
+check.benchmark<@mlp_down_projection_residual_case> @mlp_down_projection_residual_decode {rows = 2}
+check.benchmark<@mlp_down_projection_residual_case> @mlp_down_projection_residual_full {rows = 3584}

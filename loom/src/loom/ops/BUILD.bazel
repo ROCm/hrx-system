@@ -1,0 +1,252 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+    "loom_generated_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "op_defs",
+    srcs = ["op_defs.c"],
+    hdrs = [
+        "builder_macros.h",
+        "op_defs.h",
+    ],
+    textual_hdrs = [
+        "keyword_enum.inc",
+        "keyword_table.inc",
+    ],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:bstring",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "op_defs_test",
+    srcs = ["op_defs_test.cc"],
+    deps = [
+        ":op_defs",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "func_symbol_facts",
+    srcs = ["func_symbol_facts.c"],
+    hdrs = ["func_symbol_facts.h"],
+    deps = [
+        ":op_defs",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "function_contract_verify",
+    srcs = ["function_contract_verify.c"],
+    hdrs = ["function_contract_verify.h"],
+    deps = [
+        ":op_defs",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "storage_facts",
+    srcs = ["storage_facts.c"],
+    hdrs = ["storage_facts.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+loom_cc_test(
+    name = "func_symbol_facts_test",
+    srcs = ["func_symbol_facts_test.cc"],
+    deps = [
+        ":func_symbol_facts",
+        ":op_registry",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "successor_verify",
+    srcs = ["successor_verify.c"],
+    hdrs = ["successor_verify.h"],
+    deps = [
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "atomic",
+    srcs = ["atomic.c"],
+    hdrs = ["atomic.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
+    name = "cache",
+    srcs = ["cache.c"],
+    hdrs = ["cache.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
+    name = "combining",
+    srcs = ["combining.c"],
+    hdrs = ["combining.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_generated_cc_library(
+    name = "op_registry",
+    srcs = ["op_registry.c"],
+    hdrs = ["op_registry.h"],
+    args = ["--registry"],
+    generated_src_flags = [
+        "--op-registry-tables",
+        "--op-registry-tables-header",
+    ],
+    generated_srcs = [
+        "op_registry_tables.c",
+        "op_registry_tables.h",
+    ],
+    generator = "//loom/py/loom/gen/ops:c_tables_generator",
+    deps = [
+        ":op_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/check",
+        "//loom/src/loom/ops/config",
+        "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/llvmir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/pass",
+        "//loom/src/loom/ops/pool",
+        "//loom/src/loom/ops/sanitizer",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "special_values",
+    srcs = ["special_values.c"],
+    hdrs = ["special_values.h"],
+    deps = [
+        ":op_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/vector",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_generated_cc_library(
+    name = "type_registry",
+    srcs = ["type_registry.c"],
+    hdrs = ["type_registry.h"],
+    args = ["--registry"],
+    generated_src_flags = [
+        "--type-registry-tables",
+        "--type-registry-tables-header",
+    ],
+    generated_srcs = [
+        "type_registry_tables.c",
+        "type_registry_tables.h",
+    ],
+    generator = "//loom/py/loom/gen/ops:c_tables_generator",
+    deps = [
+        ":op_defs",
+        ":storage_facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "interface_test",
+    srcs = ["interface_test.cc"],
+    deps = [
+        ":op_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "registry_test",
+    srcs = ["registry_test.cc"],
+    deps = [
+        ":op_registry",
+        ":type_registry",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

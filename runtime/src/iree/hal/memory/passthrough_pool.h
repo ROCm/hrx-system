@@ -19,6 +19,9 @@ typedef struct iree_async_notification_t iree_async_notification_t;
 
 // Options for creating a pass-through HAL pool.
 typedef struct iree_hal_passthrough_pool_options_t {
+  // ASAN policy used to shape hidden backing ranges for reservations.
+  iree_hal_asan_pool_options_t asan;
+
   // Optional named-memory trace identifier for logical reservations returned by
   // this pool. Empty uses a generic process-stable identifier.
   iree_string_view_t trace_name;

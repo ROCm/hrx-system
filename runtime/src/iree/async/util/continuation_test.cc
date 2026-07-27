@@ -94,7 +94,7 @@ TEST_F(ContinuationTest, EmptyListReturnsZero) {
       iree_async_continuation_list_empty();
 
   iree_host_size_t invoked = iree_async_continuation_dispatch(
-      MockSubmit, &context_, &continuations, iree_ok_status());
+      MockSubmit, &context_, &continuations, IREE_STATUS_OK);
 
   EXPECT_EQ(invoked, 0u);
   EXPECT_TRUE(context_.submitted_operations.empty());
@@ -106,21 +106,16 @@ TEST_F(ContinuationTest, EmptyListDoesNotConsumeStatus) {
       iree_async_continuation_list_empty();
 
   // Create a status with storage (error status).
-  // We own this status until we pass it to a callback or ignore it.
+  // We own this status until we pass it to a callback or free it.
   iree_status_t status = iree_make_status(IREE_STATUS_CANCELLED, "test error");
 
   iree_host_size_t invoked = iree_async_continuation_dispatch(
-      MockSubmit, &context_, &continuations, status);
+      MockSubmit, &context_, &continuations, iree_status_code(status));
 
   EXPECT_EQ(invoked, 0u);
 
-  // CRITICAL: dispatch does NOT consume status. Caller still owns it and
-  // would pass it to the triggering operation's completion callback.
-  // For this test, we just verify it's still valid then clean up.
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_CANCELLED);
-
-  // We still own it, so we must clean up.
-  iree_status_ignore(status);
+  iree_status_free(status);
 }
 
 //===----------------------------------------------------------------------===//
@@ -134,7 +129,7 @@ TEST_F(ContinuationTest, SuccessSubmitsContinuations) {
       iree_async_make_continuation_list(operation_ptrs, 0, 3);
 
   iree_host_size_t invoked = iree_async_continuation_dispatch(
-      MockSubmit, &context_, &continuations, iree_ok_status());
+      MockSubmit, &context_, &continuations, IREE_STATUS_OK);
 
   // All operations should be submitted, none invoked directly.
   EXPECT_EQ(invoked, 0u);
@@ -156,7 +151,7 @@ TEST_F(ContinuationTest, SuccessWithStartOffset) {
                                         /*count=*/2);
 
   iree_host_size_t invoked = iree_async_continuation_dispatch(
-      MockSubmit, &context_, &continuations, iree_ok_status());
+      MockSubmit, &context_, &continuations, IREE_STATUS_OK);
 
   EXPECT_EQ(invoked, 0u);
   ASSERT_EQ(context_.submitted_operations.size(), 2u);
@@ -174,7 +169,7 @@ TEST_F(ContinuationTest, SuccessSubmitFailsInvokesCallbacksWithError) {
       iree_async_make_continuation_list(operation_ptrs, 0, 2);
 
   iree_host_size_t invoked = iree_async_continuation_dispatch(
-      MockSubmit, &context_, &continuations, iree_ok_status());
+      MockSubmit, &context_, &continuations, IREE_STATUS_OK);
 
   // Submit was attempted, then callbacks invoked directly with the error.
   // Each callback receives a CLONE of the submit error (ownership transfer).
@@ -203,12 +198,14 @@ TEST_F(ContinuationTest, FailureInvokesCancelledCallbacks) {
       iree_make_status(IREE_STATUS_INTERNAL, "something failed");
 
   iree_host_size_t invoked = iree_async_continuation_dispatch(
-      MockSubmit, &context_, &continuations, trigger_status);
+      MockSubmit, &context_, &continuations, iree_status_code(trigger_status));
 
   // All callbacks invoked directly with fresh CANCELLED statuses.
   // The original trigger_status is NOT passed to continuations.
   EXPECT_EQ(invoked, 3u);
   EXPECT_TRUE(context_.submitted_operations.empty());
+  EXPECT_EQ(iree_status_code(trigger_status), IREE_STATUS_INTERNAL);
+  iree_status_free(trigger_status);
   ASSERT_EQ(context_.completions.size(), 3u);
   for (int i = 0; i < 3; ++i) {
     EXPECT_EQ(context_.completions[i].operation, &operations_[i]);
@@ -218,13 +215,6 @@ TEST_F(ContinuationTest, FailureInvokesCancelledCallbacks) {
 
   // Count should be cleared.
   EXPECT_EQ(continuations.count, 0u);
-
-  // CRITICAL: dispatch does NOT consume trigger_status. The caller retains
-  // ownership to pass it to the triggering operation's completion callback.
-  EXPECT_EQ(iree_status_code(trigger_status), IREE_STATUS_INTERNAL);
-
-  // We still own it, so we must clean up.
-  iree_status_ignore(trigger_status);
 }
 
 TEST_F(ContinuationTest, FailureStatusNotConsumed) {
@@ -238,18 +228,14 @@ TEST_F(ContinuationTest, FailureStatusNotConsumed) {
       "this is a longer error message that will allocate storage");
 
   iree_async_continuation_dispatch(MockSubmit, &context_, &continuations,
-                                   status);
+                                   iree_status_code(status));
+
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_DATA_LOSS);
+  iree_status_free(status);
 
   // Verify the continuation got CANCELLED, not the original error.
   ASSERT_EQ(context_.completions.size(), 1u);
   EXPECT_EQ(context_.completions[0].status_code, IREE_STATUS_CANCELLED);
-
-  // Status should still be valid - caller retains ownership.
-  // This would be passed to the triggering operation's callback.
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_DATA_LOSS);
-
-  // We still own it, so clean up.
-  iree_status_ignore(status);
 }
 
 //===----------------------------------------------------------------------===//
@@ -269,16 +255,14 @@ TEST_F(ContinuationTest, NullCallbackSkipped) {
       iree_make_status(IREE_STATUS_CANCELLED, "cancelled");
 
   iree_host_size_t invoked = iree_async_continuation_dispatch(
-      MockSubmit, &context_, &continuations, trigger_status);
+      MockSubmit, &context_, &continuations, iree_status_code(trigger_status));
+  iree_status_free(trigger_status);
 
   // Only 2 callbacks invoked (the one with null is skipped).
   EXPECT_EQ(invoked, 2u);
   ASSERT_EQ(context_.completions.size(), 2u);
   EXPECT_EQ(context_.completions[0].operation, &operations_[0]);
   EXPECT_EQ(context_.completions[1].operation, &operations_[2]);
-
-  // Clean up - we still own trigger_status.
-  iree_status_ignore(trigger_status);
 }
 
 }  // namespace

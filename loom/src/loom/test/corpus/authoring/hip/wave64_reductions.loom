@@ -1,0 +1,293 @@
+// HIP concept: wave64 reductions with a lane-zero publication pattern.
+//
+// Position: these cases exercise the authoring spellings that decode and
+// matvec kernels naturally reach for when a wave64 target is selected. The
+// workgroup reductions cover sub-wave, full-wave, and cross-wave workgroup
+// sizes. Direct full-width subgroup reductions on this target are intentionally
+// rejected by AMDGPU source-to-low diagnostics because native subgroup
+// communication is only proven for the processor's narrower execution
+// partition.
+amdgpu.target<gfx1100> @gfx1100_wave64 {subgroup_size = 64}
+
+kernel.def target(@gfx1100_wave64) @wave64_workgroup_reduce_sub_wave() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<32xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32, #dense>
+  %value = view.load %input_view[%lane] : view<32xf32, #dense> -> f32
+  %sum = kernel.workgroup.reduce<addf> %value : f32
+  %is_leader = index.cmp eq, %lane, %zero : index
+  scf.if %is_leader {
+    view.store %sum, %output_view[%zero] : f32, view<1xf32, #dense>
+  }
+  kernel.return
+}
+
+kernel.def target(@gfx1100_wave64) @wave64_workgroup_reduce_full_wave() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32, #dense>
+  %value = view.load %input_view[%lane] : view<64xf32, #dense> -> f32
+  %sum = kernel.workgroup.reduce<addf> %value : f32
+  %is_leader = index.cmp eq, %lane, %zero : index
+  scf.if %is_leader {
+    view.store %sum, %output_view[%zero] : f32, view<1xf32, #dense>
+  }
+  kernel.return
+}
+
+kernel.def target(@gfx1100_wave64) @wave64_workgroup_reduce_cross_wave() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 128 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<128xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32, #dense>
+  %value = view.load %input_view[%lane] : view<128xf32, #dense> -> f32
+  %sum = kernel.workgroup.reduce<addf> %value : f32
+  %is_leader = index.cmp eq, %lane, %zero : index
+  scf.if %is_leader {
+    view.store %sum, %output_view[%zero] : f32, view<1xf32, #dense>
+  }
+  kernel.return
+}
+
+kernel.def target(@gfx1100_wave64) @wave64_workgroup_reduce_loop_accumulation() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 512 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %column_count = index.constant 3072 : index
+  %workgroup_size = index.constant 512 : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 511)] : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %input_view = buffer.view %input[%base] : buffer -> view<3072xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32, #dense>
+  %lane_sum = scf.for %column = [%lane to %column_count step %workgroup_size](%acc = %zero_f32 : f32) -> (f32) {
+    %value = view.load %input_view[%column] : view<3072xf32, #dense> -> f32
+    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %value : f32
+    scf.yield %next : f32
+  }
+  %sum = kernel.workgroup.reduce<addf> %lane_sum : f32
+  %is_lane0 = index.cmp eq, %lane, %zero : index
+  scf.if %is_lane0 {
+    view.store %sum, %output_view[%zero] : f32, view<1xf32, #dense>
+  }
+  kernel.return
+}
+
+kernel.def target(@gfx1100_wave64) @wave64_workgroup_reduce_sparse_loop_accumulation() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %sixtyfour = index.constant 64 : index
+  %workgroup_size = index.constant 256 : index
+  %block_count = index.constant 2 : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
+  %block_slot = index.div %lane, %sixtyfour : index
+  %block_step = index.div %workgroup_size, %sixtyfour : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %input_view = buffer.view %input[%base] : buffer -> view<2xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32, #dense>
+  %lane_sum = scf.for %block = [%block_slot to %block_count step %block_step](%acc = %zero_f32 : f32) -> (f32) {
+    %value = view.load %input_view[%block] : view<2xf32, #dense> -> f32
+    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %value : f32
+    scf.yield %next : f32
+  }
+  %sum = kernel.workgroup.reduce<addf> %lane_sum : f32
+  %is_lane0 = index.cmp eq, %lane, %zero : index
+  scf.if %is_lane0 {
+    view.store %sum, %output_view[%zero] : f32, view<1xf32, #dense>
+  }
+  kernel.return
+}
+
+kernel.def target(@gfx1100_wave64) @wave64_workgroup_reduce_loop_all_workitems() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 512 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %column_count = index.constant 3072 : index
+  %workgroup_size = index.constant 512 : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 511)] : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %column_count_i32 = scalar.constant 3072 : i32
+  %column_count_f32 = scalar.sitofp %column_count_i32 : i32 to f32
+  %input_view = buffer.view %input[%base] : buffer -> view<3072xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<3072xf32, #dense>
+  %lane_sum = scf.for %column = [%lane to %column_count step %workgroup_size](%acc = %zero_f32 : f32) -> (f32) {
+    %value = view.load %input_view[%column] : view<3072xf32, #dense> -> f32
+    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %value : f32
+    scf.yield %next : f32
+  }
+  %sum = kernel.workgroup.reduce<addf> %lane_sum : f32
+  %mean = scalar.divf<nnan|ninf|nsz|arcp> %sum, %column_count_f32 : f32
+  %scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %mean : f32
+  scf.for %column = [%lane to %column_count step %workgroup_size] {
+    %value = view.load %input_view[%column] : view<3072xf32, #dense> -> f32
+    %result = scalar.mulf<nnan|ninf|nsz> %value, %scale : f32
+    view.store %result, %output_view[%column] : f32, view<3072xf32, #dense>
+  }
+  kernel.return
+}
+
+kernel.def target(@gfx1100_wave64) @wave64_workgroup_reduce_two_rows() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_count: index, %fusion_flags: i32, %input0: buffer, %input1: buffer, %bias: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %input0_view = buffer.view %input0[%base] : buffer -> view<64xf32, #dense>
+  %input1_view = buffer.view %input1[%base] : buffer -> view<64xf32, #dense>
+  %bias_view = buffer.view %bias[%base] : buffer -> view<2xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xf32, #dense>
+  %value0 = view.load %input0_view[%lane] : view<64xf32, #dense> -> f32
+  %value1 = view.load %input1_view[%lane] : view<64xf32, #dense> -> f32
+  %sum0 = kernel.workgroup.reduce<addf> %value0 : f32
+  %sum1 = kernel.workgroup.reduce<addf> %value1 : f32
+  %zero_i32 = scalar.constant 0 : i32
+  %one_i32 = scalar.constant 1 : i32
+  %has_bias_bits = scalar.andi %fusion_flags, %one_i32 : i32
+  %has_bias = scalar.cmpi ne, %has_bias_bits, %zero_i32 : i32
+  %out0 = scf.if %has_bias -> (f32) {
+    %bias0 = view.load %bias_view[%zero] : view<2xf32, #dense> -> f32
+    %with_bias0 = scalar.addf %sum0, %bias0 : f32
+    scf.yield %with_bias0 : f32
+  } else {
+    scf.yield %sum0 : f32
+  }
+  %out1 = scf.if %has_bias -> (f32) {
+    %bias1 = view.load %bias_view[%one] : view<2xf32, #dense> -> f32
+    %with_bias1 = scalar.addf %sum1, %bias1 : f32
+    scf.yield %with_bias1 : f32
+  } else {
+    scf.yield %sum1 : f32
+  }
+  %is_lane0 = index.cmp eq, %lane, %zero : index
+  scf.if %is_lane0 {
+    view.store %out0, %output_view[%zero] : f32, view<2xf32, #dense>
+  }
+  %row1_in_bounds = index.cmp ult, %one, %row_count : index
+  scf.if %row1_in_bounds {
+    scf.if %is_lane0 {
+      view.store %out1, %output_view[%one] : f32, view<2xf32, #dense>
+    }
+  }
+  kernel.return
+}
+
+check.case @case_wave64_workgroup_reduce_sub_wave {
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<32xf32>
+  %output = check.generate.fill value(-1.0) : tensor<1xf32>
+  %expected = check.generate.fill value(528.0) : tensor<1xf32>
+  func.call @wave64_workgroup_reduce_sub_wave(%input, %output) : (tensor<32xf32>, tensor<1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
+  check.return
+}
+
+check.case @case_wave64_workgroup_reduce_full_wave {
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<64xf32>
+  %output = check.generate.fill value(-1.0) : tensor<1xf32>
+  %expected = check.generate.fill value(2080.0) : tensor<1xf32>
+  func.call @wave64_workgroup_reduce_full_wave(%input, %output) : (tensor<64xf32>, tensor<1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
+  check.return
+}
+
+check.case @case_wave64_workgroup_reduce_cross_wave {
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<128xf32>
+  %output = check.generate.fill value(-1.0) : tensor<1xf32>
+  %expected = check.generate.fill value(8256.0) : tensor<1xf32>
+  func.call @wave64_workgroup_reduce_cross_wave(%input, %output) : (tensor<128xf32>, tensor<1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
+  check.return
+}
+
+check.case @case_wave64_workgroup_reduce_loop_accumulation {
+  %input = check.generate.fill value(1.0) : tensor<3072xf32>
+  %output = check.generate.fill value(-1.0) : tensor<1xf32>
+  %expected = check.generate.fill value(3072.0) : tensor<1xf32>
+  func.call @wave64_workgroup_reduce_loop_accumulation(%input, %output) : (tensor<3072xf32>, tensor<1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
+  check.return
+}
+
+check.case @case_wave64_workgroup_reduce_sparse_loop_accumulation {
+  %input = check.generate.fill value(1.0) : tensor<2xf32>
+  %output = check.generate.fill value(-1.0) : tensor<1xf32>
+  %expected = check.generate.fill value(128.0) : tensor<1xf32>
+  func.call @wave64_workgroup_reduce_sparse_loop_accumulation(%input, %output) : (tensor<2xf32>, tensor<1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
+  check.return
+}
+
+check.case @case_wave64_workgroup_reduce_loop_all_workitems {
+  %input = check.generate.fill value(1.0) : tensor<3072xf32>
+  %output = check.generate.fill value(-1.0) : tensor<3072xf32>
+  %expected = check.generate.fill value(1.0) : tensor<3072xf32>
+  func.call @wave64_workgroup_reduce_loop_all_workitems(%input, %output) : (tensor<3072xf32>, tensor<3072xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<3072xf32>
+  check.return
+}
+
+check.case @case_wave64_workgroup_reduce_two_rows {
+  %row_count = check.literal value(2) : index
+  %fusion_flags = check.literal value(1) : i32
+  %input0 = check.generate.iota offset(1.0) step(1.0) : tensor<64xf32>
+  %input1 = check.generate.fill value(2.0) : tensor<64xf32>
+  %bias = check.generate.fill value(1.0) : tensor<2xf32>
+  %output = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(2081.0) step(-1952.0) : tensor<2xf32>
+  func.call @wave64_workgroup_reduce_two_rows(%row_count, %fusion_flags, %input0, %input1, %bias, %output) : (index, i32, tensor<64xf32>, tensor<64xf32>, tensor<2xf32>, tensor<2xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @case_wave64_workgroup_reduce_two_rows_tail {
+  %row_count = check.literal value(1) : index
+  %fusion_flags = check.literal value(1) : i32
+  %input0 = check.generate.iota offset(1.0) step(1.0) : tensor<64xf32>
+  %input1 = check.generate.fill value(2.0) : tensor<64xf32>
+  %bias = check.generate.fill value(1.0) : tensor<2xf32>
+  %output = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(2081.0) step(-2082.0) : tensor<2xf32>
+  func.call @wave64_workgroup_reduce_two_rows(%row_count, %fusion_flags, %input0, %input1, %bias, %output) : (index, i32, tensor<64xf32>, tensor<64xf32>, tensor<2xf32>, tensor<2xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.benchmark<@case_wave64_workgroup_reduce_sub_wave> @bench_wave64_workgroup_reduce_sub_wave
+check.benchmark<@case_wave64_workgroup_reduce_full_wave> @bench_wave64_workgroup_reduce_full_wave
+check.benchmark<@case_wave64_workgroup_reduce_cross_wave> @bench_wave64_workgroup_reduce_cross_wave
+check.benchmark<@case_wave64_workgroup_reduce_loop_accumulation> @bench_wave64_workgroup_reduce_loop_accumulation
+check.benchmark<@case_wave64_workgroup_reduce_sparse_loop_accumulation> @bench_wave64_workgroup_reduce_sparse_loop_accumulation
+check.benchmark<@case_wave64_workgroup_reduce_loop_all_workitems> @bench_wave64_workgroup_reduce_loop_all_workitems
+check.benchmark<@case_wave64_workgroup_reduce_two_rows> @bench_wave64_workgroup_reduce_two_rows
+check.benchmark<@case_wave64_workgroup_reduce_two_rows_tail> @bench_wave64_workgroup_reduce_two_rows_tail

@@ -1,0 +1,46 @@
+kernel.def @asan_global_store_valid() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %value = scalar.constant 7 : i32
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
+  view.store %value, %output_view[%zero_index] : i32, view<1xi32, #dense>
+  kernel.return
+}
+
+kernel.def @asan_global_store_redzone() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %one_index = index.constant 1 : index
+  %value = scalar.constant 11 : i32
+  %continued_value = scalar.constant 99 : i32
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %global[%zero_offset] : buffer -> view<2xi32, #dense>
+  view.store %value, %output_view[%one_index] : i32, view<2xi32, #dense>
+  view.store %continued_value, %output_view[%zero_index] : i32, view<2xi32, #dense>
+  kernel.return
+}
+
+check.case @asan_global_store_valid_case {
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  func.call @asan_global_store_valid(%output) : (tensor<1xi32>)
+  %expected = check.generate.fill value(7) : tensor<1xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.expect.event<device> {type = "asan_report", count = 0}
+  check.return
+}
+
+check.case @asan_global_store_redzone_case {
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  func.call @asan_global_store_redzone(%output) : (tensor<1xi32>)
+  %expected = check.generate.fill value(0) : tensor<1xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.expect.event<device> {type = "asan_report", severity = "error", count = 1, asan = {access = "write", access_length = 4}}
+  check.return
+}

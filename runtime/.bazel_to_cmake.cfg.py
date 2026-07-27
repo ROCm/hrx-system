@@ -111,7 +111,7 @@ class RuntimeBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def iree_generated_files(self, name, srcs, outs, args, output_args, tool, **kwargs):
         if tool != ":generate_vm_isa":
             raise NotImplementedError(f"iree_generated_files tool: {tool}")
-        cmd_parts = ["python3 $(rootpath generate_vm_isa.py)"]
+        cmd_parts = ["${Python3_EXECUTABLE} $(rootpath generate_vm_isa.py)"]
         cmd_parts.extend(arg.replace("$(location ", "$(rootpath ") for arg in args)
         for out in outs:
             cmd_parts.extend([output_args[out], f"$(execpath {out})"])
@@ -126,32 +126,28 @@ class RuntimeBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         kwargs = self._apply_runtime_cmake_policy(kwargs)
         self.iree_vmasm_module(deps=deps + ["//runtime/src:defines"], **kwargs)
 
-    def _emit_iree_hal_cts_test_suite(self, kwargs):
-        if "backends" in kwargs and "backends_lib" not in kwargs:
-            kwargs["backends_lib"] = kwargs.pop("backends")
-        self._iree_hal_cts_test_suite(**kwargs)
-
     def iree_runtime_hal_cts_test_suite(self, **kwargs):
         kwargs = self._apply_runtime_cmake_policy(
             kwargs,
             include_run_requirements=True,
         )
-        self._emit_iree_hal_cts_test_suite(kwargs)
+        self._iree_runtime_hal_cts_test_suite(**kwargs)
 
-    def iree_hal_cts_test_suite(self, **kwargs):
-        kwargs = self._apply_runtime_cmake_policy(
-            kwargs,
-            include_run_requirements=True,
-        )
-        self._emit_iree_hal_cts_test_suite(kwargs)
-
-    def iree_hal_cts_testdata(self, **kwargs):
+    def iree_amdgpu_hal_cts_testdata(self, **kwargs):
         kwargs = self._apply_runtime_cmake_policy(kwargs)
-        self._iree_hal_cts_testdata(**kwargs)
+        self._iree_amdgpu_hal_cts_testdata(**kwargs)
 
     def iree_amdgpu_binary(self, **kwargs):
         kwargs = self._apply_runtime_cmake_policy(kwargs)
         self._iree_amdgpu_binary(**kwargs)
+
+    def iree_amdgpu_library(self, **kwargs):
+        kwargs = self._apply_runtime_cmake_policy(kwargs)
+        self._iree_amdgpu_library(**kwargs)
+
+    def iree_amdgpu_library_variants(self, **kwargs):
+        kwargs = self._apply_runtime_cmake_policy(kwargs)
+        self._iree_amdgpu_library_variants(**kwargs)
 
     def iree_amdgpu_binary_variants(self, **kwargs):
         kwargs = self._apply_runtime_cmake_policy(kwargs)

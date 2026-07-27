@@ -19,6 +19,7 @@
 #include "iree/hal/drivers/vulkan/api.h"
 #include "iree/hal/drivers/vulkan/builtins.h"
 #include "iree/hal/drivers/vulkan/debug_utils.h"
+#include "iree/hal/drivers/vulkan/queue_stats.h"
 #include "iree/hal/drivers/vulkan/semaphore.h"
 #include "iree/hal/drivers/vulkan/util/libvulkan.h"
 #include "iree/hal/local/profile.h"
@@ -103,9 +104,6 @@ typedef struct iree_hal_vulkan_queue_params_t {
   // Device-owned built-in pipelines. Borrowed.
   const iree_hal_vulkan_builtins_t* builtins;
 
-  // Executable dispatch ABI bits enabled on the logical device.
-  iree_hal_vulkan_dispatch_abis_t enabled_dispatch_abis;
-
   // Vulkan queue handle borrowed from the logical device.
   VkQueue queue;
 
@@ -165,9 +163,6 @@ typedef struct iree_hal_vulkan_queue_t {
 
   // Device allocator used for queue-owned staging resources. Borrowed.
   iree_hal_allocator_t* device_allocator;
-
-  // Executable dispatch ABI bits enabled on this queue.
-  iree_hal_vulkan_dispatch_abis_t enabled_dispatch_abis;
 
   // Vulkan queue handle borrowed from the logical device.
   VkQueue queue;
@@ -443,11 +438,15 @@ void iree_hal_vulkan_queue_set_profile_recorder(
     iree_atomic_int64_t* submission_counter,
     iree_hal_vulkan_profile_clock_alignment_t* clock_alignment);
 
-// Queries queue-local scalar diagnostics for device-level query_i64.
-bool iree_hal_vulkan_queue_query_i64(iree_hal_vulkan_queue_t* queue,
-                                     iree_string_view_t category,
-                                     iree_string_view_t key,
-                                     int64_t* out_value);
+// Samples queue-local BDA publication cache counters.
+void iree_hal_vulkan_queue_sample_bda_publication_cache_stats(
+    iree_hal_vulkan_queue_t* queue,
+    iree_hal_vulkan_bda_publication_cache_stats_t* out_stats);
+
+// Samples queue-local native BDA replay cache counters.
+void iree_hal_vulkan_queue_sample_native_replay_cache_stats(
+    iree_hal_vulkan_queue_t* queue,
+    iree_hal_vulkan_native_replay_cache_stats_t* out_stats);
 
 // Submits a queue-ordered semaphore barrier.
 iree_status_t iree_hal_vulkan_queue_submit_barrier(

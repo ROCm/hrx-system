@@ -1,0 +1,64 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_library(
+    name = "contracts",
+    srcs = [
+        "__init__.py",
+        "compile.py",
+        "descriptors.py",
+        "diagnostics.py",
+        "emits.py",
+        "fragments.py",
+        "guards.py",
+        "immediates.py",
+        "kinds.py",
+        "lower_rules.py",
+        "materializers.py",
+        "patterns.py",
+        "rules.py",
+        "source.py",
+        "source_memory.py",
+        "templates.py",
+    ],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom/error",
+        "//loom/py/loom/target:low_descriptors",
+    ],
+)
+
+iree_py_test(
+    name = "contracts_test",
+    srcs = [
+        "compile_test.py",
+        "lower_rules_test.py",
+        "schema_test.py",
+        "templates_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = [
+        "loom.target.contracts.compile_test",
+        "loom.target.contracts.lower_rules_test",
+        "loom.target.contracts.schema_test",
+        "loom.target.contracts.templates_test",
+    ],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":contracts",
+        "//loom/py/loom/dialect:shared",
+        "//loom/py/loom/dialect/scalar",
+        "//loom/py/loom/dialect/vector",
+        "//loom/py/loom/target/test:descriptors",
+    ],
+)

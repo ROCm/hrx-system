@@ -1,0 +1,47 @@
+kernel.def @store_i32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %value = scalar.constant 42 : i32
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
+  view.store %value, %view[%zero_index] : i32, view<1xi32, #dense>
+  kernel.return
+}
+
+kernel.def @double_i32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
+  %loaded = view.load %view[%zero_index] : view<1xi32, #dense> -> i32
+  %doubled = scalar.addi %loaded, %loaded : i32
+  view.store %doubled, %view[%zero_index] : i32, view<1xi32, #dense>
+  kernel.return
+}
+
+check.case @store_i32_case {
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  func.call @store_i32(%output) : (tensor<1xi32>)
+  %expected = check.generate.fill value(42) : tensor<1xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.case @store_then_double_i32_case {
+  %output = check.generate.fill value(21) : tensor<1xi32>
+  func.call @store_i32(%output) : (tensor<1xi32>)
+  func.call @double_i32(%output) : (tensor<1xi32>)
+  %expected = check.generate.fill value(84) : tensor<1xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.benchmark<@store_i32_case> @store_i32_latency
+
+check.benchmark<@store_then_double_i32_case> @store_then_double_i32_latency

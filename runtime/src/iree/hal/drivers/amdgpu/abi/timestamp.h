@@ -117,8 +117,8 @@ IREE_AMDGPU_STATIC_ASSERT(sizeof(iree_hal_amdgpu_dispatch_timestamp_record_t) ==
 
 // One device-side dispatch timestamp harvest source.
 typedef struct iree_hal_amdgpu_dispatch_timestamp_harvest_source_t {
-  // Raw AMD completion signal populated by the CP for the timestamped dispatch.
-  const iree_amd_signal_t* completion_signal;
+  // Raw AMD completion signal populated by the CP and re-armed after harvest.
+  iree_amd_signal_t* completion_signal;
   // Timestamp range receiving copied completion-signal ticks.
   iree_hal_amdgpu_timestamp_range_t* ticks;
 } iree_hal_amdgpu_dispatch_timestamp_harvest_source_t;

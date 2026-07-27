@@ -1,0 +1,180 @@
+// RUN: pass canonicalize
+
+// andi with mask 0xFFFC (all but bottom 2 bits): result divisible by 4.
+func.def @andi_divisibility(%x: i32) -> (i64) {
+  %mask = scalar.constant -4 : i32
+  %r = scalar.andi %x, %mask : i32
+  %div = test.fact_divisor %r : i32 -> i64
+  func.return %div : i64
+}
+// ----
+func.def @andi_divisibility(%x: i32) -> (i64) {
+  %div = scalar.constant 4 : i64
+  func.return %div : i64
+}
+
+// ====
+
+// andi with non-negative mask: result is non-negative.
+func.def @andi_non_negative(%x: i32) -> (i1) {
+  %mask = scalar.constant 255 : i32
+  %r = scalar.andi %x, %mask : i32
+  %nn = test.fact_non_negative %r : i32 -> i1
+  func.return %nn : i1
+}
+// ----
+func.def @andi_non_negative(%x: i32) -> (i1) {
+  %nn = scalar.constant true : i1
+  func.return %nn : i1
+}
+
+// ====
+
+// andi with small mask: result range bounded by mask.
+func.def @andi_range_hi(%x: i32) -> (i64) {
+  %mask = scalar.constant 15 : i32
+  %r = scalar.andi %x, %mask : i32
+  %hi = test.fact_range_hi %r : i32 -> i64
+  func.return %hi : i64
+}
+// ----
+func.def @andi_range_hi(%x: i32) -> (i64) {
+  %hi = scalar.constant 15 : i64
+  func.return %hi : i64
+}
+
+// ====
+
+// ori with 1: result is definitely non-zero.
+func.def @ori_non_zero(%x: i32) -> (i1) {
+  %one = scalar.constant 1 : i32
+  %r = scalar.ori %x, %one : i32
+  %nz = test.fact_non_zero %r : i32 -> i1
+  func.return %nz : i1
+}
+// ----
+func.def @ori_non_zero(%x: i32) -> (i1) {
+  %nz = scalar.constant true : i1
+  func.return %nz : i1
+}
+
+// ====
+
+// shli by 4: divisor multiplied by 16.
+func.def @shli_divisibility(%x: i32) -> (i64) {
+  %shift = scalar.constant 4 : i32
+  %r = scalar.shli %x, %shift : i32
+  %div = test.fact_divisor %r : i32 -> i64
+  func.return %div : i64
+}
+// ----
+func.def @shli_divisibility(%x: i32) -> (i64) {
+  %div = scalar.constant 16 : i64
+  func.return %div : i64
+}
+
+// ====
+
+// shli by 4 of a value with divisor 8: divisor = 8 * 16 = 128.
+func.def @shli_compound_divisibility(%x: i32) -> (i64) {
+  %c8 = scalar.constant 8 : i32
+  %aligned = scalar.muli %x, %c8 : i32
+  %shift = scalar.constant 4 : i32
+  %r = scalar.shli %aligned, %shift : i32
+  %div = test.fact_divisor %r : i32 -> i64
+  func.return %div : i64
+}
+// ----
+func.def @shli_compound_divisibility(%x: i32) -> (i64) {
+  %div = scalar.constant 128 : i64
+  func.return %div : i64
+}
+
+// ====
+
+// shli can move masked bits into the sign bit; facts must not prove the
+// shifted value non-negative or rewrite the following arithmetic shift.
+func.def @shli_sign_bit_preserves_arithmetic_shift(%x: i32) -> (i32, i1) {
+  %mask = scalar.constant 255 : i32
+  %low = scalar.andi %x, %mask : i32
+  %shift = scalar.constant 24 : i32
+  %shifted = scalar.shli %low, %shift : i32
+  %signed = scalar.shrsi %shifted, %shift : i32
+  %nn = test.fact_non_negative %shifted : i32 -> i1
+  func.return %signed, %nn : i32, i1
+}
+// ----
+func.def @shli_sign_bit_preserves_arithmetic_shift(%x: i32) -> (i32, i1) {
+  %mask = scalar.constant 255 : i32
+  %low = scalar.andi %x, %mask : i32
+  %shift = scalar.constant 24 : i32
+  %shifted = scalar.shli %low, %shift : i32
+  %signed = scalar.shrsi %shifted, %shift : i32
+  %nn = scalar.constant false : i1
+  func.return %signed, %nn : i32, i1
+}
+
+// ====
+
+// shrui by 3 of a value with divisor 16: divisor = 16/8 = 2.
+func.def @shrui_divisibility(%x: i32) -> (i64) {
+  %c16 = scalar.constant 16 : i32
+  %aligned = scalar.muli %x, %c16 : i32
+  %shift = scalar.constant 3 : i32
+  %r = scalar.shrui %aligned, %shift : i32
+  %div = test.fact_divisor %r : i32 -> i64
+  func.return %div : i64
+}
+// ----
+func.def @shrui_divisibility(%x: i32) -> (i64) {
+  %div = scalar.constant 2 : i64
+  func.return %div : i64
+}
+
+// ====
+
+// shrui of non-negative value is non-negative.
+func.def @shrui_non_negative(%x: i32) -> (i1) {
+  %c = scalar.constant 100 : i32
+  %shift = scalar.constant 2 : i32
+  %r = scalar.shrui %c, %shift : i32
+  %nn = test.fact_non_negative %r : i32 -> i1
+  func.return %nn : i1
+}
+// ----
+func.def @shrui_non_negative(%x: i32) -> (i1) {
+  %nn = scalar.constant true : i1
+  func.return %nn : i1
+}
+
+// ====
+
+// Unsigned bitfield extraction bounds a dynamic byte to [0, 255].
+func.def @bitfield_extractu_range(%x: i32) -> (i64, i64) {
+  %r = scalar.bitfield.extractu %x {offset = 8, width = 8} : i32 -> i32
+  %lo = test.fact_range_lo %r : i32 -> i64
+  %hi = test.fact_range_hi %r : i32 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @bitfield_extractu_range(%x: i32) -> (i64, i64) {
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 255 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// Signed bitfield extraction bounds a dynamic byte to [-128, 127].
+func.def @bitfield_extracts_range(%x: i32) -> (i64, i64) {
+  %r = scalar.bitfield.extracts %x {offset = 16, width = 8} : i32 -> i32
+  %lo = test.fact_range_lo %r : i32 -> i64
+  %hi = test.fact_range_hi %r : i32 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @bitfield_extracts_range(%x: i32) -> (i64, i64) {
+  %lo = scalar.constant -128 : i64
+  %hi = scalar.constant 127 : i64
+  func.return %lo, %hi : i64, i64
+}

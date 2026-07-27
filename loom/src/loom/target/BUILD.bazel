@@ -1,0 +1,468 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+#===------------------------------------------------------------------------===#
+# Target-neutral data shapes
+#===------------------------------------------------------------------------===#
+
+loom_cc_library(
+    name = "types",
+    hdrs = ["types.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
+    name = "residency",
+    srcs = ["residency.c"],
+    hdrs = ["residency.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "residency_test",
+    srcs = ["residency_test.cc"],
+    deps = [
+        ":residency",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "registers",
+    hdrs = ["registers.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "launch",
+    srcs = ["launch.c"],
+    hdrs = ["launch.h"],
+    deps = [
+        ":types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "capability_facts",
+    srcs = ["capability_facts.c"],
+    hdrs = ["capability_facts.h"],
+    deps = [
+        ":types",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "capability_facts_test",
+    srcs = ["capability_facts_test.cc"],
+    deps = [
+        ":capability_facts",
+        ":types",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "selection",
+    srcs = ["selection.c"],
+    hdrs = ["selection.h"],
+    deps = [
+        ":function_contract",
+        ":types",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/pass:environment",
+        "//loom/src/loom/pass:types",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "launch_test",
+    srcs = ["launch_test.cc"],
+    deps = [
+        ":launch",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "selection_test",
+    srcs = ["selection_test.cc"],
+    deps = [
+        ":selection",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "function_contract",
+    srcs = ["function_contract.c"],
+    hdrs = ["function_contract.h"],
+    deps = [
+        ":launch",
+        ":types",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops/target",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "low_descriptor_registry",
+    srcs = ["low_descriptor_registry.c"],
+    hdrs = ["low_descriptor_registry.h"],
+    visibility = [
+        "//loom/src/loom/codegen/low/lower:__pkg__",
+        "//loom/src/loom/codegen/low/transforms/pipeline:__pkg__",
+        "//loom/src/loom/target/all:__pkg__",
+        "//loom/src/loom/target/arch:__subpackages__",
+        "//loom/src/loom/target/configured:__pkg__",
+        "//loom/src/loom/target/emit:__subpackages__",
+        "//loom/src/loom/target/test:__pkg__",
+        "//loom/src/loom/target/testing:__pkg__",
+        "//loom/src/loom/tooling/compile:__pkg__",
+        "//loom/src/loom/tooling/execution:__pkg__",
+        "//loom/src/loom/tooling/target/spirv:__pkg__",
+        "//loom/src/loom/tools/loom-check:__pkg__",
+        "//loom/src/loom/tools/loom-compile:__pkg__",
+    ],
+    deps = [
+        ":types",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "math_policy",
+    srcs = ["math_policy.c"],
+    hdrs = ["math_policy.h"],
+    deps = [
+        ":types",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/pass:environment",
+        "//loom/src/loom/pass:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "contract",
+    srcs = ["contract.c"],
+    hdrs = ["contract.h"],
+    deps = [
+        ":types",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "legalization",
+    srcs = ["legalization.c"],
+    hdrs = ["legalization.h"],
+    deps = [
+        ":contract",
+        ":types",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "contract_test",
+    srcs = ["contract_test.cc"],
+    deps = [
+        ":contract",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "low_legality",
+    srcs = ["low_legality.c"],
+    hdrs = ["low_legality.h"],
+    deps = [
+        ":contract",
+        ":low_descriptor_registry",
+        ":registers",
+        ":types",
+        "//loom/src/loom/analysis:view_regions",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "low_packet_diagnostics",
+    srcs = ["low_packet_diagnostics.c"],
+    hdrs = ["low_packet_diagnostics.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "low_asm_diagnostics",
+    hdrs = ["low_asm_diagnostics.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/format/text:low_asm",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "provider",
+    srcs = ["provider.c"],
+    hdrs = ["provider.h"],
+    deps = [
+        ":legalization",
+        ":low_asm_diagnostics",
+        ":low_descriptor_registry",
+        ":low_legality",
+        ":low_packet_diagnostics",
+        ":math_policy",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/pass:environment",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/target/reporting:artifact_manifest",
+        "//loom/src/loom/target/reporting:report",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "pipeline_options",
+    hdrs = ["pipeline_options.h"],
+    deps = [
+        ":low_legality",
+        "//loom/src/loom/sanitizer:options",
+        "//runtime/src/iree/base:core_headers",
+    ],
+)
+
+loom_cc_library(
+    name = "pipeline",
+    srcs = ["pipeline.c"],
+    hdrs = ["pipeline.h"],
+    deps = [
+        ":pipeline_options",
+        ":provider",
+        "//loom/src/loom/codegen/low/pipeline",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/pass:builder",
+        "//loom/src/loom/pass:environment",
+        "//loom/src/loom/sanitizer:options",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "pipeline_test",
+    srcs = ["pipeline_test.cc"],
+    deps = [
+        ":pipeline",
+        ":provider",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/pass",
+        "//loom/src/loom/sanitizer:options",
+        "//loom/src/loom/testing:module_ptr",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "predicate",
+    srcs = ["predicate.c"],
+    hdrs = ["predicate.h"],
+    deps = [
+        ":function_contract",
+        ":selection",
+        ":types",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops/pass",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/pass:predicate",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "provider_test",
+    srcs = ["provider_test.cc"],
+    deps = [
+        ":provider",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/pass",
+        "//loom/src/loom/pass:builder",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "predicate_test",
+    srcs = ["predicate_test.cc"],
+    deps = [
+        ":predicate",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/pass",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/pass:environment",
+        "//loom/src/loom/pass:verify",
+        "//loom/src/loom/target:selection",
+        "//loom/src/loom/target/test:target_record_table",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "entry_selection",
+    srcs = ["entry_selection.c"],
+    hdrs = ["entry_selection.h"],
+    deps = [
+        ":function_contract",
+        ":low_descriptor_registry",
+        ":types",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "low_descriptor_registry_core_test",
+    testonly = True,
+    srcs = ["low_descriptor_registry_core_test.c"],
+    hdrs = ["low_descriptor_registry_core_test.h"],
+    deps = [
+        ":low_descriptor_registry",
+        "//loom/src/loom/target/test:low_registry",
+    ],
+)
+
+loom_cc_test(
+    name = "function_contract_test",
+    srcs = ["function_contract_test.cc"],
+    deps = [
+        ":function_contract",
+        ":types",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

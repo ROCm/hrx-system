@@ -1,0 +1,44 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/lookup_table.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @f32_table_lookup_i8_codes() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%codes_buffer: buffer, %output: buffer) {
+  %tid0 = kernel.workitem.id<x> : index
+  %tid = index.assume %tid0 [range(%tid0, 0, 1)] : index
+  %base_offset = index.constant 0 : offset
+  %code_stride = index.constant 4 : index
+  %base = index.mul %tid, %code_stride : index
+  %codes_view = buffer.view %codes_buffer[%base_offset] : buffer -> view<8xi8, #dense>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<8xf32, #dense>
+  %codes = vector.load %codes_view[%base] : view<8xi8, #dense> -> vector<4xi8>
+  %g0 = scalar.constant -1.0 : f32
+  %g1 = scalar.constant -0.5 : f32
+  %g2 = scalar.constant 0.5 : f32
+  %g3 = scalar.constant 1.5 : f32
+  %grid = vector.from_elements %g0, %g1, %g2, %g3 : vector<4xf32>
+  // ERROR@+1: TARGET/032 {op_name="vector.table.lookup", op_constraint="target_contract.vector_table_lookup.provider_required"}
+  %decoded = vector.table.lookup %grid[%codes] : vector<4xf32>, vector<4xi8> -> vector<4xf32>
+  vector.store %decoded, %output_view[%base] : vector<4xf32>, view<8xf32, #dense>
+  kernel.return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32_table_lookup_i32_codes(%codes: vector<2xi32>) -> (vector<2xf32>) {
+  %g0 = scalar.constant 2.0 : f32
+  %g1 = scalar.constant -3.0 : f32
+  %g2 = scalar.constant 5.0 : f32
+  %grid = vector.from_elements %g0, %g1, %g2 : vector<3xf32>
+  // ERROR@+1: TARGET/032 {op_name="vector.table.lookup", op_constraint="target_contract.vector_table_lookup.provider_required"}
+  %decoded = vector.table.lookup %grid[%codes] : vector<3xf32>, vector<2xi32> -> vector<2xf32>
+  func.return %decoded : vector<2xf32>
+}

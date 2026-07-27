@@ -1,0 +1,14 @@
+// RUN: emit source-low output=low sanitizer=access
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @access_assert_workgroup_memory_rejected() {
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %bytes = index.constant 4 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero_offset] : buffer -> view<1xi32, #dense>
+  // ERROR@+1: AMDGPU/023 {constraint_key="memory_access.memory_space"}
+  sanitizer.assert.access<read> %scratch_view[%zero_index] : view<1xi32, #dense>
+  func.return
+}

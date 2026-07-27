@@ -1,0 +1,8 @@
+# MLIR HAL executable importer environment.
+#
+# Generate with:
+#   uv pip compile --generate-hashes --emit-index-url \
+#     --python-version 3.12 --python-platform x86_64-manylinux_2_28 \
+#     --output-file requirements-importers-mlir.lock.txt \
+#     requirements-importers-mlir.in
+iree-base-compiler==3.11.0

@@ -1,0 +1,22 @@
+// RUN: pass target-legalize{mode=final}
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @preserves_scf_until_explicit_lowering(%cond: i1) {
+  scf.if %cond {
+    scf.yield
+  } else {
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @preserves_scf_until_explicit_lowering(%cond: i1) {
+  scf.if %cond {
+  } else {
+  }
+  func.return
+}

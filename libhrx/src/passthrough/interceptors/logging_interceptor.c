@@ -73,6 +73,8 @@ static const char* memcpy_kind_name(hipMemcpyKind kind) {
       return "D2D";
     case hipMemcpyDefault:
       return "Default";
+    case hipMemcpyDeviceToDeviceNoCU:
+      return "D2DNoCU";
     default:
       return "Unknown";
   }

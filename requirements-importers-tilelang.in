@@ -1,0 +1,11 @@
+# TileLang semantic importer environment.
+#
+# Generate with:
+#   uv pip compile --generate-hashes --emit-index-url --torch-backend=cpu \
+#     --default-index https://download.pytorch.org/whl/cpu \
+#     --index https://pypi.org/simple \
+#     --python-version 3.12 --python-platform x86_64-manylinux_2_28 \
+#     --output-file requirements-importers-tilelang.lock.txt \
+#     requirements-importers-tilelang.in
+apache-tvm-ffi==0.1.11
+tilelang

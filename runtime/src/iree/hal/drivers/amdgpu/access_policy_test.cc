@@ -39,9 +39,9 @@ static iree_hal_amdgpu_topology_t MakeThreeGpuTopology() {
 
 static iree_hal_amdgpu_queue_affinity_domain_t ThreeGpuDomain() {
   return (iree_hal_amdgpu_queue_affinity_domain_t){
-      .supported_affinity = 0x3Full,
-      .physical_device_count = 3,
-      .queue_count_per_physical_device = 2,
+      /*.supported_affinity=*/0x3Full,
+      /*.physical_device_count=*/3,
+      /*.queue_count_per_physical_device=*/2,
   };
 }
 

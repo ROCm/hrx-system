@@ -30,7 +30,7 @@ extern "C" {
 // pipelines and their associated layouts.
 iree_status_t iree_hal_webgpu_executable_create(
     iree_hal_webgpu_handle_t device_handle,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
 
 // Returns the bridge handle for the compute pipeline for |function|.

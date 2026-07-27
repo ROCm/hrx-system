@@ -176,11 +176,13 @@ _iree_hal_amdgpu_read_device_bitcode_sources(_BITCODE_SRCS)
 set(_ABI_HDRS
   "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/command_buffer.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/common.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/feedback.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/kernel_args.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/profile.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/queue.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/signal.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/timestamp.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/tsan.h"
 )
 
 set(_BITCODE_HDRS
@@ -188,11 +190,15 @@ set(_BITCODE_HDRS
   "${CMAKE_CURRENT_SOURCE_DIR}/../dispatch.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../kernel_tables.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../kernels.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../support/asan.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../support/common.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../support/feedback.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../support/kernel.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../support/queue.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../support/signal.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../support/tsan.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../timestamp.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../tsan.h"
   ${_ABI_HDRS}
 )
 

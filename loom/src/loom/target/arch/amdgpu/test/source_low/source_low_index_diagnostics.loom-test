@@ -1,0 +1,38 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i64_index_cast_unknown_range_rejected(%value: i64) -> (index) {
+  // ERROR@+1: AMDGPU/033 {source_type="i64", result_type="index", index_bitwidth="32", required_range_lo="-2147483648", required_range_hi="2147483647", accepted_proof_sources="[scalar.assume on the integer source before index.cast, config or kernel boundary facts on the integer source]"}
+  %index = index.cast %value : i64 to index
+  func.return %index : index
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i64_index_cast_too_wide_range_rejected(%value: i64) -> (index) {
+  %bounded = scalar.assume %value [range(%value, 0, 2147483648)] : i64
+  // ERROR@+1: AMDGPU/033 {source_range_lo="0", source_range_hi="2147483648", index_bitwidth="32", required_range_lo="-2147483648", required_range_hi="2147483647", accepted_proof_sources="[scalar.assume on the integer source before index.cast, config or kernel boundary facts on the integer source]"}
+  %index = index.cast %bounded : i64 to index
+  func.return %index : index
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i64_index_cast_result_assume_rejected(%value: i64) -> (index) {
+  // ERROR@+1: AMDGPU/033 {source_type="i64", result_type="index", index_bitwidth="32", required_range_lo="-2147483648", required_range_hi="2147483647", accepted_proof_sources="[scalar.assume on the integer source before index.cast, config or kernel boundary facts on the integer source]"}
+  %index0 = index.cast %value : i64 to index
+  %index = index.assume %index0 [range(%index0, 0, 1023)] : index
+  func.return %index : index
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @index_scale_byte_offset_width_rejected(%lane: index) -> (offset) {
+  %stride = index.constant 4294967296 : offset
+  // ERROR@+1: TARGET/003 {subject_role="byte-offset-width", subject_name="u32", constraint_key="amdgpu.byte_offset.u32"}
+  %byte_offset = index.scale %lane, %stride : index, offset -> offset
+  func.return %byte_offset : offset
+}

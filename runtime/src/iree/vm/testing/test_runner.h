@@ -96,10 +96,8 @@ class VMTestRunner : public BaseType,
   }
 
   static void TearDownTestSuite() {
-    if (instance_) {
-      iree_vm_instance_release(instance_);
-      instance_ = nullptr;
-    }
+    iree_vm_instance_release(instance_);
+    instance_ = nullptr;
   }
 
   void SetUp() override {
@@ -126,14 +124,10 @@ class VMTestRunner : public BaseType,
   }
 
   void TearDown() override {
-    if (context_) {
-      iree_vm_context_release(context_);
-      context_ = nullptr;
-    }
-    if (test_module_) {
-      iree_vm_module_release(test_module_);
-      test_module_ = nullptr;
-    }
+    iree_vm_context_release(context_);
+    context_ = nullptr;
+    iree_vm_module_release(test_module_);
+    test_module_ = nullptr;
     for (auto* module : prerequisite_modules_) {
       iree_vm_module_release(module);
     }
@@ -214,8 +208,10 @@ class VMTestRunner : public BaseType,
       if (params.expects_failure) {                                         \
         iree_status_ignore(status);                                         \
       } else {                                                              \
+        iree::Status wrapped_status(std::move(status));                     \
+        std::string status_string = wrapped_status.ToString();              \
         GTEST_FAIL() << "Function expected success but failed with error: " \
-                     << iree::Status(std::move(status)).ToString();         \
+                     << status_string;                                      \
       }                                                                     \
     }                                                                       \
   }

@@ -147,21 +147,27 @@ enum {
 static const uint32_t
     IREE_HAL_AMDGPU_PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE = 0x80000000u;
 
-typedef enum iree_hal_amdgpu_pm4_register_space_e {
+// Encoded COPY_DATA register-space selector.
+typedef uint32_t iree_hal_amdgpu_pm4_register_space_t;
+enum iree_hal_amdgpu_pm4_register_space_e {
   IREE_HAL_AMDGPU_PM4_REGISTER_SPACE_MEM_MAPPED_REGISTER = 0,
   IREE_HAL_AMDGPU_PM4_REGISTER_SPACE_PERFCOUNTER = 4,
-} iree_hal_amdgpu_pm4_register_space_t;
+};
 
-typedef enum iree_hal_amdgpu_pm4_write_confirmation_e {
+// Encoded COPY_DATA write-confirmation selector.
+typedef uint32_t iree_hal_amdgpu_pm4_write_confirmation_t;
+enum iree_hal_amdgpu_pm4_write_confirmation_e {
   IREE_HAL_AMDGPU_PM4_WRITE_CONFIRMATION_NONE = 0,
   IREE_HAL_AMDGPU_PM4_WRITE_CONFIRMATION_WAIT = 1,
-} iree_hal_amdgpu_pm4_write_confirmation_t;
+};
 
-typedef enum iree_hal_amdgpu_pm4_acquire_mem_engine_e {
+// Encoded ACQUIRE_MEM engine selector.
+typedef uint32_t iree_hal_amdgpu_pm4_acquire_mem_engine_t;
+enum iree_hal_amdgpu_pm4_acquire_mem_engine_e {
   IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_ENGINE_DEFAULT = 0,
   IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_ENGINE_PFP = 0,
   IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_ENGINE_ME = 1,
-} iree_hal_amdgpu_pm4_acquire_mem_engine_t;
+};
 
 typedef uint32_t iree_hal_amdgpu_pm4_dispatch_initiator_flags_t;
 

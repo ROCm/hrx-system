@@ -29,6 +29,9 @@ typedef struct iree_hal_tlsf_pool_options_t {
   // Larger requests are oversized for TLSF and should route to a direct pool.
   iree_hal_memory_tlsf_options_t tlsf_options;
 
+  // ASAN policy used to shape hidden backing ranges for reservations.
+  iree_hal_asan_pool_options_t asan;
+
   // Logical byte budget for live reservations in this pool. 0 means unlimited.
   iree_device_size_t budget_limit;
 

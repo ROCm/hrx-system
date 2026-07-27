@@ -166,9 +166,6 @@ typedef struct iree_hal_vulkan_command_buffer_t {
   // Number of dispatch commands recorded.
   iree_host_size_t dispatch_count;
 
-  // Whether replay embeds binding-table-dependent descriptor dispatch state.
-  bool has_descriptor_dispatches;
-
   // Descriptor pool capacity required to replay recorded native commands.
   iree_hal_vulkan_command_buffer_descriptor_requirements_t
       descriptor_requirements;
@@ -1118,34 +1115,6 @@ static iree_status_t iree_hal_vulkan_command_buffer_add_descriptor_count(
 }
 
 static iree_status_t
-iree_hal_vulkan_command_buffer_accumulate_descriptor_pipeline(
-    iree_hal_vulkan_command_buffer_t* command_buffer,
-    const iree_hal_vulkan_pipeline_t* pipeline) {
-  command_buffer->has_descriptor_dispatches = true;
-  if (pipeline->push_descriptors.enabled) return iree_ok_status();
-
-  iree_hal_vulkan_command_buffer_descriptor_requirements_t requirements =
-      command_buffer->descriptor_requirements;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_add_descriptor_count(
-      requirements.set_count, pipeline->descriptor_requirements.set_count,
-      &requirements.set_count));
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_add_descriptor_count(
-      requirements.sampler_count,
-      pipeline->descriptor_requirements.sampler_count,
-      &requirements.sampler_count));
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_add_descriptor_count(
-      requirements.uniform_buffer_count,
-      pipeline->descriptor_requirements.uniform_buffer_count,
-      &requirements.uniform_buffer_count));
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_add_descriptor_count(
-      requirements.storage_buffer_count,
-      pipeline->descriptor_requirements.storage_buffer_count,
-      &requirements.storage_buffer_count));
-  command_buffer->descriptor_requirements = requirements;
-  return iree_ok_status();
-}
-
-static iree_status_t
 iree_hal_vulkan_command_buffer_accumulate_fill_update_descriptors(
     iree_hal_vulkan_command_buffer_t* command_buffer) {
   iree_hal_vulkan_command_buffer_descriptor_requirements_t requirements =
@@ -1166,8 +1135,7 @@ static iree_status_t iree_hal_vulkan_command_buffer_accumulate_bda_pipeline(
   iree_device_size_t binding_table_length = 0;
   iree_device_size_t publication_length = 0;
   if (!iree_device_size_checked_mul((iree_device_size_t)binding_count,
-                                    pipeline->bda.binding_table_entry_length,
-                                    &binding_table_length) ||
+                                    sizeof(uint64_t), &binding_table_length) ||
       !iree_device_size_checked_add(command_buffer->bda_publication_length,
                                     binding_table_length,
                                     &publication_length)) {
@@ -1232,14 +1200,6 @@ iree_hal_vulkan_command_buffer_native_descriptor_pool_requirements(
       iree_hal_vulkan_command_buffer_cast(base_command_buffer);
   *out_requirements = command_buffer->descriptor_requirements;
   return iree_ok_status();
-}
-
-bool iree_hal_vulkan_command_buffer_has_descriptor_dispatches(
-    iree_hal_command_buffer_t* base_command_buffer) {
-  IREE_ASSERT_ARGUMENT(base_command_buffer);
-  iree_hal_vulkan_command_buffer_t* command_buffer =
-      iree_hal_vulkan_command_buffer_cast(base_command_buffer);
-  return command_buffer->has_descriptor_dispatches;
 }
 
 iree_status_t iree_hal_vulkan_command_buffer_native_bda_publication_length(
@@ -1949,8 +1909,7 @@ static iree_status_t iree_hal_vulkan_command_buffer_publish_bda_dispatch_table(
                                              : dispatch->binding_count;
   iree_device_size_t binding_table_length = 0;
   if (!iree_device_size_checked_mul((iree_device_size_t)binding_count,
-                                    pipeline->bda.binding_table_entry_length,
-                                    &binding_table_length)) {
+                                    sizeof(uint64_t), &binding_table_length)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "Vulkan BDA binding table length overflows");
   }
@@ -2020,13 +1979,6 @@ iree_status_t iree_hal_vulkan_command_buffer_publish_bda_binding_tables(
     const iree_hal_vulkan_command_dispatch_t* dispatch =
         iree_hal_vulkan_command_dispatch_payload(command);
     const iree_hal_vulkan_pipeline_t* pipeline = dispatch->pipeline;
-    if (pipeline->dispatch_abi != IREE_HAL_VULKAN_DISPATCH_ABI_BDA) {
-      status = iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "Vulkan cached BDA replay encountered non-BDA dispatch ABI 0x%08x",
-          pipeline->dispatch_abi);
-      break;
-    }
     VkDeviceAddress binding_table_address = 0;
     status = iree_hal_vulkan_command_buffer_publish_bda_dispatch_table(
         binding_table, command, pipeline, &bda_recording_state,
@@ -2040,151 +1992,6 @@ iree_status_t iree_hal_vulkan_command_buffer_publish_bda_binding_tables(
                          " bytes but command buffer requires %" PRIhsz " bytes",
                          bda_recording_state.byte_offset,
                          command_buffer->bda_publication_length);
-  }
-  return status;
-}
-
-static iree_status_t
-iree_hal_vulkan_command_buffer_record_dispatch_descriptor_native(
-    const iree_hal_vulkan_device_syms_t* syms, VkDevice logical_device,
-    VkCommandBuffer native_command_buffer,
-    iree_hal_buffer_binding_table_t binding_table,
-    const iree_hal_vulkan_command_t* command,
-    const iree_hal_vulkan_pipeline_t* pipeline,
-    VkDescriptorPool descriptor_pool,
-    const iree_hal_vulkan_command_buffer_dispatch_profile_marker_t*
-        profile_marker,
-    iree_allocator_t host_allocator) {
-  const iree_hal_vulkan_command_dispatch_t* dispatch =
-      iree_hal_vulkan_command_dispatch_payload(command);
-  VkDescriptorSet inline_descriptor_sets
-      [IREE_HAL_VULKAN_COMMAND_BUFFER_INLINE_DESCRIPTOR_SET_CAPACITY];
-  VkDescriptorSet* descriptor_sets = inline_descriptor_sets;
-  if (!pipeline->push_descriptors.enabled &&
-      pipeline->descriptor_set_layout_count != 0) {
-    if (!descriptor_pool) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "Vulkan dispatch requires descriptor sets but no pool is available");
-    }
-    if (pipeline->descriptor_set_layout_count >
-        IREE_ARRAYSIZE(inline_descriptor_sets)) {
-      IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-          host_allocator, pipeline->descriptor_set_layout_count,
-          sizeof(descriptor_sets[0]), (void**)&descriptor_sets));
-    }
-    VkDescriptorSetAllocateInfo allocate_info = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool = descriptor_pool,
-        .descriptorSetCount = (uint32_t)pipeline->descriptor_set_layout_count,
-        .pSetLayouts = pipeline->descriptor_set_layouts,
-    };
-    iree_status_t status =
-        iree_vkAllocateDescriptorSets(IREE_VULKAN_DEVICE(syms), logical_device,
-                                      &allocate_info, descriptor_sets);
-    if (!iree_status_is_ok(status)) {
-      if (descriptor_sets != inline_descriptor_sets) {
-        iree_allocator_free(host_allocator, descriptor_sets);
-      }
-      return status;
-    }
-  }
-
-  VkDescriptorBufferInfo inline_buffer_infos
-      [IREE_HAL_VULKAN_COMMAND_BUFFER_INLINE_DESCRIPTOR_BINDING_CAPACITY];
-  VkDescriptorBufferInfo* buffer_infos = inline_buffer_infos;
-  VkWriteDescriptorSet inline_write_infos
-      [IREE_HAL_VULKAN_COMMAND_BUFFER_INLINE_DESCRIPTOR_BINDING_CAPACITY];
-  VkWriteDescriptorSet* write_infos = inline_write_infos;
-  iree_status_t status = iree_ok_status();
-  if (pipeline->descriptor_binding_count >
-      IREE_ARRAYSIZE(inline_buffer_infos)) {
-    status = iree_allocator_malloc_array(
-        host_allocator, pipeline->descriptor_binding_count,
-        sizeof(buffer_infos[0]), (void**)&buffer_infos);
-  }
-  if (iree_status_is_ok(status) &&
-      pipeline->descriptor_binding_count > IREE_ARRAYSIZE(inline_write_infos)) {
-    status = iree_allocator_malloc_array(
-        host_allocator, pipeline->descriptor_binding_count,
-        sizeof(write_infos[0]), (void**)&write_infos);
-  }
-  const iree_hal_buffer_ref_t* bindings =
-      iree_hal_vulkan_command_dispatch_bindings(dispatch);
-  for (iree_host_size_t i = 0;
-       iree_status_is_ok(status) && i < pipeline->descriptor_binding_count;
-       ++i) {
-    const iree_hal_vulkan_descriptor_binding_t* descriptor_binding =
-        &pipeline->descriptor_bindings[i];
-    status = iree_hal_vulkan_command_buffer_resolve_descriptor_binding(
-        binding_table, bindings[i], i, descriptor_binding->descriptor_type,
-        &buffer_infos[i]);
-    if (iree_status_is_ok(status)) {
-      write_infos[i] = (VkWriteDescriptorSet){
-          .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-          .dstSet = pipeline->push_descriptors.enabled
-                        ? VK_NULL_HANDLE
-                        : descriptor_sets[descriptor_binding->set_ordinal],
-          .dstBinding = descriptor_binding->binding,
-          .dstArrayElement = descriptor_binding->array_element,
-          .descriptorCount = 1,
-          .descriptorType = descriptor_binding->descriptor_type,
-          .pBufferInfo = &buffer_infos[i],
-      };
-    }
-  }
-  if (iree_status_is_ok(status) && pipeline->descriptor_binding_count != 0) {
-    if (pipeline->push_descriptors.enabled) {
-      iree_vkCmdPushDescriptorSetKHR(
-          IREE_VULKAN_DEVICE(syms), native_command_buffer,
-          VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->layout,
-          pipeline->push_descriptors.set_ordinal,
-          (uint32_t)pipeline->descriptor_binding_count, write_infos);
-    } else {
-      iree_vkUpdateDescriptorSets(
-          IREE_VULKAN_DEVICE(syms), logical_device,
-          (uint32_t)pipeline->descriptor_binding_count, write_infos,
-          /*descriptorCopyCount=*/0, /*pDescriptorCopies=*/NULL);
-    }
-  }
-
-  if (write_infos != inline_write_infos) {
-    iree_allocator_free(host_allocator, write_infos);
-  }
-  if (buffer_infos != inline_buffer_infos) {
-    iree_allocator_free(host_allocator, buffer_infos);
-  }
-  if (!iree_status_is_ok(status)) {
-    if (descriptor_sets != inline_descriptor_sets) {
-      iree_allocator_free(host_allocator, descriptor_sets);
-    }
-    return status;
-  }
-
-  if (!pipeline->push_descriptors.enabled &&
-      pipeline->descriptor_set_layout_count != 0) {
-    iree_vkCmdBindDescriptorSets(
-        IREE_VULKAN_DEVICE(syms), native_command_buffer,
-        VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->layout, /*firstSet=*/0,
-        (uint32_t)pipeline->descriptor_set_layout_count, descriptor_sets,
-        /*dynamicOffsetCount=*/0, /*pDynamicOffsets=*/NULL);
-  }
-  if (dispatch->constants_data_length != 0) {
-    iree_vkCmdPushConstants(
-        IREE_VULKAN_DEVICE(syms), native_command_buffer, pipeline->layout,
-        VK_SHADER_STAGE_COMPUTE_BIT,
-        /*offset=*/0, (uint32_t)dispatch->constants_data_length,
-        iree_hal_vulkan_command_dispatch_constants_data(dispatch));
-  }
-  iree_vkCmdBindPipeline(IREE_VULKAN_DEVICE(syms), native_command_buffer,
-                         VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->handle);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_vulkan_command_buffer_record_dispatch_issue_native(
-        syms, native_command_buffer, binding_table, command, profile_marker);
-  }
-
-  if (descriptor_sets != inline_descriptor_sets) {
-    iree_allocator_free(host_allocator, descriptor_sets);
   }
   return status;
 }
@@ -2238,32 +2045,20 @@ static iree_status_t iree_hal_vulkan_command_buffer_record_dispatch_bda_native(
 }
 
 static iree_status_t iree_hal_vulkan_command_buffer_record_dispatch_native(
-    const iree_hal_vulkan_device_syms_t* syms, VkDevice logical_device,
+    const iree_hal_vulkan_device_syms_t* syms,
     VkCommandBuffer native_command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
-    const iree_hal_vulkan_command_t* command, VkDescriptorPool descriptor_pool,
+    const iree_hal_vulkan_command_t* command,
     iree_hal_vulkan_command_buffer_bda_recording_state_t* bda_recording_state,
     iree_hal_vulkan_command_buffer_bda_binding_cache_t* bda_binding_cache,
     const iree_hal_vulkan_command_buffer_dispatch_profile_marker_t*
-        profile_marker,
-    iree_allocator_t host_allocator) {
+        profile_marker) {
   const iree_hal_vulkan_command_dispatch_t* dispatch =
       iree_hal_vulkan_command_dispatch_payload(command);
   const iree_hal_vulkan_pipeline_t* pipeline = dispatch->pipeline;
-  switch (pipeline->dispatch_abi) {
-    case IREE_HAL_VULKAN_DISPATCH_ABI_DESCRIPTOR:
-      return iree_hal_vulkan_command_buffer_record_dispatch_descriptor_native(
-          syms, logical_device, native_command_buffer, binding_table, command,
-          pipeline, descriptor_pool, profile_marker, host_allocator);
-    case IREE_HAL_VULKAN_DISPATCH_ABI_BDA:
-      return iree_hal_vulkan_command_buffer_record_dispatch_bda_native(
-          syms, native_command_buffer, binding_table, command, pipeline,
-          bda_recording_state, bda_binding_cache, profile_marker);
-    default:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "Vulkan pipeline has invalid dispatch ABI 0x%08x",
-                              pipeline->dispatch_abi);
-  }
+  return iree_hal_vulkan_command_buffer_record_dispatch_bda_native(
+      syms, native_command_buffer, binding_table, command, pipeline,
+      bda_recording_state, bda_binding_cache, profile_marker);
 }
 
 iree_status_t iree_hal_vulkan_command_buffer_record_native(
@@ -2388,9 +2183,9 @@ iree_status_t iree_hal_vulkan_command_buffer_record_native(
           }
         }
         status = iree_hal_vulkan_command_buffer_record_dispatch_native(
-            syms, logical_device, native_command_buffer, binding_table, command,
-            descriptor_pool, &bda_recording_state, bda_binding_cache,
-            dispatch_profile_marker_ptr, host_allocator);
+            syms, native_command_buffer, binding_table, command,
+            &bda_recording_state, bda_binding_cache,
+            dispatch_profile_marker_ptr);
         break;
       }
       case IREE_HAL_VULKAN_COMMAND_TYPE_EXECUTION_BARRIER:
@@ -2814,43 +2609,12 @@ static iree_status_t iree_hal_vulkan_command_buffer_collective(
                           "Vulkan command buffer collectives are unsupported");
 }
 
-static iree_status_t
-iree_hal_vulkan_command_buffer_validate_dispatch_descriptor(
-    const iree_hal_vulkan_pipeline_t* pipeline,
-    iree_hal_buffer_ref_list_t bindings) {
-  if (bindings.count != pipeline->descriptor_binding_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Vulkan command buffer dispatch provides %" PRIhsz
-        " bindings but descriptor pipeline expects %" PRIhsz,
-        bindings.count, pipeline->descriptor_binding_count);
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t iree_hal_vulkan_command_buffer_validate_dispatch_bda(
     const iree_hal_vulkan_pipeline_t* pipeline,
     iree_const_byte_span_t constants, iree_hal_buffer_ref_list_t bindings) {
-  return iree_hal_vulkan_pipeline_validate_bda_dispatch_abi(
+  return iree_hal_vulkan_pipeline_validate_bda_dispatch(
       pipeline, constants, bindings.count,
       IREE_SV("Vulkan command buffer dispatch"));
-}
-
-static iree_status_t iree_hal_vulkan_command_buffer_validate_dispatch_abi(
-    const iree_hal_vulkan_pipeline_t* pipeline,
-    iree_const_byte_span_t constants, iree_hal_buffer_ref_list_t bindings) {
-  switch (pipeline->dispatch_abi) {
-    case IREE_HAL_VULKAN_DISPATCH_ABI_DESCRIPTOR:
-      return iree_hal_vulkan_command_buffer_validate_dispatch_descriptor(
-          pipeline, bindings);
-    case IREE_HAL_VULKAN_DISPATCH_ABI_BDA:
-      return iree_hal_vulkan_command_buffer_validate_dispatch_bda(
-          pipeline, constants, bindings);
-    default:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "Vulkan pipeline has invalid dispatch ABI 0x%08x",
-                              pipeline->dispatch_abi);
-  }
 }
 
 static iree_status_t iree_hal_vulkan_command_buffer_dispatch(
@@ -2930,16 +2694,14 @@ static iree_status_t iree_hal_vulkan_command_buffer_dispatch(
           IREE_STATUS_INVALID_ARGUMENT,
           "Vulkan command buffer dispatch constants must be 4-byte aligned");
     }
-    if (constants.data_length >
-        (iree_host_size_t)pipeline->constant_count * sizeof(uint32_t)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "Vulkan command buffer dispatch provides %" PRIhsz
-          " constant bytes but pipeline accepts at most %u",
-          constants.data_length,
-          (uint32_t)pipeline->constant_count * (uint32_t)sizeof(uint32_t));
+    if (constants.data_length > pipeline->constant_byte_length) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "Vulkan command buffer dispatch provides %" PRIhsz
+                              " constant bytes but pipeline accepts at most %u",
+                              constants.data_length,
+                              pipeline->constant_byte_length);
     }
-    IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_validate_dispatch_abi(
+    IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_validate_dispatch_bda(
         pipeline, constants, bindings));
     if (iree_hal_dispatch_uses_indirect_parameters(flags)) {
       IREE_RETURN_IF_ERROR(
@@ -2975,20 +2737,11 @@ static iree_status_t iree_hal_vulkan_command_buffer_dispatch(
         "Vulkan command buffer dispatch count exceeds host size");
   }
   if (iree_status_is_ok(status)) {
-    switch (pipeline->dispatch_abi) {
-      case IREE_HAL_VULKAN_DISPATCH_ABI_DESCRIPTOR:
-        status = iree_hal_vulkan_command_buffer_accumulate_descriptor_pipeline(
-            command_buffer, pipeline);
-        break;
-      case IREE_HAL_VULKAN_DISPATCH_ABI_BDA: {
-        const iree_host_size_t binding_count = pipeline->bda.binding_count_known
-                                                   ? pipeline->binding_count
-                                                   : bindings.count;
-        status = iree_hal_vulkan_command_buffer_accumulate_bda_pipeline(
-            command_buffer, pipeline, binding_count);
-        break;
-      }
-    }
+    const iree_host_size_t binding_count = pipeline->bda.binding_count_known
+                                               ? pipeline->binding_count
+                                               : bindings.count;
+    status = iree_hal_vulkan_command_buffer_accumulate_bda_pipeline(
+        command_buffer, pipeline, binding_count);
   }
 
   if (iree_status_is_ok(status)) {

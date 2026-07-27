@@ -1,0 +1,206 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/sanitizer:suppressions.bzl", "vulkan_suppressions")
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_binary",
+    "loom_cc_test",
+    "loom_config_compatible_with",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+LOOMC_TARGET_SPIRV_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target/arch:spirv",
+    "//loom/config/emit:spirv",
+])
+
+LOOMC_TARGET_AMDGPU_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target/arch:amdgpu",
+    "//loom/config/emit:amdgpu",
+])
+
+LOOMC_TARGET_SPIRV_VULKAN_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/execute:spirv_vulkan_hal",
+])
+
+LOOMC_TARGET_SPIRV_IREE_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:spirv_vulkan_artifacts",
+])
+
+loom_cc_binary(
+    name = "source_info",
+    srcs = ["source_info.c"],
+    deps = [
+        "//loom/binding/c:loomc",
+    ],
+)
+
+loom_cc_binary(
+    name = "compile_text",
+    srcs = ["compile_text.c"],
+    deps = [
+        "//loom/binding/c:loomc",
+    ],
+)
+
+loom_cc_binary(
+    name = "link_modules",
+    srcs = ["link_modules.c"],
+    deps = [
+        "//loom/binding/c:loomc",
+    ],
+)
+
+loom_cc_binary(
+    name = "emit_spirv_offline",
+    srcs = ["emit_spirv_offline.c"],
+    target_compatible_with = LOOMC_TARGET_SPIRV_COMPATIBLE_WITH,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/spirv",
+    ],
+)
+
+loom_cc_binary(
+    name = "emit_amdgpu_offline",
+    srcs = ["emit_amdgpu_offline.c"],
+    target_compatible_with = LOOMC_TARGET_AMDGPU_COMPATIBLE_WITH,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/amdgpu",
+    ],
+)
+
+loom_cc_binary(
+    name = "emit_amdgpu_hsa",
+    srcs = ["emit_amdgpu_hsa.c"],
+    target_compatible_with = LOOMC_TARGET_AMDGPU_COMPATIBLE_WITH,
+    deps = [
+        "//build_tools:dl",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/amdgpu",
+        "//third_party:hsa_runtime_headers",
+    ],
+)
+
+loom_cc_binary(
+    name = "emit_spirv_vulkaninfo",
+    srcs = ["emit_spirv_vulkaninfo.c"],
+    target_compatible_with = LOOMC_TARGET_SPIRV_COMPATIBLE_WITH,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/spirv",
+        "//loom/binding/c/target/spirv/vulkaninfo",
+    ],
+)
+
+loom_cc_binary(
+    name = "emit_spirv_vulkan",
+    srcs = ["emit_spirv_vulkan.c"],
+    target_compatible_with = LOOMC_TARGET_SPIRV_VULKAN_COMPATIBLE_WITH,
+    deps = [
+        "//build_tools:dl",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/spirv",
+        "//loom/binding/c/target/spirv/vulkan",
+    ],
+)
+
+loom_cc_binary(
+    name = "emit_spirv_iree_hal",
+    srcs = ["emit_spirv_iree_hal.c"],
+    target_compatible_with = LOOMC_TARGET_SPIRV_IREE_HAL_COMPATIBLE_WITH,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/iree_hal",
+        "//loom/binding/c/target/spirv",
+        "//loom/binding/c/target/spirv/iree_hal",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers",
+    ],
+)
+
+loom_cc_test(
+    name = "emit_amdgpu_offline_test",
+    srcs = ["emit_amdgpu_offline.c"],
+    target_compatible_with = LOOMC_TARGET_AMDGPU_COMPATIBLE_WITH,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/amdgpu",
+    ],
+)
+
+loom_cc_test(
+    name = "emit_amdgpu_hsa_test",
+    srcs = ["emit_amdgpu_hsa.c"],
+    resource_group = "loom-amdgpu-tests",
+    tags = [
+        "driver=amdgpu",
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "nodocker",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = LOOMC_TARGET_AMDGPU_COMPATIBLE_WITH,
+    deps = [
+        "//build_tools:dl",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/amdgpu",
+        "//third_party:hsa_runtime_headers",
+    ],
+)
+
+loom_cc_test(
+    name = "emit_spirv_vulkan_test",
+    srcs = ["emit_spirv_vulkan.c"],
+    resource_group = "loom-vulkan-tests",
+    sanitizer_suppressions = vulkan_suppressions,
+    tags = [
+        "driver=vulkan",
+        "iree-run-requirement=runtime.resource.vulkan_device",
+        "runtime-resource=vulkan-device",
+    ],
+    target_compatible_with = LOOMC_TARGET_SPIRV_VULKAN_COMPATIBLE_WITH,
+    deps = [
+        "//build_tools:dl",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/spirv",
+        "//loom/binding/c/target/spirv/vulkan",
+    ],
+)
+
+loom_cc_test(
+    name = "emit_spirv_iree_hal_test",
+    srcs = ["emit_spirv_iree_hal.c"],
+    resource_group = "loom-vulkan-tests",
+    sanitizer_suppressions = vulkan_suppressions,
+    tags = [
+        "driver=vulkan",
+        "iree-run-requirement=runtime.resource.vulkan_device",
+        "runtime-resource=vulkan-device",
+    ],
+    target_compatible_with = LOOMC_TARGET_SPIRV_VULKAN_COMPATIBLE_WITH,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/iree_hal",
+        "//loom/binding/c/target/spirv",
+        "//loom/binding/c/target/spirv/iree_hal",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers",
+    ],
+)

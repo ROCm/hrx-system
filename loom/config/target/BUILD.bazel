@@ -1,0 +1,80 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@bazel_skylib//rules:common_settings.bzl", "string_list_flag")
+
+package(default_visibility = ["//visibility:public"])
+
+# Public Loom target product capabilities. Enabling one of these values means
+# the build contains the target architecture and production artifact emission
+# needed to compile for that backend.
+DEFAULT_ENABLED = [
+    "amdgpu",
+    "iree_vm",
+    "llvmir",
+    "spirv",
+    "x86",
+]
+
+SUPPORTED_VALUES = [
+    "amdgpu",
+    "iree_vm",
+    "llvmir",
+    "spirv",
+    "wasm",
+    "x86",
+]
+
+string_list_flag(
+    name = "enable",
+    build_setting_default = DEFAULT_ENABLED,
+)
+
+[
+    config_setting(
+        name = value,
+        flag_values = {
+            ":enable": value,
+        },
+    )
+    for value in SUPPORTED_VALUES
+]
+
+# Internal target artifact capabilities. These are intentionally narrower than
+# public target values so source embedders can override the advanced target/emit
+# leaves without changing user-facing product target names.
+selects.config_setting_group(
+    name = "amdgpu_artifacts",
+    match_all = [
+        "//loom/config/target/arch:amdgpu",
+        "//loom/config/emit:amdgpu",
+    ],
+)
+
+selects.config_setting_group(
+    name = "spirv_artifacts",
+    match_all = [
+        "//loom/config/target/arch:spirv",
+        "//loom/config/emit:spirv",
+    ],
+)
+
+selects.config_setting_group(
+    name = "spirv_vulkan_artifacts",
+    match_all = [
+        ":spirv_artifacts",
+        "//runtime/config/hal:driver_vulkan",
+    ],
+)
+
+selects.config_setting_group(
+    name = "llvmir_artifacts",
+    match_all = [
+        "//loom/config/target/arch:llvmir",
+        "//loom/config/emit:llvmir",
+    ],
+)

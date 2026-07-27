@@ -157,6 +157,10 @@ static iree_status_t iree_numpy_consume_dict_key_value(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "malformed header dict");
   }
+  *dict = iree_string_view_trim(*dict);
+  if (iree_string_view_is_empty(*dict)) {
+    return iree_ok_status();
+  }
   if (!iree_string_view_consume_prefix(dict, IREE_SV(","))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "malformed header dict");

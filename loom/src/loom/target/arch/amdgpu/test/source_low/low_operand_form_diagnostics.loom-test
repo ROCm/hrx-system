@@ -1,0 +1,90 @@
+// RUN: pass low-select-operand-forms{diagnostics=operand-forms},cse,low-dce
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target(@target) @sopk_immediate_add_selected(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) {
+  %step = low.const<amdgpu.s_mov_b32> {imm32 = 3} : reg<amdgpu.sgpr>
+  // REMARK@+1: BACKEND/042 {source_descriptor_key="amdgpu.s_add_u32", replacement_descriptor_key="amdgpu.s_addk_i32", decision="selected", reason_key="selected", immediate_name="imm16", immediate_value="3", tied_operand_name="lhs", tied_value_name="position"}
+  %result = low.op<amdgpu.s_add_u32>(%position, %step) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
+  low.return %result : reg<amdgpu.sgpr>
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.func.def target(@target) @sopk_immediate_add_selected(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) {
+  %result = low.op<amdgpu.s_addk_i32>(%position) {imm16 = 3} : (reg<amdgpu.sgpr>) -> %position as reg<amdgpu.sgpr>
+  low.return %result : reg<amdgpu.sgpr>
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target(@target) @sopk_immediate_add_rejected_live_lhs(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) {
+  %step = low.const<amdgpu.s_mov_b32> {imm32 = 3} : reg<amdgpu.sgpr>
+  // REMARK@+2: BACKEND/042 {source_descriptor_key="amdgpu.s_add_u32", replacement_descriptor_key="amdgpu.s_addk_i32", decision="rejected", reason_key="destructive_operand_not_single_use", immediate_name="imm16", immediate_value="3", tied_operand_name="lhs", tied_value_name="position"}
+  // REMARK@+1: BACKEND/042 {source_descriptor_key="amdgpu.s_add_u32", replacement_descriptor_key="amdgpu.s_add_u32.rhs_inline", decision="selected", reason_key="selected", immediate_name="imm32", immediate_value="3", tied_operand_name="<none>", tied_value_name="<none>"}
+  %result = low.op<amdgpu.s_add_u32>(%position, %step) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
+  low.return %result, %position : reg<amdgpu.sgpr>, reg<amdgpu.sgpr>
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.func.def target(@target) @sopk_immediate_add_rejected_live_lhs(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) {
+  %result = low.op<amdgpu.s_add_u32.rhs_inline>(%position) {imm32 = 3} : (reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
+  low.return %result, %position : reg<amdgpu.sgpr>, reg<amdgpu.sgpr>
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target(@target) @sopk_immediate_add_rejected_live_slice_source(%lo: reg<amdgpu.sgpr>, %hi: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>) {
+  %pair = low.concat(%lo, %hi) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %position = low.slice %pair[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %step = low.const<amdgpu.s_mov_b32> {imm32 = 3} : reg<amdgpu.sgpr>
+  // REMARK@+2: BACKEND/042 {source_descriptor_key="amdgpu.s_add_u32", replacement_descriptor_key="amdgpu.s_addk_i32", decision="rejected", reason_key="destructive_operand_alias_reused_after_consume", immediate_name="imm16", immediate_value="3", tied_operand_name="lhs", tied_value_name="position"}
+  // REMARK@+1: BACKEND/042 {source_descriptor_key="amdgpu.s_add_u32", replacement_descriptor_key="amdgpu.s_add_u32.rhs_inline", decision="selected", reason_key="selected", immediate_name="imm32", immediate_value="3", tied_operand_name="<none>", tied_value_name="<none>"}
+  %result = low.op<amdgpu.s_add_u32>(%position, %step) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
+  low.return %result, %pair : reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.func.def target(@target) @sopk_immediate_add_rejected_live_slice_source(%lo: reg<amdgpu.sgpr>, %hi: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>) {
+  %pair = low.concat(%lo, %hi) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %position = low.slice %pair[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %result = low.op<amdgpu.s_add_u32.rhs_inline>(%position) {imm32 = 3} : (reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
+  low.return %result, %pair : reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target(@target) @sopk_immediate_mul_rejected_loop_reused_lhs(%position: reg<amdgpu.sgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.sgpr>) {
+  %scale = low.const<amdgpu.s_mov_b32> {imm32 = 12} : reg<amdgpu.sgpr>
+  low.br ^loop
+^loop:
+  // REMARK@+2: BACKEND/042 {source_descriptor_key="amdgpu.s_mul_i32", replacement_descriptor_key="amdgpu.s_mulk_i32", decision="rejected", reason_key="destructive_operand_reused_after_consume", immediate_name="imm16", immediate_value="12", tied_operand_name="lhs", tied_value_name="position"}
+  // REMARK@+1: BACKEND/042 {source_descriptor_key="amdgpu.s_mul_i32", replacement_descriptor_key="amdgpu.s_mul_i32.rhs_inline", decision="selected", reason_key="selected", immediate_name="imm32", immediate_value="12", tied_operand_name="<none>", tied_value_name="<none>"}
+  %result = low.op<amdgpu.s_mul_i32>(%position, %scale) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
+  low.cond_br %again, ^loop, ^exit : reg<amdgpu.scc>
+^exit:
+  low.return %result : reg<amdgpu.sgpr>
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.func.def target(@target) @sopk_immediate_mul_rejected_loop_reused_lhs(%position: reg<amdgpu.sgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.sgpr>) {
+  low.br ^loop
+^loop:
+  %result = low.op<amdgpu.s_mul_i32.rhs_inline>(%position) {imm32 = 12} : (reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
+  low.cond_br %again, ^loop, ^exit : reg<amdgpu.scc>
+^exit:
+  low.return %result : reg<amdgpu.sgpr>
+}

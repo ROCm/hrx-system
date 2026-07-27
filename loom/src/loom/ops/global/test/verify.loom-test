@@ -1,0 +1,109 @@
+// RUN: verify
+
+// Undefined global reference.
+func.def @undefined_load() {
+  // ERROR@+1: SYMBOL/002 "missing"
+  %v = global.load @missing : f32
+  func.return
+}
+
+// ====
+
+// Loading from a function symbol is a kind mismatch.
+func.def @callee(%x: f32) -> (f32) {
+  func.return %x : f32
+}
+
+func.def @load_from_function() {
+  // ERROR@+1: SYMBOL/003 "expected global"
+  %v = global.load @callee : f32
+  func.return
+}
+
+// ====
+
+// Extra co-results that are not referenced by the loaded value type are invalid.
+global.constant @pi : f32
+
+func.def @load_extra_result() {
+  // ERROR@+1: STRUCTURE/002
+  %v, %extra = global.load @pi : f32
+  func.return
+}
+
+// ====
+
+// Global structural equality must survive at the load site.
+global.variable @square : tile<[%n]x[%n]xf32>
+
+func.def @load_square_mismatch() {
+  // ERROR@+1: TYPE/001 "loaded value"
+  %tile, %m, %k = global.load @square : tile<[%m]x[%k]xf32>
+  func.return
+}
+
+// ====
+
+// Equal dim refs count as one co-result.
+global.variable @square_ok : tile<[%n]x[%n]xf32>
+
+func.def @load_square_ok() {
+  %tile, %n = global.load @square_ok : tile<[%n]x[%n]xf32>
+  func.return
+}
+
+// ====
+
+// Storing a rectangular value to a square global is invalid.
+global.variable @square_store : tile<[%n]x[%n]xf32>
+
+func.def @store_square_mismatch(%m: index, %k: index, %value: tile<[%m]x[%k]xf32>) {
+  // ERROR@+1: TYPE/001 "stored value"
+  global.store %value, @square_store : tile<[%m]x[%k]xf32>
+  func.return
+}
+
+// ====
+
+// Inline initializers are scalar-only in this format.
+// ERROR@+1: TYPE/004 "scalar"
+global.constant @weights_with_initializer : tile<4xf32> = [1, 2, 3, 4]
+
+// ====
+
+// Float globals require float literal initializers.
+// ERROR@+1: TYPE/005 "initializer"
+global.constant @pi_bad_initializer : f32 = 1
+
+// ====
+
+// i1 integer initializers must be 0 or 1.
+// ERROR@+1: TYPE/005 "initializer"
+global.variable @bad_flag : i1 = 2
+
+// ====
+
+// Read-only artifact alignment must be either absent or a positive power of two.
+// ERROR@+1: STRUCTURE/014 "alignment" "3" "positive power-of-two byte alignment"
+global.rodata @bad_rodata_alignment = bytes("00"), align 3
+
+// ====
+
+// Dynamic vector globals match structurally; declaration-local dim names do not
+// need to be the same SSA ids as use-site co-results.
+global.variable @vec_state : vector<[%n]xf32>
+
+func.def @vector_global_load() {
+  %vec, %m = global.load @vec_state : vector<[%m]xf32>
+  func.return
+}
+
+// ====
+
+// View globals use the same structural dim/layout matching path.
+global.variable @view_state : view<[%n]xf32, %layout>
+
+func.def @view_global_load() {
+  %view, %m, %layout = global.load @view_state : view<[%m]xf32, %layout>
+  func.return
+}

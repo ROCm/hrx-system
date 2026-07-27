@@ -8,16 +8,28 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from build_tools.devtools import aliases, cli
 from build_tools.devtools import bazel as bazel_dev
 from build_tools.devtools.command_plan import WriteFileStep
 
 
+def normalized_plan_description(plan) -> str:
+    """Returns a host-neutral rendering for semantic plan assertions."""
+    return plan.describe().replace("\\", "/").replace(".exe", "")
+
+
 class CliTest(unittest.TestCase):
+    def planned_argv(self, arguments: list[str]) -> list[str]:
+        args = cli.parse_arguments(arguments)
+        plan = args.handler(args)
+        return plan.steps[0].argv
+
     def parse_help(self, arguments: list[str]) -> str:
         output = io.StringIO()
         with contextlib.redirect_stdout(output), self.assertRaises(SystemExit) as cm:
@@ -26,7 +38,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(cm.exception.code, 0)
         return output.getvalue()
 
-    def parse_agent_md(self, arguments: list[str]) -> str:
+    def parse_agents_md(self, arguments: list[str]) -> str:
         output = io.StringIO()
         with contextlib.redirect_stdout(output), self.assertRaises(SystemExit) as cm:
             cli.parse_arguments(arguments)
@@ -34,11 +46,35 @@ class CliTest(unittest.TestCase):
         self.assertEqual(cm.exception.code, 0)
         return output.getvalue()
 
+    def importer_manifest_patch(self):
+        return mock.patch(
+            "build_tools.devtools.importers.selected_manifests",
+            return_value=({"site_packages": "/tmp/loom-tilelang-site"},),
+        )
+
+    def test_importers_setup_uses_locked_requirements(self):
+        args = cli.parse_arguments(["importers", "setup", "tilelang"])
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn(".tmp/importers/tilelang/venv", description)
+        self.assertIn("pip install --require-hashes --only-binary=:all:", description)
+        self.assertIn("requirements-importers-tilelang.lock.txt", description)
+
+    def test_importers_env_prints_manifest(self):
+        args = cli.parse_arguments(["importers", "env", "tilelang", "--format=shell"])
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("# print importer environment tilelang manifest", description)
+
     def test_cmake_configure_forwards_options_without_separator(self):
         args = cli.parse_arguments(["cmake", "configure", "--fresh"])
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("--fresh", description)
         self.assertNotIn("-- --fresh", description)
@@ -55,7 +91,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("build/cmake-ci", description)
         self.assertNotIn("../builds", description)
@@ -75,6 +111,28 @@ class CliTest(unittest.TestCase):
 
         self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=ON", description)
         self.assertIn("-DIREE_ROCM_PATH=/opt/rocm", description)
+
+    def test_bazel_configure_accepts_portable_loom_target_options(self):
+        args = cli.parse_arguments(
+            [
+                "bazel",
+                "configure",
+                "-DLOOM_TARGET_AMDGPU=ON",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = plan.describe()
+
+        self.assertIn("-DLOOM_TARGET_AMDGPU=ON", description)
+
+    def test_bazel_configure_accepts_importer_environment(self):
+        args = cli.parse_arguments(["bazel", "configure", "--importer-env", "tilelang"])
+
+        plan = args.handler(args)
+        description = plan.describe()
+
+        self.assertIn("-DLOOM_IMPORT_TILELANG=ON", description)
 
     def test_bazel_configure_accepts_native_driver_options(self):
         args = cli.parse_arguments(
@@ -111,6 +169,134 @@ class CliTest(unittest.TestCase):
         self.assertIn("//runtime/...", description)
         self.assertIn("//libhrx/...", description)
 
+    def test_bazel_test_importer_environment_adds_config_and_pythonpath(self):
+        with self.importer_manifest_patch():
+            args = cli.parse_arguments(
+                [
+                    "bazel",
+                    "test",
+                    "--importer-env",
+                    "tilelang",
+                    "//loom/py/loom/importers/tilelang:tilelang_import_test",
+                ]
+            )
+            plan = args.handler(args)
+
+        description = plan.describe()
+        self.assertIn("--config=loom-importer-tilelang", description)
+        self.assertIn("--test_env=PYTHONPATH=/tmp/loom-tilelang-site", description)
+        self.assertIn(
+            "//loom/py/loom/importers/tilelang:tilelang_import_test",
+            description,
+        )
+
+    def test_bazel_test_all_importer_environments_use_aggregate_config(self):
+        with self.importer_manifest_patch():
+            args = cli.parse_arguments(
+                [
+                    "bazel",
+                    "test",
+                    "--importer-env",
+                    "mlir,tilelang",
+                    "//loom/py/loom/importers/...",
+                ]
+            )
+            plan = args.handler(args)
+
+        description = plan.describe()
+        self.assertIn("--config=loom-importers", description)
+        self.assertNotIn("--config=loom-importer-mlir", description)
+        self.assertNotIn("--config=loom-importer-tilelang", description)
+
+    def test_bazel_build_preserves_negative_target_separator(self):
+        argv = self.planned_argv(
+            [
+                "bazel",
+                "build",
+                "--",
+                "//runtime/...",
+                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+            ]
+        )
+
+        self.assertEqual(
+            argv[1:],
+            [
+                "build",
+                "--",
+                "//runtime/...",
+                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+            ],
+        )
+
+    def test_bazel_test_preserves_negative_target_separator_after_options(self):
+        argv = self.planned_argv(
+            [
+                "bazel",
+                "test",
+                "--test_tag_filters=-requires-gpu",
+                "//runtime/...",
+                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+            ]
+        )
+
+        self.assertEqual(
+            argv[1:],
+            [
+                "test",
+                "--config=presubmit",
+                "--test_tag_filters=-requires-gpu",
+                "--",
+                "//runtime/...",
+                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+            ],
+        )
+
+    def test_bazel_test_update_uses_standalone_test_runner_strategy(self):
+        argv = self.planned_argv(
+            [
+                "bazel",
+                "test",
+                "//loom/src/loom/target/arch/amdgpu:source_low_bitstream_report",
+                "--test_arg=--update",
+            ]
+        )
+
+        self.assertIn("--strategy=TestRunner=standalone", argv)
+
+    def test_bazel_test_update_split_arg_uses_standalone_test_runner_strategy(self):
+        argv = self.planned_argv(
+            [
+                "bazel",
+                "test",
+                "--test_arg",
+                "--update",
+                "//loom/src/loom/target/arch/amdgpu:source_low_bitstream_report",
+            ]
+        )
+
+        self.assertIn("--strategy=TestRunner=standalone", argv)
+
+    def test_bazel_query_preserves_negative_target_separator(self):
+        argv = self.planned_argv(
+            [
+                "bazel",
+                "query",
+                "//runtime/...",
+                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+            ]
+        )
+
+        self.assertEqual(
+            argv[1:],
+            [
+                "query",
+                "--",
+                "//runtime/...",
+                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+            ],
+        )
+
     def test_bazel_direct_query_commands_forward_to_bazel(self):
         args = cli.parse_arguments(
             ["bazel", "query", "kind(cc_library, //runtime/...)", "--output=label"]
@@ -128,14 +314,19 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("bazel cquery --output=files //runtime/...", description)
 
         args = cli.parse_arguments(["bazel", "info", "execution_root"])
 
         plan = args.handler(args)
-        self.assertIn("bazel info execution_root", plan.describe())
+        self.assertIn("bazel info execution_root", normalized_plan_description(plan))
+
+        args = cli.parse_arguments(["bazel", "shutdown"])
+
+        plan = args.handler(args)
+        self.assertIn("bazel shutdown", normalized_plan_description(plan))
 
     def test_bazel_run_builds_and_resolves_binary_before_exec(self):
         args = cli.parse_arguments(
@@ -150,11 +341,33 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("bazel build --config=asan", description)
         self.assertIn("bazel cquery --output=files --config=asan", description)
-        self.assertIn("exec '<built executable>' --benchmark_filter=Alloc", description)
+        self.assertIn("<built executable>", description)
+        self.assertIn("--benchmark_filter=Alloc", description)
+
+    def test_bazel_run_importer_environment_adds_config_and_pythonpath(self):
+        with self.importer_manifest_patch():
+            args = cli.parse_arguments(
+                [
+                    "bazel",
+                    "run",
+                    "--importer-env=tilelang",
+                    "//loom/py/loom/importers/check:loom_import_check",
+                    "--",
+                    "--list-importers",
+                ]
+            )
+            plan = args.handler(args)
+
+        description = normalized_plan_description(plan)
+        self.assertIn("--config=loom-importer-tilelang", description)
+        self.assertEqual(
+            plan.steps[0].env.get("PYTHONPATH", "").split(os.pathsep)[0],
+            "/tmp/loom-tilelang-site",
+        )
 
     def test_bazel_run_can_print_resolved_executable_path(self):
         args = cli.parse_arguments(
@@ -183,11 +396,11 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
-        self.assertIn(".iree-bazel-try/run-<pid>/BUILD.bazel", description)
+        self.assertIn(".iree/bazel-try/run-<pid>/BUILD.bazel", description)
         self.assertIn("bazel build", description)
-        self.assertIn("//.iree-bazel-try/run-<pid>:snippet", description)
+        self.assertIn("//.iree/bazel-try/run-<pid>:snippet", description)
         self.assertIn("# compile only", description)
 
     def test_cmake_try_generates_scratch_build(self):
@@ -204,12 +417,45 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
-        self.assertIn(".iree-cmake-try/run-<pid>/try.cmake", description)
+        self.assertIn(".tmp/iree-cmake-try/run-<pid>/try.cmake", description)
         self.assertIn("cmake -S", description)
         self.assertIn("--target iree_cmake_try_snippet", description)
         self.assertIn("# compile only", description)
+
+    def test_cmake_configure_importer_environment_adds_option_and_pythonpath(self):
+        with self.importer_manifest_patch():
+            args = cli.parse_arguments(
+                ["cmake", "configure", "--importer-env=tilelang"]
+            )
+            plan = args.handler(args)
+
+        description = plan.describe()
+        self.assertIn("-DLOOM_IMPORT_TILELANG=ON", description)
+        self.assertIn("PYTHONPATH=/tmp/loom-tilelang-site", description)
+
+    def test_cmake_test_importer_environment_adds_pythonpath(self):
+        with self.importer_manifest_patch():
+            args = cli.parse_arguments(
+                ["cmake", "test", "--importer-env", "tilelang", "-R", "tilelang"]
+            )
+            plan = args.handler(args)
+
+        description = plan.describe()
+        self.assertIn("PYTHONPATH=/tmp/loom-tilelang-site", description)
+        self.assertIn("-R tilelang", description)
+
+    def test_cmake_build_importer_environment_adds_pythonpath(self):
+        with self.importer_manifest_patch():
+            args = cli.parse_arguments(
+                ["cmake", "build", "--importer-env", "tilelang", "loom-opt"]
+            )
+            plan = args.handler(args)
+
+        description = plan.describe()
+        self.assertIn("PYTHONPATH=/tmp/loom-tilelang-site", description)
+        self.assertIn("--target loom-opt", description)
 
     def test_bazel_try_preserves_local_input_paths(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -267,10 +513,239 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("bazel build --config=fuzzer", description)
-        self.assertIn("exec '<built fuzzer>' '<corpus>'", description)
+        self.assertIn("<built fuzzer>", description)
+        self.assertIn("<corpus>", description)
+
+    def test_bazel_compile_commands_defaults_to_repo_roots(self):
+        args = cli.parse_arguments(["bazel", "compile-commands"])
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("# bazel compile-commands", description)
+        self.assertIn("bazel build", description)
+        self.assertIn(
+            "--aspects=//build_tools/bazel:compile_commands.bzl%collect_compile_commands_aspect",
+            description,
+        )
+        self.assertIn("--output_groups=iree_compile_commands_fragments", description)
+        self.assertIn("--build_event_json_file=", description)
+        self.assertIn("merge compile command fragments", description)
+        self.assertIn("//runtime/...", description)
+        self.assertIn("//libhrx/...", description)
+        self.assertIn("//loom/...", description)
+        self.assertIn("compile_commands.json", description)
+        self.assertNotIn("--check_visibility=false", description)
+
+    def test_bazel_compile_commands_accepts_options_and_target_patterns(self):
+        args = cli.parse_arguments(
+            [
+                "bazel",
+                "compile-commands",
+                "--config=asan",
+                "-o",
+                "out/compile_commands.json",
+                "//runtime/...",
+                "-//runtime/src/iree/hal/drivers/cuda/...",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("--config=asan", description)
+        self.assertIn("out/compile_commands.json", description)
+        self.assertIn("//runtime/...", description)
+        self.assertIn("-//runtime/src/iree/hal/drivers/cuda/...", description)
+
+    def test_bazel_clang_tidy_target_runs_aspect_directly(self):
+        args = cli.parse_arguments(
+            [
+                "bazel",
+                "clang-tidy",
+                "//runtime/src/iree/vm:all",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("# bazel clang-tidy", description)
+        self.assertIn("bazel build", description)
+        self.assertIn(
+            "--aspects=//build_tools/clang_tidy:clang_tidy.bzl%collect_clang_tidy_aspect",
+            description,
+        )
+        self.assertIn("--output_groups=iree_clang_tidy_reports", description)
+        self.assertIn("//runtime/src/iree/vm:all", description)
+        self.assertNotIn("build_tools/lefthook/presubmit.py", description)
+        self.assertNotIn("--keep_going", description)
+
+    def test_bazel_clang_tidy_ci_target_keeps_going(self):
+        args = cli.parse_arguments(
+            [
+                "bazel",
+                "clang-tidy",
+                "--profile",
+                "ci",
+                "//runtime/src/iree/vm:all",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("--keep_going", description)
+        self.assertIn("//runtime/src/iree/vm:all", description)
+
+    def test_bazel_clang_tidy_git_scope_uses_presubmit_provider(self):
+        args = cli.parse_arguments(["bazel", "clang-tidy", "--base", "origin/main"])
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("build_tools/lefthook/presubmit.py", description)
+        self.assertIn("--clang-tidy", description)
+        self.assertIn("--base origin/main", description)
+        self.assertIn("--profile paranoid", description)
+        self.assertNotIn("--static-analysis", description)
+
+    def test_bazel_clang_tidy_explicit_paths_use_presubmit_provider(self):
+        args = cli.parse_arguments(
+            ["bazel", "clang-tidy", "runtime/src/iree/vm/native_module.c"]
+        )
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("build_tools/lefthook/presubmit.py", description)
+        self.assertIn("--clang-tidy", description)
+        self.assertIn("runtime/src/iree/vm/native_module.c", description)
+
+    def test_bazel_clang_tidy_fix_uses_presubmit_provider(self):
+        args = cli.parse_arguments(
+            [
+                "bazel",
+                "clang-tidy",
+                "--fix",
+                "runtime/src/iree/vm/native_module.c",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("build_tools/lefthook/presubmit.py", description)
+        self.assertIn("--fix", description)
+        self.assertIn("--clang-tidy", description)
+        self.assertIn("runtime/src/iree/vm/native_module.c", description)
+
+    def test_bazel_clang_tidy_fix_rejects_target_patterns(self):
+        with self.assertRaises(SystemExit):
+            cli.parse_arguments(
+                ["bazel", "clang-tidy", "--fix", "//runtime/src/iree/vm:all"]
+            )
+
+    def test_bazel_clang_tidy_fix_rejects_all_files(self):
+        with self.assertRaises(SystemExit):
+            cli.parse_arguments(["bazel", "clang-tidy", "--fix", "--all"])
+
+    def test_cmake_compile_commands_prints_configured_database_path(self):
+        args = cli.parse_arguments(
+            [
+                "--cmake-build-dir",
+                "build/cmake-debug",
+                "cmake",
+                "compile-commands",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("# cmake compile-commands", description)
+        self.assertIn("build/cmake-debug/compile_commands.json", description)
+        self.assertIn("print", description)
+
+    def test_cmake_compile_commands_accepts_output_path(self):
+        args = cli.parse_arguments(
+            [
+                "--cmake-build-dir",
+                "build/cmake-debug",
+                "cmake",
+                "compile-commands",
+                "-o",
+                "out/cmake_compile_commands.json",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("build/cmake-debug/compile_commands.json", description)
+        self.assertIn("out/cmake_compile_commands.json", description)
+        self.assertIn("cp", description)
+
+    def test_cmake_clang_tidy_git_scope_uses_presubmit_provider(self):
+        args = cli.parse_arguments(
+            [
+                "--cmake-build-dir",
+                "build/cmake-debug",
+                "cmake",
+                "clang-tidy",
+                "--base",
+                "origin/main",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("IREE_CMAKE_BUILD_DIR=", description)
+        self.assertIn("build/cmake-debug", description)
+        self.assertIn("build_tools/lefthook/presubmit.py", description)
+        self.assertIn("--lane cmake", description)
+        self.assertIn("--clang-tidy", description)
+        self.assertIn("--base origin/main", description)
+        self.assertNotIn("--static-analysis", description)
+
+    def test_cmake_clang_tidy_explicit_paths_use_presubmit_provider(self):
+        args = cli.parse_arguments(
+            ["cmake", "clang-tidy", "runtime/src/iree/vm/native_module.c"]
+        )
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("build_tools/lefthook/presubmit.py", description)
+        self.assertIn("--lane cmake", description)
+        self.assertIn("--clang-tidy", description)
+        self.assertIn("runtime/src/iree/vm/native_module.c", description)
+
+    def test_cmake_clang_tidy_fix_uses_presubmit_provider(self):
+        args = cli.parse_arguments(
+            [
+                "cmake",
+                "clang-tidy",
+                "--fix",
+                "runtime/src/iree/vm/native_module.c",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("build_tools/lefthook/presubmit.py", description)
+        self.assertIn("--lane cmake", description)
+        self.assertIn("--fix", description)
+        self.assertIn("--clang-tidy", description)
+
+    def test_cmake_clang_tidy_rejects_bazel_targets(self):
+        with self.assertRaises(SystemExit):
+            cli.parse_arguments(["cmake", "clang-tidy", "//runtime/src/iree/vm:all"])
 
     def test_bazel_fuzz_normalizes_signal_exit_codes(self):
         self.assertEqual(bazel_dev.process_exit_code(-2), 130)
@@ -282,6 +757,11 @@ class CliTest(unittest.TestCase):
             aliases.BAZEL_ALIASES["iree-bazel-cquery"], ["bazel", "cquery"]
         )
         self.assertEqual(aliases.BAZEL_ALIASES["iree-bazel-info"], ["bazel", "info"])
+        self.assertEqual(
+            aliases.BAZEL_ALIASES["iree-bazel-shutdown"],
+            ["bazel", "shutdown"],
+        )
+        self.assertNotIn("iree-bazel-compile-commands", aliases.BAZEL_ALIASES)
 
     def test_cmake_aliases_include_fuzz(self):
         self.assertEqual(aliases.CMAKE_ALIASES["iree-cmake-fuzz"], ["cmake", "fuzz"])
@@ -311,7 +791,7 @@ class CliTest(unittest.TestCase):
         self.assertTrue(args.dry_run)
         self.assertTrue(args.verbose)
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
         self.assertIn("bazel build --config=asan", description)
         self.assertNotIn("-n", description)
         self.assertNotIn("-v", description)
@@ -333,7 +813,7 @@ class CliTest(unittest.TestCase):
 
         self.assertTrue(args.dry_run)
         plan = args.handler(args)
-        self.assertIn("bazel build --dry-run", plan.describe())
+        self.assertIn("bazel build --dry-run", normalized_plan_description(plan))
 
     def test_passthrough_tool_environment_options_are_wrapper_flags(self):
         args = cli.parse_arguments(["bazel", "build", "--system", "//runtime/..."])
@@ -354,7 +834,7 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(args.cmake_build_dir, Path("build/cmake-debug"))
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
         self.assertIn("build/cmake-debug", description)
         self.assertNotIn("--cmake-build-dir", description)
 
@@ -371,7 +851,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(args.alias_dir, Path("aliases"))
 
     def test_agents_md_survives_hoisted_wrapper_flags(self):
-        output = self.parse_agent_md(["bazel", "build", "-n", "--agents_md"])
+        output = self.parse_agents_md(["bazel", "build", "-n", "--agents_md"])
 
         self.assertIn("## iree-bazel-build", output)
 
@@ -383,39 +863,38 @@ class CliTest(unittest.TestCase):
         self.assertTrue(command.keep)
 
     def test_root_agents_md_includes_bazel_and_cmake_sections(self):
-        output = self.parse_agent_md(["--agents_md"])
+        output = self.parse_agents_md(["--agents_md"])
 
         self.assertIn("### Bazel", output)
         self.assertIn("### CMake", output)
 
     def test_bazel_agents_md_includes_only_bazel_section(self):
-        output = self.parse_agent_md(["bazel", "--agents_md"])
+        output = self.parse_agents_md(["bazel", "--agents_md"])
 
         self.assertIn("### Bazel", output)
         self.assertNotIn("### CMake", output)
 
     def test_cmake_agents_md_includes_only_cmake_section(self):
-        output = self.parse_agent_md(["cmake", "--agent_md"])
+        output = self.parse_agents_md(["cmake", "--agents_md"])
 
         self.assertIn("### CMake", output)
         self.assertIn("iree-cmake-build", output)
-        self.assertIn("build_tools/bin/iree-*-*", output)
+        self.assertIn("python dev.py", output)
         self.assertNotIn("### Bazel", output)
 
     def test_bazel_build_agents_md_uses_public_wrapper_names(self):
-        output = self.parse_agent_md(["bazel", "build", "--agents_md"])
+        output = self.parse_agents_md(["bazel", "build", "--agents_md"])
 
         self.assertIn("## iree-bazel-build", output)
         self.assertIn("iree-bazel-build //runtime/src/iree/base/...", output)
         self.assertIn("iree-bazel-run", output)
         self.assertIn("iree-bazel-fuzz", output)
         self.assertIn("Wrapper flags", output)
-        self.assertNotIn("Pass `--agents-md`", output)
         self.assertNotIn("python dev.py", output)
         self.assertNotIn("### CMake", output)
 
     def test_bazel_run_agents_md_explains_process_contract(self):
-        output = self.parse_agent_md(["bazel", "run", "--agents-md"])
+        output = self.parse_agents_md(["bazel", "run", "--agents_md"])
 
         self.assertIn("## iree-bazel-run", output)
         self.assertIn(
@@ -426,12 +905,12 @@ class CliTest(unittest.TestCase):
         self.assertNotIn("python dev.py", output)
 
     def test_bazel_try_and_fuzz_agents_md_are_focused(self):
-        try_output = self.parse_agent_md(["bazel", "try", "--agents-md"])
-        fuzz_output = self.parse_agent_md(["bazel", "fuzz", "--agents_md"])
+        try_output = self.parse_agents_md(["bazel", "try", "--agents_md"])
+        fuzz_output = self.parse_agents_md(["bazel", "fuzz", "--agents_md"])
 
         self.assertIn("## iree-bazel-try", try_output)
         self.assertIn("one-shot C/C++ probes", try_output)
-        self.assertIn(".iree-bazel-try/", try_output)
+        self.assertIn(".iree/bazel-try/", try_output)
         self.assertNotIn("## iree-bazel-fuzz", try_output)
 
         self.assertIn("## iree-bazel-fuzz", fuzz_output)
@@ -440,15 +919,15 @@ class CliTest(unittest.TestCase):
         self.assertNotIn("## iree-bazel-try", fuzz_output)
 
     def test_cmake_try_agents_md_is_focused(self):
-        output = self.parse_agent_md(["cmake", "try", "--agents-md"])
+        output = self.parse_agents_md(["cmake", "try", "--agents_md"])
 
         self.assertIn("## iree-cmake-try", output)
         self.assertIn("one-shot C/C++ probes", output)
-        self.assertIn(".iree-cmake-try/", output)
+        self.assertIn(".tmp/iree-cmake-try/", output)
         self.assertNotIn("## iree-cmake-run", output)
 
     def test_cmake_fuzz_agents_md_is_focused(self):
-        output = self.parse_agent_md(["cmake", "fuzz", "--agents-md"])
+        output = self.parse_agents_md(["cmake", "fuzz", "--agents_md"])
 
         self.assertIn("## iree-cmake-fuzz", output)
         self.assertIn("IREE_ENABLE_FUZZING=ON", output)
@@ -459,7 +938,7 @@ class CliTest(unittest.TestCase):
         args = cli.parse_arguments(["cmake", "build", "hrx"])
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("--target hrx", description)
 
@@ -498,14 +977,15 @@ class CliTest(unittest.TestCase):
 
         self.assertIn("cmake fuzz iree::tokenizer::special_tokens_fuzz", description)
         self.assertIn("--target iree::tokenizer::special_tokens_fuzz", description)
-        self.assertIn("exec '<built fuzzer>' '<corpus>'", description)
+        self.assertIn("<built fuzzer>", description)
+        self.assertIn("<corpus>", description)
         self.assertIn("--parallel 8", description)
 
     def test_cmake_test_forwards_options_without_separator(self):
         args = cli.parse_arguments(["cmake", "test", "-R", "hrx"])
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("-R hrx", description)
         self.assertNotIn("-- -R", description)
@@ -518,10 +998,11 @@ class CliTest(unittest.TestCase):
 
         self.assertIn("# cmake run iree-run-module", description)
         self.assertIn("CMake File API", description)
-        self.assertIn("exec '<built executable>' --help", description)
+        self.assertIn("<built executable>", description)
+        self.assertIn("--help", description)
 
     def test_cmake_run_agents_md_explains_no_implicit_build(self):
-        output = self.parse_agent_md(["cmake", "run", "--agents-md"])
+        output = self.parse_agents_md(["cmake", "run", "--agents_md"])
 
         self.assertIn("## iree-cmake-run", output)
         self.assertIn("iree-cmake-build iree-run-module", output)
@@ -532,7 +1013,7 @@ class CliTest(unittest.TestCase):
         args = cli.parse_arguments(["bazel", "precommit"])
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertEqual(len(plan.steps), 1)
         self.assertIn("--check", plan.steps[0].argv)
@@ -581,7 +1062,11 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(len(plan.steps), 2)
         self.assertIn("--fix", plan.steps[0].argv)
+        self.assertIn("--hygiene", plan.steps[0].argv)
         self.assertIn("--check", plan.steps[1].argv)
+        self.assertNotIn("--hygiene", plan.steps[1].argv)
+        self.assertIn("--tests", plan.steps[1].argv)
+        self.assertIn("--static-analysis", plan.steps[1].argv)
         self.assertIn("--commit", description)
         self.assertNotIn("--changed", description)
 
@@ -593,7 +1078,11 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(len(plan.steps), 2)
         self.assertIn("--fix", plan.steps[0].argv)
+        self.assertIn("--hygiene", plan.steps[0].argv)
         self.assertIn("--check", plan.steps[1].argv)
+        self.assertNotIn("--hygiene", plan.steps[1].argv)
+        self.assertIn("--tests", plan.steps[1].argv)
+        self.assertIn("--static-analysis", plan.steps[1].argv)
         self.assertIn("--staged", description)
         self.assertNotIn("--changed", description)
 
@@ -605,7 +1094,11 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(len(plan.steps), 2)
         self.assertIn("--fix", plan.steps[0].argv)
+        self.assertIn("--hygiene", plan.steps[0].argv)
         self.assertIn("--check", plan.steps[1].argv)
+        self.assertNotIn("--hygiene", plan.steps[1].argv)
+        self.assertIn("--tests", plan.steps[1].argv)
+        self.assertIn("--static-analysis", plan.steps[1].argv)
         self.assertIn("README.md dev.py", description)
         self.assertNotIn("--changed", description)
         self.assertNotIn("--staged", description)
@@ -633,7 +1126,7 @@ class CliTest(unittest.TestCase):
         )
 
         plan = args.handler(args)
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("IREE_CMAKE_BUILD_DIR=", description)
         self.assertIn("build/cmake-ci", description)
@@ -658,6 +1151,16 @@ class CliTest(unittest.TestCase):
         self.assertIn("--lane bazel", description)
         self.assertIn("--profile default", description)
         self.assertIn("--all", description)
+
+    def test_bazel_presubmit_can_use_base_ref(self):
+        args = cli.parse_arguments(["bazel", "presubmit", "--base", "origin/main"])
+
+        plan = args.handler(args)
+        description = plan.describe()
+
+        self.assertIn("--lane bazel", description)
+        self.assertIn("--base origin/main", description)
+        self.assertNotIn("--all", description)
 
     def test_bazel_presubmit_can_skip_project_tests(self):
         args = cli.parse_arguments(["bazel", "presubmit", "--no_project_tests"])
@@ -701,6 +1204,19 @@ class CliTest(unittest.TestCase):
         self.assertNotIn("../builds", output)
         self.assertNotIn("backend configure tool", output)
 
+    def test_root_help_lists_nested_build_system_commands(self):
+        output = self.parse_help(["--help"])
+
+        self.assertIn("Common build-system commands", output)
+        self.assertIn("python dev.py bazel precommit", output)
+        self.assertIn("python dev.py bazel run", output)
+        self.assertIn("python dev.py bazel compile-commands", output)
+        self.assertIn("python dev.py bazel clang-tidy", output)
+        self.assertIn("python dev.py cmake precommit", output)
+        self.assertIn("python dev.py cmake run", output)
+        self.assertIn("python dev.py cmake compile-commands", output)
+        self.assertIn("python dev.py cmake clang-tidy", output)
+
     def test_bazel_build_help_explains_default_targets(self):
         output = self.parse_help(["bazel", "build", "--help"])
 
@@ -726,7 +1242,23 @@ class CliTest(unittest.TestCase):
 
         self.assertIn("The default profile is ci", output)
         self.assertIn("full-tree", output)
+        self.assertIn("--base", output)
         self.assertIn("precommit", output)
+
+    def test_bazel_clang_tidy_help_explains_modes(self):
+        output = self.parse_help(["bazel", "clang-tidy", "--help"])
+
+        self.assertIn("Bazel target patterns", output)
+        self.assertIn("aspect directly", output)
+        self.assertIn("--keep_going", output)
+        self.assertIn("--base", output)
+
+    def test_cmake_clang_tidy_help_explains_modes(self):
+        output = self.parse_help(["cmake", "clang-tidy", "--help"])
+
+        self.assertIn("CMake compile database", output)
+        self.assertIn("--cmake-build-dir", output)
+        self.assertIn("--base", output)
 
 
 if __name__ == "__main__":

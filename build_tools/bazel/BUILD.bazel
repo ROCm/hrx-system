@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("@rules_python//python:defs.bzl", "py_test")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -19,6 +19,26 @@ py_test(
         "configure_test.py",
     ],
     main = "configure_test.py",
+)
+
+py_binary(
+    name = "compile_commands_merge",
+    srcs = ["compile_commands_merge.py"],
+    main = "compile_commands_merge.py",
+)
+
+py_library(
+    name = "compile_commands_merge_lib",
+    srcs = ["compile_commands_merge.py"],
+)
+
+py_test(
+    name = "compile_commands_merge_test",
+    srcs = [
+        "compile_commands_merge.py",
+        "compile_commands_merge_test.py",
+    ],
+    main = "compile_commands_merge_test.py",
 )
 
 config_setting(

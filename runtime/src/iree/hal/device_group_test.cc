@@ -18,8 +18,8 @@ namespace {
 
 using ::iree::testing::status::StatusIs;
 
-// Helper: creates a mock device with the given identifier and default
-// (zeroed) capabilities.
+// Helper: creates a mock device with the given identifier and a minimal cached
+// immutable spec.
 static iree_hal_device_t* CreateMockDevice(const char* identifier) {
   iree_hal_mock_device_options_t options;
   iree_hal_mock_device_options_initialize(&options);
@@ -30,14 +30,59 @@ static iree_hal_device_t* CreateMockDevice(const char* identifier) {
   return device;
 }
 
-// Helper: creates a mock device with configurable capabilities.
-static iree_hal_device_t* CreateMockDeviceWithCapabilities(
-    const char* identifier,
-    const iree_hal_device_capabilities_t* capabilities) {
+static iree_hal_device_spec_t* CreateTestDeviceSpec(const char* driver_id,
+                                                    uint32_t logical_ordinal,
+                                                    uint32_t numa_node) {
+  iree_hal_physical_device_spec_t physical_device = {
+      /*.identity=*/
+      {
+          /*.display_name=*/iree_make_cstring_view("test physical device"),
+          /*.backend_path=*/iree_make_cstring_view("test://physical"),
+          /*.vendor_id=*/0,
+          /*.device_id=*/0,
+          /*.revision_id=*/0,
+          /*.uuid=*/{{0}},
+          /*.pci=*/{0, 0, 0, 0},
+          /*.numa=*/{numa_node},
+          /*.flags=*/IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NUMA_NODE,
+      },
+      /*.physical_ordinal=*/logical_ordinal,
+      /*.partition_ordinal=*/0,
+      /*.partition_count=*/1,
+      /*.physical_device_affinity=*/1ull << logical_ordinal,
+  };
+  iree_hal_device_identity_spec_t identity = {
+      /*.logical_device_id=*/iree_make_cstring_view(driver_id),
+      /*.display_name=*/iree_make_cstring_view("test logical device"),
+      /*.driver_id=*/iree_make_cstring_view(driver_id),
+      /*.driver_version=*/iree_make_cstring_view("test"),
+      /*.backend_id=*/iree_make_cstring_view("test"),
+      /*.device_path=*/iree_make_cstring_view("test://logical"),
+      /*.vendor_name=*/iree_make_cstring_view("test"),
+      /*.vendor_id=*/0,
+      /*.device_id=*/0,
+      /*.revision_id=*/0,
+      /*.logical_ordinal=*/logical_ordinal,
+      /*.physical_device_count=*/1,
+      /*.physical_devices=*/&physical_device,
+      /*.flags=*/IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
+  };
+  iree_hal_device_spec_params_t params = {
+      /*.identity=*/&identity,
+  };
+  iree_hal_device_spec_t* device_spec = NULL;
+  IREE_CHECK_OK(iree_hal_device_spec_create(&params, iree_allocator_system(),
+                                            &device_spec));
+  return device_spec;
+}
+
+// Helper: creates a mock device with a configurable immutable spec.
+static iree_hal_device_t* CreateMockDeviceWithSpec(
+    const char* identifier, iree_hal_device_spec_t* device_spec) {
   iree_hal_mock_device_options_t options;
   iree_hal_mock_device_options_initialize(&options);
   options.identifier = iree_make_cstring_view(identifier);
-  options.capabilities = *capabilities;
+  options.device_spec = device_spec;
   iree_hal_device_t* device = NULL;
   IREE_CHECK_OK(
       iree_hal_mock_device_create(&options, iree_allocator_system(), &device));
@@ -258,10 +303,19 @@ TEST(DeviceGroup, TwoDevicesSameDriver) {
   const iree_hal_topology_t* topology = iree_hal_device_group_topology(group);
   EXPECT_EQ(topology->device_count, 2u);
 
-  // Cross-device edge should exist (computed from zeroed capabilities).
   iree_hal_topology_edge_t edge_ab =
       iree_hal_topology_query_edge(topology, 0, 1);
   EXPECT_FALSE(iree_hal_topology_edge_is_empty(edge_ab));
+  EXPECT_EQ(iree_hal_topology_edge_wait_mode(edge_ab.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
+  EXPECT_EQ(iree_hal_topology_edge_signal_mode(edge_ab.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
+  EXPECT_EQ(iree_hal_topology_edge_buffer_read_mode_noncoherent(edge_ab.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
+  EXPECT_FALSE(iree_hal_topology_edge_capability_flags(edge_ab.lo) &
+               IREE_HAL_TOPOLOGY_CAPABILITY_SAME_RUNTIME_DOMAIN);
+  EXPECT_FALSE(iree_hal_topology_edge_capability_flags(edge_ab.lo) &
+               IREE_HAL_TOPOLOGY_CAPABILITY_P2P_COPY);
 
   // Both devices should have topology info with correct indices.
   const iree_hal_device_topology_info_t* info_a =
@@ -286,8 +340,12 @@ TEST(DeviceGroup, TwoDevicesSameDriver) {
 
 // Two devices with different driver identifiers (cross-driver pair).
 TEST(DeviceGroup, TwoDevicesDifferentDrivers) {
-  iree_hal_device_t* device_a = CreateMockDevice("driver_a");
-  iree_hal_device_t* device_b = CreateMockDevice("driver_b");
+  iree_hal_device_spec_t* spec_a = CreateTestDeviceSpec("driver_a", 0, 0);
+  iree_hal_device_spec_t* spec_b = CreateTestDeviceSpec("driver_b", 1, 0);
+  iree_hal_device_t* device_a = CreateMockDeviceWithSpec("device_a", spec_a);
+  iree_hal_device_t* device_b = CreateMockDeviceWithSpec("device_b", spec_b);
+  iree_hal_device_spec_release(spec_b);
+  iree_hal_device_spec_release(spec_a);
 
   iree_hal_device_group_builder_t builder;
   InitializeDeviceGroupBuilder(&builder);
@@ -300,9 +358,6 @@ TEST(DeviceGroup, TwoDevicesDifferentDrivers) {
 
   const iree_hal_topology_t* topology = iree_hal_device_group_topology(group);
 
-  // Cross-driver edge from edge_from_capabilities with zeroed capabilities
-  // (no import/export handle types) produces COPY mode for everything — there
-  // are no external handles to import, so the only option is host-staged copy.
   iree_hal_topology_edge_t edge_ab =
       iree_hal_topology_query_edge(topology, 0, 1);
   EXPECT_EQ(iree_hal_topology_edge_wait_mode(edge_ab.lo),
@@ -345,13 +400,7 @@ TEST(DeviceGroup, ThreeDevicesBitmaps) {
   EXPECT_EQ(info_b->topology_index, 1u);
   EXPECT_EQ(info_c->topology_index, 2u);
 
-  // With zeroed capabilities, edge_from_capabilities produces edges with
-  // IMPORT wait mode (non-NONE) and IMPORT signal mode, so can_wait_from
-  // and can_signal_to should have all peer bits set.
-  //
-  // Device 0 peers are 1 and 2: bitmap = (1<<1) | (1<<2) = 0x6.
-  // Device 1 peers are 0 and 2: bitmap = (1<<0) | (1<<2) = 0x5.
-  // Device 2 peers are 0 and 1: bitmap = (1<<0) | (1<<1) = 0x3.
+  // Same-runtime specs produce native synchronization with all peers.
   EXPECT_EQ(info_a->can_wait_from, 0x6u);
   EXPECT_EQ(info_b->can_wait_from, 0x5u);
   EXPECT_EQ(info_c->can_wait_from, 0x3u);
@@ -359,6 +408,12 @@ TEST(DeviceGroup, ThreeDevicesBitmaps) {
   EXPECT_EQ(info_a->can_signal_to, 0x6u);
   EXPECT_EQ(info_b->can_signal_to, 0x5u);
   EXPECT_EQ(info_c->can_signal_to, 0x3u);
+  EXPECT_EQ(info_a->can_import_from, 0u);
+  EXPECT_EQ(info_b->can_import_from, 0u);
+  EXPECT_EQ(info_c->can_import_from, 0u);
+  EXPECT_EQ(info_a->can_p2p_with, 0u);
+  EXPECT_EQ(info_b->can_p2p_with, 0u);
+  EXPECT_EQ(info_c->can_p2p_with, 0u);
 
   iree_hal_device_group_release(group);
   iree_hal_device_release(device_a);
@@ -373,18 +428,12 @@ TEST(DeviceGroup, ThreeDevicesBitmaps) {
 // Devices with specific NUMA node assignments should produce a topology with
 // those NUMA nodes set.
 TEST(DeviceGroup, NumaNodeAssignment) {
-  iree_hal_device_capabilities_t caps_a;
-  memset(&caps_a, 0, sizeof(caps_a));
-  caps_a.numa_node = 0;
-
-  iree_hal_device_capabilities_t caps_b;
-  memset(&caps_b, 0, sizeof(caps_b));
-  caps_b.numa_node = 1;
-
-  iree_hal_device_t* device_a =
-      CreateMockDeviceWithCapabilities("mock", &caps_a);
-  iree_hal_device_t* device_b =
-      CreateMockDeviceWithCapabilities("mock", &caps_b);
+  iree_hal_device_spec_t* spec_a = CreateTestDeviceSpec("mock", 0, 0);
+  iree_hal_device_spec_t* spec_b = CreateTestDeviceSpec("mock", 1, 1);
+  iree_hal_device_t* device_a = CreateMockDeviceWithSpec("mock", spec_a);
+  iree_hal_device_t* device_b = CreateMockDeviceWithSpec("mock", spec_b);
+  iree_hal_device_spec_release(spec_b);
+  iree_hal_device_spec_release(spec_a);
 
   iree_hal_device_group_builder_t builder;
   InitializeDeviceGroupBuilder(&builder);
@@ -396,8 +445,8 @@ TEST(DeviceGroup, NumaNodeAssignment) {
       &builder, iree_allocator_system(), &group));
 
   const iree_hal_topology_t* topology = iree_hal_device_group_topology(group);
-  EXPECT_EQ(topology->numa_nodes[0], 0u);
-  EXPECT_EQ(topology->numa_nodes[1], 1u);
+  EXPECT_EQ(iree_hal_topology_device_numa_node(topology, 0), 0u);
+  EXPECT_EQ(iree_hal_topology_device_numa_node(topology, 1), 1u);
 
   iree_hal_device_group_release(group);
   iree_hal_device_release(device_a);

@@ -1,0 +1,43 @@
+// RUN: emit source-low diagnostics=all output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f32_dotf_zero_seed_fmac_diagnostics(%lhs: vector<2xf32>, %rhs: vector<2xf32>) -> (f32) {
+  %zero = scalar.constant 0.0 : f32
+  // REMARK@+2: AMDGPU/028 {descriptor_name="amdgpu.v_fmac_f32", lane_index="0", descriptor_set_name="amdgpu.rdna3.core", accumulator_kind="dot_local", decision_key="selected", reason_key="dot_local_accumulator"}
+  // REMARK@+1: AMDGPU/028 {descriptor_name="amdgpu.v_fmac_f32", lane_index="1", descriptor_set_name="amdgpu.rdna3.core", accumulator_kind="dot_local", decision_key="selected", reason_key="dot_local_accumulator"}
+  %dot = vector.dotf %lhs, %rhs, %zero : vector<2xf32>, vector<2xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32_dotf_zero_seed_fmac_diagnostics(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %9 = v_mov_b32 0
+  %10 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %11 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %12 = v_fmac_f32 %9, %10, %11
+  %13 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %14 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %dot = v_fmac_f32 %12, %13, %14
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f32_dotf_incoming_accumulator_fmac_diagnostics(%lhs: vector<2xf32>, %rhs: vector<2xf32>, %acc: f32) -> (f32) {
+  // REMARK@+2: AMDGPU/028 {descriptor_name="amdgpu.v_fma_f32", lane_index="0", descriptor_set_name="amdgpu.rdna3.core", accumulator_kind="incoming", decision_key="rejected", reason_key="incoming_accumulator"}
+  // REMARK@+1: AMDGPU/028 {descriptor_name="amdgpu.v_fmac_f32", lane_index="1", descriptor_set_name="amdgpu.rdna3.core", accumulator_kind="dot_local", decision_key="selected", reason_key="dot_local_accumulator"}
+  %dot = vector.dotf %lhs, %rhs, %acc : vector<2xf32>, vector<2xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32_dotf_incoming_accumulator_fmac_diagnostics(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %9 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %10 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %11 = v_fma_f32 %9, %10, %acc
+  %12 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %13 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %dot = v_fmac_f32 %11, %12, %13
+  return %dot
+}

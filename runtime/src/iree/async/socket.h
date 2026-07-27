@@ -263,17 +263,16 @@ static inline iree_status_t iree_async_socket_query_failure(
 
 // Sets the socket's sticky failure status if not already failed.
 // Uses atomic compare-exchange so the first error wins: if the socket already
-// has a failure, |status| is discarded and the original failure preserved.
+// has a failure, |status_code| is discarded and the original failure preserved.
 //
 // Only the status code is stored (no storage allocation). The full error
 // context is delivered to the caller via the operation's completion callback;
 // the sticky failure is a persistent "is this socket still usable?" indicator
 // that supports peek semantics in iree_async_socket_query_failure().
-static inline void iree_async_socket_set_failure(iree_async_socket_t* socket,
-                                                 iree_status_t status) {
-  if (iree_status_is_ok(status)) return;
-  intptr_t failure_code =
-      (intptr_t)iree_status_from_code(iree_status_code(status));
+static inline void iree_async_socket_set_failure(
+    iree_async_socket_t* socket, iree_status_code_t status_code) {
+  if (status_code == IREE_STATUS_OK) return;
+  intptr_t failure_code = (intptr_t)iree_status_from_code(status_code);
   intptr_t expected = (intptr_t)iree_ok_status();
   iree_atomic_compare_exchange_strong(&socket->failure_status, &expected,
                                       failure_code, iree_memory_order_acq_rel,

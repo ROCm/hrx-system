@@ -82,12 +82,12 @@ iree_status_t iree_hal_pool_set_register(iree_hal_pool_set_t* pool_set,
   if (pool_set->entry_count >= pool_set->entry_capacity) {
     IREE_TRACE_ZONE_BEGIN(z0);
     IREE_TRACE_ZONE_APPEND_TEXT(z0, "grow");
-    iree_status_t status = iree_allocator_grow_array(
-        pool_set->host_allocator, pool_set->entry_count + 1,
-        sizeof(iree_hal_pool_set_entry_t), &pool_set->entry_capacity,
-        (void**)&pool_set->entries);
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_allocator_grow_array(
+                pool_set->host_allocator, pool_set->entry_count + 1,
+                sizeof(iree_hal_pool_set_entry_t), &pool_set->entry_capacity,
+                (void**)&pool_set->entries));
     IREE_TRACE_ZONE_END(z0);
-    IREE_RETURN_IF_ERROR(status);
   }
 
   iree_host_size_t insert_index = 0;

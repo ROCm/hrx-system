@@ -24,6 +24,23 @@ static std::string ToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
 
+TEST(StringViewTest, Empty) {
+  const char storage[1] = {0};
+  EXPECT_TRUE(iree_string_view_is_empty(iree_string_view_empty()));
+  EXPECT_TRUE(iree_string_view_is_empty(iree_make_string_view(storage, 0)));
+  EXPECT_FALSE(iree_string_view_is_empty(iree_make_string_view(NULL, 1)));
+}
+
+TEST(MutableStringViewTest, Empty) {
+  char storage[1] = {0};
+  EXPECT_TRUE(
+      iree_mutable_string_view_is_empty(iree_mutable_string_view_empty()));
+  EXPECT_TRUE(iree_mutable_string_view_is_empty(
+      iree_make_mutable_string_view(storage, 0)));
+  EXPECT_FALSE(iree_mutable_string_view_is_empty(
+      iree_make_mutable_string_view(NULL, 1)));
+}
+
 TEST(StringViewTest, Equal) {
   auto equal = [](const char* lhs, const char* rhs) -> bool {
     return iree_string_view_equal(iree_make_cstring_view(lhs),
@@ -79,6 +96,81 @@ TEST(StringViewTest, FindChar) {
   EXPECT_EQ(find_char("axbxc", 'x', 4), IREE_STRING_VIEW_NPOS);
   EXPECT_EQ(find_char("axbxc", 'x', IREE_STRING_VIEW_NPOS),
             IREE_STRING_VIEW_NPOS);
+}
+
+TEST(StringViewTest, Find) {
+  auto find = [](const char* value, const char* needle, iree_host_size_t pos) {
+    return iree_string_view_find(iree_make_cstring_view(value),
+                                 iree_make_cstring_view(needle), pos);
+  };
+  // Empty value.
+  EXPECT_EQ(find("", "", 0), 0u);
+  EXPECT_EQ(find("", "", 1), IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(find("", "x", 0), IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(find("", "x", IREE_STRING_VIEW_NPOS), IREE_STRING_VIEW_NPOS);
+  // Empty needle.
+  EXPECT_EQ(find("abc", "", 0), 0u);
+  EXPECT_EQ(find("abc", "", 2), 2u);
+  EXPECT_EQ(find("abc", "", 3), 3u);
+  EXPECT_EQ(find("abc", "", 4), IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(find("abc", "", IREE_STRING_VIEW_NPOS), IREE_STRING_VIEW_NPOS);
+  // Single character needle (delegates to find_char).
+  EXPECT_EQ(find("abc", "b", 0), 1u);
+  EXPECT_EQ(find("abc", "b", 1), 1u);
+  EXPECT_EQ(find("abc", "b", 2), IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(find("abc", "x", 0), IREE_STRING_VIEW_NPOS);
+  // Multi-character needle.
+  EXPECT_EQ(find("abcdef", "cd", 0), 2u);
+  EXPECT_EQ(find("abcdef", "cd", 2), 2u);
+  EXPECT_EQ(find("abcdef", "cd", 3), IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(find("abcdef", "ef", 0), 4u);
+  EXPECT_EQ(find("abcdef", "fg", 0), IREE_STRING_VIEW_NPOS);
+  // Needle at very start and end.
+  EXPECT_EQ(find("abcdef", "ab", 0), 0u);
+  EXPECT_EQ(find("abcdef", "ef", 0), 4u);
+  EXPECT_EQ(find("abcdef", "abcdef", 0), 0u);
+  // Needle longer than value.
+  EXPECT_EQ(find("abc", "abcd", 0), IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(find("abc", "abcde", 0), IREE_STRING_VIEW_NPOS);
+  // Multiple occurrences.
+  EXPECT_EQ(find("abcabc", "abc", 0), 0u);
+  EXPECT_EQ(find("abcabc", "abc", 1), 3u);
+  EXPECT_EQ(find("abcabc", "abc", 3), 3u);
+  EXPECT_EQ(find("abcabc", "abc", 4), IREE_STRING_VIEW_NPOS);
+  // Pos at boundary: needle would extend past value.size.
+  EXPECT_EQ(find("abcdef", "ef", 5), IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(find("abcdef", "ef", 4), 4u);
+  // Pos past end.
+  EXPECT_EQ(find("abc", "a", 10), IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(find("abc", "a", IREE_STRING_VIEW_NPOS), IREE_STRING_VIEW_NPOS);
+  // Partial match that doesn't complete.
+  EXPECT_EQ(find("aab", "aac", 0), IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(find("ababac", "abac", 0), 2u);
+  // Needle same as value.
+  EXPECT_EQ(find("x", "x", 0), 0u);
+  EXPECT_EQ(find("hello", "hello", 0), 0u);
+  // Needle same size as value with pos > 0: exercises the
+  // `pos > value.size - needle.size` guard when the difference is 0.
+  EXPECT_EQ(find("abcdef", "abcdef", 1), IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(find("aa", "aa", 1), IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(find("aa", "aa", 2), IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(find("x", "x", 1), IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(find("x", "x", IREE_STRING_VIEW_NPOS), IREE_STRING_VIEW_NPOS);
+  // Non-null-terminated safety: use raw string_view to test that we
+  // respect .size and don't read past the end.
+  {
+    const char buffer[] = "abcXYZdef";
+    iree_string_view_t value = iree_make_string_view(buffer, 3);       // "abc"
+    iree_string_view_t needle = iree_make_string_view(buffer + 3, 3);  // "XYZ"
+    EXPECT_EQ(iree_string_view_find(value, needle, 0), IREE_STRING_VIEW_NPOS);
+  }
+  {
+    // Needle extends past value boundary if not checked.
+    const char buffer[] = "abcde";
+    iree_string_view_t value = iree_make_string_view(buffer, 3);   // "abc"
+    iree_string_view_t needle = iree_make_string_view(buffer, 4);  // "abcd"
+    EXPECT_EQ(iree_string_view_find(value, needle, 0), IREE_STRING_VIEW_NPOS);
+  }
 }
 
 TEST(StringViewTest, FindFirstOf) {
@@ -505,7 +597,7 @@ TEST(StringViewTest, ToCStringTruncate) {
 TEST(StringViewTest, AppendToBuffer) {
   char buffer[6] = {0, 1, 2, 3, 4, 5};
   iree_string_view_t source = iree_make_cstring_view("test");
-  iree_string_view_t target = {};
+  iree_string_view_t target = iree_string_view_empty();
   const iree_host_size_t size =
       iree_string_view_append_to_buffer(source, &target, buffer);
   EXPECT_EQ(size, source.size);
@@ -518,7 +610,7 @@ TEST(StringViewTest, AppendToBuffer) {
 TEST(StringViewTest, AppendToBufferEmptySource) {
   char buffer[4] = {0, 1, 2, 3};
   iree_string_view_t source = iree_make_string_view(nullptr, 0);
-  iree_string_view_t target = {};
+  iree_string_view_t target = iree_string_view_empty();
   const iree_host_size_t size =
       iree_string_view_append_to_buffer(source, &target, buffer);
   EXPECT_EQ(size, 0u);
@@ -530,7 +622,7 @@ TEST(StringViewTest, AppendToBufferEmptySource) {
 
 TEST(StringViewTest, AppendToBufferEmptySourceAndBuffer) {
   iree_string_view_t source = iree_make_string_view(nullptr, 0);
-  iree_string_view_t target = {};
+  iree_string_view_t target = iree_string_view_empty();
   const iree_host_size_t size =
       iree_string_view_append_to_buffer(source, &target, nullptr);
   EXPECT_EQ(size, 0u);
@@ -668,6 +760,22 @@ TEST(StringViewTest, ParseDeviceSize) {
 TEST(StringViewTest, ParseDeviceSizeInvalid) {
   EXPECT_THAT(ParseDeviceSize(""), StatusIs(StatusCode::kInvalidArgument));
   EXPECT_THAT(ParseDeviceSize("abc"), StatusIs(StatusCode::kInvalidArgument));
+}
+
+TEST(StringViewTest, ParseEmptyNumber) {
+  const iree_string_view_t empty = iree_string_view_empty();
+  int32_t i32 = 0;
+  uint32_t u32 = 0;
+  int64_t i64 = 0;
+  uint64_t u64 = 0;
+  float f32 = 0.0f;
+  double f64 = 0.0;
+  EXPECT_FALSE(iree_string_view_atoi_int32(empty, &i32));
+  EXPECT_FALSE(iree_string_view_atoi_uint32(empty, &u32));
+  EXPECT_FALSE(iree_string_view_atoi_int64(empty, &i64));
+  EXPECT_FALSE(iree_string_view_atoi_uint64(empty, &u64));
+  EXPECT_FALSE(iree_string_view_atof(empty, &f32));
+  EXPECT_FALSE(iree_string_view_atod(empty, &f64));
 }
 
 TEST(StringViewTest, MatchPattern) {

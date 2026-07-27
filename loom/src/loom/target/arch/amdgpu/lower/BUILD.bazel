@@ -1,0 +1,523 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+    "loom_generated_textual_header",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_AMDGPU_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu:__pkg__"]
+
+_AMDGPU_CANDIDATE_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/lower/candidates:__pkg__"]
+
+_AMDGPU_CONTRACT_VISIBILITY = [
+    "//loom/src/loom/target/arch/amdgpu/contracts:__pkg__",
+]
+
+_AMDGPU_LOWER_TABLE_VISIBILITY = (
+    _AMDGPU_CANDIDATE_VISIBILITY +
+    _AMDGPU_ROOT_VISIBILITY +
+    _AMDGPU_CONTRACT_VISIBILITY
+)
+
+_AMDGPU_MEMORY_CANDIDATE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/lower/candidates:memory_candidates"
+
+_AMDGPU_NARROW_FLOAT_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/lower:narrow_float_tables"
+
+_AMDGPU_TARGET_INFO_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:target_info"
+
+loom_cc_library(
+    name = "kinds",
+    hdrs = ["kinds.h"],
+    visibility = _AMDGPU_LOWER_TABLE_VISIBILITY,
+)
+
+loom_cc_library(
+    name = "materializers",
+    hdrs = ["materializers.h"],
+    visibility = _AMDGPU_CONTRACT_VISIBILITY,
+    deps = [
+        ":kinds",
+        "//loom/src/loom/codegen/low/lower",
+    ],
+)
+
+exports_files(
+    [
+        "registry.c",
+        "registry_tables.inl",
+    ],
+    visibility = ["//loom/py/loom/target/arch/amdgpu/contracts:__pkg__"],
+)
+
+loom_generated_textual_header(
+    name = "memory_descriptor_candidate_ranges_gen",
+    generator = _AMDGPU_MEMORY_CANDIDATE_GENERATOR,
+    output = "memory_descriptor_candidate_ranges.inl",
+    output_flag = "--candidate-ranges",
+)
+
+loom_generated_textual_header(
+    name = "memory_descriptor_candidates_gen",
+    generator = _AMDGPU_MEMORY_CANDIDATE_GENERATOR,
+    output = "memory_descriptor_candidates.inl",
+    output_flag = "--candidate-rows",
+)
+
+loom_generated_textual_header(
+    name = "memory_cache_policy_encoding_rows_gen",
+    generator = _AMDGPU_TARGET_INFO_GENERATOR,
+    output = "memory_cache_policy_encoding_rows.inl",
+    output_flag = "--cache-policy-encoding-rows",
+)
+
+loom_generated_textual_header(
+    name = "memory_cache_policy_temporal_th_gen",
+    generator = _AMDGPU_TARGET_INFO_GENERATOR,
+    output = "memory_cache_policy_temporal_th.inl",
+    output_flag = "--cache-policy-temporal-th",
+)
+
+loom_generated_textual_header(
+    name = "fp8_decode_plan_descriptor_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_decode_plan_descriptor_rows.inl",
+    output_flag = "--fp8-decode-plan-descriptor-rows",
+)
+
+loom_generated_textual_header(
+    name = "fp8_encoded_operand_format_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_encoded_operand_format_rows.inl",
+    output_flag = "--fp8-encoded-operand-format-rows",
+)
+
+loom_generated_textual_header(
+    name = "fp8_encoded_operand_schema_requirement_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_encoded_operand_schema_requirement_rows.inl",
+    output_flag = "--fp8-encoded-operand-schema-requirement-rows",
+)
+
+loom_generated_textual_header(
+    name = "fp8_native_descriptor_ref_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_native_descriptor_ref_rows.inl",
+    output_flag = "--fp8-native-descriptor-ref-rows",
+)
+
+loom_generated_textual_header(
+    name = "fp8_scaled_descriptor_ref_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_scaled_descriptor_ref_rows.inl",
+    output_flag = "--fp8-scaled-descriptor-ref-rows",
+)
+
+loom_generated_textual_header(
+    name = "fp8_subnormal_table_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_subnormal_table_rows.inl",
+    output_flag = "--fp8-subnormal-table-rows",
+)
+
+loom_generated_textual_header(
+    name = "fp8_packed_repair_reason_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_packed_repair_reason_rows.inl",
+    output_flag = "--fp8-packed-repair-reason-rows",
+)
+
+loom_cc_library(
+    name = "lower",
+    srcs = [
+        "abi.c",
+        "arithmetic.c",
+        "async.c",
+        "atomic.c",
+        "bitpack.c",
+        "buffer.c",
+        "cluster_preamble.c",
+        "collective_combine.c",
+        "collective_payload.c",
+        "collective_reduce.c",
+        "collective_scan.c",
+        "constants.c",
+        "control.c",
+        "control_packet.c",
+        "data_symbol.c",
+        "descriptor_ref.c",
+        "dot.c",
+        "emit_support.c",
+        "feedback.c",
+        "legality.c",
+        "mask.c",
+        "materializers.c",
+        "matrix.c",
+        "matrix_fragment.c",
+        "matrix_fragment_memory_access.c",
+        "matrix_fragment_memory_address.c",
+        "matrix_fragment_memory_emit.c",
+        "matrix_fragment_memory_narrow.c",
+        "matrix_fragment_memory_packet.c",
+        "matrix_fragment_memory_plan.c",
+        "matrix_fragment_repack.c",
+        "matrix_fragment_state.c",
+        "memory.c",
+        "memory_bank_conflict.c",
+        "memory_cache.c",
+        "memory_diagnostics.c",
+        "memory_emit.c",
+        "memory_legality.c",
+        "narrow_float/float16.c",
+        "narrow_float/fp8.c",
+        "narrow_float/fp8_descriptors.c",
+        "narrow_float/fp8_lane.c",
+        "narrow_float/fp8_packed.c",
+        "narrow_float/fp8_plan.c",
+        "narrow_float/fp8_vector_conversion.c",
+        "narrow_float/vector_conversion.c",
+        "preamble.c",
+        "prefetch.c",
+        "registry.c",
+        "sanitizer.c",
+        "sanitizer_access.c",
+        "sanitizer_race.c",
+        "sanitizer_race_report.c",
+        "sanitizer_report.c",
+        "signal.c",
+        "source_alloca_layout.c",
+        "structural.c",
+        "subgroup_broadcast.c",
+        "subgroup_crosslane.c",
+        "subgroup_mask.c",
+        "subgroup_shuffle.c",
+        "support.c",
+        "sync.c",
+        "system_memory.c",
+        "table.c",
+        "types.c",
+        "value/integer64.c",
+        "value/scalar_conversion.c",
+        "value/storage.c",
+        "value/vector_construct.c",
+        "value/vector_conversion.c",
+    ],
+    hdrs = [
+        "abi.h",
+        "arithmetic.h",
+        "async.h",
+        "bitpack.h",
+        "buffer.h",
+        "cluster_preamble.h",
+        "collective_combine.h",
+        "collective_payload.h",
+        "constants.h",
+        "control.h",
+        "control_packet.h",
+        "data_symbol.h",
+        "descriptor_ref.h",
+        "dot.h",
+        "emit.h",
+        "feedback.h",
+        "legality.h",
+        "lower.h",
+        "mask.h",
+        "matrix.h",
+        "matrix_fragment.h",
+        "matrix_fragment_memory_access.h",
+        "matrix_fragment_memory_address.h",
+        "matrix_fragment_memory_emit.h",
+        "matrix_fragment_memory_narrow.h",
+        "matrix_fragment_memory_packet.h",
+        "matrix_fragment_memory_plan.h",
+        "matrix_fragment_repack.h",
+        "matrix_fragment_state.h",
+        "memory.h",
+        "memory_bank_conflict.h",
+        "narrow_float/float16.h",
+        "narrow_float/fp8.h",
+        "narrow_float/fp8_vector_conversion.h",
+        "narrow_float/vector_conversion.h",
+        "plan.h",
+        "preamble.h",
+        "sanitizer.h",
+        "sanitizer_access.h",
+        "sanitizer_race.h",
+        "sanitizer_race_report.h",
+        "sanitizer_report.h",
+        "signal.h",
+        "structural.h",
+        "subgroup.h",
+        "sync.h",
+        "system_memory.h",
+        "table.h",
+        "topology.h",
+        "types.h",
+        "value/integer64.h",
+        "value/scalar_conversion.h",
+        "value/storage.h",
+        "value/vector_construct.h",
+        "value/vector_conversion.h",
+        "workgroup.h",
+    ],
+    textual_hdrs = [
+        "//loom/src/loom/target/arch/amdgpu/records:target_records_tables.inl",
+        ":narrow_float/fp8_decode_plan_descriptor_rows.inl",
+        ":narrow_float/fp8_encoded_operand_format_rows.inl",
+        ":narrow_float/fp8_encoded_operand_schema_requirement_rows.inl",
+        ":narrow_float/fp8_native_descriptor_ref_rows.inl",
+        ":narrow_float/fp8_packed_repair_reason_rows.inl",
+        ":narrow_float/fp8_scaled_descriptor_ref_rows.inl",
+        ":narrow_float/fp8_subnormal_table_rows.inl",
+        ":memory_cache_policy_encoding_rows.inl",
+        ":memory_cache_policy_temporal_th.inl",
+        ":memory_descriptor_candidate_ranges.inl",
+        ":memory_descriptor_candidates.inl",
+        "registry_tables.inl",
+    ],
+    visibility = _AMDGPU_ROOT_VISIBILITY,
+    deps = [
+        ":kinds",
+        ":materializers",
+        "//loom/src/loom/analysis:condition_facts",
+        "//loom/src/loom/analysis:contract_vector",
+        "//loom/src/loom/analysis:symbolic_expr",
+        "//loom/src/loom/analysis:view_regions",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:source_memory_plan",
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:atomic",
+        "//loom/src/loom/ops:cache",
+        "//loom/src/loom/ops:combining",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/sanitizer",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/sanitizer:site_collection",
+        "//loom/src/loom/sanitizer:site_table",
+        "//loom/src/loom/target:low_legality",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu:target_info_defs",
+        "//loom/src/loom/target/arch/amdgpu/abi:asan",
+        "//loom/src/loom/target/arch/amdgpu/abi:feedback",
+        "//loom/src/loom/target/arch/amdgpu/abi:signal",
+        "//loom/src/loom/target/arch/amdgpu/abi:tsan",
+        "//loom/src/loom/target/arch/amdgpu/contracts",
+        "//loom/src/loom/target/arch/amdgpu/encoding:encoding_defs",
+        "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
+        "//loom/src/loom/target/arch/amdgpu/lower/candidates:arithmetic_candidates",
+        "//loom/src/loom/target/arch/amdgpu/lower/candidates:async_gather_candidates",
+        "//loom/src/loom/target/arch/amdgpu/lower/candidates:atomic_candidates",
+        "//loom/src/loom/target/arch/amdgpu/lower/candidates:compare_candidates",
+        "//loom/src/loom/target/arch/amdgpu/matrix:contract",
+        "//loom/src/loom/target/arch/amdgpu/matrix:projection",
+        "//loom/src/loom/target/arch/amdgpu/planning:wait_counters",
+        "//loom/src/loom/target/arch/amdgpu/planning:wait_packets",
+        "//loom/src/loom/target/arch/amdgpu/planning:wait_plan",
+        "//loom/src/loom/target/arch/amdgpu/records:target_records_tables",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/target/arch/amdgpu/target_id",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:numeric_format",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+loom_cc_test(
+    name = "control_packet_test",
+    srcs = ["control_packet_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "data_symbol_test",
+    srcs = ["data_symbol_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "feedback_test",
+    srcs = ["feedback_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/error:renderer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:cache",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amdgpu/abi:feedback",
+        "//loom/src/loom/target/arch/amdgpu/abi:signal",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "sanitizer_access_test",
+    srcs = ["sanitizer_access_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/error:renderer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:cache",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amdgpu/abi:asan",
+        "//loom/src/loom/target/arch/amdgpu/abi:feedback",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "sanitizer_report_test",
+    srcs = ["sanitizer_report_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/error:renderer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:cache",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amdgpu/abi:feedback",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "sanitizer_race_report_test",
+    srcs = ["sanitizer_race_report_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/error:renderer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:cache",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amdgpu/abi:feedback",
+        "//loom/src/loom/target/arch/amdgpu/abi:tsan",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "signal_test",
+    srcs = ["signal_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:cache",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amdgpu/abi:signal",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "system_memory_test",
+    srcs = ["system_memory_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:cache",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

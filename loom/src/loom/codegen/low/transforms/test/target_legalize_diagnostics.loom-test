@@ -1,0 +1,228 @@
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_reduce_axes_without_target_legalization(%v: vector<4xi32>, %init: i32) -> (i32) {
+  // ERROR@+1: TARGET/001 {op_name="vector.reduce.axes"}
+  %r = vector.reduce.axes<addi> %v, %init axes [0] : vector<4xi32>, i32
+  func.return %r : i32
+}
+
+// ====
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_mma_without_target_legalization(%lhs_data: vector<4xi32>, %rhs_data: vector<4xi32>, %init_data: vector<4xi32>) -> (vector<4xi32>) {
+  %m = index.constant 2 : index
+  %n = index.constant 2 : index
+  %k = index.constant 2 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<4xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<4xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xi32>
+  // ERROR@+1: TARGET/001 {op_name="vector.mma"}
+  %result = vector.mma %lhs, %rhs, %init : vector<4xi32>, vector<4xi32>, vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ====
+// RUN: pass target-legalize{mode=final}
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_unsupported_source_op_in_final_mode(%v: vector<4xf32>) -> (vector<4xf32>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.logisticf"}
+  %r = vector.logisticf %v : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+// RUN: pass target-legalize{mode=final}
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_target_shaped_mma_without_layout_fallback(%lhs_data: vector<16xf16>, %rhs_data: vector<16xf16>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<16xf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<16xf16>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
+  // ERROR@+1: TARGET/039 {source_contract="target.reference", matrix_constraint="reference.lhs_fragment_ownership"}
+  %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ====
+// RUN: pass target-legalize{mode=final,policy=require-native}
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @require_native_rejects_reduce_axes_reference_fallback(%v: vector<4xi32>, %init: i32) -> (i32) {
+  // ERROR@+1: TARGET/039 {source_contract="target.reference", matrix_constraint="reference.policy"}
+  %r = vector.reduce.axes<addi> %v, %init axes [0] : vector<4xi32>, i32
+  func.return %r : i32
+}
+
+// ====
+// RUN: pass target-legalize
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_assume_range_contradicting_exact_facts() -> (index) {
+  %exact = index.constant 64 : index
+  // ERROR@+1: TARGET/059 {predicate_name="range", value_name="exact", required_min="128", required_max="255", known_min="64", known_max="64"}
+  %assumed = index.assume %exact [range(%exact, 128, 255)] : index
+  func.return %assumed : index
+}
+
+// ====
+// RUN: pass target-legalize
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_assume_ne_contradicting_exact_facts() -> (index) {
+  %exact = index.constant 64 : index
+  // ERROR@+1: TARGET/060 {predicate_name="ne", value_name="exact", known_value="64"}
+  %assumed = index.assume %exact [ne(%exact, 64)] : index
+  func.return %assumed : index
+}
+
+// ====
+// RUN: pass target-legalize
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_assume_divisibility_contradicting_exact_facts() -> (index) {
+  %exact = index.constant 66 : index
+  // ERROR@+1: TARGET/060 {predicate_name="mul", value_name="exact", known_value="66"}
+  %assumed = index.assume %exact [mul(%exact, 64)] : index
+  func.return %assumed : index
+}
+
+// ====
+// RUN: pass target-legalize
+
+test.target<low_core> @test_target
+
+kernel.def target(@test_target) @rejects_workitem_id_assume_excluding_static_workgroup() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %lane0 = kernel.workitem.id<x> : index
+  // ERROR@+1: TARGET/058 {value_kind="workitem.id", axis="x", required_min="0", required_max="63", assumed_min="0", assumed_max="31"}
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  test.use %lane : index
+  kernel.return
+}
+
+// ====
+// RUN: pass target-legalize
+
+test.target<low_core> @test_target
+
+kernel.def target(@test_target) @rejects_workgroup_id_assume_excluding_static_count() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c64, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %block0 = kernel.workgroup.id<x> : index
+  // ERROR@+1: TARGET/058 {value_kind="workgroup.id", axis="x", required_min="0", required_max="63", assumed_min="0", assumed_max="31"}
+  %block = index.assume %block0 [range(%block0, 0, 31)] : index
+  test.use %block : index
+  kernel.return
+}
+
+// ====
+// RUN: pass target-legalize
+
+test.target<low_core> @test_target
+
+kernel.def target(@test_target) @rejects_subgroup_lane_id_assume_excluding_static_workgroup() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %lane0 = kernel.subgroup.lane.id : index
+  // ERROR@+1: TARGET/058 {value_kind="subgroup.lane.id", axis="lane", required_min="0", required_max="63", assumed_min="0", assumed_max="31"}
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  test.use %lane : index
+  kernel.return
+}
+
+// ====
+// RUN: pass target-legalize
+
+test.target<low_core> @test_target
+
+kernel.def target(@test_target) @rejects_cast_workitem_id_assume_excluding_static_workgroup() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %lane0 = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane0 : index to i32
+  // ERROR@+1: TARGET/058 {value_kind="workitem.id", axis="x", required_min="0", required_max="63", assumed_min="0", assumed_max="31"}
+  %lane = scalar.assume %lane_i32 [range(%lane_i32, 0, 31)] : i32
+  test.use %lane : i32
+  kernel.return
+}
+
+// ====
+// RUN: pass target-legalize
+
+test.target<low_core> @test_target
+
+kernel.def target(@test_target) @allows_guarded_workitem_id_assume_excluding_static_workgroup() {
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %c16 = index.constant 16 : index
+  %inside = index.cmp ult, %lane, %c16 : index
+  scf.if %inside {
+    %guarded_lane = index.assume %lane [range(%lane, 0, 15)] : index
+    test.use %guarded_lane : index
+  }
+  kernel.return
+}
+
+// ====
+// RUN: pass scf-to-cfg,target-legalize
+
+test.target<low_core> @test_target
+
+kernel.def target(@test_target) @allows_cfg_guarded_workitem_id_assume_excluding_static_workgroup() {
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %c16 = index.constant 16 : index
+  %inside = index.cmp ult, %lane, %c16 : index
+  scf.if %inside {
+    test.use %lane : index
+  }
+  kernel.return
+}
+
+// ----
+test.target<low_core> @test_target
+
+kernel.def target(@test_target) @allows_cfg_guarded_workitem_id_assume_excluding_static_workgroup() {
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %c16 = index.constant 16 : index
+  %inside = index.cmp ult, %lane, %c16 : index
+  cfg.cond_br %inside, ^_bb1, ^_bb2
+^_bb1:
+  test.use %lane : index
+  cfg.br ^_bb2
+^_bb2:
+  kernel.return
+}

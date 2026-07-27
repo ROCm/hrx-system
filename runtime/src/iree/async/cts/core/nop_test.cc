@@ -31,7 +31,7 @@ TEST_P(NopTest, SingleNop) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &nop.base));
 
   // NOP should complete on the first poll.
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(100));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -64,8 +64,7 @@ TEST_P(NopTest, MultipleNops) {
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
   // All NOPs should complete quickly.
-  PollUntil(/*min_completions=*/kNopCount,
-            /*total_budget=*/iree_make_duration_ms(100));
+  PollUntil(/*min_completions=*/kNopCount);
 
   EXPECT_EQ(completion_count, kNopCount);
 }
@@ -88,14 +87,14 @@ TEST_P(NopTest, CallbackReceivesOperationPointer) {
   nop.base.user_data = &received_op;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &nop.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(100));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(received_op, &nop.base);
 }
 
 // Empty submit list: should succeed with no completions.
 TEST_P(NopTest, EmptySubmit) {
-  iree_async_operation_list_t empty_list = {nullptr, 0};
+  iree_async_operation_list_t empty_list = iree_async_operation_list_empty();
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, empty_list));
 
   // Poll should return immediately with no completions (deadline exceeded).

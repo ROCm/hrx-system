@@ -1,0 +1,54 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_library(
+    name = "package",
+    srcs = ["__init__.py"],
+    deps = [
+        "//loom/py/loom/dialect/buffer",
+        "//loom/py/loom/dialect/cfg",
+        "//loom/py/loom/dialect/check",
+        "//loom/py/loom/dialect/config",
+        "//loom/py/loom/dialect/encoding",
+        "//loom/py/loom/dialect/func",
+        "//loom/py/loom/dialect/globals",
+        "//loom/py/loom/dialect/hal",
+        "//loom/py/loom/dialect/index",
+        "//loom/py/loom/dialect/kernel",
+        "//loom/py/loom/dialect/llvmir",
+        "//loom/py/loom/dialect/low",
+        "//loom/py/loom/dialect/pass_",
+        "//loom/py/loom/dialect/pool",
+        "//loom/py/loom/dialect/sanitizer",
+        "//loom/py/loom/dialect/scalar",
+        "//loom/py/loom/dialect/scf",
+        "//loom/py/loom/dialect/target",
+        "//loom/py/loom/dialect/tensor",
+        "//loom/py/loom/dialect/test",
+        "//loom/py/loom/dialect/tile",
+        "//loom/py/loom/dialect/vector",
+        "//loom/py/loom/dialect/view",
+        "//loom/py/loom/dialect/vm",
+    ],
+)
+
+iree_py_library(
+    name = "shared",
+    srcs = [
+        "atomic.py",
+        "cache.py",
+        "combining.py",
+        "memory.py",
+    ],
+    deps = ["//loom/py/loom:core"],
+)

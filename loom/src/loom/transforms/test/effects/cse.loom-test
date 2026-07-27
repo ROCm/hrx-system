@@ -1,0 +1,481 @@
+// CSE must use effective traits, not only static vtable traits. func.call is
+// statically unknown-effect, but canonicalize can stamp pure call sites when
+// the callee body has no observable effects.
+// RUN: pass canonicalize,cse
+func.def @pure_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def @pure_calls_cse_after_canonicalize(%value: i32) -> (i32, i32) {
+  %lhs = func.call @pure_identity(%value) : (i32) -> (i32)
+  %rhs = func.call @pure_identity(%value) : (i32) -> (i32)
+  func.return %lhs, %rhs : i32, i32
+}
+
+// ----
+func.def @pure_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def @pure_calls_cse_after_canonicalize(%value: i32) -> (i32, i32) {
+  %lhs = func.call pure @pure_identity(%value) : (i32) -> (i32)
+  func.return %lhs, %lhs : i32, i32
+}
+
+// ====
+
+// func.apply is a contract demand. It has no direct callee to inspect, so pure
+// apply sites must carry explicit purity until selection rewrites them.
+// RUN: pass canonicalize,cse
+func.def @pure_applies_cse_after_canonicalize(%value: i32) -> (i32, i32) {
+  %lhs = func.apply<test.effect>(%value) pure : (i32) -> (i32)
+  %rhs = func.apply<test.effect>(%value) pure : (i32) -> (i32)
+  func.return %lhs, %rhs : i32, i32
+}
+
+// ----
+func.def @pure_applies_cse_after_canonicalize(%value: i32) -> (i32, i32) {
+  %lhs = func.apply<test.effect>(%value) pure : (i32) -> (i32)
+  func.return %lhs, %lhs : i32, i32
+}
+
+// ====
+
+// Unresolved or effectful callees remain unknown-effect. Even identical calls
+// are not CSE candidates until a pass has explicit proof that the callee is
+// pure.
+// RUN: pass canonicalize,cse
+func.decl @unknown_effects(%value: i32) -> (i32)
+
+func.def @unknown_effect_calls_do_not_cse(%value: i32) -> (i32, i32) {
+  %lhs = func.call @unknown_effects(%value) : (i32) -> (i32)
+  %rhs = func.call @unknown_effects(%value) : (i32) -> (i32)
+  func.return %lhs, %rhs : i32, i32
+}
+
+// ====
+
+// Convergent ops are not CSE candidates even when they are memory-pure and
+// operand-identical.
+// RUN: pass cse
+func.def @convergent_ops_do_not_cse(%value: i32) -> (i32, i32) {
+  %lhs = test.convergent %value : i32
+  %rhs = test.convergent %value : i32
+  func.return %lhs, %rhs : i32, i32
+}
+
+// ====
+
+// Function passes still run over the function-like body projection. CSE can be
+// driven over every root region. Equivalent expressions are only shared inside
+// one region tree; config and body keep separate SSA scopes.
+// RUN: pass cse
+test.split_func @split_func_all_regions_cse(%arg: i32) {
+  %cfg_lhs = test.addi %arg, %arg : i32
+  %cfg_rhs = test.addi %arg, %arg : i32
+  test.use %cfg_lhs, %cfg_rhs : i32, i32
+  test.yield
+} launch {
+  %body_lhs = test.addi %arg, %arg : i32
+  %body_rhs = test.addi %arg, %arg : i32
+  test.use %body_lhs, %body_rhs : i32, i32
+  test.yield
+}
+
+// ----
+test.split_func @split_func_all_regions_cse(%arg: i32) {
+  %cfg_lhs = test.addi %arg, %arg : i32
+  test.use %cfg_lhs, %cfg_lhs : i32, i32
+  test.yield
+} launch {
+  %body_lhs = test.addi %arg, %arg : i32
+  test.use %body_lhs, %body_lhs : i32, i32
+  test.yield
+}
+
+// ====
+
+// A write nested inside a region op is a barrier for memory reads in the
+// enclosing scope. The second load must not be replaced with the first load.
+// RUN: pass cse
+func.def @nested_write_blocks_outer_load_cse(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) -> (f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  %before = view.load %view[0] : view<1xf32, %layout> -> f32
+  scf.if %cond {
+    view.store %value, %view[0] : f32, view<1xf32, %layout>
+    scf.yield
+  } else {
+    scf.yield
+  }
+  %after = view.load %view[0] : view<1xf32, %layout> -> f32
+  func.return %after : f32
+}
+
+// ----
+func.def @nested_write_blocks_outer_load_cse(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) -> (f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  %before = view.load %view[0] : view<1xf32, %layout> -> f32
+  scf.if %cond {
+    view.store %value, %view[0] : f32, view<1xf32, %layout>
+  } else {
+  }
+  %after = view.load %view[0] : view<1xf32, %layout> -> f32
+  func.return %after : f32
+}
+
+// ====
+
+// scf.while contributes both before/after region effects to the parent op's
+// summary, so a nested write still blocks CSE of surrounding loads.
+// RUN: pass cse
+func.def @nested_while_write_blocks_outer_load_cse(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) -> (f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  %before = view.load %view[0] : view<1xf32, %layout> -> f32
+  %result = scf.while(%loop_value = %value : f32) -> (f32) {
+    scf.condition %cond, %loop_value : i1, f32
+  } do(%body: f32) {
+    view.store %body, %view[0] : f32, view<1xf32, %layout>
+    scf.yield %body : f32
+  }
+  %after = view.load %view[0] : view<1xf32, %layout> -> f32
+  func.return %after : f32
+}
+
+// ====
+
+// Descriptor-backed low ops must expose their descriptor effects through the
+// generic op trait cache. test.add.i32 is pure even though low.op's static
+// vtable default is conservative.
+// RUN: pass cse
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @descriptor_low_ops_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm<test.low.core> {
+  %a = test.add.i32 %lhs, %rhs
+  %b = test.add.i32 %lhs, %rhs
+  return %a, %b
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @descriptor_low_ops_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+  %a = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %a, %a : reg<test.i32>, reg<test.i32>
+}
+
+// ====
+
+// Descriptor-backed convergent low ops derive PURE and CONVERGENT from the
+// descriptor effect rows. The pure bit is not enough to make them CSE-able.
+// RUN: pass cse
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @descriptor_low_convergent_ops_do_not_cse(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm<test.low.core> {
+  %a = test.convergent.i32 %value
+  %b = test.convergent.i32 %value
+  return %a, %b
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @descriptor_low_convergent_ops_do_not_cse(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+  %a = low.op<test.convergent.i32>(%value) : (reg<test.i32>) -> reg<test.i32>
+  %b = low.op<test.convergent.i32>(%value) : (reg<test.i32>) -> reg<test.i32>
+  low.return %a, %b : reg<test.i32>, reg<test.i32>
+}
+
+// ====
+
+// Descriptor-backed packets that write target state are not value-CSE
+// candidates. The second packet may have identical operands, but erasing it
+// would erase its architectural state update.
+// RUN: pass cse
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @descriptor_low_state_writes_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm<test.low.core> {
+  %a = test.state.add.i32 %lhs, %rhs
+  %b = test.state.add.i32 %lhs, %rhs
+  return %a, %b
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @descriptor_low_state_writes_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+  %a = low.op<test.state.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %b = low.op<test.state.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %a, %b : reg<test.i32>, reg<test.i32>
+}
+
+// ====
+
+// Descriptor-backed packets with hidden target-state reads must not CSE across
+// an intervening write to the same state register class.
+// RUN: pass cse
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @descriptor_low_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %rhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm<test.low.core> {
+  %a = test.state.add.i32 %lhs, %rhs
+  %clobber = test.state.add.i32 %other, %rhs
+  %b = test.state.add.i32 %lhs, %rhs
+  return %a, %clobber, %b
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @descriptor_low_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %rhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) {
+  %a = low.op<test.state.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %clobber = low.op<test.state.add.i32>(%other, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %b = low.op<test.state.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %a, %clobber, %b : reg<test.i32>, reg<test.i32>, reg<test.i32>
+}
+
+// ====
+
+// Operand-form rewrites must preserve descriptor-derived traits on the
+// replacement packet. The rhs-zero form still reads/writes hidden target state,
+// so an intervening state write keeps the two replacements in distinct state
+// epochs.
+// RUN: pass low-select-operand-forms,cse,low-dce
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @descriptor_low_operand_form_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm<test.low.core> {
+  %zero0 = test.const.i32 0
+  %a = test.state.add.i32 %lhs, %zero0
+  %clobber = test.state.add.i32 %other, %lhs
+  %zero1 = test.const.i32 0
+  %b = test.state.add.i32 %lhs, %zero1
+  return %a, %clobber, %b
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @descriptor_low_operand_form_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) {
+  %a = low.op<test.state.add.i32.rhs_zero>(%lhs) : (reg<test.i32>) -> reg<test.i32>
+  %clobber = low.op<test.state.add.i32>(%other, %lhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %b = low.op<test.state.add.i32.rhs_zero>(%lhs) : (reg<test.i32>) -> reg<test.i32>
+  low.return %a, %clobber, %b : reg<test.i32>, reg<test.i32>, reg<test.i32>
+}
+
+// ====
+
+// Convergent ops are execution-state barriers for pure materializations. A
+// value before the barrier may be defined only for the old dynamic participant
+// set and must not be reused by a later op.
+// RUN: pass cse
+
+func.def @convergent_barriers_pure_cse() -> (i32, i32, i32) {
+  %before = test.constant 7 : i32
+  %barrier = test.convergent %before : i32
+  %after = test.constant 7 : i32
+  %sum = test.addi %before, %after : i32
+  func.return %sum, %after, %barrier : i32, i32, i32
+}
+
+// ====
+
+// CSE must not merge producers whose results are later consumed by tied-result
+// ops. The tied users are linear ownership transfers: replacing %rhs_copy with
+// %lhs_copy would make both tied ops consume the same storage.
+// RUN: pass cse
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @consumed_results_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+  %lhs_copy = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %rhs_copy = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %lhs_tied = low.op<test.tied.any>(%lhs_copy) : (reg<test.i32>) -> %lhs_copy as reg<test.i32>
+  %rhs_tied = low.op<test.tied.any>(%rhs_copy) : (reg<test.i32>) -> %rhs_copy as reg<test.i32>
+  low.return %lhs_tied, %rhs_tied : reg<test.i32>, reg<test.i32>
+}
+
+// ====
+
+// Descriptor-backed reads are CSE candidates until a descriptor-backed write
+// invalidates the read scope.
+// RUN: pass cse
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @descriptor_low_reads_cse(%ptr: reg<test.ptr>) -> (reg<test.i32 x4>) asm<test.low.core> {
+  %a = test.load.v4i32 %ptr
+  %b = test.load.v4i32 %ptr
+  %out = test.add.v4i32 %a, %b
+  return %out
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @descriptor_low_reads_cse(%ptr: reg<test.ptr>) -> (reg<test.i32 x4>) {
+  %a = low.op<test.load.v4i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %out = low.op<test.add.v4i32>(%a, %a) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  low.return %out : reg<test.i32 x4>
+}
+
+// ====
+
+// Descriptor-backed writes are barriers for descriptor-backed reads.
+// RUN: pass cse
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @descriptor_low_write_blocks_read_cse(%ptr: reg<test.ptr>, %value: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm<test.low.core> {
+  %before = test.load.v4i32 %ptr
+  test.store.v4i32 %ptr, %value
+  %after = test.load.v4i32 %ptr
+  %out = test.add.v4i32 %before, %after
+  return %out
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @descriptor_low_write_blocks_read_cse(%ptr: reg<test.ptr>, %value: reg<test.i32 x4>) -> (reg<test.i32 x4>) {
+  %before = low.op<test.load.v4i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32 x4>
+  low.op<test.store.v4i32>(%ptr, %value) : (reg<test.ptr>, reg<test.i32 x4>)
+  %after = low.op<test.load.v4i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %out = low.op<test.add.v4i32>(%before, %after) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  low.return %out : reg<test.i32 x4>
+}
+
+// ====
+
+// low.const materializes a descriptor-backed semantic constant. Identical
+// constants may share one virtual register when no consumer ties or consumes
+// the result identity.
+// RUN: pass cse
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @low_constants_cse() -> (reg<test.i32>, reg<test.i32>) {
+  %lhs = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
+  %rhs = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
+  %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %sum, %rhs : reg<test.i32>, reg<test.i32>
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @low_constants_cse() -> (reg<test.i32>, reg<test.i32>) {
+  %lhs = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
+  %sum = low.op<test.add.i32>(%lhs, %lhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %sum, %lhs : reg<test.i32>, reg<test.i32>
+}
+
+// ====
+
+// Entry-block constants dominate CFG successor blocks and can be reused there.
+// Constants in sibling blocks remain independent because neither sibling
+// dominates the other.
+// RUN: pass cse
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @low_entry_constants_cse_into_cfg(%cond: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+  %entry_zero = low.const<test.const.i32> {i32_value = 0} : reg<test.i32>
+  low.cond_br %cond, ^then, ^else : reg<test.i32>
+^then:
+  %then_zero = low.const<test.const.i32> {i32_value = 0} : reg<test.i32>
+  %then_sum = low.op<test.add.i32>(%entry_zero, %then_zero) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.br ^join(%then_sum: reg<test.i32>, %then_zero: reg<test.i32>)
+^else:
+  %else_seven = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
+  low.br ^join(%entry_zero: reg<test.i32>, %else_seven: reg<test.i32>)
+^join(%lhs: reg<test.i32>, %rhs: reg<test.i32>):
+  %result = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %result, %rhs : reg<test.i32>, reg<test.i32>
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @low_entry_constants_cse_into_cfg(%cond: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+  %entry_zero = low.const<test.const.i32> {i32_value = 0} : reg<test.i32>
+  low.cond_br %cond, ^then, ^else : reg<test.i32>
+^then:
+  %then_sum = low.op<test.add.i32>(%entry_zero, %entry_zero) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.br ^join(%then_sum: reg<test.i32>, %entry_zero: reg<test.i32>)
+^else:
+  %else_seven = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
+  low.br ^join(%entry_zero: reg<test.i32>, %else_seven: reg<test.i32>)
+^join(%lhs: reg<test.i32>, %rhs: reg<test.i32>):
+  %result = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %result, %rhs : reg<test.i32>, reg<test.i32>
+}
+
+// ====
+
+// Pure low ops in a non-entry CFG block can be reused by blocks dominated by
+// that block. This is ordinary CFG dominance CSE, not speculation.
+// RUN: pass cse
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @low_dominator_block_ops_cse_into_cfg(%cond: reg<test.i32>, %row: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm<test.low.core> {
+  low.cond_br %cond, ^then, ^exit : reg<test.i32>
+^then:
+  %row_bytes = test.add.i32 %row, %row
+  low.br ^join(%row_bytes: reg<test.i32>)
+^exit:
+  return %row, %row
+^join(%value: reg<test.i32>):
+  %row_bytes_again = test.add.i32 %row, %row
+  %sum = test.add.i32 %value, %row_bytes_again
+  return %sum, %row_bytes_again
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @low_dominator_block_ops_cse_into_cfg(%cond: reg<test.i32>, %row: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+  low.cond_br %cond, ^then, ^exit : reg<test.i32>
+^then:
+  %row_bytes = low.op<test.add.i32>(%row, %row) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.br ^join(%row_bytes: reg<test.i32>)
+^exit:
+  low.return %row, %row : reg<test.i32>, reg<test.i32>
+^join(%value: reg<test.i32>):
+  %sum = low.op<test.add.i32>(%value, %row_bytes) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %sum, %row_bytes : reg<test.i32>, reg<test.i32>
+}
+
+// ====
+
+// low.copy and low.concat are virtual-register identity constructors. They may
+// look structurally identical, but each instance names distinct storage and
+// must not be folded by value CSE.
+// RUN: pass cse
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @low_structural_identities_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32 x2>, reg<test.i32 x2>) {
+  %copy0 = low.copy %lhs : reg<test.i32> -> reg<test.i32>
+  %copy1 = low.copy %lhs : reg<test.i32> -> reg<test.i32>
+  %pair0 = low.concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %pair1 = low.concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  low.return %copy0, %copy1, %pair0, %pair1 : reg<test.i32>, reg<test.i32>, reg<test.i32 x2>, reg<test.i32 x2>
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @low_structural_identities_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32 x2>, reg<test.i32 x2>) {
+  %copy0 = low.copy %lhs : reg<test.i32> -> reg<test.i32>
+  %copy1 = low.copy %lhs : reg<test.i32> -> reg<test.i32>
+  %pair0 = low.concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %pair1 = low.concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  low.return %copy0, %copy1, %pair0, %pair1 : reg<test.i32>, reg<test.i32>, reg<test.i32 x2>, reg<test.i32 x2>
+}

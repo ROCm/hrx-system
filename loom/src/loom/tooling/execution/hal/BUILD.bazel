@@ -1,0 +1,212 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "artifact",
+    srcs = ["artifact.c"],
+    hdrs = ["artifact.h"],
+    deps = [
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:pipeline_options",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/reporting:report",
+        "//loom/src/loom/tooling/execution:compile_options",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "runtime",
+    srcs = ["runtime.c"],
+    hdrs = ["runtime.h"],
+    deps = [
+        "//loom/src/loom/sanitizer:options",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/tooling:device_util",
+    ],
+)
+
+loom_cc_library(
+    name = "candidate",
+    srcs = ["candidate.c"],
+    hdrs = ["candidate.h"],
+    deps = [
+        ":artifact",
+        ":runtime",
+        "//loom/src/loom/target/reporting:report",
+        "//loom/src/loom/tooling/execution:compile_options",
+        "//loom/src/loom/tooling/execution:session",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "invocation",
+    srcs = ["invocation.c"],
+    hdrs = ["invocation.h"],
+    deps = [
+        ":artifact",
+        ":runtime",
+        "//loom/src/loom/target:launch",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/tooling:value_io",
+    ],
+)
+
+loom_cc_library(
+    name = "testbench_actual",
+    srcs = ["testbench_actual.c"],
+    hdrs = ["testbench_actual.h"],
+    deps = [
+        ":artifact",
+        ":candidate",
+        ":invocation",
+        ":runtime",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/link:linker",
+        "//loom/src/loom/ops:special_values",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/sanitizer:options",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/tooling/compile:pipeline",
+        "//loom/src/loom/tooling/config",
+        "//loom/src/loom/tooling/execution:compile_options",
+        "//loom/src/loom/tooling/execution:compile_report_capture",
+        "//loom/src/loom/tooling/execution:session",
+        "//loom/src/loom/tooling/testbench",
+        "//loom/src/loom/tooling/testbench:invocation",
+        "//loom/src/loom/tooling/testbench:requirements",
+        "//loom/src/loom/tooling/testbench:value_materializer",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/tooling:device_util",
+    ],
+)
+
+loom_cc_library(
+    name = "benchmark",
+    srcs = ["benchmark.c"],
+    hdrs = ["benchmark.h"],
+    deps = [
+        ":invocation",
+        ":runtime",
+        "//loom/src/loom/tooling/execution:benchmark",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:profile_file",
+        "//runtime/src/iree/hal/utils:statistics_sink",
+        "//runtime/src/iree/io:file_handle",
+    ],
+)
+
+loom_cc_library(
+    name = "execution_backend",
+    srcs = ["execution_backend.c"],
+    hdrs = ["execution_backend.h"],
+    deps = [
+        ":artifact",
+        ":candidate",
+        ":invocation",
+        ":runtime",
+        "//loom/src/loom/tooling/execution:compile_report_capture",
+        "//loom/src/loom/tooling/execution:execution_backend",
+        "//loom/src/loom/tooling/execution:one_shot",
+        "//loom/src/loom/tooling/io:file",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+    ],
+)
+
+loom_cc_test(
+    name = "candidate_test",
+    srcs = ["candidate_test.cc"],
+    deps = [
+        ":candidate",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/target:low_descriptor_registry_core_test",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/tooling/execution:session",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "benchmark_test",
+    srcs = ["benchmark_test.cc"],
+    deps = [
+        ":benchmark",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "invocation_test",
+    srcs = ["invocation_test.cc"],
+    deps = [
+        ":invocation",
+        ":runtime",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "testbench_actual_test",
+    srcs = ["testbench_actual_test.cc"],
+    deps = [
+        ":invocation",
+        ":testbench_actual",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/check",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:low_descriptor_registry_core_test",
+        "//loom/src/loom/testing:module_ptr",
+        "//loom/src/loom/tooling/execution:session",
+        "//loom/src/loom/tooling/testbench",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

@@ -101,7 +101,7 @@ TEST_F(PM4ProgramTest, InitializePersistentProgram) {
   EXPECT_EQ(packet.ib_jump_cmd[3], program.dword_count | (1u << 23));
   EXPECT_EQ(packet.dw_cnt_remain, 0xAu);
 
-  IREE_ASSERT_OK(iree_hal_amdgpu_pm4_program_release(&program));
+  iree_hal_amdgpu_pm4_program_deinitialize(&program);
   EXPECT_EQ(program.dwords, nullptr);
   EXPECT_EQ(program.dword_count, 0u);
   EXPECT_EQ(program.byte_length, 0u);

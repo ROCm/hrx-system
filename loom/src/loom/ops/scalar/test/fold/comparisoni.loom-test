@@ -1,0 +1,41 @@
+// RUN: pass canonicalize
+
+// signi: sign(42) = 1.
+func.def @signi_positive() -> (i32) {
+  %a = scalar.constant 42 : i32
+  %r = scalar.signi %a : i32
+  func.return %r : i32
+}
+// ----
+func.def @signi_positive() -> (i32) {
+  %r = scalar.constant 1 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// signi: sign(-5) = -1.
+func.def @signi_negative() -> (i32) {
+  %a = scalar.constant -5 : i32
+  %r = scalar.signi %a : i32
+  func.return %r : i32
+}
+// ----
+func.def @signi_negative() -> (i32) {
+  %r = scalar.constant -1 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// signi: sign(0) = 0.
+func.def @signi_zero() -> (i32) {
+  %a = scalar.constant 0 : i32
+  %r = scalar.signi %a : i32
+  func.return %r : i32
+}
+// ----
+func.def @signi_zero() -> (i32) {
+  %r = scalar.constant 0 : i32
+  func.return %r : i32
+}

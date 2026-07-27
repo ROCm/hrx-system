@@ -22,7 +22,7 @@ enum {
 
 typedef struct iree_hal_tlsf_pool_release_node_t {
   // Intrusive next pointer in pool->pending_release_head or
-  // pool->release_node_free_head.
+  // pool-owned release-node lists.
   struct iree_hal_tlsf_pool_release_node_t* next;
 
   // Stable slab object holding |block_index|.
@@ -33,6 +33,15 @@ typedef struct iree_hal_tlsf_pool_release_node_t {
 
   // TLSF block handle owned by this reservation.
   iree_hal_memory_tlsf_block_index_t block_index;
+
+  // Backing bytes charged to this reservation.
+  iree_device_size_t charged_length;
+
+  // Backing offset within |slab| for this reservation.
+  iree_device_size_t backing_offset;
+
+  // ASAN backing layout for this reservation.
+  iree_hal_asan_allocation_layout_t asan_layout;
 } iree_hal_tlsf_pool_release_node_t;
 
 typedef struct iree_hal_tlsf_pool_slab_t {
@@ -67,8 +76,11 @@ typedef struct iree_hal_tlsf_pool_t {
   // Template options used when initializing each new TLSF slab.
   iree_hal_memory_tlsf_options_t slab_options;
 
-  // Fixed byte length requested for newly grown slabs.
-  iree_device_size_t slab_length;
+  // Maximum user-visible byte length served by this pool.
+  iree_device_size_t user_slab_length;
+
+  // Minimum backing byte length requested for newly grown slabs.
+  iree_device_size_t backing_slab_length;
 
   // Dynamic array of committed slab pointers. Protected by |mutex|.
   iree_hal_tlsf_pool_slab_t** slabs;
@@ -104,6 +116,15 @@ typedef struct iree_hal_tlsf_pool_t {
   // Free list of release nodes ready for reuse. Protected by |mutex|.
   iree_hal_tlsf_pool_release_node_t* release_node_free_head;
 
+  // Head of poisoned ASAN releases retained before TLSF reuse.
+  iree_hal_tlsf_pool_release_node_t* quarantine_head;
+
+  // Tail of poisoned ASAN releases retained before TLSF reuse.
+  iree_hal_tlsf_pool_release_node_t* quarantine_tail;
+
+  // Backing bytes currently retained in the ASAN quarantine list.
+  iree_device_size_t quarantine_size;
+
   // Optional completion predicate for try-before-fence reuse.
   iree_hal_pool_epoch_query_t epoch_query;
 
@@ -118,6 +139,9 @@ typedef struct iree_hal_tlsf_pool_t {
 
   // Buffer usages supported by |slab_provider|.
   iree_hal_buffer_usage_t supported_usage;
+
+  // ASAN policy used to shape hidden backing ranges.
+  iree_hal_asan_pool_options_t asan_options;
 
   // Logical byte budget for live reservations. 0 means unlimited.
   iree_device_size_t budget_limit;
@@ -209,9 +233,9 @@ iree_hal_tlsf_pool_take_pending_releases(iree_hal_tlsf_pool_t* pool) {
 }
 
 static bool iree_hal_tlsf_pool_try_charge_reservation(
-    iree_hal_tlsf_pool_t* pool, iree_device_size_t length) {
+    iree_hal_tlsf_pool_t* pool, iree_device_size_t charged_length) {
   if (pool->budget_limit == 0) {
-    iree_atomic_fetch_add(&pool->bytes_reserved, (int64_t)length,
+    iree_atomic_fetch_add(&pool->bytes_reserved, (int64_t)charged_length,
                           iree_memory_order_relaxed);
     return true;
   }
@@ -219,10 +243,11 @@ static bool iree_hal_tlsf_pool_try_charge_reservation(
       iree_atomic_load(&pool->bytes_reserved, iree_memory_order_relaxed);
   for (;;) {
     const iree_device_size_t current = (iree_device_size_t)expected;
-    if (current > pool->budget_limit || length > pool->budget_limit - current) {
+    if (current > pool->budget_limit ||
+        charged_length > pool->budget_limit - current) {
       return false;
     }
-    const int64_t desired = (int64_t)(current + length);
+    const int64_t desired = (int64_t)(current + charged_length);
     if (iree_atomic_compare_exchange_weak(&pool->bytes_reserved, &expected,
                                           desired, iree_memory_order_relaxed,
                                           iree_memory_order_relaxed)) {
@@ -231,9 +256,9 @@ static bool iree_hal_tlsf_pool_try_charge_reservation(
   }
 }
 
-static void iree_hal_tlsf_pool_uncharge_reservation(iree_hal_tlsf_pool_t* pool,
-                                                    iree_device_size_t length) {
-  iree_atomic_fetch_add(&pool->bytes_reserved, -(int64_t)length,
+static void iree_hal_tlsf_pool_uncharge_reservation(
+    iree_hal_tlsf_pool_t* pool, iree_device_size_t charged_length) {
+  iree_atomic_fetch_add(&pool->bytes_reserved, -(int64_t)charged_length,
                         iree_memory_order_relaxed);
 }
 
@@ -290,6 +315,9 @@ static iree_status_t iree_hal_tlsf_pool_acquire_release_node(
   node->slab = NULL;
   node->slab_index = 0;
   node->block_index = 0;
+  node->charged_length = 0;
+  node->backing_offset = 0;
+  memset(&node->asan_layout, 0, sizeof(node->asan_layout));
   iree_async_frontier_initialize(
       iree_hal_tlsf_pool_release_node_frontier(pool, node), 0);
   *out_node = node;
@@ -304,14 +332,85 @@ static void iree_hal_tlsf_pool_recycle_release_node(
   pool->release_node_free_head = node;
 }
 
-static void iree_hal_tlsf_pool_free_release_nodes(iree_hal_tlsf_pool_t* pool)
+static void iree_hal_tlsf_pool_free_release_node_list(
+    iree_hal_tlsf_pool_t* pool, iree_hal_tlsf_pool_release_node_t* node)
     IREE_THREAD_ANNOTATION_ATTRIBUTE(requires_capability(&pool->mutex)) {
-  iree_hal_tlsf_pool_release_node_t* node = pool->release_node_free_head;
-  pool->release_node_free_head = NULL;
   while (node) {
     iree_hal_tlsf_pool_release_node_t* next = node->next;
     iree_allocator_free(pool->host_allocator, node);
     node = next;
+  }
+}
+
+static void iree_hal_tlsf_pool_free_release_nodes(iree_hal_tlsf_pool_t* pool)
+    IREE_THREAD_ANNOTATION_ATTRIBUTE(requires_capability(&pool->mutex)) {
+  iree_hal_tlsf_pool_free_release_node_list(pool, pool->release_node_free_head);
+  pool->release_node_free_head = NULL;
+}
+
+static void iree_hal_tlsf_pool_return_release_node_to_tlsf(
+    iree_hal_tlsf_pool_t* pool, iree_hal_tlsf_pool_release_node_t* node)
+    IREE_THREAD_ANNOTATION_ATTRIBUTE(requires_capability(&pool->mutex)) {
+  iree_async_frontier_t* death_frontier =
+      iree_hal_tlsf_pool_release_node_frontier(pool, node);
+  iree_hal_tlsf_pool_slab_t* slab = node->slab;
+  const uint16_t slab_index = node->slab_index;
+  iree_hal_memory_tlsf_free(
+      &slab->tlsf, node->block_index,
+      death_frontier->entry_count > 0 ? death_frontier : NULL);
+  if (death_frontier->entry_count == 0) {
+    pool->preferred_slab_index = slab_index;
+  } else {
+    iree_hal_tlsf_pool_note_reuse_candidate(pool, slab_index);
+  }
+  iree_hal_tlsf_pool_recycle_release_node(pool, node);
+}
+
+static bool iree_hal_tlsf_pool_asan_quarantine_is_enabled(
+    const iree_hal_tlsf_pool_t* pool) {
+  return iree_hal_asan_pool_options_is_enabled(&pool->asan_options) &&
+         pool->asan_options.quarantine_size > 0;
+}
+
+static void iree_hal_tlsf_pool_add_quarantine_size(iree_hal_tlsf_pool_t* pool,
+                                                   iree_device_size_t length)
+    IREE_THREAD_ANNOTATION_ATTRIBUTE(requires_capability(&pool->mutex)) {
+  if (length > IREE_DEVICE_SIZE_MAX - pool->quarantine_size) {
+    pool->quarantine_size = IREE_DEVICE_SIZE_MAX;
+  } else {
+    pool->quarantine_size += length;
+  }
+}
+
+static void iree_hal_tlsf_pool_subtract_quarantine_size(
+    iree_hal_tlsf_pool_t* pool, iree_device_size_t length)
+    IREE_THREAD_ANNOTATION_ATTRIBUTE(requires_capability(&pool->mutex)) {
+  pool->quarantine_size -= iree_min(pool->quarantine_size, length);
+}
+
+static void iree_hal_tlsf_pool_quarantine_release_node(
+    iree_hal_tlsf_pool_t* pool, iree_hal_tlsf_pool_release_node_t* node)
+    IREE_THREAD_ANNOTATION_ATTRIBUTE(requires_capability(&pool->mutex)) {
+  node->next = NULL;
+  if (pool->quarantine_tail) {
+    pool->quarantine_tail->next = node;
+  } else {
+    pool->quarantine_head = node;
+  }
+  pool->quarantine_tail = node;
+  iree_hal_tlsf_pool_add_quarantine_size(pool, node->charged_length);
+
+  while (pool->quarantine_size > pool->asan_options.quarantine_size &&
+         pool->quarantine_head) {
+    iree_hal_tlsf_pool_release_node_t* release_node = pool->quarantine_head;
+    pool->quarantine_head = release_node->next;
+    if (!pool->quarantine_head) {
+      pool->quarantine_tail = NULL;
+    }
+    iree_hal_tlsf_pool_subtract_quarantine_size(pool,
+                                                release_node->charged_length);
+    release_node->next = NULL;
+    iree_hal_tlsf_pool_return_release_node_to_tlsf(pool, release_node);
   }
 }
 
@@ -322,19 +421,26 @@ static void iree_hal_tlsf_pool_drain_pending_releases(
       iree_hal_tlsf_pool_take_pending_releases(pool);
   while (node) {
     iree_hal_tlsf_pool_release_node_t* next = node->next;
-    iree_async_frontier_t* death_frontier =
-        iree_hal_tlsf_pool_release_node_frontier(pool, node);
-    iree_hal_tlsf_pool_slab_t* slab = node->slab;
-    const uint16_t slab_index = node->slab_index;
-    iree_hal_memory_tlsf_free(
-        &slab->tlsf, node->block_index,
-        death_frontier->entry_count > 0 ? death_frontier : NULL);
-    if (death_frontier->entry_count == 0) {
-      pool->preferred_slab_index = slab_index;
+    if (iree_hal_tlsf_pool_asan_quarantine_is_enabled(pool)) {
+      iree_hal_tlsf_pool_quarantine_release_node(pool, node);
     } else {
-      iree_hal_tlsf_pool_note_reuse_candidate(pool, slab_index);
+      node->next = NULL;
+      iree_hal_tlsf_pool_return_release_node_to_tlsf(pool, node);
     }
-    iree_hal_tlsf_pool_recycle_release_node(pool, node);
+    node = next;
+  }
+}
+
+static void iree_hal_tlsf_pool_flush_quarantine(iree_hal_tlsf_pool_t* pool)
+    IREE_THREAD_ANNOTATION_ATTRIBUTE(requires_capability(&pool->mutex)) {
+  iree_hal_tlsf_pool_release_node_t* node = pool->quarantine_head;
+  pool->quarantine_head = NULL;
+  pool->quarantine_tail = NULL;
+  pool->quarantine_size = 0;
+  while (node) {
+    iree_hal_tlsf_pool_release_node_t* next = node->next;
+    node->next = NULL;
+    iree_hal_tlsf_pool_return_release_node_to_tlsf(pool, node);
     node = next;
   }
 }
@@ -407,14 +513,14 @@ static iree_status_t iree_hal_tlsf_pool_aligned_slab_length(
       pool->slab_options.alignment
           ? pool->slab_options.alignment
           : (iree_device_size_t)IREE_HAL_MEMORY_TLSF_MIN_ALIGNMENT;
-  if (pool->slab_length > IREE_DEVICE_SIZE_MAX - (alignment - 1)) {
+  if (pool->backing_slab_length > IREE_DEVICE_SIZE_MAX - (alignment - 1)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "slab length %" PRIdsz
                             " overflows when aligned to %" PRIdsz,
-                            pool->slab_length, alignment);
+                            pool->backing_slab_length, alignment);
   }
   const iree_device_size_t required_length =
-      iree_device_align(pool->slab_length, alignment);
+      iree_device_align(pool->backing_slab_length, alignment);
   *out_slab_length = required_length;
   return iree_ok_status();
 }
@@ -501,6 +607,8 @@ static void iree_hal_tlsf_pool_deinitialize_slabs(iree_hal_tlsf_pool_t* pool) {
 static iree_status_t iree_hal_tlsf_pool_return_allocation(
     iree_hal_tlsf_pool_t* pool,
     const iree_hal_tlsf_pool_allocation_t* pool_allocation,
+    iree_device_size_t byte_length, iree_device_size_t charged_length,
+    const iree_hal_asan_allocation_layout_t* asan_layout,
     iree_hal_pool_acquire_result_t result,
     iree_hal_pool_reservation_t* out_reservation,
     iree_hal_pool_acquire_info_t* out_info,
@@ -515,11 +623,20 @@ static iree_status_t iree_hal_tlsf_pool_return_allocation(
   release_node->slab = slab;
   release_node->slab_index = pool_allocation->slab_index;
   release_node->block_index = allocation->block_index;
+  release_node->charged_length = charged_length;
+  release_node->backing_offset = allocation->offset;
+  if (iree_hal_asan_pool_options_is_enabled(&pool->asan_options)) {
+    release_node->asan_layout = *asan_layout;
+  }
   pool->preferred_slab_index = pool_allocation->slab_index;
 
   memset(out_reservation, 0, sizeof(*out_reservation));
-  out_reservation->offset = allocation->offset;
-  out_reservation->length = allocation->length;
+  out_reservation->offset =
+      allocation->offset +
+      (iree_hal_asan_pool_options_is_enabled(&pool->asan_options)
+           ? asan_layout->user_offset
+           : 0);
+  out_reservation->byte_length = byte_length;
   out_reservation->block_handle = (uint64_t)(uintptr_t)release_node;
   out_reservation->slab_index = pool_allocation->slab_index;
 
@@ -538,9 +655,14 @@ static iree_status_t iree_hal_tlsf_pool_return_allocation(
       IREE_ASSERT(false, "invalid successful TLSF pool result: %u", result);
       break;
   }
+  if (iree_hal_asan_pool_options_is_enabled(&pool->asan_options)) {
+    iree_hal_slab_provider_advise_asan_range(
+        pool->slab_provider, &slab->slab, allocation->offset,
+        IREE_HAL_ASAN_RANGE_ADVICE_FLAG_ALLOCATED, asan_layout);
+  }
   iree_hal_memory_trace_alloc(
-      &pool->trace, (uint8_t*)slab->slab.base_ptr + allocation->offset,
-      allocation->length);
+      &pool->trace, (uint8_t*)slab->slab.base_ptr + out_reservation->offset,
+      out_reservation->byte_length);
   *out_result = result;
   return iree_ok_status();
 }
@@ -566,6 +688,29 @@ IREE_API_EXPORT iree_status_t iree_hal_tlsf_pool_create(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "range_length must be > 0");
   }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_slab_provider_validate_asan_options(slab_provider,
+                                                       &options.asan));
+
+  iree_hal_memory_tlsf_options_t tlsf_options = options.tlsf_options;
+  if (tlsf_options.alignment == 0) {
+    tlsf_options.alignment = IREE_HAL_MEMORY_TLSF_MIN_ALIGNMENT;
+  }
+  iree_device_size_t backing_slab_length = tlsf_options.range_length;
+  if (iree_hal_asan_pool_options_is_enabled(&options.asan)) {
+    const iree_device_size_t backing_length_alignment = iree_max(
+        options.asan.backing_alignment ? options.asan.backing_alignment
+                                       : options.asan.shadow_granule_size,
+        options.asan.shadow_granule_size);
+    tlsf_options.alignment =
+        iree_max(tlsf_options.alignment, backing_length_alignment);
+    iree_hal_asan_allocation_layout_t slab_layout;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_asan_calculate_allocation_layout(
+                &options.asan, options.tlsf_options.range_length,
+                tlsf_options.alignment, &slab_layout));
+    backing_slab_length = slab_layout.backing_length;
+  }
 
   iree_hal_tlsf_pool_t* pool = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -577,8 +722,10 @@ IREE_API_EXPORT iree_status_t iree_hal_tlsf_pool_create(
   pool->host_allocator = host_allocator;
   pool->epoch_query = epoch_query;
   pool->budget_limit = options.budget_limit;
-  pool->slab_options = options.tlsf_options;
-  pool->slab_length = options.tlsf_options.range_length;
+  pool->slab_options = tlsf_options;
+  pool->user_slab_length = options.tlsf_options.range_length;
+  pool->backing_slab_length = backing_slab_length;
+  pool->asan_options = options.asan;
   iree_atomic_store(&pool->bytes_committed, 0, iree_memory_order_relaxed);
   iree_atomic_store(&pool->committed_slab_count, 0, iree_memory_order_relaxed);
 
@@ -625,6 +772,7 @@ static void iree_hal_tlsf_pool_destroy(iree_hal_pool_t* base_pool) {
 
   iree_slim_mutex_lock(&pool->mutex);
   iree_hal_tlsf_pool_drain_pending_releases(pool);
+  iree_hal_tlsf_pool_flush_quarantine(pool);
   iree_hal_tlsf_pool_free_release_nodes(pool);
   iree_slim_mutex_unlock(&pool->mutex);
 
@@ -644,7 +792,8 @@ static void iree_hal_tlsf_pool_destroy(iree_hal_pool_t* base_pool) {
 //===----------------------------------------------------------------------===//
 
 static iree_status_t iree_hal_tlsf_pool_try_acquire_from_slab(
-    iree_hal_tlsf_pool_t* pool, uint16_t slab_index, iree_device_size_t size,
+    iree_hal_tlsf_pool_t* pool, uint16_t slab_index,
+    iree_device_size_t allocation_length,
     const iree_async_frontier_t* requester_frontier, bool record_reuse_miss,
     iree_hal_tlsf_pool_allocation_t* out_allocation,
     iree_hal_pool_acquire_result_t* out_result)
@@ -658,8 +807,8 @@ static iree_status_t iree_hal_tlsf_pool_try_acquire_from_slab(
     iree_hal_memory_tlsf_allocation_t allocation;
     iree_hal_memory_tlsf_allocate_result_t allocation_result =
         IREE_HAL_MEMORY_TLSF_ALLOCATE_EXHAUSTED;
-    status = iree_hal_memory_tlsf_try_allocate(&slab->tlsf, size, &allocation,
-                                               &allocation_result);
+    status = iree_hal_memory_tlsf_try_allocate(&slab->tlsf, allocation_length,
+                                               &allocation, &allocation_result);
     if (!iree_status_is_ok(status) ||
         allocation_result == IREE_HAL_MEMORY_TLSF_ALLOCATE_EXHAUSTED) {
       break;
@@ -724,11 +873,19 @@ static iree_status_t iree_hal_tlsf_pool_acquire_reservation(
                             " exceeds TLSF pool alignment %" PRIdsz,
                             alignment, pool_alignment);
   }
-  if (size > pool->slab_length) {
+  if (size > pool->user_slab_length) {
     return iree_status_from_code(IREE_STATUS_OUT_OF_RANGE);
   }
 
-  iree_device_size_t charged_length = size;
+  iree_hal_asan_allocation_layout_t asan_layout = {0};
+  iree_device_size_t allocation_length = size;
+  if (iree_hal_asan_pool_options_is_enabled(&pool->asan_options)) {
+    IREE_RETURN_IF_ERROR(iree_hal_asan_calculate_allocation_layout(
+        &pool->asan_options, size, alignment, &asan_layout));
+    allocation_length = asan_layout.backing_length;
+  }
+
+  iree_device_size_t charged_length = allocation_length;
   if (!iree_hal_tlsf_pool_try_charge_reservation(pool, charged_length)) {
     iree_atomic_fetch_add(&pool->over_budget_count, 1,
                           iree_memory_order_relaxed);
@@ -751,7 +908,7 @@ static iree_status_t iree_hal_tlsf_pool_acquire_reservation(
   const uint16_t preferred_slab_index = pool->preferred_slab_index;
   if (preferred_slab_index < pool->slab_count) {
     status = iree_hal_tlsf_pool_try_acquire_from_slab(
-        pool, preferred_slab_index, size, requester_frontier,
+        pool, preferred_slab_index, allocation_length, requester_frontier,
         /*record_reuse_miss=*/true, &selected_allocation, &selected_result);
     has_selected_allocation = selected_result == IREE_HAL_POOL_ACQUIRE_OK ||
                               selected_result == IREE_HAL_POOL_ACQUIRE_OK_FRESH;
@@ -765,7 +922,7 @@ static iree_status_t iree_hal_tlsf_pool_acquire_reservation(
       continue;
     }
     status = iree_hal_tlsf_pool_try_acquire_from_slab(
-        pool, slab_index, size, requester_frontier,
+        pool, slab_index, allocation_length, requester_frontier,
         /*record_reuse_miss=*/true, &selected_allocation, &selected_result);
     has_selected_allocation = selected_result == IREE_HAL_POOL_ACQUIRE_OK ||
                               selected_result == IREE_HAL_POOL_ACQUIRE_OK_FRESH;
@@ -779,7 +936,7 @@ static iree_status_t iree_hal_tlsf_pool_acquire_reservation(
       status = iree_hal_tlsf_pool_append_slab(pool, &slab_index);
       if (iree_status_is_ok(status)) {
         status = iree_hal_tlsf_pool_try_acquire_from_slab(
-            pool, slab_index, size, requester_frontier,
+            pool, slab_index, allocation_length, requester_frontier,
             /*record_reuse_miss=*/true, &selected_allocation, &selected_result);
         has_selected_allocation =
             selected_result == IREE_HAL_POOL_ACQUIRE_OK ||
@@ -804,12 +961,20 @@ static iree_status_t iree_hal_tlsf_pool_acquire_reservation(
         iree_hal_tlsf_pool_uncharge_reservation(pool, charged_length);
         charged_length = 0;
       } else {
-        status = iree_hal_tlsf_pool_return_allocation(
-            pool, &selected_allocation, selected_result, out_reservation,
-            out_info, out_result);
+        if (iree_hal_asan_pool_options_is_enabled(&pool->asan_options)) {
+          status = iree_hal_asan_extend_allocation_layout(
+              selected_allocation.allocation.length, &asan_layout);
+        }
+        if (iree_status_is_ok(status)) {
+          status = iree_hal_tlsf_pool_return_allocation(
+              pool, &selected_allocation, size, charged_length, &asan_layout,
+              selected_result, out_reservation, out_info, out_result);
+        }
         if (!iree_status_is_ok(status)) {
-          iree_hal_tlsf_pool_uncharge_reservation(pool, charged_length);
-          charged_length = 0;
+          if (charged_length > 0) {
+            iree_hal_tlsf_pool_uncharge_reservation(pool, charged_length);
+            charged_length = 0;
+          }
           iree_hal_memory_tlsf_restore(
               &slab->tlsf, selected_allocation.allocation.block_index);
         }
@@ -865,10 +1030,15 @@ static void iree_hal_tlsf_pool_release_reservation(
 
   iree_hal_memory_trace_free(
       &pool->trace, (uint8_t*)slab->slab.base_ptr + reservation->offset);
+  if (iree_hal_asan_pool_options_is_enabled(&pool->asan_options)) {
+    iree_hal_slab_provider_advise_asan_range(
+        pool->slab_provider, &slab->slab, release_node->backing_offset,
+        IREE_HAL_ASAN_RANGE_ADVICE_FLAG_RELEASED, &release_node->asan_layout);
+  }
 
   iree_hal_tlsf_pool_push_pending_release(pool, release_node);
 
-  iree_hal_tlsf_pool_uncharge_reservation(pool, reservation->length);
+  iree_hal_tlsf_pool_uncharge_reservation(pool, release_node->charged_length);
   iree_atomic_fetch_add(&pool->reservation_count, -1,
                         iree_memory_order_relaxed);
   iree_atomic_fetch_add(&pool->release_count, 1, iree_memory_order_relaxed);
@@ -924,7 +1094,7 @@ static iree_status_t iree_hal_tlsf_pool_materialize_reservation(
     release_callback.user_data = state;
   }
   status = iree_hal_slab_provider_wrap_buffer(
-      pool->slab_provider, &slab, reservation->offset, reservation->length,
+      pool->slab_provider, &slab, reservation->offset, reservation->byte_length,
       params, release_callback, out_buffer);
   if (!iree_status_is_ok(status) && state) {
     iree_allocator_free(pool->host_allocator, state);
@@ -939,7 +1109,7 @@ static void iree_hal_tlsf_pool_query_capabilities(
   out_capabilities->memory_type = pool->memory_type;
   out_capabilities->supported_usage = pool->supported_usage;
   out_capabilities->min_allocation_size = 1;
-  out_capabilities->max_allocation_size = pool->slab_length;
+  out_capabilities->max_allocation_size = pool->user_slab_length;
 }
 
 static void iree_hal_tlsf_pool_query_stats(const iree_hal_pool_t* base_pool,

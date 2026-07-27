@@ -11,11 +11,12 @@
 #include "iree/hal/drivers/webgpu/webgpu_allocator.h"
 #include "iree/hal/drivers/webgpu/webgpu_builtins.h"
 #include "iree/hal/drivers/webgpu/webgpu_command_buffer.h"
-#include "iree/hal/drivers/webgpu/webgpu_executable_cache.h"
+#include "iree/hal/drivers/webgpu/webgpu_executable.h"
 #include "iree/hal/drivers/webgpu/webgpu_fd_file.h"
 #include "iree/hal/drivers/webgpu/webgpu_imports.h"
 #include "iree/hal/drivers/webgpu/webgpu_queue.h"
 #include "iree/hal/drivers/webgpu/webgpu_semaphore.h"
+#include "iree/hal/utils/device_spec_builder.h"
 #include "iree/hal/utils/memory_file.h"
 
 //===----------------------------------------------------------------------===//
@@ -50,8 +51,14 @@ typedef struct iree_hal_webgpu_device_t {
   // ensure proactor threads outlive all device resources (semaphores, etc.).
   iree_async_proactor_pool_t* proactor_pool;
 
+  // Sink copied from device creation parameters for device-originated events.
+  iree_hal_device_event_sink_t event_sink;
+
   // Optional provider used for creating/configuring collective channels.
   iree_hal_channel_provider_t* channel_provider;
+
+  // Immutable device facts captured at creation time.
+  iree_hal_device_spec_t* device_spec;
 
   // Topology information if this device is part of a multi-device topology.
   iree_hal_device_topology_info_t topology_info;
@@ -78,15 +85,18 @@ iree_status_t iree_hal_webgpu_device_create(
     const iree_hal_device_create_params_t* create_params,
     iree_allocator_t host_allocator, iree_hal_device_t** out_device) {
   IREE_ASSERT_ARGUMENT(create_params);
-  IREE_ASSERT_ARGUMENT(create_params->proactor_pool);
   IREE_ASSERT_ARGUMENT(out_device);
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_device = NULL;
+
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_device_create_params_verify(create_params));
 
   iree_hal_webgpu_device_t* device = NULL;
   iree_host_size_t total_size = sizeof(*device) + identifier.size;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(host_allocator, total_size, (void**)&device));
+  memset(device, 0, total_size);
   iree_hal_resource_initialize(&iree_hal_webgpu_device_vtable,
                                &device->resource);
   iree_string_view_append_to_buffer(
@@ -101,11 +111,17 @@ iree_status_t iree_hal_webgpu_device_create(
 
   // Retain the proactor pool and acquire a proactor for queue initialization.
   device->proactor_pool = create_params->proactor_pool;
+  device->event_sink = create_params->event_sink;
   iree_async_proactor_pool_retain(device->proactor_pool);
 
   iree_async_proactor_t* proactor = NULL;
   iree_status_t status =
       iree_async_proactor_pool_get(device->proactor_pool, 0, &proactor);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_spec_create_minimal(
+        identifier, identifier, IREE_SV("webgpu"), IREE_SV("webgpu"),
+        host_allocator, &device->device_spec);
+  }
 
   // Create the builtin compute pipelines for fill/copy operations.
   if (iree_status_is_ok(status)) {
@@ -178,6 +194,7 @@ static void iree_hal_webgpu_device_destroy(iree_hal_device_t* base_device) {
   iree_hal_webgpu_queue_deinitialize(&device->queue);
   iree_hal_webgpu_builtins_deinitialize(&device->builtins);
   iree_hal_channel_provider_release(device->channel_provider);
+  iree_hal_device_spec_release(device->device_spec);
   iree_async_proactor_pool_release(device->proactor_pool);
 
   // Release the GPUDevice bridge handle only if we own it. When created via
@@ -211,12 +228,13 @@ static iree_hal_allocator_t* iree_hal_webgpu_device_allocator(
   return device->device_allocator;
 }
 
-static void iree_hal_webgpu_replace_device_allocator(
+static iree_status_t iree_hal_webgpu_replace_device_allocator(
     iree_hal_device_t* base_device, iree_hal_allocator_t* new_allocator) {
   iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
   iree_hal_allocator_retain(new_allocator);
   iree_hal_allocator_release(device->device_allocator);
   device->device_allocator = new_allocator;
+  return iree_ok_status();
 }
 
 static void iree_hal_webgpu_replace_channel_provider(
@@ -234,48 +252,23 @@ static iree_status_t iree_hal_webgpu_device_trim(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_webgpu_device_query_i64(
-    iree_hal_device_t* base_device, iree_string_view_t category,
-    iree_string_view_t key, int64_t* out_value) {
+static const iree_hal_device_spec_t* iree_hal_webgpu_device_spec(
+    iree_hal_device_t* base_device) {
   iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
-  *out_value = 0;
-
-  if (iree_string_view_equal(category, IREE_SV("hal.device.id"))) {
-    *out_value =
-        iree_string_view_match_pattern(device->identifier, key) ? 1 : 0;
-    return iree_ok_status();
-  }
-
-  if (iree_string_view_equal(category, IREE_SV("hal.executable.format"))) {
-    *out_value = iree_string_view_equal(key, IREE_SV("webgpu-wgsl-fb")) ? 1 : 0;
-    return iree_ok_status();
-  }
-
-  // WebGPU has a single queue — concurrency is always 1.
-  if (iree_string_view_equal(category, IREE_SV("hal.device"))) {
-    if (iree_string_view_equal(key, IREE_SV("concurrency"))) {
-      *out_value = 1;
-      return iree_ok_status();
-    }
-  } else if (iree_string_view_equal(category, IREE_SV("hal.dispatch"))) {
-    if (iree_string_view_equal(key, IREE_SV("concurrency"))) {
-      *out_value = 1;
-      return iree_ok_status();
-    }
-  }
-
-  return iree_make_status(
-      IREE_STATUS_NOT_FOUND,
-      "unknown device configuration key value '%.*s :: %.*s'",
-      (int)category.size, category.data, (int)key.size, key.data);
+  return device->device_spec;
 }
 
-static iree_status_t iree_hal_webgpu_device_query_capabilities(
+static iree_status_t iree_hal_webgpu_device_sample_observation(
     iree_hal_device_t* base_device,
-    iree_hal_device_capabilities_t* out_capabilities) {
-  // WebGPU provides no UUIDs, no external semaphore/buffer handle types, and
-  // no NUMA information. The capabilities struct remains zeroed.
-  memset(out_capabilities, 0, sizeof(*out_capabilities));
+    iree_hal_device_observation_flags_t requested_flags,
+    iree_hal_device_observation_t* out_observation) {
+  iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
+  if (iree_any_bit_set(requested_flags,
+                       IREE_HAL_DEVICE_OBSERVATION_FLAG_MEMORY)) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_device_observation_populate_memory_total_from_spec(
+            device->device_spec, out_observation));
+  }
   return iree_ok_status();
 }
 
@@ -361,13 +354,15 @@ static iree_status_t iree_hal_webgpu_device_create_event(
                           "queue have implicit ordering");
 }
 
-static iree_status_t iree_hal_webgpu_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+static iree_status_t iree_hal_webgpu_device_load_executable(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
   iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
-  return iree_hal_webgpu_executable_cache_create(
-      device->device_handle, identifier, device->host_allocator,
-      out_executable_cache);
+  return iree_hal_webgpu_executable_create(device->device_handle, load_params,
+                                           device->host_allocator,
+                                           out_executable);
 }
 
 static iree_status_t iree_hal_webgpu_device_import_file(
@@ -603,15 +598,15 @@ static const iree_hal_device_vtable_t iree_hal_webgpu_device_vtable = {
     .replace_device_allocator = iree_hal_webgpu_replace_device_allocator,
     .replace_channel_provider = iree_hal_webgpu_replace_channel_provider,
     .trim = iree_hal_webgpu_device_trim,
-    .query_i64 = iree_hal_webgpu_device_query_i64,
-    .query_capabilities = iree_hal_webgpu_device_query_capabilities,
+    .device_spec = iree_hal_webgpu_device_spec,
+    .sample_observation = iree_hal_webgpu_device_sample_observation,
     .topology_info = iree_hal_webgpu_device_topology_info,
     .refine_topology_edge = iree_hal_webgpu_device_refine_topology_edge,
     .assign_topology_info = iree_hal_webgpu_device_assign_topology_info,
     .create_channel = iree_hal_webgpu_device_create_channel,
     .create_command_buffer = iree_hal_webgpu_device_create_command_buffer,
     .create_event = iree_hal_webgpu_device_create_event,
-    .create_executable_cache = iree_hal_webgpu_device_create_executable_cache,
+    .load_executable = iree_hal_webgpu_device_load_executable,
     .import_file = iree_hal_webgpu_device_import_file,
     .create_semaphore = iree_hal_webgpu_device_create_semaphore,
     .query_semaphore_compatibility =

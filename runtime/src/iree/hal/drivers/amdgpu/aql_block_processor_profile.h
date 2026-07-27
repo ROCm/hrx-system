@@ -72,6 +72,13 @@ typedef struct iree_hal_amdgpu_aql_block_processor_profile_t {
     // slot.
     const uint64_t* ptrs;
   } bindings;
+  // Queue identity used to select queue-scoped executable metadata.
+  struct {
+    // Queue ordinal relative to the owning physical device.
+    iree_host_size_t physical_queue_ordinal;
+    // Number of physical queues represented in recorded queue-scoped tables.
+    uint32_t physical_queue_count;
+  } queue_identity;
   // Reserved packet span populated by profiled replay.
   struct {
     // First reserved AQL payload packet id after wait/profile prefix packets.

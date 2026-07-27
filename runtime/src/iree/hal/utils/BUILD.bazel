@@ -73,6 +73,16 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "device_spec_builder",
+    srcs = ["device_spec_builder.c"],
+    hdrs = ["device_spec_builder.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "executable_debug_info",
     srcs = ["executable_debug_info.c"],
     hdrs = ["executable_debug_info.h"],

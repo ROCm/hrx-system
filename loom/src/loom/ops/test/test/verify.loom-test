@@ -1,0 +1,9 @@
+// RUN: verify
+
+// Projected region args are parser-owned clones of the function signature and
+// verify without spelling a second argument list.
+test.split_func @projected(%arg: i32, %other: i32) {
+  test.yield
+} launch {
+  test.yield
+}

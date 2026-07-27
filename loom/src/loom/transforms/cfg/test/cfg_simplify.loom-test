@@ -1,0 +1,948 @@
+// RUN: pass cfg-simplify
+
+func.def @folds_constant_branch_and_removes_dead(%a: i32, %b: i32) -> (i32) {
+  %cond = scalar.constant 1 : i1
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  %sum = test.addi %a, %b : i32
+  cfg.br ^join(%sum: i32)
+^else:
+  %dead = test.addi %b, %b : i32
+  cfg.br ^join(%dead: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @folds_constant_branch_and_removes_dead(%a: i32, %b: i32) -> (i32) {
+  %cond = scalar.constant 1 : i1
+  %sum = test.addi %a, %b : i32
+  func.return %sum : i32
+}
+
+// ====
+
+func.def @forwards_empty_block(%cond: i1) {
+  cfg.cond_br %cond, ^forward, ^exit
+^forward:
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ----
+func.def @forwards_empty_block(%cond: i1) {
+  func.return
+}
+
+// ====
+
+kernel.def @preserves_convergent_return_join() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%cond: i1, %value: i32) {
+  cfg.cond_br %cond, ^taken, ^exit
+^taken:
+  test.use %value : i32
+  cfg.br ^exit
+^exit:
+  kernel.return
+}
+
+// ----
+kernel.def @preserves_convergent_return_join() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%cond: i1, %value: i32) {
+  cfg.cond_br %cond, ^taken, ^exit
+^taken:
+  test.use %value : i32
+  cfg.br ^exit
+^exit:
+  kernel.return
+}
+
+// ====
+
+func.def @forwards_block_args(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^left, ^right
+^left:
+  cfg.br ^forward(%a: i32, %b: i32)
+^right:
+  cfg.br ^forward(%b: i32, %a: i32)
+^forward(%x: i32, %y: i32):
+  cfg.br ^join(%y: i32, %x: i32)
+^join(%p: i32, %q: i32):
+  %sum = test.addi %p, %q : i32
+  func.return %sum : i32
+}
+
+// ----
+func.def @forwards_block_args(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^left, ^right
+^left:
+  cfg.br ^forward(%a: i32, %b: i32)
+^right:
+  cfg.br ^forward(%b: i32, %a: i32)
+^forward(%x: i32, %y: i32):
+  %sum = test.addi %y, %x : i32
+  func.return %sum : i32
+}
+
+// ====
+
+func.def @forwards_single_predecessor_arg_block_with_later_uses(%cond: i1, %seed: i32, %x: i32) -> (i32) {
+  cfg.cond_br %cond, ^selected, ^other
+^selected:
+  cfg.br ^forward(%seed: i32)
+^forward(%carried: i32):
+  cfg.br ^tail(%x: i32)
+^tail(%tail: i32):
+  %sum = test.addi %carried, %tail : i32
+  func.return %sum : i32
+^other:
+  func.return %x : i32
+}
+
+// ----
+func.def @forwards_single_predecessor_arg_block_with_later_uses(%cond: i1, %seed: i32, %x: i32) -> (i32) {
+  cfg.cond_br %cond, ^selected, ^other
+^selected:
+  %sum = test.addi %seed, %x : i32
+  func.return %sum : i32
+^other:
+  func.return %x : i32
+}
+
+// ====
+
+func.def @preserves_prefix_guard_payload_blocks(%has_ref: i1, %after_start: i1, %before_end: i1, %token: i32, %speech: i32, %pad: i32) -> (i32, i32) {
+  cfg.cond_br %has_ref, ^has, ^no_ref
+^has:
+  cfg.cond_br %after_start, ^after, ^after_else
+^after:
+  cfg.cond_br %before_end, ^inside, ^inside_else
+^inside:
+  cfg.br ^join(%speech: i32, %pad: i32)
+^inside_else:
+  cfg.br ^join(%token: i32, %token: i32)
+^after_else:
+  cfg.br ^join(%token: i32, %token: i32)
+^no_ref:
+  cfg.br ^join(%token: i32, %token: i32)
+^join(%positive: i32, %negative: i32):
+  func.return %positive, %negative : i32, i32
+}
+
+// ====
+
+func.def @deduplicates_block_args(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  cfg.br ^join(%a: i32, %a: i32)
+^else:
+  cfg.br ^join(%b: i32, %b: i32)
+^join(%x: i32, %y: i32):
+  %sum = test.addi %x, %y : i32
+  func.return %sum : i32
+}
+
+// ----
+func.def @deduplicates_block_args(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  cfg.br ^join(%a: i32)
+^else:
+  cfg.br ^join(%b: i32)
+^join(%x: i32):
+  %sum = test.addi %x, %x : i32
+  func.return %sum : i32
+}
+
+// ====
+
+func.def @merges_duplicate_return_blocks(%cond: i1, %value: i32) -> (i32) {
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  func.return %value : i32
+^else:
+  func.return %value : i32
+}
+
+// ----
+func.def @merges_duplicate_return_blocks(%cond: i1, %value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ====
+
+func.def @merges_alpha_equivalent_pure_blocks(%cond: i1, %a: i32, %b: i32, %c: i32) -> (i32) {
+  cfg.cond_br %cond, ^left, ^right
+^left:
+  %left_sum = test.addi %a, %b : i32
+  %left_result = test.addi %left_sum, %c : i32
+  cfg.br ^join(%left_result: i32)
+^right:
+  %right_sum = test.addi %a, %b : i32
+  %right_result = test.addi %right_sum, %c : i32
+  cfg.br ^join(%right_result: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @merges_alpha_equivalent_pure_blocks(%cond: i1, %a: i32, %b: i32, %c: i32) -> (i32) {
+  %left_sum = test.addi %a, %b : i32
+  %left_result = test.addi %left_sum, %c : i32
+  func.return %left_result : i32
+}
+
+// ====
+
+func.def @merges_alpha_equivalent_blocks_with_args(%choose: i1, %left_pick: i1, %right_pick: i1, %a: i32, %b: i32, %c: i32) -> (i32) {
+  cfg.cond_br %choose, ^left_dispatch, ^right_dispatch
+^left_dispatch:
+  cfg.cond_br %left_pick, ^left_a, ^left_b
+^left_a:
+  cfg.br ^left(%a: i32, %b: i32)
+^left_b:
+  cfg.br ^left(%b: i32, %a: i32)
+^right_dispatch:
+  cfg.cond_br %right_pick, ^right_a, ^right_b
+^right_a:
+  cfg.br ^right(%a: i32, %b: i32)
+^right_b:
+  cfg.br ^right(%b: i32, %a: i32)
+^left(%x: i32, %y: i32):
+  %left_sum = test.addi %x, %y : i32
+  %left_result = test.addi %left_sum, %c : i32
+  cfg.br ^join(%left_result: i32)
+^right(%p: i32, %q: i32):
+  %right_sum = test.addi %p, %q : i32
+  %right_result = test.addi %right_sum, %c : i32
+  cfg.br ^join(%right_result: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @merges_alpha_equivalent_blocks_with_args(%choose: i1, %left_pick: i1, %right_pick: i1, %a: i32, %b: i32, %c: i32) -> (i32) {
+  cfg.cond_br %choose, ^left_dispatch, ^right_dispatch
+^left_dispatch:
+  cfg.cond_br %left_pick, ^left_a, ^left_b
+^left_a:
+  cfg.br ^left(%a: i32, %b: i32)
+^left_b:
+  cfg.br ^left(%b: i32, %a: i32)
+^right_dispatch:
+  cfg.cond_br %right_pick, ^right_a, ^right_b
+^right_a:
+  cfg.br ^left(%a: i32, %b: i32)
+^right_b:
+  cfg.br ^left(%b: i32, %a: i32)
+^left(%x: i32, %y: i32):
+  %left_sum = test.addi %x, %y : i32
+  %left_result = test.addi %left_sum, %c : i32
+  func.return %left_result : i32
+}
+
+// ====
+
+func.def @preserves_effectful_alpha_candidate(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  cfg.cond_br %cond, ^left, ^right
+^left:
+  view.store %value, %view[0] : f32, view<1xf32, %layout>
+  cfg.br ^exit
+^right:
+  view.store %value, %view[0] : f32, view<1xf32, %layout>
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ----
+func.def @preserves_effectful_alpha_candidate(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  cfg.cond_br %cond, ^left, ^right
+^left:
+  view.store %value, %view[0] : f32, view<1xf32, %layout>
+  cfg.br ^exit
+^right:
+  view.store %value, %view[0] : f32, view<1xf32, %layout>
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ====
+
+func.def @preserves_alpha_candidate_with_different_successors(%cond: i1, %guard: i1, %a: i32, %b: i32, %c: i32) -> (i32) {
+  cfg.cond_br %cond, ^left, ^right
+^left:
+  %left_sum = test.addi %a, %b : i32
+  cfg.cond_br %guard, ^left_exit, ^shared_exit
+^right:
+  %right_sum = test.addi %a, %b : i32
+  cfg.cond_br %guard, ^right_exit, ^shared_exit
+^left_exit:
+  func.return %a : i32
+^right_exit:
+  func.return %b : i32
+^shared_exit:
+  func.return %c : i32
+}
+
+// ====
+
+func.def @preserves_alpha_candidate_with_different_local_results(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^left, ^right
+^left:
+  %left_sum = test.addi %a, %b : i32
+  cfg.br ^join(%left_sum: i32)
+^right:
+  %right_sum = test.addi %a, %a : i32
+  cfg.br ^join(%right_sum: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @preserves_distinct_return_blocks(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  func.return %a : i32
+^else:
+  func.return %b : i32
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.kernel.def target(@test_target) @duplicates_low_return_after_br() {
+  low.br ^return
+^return:
+  low.return
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.kernel.def target(@test_target) @duplicates_low_return_after_br() {
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @deduplicates_low_block_args(%cond: reg<test.i32>, %a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+  low.cond_br %cond, ^then, ^else : reg<test.i32>
+^then:
+  low.br ^join(%a: reg<test.i32>, %a: reg<test.i32>)
+^else:
+  low.br ^join(%b: reg<test.i32>, %b: reg<test.i32>)
+^join(%x: reg<test.i32>, %y: reg<test.i32>):
+  %sum = test.add.i32 %x, %y
+  return %sum
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @deduplicates_low_block_args(%cond: reg<test.i32>, %a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32>) {
+  low.cond_br %cond, ^then, ^else : reg<test.i32>
+^then:
+  low.br ^join(%a: reg<test.i32>)
+^else:
+  low.br ^join(%b: reg<test.i32>)
+^join(%x: reg<test.i32>):
+  %sum = low.op<test.add.i32>(%x, %x) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %sum : reg<test.i32>
+}
+
+// ====
+
+func.def @folds_dominated_true_branch_condition(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  %sum = test.addi %a, %a : i32
+  cfg.br ^inner
+^inner:
+  cfg.cond_br %cond, ^taken, ^dead
+^taken:
+  cfg.br ^join(%sum: i32)
+^dead:
+  cfg.br ^join(%b: i32)
+^else:
+  cfg.br ^join(%b: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @folds_dominated_true_branch_condition(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  %sum = test.addi %a, %a : i32
+  cfg.br ^join(%sum: i32)
+^else:
+  cfg.br ^join(%b: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @folds_dominated_false_branch_condition(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  cfg.br ^join(%a: i32)
+^else:
+  %sum = test.addi %b, %b : i32
+  cfg.br ^inner
+^inner:
+  cfg.cond_br %cond, ^dead, ^taken
+^dead:
+  cfg.br ^join(%a: i32)
+^taken:
+  cfg.br ^join(%sum: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @folds_dominated_false_branch_condition(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  cfg.br ^join(%a: i32)
+^else:
+  %sum = test.addi %b, %b : i32
+  cfg.br ^join(%sum: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @preserves_reconverged_branch_condition(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  %left = test.addi %a, %a : i32
+  cfg.br ^join(%left: i32)
+^else:
+  %right = test.addi %b, %b : i32
+  cfg.br ^join(%right: i32)
+^join(%value: i32):
+  cfg.cond_br %cond, ^same, ^different
+^same:
+  func.return %value : i32
+^different:
+  func.return %b : i32
+}
+
+// ====
+
+func.def @folds_dominated_compare_from_true_edge(%i: index, %n: index, %a: i32, %b: i32) -> (i32) {
+  %cond = index.cmp slt, %i, %n : index
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  %again = index.cmp slt, %i, %n : index
+  cfg.cond_br %again, ^taken, ^dead
+^taken:
+  cfg.br ^join(%a: i32)
+^dead:
+  cfg.br ^join(%b: i32)
+^else:
+  cfg.br ^join(%b: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @folds_dominated_compare_from_true_edge(%i: index, %n: index, %a: i32, %b: i32) -> (i32) {
+  %cond = index.cmp slt, %i, %n : index
+  cfg.cond_br %cond, ^taken, ^else
+^taken:
+  cfg.br ^join(%a: i32)
+^else:
+  cfg.br ^join(%b: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @folds_dominated_compare_from_false_edge(%i: index, %n: index, %a: i32, %b: i32) -> (i32) {
+  %cond = index.cmp slt, %i, %n : index
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  cfg.br ^join(%a: i32)
+^else:
+  %again = index.cmp sge, %i, %n : index
+  cfg.cond_br %again, ^taken, ^dead
+^taken:
+  cfg.br ^join(%b: i32)
+^dead:
+  cfg.br ^join(%a: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @folds_dominated_compare_from_false_edge(%i: index, %n: index, %a: i32, %b: i32) -> (i32) {
+  %cond = index.cmp slt, %i, %n : index
+  cfg.cond_br %cond, ^then, ^taken
+^then:
+  cfg.br ^join(%a: i32)
+^taken:
+  cfg.br ^join(%b: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @folds_compare_after_equivalent_incoming_edges(%guard: i1, %i: index, %n: index, %a: i32, %b: i32) -> (i32) {
+  %cond = index.cmp slt, %i, %n : index
+  cfg.cond_br %guard, ^left, ^right
+^left:
+  cfg.cond_br %cond, ^join, ^exit
+^right:
+  cfg.cond_br %cond, ^join, ^exit
+^join:
+  %again = index.cmp slt, %i, %n : index
+  cfg.cond_br %again, ^taken, ^dead
+^taken:
+  cfg.br ^ret(%a: i32)
+^dead:
+  cfg.br ^ret(%b: i32)
+^exit:
+  cfg.br ^ret(%b: i32)
+^ret(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @folds_compare_after_equivalent_incoming_edges(%guard: i1, %i: index, %n: index, %a: i32, %b: i32) -> (i32) {
+  %cond = index.cmp slt, %i, %n : index
+  cfg.cond_br %cond, ^taken, ^exit
+^taken:
+  cfg.br ^ret(%a: i32)
+^exit:
+  cfg.br ^ret(%b: i32)
+^ret(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @transports_compare_facts_through_block_args(%guard: i1, %li: index, %ln: index, %ri: index, %rn: index, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %guard, ^left, ^right
+^left:
+  %left_cond = index.cmp slt, %li, %ln : index
+  cfg.cond_br %left_cond, ^left_pass, ^exit
+^left_pass:
+  cfg.br ^join(%li: index, %ln: index)
+^right:
+  %right_cond = index.cmp slt, %ri, %rn : index
+  cfg.cond_br %right_cond, ^right_pass, ^exit
+^right_pass:
+  cfg.br ^join(%ri: index, %rn: index)
+^join(%x: index, %y: index):
+  %again = index.cmp slt, %x, %y : index
+  cfg.cond_br %again, ^taken, ^dead
+^taken:
+  cfg.br ^ret(%a: i32)
+^dead:
+  cfg.br ^ret(%b: i32)
+^exit:
+  cfg.br ^ret(%b: i32)
+^ret(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @transports_compare_facts_through_block_args(%guard: i1, %li: index, %ln: index, %ri: index, %rn: index, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %guard, ^left, ^right
+^left:
+  %left_cond = index.cmp slt, %li, %ln : index
+  cfg.cond_br %left_cond, ^taken, ^exit
+^right:
+  %right_cond = index.cmp slt, %ri, %rn : index
+  cfg.cond_br %right_cond, ^taken, ^exit
+^taken:
+  cfg.br ^ret(%a: i32)
+^exit:
+  cfg.br ^ret(%b: i32)
+^ret(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @folds_transported_compare_result_and_drops_args(%guard: i1, %li: index, %ln: index, %ri: index, %rn: index) -> (i1) {
+  cfg.cond_br %guard, ^left, ^right
+^left:
+  %left_cond = index.cmp slt, %li, %ln : index
+  cfg.cond_br %left_cond, ^left_pass, ^exit
+^left_pass:
+  cfg.br ^join(%li: index, %ln: index)
+^right:
+  %right_cond = index.cmp slt, %ri, %rn : index
+  cfg.cond_br %right_cond, ^right_pass, ^exit
+^right_pass:
+  cfg.br ^join(%ri: index, %rn: index)
+^join(%x: index, %y: index):
+  %again = index.cmp slt, %x, %y : index
+  func.return %again : i1
+^exit:
+  %false = scalar.constant 0 : i1
+  func.return %false : i1
+}
+
+// ----
+func.def @folds_transported_compare_result_and_drops_args(%guard: i1, %li: index, %ln: index, %ri: index, %rn: index) -> (i1) {
+  cfg.cond_br %guard, ^left, ^right
+^left:
+  %left_cond = index.cmp slt, %li, %ln : index
+  cfg.cond_br %left_cond, ^join, ^exit
+^right:
+  %right_cond = index.cmp slt, %ri, %rn : index
+  cfg.cond_br %right_cond, ^join, ^exit
+^join:
+  %again = scalar.constant true : i1
+  func.return %again : i1
+^exit:
+  %false = scalar.constant 0 : i1
+  func.return %false : i1
+}
+
+// ====
+
+func.def @threads_compare_with_mixed_incoming_block_arg_facts(%guard: i1, %li: index, %ln: index, %ri: index, %rn: index, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %guard, ^left, ^right
+^left:
+  %left_cond = index.cmp slt, %li, %ln : index
+  cfg.cond_br %left_cond, ^left_pass, ^exit
+^left_pass:
+  cfg.br ^join(%li: index, %ln: index)
+^right:
+  cfg.br ^join(%ri: index, %rn: index)
+^join(%x: index, %y: index):
+  %again = index.cmp slt, %x, %y : index
+  cfg.cond_br %again, ^taken, ^dead
+^taken:
+  cfg.br ^ret(%a: i32)
+^dead:
+  cfg.br ^ret(%b: i32)
+^exit:
+  cfg.br ^ret(%b: i32)
+^ret(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @threads_compare_with_mixed_incoming_block_arg_facts(%guard: i1, %li: index, %ln: index, %ri: index, %rn: index, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %guard, ^left, ^right
+^left:
+  %left_cond = index.cmp slt, %li, %ln : index
+  cfg.cond_br %left_cond, ^taken, ^exit
+^right:
+  %again = index.cmp slt, %ri, %rn : index
+  cfg.cond_br %again, ^taken, ^dead
+^taken:
+  cfg.br ^ret(%a: i32)
+^dead:
+  cfg.br ^ret(%b: i32)
+^exit:
+  cfg.br ^ret(%b: i32)
+^ret(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @preserves_compare_with_unproven_block_arg_facts(%guard: i1, %li: index, %ln: index, %ri: index, %rn: index, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %guard, ^left, ^right
+^left:
+  cfg.br ^join(%li: index, %ln: index)
+^right:
+  cfg.br ^join(%ri: index, %rn: index)
+^join(%x: index, %y: index):
+  %again = index.cmp slt, %x, %y : index
+  cfg.cond_br %again, ^taken, ^dead
+^taken:
+  cfg.br ^ret(%a: i32)
+^dead:
+  cfg.br ^ret(%b: i32)
+^ret(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @preserves_reconverged_compare_result_with_mixed_facts(%guard: i1, %li: index, %ln: index, %ri: index, %rn: index) -> (i1) {
+  cfg.cond_br %guard, ^left, ^right
+^left:
+  %left_cond = index.cmp slt, %li, %ln : index
+  cfg.cond_br %left_cond, ^left_pass, ^exit
+^left_pass:
+  cfg.br ^join(%li: index, %ln: index)
+^right:
+  cfg.br ^join(%ri: index, %rn: index)
+^join(%x: index, %y: index):
+  %again = index.cmp slt, %x, %y : index
+  func.return %again : i1
+^exit:
+  %false = scalar.constant 0 : i1
+  func.return %false : i1
+}
+
+// ====
+
+func.def @threads_direct_branch_through_known_block_arg(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^left, ^exit
+^left:
+  cfg.br ^dispatch(%cond: i1)
+^dispatch(%known: i1):
+  cfg.cond_br %known, ^taken, ^dead
+^taken:
+  cfg.br ^ret(%a: i32)
+^dead:
+  cfg.br ^ret(%b: i32)
+^exit:
+  cfg.br ^ret(%b: i32)
+^ret(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @threads_direct_branch_through_known_block_arg(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^taken, ^exit
+^taken:
+  cfg.br ^ret(%a: i32)
+^exit:
+  cfg.br ^ret(%b: i32)
+^ret(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @threads_conditional_predecessor_through_known_block(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^dispatch, ^exit
+^dispatch:
+  cfg.cond_br %cond, ^taken, ^dead
+^taken:
+  cfg.br ^ret(%a: i32)
+^dead:
+  cfg.br ^ret(%b: i32)
+^exit:
+  cfg.br ^ret(%b: i32)
+^ret(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @threads_conditional_predecessor_through_known_block(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^taken, ^exit
+^taken:
+  cfg.br ^ret(%a: i32)
+^exit:
+  cfg.br ^ret(%b: i32)
+^ret(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @folds_dominated_boolean_and_relations(%i: index, %n: index, %j: index, %z: index, %a: i32, %b: i32) -> (i32) {
+  %i_in_range = index.cmp slt, %i, %n : index
+  %j_nonzero = index.cmp ne, %j, %z : index
+  %cond = scalar.andi %i_in_range, %j_nonzero : i1
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  %i_again = index.cmp slt, %i, %n : index
+  %j_again = index.cmp ne, %j, %z : index
+  %both = scalar.andi %i_again, %j_again : i1
+  cfg.cond_br %both, ^taken, ^dead
+^taken:
+  cfg.br ^join(%a: i32)
+^dead:
+  cfg.br ^join(%b: i32)
+^else:
+  cfg.br ^join(%b: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @folds_dominated_boolean_and_relations(%i: index, %n: index, %j: index, %z: index, %a: i32, %b: i32) -> (i32) {
+  %i_in_range = index.cmp slt, %i, %n : index
+  %j_nonzero = index.cmp ne, %j, %z : index
+  %cond = scalar.andi %i_in_range, %j_nonzero : i1
+  cfg.cond_br %cond, ^taken, ^else
+^taken:
+  cfg.br ^join(%a: i32)
+^else:
+  cfg.br ^join(%b: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @removes_dependent_block_args(%layout: encoding<layout>, %view: view<4xf32, %layout>) {
+  cfg.br ^join(%layout: encoding<layout>, %view: view<4xf32, %layout>)
+^join(%arg_layout: encoding<layout>, %arg_view: view<4xf32, %arg_layout>):
+  test.use %arg_view : view<4xf32, %arg_layout>
+  func.return
+}
+
+// ----
+func.def @removes_dependent_block_args(%layout: encoding<layout>, %view: view<4xf32, %layout>) {
+  test.use %view : view<4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @preserves_unused_block_arg_with_type_use(%guard: i1, %layout_a: encoding<layout>, %layout_b: encoding<layout>, %buffer: buffer, %offset: offset) {
+  cfg.cond_br %guard, ^left, ^right
+^left:
+  cfg.br ^join(%layout_a: encoding<layout>)
+^right:
+  cfg.br ^join(%layout_b: encoding<layout>)
+^join(%arg_layout: encoding<layout>):
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %arg_layout>
+  func.return
+}
+
+// ====
+
+func.def @fuses_single_predecessor_block_args(%a: i32) -> (i32) {
+  cfg.br ^middle(%a: i32)
+^middle(%x: i32):
+  cfg.br ^exit(%x: i32)
+^exit(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @fuses_single_predecessor_block_args(%a: i32) -> (i32) {
+  func.return %a : i32
+}
+
+// ====
+
+func.def @fuses_block_with_cond_terminator(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.br ^dispatch(%a: i32)
+^dispatch(%x: i32):
+  %sum = test.addi %x, %b : i32
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  func.return %sum : i32
+^else:
+  func.return %b : i32
+}
+
+// ----
+func.def @fuses_block_with_cond_terminator(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  %sum = test.addi %a, %b : i32
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  func.return %sum : i32
+^else:
+  func.return %b : i32
+}
+
+// ====
+
+func.def @preserves_loop_carried_args(%n: index, %seed: i32, %x: i32) -> (i32) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  cfg.br ^loop(%zero: index, %seed: i32)
+^loop(%i: index, %acc: i32):
+  %keep_going = index.cmp slt, %i, %n : index
+  cfg.cond_br %keep_going, ^body, ^exit
+^body:
+  %next = test.addi %acc, %x : i32
+  %next_i = index.add %i, %one : index
+  cfg.br ^loop(%next_i: index, %next: i32)
+^exit:
+  func.return %acc : i32
+}
+
+// ====
+
+func.def @removes_self_forwarded_loop_arg(%cond: i1, %seed: i32) -> (i32) {
+  cfg.br ^loop(%seed: i32)
+^loop(%carry: i32):
+  cfg.cond_br %cond, ^body, ^exit
+^body:
+  cfg.br ^loop(%carry: i32)
+^exit:
+  func.return %carry : i32
+}
+
+// ----
+func.def @removes_self_forwarded_loop_arg(%cond: i1, %seed: i32) -> (i32) {
+  cfg.br ^loop
+^loop:
+  cfg.cond_br %cond, ^loop, ^exit
+^exit:
+  func.return %seed : i32
+}
+
+// ====
+
+func.def @removes_self_forwarded_dependent_loop_args(%cond: i1, %layout: encoding<layout>, %view: view<4xf32, %layout>) {
+  cfg.br ^loop(%layout: encoding<layout>, %view: view<4xf32, %layout>)
+^loop(%arg_layout: encoding<layout>, %arg_view: view<4xf32, %arg_layout>):
+  cfg.cond_br %cond, ^body, ^exit
+^body:
+  cfg.br ^loop(%arg_layout: encoding<layout>, %arg_view: view<4xf32, %arg_layout>)
+^exit:
+  test.use %arg_view : view<4xf32, %arg_layout>
+  func.return
+}
+
+// ----
+func.def @removes_self_forwarded_dependent_loop_args(%cond: i1, %layout: encoding<layout>, %view: view<4xf32, %layout>) {
+  cfg.br ^loop
+^loop:
+  cfg.cond_br %cond, ^loop, ^exit
+^exit:
+  test.use %view : view<4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @preserves_effectful_forward_block(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  cfg.cond_br %cond, ^effect, ^exit
+^effect:
+  view.store %value, %view[0] : f32, view<1xf32, %layout>
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ----
+func.def @preserves_effectful_forward_block(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  cfg.cond_br %cond, ^effect, ^exit
+^effect:
+  view.store %value, %view[0] : f32, view<1xf32, %layout>
+  cfg.br ^exit
+^exit:
+  func.return
+}

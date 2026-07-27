@@ -47,6 +47,13 @@ IREE_FLAG(int32_t, amdgpu_default_pool_frontier_capacity, 0,
           "Maximum death-frontier entry count stored per free default-pool "
           "block or 0 for the default.");
 
+IREE_FLAG(int64_t, amdgpu_file_staging_slot_size, 0,
+          "Byte length of each queue_read/queue_write file staging slot. Must "
+          "be a power of two or 0 for the default.");
+IREE_FLAG(int32_t, amdgpu_file_staging_slot_count, 0,
+          "Number of queue_read/queue_write file staging slots per physical "
+          "device. Must be a power of two or 0 for the default.");
+
 IREE_FLAG(string, amdgpu_queue_placement, "any",
           "Device queue placement: 'any' (currently host), 'host', or "
           "'device' (reserved and currently unsupported).");
@@ -80,6 +87,50 @@ IREE_FLAG(bool, amdgpu_experimental_pm4_command_buffers, false,
           "gfx9-gfx12 "
           "targets. This is for hardware bring-up only; default automatic PM4 "
           "selection remains limited to validated GPU ISAs.");
+
+IREE_FLAG(bool, amdgpu_asan, false,
+          "Enables AMDGPU ASAN runtime state and config global publication.");
+IREE_FLAG(string, amdgpu_asan_report_policy, "report-only",
+          "AMDGPU ASAN report policy: 'report-only' emits device events and "
+          "keeps the logical device usable; 'fail-device' emits device events "
+          "and then fails the logical device.");
+IREE_FLAG(string, amdgpu_asan_shadow_mode, "sparse",
+          "AMDGPU ASAN shadow mapping mode: 'sparse' maps precise shadow slabs "
+          "on demand; 'premapped' aliases a shared poisoned slab across the "
+          "full shadow reservation so arbitrary covered shadow reads report "
+          "instead of faulting.");
+IREE_FLAG(
+    string, amdgpu_asan_shadow_backing, "device-local",
+    "AMDGPU ASAN physical shadow slab backing: 'device-local' backs shadow "
+    "slabs with GPU VRAM; 'host-local' backs shadow slabs with nearest-CPU "
+    "fine-grained host memory and relies on queue dependency edges for "
+    "dispatch-boundary shadow visibility.");
+IREE_FLAG(
+    int64_t, amdgpu_asan_quarantine_size,
+    IREE_HAL_AMDGPU_ASAN_DEFAULT_QUARANTINE_SIZE,
+    "Freed ASAN allocation mapping budget in bytes kept resident and poisoned "
+    "for stale-pointer checks. Set to 0 to release freed mappings "
+    "immediately.");
+IREE_FLAG(bool, amdgpu_tsan, false,
+          "Enables AMDGPU TSAN runtime state and config global publication.");
+IREE_FLAG(string, amdgpu_tsan_report_policy, "fail-device",
+          "AMDGPU TSAN report policy: all policies emit device events and "
+          "stop the offending kernel path; 'report-only' keeps the logical "
+          "device usable, while 'fail-device' then fails the logical device.");
+IREE_FLAG(
+    int32_t, amdgpu_tsan_workgroup_local_memory_size,
+    IREE_HAL_AMDGPU_TSAN_DEFAULT_WORKGROUP_LOCAL_MEMORY_SIZE,
+    "Local-memory byte capacity represented by each AMDGPU TSAN workgroup "
+    "shadow. Zero uses the backend-selected group segment limit.");
+IREE_FLAG(int32_t, amdgpu_tsan_workgroup_capacity,
+          IREE_HAL_AMDGPU_TSAN_DEFAULT_WORKGROUP_CAPACITY,
+          "Maximum workgroup ordinals represented by one AMDGPU TSAN dispatch "
+          "shadow.");
+
+IREE_FLAG(bool, amdgpu_suppress_device_fine_memory, false,
+          "Suppresses fine-grained GPU-local memory pools even when reported "
+          "by HSA. This validates the coarse-grained device-local memory path "
+          "used on GPUs that do not expose host-coherent VRAM.");
 
 IREE_FLAG(int64_t, amdgpu_wait_active_for_ns, 0,
           "Reserved for future HSA active-wait tuning. Must be 0 today.");
@@ -205,6 +256,21 @@ static iree_status_t iree_hal_amdgpu_driver_factory_try_create(
     device_options->default_pool.frontier_capacity =
         (uint8_t)FLAG_amdgpu_default_pool_frontier_capacity;
   }
+  if (FLAG_amdgpu_file_staging_slot_size) {
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_flag_int64_to_host_size(
+        "--amdgpu_file_staging_slot_size", FLAG_amdgpu_file_staging_slot_size,
+        &device_options->file_staging.slot_size));
+  }
+  if (FLAG_amdgpu_file_staging_slot_count) {
+    if (FLAG_amdgpu_file_staging_slot_count < 0) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "file staging slot count must be non-negative (got %d)",
+          FLAG_amdgpu_file_staging_slot_count);
+    }
+    device_options->file_staging.slot_count =
+        (uint32_t)FLAG_amdgpu_file_staging_slot_count;
+  }
 
   if (strcmp(FLAG_amdgpu_queue_placement, "any") == 0) {
     device_options->queue_placement = IREE_HAL_AMDGPU_QUEUE_PLACEMENT_ANY;
@@ -261,6 +327,77 @@ static iree_status_t iree_hal_amdgpu_driver_factory_try_create(
 
   device_options->enable_experimental_pm4_command_buffers =
       FLAG_amdgpu_experimental_pm4_command_buffers;
+
+  device_options->asan.enabled =
+      device_options->asan.enabled || FLAG_amdgpu_asan;
+  if (strcmp(FLAG_amdgpu_asan_report_policy, "report-only") == 0) {
+    device_options->asan.report_policy =
+        IREE_HAL_AMDGPU_ASAN_REPORT_POLICY_REPORT_ONLY;
+  } else if (strcmp(FLAG_amdgpu_asan_report_policy, "fail-device") == 0) {
+    device_options->asan.report_policy =
+        IREE_HAL_AMDGPU_ASAN_REPORT_POLICY_FAIL_DEVICE;
+  } else {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unrecognized ASAN report policy: '%s'",
+                            FLAG_amdgpu_asan_report_policy);
+  }
+  if (strcmp(FLAG_amdgpu_asan_shadow_mode, "sparse") == 0) {
+    device_options->asan.shadow_mode = IREE_HAL_AMDGPU_ASAN_SHADOW_MODE_SPARSE;
+  } else if (strcmp(FLAG_amdgpu_asan_shadow_mode, "premapped") == 0) {
+    device_options->asan.shadow_mode =
+        IREE_HAL_AMDGPU_ASAN_SHADOW_MODE_PREMAPPED;
+  } else {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unrecognized ASAN shadow mode: '%s'",
+                            FLAG_amdgpu_asan_shadow_mode);
+  }
+  if (strcmp(FLAG_amdgpu_asan_shadow_backing, "device-local") == 0) {
+    device_options->asan.shadow_backing =
+        IREE_HAL_AMDGPU_ASAN_SHADOW_BACKING_DEVICE_LOCAL;
+  } else if (strcmp(FLAG_amdgpu_asan_shadow_backing, "host-local") == 0) {
+    device_options->asan.shadow_backing =
+        IREE_HAL_AMDGPU_ASAN_SHADOW_BACKING_HOST_LOCAL;
+  } else {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unrecognized ASAN shadow backing: '%s'",
+                            FLAG_amdgpu_asan_shadow_backing);
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_flag_int64_to_device_size(
+      "amdgpu_asan_quarantine_size", FLAG_amdgpu_asan_quarantine_size,
+      &device_options->asan.quarantine_size));
+  device_options->tsan.enabled =
+      device_options->tsan.enabled || FLAG_amdgpu_tsan;
+  if (strcmp(FLAG_amdgpu_tsan_report_policy, "report-only") == 0) {
+    device_options->tsan.report_policy =
+        IREE_HAL_AMDGPU_TSAN_REPORT_POLICY_REPORT_ONLY;
+  } else if (strcmp(FLAG_amdgpu_tsan_report_policy, "fail-device") == 0) {
+    device_options->tsan.report_policy =
+        IREE_HAL_AMDGPU_TSAN_REPORT_POLICY_FAIL_DEVICE;
+  } else {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unrecognized TSAN report policy: '%s'",
+                            FLAG_amdgpu_tsan_report_policy);
+  }
+  if (FLAG_amdgpu_tsan_workgroup_local_memory_size < 0) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "amdgpu_tsan_workgroup_local_memory_size must be non-negative "
+        "(got %d)",
+        FLAG_amdgpu_tsan_workgroup_local_memory_size);
+  }
+  device_options->tsan.workgroup_local_memory_size =
+      (uint32_t)FLAG_amdgpu_tsan_workgroup_local_memory_size;
+  if (FLAG_amdgpu_tsan_workgroup_capacity < 0) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "amdgpu_tsan_workgroup_capacity must be "
+                            "non-negative (got %d)",
+                            FLAG_amdgpu_tsan_workgroup_capacity);
+  }
+  device_options->tsan.workgroup_capacity =
+      (uint32_t)FLAG_amdgpu_tsan_workgroup_capacity;
+
+  device_options->suppress_device_fine_memory =
+      FLAG_amdgpu_suppress_device_fine_memory;
 
   if (FLAG_amdgpu_wait_active_for_ns < 0) {
     return iree_make_status(

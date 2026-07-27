@@ -1,0 +1,226 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "iree_cmake_extra_content",
+    "loom_cc_library",
+    "loom_config_compatible_with",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_cmake_extra_content(
+    content = """
+set(IREE_PACKAGE_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(IREE_PACKAGE_ROOT_PREFIX "loom/binding/c")
+""",
+)
+
+LOOMC_PUBLIC_HDRS = [
+    "include/loomc/artifact.h",
+    "include/loomc/artifact_manifest.h",
+    "include/loomc/base.h",
+    "include/loomc/compile.h",
+    "include/loomc/compile_report.h",
+    "include/loomc/config.h",
+    "include/loomc/context.h",
+    "include/loomc/diagnostic.h",
+    "include/loomc/emit.h",
+    "include/loomc/iree.h",
+    "include/loomc/launch_config.h",
+    "include/loomc/link.h",
+    "include/loomc/link_index.h",
+    "include/loomc/loomc.h",
+    "include/loomc/module.h",
+    "include/loomc/pass.h",
+    "include/loomc/result.h",
+    "include/loomc/sanitizer.h",
+    "include/loomc/source.h",
+    "include/loomc/status.h",
+    "include/loomc/target.h",
+    "include/loomc/workspace.h",
+]
+
+LOOMC_TARGET_SPIRV_PUBLIC_HDRS = [
+    "include/loomc/target/spirv.h",
+    "include/loomc/target/spirv/base.h",
+    "include/loomc/target/spirv/emit.h",
+    "include/loomc/target/spirv/profile.h",
+]
+
+LOOMC_TARGET_AMDGPU_PUBLIC_HDRS = [
+    "include/loomc/target/amdgpu.h",
+    "include/loomc/target/amdgpu/base.h",
+    "include/loomc/target/amdgpu/emit.h",
+    "include/loomc/target/amdgpu/profile.h",
+]
+
+LOOMC_TARGET_LLVMIR_PUBLIC_HDRS = [
+    "include/loomc/target/llvmir.h",
+    "include/loomc/target/llvmir/base.h",
+    "include/loomc/target/llvmir/emit.h",
+]
+
+LOOMC_TARGET_SPIRV_VULKANINFO_PUBLIC_HDRS = [
+    "include/loomc/target/spirv/vulkaninfo.h",
+]
+
+LOOMC_TARGET_SPIRV_VULKAN_PUBLIC_HDRS = [
+    "include/loomc/target/spirv/vulkan.h",
+]
+
+LOOMC_TARGET_SPIRV_IREE_HAL_PUBLIC_HDRS = [
+    "include/loomc/target/spirv/iree_hal.h",
+]
+
+LOOMC_TARGET_IREE_HAL_PUBLIC_HDRS = [
+    "include/loomc/target/iree_hal.h",
+]
+
+_TARGET_EXTENSION_VISIBILITY = [
+    "//loom/binding/c/target:__subpackages__",
+]
+
+_LOOMC_FULL_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/execute:spirv_vulkan_hal",
+])
+
+exports_files(
+    LOOMC_TARGET_AMDGPU_PUBLIC_HDRS +
+    LOOMC_TARGET_IREE_HAL_PUBLIC_HDRS +
+    LOOMC_TARGET_LLVMIR_PUBLIC_HDRS +
+    LOOMC_TARGET_SPIRV_PUBLIC_HDRS +
+    LOOMC_TARGET_SPIRV_IREE_HAL_PUBLIC_HDRS +
+    LOOMC_TARGET_SPIRV_VULKANINFO_PUBLIC_HDRS +
+    LOOMC_TARGET_SPIRV_VULKAN_PUBLIC_HDRS,
+    visibility = _TARGET_EXTENSION_VISIBILITY,
+)
+
+loom_cc_library(
+    name = "loomc",
+    srcs = [
+        "src/artifact.c",
+        "src/artifact_manifest.c",
+        "src/base.c",
+        "src/base_system.c",
+        "src/compile.c",
+        "src/compile_report.c",
+        "src/config.c",
+        "src/context.c",
+        "src/diagnostic.c",
+        "src/emit.c",
+        "src/launch_config.c",
+        "src/link.c",
+        "src/link_index.c",
+        "src/module.c",
+        "src/module_function.c",
+        "src/module_global.c",
+        "src/option_chain.c",
+        "src/pass_program.c",
+        "src/result.c",
+        "src/source.c",
+        "src/status.c",
+        "src/target.c",
+        "src/workspace.c",
+    ],
+    hdrs = LOOMC_PUBLIC_HDRS + [
+        "src/config.h",
+        "src/context.h",
+        "src/diagnostic.h",
+        "src/link_index.h",
+        "src/module.h",
+        "src/option_chain.h",
+        "src/pass_program.h",
+        "src/result.h",
+        "src/source.h",
+        "src/target.h",
+        "src/visibility.h",
+        "src/workspace.h",
+    ],
+    includes = [
+        ".",
+        "include",
+        "src",
+    ],
+    deps = [
+        "//loom/src/loom/analysis:kernel_launch_config",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:renderer",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/format/bytecode:reader",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/link:linker",
+        "//loom/src/loom/link:module_index",
+        "//loom/src/loom/link:planner",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/pass",
+        "//loom/src/loom/pass:builtin_registry",
+        "//loom/src/loom/pass:environment",
+        "//loom/src/loom/pass:interpreter",
+        "//loom/src/loom/pass:program",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:tooling",
+        "//loom/src/loom/sanitizer:options",
+        "//loom/src/loom/target:pipeline",
+        "//loom/src/loom/target:predicate",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/reporting:artifact_manifest",
+        "//loom/src/loom/target/reporting:format",
+        "//loom/src/loom/target/reporting:report",
+        "//loom/src/loom/tooling/config",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_library(
+    name = "loomc_full",
+    hdrs = (
+        LOOMC_PUBLIC_HDRS +
+        LOOMC_TARGET_IREE_HAL_PUBLIC_HDRS +
+        LOOMC_TARGET_SPIRV_PUBLIC_HDRS +
+        LOOMC_TARGET_SPIRV_IREE_HAL_PUBLIC_HDRS +
+        LOOMC_TARGET_SPIRV_VULKANINFO_PUBLIC_HDRS +
+        LOOMC_TARGET_SPIRV_VULKAN_PUBLIC_HDRS
+    ),
+    includes = [
+        ".",
+        "include",
+    ],
+    target_compatible_with = _LOOMC_FULL_COMPATIBLE_WITH,
+    deps = [
+        ":loomc",
+        "//loom/binding/c/target/iree_hal",
+        "//loom/binding/c/target/spirv",
+        "//loom/binding/c/target/spirv/iree_hal",
+        "//loom/binding/c/target/spirv/vulkan",
+        "//loom/binding/c/target/spirv/vulkaninfo",
+    ],
+)

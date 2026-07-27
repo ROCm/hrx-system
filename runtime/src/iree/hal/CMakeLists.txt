@@ -23,12 +23,13 @@ iree_cc_library(
     "channel_provider.h"
     "command_buffer.h"
     "device.h"
+    "device_event.h"
     "device_group.h"
+    "device_spec.h"
     "driver.h"
     "driver_registry.h"
     "event.h"
     "executable.h"
-    "executable_cache.h"
     "fence.h"
     "file.h"
     "pool.h"
@@ -61,12 +62,15 @@ iree_cc_library(
     "command_buffer_validation.h"
     "detail.h"
     "device.c"
+    "device_event.c"
     "device_group.c"
+    "device_spec.c"
+    "device_spec_serialization.c"
+    "device_spec_serialization.h"
     "driver.c"
     "driver_registry.c"
     "event.c"
     "executable.c"
-    "executable_cache.c"
     "fence.c"
     "file.c"
     "pool.c"
@@ -81,9 +85,11 @@ iree_cc_library(
   DEPS
     iree::async
     iree::base
+    iree::base::core_headers
     iree::base::internal
     iree::base::internal::path
     iree::base::threading
+    iree::hal::memory::asan
     iree::hal::utils::platform_topology
     iree::io::file_handle
   PUBLIC
@@ -100,6 +106,29 @@ iree_cc_test(
     iree::hal::testing::mock_device
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    device_spec_test
+  SRCS
+    "device_spec_test.cc"
+  DEPS
+    ::hal
+    iree::base
+    iree::hal::utils::device_spec_builder
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_fuzz(
+  NAME
+    device_spec_fuzz
+  SRCS
+    "device_spec_fuzz.cc"
+  DEPS
+    ::hal
+    iree::base
 )
 
 iree_cc_test(
@@ -122,6 +151,7 @@ iree_cc_test(
   DEPS
     ::hal
     iree::base
+    iree::base::internal::fpu_state
     iree::base::internal::span
     iree::testing::gtest
     iree::testing::gtest_main
@@ -135,6 +165,17 @@ iree_cc_test(
   DEPS
     ::hal
     iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    queue_test
+  SRCS
+    "queue_test.cc"
+  DEPS
+    ::hal
     iree::testing::gtest
     iree::testing::gtest_main
 )

@@ -1,0 +1,20 @@
+// Negative HIP -> Loom diagnostic recipe.
+//
+// HIP concept:
+//   #pragma unroll
+//   for (int block = block_slot; block < blocks_per_row; block += block_step)
+//
+// Loom spelling below is syntactically valid, but it intentionally omits the
+// facts that make full-unroll legal. `unroll-scf-for` needs an exact upper
+// bound, exact positive step, and either an exact lower bound or a finite
+// lower-bound range whose endpoint trip counts match. This fixture proves the
+// structured diagnostic agents should see when those facts are missing.
+func.def @q8_hip_shaped_dynamic_lower_bound(%block_slot: index, %blocks_per_row: index, %block_step: index, %seed: f32) -> (f32) {
+  // HIP concept: a dynamic lower-bound loop marked `#pragma unroll`.
+  // Loom spelling: `scf.for ... unroll`; without source facts, the compiler
+  // must diagnose instead of guessing a trip count from names or conventions.
+  %sum = scf.for %block = [%block_slot to %blocks_per_row step %block_step](%acc = %seed : f32) -> (f32) unroll {
+    scf.yield %acc : f32
+  }
+  func.return %sum : f32
+}

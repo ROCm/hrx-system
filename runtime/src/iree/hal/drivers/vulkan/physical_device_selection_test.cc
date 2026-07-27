@@ -27,6 +27,7 @@ class PhysicalDeviceSnapshotBuilder {
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     snapshot_.features12.timelineSemaphore = VK_TRUE;
     snapshot_.features12.scalarBlockLayout = VK_TRUE;
+    snapshot_.features12.bufferDeviceAddress = VK_TRUE;
     snapshot_.features13.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     snapshot_.features13.synchronization2 = VK_TRUE;
@@ -36,6 +37,10 @@ class PhysicalDeviceSnapshotBuilder {
 
   void SetApiVersion(uint32_t api_version) {
     snapshot_.properties2.properties.apiVersion = api_version;
+  }
+
+  void SetBufferDeviceAddress(VkBool32 value) {
+    snapshot_.features12.bufferDeviceAddress = value;
   }
 
   void SetUuid(const uint8_t uuid[VK_UUID_SIZE]) {
@@ -83,6 +88,21 @@ TEST(PhysicalDeviceSelectionTest, DefaultMatchesBaselineDevice) {
 TEST(PhysicalDeviceSelectionTest, DefaultSkipsBelowBaselineDevice) {
   PhysicalDeviceSnapshotBuilder builder;
   builder.SetApiVersion(VK_API_VERSION_1_2);
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
+  const iree_hal_vulkan_physical_device_selector_t selector = {
+      IREE_HAL_VULKAN_PHYSICAL_DEVICE_SELECTOR_DEFAULT,
+  };
+
+  bool matches = true;
+  IREE_ASSERT_OK(iree_hal_vulkan_physical_device_selector_match(
+      &selector, builder.snapshot(), &matches));
+
+  EXPECT_FALSE(matches);
+}
+
+TEST(PhysicalDeviceSelectionTest, DefaultSkipsMissingBufferDeviceAddress) {
+  PhysicalDeviceSnapshotBuilder builder;
+  builder.SetBufferDeviceAddress(VK_FALSE);
   builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
   const iree_hal_vulkan_physical_device_selector_t selector = {
       IREE_HAL_VULKAN_PHYSICAL_DEVICE_SELECTOR_DEFAULT,

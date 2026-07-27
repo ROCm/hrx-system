@@ -1,0 +1,15 @@
+ireevm.target<core> @vm_target
+
+func.template<demo.double> @double_template(%value: i32) -> (i32) {
+  %doubled = scalar.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.template<demo.unused> @unused_template(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@vm_target) @entry(%value: i32) -> (i32) {
+  %result = func.apply<demo.double>(%value) : (i32) -> (i32)
+  func.return %result : i32
+}

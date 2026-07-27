@@ -1,0 +1,66 @@
+// HIP -> Loom shared-memory transpose recipe.
+//
+// HIP concept tags: `__shared__`, `__syncthreads`, LDS, workgroup memory,
+// 2D tile, transpose, cross-lane exchange, double buffering, barrier.
+//
+// Position: a shared-memory transpose is an ownership and synchronization
+// contract, not a target-emitter trick. The two scratch tiles below make the
+// cross-axis LDS traffic visible while keeping the correctness oracle simple:
+// transposing twice must reproduce the original row-major iota.
+kernel.def @shared_memory_tile_double_transpose() {
+  %unit = index.constant 1 : index
+  %tile = index.constant 8 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%tile, %tile, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row = kernel.workitem.id<y> : index
+  %column = kernel.workitem.id<x> : index
+  %scratch_bytes = index.constant 256 : offset
+
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<8x8xi32, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<8x8xi32, #dense>
+
+  // HIP concept:
+  //   __shared__ int scratch_a[8][8];
+  //   __shared__ int scratch_b[8][8];
+  %scratch_a = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_b = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_a_view = buffer.view %scratch_a[%base] : buffer -> view<8x8xi32, #dense>
+  %scratch_b_view = buffer.view %scratch_b[%base] : buffer -> view<8x8xi32, #dense>
+
+  // HIP concept:
+  //   scratch_a[threadIdx.y][threadIdx.x] = input[threadIdx.y][threadIdx.x];
+  %loaded = vector.load %input_view[%row, %column] : view<8x8xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_a_view[%row, %column] : vector<1xi32>, view<8x8xi32, #dense>
+
+  // HIP concept:
+  //   __syncthreads();
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+
+  // HIP concept:
+  //   scratch_b[threadIdx.y][threadIdx.x] = scratch_a[threadIdx.x][threadIdx.y];
+  %transposed = vector.load %scratch_a_view[%column, %row] : view<8x8xi32, #dense> -> vector<1xi32>
+  vector.store %transposed, %scratch_b_view[%row, %column] : vector<1xi32>, view<8x8xi32, #dense>
+
+  // HIP concept:
+  //   __syncthreads();
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+
+  // HIP concept:
+  //   output[threadIdx.y][threadIdx.x] = scratch_b[threadIdx.x][threadIdx.y];
+  %roundtrip = vector.load %scratch_b_view[%column, %row] : view<8x8xi32, #dense> -> vector<1xi32>
+  vector.store %roundtrip, %output_view[%row, %column] : vector<1xi32>, view<8x8xi32, #dense>
+  kernel.return
+}
+
+check.case @case_shared_memory_tile_double_transpose {
+  %input = check.generate.iota offset(1) step(1) : tensor<8x8xi32>
+  %output = check.generate.fill value(0) : tensor<8x8xi32>
+  %expected = check.generate.iota offset(1) step(1) : tensor<8x8xi32>
+  func.call @shared_memory_tile_double_transpose(%input, %output) : (tensor<8x8xi32>, tensor<8x8xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<8x8xi32>
+  check.return
+}
+
+check.benchmark<@case_shared_memory_tile_double_transpose> @bench_shared_memory_tile_double_transpose

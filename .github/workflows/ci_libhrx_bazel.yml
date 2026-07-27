@@ -18,6 +18,8 @@ on:
       - "MODULE.bazel"
       - "MODULE.bazel.lock"
       - "dev.py"
+      - "requirements-analysis.in"
+      - "requirements-analysis.lock.txt"
       - "requirements-dev.in"
       - "requirements-dev.lock.txt"
       - "build_tools/**"
@@ -35,12 +37,18 @@ on:
       - "MODULE.bazel"
       - "MODULE.bazel.lock"
       - "dev.py"
+      - "requirements-analysis.in"
+      - "requirements-analysis.lock.txt"
       - "requirements-dev.in"
       - "requirements-dev.lock.txt"
       - "build_tools/**"
       - "runtime/**"
       - "libhrx/**"
       - "third_party/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -53,6 +61,9 @@ jobs:
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
     env:
+      AR: ${{ github.workspace }}/build/libhrx-bazel/rocm-root/lib/llvm/bin/llvm-ar
+      CC: ${{ github.workspace }}/build/libhrx-bazel/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/libhrx-bazel/rocm-root/lib/llvm/bin/clang++
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/libhrx-bazel/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/libhrx-bazel
@@ -69,16 +80,7 @@ jobs:
         run: git config --global --add safe.directory "$PWD"
 
       - name: Fetch ROCm toolchain
-        run: |
-          python3 -m venv "${HRX_OUTPUT_DIR}/python"
-          "${HRX_PYTHON}" -m pip install --upgrade pip boto3 zstandard
-          "${HRX_PYTHON}" build_tools/ci_core_linux.py fetch-rocm
-          echo "${HRX_ROCM_ROOT}/lib/llvm/bin" >> "${GITHUB_PATH}"
-          echo "${HRX_ROCM_ROOT}/bin" >> "${GITHUB_PATH}"
-          echo "CC=${HRX_ROCM_ROOT}/lib/llvm/bin/clang" >> "${GITHUB_ENV}"
-          echo "CXX=${HRX_ROCM_ROOT}/lib/llvm/bin/clang++" >> "${GITHUB_ENV}"
-          echo "CMAKE_PREFIX_PATH=${HRX_ROCM_ROOT}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}" >> "${GITHUB_ENV}"
-          echo "LD_LIBRARY_PATH=${HRX_ROCM_ROOT}/lib:${HRX_ROCM_ROOT}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" >> "${GITHUB_ENV}"
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
 
       - name: Install developer tools
         run: |
@@ -89,8 +91,8 @@ jobs:
       - name: Check tool versions
         run: |
           bazel --version
-          clang --version
-          "${CC}" --version
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Configure libhrx Bazel

@@ -46,6 +46,10 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 
 // A span of mutable bytes (ala std::span of uint8_t).
+//
+// Spans are empty when data_length is zero. Empty spans may have NULL or
+// non-NULL data pointers. A span with non-zero data_length and NULL data is
+// malformed and must be rejected at API boundaries before data is accessed.
 typedef struct iree_byte_span_t {
   uint8_t* data;
   iree_host_size_t data_length;
@@ -63,10 +67,14 @@ static inline iree_byte_span_t iree_byte_span_empty() {
 }
 
 static inline bool iree_byte_span_is_empty(iree_byte_span_t span) {
-  return span.data == NULL || span.data_length == 0;
+  return span.data_length == 0;
 }
 
 // A span of constant bytes (ala std::span of const uint8_t).
+//
+// Spans are empty when data_length is zero. Empty spans may have NULL or
+// non-NULL data pointers. A span with non-zero data_length and NULL data is
+// malformed and must be rejected at API boundaries before data is accessed.
 typedef struct iree_const_byte_span_t {
   const uint8_t* data;
   iree_host_size_t data_length;
@@ -84,7 +92,7 @@ static inline iree_const_byte_span_t iree_const_byte_span_empty() {
 }
 
 static inline bool iree_const_byte_span_is_empty(iree_const_byte_span_t span) {
-  return span.data == NULL || span.data_length == 0;
+  return span.data_length == 0;
 }
 
 static inline iree_const_byte_span_t iree_const_cast_byte_span(
@@ -110,8 +118,164 @@ static inline void iree_memcpy_stream_dst(void* IREE_RESTRICT dst,
 }
 
 //===----------------------------------------------------------------------===//
-// Checked arithmetic for allocation size calculations
+// Checked arithmetic helpers
 //===----------------------------------------------------------------------===//
+
+// Performs a checked unsigned 64-bit addition of |a| and |b|, storing the
+// result in |out_result|. Returns true if the addition succeeded without
+// overflow, false if overflow occurred (|out_result| is undefined on
+// overflow).
+static inline bool iree_checked_add_u64(uint64_t a, uint64_t b,
+                                        uint64_t* out_result) {
+#if IREE_HAVE_BUILTIN(__builtin_add_overflow)
+  return !__builtin_add_overflow(a, b, out_result);
+#else
+  if (a > UINT64_MAX - b) return false;
+  *out_result = a + b;
+  return true;
+#endif
+}
+
+// Performs a checked unsigned 64-bit multiplication of |a| and |b|, storing
+// the result in |out_result|. Returns true if the multiplication succeeded
+// without overflow, false if overflow occurred (|out_result| is undefined on
+// overflow).
+static inline bool iree_checked_mul_u64(uint64_t a, uint64_t b,
+                                        uint64_t* out_result) {
+#if IREE_HAVE_BUILTIN(__builtin_mul_overflow)
+  return !__builtin_mul_overflow(a, b, out_result);
+#else
+  if (b != 0 && a > UINT64_MAX / b) return false;
+  *out_result = a * b;
+  return true;
+#endif
+}
+
+// Aligns |value| up to |alignment| with overflow checking.
+// |alignment| must be a power of two.
+// Returns true if the alignment succeeded without overflow, false if overflow
+// occurred (|out_aligned| is undefined on overflow).
+static inline bool iree_checked_align_u64(uint64_t value, uint64_t alignment,
+                                          uint64_t* out_aligned) {
+  uint64_t padded = 0;
+  if (!iree_checked_add_u64(value, alignment - 1, &padded)) return false;
+  *out_aligned = padded & ~(alignment - 1);
+  return true;
+}
+
+// Performs a checked signed 32-bit addition of |a| and |b|, storing the result
+// in |out_result|. Returns true if the addition succeeded without overflow,
+// false if overflow occurred (|out_result| is undefined on overflow).
+static inline bool iree_checked_add_i32(int32_t a, int32_t b,
+                                        int32_t* out_result) {
+#if IREE_HAVE_BUILTIN(__builtin_add_overflow)
+  return !__builtin_add_overflow(a, b, out_result);
+#else
+  if ((b > 0 && a > INT32_MAX - b) || (b < 0 && a < INT32_MIN - b)) {
+    return false;
+  }
+  *out_result = a + b;
+  return true;
+#endif
+}
+
+// Performs a checked signed 32-bit multiplication of |a| and |b|, storing the
+// result in |out_result|. Returns true if the multiplication succeeded without
+// overflow, false if overflow occurred (|out_result| is undefined on overflow).
+static inline bool iree_checked_mul_i32(int32_t a, int32_t b,
+                                        int32_t* out_result) {
+#if IREE_HAVE_BUILTIN(__builtin_mul_overflow)
+  return !__builtin_mul_overflow(a, b, out_result);
+#else
+  int64_t result = (int64_t)a * (int64_t)b;
+  if (result < INT32_MIN || result > INT32_MAX) return false;
+  *out_result = (int32_t)result;
+  return true;
+#endif
+}
+
+// Performs checked computation of |base| + |lhs| * |rhs|, storing the result in
+// |out_result|. Returns true if the computation succeeded without overflow,
+// false if overflow occurred (|out_result| is undefined on overflow).
+static inline bool iree_checked_mul_add_i32(int32_t base, int32_t lhs,
+                                            int32_t rhs, int32_t* out_result) {
+  int32_t product = 0;
+  if (!iree_checked_mul_i32(lhs, rhs, &product)) return false;
+  return iree_checked_add_i32(base, product, out_result);
+}
+
+// Performs a checked signed 64-bit addition of |a| and |b|, storing the result
+// in |out_result|. Returns true if the addition succeeded without overflow,
+// false if overflow occurred (|out_result| is undefined on overflow).
+static inline bool iree_checked_add_i64(int64_t a, int64_t b,
+                                        int64_t* out_result) {
+#if IREE_HAVE_BUILTIN(__builtin_add_overflow)
+  return !__builtin_add_overflow(a, b, out_result);
+#else
+  if ((b > 0 && a > INT64_MAX - b) || (b < 0 && a < INT64_MIN - b)) {
+    return false;
+  }
+  *out_result = a + b;
+  return true;
+#endif
+}
+
+// Performs a checked signed 64-bit subtraction of |b| from |a|, storing the
+// result in |out_result|. Returns true if the subtraction succeeded without
+// overflow, false if overflow occurred (|out_result| is undefined on
+// overflow).
+static inline bool iree_checked_sub_i64(int64_t a, int64_t b,
+                                        int64_t* out_result) {
+#if IREE_HAVE_BUILTIN(__builtin_sub_overflow)
+  return !__builtin_sub_overflow(a, b, out_result);
+#else
+  if ((b > 0 && a < INT64_MIN + b) || (b < 0 && a > INT64_MAX + b)) {
+    return false;
+  }
+  *out_result = a - b;
+  return true;
+#endif
+}
+
+// Performs a checked signed 64-bit multiplication of |a| and |b|, storing the
+// result in |out_result|. Returns true if the multiplication succeeded without
+// overflow, false if overflow occurred (|out_result| is undefined on overflow).
+static inline bool iree_checked_mul_i64(int64_t a, int64_t b,
+                                        int64_t* out_result) {
+#if IREE_HAVE_BUILTIN(__builtin_mul_overflow)
+  return !__builtin_mul_overflow(a, b, out_result);
+#else
+  if (a == 0 || b == 0) {
+    *out_result = 0;
+    return true;
+  }
+  if (a == -1 && b == INT64_MIN) return false;
+  if (b == -1 && a == INT64_MIN) return false;
+  if (a > 0) {
+    if (b > 0) {
+      if (a > INT64_MAX / b) return false;
+    } else if (b < INT64_MIN / a) {
+      return false;
+    }
+  } else if (b > 0) {
+    if (a < INT64_MIN / b) return false;
+  } else if (a < INT64_MAX / b) {
+    return false;
+  }
+  *out_result = a * b;
+  return true;
+#endif
+}
+
+// Performs checked computation of |base| + |lhs| * |rhs|, storing the result in
+// |out_result|. Returns true if the computation succeeded without overflow,
+// false if overflow occurred (|out_result| is undefined on overflow).
+static inline bool iree_checked_mul_add_i64(int64_t base, int64_t lhs,
+                                            int64_t rhs, int64_t* out_result) {
+  int64_t product = 0;
+  if (!iree_checked_mul_i64(lhs, rhs, &product)) return false;
+  return iree_checked_add_i64(base, product, out_result);
+}
 
 // Performs a checked addition of |a| and |b|, storing the result in
 // |out_result|. Returns true if the addition succeeded without overflow, false
@@ -369,7 +533,8 @@ iree_struct_layout_calculate(iree_host_size_t base_size,
 //===----------------------------------------------------------------------===//
 
 // Controls the behavior of an iree_allocator_ctl_fn_t callback function.
-typedef enum iree_allocator_command_e {
+typedef uint32_t iree_allocator_command_t;
+enum {
   // Allocates |byte_length| of memory and stores the pointer in |inout_ptr|.
   // Systems should align to 16 byte boundaries (or otherwise their natural
   // SIMD alignment). The runtime pools internally and small allocations
@@ -415,14 +580,19 @@ typedef enum iree_allocator_command_e {
   // This would take a pointer/length and a NUMA node ID to bind the memory to.
   // We may want flags for controlling whether this is a new allocation getting
   // bound or an existing one that is migrating to use MPOL_MF_MOVE.
-} iree_allocator_command_t;
+};
 
 // Parameters for various allocation commands.
+#if !defined(IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_)
+#define IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
 typedef struct iree_allocator_alloc_params_t {
   // Minimum size, in bytes, of the allocation. The underlying allocator may
   // pad the length out if needed.
   iree_host_size_t byte_length;
 } iree_allocator_alloc_params_t;
+#else
+typedef struct iree_allocator_alloc_params_t iree_allocator_alloc_params_t;
+#endif  // !IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
 
 // Function pointer for an iree_allocator_t control function.
 // |command| provides the operation to perform. Optionally some commands may use
@@ -554,12 +724,12 @@ typedef struct {
     iree_allocator_inline_storage_t header;                  \
     uint8_t data[storage_capacity];                          \
   } var = {                                                  \
-      .header =                                              \
-          {                                                  \
-              .capacity = sizeof((var).data),                \
-              .length = 0,                                   \
-              .buffer = &(var).data[0],                      \
-          },                                                 \
+      /*.header=*/{                                          \
+          /*.capacity=*/sizeof((var).data),                  \
+          /*.length=*/0,                                     \
+          /*.head_size=*/0,                                  \
+          /*.buffer=*/&(var).data[0],                        \
+      },                                                     \
   };
 
 // Inline arena allocator controller used by iree_allocator_inline_arena.

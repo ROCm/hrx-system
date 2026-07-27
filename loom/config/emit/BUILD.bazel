@@ -1,0 +1,55 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@bazel_skylib//rules:common_settings.bzl", "string_list_flag")
+
+package(default_visibility = ["//visibility:public"])
+
+# Advanced artifact-family slices. Public //loom/config/target values imply the
+# emitters required for that target. LLVMIR is included in the default build so
+# the oracle/development path stays exercised with the other target families.
+DEFAULT_ENABLED = []
+
+SUPPORTED_VALUES = [
+    "amdgpu",
+    "iree_vm",
+    "llvmir",
+    "spirv",
+    "wasm",
+]
+
+string_list_flag(
+    name = "enable",
+    build_setting_default = DEFAULT_ENABLED,
+)
+
+[
+    config_setting(
+        name = "explicit_" + value,
+        flag_values = {
+            ":enable": value,
+        },
+    )
+    for value in SUPPORTED_VALUES
+]
+
+[
+    selects.config_setting_group(
+        name = value,
+        match_any = [
+            "//loom/config/target:" + value,
+            ":explicit_" + value,
+        ],
+    )
+    for value in [
+        "amdgpu",
+        "iree_vm",
+        "llvmir",
+        "spirv",
+        "wasm",
+    ]
+]

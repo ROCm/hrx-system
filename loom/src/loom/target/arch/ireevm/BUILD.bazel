@@ -1,0 +1,100 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+)
+load(
+    "//loom/build_tools/bazel:loom_check.bzl",
+    "loom_check_test_suite",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_IREEVM_CHECK_PACKAGE_VISIBILITY = ["//loom/src/loom/target/arch/ireevm/check:__pkg__"]
+
+_IREEVM_EMIT_VISIBILITY = ["//loom/src/loom/target/emit/ireevm:__pkg__"]
+
+_IREEVM_EXECUTION_VISIBILITY = ["//loom/src/loom/tooling/execution/ireevm:__pkg__"]
+
+_IREEVM_PROVIDER_VISIBILITY = [
+    "//loom/src/loom/target/all:__pkg__",
+    "//loom/src/loom/target/configured:__pkg__",
+] + _IREEVM_CHECK_PACKAGE_VISIBILITY + _IREEVM_EMIT_VISIBILITY + _IREEVM_EXECUTION_VISIBILITY
+
+#===------------------------------------------------------------------------===#
+# IREE VM low descriptors
+#===------------------------------------------------------------------------===#
+
+loom_cc_library(
+    name = "math_policy",
+    srcs = ["math_policy.c"],
+    hdrs = ["math_policy.h"],
+    deps = [
+        "//loom/src/loom/target:math_policy",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "ref_lifetime_pass",
+    srcs = ["ref_lifetime_pass.c"],
+    hdrs = ["ref_lifetime_pass.h"],
+    deps = [
+        "//loom/src/loom/analysis:ownership_lifetime",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target/arch/ireevm/ops",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "pass_registry",
+    srcs = ["pass_registry.c"],
+    hdrs = ["pass_registry.h"],
+    deps = [
+        ":ref_lifetime_pass",
+        "//loom/src/loom/pass:registry",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "provider",
+    srcs = ["provider.c"],
+    hdrs = ["provider.h"],
+    visibility = _IREEVM_PROVIDER_VISIBILITY,
+    deps = [
+        ":math_policy",
+        ":pass_registry",
+        "//loom/src/loom/pass:builder",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/ireevm/descriptors:low_registry",
+        "//loom/src/loom/target/arch/ireevm/lower",
+        "//loom/src/loom/target/arch/ireevm/ops",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_check_test_suite(
+    name = "loom_check_file_test",
+    srcs = [
+        "test/import_decl.loom-test",
+        "test/import_decl_diagnostics.loom-test",
+        "test/ref_lifetime.loom-test",
+        "test/source_low/allocation.loom-test",
+        "test/source_low/pass_source_low.loom-test",
+        "test/source_low/source_low.loom-test",
+        "test/source_low/source_low_diagnostics.loom-test",
+    ],
+    test_name_prefix_to_strip = "test/source_low/",
+)

@@ -28,22 +28,12 @@ class ProfileMetadataTest : public ::testing::Test {
   iree_hal_executable_function_info_t MakeFunctionInfo() {
     iree_hal_executable_function_info_t function_info = {};
     function_info.name = IREE_SV("test_dispatch");
-    function_info.constant_count = 3;
+    function_info.constant_byte_length = 3 * sizeof(uint32_t);
     function_info.binding_count = 2;
     function_info.workgroup_size[0] = 8;
     function_info.workgroup_size[1] = 4;
     function_info.workgroup_size[2] = 1;
     return function_info;
-  }
-
-  iree_hal_amdgpu_device_kernel_args_t MakeKernelArgs() {
-    iree_hal_amdgpu_device_kernel_args_t kernel_args = {};
-    kernel_args.workgroup_size[0] = 8;
-    kernel_args.workgroup_size[1] = 4;
-    kernel_args.workgroup_size[2] = 1;
-    kernel_args.constant_count = 3;
-    kernel_args.binding_count = 2;
-    return kernel_args;
   }
 
   iree_hal_amdgpu_profile_metadata_registry_t registry_;
@@ -67,16 +57,13 @@ TEST_F(ProfileMetadataTest, HashCodeObjectGolden) {
 TEST_F(ProfileMetadataTest, RegisterExecutableRecordsOnlyIdentity) {
   iree_hal_executable_function_info_t function_info = MakeFunctionInfo();
   iree_host_size_t function_parameter_offsets[] = {0, 0};
-  iree_hal_amdgpu_device_kernel_args_t kernel_args = MakeKernelArgs();
   uint64_t code_object_hash[2] = {0x1111111111111111ull, 0x2222222222222222ull};
 
-  uint64_t executable_id = 0;
+  const uint64_t executable_id = 42;
   IREE_ASSERT_OK(iree_hal_amdgpu_profile_metadata_register_executable(
       &registry_, /*function_count=*/1, &function_info,
-      function_parameter_offsets, code_object_hash, &kernel_args,
-      &executable_id));
+      function_parameter_offsets, code_object_hash, executable_id));
 
-  EXPECT_EQ(executable_id, 1u);
   ASSERT_EQ(registry_.executable_record_count, 1u);
   EXPECT_EQ(registry_.executable_records[0].executable_id, executable_id);
   EXPECT_EQ(registry_.executable_records[0].function_count, 1u);
@@ -88,14 +75,12 @@ TEST_F(ProfileMetadataTest, RegisterExecutableRecordsOnlyIdentity) {
 TEST_F(ProfileMetadataTest, RegisterExecutableComputesStablePipelineHash) {
   iree_hal_executable_function_info_t function_info = MakeFunctionInfo();
   iree_host_size_t function_parameter_offsets[] = {0, 3};
-  iree_hal_amdgpu_device_kernel_args_t kernel_args = MakeKernelArgs();
   uint64_t code_object_hash[2] = {0x0706050403020100ull, 0x1716151413121110ull};
 
-  uint64_t executable_id = 0;
+  const uint64_t executable_id = 42;
   IREE_ASSERT_OK(iree_hal_amdgpu_profile_metadata_register_executable(
       &registry_, /*function_count=*/1, &function_info,
-      function_parameter_offsets, code_object_hash, &kernel_args,
-      &executable_id));
+      function_parameter_offsets, code_object_hash, executable_id));
 
   ASSERT_EQ(registry_.executable_function_record_data_length,
             sizeof(iree_hal_profile_executable_function_record_t) +
@@ -108,39 +93,37 @@ TEST_F(ProfileMetadataTest, RegisterExecutableComputesStablePipelineHash) {
             IREE_HAL_PROFILE_EXECUTABLE_FUNCTION_FLAG_FUNCTION_HASH);
   EXPECT_EQ(function_record->executable_id, executable_id);
   EXPECT_EQ(function_record->function_ordinal, 0u);
-  EXPECT_EQ(function_record->constant_count, 3u);
+  EXPECT_EQ(function_record->constant_byte_length, 3u * sizeof(uint32_t));
   EXPECT_EQ(function_record->binding_count, 2u);
   EXPECT_EQ(function_record->parameter_count, 3u);
   EXPECT_EQ(function_record->workgroup_size[0], 8u);
   EXPECT_EQ(function_record->workgroup_size[1], 4u);
   EXPECT_EQ(function_record->workgroup_size[2], 1u);
-  EXPECT_EQ(function_record->function_hash[0], 0x12dbd8b44277f553ull);
-  EXPECT_EQ(function_record->function_hash[1], 0x873c5d1c5596dce4ull);
+  EXPECT_EQ(function_record->function_hash[0], 0x04c70b01bbe18c13ull);
+  EXPECT_EQ(function_record->function_hash[1], 0x87cc32e38692103cull);
 }
 
 TEST_F(ProfileMetadataTest, RegisterExecutableArtifactsAttachToIdentity) {
   iree_hal_executable_function_info_t function_info = MakeFunctionInfo();
   iree_host_size_t function_parameter_offsets[] = {0, 0};
-  iree_hal_amdgpu_device_kernel_args_t kernel_args = MakeKernelArgs();
   uint64_t code_object_hash[2] = {0x1111111111111111ull, 0x2222222222222222ull};
 
-  uint64_t executable_id = 0;
+  const uint64_t executable_id = 42;
   IREE_ASSERT_OK(iree_hal_amdgpu_profile_metadata_register_executable(
       &registry_, /*function_count=*/1, &function_info,
-      function_parameter_offsets, code_object_hash, &kernel_args,
-      &executable_id));
+      function_parameter_offsets, code_object_hash, executable_id));
 
   const uint8_t code_object_data[] = {0x7f, 'E', 'L', 'F', 0x01};
   const iree_hal_amdgpu_profile_code_object_load_info_t load_infos[] = {
       {
-          .physical_device_ordinal = 0,
-          .load_delta = 0x1000,
-          .load_size = 0x2000,
+          /*.physical_device_ordinal=*/0,
+          /*.load_delta=*/0x1000,
+          /*.load_size=*/0x2000,
       },
       {
-          .physical_device_ordinal = 1,
-          .load_delta = 0x3000,
-          .load_size = 0x4000,
+          /*.physical_device_ordinal=*/1,
+          /*.load_delta=*/0x3000,
+          /*.load_size=*/0x4000,
       },
   };
   IREE_ASSERT_OK(iree_hal_amdgpu_profile_metadata_register_executable_artifacts(
@@ -165,6 +148,34 @@ TEST_F(ProfileMetadataTest, RegisterExecutableArtifactsAttachToIdentity) {
           &registry_, executable_id,
           iree_make_const_byte_span(code_object_data, sizeof(code_object_data)),
           code_object_hash, IREE_ARRAYSIZE(load_infos), load_infos));
+}
+
+TEST_F(ProfileMetadataTest, RegisterExecutableRejectsDuplicateIdentity) {
+  iree_hal_executable_function_info_t function_info = MakeFunctionInfo();
+  iree_host_size_t function_parameter_offsets[] = {0, 0};
+  uint64_t code_object_hash[2] = {0x1111111111111111ull, 0x2222222222222222ull};
+
+  const uint64_t executable_id = 42;
+  IREE_ASSERT_OK(iree_hal_amdgpu_profile_metadata_register_executable(
+      &registry_, /*function_count=*/1, &function_info,
+      function_parameter_offsets, code_object_hash, executable_id));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ALREADY_EXISTS,
+      iree_hal_amdgpu_profile_metadata_register_executable(
+          &registry_, /*function_count=*/1, &function_info,
+          function_parameter_offsets, code_object_hash, executable_id));
+}
+
+TEST_F(ProfileMetadataTest, RegisterExecutableRequiresIdentity) {
+  iree_hal_executable_function_info_t function_info = MakeFunctionInfo();
+  iree_host_size_t function_parameter_offsets[] = {0, 0};
+  uint64_t code_object_hash[2] = {0x1111111111111111ull, 0x2222222222222222ull};
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_amdgpu_profile_metadata_register_executable(
+                            &registry_, /*function_count=*/1, &function_info,
+                            function_parameter_offsets, code_object_hash,
+                            /*executable_id=*/0));
 }
 
 TEST_F(ProfileMetadataTest, RegisterExecutableArtifactsRequiresIdentity) {

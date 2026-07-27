@@ -1,0 +1,74 @@
+// RUN: pass vector-reduce-axes-to-scalar,dce,canonicalize
+
+// The narrow reduce-axes lowering leaves unrelated target-visible vector ops
+// intact while scalarizing the lane program needed by vector.reduce.axes.
+func.def @keeps_unrelated_vector_ops(%input: vector<2x3xf32>, %bias: vector<2x3xf32>, %init: vector<3xf32>) -> (vector<3xf32>, vector<2x3xf32>) {
+  %sum = vector.reduce.axes<addf> %input, %init axes [0] : vector<2x3xf32>, vector<3xf32>
+  %biased = vector.addf %input, %bias : vector<2x3xf32>
+  func.return %sum, %biased : vector<3xf32>, vector<2x3xf32>
+}
+
+// ----
+func.def @keeps_unrelated_vector_ops(%input: vector<2x3xf32>, %bias: vector<2x3xf32>, %init: vector<3xf32>) -> (vector<3xf32>, vector<2x3xf32>) {
+  %7 = vector.extract %init[0] : vector<3xf32> -> f32
+  %8 = vector.extract %input[0, 0] : vector<2x3xf32> -> f32
+  %9 = scalar.addf %7, %8 : f32
+  %10 = vector.extract %input[1, 0] : vector<2x3xf32> -> f32
+  %11 = scalar.addf %9, %10 : f32
+  %12 = vector.extract %init[1] : vector<3xf32> -> f32
+  %13 = vector.extract %input[0, 1] : vector<2x3xf32> -> f32
+  %14 = scalar.addf %12, %13 : f32
+  %15 = vector.extract %input[1, 1] : vector<2x3xf32> -> f32
+  %16 = scalar.addf %14, %15 : f32
+  %17 = vector.extract %init[2] : vector<3xf32> -> f32
+  %18 = vector.extract %input[0, 2] : vector<2x3xf32> -> f32
+  %19 = scalar.addf %17, %18 : f32
+  %20 = vector.extract %input[1, 2] : vector<2x3xf32> -> f32
+  %21 = scalar.addf %19, %20 : f32
+  %sum = vector.from_elements %11, %16, %21 : vector<3xf32>
+  %biased = vector.addf %input, %bias : vector<2x3xf32>
+  func.return %sum, %biased : vector<3xf32>, vector<2x3xf32>
+}
+
+// ====
+
+// Reductions over vector.load recursively materialize scalar view.load lanes so
+// later source-normalization passes can linearize the accesses normally.
+func.def @scalarizes_loaded_lanes(%source: view<2x2xf32, #dense>, %zero: f32) -> (f32) {
+  %tile = vector.load %source[0, 0] : view<2x2xf32, #dense> -> vector<2x2xf32>
+  %sum = vector.reduce.axes<addf> %tile, %zero axes [0, 1] : vector<2x2xf32>, f32
+  func.return %sum : f32
+}
+
+// ----
+func.def @scalarizes_loaded_lanes(%source: view<2x2xf32, #dense>, %zero: f32) -> (f32) {
+  %5 = view.load %source[0, 0] : view<2x2xf32, #dense> -> f32
+  %6 = scalar.addf %zero, %5 : f32
+  %7 = view.load %source[0, 1] : view<2x2xf32, #dense> -> f32
+  %8 = scalar.addf %6, %7 : f32
+  %9 = view.load %source[1, 0] : view<2x2xf32, #dense> -> f32
+  %10 = scalar.addf %8, %9 : f32
+  %11 = view.load %source[1, 1] : view<2x2xf32, #dense> -> f32
+  %sum = scalar.addf %10, %11 : f32
+  func.return %sum : f32
+}
+
+// ====
+
+func.def @balances_reassociated_static_axes(%input: vector<4xf32>, %zero: f32) -> (f32) {
+  %sum = vector.reduce.axes<addf, reassoc|nnan|ninf|nsz> %input, %zero axes [0] : vector<4xf32>, f32
+  func.return %sum : f32
+}
+
+// ----
+func.def @balances_reassociated_static_axes(%input: vector<4xf32>, %zero: f32) -> (f32) {
+  %4 = vector.extract %input[0] : vector<4xf32> -> f32
+  %5 = vector.extract %input[1] : vector<4xf32> -> f32
+  %6 = scalar.addf<reassoc|nnan|ninf|nsz> %4, %5 : f32
+  %7 = vector.extract %input[2] : vector<4xf32> -> f32
+  %8 = vector.extract %input[3] : vector<4xf32> -> f32
+  %9 = scalar.addf<reassoc|nnan|ninf|nsz> %7, %8 : f32
+  %10 = scalar.addf<reassoc|nnan|ninf|nsz> %6, %9 : f32
+  %sum = scalar.addf<reassoc|nnan|ninf|nsz> %zero, %10 : f32
+  func.return %sum : f32
+}

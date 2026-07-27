@@ -1,0 +1,220 @@
+// HIP -> Loom packed field contracts.
+//
+// HIP concept tags: `q2`, `q3`, `q4`, `q5`, `q6`, packed bits, packed
+// nibbles, split high bits, lookup tables, offset-binary values, dot-friendly
+// repack.
+//
+// Position: narrow quantized values are logical fields inside ordinary integer
+// storage. The source should spell the storage load, field ordering, signedness
+// or bias, and any regrouping needed by a target dot instruction. There is no
+// portable scalar `q4` type, and a target should not have to rediscover decode
+// intent from unrelated shifts and masks.
+
+// Q2-style fields fit a regular bitunpack. The raw codes here are packed in
+// least-significant-field order as 0, 1, 2, 3. Subtracting 2 makes the logical
+// signed lanes -2, -1, 0, 1.
+func.def @packed_q2_offset_binary_chunk() -> (i32, i32, i32, i32) {
+  // The signed i8 literal has bit pattern 0xe4.
+  %packed_byte = scalar.constant -28 : i8
+  %packed = vector.from_elements %packed_byte : vector<1xi8>
+  %codes = vector.bitunpacku<2> %packed : vector<1xi8> -> vector<4xi32>
+  %bias = vector.constant 2 : vector<4xi32>
+  %signed = vector.subi %codes, %bias : vector<4xi32>
+  %r0 = vector.extract %signed[0] : vector<4xi32> -> i32
+  %r1 = vector.extract %signed[1] : vector<4xi32> -> i32
+  %r2 = vector.extract %signed[2] : vector<4xi32> -> i32
+  %r3 = vector.extract %signed[3] : vector<4xi32> -> i32
+  func.return %r0, %r1, %r2, %r3 : i32, i32, i32, i32
+}
+
+// Q3-style fields do not divide a dword evenly, so the authoring contract is a
+// reference decode with explicit bit offsets. A target may later choose a
+// packed helper, but source authors should still expose the field order.
+func.def @packed_q3_reference_chunk() -> (i32, i32, i32, i32) {
+  // This word stores fields 0, 1, 4, and 7 in bits [0..11].
+  %word = scalar.constant 3848 : i32
+  %packed = vector.from_elements %word : vector<1xi32>
+  %field0v = vector.bitfield.extractu %packed {offset = 0, width = 3} : vector<1xi32> -> vector<1xi32>
+  %field1v = vector.bitfield.extractu %packed {offset = 3, width = 3} : vector<1xi32> -> vector<1xi32>
+  %field2v = vector.bitfield.extractu %packed {offset = 6, width = 3} : vector<1xi32> -> vector<1xi32>
+  %field3v = vector.bitfield.extractu %packed {offset = 9, width = 3} : vector<1xi32> -> vector<1xi32>
+  %field0 = vector.extract %field0v[0] : vector<1xi32> -> i32
+  %field1 = vector.extract %field1v[0] : vector<1xi32> -> i32
+  %field2 = vector.extract %field2v[0] : vector<1xi32> -> i32
+  %field3 = vector.extract %field3v[0] : vector<1xi32> -> i32
+  %bias = scalar.constant 4 : i32
+  %r0 = scalar.subi %field0, %bias : i32
+  %r1 = scalar.subi %field1, %bias : i32
+  %r2 = scalar.subi %field2, %bias : i32
+  %r3 = scalar.subi %field3, %bias : i32
+  func.return %r0, %r1, %r2, %r3 : i32, i32, i32, i32
+}
+
+// Q4 offset-binary lanes can be regrouped for dot8i4 instead of expanded to
+// f32 first. Xoring each nibble with 8 converts code-8 into signed i4 bits,
+// and the dot op's kind records that the left side is signed while the right
+// side is unsigned.
+func.def @packed_q4_repack_to_dot8i4() -> (i32, i32) {
+  %row0_storage = scalar.constant 1985229328 : i32
+  %row1_storage = scalar.constant -19088744 : i32
+  %rows = vector.from_elements %row0_storage, %row1_storage : vector<2xi32>
+  %offset_to_signed_mask = vector.constant -2004318072 : vector<2xi32>
+  %signed_rows = vector.xori %rows, %offset_to_signed_mask : vector<2xi32>
+  %rhs_storage = scalar.constant 124076833 : i32
+  %rhs = vector.splat %rhs_storage : vector<2xi32>
+  %acc = vector.constant 0 : vector<2xi32>
+  %dot = vector.dot8i4<s4u4> %signed_rows, %rhs, %acc : vector<2xi32>
+  %r0 = vector.extract %dot[0] : vector<2xi32> -> i32
+  %r1 = vector.extract %dot[1] : vector<2xi32> -> i32
+  func.return %r0, %r1 : i32, i32
+}
+
+// Q5-style layouts often store low nibbles in one stream and a side bit in
+// another stream. Keep the side stream explicit: unpack the high bits, insert
+// them into the low nibble payload, then apply the logical signed bias.
+func.def @packed_q5_split_high_bit_chunk() -> (i32, i32, i32, i32) {
+  %l0 = scalar.constant 0x10 : i8
+  %l1 = scalar.constant 0x32 : i8
+  %low_packed = vector.from_elements %l0, %l1 : vector<2xi8>
+  %lo = vector.bitfield.extractu %low_packed {offset = 0, width = 4} : vector<2xi8> -> vector<2xi8>
+  %hi = vector.bitfield.extractu %low_packed {offset = 4, width = 4} : vector<2xi8> -> vector<2xi8>
+  %low_codes = vector.concat<0> %lo, %hi : vector<2xi8>, vector<2xi8> -> vector<4xi8>
+
+  %h0 = scalar.constant 0x0a : i8
+  %high_packed = vector.from_elements %h0 : vector<1xi8>
+  %high8 = vector.bitunpacku<1> %high_packed : vector<1xi8> -> vector<8xi8>
+  %high4 = vector.slice %high8[0] : vector<8xi8> -> vector<4xi8>
+  %codes = vector.bitfield.insert %high4 into %low_codes {offset = 4, width = 1} : vector<4xi8>, vector<4xi8>
+  %bias = vector.constant -16 : vector<4xi8>
+  %signed = vector.addi %codes, %bias : vector<4xi8>
+  %s0 = vector.extract %signed[0] : vector<4xi8> -> i8
+  %s1 = vector.extract %signed[1] : vector<4xi8> -> i8
+  %s2 = vector.extract %signed[2] : vector<4xi8> -> i8
+  %s3 = vector.extract %signed[3] : vector<4xi8> -> i8
+  %r0 = scalar.extsi %s0 : i8 to i32
+  %r1 = scalar.extsi %s1 : i8 to i32
+  %r2 = scalar.extsi %s2 : i8 to i32
+  %r3 = scalar.extsi %s3 : i8 to i32
+  func.return %r0, %r1, %r2, %r3 : i32, i32, i32, i32
+}
+
+// Q6-style layouts generalize the same split-stream idea to two side bits per
+// lane. This shape matches the q6_K register assembly pattern without pulling
+// the entire model block format into a tiny authoring recipe.
+func.def @packed_q6_split_high_bits_chunk() -> (i32, i32, i32, i32) {
+  %l0 = scalar.constant 0x10 : i8
+  %l1 = scalar.constant 0x32 : i8
+  %l2 = scalar.constant 0x54 : i8
+  %l3 = scalar.constant 0x76 : i8
+  %low_packed = vector.from_elements %l0, %l1, %l2, %l3 : vector<4xi8>
+  %h0 = scalar.constant 0x24 : i8
+  %h1 = scalar.constant 0x1b : i8
+  %high_packed = vector.from_elements %h0, %h1 : vector<2xi8>
+
+  %lo4 = vector.bitfield.extractu %low_packed {offset = 0, width = 4} : vector<4xi8> -> vector<4xi8>
+  %hi4 = vector.bitfield.extractu %low_packed {offset = 4, width = 4} : vector<4xi8> -> vector<4xi8>
+  %high2 = vector.bitunpacku<2> %high_packed : vector<2xi8> -> vector<8xi8>
+  %lo2 = vector.slice %high2[0] : vector<8xi8> -> vector<4xi8>
+  %hi2 = vector.slice %high2[4] : vector<8xi8> -> vector<4xi8>
+  %lo6 = vector.bitfield.insert %lo2 into %lo4 {offset = 4, width = 2} : vector<4xi8>, vector<4xi8>
+  %hi6 = vector.bitfield.insert %hi2 into %hi4 {offset = 4, width = 2} : vector<4xi8>, vector<4xi8>
+  %codes = vector.interleave<0> %lo6, %hi6 : vector<4xi8>, vector<4xi8> -> vector<8xi8>
+  %bias = vector.constant -32 : vector<8xi8>
+  %signed = vector.addi %codes, %bias : vector<8xi8>
+  %s0 = vector.extract %signed[0] : vector<8xi8> -> i8
+  %s1 = vector.extract %signed[1] : vector<8xi8> -> i8
+  %s6 = vector.extract %signed[6] : vector<8xi8> -> i8
+  %s7 = vector.extract %signed[7] : vector<8xi8> -> i8
+  %r0 = scalar.extsi %s0 : i8 to i32
+  %r1 = scalar.extsi %s1 : i8 to i32
+  %r6 = scalar.extsi %s6 : i8 to i32
+  %r7 = scalar.extsi %s7 : i8 to i32
+  func.return %r0, %r1, %r6, %r7 : i32, i32, i32, i32
+}
+
+// Table-based formats decode compact integer codes through an explicit
+// per-block grid. The grid is ordinary SSA data; it is not a hidden property of
+// the load or a target-specific memory operation.
+func.def @packed_u4_table_decode_chunk() -> (i32, i32, i32, i32) {
+  %p0 = scalar.constant 0x10 : i8
+  %p1 = scalar.constant 0x32 : i8
+  %packed = vector.from_elements %p0, %p1 : vector<2xi8>
+  %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+  %g0 = scalar.constant -8 : i8
+  %g1 = scalar.constant -1 : i8
+  %g2 = scalar.constant 3 : i8
+  %g3 = scalar.constant 9 : i8
+  %g4 = scalar.constant 0 : i8
+  %grid = vector.from_elements %g0, %g1, %g2, %g3, %g4, %g4, %g4, %g4, %g4, %g4, %g4, %g4, %g4, %g4, %g4, %g4 : vector<16xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
+  %d0 = vector.extract %decoded[0] : vector<4xi8> -> i8
+  %d1 = vector.extract %decoded[1] : vector<4xi8> -> i8
+  %d2 = vector.extract %decoded[2] : vector<4xi8> -> i8
+  %d3 = vector.extract %decoded[3] : vector<4xi8> -> i8
+  %r0 = scalar.extsi %d0 : i8 to i32
+  %r1 = scalar.extsi %d1 : i8 to i32
+  %r2 = scalar.extsi %d2 : i8 to i32
+  %r3 = scalar.extsi %d3 : i8 to i32
+  func.return %r0, %r1, %r2, %r3 : i32, i32, i32, i32
+}
+
+check.case @case_packed_field_contracts {
+  %q2_0, %q2_1, %q2_2, %q2_3 = func.call @packed_q2_offset_binary_chunk() : () -> (i32, i32, i32, i32)
+  %q2_e0 = check.literal value(-2) : i32
+  %q2_e1 = check.literal value(-1) : i32
+  %q2_e2 = check.literal value(0) : i32
+  %q2_e3 = check.literal value(1) : i32
+  check.expect.equal actual(%q2_0) expected(%q2_e0) : i32
+  check.expect.equal actual(%q2_1) expected(%q2_e1) : i32
+  check.expect.equal actual(%q2_2) expected(%q2_e2) : i32
+  check.expect.equal actual(%q2_3) expected(%q2_e3) : i32
+
+  %q3_0, %q3_1, %q3_2, %q3_3 = func.call @packed_q3_reference_chunk() : () -> (i32, i32, i32, i32)
+  %q3_e0 = check.literal value(-4) : i32
+  %q3_e1 = check.literal value(-3) : i32
+  %q3_e2 = check.literal value(0) : i32
+  %q3_e3 = check.literal value(3) : i32
+  check.expect.equal actual(%q3_0) expected(%q3_e0) : i32
+  check.expect.equal actual(%q3_1) expected(%q3_e1) : i32
+  check.expect.equal actual(%q3_2) expected(%q3_e2) : i32
+  check.expect.equal actual(%q3_3) expected(%q3_e3) : i32
+
+  %q4_0, %q4_1 = func.call @packed_q4_repack_to_dot8i4() : () -> (i32, i32)
+  %q4_e0 = check.literal value(-112) : i32
+  %q4_e1 = check.literal value(112) : i32
+  check.expect.equal actual(%q4_0) expected(%q4_e0) : i32
+  check.expect.equal actual(%q4_1) expected(%q4_e1) : i32
+
+  %q5_0, %q5_1, %q5_2, %q5_3 = func.call @packed_q5_split_high_bit_chunk() : () -> (i32, i32, i32, i32)
+  %q5_e0 = check.literal value(-16) : i32
+  %q5_e1 = check.literal value(2) : i32
+  %q5_e2 = check.literal value(-15) : i32
+  %q5_e3 = check.literal value(3) : i32
+  check.expect.equal actual(%q5_0) expected(%q5_e0) : i32
+  check.expect.equal actual(%q5_1) expected(%q5_e1) : i32
+  check.expect.equal actual(%q5_2) expected(%q5_e2) : i32
+  check.expect.equal actual(%q5_3) expected(%q5_e3) : i32
+
+  %q6_0, %q6_1, %q6_6, %q6_7 = func.call @packed_q6_split_high_bits_chunk() : () -> (i32, i32, i32, i32)
+  %q6_e0 = check.literal value(-32) : i32
+  %q6_e1 = check.literal value(17) : i32
+  %q6_e6 = check.literal value(-26) : i32
+  %q6_e7 = check.literal value(-25) : i32
+  check.expect.equal actual(%q6_0) expected(%q6_e0) : i32
+  check.expect.equal actual(%q6_1) expected(%q6_e1) : i32
+  check.expect.equal actual(%q6_6) expected(%q6_e6) : i32
+  check.expect.equal actual(%q6_7) expected(%q6_e7) : i32
+
+  %t0, %t1, %t2, %t3 = func.call @packed_u4_table_decode_chunk() : () -> (i32, i32, i32, i32)
+  %t_e0 = check.literal value(-8) : i32
+  %t_e1 = check.literal value(-1) : i32
+  %t_e2 = check.literal value(3) : i32
+  %t_e3 = check.literal value(9) : i32
+  check.expect.equal actual(%t0) expected(%t_e0) : i32
+  check.expect.equal actual(%t1) expected(%t_e1) : i32
+  check.expect.equal actual(%t2) expected(%t_e2) : i32
+  check.expect.equal actual(%t3) expected(%t_e3) : i32
+  check.return
+}
+
+check.benchmark<@case_packed_field_contracts> @bench_packed_field_contracts

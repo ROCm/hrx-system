@@ -257,12 +257,8 @@ CUDAAPI CUresult cuSetDevice(int device) {
   }
 
   // Set the primary context as current.
-  status = iree_hal_streaming_context_set_current(primary_context);
-  CUresult result = iree_status_to_cu_result(status);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-  }
-  return result;
+  iree_hal_streaming_context_set_current(primary_context);
+  return CUDA_SUCCESS;
 }
 
 //===----------------------------------------------------------------------===//
@@ -333,7 +329,7 @@ CUDAAPI CUresult cuCtxCreate(CUcontext* pctx, unsigned int flags,
   if (iree_status_is_ok(status)) {
     *pctx = (CUcontext)context;
     // Make it current.
-    status = iree_hal_streaming_context_set_current(context);
+    iree_hal_streaming_context_set_current(context);
   }
 
   CUresult result = iree_status_to_cu_result(status);
@@ -387,11 +383,9 @@ CUDAAPI CUresult cuCtxPopCurrent(CUcontext* pctx) {
 
 CUDAAPI CUresult cuCtxSetCurrent(CUcontext ctx) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status = iree_hal_streaming_context_set_current(
-      (iree_hal_streaming_context_t*)ctx);
-  CUresult result = iree_status_to_cu_result(status);
+  iree_hal_streaming_context_set_current((iree_hal_streaming_context_t*)ctx);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  return CUDA_SUCCESS;
 }
 
 CUDAAPI CUresult cuCtxGetCurrent(CUcontext* pctx) {
@@ -668,17 +662,13 @@ CUDAAPI CUresult cuDeviceTotalMem(size_t* bytes, CUdevice dev) {
     return CUDA_ERROR_INVALID_VALUE;
   }
 
-  iree_device_size_t free_memory = 0;
-  iree_device_size_t total_memory = 0;
-  iree_status_t status =
-      iree_hal_streaming_device_memory_info(dev, &free_memory, &total_memory);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
+  iree_hal_streaming_device_t* device = iree_hal_streaming_device_entry(dev);
+  if (!device) {
     IREE_TRACE_ZONE_END(z0);
     return CUDA_ERROR_INVALID_DEVICE;
   }
 
-  *bytes = total_memory;
+  *bytes = (size_t)device->total_memory;
   IREE_TRACE_ZONE_END(z0);
   return CUDA_SUCCESS;
 }
@@ -733,15 +723,10 @@ CUDAAPI CUresult cuDeviceGetAttribute(int* pi, CUdevice_attribute attrib,
       *pi = device->compute_capability_minor;
       break;
     case CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN:
-      // Return the maximum shared memory per block when opted in.
-      // For now, return the same as MAX_SHARED_MEMORY_PER_BLOCK.
-      // This would typically be higher on devices that support > 48KB.
-      *pi = 49152;  // 48KB default, actual value would be device-specific.
+      *pi = device->max_shared_memory_per_block;
       break;
     case CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR:
-      // Total shared memory per SM/multiprocessor.
-      // Common values: 64KB, 96KB, 128KB depending on architecture.
-      *pi = 65536;  // 64KB default.
+      *pi = device->max_shared_memory_per_multiprocessor;
       break;
     case CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED:
       // GPU Direct RDMA with CUDA VMM support.
@@ -1025,14 +1010,10 @@ CUDAAPI CUresult cuDevicePrimaryCtxReset(CUdevice dev) {
     device->primary_context = NULL;
 
     // Also clear memory pools.
-    if (device->current_mem_pool) {
-      hrx_mem_pool_release(device->current_mem_pool);
-      device->current_mem_pool = NULL;
-    }
-    if (device->default_mem_pool) {
-      hrx_mem_pool_release(device->default_mem_pool);
-      device->default_mem_pool = NULL;
-    }
+    hrx_mem_pool_release(device->current_mem_pool);
+    device->current_mem_pool = NULL;
+    hrx_mem_pool_release(device->default_mem_pool);
+    device->default_mem_pool = NULL;
 
     iree_slim_mutex_unlock(&device->primary_context_mutex);
 
@@ -1980,12 +1961,11 @@ CUDAAPI CUresult cuModuleLoad(CUmodule* module, const char* fname) {
     return CUDA_ERROR_INVALID_CONTEXT;
   }
 
-  iree_hal_executable_caching_mode_t caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_PERSISTENT_CACHING |
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION;
+  iree_hal_executable_load_flags_t load_flags =
+      IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION;
   iree_hal_streaming_module_t* stream_module = NULL;
   iree_status_t status = iree_hal_streaming_module_create_from_file(
-      context, caching_mode, iree_make_cstring_view(fname),
+      context, load_flags, iree_make_cstring_view(fname),
       context->host_allocator, &stream_module);
 
   if (iree_status_is_ok(status)) {
@@ -2092,14 +2072,13 @@ CUDAAPI CUresult cuModuleLoadDataEx(CUmodule* module, const void* image,
     }
   }
 
-  // TODO: Determine caching mode from JIT options if available.
-  iree_hal_executable_caching_mode_t caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA |
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION;
+  // TODO: Determine load flags from JIT options if available.
+  iree_hal_executable_load_flags_t load_flags =
+      IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION;
 
   iree_hal_streaming_module_t* stream_module = NULL;
   iree_status_t status = iree_hal_streaming_module_create_from_memory(
-      context, caching_mode, iree_make_const_byte_span(image, 0),
+      context, load_flags, iree_make_const_byte_span(image, 0),
       context->host_allocator, &stream_module);
 
   if (iree_status_is_ok(status)) {
@@ -2120,7 +2099,21 @@ CUDAAPI CUresult cuModuleLoadFatBinary(CUmodule* module, const void* fatCubin) {
 
 CUDAAPI CUresult cuModuleUnload(CUmodule hmod) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_streaming_module_release((iree_hal_streaming_module_t*)hmod);
+  if (!hmod) {
+    IREE_TRACE_ZONE_END(z0);
+    return CUDA_ERROR_INVALID_HANDLE;
+  }
+
+  iree_hal_streaming_module_t* module = (iree_hal_streaming_module_t*)hmod;
+  iree_status_t status =
+      iree_hal_streaming_context_synchronize(module->context);
+  if (!iree_status_is_ok(status)) {
+    CUresult result = iree_status_to_cu_result(status);
+    IREE_TRACE_ZONE_END(z0);
+    return result;
+  }
+
+  iree_hal_streaming_module_release(module);
   IREE_TRACE_ZONE_END(z0);
   return CUDA_SUCCESS;
 }
@@ -3332,12 +3325,19 @@ CUDAAPI CUresult cuGraphExecUpdate(CUgraphExec hGraphExec, CUgraph hGraph,
       (iree_hal_streaming_graph_exec_t*)hGraphExec;
   iree_hal_streaming_graph_t* graph = (iree_hal_streaming_graph_t*)hGraph;
 
-  iree_status_t status = iree_hal_streaming_graph_exec_update(exec, graph);
-  if (!iree_status_is_ok(status) && hErrorNode_out) {
-    *hErrorNode_out = NULL;  // We don't track specific error nodes yet.
+  iree_hal_streaming_graph_node_t* error_node = NULL;
+  iree_hal_streaming_graph_exec_update_result_t update_result =
+      IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_ERROR;
+  iree_status_t status = iree_hal_streaming_graph_exec_update(
+      exec, graph, &error_node, &update_result);
+  if (hErrorNode_out) {
+    *hErrorNode_out = (CUgraphNode)error_node;
   }
 
-  CUresult result = iree_status_to_cu_result(status);
+  CUresult result = iree_status_is_ok(status)
+                        ? CUDA_SUCCESS
+                        : CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE;
+  if (!iree_status_is_ok(status)) iree_status_ignore(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -4067,7 +4067,7 @@ CUDAAPI const char* cuGetErrorName(CUresult error) {
 }
 
 // Thread-local error state.
-static iree_thread_local CUresult iree_cuda_thread_error = CUDA_SUCCESS;
+static IREE_THREAD_LOCAL CUresult iree_cuda_thread_error = CUDA_SUCCESS;
 
 static void iree_cuda_thread_error_set(CUresult error) {
   iree_cuda_thread_error = error;

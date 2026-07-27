@@ -1,0 +1,57 @@
+// RUN: roundtrip
+
+func.def @prefetch_static(%input: buffer) {
+  %base = index.constant 16 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<64xi32, #dense>
+  view.prefetch %input_view[4] {intent = read, locality = l1} : view<64xi32, #dense>
+  func.return
+}
+
+// ====
+
+kernel.def @prefetch_workgroup_id() {
+  %unit = index.constant 1 : index
+  %workgroups = index.constant 1025 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<1025xi32, #dense>
+  view.prefetch %input_view[%workgroup] {intent = read, locality = l2} : view<1025xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @prefetch_fixed_query_offset() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %c4 = index.constant 4 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c8, %c4, %c1) : index
+} launch(%input: buffer) {
+  %workgroup_size_x = kernel.workgroup.size<x> : index
+  %workgroup_size_y = kernel.workgroup.size<y> : index
+  %subgroup_size = kernel.subgroup.size : index
+  %subgroup_count = kernel.subgroup.count : index
+  %offset0 = index.add %workgroup_size_x, %workgroup_size_y : index
+  %offset1 = index.add %offset0, %subgroup_size : index
+  %offset = index.add %offset1, %subgroup_count : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
+  view.prefetch %input_view[%offset] {intent = read, locality = l1} : view<64xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @prefetch_workitem_dropped() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
+  view.prefetch %input_view[%lane] {intent = read, locality = l1} : view<64xi32, #dense>
+  kernel.return
+}

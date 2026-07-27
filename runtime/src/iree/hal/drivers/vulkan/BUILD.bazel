@@ -24,6 +24,31 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "device_spec",
+    srcs = ["device_spec.c"],
+    hdrs = ["device_spec.h"],
+    deps = [
+        ":api",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "device_spec_builder",
+    srcs = ["device_spec_builder.c"],
+    hdrs = ["device_spec_builder.h"],
+    deps = [
+        ":device_spec",
+        ":headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+    ],
+)
+
 # Provided for tests and tools that may reach in.
 # These headers are not part of the public API and should not be depended on.
 iree_runtime_cc_library(
@@ -37,6 +62,7 @@ iree_runtime_cc_library(
         "executable.h",
         "physical_device.h",
         "physical_device_selection.h",
+        "queue_stats.h",
         "spirv.h",
     ],
     deps = [
@@ -44,6 +70,21 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/vulkan/util:libvulkan",
+        "//third_party:vulkan_headers",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "device_spec_test",
+    srcs = ["device_spec_test.cc"],
+    deps = [
+        ":device_spec",
+        ":device_spec_builder",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
         "//third_party:vulkan_headers",
     ],
 )
@@ -112,23 +153,6 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "executable_test",
-    srcs = ["executable_test.cc"],
-    deps = [
-        ":headers",
-        ":vulkan",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base:core_headers",
-        "//runtime/src/iree/base/internal/flatcc:building",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/utils:executable_header",
-        "//runtime/src/iree/schemas:vulkan_executable_def_c_fbs",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-iree_runtime_cc_test(
     name = "physical_device_selection_test",
     srcs = ["physical_device_selection_test.cc"],
     deps = [
@@ -174,8 +198,6 @@ iree_runtime_cc_library(
         "driver.h",
         "executable.c",
         "executable.h",
-        "executable_cache.c",
-        "executable_cache.h",
         "logical_device.c",
         "logical_device.h",
         "physical_device.c",
@@ -184,6 +206,7 @@ iree_runtime_cc_library(
         "physical_device_selection.h",
         "queue.c",
         "queue.h",
+        "queue_stats.h",
         "semaphore.c",
         "semaphore.h",
         "slab_provider.c",
@@ -196,13 +219,13 @@ iree_runtime_cc_library(
     ],
     deps = [
         ":api",
+        ":device_spec_builder",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/base/internal/flatcc:parsing",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/threading:thread",
         "//runtime/src/iree/hal",
@@ -213,12 +236,8 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/memory:slab_provider",
         "//runtime/src/iree/hal/memory:tlsf_pool",
         "//runtime/src/iree/hal/memory:tracing",
-        "//runtime/src/iree/hal/utils:executable_debug_info",
-        "//runtime/src/iree/hal/utils:executable_header",
         "//runtime/src/iree/hal/utils:files",
         "//runtime/src/iree/hal/utils:resource_set",
-        "//runtime/src/iree/schemas:executable_debug_info_c_fbs",
-        "//runtime/src/iree/schemas:vulkan_executable_def_c_fbs",
         "//third_party:vulkan_headers",
     ],
 )

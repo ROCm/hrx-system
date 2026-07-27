@@ -18,9 +18,9 @@ from pathlib import Path
 
 from build_tools.devtools import cmake_file_api
 from build_tools.devtools.command_plan import CommandPlan, quote_command
-from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment
+from build_tools.devtools.environment import LOCAL_TMP_ROOT, REPO_ROOT, ToolEnvironment
 
-CMAKE_TRY_ROOT = REPO_ROOT / ".iree-cmake-try"
+CMAKE_TRY_ROOT = LOCAL_TMP_ROOT / "iree-cmake-try"
 DEFAULT_TRY_BINARY_NAME = "snippet"
 TRY_TARGET_NAME = "iree_cmake_try_snippet"
 PROJECT_CACHE_PREFIXES = ("IREE_", "LIBHRX_", "HRX_")

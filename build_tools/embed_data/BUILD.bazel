@@ -22,6 +22,7 @@ cc_test(
     name = "embed_data_test",
     srcs = ["embed_data_test.cc"],
     deps = [
+        "//build_tools/embed_data/testdata:empty_embed",
         "//build_tools/embed_data/testdata:flat_embed",
         "//build_tools/embed_data/testdata:path_embed",
     ],

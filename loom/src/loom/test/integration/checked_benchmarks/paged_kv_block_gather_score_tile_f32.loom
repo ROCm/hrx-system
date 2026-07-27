@@ -1,0 +1,106 @@
+// Paged KV block gather feeding a score tile.
+//
+// This uses the current explicit offset-domain spelling: page ids are ordinary
+// i32 payloads loaded from a page table, page and lane indices are range-checked
+// with source assumptions, and byte offsets select the four-value payload tile.
+// Numeric policy is ML-fast dot-style scoring: the payload products and score
+// reduction are contractable so backend comparisons may expect FMA forms.
+kernel.def @paged_kv_block_gather_score_tile_f32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%block_id0: index, %lane_start0: index, %valid_count: i32, %query: buffer, %page_table: buffer, %page_pool: buffer, %score_output: buffer, %payload_output: buffer) {
+  %base = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %zero_i32 = scalar.constant 0 : i32
+  %one_i32 = scalar.constant 1 : i32
+  %zero_f32 = scalar.constant 0.0 : f32
+
+  %block_id = index.assume %block_id0 [range(%block_id0, 0, 1)] : index
+  %lane_start = index.assume %lane_start0 [range(%lane_start0, 0, 4)] : index
+  %page_entry_byte_stride = index.constant 4 : offset
+  %page_byte_stride = index.constant 32 : offset
+  %lane_byte_stride = index.constant 4 : offset
+
+  %query_noalias, %page_table_noalias, %page_pool_noalias, %score_output_noalias, %payload_output_noalias = buffer.assume.noalias %query, %page_table, %page_pool, %score_output, %payload_output : buffer, buffer, buffer, buffer, buffer
+  %query_view = buffer.view %query_noalias[%base] : buffer -> view<4xf32, #dense>
+  %score_output_view = buffer.view %score_output_noalias[%base] : buffer -> view<1xf32, #dense>
+  %payload_output_view = buffer.view %payload_output_noalias[%base] : buffer -> view<4xf32, #dense>
+
+  %page_entry_offset = index.scale %block_id, %page_entry_byte_stride : index, offset -> offset
+  %page_table_view = buffer.view %page_table_noalias[%page_entry_offset] : buffer -> view<1xi32, #dense>
+  %page_i32 = view.load %page_table_view[0] : view<1xi32, #dense> -> i32
+  %page0 = index.cast %page_i32 : i32 to index
+  %page = index.assume %page0 [range(%page0, 0, 1)] : index
+
+  %page_base = index.scale %page, %page_byte_stride : index, offset -> offset
+  %lane_offset = index.scale %lane_start, %lane_byte_stride : index, offset -> offset
+  %payload_offset = index.add %page_base, %lane_offset : offset
+  %payload_view = buffer.view %page_pool_noalias[%payload_offset] : buffer -> view<4xf32, #dense>
+
+  %query_values = vector.load %query_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %payload_values = vector.load %payload_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %lanes = vector.iota %zero_i32 step %one_i32 : vector<4xi32>
+  %valid_limits = vector.splat %valid_count : vector<4xi32>
+  %valid = vector.cmpi slt, %lanes, %valid_limits : vector<4xi32> -> vector<4xi1>
+  %zeros = vector.splat %zero_f32 : vector<4xf32>
+  %masked_payload_values = vector.select %valid, %payload_values, %zeros : vector<4xf32>
+  %products = vector.mulf<reassoc|nnan|nsz|contract> %query_values, %masked_payload_values : vector<4xf32>
+  %score = vector.reduce<addf, reassoc|nnan|nsz|contract> %products, %zero_f32 : vector<4xf32>, f32
+
+  view.store %score, %score_output_view[%zero_index] : f32, view<1xf32, #dense>
+  vector.store %masked_payload_values, %payload_output_view[%zero_index] : vector<4xf32>, view<4xf32, #dense>
+  kernel.return
+}
+
+check.case public @paged_kv_block_gather_score_tile_page1_lane2_case {
+  %block_id = check.literal value(0) : index
+  %lane_start = check.literal value(2) : index
+  %valid_count = check.literal value(4) : i32
+  %query = check.generate.fill value(1.0) : tensor<4xf32>
+  %page_table = check.generate.iota offset(1) step(-1) : tensor<2xi32>
+  %page_pool = check.generate.iota offset(1.0) step(1.0) : tensor<16xf32>
+  %score_output = check.generate.fill value(-1.0) : tensor<1xf32>
+  %payload_output = check.generate.fill value(-1.0) : tensor<4xf32>
+  %expected_score = check.generate.fill value(50.0) : tensor<1xf32>
+  %expected_payload = check.generate.iota offset(11.0) step(1.0) : tensor<4xf32>
+  func.call @paged_kv_block_gather_score_tile_f32(%block_id, %lane_start, %valid_count, %query, %page_table, %page_pool, %score_output, %payload_output) : (index, index, i32, tensor<4xf32>, tensor<2xi32>, tensor<16xf32>, tensor<1xf32>, tensor<4xf32>)
+  check.expect.close actual(%score_output) expected(%expected_score) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
+  check.expect.close actual(%payload_output) expected(%expected_payload) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.case public @paged_kv_block_gather_score_tile_page0_lane1_case {
+  %block_id = check.literal value(1) : index
+  %lane_start = check.literal value(1) : index
+  %valid_count = check.literal value(4) : i32
+  %query = check.generate.fill value(1.0) : tensor<4xf32>
+  %page_table = check.generate.iota offset(1) step(-1) : tensor<2xi32>
+  %page_pool = check.generate.iota offset(1.0) step(1.0) : tensor<16xf32>
+  %score_output = check.generate.fill value(-1.0) : tensor<1xf32>
+  %payload_output = check.generate.fill value(-1.0) : tensor<4xf32>
+  %expected_score = check.generate.fill value(14.0) : tensor<1xf32>
+  %expected_payload = check.generate.iota offset(2.0) step(1.0) : tensor<4xf32>
+  func.call @paged_kv_block_gather_score_tile_f32(%block_id, %lane_start, %valid_count, %query, %page_table, %page_pool, %score_output, %payload_output) : (index, index, i32, tensor<4xf32>, tensor<2xi32>, tensor<16xf32>, tensor<1xf32>, tensor<4xf32>)
+  check.expect.close actual(%score_output) expected(%expected_score) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
+  check.expect.close actual(%payload_output) expected(%expected_payload) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.case public @paged_kv_block_gather_score_tile_tail_case {
+  %block_id = check.literal value(0) : index
+  %lane_start = check.literal value(4) : index
+  %valid_count = check.literal value(3) : i32
+  %query = check.generate.fill value(1.0) : tensor<4xf32>
+  %page_table = check.generate.iota offset(1) step(-1) : tensor<2xi32>
+  %page_pool = check.generate.iota offset(1.0) step(1.0) : tensor<16xf32>
+  %score_output = check.generate.fill value(-1.0) : tensor<1xf32>
+  %payload_output = check.generate.fill value(-1.0) : tensor<4xf32>
+  %expected_score = check.generate.fill value(42.0) : tensor<1xf32>
+  func.call @paged_kv_block_gather_score_tile_f32(%block_id, %lane_start, %valid_count, %query, %page_table, %page_pool, %score_output, %payload_output) : (index, index, i32, tensor<4xf32>, tensor<2xi32>, tensor<16xf32>, tensor<1xf32>, tensor<4xf32>)
+  check.expect.close actual(%score_output) expected(%expected_score) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
+  check.return
+}
+
+check.benchmark<@paged_kv_block_gather_score_tile_page1_lane2_case> @paged_kv_block_gather_score_tile_page1_lane2
+check.benchmark<@paged_kv_block_gather_score_tile_page0_lane1_case> @paged_kv_block_gather_score_tile_page0_lane1
+check.benchmark<@paged_kv_block_gather_score_tile_tail_case> @paged_kv_block_gather_score_tile_tail

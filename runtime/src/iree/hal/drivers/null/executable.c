@@ -24,9 +24,11 @@ static iree_hal_null_executable_t* iree_hal_null_executable_cast(
 }
 
 iree_status_t iree_hal_null_executable_create(
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
-  IREE_ASSERT_ARGUMENT(executable_params);
+  IREE_ASSERT_ARGUMENT(target);
+  IREE_ASSERT_ARGUMENT(load_params);
   IREE_ASSERT_ARGUMENT(out_executable);
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_executable = NULL;
@@ -40,25 +42,20 @@ iree_status_t iree_hal_null_executable_create(
                                &executable->resource);
   executable->host_allocator = host_allocator;
 
-  // TODO(null): load executable module(s). Note that the input data should be
-  // treated as untrusted and should be verified to the best ability the format
-  // provides. A target that cannot provide verification will be treated as
-  // unsafe. For JIT-style implementations as much work as possible should be
-  // done here so that errors can be propagated back to users - do not defer
-  // preparation.
+  // TODO(null): load executable module(s) for |target|. The input data is
+  // untrusted and requires the strongest verification the native artifact
+  // representation provides. For JIT-style implementations as much work as
+  // possible belongs here so failures propagate synchronously to users instead
+  // of appearing during dispatch.
   //
   // In general the executable should only retain information required to
   // service the command buffer implementation that will be dispatching entry
   // points within it. Optionally information can be retained for tracing and
   // debugging.
   //
-  // Implementations with flexible formats (ELF, etc) can directly use those for
-  // metadata as well with custom sections. If an implementation does not have a
-  // flexible format or support linking and requires several modules a wrapper
-  // can be used instead. In upstream IREE HALs Flatbuffers is used and is the
-  // preferred format (zero-copy, mmappable, verifiable, near header-only dep
-  // with no binary size or runtime overheads, etc) and is the easiest to use,
-  // but you do you.
+  // Native containers such as ELF can carry reflection and ABI metadata in
+  // their normal sections. Drivers loading another container retain only the
+  // target-native metadata required for dispatch, tracing, and debugging.
   iree_status_t status =
       iree_make_status(IREE_STATUS_UNIMPLEMENTED, "executable not implemented");
 
@@ -129,17 +126,41 @@ static iree_status_t iree_hal_null_executable_lookup_export_by_name(
                           "reflection not implemented");
 }
 
-static iree_status_t iree_hal_null_executable_lookup_global_by_name(
+static iree_status_t iree_hal_null_executable_try_lookup_global_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+    bool* out_found, iree_hal_executable_global_t* out_global) {
   iree_hal_null_executable_t* executable =
       iree_hal_null_executable_cast(base_executable);
   (void)executable;
   (void)name;
+  *out_found = false;
+  *out_global = iree_hal_executable_global_invalid();
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_null_executable_global_info(
+    iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
+    iree_hal_executable_global_info_t* out_info) {
+  iree_hal_null_executable_t* executable =
+      iree_hal_null_executable_cast(base_executable);
+  (void)executable;
+  (void)global;
+  memset(out_info, 0, sizeof(*out_info));
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "invalid null executable global");
+}
+
+static iree_status_t iree_hal_null_executable_global_buffer(
+    iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
+    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+  iree_hal_null_executable_t* executable =
+      iree_hal_null_executable_cast(base_executable);
+  (void)executable;
+  (void)global;
   (void)queue_affinity;
   *out_buffer = NULL;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "global lookup not implemented");
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "invalid null executable global");
 }
 
 static const iree_hal_executable_vtable_t iree_hal_null_executable_vtable = {
@@ -148,5 +169,8 @@ static const iree_hal_executable_vtable_t iree_hal_null_executable_vtable = {
     .function_info = iree_hal_null_executable_export_info,
     .function_parameters = iree_hal_null_executable_export_parameters,
     .lookup_function_by_name = iree_hal_null_executable_lookup_export_by_name,
-    .lookup_global_by_name = iree_hal_null_executable_lookup_global_by_name,
+    .try_lookup_global_by_name =
+        iree_hal_null_executable_try_lookup_global_by_name,
+    .global_info = iree_hal_null_executable_global_info,
+    .global_buffer = iree_hal_null_executable_global_buffer,
 };

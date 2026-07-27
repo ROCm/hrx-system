@@ -1,0 +1,13 @@
+// RUN: roundtrip
+
+func.def @workgroup_barrier() {
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  func.return
+}
+
+// ====
+
+func.def @subgroup_shared_memory_barrier() {
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  func.return
+}

@@ -7,6 +7,11 @@
 """Shared C/C++ Bazel test macros for IREE repositories."""
 
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load(
+    "//build_tools/sanitizer:suppressions.bzl",
+    "iree_sanitizer_suppression_data",
+    "iree_sanitizer_suppression_env",
+)
 load(":cc_attrs.bzl", "cc_attrs")
 
 def _iree_cc_test_impl(
@@ -26,10 +31,13 @@ def _iree_cc_test_impl(
         linkstatic,
         args,
         env,
+        sanitizer_suppressions,
         size,
         tags,
         resource_group,
         **kwargs):
+    data = iree_sanitizer_suppression_data(data, sanitizer_suppressions)
+    env = iree_sanitizer_suppression_env(env, sanitizer_suppressions)
     target_attrs = cc_attrs.collect(
         srcs = srcs,
         hdrs = None,
@@ -80,11 +88,16 @@ iree_cc_test = macro(
                 doc = "Command-line arguments passed to the test binary.",
             ),
             "env": attr.string_dict(
+                configurable = False,
                 doc = "Environment variables passed to the test binary.",
             ),
             "resource_group": attr.string(
                 configurable = False,
                 doc = "Local resource name used to serialize tests competing for the same host resource.",
+            ),
+            "sanitizer_suppressions": attr.string_dict(
+                configurable = False,
+                doc = "Sanitizer suppression files keyed by sanitizer name.",
             ),
             "size": attr.string(
                 configurable = False,

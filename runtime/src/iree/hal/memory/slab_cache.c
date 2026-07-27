@@ -473,20 +473,29 @@ static iree_status_t iree_hal_slab_cache_wrap_buffer(
       release_callback, out_buffer);
 }
 
+static iree_status_t iree_hal_slab_cache_validate_asan_options(
+    const iree_hal_slab_provider_t* base_provider,
+    const iree_hal_asan_pool_options_t* options) {
+  const iree_hal_slab_cache_t* cache =
+      (const iree_hal_slab_cache_t*)base_provider;
+  return iree_hal_slab_provider_validate_asan_options(cache->inner_provider,
+                                                      options);
+}
+
+static void iree_hal_slab_cache_advise_asan_range(
+    iree_hal_slab_provider_t* base_provider, const iree_hal_slab_t* slab,
+    iree_device_size_t backing_offset,
+    iree_hal_asan_range_advice_flags_t advice_flags,
+    const iree_hal_asan_allocation_layout_t* layout) {
+  iree_hal_slab_cache_t* cache = (iree_hal_slab_cache_t*)base_provider;
+  iree_hal_slab_provider_advise_asan_range(
+      cache->inner_provider, slab, backing_offset, advice_flags, layout);
+}
+
 static void iree_hal_slab_cache_prefault(
     iree_hal_slab_provider_t* base_provider, iree_hal_slab_t* slab) {
   // Slabs from the cache are already pre-faulted by the background thread.
   // Oversized slabs that bypassed the cache were pre-faulted in acquire_slab.
-}
-
-static void iree_hal_slab_cache_query_properties(
-    const iree_hal_slab_provider_t* base_provider,
-    iree_hal_memory_type_t* out_memory_type,
-    iree_hal_buffer_usage_t* out_supported_usage) {
-  const iree_hal_slab_cache_t* cache =
-      (const iree_hal_slab_cache_t*)base_provider;
-  iree_hal_slab_provider_query_properties(cache->inner_provider,
-                                          out_memory_type, out_supported_usage);
 }
 
 static void iree_hal_slab_cache_trim(
@@ -543,6 +552,16 @@ static void iree_hal_slab_cache_query_stats(
       &cache->prefault_time_nanoseconds, iree_memory_order_relaxed);
 }
 
+static void iree_hal_slab_cache_query_properties(
+    const iree_hal_slab_provider_t* base_provider,
+    iree_hal_memory_type_t* out_memory_type,
+    iree_hal_buffer_usage_t* out_supported_usage) {
+  const iree_hal_slab_cache_t* cache =
+      (const iree_hal_slab_cache_t*)base_provider;
+  iree_hal_slab_provider_query_properties(cache->inner_provider,
+                                          out_memory_type, out_supported_usage);
+}
+
 //===----------------------------------------------------------------------===//
 // Vtable
 //===----------------------------------------------------------------------===//
@@ -552,6 +571,8 @@ static const iree_hal_slab_provider_vtable_t iree_hal_slab_cache_vtable = {
     .acquire_slab = iree_hal_slab_cache_acquire_slab,
     .release_slab = iree_hal_slab_cache_release_slab,
     .wrap_buffer = iree_hal_slab_cache_wrap_buffer,
+    .validate_asan_options = iree_hal_slab_cache_validate_asan_options,
+    .advise_asan_range = iree_hal_slab_cache_advise_asan_range,
     .prefault = iree_hal_slab_cache_prefault,
     .trim = iree_hal_slab_cache_trim,
     .query_stats = iree_hal_slab_cache_query_stats,

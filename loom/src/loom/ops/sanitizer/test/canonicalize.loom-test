@@ -1,0 +1,160 @@
+// RUN: pass canonicalize
+
+// A sanitizer assertion is removed only when incoming facts already prove every
+// predicate. The checked result is replaced with the original value.
+func.def @proven_assertion_folds(%n: index) -> (index) {
+  %known = index.assume %n [range(%n, 0, 4096), mul(%n, 16)] : index
+  %checked = sanitizer.assert.value %known [range(%known, 0, 4096), mul(%known, 8)] : index
+  func.return %checked : index
+}
+
+// ----
+func.def @proven_assertion_folds(%n: index) -> (index) {
+  %known = index.assume %n [range(%n, 0, 4096), mul(%n, 16)] : index
+  func.return %known : index
+}
+
+// ====
+
+// A stronger checked alias proves a later weaker assertion, so only the first
+// executable boundary remains.
+func.def @weaker_dominated_assertion_folds(%n: index) -> (index) {
+  %strong = sanitizer.assert.value %n [range(%n, 1, 1024), ne(%n, 0), pow2(%n), mul(%n, 64)] : index
+  %weak = sanitizer.assert.value %strong [range(%strong, 0, 2048), ne(%strong, 0), mul(%strong, 8)] : index
+  func.return %weak : index
+}
+
+// ----
+func.def @weaker_dominated_assertion_folds(%n: index) -> (index) {
+  %strong = sanitizer.assert.value %n [range(%n, 1, 1024), ne(%n, 0), pow2(%n), mul(%n, 64)] : index
+  func.return %strong : index
+}
+
+// ====
+
+// A stronger dominated assertion is still a runtime assertion. It cannot be
+// folded into a weaker checked alias.
+func.def @stronger_dominated_assertion_survives(%n: index) -> (index) {
+  %weak = sanitizer.assert.value %n [range(%n, 0, 2048), mul(%n, 8)] : index
+  %strong = sanitizer.assert.value %weak [range(%weak, 1, 1024), ne(%weak, 0), pow2(%weak), mul(%weak, 64)] : index
+  func.return %strong : index
+}
+
+// ----
+func.def @stronger_dominated_assertion_survives(%n: index) -> (index) {
+  %weak = sanitizer.assert.value %n [range(%n, 0, 2048), mul(%n, 8)] : index
+  %strong = sanitizer.assert.value %weak [range(%weak, 1, 1024), ne(%weak, 0), pow2(%weak), mul(%weak, 64)] : index
+  func.return %strong : index
+}
+
+// ====
+
+// Exact float facts prove matching float assertions, so no runtime boundary is
+// needed.
+func.def @proven_exact_float_assertion_folds() -> (f32) {
+  %two = scalar.constant 2.0 : f32
+  %checked = sanitizer.assert.value %two [finite(%two)] : f32
+  func.return %checked : f32
+}
+
+// ----
+func.def @proven_exact_float_assertion_folds() -> (f32) {
+  %two = scalar.constant 2.0 : f32
+  func.return %two : f32
+}
+
+// ====
+
+// finite implies not_nan, so a later weaker dominated assertion folds.
+func.def @weaker_dominated_float_assertion_folds(%x: f32) -> (f32) {
+  %finite = sanitizer.assert.value %x [finite(%x)] : f32
+  %not_inf = sanitizer.assert.value %finite [not_inf(%finite)] : f32
+  %not_nan = sanitizer.assert.value %not_inf [not_nan(%not_inf)] : f32
+  func.return %not_nan : f32
+}
+
+// ----
+func.def @weaker_dominated_float_assertion_folds(%x: f32) -> (f32) {
+  %finite = sanitizer.assert.value %x [finite(%x)] : f32
+  func.return %finite : f32
+}
+
+// ====
+
+// not_nan does not imply finite because infinities are still allowed.
+func.def @stronger_dominated_float_assertion_survives(%x: f32) -> (f32) {
+  %not_nan = sanitizer.assert.value %x [not_nan(%x)] : f32
+  %finite = sanitizer.assert.value %not_nan [finite(%not_nan)] : f32
+  func.return %finite : f32
+}
+
+// ----
+func.def @stronger_dominated_float_assertion_survives(%x: f32) -> (f32) {
+  %not_nan = sanitizer.assert.value %x [not_nan(%x)] : f32
+  %finite = sanitizer.assert.value %not_nan [finite(%not_nan)] : f32
+  func.return %finite : f32
+}
+
+// ====
+
+// Separate not_nan and not_inf facts together prove finite.
+func.def @finite_assertion_folds_from_weaker_float_facts(%x: f32) -> (f32) {
+  %not_nan = sanitizer.assert.value %x [not_nan(%x)] : f32
+  %not_inf = sanitizer.assert.value %not_nan [not_inf(%not_nan)] : f32
+  %finite = sanitizer.assert.value %not_inf [finite(%not_inf)] : f32
+  func.return %finite : f32
+}
+
+// ----
+func.def @finite_assertion_folds_from_weaker_float_facts(%x: f32) -> (f32) {
+  %not_nan = sanitizer.assert.value %x [not_nan(%x)] : f32
+  %not_inf = sanitizer.assert.value %not_nan [not_inf(%not_nan)] : f32
+  func.return %not_inf : f32
+}
+
+// ====
+
+// Exact result facts are allowed to flow through an unproven assertion, but the
+// assertion remains as the executable trap/report boundary.
+func.def @unproven_exact_assertion_survives(%n: index) -> (index, index) {
+  %checked = sanitizer.assert.value %n [eq(%n, 42)] : index
+  %sum = index.add %checked, %checked : index
+  func.return %checked, %sum : index, index
+}
+
+// ----
+func.def @unproven_exact_assertion_survives(%n: index) -> (index, index) {
+  %checked = sanitizer.assert.value %n [eq(%n, 42)] : index
+  %sum = index.constant 84 : index
+  func.return %checked, %sum : index, index
+}
+
+// ====
+
+// Operation assertions have no checked aliases, so proven predicates erase the
+// trap/report site directly.
+func.def @proven_op_assertion_folds(%n: index) -> (index) {
+  %known = index.assume %n [range(%n, 0, 4096), mul(%n, 16)] : index
+  sanitizer.assert.op %known [range(%known, 0, 4096), mul(%known, 8)] : index
+  func.return %known : index
+}
+
+// ----
+func.def @proven_op_assertion_folds(%n: index) -> (index) {
+  %known = index.assume %n [range(%n, 0, 4096), mul(%n, 16)] : index
+  func.return %known : index
+}
+
+// ====
+
+// Unproven operation assertions stay as executable boundaries.
+func.def @unproven_op_assertion_survives(%n: index) -> (index) {
+  sanitizer.assert.op %n [eq(%n, 42)] : index
+  func.return %n : index
+}
+
+// ----
+func.def @unproven_op_assertion_survives(%n: index) -> (index) {
+  sanitizer.assert.op %n [eq(%n, 42)] : index
+  func.return %n : index
+}

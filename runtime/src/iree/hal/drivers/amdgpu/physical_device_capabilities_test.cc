@@ -7,6 +7,7 @@
 #include "iree/hal/drivers/amdgpu/physical_device_capabilities.h"
 
 #include <array>
+#include <cstring>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -63,6 +64,119 @@ static hsa_amd_memory_pool_link_info_t LinkInfo(
   return link_info;
 }
 
+enum ClusterQueryAttribute : uint32_t {
+  kKernelClusterMaximumDimensions = 0xA11E,
+  kKernelClusterMaximumTotal = 0xA11F,
+  kWorkgroupClusterMaximumDimensions = 0xA120,
+  kWorkgroupClusterMaximumTotal = 0xA121,
+};
+
+struct ClusterQueryDimensions {
+  uint64_t x;
+  uint64_t y;
+  uint64_t z;
+};
+
+struct ClusterQueryAgentInfo {
+  ClusterQueryDimensions cluster_count_dimensions = {1024, 64, 64};
+  uint64_t cluster_count_total = 4096;
+  ClusterQueryDimensions workgroups_per_cluster_dimensions = {16, 8, 4};
+  uint64_t workgroups_per_cluster_total = 32;
+  std::array<hsa_status_t, 4> statuses = {
+      HSA_STATUS_SUCCESS,
+      HSA_STATUS_SUCCESS,
+      HSA_STATUS_SUCCESS,
+      HSA_STATUS_SUCCESS,
+  };
+  std::array<uint32_t, 4> query_counts = {};
+};
+
+static hsa_status_t HSA_API FakeClusterAgentGetInfo(hsa_agent_t agent,
+                                                    hsa_agent_info_t attribute,
+                                                    void* value) {
+  auto* agent_info = reinterpret_cast<ClusterQueryAgentInfo*>(
+      static_cast<uintptr_t>(agent.handle));
+  if (!agent_info || !value) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  iree_host_size_t query_index = 0;
+  const void* source = nullptr;
+  iree_host_size_t source_size = 0;
+  switch (static_cast<uint32_t>(attribute)) {
+    case kKernelClusterMaximumDimensions:
+      query_index = 0;
+      source = &agent_info->cluster_count_dimensions;
+      source_size = sizeof(agent_info->cluster_count_dimensions);
+      break;
+    case kKernelClusterMaximumTotal:
+      query_index = 1;
+      source = &agent_info->cluster_count_total;
+      source_size = sizeof(agent_info->cluster_count_total);
+      break;
+    case kWorkgroupClusterMaximumDimensions:
+      query_index = 2;
+      source = &agent_info->workgroups_per_cluster_dimensions;
+      source_size = sizeof(agent_info->workgroups_per_cluster_dimensions);
+      break;
+    case kWorkgroupClusterMaximumTotal:
+      query_index = 3;
+      source = &agent_info->workgroups_per_cluster_total;
+      source_size = sizeof(agent_info->workgroups_per_cluster_total);
+      break;
+    default:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  ++agent_info->query_counts[query_index];
+  const hsa_status_t status = agent_info->statuses[query_index];
+  if (status == HSA_STATUS_SUCCESS) std::memcpy(value, source, source_size);
+  return status;
+}
+
+static iree_hal_amdgpu_libhsa_t ClusterQueryLibhsa() {
+  iree_hal_amdgpu_libhsa_t libhsa = {};
+  libhsa.hsa_agent_get_info = FakeClusterAgentGetInfo;
+  return libhsa;
+}
+
+static hsa_agent_t ClusterQueryAgent(ClusterQueryAgentInfo* agent_info) {
+  return Agent(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(agent_info)));
+}
+
+static void ExpectUnsupportedClusterCapability(
+    const iree_hal_amdgpu_workgroup_cluster_capabilities_t& capabilities) {
+  EXPECT_FALSE(capabilities.supported);
+  EXPECT_EQ(capabilities.cluster_count.x, 0u);
+  EXPECT_EQ(capabilities.cluster_count.y, 0u);
+  EXPECT_EQ(capabilities.cluster_count.z, 0u);
+  EXPECT_EQ(capabilities.cluster_count.total, 0u);
+  EXPECT_EQ(capabilities.workgroups_per_cluster.x, 0u);
+  EXPECT_EQ(capabilities.workgroups_per_cluster.y, 0u);
+  EXPECT_EQ(capabilities.workgroups_per_cluster.z, 0u);
+  EXPECT_EQ(capabilities.workgroups_per_cluster.total, 0u);
+}
+
+static void ExpectAllClusterAttributesQueriedOnce(
+    const ClusterQueryAgentInfo& agent_info) {
+  EXPECT_EQ(agent_info.query_counts, (std::array<uint32_t, 4>{1u, 1u, 1u, 1u}));
+}
+
+static iree_hal_amdgpu_workgroup_cluster_capabilities_t
+SupportedClusterCapabilities(uint64_t x, uint64_t y, uint64_t z,
+                             uint64_t total) {
+  iree_hal_amdgpu_workgroup_cluster_capabilities_t capabilities = {};
+  capabilities.supported = 1;
+  capabilities.cluster_count = {1024, 64, 64, 4096};
+  capabilities.workgroups_per_cluster = {x, y, z, total};
+  return capabilities;
+}
+
+static iree_hal_amdgpu_workgroup_cluster_capabilities_t
+SupportedClusterDispatchCapabilities(uint64_t x, uint64_t y, uint64_t z,
+                                     uint64_t total) {
+  auto capabilities = SupportedClusterCapabilities(8, 8, 8, 512);
+  capabilities.cluster_count = {x, y, z, total};
+  return capabilities;
+}
+
 class PhysicalDeviceCapabilitiesTest : public ::testing::Test {
  protected:
   iree_hal_amdgpu_cpu_visible_device_coarse_memory_selection_t
@@ -70,7 +184,7 @@ class PhysicalDeviceCapabilitiesTest : public ::testing::Test {
     iree_hal_amdgpu_cpu_visible_device_coarse_memory_selection_t selection = {};
     selection.device_agent = Agent(10);
     selection.memory_pool = MemoryPool(20);
-    selection.gfxip_version = GfxIp(11, 0, 0);
+    selection.gfxip_version = GfxIp(9, 4, 2);
     selection.cpu.agents = cpu_agents_.data();
     selection.cpu.access = cpu_access_.data();
     selection.cpu.count = cpu_agents_.size();
@@ -110,6 +224,279 @@ class PhysicalDeviceCapabilitiesTest : public ::testing::Test {
       HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT,
       HSA_AMD_MEMORY_POOL_ACCESS_DISALLOWED_BY_DEFAULT};
 };
+
+TEST_F(PhysicalDeviceCapabilitiesTest, QueriesWorkgroupClusterCapabilities) {
+  const iree_hal_amdgpu_libhsa_t libhsa = ClusterQueryLibhsa();
+  ClusterQueryAgentInfo agent_info;
+  iree_hal_amdgpu_workgroup_cluster_capabilities_t capabilities = {};
+  IREE_ASSERT_OK(iree_hal_amdgpu_query_workgroup_cluster_capabilities(
+      &libhsa, ClusterQueryAgent(&agent_info), &capabilities));
+
+  EXPECT_TRUE(capabilities.supported);
+  EXPECT_EQ(capabilities.cluster_count.x, 1024u);
+  EXPECT_EQ(capabilities.cluster_count.y, 64u);
+  EXPECT_EQ(capabilities.cluster_count.z, 64u);
+  EXPECT_EQ(capabilities.cluster_count.total, 4096u);
+  EXPECT_EQ(capabilities.workgroups_per_cluster.x, 16u);
+  EXPECT_EQ(capabilities.workgroups_per_cluster.y, 8u);
+  EXPECT_EQ(capabilities.workgroups_per_cluster.z, 4u);
+  EXPECT_EQ(capabilities.workgroups_per_cluster.total, 32u);
+  ExpectAllClusterAttributesQueriedOnce(agent_info);
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       OlderRuntimeDisablesWorkgroupClusterCapabilities) {
+  const iree_hal_amdgpu_libhsa_t libhsa = ClusterQueryLibhsa();
+  ClusterQueryAgentInfo agent_info;
+  agent_info.statuses.fill(HSA_STATUS_ERROR_INVALID_ARGUMENT);
+  iree_hal_amdgpu_workgroup_cluster_capabilities_t capabilities;
+  std::memset(&capabilities, 0xFF, sizeof(capabilities));
+  IREE_ASSERT_OK(iree_hal_amdgpu_query_workgroup_cluster_capabilities(
+      &libhsa, ClusterQueryAgent(&agent_info), &capabilities));
+
+  ExpectUnsupportedClusterCapability(capabilities);
+  ExpectAllClusterAttributesQueriedOnce(agent_info);
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       AgentWithoutClustersDisablesWorkgroupClusterCapabilities) {
+  const iree_hal_amdgpu_libhsa_t libhsa = ClusterQueryLibhsa();
+  ClusterQueryAgentInfo agent_info;
+  agent_info.workgroups_per_cluster_dimensions = {1, 1, 1};
+  agent_info.workgroups_per_cluster_total = 1;
+  iree_hal_amdgpu_workgroup_cluster_capabilities_t capabilities;
+  std::memset(&capabilities, 0xFF, sizeof(capabilities));
+  IREE_ASSERT_OK(iree_hal_amdgpu_query_workgroup_cluster_capabilities(
+      &libhsa, ClusterQueryAgent(&agent_info), &capabilities));
+
+  ExpectUnsupportedClusterCapability(capabilities);
+  ExpectAllClusterAttributesQueriedOnce(agent_info);
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       PartialWorkgroupClusterQuerySurfaceFails) {
+  const iree_hal_amdgpu_libhsa_t libhsa = ClusterQueryLibhsa();
+  ClusterQueryAgentInfo agent_info;
+  agent_info.statuses[2] = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  iree_hal_amdgpu_workgroup_cluster_capabilities_t capabilities;
+  std::memset(&capabilities, 0xFF, sizeof(capabilities));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_hal_amdgpu_query_workgroup_cluster_capabilities(
+          &libhsa, ClusterQueryAgent(&agent_info), &capabilities));
+
+  ExpectUnsupportedClusterCapability(capabilities);
+  ExpectAllClusterAttributesQueriedOnce(agent_info);
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest, MalformedWorkgroupClusterLimitsFail) {
+  struct MalformedLimits {
+    const char* name;
+    ClusterQueryDimensions cluster_count_dimensions;
+    uint64_t cluster_count_total;
+    ClusterQueryDimensions workgroups_per_cluster_dimensions;
+    uint64_t workgroups_per_cluster_total;
+  };
+  const MalformedLimits malformed_limits[] = {
+      {"zero cluster-count dimension", {0, 64, 64}, 4096, {16, 8, 4}, 32},
+      {"zero cluster-count total", {1024, 64, 64}, 0, {16, 8, 4}, 32},
+      {"workgroup flat limit below axis", {1024, 64, 64}, 4096, {16, 8, 4}, 8},
+      {"workgroup flat limit above product",
+       {1024, 64, 64},
+       4096,
+       {2, 2, 2},
+       9},
+  };
+
+  const iree_hal_amdgpu_libhsa_t libhsa = ClusterQueryLibhsa();
+  for (const MalformedLimits& malformed : malformed_limits) {
+    SCOPED_TRACE(malformed.name);
+    ClusterQueryAgentInfo agent_info;
+    agent_info.cluster_count_dimensions = malformed.cluster_count_dimensions;
+    agent_info.cluster_count_total = malformed.cluster_count_total;
+    agent_info.workgroups_per_cluster_dimensions =
+        malformed.workgroups_per_cluster_dimensions;
+    agent_info.workgroups_per_cluster_total =
+        malformed.workgroups_per_cluster_total;
+    iree_hal_amdgpu_workgroup_cluster_capabilities_t capabilities;
+    std::memset(&capabilities, 0xFF, sizeof(capabilities));
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        iree_hal_amdgpu_query_workgroup_cluster_capabilities(
+            &libhsa, ClusterQueryAgent(&agent_info), &capabilities));
+    ExpectUnsupportedClusterCapability(capabilities);
+    ExpectAllClusterAttributesQueriedOnce(agent_info);
+  }
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest, WorkgroupClusterQueryFailurePropagates) {
+  const iree_hal_amdgpu_libhsa_t libhsa = ClusterQueryLibhsa();
+  ClusterQueryAgentInfo agent_info;
+  agent_info.statuses[1] = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  iree_hal_amdgpu_workgroup_cluster_capabilities_t capabilities = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_amdgpu_query_workgroup_cluster_capabilities(
+          &libhsa, ClusterQueryAgent(&agent_info), &capabilities));
+  ExpectUnsupportedClusterCapability(capabilities);
+  ExpectAllClusterAttributesQueriedOnce(agent_info);
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       PreservesHeterogeneousWorkgroupClusterLimits) {
+  const iree_hal_amdgpu_libhsa_t libhsa = ClusterQueryLibhsa();
+  ClusterQueryAgentInfo first_agent_info;
+  ClusterQueryAgentInfo second_agent_info;
+  second_agent_info.cluster_count_dimensions = {2048, 128, 64};
+  second_agent_info.cluster_count_total = 8192;
+  second_agent_info.workgroups_per_cluster_dimensions = {32, 16, 8};
+  second_agent_info.workgroups_per_cluster_total = 64;
+
+  iree_hal_amdgpu_workgroup_cluster_capabilities_t first_capabilities = {};
+  iree_hal_amdgpu_workgroup_cluster_capabilities_t second_capabilities = {};
+  IREE_ASSERT_OK(iree_hal_amdgpu_query_workgroup_cluster_capabilities(
+      &libhsa, ClusterQueryAgent(&first_agent_info), &first_capabilities));
+  IREE_ASSERT_OK(iree_hal_amdgpu_query_workgroup_cluster_capabilities(
+      &libhsa, ClusterQueryAgent(&second_agent_info), &second_capabilities));
+
+  EXPECT_EQ(first_capabilities.workgroups_per_cluster.x, 16u);
+  EXPECT_EQ(first_capabilities.workgroups_per_cluster.total, 32u);
+  EXPECT_EQ(second_capabilities.workgroups_per_cluster.x, 32u);
+  EXPECT_EQ(second_capabilities.workgroups_per_cluster.total, 64u);
+  EXPECT_EQ(first_capabilities.cluster_count.total, 4096u);
+  EXPECT_EQ(second_capabilities.cluster_count.total, 8192u);
+  ExpectAllClusterAttributesQueriedOnce(first_agent_info);
+  ExpectAllClusterAttributesQueriedOnce(second_agent_info);
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest, ValidatesMetadataWorkgroupClusterSize) {
+  const auto capabilities = SupportedClusterCapabilities(4, 3, 2, 8);
+  const uint8_t ordinary_size[3] = {0, 0, 0};
+  IREE_EXPECT_OK(iree_hal_amdgpu_validate_workgroup_cluster_size(
+      IREE_SV("ordinary.kd"), ordinary_size, 0, &capabilities));
+  const uint8_t clustered_size[3] = {1, 2, 1};
+  IREE_EXPECT_OK(iree_hal_amdgpu_validate_workgroup_cluster_size(
+      IREE_SV("clustered.kd"), clustered_size, 7, &capabilities));
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       RejectsMalformedMetadataWorkgroupClusterSize) {
+  const auto capabilities = SupportedClusterCapabilities(4, 3, 2, 8);
+  const uint8_t partial_size[3] = {1, 0, 2};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amdgpu_validate_workgroup_cluster_size(
+          IREE_SV("partial.kd"), partial_size, 0, &capabilities));
+  const uint8_t trivial_size[3] = {1, 1, 1};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amdgpu_validate_workgroup_cluster_size(
+          IREE_SV("trivial.kd"), trivial_size, 0, &capabilities));
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       RejectsUnsupportedMetadataWorkgroupClusterSize) {
+  const iree_hal_amdgpu_workgroup_cluster_capabilities_t unsupported = {};
+  const uint8_t clustered_size[3] = {1, 2, 1};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INCOMPATIBLE,
+      iree_hal_amdgpu_validate_workgroup_cluster_size(
+          IREE_SV("clustered.kd"), clustered_size, 3, &unsupported));
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       RejectsEachExceededMetadataWorkgroupClusterLimit) {
+  const auto capabilities = SupportedClusterCapabilities(4, 3, 2, 8);
+  const uint8_t exceeded_sizes[][3] = {
+      {5, 1, 1},
+      {1, 4, 1},
+      {1, 1, 3},
+      {4, 3, 2},
+  };
+  for (const auto& exceeded_size : exceeded_sizes) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_hal_amdgpu_validate_workgroup_cluster_size(
+            IREE_SV("oversized.kd"), exceeded_size, 2, &capabilities));
+  }
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       HeterogeneousDevicesValidateWorkgroupClustersIndependently) {
+  const auto supported = SupportedClusterCapabilities(4, 4, 4, 8);
+  const auto too_small = SupportedClusterCapabilities(4, 1, 4, 4);
+  const uint8_t clustered_size[3] = {1, 2, 1};
+  IREE_EXPECT_OK(iree_hal_amdgpu_validate_workgroup_cluster_size(
+      IREE_SV("heterogeneous.kd"), clustered_size, 0, &supported));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amdgpu_validate_workgroup_cluster_size(
+          IREE_SV("heterogeneous.kd"), clustered_size, 1, &too_small));
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest, ValidatesWorkgroupClusterDispatch) {
+  const auto capabilities = SupportedClusterDispatchCapabilities(4, 3, 2, 8);
+  const uint8_t ordinary_size[3] = {0, 0, 0};
+  const uint32_t arbitrary_count[3] = {0, UINT32_MAX, 7};
+  IREE_EXPECT_OK(iree_hal_amdgpu_validate_workgroup_cluster_dispatch(
+      ordinary_size, arbitrary_count, 0, &capabilities.cluster_count));
+
+  const uint8_t clustered_size[3] = {2, 3, 1};
+  const uint32_t valid_count[3] = {4, 6, 2};
+  IREE_EXPECT_OK(iree_hal_amdgpu_validate_workgroup_cluster_dispatch(
+      clustered_size, valid_count, 7, &capabilities.cluster_count));
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       RejectsInvalidWorkgroupClusterDispatchGeometry) {
+  const auto capabilities = SupportedClusterDispatchCapabilities(4, 3, 2, 8);
+  const uint8_t clustered_size[3] = {2, 3, 1};
+  const uint32_t zero_count[3] = {0, 3, 1};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amdgpu_validate_workgroup_cluster_dispatch(
+          clustered_size, zero_count, 0, &capabilities.cluster_count));
+  const uint32_t nondivisible_count[3] = {3, 3, 1};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amdgpu_validate_workgroup_cluster_dispatch(
+          clustered_size, nondivisible_count, 0, &capabilities.cluster_count));
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       RejectsEachExceededWorkgroupClusterDispatchLimit) {
+  const auto capabilities = SupportedClusterDispatchCapabilities(4, 3, 2, 8);
+  const uint8_t cluster_size[3] = {1, 2, 1};
+  const uint32_t exceeded_counts[][3] = {
+      {5, 2, 1},
+      {1, 8, 1},
+      {1, 2, 3},
+      {4, 6, 2},
+  };
+  for (const auto& exceeded_count : exceeded_counts) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        iree_hal_amdgpu_validate_workgroup_cluster_dispatch(
+            cluster_size, exceeded_count, 2, &capabilities.cluster_count));
+  }
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       WorkgroupClusterDispatchHonorsPacketFieldWidths) {
+  const auto capabilities = SupportedClusterDispatchCapabilities(
+      UINT64_MAX, UINT64_MAX, UINT64_MAX, UINT64_MAX);
+  const uint8_t cluster_size[3] = {1, 1, 2};
+  const uint32_t wide_y_count[3] = {1, UINT16_MAX + 1u, 2};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_amdgpu_validate_workgroup_cluster_dispatch(
+          cluster_size, wide_y_count, 0, &capabilities.cluster_count));
+  const uint32_t wide_z_count[3] = {1, 1, (UINT16_MAX + 1u) * 2u};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_amdgpu_validate_workgroup_cluster_dispatch(
+          cluster_size, wide_z_count, 0, &capabilities.cluster_count));
+}
 
 TEST_F(PhysicalDeviceCapabilitiesTest, SelectsAvailableCoarseMemory) {
   iree_hal_amdgpu_cpu_visible_device_coarse_memory_selection_t selection =
@@ -184,22 +571,36 @@ TEST_F(PhysicalDeviceCapabilitiesTest, PublicationGatesDisableCoarseMemory) {
 TEST_F(PhysicalDeviceCapabilitiesTest, GfxIpGatesHdpPublication) {
   EXPECT_FALSE(
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(9, 0, 7)));
-  EXPECT_TRUE(
+  EXPECT_FALSE(
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(9, 0, 8)));
+  EXPECT_FALSE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(9, 0, 10)));
+  EXPECT_TRUE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(9, 4, 0)));
+  EXPECT_TRUE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(9, 4, 2)));
+  EXPECT_FALSE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(9, 4, 3)));
+  EXPECT_TRUE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(9, 5, 0)));
   EXPECT_FALSE(
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(10, 0, 0)));
   EXPECT_FALSE(
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(10, 1, 0)));
-  EXPECT_TRUE(
+  EXPECT_FALSE(
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(10, 3, 0)));
-  EXPECT_TRUE(
+  EXPECT_FALSE(
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(11, 0, 0)));
+  EXPECT_FALSE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(12, 0, 0)));
+  EXPECT_TRUE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(12, 5, 0)));
 }
 
 TEST_F(PhysicalDeviceCapabilitiesTest, UnsupportedGfxIpDisablesCoarseMemory) {
   iree_hal_amdgpu_cpu_visible_device_coarse_memory_selection_t selection =
       MakeCoarseMemorySelection();
-  selection.gfxip_version = GfxIp(10, 1, 0);
+  selection.gfxip_version = GfxIp(11, 0, 0);
   iree_hal_amdgpu_cpu_visible_device_coarse_memory_t capability;
   IREE_ASSERT_OK(iree_hal_amdgpu_select_cpu_visible_device_coarse_memory(
       &selection, &capability));
@@ -467,12 +868,6 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SvmDefaultAccessDoesNotImplyPeerFlags) {
   EXPECT_TRUE(capability.device_local.fine_host_visible);
   EXPECT_FALSE(capability.device_local.coarse_cpu_visible);
 
-  iree_hal_device_capability_bits_t flags =
-      iree_hal_amdgpu_select_memory_system_device_capability_flags(&capability);
-  EXPECT_TRUE(flags & IREE_HAL_DEVICE_CAPABILITY_SHARED_VIRTUAL_ADDRESS);
-  EXPECT_TRUE(flags & IREE_HAL_DEVICE_CAPABILITY_UNIFIED_MEMORY);
-  EXPECT_FALSE(flags & IREE_HAL_DEVICE_CAPABILITY_PEER_ADDRESSABLE);
-  EXPECT_FALSE(flags & IREE_HAL_DEVICE_CAPABILITY_PEER_COHERENT);
   EXPECT_FALSE(iree_hal_amdgpu_memory_system_requires_svm_access_attributes(
       &capability));
 }
@@ -500,26 +895,27 @@ TEST_F(PhysicalDeviceCapabilitiesTest,
   EXPECT_TRUE(capability.device_local.fine_host_visible);
   EXPECT_TRUE(capability.device_local.coarse_cpu_visible);
 
-  iree_hal_device_capability_bits_t flags =
-      iree_hal_amdgpu_select_memory_system_device_capability_flags(&capability);
-  EXPECT_TRUE(flags & IREE_HAL_DEVICE_CAPABILITY_SHARED_VIRTUAL_ADDRESS);
-  EXPECT_FALSE(flags & IREE_HAL_DEVICE_CAPABILITY_UNIFIED_MEMORY);
-  EXPECT_FALSE(flags & IREE_HAL_DEVICE_CAPABILITY_PEER_ADDRESSABLE);
-  EXPECT_FALSE(flags & IREE_HAL_DEVICE_CAPABILITY_PEER_COHERENT);
   EXPECT_TRUE(iree_hal_amdgpu_memory_system_requires_svm_access_attributes(
       &capability));
 }
 
 TEST_F(PhysicalDeviceCapabilitiesTest, SelectsPrepublishedKernargStorage) {
   iree_hal_amdgpu_aql_prepublished_kernarg_storage_t storage =
-      iree_hal_amdgpu_select_prepublished_kernarg_storage(MemoryPool(0));
-  EXPECT_EQ(storage.strategy,
-            IREE_HAL_AMDGPU_AQL_PREPUBLISHED_KERNARG_STORAGE_STRATEGY_DISABLED);
+      iree_hal_amdgpu_select_prepublished_kernarg_storage(
+          MemoryPool(0), /*direct_host_access=*/true);
+  EXPECT_EQ(storage.mode,
+            IREE_HAL_AMDGPU_AQL_PREPUBLISHED_KERNARG_STORAGE_MODE_DISABLED);
 
-  storage = iree_hal_amdgpu_select_prepublished_kernarg_storage(MemoryPool(42));
+  storage = iree_hal_amdgpu_select_prepublished_kernarg_storage(
+      MemoryPool(42), /*direct_host_access=*/false);
+  EXPECT_EQ(storage.mode,
+            IREE_HAL_AMDGPU_AQL_PREPUBLISHED_KERNARG_STORAGE_MODE_DISABLED);
+
+  storage = iree_hal_amdgpu_select_prepublished_kernarg_storage(
+      MemoryPool(42), /*direct_host_access=*/true);
   EXPECT_EQ(
-      storage.strategy,
-      IREE_HAL_AMDGPU_AQL_PREPUBLISHED_KERNARG_STORAGE_STRATEGY_DEVICE_FINE_HOST_COHERENT);
+      storage.mode,
+      IREE_HAL_AMDGPU_AQL_PREPUBLISHED_KERNARG_STORAGE_MODE_DEVICE_FINE_HOST_COHERENT);
   EXPECT_TRUE(iree_all_bits_set(storage.buffer_params.type,
                                 IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
                                     IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |

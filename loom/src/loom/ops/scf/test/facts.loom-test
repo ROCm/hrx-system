@@ -1,0 +1,499 @@
+// RUN: pass canonicalize
+
+// A counted loop IV with static positive bounds has a tight inclusive range and
+// divisibility derived from the lower bound plus the step.
+func.def @for_iv_static_bounds() -> (i64, i64, i64) {
+  %lo = index.constant 4 : index
+  %hi = index.constant 12 : index
+  %step = index.constant 2 : index
+  %zero = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %iv = [%lo to %hi step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+    %fact_lo = test.fact_range_lo %iv : index -> i64
+    %fact_hi = test.fact_range_hi %iv : index -> i64
+    %fact_div = test.fact_divisor %iv : index -> i64
+    scf.yield %fact_lo, %fact_hi, %fact_div : i64, i64, i64
+  }
+  func.return %iv_lo, %iv_hi, %iv_div : i64, i64, i64
+}
+
+// ----
+func.def @for_iv_static_bounds() -> (i64, i64, i64) {
+  %lo = index.constant 4 : index
+  %hi = index.constant 12 : index
+  %step = index.constant 2 : index
+  %zero = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %iv = [%lo to %hi step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+    %fact_lo = scalar.constant 4 : i64
+    %fact_hi = scalar.constant 10 : i64
+    %fact_div = scalar.constant 2 : i64
+    scf.yield %fact_lo, %fact_hi, %fact_div : i64, i64, i64
+  }
+  func.return %iv_lo, %iv_hi, %iv_div : i64, i64, i64
+}
+
+// ====
+
+// Predicate-refined dynamic bounds still feed the IV range. Starting from zero
+// preserves step divisibility instead of degrading through exact-zero facts.
+func.def @for_iv_assumed_upper_bound(%n: index) -> (i64, i64, i64, i1) {
+  %lo = index.constant 0 : index
+  %n2 = index.assume %n [range(%n, 16, 64)] : index
+  %step = index.constant 4 : index
+  %zero = scalar.constant 0 : i64
+  %false = scalar.constant false : i1
+  %iv_lo, %iv_hi, %iv_div, %iv_non_negative = scf.for %iv = [%lo to %n2 step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64, %carry_non_negative = %false : i1) -> (i64, i64, i64, i1) {
+    %fact_lo = test.fact_range_lo %iv : index -> i64
+    %fact_hi = test.fact_range_hi %iv : index -> i64
+    %fact_div = test.fact_divisor %iv : index -> i64
+    %fact_non_negative = test.fact_non_negative %iv : index -> i1
+    scf.yield %fact_lo, %fact_hi, %fact_div, %fact_non_negative : i64, i64, i64, i1
+  }
+  func.return %iv_lo, %iv_hi, %iv_div, %iv_non_negative : i64, i64, i64, i1
+}
+
+// ----
+func.def @for_iv_assumed_upper_bound(%n: index) -> (i64, i64, i64, i1) {
+  %lo = index.constant 0 : index
+  %n2 = index.assume %n [range(%n, 16, 64)] : index
+  %step = index.constant 4 : index
+  %zero = scalar.constant 0 : i64
+  %false = scalar.constant false : i1
+  %iv_lo, %iv_hi, %iv_div, %iv_non_negative = scf.for %iv = [%lo to %n2 step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64, %carry_non_negative = %false : i1) -> (i64, i64, i64, i1) {
+    %fact_lo = scalar.constant 0 : i64
+    %fact_hi = scalar.constant 60 : i64
+    %fact_div = scalar.constant 4 : i64
+    %fact_non_negative = scalar.constant true : i1
+    scf.yield %fact_lo, %fact_hi, %fact_div, %fact_non_negative : i64, i64, i64, i1
+  }
+  func.return %iv_lo, %iv_hi, %iv_div, %iv_non_negative : i64, i64, i64, i1
+}
+
+// ====
+
+// Matvec-style lane grouping composes counted-loop IV facts with div/rem lane
+// facts without requiring local assumptions on every address intermediate.
+func.def @for_iv_matvec_lane_address_range(%lane0: index) -> (i64, i64, i1) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %block_begin = index.constant 0 : index
+  %block_end = index.constant 12 : index
+  %block_step = index.constant 4 : index
+  %lanes_per_group = index.constant 16 : index
+  %block_stride = index.constant 105 : index
+  %zero = scalar.constant 0 : i64
+  %false = scalar.constant false : i1
+  %linear_lo, %linear_hi, %linear_non_negative = scf.for %block_base = [%block_begin to %block_end step %block_step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_non_negative = %false : i1) -> (i64, i64, i1) {
+    %lane_group = index.div %lane, %lanes_per_group : index
+    %lane_offset = index.rem %lane, %lanes_per_group : index
+    %block = index.add %block_base, %lane_group : index
+    %block_origin = index.mul %block, %block_stride : index
+    %linear = index.add %block_origin, %lane_offset : index
+    %fact_lo = test.fact_range_lo %linear : index -> i64
+    %fact_hi = test.fact_range_hi %linear : index -> i64
+    %fact_non_negative = test.fact_non_negative %linear : index -> i1
+    scf.yield %fact_lo, %fact_hi, %fact_non_negative : i64, i64, i1
+  }
+  func.return %linear_lo, %linear_hi, %linear_non_negative : i64, i64, i1
+}
+
+// ----
+func.def @for_iv_matvec_lane_address_range(%lane0: index) -> (i64, i64, i1) {
+  %block_begin = index.constant 0 : index
+  %block_end = index.constant 12 : index
+  %block_step = index.constant 4 : index
+  %zero = scalar.constant 0 : i64
+  %false = scalar.constant false : i1
+  %linear_lo, %linear_hi, %linear_non_negative = scf.for %block_base = [%block_begin to %block_end step %block_step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_non_negative = %false : i1) -> (i64, i64, i1) {
+    %fact_lo = scalar.constant 0 : i64
+    %fact_hi = scalar.constant 1170 : i64
+    %fact_non_negative = scalar.constant true : i1
+    scf.yield %fact_lo, %fact_hi, %fact_non_negative : i64, i64, i1
+  }
+  func.return %linear_lo, %linear_hi, %linear_non_negative : i64, i64, i1
+}
+
+// ====
+
+// Projection-style dot loops use a two-element vector footprint at every
+// stepped IV. The IV high fact is the last reachable origin, not upper - 1.
+func.def @for_iv_projection_pair_origins() -> (i64, i64, i64) {
+  %start = index.constant 0 : index
+  %limit = index.constant 3584 : index
+  %step = index.constant 2 : index
+  %zero = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %origin = [%start to %limit step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+    %fact_lo = test.fact_range_lo %origin : index -> i64
+    %fact_hi = test.fact_range_hi %origin : index -> i64
+    %fact_div = test.fact_divisor %origin : index -> i64
+    scf.yield %fact_lo, %fact_hi, %fact_div : i64, i64, i64
+  }
+  func.return %iv_lo, %iv_hi, %iv_div : i64, i64, i64
+}
+
+// ----
+func.def @for_iv_projection_pair_origins() -> (i64, i64, i64) {
+  %start = index.constant 0 : index
+  %limit = index.constant 3584 : index
+  %step = index.constant 2 : index
+  %zero = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %origin = [%start to %limit step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+    %fact_lo = scalar.constant 0 : i64
+    %fact_hi = scalar.constant 3582 : i64
+    %fact_div = scalar.constant 2 : i64
+    scf.yield %fact_lo, %fact_hi, %fact_div : i64, i64, i64
+  }
+  func.return %iv_lo, %iv_hi, %iv_div : i64, i64, i64
+}
+
+// ====
+
+// When static facts prove exactly one iteration, the body IV is exact and the
+// loop promotes to the already-folded straight-line body.
+func.def @for_iv_single_trip_exact() -> (i64, i64, i64) {
+  %lo = index.constant 8 : index
+  %hi = index.constant 12 : index
+  %step = index.constant 4 : index
+  %zero = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %iv = [%lo to %hi step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+    %fact_lo = test.fact_range_lo %iv : index -> i64
+    %fact_hi = test.fact_range_hi %iv : index -> i64
+    %fact_div = test.fact_divisor %iv : index -> i64
+    scf.yield %fact_lo, %fact_hi, %fact_div : i64, i64, i64
+  }
+  func.return %iv_lo, %iv_hi, %iv_div : i64, i64, i64
+}
+
+// ----
+func.def @for_iv_single_trip_exact() -> (i64, i64, i64) {
+  %fact_lo = scalar.constant 8 : i64
+  %fact_hi = scalar.constant 8 : i64
+  %fact_div = scalar.constant 8 : i64
+  func.return %fact_lo, %fact_hi, %fact_div : i64, i64, i64
+}
+
+// ====
+
+// Ordinary index consumers inside the body can fold directly from seeded IV
+// facts before single-trip promotion; they do not need bespoke SCF-aware logic.
+func.def @for_iv_feeds_index_consumers() -> (index, i1) {
+  %lo = index.constant 8 : index
+  %hi = index.constant 12 : index
+  %step = index.constant 4 : index
+  %zero = index.constant 0 : index
+  %false = scalar.constant false : i1
+  %sum, %is_before_limit = scf.for %iv = [%lo to %hi step %step](%carry_sum = %zero : index, %carry_cmp = %false : i1) -> (index, i1) {
+    %two = index.constant 2 : index
+    %limit = index.constant 12 : index
+    %plus = index.add %iv, %two : index
+    %cmp = index.cmp slt, %iv, %limit : index
+    scf.yield %plus, %cmp : index, i1
+  }
+  func.return %sum, %is_before_limit : index, i1
+}
+
+// ----
+func.def @for_iv_feeds_index_consumers() -> (index, i1) {
+  %plus = index.constant 10 : index
+  %cmp = scalar.constant true : i1
+  func.return %plus, %cmp : index, i1
+}
+
+// ====
+
+// A step that is not fact-proven positive leaves the IV unknown. This keeps
+// malformed or nonterminating counted loops from gaining unsound body facts.
+func.def @for_iv_unknown_step_is_unknown(%step: index) -> (i64, i64, i64) {
+  %lo = index.constant 0 : index
+  %hi = index.constant 16 : index
+  %zero = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %iv = [%lo to %hi step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+    %fact_lo = test.fact_range_lo %iv : index -> i64
+    %fact_hi = test.fact_range_hi %iv : index -> i64
+    %fact_div = test.fact_divisor %iv : index -> i64
+    scf.yield %fact_lo, %fact_hi, %fact_div : i64, i64, i64
+  }
+  func.return %iv_lo, %iv_hi, %iv_div : i64, i64, i64
+}
+
+// ----
+func.def @for_iv_unknown_step_is_unknown(%step: index) -> (i64, i64, i64) {
+  %lo = index.constant 0 : index
+  %hi = index.constant 16 : index
+  %zero = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %iv = [%lo to %hi step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+    %fact_lo = scalar.constant -9223372036854775808 : i64
+    %fact_hi = scalar.constant 9223372036854775807 : i64
+    %fact_div = scalar.constant 1 : i64
+    scf.yield %fact_lo, %fact_hi, %fact_div : i64, i64, i64
+  }
+  func.return %iv_lo, %iv_hi, %iv_div : i64, i64, i64
+}
+
+// ====
+
+// Loop-carried entry facts seed iter_arg block arguments, so facts queried
+// inside a dynamic counted loop body can fold without inlining the loop.
+func.def @for_iter_arg_facts_reach_body(%n: index) -> (i64) {
+  %lo = index.constant 0 : index
+  %n2 = index.assume %n [range(%n, 1, 4)] : index
+  %step = index.constant 1 : index
+  %seven = scalar.constant 7 : i64
+  %zero = scalar.constant 0 : i64
+  %forwarded, %observed = scf.for %iv = [%lo to %n2 step %step](%acc = %seven : i64, %prev = %zero : i64) -> (i64, i64) {
+    %body_lo = test.fact_range_lo %acc : i64 -> i64
+    scf.yield %acc, %body_lo : i64, i64
+  }
+  func.return %observed : i64
+}
+
+// ----
+func.def @for_iter_arg_facts_reach_body(%n: index) -> (i64) {
+  %lo = index.constant 0 : index
+  %n2 = index.assume %n [range(%n, 1, 4)] : index
+  %step = index.constant 1 : index
+  %zero = scalar.constant 0 : i64
+  %observed = scf.for %iv = [%lo to %n2 step %step](%prev = %zero : i64) -> (i64) {
+    %body_lo = scalar.constant 7 : i64
+    scf.yield %body_lo : i64
+  }
+  func.return %observed : i64
+}
+
+// ====
+
+// A may-zero loop can still expose exact result facts when the zero-trip init
+// and every yielded value meet to the same type-domain fact.
+func.def @for_may_zero_result_uses_loop_summary(%n: index) -> (i64) {
+  %lo = index.constant 0 : index
+  %n2 = index.assume %n [range(%n, 0, 4)] : index
+  %step = index.constant 1 : index
+  %seven = scalar.constant 7 : i64
+  %observed = scf.for %iv = [%lo to %n2 step %step](%acc = %seven : i64) -> (i64) {
+    %body_lo = test.fact_range_lo %acc : i64 -> i64
+    scf.yield %body_lo : i64
+  }
+  %result_lo = test.fact_range_lo %observed : i64 -> i64
+  func.return %result_lo : i64
+}
+
+// ----
+func.def @for_may_zero_result_uses_loop_summary(%n: index) -> (i64) {
+  %result_lo = scalar.constant 7 : i64
+  func.return %result_lo : i64
+}
+
+// ====
+
+// A statically zero-trip loop result keeps the init operand facts even if the
+// body would yield a different exact value.
+func.def @for_zero_trip_result_is_init() -> (i64) {
+  %lo = index.constant 8 : index
+  %hi = index.constant 4 : index
+  %step = index.constant 1 : index
+  %seven = scalar.constant 7 : i64
+  %forty_two = scalar.constant 42 : i64
+  %observed = scf.for %iv = [%lo to %hi step %step](%acc = %seven : i64) -> (i64) {
+    scf.yield %forty_two : i64
+  }
+  %result_lo = test.fact_range_lo %observed : i64 -> i64
+  func.return %result_lo : i64
+}
+
+// ----
+func.def @for_zero_trip_result_is_init() -> (i64) {
+  %result_lo = scalar.constant 7 : i64
+  func.return %result_lo : i64
+}
+
+// ====
+
+// Arithmetic-carried values widen instead of leaving a stale exact summary when
+// the bounded solver cannot represent the recurrence compactly.
+func.def @for_arithmetic_carried_widens_to_unknown(%n: index) -> (i64, i64) {
+  %lo = index.constant 0 : index
+  %n2 = index.assume %n [range(%n, 0, 4)] : index
+  %step = index.constant 1 : index
+  %zero = scalar.constant 0 : i64
+  %one = scalar.constant 1 : i64
+  %observed = scf.for %iv = [%lo to %n2 step %step](%acc = %zero : i64) -> (i64) {
+    %next = scalar.addi %acc, %one : i64
+    scf.yield %next : i64
+  }
+  %result_lo = test.fact_range_lo %observed : i64 -> i64
+  %result_hi = test.fact_range_hi %observed : i64 -> i64
+  func.return %result_lo, %result_hi : i64, i64
+}
+
+// ----
+func.def @for_arithmetic_carried_widens_to_unknown(%n: index) -> (i64, i64) {
+  %result_lo = scalar.constant -9223372036854775808 : i64
+  %result_hi = scalar.constant 9223372036854775807 : i64
+  func.return %result_lo, %result_hi : i64, i64
+}
+
+// ====
+
+// The same loop-like summary path handles condition-region loops. The carried
+// value is forwarded unchanged through both the false exit and true body paths.
+func.def @while_unchanged_carried_result(%keep_going: i1) -> (i64) {
+  %nine = scalar.constant 9 : i64
+  %result = scf.while(%before = %nine : i64) -> (i64) {
+    scf.condition %keep_going, %before : i1, i64
+  } do(%body: i64) {
+    scf.yield %body : i64
+  }
+  %result_lo = test.fact_range_lo %result : i64 -> i64
+  func.return %result_lo : i64
+}
+
+// ----
+func.def @while_unchanged_carried_result(%keep_going: i1) -> (i64) {
+  %result_lo = scalar.constant 9 : i64
+  func.return %result_lo : i64
+}
+
+// ====
+
+// Selecting between different uniform values with a lane-local predicate
+// produces lane-varying data, not a uniform unknown.
+kernel.def @select_lane_predicate_different_values_is_varying() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs: i32, %rhs: i32) {
+  %lane = kernel.subgroup.lane.id : index
+  %zero = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %zero : index
+  %selected = scf.select %condition, %lhs, %rhs : i32
+  %selected_is_varying = test.fact_lane_varying %selected : i32 -> i1
+  %selected_is_uniform = test.fact_subgroup_uniform %selected : i32 -> i1
+  test.use %selected_is_varying, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @select_lane_predicate_different_values_is_varying() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs: i32, %rhs: i32) {
+  %selected_is_varying = scalar.constant true : i1
+  %selected_is_uniform = scalar.constant false : i1
+  test.use %selected_is_varying, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ====
+
+// The boolean form keeps the stronger lane-predicate classification.
+kernel.def @select_lane_predicate_boolean_result_is_predicate() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs: i1, %rhs: i1) {
+  %lane = kernel.subgroup.lane.id : index
+  %zero = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %zero : index
+  %selected = scf.select %condition, %lhs, %rhs : i1
+  %selected_is_predicate = test.fact_lane_predicate %selected : i1 -> i1
+  %selected_is_uniform = test.fact_subgroup_uniform %selected : i1 -> i1
+  test.use %selected_is_predicate, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @select_lane_predicate_boolean_result_is_predicate() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs: i1, %rhs: i1) {
+  %selected_is_predicate = scalar.constant true : i1
+  %selected_is_uniform = scalar.constant false : i1
+  test.use %selected_is_predicate, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ====
+
+// Lookup facts meet only rows that selector range facts allow. Since the
+// explicit keys cover the full [0, 1] selector domain, the default row is not
+// included in the result range.
+func.def @lookup_facts_prune_default_from_covered_range(%variant: index) -> (i64, i64, i64) {
+  %bounded = index.assume %variant [range(%variant, 0, 1)] : index
+  %v0 = scalar.constant 10 : i64
+  %v1 = scalar.constant 20 : i64
+  %v2 = scalar.constant 100 : i64
+  %fallback = scalar.constant 1000 : i64
+  %result = scf.lookup %bounded {
+    0 = (%v0),
+    1 = (%v1),
+    2 = (%v2)
+  } default(%fallback) : i64
+  %fact_lo = test.fact_range_lo %result : i64 -> i64
+  %fact_hi = test.fact_range_hi %result : i64 -> i64
+  %fact_div = test.fact_divisor %result : i64 -> i64
+  func.return %fact_lo, %fact_hi, %fact_div : i64, i64, i64
+}
+
+// ----
+func.def @lookup_facts_prune_default_from_covered_range(%variant: index) -> (i64, i64, i64) {
+  %fact_lo = scalar.constant 10 : i64
+  %fact_hi = scalar.constant 20 : i64
+  %fact_div = scalar.constant 10 : i64
+  func.return %fact_lo, %fact_hi, %fact_div : i64, i64, i64
+}
+
+// ====
+
+// If selector facts leave values outside the explicit keys, the default row
+// participates in the conservative meet.
+func.def @lookup_facts_include_default_for_uncovered_range(%variant: index) -> (i64, i64) {
+  %bounded = index.assume %variant [range(%variant, 0, 3)] : index
+  %v0 = scalar.constant 10 : i64
+  %v1 = scalar.constant 20 : i64
+  %fallback = scalar.constant 100 : i64
+  %result = scf.lookup %bounded {
+    0 = (%v0),
+    1 = (%v1)
+  } default(%fallback) : i64
+  %fact_lo = test.fact_range_lo %result : i64 -> i64
+  %fact_hi = test.fact_range_hi %result : i64 -> i64
+  func.return %fact_lo, %fact_hi : i64, i64
+}
+
+// ----
+func.def @lookup_facts_include_default_for_uncovered_range(%variant: index) -> (i64, i64) {
+  %fact_lo = scalar.constant 10 : i64
+  %fact_hi = scalar.constant 100 : i64
+  func.return %fact_lo, %fact_hi : i64, i64
+}
+
+// ====
+
+// Divisibility facts prune explicit cases and can prove that a sparse key set
+// still covers every possible selector value.
+func.def @lookup_facts_prune_by_divisor(%variant: index) -> (i64, i64) {
+  %bounded = index.assume %variant [range(%variant, 0, 4), mul(%variant, 2)] : index
+  %v0 = scalar.constant 10 : i64
+  %v1 = scalar.constant 11 : i64
+  %v2 = scalar.constant 20 : i64
+  %v3 = scalar.constant 21 : i64
+  %v4 = scalar.constant 30 : i64
+  %fallback = scalar.constant 100 : i64
+  %result = scf.lookup %bounded {
+    0 = (%v0),
+    1 = (%v1),
+    2 = (%v2),
+    3 = (%v3),
+    4 = (%v4)
+  } default(%fallback) : i64
+  %fact_lo = test.fact_range_lo %result : i64 -> i64
+  %fact_hi = test.fact_range_hi %result : i64 -> i64
+  func.return %fact_lo, %fact_hi : i64, i64
+}
+
+// ----
+func.def @lookup_facts_prune_by_divisor(%variant: index) -> (i64, i64) {
+  %fact_lo = scalar.constant 10 : i64
+  %fact_hi = scalar.constant 30 : i64
+  func.return %fact_lo, %fact_hi : i64, i64
+}

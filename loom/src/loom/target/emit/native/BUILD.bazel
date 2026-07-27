@@ -1,0 +1,128 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_NATIVE_AMDGPU_VISIBILITY = ["//loom/src/loom/target/emit/native/amdgpu:__pkg__"]
+
+_NATIVE_X86_VISIBILITY = ["//loom/src/loom/target/emit/native/x86:__pkg__"]
+
+#===------------------------------------------------------------------------===#
+# Native assembly fragments
+#===------------------------------------------------------------------------===#
+
+loom_cc_library(
+    name = "assembly",
+    srcs = ["assembly.c"],
+    hdrs = ["assembly.h"],
+    visibility = _NATIVE_AMDGPU_VISIBILITY + _NATIVE_X86_VISIBILITY,
+    deps = [
+        ":fragment",
+        "//loom/src/loom/codegen/low:move_sequence",
+        "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "fragment",
+    srcs = ["fragment.c"],
+    hdrs = ["fragment.h"],
+    visibility = _NATIVE_AMDGPU_VISIBILITY,
+    deps = [
+        "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "elf",
+    srcs = ["elf.c"],
+    hdrs = ["elf.h"],
+    visibility = _NATIVE_AMDGPU_VISIBILITY,
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_library(
+    name = "contribution",
+    srcs = ["contribution.c"],
+    hdrs = ["contribution.h"],
+    deps = [
+        ":elf",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "object",
+    srcs = ["object.c"],
+    hdrs = ["object.h"],
+    deps = [
+        ":contribution",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "elf_test",
+    srcs = ["elf_test.cc"],
+    deps = [
+        ":elf",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "object_test",
+    srcs = ["object_test.cc"],
+    deps = [
+        ":contribution",
+        ":object",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "contribution_test",
+    srcs = ["contribution_test.cc"],
+    deps = [
+        ":contribution",
+        ":elf",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

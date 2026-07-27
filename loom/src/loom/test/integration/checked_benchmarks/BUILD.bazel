@@ -1,0 +1,264 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_CHECKED_BENCHMARK_CASES = [
+    {
+        "name": "paged_kv_block_gather_score_tile_f32",
+        "rows": [
+            {
+                "benchmark": "@paged_kv_block_gather_score_tile_page1_lane2",
+                "target_name": "paged_kv_block_gather_score_tile_page1_lane2",
+            },
+            {
+                "benchmark": "@paged_kv_block_gather_score_tile_page0_lane1",
+                "target_name": "paged_kv_block_gather_score_tile_page0_lane1",
+            },
+            {
+                "benchmark": "@paged_kv_block_gather_score_tile_tail",
+                "target_name": "paged_kv_block_gather_score_tile_tail",
+            },
+        ],
+        "source": "paged_kv_block_gather_score_tile_f32.loom",
+        "targets": [
+            "amdgpu",
+        ],
+    },
+    {
+        "name": "paged_decode_attention_tile_f32",
+        "rows": [
+            {
+                "benchmark": "@paged_decode_attention_tile_tail",
+                "target_name": "paged_decode_attention_tile_tail",
+            },
+        ],
+        "source": "paged_decode_attention_tile_f32.loom",
+        "targets": [
+            "amdgpu",
+        ],
+    },
+    {
+        "name": "rope_pair_rotate_tile_f32",
+        "rows": [
+            {
+                "benchmark": "@rope_pair_rotate_tile_identity_smoke",
+                "target_name": "rope_pair_rotate_tile_identity",
+            },
+            {
+                "benchmark": "@rope_pair_rotate_tile_quarter_turn_smoke",
+                "target_name": "rope_pair_rotate_tile_quarter_turn",
+            },
+        ],
+        "source": "rope_pair_rotate_tile_f32.loom",
+        "targets": [
+            "amdgpu",
+        ],
+    },
+    {
+        "name": "split_kv_online_softmax_combine_f32",
+        "rows": [
+            {
+                "benchmark": "@split_kv_online_softmax_combine_f32_smoke",
+                "target_name": "split_kv_online_softmax_combine_f32",
+            },
+        ],
+        "source": "split_kv_online_softmax_combine_f32.loom",
+        "targets": [
+            "amdgpu",
+        ],
+    },
+    {
+        "name": "online_softmax_tail_attention_tile_f32",
+        "rows": [
+            {
+                "benchmark": "@online_softmax_tail_attention_tile_f32_smoke",
+                "target_name": "online_softmax_tail_attention_tile_f32",
+            },
+        ],
+        "source": "online_softmax_tail_attention_tile_f32.loom",
+        "targets": [
+            "amdgpu",
+        ],
+    },
+    {
+        "name": "top2_routing_expert_gather_f32",
+        "rows": [
+            {
+                "benchmark": "@top2_routing_expert_gather_ordered_smoke",
+                "target_name": "top2_routing_expert_gather_ordered",
+            },
+            {
+                "benchmark": "@top2_routing_expert_gather_tie_smoke",
+                "target_name": "top2_routing_expert_gather_tie",
+            },
+        ],
+        "source": "top2_routing_expert_gather_f32.loom",
+        "targets": [
+            "amdgpu",
+        ],
+    },
+    {
+        "name": "weighted_expert_route_gather_f32",
+        "rows": [
+            {
+                "benchmark": "@weighted_expert_route_gather_distinct",
+                "target_name": "weighted_expert_route_gather_distinct",
+            },
+            {
+                "benchmark": "@weighted_expert_route_gather_duplicate",
+                "target_name": "weighted_expert_route_gather_duplicate",
+            },
+        ],
+        "source": "weighted_expert_route_gather_f32.loom",
+        "targets": [
+            "amdgpu",
+        ],
+    },
+    {
+        "name": "workgroup_rank_sort_f32_i32",
+        "rows": [
+            {
+                "benchmark": "@workgroup_rank_sort_distinct",
+                "target_name": "workgroup_rank_sort_distinct",
+            },
+            {
+                "benchmark": "@workgroup_rank_sort_tie",
+                "target_name": "workgroup_rank_sort_tie",
+            },
+        ],
+        "source": "workgroup_rank_sort_f32_i32.loom",
+        "targets": [
+            "amdgpu",
+        ],
+    },
+    {
+        "name": "packed_s8_fields_f16scale_f32dot",
+        "rows": [
+            {
+                "benchmark": "@packed_s8_fields_f16scale_f32dot_smoke",
+                "target_name": "packed_s8_fields_f16scale_f32dot",
+            },
+        ],
+        "source": "packed_s8_fields_f16scale_f32dot.loom",
+        "targets": [
+            "amdgpu",
+        ],
+    },
+    {
+        "name": "signed_i8_tile_quantize_f32",
+        "rows": [
+            {
+                "benchmark": "@signed_i8_tile_quantize_even_ties_f32_smoke",
+                "target_name": "signed_i8_tile_quantize_even_ties_f32",
+            },
+            {
+                "benchmark": "@signed_i8_tile_quantize_arcp_f32_smoke",
+                "target_name": "signed_i8_tile_quantize_arcp_f32",
+            },
+        ],
+        "source": "signed_i8_tile_quantize_f32.loom",
+        "targets": [
+            "amdgpu",
+        ],
+    },
+    {
+        "name": "fragment_result_dynamic_strided_f16acc_f32_store",
+        "rows": [
+            {
+                "benchmark": "@fragment_result_dynamic_strided_f16acc_f32_store_smoke",
+                "target_name": "fragment_result_dynamic_strided_f16acc_f32_store",
+            },
+        ],
+        "source": "fragment_result_dynamic_strided_f16acc_f32_store.loom",
+        "targets": [
+            "amdgpu",
+        ],
+    },
+    {
+        "name": "fragment_result_f16_lds_roundtrip",
+        "rows": [
+            {
+                "benchmark": "@fragment_result_f16_lds_roundtrip_smoke",
+                "target_name": "fragment_result_f16_lds_roundtrip",
+            },
+        ],
+        "source": "fragment_result_f16_lds_roundtrip.loom",
+        "targets": [
+            "amdgpu",
+        ],
+    },
+]
+
+exports_files([_case["source"] for _case in _CHECKED_BENCHMARK_CASES])
+
+_AMDGPU_ARTIFACTS_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:amdgpu_artifacts",
+])
+
+_AMDGPU_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/execute:amdgpu_hal",
+])
+
+[
+    iree_executable_test(
+        name = _row["target_name"] + "_plan_test",
+        src = "//loom/src/loom/tools/iree-benchmark-loom",
+        args = [
+            "$(location %s)" % _case["source"],
+            "--benchmark=%s" % _row["benchmark"],
+            "--dry-run",
+            "--output-format=jsonl",
+        ],
+        data = [
+            _case["source"],
+        ],
+        tags = ["hostonly"],
+        target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
+    )
+    for _case in _CHECKED_BENCHMARK_CASES
+    for _row in _case["rows"]
+]
+
+[
+    iree_executable_test(
+        name = _row["target_name"] + "_amdgpu_test",
+        src = "//loom/src/loom/tools/iree-benchmark-loom",
+        args = [
+            "$(location %s)" % _case["source"],
+            "--benchmark=%s" % _row["benchmark"],
+            "--device=amdgpu",
+            "--measure=dispatch_complete",
+            "--iterations=1",
+            "--warmup-iterations=0",
+            "--batch-size=1",
+            "--min-time-ms=0",
+            "--max-batches=1",
+            "--input-ring-count=1",
+            "--output-format=jsonl",
+        ],
+        data = [
+            _case["source"],
+        ],
+        tags = [
+            "iree-run-requirement=runtime.resource.amd_gpu",
+            "manual",
+            "requires-gpu-amd",
+            "runtime-resource=amd-gpu",
+        ],
+        target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    )
+    for _case in _CHECKED_BENCHMARK_CASES
+    if "amdgpu" in _case["targets"]
+    for _row in _case["rows"]
+]

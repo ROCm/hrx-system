@@ -1,0 +1,6 @@
+func.def @llvmir(%lhs: i32, %rhs: i32, %target: buffer, %source: buffer, %length: offset, %is_volatile: i1) -> (i32, i64) {
+  %sum = llvmir.inline_asm<sideeffect> "addl $2, $0", "=r,r,r"(%lhs, %rhs) : (i32, i32) -> i32
+  %ticks = llvmir.intrinsic<llvm.x86.rdtsc> () : () -> i64
+  llvmir.intrinsic<llvm.memcpy> (%target, %source, %length, %is_volatile) : (buffer, buffer, offset, i1)
+  func.return %sum, %ticks : i32, i64
+}

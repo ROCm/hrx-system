@@ -215,6 +215,47 @@ typedef struct iree_test_process_t {
 #endif
 } iree_test_process_t;
 
+typedef enum iree_test_process_wait_result_e {
+  IREE_TEST_PROCESS_WAIT_PENDING = 0,
+  IREE_TEST_PROCESS_WAIT_COMPLETED = 1,
+  IREE_TEST_PROCESS_WAIT_FAILED = 2,
+} iree_test_process_wait_result_t;
+
+#if !defined(IREE_PLATFORM_WINDOWS)
+static int iree_coordinated_test_process_exit_code(int status) {
+  if (WIFEXITED(status)) return WEXITSTATUS(status);
+  if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+  return 1;
+}
+#endif  // !IREE_PLATFORM_WINDOWS
+
+// Checks whether a process has exited without blocking. A completed process is
+// reaped and its exit code returned through |out_exit_code|.
+static iree_test_process_wait_result_t iree_coordinated_test_process_try_wait(
+    iree_test_process_t* process, int* out_exit_code) {
+#if defined(IREE_PLATFORM_WINDOWS)
+  DWORD wait_result = WaitForSingleObject(process->handle, 0);
+  if (wait_result == WAIT_TIMEOUT) return IREE_TEST_PROCESS_WAIT_PENDING;
+  if (wait_result != WAIT_OBJECT_0) return IREE_TEST_PROCESS_WAIT_FAILED;
+  DWORD exit_code = 1;
+  if (!GetExitCodeProcess(process->handle, &exit_code)) {
+    return IREE_TEST_PROCESS_WAIT_FAILED;
+  }
+  *out_exit_code = (int)exit_code;
+  return IREE_TEST_PROCESS_WAIT_COMPLETED;
+#else
+  int status = 0;
+  pid_t result = 0;
+  do {
+    result = waitpid(process->pid, &status, WNOHANG);
+  } while (result < 0 && errno == EINTR);
+  if (result == 0) return IREE_TEST_PROCESS_WAIT_PENDING;
+  if (result < 0) return IREE_TEST_PROCESS_WAIT_FAILED;
+  *out_exit_code = iree_coordinated_test_process_exit_code(status);
+  return IREE_TEST_PROCESS_WAIT_COMPLETED;
+#endif
+}
+
 // Spawns a child process running the given argv (NULL-terminated).
 // The child inherits the parent's stdout/stderr.
 static bool iree_coordinated_test_process_spawn(const char* const* argv,
@@ -270,18 +311,16 @@ static bool iree_coordinated_test_process_spawn(const char* const* argv,
   return success;
 }
 
-// Waits for a process to exit within |timeout_ms|. On success, sets
-// |out_exit_code| and returns true. On timeout, returns false.
+// Waits for a process to exit. On success, sets |out_exit_code| and returns
+// true. The outer test harness owns hang detection.
 static bool iree_coordinated_test_process_wait(iree_test_process_t* process,
-                                               int64_t timeout_ms,
                                                int* out_exit_code) {
   IREE_TRACE_ZONE_BEGIN(z0);
   bool completed = false;
 
 #if defined(IREE_PLATFORM_WINDOWS)
-  DWORD wait_result = WaitForSingleObject(
-      process->handle, (DWORD)(timeout_ms > 0 ? timeout_ms : INFINITE));
-  if (wait_result != WAIT_TIMEOUT) {
+  DWORD wait_result = WaitForSingleObject(process->handle, INFINITE);
+  if (wait_result == WAIT_OBJECT_0) {
     DWORD exit_code = 1;
     GetExitCodeProcess(process->handle, &exit_code);
     *out_exit_code = (int)exit_code;
@@ -289,30 +328,14 @@ static bool iree_coordinated_test_process_wait(iree_test_process_t* process,
   }
 
 #else  // POSIX
-  // Poll with 10ms intervals.
-  int64_t remaining_ms = timeout_ms > 0 ? timeout_ms : 30000;
-  while (remaining_ms > 0) {
-    int status = 0;
-    pid_t result = waitpid(process->pid, &status, WNOHANG);
-    if (result > 0) {
-      if (WIFEXITED(status)) {
-        *out_exit_code = WEXITSTATUS(status);
-      } else if (WIFSIGNALED(status)) {
-        *out_exit_code = 128 + WTERMSIG(status);
-      } else {
-        *out_exit_code = 1;
-      }
-      completed = true;
-      break;
-    }
-    if (result < 0 && errno != EINTR) {
-      *out_exit_code = 1;
-      completed = true;  // Process gone or error.
-      break;
-    }
-    struct timespec sleep_time = {0, 10 * 1000 * 1000};  // 10ms.
-    nanosleep(&sleep_time, NULL);
-    remaining_ms -= 10;
+  int status = 0;
+  pid_t result = 0;
+  do {
+    result = waitpid(process->pid, &status, 0);
+  } while (result < 0 && errno == EINTR);
+  if (result > 0) {
+    *out_exit_code = iree_coordinated_test_process_exit_code(status);
+    completed = true;
   }
 #endif
 
@@ -324,7 +347,7 @@ static bool iree_coordinated_test_process_wait(iree_test_process_t* process,
 static void iree_coordinated_test_process_kill(iree_test_process_t* process) {
 #if defined(IREE_PLATFORM_WINDOWS)
   TerminateProcess(process->handle, 1);
-  WaitForSingleObject(process->handle, 5000);
+  WaitForSingleObject(process->handle, INFINITE);
 #else
   kill(process->pid, SIGKILL);
   int status = 0;
@@ -476,35 +499,54 @@ void iree_coordinated_test_signal_ready(const char* temp_directory) {
   IREE_TRACE_ZONE_END(z0);
 }
 
-// Polls for the ready file to appear. Returns true when found, false on
-// timeout.
+// Takes a published ready file and returns true if one was present.
+static bool iree_coordinated_test_take_ready_file(const char* ready_path) {
+#if defined(IREE_PLATFORM_WINDOWS)
+  DWORD attributes = GetFileAttributesA(ready_path);
+  if (attributes == INVALID_FILE_ATTRIBUTES) return false;
+  DeleteFileA(ready_path);
+  return true;
+#else
+  struct stat st;
+  if (stat(ready_path, &st) != 0) return false;
+  unlink(ready_path);
+  return true;
+#endif
+}
+
+// Polls for the ready file to appear or the role process to exit. The
+// condition, not elapsed wall time, controls completion; the outer test
+// harness owns hang detection.
 static bool iree_coordinated_test_wait_ready(const char* temp_directory,
-                                             int64_t timeout_ms) {
+                                             iree_test_process_t* process,
+                                             int* out_exit_code,
+                                             bool* out_process_completed) {
   IREE_TRACE_ZONE_BEGIN(z0);
   bool found = false;
   char ready_path[512];
   iree_snprintf(ready_path, sizeof(ready_path), "%s/.ready", temp_directory);
-  int64_t remaining_ms = timeout_ms;
-  while (remaining_ms > 0) {
-#if defined(IREE_PLATFORM_WINDOWS)
-    DWORD attributes = GetFileAttributesA(ready_path);
-    if (attributes != INVALID_FILE_ATTRIBUTES) {
-      DeleteFileA(ready_path);  // Clean up for reuse.
+  while (!found) {
+    if (iree_coordinated_test_take_ready_file(ready_path)) {
       found = true;
       break;
     }
+
+    iree_test_process_wait_result_t wait_result =
+        iree_coordinated_test_process_try_wait(process, out_exit_code);
+    if (wait_result == IREE_TEST_PROCESS_WAIT_COMPLETED) {
+      *out_process_completed = true;
+      // The role may have published readiness immediately before exiting.
+      found = iree_coordinated_test_take_ready_file(ready_path);
+      break;
+    }
+    if (wait_result == IREE_TEST_PROCESS_WAIT_FAILED) break;
+
+#if defined(IREE_PLATFORM_WINDOWS)
     Sleep(1);
 #else
-    struct stat st;
-    if (stat(ready_path, &st) == 0) {
-      unlink(ready_path);  // Clean up for reuse.
-      found = true;
-      break;
-    }
     struct timespec sleep_time = {0, 1 * 1000 * 1000};  // 1ms.
     nanosleep(&sleep_time, NULL);
 #endif
-    remaining_ms -= 1;
   }
   IREE_TRACE_ZONE_END(z0);
   return found;
@@ -556,8 +598,6 @@ int iree_coordinated_test_run(int argc, char** argv,
     IREE_TRACE_ZONE_END(z0);
     return 1;
   }
-
-  int64_t timeout_ms = config->timeout_ms > 0 ? config->timeout_ms : 30000;
 
   // Discover our own executable path.
   char* self_path = iree_coordinated_test_get_self_path(argv[0]);
@@ -618,8 +658,6 @@ int iree_coordinated_test_run(int argc, char** argv,
   child_argv[base_argc] = NULL;
 
   int result = 0;
-  int64_t remaining_ms = timeout_ms;
-
   for (iree_host_size_t i = 0; i < config->role_count; ++i) {
     iree_snprintf(role_flag, sizeof(role_flag), "--iree_test_role=%s",
                   config->roles[i].name);
@@ -637,11 +675,18 @@ int iree_coordinated_test_run(int argc, char** argv,
 
     // Wait for ready signal if required.
     if (config->roles[i].signals_ready) {
-      if (!iree_coordinated_test_wait_ready(temp_directory, remaining_ms)) {
-        fprintf(stderr,
-                "coordinated_test: TIMEOUT waiting for role '%s' to signal "
-                "ready\n",
-                config->roles[i].name);
+      if (!iree_coordinated_test_wait_ready(temp_directory, &processes[i],
+                                            &exit_codes[i], &completed[i])) {
+        if (completed[i]) {
+          fprintf(stderr,
+                  "coordinated_test: role '%s' exited with code %d before "
+                  "signaling ready\n",
+                  config->roles[i].name, exit_codes[i]);
+        } else {
+          fprintf(stderr,
+                  "coordinated_test: failed waiting for role '%s' readiness\n",
+                  config->roles[i].name);
+        }
         result = 1;
         break;
       }
@@ -651,10 +696,13 @@ int iree_coordinated_test_run(int argc, char** argv,
   // Wait for all spawned children to exit.
   if (result == 0) {
     for (iree_host_size_t i = 0; i < config->role_count; ++i) {
-      if (!spawned[i]) continue;
-      if (iree_coordinated_test_process_wait(&processes[i], remaining_ms,
-                                             &exit_codes[i])) {
+      if (!spawned[i] || completed[i]) continue;
+      if (iree_coordinated_test_process_wait(&processes[i], &exit_codes[i])) {
         completed[i] = true;
+      } else {
+        fprintf(stderr, "coordinated_test: failed waiting for role '%s'\n",
+                config->roles[i].name);
+        result = 1;
       }
     }
   }
@@ -662,7 +710,7 @@ int iree_coordinated_test_run(int argc, char** argv,
   // Kill any that didn't complete.
   for (iree_host_size_t i = 0; i < config->role_count; ++i) {
     if (spawned[i] && !completed[i]) {
-      fprintf(stderr, "coordinated_test: killing role '%s' (timeout)\n",
+      fprintf(stderr, "coordinated_test: terminating role '%s'\n",
               config->roles[i].name);
       iree_coordinated_test_process_kill(&processes[i]);
       exit_codes[i] = -1;
@@ -681,7 +729,7 @@ int iree_coordinated_test_run(int argc, char** argv,
       continue;
     }
     if (!completed[i]) {
-      fprintf(stderr, "  %-12s TIMEOUT\n", config->roles[i].name);
+      fprintf(stderr, "  %-12s NOT COMPLETED\n", config->roles[i].name);
       continue;
     }
     if (exit_codes[i] != 0) {

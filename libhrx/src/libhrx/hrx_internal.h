@@ -10,9 +10,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/tracing.h"
 #include "iree/hal/api.h"
-#include "iree/hal/device_group.h"
 #include "iree/hal/local/loaders/registration/init.h"
-#include "iree/hal/pool.h"
 #include "iree/hal/utils/resource_set.h"
 #include "iree/modules/hal/module.h"
 #include "iree/modules/hal/types.h"
@@ -74,32 +72,37 @@ extern "C" {
 // HRX enums match IREE values by convention. These asserts guarantee it.
 //===----------------------------------------------------------------------===//
 
-#define HRX_STATIC_ASSERT_ENUM_EQ(lhs, rhs, message) \
-  _Static_assert((int)(lhs) == (int)(rhs), message)
-
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_OK, IREE_STATUS_OK, "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_CANCELLED, IREE_STATUS_CANCELLED,
-                          "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_UNKNOWN, IREE_STATUS_UNKNOWN,
-                          "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_INVALID_ARGUMENT,
-                          IREE_STATUS_INVALID_ARGUMENT, "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_DEADLINE_EXCEEDED,
-                          IREE_STATUS_DEADLINE_EXCEEDED, "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_NOT_FOUND, IREE_STATUS_NOT_FOUND,
-                          "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_ALREADY_EXISTS, IREE_STATUS_ALREADY_EXISTS,
-                          "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_OUT_OF_MEMORY,
-                          IREE_STATUS_RESOURCE_EXHAUSTED, "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_OUT_OF_RANGE, IREE_STATUS_OUT_OF_RANGE,
-                          "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_UNIMPLEMENTED, IREE_STATUS_UNIMPLEMENTED,
-                          "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_INTERNAL, IREE_STATUS_INTERNAL,
-                          "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_UNAVAILABLE, IREE_STATUS_UNAVAILABLE,
-                          "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_OK, IREE_STATUS_OK, "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_CANCELLED, IREE_STATUS_CANCELLED,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_UNKNOWN, IREE_STATUS_UNKNOWN,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_INVALID_ARGUMENT,
+                           IREE_STATUS_INVALID_ARGUMENT, "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_DEADLINE_EXCEEDED,
+                           IREE_STATUS_DEADLINE_EXCEEDED, "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_NOT_FOUND, IREE_STATUS_NOT_FOUND,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_ALREADY_EXISTS,
+                           IREE_STATUS_ALREADY_EXISTS, "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_PERMISSION_DENIED,
+                           IREE_STATUS_PERMISSION_DENIED, "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_OUT_OF_MEMORY,
+                           IREE_STATUS_RESOURCE_EXHAUSTED, "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_FAILED_PRECONDITION,
+                           IREE_STATUS_FAILED_PRECONDITION, "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_ABORTED, IREE_STATUS_ABORTED,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_OUT_OF_RANGE, IREE_STATUS_OUT_OF_RANGE,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_UNIMPLEMENTED, IREE_STATUS_UNIMPLEMENTED,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_INTERNAL, IREE_STATUS_INTERNAL,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_UNAVAILABLE, IREE_STATUS_UNAVAILABLE,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_DATA_LOSS, IREE_STATUS_DATA_LOSS,
+                           "status mismatch");
 
 // Memory type bitfield.
 _Static_assert(HRX_MEMORY_TYPE_NONE == IREE_HAL_MEMORY_TYPE_NONE,
@@ -218,8 +221,6 @@ _Static_assert(HRX_MAP_WRITE == IREE_HAL_MEMORY_ACCESS_WRITE,
                "map flags mismatch");
 _Static_assert(HRX_MAP_DISCARD == IREE_HAL_MEMORY_ACCESS_DISCARD,
                "map flags mismatch");
-
-#undef HRX_STATIC_ASSERT_ENUM_EQ
 
 //===----------------------------------------------------------------------===//
 // Internal types backing opaque handles
@@ -466,25 +467,53 @@ typedef struct hrx_buffer_s {
 // Memory pool (stream-ordered memory management).
 typedef struct hrx_mem_pool_s {
   iree_atomic_ref_count_t ref_count;
+
+  // Device whose HAL pool backend supplies this pool's backing storage.
   hrx_device_t device;
+
+  // HIP/CUDA-style creation properties used for attribute queries.
   hrx_mem_pool_props_t props;
 
+  // HAL pool lazily created on first allocation.
+  iree_hal_pool_t* hal_pool;
+
+  // HIP/CUDA release threshold attribute in bytes.
   uint64_t release_threshold;
+
+  // True when internal dependency insertion is allowed for reuse.
   bool reuse_allow_internal_dependencies;
+
+  // True when event dependencies are honored for reuse.
   bool reuse_follow_event_dependencies;
+
+  // True when opportunistic reuse is allowed.
   bool reuse_allow_opportunistic;
 
+  // Current bytes reserved from the system for this pool.
   uint64_t reserved_mem_current;
+
+  // Peak bytes reserved from the system for this pool.
   uint64_t reserved_mem_high;
+
+  // Current backing bytes charged to live allocations.
   uint64_t used_mem_current;
+
+  // Peak backing bytes charged to live allocations.
   uint64_t used_mem_high;
 
+  // Platform-native pool handle, if one is imported or exported.
   void* platform_handle;
 
+  // Guards mutable pool attributes and lazy HAL pool creation.
   iree_slim_mutex_t mutex;
 
+  // True when the device allocator exposes HAL virtual-memory operations.
   bool supports_virtual_memory;
+
+  // Minimum virtual-memory page size reported by the HAL allocator.
   iree_device_size_t vm_page_size_min;
+
+  // Recommended virtual-memory page size reported by the HAL allocator.
   iree_device_size_t vm_page_size_recommended;
 } hrx_mem_pool_s;
 
@@ -524,10 +553,17 @@ typedef struct hrx_buffer_view_s {
 
 // HAL executable wrapper for direct queue/stream dispatch.
 typedef struct hrx_executable_s {
+  // Reference count for the executable wrapper.
   iree_atomic_ref_count_t ref_count;
-  iree_hal_executable_cache_t* hal_executable_cache;
+  // Retained HAL executable containing the native functions.
   iree_hal_executable_t* hal_executable;
+  // Retained device that owns the HAL executable.
   hrx_device_t device;
+  // Number of NUL-terminated export names snapshotted at load time.
+  iree_host_size_t export_count;
+  // Single allocation containing the export name pointer table followed by the
+  // NUL-terminated name storage.
+  const char** export_names;
 } hrx_executable_s;
 
 typedef struct iree_async_proactor_pool_t iree_async_proactor_pool_t;
@@ -565,6 +601,14 @@ hrx_cpu_state_t* hrx_get_cpu_state(void);
 
 // Ensure shared infrastructure is created (idempotent).
 hrx_status_t hrx_ensure_shared_state(void);
+
+// Queries immutable total device memory from the HAL device spec.
+//
+// Returns OK with |out_known| false when the HAL spec does not describe a
+// known total capacity. Returns an error only when the spec data is invalid or
+// cannot be represented.
+hrx_status_t hrx_device_query_total_memory_from_spec(
+    hrx_device_t device, bool* out_known, iree_device_size_t* out_total);
 
 // Convert iree_status_t to hrx_status_t.
 hrx_status_t hrx_status_from_iree(iree_status_t iree_status);

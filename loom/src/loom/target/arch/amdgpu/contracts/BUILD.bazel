@@ -1,0 +1,259 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_target_table_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_AMDGPU_CONTRACT_FRAGMENT_GENERATOR = "//loom/py/loom/gen/target/contracts:amdgpu_contract_fragment"
+
+_AMDGPU_LOWER_RULE_GENERATOR = "//loom/py/loom/gen/target/contracts:amdgpu_lower_rule_shard"
+
+loom_target_table_cc_library(
+    name = "arithmetic",
+    args = ["--contract-fragment=amdgpu.arithmetic"],
+    generator = _AMDGPU_CONTRACT_FRAGMENT_GENERATOR,
+    deps = ["//loom/src/loom/target:contract"],
+)
+
+loom_target_table_cc_library(
+    name = "arithmetic_lower_rules",
+    args = ["--contract-fragment=amdgpu.arithmetic"],
+    generator = _AMDGPU_LOWER_RULE_GENERATOR,
+    deps = [
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/target/arch/amdgpu/lower:kinds",
+        "//loom/src/loom/target/arch/amdgpu/lower:materializers",
+    ],
+)
+
+loom_target_table_cc_library(
+    name = "async",
+    args = ["--contract-fragment=amdgpu.async"],
+    generator = _AMDGPU_CONTRACT_FRAGMENT_GENERATOR,
+    deps = ["//loom/src/loom/target:contract"],
+)
+
+loom_target_table_cc_library(
+    name = "async_lower_rules",
+    args = ["--contract-fragment=amdgpu.async"],
+    generator = _AMDGPU_LOWER_RULE_GENERATOR,
+    deps = [
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ops/kernel",
+    ],
+)
+
+loom_target_table_cc_library(
+    name = "buffer",
+    args = ["--contract-fragment=amdgpu.buffer"],
+    generator = _AMDGPU_CONTRACT_FRAGMENT_GENERATOR,
+    deps = ["//loom/src/loom/target:contract"],
+)
+
+loom_target_table_cc_library(
+    name = "buffer_lower_rules",
+    args = ["--contract-fragment=amdgpu.buffer"],
+    generator = _AMDGPU_LOWER_RULE_GENERATOR,
+    deps = [
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ops/buffer",
+    ],
+)
+
+loom_target_table_cc_library(
+    name = "config",
+    args = ["--contract-fragment=amdgpu.config"],
+    generator = _AMDGPU_CONTRACT_FRAGMENT_GENERATOR,
+    deps = ["//loom/src/loom/target:contract"],
+)
+
+loom_target_table_cc_library(
+    name = "config_lower_rules",
+    args = ["--contract-fragment=amdgpu.config"],
+    generator = _AMDGPU_LOWER_RULE_GENERATOR,
+    deps = [
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ops/config",
+    ],
+)
+
+loom_target_table_cc_library(
+    name = "compare",
+    args = ["--contract-fragment=amdgpu.compare"],
+    generator = _AMDGPU_CONTRACT_FRAGMENT_GENERATOR,
+    deps = ["//loom/src/loom/target:contract"],
+)
+
+loom_target_table_cc_library(
+    name = "compare_lower_rules",
+    args = ["--contract-fragment=amdgpu.compare"],
+    generator = _AMDGPU_LOWER_RULE_GENERATOR,
+    deps = [
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/target/arch/amdgpu/lower:materializers",
+    ],
+)
+
+loom_target_table_cc_library(
+    name = "dot",
+    args = ["--contract-fragment=amdgpu.dot"],
+    generator = _AMDGPU_CONTRACT_FRAGMENT_GENERATOR,
+    deps = ["//loom/src/loom/target:contract"],
+)
+
+loom_target_table_cc_library(
+    name = "dot_lower_rules",
+    args = ["--contract-fragment=amdgpu.dot"],
+    generator = _AMDGPU_LOWER_RULE_GENERATOR,
+    deps = [
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/target/arch/amdgpu/lower:kinds",
+    ],
+)
+
+loom_target_table_cc_library(
+    name = "integer",
+    args = ["--contract-fragment=amdgpu.integer"],
+    generator = _AMDGPU_CONTRACT_FRAGMENT_GENERATOR,
+    deps = ["//loom/src/loom/target:contract"],
+)
+
+loom_target_table_cc_library(
+    name = "integer_lower_rules",
+    args = ["--contract-fragment=amdgpu.integer"],
+    generator = _AMDGPU_LOWER_RULE_GENERATOR,
+    deps = [
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/target/arch/amdgpu/lower:materializers",
+    ],
+)
+
+loom_target_table_cc_library(
+    name = "matrix",
+    args = ["--contract-fragment=amdgpu.matrix"],
+    generator = _AMDGPU_CONTRACT_FRAGMENT_GENERATOR,
+    deps = ["//loom/src/loom/target:contract"],
+)
+
+loom_target_table_cc_library(
+    name = "reduce",
+    args = ["--contract-fragment=amdgpu.reduce"],
+    generator = _AMDGPU_CONTRACT_FRAGMENT_GENERATOR,
+    deps = ["//loom/src/loom/target:contract"],
+)
+
+loom_target_table_cc_library(
+    name = "reduce_lower_rules",
+    args = ["--contract-fragment=amdgpu.reduce"],
+    generator = _AMDGPU_LOWER_RULE_GENERATOR,
+    deps = [
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/target/arch/amdgpu/lower:kinds",
+        "//loom/src/loom/target/arch/amdgpu/lower:materializers",
+    ],
+)
+
+loom_target_table_cc_library(
+    name = "sanitizer",
+    args = ["--contract-fragment=amdgpu.sanitizer"],
+    generator = _AMDGPU_CONTRACT_FRAGMENT_GENERATOR,
+    deps = ["//loom/src/loom/target:contract"],
+)
+
+loom_target_table_cc_library(
+    name = "sanitizer_lower_rules",
+    args = ["--contract-fragment=amdgpu.sanitizer"],
+    generator = _AMDGPU_LOWER_RULE_GENERATOR,
+    deps = [
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ops/sanitizer",
+    ],
+)
+
+loom_target_table_cc_library(
+    name = "view",
+    args = ["--contract-fragment=amdgpu.view"],
+    generator = _AMDGPU_CONTRACT_FRAGMENT_GENERATOR,
+    deps = ["//loom/src/loom/target:contract"],
+)
+
+loom_target_table_cc_library(
+    name = "view_lower_rules",
+    args = ["--contract-fragment=amdgpu.view"],
+    generator = _AMDGPU_LOWER_RULE_GENERATOR,
+    deps = [
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ops/view",
+    ],
+)
+
+loom_cc_library(
+    name = "contracts",
+    hdrs = [
+        "arithmetic.h",
+        "arithmetic_lower_rules.h",
+        "async.h",
+        "async_lower_rules.h",
+        "buffer.h",
+        "buffer_lower_rules.h",
+        "compare.h",
+        "compare_lower_rules.h",
+        "config.h",
+        "config_lower_rules.h",
+        "dot.h",
+        "dot_lower_rules.h",
+        "integer.h",
+        "integer_lower_rules.h",
+        "matrix.h",
+        "reduce.h",
+        "reduce_lower_rules.h",
+        "sanitizer.h",
+        "sanitizer_lower_rules.h",
+        "view.h",
+        "view_lower_rules.h",
+    ],
+    deps = [
+        ":arithmetic",
+        ":arithmetic_lower_rules",
+        ":async",
+        ":async_lower_rules",
+        ":buffer",
+        ":buffer_lower_rules",
+        ":compare",
+        ":compare_lower_rules",
+        ":config",
+        ":config_lower_rules",
+        ":dot",
+        ":dot_lower_rules",
+        ":integer",
+        ":integer_lower_rules",
+        ":matrix",
+        ":reduce",
+        ":reduce_lower_rules",
+        ":sanitizer",
+        ":sanitizer_lower_rules",
+        ":view",
+        ":view_lower_rules",
+    ],
+)

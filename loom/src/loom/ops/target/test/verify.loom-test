@@ -1,0 +1,7 @@
+// RUN: verify
+
+target.generic<reference> @ok
+
+target.generic<reference> @duplicate
+// ERROR@+1: SYMBOL/005 "duplicate"
+target.generic<reference> @duplicate

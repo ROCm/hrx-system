@@ -10,7 +10,6 @@
 #include "iree/base/api.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/amdgpu/abi/kernel_args.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,30 +37,28 @@ typedef struct iree_hal_amdgpu_profile_metadata_registry_t {
   iree_allocator_t host_allocator;
   // Mutex protecting registry growth and snapshot copies.
   iree_slim_mutex_t mutex;
-  // Next non-zero executable id to assign.
-  uint64_t next_executable_id;
   // Next non-zero command-buffer id to assign.
   uint64_t next_command_buffer_id;
-  // Executable records in id assignment order.
+  // Executable records in registration order.
   iree_hal_profile_executable_record_t* executable_records;
   // Number of valid executable records.
   iree_host_size_t executable_record_count;
   // Allocated executable record capacity.
   iree_host_size_t executable_record_capacity;
-  // Packed executable code-object records in executable id assignment order.
+  // Packed executable code-object records in artifact registration order.
   uint8_t* executable_code_object_record_data;
   // Byte length of valid packed executable code-object records.
   iree_host_size_t executable_code_object_record_data_length;
   // Allocated byte capacity for packed executable code-object records.
   iree_host_size_t executable_code_object_record_data_capacity;
-  // Executable code-object load records in executable id assignment order.
+  // Executable code-object load records in artifact registration order.
   iree_hal_profile_executable_code_object_load_record_t*
       executable_code_object_load_records;
   // Number of valid executable code-object load records.
   iree_host_size_t executable_code_object_load_record_count;
   // Allocated executable code-object load record capacity.
   iree_host_size_t executable_code_object_load_record_capacity;
-  // Packed executable function records in executable id assignment order.
+  // Packed executable function records in executable registration order.
   uint8_t* executable_function_record_data;
   // Byte length of valid packed executable function records.
   iree_host_size_t executable_function_record_data_length;
@@ -109,8 +106,7 @@ void iree_hal_amdgpu_profile_metadata_deinitialize(
 void iree_hal_amdgpu_profile_metadata_hash_code_object(
     iree_const_byte_span_t code_object_data, uint64_t out_hash[2]);
 
-// Registers immutable executable identity metadata and assigns
-// |out_executable_id|.
+// Registers immutable executable profiling metadata for |executable_id|.
 //
 // This records the cheap executable/function metadata required to attribute
 // dispatch events and aggregate statistics. Code-object image bytes and loader
@@ -120,8 +116,8 @@ void iree_hal_amdgpu_profile_metadata_hash_code_object(
 // When |code_object_hash| is provided, each function receives an AMDGPU
 // pipeline hash. Inputs are appended in this order: code_object_hash[0] and
 // code_object_hash[1] as little-endian u64 values, function ordinal as a
-// little-endian u32 value, HAL ABI constant count and binding count as
-// little-endian u16 values, static workgroup size x/y/z as little-endian u32
+// little-endian u32 value, HAL dispatch constant byte length and binding count
+// as little-endian u32 values, static workgroup size x/y/z as little-endian u32
 // values, and function name byte length as a little-endian u64 value followed
 // by the exact function name bytes.
 //
@@ -133,9 +129,7 @@ iree_status_t iree_hal_amdgpu_profile_metadata_register_executable(
     iree_host_size_t function_count,
     const iree_hal_executable_function_info_t* function_infos,
     const iree_host_size_t* function_parameter_offsets,
-    const uint64_t code_object_hash[2],
-    const iree_hal_amdgpu_device_kernel_args_t* host_kernel_args,
-    uint64_t* out_executable_id);
+    const uint64_t code_object_hash[2], uint64_t executable_id);
 
 // Registers code-object image and load-range artifacts for an executable
 // previously registered with

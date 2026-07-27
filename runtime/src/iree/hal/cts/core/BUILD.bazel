@@ -75,17 +75,6 @@ iree_runtime_cc_library(
     alwayslink = True,
 )
 
-iree_runtime_cc_library(
-    name = "executable_cache_test",
-    testonly = True,
-    srcs = ["executable_cache_test.cc"],
-    deps = [
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/cts/util:test_base",
-    ],
-    alwayslink = True,
-)
-
 # All core tests (link with backend library and test_main.cc for test binary).
 iree_runtime_cc_library(
     name = "all_tests",
@@ -107,7 +96,6 @@ iree_runtime_cc_library(
     name = "all_executable_tests",
     testonly = True,
     deps = [
-        ":executable_cache_test",
         ":executable_test",
     ],
 )

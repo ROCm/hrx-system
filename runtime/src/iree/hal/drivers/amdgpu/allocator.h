@@ -21,11 +21,10 @@ typedef struct iree_hal_amdgpu_topology_t iree_hal_amdgpu_topology_t;
 
 // Creates a buffer allocator that allocates from HSA memory pools.
 //
-// This is a simple direct allocator — each allocate_buffer call maps to an
-// hsa_amd_memory_pool_allocate and each deallocation to an
-// hsa_amd_memory_pool_free. No pooling, no suballocation. Suitable for
-// bootstrapping and testing; the async suballocator (hal/utils/) will replace
-// this on the transient allocation path.
+// Normal allocations are direct HSA memory-pool allocations. When the logical
+// device has HAL ASAN enabled, device-local persistent allocations route
+// through the device default pool set so redzones, shadow publication, release
+// poisoning, and quarantine follow the same policy as queue allocations.
 //
 // |logical_device| is unretained and must outlive the allocator.
 iree_status_t iree_hal_amdgpu_allocator_create(

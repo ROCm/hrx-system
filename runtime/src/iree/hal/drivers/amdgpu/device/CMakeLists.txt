@@ -15,10 +15,15 @@ add_custom_command(OUTPUT bitcode_srcs.stamp
     "blit.c"
     "dispatch.c"
     "timestamp.c"
+    "tsan.c"
 )
 
 add_custom_target(bitcode_srcs
     DEPENDS bitcode_srcs.stamp
+)
+iree_register_generated_compile_input(bitcode_srcs
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/bitcode_srcs.stamp"
 )
 
 add_custom_command(OUTPUT bitcode_hdrs.stamp
@@ -28,16 +33,40 @@ add_custom_command(OUTPUT bitcode_hdrs.stamp
     "dispatch.h"
     "kernel_tables.h"
     "kernels.h"
+    "support/asan.h"
     "support/common.h"
+    "support/feedback.h"
     "support/kernel.h"
     "support/queue.h"
     "support/signal.h"
+    "support/tsan.h"
     "timestamp.h"
+    "tsan.h"
 )
 
 add_custom_target(bitcode_hdrs
     DEPENDS bitcode_hdrs.stamp
 )
+iree_register_generated_compile_input(bitcode_hdrs
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/bitcode_hdrs.stamp"
+)
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_amdgpu_library_variants(
+  NAME
+    asanrtl
+  TARGET
+    amdgcn-amd-amdhsa
+  TARGETS
+    ${IREE_HAL_AMDGPU_TARGETS}
+  INTERNAL_HDRS
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/abi/amdgpu_abi_bitcode_hdrs.stamp"
+    "bitcode_hdrs.stamp"
+  SRCS
+    "asanrtl.c"
+)
+endif()
 
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
@@ -48,11 +77,15 @@ iree_cc_library(
     "dispatch.h"
     "kernel_tables.h"
     "kernels.h"
+    "support/asan.h"
     "support/common.h"
+    "support/feedback.h"
     "support/kernel.h"
     "support/queue.h"
     "support/signal.h"
+    "support/tsan.h"
     "timestamp.h"
+    "tsan.h"
   DEPS
     iree::base
     iree::base::internal
@@ -92,6 +125,19 @@ iree_cc_library(
     timestamp
   SRCS
     "timestamp.c"
+  DEPS
+    ::dispatch
+    ::headers
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    tsan
+  SRCS
+    "tsan.c"
   DEPS
     ::dispatch
     ::headers
@@ -149,6 +195,26 @@ iree_cc_test(
     ::headers
     ::timestamp
     iree::hal::drivers::amdgpu::abi
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    tsan_test
+  SRCS
+    "tsan_test.cc"
+  DEPS
+    ::headers
+    ::tsan
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

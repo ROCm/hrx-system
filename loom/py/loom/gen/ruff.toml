@@ -1,0 +1,4 @@
+# Code generators emit long template strings.
+# No line-length limit for formatting.
+extend = "../../ruff.toml"
+line-length = 200

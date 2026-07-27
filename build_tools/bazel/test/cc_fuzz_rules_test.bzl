@@ -17,7 +17,7 @@ def _test_cc_fuzz_adds_fuzzer_contract(name, **kwargs):
         defines = ["USER_DEFINE"],
         linkopts = ["-Wl,--user-linkopt"],
         srcs = [name + "_subject.cc"],
-        tags = ["driver=vulkan"],
+        tags = ["requires-gpu-vulkan"],
     )
     analysis_test(
         name = name,
@@ -44,7 +44,7 @@ def _test_cc_fuzz_adds_fuzzer_contract_impl(env, target):
         if expected_linkopt not in attrs.linkopts:
             env.fail("expected %r in fuzz linkopts %r" % (expected_linkopt, attrs.linkopts))
     for expected_tag in [
-        "driver=vulkan",
+        "requires-gpu-vulkan",
         "fuzz",
         "manual",
     ]:

@@ -89,6 +89,10 @@ iree_select_compiler_opts(IREE_DEFAULT_COPTS
     "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>"
 
   MSVC_OR_CLANG_CL
+    # Interpret source files as UTF-8 and use UTF-8 for narrow literals. This
+    # keeps the checked-in source encoding independent of the host code page.
+    "/utf-8"
+
     # Exclude a bunch of rarely-used APIs, such as crypto/DDE/shell.
     # https://docs.microsoft.com/en-us/windows/win32/winprog/using-the-windows-headers
     # NOTE: this is not really required anymore for build performance but does
@@ -234,6 +238,7 @@ iree_select_compiler_opts(IREE_DEFAULT_COPTS
     # Note that we set CMake policy CMP0092 (if found), making this explicit:
     # https://cmake.org/cmake/help/v3.15/policy/CMP0092.html
     "/W3"
+    "$<$<BOOL:${IREE_ENABLE_WERROR_FLAG}>:/WX>"
 
     # "nonstandard extension used : zero-sized array in struct/union"
     # This happens with unsized or zero-length arrays at the end of structs,
@@ -402,8 +407,6 @@ iree_select_compiler_opts(IREE_DEFAULT_LINKOPTS
   CLANG_OR_GCC
     ${_IREE_MATH_LINKOPTS}
     ${_IREE_LOGGING_LINKOPTS}
-  MSVC
-    "-natvis:${IREE_ROOT_DIR}/runtime/iree.natvis"
 )
 
 if(EMSCRIPTEN AND IREE_EXTERNAL_WEBGPU_HAL_DRIVER_FOUND)

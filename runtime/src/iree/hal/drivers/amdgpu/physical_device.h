@@ -18,7 +18,7 @@
 #include "iree/hal/drivers/amdgpu/util/block_pool.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/signal_pool.h"
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 #include "iree/hal/memory/slab_provider.h"
 #include "iree/hal/memory/tlsf_pool.h"
 #include "iree/hal/pool.h"
@@ -28,6 +28,9 @@ typedef struct iree_hal_amdgpu_host_memory_pools_t
     iree_hal_amdgpu_host_memory_pools_t;
 typedef struct iree_hal_amdgpu_pm4_command_buffer_resident_pool_t
     iree_hal_amdgpu_pm4_command_buffer_resident_pool_t;
+typedef struct iree_hal_amdgpu_asan_state_t iree_hal_amdgpu_asan_state_t;
+typedef struct iree_hal_amdgpu_feedback_state_t
+    iree_hal_amdgpu_feedback_state_t;
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_physical_device_options_t
@@ -147,6 +150,9 @@ typedef struct iree_hal_amdgpu_physical_device_options_t {
 
     // Maximum death-frontier entry count stored per free TLSF block.
     uint8_t frontier_capacity;
+
+    // ASAN allocation-shaping policy for default pools.
+    iree_hal_asan_pool_options_t asan;
   } default_pool;
 
   // Fixed-size queue_read/queue_write staging policy.
@@ -159,6 +165,9 @@ typedef struct iree_hal_amdgpu_physical_device_options_t {
   // Enables PM4 dispatch command-buffer capabilities on unvalidated gfx9-gfx12
   // targets for hardware bring-up experiments.
   uint32_t enable_experimental_pm4_command_buffers : 1;
+
+  // Suppresses fine-grained GPU-local memory pools even if HSA reports them.
+  uint32_t suppress_device_fine_memory : 1;
 } iree_hal_amdgpu_physical_device_options_t;
 
 // Initializes |out_options| to its default values.
@@ -211,12 +220,18 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   uint32_t compute_unit_count;
   // Native wavefront size reported by HSA for this GPU agent.
   uint32_t wavefront_size;
+  // Maximum resident wave count per compute unit reported by HSA.
+  uint32_t maximum_waves_per_compute_unit;
+  // Maximum group segment byte length used for dispatch and sanitizer sizing.
+  uint32_t group_segment_max_size;
   // HDP flush register descriptor reported by HSA for this GPU agent.
   hsa_amd_hdp_flush_t hdp_flush;
   // Host memory pools for the CPU agent nearest to |device_agent|.
   iree_hal_amdgpu_host_memory_pools_t host_memory_pools;
   // Cold memory-system facts used to derive conservative topology flags.
   iree_hal_amdgpu_memory_system_capabilities_t memory_system;
+  // Clustered-dispatch limits reported for this GPU agent.
+  iree_hal_amdgpu_workgroup_cluster_capabilities_t workgroup_cluster;
   // CPU-visible coarse-grained device-memory capability for this GPU.
   iree_hal_amdgpu_cpu_visible_device_coarse_memory_t
       cpu_visible_device_coarse_memory;
@@ -224,9 +239,9 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
       prepublished_kernarg_storage;
 
-  // Fine-grained block pools for device memory blocks of various sizes.
+  // Optional fine-grained block pools for host-coherent device memory.
   iree_hal_amdgpu_block_pools_t fine_block_pools;
-  // Fine-grained block pool-based allocators for small transient allocations.
+  // Optional fine-grained block pool-based allocators for small transients.
   iree_hal_amdgpu_block_allocators_t fine_block_allocators;
   // Coarse-grained block pools for device memory blocks of various sizes.
   iree_hal_amdgpu_block_pools_t coarse_block_pools;
@@ -319,7 +334,8 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
     const iree_hal_amdgpu_physical_device_options_t* options,
     iree_async_proactor_t* proactor, iree_host_size_t host_ordinal,
     const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
-    iree_host_size_t device_ordinal, iree_allocator_t host_allocator,
+    iree_host_size_t device_ordinal, iree_hal_amdgpu_asan_state_t* asan_state,
+    iree_allocator_t host_allocator,
     iree_hal_amdgpu_physical_device_t* out_physical_device);
 
 // Binds and initializes this physical device's host queues after the logical
@@ -330,6 +346,7 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
     iree_async_frontier_tracker_t* frontier_tracker,
     iree_async_axis_t base_axis,
     iree_hal_amdgpu_epoch_signal_table_t* epoch_signal_table,
+    iree_hal_amdgpu_feedback_state_t* feedback_state,
     const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_physical_device_t* physical_device);

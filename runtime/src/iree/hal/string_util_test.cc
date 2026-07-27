@@ -6,12 +6,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "iree/base/api.h"
+#include "iree/base/internal/fpu_state.h"
 #include "iree/base/internal/span.h"
 #include "iree/hal/api.h"
 #include "iree/testing/gtest.h"
@@ -269,6 +271,13 @@ inline StatusOr<uint16_t> ParseElementBF16(const std::string& value) {
   uint16_t result = uint16_t();
   IREE_RETURN_IF_ERROR(ParseElement(value, IREE_HAL_ELEMENT_TYPE_BFLOAT_16,
                                     iree::span<uint16_t>(&result, 1)));
+  return result;
+}
+inline StatusOr<uint8_t> ParseElementF8E4M3FN(const std::string& value) {
+  uint8_t result = uint8_t();
+  IREE_RETURN_IF_ERROR(ParseElement(value,
+                                    IREE_HAL_ELEMENT_TYPE_FLOAT_8_E4M3_FN,
+                                    iree::span<uint8_t>(&result, 1)));
   return result;
 }
 
@@ -729,6 +738,9 @@ TEST(ElementStringUtilTest, ParseElement) {
   EXPECT_THAT(ParseElement<uint64_t>("18446744073709551615"),
               IsOkAndHolds(Eq(UINT64_MAX)));
   EXPECT_THAT(ParseElementBF16("1.5"), IsOkAndHolds(Eq(0x3FC0u)));
+  EXPECT_THAT(ParseElementF8E4M3FN("449"), IsOkAndHolds(Eq(0x7Eu)));
+  EXPECT_THAT(ParseElementF8E4M3FN("-449"), IsOkAndHolds(Eq(0xFEu)));
+  EXPECT_THAT(ParseElementF8E4M3FN("inf"), IsOkAndHolds(Eq(0x7Eu)));
   EXPECT_THAT(ParseElement<float>("1.5"), IsOkAndHolds(Eq(1.5f)));
   EXPECT_THAT(ParseElement<double>("1.567890123456789"),
               IsOkAndHolds(Eq(1.567890123456789)));
@@ -873,6 +885,34 @@ TEST(ElementStringUtilTest, FormatElement) {
   EXPECT_THAT(FormatElement<double>(1123.56789456789),
               IsOkAndHolds(Eq("1123.57")));
   EXPECT_THAT(FormatElement<double>(-1.5e-10), IsOkAndHolds(Eq("-1.5E-10")));
+}
+
+TEST(ElementStringUtilTest, FormatSubnormalsUnderFlushToZero) {
+  IREE_ASSERT_OK_AND_ASSIGN(std::string expected_bf16,
+                            FormatElementBF16(0x0001u));
+  float f32_value = 0.0f;
+  const uint32_t f32_bits = 1;
+  std::memcpy(&f32_value, &f32_bits, sizeof(f32_value));
+  IREE_ASSERT_OK_AND_ASSIGN(std::string expected_f32,
+                            FormatElement<float>(f32_value));
+  IREE_ASSERT_OK_AND_ASSIGN(
+      std::string expected_e8m0,
+      FormatElement(uint8_t{0}, IREE_HAL_ELEMENT_TYPE_FLOAT_8_E8M0_FNU));
+  EXPECT_NE("0", expected_bf16);
+  EXPECT_NE("0", expected_f32);
+  EXPECT_NE("0", expected_e8m0);
+
+  const iree_fpu_state_t fpu_state =
+      iree_fpu_state_push(IREE_FPU_STATE_FLAG_FLUSH_DENORMALS_TO_ZERO);
+  auto actual_bf16 = FormatElementBF16(0x0001u);
+  auto actual_f32 = FormatElement<float>(f32_value);
+  auto actual_e8m0 =
+      FormatElement(uint8_t{0}, IREE_HAL_ELEMENT_TYPE_FLOAT_8_E8M0_FNU);
+  iree_fpu_state_pop(fpu_state);
+
+  EXPECT_THAT(std::move(actual_bf16), IsOkAndHolds(Eq(expected_bf16)));
+  EXPECT_THAT(std::move(actual_f32), IsOkAndHolds(Eq(expected_f32)));
+  EXPECT_THAT(std::move(actual_e8m0), IsOkAndHolds(Eq(expected_e8m0)));
 }
 
 TEST(ElementStringUtilTest, FormatOpaqueElement) {

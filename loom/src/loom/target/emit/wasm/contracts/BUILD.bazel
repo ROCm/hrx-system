@@ -1,0 +1,50 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_target_table_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_target_table_cc_library(
+    name = "core_simd128",
+    args = ["--contract-fragment=wasm.core.simd128"],
+    generator = "//loom/py/loom/gen/target/contracts:wasm_contract_fragment",
+    deps = ["//loom/src/loom/target:contract"],
+)
+
+loom_target_table_cc_library(
+    name = "core_simd128_lower_rules",
+    args = ["--contract-fragment=wasm.core.simd128"],
+    generator = "//loom/py/loom/gen/target/contracts:wasm_lower_rule_shard",
+    deps = [
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/target/arch/wasm/descriptors:descriptors_ids",
+    ],
+)
+
+loom_cc_library(
+    name = "contracts",
+    hdrs = [
+        "core_simd128.h",
+        "core_simd128_lower_rules.h",
+    ],
+    deps = [
+        ":core_simd128",
+        ":core_simd128_lower_rules",
+    ],
+)

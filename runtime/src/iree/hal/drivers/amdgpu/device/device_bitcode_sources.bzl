@@ -7,5 +7,6 @@
 IREE_HAL_AMDGPU_DEVICE_BITCODE_SRCS = [
     "blit.c",
     "dispatch.c",
+    "tsan.c",
     "timestamp.c",
 ]

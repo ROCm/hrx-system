@@ -9,12 +9,17 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Mapping
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+DEVTOOLS_TMP_ENV = "IREE_DEVTOOLS_TMP"
+DEFAULT_LOCAL_TMP_ROOT = REPO_ROOT / ".tmp"
+BAZEL_SH_ENV = "BAZEL_SH"
 
 
 class ToolMode(Enum):
@@ -55,11 +60,77 @@ class ToolEnvironment:
 
     def path_env(self, base_env: dict[str, str] | None = None) -> dict[str, str]:
         env = dict(os.environ if base_env is None else base_env)
-        if self.bin_dir is None:
-            return env
-        current_path = env.get("PATH", "")
-        env["PATH"] = os.pathsep.join([str(self.bin_dir), current_path])
+        if self.bin_dir is not None:
+            current_path = env.get("PATH", "")
+            env["PATH"] = os.pathsep.join([str(self.bin_dir), current_path])
+        bazel_sh = find_windows_bazel_sh(env)
+        if bazel_sh:
+            env[BAZEL_SH_ENV] = bazel_sh
         return env
+
+
+def find_windows_bazel_sh(
+    environ: Mapping[str, str] | None = None,
+    *,
+    platform_name: str | None = None,
+    git_executable: str | None = None,
+) -> str | None:
+    environ = os.environ if environ is None else environ
+    configured_path = environ.get(BAZEL_SH_ENV)
+    if configured_path:
+        return configured_path
+    platform_name = os.name if platform_name is None else platform_name
+    if platform_name != "nt":
+        return None
+
+    if git_executable is None:
+        git_executable = shutil.which("git", path=environ.get("PATH"))
+
+    candidates = []
+    if git_executable:
+        git_path = Path(git_executable)
+        for parent in list(git_path.parents)[:3]:
+            candidates.extend(
+                (parent / "bin" / "bash.exe", parent / "usr/bin/bash.exe")
+            )
+
+    for key in ("ProgramFiles", "ProgramFiles(x86)", "LocalAppData"):
+        root = environ.get(key)
+        if not root:
+            continue
+        root_path = Path(root)
+        if key == "LocalAppData":
+            root_path /= "Programs"
+        candidates.extend(
+            (
+                root_path / "Git/bin/bash.exe",
+                root_path / "Git/usr/bin/bash.exe",
+            )
+        )
+
+    seen = set()
+    for candidate in candidates:
+        candidate_key = str(candidate).casefold()
+        if candidate_key in seen:
+            continue
+        seen.add(candidate_key)
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def local_tmp_root(environ: Mapping[str, str] | None = None) -> Path:
+    environ = os.environ if environ is None else environ
+    value = environ.get(DEVTOOLS_TMP_ENV)
+    if not value:
+        return DEFAULT_LOCAL_TMP_ROOT
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    return path
+
+
+LOCAL_TMP_ROOT = local_tmp_root()
 
 
 def executable_name(name: str) -> str:

@@ -204,7 +204,9 @@ iree_status_t iree_async_slab_import_dmabuf(int dmabuf_fd, uint64_t offset,
 
 // Retains a reference to the slab.
 static inline void iree_async_slab_retain(iree_async_slab_t* slab) {
-  iree_atomic_ref_count_inc(&slab->ref_count);
+  if (slab) {
+    iree_atomic_ref_count_inc(&slab->ref_count);
+  }
 }
 
 // Releases a reference to the slab. When the last reference is released,

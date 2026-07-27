@@ -92,10 +92,8 @@ static void iree_async_proactor_pool_destroy(iree_async_proactor_pool_t* pool) {
   }
 
   for (iree_host_size_t i = 0; i < pool->count; ++i) {
-    if (pool->entries[i].proactor) {
-      iree_async_proactor_release(pool->entries[i].proactor);
-      pool->entries[i].proactor = NULL;
-    }
+    iree_async_proactor_release(pool->entries[i].proactor);
+    pool->entries[i].proactor = NULL;
   }
 
   iree_slim_mutex_deinitialize(&pool->mutex);

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "prints agent documentation",
+      "run": {
+        "tool": "loom-format",
+        "args": ["--agents_md"]
+      },
+      "stdout": {
+        "contains": [
+          "## loom-format",
+          "--from=text",
+          "--to=bc",
+          "--from=auto",
+          "loom-link --library"
+        ]
+      }
+    }
+  ]
+}

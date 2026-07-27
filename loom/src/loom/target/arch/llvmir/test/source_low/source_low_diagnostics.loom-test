@@ -1,0 +1,25 @@
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+
+func.def target(@target) @unsupported_vector_shape(%lhs: vector<32xi32>, %rhs: vector<32xi32>) -> (vector<32xi32>) {
+  // ERROR@+1: TARGET/002 {field_name="lhs", actual_type="vector<32xi32>", expected_type="vector<2xi32>"}
+  %sum = vector.addi %lhs, %rhs : vector<32xi32>
+  func.return %sum : vector<32xi32>
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+
+func.def target(@target) @unsupported_source_op(%lhs: i32, %rhs: i32) -> (i32) {
+  // ERROR@+1: TARGET/001 {op_name="scalar.ceildivsi"}
+  %quotient = scalar.ceildivsi %lhs, %rhs : i32
+  func.return %quotient : i32
+}

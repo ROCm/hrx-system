@@ -1,0 +1,95 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx950> @gfx950
+func.def target(@gfx950) @i8_table_lookup_u4_dynamic_table_gfx950(%grid: vector<16xi8>, %packed: vector<2xi8>) -> (vector<4xi8>) {
+  %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ----
+low.func.def target(@gfx950) abi(hal_kernel) @i8_table_lookup_u4_dynamic_table_gfx950(%grid: reg<amdgpu.vgpr x4>, %packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
+  %8 = v_and_b32_src0_inline %packed, 15
+  %9 = v_bfe_u32_offset_width_inline %packed {offset = 4, width = 4}
+  %10 = v_lshl_add_u32_shift_imm %9, %8, 8
+  %11 = v_bfe_u32_offset_width_inline %packed {offset = 8, width = 4}
+  %12 = v_lshl_add_u32_shift_imm %11, %10, 16
+  %13 = v_bfe_u32_offset_width_inline %packed {offset = 12, width = 4}
+  %codes = v_lshl_add_u32_shift_imm %13, %12, 24
+  %15 = slice %grid[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = slice %grid[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %17 = slice %grid[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %18 = slice %grid[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = v_and_b32_lit %codes, 117901063
+  %20 = v_perm_b32 %15, %16, %19
+  %21 = v_perm_b32 %17, %18, %19
+  %22 = v_and_b32_lit %codes, 134744072
+  %23 = v_lshrrev_b32_src0_inline %22, 1
+  %24 = v_or_b32_lit %23, 50462976
+  %decoded = v_perm_b32 %20, %21, %24
+  return %decoded
+}
+
+// ====
+
+amdgpu.target<gfx1200> @gfx1200
+func.def target(@gfx1200) @i8_table_lookup_u4_dynamic_table_gfx1200(%grid: vector<16xi8>, %packed: vector<2xi8>) -> (vector<4xi8>) {
+  %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ----
+low.func.def target(@gfx1200) abi(hal_kernel) @i8_table_lookup_u4_dynamic_table_gfx1200(%grid: reg<amdgpu.vgpr x4>, %packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+  %8 = v_and_b32_src0_inline %packed, 15
+  %9 = v_bfe_u32_offset_width_inline %packed {offset = 4, width = 4}
+  %10 = v_lshl_add_u32_shift_imm %9, %8, 8
+  %11 = v_bfe_u32_offset_width_inline %packed {offset = 8, width = 4}
+  %12 = v_lshl_add_u32_shift_imm %11, %10, 16
+  %13 = v_bfe_u32_offset_width_inline %packed {offset = 12, width = 4}
+  %codes = v_lshl_add_u32_shift_imm %13, %12, 24
+  %15 = slice %grid[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = slice %grid[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %17 = slice %grid[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %18 = slice %grid[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = v_and_b32_lit %codes, 117901063
+  %20 = v_perm_b32 %15, %16, %19
+  %21 = v_perm_b32 %17, %18, %19
+  %22 = v_and_b32_lit %codes, 134744072
+  %23 = v_lshrrev_b32_src0_inline %22, 1
+  %24 = v_or_b32_lit %23, 50462976
+  %decoded = v_perm_b32 %20, %21, %24
+  return %decoded
+}
+
+// ====
+
+amdgpu.target<gfx1250> @gfx1250
+func.def target(@gfx1250) @i8_table_lookup_u4_dynamic_table_gfx1250(%grid: vector<16xi8>, %packed: vector<2xi8>) -> (vector<4xi8>) {
+  %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ----
+low.func.def target(@gfx1250) abi(hal_kernel) @i8_table_lookup_u4_dynamic_table_gfx1250(%grid: reg<amdgpu.vgpr x4>, %packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %8 = v_and_b32_src0_inline %packed, 15
+  %9 = v_bfe_u32_offset_width_inline %packed {offset = 4, width = 4}
+  %10 = v_lshl_add_u32_shift_imm %9, %8, 8
+  %11 = v_bfe_u32_offset_width_inline %packed {offset = 8, width = 4}
+  %12 = v_lshl_add_u32_shift_imm %11, %10, 16
+  %13 = v_bfe_u32_offset_width_inline %packed {offset = 12, width = 4}
+  %codes = v_lshl_add_u32_shift_imm %13, %12, 24
+  %15 = slice %grid[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = slice %grid[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %17 = slice %grid[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %18 = slice %grid[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = v_and_b32_lit %codes, 117901063
+  %20 = v_perm_b32 %15, %16, %19
+  %21 = v_perm_b32 %17, %18, %19
+  %22 = v_and_b32_lit %codes, 134744072
+  %23 = v_lshrrev_b32_src0_inline %22, 1
+  %24 = v_or_b32_lit %23, 50462976
+  %decoded = v_perm_b32 %20, %21, %24
+  return %decoded
+}

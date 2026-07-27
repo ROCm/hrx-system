@@ -1,0 +1,71 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@bazel_skylib//rules:common_settings.bzl", "string_list_flag")
+
+package(default_visibility = ["//visibility:public"])
+
+DEFAULT_ENABLED = [
+    "iree_hal",
+    "iree_vm",
+]
+
+SUPPORTED_VALUES = [
+    "iree_hal",
+    "iree_vm",
+]
+
+string_list_flag(
+    name = "enable",
+    build_setting_default = DEFAULT_ENABLED,
+)
+
+[
+    config_setting(
+        name = value,
+        flag_values = {
+            ":enable": value,
+        },
+    )
+    for value in SUPPORTED_VALUES
+]
+
+selects.config_setting_group(
+    name = "iree_hal_amdgpu",
+    match_all = [
+        ":iree_hal",
+        "//runtime/config/hal:driver_amdgpu",
+    ],
+)
+
+selects.config_setting_group(
+    name = "iree_hal_vulkan",
+    match_all = [
+        ":iree_hal",
+        "//runtime/config/hal:driver_vulkan",
+    ],
+)
+
+# Internal execution provider capabilities. Public execution settings choose the
+# substrate; providers also need the matching Loom target/emitter slice.
+selects.config_setting_group(
+    name = "amdgpu_hal",
+    match_all = [
+        ":iree_hal_amdgpu",
+        "//loom/config/target/arch:amdgpu",
+        "//loom/config/emit:amdgpu",
+    ],
+)
+
+selects.config_setting_group(
+    name = "spirv_vulkan_hal",
+    match_all = [
+        ":iree_hal_vulkan",
+        "//loom/config/target/arch:spirv",
+        "//loom/config/emit:spirv",
+    ],
+)

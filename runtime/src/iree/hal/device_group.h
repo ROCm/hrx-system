@@ -31,10 +31,10 @@ extern "C" {
 // device relationships: synchronization modes, buffer sharing capabilities,
 // and relative costs.
 //
-// The topology is computed once during group creation from device capabilities
-// and optional driver-specific refinement. After creation both the device set
-// and topology are immutable. Devices cache a pointer to the group's topology
-// for lock-free concurrent edge queries.
+// The topology is computed once during group creation from cached immutable
+// device specs and optional driver-local refinement. After creation both the
+// device set and topology are immutable. Devices cache a pointer to the group's
+// topology for lock-free concurrent edge queries.
 //
 // Lifetime: the group must outlive all its devices. Whoever holds the devices
 // long-term (e.g., the HAL module) must also retain the group. The group
@@ -160,10 +160,9 @@ IREE_API_EXPORT iree_status_t iree_hal_device_group_builder_add_device(
 
 // Builds the topology, creates the device group, and invalidates the builder.
 //
-// This queries capabilities from all devices, computes base edges via
-// iree_hal_topology_edge_from_capabilities(), calls
-// iree_hal_device_refine_topology_edge() for same-driver pairs, finalizes
-// the topology, and pushes topology info into each device via
+// This projects cached immutable device specs into base topology edges, calls
+// iree_hal_device_refine_topology_edge() for same-runtime pairs, finalizes the
+// topology, and pushes topology info into each device via
 // iree_hal_device_assign_topology_info().
 //
 // The group retains all devices. The builder is zeroed after this call

@@ -1,0 +1,38 @@
+// RUN: emit low-packet-json @packet
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @packet(%value: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+  return %value
+}
+
+// ----
+{"format":"loom.low.packet.v0","function":"packet","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","block_count":1,"packet_count":1,"assignment_count":1,"spill_count":0,"hazard_gap_count":0,"blocks":[{"index":0,"label":null,"packet_start":0,"packet_count":1,"args":[{"id":0,"name":"value","type":"reg<test.i32>","location":{"assignment":0,"kind":"target_id","base":0,"count":1}}]}],"packets":[{"index":0,"node":0,"block":0,"source_ordinal":0,"scheduled_ordinal":0,"kind":"terminator","op":"low.return","descriptor":null,"mnemonic":null,"encoding_id":null,"descriptor_flags":null,"schedule_class":null,"latency_cycles":0,"latency_kind":"unknown","model_quality":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0,"results":[],"operands":[{"id":0,"name":"value","type":"reg<test.i32>","location":{"assignment":0,"kind":"target_id","base":0,"count":1}}],"attributes":{},"immediates":[],"successors":[]}]}
+
+// ====
+
+// RUN: emit low-packet-json @packet_structural_storage
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @packet_structural_storage(%value: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+  %scratch = storage {byte_alignment = 16, byte_length = 64} : low.storage<workgroup>
+  return %value
+}
+
+// ----
+{"format":"loom.low.packet.v0","function":"packet_structural_storage","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","block_count":1,"packet_count":2,"assignment_count":1,"spill_count":0,"hazard_gap_count":0,"blocks":[{"index":0,"label":null,"packet_start":0,"packet_count":2,"args":[{"id":0,"name":"value","type":"reg<test.i32>","location":{"assignment":0,"kind":"target_id","base":0,"count":1}}]}],"packets":[{"index":0,"node":0,"block":0,"source_ordinal":0,"scheduled_ordinal":0,"kind":"structural","op":"low.storage.reserve","descriptor":null,"mnemonic":null,"encoding_id":null,"descriptor_flags":null,"schedule_class":null,"latency_cycles":0,"latency_kind":"unknown","model_quality":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0,"results":[{"id":2,"name":"scratch","type":"low.storage<workgroup>","location":null}],"operands":[],"attributes":{"byte_length":64,"byte_alignment":16},"immediates":[],"successors":[]},{"index":1,"node":1,"block":0,"source_ordinal":1,"scheduled_ordinal":1,"kind":"terminator","op":"low.return","descriptor":null,"mnemonic":null,"encoding_id":null,"descriptor_flags":null,"schedule_class":null,"latency_cycles":0,"latency_kind":"unknown","model_quality":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0,"results":[],"operands":[{"id":0,"name":"value","type":"reg<test.i32>","location":{"assignment":0,"kind":"target_id","base":0,"count":1}}],"attributes":{},"immediates":[],"successors":[]}]}
+
+// ====
+
+// RUN: emit low-packet-json @structural_storage_location
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @structural_storage_location() {
+  %storage = low.storage.reserve {byte_alignment = 16, byte_length = 64} : low.storage<private>
+  low.return
+}
+
+// ----
+{"format":"loom.low.packet.v0","function":"structural_storage_location","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","block_count":1,"packet_count":2,"assignment_count":0,"spill_count":0,"hazard_gap_count":0,"blocks":[{"index":0,"label":null,"packet_start":0,"packet_count":2,"args":[]}],"packets":[{"index":0,"node":0,"block":0,"source_ordinal":0,"scheduled_ordinal":0,"kind":"structural","op":"low.storage.reserve","descriptor":null,"mnemonic":null,"encoding_id":null,"descriptor_flags":null,"schedule_class":null,"latency_cycles":0,"latency_kind":"unknown","model_quality":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0,"results":[{"id":0,"name":"storage","type":"low.storage<private>","location":null}],"operands":[],"attributes":{"byte_length":64,"byte_alignment":16},"immediates":[],"successors":[]},{"index":1,"node":1,"block":0,"source_ordinal":1,"scheduled_ordinal":1,"kind":"terminator","op":"low.return","descriptor":null,"mnemonic":null,"encoding_id":null,"descriptor_flags":null,"schedule_class":null,"latency_cycles":0,"latency_kind":"unknown","model_quality":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0,"results":[],"operands":[],"attributes":{},"immediates":[],"successors":[]}]}

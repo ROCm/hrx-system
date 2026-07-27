@@ -13,9 +13,10 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Validates a queue_update request and resolves the source host span and target
-// device pointer. The source host pointer is captured by the caller either into
-// the pending-op arena or into the queue-owned kernarg ring.
+// Validates a queue_update request and resolves the source host span. When
+// |out_target_device_ptr| is non-NULL, also requires and resolves the target's
+// staged AMDGPU backing. Deferred capture omits that resolution until its wait
+// semaphores have made a preceding queue_alloca backing available.
 iree_status_t iree_hal_amdgpu_host_queue_prepare_update_copy(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     const void* source_buffer, iree_host_size_t source_offset,

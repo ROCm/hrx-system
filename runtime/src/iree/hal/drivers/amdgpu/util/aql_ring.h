@@ -9,7 +9,8 @@
 //
 // The ring caches hot pointers from iree_amd_queue_t at initialization:
 // ring base, mask, doorbell MMIO pointer, and the atomic write/read dispatch
-// IDs. All hot-path operations are inline with zero libhsa indirection.
+// IDs. All hot-path operations are inline with zero libhsa indirection except
+// ringing a non-DOORBELL-kind doorbell, which goes through HSA signal-store.
 //
 // Thread safety:
 //   reserve() is multi-producer safe (atomic_fetch_add on write_dispatch_id).
@@ -31,6 +32,7 @@
 #include "iree/base/threading/processor.h"
 #include "iree/hal/drivers/amdgpu/abi/queue.h"
 #include "iree/hal/drivers/amdgpu/abi/signal.h"
+#include "iree/hal/drivers/amdgpu/util/libhsa.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,6 +48,7 @@ extern "C" {
 // packet is cache-line aligned at every access point.
 typedef union iree_alignas(64) iree_hal_amdgpu_aql_packet_t {
   iree_hsa_kernel_dispatch_packet_t dispatch;
+  iree_hsa_amd_ext_kernel_dispatch_packet_t extended_dispatch;
   iree_hsa_barrier_and_packet_t barrier_and;
   iree_hsa_barrier_or_packet_t barrier_or;
   iree_hsa_amd_aql_pm4_ib_packet_t pm4_ib;
@@ -63,6 +66,10 @@ static_assert(sizeof(iree_hal_amdgpu_aql_packet_t) == 64,
 // and used for all subsequent packet operations. The cached pointers avoid
 // repeated indirection through the queue descriptor on the hot path.
 typedef struct iree_hal_amdgpu_aql_ring_t {
+  // Unretained libhsa handle injected at initialize; must outlive the ring.
+  // Used only on the fallback doorbell path (signal-store via libhsa).
+  const iree_hal_amdgpu_libhsa_t* libhsa;
+
   // Packet ring buffer base (from hsa_queue.base_address), cast for natural
   // indexing: ring.base[id & ring.mask] gives the packet slot.
   iree_hal_amdgpu_aql_packet_t* base;
@@ -70,11 +77,20 @@ typedef struct iree_hal_amdgpu_aql_ring_t {
   // Power-of-two ring mask (hsa_queue.size - 1). Slot = packet_id & mask.
   uint32_t mask;
 
-  // Cached hardware doorbell MMIO pointer. Resolved at init from the doorbell
-  // signal's iree_amd_signal_t.hardware_doorbell_ptr. Writing a packet ID here
-  // wakes the CP to process new packets. Inlined: no libhsa function pointer
-  // indirection, just an atomic store to MMIO.
-  volatile int64_t* doorbell;
+  // How the doorbell gets rung; both fields represent the queue's doorbell
+  // signal.
+  struct {
+    // Cached hardware doorbell MMIO pointer, or NULL when the queue's doorbell
+    // signal is not DOORBELL-kind (then ring via |signal| below). When
+    // non-NULL, writing a packet ID here wakes the CP to process new packets
+    // via a direct atomic store to MMIO — no libhsa indirection. Resolved at
+    // init from the doorbell signal's iree_amd_signal_t.hardware_doorbell_ptr.
+    volatile int64_t* ptr;
+    // Doorbell signal handle, used when |ptr| is NULL (non-DOORBELL-kind
+    // doorbell signals, e.g. interrupt-backed USER-kind): ring through the HSA
+    // signal-store API via |libhsa|.
+    iree_hsa_signal_t signal;
+  } doorbell;
 
   // Atomic write dispatch ID. Points into the hardware queue descriptor
   // (iree_amd_queue_t.write_dispatch_id). Multi-producer safe: each thread
@@ -93,18 +109,33 @@ typedef struct iree_hal_amdgpu_aql_ring_t {
 // Resolves the doorbell pointer from the signal's iree_amd_signal_t and
 // caches all hot pointers for zero-indirection access.
 static inline void iree_hal_amdgpu_aql_ring_initialize(
-    iree_amd_queue_t* hardware_queue, iree_hal_amdgpu_aql_ring_t* out_ring) {
+    const iree_hal_amdgpu_libhsa_t* libhsa, iree_amd_queue_t* hardware_queue,
+    iree_hal_amdgpu_aql_ring_t* out_ring) {
   out_ring->base =
       (iree_hal_amdgpu_aql_packet_t*)hardware_queue->hsa_queue.base_address;
   out_ring->mask = hardware_queue->hsa_queue.size - 1;
 
-  // Resolve the doorbell MMIO pointer from the signal handle. The signal is
-  // DOORBELL kind: its hardware_doorbell_ptr points to the memory-mapped
-  // doorbell register. Writing a packet ID there wakes the CP.
+  // Resolve how to ring the doorbell from the queue's doorbell signal.
+  //
+  // Only DOORBELL-kind signals expose a directly-writable hardware_doorbell_ptr
+  // (a memory-mapped doorbell register); writing a packet ID there wakes the CP
+  // with zero libhsa indirection. Other signal kinds — e.g. the
+  // interrupt-backed USER-kind doorbells some ROCm builds hand back for AQL
+  // queues — store a signal value in that same union slot rather than an MMIO
+  // pointer, so the raw write would fault. For those we leave |doorbell.ptr|
+  // NULL and ring via the HSA signal-store API using the cached handle +
+  // libhsa.
+  out_ring->libhsa = libhsa;
+  out_ring->doorbell.signal = hardware_queue->hsa_queue.doorbell_signal;
   iree_amd_signal_t* doorbell_signal =
       (iree_amd_signal_t*)hardware_queue->hsa_queue.doorbell_signal.handle;
-  out_ring->doorbell =
-      (volatile int64_t*)doorbell_signal->hardware_doorbell_ptr;
+  if (doorbell_signal &&
+      doorbell_signal->kind == IREE_AMD_SIGNAL_KIND_DOORBELL) {
+    out_ring->doorbell.ptr =
+        (volatile int64_t*)doorbell_signal->hardware_doorbell_ptr;
+  } else {
+    out_ring->doorbell.ptr = NULL;
+  }
 
   out_ring->write_dispatch_id =
       (iree_atomic_int64_t*)&hardware_queue->write_dispatch_id;
@@ -219,8 +250,17 @@ static inline void iree_hal_amdgpu_aql_ring_commit(
 // the CP wakes and starts scanning.
 static inline void iree_hal_amdgpu_aql_ring_doorbell(
     iree_hal_amdgpu_aql_ring_t* ring, uint64_t packet_id) {
-  iree_atomic_store((iree_atomic_int64_t*)ring->doorbell, (int64_t)packet_id,
-                    iree_memory_order_release);
+  if (ring->doorbell.ptr != NULL) {
+    // Fast path: DOORBELL-kind signal — direct MMIO write to the doorbell.
+    iree_atomic_store((iree_atomic_int64_t*)ring->doorbell.ptr,
+                      (int64_t)packet_id, iree_memory_order_release);
+  } else {
+    // Fallback: USER/interrupt-kind doorbell signal — ring via the HSA
+    // signal-store API (store-release matches the fast path's ordering).
+    iree_hsa_signal_store_screlease(IREE_LIBHSA(ring->libhsa),
+                                    ring->doorbell.signal,
+                                    (iree_hsa_signal_value_t)packet_id);
+  }
 }
 
 #ifdef __cplusplus

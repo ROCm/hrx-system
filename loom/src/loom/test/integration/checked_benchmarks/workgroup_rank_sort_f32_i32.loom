@@ -1,0 +1,78 @@
+// Workgroup-memory rank sort for small routing rows.
+//
+// This motif stages one score per lane in workgroup memory, synchronizes the
+// workgroup, then lets every lane rank itself by reading all peer scores from
+// LDS. The descending sort is stable: equal scores preserve the lower original
+// lane id first. That gives sort/top-k kernels a compact correctness gate for
+// cross-lane LDS publication, dynamic workgroup-memory reads, compare/tie
+// policy, and rank-indexed global stores.
+kernel.def @workgroup_rank_sort_f32_i32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 8 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%scores: buffer, %sorted_ids: buffer) {
+  %base = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %eight_index = index.constant 8 : index
+  %one_index = index.constant 1 : index
+  %zero_i32 = scalar.constant 0 : i32
+  %one_i32 = scalar.constant 1 : i32
+  %scratch_bytes = index.constant 32 : offset
+
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 7)] : index
+  %lane_i32 = index.cast %lane : index to i32
+
+  %scores_noalias, %sorted_ids_noalias = buffer.assume.noalias %scores, %sorted_ids : buffer, buffer
+  %scores_view = buffer.view %scores_noalias[%base] : buffer -> view<8xf32, #dense>
+  %sorted_ids_view = buffer.view %sorted_ids_noalias[%base] : buffer -> view<8xi32, #dense>
+  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<8xf32, #dense>
+
+  %score = view.load %scores_view[%lane] : view<8xf32, #dense> -> f32
+  view.store %score, %scratch_view[%lane] : f32, view<8xf32, #dense>
+
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+
+  %rank = scf.for %other = [%zero_index to %eight_index step %one_index](%acc = %zero_i32 : i32) -> (i32) {
+    %other_score = view.load %scratch_view[%other] : view<8xf32, #dense> -> f32
+    %other_i32 = index.cast %other : index to i32
+    %greater = scalar.cmpf ogt, %other_score, %score : f32
+    %equal = scalar.cmpf oeq, %other_score, %score : f32
+    %other_before = scalar.cmpi slt, %other_i32, %lane_i32 : i32
+    %tie_before = scalar.andi %equal, %other_before : i1
+    %precedes = scalar.ori %greater, %tie_before : i1
+    %next = scf.if %precedes -> (i32) {
+      %incremented = scalar.addi %acc, %one_i32 : i32
+      scf.yield %incremented : i32
+    } else {
+      scf.yield %acc : i32
+    }
+    scf.yield %next : i32
+  }
+  %rank_index0 = index.cast %rank : i32 to index
+  %rank_index = index.assume %rank_index0 [range(%rank_index0, 0, 7)] : index
+  view.store %lane_i32, %sorted_ids_view[%rank_index] : i32, view<8xi32, #dense>
+  kernel.return
+}
+
+check.case public @workgroup_rank_sort_distinct_case {
+  %scores = check.generate.iota offset(0.0) step(1.0) : tensor<8xf32>
+  %sorted_ids = check.generate.fill value(-1) : tensor<8xi32>
+  %expected_ids = check.generate.iota offset(7) step(-1) : tensor<8xi32>
+  func.call @workgroup_rank_sort_f32_i32(%scores, %sorted_ids) : (tensor<8xf32>, tensor<8xi32>)
+  check.expect.equal actual(%sorted_ids) expected(%expected_ids) : tensor<8xi32>
+  check.return
+}
+
+check.case public @workgroup_rank_sort_tie_case {
+  %scores = check.generate.fill value(3.0) : tensor<8xf32>
+  %sorted_ids = check.generate.fill value(-1) : tensor<8xi32>
+  %expected_ids = check.generate.iota offset(0) step(1) : tensor<8xi32>
+  func.call @workgroup_rank_sort_f32_i32(%scores, %sorted_ids) : (tensor<8xf32>, tensor<8xi32>)
+  check.expect.equal actual(%sorted_ids) expected(%expected_ids) : tensor<8xi32>
+  check.return
+}
+
+check.benchmark<@workgroup_rank_sort_distinct_case> @workgroup_rank_sort_distinct
+check.benchmark<@workgroup_rank_sort_tie_case> @workgroup_rank_sort_tie

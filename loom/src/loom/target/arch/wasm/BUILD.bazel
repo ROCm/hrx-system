@@ -1,0 +1,101 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+load(
+    "//loom/build_tools/bazel:loom_check.bzl",
+    "loom_check_test_suite",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_WASM_CHECK_PACKAGE_VISIBILITY = ["//loom/src/loom/target/arch/wasm/check:__pkg__"]
+
+_WASM_PROVIDER_VISIBILITY = [
+    "//loom/src/loom/target/all:__pkg__",
+    "//loom/src/loom/target/configured:__pkg__",
+] + _WASM_CHECK_PACKAGE_VISIBILITY
+
+#===------------------------------------------------------------------------===#
+# Wasm low descriptors
+#===------------------------------------------------------------------------===#
+
+loom_cc_library(
+    name = "math_policy",
+    srcs = ["math_policy.c"],
+    hdrs = ["math_policy.h"],
+    deps = [
+        "//loom/src/loom/target:math_policy",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "low_verify",
+    srcs = ["low_verify.c"],
+    hdrs = ["low_verify.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/wasm/descriptors:descriptors_ids",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "provider",
+    srcs = ["provider.c"],
+    hdrs = ["provider.h"],
+    visibility = _WASM_PROVIDER_VISIBILITY,
+    deps = [
+        ":low_verify",
+        ":math_policy",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/wasm/descriptors:low_registry",
+        "//loom/src/loom/target/arch/wasm/ops",
+        "//loom/src/loom/target/emit/wasm/lower",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "registers_test",
+    srcs = ["registers_test.cc"],
+    deps = [
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/wasm/descriptors",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_check_test_suite(
+    name = "loom_check_file_test",
+    srcs = [
+        "test/source_low/source_low.loom-test",
+        "test/source_low/source_low_diagnostics.loom-test",
+        "test/source_low/structured_allocation.loom-test",
+        "test/source_low/structured_control.loom-test",
+    ],
+    data = [
+        "//loom/src/loom/test/corpus/source_low:vector_v4.loom-test",
+    ],
+    test_name_prefix_to_strip = "test/source_low/",
+)

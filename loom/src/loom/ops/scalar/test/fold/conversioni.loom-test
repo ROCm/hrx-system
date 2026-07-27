@@ -1,0 +1,35 @@
+// RUN: pass canonicalize
+
+// extsi: sign-extend preserves value, folds through.
+func.def @extsi() -> (i64) {
+  %a = scalar.constant 42 : i32
+  %r = scalar.extsi %a : i32 to i64
+  func.return %r : i64
+}
+// ----
+func.def @extsi() -> (i64) {
+  %r = scalar.constant 42 : i64
+  func.return %r : i64
+}
+
+// ====
+
+// trunci: truncate folds exact value.
+func.def @trunci() -> (i8) {
+  %a = scalar.constant 42 : i32
+  %r = scalar.trunci %a : i32 to i8
+  func.return %r : i8
+}
+// ----
+func.def @trunci() -> (i8) {
+  %r = scalar.constant 42 : i8
+  func.return %r : i8
+}
+
+// ====
+
+// Dynamic operands: no fold for conversion.
+func.def @no_fold(%x: i32) -> (i64) {
+  %r = scalar.extsi %x : i32 to i64
+  func.return %r : i64
+}

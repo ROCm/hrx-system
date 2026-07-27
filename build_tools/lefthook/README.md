@@ -9,21 +9,24 @@ routing. Project-specific policy stays in each project under
 ## Commit Contract
 
 A successful Git commit must not commit stale formatter or generated-file
-output. The Git `pre-commit` hook uses commit scope: files staged for commit
-plus files changed by `HEAD`, so `git commit --amend` validates the commit being
-replaced without scanning the full feature branch. Test-bearing hook profiles
-run a mechanical fix pass first, stage files owned by those fixers, and then run
-the same profile in non-mutating check mode:
+output or private work-tracking breadcrumbs. The generated Git commit hook uses
+commit scope: files staged for commit plus files changed by `HEAD`, so
+`git commit --amend` validates the commit being replaced without scanning the
+full feature branch. Test-bearing hook profiles run a mechanical fix pass first,
+stage files owned by those fixers, and then run the same profile in
+non-mutating check mode:
 
 ```bash
 python dev.py <lane> precommit --profile <profile> --commit
 ```
 
 This fix-then-check path is used for `paranoid` and `ci` when the input is the
-generated hook's commit scope or an explicit `--staged` precommit, because those
-profiles run affected tests after any mutation. Broader local-change precommit
-runs stay check-only. The `default` profile remains check-only. Local fixups are
-also available through explicit commands:
+generated hook's commit scope or an explicit `--staged` precommit. The mutating
+pass is limited to hygiene fixers and is also the hygiene validation boundary:
+unfixable diagnostics fail there. The validation pass then runs affected tests
+and static analysis once against the post-fix tree. Broader local-change
+precommit runs stay check-only. The `default` profile remains check-only. Local
+fixups are also available through explicit commands:
 
 ```bash
 python dev.py bazel fix
@@ -34,6 +37,40 @@ python dev.py cmake fix
 `precommit` checks the current local change set, with autofix enabled for
 commit-scope, staged, and explicit-path test-bearing runs. `presubmit` is
 non-mutating and runs the full-tree CI-shaped profile.
+
+The `commit-msg` hook validates the final Git commit message text. The subject
+line must start with a bracketed subsystem tag such as `[Loom]`, `[HRX]`,
+`[HAL]`, `[Runtime]`, `[Infra]`, or `[CI]`, followed by the short description.
+Slash-qualified tags such as `[HAL/AMDGPU]`, `[Loom/WASM]`, or `[Runtime/VM]`
+are accepted when the narrower ownership surface is useful.
+
+Git autosquash subjects such as `fixup! [Loom] ...`, `squash! [Loom] ...`,
+and `amend! [Loom] ...` are accepted. The hook strips the autosquash wrapper
+and validates the target subject with the same tag and subject-length policy.
+
+Subjects and prose body lines must stay at or below 72 characters. This is a
+formatting policy for readable Git log output, not a request to shorten or
+fragment useful commit-message prose. Long fenced code blocks, indented
+examples, Markdown tables, URLs, and final Git trailers are preserved as
+structured text.
+
+When body prose is too long, the hook writes a reflowed suggestion under
+`.tmp/commit-msg/` and prints a `git commit -F ...` retry command. The
+suggestion reflows ordinary prose paragraphs only: subject lines, trailers,
+fenced blocks, indented examples, tables, URLs, block quotes, and list items are
+left untouched. The same formatter is available directly:
+
+```bash
+python build_tools/lefthook/commit_msg.py --format .git/COMMIT_EDITMSG
+```
+
+When a tag is missing, the hook ranks suggested tags from the staged paths and
+prints the paths used for the suggestion so the next edit is obvious.
+
+The hook also rejects literal `\n`/`\r` escape sequences that should have been
+real paragraph breaks and bead-shaped issue identifiers such as `loom-20r1y`,
+`loom-qof73.1`, or `bd-123`. Legitimate tool names such as `loom-check`,
+`loom-compile`, and `loom-opt` are not issue identifiers and are accepted.
 
 Normal presubmit output is terse: major phases, named checks, pass/fail status,
 and failure details. Large captured failures print the beginning and end with an
@@ -48,9 +85,13 @@ tool output are useful.
 bazel-to-cmake, generated AMDGPU target metadata, watchwords, merge-conflict
 markers, and basic text hygiene.
 
+clang-format runs C/C++ files in parallel batches. Set `IREE_CLANG_FORMAT_JOBS`
+to override the default worker cap when diagnosing local machine behavior.
+
 `paranoid` adds affected project tests for the selected build lane and the
-static-analysis lane. The static-analysis lane is intentionally empty until
-providers such as clang-tidy or CodeQL are wired in.
+static-analysis lane. Semgrep hard rules are the first configured provider.
+Rules that inventory existing drift stay at `WARNING` or `INFO` severity until
+their baseline is cleaned up and the rule is promoted.
 
 `ci` is the full-tree, non-mutating profile. It checks all tracked files and
 runs all configured project presubmit tests.
@@ -84,9 +125,8 @@ python dev.py cmake presubmit --profile default
 
 ## Lefthook Groups
 
-`pre-commit` is the installed Git hook. With `paranoid` or `ci` it runs fixups
-first and then validates the same commit-scope set; with `default` it is
-check-only.
+The installed Git commit hook runs fixups first with `paranoid` or `ci` and
+then validates the same commit-scope set; with `default` it is check-only.
 
 `dev.py` installs lane-specific local hook policy into ignored
 `lefthook-local.yml`:
@@ -140,9 +180,16 @@ custom manual hook groups in addition to Git hook names.
 
 ## Tool Installation
 
-Python-packaged local tools are pinned in `requirements-dev.lock.txt`. That
-lock contains only local development tools; Bazel build and test dependencies
+Python-packaged local tools are split by role. Core developer tools are pinned
+in `requirements-dev.lock.txt`. Optional static-analysis providers are pinned
+in `requirements-analysis.lock.txt` so analyzer dependency churn stays out of
+the smaller build/test tool environment. Bazel build and test dependencies
 belong in Bazel module fragments and `MODULE.bazel.lock`.
+
+Managed setup installs both Python locks. The analysis lock is installed with
+`--only-binary=:all:` so an incompatible Python package wheel fails setup
+clearly instead of falling back to a source distribution that may produce a
+broken analyzer executable.
 
 Standalone binaries are installed by `build_tools/devtools/install.py` into the
 selected tool environment. The Bazel lane installs Bazelisk and buildifier with
@@ -155,9 +202,54 @@ python dev.py bazel setup
 The CMake lane currently has no standalone tool downloads; it uses system CMake
 and CTest plus the shared Python-packaged tools.
 
-Optional future providers can be added to the installer manifest without being
-part of the default install set. Presubmit providers that are optional should
-skip when their tool is unavailable and print the missing executable.
+Outside CI, optional static-analysis providers skip when their tool is
+unavailable and print the missing executable. CI requires the providers selected
+by the CI profile. `dev.py doctor` reports optional tool availability; Semgrep
+includes the managed setup command in its warning when it is missing or the
+wrong version. Clang-tidy uses the Bazel LLVM repository model under
+`build_tools/clang_tidy`; local paranoid precommit skips when the LLVM tools are
+not available. The GitHub presubmit workflow fetches the ROCm LLVM toolchain and
+sets `IREE_CLANG_TIDY_REQUIRED=1` so missing LLVM tools fail loudly instead of
+silently skipping.
+
+## Static Analysis
+
+The root static-analysis lane dispatches providers from
+`build_tools/lefthook/presubmit.py`. Provider-specific rule configuration stays
+native to each provider. Semgrep is installed by managed setup through
+`requirements-analysis.lock.txt`:
+
+```bash
+python dev.py bazel setup --venv
+```
+
+Semgrep rules live under `build_tools/static_analysis/semgrep/` and can be run
+directly:
+
+```bash
+semgrep scan --metrics=off --disable-version-check \
+  --config build_tools/static_analysis/semgrep/iree.yml runtime/src/iree
+```
+
+Presubmit runs Semgrep with `--severity ERROR --error`; only promoted hard
+rules gate commits and CI. Lower-severity rules remain available for cleanup
+campaigns and rule prototyping without flooding the new CI lane. Semgrep
+parallelism is controlled by `IREE_SEMGREP_JOBS`; when unset, the dispatcher
+uses roughly 85% of detected logical CPUs capped at 14 jobs. That cap avoids
+Semgrep's current high-core-count OCaml-domain failure mode while keeping the
+local/CI default comfortably fast for this repository size.
+
+Clang-tidy runs only in the Bazel lane. It maps changed C/C++ files under
+`runtime/src/iree/`, `loom/src/loom/`, and `libhrx/` to their nearest Bazel
+package and invokes the checked-in clang-tidy aspect:
+
+```bash
+python dev.py bazel precommit --profile paranoid runtime/src/iree/base/status.c
+```
+
+Changes under `build_tools/clang_tidy/` run the plugin smoke test and action
+smoke target instead. See `build_tools/clang_tidy/README.md` for the direct
+Bazel commands and LLVM discovery environment variables.
 
 ## Project Dispatch
 

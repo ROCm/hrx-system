@@ -514,6 +514,35 @@ static iree_status_t iree_hal_cuda_stream_command_buffer_dispatch(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_cuda_native_executable_lookup_kernel_params(
               executable, export_ordinal, &kernel_params));
+  const iree_host_size_t expected_constant_length =
+      (iree_host_size_t)kernel_params->constant_count * sizeof(uint32_t);
+  if (IREE_UNLIKELY(constants.data_length != expected_constant_length)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "CUDA stream dispatch provides %" PRIhsz
+                             " constant bytes but kernel expects %" PRIhsz,
+                             constants.data_length, expected_constant_length));
+  } else if (IREE_UNLIKELY(expected_constant_length > 0 && !constants.data)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "CUDA stream dispatch constants must be non-null when length is "
+            "non-zero"));
+  } else if (IREE_UNLIKELY(bindings.count != kernel_params->binding_count)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "CUDA stream dispatch provides %" PRIhsz
+                             " bindings but kernel expects %" PRIhsz,
+                             bindings.count,
+                             (iree_host_size_t)kernel_params->binding_count));
+  } else if (IREE_UNLIKELY(bindings.count > 0 && !bindings.values)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(
+                IREE_STATUS_INVALID_ARGUMENT,
+                "CUDA stream dispatch bindings must be non-null when count is "
+                "non-zero"));
+  }
 
   IREE_HAL_STREAM_TRACE_ZONE_BEGIN_EXTERNAL(
       command_buffer->tracing_context, &command_buffer->tracing_event_list,

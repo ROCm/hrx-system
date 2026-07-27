@@ -31,9 +31,35 @@ static iree_async_proactor_t* test_proactor() {
 }
 
 typedef struct iree_hal_test_opaque_slab_provider_t {
+  // Base slab provider interface.
   iree_hal_slab_provider_t base;
+
+  // Host allocator used for provider metadata and slab allocations.
   iree_allocator_t host_allocator;
+
+  // Number of wrap_buffer calls received by the provider.
   iree_atomic_int32_t wrap_count;
+
+  // Number of ASAN advice calls received by the provider.
+  iree_atomic_int32_t asan_advice_count;
+
+  // Number of allocated ASAN advice calls received by the provider.
+  iree_atomic_int32_t asan_allocated_count;
+
+  // Number of released ASAN advice calls received by the provider.
+  iree_atomic_int32_t asan_released_count;
+
+  // Last ASAN backing offset received by the provider.
+  iree_device_size_t last_asan_backing_offset;
+
+  // Last ASAN layout received by the provider.
+  iree_hal_asan_allocation_layout_t last_asan_layout;
+
+  // Sequence number of the last allocated ASAN advice call.
+  int32_t last_asan_allocated_sequence;
+
+  // Sequence number of the last released ASAN advice call.
+  int32_t last_asan_released_sequence;
 } iree_hal_test_opaque_slab_provider_t;
 
 extern const iree_hal_slab_provider_vtable_t
@@ -102,6 +128,42 @@ static iree_status_t iree_hal_test_opaque_slab_provider_wrap_buffer(
                                    provider->host_allocator, out_buffer);
 }
 
+static iree_status_t iree_hal_test_opaque_slab_provider_validate_asan_options(
+    const iree_hal_slab_provider_t* base_provider,
+    const iree_hal_asan_pool_options_t* options) {
+  (void)base_provider;
+  (void)options;
+  return iree_ok_status();
+}
+
+static void iree_hal_test_opaque_slab_provider_advise_asan_range(
+    iree_hal_slab_provider_t* base_provider, const iree_hal_slab_t* slab,
+    iree_device_size_t backing_offset,
+    iree_hal_asan_range_advice_flags_t advice_flags,
+    const iree_hal_asan_allocation_layout_t* layout) {
+  iree_hal_test_opaque_slab_provider_t* provider =
+      (iree_hal_test_opaque_slab_provider_t*)base_provider;
+  (void)slab;
+  provider->last_asan_backing_offset = backing_offset;
+  provider->last_asan_layout = *layout;
+  const int32_t advice_sequence =
+      iree_atomic_fetch_add(&provider->asan_advice_count, 1,
+                            iree_memory_order_relaxed) +
+      1;
+  if (advice_flags == IREE_HAL_ASAN_RANGE_ADVICE_FLAG_ALLOCATED) {
+    provider->last_asan_allocated_sequence = advice_sequence;
+    iree_atomic_fetch_add(&provider->asan_allocated_count, 1,
+                          iree_memory_order_relaxed);
+  } else if (advice_flags == IREE_HAL_ASAN_RANGE_ADVICE_FLAG_RELEASED) {
+    provider->last_asan_released_sequence = advice_sequence;
+    iree_atomic_fetch_add(&provider->asan_released_count, 1,
+                          iree_memory_order_relaxed);
+  } else {
+    IREE_ASSERT(false, "unsupported ASAN range advice flags 0x%x",
+                advice_flags);
+  }
+}
+
 static void iree_hal_test_opaque_slab_provider_prefault(
     iree_hal_slab_provider_t* base_provider, iree_hal_slab_t* slab) {}
 
@@ -135,6 +197,10 @@ const iree_hal_slab_provider_vtable_t
         /*.acquire_slab=*/iree_hal_test_opaque_slab_provider_acquire_slab,
         /*.release_slab=*/iree_hal_test_opaque_slab_provider_release_slab,
         /*.wrap_buffer=*/iree_hal_test_opaque_slab_provider_wrap_buffer,
+        /*.validate_asan_options=*/
+        iree_hal_test_opaque_slab_provider_validate_asan_options,
+        /*.advise_asan_range=*/
+        iree_hal_test_opaque_slab_provider_advise_asan_range,
         /*.prefault=*/iree_hal_test_opaque_slab_provider_prefault,
         /*.trim=*/iree_hal_test_opaque_slab_provider_trim,
         /*.query_stats=*/iree_hal_test_opaque_slab_provider_query_stats,
@@ -150,7 +216,7 @@ class PassthroughPoolTest : public ::testing::Test {
         iree_hal_cpu_slab_provider_create(allocator_, &slab_provider_));
     IREE_ASSERT_OK(iree_async_notification_create(
         test_proactor(), IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification_));
-    iree_hal_passthrough_pool_options_t options = {0};
+    iree_hal_passthrough_pool_options_t options = {};
     IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
         options, slab_provider_, notification_, allocator_, &pool_));
   }
@@ -167,6 +233,15 @@ class PassthroughPoolTest : public ::testing::Test {
   iree_hal_pool_t* pool_ = nullptr;
 };
 
+static iree_hal_asan_pool_options_t ShadowOptions() {
+  iree_hal_asan_pool_options_t options = {};
+  options.mode = IREE_HAL_ASAN_POOL_MODE_SHADOW;
+  options.shadow_granule_size = 8;
+  options.redzone_size = 16;
+  options.backing_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT;
+  return options;
+}
+
 TEST_F(PassthroughPoolTest, ReserveRelease) {
   iree_hal_pool_reservation_t reservation;
   iree_hal_pool_acquire_info_t reserve_info;
@@ -176,7 +251,7 @@ TEST_F(PassthroughPoolTest, ReserveRelease) {
       &reserve_info, &result));
   EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
   EXPECT_EQ(reservation.offset, 0u);
-  EXPECT_GE(reservation.length, 4096u);
+  EXPECT_EQ(reservation.byte_length, 4096u);
   EXPECT_NE(reservation.block_handle, 0u);
   EXPECT_EQ(reserve_info.wait_frontier, nullptr);
   EXPECT_EQ(reserve_info.flags, IREE_HAL_POOL_ACQUIRE_FLAG_NONE);
@@ -245,7 +320,8 @@ TEST_F(PassthroughPoolTest, WrapReservationCreatesBuffer) {
       pool_, params, &reservation,
       IREE_HAL_POOL_MATERIALIZE_FLAG_TRANSFER_RESERVATION_OWNERSHIP, &buffer));
   ASSERT_NE(buffer, nullptr);
-  EXPECT_GE(iree_hal_buffer_allocation_size(buffer), 4096u);
+  EXPECT_EQ(iree_hal_buffer_allocation_size(buffer), 4096u);
+  EXPECT_EQ(iree_hal_buffer_byte_length(buffer), 4096u);
 
   // Releasing the buffer should release the reservation back to the pool.
   iree_hal_pool_stats_t stats;
@@ -306,7 +382,7 @@ TEST(PassthroughPool, WrapReservationUsesProviderHook) {
       test_proactor(), IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification));
 
   iree_hal_pool_t* pool = NULL;
-  iree_hal_passthrough_pool_options_t options = {0};
+  iree_hal_passthrough_pool_options_t options = {};
   IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
       options, slab_provider, notification, allocator, &pool));
 
@@ -335,7 +411,7 @@ TEST(PassthroughPool, WrapReservationUsesProviderHook) {
       &mapping));
   memset(mapping.contents.data, 0x6B, 256);
   EXPECT_EQ(((uint8_t*)mapping.contents.data)[255], 0x6B);
-  iree_hal_buffer_unmap_range(&mapping);
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
   EXPECT_EQ(
       1,
@@ -344,6 +420,117 @@ TEST(PassthroughPool, WrapReservationUsesProviderHook) {
           iree_memory_order_relaxed));
 
   iree_hal_buffer_release(buffer);
+  iree_hal_pool_release(pool);
+  iree_async_notification_release(notification);
+  iree_hal_slab_provider_release(slab_provider);
+}
+
+TEST(PassthroughPool, CreateRejectsASANWhenProviderCannotAdviseRanges) {
+  iree_allocator_t allocator = iree_allocator_system();
+  iree_hal_slab_provider_t* slab_provider = NULL;
+  IREE_ASSERT_OK(iree_hal_cpu_slab_provider_create(allocator, &slab_provider));
+  iree_async_notification_t* notification = NULL;
+  IREE_ASSERT_OK(iree_async_notification_create(
+      test_proactor(), IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification));
+
+  iree_hal_passthrough_pool_options_t options = {};
+  options.asan = ShadowOptions();
+
+  iree_hal_pool_t* pool = NULL;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_hal_passthrough_pool_create(options, slab_provider, notification,
+                                       allocator, &pool));
+  EXPECT_EQ(pool, nullptr);
+
+  iree_async_notification_release(notification);
+  iree_hal_slab_provider_release(slab_provider);
+}
+
+TEST(PassthroughPool, ASANAdvisesBackingRangeAndExposesUserRange) {
+  iree_allocator_t allocator = iree_allocator_system();
+  iree_hal_slab_provider_t* slab_provider = NULL;
+  IREE_ASSERT_OK(
+      iree_hal_test_opaque_slab_provider_create(allocator, &slab_provider));
+  iree_async_notification_t* notification = NULL;
+  IREE_ASSERT_OK(iree_async_notification_create(
+      test_proactor(), IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification));
+
+  iree_hal_passthrough_pool_options_t options = {};
+  options.asan = ShadowOptions();
+
+  iree_hal_pool_t* pool = NULL;
+  IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
+      options, slab_provider, notification, allocator, &pool));
+
+  iree_hal_pool_reservation_t reservation;
+  iree_hal_pool_acquire_info_t reserve_info;
+  iree_hal_pool_acquire_result_t result;
+  IREE_ASSERT_OK(iree_hal_pool_acquire_reservation(
+      pool, 13, 16, /*requester_frontier=*/NULL,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, &reservation, &reserve_info, &result));
+
+  EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
+  EXPECT_EQ(reservation.offset, 64u);
+  EXPECT_EQ(reservation.byte_length, 13u);
+
+  iree_hal_test_opaque_slab_provider_t* provider =
+      (iree_hal_test_opaque_slab_provider_t*)slab_provider;
+  EXPECT_EQ(iree_atomic_load(&provider->asan_allocated_count,
+                             iree_memory_order_relaxed),
+            1);
+  EXPECT_EQ(provider->last_asan_backing_offset, 0u);
+  EXPECT_EQ(provider->last_asan_layout.backing_length, 128u);
+  EXPECT_EQ(provider->last_asan_layout.user_offset, 64u);
+  EXPECT_EQ(provider->last_asan_layout.user_length, 13u);
+  EXPECT_EQ(provider->last_asan_layout.right_redzone_length, 51u);
+
+  iree_hal_pool_stats_t stats;
+  iree_hal_pool_query_stats(pool, &stats);
+  EXPECT_EQ(stats.bytes_reserved, 128u);
+
+  iree_hal_buffer_params_t params = {0};
+  params.usage =
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+  params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+
+  iree_hal_buffer_t* buffer = NULL;
+  IREE_ASSERT_OK(iree_hal_pool_materialize_reservation(
+      pool, params, &reservation,
+      IREE_HAL_POOL_MATERIALIZE_FLAG_TRANSFER_RESERVATION_OWNERSHIP, &buffer));
+  ASSERT_NE(buffer, nullptr);
+  EXPECT_EQ(iree_hal_buffer_allocation_size(buffer), 13u);
+  EXPECT_EQ(iree_hal_buffer_byte_length(buffer), 13u);
+
+  iree_hal_buffer_release(buffer);
+
+  EXPECT_EQ(iree_atomic_load(&provider->asan_released_count,
+                             iree_memory_order_relaxed),
+            1);
+  const int32_t first_release_sequence = provider->last_asan_released_sequence;
+  EXPECT_LT(provider->last_asan_allocated_sequence, first_release_sequence);
+  iree_hal_pool_query_stats(pool, &stats);
+  EXPECT_EQ(stats.bytes_reserved, 0u);
+  EXPECT_EQ(stats.reservation_count, 0u);
+
+  IREE_ASSERT_OK(iree_hal_pool_acquire_reservation(
+      pool, 13, 16, /*requester_frontier=*/NULL,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, &reservation, &reserve_info, &result));
+  EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
+  EXPECT_EQ(iree_atomic_load(&provider->asan_allocated_count,
+                             iree_memory_order_relaxed),
+            2);
+  EXPECT_LT(first_release_sequence, provider->last_asan_allocated_sequence);
+
+  iree_hal_pool_release_reservation(pool, &reservation,
+                                    /*death_frontier=*/NULL);
+  EXPECT_EQ(iree_atomic_load(&provider->asan_released_count,
+                             iree_memory_order_relaxed),
+            2);
+  EXPECT_LT(provider->last_asan_allocated_sequence,
+            provider->last_asan_released_sequence);
+
   iree_hal_pool_release(pool);
   iree_async_notification_release(notification);
   iree_hal_slab_provider_release(slab_provider);
@@ -377,7 +564,7 @@ TEST_F(PassthroughPoolTest, BufferMemoryAccess) {
   memset(mapping.contents.data, 0xCD, 256);
   EXPECT_EQ(((uint8_t*)mapping.contents.data)[0], 0xCD);
   EXPECT_EQ(((uint8_t*)mapping.contents.data)[255], 0xCD);
-  iree_hal_buffer_unmap_range(&mapping);
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
   iree_hal_buffer_release(buffer);
 }
@@ -437,7 +624,8 @@ TEST_F(PassthroughPoolTest, AllocateBuffer) {
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       pool_, params, 2048, NULL, iree_make_timeout_ms(0), &buffer));
   ASSERT_NE(buffer, nullptr);
-  EXPECT_GE(iree_hal_buffer_allocation_size(buffer), 2048u);
+  EXPECT_EQ(iree_hal_buffer_allocation_size(buffer), 2048u);
+  EXPECT_EQ(iree_hal_buffer_byte_length(buffer), 2048u);
 
   iree_hal_pool_stats_t stats;
   iree_hal_pool_query_stats(pool_, &stats);
@@ -467,7 +655,7 @@ TEST_F(PassthroughPoolTest, WrappedBuffersBorrowPool) {
                                            IREE_HAL_MEMORY_ACCESS_WRITE, 0, 512,
                                            &mapping));
   memset(mapping.contents.data, 0xEF, 512);
-  iree_hal_buffer_unmap_range(&mapping);
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
   iree_hal_buffer_release(buffer);
 }

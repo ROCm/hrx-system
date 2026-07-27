@@ -39,11 +39,13 @@ iree_runtime_cc_library(
         "//runtime/src/iree/async:types",
         "//runtime/src/iree/async/util:message_pool",
         "//runtime/src/iree/async/util:operation_pool",
+        "//runtime/src/iree/async/util:semaphore_wait",
         "//runtime/src/iree/async/util:sequence_emulation",
         "//runtime/src/iree/async/util:signal",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:atomic_slist",
         "//runtime/src/iree/base/internal:memory",
+        "//runtime/src/iree/base/internal:path",
     ],
 )

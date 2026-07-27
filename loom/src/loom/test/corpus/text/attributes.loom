@@ -1,0 +1,25 @@
+func.def @attributes(%input: f32, %alpha: i32, %beta: f32, %selector: index, %a0: i32, %b0: f32, %a1: i32, %b1: f32, %ad: i32, %bd: f32) -> (i32, f32) {
+  %configured = test.attrs %input {axis = 0, enabled = true, label = "foo", limits = [1, 2, 3], meta = {phase = "golden", version = 1}, scale = 1.25} : f32
+  %dict = test.operand_dict %configured {alpha = %alpha : i32, beta = %beta : f32} : f32
+  test.use %dict : f32
+  %x, %y = test.attr_table %selector {
+    0 = (%a0, %b0),
+    1 = (%a1, %b1)
+  } default(%ad, %bd) : i32, f32
+  func.return %x, %y : i32, f32
+}
+
+func.def @region_table(%selector: index) {
+  test.region_table %selector {
+    case 0 {
+      test.yield
+    }
+    case 1 {
+      test.yield
+    }
+    default {
+      test.yield
+    }
+  }
+  func.return
+}

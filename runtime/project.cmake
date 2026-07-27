@@ -156,16 +156,15 @@ set(IREE_HAL_AMDGPU_TARGETS
   "gfx9-generic;gfx90a;gfx9-4-generic;gfx10-1-generic;gfx10-3-generic;gfx11-generic;gfx12-generic"
   CACHE STRING
   "AMDGPU target selectors supported by this runtime build.")
-set(IREE_ROCM_TEST_AMDGCNSPIRV OFF CACHE BOOL
-  "Use amdgcnspirv for ROCm e2e tests.")
 
 include(flatbuffer_c_library)
 include(binary)
 include(selectors)
+include(cts)
 include(iree_execution_test_suite)
 include(iree_runtime_amdgpu_toolchain)
 include(iree_vmasm_module)
-include(iree_hal_cts_test_suite)
+include(iree_runtime_hal_cts_test_suite)
 include(iree_wasm_library)
 
 function(iree_runtime_configure_project)

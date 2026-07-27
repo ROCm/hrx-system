@@ -25,8 +25,6 @@ iree_cc_library(
     "metal_buffer.m"
     "metal_device.m"
     "metal_driver.m"
-    "nop_executable_cache.h"
-    "nop_executable_cache.m"
     "shared_event.h"
     "shared_event.m"
     "staging_buffer.h"
@@ -40,6 +38,7 @@ iree_cc_library(
     iree::hal
     iree::hal::drivers::metal::builtin
     iree::hal::utils::deferred_command_buffer
+    iree::hal::utils::device_spec_builder
     iree::hal::utils::executable_debug_info
     iree::hal::utils::executable_header
     iree::hal::utils::file_transfer

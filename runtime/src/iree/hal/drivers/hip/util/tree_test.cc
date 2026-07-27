@@ -7,6 +7,7 @@
 #include "iree/hal/drivers/hip/util/tree.h"
 
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
 
 class RedBlackTreeTest : public ::testing::Test {
  protected:
@@ -18,6 +19,13 @@ class RedBlackTreeTest : public ::testing::Test {
 
   void TearDown() override { iree_hal_hip_util_tree_deinitialize(&tree_); }
 
+  void Insert(iree_host_size_t key,
+              iree_hal_hip_util_tree_node_t** out_node = nullptr) {
+    iree_hal_hip_util_tree_node_t* node = NULL;
+    IREE_ASSERT_OK(iree_hal_hip_util_tree_insert(&tree_, key, &node));
+    if (out_node) *out_node = node;
+  }
+
   iree_hal_hip_util_tree_t tree_;
   uint8_t initial_cache[1024];
 };
@@ -28,21 +36,20 @@ TEST_F(RedBlackTreeTest, initialize) {
 
 TEST_F(RedBlackTreeTest, insert) {
   iree_hal_hip_util_tree_node_t* node = NULL;
-  EXPECT_EQ(iree_hal_hip_util_tree_insert(&tree_, 10, &node), iree_ok_status());
+  Insert(10, &node);
   EXPECT_EQ(iree_hal_hip_util_tree_size(&tree_), 1);
   EXPECT_EQ(iree_hal_hip_util_tree_node_get_key(node), 10);
 }
 
 TEST_F(RedBlackTreeTest, get) {
-  iree_hal_hip_util_tree_node_t* node = NULL;
-  iree_hal_hip_util_tree_insert(&tree_, 10, &node);
+  Insert(10);
   EXPECT_NE(iree_hal_hip_util_tree_get(&tree_, 10), nullptr);
   EXPECT_EQ(iree_hal_hip_util_tree_get(&tree_, 20), nullptr);
 }
 
 TEST_F(RedBlackTreeTest, delete) {
   iree_hal_hip_util_tree_node_t* node = NULL;
-  iree_hal_hip_util_tree_insert(&tree_, 10, &node);
+  Insert(10, &node);
   iree_hal_hip_util_tree_erase(&tree_, node);
   EXPECT_EQ(iree_hal_hip_util_tree_get(&tree_, 10), nullptr);
   EXPECT_EQ(iree_hal_hip_util_tree_size(&tree_), 0);
@@ -50,11 +57,11 @@ TEST_F(RedBlackTreeTest, delete) {
 
 TEST_F(RedBlackTreeTest, walk) {
   iree_hal_hip_util_tree_node_t* node = NULL;
-  iree_hal_hip_util_tree_insert(&tree_, 10, &node);
+  Insert(10, &node);
   static_cast<int*>(iree_hal_hip_util_tree_node_get_value(node))[0] = 10;
-  iree_hal_hip_util_tree_insert(&tree_, 20, &node);
+  Insert(20, &node);
   static_cast<int*>(iree_hal_hip_util_tree_node_get_value(node))[0] = 20;
-  iree_hal_hip_util_tree_insert(&tree_, 30, &node);
+  Insert(30, &node);
   static_cast<int*>(iree_hal_hip_util_tree_node_get_value(node))[0] = 30;
 
   int sum = 0;
@@ -71,10 +78,9 @@ TEST_F(RedBlackTreeTest, walk) {
 }
 
 TEST_F(RedBlackTreeTest, boundary_conditions) {
-  iree_hal_hip_util_tree_node_t* node = NULL;
-  iree_hal_hip_util_tree_insert(&tree_, 10, &node);
-  iree_hal_hip_util_tree_insert(&tree_, 20, &node);
-  iree_hal_hip_util_tree_insert(&tree_, 30, &node);
+  Insert(10);
+  Insert(20);
+  Insert(30);
 
   EXPECT_EQ(
       iree_hal_hip_util_tree_node_get_key(iree_hal_hip_util_tree_first(&tree_)),
@@ -98,17 +104,16 @@ TEST_F(RedBlackTreeTest, boundary_conditions) {
 
 TEST_F(RedBlackTreeTest, move_node) {
   iree_hal_hip_util_tree_node_t* node = NULL;
-  iree_hal_hip_util_tree_insert(&tree_, 10, &node);
-  iree_hal_hip_util_tree_move_node(&tree_, node, 20);
+  Insert(10, &node);
+  IREE_ASSERT_OK(iree_hal_hip_util_tree_move_node(&tree_, node, 20));
   EXPECT_EQ(iree_hal_hip_util_tree_get(&tree_, 10), nullptr);
   EXPECT_NE(iree_hal_hip_util_tree_get(&tree_, 20), nullptr);
 }
 
 TEST_F(RedBlackTreeTest, in_order_iterators) {
-  iree_hal_hip_util_tree_node_t* node = NULL;
-  iree_hal_hip_util_tree_insert(&tree_, 10, &node);
-  iree_hal_hip_util_tree_insert(&tree_, 20, &node);
-  iree_hal_hip_util_tree_insert(&tree_, 30, &node);
+  Insert(10);
+  Insert(20);
+  Insert(30);
 
   std::vector<int> keys;
   for (iree_hal_hip_util_tree_node_t* node =
@@ -124,10 +129,9 @@ TEST_F(RedBlackTreeTest, in_order_iterators) {
 }
 
 TEST_F(RedBlackTreeTest, in_order_iterators_last) {
-  iree_hal_hip_util_tree_node_t* node = NULL;
-  iree_hal_hip_util_tree_insert(&tree_, 10, &node);
-  iree_hal_hip_util_tree_insert(&tree_, 20, &node);
-  iree_hal_hip_util_tree_insert(&tree_, 30, &node);
+  Insert(10);
+  Insert(20);
+  Insert(30);
 
   std::vector<int> keys;
   for (iree_hal_hip_util_tree_node_t* node =
@@ -148,10 +152,9 @@ class RedBlackTreeWalkTest
 };
 
 TEST_P(RedBlackTreeWalkTest, walk) {
-  iree_hal_hip_util_tree_node_t* node = NULL;
-  iree_hal_hip_util_tree_insert(&tree_, 10, &node);
-  iree_hal_hip_util_tree_insert(&tree_, 20, &node);
-  iree_hal_hip_util_tree_insert(&tree_, 30, &node);
+  Insert(10);
+  Insert(20);
+  Insert(30);
 
   std::vector<int> keys;
   auto callback = [](iree_hal_hip_util_tree_node_t* node,

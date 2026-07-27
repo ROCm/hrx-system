@@ -6,6 +6,8 @@
 
 #include "iree/tooling/numpy_io.h"
 
+#include <string>
+
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/numa.h"
 #include "iree/io/memory_stream.h"
@@ -46,6 +48,7 @@ class NumpyIOTest : public ::testing::Test {
       iree_status_free(status);
       GTEST_SKIP();
     }
+    IREE_ASSERT_OK(status);
     device_allocator_ = iree_hal_device_allocator(device_);
   }
 
@@ -66,6 +69,16 @@ class NumpyIOTest : public ::testing::Test {
     return StreamPtr{nullptr, iree_io_stream_release};
   }
 
+  StreamPtr OpenInputBytes(const std::vector<uint8_t>& contents) {
+    iree_io_stream_t* stream = NULL;
+    IREE_CHECK_OK(iree_io_memory_stream_wrap(
+        IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_SEEKABLE,
+        iree_make_byte_span((void*)contents.data(), contents.size()),
+        iree_io_stream_release_callback_null(), iree_allocator_system(),
+        &stream));
+    return StreamPtr(stream, iree_io_stream_release);
+  }
+
   StreamPtr OpenOutputFile(const char* name) {
     iree_io_stream_t* stream = NULL;
     IREE_CHECK_OK(iree_io_vec_stream_create(
@@ -79,6 +92,26 @@ class NumpyIOTest : public ::testing::Test {
   iree_hal_device_t* device_ = nullptr;
   iree_hal_allocator_t* device_allocator_ = nullptr;
 };
+
+static std::vector<uint8_t> MakeNpyV1Bytes(std::string header_dict,
+                                           std::vector<uint8_t> contents) {
+  const size_t header_prefix_length = 10;
+  size_t header_length = header_dict.size() + /*\n*/ 1;
+  while ((header_prefix_length + header_length) % 64 != 0) {
+    ++header_length;
+  }
+
+  std::vector<uint8_t> file;
+  file.reserve(header_prefix_length + header_length + contents.size());
+  file.insert(file.end(), {0x93, 'N', 'U', 'M', 'P', 'Y', 1, 0});
+  file.push_back((uint8_t)(header_length & 0xFF));
+  file.push_back((uint8_t)((header_length >> 8) & 0xFF));
+  file.insert(file.end(), header_dict.begin(), header_dict.end());
+  file.resize(header_prefix_length + header_length - /*\n*/ 1, ' ');
+  file.push_back('\n');
+  file.insert(file.end(), contents.begin(), contents.end());
+  return file;
+}
 
 template <typename T>
 static void AssertBufferViewContents(iree_hal_buffer_view_t* buffer_view,
@@ -160,6 +193,35 @@ TEST_F(NumpyIOTest, LoadSingleArray) {
 
   // Should have hit EOF.
   ASSERT_TRUE(iree_io_stream_is_eos(stream.get()));
+}
+
+TEST_F(NumpyIOTest, LoadHeaderWithoutTrailingDictComma) {
+  auto file = MakeNpyV1Bytes(
+      "{'descr': '|i1', 'fortran_order': False, 'shape': (3,)}", {1, 2, 3});
+  auto stream = OpenInputBytes(file);
+
+  LoadArrayAndAssertContents<int8_t>(stream.get(), device_, device_allocator_,
+                                     {3}, IREE_HAL_ELEMENT_TYPE_SINT_8,
+                                     IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
+                                     {1, 2, 3});
+
+  ASSERT_TRUE(iree_io_stream_is_eos(stream.get()));
+}
+
+TEST_F(NumpyIOTest, RejectMalformedHeaderWithoutDictSeparator) {
+  auto file = MakeNpyV1Bytes(
+      "{'descr': '|i1' 'fortran_order': False, 'shape': (3,)}", {1, 2, 3});
+  auto stream = OpenInputBytes(file);
+
+  iree_hal_buffer_params_t buffer_params = {};
+  buffer_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  buffer_params.access = IREE_HAL_MEMORY_ACCESS_READ;
+  buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+  iree_hal_buffer_view_t* buffer_view = NULL;
+  EXPECT_THAT(Status(iree_numpy_npy_load_ndarray(
+                  stream.get(), IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT,
+                  buffer_params, device_, device_allocator_, &buffer_view)),
+              StatusIs(StatusCode::kInvalidArgument));
 }
 
 // Tests loading multiple arrays from a concatenated file.

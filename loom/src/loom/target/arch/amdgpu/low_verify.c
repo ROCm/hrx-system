@@ -1,0 +1,201 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "loom/target/arch/amdgpu/low_verify.h"
+
+#include "loom/codegen/low/diagnostics.h"
+#include "loom/codegen/low/packet.h"
+#include "loom/target/arch/amdgpu/encoding/encoding.h"
+#include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/low_aliases.h"
+#include "loom/target/arch/amdgpu/ops/ops.h"
+
+typedef struct loom_amdgpu_low_verify_state_t {
+  // Target resolved for the current function.
+  const loom_low_resolved_target_t* target;
+  // Borrowed function name used in diagnostics.
+  iree_string_view_t function_name;
+} loom_amdgpu_low_verify_state_t;
+
+static iree_status_t loom_amdgpu_low_verify_begin_function(
+    const loom_low_verify_provider_t* provider,
+    loom_low_verify_context_t* context, void** out_provider_state) {
+  (void)provider;
+  *out_provider_state = NULL;
+  const loom_low_resolved_target_t* target =
+      loom_low_verify_context_target(context);
+  if (!loom_amdgpu_target_isa(target->target_op)) {
+    return iree_ok_status();
+  }
+
+  loom_amdgpu_low_verify_state_t* state = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      loom_low_verify_context_arena(context), sizeof(*state), (void**)&state));
+  *state = (loom_amdgpu_low_verify_state_t){
+      .target = target,
+      .function_name = loom_low_diagnostic_function_name(
+          loom_low_verify_context_module(context),
+          loom_low_verify_context_function_op(context)),
+  };
+  *out_provider_state = state;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_low_emit_blocked_alias(
+    loom_low_verify_context_t* context,
+    const loom_amdgpu_low_verify_state_t* state,
+    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_amdgpu_low_blocked_alias_t* alias) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(state->function_name),
+      loom_param_with_field_ref(
+          loom_param_string(packet->key),
+          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+                                    packet->key_attr_index)),
+      loom_param_string(state->target->descriptor_set_key),
+      loom_param_string(alias->alias_mnemonic),
+      loom_param_string(alias->alias_semantics),
+      loom_param_string(alias->replacement_descriptor_name),
+      loom_param_string(alias->replacement_mnemonic),
+      loom_param_string(alias->decision_key),
+      loom_param_string(alias->reason_key),
+  };
+  return loom_low_verify_context_emit(context, packet->op, LOOM_ERR_AMDGPU_031,
+                                      params, IREE_ARRAYSIZE(params));
+}
+
+static const loom_low_immediate_t* loom_amdgpu_low_find_dpp_control_immediate(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  IREE_ASSERT_LE(descriptor->immediate_start, descriptor_set->immediate_count);
+  IREE_ASSERT_LE(descriptor->immediate_count,
+                 descriptor_set->immediate_count - descriptor->immediate_start);
+  const loom_low_immediate_t* dpp_control = NULL;
+  for (uint16_t i = 0; i < descriptor->immediate_count; ++i) {
+    const loom_low_immediate_t* immediate =
+        &descriptor_set->immediates[descriptor->immediate_start + i];
+    if (immediate->encoding_field_id != LOOM_AMDGPU_ENCODING_FIELD_DPP_CTRL) {
+      continue;
+    }
+    IREE_ASSERT(dpp_control == NULL);
+    dpp_control = immediate;
+  }
+  return dpp_control;
+}
+
+static bool loom_amdgpu_low_find_immediate_value(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_string_view_t immediate_name, const loom_low_immediate_t* immediate,
+    uint16_t* out_attrs_attr_index, int64_t* out_value) {
+  *out_attrs_attr_index = UINT16_MAX;
+  *out_value = 0;
+  loom_named_attr_slice_t attrs = loom_named_attr_slice_empty();
+  if (!loom_low_packet_try_op_attrs(op, &attrs, out_attrs_attr_index)) {
+    IREE_ASSERT_UNREACHABLE("resolved low packet has no immediate dictionary");
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
+    const loom_named_attr_t* attr = &attrs.entries[i];
+    if (attr->name_id >= module->strings.count ||
+        !iree_string_view_equal(module->strings.entries[attr->name_id],
+                                immediate_name)) {
+      continue;
+    }
+    if (attr->value.kind != LOOM_ATTR_I64) {
+      return false;
+    }
+    *out_value = attr->value.i64;
+    return true;
+  }
+  if (iree_any_bit_set(immediate->flags,
+                       LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE)) {
+    *out_value = immediate->default_value;
+    return true;
+  }
+  return false;
+}
+
+static iree_status_t loom_amdgpu_low_verify_dpp_control(
+    loom_low_verify_context_t* context,
+    const loom_amdgpu_low_verify_state_t* state,
+    const loom_low_resolved_descriptor_packet_t* packet) {
+  const loom_low_descriptor_t* descriptor = packet->descriptor;
+  const loom_amdgpu_encoding_format_flags_t format_flags =
+      loom_amdgpu_encoding_format_flags(descriptor->encoding_format_id);
+  if (!iree_any_bit_set(format_flags,
+                        LOOM_AMDGPU_ENCODING_FORMAT_FLAG_DPP_CONTROL)) {
+    return iree_ok_status();
+  }
+
+  const loom_low_descriptor_set_t* descriptor_set =
+      state->target->descriptor_set;
+  const loom_low_immediate_t* immediate =
+      loom_amdgpu_low_find_dpp_control_immediate(descriptor_set, descriptor);
+  if (immediate == NULL) {
+    return iree_ok_status();
+  }
+  const iree_string_view_t immediate_name = loom_low_descriptor_set_string(
+      descriptor_set, immediate->field_name_string_offset);
+  uint16_t attrs_attr_index = UINT16_MAX;
+  int64_t value = 0;
+  const loom_module_t* module = loom_low_verify_context_module(context);
+  if (!loom_amdgpu_low_find_immediate_value(module, packet->op, immediate_name,
+                                            immediate, &attrs_attr_index,
+                                            &value) ||
+      value < 0 || value > 0x1FF) {
+    return iree_ok_status();
+  }
+
+  loom_amdgpu_dpp_control_decoding_t decoding = {0};
+  if (loom_amdgpu_dpp_control_decode((uint16_t)value, &decoding)) {
+    return iree_ok_status();
+  }
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(state->function_name),
+      loom_param_with_field_ref(
+          loom_param_string(packet->key),
+          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+                                    packet->key_attr_index)),
+      loom_param_string(state->target->descriptor_set_key),
+      loom_param_with_field_ref(
+          loom_param_string(immediate_name),
+          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+                                    attrs_attr_index)),
+      loom_param_u32((uint32_t)value),
+      loom_param_string(IREE_SV("dpp.control.encoding")),
+      loom_param_string(IREE_SV("reserved_encoding")),
+  };
+  return loom_low_verify_context_emit(context, packet->op, LOOM_ERR_AMDGPU_044,
+                                      params, IREE_ARRAYSIZE(params));
+}
+
+static iree_status_t loom_amdgpu_low_verify_op(
+    const loom_low_verify_provider_t* provider,
+    loom_low_verify_context_t* context, void* provider_state,
+    const loom_low_resolved_descriptor_packet_t* packet) {
+  (void)provider;
+  loom_amdgpu_low_verify_state_t* state =
+      (loom_amdgpu_low_verify_state_t*)provider_state;
+  if (state == NULL || packet->kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE ||
+      loom_low_verify_context_should_stop(context)) {
+    return iree_ok_status();
+  }
+  if (packet->descriptor != NULL) {
+    return loom_amdgpu_low_verify_dpp_control(context, state, packet);
+  }
+  const loom_amdgpu_low_blocked_alias_t* alias =
+      loom_amdgpu_low_blocked_alias_lookup(packet->key);
+  if (alias == NULL) {
+    return iree_ok_status();
+  }
+  return loom_amdgpu_low_emit_blocked_alias(context, state, packet, alias);
+}
+
+const loom_low_verify_provider_t loom_amdgpu_low_verify_provider = {
+    .name = IREE_SVL("amdgpu"),
+    .begin_function = loom_amdgpu_low_verify_begin_function,
+    .verify_op = loom_amdgpu_low_verify_op,
+};

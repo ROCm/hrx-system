@@ -1,0 +1,161 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Loom Test",
+  "scopeName": "source.loom-test",
+  "fileTypes": [
+    "loom-test"
+  ],
+  "comment": "GENERATED FILE: DO NOT EDIT. Generator: loom.gen.editor.textmate. Regenerate: python3 loom/py/loom/gen/run.py textmate",
+  "patterns": [
+    {
+      "include": "#loom-check"
+    },
+    {
+      "include": "source.loom"
+    }
+  ],
+  "repository": {
+    "loom-check": {
+      "patterns": [
+        {
+          "name": "meta.separator.case.loom-test",
+          "match": "^\\s*(//)\\s*(====)(?:\\s+(.*))?$",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.comment.loom-test"
+            },
+            "2": {
+              "name": "keyword.control.separator.case.loom-test"
+            },
+            "3": {
+              "name": "entity.name.section.case.loom-test"
+            }
+          }
+        },
+        {
+          "name": "meta.separator.expected.loom-test",
+          "match": "^\\s*(//)\\s*(----)\\s*$",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.comment.loom-test"
+            },
+            "2": {
+              "name": "keyword.control.separator.expected.loom-test"
+            }
+          }
+        },
+        {
+          "name": "comment.line.double-slash.directive.run.loom-test",
+          "match": "^\\s*(//)\\s*(RUN)(:)\\s*(roundtrip|verify|pass|format|emit)\\b(?:\\s+(.*))?$",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.comment.loom-test"
+            },
+            "2": {
+              "name": "keyword.control.directive.run.loom-test"
+            },
+            "3": {
+              "name": "punctuation.separator.key-value.loom-test"
+            },
+            "4": {
+              "name": "support.function.mode.loom-test"
+            },
+            "5": {
+              "name": "string.unquoted.directive-argument.loom-test"
+            }
+          }
+        },
+        {
+          "name": "comment.line.double-slash.directive.xfail.loom-test",
+          "match": "^\\s*(//)\\s*(XFAIL)(:)\\s*(.*)$",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.comment.loom-test"
+            },
+            "2": {
+              "name": "keyword.control.directive.xfail.loom-test"
+            },
+            "3": {
+              "name": "punctuation.separator.key-value.loom-test"
+            },
+            "4": {
+              "name": "string.unquoted.xfail-reason.loom-test"
+            }
+          }
+        },
+        {
+          "name": "comment.line.double-slash.diagnostic.loom-test",
+          "begin": "^\\s*(//)\\s*(ERROR|WARNING|REMARK)(@[+-]?[0-9]+)?(:)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.comment.loom-test"
+            },
+            "2": {
+              "name": "keyword.control.diagnostic.severity.loom-test"
+            },
+            "3": {
+              "name": "constant.numeric.annotation-offset.loom-test"
+            },
+            "4": {
+              "name": "punctuation.separator.key-value.loom-test"
+            }
+          },
+          "end": "$",
+          "patterns": [
+            {
+              "name": "constant.other.error-code.loom-test",
+              "match": "\\b(DOMINANCE|STRUCTURE|BYTECODE|ENCODING|LOWERING|SUBRANGE|BACKEND|AMDGPU|SYMBOL|TARGET|PARSE|SHAPE|SPIRV|FOLD|TYPE|WASM|X86)(/)([0-9]+)\\b",
+              "captures": {
+                "1": {
+                  "name": "support.type.error-domain.loom-test"
+                },
+                "2": {
+                  "name": "punctuation.separator.error-code.loom-test"
+                },
+                "3": {
+                  "name": "constant.numeric.error-code.loom-test"
+                }
+              }
+            },
+            {
+              "name": "support.type.error-domain.loom-test",
+              "match": "\\b(?:DOMINANCE|STRUCTURE|BYTECODE|ENCODING|LOWERING|SUBRANGE|BACKEND|AMDGPU|SYMBOL|TARGET|PARSE|SHAPE|SPIRV|FOLD|TYPE|WASM|X86)\\b"
+            },
+            {
+              "include": "#strings"
+            }
+          ]
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.loom-test",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.loom-test"
+            }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.loom-test"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.loom-test",
+              "match": "\\\\(?:[\"\\\\/bfnrt]|u[0-9A-Fa-f]{4})"
+            },
+            {
+              "name": "invalid.illegal.escape.loom-test",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -45,8 +45,7 @@ TEST_P(ResourceExhaustionTest, ManyConcurrentTimers) {
   }
 
   // Poll until all complete.
-  PollUntil(/*min_completions=*/kNumTimers,
-            /*total_budget=*/iree_make_duration_ms(10000));
+  PollUntil(/*min_completions=*/kNumTimers);
 
   // Verify all completed successfully.
   int completed_count = 0;
@@ -67,11 +66,11 @@ TEST_P(ResourceExhaustionTest, ManyConcurrentCancellations) {
   std::vector<iree_async_timer_operation_t> timers(kNumTimers);
   std::vector<CompletionTracker> trackers(kNumTimers);
 
-  // Submit timers with future deadline (so they're pending).
+  // Submit timers that remain pending until cancelled.
   for (int i = 0; i < kNumTimers; ++i) {
     memset(&timers[i], 0, sizeof(timers[i]));
     timers[i].base.type = IREE_ASYNC_OPERATION_TYPE_TIMER;
-    timers[i].deadline_ns = iree_time_now() + iree_make_duration_ms(60000);
+    timers[i].deadline_ns = IREE_TIME_INFINITE_FUTURE;
     timers[i].base.completion_fn = CompletionTracker::Callback;
     timers[i].base.user_data = &trackers[i];
 
@@ -84,16 +83,14 @@ TEST_P(ResourceExhaustionTest, ManyConcurrentCancellations) {
   }
 
   // Poll until all complete (with CANCELLED status).
-  PollUntil(/*min_completions=*/kNumTimers,
-            /*total_budget=*/iree_make_duration_ms(10000));
+  PollUntil(/*min_completions=*/kNumTimers);
 
-  // Verify all completed (with any status - OK or CANCELLED depending on race).
+  // Verify all completed with cancellation.
   int completed_count = 0;
   for (int i = 0; i < kNumTimers; ++i) {
     if (trackers[i].call_count > 0) {
       ++completed_count;
-      // Consume status to avoid leak - could be OK or CANCELLED.
-      iree_status_ignore(trackers[i].ConsumeStatus());
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, trackers[i].ConsumeStatus());
     }
   }
   EXPECT_EQ(completed_count, kNumTimers)
@@ -119,8 +116,7 @@ TEST_P(ResourceExhaustionTest, RapidNopSubmissions) {
   }
 
   // Poll until all complete.
-  PollUntil(/*min_completions=*/kNumNops,
-            /*total_budget=*/iree_make_duration_ms(10000));
+  PollUntil(/*min_completions=*/kNumNops);
 
   // Verify all completed.
   int completed_count = 0;
@@ -159,8 +155,7 @@ TEST_P(ResourceExhaustionTest, InterleavedSubmitPoll) {
     }
 
     // Poll to process completions.
-    PollUntil(/*min_completions=*/kOpsPerIteration,
-              /*total_budget=*/iree_make_duration_ms(1000));
+    PollUntil(/*min_completions=*/kOpsPerIteration);
 
     // Count completions.
     for (int i = 0; i < kOpsPerIteration; ++i) {

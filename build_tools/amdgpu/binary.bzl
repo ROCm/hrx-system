@@ -13,6 +13,7 @@ load(
     "AMDGPU_CLANG_TOOL",
     "AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE",
     "AMDGPU_LLD_TOOL",
+    "AMDGPU_LLVM_AR_TOOL",
     "AMDGPU_LLVM_LINK_TOOL",
     "AMDGPU_LLVM_OBJCOPY_TOOL",
 )
@@ -41,55 +42,8 @@ def _incompatible_filegroup(name, kwargs):
         **filegroup_kwargs
     )
 
-def iree_amdgpu_binary(
-        name,
-        target,
-        arch,
-        srcs,
-        internal_hdrs = [],
-        copts = [],
-        linkopts = [],
-        clang_tool = AMDGPU_CLANG_TOOL,
-        link_tool = AMDGPU_LLVM_LINK_TOOL,
-        lld_tool = AMDGPU_LLD_TOOL,
-        objcopy_tool = AMDGPU_LLVM_OBJCOPY_TOOL,
-        minimize = False,
-        builtin_headers_dep = AMDGPU_CLANG_RESOURCE_HEADERS,
-        builtin_headers_marker = AMDGPU_CLANG_RESOURCE_MARKER,
-        builtin_headers_include_flag = _CLANG_RESOURCE_INCLUDE_FLAG,
-        **kwargs):
-    """Builds an LLVM shared library for AMDGPU from input files via clang.
-
-    Args:
-        name: Name of the target.
-        target: LLVM `-target` flag.
-        arch: LLVM `-march` flag.
-        srcs: source files or filegroups to pass to clang.
-        internal_hdrs: headers that should invalidate device compilation but
-                       are not compiled as translation units or exposed as
-                       interface headers.
-        copts: additional flags to pass to clang.
-        linkopts: additional flags to pass to lld.
-        clang_tool: clang/amdclang executable target.
-        link_tool: llvm-link executable target.
-        lld_tool: lld executable target.
-        objcopy_tool: optional llvm-objcopy executable target used for
-                      `minimize`.
-        minimize: whether to apply the optional post-link symbol-table
-                  minimization pass. This is only valid for opaque code-object
-                  data blobs whose kernels are not looked up by name.
-        builtin_headers_dep: target containing clang builtin headers.
-        builtin_headers_marker: optional single builtin header file used to
-                                derive the builtin header include directory.
-        builtin_headers_include_flag: shell fragment adding the builtin header
-                                      include directory to clang.
-        **kwargs: any additional attributes to pass to the underlying rules.
-    """
-    if not AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE:
-        _incompatible_filegroup(name, kwargs)
-        return
-
-    base_copts = [
+def _amdgpu_base_copts(target, arch, builtin_headers_include_flag, copts):
+    return [
         # C configuration.
         "-x c",
         "-std=c23",
@@ -119,9 +73,65 @@ def iree_amdgpu_binary(
         # Object file only in bitcode format.
         "-c",
         "-emit-llvm",
+    ] + copts
+
+def _code_object_target_deps(deps, code_object_target):
+    code_object_target_fragment = iree_amdgpu_target_label_fragment(code_object_target)
+    return [
+        dep.replace("{AMDGPU_CODE_OBJECT_TARGET}", code_object_target)
+            .replace("{AMDGPU_CODE_OBJECT_TARGET_FRAGMENT}", code_object_target_fragment)
+        for dep in deps
     ]
 
-    archive_out = "%s.a" % (name)
+def iree_amdgpu_library(
+        name,
+        target,
+        arch,
+        srcs,
+        internal_hdrs = [],
+        copts = [],
+        clang_tool = AMDGPU_CLANG_TOOL,
+        archive_tool = AMDGPU_LLVM_AR_TOOL,
+        out = None,
+        builtin_headers_dep = AMDGPU_CLANG_RESOURCE_HEADERS,
+        builtin_headers_marker = AMDGPU_CLANG_RESOURCE_MARKER,
+        builtin_headers_include_flag = _CLANG_RESOURCE_INCLUDE_FLAG,
+        **kwargs):
+    """Builds an LLVM bitcode archive for AMDGPU from input files via clang.
+
+    Args:
+        name: Name of the target.
+        target: LLVM `-target` flag.
+        arch: LLVM `-march` flag.
+        srcs: source files or filegroups to pass to clang.
+        internal_hdrs: headers that should invalidate device compilation but
+                       are not compiled as translation units or exposed as
+                       interface headers.
+        copts: additional flags to pass to clang.
+        clang_tool: clang/amdclang executable target.
+        archive_tool: llvm-ar executable target.
+        out: output archive path. Defaults to `<name>.a`.
+        builtin_headers_dep: target containing clang builtin headers.
+        builtin_headers_marker: optional single builtin header file used to
+                                derive the builtin header include directory.
+        builtin_headers_include_flag: shell fragment adding the builtin header
+                                      include directory to clang.
+        **kwargs: any additional attributes to pass to the underlying rules.
+    """
+    if not AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE:
+        _incompatible_filegroup(name, kwargs)
+        return
+    if not srcs:
+        fail("iree_amdgpu_library requires at least one source")
+
+    base_copts = _amdgpu_base_copts(
+        target,
+        arch,
+        builtin_headers_include_flag,
+        copts,
+    )
+
+    out = out or ("%s.a" % (name))
     source_locations = " ".join(["$(locations %s)" % (src,) for src in srcs])
     object_dir = "$(@D)/%s.objects" % (name,)
     compile_srcs = srcs + internal_hdrs
@@ -130,9 +140,9 @@ def iree_amdgpu_binary(
     if builtin_headers_marker:
         compile_srcs.append(builtin_headers_marker)
     native.genrule(
-        name = "archive_%s" % (name),
+        name = name,
         srcs = compile_srcs,
-        outs = [archive_out],
+        outs = [out],
         cmd = " && ".join([
             "set -e",
             "object_dir=\"%s\"" % (object_dir,),
@@ -143,7 +153,179 @@ def iree_amdgpu_binary(
                 source_locations,
                 " ".join([
                     "$(location %s)" % (clang_tool),
-                    " ".join(base_copts + copts),
+                    " ".join(base_copts),
+                    "-o \"$${object_dir}/$${object_index}.bc\"",
+                    "\"$${src}\"",
+                ]),
+            ),
+            "rm -f $(location %s)" % (out),
+            " ".join([
+                "$(location %s)" % (archive_tool),
+                "rc",
+                "$(location %s)" % (out),
+                "\"$${object_dir}\"/*.bc",
+            ]),
+        ]),
+        tools = [
+            clang_tool,
+            archive_tool,
+        ],
+        message = "Compiling bitcode archive %s to %s..." % (srcs, out),
+        output_to_bindir = 1,
+        **kwargs
+    )
+
+def iree_amdgpu_library_variants(
+        name,
+        target,
+        srcs,
+        target_selectors_flag,
+        library_name_prefix = None,
+        code_object_targets = IREE_AMDGPU_CODE_OBJECT_TARGETS,
+        tags = [],
+        **kwargs):
+    """Builds code-object bitcode archives and exposes selected outputs.
+
+    Args:
+      name: Aggregate filegroup name containing selected archives.
+      target: LLVM `-target` flag.
+      srcs: source files or filegroups to pass to clang.
+      target_selectors_flag: Label of an `iree_amdgpu_target_selectors_flag`
+        build setting controlling which variants are selected.
+      library_name_prefix: Prefix for generated per-code-object archive targets.
+        Defaults to `name`.
+      code_object_targets: Code-object targets to build variants for.
+      tags: Tags applied to generated archive targets and the aggregate
+        filegroup.
+      **kwargs: Additional attributes forwarded to `iree_amdgpu_library`.
+    """
+    if library_name_prefix == None:
+        library_name_prefix = name
+
+    target_selection = iree_amdgpu_target_selector_config_settings(
+        name = "{}_target".format(name),
+        code_object_targets = code_object_targets,
+        flag = target_selectors_flag,
+    )
+
+    selected_srcs = []
+    for code_object_target in code_object_targets:
+        library_name = "{}_{}".format(
+            library_name_prefix,
+            iree_amdgpu_target_label_fragment(code_object_target),
+        )
+        iree_amdgpu_library(
+            name = library_name,
+            target = target,
+            arch = code_object_target,
+            srcs = srcs,
+            tags = tags,
+            **kwargs
+        )
+        selected_srcs += select({
+            target_selection.requested[code_object_target]: [":" + library_name],
+            "//conditions:default": [],
+        })
+
+    filegroup_kwargs = {}
+    if "visibility" in kwargs:
+        filegroup_kwargs["visibility"] = kwargs["visibility"]
+    native.filegroup(
+        name = name,
+        srcs = selected_srcs,
+        tags = tags,
+        testonly = kwargs.get("testonly", False),
+        **filegroup_kwargs
+    )
+
+def iree_amdgpu_binary(
+        name,
+        target,
+        arch,
+        srcs,
+        deps = [],
+        internal_hdrs = [],
+        copts = [],
+        linkopts = [],
+        internalize = True,
+        clang_tool = AMDGPU_CLANG_TOOL,
+        link_tool = AMDGPU_LLVM_LINK_TOOL,
+        lld_tool = AMDGPU_LLD_TOOL,
+        objcopy_tool = AMDGPU_LLVM_OBJCOPY_TOOL,
+        minimize = False,
+        out = None,
+        builtin_headers_dep = AMDGPU_CLANG_RESOURCE_HEADERS,
+        builtin_headers_marker = AMDGPU_CLANG_RESOURCE_MARKER,
+        builtin_headers_include_flag = _CLANG_RESOURCE_INCLUDE_FLAG,
+        **kwargs):
+    """Builds an LLVM shared library for AMDGPU from input files via clang.
+
+    Args:
+        name: Name of the target.
+        target: LLVM `-target` flag.
+        arch: LLVM `-march` flag.
+        srcs: source files or filegroups to pass to clang.
+        deps: bitcode archives to lazily link with `llvm-link -only-needed`.
+        internal_hdrs: headers that should invalidate device compilation but
+                       are not compiled as translation units or exposed as
+                       interface headers.
+        copts: additional flags to pass to clang.
+        linkopts: additional flags to pass to lld.
+        internalize: whether to internalize linked dependency symbols after lazy
+                     archive extraction. Disable when dependencies provide
+                     executable ABI symbols such as HAL globals.
+        clang_tool: clang/amdclang executable target.
+        link_tool: llvm-link executable target.
+        lld_tool: lld executable target.
+        objcopy_tool: optional llvm-objcopy executable target used for
+                      `minimize`.
+        minimize: whether to apply the optional post-link symbol-table
+                  minimization pass. This is only valid for opaque code-object
+                  data blobs whose kernels are not looked up by name.
+        out: output binary path. Defaults to `<name>.so`.
+        builtin_headers_dep: target containing clang builtin headers.
+        builtin_headers_marker: optional single builtin header file used to
+                                derive the builtin header include directory.
+        builtin_headers_include_flag: shell fragment adding the builtin header
+                                      include directory to clang.
+        **kwargs: any additional attributes to pass to the underlying rules.
+    """
+    if not AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE:
+        _incompatible_filegroup(name, kwargs)
+        return
+    if not srcs:
+        fail("iree_amdgpu_binary requires at least one source")
+
+    base_copts = _amdgpu_base_copts(
+        target,
+        arch,
+        builtin_headers_include_flag,
+        copts,
+    )
+
+    srcs_out = "%s.srcs.bc" % (name)
+    source_locations = " ".join(["$(locations %s)" % (src,) for src in srcs])
+    object_dir = "$(@D)/%s.objects" % (name,)
+    compile_srcs = srcs + internal_hdrs
+    if builtin_headers_dep:
+        compile_srcs.append(builtin_headers_dep)
+    if builtin_headers_marker:
+        compile_srcs.append(builtin_headers_marker)
+    native.genrule(
+        name = "compile_%s" % (name),
+        srcs = compile_srcs,
+        outs = [srcs_out],
+        cmd = " && ".join([
+            "set -e",
+            "object_dir=\"%s\"" % (object_dir,),
+            "rm -rf \"$${object_dir}\"",
+            "mkdir -p \"$${object_dir}\"",
+            "object_index=0",
+            "for src in %s; do %s; object_index=$$((object_index + 1)); done" % (
+                source_locations,
+                " ".join([
+                    "$(location %s)" % (clang_tool),
+                    " ".join(base_copts),
                     "-o \"$${object_dir}/$${object_index}.bc\"",
                     "\"$${src}\"",
                 ]),
@@ -151,29 +333,32 @@ def iree_amdgpu_binary(
             " ".join([
                 "$(location %s)" % (link_tool),
                 "\"$${object_dir}\"/*.bc",
-                "-o $(location %s)" % (archive_out),
+                "-o $(location %s)" % (srcs_out),
             ]),
         ]),
         tools = [
             clang_tool,
             link_tool,
         ],
-        message = "Compiling bitcode library %s to %s..." % (srcs, archive_out),
+        message = "Compiling bitcode sources %s to %s..." % (srcs, srcs_out),
         output_to_bindir = 1,
         **kwargs
     )
 
     link_out = "%s.bc" % (name)
+    dep_locations = " ".join(["$(locations %s)" % (dep,) for dep in deps])
+    internalize_flag = "-internalize" if internalize else ""
     native.genrule(
         name = "link_%s" % (name),
-        srcs = [archive_out],
+        srcs = [srcs_out] + deps,
         outs = [link_out],
         cmd = " && ".join([
             " ".join([
                 "$(location %s)" % (link_tool),
-                "-internalize",
+                internalize_flag,
                 "-only-needed",
-                "$(locations %s)" % (archive_out),
+                "$(location %s)" % (srcs_out),
+                dep_locations,
                 "-o $(location %s)" % (link_out),
             ]),
         ]),
@@ -198,7 +383,7 @@ def iree_amdgpu_binary(
         "--discard-locals",
     ]
 
-    out = "%s.so" % (name)
+    out = out or ("%s.so" % (name))
     version_script = "$(@D)/%s.local.version" % (name,)
     link_output = "$(location %s)" % (out)
     lld_linkopts = base_linkopts + linkopts
@@ -249,6 +434,7 @@ def iree_amdgpu_binary_variants(
         srcs,
         target_selectors_flag,
         binary_name_prefix = None,
+        deps = [],
         code_object_targets = IREE_AMDGPU_CODE_OBJECT_TARGETS,
         minimize = False,
         tags = [],
@@ -263,6 +449,10 @@ def iree_amdgpu_binary_variants(
         build setting controlling which variants are selected.
       binary_name_prefix: Prefix for generated per-code-object binary targets.
         Defaults to `name`.
+      deps: bitcode archives passed to each generated executable. Labels may
+        use `{AMDGPU_CODE_OBJECT_TARGET}` or
+        `{AMDGPU_CODE_OBJECT_TARGET_FRAGMENT}` placeholders to refer to the
+        code-object target being generated.
       code_object_targets: Code-object targets to build variants for.
       minimize: Whether generated binaries should apply post-link
         symbol-table minimization.
@@ -290,14 +480,18 @@ def iree_amdgpu_binary_variants(
             target = target,
             arch = code_object_target,
             srcs = srcs,
+            deps = _code_object_target_deps(deps, code_object_target),
             minimize = minimize,
             tags = tags,
             **kwargs
         )
-        selected_srcs += select({
-            target_selection.requested[code_object_target]: [":" + binary_name],
-            "//conditions:default": [],
-        })
+        if AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE:
+            # Keep no-toolchain aggregates empty while per-variant targets stay
+            # incompatible for direct requests.
+            selected_srcs += select({
+                target_selection.requested[code_object_target]: [":" + binary_name],
+                "//conditions:default": [],
+            })
 
     filegroup_kwargs = {}
     if "visibility" in kwargs:

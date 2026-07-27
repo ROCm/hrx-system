@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "iree/base/internal/debugging.h"
+#include "iree/base/internal/math.h"
 
 //===----------------------------------------------------------------------===//
 // iree_arena_block_pool_t
@@ -33,6 +34,15 @@ void iree_arena_block_pool_initialize(iree_host_size_t total_block_size,
                                       iree_arena_block_pool_t* out_block_pool) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_host_size_t aligned_total_block_size = 0;
+  const bool can_align_total_block_size = iree_host_size_checked_align(
+      total_block_size, iree_alignof(iree_arena_block_t),
+      &aligned_total_block_size);
+  IREE_ASSERT(can_align_total_block_size, "block size too large");
+  if (IREE_LIKELY(can_align_total_block_size)) {
+    total_block_size = aligned_total_block_size;
+  }
+
   memset(out_block_pool, 0, sizeof(*out_block_pool));
   IREE_ASSERT(total_block_size >= sizeof(iree_arena_block_t),
               "block size too small for header");
@@ -41,6 +51,14 @@ void iree_arena_block_pool_initialize(iree_host_size_t total_block_size,
       total_block_size - sizeof(iree_arena_block_t);
   out_block_pool->block_allocator = block_allocator;
   iree_atomic_arena_block_slist_initialize(&out_block_pool->available_slist);
+  IREE_STATISTICS({
+    iree_atomic_store(&out_block_pool->statistics.block_system_allocation_count,
+                      0, iree_memory_order_relaxed);
+    iree_atomic_store(&out_block_pool->statistics.oversized_allocation_count, 0,
+                      iree_memory_order_relaxed);
+    iree_atomic_store(&out_block_pool->statistics.oversized_allocation_bytes, 0,
+                      iree_memory_order_relaxed);
+  });
 
   IREE_TRACE_ZONE_END(z0);
 }
@@ -69,6 +87,9 @@ iree_status_t iree_arena_block_pool_preallocate(
                                                 (void**)&block_base));
     iree_arena_block_t* block =
         iree_arena_block_trailer(block_pool, block_base);
+    IREE_STATISTICS(iree_atomic_fetch_add(
+        &block_pool->statistics.block_system_allocation_count, 1,
+        iree_memory_order_relaxed));
 #if defined(IREE_SANITIZER_THREAD)
     IREE_TSAN_RELEASE(block);
 #endif  // IREE_SANITIZER_THREAD
@@ -96,6 +117,29 @@ void iree_arena_block_pool_trim(iree_arena_block_pool_t* block_pool) {
   IREE_TRACE_ZONE_END(z0);
 }
 
+void iree_arena_block_pool_query_statistics(
+    const iree_arena_block_pool_t* block_pool,
+    iree_arena_block_pool_statistics_t* out_statistics) {
+  IREE_ASSERT_ARGUMENT(block_pool);
+  IREE_ASSERT_ARGUMENT(out_statistics);
+  memset(out_statistics, 0, sizeof(*out_statistics));
+  IREE_STATISTICS({
+    out_statistics->block_system_allocation_count = (uint64_t)iree_atomic_load(
+        &block_pool->statistics.block_system_allocation_count,
+        iree_memory_order_relaxed);
+    out_statistics->block_system_allocation_bytes =
+        iree_math_saturating_mul_u64(
+            out_statistics->block_system_allocation_count,
+            block_pool->total_block_size);
+    out_statistics->oversized_allocation_count = (uint64_t)iree_atomic_load(
+        &block_pool->statistics.oversized_allocation_count,
+        iree_memory_order_relaxed);
+    out_statistics->oversized_allocation_bytes = (uint64_t)iree_atomic_load(
+        &block_pool->statistics.oversized_allocation_bytes,
+        iree_memory_order_relaxed);
+  });
+}
+
 iree_status_t iree_arena_block_pool_acquire(iree_arena_block_pool_t* block_pool,
                                             iree_arena_block_t** out_block,
                                             void** out_ptr) {
@@ -118,6 +162,9 @@ iree_status_t iree_arena_block_pool_acquire(iree_arena_block_pool_t* block_pool,
                                                 (void**)&block_base));
     block = iree_arena_block_trailer(block_pool, block_base);
     *out_ptr = block_base;
+    IREE_STATISTICS(iree_atomic_fetch_add(
+        &block_pool->statistics.block_system_allocation_count, 1,
+        iree_memory_order_relaxed));
   } else {
 #if defined(IREE_SANITIZER_THREAD)
     IREE_TSAN_ACQUIRE(block);
@@ -207,6 +254,92 @@ void iree_arena_reset(iree_arena_allocator_t* arena) {
   IREE_TRACE_ZONE_END(z0);
 }
 
+iree_arena_checkpoint_t iree_arena_checkpoint_save(
+    iree_arena_allocator_t* arena) {
+  IREE_ASSERT_ARGUMENT(arena);
+  return (iree_arena_checkpoint_t){
+      .arena = arena,
+      .allocation_head = arena->allocation_head,
+      .block_head = arena->block_head,
+      .block_tail = arena->block_tail,
+      .total_allocation_size = arena->total_allocation_size,
+      .used_allocation_size = arena->used_allocation_size,
+      .block_bytes_remaining = arena->block_bytes_remaining,
+  };
+}
+
+void iree_arena_checkpoint_restore(const iree_arena_checkpoint_t* checkpoint) {
+  IREE_ASSERT_ARGUMENT(checkpoint);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // The checkpoint itself may be stored in arena memory that this operation
+  // discards. Copy it before releasing any storage.
+  const iree_arena_checkpoint_t saved_state = *checkpoint;
+  iree_arena_allocator_t* arena = saved_state.arena;
+  IREE_ASSERT_ARGUMENT(arena);
+
+  // Identify the prefixes allocated after the checkpoint before publishing
+  // the restored arena state. The arena object itself may live in retained
+  // arena storage, so no arena fields are accessed after releasing blocks.
+  iree_arena_oversized_allocation_t* released_allocation_head =
+      arena->allocation_head;
+  iree_arena_oversized_allocation_t* allocation = released_allocation_head;
+  while (allocation != saved_state.allocation_head) {
+    IREE_ASSERT(allocation != NULL);
+    allocation = allocation->next;
+  }
+
+  iree_arena_block_t* released_block_head = arena->block_head;
+  iree_arena_block_t* released_block_tail = NULL;
+  iree_arena_block_t* block = released_block_head;
+  while (block != saved_state.block_head) {
+    IREE_ASSERT(block != NULL);
+    released_block_tail = block;
+    block = block->next;
+  }
+  if (released_block_tail != NULL) {
+    released_block_tail->next = NULL;
+  } else {
+    released_block_head = NULL;
+  }
+
+  iree_arena_block_pool_t* block_pool = arena->block_pool;
+  arena->allocation_head = saved_state.allocation_head;
+  arena->block_head = saved_state.block_head;
+  arena->block_tail = saved_state.block_tail;
+  arena->total_allocation_size = saved_state.total_allocation_size;
+  arena->used_allocation_size = saved_state.used_allocation_size;
+  arena->block_bytes_remaining = saved_state.block_bytes_remaining;
+
+  while (released_allocation_head != saved_state.allocation_head) {
+    allocation = released_allocation_head;
+    released_allocation_head = allocation->next;
+    iree_allocator_free(block_pool->block_allocator, allocation);
+  }
+
+  if (released_block_head != NULL) {
+#if defined(IREE_SANITIZER_ADDRESS)
+    block = released_block_head;
+    while (block != NULL) {
+      IREE_ASAN_UNPOISON_MEMORY_REGION(iree_arena_block_ptr(block_pool, block),
+                                       block_pool->usable_block_size);
+      block = block->next;
+    }
+#endif  // IREE_SANITIZER_ADDRESS
+    iree_arena_block_pool_release(block_pool, released_block_head,
+                                  released_block_tail);
+  }
+
+  if (saved_state.block_head != NULL &&
+      saved_state.block_bytes_remaining != 0) {
+    void* free_ptr =
+        (uint8_t*)saved_state.block_head - saved_state.block_bytes_remaining;
+    IREE_ASAN_POISON_MEMORY_REGION(free_ptr, saved_state.block_bytes_remaining);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+}
+
 iree_status_t iree_arena_allocate(iree_arena_allocator_t* arena,
                                   iree_host_size_t byte_length,
                                   void** out_ptr) {
@@ -214,7 +347,15 @@ iree_status_t iree_arena_allocate(iree_arena_allocator_t* arena,
 
   iree_arena_block_pool_t* block_pool = arena->block_pool;
 
-  if (byte_length > block_pool->usable_block_size) {
+  // Pad length allocated so that each pointer bump is always ending at an
+  // aligned address and the next allocation will start aligned.
+  iree_host_size_t aligned_length = 0;
+  if (!iree_host_size_checked_align(byte_length, iree_max_align_t,
+                                    &aligned_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "alignment overflow");
+  }
+
+  if (aligned_length > block_pool->usable_block_size) {
     // Oversized allocation that can't be handled by the block pool. We'll
     // allocate directly from the system allocator and track it ourselves for
     // freeing during reset.
@@ -235,17 +376,16 @@ iree_status_t iree_arena_allocate(iree_arena_allocator_t* arena,
     arena->allocation_head = allocation;
     arena->total_allocation_size += allocation_size;
     arena->used_allocation_size += byte_length;
+    IREE_STATISTICS({
+      iree_atomic_fetch_add(&block_pool->statistics.oversized_allocation_count,
+                            1, iree_memory_order_relaxed);
+      iree_atomic_fetch_add(&block_pool->statistics.oversized_allocation_bytes,
+                            (int64_t)allocation_size,
+                            iree_memory_order_relaxed);
+    });
     *out_ptr = (uint8_t*)allocation + sizeof(iree_arena_oversized_allocation_t);
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
-  }
-
-  // Pad length allocated so that each pointer bump is always ending at an
-  // aligned address and the next allocation will start aligned.
-  iree_host_size_t aligned_length = 0;
-  if (!iree_host_size_checked_align(byte_length, iree_max_align_t,
-                                    &aligned_length)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "alignment overflow");
   }
 
   // Check to see if the current block (if any) has space - if not, get another.
@@ -301,6 +441,69 @@ iree_status_t iree_arena_allocate_aligned(iree_arena_allocator_t* arena,
   *out_ptr =
       (void*)(((uintptr_t)raw_ptr + min_alignment - 1) & ~(min_alignment - 1));
   return iree_ok_status();
+}
+
+iree_status_t iree_arena_allocate_array(iree_arena_allocator_t* arena,
+                                        iree_host_size_t count,
+                                        iree_host_size_t element_size,
+                                        void** out_ptr) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_host_size_t byte_size = 0;
+  if (!iree_host_size_checked_mul(count, element_size, &byte_size)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "array size overflow: %" PRIhsz " * %" PRIhsz,
+                            count, element_size);
+  }
+  iree_status_t status = iree_arena_allocate(arena, byte_size, out_ptr);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+iree_status_t iree_arena_allocate_array_aligned(iree_arena_allocator_t* arena,
+                                                iree_host_size_t count,
+                                                iree_host_size_t element_size,
+                                                iree_host_size_t min_alignment,
+                                                void** out_ptr) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_host_size_t byte_size = 0;
+  if (!iree_host_size_checked_mul(count, element_size, &byte_size)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "array size overflow: %" PRIhsz " * %" PRIhsz,
+                            count, element_size);
+  }
+  iree_status_t status =
+      iree_arena_allocate_aligned(arena, byte_size, min_alignment, out_ptr);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+iree_status_t iree_arena_grow_array(iree_arena_allocator_t* arena,
+                                    iree_host_size_t existing_count,
+                                    iree_host_size_t minimum_capacity,
+                                    iree_host_size_t element_size,
+                                    iree_host_size_t* inout_capacity,
+                                    void** inout_ptr) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_host_size_t doubled_capacity = 0;
+  if (!iree_host_size_checked_mul(*inout_capacity, 2, &doubled_capacity)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "capacity overflow");
+  }
+  iree_host_size_t new_capacity = iree_max(minimum_capacity, doubled_capacity);
+  void* new_ptr = NULL;
+  iree_status_t status =
+      iree_arena_allocate_array(arena, new_capacity, element_size, &new_ptr);
+  if (iree_status_is_ok(status)) {
+    if (*inout_ptr && existing_count > 0) {
+      memcpy(new_ptr, *inout_ptr, existing_count * element_size);
+    }
+    *inout_ptr = new_ptr;
+    *inout_capacity = new_capacity;
+  }
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 static iree_status_t iree_arena_allocator_ctl(void* self,

@@ -38,6 +38,41 @@ class ConfigureBazelTest(unittest.TestCase):
         (rocm_root / "include").mkdir(parents=True)
         return rocm_root
 
+    def assert_rocm_path(self, config: str, rocm_root: Path) -> None:
+        self.assertIn(
+            self.configure_bazel.bazelrc_line(
+                "common", f"--repo_env=IREE_ROCM_PATH={rocm_root}"
+            ),
+            config,
+        )
+
+    def test_non_windows_host_does_not_require_long_path_policy(self):
+        enabled_reader = mock.Mock(return_value=False)
+
+        self.configure_bazel.require_windows_long_paths(
+            platform_name="linux", enabled_reader=enabled_reader
+        )
+
+        enabled_reader.assert_not_called()
+
+    def test_windows_host_accepts_enabled_long_path_policy(self):
+        self.configure_bazel.require_windows_long_paths(
+            platform_name="win32", enabled_reader=lambda: True
+        )
+
+    def test_windows_host_reports_exact_long_path_setup(self):
+        with self.assertRaisesRegex(
+            SystemExit, "Open PowerShell as Administrator"
+        ) as context:
+            self.configure_bazel.require_windows_long_paths(
+                platform_name="win32", enabled_reader=lambda: False
+            )
+
+        message = str(context.exception)
+        self.assertIn("LongPathsEnabled", message)
+        self.assertIn("-Value 1", message)
+        self.assertIn("python dev.py bazel shutdown", message)
+
     def test_portable_project_options_configure_amdgpu(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             rocm_root = self.make_rocm_root(temporary_directory)
@@ -56,7 +91,7 @@ class ConfigureBazelTest(unittest.TestCase):
         )
         self.assertIn("common --repo_env=IREE_DEPENDENCY_MODE=pinned", config)
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
         self.assertNotIn("--deleted_packages", config)
 
     def test_native_bazel_options_configure_amdgpu(self):
@@ -78,7 +113,7 @@ class ConfigureBazelTest(unittest.TestCase):
         self.assertIn("common --repo_env=IREE_DEPENDENCY_MODE=pinned", config)
         self.assertIn("common --repo_env=IREE_ROCM_DEPENDENCY_MODE=package", config)
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
         self.assertNotIn("--deleted_packages", config)
 
     def test_rocm_dependency_mode_overrides_rocm_path_default(self):
@@ -97,7 +132,7 @@ class ConfigureBazelTest(unittest.TestCase):
         self.assertIn("common --repo_env=IREE_DEPENDENCY_MODE=pinned", config)
         self.assertIn("common --repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned", config)
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
 
     def test_portable_project_options_configure_hip(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -116,7 +151,7 @@ class ConfigureBazelTest(unittest.TestCase):
             config,
         )
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
         self.assertNotIn("--deleted_packages", config)
 
     def test_portable_project_options_configure_amdgpu_and_hip(self):
@@ -137,7 +172,7 @@ class ConfigureBazelTest(unittest.TestCase):
             config,
         )
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
         self.assertNotIn("--deleted_packages", config)
 
     def test_native_bazel_options_configure_hip(self):
@@ -157,7 +192,7 @@ class ConfigureBazelTest(unittest.TestCase):
             config,
         )
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
         self.assertNotIn("--deleted_packages", config)
 
     def test_portable_project_options_configure_webgpu(self):
@@ -197,7 +232,7 @@ class ConfigureBazelTest(unittest.TestCase):
                 config = self.configure_bazel.generate_config(args)
 
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
 
     def test_environment_rocm_path_configures_hip(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -212,7 +247,7 @@ class ConfigureBazelTest(unittest.TestCase):
                 config = self.configure_bazel.generate_config(args)
 
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
 
     def test_pinned_rocm_driver_without_rocm_path_uses_no_device_toolchain(self):
         for driver_define in (
@@ -252,6 +287,128 @@ class ConfigureBazelTest(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(SystemExit, "IREE_DEPENDENCY_MODE"):
+            self.configure_bazel.generate_config(args)
+
+    def test_default_loom_scope_is_dependency_satisfied(self):
+        args = self.configure_bazel.parse_arguments([])
+        config = self.configure_bazel.generate_config(args)
+
+        self.assertIn(
+            "build --//loom/config/target:enable=amdgpu,iree_vm,llvmir,spirv,x86",
+            config,
+        )
+        self.assertIn("build --//loom/config/execute:enable=iree_hal,iree_vm", config)
+        self.assertIn("build --//loom/config/import:enable=", config)
+        self.assertIn("build --//loom/config/emit:enable=", config)
+
+    def test_portable_loom_target_option_configures_target_scope(self):
+        args = self.configure_bazel.parse_arguments(["-DLOOM_TARGET_WASM=ON"])
+        config = self.configure_bazel.generate_config(args)
+
+        self.assertIn(
+            "build --//loom/config/target:enable=amdgpu,iree_vm,llvmir,spirv,wasm,x86",
+            config,
+        )
+        self.assertIn("build --//loom/config/execute:enable=iree_hal,iree_vm", config)
+        self.assertIn("build --//loom/config/emit:enable=", config)
+        self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none", config)
+        self.assertNotIn("IREE_ROCM_PATH", config)
+
+    def test_portable_loom_target_option_removes_default_target(self):
+        args = self.configure_bazel.parse_arguments(["-DLOOM_TARGET_AMDGPU=OFF"])
+        config = self.configure_bazel.generate_config(args)
+
+        self.assertIn(
+            "build --//loom/config/target:enable=iree_vm,llvmir,spirv,x86",
+            config,
+        )
+        self.assertIn("build --//loom/config/execute:enable=iree_hal,iree_vm", config)
+        self.assertIn("build --//loom/config/emit:enable=", config)
+
+    def test_portable_loom_execute_option_configures_execute_scope(self):
+        args = self.configure_bazel.parse_arguments(["-DLOOM_EXECUTE_IREE_HAL=OFF"])
+        config = self.configure_bazel.generate_config(args)
+
+        self.assertIn(
+            "build --//loom/config/target:enable=amdgpu,iree_vm,llvmir,spirv,x86",
+            config,
+        )
+        self.assertIn("build --//loom/config/execute:enable=iree_vm", config)
+        self.assertIn("build --//loom/config/emit:enable=", config)
+
+    def test_portable_loom_llvmir_option_configures_explicit_emitter_scope(self):
+        args = self.configure_bazel.parse_arguments(["-DLOOM_EMIT_LLVMIR=ON"])
+        config = self.configure_bazel.generate_config(args)
+
+        self.assertIn(
+            "build --//loom/config/target:enable=amdgpu,iree_vm,llvmir,spirv,x86",
+            config,
+        )
+        self.assertIn("build --//loom/config/execute:enable=iree_hal,iree_vm", config)
+        self.assertIn("build --//loom/config/emit:enable=llvmir", config)
+
+    def test_portable_loom_import_option_configures_importer_scope(self):
+        args = self.configure_bazel.parse_arguments(["-DLOOM_IMPORT_TILELANG=ON"])
+        config = self.configure_bazel.generate_config(args)
+
+        self.assertIn("build --//loom/config/import:enable=tilelang", config)
+
+    def test_native_loom_import_option_configures_importer_scope(self):
+        args = self.configure_bazel.parse_arguments(
+            ["--//loom/config/import:enable=mlir,tilelang"]
+        )
+        config = self.configure_bazel.generate_config(args)
+
+        self.assertIn("build --//loom/config/import:enable=mlir,tilelang", config)
+
+    def test_native_loom_target_execute_and_emit_options_configure_scope(self):
+        args = self.configure_bazel.parse_arguments(
+            [
+                "--//loom/config/target:enable=amdgpu,iree_vm,spirv",
+                "--//loom/config/execute:enable=iree_hal,iree_vm",
+                "--//loom/config/emit:enable=llvmir",
+            ]
+        )
+        config = self.configure_bazel.generate_config(args)
+
+        self.assertIn(
+            "build --//loom/config/target:enable=amdgpu,iree_vm,spirv",
+            config,
+        )
+        self.assertIn("build --//loom/config/execute:enable=iree_hal,iree_vm", config)
+        self.assertIn("build --//loom/config/emit:enable=llvmir", config)
+
+    def test_portable_and_native_loom_target_options_conflict(self):
+        args = self.configure_bazel.parse_arguments(
+            [
+                "-DLOOM_TARGET_AMDGPU=ON",
+                "--//loom/config/target:enable=iree_vm",
+            ]
+        )
+
+        with self.assertRaisesRegex(SystemExit, "Do not mix portable"):
+            self.configure_bazel.generate_config(args)
+
+    def test_portable_and_native_loom_import_options_conflict(self):
+        args = self.configure_bazel.parse_arguments(
+            [
+                "-DLOOM_IMPORT_TILELANG=ON",
+                "--//loom/config/import:enable=mlir",
+            ]
+        )
+
+        with self.assertRaisesRegex(SystemExit, "Do not mix portable"):
+            self.configure_bazel.generate_config(args)
+
+    def test_portable_and_native_loom_execute_options_conflict(self):
+        args = self.configure_bazel.parse_arguments(
+            [
+                "-DLOOM_EXECUTE_IREE_HAL=ON",
+                "--//loom/config/execute:enable=iree_vm",
+            ]
+        )
+
+        with self.assertRaisesRegex(SystemExit, "Do not mix portable"):
             self.configure_bazel.generate_config(args)
 
     def test_removed_driver_dialect_fails(self):

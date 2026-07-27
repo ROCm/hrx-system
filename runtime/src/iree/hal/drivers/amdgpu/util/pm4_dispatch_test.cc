@@ -50,6 +50,19 @@ static iree_hal_amdgpu_kernel_descriptor_t MakeDescriptor(
   return descriptor;
 }
 
+static uint32_t GranulatedLdsSize(uint32_t byte_count) {
+  return (uint32_t)(((uint64_t)byte_count + 511u) / 512u);
+}
+
+static uint32_t ComputePgmRsrc2WithLdsSize(
+    const iree_hal_amdgpu_kernel_descriptor_t& descriptor,
+    uint32_t granulated_lds_size) {
+  return (descriptor.compute_pgm_rsrc2 &
+          ~IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE_MASK) |
+         (granulated_lds_size
+          << IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE_SHIFT);
+}
+
 static iree_status_t InitializeLaunchState(
     const iree_hal_amdgpu_kernel_descriptor_t* descriptor,
     uint64_t kernel_object, const uint16_t workgroup_size[3],
@@ -100,7 +113,10 @@ TEST(PM4DispatchTest, InitializesLaunchStateFromDescriptor) {
       std::memcmp(state.program, expected_program, sizeof(expected_program)),
       0);
   EXPECT_EQ(state.resources[0], descriptor.compute_pgm_rsrc1);
-  EXPECT_EQ(state.resources[1], descriptor.compute_pgm_rsrc2);
+  EXPECT_EQ(
+      state.resources[1],
+      ComputePgmRsrc2WithLdsSize(
+          descriptor, GranulatedLdsSize(descriptor.group_segment_fixed_size)));
   EXPECT_EQ(state.resource3, descriptor.compute_pgm_rsrc3);
   EXPECT_EQ(state.resource3_register_address,
             IREE_HAL_AMDGPU_PM4_COMPUTE_PGM_RSRC3_GFX10_REGISTER);
@@ -123,8 +139,43 @@ TEST(PM4DispatchTest, InitializesLaunchStateFromDescriptor) {
   EXPECT_EQ(state.dispatch_initiator,
             IREE_HAL_AMDGPU_PM4_DISPATCH_INITIATOR_COMPUTE_SHADER_EN |
                 IREE_HAL_AMDGPU_PM4_DISPATCH_INITIATOR_FORCE_START_AT_000 |
+                IREE_HAL_AMDGPU_PM4_DISPATCH_INITIATOR_USE_THREAD_DIMENSIONS |
                 IREE_HAL_AMDGPU_PM4_DISPATCH_INITIATOR_ORDER_MODE |
                 IREE_HAL_AMDGPU_PM4_DISPATCH_INITIATOR_CS_W32_EN);
+}
+
+TEST(PM4DispatchTest, SynthesizesLdsSizeFromGroupSegmentFixedSize) {
+  iree_hal_amdgpu_kernel_descriptor_t descriptor = MakeDescriptor();
+  descriptor.group_segment_fixed_size = 513;
+  descriptor.compute_pgm_rsrc2 &=
+      ~IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE_MASK;
+  const uint16_t workgroup_size[3] = {64, 1, 1};
+
+  iree_hal_amdgpu_pm4_dispatch_launch_state_t state = {};
+  IREE_ASSERT_OK(InitializeLaunchState(
+      &descriptor, /*kernel_object=*/0x0000123456780000ull, workgroup_size,
+      IREE_HAL_AMDGPU_PM4_DISPATCH_LAUNCH_FLAG_NONE, &state));
+
+  EXPECT_EQ(
+      state.resources[1],
+      ComputePgmRsrc2WithLdsSize(
+          descriptor, GranulatedLdsSize(descriptor.group_segment_fixed_size)));
+}
+
+TEST(PM4DispatchTest, RejectsUnrepresentableStaticLdsSize) {
+  iree_hal_amdgpu_kernel_descriptor_t descriptor = MakeDescriptor();
+  descriptor.group_segment_fixed_size = 512u * 512u;
+  const uint16_t workgroup_size[3] = {64, 1, 1};
+
+  EXPECT_FALSE(iree_hal_amdgpu_pm4_dispatch_launch_state_is_supported(
+      kGfx10, &descriptor, /*kernel_object=*/0x0000123456780000ull,
+      workgroup_size, IREE_HAL_AMDGPU_PM4_DISPATCH_LAUNCH_FLAG_NONE));
+  iree_hal_amdgpu_pm4_dispatch_launch_state_t state = {};
+  EXPECT_THAT(
+      Status(InitializeLaunchState(
+          &descriptor, /*kernel_object=*/0x0000123456780000ull, workgroup_size,
+          IREE_HAL_AMDGPU_PM4_DISPATCH_LAUNCH_FLAG_NONE, &state)),
+      StatusIs(StatusCode::kOutOfRange));
 }
 
 TEST(PM4DispatchTest, InitializesLaunchStateWithPaddedUserDataDwords) {
@@ -256,6 +307,9 @@ TEST(PM4DispatchTest, EmitsGfx9Resource3RegisterOffset) {
   EXPECT_FALSE(
       iree_any_bit_set(state.dispatch_initiator,
                        IREE_HAL_AMDGPU_PM4_DISPATCH_INITIATOR_CS_W32_EN));
+  EXPECT_TRUE(iree_any_bit_set(
+      state.dispatch_initiator,
+      IREE_HAL_AMDGPU_PM4_DISPATCH_INITIATOR_USE_THREAD_DIMENSIONS));
 }
 
 TEST(PM4DispatchTest, EmitsKernargUserDataDwords) {

@@ -1,0 +1,322 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+    "loom_generated_cc_library",
+    "loom_generated_textual_header",
+)
+load(
+    "//loom/build_tools/bazel:loom_check.bzl",
+    "loom_check_test_suite",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_SPIRV_CHECK_PACKAGE_VISIBILITY = ["//loom/src/loom/target/arch/spirv/check:__pkg__"]
+
+_SPIRV_C_API_VISIBILITY = ["//loom/binding/c/target/spirv:__pkg__"]
+
+_SPIRV_EMIT_VISIBILITY = ["//loom/src/loom/target/emit/spirv:__pkg__"]
+
+_SPIRV_LOWER_VISIBILITY = ["//loom/src/loom/target/arch/spirv/lower:__pkg__"]
+
+_SPIRV_RECORDS_VISIBILITY = ["//loom/src/loom/target/arch/spirv/records:__pkg__"]
+
+_SPIRV_PROVIDER_VISIBILITY = [
+    "//loom/src/loom/target/all:__pkg__",
+    "//loom/src/loom/target/configured:__pkg__",
+    "//loom/src/loom/tools/iree-benchmark-loom:__pkg__",
+    "//loom/src/loom/tools/iree-test-loom:__pkg__",
+    "//loom/src/loom/tools/loom-compile:__pkg__",
+    "//loom/src/loom/tooling/target/spirv/execution:__pkg__",
+] + _SPIRV_C_API_VISIBILITY + _SPIRV_CHECK_PACKAGE_VISIBILITY
+
+_SPIRV_TOOLING_VISIBILITY = [
+    "//loom/src/loom/tooling/target/spirv:__pkg__",
+    "//loom/src/loom/tooling/target/spirv/execution:__pkg__",
+]
+
+#===------------------------------------------------------------------------===#
+# SPIR-V low descriptors
+#===------------------------------------------------------------------------===#
+
+loom_generated_cc_library(
+    name = "error_defs",
+    args = [
+        "--catalog-symbol=loom_spirv_error_catalog",
+        "--fallback-catalog-symbol=loom_error_catalog_core",
+        "--fallback-public-header=loom/error/error_catalog.h",
+        "--public-header=loom/target/arch/spirv/error_catalog.h",
+        "--shard=spirv",
+    ],
+    generated_hdr_flags = ["--header"],
+    generated_hdrs = ["error_catalog.h"],
+    generator = "//loom/py/loom/gen/error:c_errors",
+    source = "error_catalog.c",
+    deps = ["//loom/src/loom/error:error_defs"],
+)
+
+loom_cc_library(
+    name = "isa",
+    hdrs = ["isa.h"],
+    visibility = _SPIRV_EMIT_VISIBILITY,
+)
+
+loom_generated_textual_header(
+    name = "features_gen",
+    args = ["--isa-header=$(location isa.h)"],
+    generator = "//loom/py/loom/gen/target/arch/spirv:features",
+    inputs = ["isa.h"],
+    output = "features_tables.inl",
+    output_flag = "--tables",
+)
+
+loom_cc_library(
+    name = "features",
+    srcs = ["features.c"],
+    hdrs = ["features.h"],
+    textual_hdrs = [":features_tables.inl"],
+    visibility = _SPIRV_C_API_VISIBILITY + _SPIRV_EMIT_VISIBILITY + _SPIRV_RECORDS_VISIBILITY + _SPIRV_TOOLING_VISIBILITY,
+    deps = [
+        ":isa",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "scalar_types",
+    srcs = ["scalar_types.c"],
+    hdrs = ["scalar_types.h"],
+    visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY,
+    deps = [
+        ":features",
+        "//loom/src/loom/util:numeric_format",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "abi",
+    hdrs = ["abi.h"],
+    visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY,
+    deps = [
+        ":value_types",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "value_types",
+    hdrs = ["value_types.h"],
+    visibility = _SPIRV_EMIT_VISIBILITY,
+    deps = [
+        ":isa",
+        ":scalar_types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_generated_textual_header(
+    name = "packet_rows_tables_gen",
+    generator = "//loom/py/loom/gen/target/arch/spirv:packet_rows",
+    output = "packet_rows_tables.inl",
+    output_flag = "--tables",
+)
+
+loom_cc_library(
+    name = "packet_rows",
+    srcs = ["packet_rows.c"],
+    hdrs = ["packet_rows.h"],
+    textual_hdrs = [":packet_rows_tables.inl"],
+    visibility = _SPIRV_EMIT_VISIBILITY,
+    deps = [
+        ":isa",
+        ":value_types",
+        "//loom/src/loom/target/arch/spirv/descriptors",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "registers",
+    srcs = ["registers.c"],
+    hdrs = ["registers.h"],
+    visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY,
+    deps = [
+        ":scalar_types",
+        ":value_types",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target/arch/spirv/descriptors:descriptors_ids",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_generated_textual_header(
+    name = "cooperative_properties_tables_gen",
+    generator = "//loom/py/loom/gen/target/arch/spirv:cooperative_properties",
+    output = "cooperative_properties_tables.inl",
+    output_flag = "--tables",
+)
+
+loom_cc_library(
+    name = "cooperative_properties",
+    srcs = ["cooperative_properties.c"],
+    hdrs = ["cooperative_properties.h"],
+    textual_hdrs = [":cooperative_properties_tables.inl"],
+    visibility = _SPIRV_C_API_VISIBILITY + _SPIRV_LOWER_VISIBILITY + _SPIRV_TOOLING_VISIBILITY,
+    deps = [
+        ":features",
+        ":scalar_types",
+        "//loom/src/loom/analysis:policy",
+        "//loom/src/loom/target/arch/spirv/descriptors:descriptors_ids",
+        "//loom/src/loom/util:numeric_format",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "profile",
+    hdrs = ["profile.h"],
+    visibility = _SPIRV_C_API_VISIBILITY + _SPIRV_LOWER_VISIBILITY + _SPIRV_TOOLING_VISIBILITY,
+    deps = [
+        ":cooperative_properties",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "math_policy",
+    srcs = ["math_policy.c"],
+    hdrs = ["math_policy.h"],
+    deps = [
+        "//loom/src/loom/target:math_policy",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "module_contract",
+    srcs = ["module_contract.c"],
+    hdrs = ["module_contract.h"],
+    visibility = _SPIRV_EMIT_VISIBILITY,
+    deps = [
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "low_verify",
+    srcs = ["low_verify.c"],
+    hdrs = ["low_verify.h"],
+    visibility = _SPIRV_TOOLING_VISIBILITY,
+    deps = [
+        ":abi",
+        ":error_defs",
+        ":module_contract",
+        ":packet_rows",
+        ":registers",
+        ":scalar_types",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/spirv/descriptors",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "provider",
+    srcs = ["provider.c"],
+    hdrs = ["provider.h"],
+    visibility = _SPIRV_PROVIDER_VISIBILITY,
+    deps = [
+        ":low_verify",
+        ":math_policy",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/pass:builder",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/spirv/descriptors:low_registry",
+        "//loom/src/loom/target/arch/spirv/lower",
+        "//loom/src/loom/target/arch/spirv/ops",
+        "//loom/src/loom/target/arch/spirv/records:target_records",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "cooperative_properties_test",
+    srcs = ["cooperative_properties_test.cc"],
+    deps = [
+        ":cooperative_properties",
+        ":features",
+        "//loom/src/loom/target/arch/spirv/descriptors:descriptors_ids",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "features_test",
+    srcs = ["features_test.cc"],
+    deps = [
+        ":features",
+        "//loom/src/loom/target/arch/spirv/records:target_records",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "scalar_types_test",
+    srcs = ["scalar_types_test.cc"],
+    deps = [
+        ":scalar_types",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "registers_test",
+    srcs = ["registers_test.cc"],
+    deps = [
+        ":registers",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target/arch/spirv/descriptors",
+        "//loom/src/loom/target/arch/spirv/records:target_records",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_check_test_suite(
+    name = "loom_check_file_test",
+    srcs = [
+        "test/source_low/barrier.loom-test",
+        "test/source_low/baseline.loom-test",
+        "test/source_low/low_verify_diagnostics.loom-test",
+        "test/source_low/source_low.loom-test",
+        "test/source_low/source_low_diagnostics.loom-test",
+        "test/source_low/structured_control.loom-test",
+        "test/source_low/target_legalize.loom-test",
+        "test/source_low/workgroup_storage.loom-test",
+    ],
+    test_name_prefix_to_strip = "test/source_low/",
+)

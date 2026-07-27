@@ -29,6 +29,9 @@ typedef struct iree_hal_fixed_block_pool_options_t {
   // block_allocator_options.block_count * block_allocator_options.block_size.
   iree_hal_memory_fixed_block_allocator_options_t block_allocator_options;
 
+  // ASAN policy used to shape hidden backing ranges for reservations.
+  iree_hal_asan_pool_options_t asan;
+
   // Logical byte budget for live reservations in this pool. 0 means unlimited.
   // This is checked before each reservation and can return
   // IREE_HAL_POOL_RESERVE_OVER_BUDGET without touching the allocator.

@@ -764,8 +764,9 @@ static iree_status_t iree_hal_cmd_execute_dispatch_tiles(
   dispatch_state.workgroup_count_x = workgroup_count[0];
   dispatch_state.workgroup_count_y = workgroup_count[1];
   dispatch_state.workgroup_count_z = (uint16_t)workgroup_count[2];
-  dispatch_state.constant_count = (uint16_t)dispatch->constant_count;
-  dispatch_state.constants = dispatch->constants;
+  dispatch_state.constants = (iree_hal_executable_const_byte_span_v0_t){
+      (const uint8_t*)dispatch->constants,
+      dispatch->constant_count * sizeof(uint32_t)};
   dispatch_state.max_concurrency = (uint8_t)worker_count;
   dispatch_state.binding_count = dispatch->binding_count;
   dispatch_state.binding_ptrs =
@@ -869,7 +870,7 @@ static bool iree_hal_cmd_transfer_claim_tile(iree_atomic_int64_t* tile_index,
 
 static void iree_hal_cmd_block_processor_profile_accumulate_dispatch(
     iree_hal_cmd_block_processor_context_t* context,
-    const iree_hal_cmd_dispatch_t* dispatch, iree_status_t status,
+    const iree_hal_cmd_dispatch_t* dispatch, iree_status_code_t status_code,
     iree_time_t start_host_time_ns, iree_time_t end_host_time_ns,
     uint32_t tile_count) {
   iree_hal_cmd_block_processor_profile_dispatch_t* dispatch_profile =
@@ -883,7 +884,6 @@ static void iree_hal_cmd_block_processor_profile_accumulate_dispatch(
   iree_atomic_fetch_add(&dispatch_profile->tile_duration_sum_ns,
                         (int64_t)(end_host_time_ns - start_host_time_ns),
                         iree_memory_order_relaxed);
-  const iree_status_code_t status_code = iree_status_code(status);
   if (status_code != IREE_STATUS_OK) {
     int32_t expected_status_code = IREE_STATUS_OK;
     iree_atomic_compare_exchange_strong(
@@ -989,8 +989,8 @@ static iree_status_t iree_hal_cmd_execute_dispatch_tiles_profiled(
                                                !iree_status_is_ok(status)))) {
     if (aggregate_host_execution) {
       iree_hal_cmd_block_processor_profile_accumulate_dispatch(
-          context, dispatch, status, start_host_time_ns, end_host_time_ns,
-          *out_tiles_completed);
+          context, dispatch, iree_status_code(status), start_host_time_ns,
+          end_host_time_ns, *out_tiles_completed);
     } else {
       iree_hal_cmd_block_processor_profile_append_dispatch_event(
           context, dispatch, binding_ptrs, *out_tiles_completed,

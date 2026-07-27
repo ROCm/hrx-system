@@ -148,8 +148,7 @@ static iree_vm_ref_t MakeRef(V value) {
   iree_vm_ref_t ref = {0};
   auto* obj = new T();
   obj->set_data(value);
-  IREE_CHECK_OK(iree_vm_ref_wrap_assign(
-      obj, iree::vm::ref_type_descriptor<T>::type(), &ref));
+  iree_vm_ref_wrap_assign(obj, iree::vm::ref_type_descriptor<T>::type(), &ref);
   return ref;
 }
 

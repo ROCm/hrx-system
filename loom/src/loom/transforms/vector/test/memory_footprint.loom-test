@@ -1,0 +1,1129 @@
+// RUN: pass vector-memory-footprint
+
+func.def @static_dense_load_in_bounds(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<8xf32, %layout>
+  %loaded = vector.load %view[4] : view<8xf32, %layout> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @static_dense_store_in_bounds(%buffer: buffer, %base: offset, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<8xf32, %layout>
+  vector.store %value, %view[4] : vector<4xf32>, view<8xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @fragment_load_in_bounds(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<16x16xf32, %layout>
+  %loaded = vector.fragment.load<init> %view[0, 0] shape [%m, %n] : view<16x16xf32, %layout> -> vector<8xf32>
+  test.use %loaded : vector<8xf32>
+  func.return
+}
+
+// ====
+
+func.def @sparse_lhs_fragment_load_uses_compact_physical_extent(%buffer: buffer, %base: offset, %metadata: vector<1xi32>) {
+  %m = index.constant 16 : index
+  %k = index.constant 64 : index
+  %schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %layout = encoding.layout.dense : encoding<layout>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%base] : buffer -> view<16x32xf8E5M2, %storage>
+  %loaded = vector.fragment.load<lhs> %view[0, 0] shape [%m, %k] using {sparsity = %metadata : vector<1xi32>} : view<16x32xf8E5M2, %storage> -> vector<2xi32>
+  test.use %loaded : vector<2xi32>
+  func.return
+}
+
+// ====
+
+func.def @dynamic_sparse_lhs_fragment_load_proves_compact_physical_extent(%buffer: buffer, %base: offset, %group_count0: index, %metadata: vector<1xi32>) {
+  %group_count = index.assume %group_count0 [range(%group_count0, 1, 4096)] : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %m = index.constant 16 : index
+  %physical_k = index.mul %group_count, %two : index
+  %logical_k = index.mul %group_count, %four : index
+  %schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %layout = encoding.layout.dense : encoding<layout>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%base] : buffer -> view<16x[%physical_k]xf8E5M2, %storage>
+  %loaded = vector.fragment.load<lhs> %view[0, 0] shape [%m, %logical_k] using {sparsity = %metadata : vector<1xi32>} : view<16x[%physical_k]xf8E5M2, %storage> -> vector<2xi32>
+  test.use %loaded : vector<2xi32>
+  func.return
+}
+
+// ====
+
+func.def @sparse_lhs_fragment_load_rejects_compact_physical_tail(%buffer: buffer, %base: offset, %metadata: vector<1xi32>) {
+  %m = index.constant 16 : index
+  %k = index.constant 64 : index
+  %schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %layout = encoding.layout.dense : encoding<layout>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%base] : buffer -> view<16x31xf8E5M2, %storage>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.fragment.load", view_axis="1", vector_axis="1", vector_extent="32", view_bound="31", required_origin_upper_bound="-1", constraint_key="vector_footprint.full_vector_upper_bound"}
+  %loaded = vector.fragment.load<lhs> %view[0, 0] shape [%m, %k] using {sparsity = %metadata : vector<1xi32>} : view<16x31xf8E5M2, %storage> -> vector<2xi32>
+  test.use %loaded : vector<2xi32>
+  func.return
+}
+
+// ====
+
+func.def @sparse_lhs_fragment_load_uses_physical_origin(%buffer: buffer, %base: offset, %metadata: vector<1xi32>) {
+  %m = index.constant 16 : index
+  %k = index.constant 64 : index
+  %schema = encoding.define #matrix_operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %layout = encoding.layout.dense : encoding<layout>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%base] : buffer -> view<16x64xf8E5M2, %storage>
+  %loaded = vector.fragment.load<lhs> %view[0, 32] shape [%m, %k] using {sparsity = %metadata : vector<1xi32>} : view<16x64xf8E5M2, %storage> -> vector<2xi32>
+  test.use %loaded : vector<2xi32>
+  func.return
+}
+
+// ====
+
+func.def @dense_lhs_fragment_load_retains_logical_extent(%buffer: buffer, %base: offset) {
+  %m = index.constant 16 : index
+  %k = index.constant 64 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<16x32xf8E5M2, %layout>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.fragment.load", view_axis="1", vector_axis="1", vector_extent="64", view_bound="32", required_origin_upper_bound="-32", constraint_key="vector_footprint.full_vector_upper_bound"}
+  %loaded = vector.fragment.load<lhs> %view[0, 0] shape [%m, %k] : view<16x32xf8E5M2, %layout> -> vector<2xi32>
+  test.use %loaded : vector<2xi32>
+  func.return
+}
+
+// ====
+
+func.def @sparse_rhs_fragment_load_uses_compact_physical_extent(%buffer: buffer, %base: offset, %metadata: vector<1xi32>) {
+  %k = index.constant 64 : index
+  %n = index.constant 16 : index
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %layout = encoding.layout.strided [1, 32] : encoding<layout>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%base] : buffer -> view<32x16xf8E4M3, %storage>
+  %loaded = vector.fragment.load<rhs> %view[0, 0] shape [%k, %n] using {sparsity = %metadata : vector<1xi32>} : view<32x16xf8E4M3, %storage> -> vector<2xi32>
+  test.use %loaded : vector<2xi32>
+  func.return
+}
+
+// ====
+
+func.def @fragment_store_in_bounds(%buffer: buffer, %base: offset, %value: vector<8xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<16x16xf32, %layout>
+  vector.fragment.store<result> %value, %view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @fragment_store_rejects_row_tail_overlap(%buffer: buffer, %base: offset, %value: vector<8xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<17x32xf32, %layout>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.fragment.store", view_axis="0", vector_axis="0", vector_extent="16", view_bound="17", required_origin_upper_bound="1", constraint_key="vector_footprint.full_vector_upper_bound"}
+  vector.fragment.store<result> %value, %view[16, 0] shape [%m, %n] : vector<8xf32>, view<17x32xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @fragment_store_rejects_column_tail_overlap(%buffer: buffer, %base: offset, %value: vector<8xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<32x32xf32, %layout>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.fragment.store", view_axis="1", vector_axis="1", vector_extent="16", view_bound="32", required_origin_upper_bound="16", constraint_key="vector_footprint.full_vector_upper_bound"}
+  vector.fragment.store<result> %value, %view[0, 17] shape [%m, %n] : vector<8xf32>, view<32x32xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @static_dense_load_out_of_bounds(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<8xf32, %layout>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.load", view_axis="0", vector_axis="0", vector_extent="4", view_bound="8", required_origin_upper_bound="4", constraint_key="vector_footprint.full_vector_upper_bound"}
+  %loaded = vector.load %view[5] : view<8xf32, %layout> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @dynamic_full_vector_at_zero_is_proven(%buffer: buffer, %base: offset, %n: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c0 = index.constant 0 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%n]xf32, %layout>
+  %loaded = vector.load %view[%c0] : view<[%n]xf32, %layout> -> vector<[%n]xf32>
+  func.return
+}
+
+// ====
+
+func.def @dynamic_unproven_tail(%buffer: buffer, %base: offset, %n: index, %iv: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %iv2 = index.assume %iv [range(%iv, 0, 4096)] : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%n]xf32, %layout>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="16", constraint_key="vector_footprint.full_vector_upper_bound"}
+  %loaded = vector.load %view[%iv2] : view<[%n]xf32, %layout> -> vector<16xf32>
+  func.return
+}
+
+// ====
+
+func.def @counted_loop_iv_proves_pair_load_extent(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %start = index.constant 0 : index
+  %limit = index.constant 3584 : index
+  %step = index.constant 2 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<3584xbf16, %layout>
+  scf.for %origin = [%start to %limit step %step] {
+    %loaded = vector.load %view[%origin] : view<3584xbf16, %layout> -> vector<2xbf16>
+  }
+  func.return
+}
+
+// ====
+
+func.def @static_vector_origin_proven_by_shifted_assume_relation(%buffer: buffer, %base: offset, %row: index, %column: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %stride = index.constant 1024 : index
+  %limit = index.constant 262137 : index
+  %row_offset = index.mul %row, %stride : index
+  %origin0 = index.add %row_offset, %column : index
+  %origin = index.assume %origin0 [range(%origin0, 0, 262137), lt(%origin0, %limit), mul(%origin0, 8)] : index
+  %view = buffer.view %buffer[%base] : buffer -> view<262144xf16, %layout>
+  %loaded = vector.load %view[%origin] : view<262144xf16, %layout> -> vector<8xf16>
+  test.use %loaded : vector<8xf16>
+  func.return
+}
+
+// ====
+
+func.def @static_vector_origin_rejects_insufficient_shifted_assume_relation(%buffer: buffer, %base: offset, %row: index, %column: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %stride = index.constant 1024 : index
+  %late_limit = index.constant 262138 : index
+  %row_offset = index.mul %row, %stride : index
+  %origin0 = index.add %row_offset, %column : index
+  %origin = index.assume %origin0 [range(%origin0, 0, 262137), lt(%origin0, %late_limit), mul(%origin0, 8)] : index
+  %view = buffer.view %buffer[%base] : buffer -> view<262144xf16, %layout>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="8", view_bound="262144", required_origin_upper_bound="262136", constraint_key="vector_footprint.full_vector_upper_bound"}
+  %loaded = vector.load %view[%origin] : view<262144xf16, %layout> -> vector<8xf16>
+  test.use %loaded : vector<8xf16>
+  func.return
+}
+
+// ====
+
+func.def @dynamic_unit_axis_proven_by_assume_relation(%buffer: buffer, %base: offset, %row: index, %n: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<[%n]x4xf32, %layout>
+  %row_in_bounds, %n_assumed = index.assume %row, %n [ge(%row, 0), lt(%row, %n)] : index, index
+  %loaded = vector.load %view[%row_in_bounds, 0] : view<[%n]x4xf32, %layout> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @dynamic_unit_axis_proven_by_remainder_relation(%buffer: buffer, %base: offset, %lane0: index, %columns0: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %lane = index.assume %lane0 [range(%lane0, 0, 4095)] : index
+  %columns = index.assume %columns0 [range(%columns0, 1, 1024)] : index
+  %column = index.rem %lane, %columns : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%columns]xf32, %layout>
+  %loaded = vector.load %view[%column] : view<[%columns]xf32, %layout> -> vector<1xf32>
+  test.use %loaded : vector<1xf32>
+  func.return
+}
+
+// ====
+
+func.def @dynamic_scaled_vector_origin_proven_by_assume_relation(%buffer: buffer, %base: offset, %i: index, %n: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %four = index.constant 4 : index
+  %i_in_bounds, %n_assumed = index.assume %i, %n [ge(%i, 0), lt(%i, %n)] : index, index
+  %element_count = index.mul %n_assumed, %four : index
+  %origin = index.mul %i_in_bounds, %four : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%element_count]xf32, %layout>
+  %loaded = vector.load %view[%origin] : view<[%element_count]xf32, %layout> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @dynamic_vector_origin_proven_by_shifted_assume_relation(%buffer: buffer, %base: offset, %origin0: index, %n0: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %n = index.assume %n0 [range(%n0, 4, 4096)] : index
+  %three = index.constant 3 : index
+  %last_valid_start = index.sub %n, %three : index
+  %origin = index.assume %origin0 [ge(%origin0, 0), lt(%origin0, %last_valid_start)] : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%n]xi32, %layout>
+  %words = vector.load %view[%origin] : view<[%n]xi32, %layout> -> vector<4xi32>
+  test.use %words : vector<4xi32>
+  func.return
+}
+
+// ====
+
+func.def @dynamic_vector_origin_proven_by_exact_count_minus_extent_relation(%buffer: buffer, %base: offset, %origin0: index, %n0: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %n = index.assume %n0 [range(%n0, 262144, 262144)] : index
+  %seven = index.constant 7 : index
+  %last_valid_start = index.sub %n, %seven : index
+  %origin = index.assume %origin0 [ge(%origin0, 0), lt(%origin0, %last_valid_start), mul(%origin0, 8)] : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%n]xf16, %layout>
+  %values = vector.load %view[%origin] : view<[%n]xf16, %layout> -> vector<8xf16>
+  test.use %values : vector<8xf16>
+  func.return
+}
+
+// ====
+
+func.def @dynamic_vector_tail_origin_proven_by_dynamic_bound(%input: buffer, %output: buffer, %base_i32: i32, %tail_i32: i32, %stride_i32: i32, %token_count_i32: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %zero = index.constant 0 : offset
+  %one = index.constant 1 : index
+  %stride0 = index.cast %stride_i32 : i32 to index
+  %stride = index.assume %stride0 [range(%stride0, 2, 2048)] : index
+  %token_count0 = index.cast %token_count_i32 : i32 to index
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 2)] : index
+  %element_count = index.mul %stride, %token_count : index
+  %base0 = index.cast %base_i32 : i32 to index
+  %base = index.assume %base0 [range(%base0, 0, 4094)] : index
+  %tail0 = index.cast %tail_i32 : i32 to index
+  %tail = index.assume %tail0 [range(%tail0, 0, 4094)] : index
+  %origin0 = index.add %base, %tail : index
+  %origin_nonnegative = index.assume %origin0 [range(%origin0, 0, 4094)] : index
+  %max_vector_origin = index.sub %element_count, %one : index
+  %origin = index.assume %origin_nonnegative [lt(%origin_nonnegative, %max_vector_origin)] : index
+  %input_view = buffer.view %input[%zero] : buffer -> view<[%element_count]xf32, %layout>
+  %output_view = buffer.view %output[%zero] : buffer -> view<[%element_count]xf32, %layout>
+  %loaded = vector.load %input_view[%origin] : view<[%element_count]xf32, %layout> -> vector<2xf32>
+  vector.store %loaded, %output_view[%origin] : vector<2xf32>, view<[%element_count]xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @dynamic_vector_tail_origin_proven_by_relation_lower_bound(%input: buffer, %output: buffer, %pair_i32: i32, %half_i32: i32, %base_i32: i32, %n_dims_i32: i32, %element_count_i32: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %zero = index.constant 0 : offset
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 2, 8192)] : index
+  %half0 = index.cast %half_i32 : i32 to index
+  %half = index.assume %half0 [range(%half0, 0, 4094)] : index
+  %pair0 = index.cast %pair_i32 : i32 to index
+  %pair = index.assume %pair0 [range(%pair0, 0, 4094), ge(%pair0, %half)] : index
+  %tail_pair = index.sub %pair, %half : index
+  %n_dims0 = index.cast %n_dims_i32 : i32 to index
+  %n_dims = index.assume %n_dims0 [range(%n_dims0, 0, 4094)] : index
+  %tail0 = index.madd %tail_pair, %two, %n_dims : index
+  %base0 = index.cast %base_i32 : i32 to index
+  %base = index.assume %base0 [range(%base0, 0, 4094)] : index
+  %origin0 = index.add %base, %tail0 : index
+  %max_vector_origin = index.sub %element_count, %one : index
+  %origin = index.assume %origin0 [lt(%origin0, %max_vector_origin)] : index
+  %input_view = buffer.view %input[%zero] : buffer -> view<[%element_count]xf32, %layout>
+  %output_view = buffer.view %output[%zero] : buffer -> view<[%element_count]xf32, %layout>
+  %loaded = vector.load %input_view[%origin] : view<[%element_count]xf32, %layout> -> vector<2xf32>
+  vector.store %loaded, %output_view[%origin] : vector<2xf32>, view<[%element_count]xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @dynamic_vector_origin_rejects_insufficient_shifted_assume_relation(%buffer: buffer, %base: offset, %origin0: index, %n0: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %n = index.assume %n0 [range(%n0, 4, 4096)] : index
+  %two = index.constant 2 : index
+  %late_start = index.sub %n, %two : index
+  %origin = index.assume %origin0 [ge(%origin0, 0), lt(%origin0, %late_start)] : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%n]xi32, %layout>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="4", constraint_key="vector_footprint.full_vector_upper_bound"}
+  %words = vector.load %view[%origin] : view<[%n]xi32, %layout> -> vector<4xi32>
+  test.use %words : vector<4xi32>
+  func.return
+}
+
+// ====
+
+func.def @quantized_q8_x4_word_chunk_vector_load_is_proven(%buffer: buffer, %base: offset, %lane0: index, %iter0: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %thirtytwo = index.constant 32 : index
+  %thirtysix = index.constant 36 : index
+  %tentwentyfour = index.constant 1024 : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %iter = index.assume %iter0 [range(%iter0, 0, 31)] : index
+  %q8_word_pair = index.rem %lane, %two : index
+  %lane_column = index.mul %lane, %sixteen : index
+  %iter_column_base = index.mul %iter, %tentwentyfour : index
+  %column = index.add %iter_column_base, %lane_column : index
+  %block_column = index.div %column, %thirtytwo : index
+  %block_outer = index.div %block_column, %four : index
+  %block_inner = index.rem %block_column, %four : index
+  %outer_word_base = index.mul %block_outer, %thirtysix : index
+  %payload_base = index.add %outer_word_base, %four : index
+  %inner_word_base = index.mul %block_inner, %eight : index
+  %q8_word_offset = index.mul %q8_word_pair, %four : index
+  %payload_word_base = index.add %payload_base, %inner_word_base : index
+  %word_origin = index.add %payload_word_base, %q8_word_offset : index
+  %view = buffer.view %buffer[%base] : buffer -> view<9216xi32, %layout>
+  %words = vector.load %view[%word_origin] : view<9216xi32, %layout> -> vector<4xi32>
+  test.use %words : vector<4xi32>
+  func.return
+}
+
+// ====
+
+func.def @quantized_q4_row_word_chunk_reports_storage_envelope(%buffer: buffer, %base: offset, %row0: index, %ncols0: index, %lane0: index, %iter0: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %thirtytwo = index.constant 32 : index
+  %thirtysix = index.constant 36 : index
+  %tentwentyfour = index.constant 1024 : index
+  %row = index.assume %row0 [range(%row0, 0, 32767)] : index
+  %ncols = index.assume %ncols0 [range(%ncols0, 256, 32768), mul(%ncols0, 256)] : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %iter = index.assume %iter0 [range(%iter0, 0, 31)] : index
+  %q8_word_pair = index.rem %lane, %two : index
+  %lane_column = index.mul %lane, %sixteen : index
+  %row_column_base = index.mul %row, %ncols : index
+  %iter_column_base = index.mul %iter, %tentwentyfour : index
+  %column = index.add %iter_column_base, %lane_column : index
+  %element = index.add %row_column_base, %column : index
+  %block_column = index.div %element, %thirtytwo : index
+  %block = index.div %block_column, %eight : index
+  %group = index.rem %block_column, %eight : index
+  %group_payload_base = index.mul %group, %eight : index
+  %q8_payload_base = index.mul %q8_word_pair, %four : index
+  %intra_block_payload = index.add %group_payload_base, %q8_payload_base : index
+  %scale_group_divisor = index.constant 16 : index
+  %payload_group = index.div %intra_block_payload, %scale_group_divisor : index
+  %payload_lane = index.rem %intra_block_payload, %eight : index
+  %payload_group_base = index.mul %payload_group, %eight : index
+  %payload_word = index.add %payload_group_base, %payload_lane : index
+  %block_word_base = index.mul %block, %thirtysix : index
+  %payload_word_base = index.add %block_word_base, %four : index
+  %word_origin = index.add %payload_word_base, %payload_word : index
+  %view = buffer.view %buffer[%base] : buffer -> view<8388608xi32, %layout>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="4", view_bound="8388608", required_origin_upper_bound="8388604", constraint_key="vector_footprint.full_vector_upper_bound"}
+  %words = vector.load %view[%word_origin] : view<8388608xi32, %layout> -> vector<4xi32>
+  test.use %words : vector<4xi32>
+  func.return
+}
+
+// ====
+
+config.decl @runtime.column_count : %value: index where [range(%value, 3072, 8192), mul(%value, 4)]
+
+func.def @config_decl_matvec_block_lane_vec4_origin_is_proven(%buffer: buffer, %base: offset, %lane0: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %columns = config.get @runtime.column_count : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %block_begin = index.constant 0 : index
+  %block_end = index.constant 12 : index
+  %block_step = index.constant 4 : index
+  %lanes_per_group = index.constant 16 : index
+  %block_stride = index.constant 105 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%columns]xf32, %layout>
+  scf.for %block_base = [%block_begin to %block_end step %block_step] {
+    %lane_group = index.div %lane, %lanes_per_group : index
+    %lane_offset = index.rem %lane, %lanes_per_group : index
+    %block = index.add %block_base, %lane_group : index
+    %block_origin = index.mul %block, %block_stride : index
+    %origin = index.add %block_origin, %lane_offset : index
+    %loaded = vector.load %view[%origin] : view<[%columns]xf32, %layout> -> vector<4xf32>
+    test.use %loaded : vector<4xf32>
+  }
+  func.return
+}
+
+// ====
+
+config.decl @runtime.column_count : index
+
+func.def @config_decl_matvec_block_lane_vec4_origin_missing_bound(%buffer: buffer, %base: offset, %lane0: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %columns = config.get @runtime.column_count : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %block_begin = index.constant 0 : index
+  %block_end = index.constant 12 : index
+  %block_step = index.constant 4 : index
+  %lanes_per_group = index.constant 16 : index
+  %block_stride = index.constant 105 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%columns]xf32, %layout>
+  scf.for %block_base = [%block_begin to %block_end step %block_step] {
+    %lane_group = index.div %lane, %lanes_per_group : index
+    %lane_offset = index.rem %lane, %lanes_per_group : index
+    %block = index.add %block_base, %lane_group : index
+    %block_origin = index.mul %block, %block_stride : index
+    %origin = index.add %block_origin, %lane_offset : index
+    // ERROR@+1: SUBRANGE/018 {config_key="runtime.column_count", constraint_key="config_decl.where.vector_footprint_upper_bound"}
+    %loaded = vector.load %view[%origin] : view<[%columns]xf32, %layout> -> vector<4xf32>
+    test.use %loaded : vector<4xf32>
+  }
+  func.return
+}
+
+// ====
+
+func.def @dynamic_unit_axis_proven_by_assume_relation_through_cast(%buffer: buffer, %base: offset, %row: index, %n: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %n_idx = index.cast %n : i32 to index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%n]x4xf32, %layout>
+  %row_in_bounds, %n_idx_assumed = index.assume %row, %n_idx [ge(%row, 0), lt(%row, %n_idx)] : index, index
+  %loaded = vector.load %view[%row_in_bounds, 0] : view<[%n]x4xf32, %layout> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @dynamic_unit_axis_proven_by_scalar_assume_before_index_cast(%buffer: buffer, %base: offset, %row: i32, %n: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %n_idx = index.cast %n : i32 to index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%n_idx]x4xf32, %layout>
+  %row_bounded, %n_bounded = scalar.assume %row, %n [lt(%row, %n)] : i32, i32
+  %row_nonnegative = scalar.assume %row_bounded [ge(%row_bounded, 0)] : i32
+  %row_idx = index.cast %row_nonnegative : i32 to index
+  %loaded = vector.load %view[%row_idx, 0] : view<[%n_idx]x4xf32, %layout> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+// RUN: pass canonicalize,vector-memory-footprint
+func.def @guarded_loaded_i32_precast_index_proves_unit_axis(%ids: buffer, %payload: buffer, %base: offset, %row_count: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %id_view = buffer.view %ids[%base] : buffer -> view<1xi32, %layout>
+  %id_vec = vector.load %id_view[0] : view<1xi32, %layout> -> vector<1xi32>
+  %row = vector.extract %id_vec[0] : vector<1xi32> -> i32
+  %row_idx = index.cast %row : i32 to index
+  %row_count_idx = index.cast %row_count : i32 to index
+  %zero = scalar.constant 0 : i32
+  %nonnegative = scalar.cmpi sge, %row, %zero : i32
+  %below = scalar.cmpi slt, %row, %row_count : i32
+  %guard = scalar.andi %nonnegative, %below : i1
+  scf.if %guard {
+    %payload_view = buffer.view %payload[%base] : buffer -> view<[%row_count_idx]x4xf32, %layout>
+    %loaded = vector.load %payload_view[%row_idx, 0] : view<[%row_count_idx]x4xf32, %layout> -> vector<4xf32>
+    test.use %loaded : vector<4xf32>
+    scf.yield
+  } else {
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_loaded_i32_precast_index_proves_unit_axis(%ids: buffer, %payload: buffer, %base: offset, %row_count: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %id_view = buffer.view %ids[%base] : buffer -> view<1xi32, %layout>
+  %row = view.load %id_view[0] : view<1xi32, %layout> -> i32
+  %row_idx = index.cast %row : i32 to index
+  %row_count_idx = index.cast %row_count : i32 to index
+  %zero = scalar.constant 0 : i32
+  %nonnegative = scalar.cmpi sge, %row, %zero : i32
+  %below = scalar.cmpi slt, %row, %row_count : i32
+  %guard = scalar.andi %nonnegative, %below : i1
+  scf.if %guard {
+    %16 = index.assume %row_idx [ge(%row_idx, 0), lt(%row_idx, %row_count)] : index
+    %payload_view = buffer.view %payload[%base] : buffer -> view<[%row_count_idx]x4xf32, %layout>
+    %loaded = vector.load %payload_view[%16, 0] : view<[%row_count_idx]x4xf32, %layout> -> vector<4xf32>
+    test.use %loaded : vector<4xf32>
+  } else {
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass canonicalize,vector-memory-footprint
+func.def @guarded_i64_precast_index_proves_store_unit_axis(%payload: buffer, %base: offset, %row: i64, %row_count: i64, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %row_idx = index.cast %row : i64 to index
+  %row_count_idx = index.cast %row_count : i64 to index
+  %zero = scalar.constant 0 : i64
+  %nonnegative = scalar.cmpi sge, %row, %zero : i64
+  %below = scalar.cmpi slt, %row, %row_count : i64
+  %guard = scalar.andi %nonnegative, %below : i1
+  scf.if %guard {
+    %payload_view = buffer.view %payload[%base] : buffer -> view<[%row_count_idx]x4xf32, %layout>
+    vector.store %value, %payload_view[%row_idx, 0] : vector<4xf32>, view<[%row_count_idx]x4xf32, %layout>
+    scf.yield
+  } else {
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_i64_precast_index_proves_store_unit_axis(%payload: buffer, %base: offset, %row: i64, %row_count: i64, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %row_idx = index.cast %row : i64 to index
+  %row_count_idx = index.cast %row_count : i64 to index
+  %zero = scalar.constant 0 : i64
+  %nonnegative = scalar.cmpi sge, %row, %zero : i64
+  %below = scalar.cmpi slt, %row, %row_count : i64
+  %guard = scalar.andi %nonnegative, %below : i1
+  scf.if %guard {
+    %13 = index.assume %row_idx [ge(%row_idx, 0), lt(%row_idx, %row_count)] : index
+    %payload_view = buffer.view %payload[%base] : buffer -> view<[%row_count_idx]x4xf32, %layout>
+    vector.store %value, %payload_view[%13, 0] : vector<4xf32>, view<[%row_count_idx]x4xf32, %layout>
+  } else {
+  }
+  func.return
+}
+
+// ====
+
+kernel.def @dynamic_unit_axis_proven_by_workgroup_id_launch_config(%rows: index) {
+  %c1 = index.constant 1 : index
+  %c128 = index.constant 128 : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%c128, %c1, %c1) : index
+} launch(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %row = kernel.workgroup.id<x> : index
+  %row_count = kernel.workgroup.count<x> : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%row_count]x2xf32, %layout>
+  %loaded = vector.load %view[%row, 0] : view<[%row_count]x2xf32, %layout> -> vector<2xf32>
+  kernel.return
+}
+
+// ====
+
+kernel.def @scalar_store_origin_proven_by_launch_product_quotient_remainder() {
+  %c1 = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %row_count = index.mul %head_count, %token_count : index
+  kernel.launch.config workgroups(%row_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%buffer: buffer, %base: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %head_stride = index.constant 128 : index
+  %tail = index.constant 127 : index
+  %token_stride = index.constant 3072 : index
+  %row0 = kernel.workgroup.id<x> : index
+  %row = index.assume %row0 [range(%row0, 0, 1048575)] : index
+  %view_count = index.mul %token_stride, %token_count : index
+  %head = index.rem %row, %head_count : index
+  %token = index.div %row, %head_count : index
+  %head_base = index.mul %head, %head_stride : index
+  %token_base = index.mul %token, %token_stride : index
+  %base_index = index.add %token_base, %head_base : index
+  %origin = index.add %base_index, %tail : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%view_count]xf32, %layout>
+  view.store %value, %view[%origin] : f32, view<[%view_count]xf32, %layout>
+  kernel.return
+}
+
+// ====
+
+kernel.def @scalar_store_tail_origin_proven_by_launch_product_quotient_remainder() {
+  %c1 = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %row_count = index.mul %head_count, %token_count : index
+  kernel.launch.config workgroups(%row_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%buffer: buffer, %base: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %half_cols = index.constant 64 : index
+  %half_dims = index.constant 48 : index
+  %n_dims = index.constant 96 : index
+  %head_stride = index.constant 128 : index
+  %token_stride = index.constant 3072 : index
+  %row0 = kernel.workgroup.id<x> : index
+  %row = index.assume %row0 [range(%row0, 0, 1048575)] : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 1023)] : index
+  %view_count = index.mul %token_stride, %token_count : index
+  %in_bounds = index.cmp ult, %lane, %half_cols : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%view_count]xf32, %layout>
+  scf.if %in_bounds {
+    %pair = index.assume %lane [range(%lane, 0, 1023)] : index
+    %head = index.rem %row, %head_count : index
+    %token = index.div %row, %head_count : index
+    %head_base = index.mul %head, %head_stride : index
+    %token_base = index.mul %token, %token_stride : index
+    %dst_base0 = index.add %head_base, %token_base : index
+    %dst_base = index.assume %dst_base0 [range(%dst_base0, 0, 1073741823)] : index
+    %pair_in_rot = index.cmp ult, %pair, %half_dims : index
+    scf.if %pair_in_rot {
+    } else {
+      %tail_pair = index.sub %pair, %half_dims : index
+      %tail_pair2 = index.mul %tail_pair, %two : index
+      %tail0 = index.add %n_dims, %tail_pair2 : index
+      %tail1 = index.add %tail0, %one : index
+      %origin = index.add %dst_base, %tail1 : index
+      view.store %value, %view[%origin] : f32, view<[%view_count]xf32, %layout>
+    }
+  }
+  kernel.return
+}
+
+// ====
+
+kernel.def @dynamic_unit_axis_proven_by_workitem_id_launch_config(%columns: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%columns, %c1, %c1) : index
+} launch(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %column = kernel.workitem.id<x> : index
+  %column_count = kernel.workgroup.size<x> : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%column_count]xf32, %layout>
+  %loaded = vector.load %view[%column] : view<[%column_count]xf32, %layout> -> vector<1xf32>
+  kernel.return
+}
+
+// ====
+
+kernel.def @dynamic_scaled_vector_origin_proven_by_workitem_id_launch_config(%columns: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%columns, %c1, %c1) : index
+} launch(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %four = index.constant 4 : index
+  %column = kernel.workitem.id<x> : index
+  %column_count = kernel.workgroup.size<x> : index
+  %element_count = index.mul %column_count, %four : index
+  %origin = index.mul %column, %four : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%element_count]xf32, %layout>
+  %loaded = vector.load %view[%origin] : view<[%element_count]xf32, %layout> -> vector<4xf32>
+  kernel.return
+}
+
+// ====
+
+kernel.def @dynamic_scaled_vector_origin_rejects_offset_workitem_id(%columns: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%columns, %c1, %c1) : index
+} launch(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %column = kernel.workitem.id<x> : index
+  %column_count = kernel.workgroup.size<x> : index
+  %element_count = index.mul %column_count, %four : index
+  %next_column = index.add %column, %one : index
+  %origin = index.mul %next_column, %four : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%element_count]xf32, %layout>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="4", constraint_key="vector_footprint.full_vector_upper_bound"}
+  %loaded = vector.load %view[%origin] : view<[%element_count]xf32, %layout> -> vector<4xf32>
+  kernel.return
+}
+
+// ====
+
+kernel.def @dynamic_unit_axis_rejects_offset_workgroup_id(%rows: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %one = index.constant 1 : index
+  %row = kernel.workgroup.id<x> : index
+  %next_row = index.add %row, %one : index
+  %row_count = kernel.workgroup.count<x> : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%row_count]x2xf32, %layout>
+  // ERROR@+1: SUBRANGE/011 {op_name="vector.load", vector_extent="1", constraint_key="vector_footprint.scalar_axis_upper_bound"}
+  %loaded = vector.load %view[%next_row, 0] : view<[%row_count]x2xf32, %layout> -> vector<2xf32>
+  kernel.return
+}
+
+// ====
+
+func.def @scalar_view_access_rejects_same_padding_edge_tap_without_origin_proof(%input: buffer, %output: buffer, %base: offset, %x0: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %width = index.constant 64 : index
+  %x = index.assume %x0 [range(%x0, 0, 63)] : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64xi32, %layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xi32, %layout>
+  %last_x = index.sub %width, %unit : index
+  %is_left_edge = index.cmp eq, %x, %zero : index
+  %kernel_x_begin = scf.if %is_left_edge -> (index) {
+    scf.yield %unit : index
+  } else {
+    scf.yield %zero : index
+  }
+  %is_right_edge = index.cmp eq, %x, %last_x : index
+  %kernel_x_end = scf.if %is_right_edge -> (index) {
+    scf.yield %two : index
+  } else {
+    scf.yield %three : index
+  }
+  scf.for %kernel_x = [%kernel_x_begin to %kernel_x_end step %unit] {
+    %x_with_kernel = index.add %x, %kernel_x : index
+    %source_x = index.sub %x_with_kernel, %unit : index
+    // ERROR@+1: SUBRANGE/023 {op_name="view.load", view_axis="0"}
+    %loaded = view.load %input_view[%source_x] : view<64xi32, %layout> -> i32
+    // ERROR@+1: SUBRANGE/023 {op_name="view.store", view_axis="0"}
+    view.store %loaded, %output_view[%source_x] : i32, view<64xi32, %layout>
+  }
+  func.return
+}
+
+// ====
+
+func.def @scalar_view_access_accepts_same_padding_edge_tap_with_origin_proof(%input: buffer, %output: buffer, %base: offset, %x0: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %width = index.constant 64 : index
+  %x = index.assume %x0 [range(%x0, 0, 63)] : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64xi32, %layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xi32, %layout>
+  %last_x = index.sub %width, %unit : index
+  %is_left_edge = index.cmp eq, %x, %zero : index
+  %kernel_x_begin = scf.if %is_left_edge -> (index) {
+    scf.yield %unit : index
+  } else {
+    scf.yield %zero : index
+  }
+  %is_right_edge = index.cmp eq, %x, %last_x : index
+  %kernel_x_end = scf.if %is_right_edge -> (index) {
+    scf.yield %two : index
+  } else {
+    scf.yield %three : index
+  }
+  scf.for %kernel_x = [%kernel_x_begin to %kernel_x_end step %unit] {
+    %x_with_kernel0 = index.add %x, %kernel_x : index
+    %x_with_kernel = index.assume %x_with_kernel0 [range(%x_with_kernel0, 1, 64)] : index
+    %source_x = index.sub %x_with_kernel, %unit : index
+    %loaded = view.load %input_view[%source_x] : view<64xi32, %layout> -> i32
+    view.store %loaded, %output_view[%source_x] : i32, view<64xi32, %layout>
+  }
+  func.return
+}
+
+// ====
+
+func.def @scalar_view_atomic_rejects_unproven_origin_while_prefetch_is_ignored(%buffer: buffer, %base: offset, %value: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %origin = index.sub %zero, %unit : index
+  %view = buffer.view %buffer[%base] : buffer -> view<64xi32, %layout>
+  // ERROR@+1: SUBRANGE/023 {op_name="view.atomic.reduce", view_axis="0"}
+  view.atomic.reduce<addi> %value, %view[%origin] {ordering = relaxed, scope = device} : i32, view<64xi32, %layout>
+  view.prefetch %view[%origin] {intent = read, locality = l1} : view<64xi32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @mask_range_tail_uses_upper_bound(%buffer: buffer, %base: offset, %n: index, %iv: index, %old: vector<16xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c1 = index.constant 1 : index
+  %iv2 = index.assume %iv [range(%iv, 0, 4096)] : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%n]xf32, %layout>
+  %mask = vector.mask.range [%iv2 to %n step %c1] : index -> vector<16xi1>
+  %loaded = vector.load.mask %view[%iv2], %mask, %old : view<[%n]xf32, %layout>, vector<16xi1>, vector<16xf32>
+  func.return
+}
+
+// ====
+
+func.def @masked_store_tail_uses_upper_bound(%buffer: buffer, %base: offset, %n: index, %iv: index, %value: vector<16xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c1 = index.constant 1 : index
+  %iv2 = index.assume %iv [range(%iv, 0, 4096)] : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%n]xf32, %layout>
+  %mask = vector.mask.range [%iv2 to %n step %c1] : index -> vector<16xi1>
+  vector.store.mask %value, %view[%iv2], %mask : vector<16xf32>, view<[%n]xf32, %layout>, vector<16xi1>
+  func.return
+}
+
+// ====
+
+func.def @expand_compress_tail_uses_upper_bound(%buffer: buffer, %base: offset, %n: index, %iv: index, %old: vector<16xf32>, %value: vector<16xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c1 = index.constant 1 : index
+  %iv2 = index.assume %iv [range(%iv, 0, 4096)] : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%n]xf32, %layout>
+  %mask = vector.mask.range [%iv2 to %n step %c1] : index -> vector<16xi1>
+  %loaded = vector.load.expand %view[%iv2], %mask, %old : view<[%n]xf32, %layout>, vector<16xi1>, vector<16xf32>
+  vector.store.compress %value, %view[%iv2], %mask : vector<16xf32>, view<[%n]xf32, %layout>, vector<16xi1>
+  func.return
+}
+
+// ====
+
+func.def @iota_gather_in_bounds(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<4xf32, %layout>
+  %offsets = vector.iota %c0 step %c1 : vector<4xindex>
+  %loaded = vector.gather %view[%c0][%offsets] : view<4xf32, %layout>, vector<4xindex> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @fact_identity_iota_gather_in_bounds(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<4xf32, %layout>
+  %offsets = vector.iota %c0 step %c1 : vector<4xindex>
+  %checked = sanitizer.assert.value %offsets [] : vector<4xindex>
+  %loaded = vector.gather %view[%c0][%checked] : view<4xf32, %layout>, vector<4xindex> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @iota_scatter_in_bounds(%buffer: buffer, %base: offset, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<4xf32, %layout>
+  %offsets = vector.iota %c0 step %c1 : vector<4xindex>
+  vector.scatter %value, %view[%c0][%offsets] : vector<4xf32>, view<4xf32, %layout>, vector<4xindex>
+  func.return
+}
+
+// ====
+
+func.def @iota_gather_rank_two_crosses_dense_row_in_bounds(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<2x4xf32, %layout>
+  %offsets = vector.iota %c0 step %c1 : vector<2xindex>
+  %loaded = vector.gather %view[0, 3][%offsets] : view<2x4xf32, %layout>, vector<2xindex> -> vector<2xf32>
+  func.return
+}
+
+// ====
+
+func.def @rank_two_offset_vector_is_rejected_by_footprint(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<4x4xf32, %layout>
+  %offsets = vector.iota %c0 step %c1 : vector<2x2xindex>
+  // ERROR@+1: SUBRANGE/017 "vector.gather" "rank-1 vector offsets"
+  %loaded = vector.gather %view[0, 0][%offsets] : view<4x4xf32, %layout>, vector<2x2xindex> -> vector<2x2xf32>
+  func.return
+}
+
+// ====
+
+func.def @iota_gather_rank_two_linear_out_of_bounds(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<2x4xf32, %layout>
+  %offsets = vector.iota %c0 step %c1 : vector<2xindex>
+  // ERROR@+1: SUBRANGE/016 "vector.gather" "linear footprint upper bound" "linearized_origin + max(offsets) + 1 <= view_storage_span"
+  %loaded = vector.gather %view[1, 3][%offsets] : view<2x4xf32, %layout>, vector<2xindex> -> vector<2xf32>
+  func.return
+}
+
+// ====
+
+func.def @iota_gather_out_of_bounds(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<4xf32, %layout>
+  %offsets = vector.iota %c1 step %c1 : vector<4xindex>
+  // ERROR@+1: SUBRANGE/016 "vector.gather" "linear footprint upper bound" "linearized_origin + max(offsets) + 1 <= view_storage_span"
+  %loaded = vector.gather %view[%c0][%offsets] : view<4xf32, %layout>, vector<4xindex> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @fact_identity_iota_gather_out_of_bounds(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<4xf32, %layout>
+  %offsets = vector.iota %c1 step %c1 : vector<4xindex>
+  %checked = sanitizer.assert.value %offsets [] : vector<4xindex>
+  // ERROR@+1: SUBRANGE/016 "vector.gather" "linear footprint upper bound" "linearized_origin + max(offsets) + 1 <= view_storage_span"
+  %loaded = vector.gather %view[%c0][%checked] : view<4xf32, %layout>, vector<4xindex> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @atomic_reduce_footprint_is_checked(%buffer: buffer, %base: offset, %value: vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<4xi32, %layout>
+  %offsets = vector.iota %c0 step %c1 : vector<4xindex>
+  vector.atomic.reduce<addi> %value, %view[%c0][%offsets] {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<4xi32, %layout>, vector<4xindex>
+  func.return
+}
+
+// ====
+
+func.def @atomic_rmw_footprint_is_checked(%buffer: buffer, %base: offset, %value: vector<4xi32>) -> (vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<4xi32, %layout>
+  %offsets = vector.iota %c0 step %c1 : vector<4xindex>
+  %old = vector.atomic.rmw<xchgi> %value, %view[%c0][%offsets] {ordering = acq_rel, scope = workgroup} : vector<4xi32>, view<4xi32, %layout>, vector<4xindex>
+  func.return %old : vector<4xi32>
+}
+
+// ====
+
+func.def @masked_offset_ops_uniform_false_skip(%buffer: buffer, %base: offset, %value: vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %mask = vector.constant false : vector<4xi1>
+  %old = vector.constant 0 : vector<4xi32>
+  %view = buffer.view %buffer[%base] : buffer -> view<4xi32, %layout>
+  %offsets = vector.iota %c1 step %c1 : vector<4xindex>
+  %gathered = vector.gather.mask %view[%c0][%offsets], %mask, %old : view<4xi32, %layout>, vector<4xindex>, vector<4xi1>, vector<4xi32>
+  vector.scatter.mask %value, %view[%c0][%offsets], %mask : vector<4xi32>, view<4xi32, %layout>, vector<4xindex>, vector<4xi1>
+  vector.atomic.reduce.mask<addi> %value, %view[%c0][%offsets], %mask {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<4xi32, %layout>, vector<4xindex>, vector<4xi1>
+  %rmw = vector.atomic.rmw.mask<xchgi> %value, %view[%c0][%offsets], %mask, %old {ordering = acq_rel, scope = workgroup} : vector<4xi32>, view<4xi32, %layout>, vector<4xindex>, vector<4xi1>, vector<4xi32>
+  func.return
+}
+
+// ====
+
+func.def @unresolved_layout(%buffer: buffer, %base: offset, %layout: encoding<layout>) {
+  %view = buffer.view %buffer[%base] : buffer -> view<4xf32, %layout>
+  // ERROR@+1: SUBRANGE/007 "vector.load" "requires a resolved view layout"
+  %loaded = vector.load %view[0] : view<4xf32, %layout> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+// RUN: pass scf-to-cfg,vector-memory-footprint
+kernel.def @scalar_store_tail_origin_proven_after_scf_to_cfg() {
+  %c1 = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %row_count = index.mul %head_count, %token_count : index
+  kernel.launch.config workgroups(%row_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%buffer: buffer, %base: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %half_cols = index.constant 64 : index
+  %half_dims = index.constant 48 : index
+  %n_dims = index.constant 96 : index
+  %head_stride = index.constant 128 : index
+  %token_stride = index.constant 3072 : index
+  %row = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %view_count = index.mul %token_stride, %token_count : index
+  %in_bounds = index.cmp ult, %lane, %half_cols : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%view_count]xf32, %layout>
+  scf.if %in_bounds {
+    %head = index.rem %row, %head_count : index
+    %token = index.div %row, %head_count : index
+    %head_base = index.mul %head, %head_stride : index
+    %token_base = index.mul %token, %token_stride : index
+    %dst_base = index.add %head_base, %token_base : index
+    %pair_in_rot = index.cmp ult, %lane, %half_dims : index
+    scf.if %pair_in_rot {
+    } else {
+      %tail_pair = index.sub %lane, %half_dims : index
+      %tail_pair2 = index.mul %tail_pair, %two : index
+      %tail0 = index.add %n_dims, %tail_pair2 : index
+      %tail1 = index.add %tail0, %one : index
+      %origin = index.add %dst_base, %tail1 : index
+      view.store %value, %view[%origin] : f32, view<[%view_count]xf32, %layout>
+    }
+  }
+  kernel.return
+}
+
+// ----
+kernel.def @scalar_store_tail_origin_proven_after_scf_to_cfg() {
+  %c1 = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %row_count = index.mul %head_count, %token_count : index
+  kernel.launch.config workgroups(%row_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%buffer: buffer, %base: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %half_cols = index.constant 64 : index
+  %half_dims = index.constant 48 : index
+  %n_dims = index.constant 96 : index
+  %head_stride = index.constant 128 : index
+  %token_stride = index.constant 3072 : index
+  %row = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %view_count = index.mul %token_stride, %token_count : index
+  %in_bounds = index.cmp ult, %lane, %half_cols : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%view_count]xf32, %layout>
+  cfg.cond_br %in_bounds, ^_bb1, ^_bb5
+^_bb1:
+  %head = index.rem %row, %head_count : index
+  %token = index.div %row, %head_count : index
+  %head_base = index.mul %head, %head_stride : index
+  %token_base = index.mul %token, %token_stride : index
+  %dst_base = index.add %head_base, %token_base : index
+  %pair_in_rot = index.cmp ult, %lane, %half_dims : index
+  cfg.cond_br %pair_in_rot, ^_bb2, ^_bb3
+^_bb2:
+  cfg.br ^_bb4
+^_bb3:
+  %tail_pair = index.sub %lane, %half_dims : index
+  %tail_pair2 = index.mul %tail_pair, %two : index
+  %tail0 = index.add %n_dims, %tail_pair2 : index
+  %tail1 = index.add %tail0, %one : index
+  %origin = index.add %dst_base, %tail1 : index
+  view.store %value, %view[%origin] : f32, view<[%view_count]xf32, %layout>
+  cfg.br ^_bb4
+^_bb4:
+  cfg.br ^_bb5
+^_bb5:
+  kernel.return
+}

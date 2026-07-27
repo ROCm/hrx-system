@@ -1,0 +1,217 @@
+// RUN: pass canonicalize
+
+// muli by constant 64 sets divisibility to 64.
+func.def @muli_divisibility(%x: index) -> (i64) {
+  %c64 = index.constant 64 : index
+  %r = index.mul %x, %c64 : index
+  %div = test.fact_divisor %r : index -> i64
+  func.return %div : i64
+}
+// ----
+func.def @muli_divisibility(%x: index) -> (i64) {
+  %div = scalar.constant 64 : i64
+  func.return %div : i64
+}
+
+// ====
+
+// addi of two values with known divisors: gcd(64, 16) = 16.
+func.def @addi_divisibility(%x: index, %y: index) -> (i64) {
+  %c64 = index.constant 64 : index
+  %c16 = index.constant 16 : index
+  %a = index.mul %x, %c64 : index
+  %b = index.mul %y, %c16 : index
+  %r = index.add %a, %b : index
+  %div = test.fact_divisor %r : index -> i64
+  func.return %div : i64
+}
+// ----
+func.def @addi_divisibility(%x: index, %y: index) -> (i64) {
+  %div = scalar.constant 16 : i64
+  func.return %div : i64
+}
+
+// ====
+
+// Constant is exact: range_lo == range_hi == 42.
+func.def @constant_exact(%x: i32) -> (i64, i64) {
+  %c = scalar.constant 42 : i32
+  %lo = test.fact_range_lo %c : i32 -> i64
+  %hi = test.fact_range_hi %c : i32 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @constant_exact(%x: i32) -> (i64, i64) {
+  %lo = scalar.constant 42 : i64
+  %hi = scalar.constant 42 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// scalar.assume applies predicate facts to integer payload results.
+func.def @assume_divisibility(%x: i64) -> (i64) {
+  %x2 = scalar.assume %x [mul(%x, 32)] : i64
+  %div = test.fact_divisor %x2 : i64 -> i64
+  func.return %div : i64
+}
+// ----
+func.def @assume_divisibility(%x: i64) -> (i64) {
+  %div = scalar.constant 32 : i64
+  func.return %div : i64
+}
+
+// ====
+
+// remui is bounded by the non-negative dividend as well as by the dynamic
+// divisor range.
+func.def @remui_dynamic_divisor_uses_dividend_bound(%x0: i32, %d0: i32) -> (i64, i64) {
+  %x = scalar.assume %x0 [range(%x0, 0, 63)] : i32
+  %d = scalar.assume %d0 [range(%d0, 1, 1024)] : i32
+  %r = scalar.remui %x, %d : i32
+  %lo = test.fact_range_lo %r : i32 -> i64
+  %hi = test.fact_range_hi %r : i32 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @remui_dynamic_divisor_uses_dividend_bound(%x0: i32, %d0: i32) -> (i64, i64) {
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 63 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// addi of exact values produces exact result.
+func.def @addi_exact() -> (i64) {
+  %a = scalar.constant 10 : i32
+  %b = scalar.constant 20 : i32
+  %r = scalar.addi %a, %b : i32
+  %lo = test.fact_range_lo %r : i32 -> i64
+  func.return %lo : i64
+}
+// ----
+func.def @addi_exact() -> (i64) {
+  %lo = scalar.constant 30 : i64
+  func.return %lo : i64
+}
+
+// ====
+
+// Dynamic value has unknown facts.
+func.def @dynamic_unknown(%x: i32) -> (i64, i64) {
+  %lo = test.fact_range_lo %x : i32 -> i64
+  %hi = test.fact_range_hi %x : i32 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @dynamic_unknown(%x: i32) -> (i64, i64) {
+  %lo = scalar.constant -2147483648 : i64
+  %hi = scalar.constant 2147483647 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// Constant is non-negative.
+func.def @constant_non_negative() -> (i1) {
+  %c = scalar.constant 42 : i32
+  %nn = test.fact_non_negative %c : i32 -> i1
+  func.return %nn : i1
+}
+// ----
+func.def @constant_non_negative() -> (i1) {
+  %nn = scalar.constant true : i1
+  func.return %nn : i1
+}
+
+// ====
+
+// Negative constant is not non-negative.
+func.def @negative_not_non_negative() -> (i1) {
+  %c = scalar.constant -5 : i32
+  %nn = test.fact_non_negative %c : i32 -> i1
+  func.return %nn : i1
+}
+// ----
+func.def @negative_not_non_negative() -> (i1) {
+  %nn = scalar.constant false : i1
+  func.return %nn : i1
+}
+
+// ====
+
+// Power of two constant.
+func.def @power_of_two() -> (i1) {
+  %c = scalar.constant 64 : i32
+  %p2 = test.fact_power_of_two %c : i32 -> i1
+  func.return %p2 : i1
+}
+// ----
+func.def @power_of_two() -> (i1) {
+  %p2 = scalar.constant true : i1
+  func.return %p2 : i1
+}
+
+// ====
+
+// Non-power-of-two constant.
+func.def @not_power_of_two() -> (i1) {
+  %c = scalar.constant 42 : i32
+  %p2 = test.fact_power_of_two %c : i32 -> i1
+  func.return %p2 : i1
+}
+// ----
+func.def @not_power_of_two() -> (i1) {
+  %p2 = scalar.constant false : i1
+  func.return %p2 : i1
+}
+
+// ====
+
+// fmai: divisibility propagation.
+// a = x*8 (divisible by 8), b = 4 (const), c = y*16 (divisible by 16)
+// a*b = divisible by 32, result = gcd(32, 16) = 16
+func.def @fmai_divisibility(%x: index, %y: index) -> (i64) {
+  %c8 = index.constant 8 : index
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  %a = index.mul %x, %c8 : index
+  %c = index.mul %y, %c16 : index
+  %r = index.madd %a, %c4, %c : index
+  %div = test.fact_divisor %r : index -> i64
+  func.return %div : i64
+}
+// ----
+func.def @fmai_divisibility(%x: index, %y: index) -> (i64) {
+  %div = scalar.constant 16 : i64
+  func.return %div : i64
+}
+
+// ====
+
+// fmai: range propagation with exact values.
+// 10*20 + 5 = 205, so range is exactly [205, 205]
+func.def @fmai_range_exact() -> (i64, i64) {
+  %a = scalar.constant 10 : i32
+  %b = scalar.constant 20 : i32
+  %c = scalar.constant 5 : i32
+  %r = scalar.fmai %a, %b, %c : i32
+  %lo = test.fact_range_lo %r : i32 -> i64
+  %hi = test.fact_range_hi %r : i32 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @fmai_range_exact() -> (i64, i64) {
+  %lo = scalar.constant 205 : i64
+  %hi = scalar.constant 205 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// fmai: dynamic inputs - op remains (negative test).
+func.def @fmai_dynamic(%a: i32, %b: i32, %c: i32) -> (i32) {
+  %r = scalar.fmai %a, %b, %c : i32
+  func.return %r : i32
+}

@@ -14,12 +14,30 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Memory type reported by the CPU slab provider.
+#define IREE_HAL_CPU_SLAB_PROVIDER_MEMORY_TYPE                           \
+  (IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | \
+   IREE_HAL_MEMORY_TYPE_HOST_COHERENT | IREE_HAL_MEMORY_TYPE_HOST_CACHED)
+
+// Buffer usage flags supported by CPU slab allocations.
+#define IREE_HAL_CPU_SLAB_PROVIDER_BUFFER_USAGE                      \
+  (IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH | \
+   IREE_HAL_BUFFER_USAGE_SHARING_EXPORT |                            \
+   IREE_HAL_BUFFER_USAGE_SHARING_REPLICATE |                         \
+   IREE_HAL_BUFFER_USAGE_SHARING_CONCURRENT |                        \
+   IREE_HAL_BUFFER_USAGE_SHARING_IMMUTABLE |                         \
+   IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |                            \
+   IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT |                        \
+   IREE_HAL_BUFFER_USAGE_MAPPING_OPTIONAL |                          \
+   IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM |                     \
+   IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE)
+
 // Creates a slab provider that allocates host memory via |host_allocator|
 // (typically the system allocator / malloc). Slabs are plain host memory
 // with no special alignment, registration, or NUMA affinity.
 //
-// Reports memory type HOST_LOCAL | HOST_VISIBLE | HOST_COHERENT | HOST_CACHED
-// and supports all buffer usage flags (TRANSFER, DISPATCH, MAPPING, etc.).
+// Reports IREE_HAL_CPU_SLAB_PROVIDER_MEMORY_TYPE and supports
+// IREE_HAL_CPU_SLAB_PROVIDER_BUFFER_USAGE.
 //
 // This is the simplest slab provider; intended for CPU-only testing and as
 // the backing for pass-through pools on host targets.

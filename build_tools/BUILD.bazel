@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@rules_python//python:defs.bzl", "py_test")
 load("//build_tools/bazel:cc.bzl", "iree_cc_library")
 load("//build_tools/bazel:cc_link.bzl", "cc_link")
 
@@ -26,4 +27,13 @@ iree_cc_library(
 iree_cc_library(
     name = "rt",
     linkopts = cc_link.rt_linkopts(),
+)
+
+py_test(
+    name = "ci_core_linux_test",
+    srcs = [
+        "ci_core_linux.py",
+        "ci_core_linux_test.py",
+    ],
+    main = "ci_core_linux_test.py",
 )

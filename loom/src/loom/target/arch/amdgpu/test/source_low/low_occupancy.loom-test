@@ -1,0 +1,122 @@
+// RUN: emit amdgpu-occupancy-json @gfx11_pressure diagnostics=summary fixed=%value:physical_register:64:1
+
+amdgpu.target<gfx1100> @gfx11_target
+// REMARK@+2: BACKEND/010 "uses 0 of 800 amdgpu.sgpr" "93%" "limited by 'amdgpu.vgpr'"
+// REMARK@+1: BACKEND/010 "uses 65 of 1024 amdgpu.vgpr" "93%" "limited by 'amdgpu.vgpr'"
+low.func.def target(@gfx11_target) @gfx11_pressure(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+  low.return %value : reg<amdgpu.vgpr>
+}
+
+// ----
+{"format":"loom.amdgpu.occupancy.v0","function":"gfx11_pressure","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","processor":"gfx1100","wave_size":32,"max_waves_per_simd":16,"flat_workgroup_size":0,"waves_per_workgroup":0,"resident_waves_per_simd":15,"occupancy_percent":93,"limiting_resource":"amdgpu.vgpr","spill_count":0,"scratch_spill_bytes":0,"spill_store_count":0,"spill_reload_count":0,"register_classes":[{"register_class":"amdgpu.sgpr","allocated_units":0,"rounded_units":0,"pool_units":800,"allocation_granularity":16,"wave_limit":16,"next_cliff_units":49,"units_until_next_cliff":49,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.vgpr","allocated_units":65,"rounded_units":68,"pool_units":1024,"allocation_granularity":4,"wave_limit":15,"next_cliff_units":69,"units_until_next_cliff":4,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0}],"pressure_resources":[]}
+
+// ====
+
+// RUN: emit amdgpu-occupancy-json @gfx11_scc_does_not_contribute
+
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_scc_does_not_contribute(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %cond = s_cmp_lt_i32 %lhs, %rhs
+  low.cond_br %cond, ^then, ^else : reg<amdgpu.scc>
+^then:
+  return %value
+^else:
+  return %value
+}
+
+// ----
+{"format":"loom.amdgpu.occupancy.v0","function":"gfx11_scc_does_not_contribute","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","processor":"gfx1100","wave_size":32,"max_waves_per_simd":16,"flat_workgroup_size":0,"waves_per_workgroup":0,"resident_waves_per_simd":16,"occupancy_percent":100,"limiting_resource":"max_waves","spill_count":0,"scratch_spill_bytes":0,"spill_store_count":0,"spill_reload_count":0,"register_classes":[{"register_class":"amdgpu.sgpr","allocated_units":2,"rounded_units":16,"pool_units":800,"allocation_granularity":16,"wave_limit":16,"next_cliff_units":49,"units_until_next_cliff":47,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.vgpr","allocated_units":1,"rounded_units":4,"pool_units":1024,"allocation_granularity":4,"wave_limit":16,"next_cliff_units":65,"units_until_next_cliff":64,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0}],"pressure_resources":[]}
+
+// ====
+
+// RUN: emit amdgpu-occupancy-json @gfx11_spill amdgpu.vgpr=2
+
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_spill(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) {
+  low.return %a, %b, %c : reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>
+}
+
+// ----
+{"format":"loom.amdgpu.occupancy.v0","function":"gfx11_spill","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","processor":"gfx1100","wave_size":32,"max_waves_per_simd":16,"flat_workgroup_size":0,"waves_per_workgroup":0,"resident_waves_per_simd":16,"occupancy_percent":100,"limiting_resource":"max_waves","spill_count":1,"scratch_spill_bytes":4,"spill_store_count":1,"spill_reload_count":1,"register_classes":[{"register_class":"amdgpu.sgpr","allocated_units":0,"rounded_units":0,"pool_units":800,"allocation_granularity":16,"wave_limit":16,"next_cliff_units":49,"units_until_next_cliff":49,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.vgpr","allocated_units":2,"rounded_units":4,"pool_units":1024,"allocation_granularity":4,"wave_limit":16,"next_cliff_units":65,"units_until_next_cliff":63,"spill_count":1,"spill_bytes":4,"spill_store_count":1,"spill_reload_count":1}],"pressure_resources":[]}
+
+// ====
+
+// RUN: emit amdgpu-occupancy-json @gfx11_concat_reuses_releasable_memory_lease strategy=source fixed=%state:physical_register:0:184
+
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_concat_reuses_releasable_memory_lease(%state: reg<amdgpu.vgpr x184>) -> (reg<amdgpu.vgpr x184>, reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3.core> {
+  %address = slice %state[0] : reg<amdgpu.vgpr x184> -> reg<amdgpu.vgpr>
+  %dead = ds_read_b128 %address
+  %lhs0 = ds_read_b128 %address {offset = 16}
+  %lhs1 = ds_read_b128 %address {offset = 32}
+  %lhs = concat(%lhs0, %lhs1) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  return %state, %lhs
+}
+
+// ----
+{"format":"loom.amdgpu.occupancy.v0","function":"gfx11_concat_reuses_releasable_memory_lease","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","processor":"gfx1100","wave_size":32,"max_waves_per_simd":16,"flat_workgroup_size":0,"waves_per_workgroup":0,"resident_waves_per_simd":5,"occupancy_percent":31,"limiting_resource":"amdgpu.vgpr","spill_count":0,"scratch_spill_bytes":0,"spill_store_count":0,"spill_reload_count":0,"register_classes":[{"register_class":"amdgpu.sgpr","allocated_units":0,"rounded_units":0,"pool_units":800,"allocation_granularity":16,"wave_limit":16,"next_cliff_units":49,"units_until_next_cliff":49,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.vgpr","allocated_units":192,"rounded_units":192,"pool_units":1024,"allocation_granularity":4,"wave_limit":5,"next_cliff_units":205,"units_until_next_cliff":13,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0}],"pressure_resources":[]}
+
+// ====
+
+// RUN: emit amdgpu-occupancy-json @cdna_mixed_vector_pressure diagnostics=summary
+
+amdgpu.target<gfx942> @gfx942_target
+// REMARK@+4: BACKEND/010 "uses 0 of 800 amdgpu.sgpr" "6%" "limited by 'amdgpu.vgpr_agpr'"
+// REMARK@+3: BACKEND/010 "uses 256 of 512 amdgpu.vgpr" "6%" "limited by 'amdgpu.vgpr_agpr'"
+// REMARK@+2: BACKEND/010 "uses 128 of 256 amdgpu.agpr" "6%" "limited by 'amdgpu.vgpr_agpr'"
+// REMARK@+1: BACKEND/010 "uses 384 of 512 amdgpu.vgpr_agpr" "6%" "limited by 'amdgpu.vgpr_agpr'"
+low.func.def target(@gfx942_target) @cdna_mixed_vector_pressure(%vgpr: reg<amdgpu.vgpr x256>, %agpr: reg<amdgpu.agpr x128>) -> (reg<amdgpu.vgpr x256>, reg<amdgpu.agpr x128>) {
+  low.return %vgpr, %agpr : reg<amdgpu.vgpr x256>, reg<amdgpu.agpr x128>
+}
+
+// ----
+{"format":"loom.amdgpu.occupancy.v0","function":"cdna_mixed_vector_pressure","target":"gfx942_target","descriptor_set":"amdgpu.cdna3.core","processor":"gfx942","wave_size":64,"max_waves_per_simd":16,"flat_workgroup_size":0,"waves_per_workgroup":0,"resident_waves_per_simd":1,"occupancy_percent":6,"limiting_resource":"amdgpu.vgpr_agpr","spill_count":0,"scratch_spill_bytes":0,"spill_store_count":0,"spill_reload_count":0,"register_classes":[{"register_class":"amdgpu.sgpr","allocated_units":0,"rounded_units":0,"pool_units":800,"allocation_granularity":16,"wave_limit":16,"next_cliff_units":49,"units_until_next_cliff":49,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.vgpr","allocated_units":256,"rounded_units":256,"pool_units":512,"allocation_granularity":8,"wave_limit":2,"next_cliff_units":257,"units_until_next_cliff":1,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.agpr","allocated_units":128,"rounded_units":128,"pool_units":256,"allocation_granularity":4,"wave_limit":2,"next_cliff_units":129,"units_until_next_cliff":1,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0}],"pressure_resources":[{"resource":"amdgpu.vgpr_agpr","allocated_units":384,"rounded_units":384,"pool_units":512,"allocation_granularity":8,"wave_limit":1,"next_cliff_units":513,"units_until_next_cliff":129}]}
+
+// ====
+
+// RUN: emit amdgpu-occupancy-json @cdna_fragment_accumulator_pressure diagnostics=summary
+
+amdgpu.target<gfx942> @gfx942_target
+// REMARK@+4: BACKEND/010 "uses 0 of 800 amdgpu.sgpr" "50%" "limited by 'amdgpu.agpr'"
+// REMARK@+3: BACKEND/010 "uses 32 of 512 amdgpu.vgpr" "50%" "limited by 'amdgpu.agpr'"
+// REMARK@+2: BACKEND/010 "uses 32 of 256 amdgpu.agpr" "50%" "limited by 'amdgpu.agpr'"
+// REMARK@+1: BACKEND/010 "uses 64 of 512 amdgpu.vgpr_agpr" "50%" "limited by 'amdgpu.agpr'"
+low.func.def target(@gfx942_target) @cdna_fragment_accumulator_pressure(%lhs: reg<amdgpu.vgpr x16>, %rhs: reg<amdgpu.vgpr x16>, %acc: reg<amdgpu.agpr x32>) -> (reg<amdgpu.agpr x32>) asm<amdgpu.cdna3.core> {
+  %lhs0 = slice %lhs[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %rhs0 = slice %rhs[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %acc0 = slice %acc[0] : reg<amdgpu.agpr x32> -> reg<amdgpu.agpr x4>
+  %out0 = v_mfma_f32_16x16x16_bf16 %lhs0, %rhs0, %acc0
+  %lhs1 = slice %lhs[2] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %rhs1 = slice %rhs[2] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %acc1 = slice %acc[4] : reg<amdgpu.agpr x32> -> reg<amdgpu.agpr x4>
+  %out1 = v_mfma_f32_16x16x16_bf16 %lhs1, %rhs1, %acc1
+  %lhs2 = slice %lhs[4] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %rhs2 = slice %rhs[4] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %acc2 = slice %acc[8] : reg<amdgpu.agpr x32> -> reg<amdgpu.agpr x4>
+  %out2 = v_mfma_f32_16x16x16_bf16 %lhs2, %rhs2, %acc2
+  %lhs3 = slice %lhs[6] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %rhs3 = slice %rhs[6] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %acc3 = slice %acc[12] : reg<amdgpu.agpr x32> -> reg<amdgpu.agpr x4>
+  %out3 = v_mfma_f32_16x16x16_bf16 %lhs3, %rhs3, %acc3
+  %lhs4 = slice %lhs[8] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %rhs4 = slice %rhs[8] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %acc4 = slice %acc[16] : reg<amdgpu.agpr x32> -> reg<amdgpu.agpr x4>
+  %out4 = v_mfma_f32_16x16x16_bf16 %lhs4, %rhs4, %acc4
+  %lhs5 = slice %lhs[10] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %rhs5 = slice %rhs[10] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %acc5 = slice %acc[20] : reg<amdgpu.agpr x32> -> reg<amdgpu.agpr x4>
+  %out5 = v_mfma_f32_16x16x16_bf16 %lhs5, %rhs5, %acc5
+  %lhs6 = slice %lhs[12] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %rhs6 = slice %rhs[12] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %acc6 = slice %acc[24] : reg<amdgpu.agpr x32> -> reg<amdgpu.agpr x4>
+  %out6 = v_mfma_f32_16x16x16_bf16 %lhs6, %rhs6, %acc6
+  %lhs7 = slice %lhs[14] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %rhs7 = slice %rhs[14] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x2>
+  %acc7 = slice %acc[28] : reg<amdgpu.agpr x32> -> reg<amdgpu.agpr x4>
+  %out7 = v_mfma_f32_16x16x16_bf16 %lhs7, %rhs7, %acc7
+  %result = concat(%out0, %out1, %out2, %out3, %out4, %out5, %out6, %out7) : (reg<amdgpu.agpr x4>, reg<amdgpu.agpr x4>, reg<amdgpu.agpr x4>, reg<amdgpu.agpr x4>, reg<amdgpu.agpr x4>, reg<amdgpu.agpr x4>, reg<amdgpu.agpr x4>, reg<amdgpu.agpr x4>) -> reg<amdgpu.agpr x32>
+  return %result
+}
+
+// ----
+{"format":"loom.amdgpu.occupancy.v0","function":"cdna_fragment_accumulator_pressure","target":"gfx942_target","descriptor_set":"amdgpu.cdna3.core","processor":"gfx942","wave_size":64,"max_waves_per_simd":16,"flat_workgroup_size":0,"waves_per_workgroup":0,"resident_waves_per_simd":8,"occupancy_percent":50,"limiting_resource":"amdgpu.agpr","spill_count":0,"scratch_spill_bytes":0,"spill_store_count":0,"spill_reload_count":0,"register_classes":[{"register_class":"amdgpu.sgpr","allocated_units":0,"rounded_units":0,"pool_units":800,"allocation_granularity":16,"wave_limit":16,"next_cliff_units":49,"units_until_next_cliff":49,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.vgpr","allocated_units":32,"rounded_units":32,"pool_units":512,"allocation_granularity":8,"wave_limit":16,"next_cliff_units":33,"units_until_next_cliff":1,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.agpr","allocated_units":32,"rounded_units":32,"pool_units":256,"allocation_granularity":4,"wave_limit":8,"next_cliff_units":33,"units_until_next_cliff":1,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0}],"pressure_resources":[{"resource":"amdgpu.vgpr_agpr","allocated_units":64,"rounded_units":64,"pool_units":512,"allocation_granularity":8,"wave_limit":8,"next_cliff_units":65,"units_until_next_cliff":1}]}

@@ -21,7 +21,21 @@ namespace iree::hal::cts {
 using ::testing::Each;
 using ::testing::ElementsAreArray;
 
-class CommandBufferStressTest : public CtsTestBase<> {};
+class CommandBufferStressTest : public CtsTestBase<> {
+ protected:
+  void QueueFillAndWait(iree_hal_buffer_t* target_buffer,
+                        iree_device_size_t length, const void* pattern,
+                        iree_host_size_t pattern_length) {
+    SemaphoreList empty_wait;
+    SemaphoreList fill_signal(device_, {0}, {1});
+    IREE_ASSERT_OK(iree_hal_device_queue_fill(
+        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, fill_signal,
+        target_buffer, /*target_offset=*/0, length, pattern, pattern_length,
+        IREE_HAL_FILL_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+        fill_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  }
+};
 
 // Submits 200 one-shot fill command buffers in a tight loop, each writing
 // a different pattern. This stresses the recording item pool: each submit
@@ -67,19 +81,8 @@ TEST_P(CommandBufferStressTest, RapidCopySubmit) {
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(buffer_size, target.out()));
 
   for (int i = 0; i < 200; ++i) {
-    // Fill source with pattern via host mapping.
     uint32_t pattern = (uint32_t)(0xCAFE0000 | i);
-    {
-      iree_hal_buffer_mapping_t mapping;
-      IREE_ASSERT_OK(iree_hal_buffer_map_range(
-          source, IREE_HAL_MAPPING_MODE_SCOPED,
-          IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE, 0, buffer_size, &mapping));
-      uint32_t* data = (uint32_t*)mapping.contents.data;
-      for (iree_device_size_t j = 0; j < buffer_size / sizeof(uint32_t); ++j) {
-        data[j] = pattern;
-      }
-      IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
-    }
+    QueueFillAndWait(source, buffer_size, &pattern, sizeof(pattern));
 
     // Copy source→target via command buffer.
     Ref<iree_hal_command_buffer_t> command_buffer;

@@ -1,0 +1,56 @@
+func.def @assert_access_roundtrip(%layout: encoding<layout>, %view: view<16x32xf32, %layout>, %row: index) {
+  sanitizer.assert.access<read> %view[%row, 0] : view<16x32xf32, %layout>
+  sanitizer.assert.access<read> %view[%row, 0] {static_extents = [1, 4]} : view<16x32xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @assert_accesses_roundtrip(%layout: encoding<layout>, %view: view<16x32xf32, %layout>, %row: index) {
+  sanitizer.assert.accesses<write> %view[%row, 0] {static_count = 4, static_extents = [1, 4], static_strides = [1, 0]} : view<16x32xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @assert_value_roundtrip(%n: index, %m: index) -> (index, index) {
+  %n_checked, %m_checked = sanitizer.assert.value %n, %m [range(%n, 0, 4096), lt(%n, %m)] : index, index
+  func.return %n_checked, %m_checked : index, index
+}
+
+// ====
+
+func.def @assert_float_value_roundtrip(%x: f32) -> (f32) {
+  %checked = sanitizer.assert.value %x [not_nan(%x), not_inf(%x), finite(%x)] : f32
+  func.return %checked : f32
+}
+
+// ====
+
+func.def @assert_op_roundtrip(%lhs: i32, %rhs: i32) {
+  sanitizer.assert.op %lhs, %rhs [ne(%rhs, 0)] : i32, i32
+  func.return
+}
+
+// ====
+
+func.def @assert_layout_roundtrip(%m: index, %layout: encoding<layout>, %view: view<[%m]x32xf32, %layout>) -> (view<16x32xf32, %layout>) {
+  %checked = sanitizer.assert.layout %view : view<[%m]x32xf32, %layout> -> view<16x32xf32, %layout>
+  func.return %checked : view<16x32xf32, %layout>
+}
+
+// ====
+
+func.def @race_access_roundtrip(%layout: encoding<layout>, %view: view<64xi32, %layout>, %lane: index) {
+  sanitizer.race.access<read> %view[%lane] : view<64xi32, %layout>
+  sanitizer.race.access<write> %view[%lane] : view<64xi32, %layout>
+  sanitizer.race.access<read_write> %view[%lane] {atomic = true, ordering = acq_rel, scope = workgroup} : view<64xi32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @race_sync_roundtrip() {
+  sanitizer.race.sync<workgroup> {ordering = acq_rel, scope = workgroup}
+  func.return
+}

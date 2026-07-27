@@ -362,6 +362,29 @@ static iree_status_t iree_hal_vulkan_slab_provider_wrap_buffer(
       provider->host_allocator, out_buffer);
 }
 
+static iree_status_t iree_hal_vulkan_slab_provider_validate_asan_options(
+    const iree_hal_slab_provider_t* base_provider,
+    const iree_hal_asan_pool_options_t* options) {
+  (void)base_provider;
+  (void)options;
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "Vulkan slab provider does not support HAL ASAN range advice");
+}
+
+static void iree_hal_vulkan_slab_provider_advise_asan_range(
+    iree_hal_slab_provider_t* base_provider, const iree_hal_slab_t* slab,
+    iree_device_size_t backing_offset,
+    iree_hal_asan_range_advice_flags_t advice_flags,
+    const iree_hal_asan_allocation_layout_t* layout) {
+  (void)base_provider;
+  (void)slab;
+  (void)backing_offset;
+  (void)advice_flags;
+  (void)layout;
+  IREE_ASSERT(false, "Vulkan slab provider cannot advise ASAN ranges");
+}
+
 static void iree_hal_vulkan_slab_provider_prefault(
     iree_hal_slab_provider_t* base_provider, iree_hal_slab_t* slab) {
   (void)base_provider;
@@ -406,6 +429,9 @@ static const iree_hal_slab_provider_vtable_t
         .acquire_slab = iree_hal_vulkan_slab_provider_acquire_slab,
         .release_slab = iree_hal_vulkan_slab_provider_release_slab,
         .wrap_buffer = iree_hal_vulkan_slab_provider_wrap_buffer,
+        .validate_asan_options =
+            iree_hal_vulkan_slab_provider_validate_asan_options,
+        .advise_asan_range = iree_hal_vulkan_slab_provider_advise_asan_range,
         .prefault = iree_hal_vulkan_slab_provider_prefault,
         .trim = iree_hal_vulkan_slab_provider_trim,
         .query_stats = iree_hal_vulkan_slab_provider_query_stats,

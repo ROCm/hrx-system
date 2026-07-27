@@ -1,0 +1,116 @@
+// RUN: roundtrip
+
+func.def @scalar_i64_bitwise_sgpr(%lhs: i64, %rhs: i64) -> (i64, i64, i64) {
+  %and = scalar.andi %lhs, %rhs : i64
+  %or = scalar.ori %and, %lhs : i64
+  %xor = scalar.xori %or, %rhs : i64
+  func.return %and, %or, %xor : i64, i64, i64
+}
+
+// ====
+
+func.def @scalar_i64_addi_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>) -> (i64) {
+  %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
+  %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
+  %sum = scalar.addi %lhs, %rhs : i64
+  func.return %sum : i64
+}
+
+// ====
+
+func.def @scalar_i64_subi_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>) -> (i64) {
+  %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
+  %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
+  %difference = scalar.subi %lhs, %rhs : i64
+  func.return %difference : i64
+}
+
+// ====
+
+func.def @scalar_i64_shli_vgpr(%value_values: vector<2xi64>, %shift_values: vector<2xi64>) -> (i64) {
+  %value = vector.extract %value_values[0] : vector<2xi64> -> i64
+  %shift = vector.extract %shift_values[0] : vector<2xi64> -> i64
+  %shifted = scalar.shli %value, %shift : i64
+  func.return %shifted : i64
+}
+
+// ====
+
+func.def @scalar_i64_muli_bitwise_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>, %mask_values: vector<2xi64>) -> (i64) {
+  %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
+  %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
+  %mask = vector.extract %mask_values[0] : vector<2xi64> -> i64
+  %product = scalar.muli %lhs, %rhs : i64
+  %mixed = scalar.xori %product, %mask : i64
+  func.return %mixed : i64
+}
+
+// ====
+
+func.def @scalar_i64_compare_eq_scc(%lhs: i64, %rhs: i64) -> (i1) {
+  %cmp = scalar.cmpi eq, %lhs, %rhs : i64
+  func.return %cmp : i1
+}
+
+// ====
+
+func.def @scalar_i64_compare_ne_scc(%lhs: i64, %rhs: i64) -> (i1) {
+  %cmp = scalar.cmpi ne, %lhs, %rhs : i64
+  func.return %cmp : i1
+}
+
+// ====
+
+func.def @scalar_i64_compare_slt_return(%lhs: i64, %rhs: i64) -> (i1) {
+  %cmp = scalar.cmpi slt, %lhs, %rhs : i64
+  func.return %cmp : i1
+}
+
+// ====
+
+func.def @scalar_i64_compare_slt_if(%lhs: i64, %rhs: i64, %then_value: i32, %else_value: i32) -> (i32) {
+  %cmp = scalar.cmpi slt, %lhs, %rhs : i64
+  %result = scf.if %cmp -> (i32) {
+    scf.yield %then_value : i32
+  } else {
+    scf.yield %else_value : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+func.def @scalar_i64_compare_constant_select(%lhs: i64, %true_value: f32, %false_value: f32) -> (f32) {
+  %limit = scalar.constant 4294967296 : i64
+  %cmp = scalar.cmpi ult, %lhs, %limit : i64
+  %result = scf.select %cmp, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @scalar_i64_compare_all_predicates_vgpr_select(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>, %true_value: f32, %false_value: f32) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32, f32) {
+  %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
+  %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  %eq_result = scf.select %eq, %true_value, %false_value : f32
+  %ne_result = scf.select %ne, %true_value, %false_value : f32
+  %slt_result = scf.select %slt, %true_value, %false_value : f32
+  %sle_result = scf.select %sle, %true_value, %false_value : f32
+  %sgt_result = scf.select %sgt, %true_value, %false_value : f32
+  %sge_result = scf.select %sge, %true_value, %false_value : f32
+  %ult_result = scf.select %ult, %true_value, %false_value : f32
+  %ule_result = scf.select %ule, %true_value, %false_value : f32
+  %ugt_result = scf.select %ugt, %true_value, %false_value : f32
+  %uge_result = scf.select %uge, %true_value, %false_value : f32
+  func.return %eq_result, %ne_result, %slt_result, %sle_result, %sgt_result, %sge_result, %ult_result, %ule_result, %ugt_result, %uge_result : f32, f32, f32, f32, f32, f32, f32, f32, f32, f32
+}

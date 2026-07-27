@@ -51,8 +51,9 @@ typedef struct iree_hal_amdgpu_aql_program_t {
   uint32_t max_block_kernarg_length;
 } iree_hal_amdgpu_aql_program_t;
 
-// Releases all blocks in |program| back to its block pool.
-void iree_hal_amdgpu_aql_program_release(
+// Deinitializes |program|, returning all blocks to its block pool and clearing
+// it.
+void iree_hal_amdgpu_aql_program_deinitialize(
     iree_hal_amdgpu_aql_program_t* program);
 
 // Returns the block following |block| in program order.
@@ -168,6 +169,11 @@ iree_status_t iree_hal_amdgpu_aql_program_builder_append_command(
 void iree_hal_amdgpu_aql_program_builder_set_pending_barrier_scopes(
     iree_hal_amdgpu_aql_program_builder_t* builder, uint8_t acquire_scope,
     uint8_t release_scope);
+
+// ORs |flags| into the current block header.
+void iree_hal_amdgpu_aql_program_builder_or_current_block_flags(
+    iree_hal_amdgpu_aql_program_builder_t* builder,
+    iree_hal_amdgpu_command_buffer_block_flags_t flags);
 
 #ifdef __cplusplus
 }  // extern "C"

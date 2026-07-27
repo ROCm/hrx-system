@@ -1,0 +1,61 @@
+// RUN: pass-report target-legalize{mode=final},dce,canonicalize,source-to-low,low-dce
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @report_f32_table_lookup_i32_ladder(%codes: vector<2xi32>) -> (vector<2xf32>) {
+  %g0 = scalar.constant 2.0 : f32
+  %g1 = scalar.constant -3.0 : f32
+  %g2 = scalar.constant 5.0 : f32
+  %grid = vector.from_elements %g0, %g1, %g2 : vector<3xf32>
+  %decoded = vector.table.lookup %grid[%codes] : vector<3xf32>, vector<2xi32> -> vector<2xf32>
+  func.return %decoded : vector<2xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=5 emitted_ops=18 rows=5
+COMPILE-REPORT: source_low[0] function=report_f32_table_lookup_i32_ladder source_op=scalar.constant selection=plan plan=597 emitted_ops=1
+COMPILE-REPORT: source_low[1] function=report_f32_table_lookup_i32_ladder source_op=scalar.constant selection=plan plan=597 emitted_ops=1
+COMPILE-REPORT: source_low[2] function=report_f32_table_lookup_i32_ladder source_op=scalar.constant selection=plan plan=597 emitted_ops=1
+COMPILE-REPORT: source_low[3] function=report_f32_table_lookup_i32_ladder source_op=vector.from_elements selection=plan plan=3591 emitted_ops=1
+COMPILE-REPORT: source_low[4] function=report_f32_table_lookup_i32_ladder source_op=vector.table.lookup selection=plan plan=3600 plan_key=amdgpu.table_lookup.strategy.f32_ladder emitted_ops=14
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @report_i8_table_lookup_permute(%grid: vector<4xi8>) -> (vector<4xi8>) {
+  %c0 = scalar.constant 0 : i8
+  %c1 = scalar.constant 1 : i8
+  %c2 = scalar.constant 2 : i8
+  %c3 = scalar.constant 3 : i8
+  %codes = vector.from_elements %c2, %c0, %c3, %c1 : vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<4xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=6 emitted_ops=2 rows=6
+COMPILE-REPORT: source_low[0] function=report_i8_table_lookup_permute source_op=scalar.constant selection=plan plan=597 emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_i8_table_lookup_permute source_op=scalar.constant selection=plan plan=597 emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_i8_table_lookup_permute source_op=scalar.constant selection=plan plan=597 emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_i8_table_lookup_permute source_op=scalar.constant selection=plan plan=597 emitted_ops=0
+COMPILE-REPORT: source_low[4] function=report_i8_table_lookup_permute source_op=vector.from_elements selection=plan plan=3591 emitted_ops=1
+COMPILE-REPORT: source_low[5] function=report_i8_table_lookup_permute source_op=vector.table.lookup selection=plan plan=3600 plan_key=amdgpu.table_lookup.strategy.packed_i8_permute emitted_ops=1
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @report_i8_table_lookup_u4_permute(%grid: vector<16xi8>, %packed: vector<2xi8>) -> (vector<4xi8>) {
+  %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=2 emitted_ops=18 rows=2
+COMPILE-REPORT: source_low[0] function=report_i8_table_lookup_u4_permute source_op=vector.bitunpacku selection=plan plan=3721 emitted_ops=7
+COMPILE-REPORT: source_low[1] function=report_i8_table_lookup_u4_permute source_op=vector.table.lookup selection=plan plan=3600 plan_key=amdgpu.table_lookup.strategy.packed_i8_u4_permute emitted_ops=11

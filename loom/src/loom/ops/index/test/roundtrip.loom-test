@@ -1,0 +1,60 @@
+// RUN: roundtrip
+
+func.def @index_arithmetic(%i: index, %j: index, %cond: i1) -> (index, index, index, index, i1, i64) {
+  %c4 = index.constant 4 : index
+  %add = index.add %i, %c4 : index
+  %mul = index.mul %add, %j : index
+  %madd = index.madd %i, %c4, %mul : index
+  %div = index.div %madd, %c4 : index
+  %rem = index.rem %madd, %c4 : index
+  %min = index.min %div, %rem : index
+  %max = index.max %div, %rem : index
+  %cmp = index.cmp slt, %madd, %j : index
+  %sel = scf.select %cond, %madd, %j : index
+  %payload = index.cast %sel : index to i64
+  func.return %div, %rem, %min, %max, %cmp, %payload : index, index, index, index, i1, i64
+}
+
+// ====
+
+func.def @index_bitwise(%x: index, %y: index) -> (index, index, index, index, index, index, index, index, index, index, index) {
+  %and = index.andi %x, %y : index
+  %or = index.ori %x, %y : index
+  %xor = index.xori %x, %y : index
+  %shl = index.shli %x, %y : index
+  %shrs = index.shrsi %x, %y : index
+  %shru = index.shrui %x, %y : index
+  %rotl = index.rotli %x, %y : index
+  %rotr = index.rotri %x, %y : index
+  %clz = index.ctlzi %x : index
+  %ctz = index.cttzi %x : index
+  %pop = index.ctpopi %x : index
+  func.return %and, %or, %xor, %shl, %shrs, %shru, %rotl, %rotr, %clz, %ctz, %pop : index, index, index, index, index, index, index, index, index, index, index
+}
+
+// ====
+
+func.def @address_boundary(%raw: i64, %i: index, %byte_offset: offset) -> (index, offset, i64) {
+  %base = index.constant 0 : offset
+  %from_raw = index.cast %raw : i64 to index
+  %bytes = index.cast %raw : i64 to offset
+  %payload = index.cast %byte_offset : offset to i64
+  func.return %from_raw, %bytes, %payload : index, offset, i64
+}
+
+// ====
+
+func.def @offset_address_ops(%base: offset, %delta: offset, %limit: offset, %cond: i1) -> (offset, i1) {
+  %sum = index.add %base, %delta : offset
+  %back = index.sub %sum, %delta : offset
+  %inside = index.cmp ule, %back, %limit : offset
+  %selected = scf.select %cond, %back, %limit : offset
+  func.return %selected, %inside : offset, i1
+}
+
+// ====
+
+func.def @index_assume(%n: index, %base: offset) -> (index, offset) {
+  %n2, %base2 = index.assume %n, %base [mul(%n, 16), mul(%base, 64)] : index, offset
+  func.return %n2, %base2 : index, offset
+}

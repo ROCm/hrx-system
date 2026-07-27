@@ -103,8 +103,11 @@ static int kernel_sum_constants(
     const iree_hal_executable_dispatch_state_v0_t* dispatch_state,
     const iree_hal_executable_workgroup_state_v0_t* workgroup_state) {
   uint32_t sum = 0;
-  for (uint16_t i = 0; i < dispatch_state->constant_count; ++i) {
-    sum += dispatch_state->constants[i];
+  const uint32_t* constants =
+      reinterpret_cast<const uint32_t*>(dispatch_state->constants.data);
+  for (size_t i = 0;
+       i < dispatch_state->constants.data_length / sizeof(uint32_t); ++i) {
+    sum += constants[i];
   }
   iree_atomic_int32_t* output =
       reinterpret_cast<iree_atomic_int32_t*>(dispatch_state->binding_ptrs[0]);

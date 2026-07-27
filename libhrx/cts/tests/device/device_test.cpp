@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <cstring>
 
 #include "hrx_test_fixture.hpp"
@@ -31,6 +32,19 @@ TEST_CASE_METHOD(HrxTestFixture,
   REQUIRE_OK(hrx().device_get_property(
       device_, HRX_DEVICE_PROPERTY_ARCHITECTURE, arch, sizeof(arch)));
   REQUIRE(strncmp(arch, "gfx", 3) == 0);
+}
+
+TEST_CASE_METHOD(HrxTestFixture, "GPU device reports total memory",
+                 "[device][gpu]") {
+  if (!is_gpu()) {
+    SKIP("GPU total memory is only validated on GPU devices");
+  }
+
+  uint64_t total_memory = 0;
+  REQUIRE_OK(hrx().device_get_property(device_,
+                                       HRX_DEVICE_PROPERTY_TOTAL_MEMORY,
+                                       &total_memory, sizeof(total_memory)));
+  REQUIRE(total_memory > 0);
 }
 
 TEST_CASE_METHOD(HrxTestFixture, "Device get_type matches accelerator",

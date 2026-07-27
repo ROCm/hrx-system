@@ -10,6 +10,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/amdgpu/abi/tsan.h"
 #include "iree/hal/drivers/amdgpu/aql_prepublished_kernarg_storage.h"
 #include "iree/hal/drivers/amdgpu/aql_program_builder.h"
 #include "iree/hal/drivers/amdgpu/profile_metadata.h"
@@ -29,6 +30,8 @@ iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
     iree_hal_command_category_t command_categories,
     iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
     iree_host_size_t device_ordinal,
+    iree_host_size_t queue_count_per_physical_device,
+    uint32_t tsan_shadow_slot_count,
     iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
         prepublished_kernarg_storage,
     iree_hal_amdgpu_profile_metadata_registry_t* profile_metadata,
@@ -55,7 +58,7 @@ typedef struct iree_hal_amdgpu_aql_command_buffer_dispatch_summary_t {
   } packets;
   // Correlation metadata used by profiling, timestamps, and diagnostics.
   struct {
-    // Session-local profile executable id used for event attribution.
+    // Logical-device-local executable id used for event attribution.
     uint64_t executable_id;
     // Program-global command index used for profiling/source attribution.
     uint32_t command_index;
@@ -82,6 +85,11 @@ const iree_hal_amdgpu_aql_program_t* iree_hal_amdgpu_aql_command_buffer_program(
 
 // Returns the physical device ordinal this command buffer was recorded for.
 iree_host_size_t iree_hal_amdgpu_aql_command_buffer_device_ordinal(
+    iree_hal_command_buffer_t* command_buffer);
+
+// Returns the number of physical queues covered by recorded queue-scoped
+// executable tables.
+uint32_t iree_hal_amdgpu_aql_command_buffer_queue_count_per_physical_device(
     iree_hal_command_buffer_t* command_buffer);
 
 // Returns the producer-local profile command-buffer id, or 0 when recording

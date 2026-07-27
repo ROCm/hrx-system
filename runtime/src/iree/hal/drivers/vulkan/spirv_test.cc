@@ -654,6 +654,102 @@ TEST(SpirvTest, VerifiesBdaRootPushConstantLayout) {
   };
   IREE_ASSERT_OK(iree_hal_vulkan_spirv_verify_bda_root_push_constant_layout(
       kBdaRootModule, IREE_ARRAYSIZE(kBdaRootModule)));
+
+  static constexpr uint32_t kBdaRootWithConstantsModule[] = {
+      0x07230203u,
+      0x00010600u,
+      0u,
+      20u,
+      0u,
+      // Declares OpTypeInt %1 64 0.
+      0x00040015u,
+      1u,
+      64u,
+      0u,
+      // Declares OpTypeInt %2 32 0.
+      0x00040015u,
+      2u,
+      32u,
+      0u,
+      // Declares OpConstant %2 %3 2.
+      0x0004002bu,
+      2u,
+      3u,
+      2u,
+      // Declares OpTypeArray %4 %2 %3.
+      0x0004001cu,
+      4u,
+      2u,
+      3u,
+      // Declares OpTypeStruct %5 %1 %1 %2 %2 %2 %2 %4.
+      0x0009001eu,
+      5u,
+      1u,
+      1u,
+      2u,
+      2u,
+      2u,
+      2u,
+      4u,
+      // Declares OpTypePointer %6 PushConstant %5.
+      0x00040020u,
+      6u,
+      9u,
+      5u,
+      // Declares OpVariable %7 in PushConstant storage class.
+      0x0004003bu,
+      6u,
+      7u,
+      9u,
+      // Declares OpDecorate %4 ArrayStride 4.
+      0x00040047u,
+      4u,
+      6u,
+      4u,
+      // Declares OpDecorate %5 Block.
+      0x00030047u,
+      5u,
+      2u,
+      // Declares BDA root member offsets and a trailing constants array.
+      0x00050048u,
+      5u,
+      0u,
+      35u,
+      0u,
+      0x00050048u,
+      5u,
+      1u,
+      35u,
+      8u,
+      0x00050048u,
+      5u,
+      2u,
+      35u,
+      16u,
+      0x00050048u,
+      5u,
+      3u,
+      35u,
+      20u,
+      0x00050048u,
+      5u,
+      4u,
+      35u,
+      24u,
+      0x00050048u,
+      5u,
+      5u,
+      35u,
+      28u,
+      0x00050048u,
+      5u,
+      6u,
+      35u,
+      32u,
+  };
+  IREE_ASSERT_OK(iree_hal_vulkan_spirv_verify_bda_root_push_constant_layout(
+      kBdaRootWithConstantsModule,
+      IREE_ARRAYSIZE(kBdaRootWithConstantsModule)));
   IREE_EXPECT_STATUS_IS(
       StatusCode::kInvalidArgument,
       iree_hal_vulkan_spirv_verify_bda_root_push_constant_layout(
@@ -797,7 +893,7 @@ TEST(SpirvTest, ParsesBdaDispatchMetadata) {
   std::vector<uint32_t> module = MakeBdaMetadataModule({
       "iree.vulkan.bda.v1",
       "iree.vulkan.bda.v1.bindings=2",
-      "iree.vulkan.bda.v1.constants=3",
+      "iree.vulkan.bda.v1.constant_length=12",
       "iree.vulkan.bda.v1.constant_offset=48",
       "iree.vulkan.bda.v1.binding.1=16,64",
   });
@@ -809,7 +905,8 @@ TEST(SpirvTest, ParsesBdaDispatchMetadata) {
   EXPECT_EQ(0u, metadata.root_push_constant_offset);
   EXPECT_EQ(32u, metadata.root_push_constant_length);
   EXPECT_EQ(48u, metadata.constant_push_constant_offset);
-  EXPECT_EQ(3u, metadata.constant_count);
+  EXPECT_EQ(12u, metadata.constant_byte_length);
+  EXPECT_TRUE(metadata.binding_count_known);
   EXPECT_EQ(2u, metadata.binding_count);
   ASSERT_EQ(2u, metadata.binding_requirement_count);
   EXPECT_EQ(1u, metadata.binding_requirements[0].minimum_alignment);

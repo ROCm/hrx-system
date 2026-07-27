@@ -1,0 +1,27 @@
+amdgpu.target<gfx1100> @gfx1100_target
+
+kernel.def target(@gfx1100_target) export("selected_store_i32") @selected_store_i32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %value = scalar.constant 42 : i32
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
+  view.store %value, %view[%zero_index] : i32, view<1xi32, #dense>
+  kernel.return
+}
+
+kernel.def export("unselected_targetless_store_i32") @unselected_targetless_store_i32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %value = scalar.constant 7 : i32
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
+  view.store %value, %view[%zero_index] : i32, view<1xi32, #dense>
+  kernel.return
+}

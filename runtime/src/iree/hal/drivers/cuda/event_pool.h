@@ -47,11 +47,11 @@ void iree_hal_cuda_event_release(iree_hal_cuda_event_t* event);
 // Thread-safe; multiple threads may acquire and release events from the pool.
 typedef struct iree_hal_cuda_event_pool_t iree_hal_cuda_event_pool_t;
 
-// Allocates a new event pool with up to |available_capacity| events.
+// Creates a new event pool with up to |available_capacity| events.
 //
 // Extra events requested beyond the capability are directly created and
 // destroyed without pooling.
-iree_status_t iree_hal_cuda_event_pool_allocate(
+iree_status_t iree_hal_cuda_event_pool_create(
     const iree_hal_cuda_dynamic_symbols_t* symbols,
     iree_host_size_t available_capacity, iree_allocator_t host_allocator,
     iree_hal_cuda_event_pool_t** out_event_pool);

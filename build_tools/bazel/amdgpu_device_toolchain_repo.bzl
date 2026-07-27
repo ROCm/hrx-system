@@ -23,6 +23,7 @@ _STUB_PATHS = """\
 AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE = False
 AMDGPU_DEVICE_TOOLCHAIN_ERROR = "AMDGPU device binary source mode requires --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm, llvm-tools, llvm-project, or auto."
 AMDGPU_CLANG_TOOL = ""
+AMDGPU_LLVM_AR_TOOL = ""
 AMDGPU_LLVM_LINK_TOOL = ""
 AMDGPU_LLD_TOOL = ""
 AMDGPU_LLVM_OBJCOPY_TOOL = ""
@@ -79,6 +80,11 @@ prebuilt_tool(
 )
 
 prebuilt_tool(
+    name = "llvm-ar",
+    src = "bin/llvm-ar",
+)
+
+prebuilt_tool(
     name = "llvm-link",
     src = "bin/llvm-link",
 )
@@ -110,6 +116,7 @@ _LOCAL_PATHS_TEMPLATE = """\
 AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE = True
 AMDGPU_DEVICE_TOOLCHAIN_ERROR = ""
 AMDGPU_CLANG_TOOL = "@iree_amdgpu_device_toolchain//:clang"
+AMDGPU_LLVM_AR_TOOL = "@iree_amdgpu_device_toolchain//:llvm-ar"
 AMDGPU_LLVM_LINK_TOOL = "@iree_amdgpu_device_toolchain//:llvm-link"
 AMDGPU_LLD_TOOL = "@iree_amdgpu_device_toolchain//:lld"
 AMDGPU_LLVM_OBJCOPY_TOOL = "@iree_amdgpu_device_toolchain//:llvm-objcopy"
@@ -129,6 +136,11 @@ package(default_visibility = ["//visibility:public"])
 alias(
     name = "clang",
     actual = "@llvm-project//clang:clang",
+)
+
+alias(
+    name = "llvm-ar",
+    actual = "@llvm-project//llvm:llvm-ar",
 )
 
 alias(
@@ -153,6 +165,7 @@ _LLVM_PROJECT_PATHS = """\
 AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE = True
 AMDGPU_DEVICE_TOOLCHAIN_ERROR = ""
 AMDGPU_CLANG_TOOL = "@iree_amdgpu_device_toolchain//:clang"
+AMDGPU_LLVM_AR_TOOL = "@iree_amdgpu_device_toolchain//:llvm-ar"
 AMDGPU_LLVM_LINK_TOOL = "@iree_amdgpu_device_toolchain//:llvm-link"
 AMDGPU_LLD_TOOL = "@iree_amdgpu_device_toolchain//:lld"
 AMDGPU_LLVM_OBJCOPY_TOOL = "@iree_amdgpu_device_toolchain//:llvm-objcopy"
@@ -308,6 +321,31 @@ def _clang_tool_candidates(repository_ctx, clang, names):
             ])
     return candidates
 
+def _detect_clang_resource_dir(repository_ctx, clang):
+    result = repository_ctx.execute([clang, "-print-resource-dir"], quiet = True)
+    if result.return_code != 0:
+        fail("Failed to query clang resource directory from {}:\n{}".format(
+            clang,
+            result.stderr,
+        ))
+    resource_dir = result.stdout.strip()
+    if not resource_dir:
+        fail("clang resource directory query returned an empty path from {}".format(clang))
+    return resource_dir
+
+def _select_invocable_clang(repository_ctx, clang):
+    resource_dir = _detect_clang_resource_dir(repository_ctx, clang)
+    resource_version = _basename(resource_dir)
+    if not resource_version:
+        return clang
+    clang_basename = _basename(clang)
+    if clang_basename.endswith("-" + resource_version):
+        return clang
+    versioned_clang = _join_path(_dirname(clang), clang_basename + "-" + resource_version)
+    if _is_executable(repository_ctx, versioned_clang):
+        return str(repository_ctx.path(versioned_clang))
+    return clang
+
 def _detect_clang_resource_include(repository_ctx, clang):
     explicit = repository_ctx.getenv("IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_RESOURCE_INCLUDE")
     if not explicit:
@@ -318,19 +356,19 @@ def _detect_clang_resource_include(repository_ctx, clang):
             fail("Configured clang resource include directory does not exist: {}".format(explicit))
         return str(path)
 
-    result = repository_ctx.execute([clang, "-print-resource-dir"], quiet = True)
-    if result.return_code != 0:
-        fail("Failed to query clang resource directory from {}:\n{}".format(
-            clang,
-            result.stderr,
-        ))
-    include_dir = _join_path(result.stdout.strip(), "include")
+    include_dir = _join_path(_detect_clang_resource_dir(repository_ctx, clang), "include")
     path = repository_ctx.path(include_dir)
     if not path.exists:
         fail("clang resource include directory does not exist: {}".format(include_dir))
     return str(path)
 
+def _validate_clang_resource_include(repository_ctx, clang_resource_include):
+    marker = _join_path(clang_resource_include, "stddef.h")
+    if not repository_ctx.path(marker).exists:
+        fail("clang resource include marker does not exist: {}".format(marker))
+
 def _write_local_toolchain_repo(repository_ctx, tools, clang_resource_include):
+    _validate_clang_resource_include(repository_ctx, clang_resource_include)
     repository_ctx.file("prebuilt_tool.bzl", _PREBUILT_TOOL_BZL)
     repository_ctx.file("bin/.keep", "")
     for name, path in tools.items():
@@ -368,6 +406,15 @@ def _amdgpu_device_toolchain_repo_impl(repository_ctx):
         ["IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY", "IREE_CLANG_BINARY", "CLANG"],
         "clang with AMDGPU support",
     )
+    clang = _select_invocable_clang(repository_ctx, clang)
+    llvm_ar = _find_tool(
+        repository_ctx,
+        ["llvm-ar"],
+        tool_dirs,
+        ["IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_AR_BINARY", "IREE_LLVM_AR_BINARY", "LLVM_AR"],
+        "llvm-ar",
+        additional_candidates = _clang_tool_candidates(repository_ctx, clang, ["llvm-ar"]),
+    )
     llvm_link = _find_tool(
         repository_ctx,
         ["llvm-link"],
@@ -398,8 +445,9 @@ def _amdgpu_device_toolchain_repo_impl(repository_ctx):
         repository_ctx,
         {
             "clang": clang,
-            "llvm-link": llvm_link,
             "lld": lld,
+            "llvm-ar": llvm_ar,
+            "llvm-link": llvm_link,
             "llvm-objcopy": llvm_objcopy,
         },
         clang_resource_include,
@@ -414,6 +462,7 @@ amdgpu_device_toolchain_repo = repository_rule(
         "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY",
         "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_RESOURCE_INCLUDE",
         "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLD_BINARY",
+        "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_AR_BINARY",
         "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_LINK_BINARY",
         "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_OBJCOPY_BINARY",
         "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_TOOLS_DIR",
@@ -425,6 +474,7 @@ amdgpu_device_toolchain_repo = repository_rule(
         "IREE_HOST_TOOLS_DIR",
         "IREE_BINARY_DIR",
         "IREE_LLD_BINARY",
+        "IREE_LLVM_AR_BINARY",
         "IREE_LLVM_LINK_BINARY",
         "IREE_LLVM_OBJCOPY_BINARY",
         "IREE_LLVM_TOOL_DIR",
@@ -432,6 +482,7 @@ amdgpu_device_toolchain_repo = repository_rule(
         "IREE_ROCM_PATH",
         "LD_LLD",
         "LLD",
+        "LLVM_AR",
         "LLVM_BINARY_DIR",
         "LLVM_LINK",
         "LLVM_OBJCOPY",

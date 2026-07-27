@@ -63,7 +63,7 @@ static iree_status_t iree_hal_needs_wait_test_pool_acquire_reservation(
       &pool->wait_frontier, iree_async_axis_make_queue(1, 2, 3, 4), 42);
   memset(out_reservation, 0, sizeof(*out_reservation));
   out_reservation->offset = 128;
-  out_reservation->length = size;
+  out_reservation->byte_length = size;
   out_reservation->block_handle = 0xB10Cu;
   out_reservation->slab_index = 7;
   memset(out_info, 0, sizeof(*out_info));
@@ -266,7 +266,7 @@ TEST(PoolAllocateBufferTest,
   EXPECT_EQ(buffer, nullptr);
   EXPECT_FALSE(concrete_pool->wrap_called);
   EXPECT_EQ(concrete_pool->released_reservation.offset, 128u);
-  EXPECT_EQ(concrete_pool->released_reservation.length, 4096u);
+  EXPECT_EQ(concrete_pool->released_reservation.byte_length, 4096u);
   EXPECT_EQ(concrete_pool->released_reservation.block_handle, 0xB10Cu);
   EXPECT_EQ(concrete_pool->released_reservation.slab_index, 7u);
   EXPECT_EQ(concrete_pool->released_frontier,

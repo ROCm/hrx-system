@@ -80,6 +80,130 @@ static iree_hal_profile_sink_t* CountingProfileSinkAsBase(
   return reinterpret_cast<iree_hal_profile_sink_t*>(sink);
 }
 
+TEST(DeviceSpecTest, MockDeviceExposesCachedSpec) {
+  iree_hal_mock_device_options_t mock_options;
+  iree_hal_mock_device_options_initialize(&mock_options);
+  mock_options.identifier = IREE_SV("mock0");
+
+  iree_hal_device_t* device = NULL;
+  IREE_ASSERT_OK(iree_hal_mock_device_create(&mock_options,
+                                             iree_allocator_system(), &device));
+
+  const iree_hal_device_spec_t* spec = iree_hal_device_spec(device);
+  ASSERT_NE(spec, nullptr);
+  EXPECT_EQ(spec, iree_hal_device_spec(device));
+
+  const iree_hal_device_identity_spec_t* identity =
+      iree_hal_device_spec_identity(spec);
+  ASSERT_NE(identity, nullptr);
+  EXPECT_TRUE(
+      iree_string_view_equal(identity->logical_device_id, IREE_SV("mock0")));
+  EXPECT_TRUE(iree_string_view_equal(identity->display_name, IREE_SV("mock0")));
+  EXPECT_TRUE(iree_string_view_equal(identity->driver_id, IREE_SV("mock")));
+  EXPECT_TRUE(iree_string_view_equal(identity->backend_id, IREE_SV("mock")));
+
+  iree_hal_device_release(device);
+}
+
+TEST(DeviceSpecTest, MockDeviceAdvertisesEnabledExecutableTarget) {
+  iree_hal_mock_device_options_t mock_options;
+  iree_hal_mock_device_options_initialize(&mock_options);
+  mock_options.executable_loading_enabled = true;
+
+  iree_hal_device_t* device = NULL;
+  IREE_ASSERT_OK(iree_hal_mock_device_create(&mock_options,
+                                             iree_allocator_system(), &device));
+
+  const iree_hal_executable_target_selection_t selection = {
+      /*.family=*/IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY),
+      /*.target_key=*/IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY),
+      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_VIRTUAL,
+  };
+  const iree_hal_executable_target_selection_result_t result =
+      iree_hal_device_spec_select_executable_target(
+          iree_hal_device_spec(device), &selection);
+  ASSERT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
+            result.outcome);
+  ASSERT_NE(nullptr, result.target);
+  EXPECT_EQ(1ull, result.target->physical_device_affinity);
+
+  iree_hal_device_release(device);
+}
+
+TEST(DeviceObservationTest, RejectsUnknownObservationFlags) {
+  iree_hal_mock_device_options_t mock_options;
+  iree_hal_mock_device_options_initialize(&mock_options);
+
+  iree_hal_device_t* device = NULL;
+  IREE_ASSERT_OK(iree_hal_mock_device_create(&mock_options,
+                                             iree_allocator_system(), &device));
+  EXPECT_EQ(
+      IREE_HAL_DEVICE_SANITIZER_FLAG_NONE,
+      iree_hal_device_spec_sanitizer(iree_hal_device_spec(device))->flags);
+
+  iree_hal_device_observation_t observation = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_device_sample_observation(
+          device, static_cast<iree_hal_device_observation_flags_t>(1ull << 63),
+          &observation));
+
+  iree_hal_device_release(device);
+}
+
+TEST(DeviceObservationTest, MinimalSpecLeavesMemoryUnprovided) {
+  iree_hal_mock_device_options_t mock_options;
+  iree_hal_mock_device_options_initialize(&mock_options);
+
+  iree_hal_device_t* device = NULL;
+  IREE_ASSERT_OK(iree_hal_mock_device_create(&mock_options,
+                                             iree_allocator_system(), &device));
+
+  iree_hal_device_observation_t observation = {};
+  IREE_ASSERT_OK(iree_hal_device_sample_observation(
+      device, IREE_HAL_DEVICE_OBSERVATION_FLAG_MEMORY, &observation));
+  EXPECT_EQ(IREE_HAL_DEVICE_OBSERVATION_FLAG_MEMORY,
+            observation.requested_flags);
+  EXPECT_EQ(IREE_HAL_DEVICE_OBSERVATION_FLAG_NONE, observation.provided_flags);
+  EXPECT_EQ(IREE_HAL_DEVICE_MEMORY_OBSERVATION_FLAG_NONE,
+            observation.memory.flags);
+
+  iree_hal_device_release(device);
+}
+
+TEST(DeviceObservationTest, MinimalSpecLeavesSanitizerUnprovided) {
+  iree_hal_mock_device_options_t mock_options;
+  iree_hal_mock_device_options_initialize(&mock_options);
+
+  iree_hal_device_t* device = NULL;
+  IREE_ASSERT_OK(iree_hal_mock_device_create(&mock_options,
+                                             iree_allocator_system(), &device));
+
+  iree_hal_device_observation_t observation = {};
+  IREE_ASSERT_OK(iree_hal_device_sample_observation(
+      device, IREE_HAL_DEVICE_OBSERVATION_FLAG_SANITIZER, &observation));
+  EXPECT_EQ(IREE_HAL_DEVICE_OBSERVATION_FLAG_SANITIZER,
+            observation.requested_flags);
+  EXPECT_EQ(IREE_HAL_DEVICE_OBSERVATION_FLAG_NONE, observation.provided_flags);
+  EXPECT_EQ(IREE_HAL_DEVICE_ASAN_OBSERVATION_FLAG_NONE,
+            observation.sanitizer.asan.flags);
+
+  iree_hal_device_release(device);
+}
+
+TEST(DeviceCreateParamsTest, DefaultParamsIncludeDiscardEventSink) {
+  iree_hal_device_create_params_t params =
+      iree_hal_device_create_params_default();
+  EXPECT_TRUE(iree_hal_device_event_sink_is_valid(params.event_sink));
+  EXPECT_EQ(IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_NONE, params.runtime_features);
+}
+
+TEST(DeviceCreateParamsTest, VerifyRejectsZeroedParams) {
+  iree_hal_device_create_params_t params = {0};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_device_create_params_verify(&params));
+}
+
 class DeviceProfilingTest : public ::testing::Test {
  protected:
   void SetUp() override {

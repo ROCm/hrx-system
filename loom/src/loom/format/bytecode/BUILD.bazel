@@ -1,0 +1,212 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_benchmark", "loom_cc_fuzz", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "varint",
+    srcs = ["varint.c"],
+    hdrs = ["varint.h"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "varint_test",
+    srcs = ["varint_test.cc"],
+    deps = [
+        ":varint",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "diagnostic",
+    srcs = ["diagnostic.c"],
+    hdrs = ["diagnostic.h"],
+    deps = [
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:error_defs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "diagnostic_test",
+    srcs = ["diagnostic_test.cc"],
+    deps = [
+        ":diagnostic",
+        "//loom/src/loom/error:json_sink",
+        "//loom/src/loom/error:renderer",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "format",
+    hdrs = ["format.h"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "reader",
+    srcs = ["reader.c"],
+    hdrs = ["reader.h"],
+    deps = [
+        ":diagnostic",
+        ":format",
+        ":varint",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_test(
+    name = "reader_test",
+    srcs = ["reader_test.cc"],
+    deps = [
+        ":format",
+        ":reader",
+        ":varint",
+        ":writer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "reader_corpus_test",
+    srcs = ["reader_corpus_test.cc"],
+    deps = [
+        ":reader",
+        ":writer",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:low_descriptor_registry_core_test",
+        "//loom/src/loom/test/corpus/text:golden_text_corpus",
+        "//loom/src/loom/testing:context",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "writer",
+    srcs = ["writer.c"],
+    hdrs = ["writer.h"],
+    deps = [
+        ":format",
+        ":varint",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_test(
+    name = "writer_test",
+    srcs = ["writer_test.cc"],
+    deps = [
+        ":format",
+        ":varint",
+        ":writer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_fuzz(
+    name = "reader_fuzz",
+    srcs = ["reader_fuzz.cc"],
+    deps = [
+        ":reader",
+        ":writer",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/testing:context",
+        "//loom/src/loom/testing:gen",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_fuzz(
+    name = "writer_fuzz",
+    srcs = ["writer_fuzz.cc"],
+    deps = [
+        ":writer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/testing:gen",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "reader_benchmark",
+    srcs = ["reader_benchmark.cc"],
+    deps = [
+        ":reader",
+        ":writer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/testing:gen",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "varint_benchmark",
+    srcs = ["varint_benchmark.cc"],
+    deps = [
+        ":varint",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)

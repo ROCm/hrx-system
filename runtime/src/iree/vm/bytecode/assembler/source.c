@@ -9,7 +9,7 @@
 #include <ctype.h>
 
 bool iree_vm_bytecode_assembler_string_view_is_empty(iree_string_view_t value) {
-  return value.data == NULL || value.size == 0;
+  return iree_string_view_is_empty(value);
 }
 
 bool iree_vm_bytecode_assembler_string_view_equal_cstring(

@@ -90,7 +90,7 @@ static iree_hal_device_group_t* CreateMockExecutableDeviceGroup() {
   iree_hal_mock_device_options_t options;
   iree_hal_mock_device_options_initialize(&options);
   options.identifier = iree_make_cstring_view("mock-executable-device");
-  options.executable_cache_enabled = true;
+  options.executable_loading_enabled = true;
 
   iree_hal_device_t* device = nullptr;
   IREE_CHECK_OK(
@@ -165,35 +165,66 @@ static iree_status_t RecordReplayScopeEvent(
   return iree_ok_status();
 }
 
-static std::vector<uint8_t> MakeMockExecutableData(uint8_t constant_count,
-                                                   uint8_t binding_count,
-                                                   uint8_t workgroup_size_x) {
+typedef struct MockExecutableFunctionRecord {
+  // Number of 32-bit constant words reflected for the function.
+  uint8_t constant_count;
+  // Number of buffer bindings reflected for the function.
+  uint8_t binding_count;
+  // Executable function flags byte.
+  uint8_t flags;
+  // Static workgroup size reflected for the function.
+  uint8_t workgroup_size[3];
+  // Byte length of the function name in the trailing name storage.
+  uint8_t name_length;
+  // Native ABI byte offset for one optional reflected buffer binding.
+  uint8_t native_abi_offset;
+  // Native ABI byte size for the optional reflected buffer binding.
+  uint16_t parameter_size;
+} MockExecutableFunctionRecord;
+
+static_assert(sizeof(MockExecutableFunctionRecord) == 10);
+
+static std::vector<uint8_t> MakeMockExecutableData(
+    uint8_t constant_count, uint8_t binding_count, uint8_t workgroup_size_x,
+    uint8_t native_abi_offset = 0, uint16_t parameter_size = 0) {
   const char name[] = "main";
-  std::vector<uint8_t> data(12 + sizeof(name) - 1, 0);
+  if (native_abi_offset != 0 && parameter_size == 0) {
+    parameter_size = sizeof(void*);
+  }
+  std::vector<uint8_t> data(
+      4 + sizeof(MockExecutableFunctionRecord) + sizeof(name) - 1, 0);
   const uint32_t function_count = 1;
   std::memcpy(data.data(), &function_count, sizeof(function_count));
-  data[4] = constant_count;
-  data[5] = binding_count;
-  data[6] = 0;  // flags
-  data[7] = workgroup_size_x;
-  data[8] = 1;
-  data[9] = 1;
-  data[10] = sizeof(name) - 1;
-  std::memcpy(data.data() + 12, name, sizeof(name) - 1);
+  const MockExecutableFunctionRecord record = {
+      /*.constant_count=*/constant_count,
+      /*.binding_count=*/binding_count,
+      /*.flags=*/0,
+      /*.workgroup_size=*/{workgroup_size_x, 1, 1},
+      /*.name_length=*/sizeof(name) - 1,
+      /*.native_abi_offset=*/native_abi_offset,
+      /*.parameter_size=*/parameter_size,
+  };
+  std::memcpy(data.data() + 4, &record, sizeof(record));
+  std::memcpy(data.data() + 4 + sizeof(record), name, sizeof(name) - 1);
   return data;
 }
 
 typedef struct MockExecutableFunction {
+  // Function name stored in the executable's trailing name storage.
   const char* name;
+  // Number of 32-bit constant words reflected for the function.
   uint8_t constant_count;
+  // Number of buffer bindings reflected for the function.
   uint8_t binding_count;
+  // Static X dimension reflected for the function's workgroup size.
   uint8_t workgroup_size_x;
 } MockExecutableFunction;
 
 static std::vector<uint8_t> MakeNamedMockExecutableData(
     std::initializer_list<MockExecutableFunction> functions) {
   const uint32_t function_count = (uint32_t)functions.size();
-  std::vector<uint8_t> data(4 + functions.size() * 8, 0);
+  std::vector<uint8_t> data(
+      4 + functions.size() * sizeof(MockExecutableFunctionRecord), 0);
   std::memcpy(data.data(), &function_count, sizeof(function_count));
 
   size_t function_ordinal = 0;
@@ -206,14 +237,17 @@ static std::vector<uint8_t> MakeNamedMockExecutableData(
     }
     data.resize(data.size() + name_length);
 
-    uint8_t* record = data.data() + 4 + function_ordinal * 8;
-    record[0] = function_record.constant_count;
-    record[1] = function_record.binding_count;
-    record[2] = 0;  // flags
-    record[3] = function_record.workgroup_size_x;
-    record[4] = 1;
-    record[5] = 1;
-    record[6] = (uint8_t)name_length;
+    const MockExecutableFunctionRecord record = {
+        /*.constant_count=*/function_record.constant_count,
+        /*.binding_count=*/function_record.binding_count,
+        /*.flags=*/0,
+        /*.workgroup_size=*/{function_record.workgroup_size_x, 1, 1},
+        /*.name_length=*/(uint8_t)name_length,
+        /*.native_abi_offset=*/0,
+        /*.parameter_size=*/0,
+    };
+    std::memcpy(data.data() + 4 + function_ordinal * sizeof(record), &record,
+                sizeof(record));
     if (name_length != 0) {
       std::memcpy(data.data() + name_offset, function_record.name, name_length);
       name_offset += name_length;
@@ -223,8 +257,8 @@ static std::vector<uint8_t> MakeNamedMockExecutableData(
   return data;
 }
 
-static void CaptureMockExecutablePrepare(iree_const_byte_span_t executable_data,
-                                         std::vector<uint8_t>* storage) {
+static void CaptureMockExecutableLoad(iree_const_byte_span_t executable_data,
+                                      std::vector<uint8_t>* storage) {
   iree_hal_replay_recorder_t* recorder =
       CreateHostAllocationRecorder(storage, nullptr);
 
@@ -235,24 +269,28 @@ static void CaptureMockExecutablePrepare(iree_const_byte_span_t executable_data,
 
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
-  iree_hal_executable_cache_t* executable_cache = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_cache_create(
-      wrapped_device, iree_make_cstring_view("mock-cache"), &executable_cache));
+  const iree_hal_executable_target_selection_t target_selection = {
+      /*.family=*/IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY),
+      /*.target_key=*/IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY),
+      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_VIRTUAL,
+      /*.physical_device_affinity=*/1,
+  };
+  const iree_hal_executable_target_selection_result_t target_result =
+      iree_hal_device_spec_select_executable_target(
+          iree_hal_device_spec(wrapped_device), &target_selection);
+  ASSERT_EQ(target_result.outcome,
+            IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED);
 
-  iree_hal_executable_params_t executable_params;
-  iree_hal_executable_params_initialize(&executable_params);
-  executable_params.caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-  executable_params.executable_format =
-      iree_make_cstring_view("mock-executable");
-  executable_params.executable_data = executable_data;
+  iree_hal_executable_load_params_t load_params;
+  iree_hal_executable_load_params_initialize(&load_params);
+  load_params.executable_data = executable_data;
 
   iree_hal_executable_t* executable = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_cache_prepare_executable(
-      executable_cache, &executable_params, &executable));
+  IREE_ASSERT_OK(iree_hal_device_load_executable(
+      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target,
+      &load_params, &executable));
 
   iree_hal_executable_release(executable);
-  iree_hal_executable_cache_release(executable_cache);
 
   IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
   iree_hal_device_group_release(wrapped_group);
@@ -276,16 +314,17 @@ static void CorruptFirstCapturedExecutableData(std::vector<uint8_t>* storage) {
     IREE_ASSERT_OK(iree_hal_replay_file_parse_record(
         file_contents, record_offset, &record, &next_record_offset));
     if (record.header.payload_type !=
-        IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_PREPARE) {
+        IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_LOAD) {
       record_offset = next_record_offset;
       continue;
     }
 
-    iree_hal_replay_executable_prepare_payload_t payload;
+    iree_hal_replay_executable_load_payload_t payload;
     ASSERT_GE(record.payload.data_length, sizeof(payload));
     std::memcpy(&payload, record.payload.data, sizeof(payload));
-    const iree_host_size_t data_offset =
-        sizeof(payload) + payload.executable_format_length;
+    const iree_host_size_t data_offset = sizeof(payload) +
+                                         payload.target_family_length +
+                                         payload.target_key_length;
     ASSERT_GE(payload.executable_data_length, sizeof(uint32_t));
     ASSERT_LE(data_offset + sizeof(uint32_t), record.payload.data_length);
     auto* mutable_payload =
@@ -296,12 +335,11 @@ static void CorruptFirstCapturedExecutableData(std::vector<uint8_t>* storage) {
     return;
   }
 
-  FAIL() << "expected an executable prepare record";
+  FAIL() << "expected an executable load record";
 }
 
 typedef struct TestExecutableSubstitutionState {
   iree_string_view_t source;
-  iree_string_view_t executable_format;
   iree_const_byte_span_t executable_data;
   iree_host_size_t invocation_count;
   iree_hal_replay_object_id_t executable_id;
@@ -316,15 +354,18 @@ static iree_status_t TestExecutableSubstitutionCallback(
   ++state->invocation_count;
   state->executable_id = request->executable_id;
   EXPECT_EQ(request->device_id, 1u);
-  EXPECT_EQ(request->executable_cache_id, 2u);
-  EXPECT_EQ(request->executable_id, 3u);
-  EXPECT_EQ(std::string_view(request->captured_params->executable_format.data,
-                             request->captured_params->executable_format.size),
-            std::string_view("mock-executable"));
+  EXPECT_EQ(request->executable_id, 2u);
+  EXPECT_EQ(std::string_view(request->captured_target->family.data,
+                             request->captured_target->family.size),
+            std::string_view(IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY));
+  EXPECT_EQ(std::string_view(request->captured_target->target_key.data,
+                             request->captured_target->target_key.size),
+            std::string_view(IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY));
+  EXPECT_EQ(request->captured_target->kind_flags,
+            IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_VIRTUAL);
   memset(out_substitution, 0, sizeof(*out_substitution));
   out_substitution->substitute = true;
   out_substitution->source = state->source;
-  out_substitution->executable_format = state->executable_format;
   out_substitution->executable_data = state->executable_data;
   return iree_ok_status();
 }
@@ -421,13 +462,12 @@ TEST(ReplayExecuteTest, SubstitutesRecordedExecutablePayload) {
       MakeMockExecutableData(/*constant_count=*/2, /*binding_count=*/3,
                              /*workgroup_size_x=*/4);
   std::vector<uint8_t> storage(32768, 0);
-  CaptureMockExecutablePrepare(
+  CaptureMockExecutableLoad(
       iree_make_const_byte_span(captured_data.data(), captured_data.size()),
       &storage);
 
   TestExecutableSubstitutionState substitution_state = {
       /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_format=*/iree_make_cstring_view("mock-executable"),
       /*.executable_data=*/
       iree_make_const_byte_span(replacement_data.data(),
                                 replacement_data.size()),
@@ -445,7 +485,7 @@ TEST(ReplayExecuteTest, SubstitutesRecordedExecutablePayload) {
                                               replay_group, &options,
                                               iree_allocator_system()));
   EXPECT_EQ(substitution_state.invocation_count, 1u);
-  EXPECT_EQ(substitution_state.executable_id, 3u);
+  EXPECT_EQ(substitution_state.executable_id, 2u);
   iree_hal_device_group_release(replay_group);
 }
 
@@ -457,14 +497,13 @@ TEST(ReplayExecuteTest, UsesRecordedExecutableMetadataForSubstitution) {
       MakeMockExecutableData(/*constant_count=*/2, /*binding_count=*/3,
                              /*workgroup_size_x=*/4);
   std::vector<uint8_t> storage(32768, 0);
-  CaptureMockExecutablePrepare(
+  CaptureMockExecutableLoad(
       iree_make_const_byte_span(captured_data.data(), captured_data.size()),
       &storage);
   CorruptFirstCapturedExecutableData(&storage);
 
   TestExecutableSubstitutionState substitution_state = {
       /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_format=*/iree_make_cstring_view("mock-executable"),
       /*.executable_data=*/
       iree_make_const_byte_span(replacement_data.data(),
                                 replacement_data.size()),
@@ -515,14 +554,13 @@ TEST(ReplayExecuteTest, SubstitutesRecordedExecutablePayloadByName) {
       },
   });
   std::vector<uint8_t> storage(32768, 0);
-  CaptureMockExecutablePrepare(
+  CaptureMockExecutableLoad(
       iree_make_const_byte_span(captured_data.data(), captured_data.size()),
       &storage);
   CorruptFirstCapturedExecutableData(&storage);
 
   TestExecutableSubstitutionState substitution_state = {
       /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_format=*/iree_make_cstring_view("mock-executable"),
       /*.executable_data=*/
       iree_make_const_byte_span(replacement_data.data(),
                                 replacement_data.size()),
@@ -551,13 +589,12 @@ TEST(ReplayExecuteTest, RejectsExecutableSubstitutionAbiMismatch) {
       MakeMockExecutableData(/*constant_count=*/2, /*binding_count=*/4,
                              /*workgroup_size_x=*/4);
   std::vector<uint8_t> storage(32768, 0);
-  CaptureMockExecutablePrepare(
+  CaptureMockExecutableLoad(
       iree_make_const_byte_span(captured_data.data(), captured_data.size()),
       &storage);
 
   TestExecutableSubstitutionState substitution_state = {
       /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_format=*/iree_make_cstring_view("mock-executable"),
       /*.executable_data=*/
       iree_make_const_byte_span(replacement_data.data(),
                                 replacement_data.size()),
@@ -575,6 +612,77 @@ TEST(ReplayExecuteTest, RejectsExecutableSubstitutionAbiMismatch) {
                         iree_hal_replay_execute_file(
                             GetCapturedFileContents(storage), replay_group,
                             &options, iree_allocator_system()));
+  EXPECT_EQ(substitution_state.invocation_count, 1u);
+  iree_hal_device_group_release(replay_group);
+}
+
+TEST(ReplayExecuteTest,
+     RejectsExecutableSubstitutionNativeParameterLayoutMismatch) {
+  std::vector<uint8_t> captured_data = MakeMockExecutableData(
+      /*constant_count=*/2, /*binding_count=*/3, /*workgroup_size_x=*/4,
+      /*native_abi_offset=*/8);
+  std::vector<uint8_t> replacement_data = MakeMockExecutableData(
+      /*constant_count=*/2, /*binding_count=*/3, /*workgroup_size_x=*/4,
+      /*native_abi_offset=*/16);
+  std::vector<uint8_t> storage(32768, 0);
+  CaptureMockExecutableLoad(
+      iree_make_const_byte_span(captured_data.data(), captured_data.size()),
+      &storage);
+  CorruptFirstCapturedExecutableData(&storage);
+
+  TestExecutableSubstitutionState substitution_state = {
+      /*.source=*/iree_make_cstring_view("replacement.mock"),
+      /*.executable_data=*/
+      iree_make_const_byte_span(replacement_data.data(),
+                                replacement_data.size()),
+      /*.invocation_count=*/0,
+      /*.executable_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
+  };
+  iree_hal_replay_execute_options_t options =
+      iree_hal_replay_execute_options_default();
+  options.executable_substitution_callback.fn =
+      TestExecutableSubstitutionCallback;
+  options.executable_substitution_callback.user_data = &substitution_state;
+
+  iree_hal_device_group_t* replay_group = CreateMockExecutableDeviceGroup();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_hal_replay_execute_file(
+                            GetCapturedFileContents(storage), replay_group,
+                            &options, iree_allocator_system()));
+  EXPECT_EQ(substitution_state.invocation_count, 1u);
+  iree_hal_device_group_release(replay_group);
+}
+
+TEST(ReplayExecuteTest, PreservesWideNativeParameterSize) {
+  std::vector<uint8_t> captured_data = MakeMockExecutableData(
+      /*constant_count=*/2, /*binding_count=*/3, /*workgroup_size_x=*/4,
+      /*native_abi_offset=*/8, /*parameter_size=*/512);
+  std::vector<uint8_t> replacement_data = MakeMockExecutableData(
+      /*constant_count=*/2, /*binding_count=*/3, /*workgroup_size_x=*/4,
+      /*native_abi_offset=*/8, /*parameter_size=*/512);
+  std::vector<uint8_t> storage(32768, 0);
+  CaptureMockExecutableLoad(
+      iree_make_const_byte_span(captured_data.data(), captured_data.size()),
+      &storage);
+
+  TestExecutableSubstitutionState substitution_state = {
+      /*.source=*/iree_make_cstring_view("replacement.mock"),
+      /*.executable_data=*/
+      iree_make_const_byte_span(replacement_data.data(),
+                                replacement_data.size()),
+      /*.invocation_count=*/0,
+      /*.executable_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
+  };
+  iree_hal_replay_execute_options_t options =
+      iree_hal_replay_execute_options_default();
+  options.executable_substitution_callback.fn =
+      TestExecutableSubstitutionCallback;
+  options.executable_substitution_callback.user_data = &substitution_state;
+
+  iree_hal_device_group_t* replay_group = CreateMockExecutableDeviceGroup();
+  IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
+                                              replay_group, &options,
+                                              iree_allocator_system()));
   EXPECT_EQ(substitution_state.invocation_count, 1u);
   iree_hal_device_group_release(replay_group);
 }
@@ -1358,11 +1466,11 @@ TEST(ReplayExecuteTest, SkipsFailedOperationRecords) {
 
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
-  int64_t value = 0;
+  iree_hal_device_external_capture_options_t capture_options = {};
+  capture_options.provider = IREE_SV("replay-test");
   IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_NOT_FOUND,
-      iree_hal_device_query_i64(wrapped_device, IREE_SV("hal.replay.missing"),
-                                IREE_SV("probe"), &value));
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_hal_device_external_capture_begin(wrapped_device, &capture_options));
 
   IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
   iree_hal_device_group_release(wrapped_group);

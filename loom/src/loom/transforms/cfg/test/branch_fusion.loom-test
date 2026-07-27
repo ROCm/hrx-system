@@ -1,0 +1,192 @@
+// RUN: pass branch-fusion
+
+func.def @fuses_adjacent_result_branches(%cond: i1, %a: i32, %b: i32) -> (i32, i32) {
+  %lhs = scf.if %cond -> (i32) {
+    %then_lhs = test.addi %a, %b : i32
+    scf.yield %then_lhs : i32
+  } else {
+    %else_lhs = test.addi %b, %b : i32
+    scf.yield %else_lhs : i32
+  }
+  %rhs = scf.if %cond -> (i32) {
+    %then_rhs = test.addi %lhs, %a : i32
+    scf.yield %then_rhs : i32
+  } else {
+    %else_rhs = test.addi %lhs, %b : i32
+    scf.yield %else_rhs : i32
+  }
+  func.return %lhs, %rhs : i32, i32
+}
+
+// ----
+func.def @fuses_adjacent_result_branches(%cond: i1, %a: i32, %b: i32) -> (i32, i32) {
+  %lhs, %rhs = scf.if %cond -> (i32, i32) {
+    %then_lhs = test.addi %a, %b : i32
+    %then_rhs = test.addi %then_lhs, %a : i32
+    scf.yield %then_lhs, %then_rhs : i32, i32
+  } else {
+    %else_lhs = test.addi %b, %b : i32
+    %else_rhs = test.addi %else_lhs, %b : i32
+    scf.yield %else_lhs, %else_rhs : i32, i32
+  }
+  func.return %lhs, %rhs : i32, i32
+}
+
+// ====
+
+func.def @fuses_resultless_effectful_branches(%cond: i1, %pool: pool<16>, %tile: tile<4xf32>, %value: i32) {
+  scf.if %cond {
+    test.write_resource %pool, %tile : pool<16>, tile<4xf32>
+    scf.yield
+  } else {
+    test.use %value : i32
+    scf.yield
+  }
+  scf.if %cond {
+    test.use %value : i32
+    scf.yield
+  } else {
+    test.write_resource %pool, %tile : pool<16>, tile<4xf32>
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @fuses_resultless_effectful_branches(%cond: i1, %pool: pool<16>, %tile: tile<4xf32>, %value: i32) {
+  scf.if %cond {
+    test.write_resource %pool, %tile : pool<16>, tile<4xf32>
+    test.use %value : i32
+  } else {
+    test.use %value : i32
+    test.write_resource %pool, %tile : pool<16>, tile<4xf32>
+  }
+  func.return
+}
+
+// ====
+
+func.def @clears_only_conflicting_second_body_names(%cond: i1, %a: i32, %b: i32) -> (i32, i32) {
+  %lhs = scf.if %cond -> (i32) {
+    %same = test.addi %a, %b : i32
+    scf.yield %same : i32
+  } else {
+    %same = test.addi %b, %b : i32
+    scf.yield %same : i32
+  }
+  %rhs = scf.if %cond -> (i32) {
+    %same = test.addi %a, %a : i32
+    scf.yield %same : i32
+  } else {
+    %same = test.addi %b, %a : i32
+    scf.yield %same : i32
+  }
+  func.return %lhs, %rhs : i32, i32
+}
+
+// ----
+func.def @clears_only_conflicting_second_body_names(%cond: i1, %a: i32, %b: i32) -> (i32, i32) {
+  %lhs, %rhs = scf.if %cond -> (i32, i32) {
+    %same = test.addi %a, %b : i32
+    %9 = test.addi %a, %a : i32
+    scf.yield %same, %9 : i32, i32
+  } else {
+    %same = test.addi %b, %b : i32
+    %10 = test.addi %b, %a : i32
+    scf.yield %same, %10 : i32, i32
+  }
+  func.return %lhs, %rhs : i32, i32
+}
+
+// ====
+
+// Result types can reference results from the first branch op. The fused op
+// must remap the external result type to the new co-result and remap moved
+// branch bodies to the branch-local yielded layout value.
+func.def @remaps_result_type_refs(%cond: i1, %buffer: buffer, %offset: offset) {
+  %layout = scf.if %cond -> (encoding<layout>) {
+    %dense = encoding.layout.dense : encoding<layout>
+    scf.yield %dense : encoding<layout>
+  } else {
+    %strided = encoding.layout.strided [1] : encoding<layout>
+    scf.yield %strided : encoding<layout>
+  }
+  %view = scf.if %cond -> (view<4xf32, %layout>) {
+    %then_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+    scf.yield %then_view : view<4xf32, %layout>
+  } else {
+    %else_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+    scf.yield %else_view : view<4xf32, %layout>
+  }
+  test.use %layout : encoding<layout>
+  test.use %view : view<4xf32, %layout>
+  func.return
+}
+
+// ----
+func.def @remaps_result_type_refs(%cond: i1, %buffer: buffer, %offset: offset) {
+  %layout, %view = scf.if %cond -> (encoding<layout>, view<4xf32, %layout>) {
+    %dense = encoding.layout.dense : encoding<layout>
+    %then_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %dense>
+    scf.yield %dense, %then_view : encoding<layout>, view<4xf32, %dense>
+  } else {
+    %strided = encoding.layout.strided [1] : encoding<layout>
+    %else_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %strided>
+    scf.yield %strided, %else_view : encoding<layout>, view<4xf32, %strided>
+  }
+  test.use %layout : encoding<layout>
+  test.use %view : view<4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @fuses_scalarized_vector_branch_cleanup(%cond: i1, %x: i32, %y: i32, %z: i32, %acc: vector<4xi32>, %lane_index: index) -> (i32, vector<4xi32>) {
+  %lane = scf.if %cond -> (i32) {
+    scf.yield %x : i32
+  } else {
+    scf.yield %y : i32
+  }
+  %next = scf.if %cond -> (vector<4xi32>) {
+    %sum = test.addi %lane, %z : i32
+    %inserted = vector.insert %sum into %acc[%lane_index] : i32, vector<4xi32>
+    scf.yield %inserted : vector<4xi32>
+  } else {
+    %inserted = vector.insert %lane into %acc[%lane_index] : i32, vector<4xi32>
+    scf.yield %inserted : vector<4xi32>
+  }
+  func.return %lane, %next : i32, vector<4xi32>
+}
+
+// ----
+func.def @fuses_scalarized_vector_branch_cleanup(%cond: i1, %x: i32, %y: i32, %z: i32, %acc: vector<4xi32>, %lane_index: index) -> (i32, vector<4xi32>) {
+  %lane, %next = scf.if %cond -> (i32, vector<4xi32>) {
+    %sum = test.addi %x, %z : i32
+    %inserted = vector.insert %sum into %acc[%lane_index] : i32, vector<4xi32>
+    scf.yield %x, %inserted : i32, vector<4xi32>
+  } else {
+    %inserted = vector.insert %y into %acc[%lane_index] : i32, vector<4xi32>
+    scf.yield %y, %inserted : i32, vector<4xi32>
+  }
+  func.return %lane, %next : i32, vector<4xi32>
+}
+
+// ====
+
+func.def @rejects_different_conditions(%cond0: i1, %cond1: i1, %a: i32, %b: i32) -> (i32, i32) {
+  %lhs = scf.if %cond0 -> (i32) {
+    %then_lhs = test.addi %a, %b : i32
+    scf.yield %then_lhs : i32
+  } else {
+    %else_lhs = test.addi %b, %b : i32
+    scf.yield %else_lhs : i32
+  }
+  %rhs = scf.if %cond1 -> (i32) {
+    %then_rhs = test.addi %a, %a : i32
+    scf.yield %then_rhs : i32
+  } else {
+    %else_rhs = test.addi %b, %a : i32
+    scf.yield %else_rhs : i32
+  }
+  func.return %lhs, %rhs : i32, i32
+}

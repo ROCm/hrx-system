@@ -20,19 +20,6 @@
 extern "C" {
 #endif
 
-//===----------------------------------------------------------------------===//
-// Compiler support
-//===----------------------------------------------------------------------===//
-
-#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201102L) && \
-    !__STDC_NO_THREADS__
-#define iree_thread_local _Thread_local
-#elif defined(IREE_COMPILER_MSVC)
-#define iree_thread_local __declspec(thread)
-#else
-#define iree_thread_local static
-#endif  // __STDC_NO_THREADS__
-
 typedef uint64_t iree_hal_streaming_deviceptr_t;
 typedef iree_host_size_t iree_hal_streaming_device_ordinal_t;
 
@@ -158,7 +145,9 @@ typedef struct iree_hal_streaming_context_module_entry_t {
 } iree_hal_streaming_context_module_entry_t;
 
 typedef struct iree_hal_streaming_context_symbol_entry_t {
+  // Host pointer key used by generated HIP registration code.
   void* key;
+  // Compiled symbol associated with the registration key.
   iree_hal_streaming_symbol_t* symbol;
 } iree_hal_streaming_context_symbol_entry_t;
 
@@ -187,6 +176,15 @@ typedef struct iree_hal_streaming_context_symbol_map_t {
   iree_allocator_t host_allocator;
 } iree_hal_streaming_context_symbol_map_t;
 
+typedef struct iree_hal_streaming_graph_memory_size_entry_t {
+  // Next size class tracked in the device graph-memory accounting table.
+  struct iree_hal_streaming_graph_memory_size_entry_t* next;
+  // Exact allocation size represented by this reusable graph-memory class.
+  iree_device_size_t size;
+  // Number of live executable graphs actively using this reusable size class.
+  uint32_t reference_count;
+} iree_hal_streaming_graph_memory_size_entry_t;
+
 // Stream context mapped to HAL device.
 struct iree_hal_streaming_context_t {
   // Reference counting.
@@ -200,7 +198,6 @@ struct iree_hal_streaming_context_t {
 
   // HAL resources.
   iree_hal_allocator_t* device_allocator;
-  iree_hal_executable_cache_t* executable_cache;
   iree_status_t loop_status;
 
   // Context flags.
@@ -209,6 +206,11 @@ struct iree_hal_streaming_context_t {
   // Default stream for this context (always created during context
   // initialization).
   iree_hal_streaming_stream_t* default_stream;
+
+  // Next non-zero stream identifier assigned under |stream_list_mutex|.
+  unsigned long long next_stream_id;
+  // Next non-zero stream capture identifier assigned under |stream_list_mutex|.
+  unsigned long long next_capture_id;
 
   // Peer access list.
   iree_hal_streaming_context_t** peer_contexts;
@@ -222,6 +224,9 @@ struct iree_hal_streaming_context_t {
   // Guarded by |mutex| and released during context destruction.
   iree_hal_streaming_buffer_t* pageable_h2d_staging_buffer;
   iree_device_size_t pageable_h2d_staging_size;
+
+  // Number of streams in this context with capture state other than NONE.
+  iree_atomic_int32_t capture_stream_count;
 
   // Context resource limits.
   iree_hal_streaming_limits_t limits;
@@ -250,12 +255,28 @@ struct iree_hal_streaming_context_t {
     iree_hal_streaming_context_t* prev;
   } context_list_entry;
 
-  // Symbol map for HIP/CUDA-style __hip*/__cuda* nasty registration functions.
-  // Lazily initialized on first use. Only used in programs compiled with
-  // HIP/CUDA C++ and embedded kernels split out by the compiler. If only using
-  // the driver API with explicit module management this is bypassed.
+  // Symbol map for compiler-generated host registration functions. Lazily
+  // initialized on first use. Explicit module-management paths bypass it.
   iree_hal_streaming_context_symbol_map_t symbol_map;
 };
+
+static inline bool iree_hal_streaming_context_has_capture_streams(
+    const iree_hal_streaming_context_t* context) {
+  return iree_atomic_load(&context->capture_stream_count,
+                          iree_memory_order_acquire) > 0;
+}
+
+static inline void iree_hal_streaming_context_enter_capture(
+    iree_hal_streaming_context_t* context) {
+  iree_atomic_fetch_add(&context->capture_stream_count, 1,
+                        iree_memory_order_acq_rel);
+}
+
+static inline void iree_hal_streaming_context_leave_capture(
+    iree_hal_streaming_context_t* context) {
+  iree_atomic_fetch_sub(&context->capture_stream_count, 1,
+                        iree_memory_order_acq_rel);
+}
 
 //===----------------------------------------------------------------------===//
 // Device types
@@ -273,7 +294,7 @@ typedef struct iree_hal_streaming_p2p_link_t {
   // P2P attributes.
   bool access_supported;             // Basic P2P access.
   bool native_atomic_supported;      // Native atomic operations.
-  bool cuda_array_access_supported;  // CUDA/HIP array access.
+  bool cuda_array_access_supported;  // HIP array access.
   int32_t performance_rank;          // Performance ranking (higher is better).
 
   // Additional link properties.
@@ -298,8 +319,11 @@ typedef struct iree_hal_streaming_device_t {
   // Device capabilities.
   uint32_t compute_capability_major;
   uint32_t compute_capability_minor;
+  // Total HIP-visible memory reported for the device.
   iree_device_size_t total_memory;
+  // Approximate HIP-visible free memory tracked by the binding.
   iree_device_size_t free_memory;
+  // True when cooperative launches are supported by the device.
   bool supports_cooperative_launch;
 
   // GCN architecture name (e.g., "gfx942:sramecc+:xnack-").
@@ -339,9 +363,26 @@ typedef struct iree_hal_streaming_device_t {
   // Protected by primary_context_mutex.
   int32_t primary_context_ref_count;
 
-  // Memory pools (owned by pyre, not the binding).
+  // Default device allocation pool used when no explicit pool is selected.
   hrx_mem_pool_t default_mem_pool;
+  // Current device allocation pool used by HIP runtime allocation APIs.
   hrx_mem_pool_t current_mem_pool;
+
+  // Guards graph-memory accounting fields.
+  iree_slim_mutex_t graph_memory_mutex;
+  // Current graph-memory bytes visible via hipGraphMemAttrUsedMemCurrent.
+  uint64_t graph_memory_used_current;
+  // High-water graph-memory bytes visible via hipGraphMemAttrUsedMemHigh.
+  uint64_t graph_memory_used_high;
+  // Current graph-memory reservation visible via
+  // hipGraphMemAttrReservedMemCurrent.
+  uint64_t graph_memory_reserved_current;
+  // High-water graph-memory reservation visible via
+  // hipGraphMemAttrReservedMemHigh.
+  uint64_t graph_memory_reserved_high;
+  // Reusable graph-memory size classes retained by this device graph pool.
+  iree_hal_streaming_graph_memory_size_entry_t*
+      graph_memory_reusable_size_entries;
 } iree_hal_streaming_device_t;
 
 // Global device registry for multi-device management.
@@ -381,7 +422,14 @@ typedef enum iree_hal_streaming_stream_flag_bits_e {
   IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING = 1ull << 0,
 } iree_hal_streaming_stream_flags_t;
 
-// Stream capture status enum (matching CUDA/HIP).
+typedef enum iree_hal_streaming_synchronization_policy_e {
+  IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_AUTO = 1,
+  IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_SPIN = 2,
+  IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_YIELD = 3,
+  IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_BLOCKING_SYNC = 4,
+} iree_hal_streaming_synchronization_policy_t;
+
+// Stream capture status enum.
 typedef enum iree_hal_streaming_capture_status_e {
   IREE_HAL_STREAMING_CAPTURE_STATUS_NONE = 0,
   IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE = 1,
@@ -411,9 +459,21 @@ typedef struct iree_hal_streaming_stream_t {
   // Parent context, unowned (to avoid cycles).
   iree_hal_streaming_context_t* context;
 
-  // Stream properties.
+  // HIP stream creation flags.
   iree_hal_streaming_stream_flags_t flags;
+  // HIP synchronization policy value for stream attribute queries.
+  iree_hal_streaming_synchronization_policy_t synchronization_policy;
+  // HIP stream scheduling priority hint.
   int priority;
+  // Number of 32-bit entries in |cu_mask|; zero until CU-mask APIs attach
+  // state.
+  iree_host_size_t cu_mask_count;
+  // Optional HIP CU mask owned by this stream; NULL means default device mask.
+  // The stream CU-mask API follow-up will populate/query this value; command
+  // scheduling in this layer does not consume it.
+  uint32_t* cu_mask;
+  // Stable HIP stream identifier, unique within this context.
+  unsigned long long stream_id;
 
   // Command buffer for batching operations.
   iree_hal_command_buffer_t* command_buffer;
@@ -421,7 +481,7 @@ typedef struct iree_hal_streaming_stream_t {
 
   // Semaphore chain for synchronization.
   iree_hal_semaphore_t* timeline_semaphore;
-  uint64_t pending_value;    // Next value to be used for signaling
+  uint64_t pending_value;    // Last stream timeline value reserved.
   uint64_t submitted_value;  // Last value that was actually submitted (for
                              // wait_submitted)
   uint64_t completed_value;  // Last value we've verified as completed
@@ -438,7 +498,16 @@ typedef struct iree_hal_streaming_stream_t {
   iree_hal_streaming_capture_status_t capture_status;
   iree_hal_streaming_capture_mode_t capture_mode;
   iree_hal_streaming_graph_t* capture_graph;
+  // True when |capture_graph| is retained by this stream and must be released.
+  bool capture_graph_owned;
+  // True when this stream began the capture and is allowed to end it.
+  bool capture_origin;
+  // True when this stream's current captured frontier has been joined to the
+  // origin stream by an event wait.
+  bool capture_joined_to_origin;
   unsigned long long capture_id;
+  // Host thread that began this capture sequence.
+  uintptr_t capture_owner_thread_id;
   iree_hal_streaming_graph_node_t** capture_dependencies;
   iree_host_size_t capture_dependency_count;
   iree_host_size_t capture_dependency_capacity;
@@ -449,6 +518,24 @@ typedef struct iree_hal_streaming_stream_t {
   // Host allocator.
   iree_allocator_t host_allocator;
 } iree_hal_streaming_stream_t;
+
+// Updates capture status while keeping the owning context's capture-stream
+// count in sync. Callers serialize access to the stream capture fields.
+static inline void iree_hal_streaming_stream_set_capture_status(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_capture_status_t new_status) {
+  const iree_hal_streaming_capture_status_t old_status = stream->capture_status;
+  if (old_status == new_status) return;
+  if (old_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE &&
+      new_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+    iree_hal_streaming_context_enter_capture(stream->context);
+  }
+  stream->capture_status = new_status;
+  if (old_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE &&
+      new_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+    iree_hal_streaming_context_leave_capture(stream->context);
+  }
+}
 
 //===----------------------------------------------------------------------===//
 // Module types
@@ -462,32 +549,32 @@ typedef enum iree_hal_streaming_symbol_type_e {
   IREE_HAL_STREAMING_SYMBOL_TYPE_DATA = 3,
 } iree_hal_streaming_symbol_type_t;
 
-// Copy operation: memcpy(dst_offset, src_offset, size).
+// Copy operation for reflected non-pointer launch parameters.
 typedef struct iree_hal_streaming_parameter_copy_op_t {
   // Size in bytes of the copy operation.
   uint16_t size;
-  uint16_t reserved;
-  // Source offset in parameters buffer, in bytes.
-  uint16_t src_offset;
-  // Source binding ordinal (for parameter arrays);
-  uint16_t src_ordinal;
-  // Destination offset in constants, in bytes.
-  uint16_t dst_offset;
+  // Destination byte offset in the native ABI kernarg byte image.
+  uint16_t native_abi_destination_offset;
+  // Source byte offset in a packed launch parameter buffer.
+  uint16_t source_offset;
+  // Source argument ordinal in a pointer-array launch parameter list.
+  uint16_t source_ordinal;
+  // Destination byte offset in the HAL constants table.
+  uint16_t constant_destination_offset;
 } iree_hal_streaming_parameter_copy_op_t;
 
 // Binding resolve operation: lookup and construct iree_hal_buffer_ref_t.
 typedef struct iree_hal_streaming_parameter_resolve_op_t {
-  // Destination offset in constants buffer for native kernels.
-  // For native kernels with CUSTOM_DIRECT_ARGUMENTS, pointers are copied
-  // directly to the constants buffer at this offset.
-  uint16_t dst_offset;
+  // Destination byte offset in the native ABI kernarg byte image.
+  uint16_t native_abi_destination_offset;
+  // Reserved so copy and resolve ops keep the same compact field count.
   uint16_t reserved;
-  // Source offset in parameters buffer, in bytes.
-  uint16_t src_offset;
-  // Source binding ordinal (for parameter arrays);
-  uint16_t src_ordinal;
-  // Destination binding ordinal.
-  uint16_t dst_ordinal;
+  // Source byte offset in a packed launch parameter buffer.
+  uint16_t source_offset;
+  // Source argument ordinal in a pointer-array launch parameter list.
+  uint16_t source_ordinal;
+  // Destination HAL binding-list ordinal.
+  uint16_t destination_ordinal;
 } iree_hal_streaming_parameter_resolve_op_t;
 
 typedef union iree_hal_streaming_parameter_op_t {
@@ -495,22 +582,18 @@ typedef union iree_hal_streaming_parameter_op_t {
   iree_hal_streaming_parameter_resolve_op_t resolve;
 } iree_hal_streaming_parameter_op_t;
 
-// Function parameter information used for unpacking.
-// CUDA-style kernel parameters (usually a list of pointers, but can be packed)
-// need to be converted into IREE constants and bindings for dispatch. For
-// compatibility we allow bindless constant-only parameters by directly copying
-// buffer pointers to the constant storage. The preferred mode for compatibility
-// is to resolve buffer pointers to their HAL buffers and pass them in as
-// bindings. Though it takes longer to resolve in the dispatch path when using
-// graphs we capture only when the graph is recorded and not when it is
-// launched. The binding approach is also required in order to use the IREE
-// async allocation support.
+// Function parameter information used for argument packing.
+// Kernel launch parameters may arrive as a pointer array or packed argument
+// buffer. HIP dispatches preserve native device pointer values in the kernarg
+// payload; pointer metadata is used to place direct arguments at ABI offsets,
+// not as a complete residency or lifetime model.
 typedef struct iree_hal_streaming_parameter_info_t {
   // Total size, in bytes, of the final parameter pack.
   uint16_t buffer_size;
-  // Total size of constants, in bytes. Includes raw buffer pointers.
-  // May include padding/alignment.
+  // Total size of the HAL dispatch constants stream, in bytes.
   uint16_t constant_bytes;
+  // Total size of the native direct-argument kernarg prefix, in bytes.
+  uint16_t direct_arg_bytes;
   // Total number of HAL bindings in the parameters (and resolve ops).
   uint16_t binding_count;
   // Total number of parameter copy operations to perform during unpacking.
@@ -519,6 +602,15 @@ typedef struct iree_hal_streaming_parameter_info_t {
   // Ordered by copies first (copy_count) followed by bindings (binding_count).
   iree_hal_streaming_parameter_op_t* ops;
 } iree_hal_streaming_parameter_info_t;
+
+// True when launch metadata describes no parameters in either HAL binding form
+// or native direct-argument form.
+static inline bool iree_hal_streaming_parameter_info_is_empty(
+    const iree_hal_streaming_parameter_info_t* parameters) {
+  return parameters->buffer_size == 0 && parameters->constant_bytes == 0 &&
+         parameters->direct_arg_bytes == 0 && parameters->binding_count == 0 &&
+         parameters->copy_count == 0;
+}
 
 // Symbol metadata structure.
 typedef struct iree_hal_streaming_symbol_t {
@@ -531,18 +623,25 @@ typedef struct iree_hal_streaming_symbol_t {
 
   // Function attributes (only valid for FUNCTION type).
   iree_hal_occupancy_info_t occupancy_info;
-  // TODO(benvanik): replace with occupancy info?
+  // Maximum workgroup size reported by executable metadata, or the device
+  // limit when metadata does not specify one.
   uint32_t max_threads_per_block;
   uint32_t shared_size_bytes;
   uint32_t local_size_bytes;
   uint32_t num_regs;
   uint32_t max_dynamic_shared_size_bytes;
 
-  // Function parameter information used for unpacking.
+  // Function parameter information used for argument packing and unpacking.
   iree_hal_streaming_parameter_info_t parameters;
 
   // Global/data attributes (only valid for GLOBAL/DATA types).
+  // HAL executable global handle, when backed by an executable global.
+  iree_hal_executable_global_t global_handle;
+  // Cached streaming wrapper around the executable-owned global buffer.
+  iree_hal_streaming_buffer_t* global_buffer;
+  // HIP-visible device pointer for the global storage.
   iree_hal_streaming_deviceptr_t device_address;
+  // Byte length of the global storage.
   iree_device_size_t size_bytes;
 } iree_hal_streaming_symbol_t;
 
@@ -552,7 +651,6 @@ typedef struct iree_hal_streaming_module_t {
   iree_atomic_ref_count_t ref_count;
 
   // HAL executable resources.
-  iree_hal_executable_cache_t* cache;
   iree_hal_executable_t* executable;
   iree_hal_executable_t** executables;
   iree_host_size_t executable_count;
@@ -561,14 +659,14 @@ typedef struct iree_hal_streaming_module_t {
   iree_hal_streaming_symbol_t* symbols;
   iree_host_size_t symbol_count;
 
-  // File mapping if loaded from file.
-  iree_io_file_mapping_t* file_mapping;
-
-  // Fat-binary / Clang offload bundle unpacking state. Holds the
-  // decompressed ELF backing buffer (CCOB) and/or the matched-entry
-  // table — both referenced by the HAL executable's code-object reader,
-  // so they must live at least as long as the executable itself.
-  iree_hal_streaming_fat_binary_extract_t fat_extract;
+  // Synchronizes lazy executable global resolution and cache access.
+  iree_slim_mutex_t global_mutex;
+  // Cached executable global symbols keyed by name.
+  iree_hal_streaming_symbol_t** globals;
+  // Number of cached executable global symbols.
+  iree_host_size_t global_count;
+  // Capacity of the cached executable global symbols array.
+  iree_host_size_t global_capacity;
 
   // Context that loaded this module.
   iree_hal_streaming_context_t* context;
@@ -610,6 +708,15 @@ typedef struct iree_hal_streaming_event_t {
   // Platform-specific IPC handle, if the event is IPC enabled.
   void* ipc_handle;
 
+  // Captured graph associated with this event's last captured record.
+  iree_hal_streaming_graph_t* capture_graph;
+  // Captured dependency frontier stored by the last captured record.
+  iree_hal_streaming_graph_node_t** capture_dependencies;
+  // Number of entries in |capture_dependencies| currently valid.
+  iree_host_size_t capture_dependency_count;
+  // Allocated capacity of |capture_dependencies|.
+  iree_host_size_t capture_dependency_capacity;
+
   // Host allocator.
   iree_allocator_t host_allocator;
 } iree_hal_streaming_event_t;
@@ -629,7 +736,32 @@ typedef enum iree_hal_streaming_host_register_flag_bits_e {
   IREE_HAL_STREAMING_HOST_REGISTER_FLAG_WRITE_COMBINED = 1ull << 2,
   // Read-only from device.
   IREE_HAL_STREAMING_HOST_REGISTER_FLAG_READ_ONLY = 1ull << 3,
+  // HIP uncached host allocation flag.
+  IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_UNCACHED = 1ull << 28,
+  // HIP NUMA-user host allocation flag.
+  IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_NUMA_USER = 1ull << 29,
+  // HIP coherent host allocation flag.
+  IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_COHERENT = 1ull << 30,
+  // HIP non-coherent host allocation flag.
+  IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_NON_COHERENT = 1ull << 31,
 } iree_hal_streaming_host_register_flags_t;
+
+// Describes how a streaming buffer wrapper keeps its context alive.
+typedef enum iree_hal_streaming_buffer_context_ownership_e {
+  // The containing context owns the wrapper and must outlive it.
+  IREE_HAL_STREAMING_BUFFER_CONTEXT_BORROWED = 0,
+  // The wrapper owns a reference to its context.
+  IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED = 1,
+} iree_hal_streaming_buffer_context_ownership_t;
+
+typedef struct iree_hal_streaming_context_import_t {
+  // Next imported HAL buffer wrapper for the same HIP-visible allocation.
+  struct iree_hal_streaming_context_import_t* next;
+  // Context whose allocator imported |buffer|.
+  iree_hal_streaming_context_t* context;
+  // Imported HAL buffer wrapper over the original allocation.
+  iree_hal_buffer_t* buffer;
+} iree_hal_streaming_context_import_t;
 
 // Buffer wrapper for device memory.
 typedef struct iree_hal_streaming_buffer_t {
@@ -639,8 +771,20 @@ typedef struct iree_hal_streaming_buffer_t {
   // Host address, if available.
   void* host_ptr;
 
+  // True when |host_ptr| is separately allocated and owned by this wrapper.
+  bool owns_host_ptr;
+
+  // True when |host_mapping| contains an active persistent HAL mapping.
+  bool has_host_mapping;
+
+  // Persistent mapping used to expose HOST_VISIBLE non-HOST_LOCAL buffers.
+  iree_hal_buffer_mapping_t host_mapping;
+
   // Total size in bytes of the buffer.
   iree_device_size_t size;
+
+  // Size reported by API metadata queries.
+  iree_device_size_t logical_size;
 
   // HAL buffer (alias for hrx_buf->hal_buffer when hrx_buf is set).
   iree_hal_buffer_t* buffer;
@@ -650,14 +794,50 @@ typedef struct iree_hal_streaming_buffer_t {
   // alias pointing to hrx_buf->hal_buffer.
   hrx_buffer_t hrx_buf;
 
-  // Owning context.
+  // Context used for allocation, table lookup, and device accounting.
   iree_hal_streaming_context_t* context;
+
+  // Whether this wrapper owns a reference to |context|.
+  iree_hal_streaming_buffer_context_ownership_t context_ownership;
+
+  // HRX memory pool retained while |buffer| may borrow its HAL pool.
+  hrx_mem_pool_t allocation_pool;
 
   // Platform-specific memory type.
   int memory_type;
 
   // Host registration flags (if registered host memory).
   iree_hal_streaming_host_register_flags_t host_register_flags;
+
+  // True when host memory was imported by registration rather than allocated.
+  bool imported_host_allocation;
+
+  // True when the allocation was created by hipMallocManaged.
+  bool is_managed;
+
+  // Number of managed-memory metadata pages tracked for this allocation.
+  iree_host_size_t managed_page_count;
+
+  // Per-page read-mostly advice for hipMallocManaged allocations.
+  bool* managed_read_mostly_pages;
+
+  // Per-page preferred location for hipMallocManaged allocations.
+  int32_t* managed_preferred_locations;
+
+  // Per-page accessed-by device mask for hipMallocManaged allocations.
+  uint64_t* managed_accessed_by_device_masks;
+
+  // Per-page last prefetch location for hipMallocManaged allocations.
+  int32_t* managed_last_prefetch_locations;
+
+  // Per-page coherency mode for hipMallocManaged allocations.
+  int32_t* managed_coherency_modes;
+
+  // Guards cross-context import cache mutation.
+  iree_slim_mutex_t context_import_mutex;
+
+  // Per-context imported wrappers over the same HIP-visible allocation.
+  iree_hal_streaming_context_import_t* context_imports;
 
   // Platform-specific IPC handle, if the buffer is IPC enabled.
   void* ipc_handle;
@@ -669,9 +849,15 @@ typedef struct iree_hal_streaming_buffer_t {
   // -1 indicates CPU preference, >= 0 indicates device ID.
   int32_t preferred_location;
 
+  // Bit mask of devices recorded by hipMemAdviseSetAccessedBy.
+  uint64_t accessed_by_device_mask;
+
   // Last prefetch location for this memory range.
   // -1 indicates CPU, -2 indicates never prefetched, >= 0 indicates device ID.
   int32_t last_prefetch_location;
+
+  // Default coherency mode for this managed memory range.
+  int32_t coherency_mode;
 } iree_hal_streaming_buffer_t;
 
 // A buffer and an offset into it resolved from a device pointer.
@@ -684,8 +870,9 @@ typedef struct iree_hal_streaming_buffer_ref_t {
 
 static inline iree_hal_buffer_ref_t iree_hal_streaming_convert_buffer_ref(
     iree_hal_streaming_buffer_ref_t ref) {
-  return iree_hal_make_buffer_ref(ref.buffer->buffer, ref.offset,
-                                  IREE_HAL_WHOLE_BUFFER);
+  const iree_device_size_t length =
+      ref.offset < ref.buffer->size ? ref.buffer->size - ref.offset : 0;
+  return iree_hal_make_buffer_ref(ref.buffer->buffer, ref.offset, length);
 }
 
 static inline iree_hal_buffer_ref_t iree_hal_streaming_convert_range_buffer_ref(
@@ -704,10 +891,9 @@ typedef enum iree_hal_streaming_dispatch_flag_bits_e {
   IREE_HAL_STREAMING_DISPATCH_FLAG_COOPERATIVE = 1ull << 0,
   // The parameters are an array of pointers to values.
   IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY = 1ull << 1,
-  // The parameter buffer is pre-packed in the kernel's native ABI format.
-  // This is used when HIP_LAUNCH_PARAM_BUFFER_POINTER is used to pass
-  // arguments. The buffer should be passed directly to the kernel without
-  // unpacking.
+  // The parameter buffer is already packed in the kernel's native ABI format.
+  // The launch path preserves the byte image and does not rewrite reflected
+  // pointer slots into HAL bindings.
   IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED = 1ull << 2,
 } iree_hal_streaming_dispatch_flags_t;
 
@@ -738,8 +924,20 @@ enum iree_hal_streaming_graph_node_type_e {
       3 | IREE_HAL_STREAMING_GRAPH_NODE_TYPE_RECORDABLE,
   IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL = 4,
   IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH = 5,
+  IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT = 6,
+  IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD = 7,
+  IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC = 8,
+  IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE = 9,
+  IREE_HAL_STREAMING_GRAPH_NODE_TYPE_BATCH_MEM_OP = 10,
 };
 typedef uint8_t iree_hal_streaming_graph_node_type_t;
+
+typedef enum iree_hal_streaming_graph_node_flag_bits_e {
+  // Node is an internal implementation detail and is hidden from HIP queries.
+  IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN = 1u << 0,
+  // Node is disabled in an executable graph and omitted from scheduling.
+  IREE_HAL_STREAMING_GRAPH_NODE_FLAG_DISABLED = 1u << 1,
+} iree_hal_streaming_graph_node_flag_bits_t;
 
 // Returns true if the node type can be recorded into a command buffer.
 // Nodes without this bit set will be queue operations.
@@ -750,33 +948,235 @@ static bool iree_hal_streaming_graph_node_is_recordable(
 
 // Graph node attribute structures.
 typedef struct iree_hal_streaming_graph_kernel_node_attrs_t {
+  // HIP kernel function address used for parameter query APIs.
+  void* hip_function;
+  // HIP kernel parameter pointer array captured by graph node APIs.
+  void** hip_kernel_params;
+  // HIP extra launch parameter array captured by graph node APIs.
+  void** hip_extra;
+  // Resolved executable symbol used for graph launch.
   iree_hal_streaming_symbol_t* symbol;
+  // Grid dimensions in workgroups.
   uint32_t grid_dim[3];
+  // Block dimensions in workitems.
   uint32_t block_dim[3];
+  // Dynamic shared memory byte count.
   uint32_t shared_memory_bytes;
+  // Packed constant argument bytes.
   iree_const_byte_span_t constants;
+  // Bytes reserved for constants in this node's trailing storage.
+  iree_host_size_t constants_capacity;
+  // Resolved buffer bindings.
   iree_hal_buffer_ref_list_t bindings;
+  // Binding refs reserved in this node's trailing storage.
+  iree_host_size_t binding_capacity;
+  // Base pointer for the HIP kernel-node access policy window attribute.
+  void* access_policy_window_base_ptr;
+  // Byte length for the HIP kernel-node access policy window attribute.
+  iree_device_size_t access_policy_window_num_bytes;
+  // Cache-hit ratio for the HIP kernel-node access policy window attribute.
+  float access_policy_window_hit_ratio;
+  // Cache policy enum for access-policy hits.
+  uint32_t access_policy_window_hit_property;
+  // Cache policy enum for access-policy misses.
+  uint32_t access_policy_window_miss_property;
+  // Cooperative launch hint associated with the kernel node.
+  int cooperative;
+  // Priority hint associated with the kernel node.
+  int priority;
 } iree_hal_streaming_graph_kernel_node_attrs_t;
 
+typedef struct iree_hal_streaming_graph_memcpy_driver_node_attrs_t {
+  // True when these fields contain caller-visible HIP_MEMCPY3D metadata.
+  bool valid;
+  // HIP_MEMCPY3D::srcXInBytes value.
+  iree_device_size_t src_x_in_bytes;
+  // HIP_MEMCPY3D::srcY value.
+  iree_device_size_t src_y;
+  // HIP_MEMCPY3D::srcZ value.
+  iree_device_size_t src_z;
+  // HIP_MEMCPY3D::srcLOD value.
+  iree_device_size_t src_lod;
+  // HIP_MEMCPY3D source memory type value.
+  int src_memory_type;
+  // HIP_MEMCPY3D destination memory type value.
+  int dst_memory_type;
+  // HIP_MEMCPY3D source host pointer.
+  const void* src_host;
+  // HIP_MEMCPY3D source device pointer.
+  iree_hal_streaming_deviceptr_t src_device;
+  // HIP_MEMCPY3D source array handle.
+  const void* src_array;
+  // HIP_MEMCPY3D::srcPitch value.
+  iree_device_size_t src_pitch;
+  // HIP_MEMCPY3D::srcHeight value.
+  iree_device_size_t src_height;
+  // HIP_MEMCPY3D::dstXInBytes value.
+  iree_device_size_t dst_x_in_bytes;
+  // HIP_MEMCPY3D::dstY value.
+  iree_device_size_t dst_y;
+  // HIP_MEMCPY3D::dstZ value.
+  iree_device_size_t dst_z;
+  // HIP_MEMCPY3D::dstLOD value.
+  iree_device_size_t dst_lod;
+  // HIP_MEMCPY3D destination host pointer.
+  void* dst_host;
+  // HIP_MEMCPY3D destination device pointer.
+  iree_hal_streaming_deviceptr_t dst_device;
+  // HIP_MEMCPY3D destination array handle.
+  void* dst_array;
+  // HIP_MEMCPY3D::dstPitch value.
+  iree_device_size_t dst_pitch;
+  // HIP_MEMCPY3D::dstHeight value.
+  iree_device_size_t dst_height;
+  // HIP_MEMCPY3D::WidthInBytes value.
+  iree_device_size_t width_in_bytes;
+  // HIP_MEMCPY3D::Height value.
+  iree_device_size_t height;
+  // HIP_MEMCPY3D::Depth value.
+  iree_device_size_t depth;
+} iree_hal_streaming_graph_memcpy_driver_node_attrs_t;
+
 typedef struct iree_hal_streaming_graph_memcpy_node_attrs_t {
+  // Destination buffer reference.
   iree_hal_streaming_buffer_ref_t dst_ref;
+  // Source buffer reference.
   iree_hal_streaming_buffer_ref_t src_ref;
+  // Number of contiguous bytes to copy.
   iree_device_size_t size;
+  // Copy flags passed to HAL.
   iree_hal_copy_flags_t flags;
+  // Destination pitch in bytes used for command-buffer recording.
+  iree_device_size_t execution_dst_pitch;
+  // Source pitch in bytes used for command-buffer recording.
+  iree_device_size_t execution_src_pitch;
+  // Destination rows per slice used for command-buffer recording.
+  iree_device_size_t execution_dst_ysize;
+  // Source rows per slice used for command-buffer recording.
+  iree_device_size_t execution_src_ysize;
+  // Copy extent width in bytes used for command-buffer recording.
+  iree_device_size_t execution_extent_width;
+  // Copy extent height in rows used for command-buffer recording.
+  iree_device_size_t execution_extent_height;
+  // Copy extent depth in planes used for command-buffer recording.
+  iree_device_size_t execution_extent_depth;
+  // HIP destination pointer used for parameter query APIs.
+  void* hip_dst;
+  // HIP source pointer used for parameter query APIs.
+  const void* hip_src;
+  // HIP destination array handle used for parameter query APIs.
+  void* hip_dst_array;
+  // HIP source array handle used for parameter query APIs.
+  const void* hip_src_array;
+  // HIP destination x position in bytes.
+  iree_device_size_t hip_dst_position_x;
+  // HIP destination y position in rows.
+  iree_device_size_t hip_dst_position_y;
+  // HIP destination z position in slices.
+  iree_device_size_t hip_dst_position_z;
+  // HIP source x position in bytes.
+  iree_device_size_t hip_src_position_x;
+  // HIP source y position in rows.
+  iree_device_size_t hip_src_position_y;
+  // HIP source z position in slices.
+  iree_device_size_t hip_src_position_z;
+  // HIP destination pitch in bytes.
+  iree_device_size_t hip_dst_pitch;
+  // HIP source pitch in bytes.
+  iree_device_size_t hip_src_pitch;
+  // HIP destination x size in bytes.
+  iree_device_size_t hip_dst_xsize;
+  // HIP source x size in bytes.
+  iree_device_size_t hip_src_xsize;
+  // HIP destination y size in rows.
+  iree_device_size_t hip_dst_ysize;
+  // HIP source y size in rows.
+  iree_device_size_t hip_src_ysize;
+  // HIP extent width in bytes.
+  iree_device_size_t hip_extent_width;
+  // HIP extent height in rows.
+  iree_device_size_t hip_extent_height;
+  // HIP extent depth in planes.
+  iree_device_size_t hip_extent_depth;
+  // HIP memcpy kind value.
+  int hip_kind;
+  // HIP driver API metadata used for HIP_MEMCPY3D round-tripping.
+  iree_hal_streaming_graph_memcpy_driver_node_attrs_t hip_driver;
 } iree_hal_streaming_graph_memcpy_node_attrs_t;
 
 typedef struct iree_hal_streaming_graph_memset_node_attrs_t {
+  // Destination buffer reference.
   iree_hal_streaming_buffer_ref_t dst_ref;
+  // Fill pattern value.
   uint32_t pattern;
+  // Fill pattern byte width.
   uint8_t pattern_size;
+  // Element count to fill.
   iree_device_size_t count;
+  // Fill flags passed to HAL.
   iree_hal_copy_flags_t flags;
+  // HIP destination pointer used for parameter query APIs.
+  void* hip_dst;
+  // HIP width in elements.
+  iree_device_size_t hip_width;
+  // HIP height in rows.
+  iree_device_size_t hip_height;
+  // HIP pitch in bytes.
+  iree_device_size_t hip_pitch;
 } iree_hal_streaming_graph_memset_node_attrs_t;
 
 typedef struct iree_hal_streaming_graph_host_call_node_attrs_t {
+  // Host callback function.
   void (*fn)(void* user_data);
+  // User data passed to the host callback function.
   void* user_data;
+  // Bytes of graph-owned user data to copy into graph execs, or zero.
+  iree_host_size_t user_data_size;
 } iree_hal_streaming_graph_host_call_node_attrs_t;
+
+typedef struct iree_hal_streaming_graph_child_graph_node_attrs_t {
+  // Child graph template owned by this node while the parent graph is alive.
+  iree_hal_streaming_graph_t* graph;
+} iree_hal_streaming_graph_child_graph_node_attrs_t;
+
+typedef struct iree_hal_streaming_graph_event_node_attrs_t {
+  // Event retained by an event record or wait graph node.
+  iree_hal_streaming_event_t* event;
+} iree_hal_streaming_graph_event_node_attrs_t;
+
+typedef struct iree_hal_streaming_graph_mem_alloc_node_attrs_t {
+  // HIP memory allocation node parameters captured at graph construction time.
+  void* params;
+  // Number of parameter bytes stored at |params|.
+  iree_host_size_t params_size;
+  // Device pointer allocated for this graph memory node.
+  void* dptr;
+  // Allocation size in bytes.
+  iree_device_size_t bytesize;
+  // True when |dptr| is owned by this graph template and must be released with
+  // the node.
+  bool owns_device_allocation;
+} iree_hal_streaming_graph_mem_alloc_node_attrs_t;
+
+typedef struct iree_hal_streaming_graph_mem_free_node_attrs_t {
+  // Device pointer associated with the memory free node.
+  void* dptr;
+} iree_hal_streaming_graph_mem_free_node_attrs_t;
+
+typedef struct iree_hal_streaming_graph_batch_mem_op_node_attrs_t {
+  // Opaque HIP batch memory operation node parameter bytes.
+  void* params;
+  // Number of parameter bytes currently valid at |params|.
+  iree_host_size_t params_size;
+  // Number of parameter bytes reserved at |params|.
+  iree_host_size_t params_capacity;
+  // Opaque HIP stream batch memory operation array bytes.
+  void* param_array;
+  // Number of operation array bytes currently valid at |param_array|.
+  iree_host_size_t param_array_size;
+  // Number of operation array bytes reserved at |param_array|.
+  iree_host_size_t param_array_capacity;
+} iree_hal_streaming_graph_batch_mem_op_node_attrs_t;
 
 // Graph node structure.
 // Memory layout:
@@ -785,10 +1185,19 @@ typedef struct iree_hal_streaming_graph_host_call_node_attrs_t {
 // [padding to iree_max_align_t]
 // [extra_data (e.g., packed kernel arguments)]
 typedef struct iree_hal_streaming_graph_node_t {
+  // Graph that owns the node while it remains part of a graph template.
+  iree_hal_streaming_graph_t* graph;
   // Type of the node indicating which attribute data is valid.
   iree_hal_streaming_graph_node_type_t type;
-  // Unique index assigned when added to graph.
+  // Flags controlling graph node visibility and behavior.
+  uint32_t flags;
+  // Dense index used by graph analysis while the node is active.
   uint32_t node_index;
+  // Stable source node index used to find original nodes in cloned graphs.
+  uint32_t clone_source_node_index;
+  // Process-unique identifier used for graph debug output.
+  uint64_t debug_id;
+  // Number of embedded dependency pointers in |dependencies|.
   uint32_t dependency_count;
 
   // Node-specific data.
@@ -797,13 +1206,16 @@ typedef struct iree_hal_streaming_graph_node_t {
     iree_hal_streaming_graph_memcpy_node_attrs_t memcpy;
     iree_hal_streaming_graph_memset_node_attrs_t memset;
     iree_hal_streaming_graph_host_call_node_attrs_t host;
+    iree_hal_streaming_graph_child_graph_node_attrs_t child_graph;
+    iree_hal_streaming_graph_event_node_attrs_t event;
+    iree_hal_streaming_graph_mem_alloc_node_attrs_t mem_alloc;
+    iree_hal_streaming_graph_mem_free_node_attrs_t mem_free;
+    iree_hal_streaming_graph_batch_mem_op_node_attrs_t batch_mem_op;
   } attrs;
 
-  // Variable-length array of dependencies follows the struct.
-  // TODO(benvanik): use uint32_t instead as it'd shrink the size of the struct
-  // and be faster to look up later. It means having a single node pointer is
-  // not sufficient to get a dependency node pointer (need the table) but that's
-  // not really useful anyway.
+  // Variable-length array of dependency node pointers follows the struct.
+  // Pointer storage keeps dependency traversal independent of the graph's
+  // backing node blocks.
   iree_hal_streaming_graph_node_t* dependencies[];
 } iree_hal_streaming_graph_node_t;
 
@@ -984,8 +1396,11 @@ iree_hal_streaming_context_flags_t iree_hal_streaming_context_flags(
 // Synchronization: none (thread-local access).
 iree_hal_streaming_context_t* iree_hal_streaming_context_current(void);
 
+// Synchronization: none (thread-local access).
+uintptr_t iree_hal_streaming_current_thread_token(void);
+
 // Synchronization: none (thread-local modification).
-iree_status_t iree_hal_streaming_context_set_current(
+void iree_hal_streaming_context_set_current(
     iree_hal_streaming_context_t* context);
 
 // Synchronization: none (thread-local stack operation).
@@ -1039,15 +1454,51 @@ iree_status_t iree_hal_streaming_context_register_stream(
 void iree_hal_streaming_context_unregister_stream(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
 
+iree_status_t iree_hal_streaming_context_allocate_capture_id(
+    iree_hal_streaming_context_t* context, unsigned long long* out_capture_id);
+
+// Returns true when another context is present in the global context list.
+bool iree_hal_streaming_context_has_peer_contexts(
+    iree_hal_streaming_context_t* context);
+
 // Waits for all streams in the context to become idle.
 // Synchronization: all streams in context (blocking wait).
 iree_status_t iree_hal_streaming_context_wait_idle(
     iree_hal_streaming_context_t* context, iree_timeout_t timeout);
 
+// Flushes pending command buffers in all streams in the context without
+// waiting for completion.
+iree_status_t iree_hal_streaming_context_flush(
+    iree_hal_streaming_context_t* context);
+
+// Flushes pending command buffers in every active context without waiting for
+// completion.
+iree_status_t iree_hal_streaming_context_flush_all(void);
+
 // Synchronization: all streams (blocks until all streams idle).
 // This flushes and waits for all streams on the device.
 iree_status_t iree_hal_streaming_context_synchronize(
     iree_hal_streaming_context_t* context);
+
+// Synchronizes streams that participate in legacy default stream ordering.
+// Non-blocking streams are excluded. The legacy default stream itself is always
+// synchronized.
+iree_status_t iree_hal_streaming_context_synchronize_legacy_default(
+    iree_hal_streaming_context_t* context);
+
+// Synchronization: all streams in all active contexts.
+// This flushes and waits for every context registered in the process.
+iree_status_t iree_hal_streaming_context_synchronize_all(void);
+
+// Synchronizes blocking streams that implicitly serialize with the legacy
+// default stream.
+iree_status_t iree_hal_streaming_context_synchronize_blocking_streams(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_stream_t* except_stream);
+
+// Queries whether any stream in the context still has queued work.
+iree_status_t iree_hal_streaming_context_query(
+    iree_hal_streaming_context_t* context, int* status);
 
 // Wait for all already-submitted work on all streams to complete.
 // Unlike context_synchronize, this does NOT flush in-progress recordings.
@@ -1063,15 +1514,14 @@ iree_status_t iree_hal_streaming_context_wait_all_submitted(
 // Synchronization: none (creates new module).
 iree_status_t iree_hal_streaming_module_create_from_memory(
     iree_hal_streaming_context_t* context,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_const_byte_span_t image, iree_allocator_t host_allocator,
-    iree_hal_streaming_module_t** out_module);
+    iree_hal_executable_load_flags_t load_flags, iree_const_byte_span_t image,
+    iree_allocator_t host_allocator, iree_hal_streaming_module_t** out_module);
 
 // Loads module from a file at the given path.
 // Synchronization: none (creates new module).
 iree_status_t iree_hal_streaming_module_create_from_file(
     iree_hal_streaming_context_t* context,
-    iree_hal_executable_caching_mode_t caching_mode, iree_string_view_t path,
+    iree_hal_executable_load_flags_t load_flags, iree_string_view_t path,
     iree_allocator_t host_allocator, iree_hal_streaming_module_t** out_module);
 
 void iree_hal_streaming_module_retain(iree_hal_streaming_module_t* module);
@@ -1088,7 +1538,23 @@ iree_status_t iree_hal_streaming_module_function(
     iree_hal_streaming_module_t* module, const char* name,
     iree_hal_streaming_symbol_t** out_function);
 
-// Synchronization: none (queries global metadata).
+// Tries to resolve a global symbol by name, lazily querying HAL executable
+// globals. Returned storage is owned by |module| and remains valid while it is
+// live.
+// Synchronization: module (global cache).
+iree_status_t iree_hal_streaming_module_try_lookup_global_symbol(
+    iree_hal_streaming_module_t* module, const char* name, bool* out_found,
+    iree_hal_streaming_symbol_t** out_global);
+
+// Resolves a required global symbol by name, lazily querying HAL executable
+// globals. Returned storage is owned by |module| and remains valid while it is
+// live.
+// Synchronization: module (global cache).
+iree_status_t iree_hal_streaming_module_global_symbol(
+    iree_hal_streaming_module_t* module, const char* name,
+    iree_hal_streaming_symbol_t** out_global);
+
+// Synchronization: module (global cache).
 iree_status_t iree_hal_streaming_module_global(
     iree_hal_streaming_module_t* module, const char* name,
     iree_hal_streaming_deviceptr_t* out_device_ptr,
@@ -1113,6 +1579,11 @@ void iree_hal_streaming_stream_release(iree_hal_streaming_stream_t* stream);
 iree_status_t iree_hal_streaming_stream_begin(
     iree_hal_streaming_stream_t* stream);
 
+// Ensures a stream command buffer is recording while the caller holds
+// stream->mutex. Use this when appending commands under the stream lock.
+iree_status_t iree_hal_streaming_stream_begin_locked(
+    iree_hal_streaming_stream_t* stream);
+
 // Flushes pending commands.
 // Synchronization: none (submits to queue, non-blocking).
 iree_status_t iree_hal_streaming_stream_flush(
@@ -1124,6 +1595,9 @@ iree_status_t iree_hal_streaming_stream_query(
 
 // Synchronization: stream (blocks until stream idle).
 iree_status_t iree_hal_streaming_stream_synchronize(
+    iree_hal_streaming_stream_t* stream);
+// Synchronizes stream work that the caller has already flushed/submitted.
+iree_status_t iree_hal_streaming_stream_synchronize_flushed(
     iree_hal_streaming_stream_t* stream);
 
 // Wait for already-submitted work on this stream to complete.
@@ -1140,9 +1614,9 @@ iree_status_t iree_hal_streaming_stream_wait_event(
 // Execution control
 //===----------------------------------------------------------------------===//
 
-// Unpacks parameters from a CUDA-style kernel parameter buffer into a constant
-// buffer and binding list. Some dispatches may use raw device buffer pointers
-// and others may use bindings that can be resolved to HAL buffers.
+// Unpacks a packed kernel parameter buffer into a constant buffer and binding
+// list. Some dispatches may use raw device buffer pointers and others may use
+// bindings that can be resolved to HAL buffers.
 // Callers must ensure sufficient storage in |out_constants| and |out_bindings|
 // based on the symbol constant size and binding count.
 // Synchronization: none (data packing utility).
@@ -1245,10 +1719,25 @@ iree_status_t iree_hal_streaming_memory_lookup_range(
     iree_hal_streaming_deviceptr_t device_ptr, iree_device_size_t size,
     iree_hal_streaming_buffer_ref_t* out_ref);
 
+// Looks up the context and buffer that contain the specified address range.
+// On success, |out_context| receives a retained context reference that the
+// caller must release.
+// Synchronization: global context-list lock during lookup.
+iree_status_t iree_hal_streaming_memory_lookup_range_across_contexts(
+    iree_hal_streaming_deviceptr_t device_ptr, iree_device_size_t size,
+    iree_hal_streaming_context_t** out_context,
+    iree_hal_streaming_buffer_ref_t* out_ref);
+
 // Synchronization: none (allocates memory).
 iree_status_t iree_hal_streaming_memory_allocate_device(
     iree_hal_streaming_context_t* context, iree_device_size_t size,
     iree_hal_streaming_memory_flags_t flags,
+    iree_hal_streaming_buffer_t** out_buffer);
+
+// Synchronization: none (allocates memory from a pool).
+iree_status_t iree_hal_streaming_memory_allocate_device_from_pool(
+    iree_hal_streaming_context_t* context, hrx_mem_pool_t pool,
+    iree_device_size_t size, iree_hal_streaming_memory_flags_t flags,
     iree_hal_streaming_buffer_t** out_buffer);
 
 // Synchronization: none (allocates pitched memory).
@@ -1257,9 +1746,15 @@ iree_status_t iree_hal_streaming_memory_allocate_device_pitched(
     iree_device_size_t height, iree_device_size_t element_size_bytes,
     iree_device_size_t* out_pitch, iree_hal_streaming_buffer_t** out_buffer);
 
-// Synchronization: context (waits for all operations to complete).
+// Synchronization: all active contexts.
 iree_status_t iree_hal_streaming_memory_free_device(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t ptr);
+
+// Synchronization: stream-ordered (releases allocation when |stream| reaches
+// the free operation).
+iree_status_t iree_hal_streaming_memory_free_device_async(
+    iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t ptr,
+    iree_hal_streaming_stream_t* stream);
 
 // Synchronization: none (allocates host memory).
 iree_status_t iree_hal_streaming_memory_allocate_host(
@@ -1267,13 +1762,32 @@ iree_status_t iree_hal_streaming_memory_allocate_host(
     iree_hal_streaming_host_register_flags_t flags,
     iree_hal_streaming_buffer_t** out_buffer);
 
-// Synchronization: context (waits for all operations to complete).
+// Synchronization: none (allocates host-visible device memory).
+iree_status_t iree_hal_streaming_memory_allocate_managed(
+    iree_hal_streaming_context_t* context, iree_host_size_t size,
+    unsigned int allocation_flags, iree_hal_streaming_buffer_t** out_buffer);
+
+// Synchronization: all active contexts.
 iree_status_t iree_hal_streaming_memory_free_host(
     iree_hal_streaming_context_t* context, void* ptr);
 
 // Synchronization: none; called during context destruction after streams idle.
 void iree_hal_streaming_memory_release_pageable_staging(
     iree_hal_streaming_context_t* context);
+
+// Wraps an existing HAL buffer and registers it in the context pointer map.
+// The wrapper retains |buffer| for HRX interop, but callers must still ensure
+// the backing owner remains live for the duration required by the HAL API.
+// Synchronization: none (registers existing memory).
+iree_status_t iree_hal_streaming_memory_wrap_buffer(
+    iree_hal_streaming_context_t* context, iree_hal_buffer_t* buffer,
+    iree_hal_streaming_buffer_context_ownership_t context_ownership,
+    iree_hal_streaming_buffer_t** out_buffer);
+
+// Releases a wrapper created with iree_hal_streaming_memory_wrap_buffer.
+// Synchronization: none (unregisters existing memory).
+void iree_hal_streaming_memory_release_wrapped_buffer(
+    iree_hal_streaming_buffer_t* buffer);
 
 // Synchronization: none (registers existing memory).
 iree_status_t iree_hal_streaming_memory_register_host(
@@ -1366,6 +1880,8 @@ hrx_mem_pool_t iree_hal_streaming_device_default_mem_pool(
     iree_hal_streaming_device_t* device);
 hrx_mem_pool_t iree_hal_streaming_device_mem_pool(
     iree_hal_streaming_device_t* device);
+iree_status_t iree_hal_streaming_device_ensure_default_mem_pool(
+    iree_hal_streaming_device_t* device);
 void iree_hal_streaming_device_set_mem_pool(iree_hal_streaming_device_t* device,
                                             hrx_mem_pool_t pool);
 
@@ -1385,10 +1901,25 @@ typedef enum iree_hal_streaming_graph_instantiate_flag_bits_e {
   IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_USE_NODE_PRIORITY = 1ull << 3,
 } iree_hal_streaming_graph_instantiate_flags_t;
 
+typedef enum iree_hal_streaming_graph_exec_update_result_e {
+  IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_SUCCESS = 0,
+  IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_ERROR = 1,
+  IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_TOPOLOGY_CHANGED = 2,
+  IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_NODE_TYPE_CHANGED = 3,
+  IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_FUNCTION_CHANGED = 4,
+  IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_PARAMETERS_CHANGED = 5,
+  IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_NOT_SUPPORTED = 6,
+  IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_UNSUPPORTED_FUNCTION_CHANGE = 7,
+} iree_hal_streaming_graph_exec_update_result_t;
+
 // Synchronization: none (creates new graph).
 iree_status_t iree_hal_streaming_graph_create(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_graph_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_streaming_graph_t** out_graph);
+
+iree_status_t iree_hal_streaming_graph_clone(
+    iree_hal_streaming_graph_t* source_graph,
     iree_hal_streaming_graph_t** out_graph);
 
 // Synchronization: none (reference counting).
@@ -1415,12 +1946,31 @@ iree_status_t iree_hal_streaming_graph_add_kernel_node(
     const iree_hal_streaming_dispatch_params_t* params,
     iree_hal_streaming_graph_node_t** out_node);
 
+iree_status_t iree_hal_streaming_graph_set_kernel_node_params(
+    iree_hal_streaming_graph_node_t* node, iree_hal_streaming_symbol_t* symbol,
+    const iree_hal_streaming_dispatch_params_t* params);
+
 iree_status_t iree_hal_streaming_graph_add_memcpy_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, iree_hal_streaming_deviceptr_t dst,
     iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
     iree_hal_streaming_graph_node_t** out_node);
+
+iree_status_t iree_hal_streaming_graph_add_memcpy_node_from_refs(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count, iree_hal_streaming_buffer_ref_t dst_ref,
+    iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
+    iree_hal_streaming_graph_node_t** out_node);
+
+iree_status_t iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count,
+    iree_hal_streaming_graph_node_t* extra_dependency,
+    iree_hal_streaming_deviceptr_t dst, iree_hal_streaming_deviceptr_t src,
+    iree_device_size_t size, iree_hal_streaming_graph_node_t** out_node);
 
 iree_status_t iree_hal_streaming_graph_add_memset_node(
     iree_hal_streaming_graph_t* graph,
@@ -1435,6 +1985,36 @@ iree_status_t iree_hal_streaming_graph_add_host_call_node(
     iree_host_size_t dependency_count, void (*fn)(void*), void* user_data,
     iree_hal_streaming_graph_node_t** out_node);
 
+iree_status_t iree_hal_streaming_graph_add_event_node(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count,
+    iree_hal_streaming_graph_node_type_t type,
+    iree_hal_streaming_event_t* event,
+    iree_hal_streaming_graph_node_t** out_node);
+
+iree_status_t iree_hal_streaming_graph_add_child_graph_node(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count, iree_hal_streaming_graph_t* child_graph,
+    iree_hal_streaming_graph_node_t** out_node);
+
+iree_status_t iree_hal_streaming_graph_add_batch_mem_op_node(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count, const void* params,
+    iree_host_size_t params_size, const void* param_array,
+    iree_host_size_t param_array_size,
+    iree_hal_streaming_graph_node_t** out_node);
+
+iree_status_t iree_hal_streaming_graph_set_batch_mem_op_node_params(
+    iree_hal_streaming_graph_node_t* node, const void* params,
+    iree_host_size_t params_size, const void* param_array,
+    iree_host_size_t param_array_size);
+
+iree_status_t iree_hal_streaming_graph_destroy_node(
+    iree_hal_streaming_graph_node_t* node);
+
 // Synchronization: none (creates executable graph).
 iree_status_t iree_hal_streaming_graph_instantiate(
     iree_hal_streaming_graph_t* graph,
@@ -1446,6 +2026,33 @@ void iree_hal_streaming_graph_exec_retain(
     iree_hal_streaming_graph_exec_t* exec);
 void iree_hal_streaming_graph_exec_release(
     iree_hal_streaming_graph_exec_t* exec);
+bool iree_hal_streaming_graph_exec_try_retain_live(
+    iree_hal_streaming_graph_exec_t* exec);
+bool iree_hal_streaming_graph_exec_is_live(
+    iree_hal_streaming_graph_exec_t* exec);
+iree_status_t iree_hal_streaming_graph_exec_destroy_handle(
+    iree_hal_streaming_graph_exec_t* exec);
+
+// Synchronization: none (queries immutable instantiation flags).
+iree_hal_streaming_graph_instantiate_flags_t
+iree_hal_streaming_graph_exec_flags(iree_hal_streaming_graph_exec_t* exec);
+
+// Synchronization: graph exec (updates instantiated event-node metadata).
+iree_status_t iree_hal_streaming_graph_exec_set_event_node_event(
+    iree_hal_streaming_graph_exec_t* exec,
+    iree_hal_streaming_graph_node_t* node,
+    iree_hal_streaming_graph_node_type_t type,
+    iree_hal_streaming_event_t* event);
+
+// Synchronization: graph exec (queries exec-local node enable state).
+bool iree_hal_streaming_graph_exec_node_is_enabled(
+    iree_hal_streaming_graph_exec_t* exec,
+    iree_hal_streaming_graph_node_t* node);
+
+// Synchronization: graph exec (updates exec-local node enable state).
+iree_status_t iree_hal_streaming_graph_exec_set_node_enabled(
+    iree_hal_streaming_graph_exec_t* exec,
+    iree_hal_streaming_graph_node_t* node, bool enabled);
 
 // Synchronization: stream (launches graph async on stream).
 iree_status_t iree_hal_streaming_graph_exec_launch(
@@ -1453,7 +2060,23 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
 
 // Synchronization: none (updates graph structure).
 iree_status_t iree_hal_streaming_graph_exec_update(
-    iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_graph_t* graph);
+    iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** out_error_node,
+    iree_hal_streaming_graph_exec_update_result_t* out_result);
+
+uint64_t iree_hal_streaming_graph_memory_used_current(
+    iree_hal_streaming_device_t* device);
+uint64_t iree_hal_streaming_graph_memory_used_high(
+    iree_hal_streaming_device_t* device);
+uint64_t iree_hal_streaming_graph_memory_reserved_current(
+    iree_hal_streaming_device_t* device);
+uint64_t iree_hal_streaming_graph_memory_reserved_high(
+    iree_hal_streaming_device_t* device);
+void iree_hal_streaming_graph_memory_reset_used_high(
+    iree_hal_streaming_device_t* device);
+void iree_hal_streaming_graph_memory_reset_reserved_high(
+    iree_hal_streaming_device_t* device);
+void iree_hal_streaming_graph_memory_trim(iree_hal_streaming_device_t* device);
 
 //===----------------------------------------------------------------------===//
 // Stream capture
@@ -1463,6 +2086,11 @@ iree_status_t iree_hal_streaming_graph_exec_update(
 iree_status_t iree_hal_streaming_begin_capture(
     iree_hal_streaming_stream_t* stream,
     iree_hal_streaming_capture_mode_t mode);
+
+iree_status_t iree_hal_streaming_begin_capture_to_graph(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count, iree_hal_streaming_capture_mode_t mode);
 
 // Synchronization: none (ends capture mode, creates graph).
 iree_status_t iree_hal_streaming_end_capture(
@@ -1485,6 +2113,9 @@ iree_status_t iree_hal_streaming_update_capture_dependencies(
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count,
     iree_hal_streaming_capture_dependencies_mode_t mode);
+
+iree_status_t iree_hal_streaming_capture_set_last_node(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_graph_node_t* node);
 
 //===----------------------------------------------------------------------===//
 // Symbol registry
@@ -1532,7 +2163,7 @@ typedef struct iree_hal_streaming_module_registration_t {
 
 // Global registry that holds all symbol registrations and manages local
 // per-context hash maps.
-// Typically one per process, created on demand by HIP/CUDA bindings.
+// Typically one per process, created on demand by HIP bindings.
 //
 // Thread-safe: modules and symbols can be registered/unregistered from any
 // thread.
@@ -1589,6 +2220,17 @@ iree_status_t iree_hal_streaming_global_symbol_registry_insert_variable(
     iree_hal_streaming_global_symbol_registry_t* registry,
     iree_hal_streaming_module_registration_t* module, void* host_variable,
     const char* device_name, size_t size, uint32_t alignment);
+
+// Registers a managed global variable within a module.
+iree_status_t iree_hal_streaming_global_symbol_registry_insert_managed_variable(
+    iree_hal_streaming_global_symbol_registry_t* registry,
+    iree_hal_streaming_module_registration_t* module, void* host_variable,
+    const char* device_name, size_t size, uint32_t alignment);
+
+// Looks up the registration type for a host-side variable pointer.
+bool iree_hal_streaming_global_symbol_registry_query_variable(
+    iree_hal_streaming_global_symbol_registry_t* registry, void* host_variable,
+    iree_hal_streaming_symbol_type_t* out_type, size_t* out_size);
 
 // Initializes a context-specific symbol map.
 // It will be registered with the given global |registry| until it is

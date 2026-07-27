@@ -39,6 +39,7 @@ static iree_status_t iree_hal_module_buffer_view_trace_stdio(
     if (!iree_status_is_out_of_range(status)) {
       return status;
     }
+    iree_status_free(status);
     ++result_length;  // include NUL
 
     // Allocate scratch heap memory to contain the result and format into it.

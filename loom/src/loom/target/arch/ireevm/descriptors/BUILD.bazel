@@ -1,0 +1,59 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_low_descriptor_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_IREEVM_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/ireevm:__pkg__"]
+
+_IREEVM_DESCRIPTOR_VISIBILITY = [
+    "//loom/src/loom/target/arch/ireevm/contracts:__pkg__",
+    "//loom/src/loom/target/emit/ireevm:__pkg__",
+    "//loom/src/loom/tooling/execution/ireevm:__pkg__",
+]
+
+_IREEVM_DESCRIPTOR_IDS_VISIBILITY = (
+    _IREEVM_DESCRIPTOR_VISIBILITY + [
+        "//loom/src/loom/target/arch/ireevm/lower:__pkg__",
+    ]
+)
+
+_IREEVM_LOW_REGISTRY_VISIBILITY = [
+    "//loom/src/loom/tooling/execution/ireevm:__pkg__",
+] + _IREEVM_ROOT_VISIBILITY
+
+loom_low_descriptor_cc_library(
+    name = "descriptors",
+    args = ["--descriptor-set=ireevm_core"],
+    generator = "//loom/py/loom/gen/target/low:ireevm_low_descriptor_shard",
+    ids_visibility = _IREEVM_DESCRIPTOR_IDS_VISIBILITY,
+    visibility = _IREEVM_DESCRIPTOR_VISIBILITY,
+    deps = ["//loom/src/loom/codegen/low:descriptors"],
+)
+
+loom_cc_library(
+    name = "low_registry",
+    srcs = ["low_registry.c"],
+    hdrs = ["low_registry.h"],
+    visibility = _IREEVM_LOW_REGISTRY_VISIBILITY,
+    deps = [
+        ":descriptors",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/ireevm/records:target_records",
+        "//runtime/src/iree/base",
+    ],
+)

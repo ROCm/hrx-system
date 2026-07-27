@@ -13,7 +13,7 @@
 static iree_hal_semaphore_list_t hrx_to_iree_semaphore_list(
     const hrx_semaphore_list_t* list, iree_hal_semaphore_t** hal_semaphores,
     uint64_t* values) {
-  iree_hal_semaphore_list_t result = {0};
+  iree_hal_semaphore_list_t result = iree_hal_semaphore_list_empty();
   if (!list || list->count == 0) return result;
   for (size_t i = 0; i < list->count; i++) {
     hal_semaphores[i] = list->semaphores[i]->hal_semaphore;
@@ -107,7 +107,7 @@ hrx_status_t hrx_queue_fill(hrx_device_t device, hrx_queue_affinity_t affinity,
   iree_hal_semaphore_list_t sig_list =
       hrx_to_iree_semaphore_list(signal_semaphores, sig_hal, sig_vals);
 
-  iree_hal_buffer_binding_table_t bt = {0};
+  iree_hal_buffer_binding_table_t bt = iree_hal_buffer_binding_table_empty();
   status = iree_hal_device_queue_execute(device->hal_device, queue_affinity,
                                          wait_list, sig_list, cb, bt,
                                          /*flags=*/0);
@@ -172,7 +172,7 @@ hrx_status_t hrx_queue_copy(hrx_device_t device, hrx_queue_affinity_t affinity,
   iree_hal_semaphore_list_t sig_list =
       hrx_to_iree_semaphore_list(signal_semaphores, sig_hal, sig_vals);
 
-  iree_hal_buffer_binding_table_t bt = {0};
+  iree_hal_buffer_binding_table_t bt = iree_hal_buffer_binding_table_empty();
   status = iree_hal_device_queue_execute(device->hal_device, queue_affinity,
                                          wait_list, sig_list, cb, bt,
                                          /*flags=*/0);

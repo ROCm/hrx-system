@@ -61,7 +61,8 @@ static bool local_task_registered_ =
     (CtsRegistry::RegisterBackend({
          "local_task",
          {"local_task", CreateLocalTaskDevice,
-          /*executable_format=*/nullptr,
+          /*executable_target_family=*/nullptr,
+          /*executable_target_key=*/nullptr,
           /*executable_data=*/nullptr, RecordingMode::kDirect,
           /*unsupported_tests=*/{},
           /*expected_failures=*/{}},

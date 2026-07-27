@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "build_tools/embed_data/testdata/empty_embed.h"
 #include "build_tools/embed_data/testdata/flat_embed.h"
 #include "build_tools/embed_data/testdata/path_embed.h"
 
@@ -41,6 +42,14 @@ int main(int argc, char** argv) {
   (void)argv;
 
   int result = 0;
+
+  const iree_file_toc_t* empty = empty_embed_create();
+  result |= expect_sentinel("empty[0]", &empty[0]);
+  if (empty_embed_size() != 0) {
+    fprintf(stderr, "empty_embed_size: expected 0, got %zu\n",
+            empty_embed_size());
+    result = 1;
+  }
 
   const iree_file_toc_t* flat = flat_embed_create();
   result |= expect_string("flat[0].name", flat[0].name, "crlf.bin");

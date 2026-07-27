@@ -77,10 +77,12 @@ iree_status_t iree_tokenizer_normalizer_prepend_allocate(
   *out_normalizer = NULL;
 
   if (prepend_string.size > IREE_TOKENIZER_NORMALIZER_PREPEND_MAX_LENGTH) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "prepend string length %" PRIhsz " exceeds maximum %d",
-        prepend_string.size, IREE_TOKENIZER_NORMALIZER_PREPEND_MAX_LENGTH);
+    IREE_RETURN_AND_END_ZONE(
+        z0,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "prepend string length %" PRIhsz " exceeds maximum %d",
+                         prepend_string.size,
+                         IREE_TOKENIZER_NORMALIZER_PREPEND_MAX_LENGTH));
   }
 
   // Allocate normalizer struct + inline storage for prepend string.

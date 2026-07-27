@@ -46,7 +46,7 @@ _collect_dependency_closure_aspect = aspect(
 )
 
 def _assert_no_dependency_impl(ctx):
-    dependency_label = str(ctx.attr.dependency.label)
+    dependency_label = ctx.attr.dependency_label
     target_labels = ctx.attr.target[_DependencyClosureInfo].labels.to_list()
     if dependency_label not in target_labels:
         return [AnalysisTestResultInfo(
@@ -65,11 +65,23 @@ def _assert_no_dependency_impl(ctx):
         success = False,
     )]
 
+def _canonical_label_string(label):
+    if type(label) != type(""):
+        label = str(label)
+    if label.startswith(":"):
+        return "//%s%s" % (native.package_name(), label)
+    if label.startswith("//") or label.startswith("@"):
+        return label
+    return "//%s:%s" % (native.package_name(), label)
+
 def iree_assert_no_dependency(name, target, dependency, message = None, tags = None, **kwargs):
     """Asserts that `target` does not transitively depend on `dependency`.
 
     This checks the configured dependency graph so optional `select()` branches
-    do not force disabled providers to resolve their dependencies.
+    do not force disabled providers to resolve their dependencies. The forbidden
+    dependency is compared by label string instead of as a rule dependency so
+    checks can name labels that are expected to be absent from the configured
+    repository.
 
     Args:
       name: Test target name.
@@ -83,7 +95,7 @@ def iree_assert_no_dependency(name, target, dependency, message = None, tags = N
         tags = []
 
     attr_values = {
-        "dependency": dependency,
+        "dependency_label": _canonical_label_string(dependency),
         "message": message or "",
         "tags": tags,
         "target": target,
@@ -94,9 +106,7 @@ def iree_assert_no_dependency(name, target, dependency, message = None, tags = N
         name,
         _assert_no_dependency_impl,
         attrs = {
-            "dependency": attr.label(
-                mandatory = True,
-            ),
+            "dependency_label": attr.string(mandatory = True),
             "message": attr.string(),
             "target": attr.label(
                 aspects = [_collect_dependency_closure_aspect],

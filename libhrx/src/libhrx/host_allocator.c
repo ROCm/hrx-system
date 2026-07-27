@@ -10,21 +10,22 @@ _Static_assert(sizeof(hrx_host_allocator_t) == sizeof(iree_allocator_t),
 _Static_assert(_Alignof(hrx_host_allocator_t) == _Alignof(iree_allocator_t),
                "host allocator alignment mismatch");
 
-// Initialized before main() via constructor. iree_allocator_system() is
-// safe to call at load time (it's an inline returning two constants).
-hrx_host_allocator_t hrx_host_allocator_system_value;
-
-__attribute__((constructor)) static void hrx_host_allocator_init(void) {
-  iree_allocator_t sys = iree_allocator_system();
-  hrx_host_allocator_system_value.self = sys.self;
-  hrx_host_allocator_system_value.ctl = (void*)sys.ctl;
+// Type-pun allocator values. Both are two-word structs {self, ctl} with
+// identical layout, but HRX keeps the control pointer opaque in the public API.
+static inline hrx_host_allocator_t iree_to_hrx_allocator(iree_allocator_t a) {
+  hrx_host_allocator_t v;
+  memcpy(&v, &a, sizeof(v));
+  return v;
 }
 
-// Type-pun hrx_host_allocator_t to iree_allocator_t.
 static inline iree_allocator_t hrx_to_iree_allocator(hrx_host_allocator_t a) {
   iree_allocator_t v;
   memcpy(&v, &a, sizeof(v));
   return v;
+}
+
+hrx_host_allocator_t hrx_host_allocator_system(void) {
+  return iree_to_hrx_allocator(iree_allocator_system());
 }
 
 //===----------------------------------------------------------------------===//

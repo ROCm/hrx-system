@@ -40,8 +40,8 @@ typedef struct iree_hal_amdgpu_host_queue_post_commit_callback_t {
 static inline iree_hal_amdgpu_host_queue_post_commit_callback_t
 iree_hal_amdgpu_host_queue_post_commit_callback_null(void) {
   iree_hal_amdgpu_host_queue_post_commit_callback_t callback = {
-      .fn = NULL,
-      .user_data = NULL,
+      /*.fn=*/NULL,
+      /*.user_data=*/NULL,
   };
   return callback;
 }
@@ -121,6 +121,9 @@ typedef struct iree_hal_amdgpu_host_queue_dispatch_submission_t {
   uint64_t dispatch_packet_id;
   // Uncommitted dispatch payload AQL slot.
   iree_hal_amdgpu_aql_packet_t* dispatch_slot;
+  // Optional barrier slot waiting on |dispatch_completion_signal| before the
+  // harvest dispatch reads CP-written timestamp fields.
+  iree_hal_amdgpu_aql_packet_t* profile_completion_barrier_slot;
   // Optional trailing harvest slot used when |dispatch_slot| completes with a
   // profiling-owned signal instead of the queue epoch signal.
   iree_hal_amdgpu_aql_packet_t* profile_harvest_slot;
@@ -205,20 +208,14 @@ static inline void iree_hal_amdgpu_host_queue_publish_submission_kernargs(
 }
 
 // Returns the acquire scope required for device execution to observe
-// host-populated queue-owned kernargs. Device-local rings need SYSTEM acquire
-// here because publish_submission_kernargs() only drains host writes before
-// packet publication; shader-visible memory may otherwise retain stale
-// contents across ring-slot reuse.
+// host-populated queue-owned kernargs. CPU-side publication and device-side
+// acquisition are independent: coherent host memory needs no explicit
+// publication step but still crosses from the host agent to the GPU agent.
 static inline iree_hsa_fence_scope_t
 iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
-    const iree_hal_amdgpu_host_queue_t* queue,
     iree_hsa_fence_scope_t minimum_acquire_scope) {
-  if (iree_hal_amdgpu_kernarg_ring_requires_host_write_publication(
-          &queue->kernarg_ring)) {
-    return iree_hal_amdgpu_host_queue_max_fence_scope(
-        minimum_acquire_scope, IREE_HSA_FENCE_SCOPE_SYSTEM);
-  }
-  return minimum_acquire_scope;
+  return iree_hal_amdgpu_host_queue_max_fence_scope(
+      minimum_acquire_scope, IREE_HSA_FENCE_SCOPE_SYSTEM);
 }
 
 // Attempts to begin one barrier-shaped packet submission without waiting for
@@ -303,6 +300,11 @@ void iree_hal_amdgpu_host_queue_commit_queue_device_end_packet(
     const iree_hal_amdgpu_wait_resolution_t* resolution,
     const iree_hal_semaphore_list_t signal_semaphore_list, uint64_t packet_id,
     iree_hal_amdgpu_profile_queue_device_event_t* queue_device_event);
+
+// Commits a barrier packet that waits for |signal| to reach zero and publishes
+// an agent-scope release edge for following packets to consume.
+void iree_hal_amdgpu_host_queue_commit_signal_barrier(
+    iree_hal_amdgpu_aql_packet_t* packet, iree_hsa_signal_t signal);
 
 // Attempts to begin one kernel-dispatch submission without waiting for ring
 // capacity. Caller must hold submission_mutex.
@@ -396,6 +398,8 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_dispatch_packet(
     const void* kernargs, iree_host_size_t kernarg_length,
     iree_hal_resource_t* const* operation_resources,
     iree_host_size_t operation_resource_count,
+    iree_hsa_fence_scope_t minimum_acquire_scope,
+    iree_hsa_fence_scope_t minimum_release_scope,
     const iree_hal_amdgpu_host_queue_profile_event_info_t*
         profile_queue_event_info,
     iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,

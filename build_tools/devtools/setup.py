@@ -20,7 +20,9 @@ from build_tools.devtools.command_plan import (
 from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment, ToolMode
 
 
-def common_setup_plan(tool_env: ToolEnvironment) -> CommandPlan:
+def common_setup_plan(
+    tool_env: ToolEnvironment, *, platform_name: str | None = None
+) -> CommandPlan:
     plan = CommandPlan()
     if tool_env.mode == ToolMode.SYSTEM:
         plan.add(
@@ -57,11 +59,33 @@ def common_setup_plan(tool_env: ToolEnvironment) -> CommandPlan:
             label="install Python developer tools",
         )
     )
+    platform_name = sys.platform if platform_name is None else platform_name
+    if platform_name != "win32":
+        plan.add(
+            CommandStep(
+                [
+                    tool_env.python,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--require-hashes",
+                    "--only-binary=:all:",
+                    "-r",
+                    str(REPO_ROOT / "requirements-analysis.lock.txt"),
+                ],
+                cwd=REPO_ROOT,
+                label="install static-analysis tools",
+            )
+        )
     return plan
 
 
 def setup_plan(
-    lane: str, tool_env: ToolEnvironment, alias_dir: Path | None
+    lane: str,
+    tool_env: ToolEnvironment,
+    alias_dir: Path | None,
+    *,
+    platform_name: str | None = None,
 ) -> CommandPlan:
     if tool_env.mode == ToolMode.SYSTEM:
         plan = CommandPlan()
@@ -77,7 +101,7 @@ def setup_plan(
             plan.extend(alias_steps(lane, alias_dir, sys.executable))
         return plan
 
-    plan = common_setup_plan(tool_env)
+    plan = common_setup_plan(tool_env, platform_name=platform_name)
     if tool_env.root is None or tool_env.bin_dir is None:
         raise ValueError("managed setup requires a tool environment root")
     plan.add(

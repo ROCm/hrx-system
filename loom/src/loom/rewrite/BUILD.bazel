@@ -1,0 +1,179 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "rewriter",
+    srcs = ["rewriter.c"],
+    hdrs = ["rewriter.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "greedy",
+    srcs = ["greedy.c"],
+    hdrs = ["greedy.h"],
+    deps = [
+        ":rewriter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "greedy_test",
+    srcs = ["greedy_test.cc"],
+    deps = [
+        ":greedy",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "remap",
+    srcs = ["remap.c"],
+    hdrs = ["remap.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "remap_test",
+    srcs = ["remap_test.cc"],
+    deps = [
+        ":remap",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "materialize",
+    srcs = ["materialize.c"],
+    hdrs = ["materialize.h"],
+    deps = [
+        ":remap",
+        ":rewriter",
+        "//loom/src/loom/analysis:availability",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "materialize_test",
+    srcs = ["materialize_test.cc"],
+    deps = [
+        ":materialize",
+        ":remap",
+        ":rewriter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "callable",
+    srcs = [
+        "callable.c",
+        "callable_outline.c",
+    ],
+    hdrs = ["callable.h"],
+    deps = [
+        ":materialize",
+        ":remap",
+        ":rewriter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/func",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "callable_test",
+    srcs = ["callable_test.cc"],
+    deps = [
+        ":callable",
+        ":rewriter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "type_propagation",
+    srcs = ["type_propagation.c"],
+    hdrs = ["type_propagation.h"],
+    deps = [
+        ":rewriter",
+        "//loom/src/loom/analysis:type_refinement",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:type_refinement",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "type_propagation_test",
+    srcs = ["type_propagation_test.cc"],
+    deps = [
+        ":rewriter",
+        ":type_propagation",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/pass:value_facts",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

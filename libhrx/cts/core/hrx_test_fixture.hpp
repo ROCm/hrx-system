@@ -4,11 +4,14 @@
 #ifndef HRX_CTS_TEST_FIXTURE_HPP
 #define HRX_CTS_TEST_FIXTURE_HPP
 
+#include <string>
+
 #include "hrx_loader.hpp"
 
 // Global test device (set by main.cpp).
 extern hrx_device_t g_test_device;
 extern hrx_accelerator_type_t g_test_device_type;
+extern std::string g_test_hip_library_path;
 
 class HrxTestFixture {
  protected:

@@ -1,0 +1,49 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+
+package(
+    default_visibility = [
+        "//loom/src/loom/pass:__pkg__",
+        "//loom/src/loom/pass/test:__pkg__",
+        "//loom/src/loom/target/arch/amdgpu:__pkg__",
+    ],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "registry_verify",
+    testonly = True,
+    srcs = ["registry_verify.c"],
+    hdrs = ["registry_verify.h"],
+    deps = [
+        "//loom/src/loom/pass:environment",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "registry_verify_test",
+    srcs = ["registry_verify_test.cc"],
+    deps = [
+        ":registry_verify",
+        "//loom/src/loom/pass:environment",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:report",
+        "//loom/src/loom/pass/test:registry",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

@@ -194,9 +194,7 @@ void iree_hal_local_transient_buffer_decommit(iree_hal_buffer_t* base_buffer) {
   buffer->staged_backing = NULL;
   buffer->committed_backing = NULL;
   iree_slim_mutex_unlock(&buffer->mutex);
-  if (staged_backing) {
-    iree_hal_buffer_release(staged_backing);
-  }
+  iree_hal_buffer_release(staged_backing);
 }
 
 bool iree_hal_local_transient_buffer_is_dealloca_queued(

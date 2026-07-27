@@ -1,0 +1,11 @@
+// RUN: roundtrip
+
+amdgpu.target<gfx1100> @gfx11
+
+amdgpu.target<gfx1100> @gfx11_wave64 {subgroup_size = 64}
+
+amdgpu.target<gfx1200> @gfx12_wave64 {subgroup_size = 64}
+
+amdgpu.target<gfx942> @gfx942 {max_flat_workgroup_size = 1024, subgroup_size = 64}
+
+amdgpu.target<gfx950> @gfx950 {max_flat_workgroup_size = 1024, subgroup_size = 64}

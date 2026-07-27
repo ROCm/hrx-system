@@ -83,6 +83,19 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    device_spec_builder
+  HDRS
+    "device_spec_builder.h"
+  SRCS
+    "device_spec_builder.c"
+  DEPS
+    iree::base
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     executable_debug_info
   HDRS
     "executable_debug_info.h"

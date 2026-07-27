@@ -205,6 +205,24 @@ static inline void iree_hal_amdgpu_kernarg_ring_host_write_fence(void) {
 #endif  // IREE_ARCH_*
 }
 
+// Publishes host writes through |publication|.
+//
+// Host-visible device memory can be mapped through write-combining/BAR paths,
+// so CPU-authored records must drain CPU writes and make them visible to the
+// GPU before a queue-ordered packet consumes them.
+static inline void iree_hal_amdgpu_kernarg_ring_publication_publish_host_writes(
+    iree_hal_amdgpu_kernarg_ring_publication_t publication) {
+  if (publication.mode == IREE_HAL_AMDGPU_KERNARG_RING_PUBLICATION_MODE_NONE) {
+    return;
+  }
+  IREE_ASSERT(publication.mode ==
+              IREE_HAL_AMDGPU_KERNARG_RING_PUBLICATION_MODE_HDP_FLUSH);
+  IREE_ASSERT(publication.hdp_mem_flush_control);
+  iree_hal_amdgpu_kernarg_ring_host_write_fence();
+  *publication.hdp_mem_flush_control = 1u;
+  (void)*publication.hdp_mem_flush_control;
+}
+
 // Publishes host writes to queue-owned kernargs before their packet headers
 // become visible to the command processor.
 //
@@ -214,16 +232,8 @@ static inline void iree_hal_amdgpu_kernarg_ring_host_write_fence(void) {
 // writes and make them visible to the GPU before packet publication.
 static inline void iree_hal_amdgpu_kernarg_ring_publish_host_writes(
     const iree_hal_amdgpu_kernarg_ring_t* ring) {
-  if (ring->publication.mode ==
-      IREE_HAL_AMDGPU_KERNARG_RING_PUBLICATION_MODE_NONE) {
-    return;
-  }
-  IREE_ASSERT(ring->publication.mode ==
-              IREE_HAL_AMDGPU_KERNARG_RING_PUBLICATION_MODE_HDP_FLUSH);
-  IREE_ASSERT(ring->publication.hdp_mem_flush_control);
-  iree_hal_amdgpu_kernarg_ring_host_write_fence();
-  *ring->publication.hdp_mem_flush_control = 1u;
-  (void)*ring->publication.hdp_mem_flush_control;
+  iree_hal_amdgpu_kernarg_ring_publication_publish_host_writes(
+      ring->publication);
 }
 
 // Returns true if |block_count| contiguous blocks can currently be allocated

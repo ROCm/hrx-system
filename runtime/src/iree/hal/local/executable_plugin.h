@@ -41,6 +41,7 @@
 // NOTE: this file is designed to be a standalone header: it is intended to be
 // used by external projects that may build without the IREE source code.
 // Include nothing but headers always available on all platforms/toolchains.
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -122,6 +123,7 @@ typedef enum iree_hal_executable_plugin_sanitizer_kind_e {
 
 #if !defined(IREE_HOST_SIZE_T)
 #define IREE_HOST_SIZE_T size_t
+#define PRIhsz "zu"
 #endif  // !IREE_HOST_SIZE_T
 
 // Size, in bytes, of a buffer on the local host.
@@ -182,7 +184,12 @@ typedef struct iree_hal_executable_plugin_header_t {
 // The provided |max_version| is the maximum version the caller supports;
 // callees must return NULL if their lowest available version is greater
 // than the max version supported by the caller.
-typedef const iree_hal_executable_plugin_header_t** (
+//
+// On success the function returns the address of the initial |header| member
+// in the selected versioned plugin structure. The header pointer must be
+// non-NULL. Callers inspect the header to validate the version before
+// recovering the corresponding plugin structure.
+typedef const iree_hal_executable_plugin_header_t* const* (
     *iree_hal_executable_plugin_query_fn_t)(
     iree_hal_executable_plugin_version_t max_version, void* reserved);
 
@@ -275,16 +282,23 @@ typedef struct iree_status_handle_t* iree_hal_executable_plugin_status_t;
 // The iree_hal_executable_plugin_allocator_t struct is compatible with
 // iree_allocator_t and can be used interchangeably.
 
-typedef enum iree_hal_executable_plugin_allocator_command_e {
+typedef uint32_t iree_hal_executable_plugin_allocator_command_t;
+enum {
   IREE_HAL_EXECUTABLE_PLUGIN_ALLOCATOR_COMMAND_MALLOC = 0,
   IREE_HAL_EXECUTABLE_PLUGIN_ALLOCATOR_COMMAND_CALLOC = 1,
   IREE_HAL_EXECUTABLE_PLUGIN_ALLOCATOR_COMMAND_REALLOC = 2,
   IREE_HAL_EXECUTABLE_PLUGIN_ALLOCATOR_COMMAND_FREE = 3,
-} iree_hal_executable_plugin_allocator_command_t;
+};
 
-typedef struct iree_hal_executable_plugin_allocator_alloc_params_t {
+#if !defined(IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_)
+#define IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
+typedef struct iree_allocator_alloc_params_t {
   iree_host_size_t byte_length;
 } iree_hal_executable_plugin_allocator_alloc_params_t;
+#else
+typedef struct iree_allocator_alloc_params_t
+    iree_hal_executable_plugin_allocator_alloc_params_t;
+#endif  // !IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
 
 typedef iree_hal_executable_plugin_status_t (
     *iree_hal_executable_plugin_allocator_ctl_fn_t)(
@@ -318,16 +332,23 @@ iree_hal_executable_plugin_allocator_free(
 // iree_hal_executable_plugin_string_view_t
 //===----------------------------------------------------------------------===//
 
-// iree_string_view_t-compatible type.
+// Shared language type used by iree_string_view_t when the runtime is present.
 // The string data may not be NUL terminated and the provided size (in
 // characters) must be used.
-typedef struct iree_hal_executable_plugin_string_view_t {
+#if !defined(IREE_STRING_VIEW_T_DEFINED_)
+#define IREE_STRING_VIEW_T_DEFINED_
+typedef struct iree_string_view_t {
   const char* data;
   iree_host_size_t size;
 } iree_hal_executable_plugin_string_view_t;
+#else
+typedef struct iree_string_view_t iree_hal_executable_plugin_string_view_t;
+#endif  // !IREE_STRING_VIEW_T_DEFINED_
 
-// iree_string_pair_t-compatible type.
-typedef struct iree_hal_executable_plugin_string_pair_t {
+// Shared language type used by iree_string_pair_t when the runtime is present.
+#if !defined(IREE_STRING_PAIR_T_DEFINED_)
+#define IREE_STRING_PAIR_T_DEFINED_
+typedef struct iree_string_pair_t {
   union {
     iree_hal_executable_plugin_string_view_t first;
     iree_hal_executable_plugin_string_view_t key;
@@ -337,6 +358,9 @@ typedef struct iree_hal_executable_plugin_string_pair_t {
     iree_hal_executable_plugin_string_view_t value;
   };
 } iree_hal_executable_plugin_string_pair_t;
+#else
+typedef struct iree_string_pair_t iree_hal_executable_plugin_string_pair_t;
+#endif  // !IREE_STRING_PAIR_T_DEFINED_
 
 //===----------------------------------------------------------------------===//
 // Common utilities
@@ -459,6 +483,16 @@ typedef struct iree_hal_executable_plugin_v0_t {
   // avoid big switch tables.
   iree_hal_executable_plugin_resolve_fn_v0_t resolve;
 } iree_hal_executable_plugin_v0_t;
+
+static_assert(offsetof(iree_hal_executable_plugin_v0_t, header) == 0,
+              "the query result must address the initial header member");
+
+// Recovers a v0 plugin after its query result header has been validated.
+static inline const iree_hal_executable_plugin_v0_t*
+iree_hal_executable_plugin_v0_from_query_result(
+    const iree_hal_executable_plugin_header_t* const* query_result) {
+  return (const iree_hal_executable_plugin_v0_t*)query_result;
+}
 
 #ifdef __cplusplus
 }  // extern "C"

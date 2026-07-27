@@ -6,6 +6,8 @@
 
 #include "iree/hal/executable.h"
 
+#include <string.h>
+
 #include "iree/hal/detail.h"
 #include "iree/hal/resource.h"
 
@@ -13,6 +15,13 @@
   IREE_HAL_VTABLE_DISPATCH(executable, iree_hal_executable, method_name)
 
 IREE_HAL_API_RETAIN_RELEASE(executable);
+
+IREE_API_EXPORT void iree_hal_executable_load_params_initialize(
+    iree_hal_executable_load_params_t* out_params) {
+  IREE_ASSERT_ARGUMENT(out_params);
+  memset(out_params, 0, sizeof(*out_params));
+  out_params->flags = IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION;
+}
 
 IREE_API_EXPORT iree_host_size_t
 iree_hal_executable_function_count(iree_hal_executable_t* executable) {
@@ -57,15 +66,52 @@ IREE_API_EXPORT iree_status_t iree_hal_executable_lookup_function_by_name(
   return status;
 }
 
+IREE_API_EXPORT iree_status_t iree_hal_executable_try_lookup_global_by_name(
+    iree_hal_executable_t* executable, iree_string_view_t name, bool* out_found,
+    iree_hal_executable_global_t* out_global) {
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_found);
+  IREE_ASSERT_ARGUMENT(out_global);
+  *out_found = false;
+  *out_global = iree_hal_executable_global_invalid();
+  return _VTABLE_DISPATCH(executable, try_lookup_global_by_name)(
+      executable, name, out_found, out_global);
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_executable_lookup_global_by_name(
     iree_hal_executable_t* executable, iree_string_view_t name,
+    iree_hal_executable_global_t* out_global) {
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_global);
+  bool found = false;
+  IREE_RETURN_IF_ERROR(iree_hal_executable_try_lookup_global_by_name(
+      executable, name, &found, out_global));
+  if (!found) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "executable global `%.*s` not found",
+                            (int)name.size, name.data);
+  }
+  return iree_ok_status();
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_executable_global_info(
+    iree_hal_executable_t* executable, iree_hal_executable_global_t global,
+    iree_hal_executable_global_info_t* out_info) {
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_info);
+  memset(out_info, 0, sizeof(*out_info));
+  iree_status_t status =
+      _VTABLE_DISPATCH(executable, global_info)(executable, global, out_info);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_executable_global_buffer(
+    iree_hal_executable_t* executable, iree_hal_executable_global_t global,
     iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(executable);
   IREE_ASSERT_ARGUMENT(out_buffer);
-  IREE_TRACE_ZONE_BEGIN(z0);
   *out_buffer = NULL;
-  iree_status_t status = _VTABLE_DISPATCH(executable, lookup_global_by_name)(
-      executable, name, queue_affinity, out_buffer);
-  IREE_TRACE_ZONE_END(z0);
+  iree_status_t status = _VTABLE_DISPATCH(executable, global_buffer)(
+      executable, global, queue_affinity, out_buffer);
   return status;
 }

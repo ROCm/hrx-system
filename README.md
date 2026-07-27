@@ -145,10 +145,10 @@ python dev.py bazel fix
 python dev.py cmake fix
 ```
 
-Test-bearing Git `pre-commit` hook profiles apply mechanical fixups before
-running the same profile in non-mutating check mode. The hook validates commit
-scope, not the full branch: files staged for commit plus files changed by
-`HEAD`, so amended commits include the commit being replaced. See
+Test-bearing Git commit-hook profiles apply mechanical fixups before running
+the same profile in non-mutating check mode. The hook validates commit scope,
+not the full branch: files staged for commit plus files changed by `HEAD`, so
+amended commits include the commit being replaced. See
 `CONTRIBUTING.md` for contributor setup and `build_tools/lefthook/README.md`
 for the hook architecture.
 

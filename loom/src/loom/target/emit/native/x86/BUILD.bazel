@@ -1,0 +1,70 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+)
+load(
+    "//loom/build_tools/bazel:loom_check.bzl",
+    "loom_check_test_suite",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_X86_CHECK_VISIBILITY = ["//loom/src/loom/target/arch/x86/check:__pkg__"]
+
+#===------------------------------------------------------------------------===#
+# x86 native assembly fragments
+#===------------------------------------------------------------------------===#
+
+loom_cc_library(
+    name = "assembly",
+    srcs = ["assembly.c"],
+    hdrs = ["assembly.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:move_sequence",
+        "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/x86:register_classes",
+        "//loom/src/loom/target/arch/x86/descriptors:avx2_descriptors_ids",
+        "//loom/src/loom/target/arch/x86/descriptors:avx512_descriptors_ids",
+        "//loom/src/loom/target/arch/x86/descriptors:avx512_packed_dot_descriptors_ids",
+        "//loom/src/loom/target/arch/x86/descriptors:packed_dot_descriptors_ids",
+        "//loom/src/loom/target/arch/x86/descriptors:scalar_descriptors_ids",
+        "//loom/src/loom/target/arch/x86/descriptors:simd128_descriptors_ids",
+        "//loom/src/loom/target/emit/native:assembly",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "loom_check",
+    testonly = True,
+    srcs = ["check/loom_check.c"],
+    hdrs = ["check/loom_check.h"],
+    visibility = _X86_CHECK_VISIBILITY,
+    deps = [
+        ":assembly",
+        "//loom/src/loom/tools/loom-check:execute",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_check_test_suite(
+    name = "loom_check_file_test",
+    srcs = [
+        "test/assembly.loom-test",
+    ],
+)

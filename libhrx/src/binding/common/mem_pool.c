@@ -29,9 +29,7 @@ void iree_hal_streaming_device_set_mem_pool(iree_hal_streaming_device_t* device,
                                             hrx_mem_pool_t pool) {
   IREE_ASSERT_ARGUMENT(device);
 
-  if (device->current_mem_pool) {
-    hrx_mem_pool_release(device->current_mem_pool);
-  }
+  hrx_mem_pool_release(device->current_mem_pool);
 
   device->current_mem_pool = pool;
   if (pool) {

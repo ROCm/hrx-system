@@ -36,7 +36,7 @@ def _test_non_executable_suite_generates_wrapped_test(name, **kwargs):
         resource_group = "gpu",
         size = "medium",
         tags = [
-            "driver=fixture",
+            "fixture-driver",
             "manual",
         ],
     )
@@ -60,7 +60,7 @@ def _test_non_executable_suite_generates_wrapped_test_impl(env, target):
 
     attrs = target[TestingAspectInfo].attrs
     _expect_value(env, attrs.args, "--cts_fixture_flag=true")
-    _expect_value(env, attrs.tags, "driver=fixture")
+    _expect_value(env, attrs.tags, "fixture-driver")
     _expect_value(env, attrs.tags, "exclusive-if-local")
     _expect_value(env, attrs.tags, "resource_group:gpu")
     env.expect.that_bool(attrs.local).equals(True)

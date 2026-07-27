@@ -11,6 +11,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amdgpu/host_queue.h"
+#include "iree/hal/drivers/amdgpu/host_queue_policy.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile_events.h"
 #include "iree/hal/drivers/amdgpu/host_queue_waits.h"
@@ -25,6 +26,7 @@ namespace iree::hal::amdgpu {
 namespace {
 
 constexpr uint32_t kNoHarvestPacketOffset = UINT32_MAX;
+constexpr uint32_t kNoCompletionBarrierPacketOffset = UINT32_MAX;
 constexpr uint32_t kNoPublicationPacketOffset = UINT32_MAX;
 
 class HostQueueSubmissionTest : public ::testing::Test {
@@ -103,6 +105,125 @@ class TestLogicalDevice {
   // Device group that owns the topology assigned to |base_device_|.
   iree_hal_device_group_t* device_group_ = NULL;
 };
+
+// Two independently-created logical devices assigned to one causal topology.
+class TestLogicalDeviceGroup {
+ public:
+  ~TestLogicalDeviceGroup() {
+    // The group keeps each device and its topology live while the test-owned
+    // references are released. Releasing the group last lets it destroy the
+    // devices before destroying their borrowed topology.
+    for (iree_hal_device_t* device : devices_) {
+      iree_hal_device_release(device);
+    }
+    iree_hal_device_group_release(device_group_);
+  }
+
+  iree_status_t Initialize(
+      const iree_hal_amdgpu_logical_device_options_t* options,
+      const iree_hal_amdgpu_libhsa_t* libhsa,
+      const iree_hal_amdgpu_topology_t* topology,
+      iree_allocator_t host_allocator) {
+    iree_status_t status = create_context_.Initialize(host_allocator);
+    for (iree_host_size_t i = 0;
+         i < IREE_ARRAYSIZE(devices_) && iree_status_is_ok(status); ++i) {
+      status = iree_hal_amdgpu_logical_device_create(
+          IREE_SV("amdgpu"), options, libhsa, topology,
+          create_context_.params(), host_allocator, &devices_[i]);
+    }
+    if (!iree_status_is_ok(status)) return status;
+
+    iree_hal_device_group_builder_t builder;
+    iree_hal_device_group_builder_initialize(
+        &builder, create_context_.frontier_tracker());
+    for (iree_hal_device_t* device : devices_) {
+      if (!iree_status_is_ok(status)) break;
+      status = iree_hal_device_group_builder_add_device(&builder, device);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_device_group_builder_finalize(&builder, host_allocator,
+                                                      &device_group_);
+    } else {
+      iree_hal_device_group_builder_deinitialize(&builder);
+    }
+    return status;
+  }
+
+  iree_hal_device_group_t* device_group() const { return device_group_; }
+
+  iree_hal_amdgpu_logical_device_t* logical_device(
+      iree_host_size_t index) const {
+    return (iree_hal_amdgpu_logical_device_t*)devices_[index];
+  }
+
+  iree_hal_amdgpu_host_queue_t* first_host_queue(iree_host_size_t index) const {
+    iree_hal_amdgpu_logical_device_t* logical_device =
+        this->logical_device(index);
+    if (logical_device->physical_device_count == 0) return NULL;
+    iree_hal_amdgpu_physical_device_t* physical_device =
+        logical_device->physical_devices[0];
+    if (physical_device->host_queue_count == 0) return NULL;
+    return &physical_device->host_queues[0];
+  }
+
+ private:
+  // Creation context supplying the group's shared causal frontier tracker.
+  iree::hal::cts::DeviceCreateContext create_context_;
+
+  // Test-owned device references released while the group still owns them.
+  iree_hal_device_t* devices_[2] = {NULL, NULL};
+
+  // Group owning the topology borrowed by both logical devices.
+  iree_hal_device_group_t* device_group_ = NULL;
+};
+
+TEST_F(HostQueueSubmissionTest, GroupedLogicalDeviceQueueFrontiersAreDistinct) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+
+  TestLogicalDeviceGroup test_group;
+  IREE_ASSERT_OK(
+      test_group.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  ASSERT_EQ(iree_hal_device_group_device_count(test_group.device_group()), 2u);
+
+  iree_hal_amdgpu_logical_device_t* logical_device_a =
+      test_group.logical_device(0);
+  iree_hal_amdgpu_logical_device_t* logical_device_b =
+      test_group.logical_device(1);
+  iree_hal_amdgpu_host_queue_t* queue_a = test_group.first_host_queue(0);
+  iree_hal_amdgpu_host_queue_t* queue_b = test_group.first_host_queue(1);
+  ASSERT_NE(queue_a, nullptr);
+  ASSERT_NE(queue_b, nullptr);
+
+  EXPECT_NE(queue_a->axis, queue_b->axis);
+  EXPECT_EQ(iree_async_axis_session(queue_a->axis),
+            iree_async_axis_session(queue_b->axis));
+  EXPECT_EQ(iree_async_axis_machine(queue_a->axis),
+            iree_async_axis_machine(queue_b->axis));
+  EXPECT_EQ(iree_async_axis_device_index(queue_a->axis), 0u);
+  EXPECT_EQ(iree_async_axis_device_index(queue_b->axis), 1u);
+  EXPECT_EQ(iree_async_axis_queue_index(queue_a->axis), 0u);
+  EXPECT_EQ(iree_async_axis_queue_index(queue_b->axis), 0u);
+
+  iree_hal_amdgpu_host_queue_epoch_wait_t wait_state;
+  ASSERT_TRUE(iree_hal_amdgpu_logical_device_lookup_host_queue_epoch_wait(
+      logical_device_a, queue_a->axis, &wait_state));
+  EXPECT_EQ(wait_state.host_queue, queue_a);
+  ASSERT_TRUE(iree_hal_amdgpu_logical_device_lookup_host_queue_epoch_wait(
+      logical_device_b, queue_b->axis, &wait_state));
+  EXPECT_EQ(wait_state.host_queue, queue_b);
+  EXPECT_FALSE(iree_hal_amdgpu_logical_device_lookup_host_queue_epoch_wait(
+      logical_device_a, queue_b->axis, &wait_state));
+  EXPECT_FALSE(iree_hal_amdgpu_logical_device_lookup_host_queue_epoch_wait(
+      logical_device_b, queue_a->axis, &wait_state));
+
+  EXPECT_EQ(
+      iree_hal_amdgpu_host_queue_axis_acquire_scope(queue_a, queue_a->axis),
+      IREE_HSA_FENCE_SCOPE_AGENT);
+  EXPECT_EQ(
+      iree_hal_amdgpu_host_queue_axis_acquire_scope(queue_a, queue_b->axis),
+      IREE_HSA_FENCE_SCOPE_SYSTEM);
+}
 
 class HostQueueHsaProfilingScope {
  public:
@@ -186,6 +307,18 @@ static iree_hal_profile_sink_t* NoopProfileSinkAsBase(NoopProfileSink* sink) {
   return reinterpret_cast<iree_hal_profile_sink_t*>(sink);
 }
 
+TEST(HostQueueSubmissionUnitTest, QueueOwnedKernargsRequireSystemAcquire) {
+  EXPECT_EQ(iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
+                IREE_HSA_FENCE_SCOPE_NONE),
+            IREE_HSA_FENCE_SCOPE_SYSTEM);
+  EXPECT_EQ(iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
+                IREE_HSA_FENCE_SCOPE_AGENT),
+            IREE_HSA_FENCE_SCOPE_SYSTEM);
+  EXPECT_EQ(iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
+                IREE_HSA_FENCE_SCOPE_SYSTEM),
+            IREE_HSA_FENCE_SCOPE_SYSTEM);
+}
+
 TEST(HostQueueSubmissionUnitTest, WritesPersistentPm4IbPacketBody) {
   iree_hsa_amd_aql_pm4_ib_packet_t packet = {};
   const uint32_t* ib_dwords = reinterpret_cast<const uint32_t*>(
@@ -193,7 +326,7 @@ TEST(HostQueueSubmissionUnitTest, WritesPersistentPm4IbPacketBody) {
   const uint32_t ib_dword_count = 0x13579u;
   const iree_hal_amdgpu_aql_packet_control_t packet_control =
       iree_hal_amdgpu_aql_packet_control_barrier_system();
-  const iree_hsa_signal_t completion_signal = {.handle = 0x2468u};
+  const iree_hsa_signal_t completion_signal = {/*.handle=*/0x2468u};
 
   uint16_t setup = 0;
   const uint16_t header = iree_hal_amdgpu_host_queue_write_pm4_ib_packet_body(
@@ -214,6 +347,26 @@ TEST(HostQueueSubmissionUnitTest, WritesPersistentPm4IbPacketBody) {
   EXPECT_EQ(packet.dw_cnt_remain, 0xAu);
 }
 
+TEST(HostQueueSubmissionUnitTest, CommitsSignalBarrierPacket) {
+  iree_hal_amdgpu_aql_packet_t packet = {};
+  const iree_hsa_signal_t signal = {/*.handle=*/0x12345678u};
+
+  iree_hal_amdgpu_host_queue_commit_signal_barrier(&packet, signal);
+
+  const iree_hal_amdgpu_aql_packet_control_t packet_control =
+      iree_hal_amdgpu_aql_packet_control_barrier(IREE_HSA_FENCE_SCOPE_SYSTEM,
+                                                 IREE_HSA_FENCE_SCOPE_AGENT);
+  EXPECT_EQ(packet.barrier_and.header,
+            iree_hal_amdgpu_aql_make_header(IREE_HSA_PACKET_TYPE_BARRIER_AND,
+                                            packet_control));
+  EXPECT_EQ(packet.barrier_and.dep_signal[0].handle, signal.handle);
+  for (iree_host_size_t i = 1;
+       i < IREE_ARRAYSIZE(packet.barrier_and.dep_signal); ++i) {
+    EXPECT_EQ(packet.barrier_and.dep_signal[i].handle, 0u);
+  }
+  EXPECT_EQ(packet.barrier_and.completion_signal.handle, 0u);
+}
+
 typedef struct DispatchSubmissionPlanCase {
   // Number of wait-barrier packets preceding the dispatch payload.
   uint8_t barrier_count;
@@ -225,6 +378,9 @@ typedef struct DispatchSubmissionPlanCase {
   uint32_t expected_packet_count;
   // Expected dispatch packet offset from the first reserved packet.
   uint32_t expected_dispatch_packet_offset;
+  // Expected profiling completion barrier offset, or
+  // kNoCompletionBarrierPacketOffset when absent.
+  uint32_t expected_completion_barrier_packet_offset;
   // Expected harvest packet offset, or kNoHarvestPacketOffset when absent.
   uint32_t expected_harvest_packet_offset;
   // True when the dispatch packet should signal queue completion directly.
@@ -236,11 +392,17 @@ static void ExpectDispatchSubmissionPlan(
     const DispatchSubmissionPlanCase& plan_case) {
   iree_hal_amdgpu_wait_resolution_t resolution = {0};
   resolution.barrier_count = plan_case.barrier_count;
-  const iree_hal_semaphore_list_t empty_signal_list = {0};
+  const iree_hal_semaphore_list_t empty_signal_list =
+      iree_hal_semaphore_list_empty();
   iree_hal_amdgpu_profile_dispatch_event_reservation_t profile_events = {0};
   iree_hal_amdgpu_host_queue_profile_event_info_t profile_queue_event_info = {
-      .type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH,
-      .operation_count = 1,
+      /*.type=*/IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH,
+      /*.flags=*/{},
+      /*.submission_id=*/{},
+      /*.command_buffer_id=*/{},
+      /*.allocation_id=*/{},
+      /*.payload_length=*/{},
+      /*.operation_count=*/1,
   };
   iree_hal_amdgpu_host_queue_set_profile_flags(
       queue, plan_case.reserve_queue_device_event
@@ -272,6 +434,18 @@ static void ExpectDispatchSubmissionPlan(
 
     const bool has_harvest_packet =
         plan_case.expected_harvest_packet_offset != kNoHarvestPacketOffset;
+    const bool has_completion_barrier =
+        plan_case.expected_completion_barrier_packet_offset !=
+        kNoCompletionBarrierPacketOffset;
+    if (has_completion_barrier) {
+      EXPECT_EQ(iree_hal_amdgpu_aql_ring_packet(
+                    &queue->aql_ring,
+                    submission.kernel.first_packet_id +
+                        plan_case.expected_completion_barrier_packet_offset),
+                submission.profile_completion_barrier_slot);
+    } else {
+      EXPECT_EQ(NULL, submission.profile_completion_barrier_slot);
+    }
     if (has_harvest_packet) {
       EXPECT_EQ(
           iree_hal_amdgpu_aql_ring_packet(
@@ -322,10 +496,16 @@ static void ExpectPm4IbSubmissionPlan(
     const Pm4IbSubmissionPlanCase& plan_case) {
   iree_hal_amdgpu_wait_resolution_t resolution = {0};
   resolution.barrier_count = plan_case.barrier_count;
-  const iree_hal_semaphore_list_t empty_signal_list = {0};
+  const iree_hal_semaphore_list_t empty_signal_list =
+      iree_hal_semaphore_list_empty();
   iree_hal_amdgpu_host_queue_profile_event_info_t profile_queue_event_info = {
-      .type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_UPDATE,
-      .operation_count = 1,
+      /*.type=*/IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_UPDATE,
+      /*.flags=*/{},
+      /*.submission_id=*/{},
+      /*.command_buffer_id=*/{},
+      /*.allocation_id=*/{},
+      /*.payload_length=*/{},
+      /*.operation_count=*/1,
   };
   iree_hal_amdgpu_host_queue_set_profile_flags(
       queue, plan_case.reserve_queue_device_event
@@ -411,6 +591,8 @@ TEST_F(HostQueueSubmissionTest, DispatchPacketAccountingCombinations) {
           /*reserve_queue_device_event=*/false,
           /*expected_packet_count=*/1,
           /*expected_dispatch_packet_offset=*/0,
+          /*expected_completion_barrier_packet_offset=*/
+          kNoCompletionBarrierPacketOffset,
           /*expected_harvest_packet_offset=*/kNoHarvestPacketOffset,
           /*expect_dispatch_completion_signal=*/true,
       },
@@ -420,6 +602,8 @@ TEST_F(HostQueueSubmissionTest, DispatchPacketAccountingCombinations) {
           /*reserve_queue_device_event=*/false,
           /*expected_packet_count=*/3,
           /*expected_dispatch_packet_offset=*/2,
+          /*expected_completion_barrier_packet_offset=*/
+          kNoCompletionBarrierPacketOffset,
           /*expected_harvest_packet_offset=*/kNoHarvestPacketOffset,
           /*expect_dispatch_completion_signal=*/true,
       },
@@ -429,6 +613,8 @@ TEST_F(HostQueueSubmissionTest, DispatchPacketAccountingCombinations) {
           /*reserve_queue_device_event=*/true,
           /*expected_packet_count=*/3,
           /*expected_dispatch_packet_offset=*/1,
+          /*expected_completion_barrier_packet_offset=*/
+          kNoCompletionBarrierPacketOffset,
           /*expected_harvest_packet_offset=*/kNoHarvestPacketOffset,
           /*expect_dispatch_completion_signal=*/false,
       },
@@ -436,27 +622,30 @@ TEST_F(HostQueueSubmissionTest, DispatchPacketAccountingCombinations) {
           /*barrier_count=*/0,
           /*reserve_dispatch_event=*/true,
           /*reserve_queue_device_event=*/false,
-          /*expected_packet_count=*/2,
+          /*expected_packet_count=*/3,
           /*expected_dispatch_packet_offset=*/0,
-          /*expected_harvest_packet_offset=*/1,
+          /*expected_completion_barrier_packet_offset=*/1,
+          /*expected_harvest_packet_offset=*/2,
           /*expect_dispatch_completion_signal=*/true,
       },
       {
           /*barrier_count=*/2,
           /*reserve_dispatch_event=*/true,
           /*reserve_queue_device_event=*/false,
-          /*expected_packet_count=*/4,
+          /*expected_packet_count=*/5,
           /*expected_dispatch_packet_offset=*/2,
-          /*expected_harvest_packet_offset=*/3,
+          /*expected_completion_barrier_packet_offset=*/3,
+          /*expected_harvest_packet_offset=*/4,
           /*expect_dispatch_completion_signal=*/true,
       },
       {
           /*barrier_count=*/0,
           /*reserve_dispatch_event=*/true,
           /*reserve_queue_device_event=*/true,
-          /*expected_packet_count=*/4,
+          /*expected_packet_count=*/5,
           /*expected_dispatch_packet_offset=*/1,
-          /*expected_harvest_packet_offset=*/2,
+          /*expected_completion_barrier_packet_offset=*/2,
+          /*expected_harvest_packet_offset=*/3,
           /*expect_dispatch_completion_signal=*/true,
       },
   };

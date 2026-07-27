@@ -1,0 +1,226 @@
+// RUN: pass canonicalize
+
+// andi: 0xFF & 0x0F = 0x0F (15).
+func.def @andi() -> (i32) {
+  %a = scalar.constant 255 : i32
+  %b = scalar.constant 15 : i32
+  %r = scalar.andi %a, %b : i32
+  func.return %r : i32
+}
+// ----
+func.def @andi() -> (i32) {
+  %r = scalar.constant 15 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// ori: 0xF0 | 0x0F = 0xFF (255).
+func.def @ori() -> (i32) {
+  %a = scalar.constant 240 : i32
+  %b = scalar.constant 15 : i32
+  %r = scalar.ori %a, %b : i32
+  func.return %r : i32
+}
+// ----
+func.def @ori() -> (i32) {
+  %r = scalar.constant 255 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// xori: 0xFF ^ 0x0F = 0xF0 (240).
+func.def @xori() -> (i32) {
+  %a = scalar.constant 255 : i32
+  %b = scalar.constant 15 : i32
+  %r = scalar.xori %a, %b : i32
+  func.return %r : i32
+}
+// ----
+func.def @xori() -> (i32) {
+  %r = scalar.constant 240 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// xori: self-cancel. x ^ x = 0.
+func.def @xori_self() -> (i32) {
+  %a = scalar.constant 42 : i32
+  %b = scalar.constant 42 : i32
+  %r = scalar.xori %a, %b : i32
+  func.return %r : i32
+}
+// ----
+func.def @xori_self() -> (i32) {
+  %r = scalar.constant 0 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// shli: 5 << 3 = 40.
+func.def @shli() -> (i32) {
+  %a = scalar.constant 5 : i32
+  %b = scalar.constant 3 : i32
+  %r = scalar.shli %a, %b : i32
+  func.return %r : i32
+}
+// ----
+func.def @shli() -> (i32) {
+  %r = scalar.constant 40 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// shrui: 40 >> 3 = 5 (logical).
+func.def @shrui() -> (i32) {
+  %a = scalar.constant 40 : i32
+  %b = scalar.constant 3 : i32
+  %r = scalar.shrui %a, %b : i32
+  func.return %r : i32
+}
+// ----
+func.def @shrui() -> (i32) {
+  %r = scalar.constant 5 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// shrsi: -8 >> 2 = -2 (arithmetic).
+func.def @shrsi() -> (i32) {
+  %a = scalar.constant -8 : i32
+  %b = scalar.constant 2 : i32
+  %r = scalar.shrsi %a, %b : i32
+  func.return %r : i32
+}
+// ----
+func.def @shrsi() -> (i32) {
+  %r = scalar.constant -2 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// andi: zero mask. x & 0 = 0.
+func.def @andi_zero() -> (i32) {
+  %a = scalar.constant 12345 : i32
+  %b = scalar.constant 0 : i32
+  %r = scalar.andi %a, %b : i32
+  func.return %r : i32
+}
+// ----
+func.def @andi_zero() -> (i32) {
+  %r = scalar.constant 0 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// shli: shift by 0 = identity.
+func.def @shli_zero() -> (i32) {
+  %a = scalar.constant 42 : i32
+  %b = scalar.constant 0 : i32
+  %r = scalar.shli %a, %b : i32
+  func.return %r : i32
+}
+// ----
+func.def @shli_zero() -> (i32) {
+  %r = scalar.constant 42 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// ctlzi counts within the declared integer width, not a widened i64 fact slot.
+func.def @ctlzi_i32_width() -> (i32) {
+  %a = scalar.constant 1 : i32
+  %r = scalar.ctlzi %a : i32
+  func.return %r : i32
+}
+// ----
+func.def @ctlzi_i32_width() -> (i32) {
+  %r = scalar.constant 31 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// cttzi of zero returns the declared integer width.
+func.def @cttzi_i32_zero_width() -> (i32) {
+  %a = scalar.constant 0 : i32
+  %r = scalar.cttzi %a : i32
+  func.return %r : i32
+}
+// ----
+func.def @cttzi_i32_zero_width() -> (i32) {
+  %r = scalar.constant 32 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// ctpopi masks exact negative facts to the declared integer width.
+func.def @ctpopi_i32_negative_width() -> (i32) {
+  %a = scalar.constant -1 : i32
+  %r = scalar.ctpopi %a : i32
+  func.return %r : i32
+}
+// ----
+func.def @ctpopi_i32_negative_width() -> (i32) {
+  %r = scalar.constant 32 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// bitfield.extractu: 0x1234[4:12] = 0x23.
+func.def @bitfield_extractu() -> (i32) {
+  %a = scalar.constant 4660 : i32
+  %r = scalar.bitfield.extractu %a {offset = 4, width = 8} : i32 -> i32
+  func.return %r : i32
+}
+// ----
+func.def @bitfield_extractu() -> (i32) {
+  %r = scalar.constant 35 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// bitfield.extracts sign-extends the selected field width.
+func.def @bitfield_extracts() -> (i32) {
+  %a = scalar.constant 240 : i32
+  %r = scalar.bitfield.extracts %a {offset = 4, width = 4} : i32 -> i32
+  func.return %r : i32
+}
+// ----
+func.def @bitfield_extracts() -> (i32) {
+  %r = scalar.constant -1 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// bitfield.extractu masks exact negative source facts to the declared width.
+func.def @bitfield_extractu_negative_i8() -> (i32) {
+  %a = scalar.constant -16 : i8
+  %r = scalar.bitfield.extractu %a {offset = 4, width = 4} : i8 -> i32
+  func.return %r : i32
+}
+// ----
+func.def @bitfield_extractu_negative_i8() -> (i32) {
+  %r = scalar.constant 15 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// Dynamic operands: no fold.
+func.def @no_fold(%x: i32, %y: i32) -> (i32) {
+  %r = scalar.andi %x, %y : i32
+  func.return %r : i32
+}

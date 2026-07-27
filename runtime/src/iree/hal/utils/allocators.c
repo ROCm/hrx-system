@@ -58,9 +58,9 @@ iree_status_t iree_hal_configure_allocator_from_specs(
   }
 
   // Swap the allocator on the device - this is only safe because we know no
-  // allocations have been made yet.
+  // allocations have been made yet and wrappers preserve device spec facts.
   if (iree_status_is_ok(status)) {
-    iree_hal_device_replace_allocator(device, device_allocator);
+    status = iree_hal_device_replace_allocator(device, device_allocator);
   }
   iree_hal_allocator_release(device_allocator);
   IREE_TRACE_ZONE_END(z0);

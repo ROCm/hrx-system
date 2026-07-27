@@ -52,7 +52,7 @@ std::vector<std::pair<int32_t, size_t>> TraverseTrie(
 
 TEST(VocabTrieTest, EmptyVocab) {
   iree_tokenizer_vocab_trie_t* trie = nullptr;
-  iree_const_byte_span_t empty_table = {nullptr, 0};
+  iree_const_byte_span_t empty_table = iree_const_byte_span_empty();
   IREE_ASSERT_OK(iree_tokenizer_vocab_trie_build(
       nullptr, 0, empty_table, iree_allocator_system(), &trie));
   ASSERT_NE(trie, nullptr);

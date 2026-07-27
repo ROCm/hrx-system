@@ -1,0 +1,571 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/amdgpu:descriptor_sets.bzl",
+    "loom_amdgpu_descriptor_set_compatible_with",
+)
+load(
+    "//loom/build_tools/amdgpu:target_config.bzl",
+    "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY",
+)
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+load(
+    "//loom/build_tools/bazel:loom_check.bzl",
+    "loom_check_test_suite",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_AMDGPU_CHECK_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/check:__pkg__"]
+
+_DESCRIPTOR_SET_RDNA3 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna3.core"]
+
+_AMDGPU_TOOLING_VISIBILITY = [
+    "//loom/binding/c/target/amdgpu:__pkg__",
+    "//loom/src/loom/tooling/target/amdgpu:__pkg__",
+]
+
+#===------------------------------------------------------------------------===#
+# AMDGPU native assembly fragments
+#===------------------------------------------------------------------------===#
+
+loom_cc_library(
+    name = "register_class",
+    hdrs = ["register_class.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+    ],
+)
+
+loom_cc_library(
+    name = "assembly",
+    srcs = ["assembly.c"],
+    hdrs = ["assembly.h"],
+    deps = [
+        ":register_class",
+        ":storage_layout",
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:move_sequence",
+        "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/encoding",
+        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/target/emit/native:assembly",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "loom_check",
+    testonly = True,
+    srcs = ["check/loom_check.c"],
+    hdrs = ["check/loom_check.h"],
+    visibility = _AMDGPU_CHECK_VISIBILITY,
+    deps = [
+        ":assembly",
+        ":encoding",
+        ":spill_lowering",
+        "//loom/src/loom/codegen/low:allocation_json",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:packet_json",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/amdgpu/planning:descriptor_semantics",
+        "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
+        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+        "//loom/src/loom/target/arch/amdgpu/planning:storage_lease",
+        "//loom/src/loom/target/arch/amdgpu/planning:vopd_plan",
+        "//loom/src/loom/tools/loom-check:execute",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_check_test_suite(
+    name = "loom_check_file_test",
+    srcs = [
+        "test/allocation_json.loom-test",
+        "test/assembly.loom-test",
+        "test/assembly_cluster.loom-test",
+        "test/assembly_q8.loom-test",
+        "test/assembly_wmma.loom-test",
+        "test/packet.loom-test",
+        "test/packet_json.loom-test",
+        "test/vopd_plan.loom-test",
+        "test/wait_plan.loom-test",
+        "test/wait_states.loom-test",
+    ],
+)
+
+loom_cc_library(
+    name = "metadata",
+    srcs = ["metadata.c"],
+    hdrs = ["metadata.h"],
+    deps = [
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "descriptor",
+    srcs = ["descriptor.c"],
+    hdrs = ["descriptor.h"],
+    deps = [
+        ":metadata",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "storage_layout",
+    srcs = ["storage_layout.c"],
+    hdrs = ["storage_layout.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:storage_layout",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "storage_layout_test",
+    srcs = ["storage_layout_test.cc"],
+    deps = [
+        ":storage_layout",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "spill_lowering",
+    srcs = ["spill_lowering.c"],
+    hdrs = ["spill_lowering.h"],
+    deps = [
+        ":storage_layout",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "spill_lowering_test",
+    srcs = ["spill_lowering_test.cc"],
+    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA3),
+    deps = [
+        ":spill_lowering",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "text_fixup",
+    hdrs = ["text_fixup.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
+    name = "encoding",
+    srcs = ["encoding.c"],
+    hdrs = ["encoding.h"],
+    deps = [
+        ":register_class",
+        ":storage_layout",
+        ":text_fixup",
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:move_sequence",
+        "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/encoding",
+        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/target/emit/native:fragment",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "encoding_test",
+    srcs = ["encoding_test.cc"],
+    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA3),
+    deps = [
+        ":encoding",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/ops",
+        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "kernel_record",
+    srcs = ["kernel_record.c"],
+    hdrs = ["kernel_record.h"],
+    deps = [
+        ":descriptor",
+        ":metadata",
+        ":preflight",
+        ":storage_layout",
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:launch",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
+        "//loom/src/loom/target/arch/amdgpu/target_id",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "preflight",
+    srcs = ["preflight.c"],
+    hdrs = ["preflight.h"],
+    deps = [
+        ":register_class",
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:storage_layout",
+        "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/target/emit/native:fragment",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "preflight_test",
+    srcs = ["preflight_test.cc"],
+    deps = [
+        ":preflight",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "kernel_assembly",
+    srcs = ["kernel_assembly.c"],
+    hdrs = ["kernel_assembly.h"],
+    deps = [
+        ":assembly",
+        ":kernel_record",
+        ":metadata",
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "kernel_hsaco",
+    srcs = ["kernel_hsaco.c"],
+    hdrs = ["kernel_hsaco.h"],
+    deps = [
+        ":encoding",
+        ":hsaco",
+        ":kernel_record",
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
+        "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
+        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_library(
+    name = "hsaco",
+    srcs = ["hsaco.c"],
+    hdrs = ["hsaco.h"],
+    deps = [
+        ":descriptor",
+        ":metadata",
+        ":text_fixup",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/emit/native:elf",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_library(
+    name = "runtime_globals",
+    srcs = ["runtime_globals.c"],
+    hdrs = ["runtime_globals.h"],
+    visibility = _AMDGPU_TOOLING_VISIBILITY,
+    deps = [
+        ":hsaco",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "runtime_globals_test",
+    srcs = ["runtime_globals_test.cc"],
+    deps = [
+        ":runtime_globals",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "hal_kernel_library",
+    srcs = ["hal_kernel_library.c"],
+    hdrs = ["hal_kernel_library.h"],
+    visibility = _AMDGPU_TOOLING_VISIBILITY,
+    deps = [
+        ":kernel_assembly",
+        ":kernel_hsaco",
+        ":preflight",
+        ":runtime_globals",
+        ":spill_lowering",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/codegen/low:allocation_materialization",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:storage_layout",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target:function_contract",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu:provider",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
+        "//loom/src/loom/target/arch/amdgpu/matrix:contract",
+        "//loom/src/loom/target/arch/amdgpu/ops",
+        "//loom/src/loom/target/arch/amdgpu/planning:descriptor_semantics",
+        "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
+        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+        "//loom/src/loom/target/arch/amdgpu/planning:storage_lease",
+        "//loom/src/loom/target/arch/amdgpu/planning:vopd_plan",
+        "//loom/src/loom/target/arch/amdgpu/planning:wait_counters",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/target/reporting:artifact_manifest_collect",
+        "//loom/src/loom/target/reporting:low",
+        "//loom/src/loom/target/reporting:report",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_test(
+    name = "hal_kernel_library_test",
+    srcs = ["hal_kernel_library_test.cc"],
+    deps = [
+        ":hal_kernel_library",
+        ":runtime_globals",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/sanitizer",
+        "//loom/src/loom/sanitizer:site_table",
+        "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu:provider",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/matrix:contract",
+        "//loom/src/loom/target/arch/amdgpu/planning:wait_counters",
+        "//loom/src/loom/target/arch/amdgpu/records:target_records",
+        "//loom/src/loom/target/emit/native:elf",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//loom/src/loom/tooling/compile:pipeline",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "metadata_test",
+    srcs = ["metadata_test.cc"],
+    deps = [
+        ":metadata",
+        "//loom/src/loom/target/emit/native:elf",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "descriptor_test",
+    srcs = ["descriptor_test.cc"],
+    deps = [
+        ":descriptor",
+        ":metadata",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "hsaco_test",
+    srcs = ["hsaco_test.cc"],
+    deps = [
+        ":descriptor",
+        ":hsaco",
+        ":metadata",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/emit/native:elf",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "kernel_hsaco_test",
+    srcs = ["kernel_hsaco_test.cc"],
+    deps = [
+        ":kernel_hsaco",
+        "//loom/src/loom/target/emit/native:elf",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "hsaco_hsa_test",
+    srcs = ["hsaco_hsa_test.cc"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "nodocker",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    deps = [
+        ":kernel_hsaco",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/hal:binding_materialization",
+        "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
+        "//loom/src/loom/target/arch/amdgpu/ops",
+        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+        "//loom/src/loom/target/arch/amdgpu/planning:storage_lease",
+        "//loom/src/loom/target/arch/amdgpu/records:target_records",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:dynamic_library",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//third_party:hsa_runtime_headers",
+    ],
+)

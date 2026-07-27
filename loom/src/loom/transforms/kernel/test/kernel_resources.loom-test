@@ -1,0 +1,65 @@
+// RUN: pass normalize-kernel-resources
+
+// Exported device function resource views normalize to ordered buffer ABI
+// roots plus explicit view derivations at the top of the body.
+func.def public device @independent_resources(%lhs: view<16xf32, #dense>, %rhs: view<16xf32, #dense>, %scale: f32) {
+  %a = view.load %lhs[0] : view<16xf32, #dense> -> f32
+  %b = view.load %rhs[1] : view<16xf32, #dense> -> f32
+  test.use %a, %b, %scale : f32, f32, f32
+  func.return
+}
+
+// ----
+func.def public device @independent_resources(%lhs: buffer, %rhs: buffer, %scale: f32) {
+  %5 = index.constant 0 : offset
+  %6 = buffer.view %lhs[%5] : buffer -> view<16xf32, #dense>
+  %7 = buffer.view %rhs[%5] : buffer -> view<16xf32, #dense>
+  %a = view.load %6[0] : view<16xf32, #dense> -> f32
+  %b = view.load %7[1] : view<16xf32, #dense> -> f32
+  test.use %a, %b, %scale : f32, f32, f32
+  func.return
+}
+
+// ====
+
+// Same-slab resources are already canonical: one ordered buffer root and
+// multiple explicit views derived from it preserve alias root identity.
+func.def public device @same_transient_slab(%slab: buffer, %offset_a: offset, %offset_b: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %a = buffer.view %slab[%offset_a] : buffer -> view<16xf32, %layout>
+  %b = buffer.view %slab[%offset_b] : buffer -> view<16xf32, %layout>
+  test.use %a, %b : view<16xf32, %layout>, view<16xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Parameters slabs use the same explicit root/view form; read-only behavior is
+// a fact of consuming ops and storage summaries, not a separate ABI kind.
+func.def public device @parameters_slab_read_views(%params: buffer, %weights_offset: offset, %scales_offset: offset, %row: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %weights = buffer.view %params[%weights_offset] : buffer -> view<256xi8, %layout>
+  %scales = buffer.view %params[%scales_offset] : buffer -> view<16xf32, %layout>
+  %w = view.load %weights[%row] : view<256xi8, %layout> -> i8
+  %s = view.load %scales[0] : view<16xf32, %layout> -> f32
+  test.use %w, %s : i8, f32
+  func.return
+}
+
+// ====
+
+// Private device helpers may remain view-typed; this pass only normalizes
+// exported device ABI boundaries.
+func.def device @private_view_helper(%input: view<16xf32, #dense>) {
+  test.use %input : view<16xf32, #dense>
+  func.return
+}
+
+// ====
+
+// Public host functions are callable ABI boundaries but not device dispatch
+// resource boundaries, so view-typed args remain untouched here.
+func.def public host @public_host_view_helper(%input: view<16xf32, #dense>) {
+  test.use %input : view<16xf32, #dense>
+  func.return
+}

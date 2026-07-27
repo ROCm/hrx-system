@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "iree/base/api.h"
+#include "iree/hal/semaphore.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,7 +19,6 @@ extern "C" {
 
 // Forward declarations.
 typedef struct iree_hal_device_t iree_hal_device_t;
-typedef struct iree_hal_device_capabilities_t iree_hal_device_capabilities_t;
 
 //===----------------------------------------------------------------------===//
 // Constants
@@ -30,9 +30,20 @@ typedef struct iree_hal_device_capabilities_t iree_hal_device_capabilities_t;
 // Invalid device ordinal sentinel value.
 #define IREE_HAL_TOPOLOGY_DEVICE_ORDINAL_INVALID UINT32_MAX
 
+// Number of physical-device affinity bits available in one logical device.
+#define IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT 64
+
 //===----------------------------------------------------------------------===//
 // Types and Enums
 //===----------------------------------------------------------------------===//
+
+// Identifies physical-device records within one logical device specification.
+//
+// The bit namespace is local to the canonical device spec containing the
+// records. The device-spec producer assigns one unique bit to each physical
+// device record; bit positions are independent of backend physical-device
+// ordinals and iree_hal_queue_affinity_t bits.
+typedef uint64_t iree_hal_physical_device_affinity_t;
 
 // Bitmap type for device compatibility masks.
 // Sized based on max device count for efficient bitwise operations.
@@ -117,25 +128,27 @@ typedef uint64_t iree_hal_topology_edge_scheduling_word_t;
 #define IREE_HAL_TOPOLOGY_EDGE_LINK_CLASS_SHIFT                      48
 #define IREE_HAL_TOPOLOGY_EDGE_LINK_CLASS_MASK                       0x7ull
 // Interop word layout constants.
-#define IREE_HAL_TOPOLOGY_EDGE_SEMAPHORE_IMPORT_TYPES_SHIFT          0
-#define IREE_HAL_TOPOLOGY_EDGE_SEMAPHORE_IMPORT_TYPES_MASK           0xFFull
-#define IREE_HAL_TOPOLOGY_EDGE_SEMAPHORE_EXPORT_TYPES_SHIFT          8
-#define IREE_HAL_TOPOLOGY_EDGE_SEMAPHORE_EXPORT_TYPES_MASK           0xFFull
-#define IREE_HAL_TOPOLOGY_EDGE_BUFFER_IMPORT_TYPES_SHIFT             16
+#define IREE_HAL_TOPOLOGY_EDGE_SEMAPHORE_IMPORT_TIMEPOINT_TYPES_SHIFT 0
+#define IREE_HAL_TOPOLOGY_EDGE_SEMAPHORE_IMPORT_TIMEPOINT_TYPES_MASK  0xFFFFull
+#define IREE_HAL_TOPOLOGY_EDGE_SEMAPHORE_EXPORT_TIMEPOINT_TYPES_SHIFT 16
+#define IREE_HAL_TOPOLOGY_EDGE_SEMAPHORE_EXPORT_TIMEPOINT_TYPES_MASK  0xFFFFull
+#define IREE_HAL_TOPOLOGY_EDGE_BUFFER_IMPORT_TYPES_SHIFT             32
 #define IREE_HAL_TOPOLOGY_EDGE_BUFFER_IMPORT_TYPES_MASK              0xFFull
-#define IREE_HAL_TOPOLOGY_EDGE_BUFFER_EXPORT_TYPES_SHIFT             24
+#define IREE_HAL_TOPOLOGY_EDGE_BUFFER_EXPORT_TYPES_SHIFT             40
 #define IREE_HAL_TOPOLOGY_EDGE_BUFFER_EXPORT_TYPES_MASK              0xFFull
 // clang-format on
 
-// Interop word: external handle type bitmasks for resource sharing.
+// Interop word: external handle/timepoint bitmasks for resource sharing.
 // This is cold-path data read only during resource import/export negotiation.
 //
 // Layout (64 bits):
-//  Bits  0-7:  semaphore_import_types (8 bits) - handle types dst can import
-//  Bits  8-15: semaphore_export_types (8 bits) - handle types src can export
-//  Bits 16-23: buffer_import_types (8 bits) - buffer types dst can import
-//  Bits 24-31: buffer_export_types (8 bits) - buffer types src can export
-//  Bits 32-63: reserved (32 bits) - must be zero
+//  Bits  0-15: semaphore_import_timepoint_types (16 bits)
+//               iree_hal_external_timepoint_type_t bits dst can import.
+//  Bits 16-31: semaphore_export_timepoint_types (16 bits)
+//               iree_hal_external_timepoint_type_t bits src can export.
+//  Bits 32-39: buffer_import_types (8 bits) - buffer types dst can import.
+//  Bits 40-47: buffer_export_types (8 bits) - buffer types src can export.
+//  Bits 48-63: reserved (16 bits) - must be zero.
 typedef uint64_t iree_hal_topology_edge_interop_word_t;
 
 // 128-bit packed edge descriptor encoding directional device capabilities.
@@ -220,14 +233,14 @@ enum iree_hal_topology_link_class_bits_t {
 };
 typedef uint8_t iree_hal_topology_link_class_t;
 
-// External handle type bits for import/export operations.
+// External buffer handle type bits for import/export operations.
 // These map to platform-specific handle types used for cross-device and
-// cross-driver resource sharing. Each bit represents a handle format that
-// may be supported for semaphore or buffer import/export.
+// cross-driver resource sharing. Each bit represents a buffer handle format.
+// Semaphore interop uses iree_hal_external_timepoint_type_mask_t instead.
 enum iree_hal_topology_handle_type_bits_t {
   // No external handle support.
   IREE_HAL_TOPOLOGY_HANDLE_TYPE_NONE = 0,
-  // Native handle for same-driver devices.
+  // Native handle for devices in the same runtime domain.
   IREE_HAL_TOPOLOGY_HANDLE_TYPE_NATIVE = 1u << 0,
   // POSIX file descriptor (Linux/Android).
   IREE_HAL_TOPOLOGY_HANDLE_TYPE_OPAQUE_FD = 1u << 1,
@@ -283,6 +296,97 @@ enum iree_hal_topology_capability_bits_t {
 };
 typedef uint16_t iree_hal_topology_capability_t;
 
+// Kinds of nodes in a normalized HAL topology graph.
+typedef uint32_t iree_hal_topology_node_kind_t;
+typedef enum iree_hal_topology_node_kind_e {
+  // Node kind is not known or not represented by the backend.
+  IREE_HAL_TOPOLOGY_NODE_KIND_UNKNOWN = 0,
+  // A host NUMA node that may contain CPUs and memory controllers.
+  IREE_HAL_TOPOLOGY_NODE_KIND_HOST_NUMA = 1,
+  // A physical device such as a GPU or accelerator package.
+  IREE_HAL_TOPOLOGY_NODE_KIND_PHYSICAL_DEVICE = 2,
+  // A logical HAL device exposed to applications.
+  IREE_HAL_TOPOLOGY_NODE_KIND_LOGICAL_DEVICE = 3,
+  // A memory domain such as device-local, host-visible, or managed memory.
+  IREE_HAL_TOPOLOGY_NODE_KIND_MEMORY_DOMAIN = 4,
+  // A queue family or execution engine exposed by a logical device.
+  IREE_HAL_TOPOLOGY_NODE_KIND_QUEUE_FAMILY = 5,
+  // A fabric endpoint such as an RDMA-capable NIC or switch port.
+  IREE_HAL_TOPOLOGY_NODE_KIND_FABRIC_ENDPOINT = 6,
+} iree_hal_topology_node_kind_e;
+
+// Normalized topology node ordinal sentinel value.
+#define IREE_HAL_TOPOLOGY_NODE_ORDINAL_INVALID UINT32_MAX
+
+// Normalized topology node.
+typedef struct iree_hal_topology_node_t {
+  // Stable ordinal of this node within the topology node array.
+  uint32_t ordinal;
+  // Parent node ordinal or IREE_HAL_TOPOLOGY_NODE_ORDINAL_INVALID.
+  uint32_t parent_ordinal;
+  // HAL device ordinal represented by this node or
+  // IREE_HAL_TOPOLOGY_DEVICE_ORDINAL_INVALID.
+  uint32_t device_ordinal;
+  // Kind of topology object represented by this node.
+  iree_hal_topology_node_kind_t kind;
+  // Kind-specific local ordinal such as an OS NUMA node id, physical device
+  // ordinal, memory domain index, or queue family index.
+  uint32_t local_ordinal;
+  // Physical device affinity represented by this node, or 0 when not tied to
+  // a specific physical-device subset.
+  iree_hal_physical_device_affinity_t physical_device_affinity;
+} iree_hal_topology_node_t;
+
+// Kinds of links in a normalized HAL topology graph.
+typedef uint32_t iree_hal_topology_link_kind_t;
+typedef enum iree_hal_topology_link_kind_e {
+  // Link kind is not known or not represented by the backend.
+  IREE_HAL_TOPOLOGY_LINK_KIND_UNKNOWN = 0,
+  // Containment or ownership relationship between two nodes.
+  IREE_HAL_TOPOLOGY_LINK_KIND_CONTAINS = 1,
+  // Memory access path between a device and memory domain.
+  IREE_HAL_TOPOLOGY_LINK_KIND_MEMORY = 2,
+  // Command submission path between a logical device and queue family.
+  IREE_HAL_TOPOLOGY_LINK_KIND_QUEUE = 3,
+  // Physical interconnect such as PCIe, Infinity Fabric, or NVLink.
+  IREE_HAL_TOPOLOGY_LINK_KIND_INTERCONNECT = 4,
+  // Network or cluster fabric path.
+  IREE_HAL_TOPOLOGY_LINK_KIND_FABRIC = 5,
+} iree_hal_topology_link_kind_e;
+
+// Normalized topology link property flags.
+typedef uint32_t iree_hal_topology_link_flags_t;
+typedef enum iree_hal_topology_link_flag_bits_e {
+  // No known link properties.
+  IREE_HAL_TOPOLOGY_LINK_FLAG_NONE = 0u,
+  // The reverse direction is represented by an equivalent link.
+  IREE_HAL_TOPOLOGY_LINK_FLAG_BIDIRECTIONAL = 1u << 0,
+  // Memory accessed through this link is coherent without explicit flushing.
+  IREE_HAL_TOPOLOGY_LINK_FLAG_COHERENT = 1u << 1,
+  // The link supports direct peer addressing.
+  IREE_HAL_TOPOLOGY_LINK_FLAG_PEER_ADDRESSABLE = 1u << 2,
+  // The link supports direct peer copies.
+  IREE_HAL_TOPOLOGY_LINK_FLAG_P2P_COPY = 1u << 3,
+} iree_hal_topology_link_flag_bits_e;
+
+// Normalized topology link between two nodes.
+typedef struct iree_hal_topology_link_t {
+  // Source node ordinal in the topology node array.
+  uint32_t source_node_ordinal;
+  // Target node ordinal in the topology node array.
+  uint32_t target_node_ordinal;
+  // Kind of relationship represented by this link.
+  iree_hal_topology_link_kind_t kind;
+  // Flags describing stable link capabilities.
+  iree_hal_topology_link_flags_t flags;
+  // Relative distance or hop count; 0 means same node or unknown.
+  uint32_t distance;
+  // Estimated one-way bandwidth in bytes per second, or 0 if unknown.
+  uint64_t bandwidth_bytes_per_second;
+  // Estimated one-way latency in nanoseconds, or 0 if unknown.
+  uint64_t latency_nanoseconds;
+} iree_hal_topology_link_t;
+
 //===----------------------------------------------------------------------===//
 // iree_hal_resource_origin_t
 //===----------------------------------------------------------------------===//
@@ -322,7 +426,7 @@ static inline iree_hal_resource_origin_t iree_hal_resource_origin_undefined(
 // iree_hal_topology_t
 //===----------------------------------------------------------------------===//
 
-// Immutable device topology describing relationships between devices.
+// Immutable topology describing relationships between devices.
 //
 // The topology is a pure data structure (POD) that encodes a directed graph
 // of device relationships. Each edge in the graph describes how one device
@@ -334,33 +438,37 @@ static inline iree_hal_resource_origin_t iree_hal_resource_origin_undefined(
 // (1-3ns) compatibility queries without pointer chasing or synchronization.
 //
 // Memory layout is optimized for cache efficiency:
-// - Edge matrix is row-major (all edges from device i are contiguous)
+// - Device edge matrix is row-major (all edges from device i are contiguous)
 // - Self-edges (diagonal) encode device capabilities
 // - Symmetric properties (link_class) must match in both directions
 //
 // Thread safety: The topology is immutable after creation and can be
 // queried concurrently from any thread without synchronization.
 typedef struct iree_hal_topology_t {
+  // Number of normalized topology nodes.
+  iree_host_size_t node_count;
+
+  // Borrowed immutable node array owned by this topology allocation.
+  const iree_hal_topology_node_t* nodes;
+
+  // Number of normalized topology links.
+  iree_host_size_t link_count;
+
+  // Borrowed immutable link array owned by this topology allocation.
+  const iree_hal_topology_link_t* links;
+
+  // NUMA node assignment for each device (0-255).
+  uint8_t device_numa_nodes[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
+
   // Number of devices in this topology (1 to
   // IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT).
   uint32_t device_count;
 
-  // Edge matrix in row-major order.
-  // Edge from device i to device j is at edges[i * device_count + j].
-  // Self-edges (i == j) encode device capabilities.
-  iree_hal_topology_edge_t edges[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT *
-                                 IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
-
-  // NUMA node assignment for each device (0-255).
-  // Used for memory placement optimization.
-  uint8_t numa_nodes[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
+  // Device edge matrix in row-major order.
+  // Edge from device i to device j is at
+  // device_edges[i * device_count + j].
+  iree_hal_topology_edge_t device_edges[];
 } iree_hal_topology_t;
-
-// Returns an empty topology.
-static inline iree_hal_topology_t iree_hal_topology_empty(void) {
-  iree_hal_topology_t topology = {0};
-  return topology;
-}
 
 // Returns true if the topology is empty (no devices).
 static inline bool iree_hal_topology_is_empty(
@@ -374,6 +482,40 @@ static inline uint32_t iree_hal_topology_device_count(
   return topology->device_count;
 }
 
+// Returns the NUMA node assigned to |device_ordinal|.
+static inline uint8_t iree_hal_topology_device_numa_node(
+    const iree_hal_topology_t* topology, uint32_t device_ordinal) {
+  IREE_ASSERT_LT(device_ordinal, topology->device_count);
+  if (device_ordinal >= topology->device_count) return 0;
+  return topology->device_numa_nodes[device_ordinal];
+}
+
+// Returns the number of normalized nodes in the topology.
+static inline iree_host_size_t iree_hal_topology_node_count(
+    const iree_hal_topology_t* topology) {
+  return topology->node_count;
+}
+
+// Returns the normalized node at |index| or NULL if out of range.
+static inline const iree_hal_topology_node_t* iree_hal_topology_node_at(
+    const iree_hal_topology_t* topology, iree_host_size_t index) {
+  if (index >= topology->node_count) return NULL;
+  return &topology->nodes[index];
+}
+
+// Returns the number of normalized links in the topology.
+static inline iree_host_size_t iree_hal_topology_link_count(
+    const iree_hal_topology_t* topology) {
+  return topology->link_count;
+}
+
+// Returns the normalized link at |index| or NULL if out of range.
+static inline const iree_hal_topology_link_t* iree_hal_topology_link_at(
+    const iree_hal_topology_t* topology, iree_host_size_t index) {
+  if (index >= topology->link_count) return NULL;
+  return &topology->links[index];
+}
+
 // Queries the edge from |src_ordinal| to |dst_ordinal|.
 // Returns an empty edge if either ordinal is out of range.
 static inline iree_hal_topology_edge_t iree_hal_topology_query_edge(
@@ -383,10 +525,10 @@ static inline iree_hal_topology_edge_t iree_hal_topology_query_edge(
   IREE_ASSERT_LT(dst_ordinal, topology->device_count);
   if (src_ordinal >= topology->device_count ||
       dst_ordinal >= topology->device_count) {
-    iree_hal_topology_edge_t empty = {0, 0};
-    return empty;
+    return iree_hal_topology_edge_empty();
   }
-  return topology->edges[src_ordinal * topology->device_count + dst_ordinal];
+  return topology
+      ->device_edges[src_ordinal * topology->device_count + dst_ordinal];
 }
 
 //===----------------------------------------------------------------------===//
@@ -415,11 +557,11 @@ static inline iree_hal_topology_interop_mode_t iree_hal_topology_edge_wait_mode(
 }
 
 // Returns the signal interop mode from a scheduling word.
-// This describes how the destination device can signal a semaphore that will
-// be consumed by the source device. Asymmetric from wait mode as signal and
-// wait may have different hardware capabilities:
+// This describes how a semaphore signaled by the source device can be observed
+// by the destination device. Asymmetric from wait mode as signal and wait may
+// have different hardware capabilities:
 // - NATIVE: Direct hardware signal (same driver/device)
-// - IMPORT: Export handle, signal through imported semaphore (cross-driver)
+// - IMPORT: Export/import timepoint handle, observe signal natively
 // - COPY: Must stage signal through host updates (incompatible HW)
 // - NONE: Cannot signal (isolated devices)
 //
@@ -648,33 +790,38 @@ static inline iree_hal_topology_link_class_t iree_hal_topology_edge_link_class(
 // Interop word (hi) getters
 //===----------------------------------------------------------------------===//
 //
-// These getters operate on the interop word (edge.hi). They extract handle
-// type bitmasks used during resource import/export negotiation.
+// These getters operate on the interop word (edge.hi). They extract external
+// handle/timepoint bitmasks used during resource import/export negotiation.
 
-// Returns semaphore import handle types from an interop word.
-// Bitfield of iree_hal_topology_handle_type_t values indicating which external
-// semaphore handle types can be imported for waiting by the destination device.
-// Common values include OPAQUE_FD (Linux), OPAQUE_WIN32 (Windows), or
-// RDMA_MR for remote memory regions.
+// Returns semaphore import timepoint types from an interop word.
+// An iree_hal_external_timepoint_type_mask_t value indicating which external
+// semaphore timepoint types can be imported for waiting by the destination
+// device.
 //
 // Implementations should query platform capabilities (e.g., Vulkan/CUDA/ROCm
 // external semaphore support) and set corresponding bits for supported types.
-static inline iree_hal_topology_handle_type_t
-iree_hal_topology_edge_semaphore_import_types(
+static inline iree_hal_external_timepoint_type_mask_t
+iree_hal_topology_edge_semaphore_import_timepoint_types(
     iree_hal_topology_edge_interop_word_t word) {
-  return (word >> 0) & 0xFFull;
+  const uint64_t raw_types =
+      (word >> IREE_HAL_TOPOLOGY_EDGE_SEMAPHORE_IMPORT_TIMEPOINT_TYPES_SHIFT) &
+      IREE_HAL_TOPOLOGY_EDGE_SEMAPHORE_IMPORT_TIMEPOINT_TYPES_MASK;
+  return (iree_hal_external_timepoint_type_mask_t)raw_types;
 }
 
-// Returns semaphore export handle types from an interop word.
-// Bitfield of iree_hal_topology_handle_type_t values indicating which external
-// semaphore handle types can be exported for signaling by the source device.
+// Returns semaphore export timepoint types from an interop word.
+// An iree_hal_external_timepoint_type_mask_t value indicating which external
+// semaphore timepoint types can be exported for signaling by the source device.
 //
 // Implementations should advertise handle types that other drivers can import.
 // Asymmetric from import types when devices have different export capabilities.
-static inline iree_hal_topology_handle_type_t
-iree_hal_topology_edge_semaphore_export_types(
+static inline iree_hal_external_timepoint_type_mask_t
+iree_hal_topology_edge_semaphore_export_timepoint_types(
     iree_hal_topology_edge_interop_word_t word) {
-  return (word >> 8) & 0xFFull;
+  const uint64_t raw_types =
+      (word >> IREE_HAL_TOPOLOGY_EDGE_SEMAPHORE_EXPORT_TIMEPOINT_TYPES_SHIFT) &
+      IREE_HAL_TOPOLOGY_EDGE_SEMAPHORE_EXPORT_TIMEPOINT_TYPES_MASK;
+  return (iree_hal_external_timepoint_type_mask_t)raw_types;
 }
 
 // Returns buffer import handle types from an interop word.
@@ -688,7 +835,10 @@ iree_hal_topology_edge_semaphore_export_types(
 static inline iree_hal_topology_handle_type_t
 iree_hal_topology_edge_buffer_import_types(
     iree_hal_topology_edge_interop_word_t word) {
-  return (word >> 16) & 0xFFull;
+  const uint64_t raw_types =
+      (word >> IREE_HAL_TOPOLOGY_EDGE_BUFFER_IMPORT_TYPES_SHIFT) &
+      IREE_HAL_TOPOLOGY_EDGE_BUFFER_IMPORT_TYPES_MASK;
+  return (iree_hal_topology_handle_type_t)raw_types;
 }
 
 // Returns buffer export handle types from an interop word.
@@ -700,7 +850,10 @@ iree_hal_topology_edge_buffer_import_types(
 static inline iree_hal_topology_handle_type_t
 iree_hal_topology_edge_buffer_export_types(
     iree_hal_topology_edge_interop_word_t word) {
-  return (word >> 24) & 0xFFull;
+  const uint64_t raw_types =
+      (word >> IREE_HAL_TOPOLOGY_EDGE_BUFFER_EXPORT_TYPES_SHIFT) &
+      IREE_HAL_TOPOLOGY_EDGE_BUFFER_EXPORT_TYPES_MASK;
+  return (iree_hal_topology_handle_type_t)raw_types;
 }
 
 //===----------------------------------------------------------------------===//
@@ -750,27 +903,6 @@ iree_hal_topology_edge_buffer_export_types(
 //   noncoherent COPY + P2P_COPY      -> pipeline with DMA
 //   otherwise                        -> replicate-and-compute
 // This decision happens once at plan construction time — no buffers exist yet.
-
-//===----------------------------------------------------------------------===//
-// iree_hal_topology_edge_t edge construction
-//===----------------------------------------------------------------------===//
-
-// Computes a base edge from device capabilities and driver names by:
-//  - Detecting same driver (enables NATIVE mode)
-//  - Matching physical device UUIDs (cross-driver same-GPU detection)
-//  - Intersecting external handle types (semaphore/buffer import/export)
-//  - Deriving interop modes from handle type intersections
-//  - Computing buffer modes based on P2P capability flags
-//  - Propagating capability flags (bitwise AND of device flags)
-//  - Calculating NUMA distance
-//  - Assigning default link class and costs
-// Returns base edge that can be refined by driver-specific logic via
-// iree_hal_device_refine_topology_edge().
-IREE_API_EXPORT iree_hal_topology_edge_t
-iree_hal_topology_edge_from_capabilities(
-    const iree_hal_device_capabilities_t* src_caps,
-    const iree_hal_device_capabilities_t* dst_caps,
-    iree_string_view_t src_driver_name, iree_string_view_t dst_driver_name);
 
 //===----------------------------------------------------------------------===//
 // iree_hal_topology_t formatting

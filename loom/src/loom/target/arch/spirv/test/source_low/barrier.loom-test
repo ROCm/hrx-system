@@ -1,0 +1,29 @@
+// RUN: emit source-low output=low
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @spirv_workgroup_barrier() {
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(shader_entry_point) @spirv_workgroup_barrier() asm<spirv.logical.core> {
+  OpControlBarrier.workgroup.workgroup.acq_rel
+  return
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @spirv_subgroup_barrier() {
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(shader_entry_point) @spirv_subgroup_barrier() asm<spirv.logical.core> {
+  OpControlBarrier.subgroup.workgroup.acq_rel
+  return
+}

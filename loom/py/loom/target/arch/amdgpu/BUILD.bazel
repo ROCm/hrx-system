@@ -1,0 +1,155 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_library(
+    name = "target_info",
+    srcs = [
+        "__init__.py",
+        "names.py",
+        "target_info.py",
+    ],
+    deps = [
+        "//loom/py/loom/dialect:shared",
+        "//loom/py/loom/target:low_descriptors",
+        "//loom/py/loom/target/arch:package_init",
+    ],
+)
+
+iree_py_library(
+    name = "encoding_info",
+    srcs = ["encoding.py"],
+)
+
+iree_py_library(
+    name = "isa_xml",
+    srcs = ["isa_xml.py"],
+)
+
+iree_py_library(
+    name = "dialect",
+    srcs = [
+        "__init__.py",
+        "dialect.py",
+    ],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom/dialect/target",
+        "//loom/py/loom/target/arch/amdgpu:target_info",
+    ],
+)
+
+iree_py_library(
+    name = "low_aliases",
+    srcs = ["low_aliases.py"],
+)
+
+iree_py_library(
+    name = "matrix_contracts",
+    srcs = ["matrix_contracts.py"],
+    deps = [
+        ":matrix_fragment_layouts",
+        "//loom/py/loom/target/arch:package",
+    ],
+)
+
+iree_py_library(
+    name = "matrix_fragment_layouts",
+    srcs = ["matrix_fragment_layouts.py"],
+    deps = ["//loom/py/loom/target/arch:package"],
+)
+
+iree_py_test(
+    name = "matrix_fragment_layouts_test",
+    srcs = [
+        "matrix_fragment_layouts_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amdgpu.matrix_fragment_layouts_test"],
+    main = "pytest_style_runner.py",
+    deps = [":matrix_fragment_layouts"],
+)
+
+iree_py_library(
+    name = "descriptors",
+    srcs = [
+        "__init__.py",
+        "descriptor_overlay.py",
+        "descriptors/__init__.py",
+        "descriptors/alu.py",
+        "descriptors/api.py",
+        "descriptors/atomic.py",
+        "descriptors/candidates.py",
+        "descriptors/categories.py",
+        "descriptors/cdna.py",
+        "descriptors/cluster.py",
+        "descriptors/common.py",
+        "descriptors/contracts.py",
+        "descriptors/control.py",
+        "descriptors/matrix.py",
+        "descriptors/memory.py",
+        "descriptors/rdna3.py",
+        "descriptors/rdna4.py",
+        "descriptors/sets.py",
+        "descriptors/tensor.py",
+        "descriptors/workgroup.py",
+        "target_info.py",
+    ],
+    deps = [
+        ":encoding_info",
+        ":isa_xml",
+        ":target_info",
+        "//loom/py/loom/target:low_descriptors",
+        "//loom/py/loom/target/arch:package",
+    ],
+)
+
+iree_py_test(
+    name = "target_info_test",
+    srcs = [
+        "isa_xml_test.py",
+        "target_info_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = [
+        "loom.target.arch.amdgpu.isa_xml_test",
+        "loom.target.arch.amdgpu.target_info_test",
+    ],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":isa_xml",
+        ":target_info",
+    ],
+)
+
+iree_py_test(
+    name = "descriptors_test",
+    srcs = [
+        "descriptor_overlay_test.py",
+        "descriptors_test.py",
+        "isa_xml_test.py",
+        "low_aliases_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = [
+        "loom.target.arch.amdgpu.descriptor_overlay_test",
+        "loom.target.arch.amdgpu.descriptors_test",
+        "loom.target.arch.amdgpu.low_aliases_test",
+    ],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":descriptors",
+        ":isa_xml",
+        ":low_aliases",
+        "//loom/py/loom/target:low_descriptors",
+    ],
+)

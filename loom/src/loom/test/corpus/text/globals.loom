@@ -1,0 +1,31 @@
+global.constant @weights : tile<[%m]x[%k]xi8, #q8_0<block=32>> where [mul(%m, 16)]
+
+global.variable @state : f32 = 0.0
+
+global.variable @kv_cache : tile<[%s]x[%d]xf32>
+
+global.variable @scratch_view : view<[%n]xf32, %layout> where [mul(%n, 16)]
+
+func.def initializer @init_state(%value: f32) {
+  global.store %value, @state : f32
+  func.return
+}
+
+func.def @load_weights() {
+  %tile, %m, %k = global.load @weights : tile<[%m]x[%k]xi8, #q8_0<block=32>>
+  test.use %tile, %m, %k : tile<[%m]x[%k]xi8, #q8_0<block=32>>, index, index
+  func.return
+}
+
+func.def deinitializer @cleanup() {
+  %value = global.load @state : f32
+  test.use %value : f32
+  func.return
+}
+
+func.def @roundtrip_scratch_view() {
+  %view, %n, %layout = global.load @scratch_view : view<[%n]xf32, %layout>
+  test.use %view, %n, %layout : view<[%n]xf32, %layout>, index, encoding
+  global.store %view, @scratch_view : view<[%n]xf32, %layout>
+  func.return
+}

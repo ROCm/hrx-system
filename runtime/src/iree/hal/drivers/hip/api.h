@@ -56,9 +56,8 @@ typedef struct iree_hal_hip_memory_pooling_params_t {
 // Must be initialized with iree_hal_hip_device_params_initialize prior to
 // use.
 typedef struct iree_hal_hip_device_params_t {
-  // Number of queues exposed on the device.
-  // Each queue acts as a separate synchronization scope where all work executes
-  // concurrently unless prohibited by semaphores.
+  // Number of queues exposed on each physical device.
+  // The HIP driver currently supports exactly one queue per physical device.
   iree_host_size_t queue_count;
 
   // Total size of each block in the device shared block pool.

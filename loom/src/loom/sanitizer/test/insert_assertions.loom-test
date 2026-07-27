@@ -1,0 +1,630 @@
+// RUN: pass sanitizer-insert-assertions{checks=value}
+
+// Explicit assumes become checked aliases instead of duplicated assume/assert
+// pairs. Predicates already proven by the incoming alias are omitted from the
+// new runtime assertion.
+func.def @assume_predicates_filter_to_missing_proof(%n: index) -> (index) {
+  %known = index.assume %n [range(%n, 0, 1024)] : index
+  %checked = index.assume %known [range(%known, 0, 2048), mul(%known, 16)] : index
+  func.return %checked : index
+}
+
+// ----
+func.def @assume_predicates_filter_to_missing_proof(%n: index) -> (index) {
+  %known = sanitizer.assert.value %n [range(%n, 0, 1024)] : index
+  %checked = sanitizer.assert.value %known [mul(%known, 16)] : index
+  func.return %checked : index
+}
+
+// ====
+
+// A fully proven assume has no runtime work left; it becomes the source alias.
+func.def @assume_with_only_proven_predicates_erases(%n: index) -> (index) {
+  %known = index.assume %n [range(%n, 0, 1024)] : index
+  %checked = index.assume %known [range(%known, 0, 2048)] : index
+  func.return %checked : index
+}
+
+// ----
+func.def @assume_with_only_proven_predicates_erases(%n: index) -> (index) {
+  %known = sanitizer.assert.value %n [range(%n, 0, 1024)] : index
+  func.return %known : index
+}
+
+// ====
+
+// Predicate SSA operands that are not themselves checked aliases are still
+// listed on the assertion so the predicate remains verifiable and reportable.
+func.def @assume_with_relational_rhs_value(%n: index) -> (index) {
+  %limit = index.constant 128 : index
+  %bounded = index.assume %n [lt(%n, %limit)] : index
+  func.return %bounded : index
+}
+
+// ----
+func.def @assume_with_relational_rhs_value(%n: index) -> (index) {
+  %limit = index.constant 128 : index
+  %bounded, %5 = sanitizer.assert.value %n, %limit [lt(%n, %limit)] : index, index
+  func.return %bounded : index
+}
+
+// ====
+
+// Scalar floating-point assumes use the same assertion vocabulary as fast-math
+// checks.
+func.def @float_assume_becomes_value_assertion(%x: f32) -> (f32) {
+  %checked = scalar.assume %x [not_nan(%x), not_inf(%x)] : f32
+  func.return %checked : f32
+}
+
+// ----
+func.def @float_assume_becomes_value_assertion(%x: f32) -> (f32) {
+  %checked = sanitizer.assert.value %x [not_nan(%x), not_inf(%x)] : f32
+  func.return %checked : f32
+}
+
+// ====
+
+// Fast-math nnan+ninf is a finite contract on both operands and the result.
+func.def @fastmath_finite_instruments_inputs_and_result(%x: f32, %y: f32) -> (f32) {
+  %sum = scalar.addf<nnan|ninf> %x, %y : f32
+  func.return %sum : f32
+}
+
+// ----
+func.def @fastmath_finite_instruments_inputs_and_result(%x: f32, %y: f32) -> (f32) {
+  %4, %5 = sanitizer.assert.value %x, %y [finite(%x), finite(%y)] : f32, f32
+  %sum$3 = scalar.addf<nnan|ninf> %4, %5 : f32
+  %sum$6 = sanitizer.assert.value %sum$3 [finite(%sum$3)] : f32
+  func.return %sum$6 : f32
+}
+
+// ====
+
+// ninf without nnan maps to not_inf, not finite.
+func.def @fastmath_ninf_instruments_not_inf(%x: f32) -> (f32) {
+  %neg = scalar.negf<ninf> %x : f32
+  func.return %neg : f32
+}
+
+// ----
+func.def @fastmath_ninf_instruments_not_inf(%x: f32) -> (f32) {
+  %3 = sanitizer.assert.value %x [not_inf(%x)] : f32
+  %neg$2 = scalar.negf<ninf> %3 : f32
+  %neg$4 = sanitizer.assert.value %neg$2 [not_inf(%neg$2)] : f32
+  func.return %neg$4 : f32
+}
+
+// ====
+
+// Non-value check selections are precise and do not enable value assertions.
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_selection_leaves_value_ir_unchanged(%n: index) -> (index) {
+  %checked = index.assume %n [range(%n, 0, 1024)] : index
+  func.return %checked : index
+}
+
+// ----
+func.def @access_only_selection_leaves_value_ir_unchanged(%n: index) -> (index) {
+  %checked = index.assume %n [range(%n, 0, 1024)] : index
+  func.return %checked : index
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_keeps_existing_scalar_view_assertions(%layout: encoding<layout>, %input: view<16xf32, %layout>, %i: index) -> (f32) {
+  sanitizer.assert.access<read> %input[%i] : view<16xf32, %layout>
+  %value = view.load %input[%i] : view<16xf32, %layout> -> f32
+  func.return %value : f32
+}
+
+// ----
+func.def @access_only_keeps_existing_scalar_view_assertions(%layout: encoding<layout>, %input: view<16xf32, %layout>, %i: index) -> (f32) {
+  sanitizer.assert.access<read> %input[%i] : view<16xf32, %layout>
+  %value = view.load %input[%i] : view<16xf32, %layout> -> f32
+  func.return %value : f32
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_instruments_scalar_view_memory(%layout: encoding<layout>, %input: view<16xf32, %layout>, %output: view<16xf32, %layout>, %i: index) {
+  %value = view.load %input[%i] : view<16xf32, %layout> -> f32
+  view.store %value, %output[%i] : f32, view<16xf32, %layout>
+  func.return
+}
+
+// ----
+func.def @access_only_instruments_scalar_view_memory(%layout: encoding<layout>, %input: view<16xf32, %layout>, %output: view<16xf32, %layout>, %i: index) {
+  sanitizer.assert.access<read> %input[%i] : view<16xf32, %layout>
+  %value = view.load %input[%i] : view<16xf32, %layout> -> f32
+  sanitizer.assert.access<write> %output[%i] : view<16xf32, %layout>
+  view.store %value, %output[%i] : f32, view<16xf32, %layout>
+  func.return
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_uses_memory_space_facts(%input: buffer, %output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %global_input = buffer.assume.memory_space<global> %input : buffer
+  %global_output = buffer.assume.memory_space<global> %output : buffer
+  %generic_input = buffer.assume.memory_space<generic> %input : buffer
+  %host_output = buffer.assume.memory_space<host> %output : buffer
+  %input_view = buffer.view %global_input[%zero_offset] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %global_output[%zero_offset] : buffer -> view<1xi32, #dense>
+  %generic_view = buffer.view %generic_input[%zero_offset] : buffer -> view<1xi32, #dense>
+  %host_view = buffer.view %host_output[%zero_offset] : buffer -> view<1xi32, #dense>
+  %global_value = view.load %input_view[%zero_index] : view<1xi32, #dense> -> i32
+  view.store %global_value, %output_view[%zero_index] : i32, view<1xi32, #dense>
+  %generic_value = view.load %generic_view[%zero_index] : view<1xi32, #dense> -> i32
+  view.store %generic_value, %host_view[%zero_index] : i32, view<1xi32, #dense>
+  %bytes = index.constant 4 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero_offset] : buffer -> view<1xi32, #dense>
+  %scratch_value = view.load %scratch_view[%zero_index] : view<1xi32, #dense> -> i32
+  %private = buffer.alloca %bytes {base_alignment = 4, memory_space = private} : buffer
+  %private_view = buffer.view %private[%zero_offset] : buffer -> view<1xi32, #dense>
+  view.store %scratch_value, %private_view[%zero_index] : i32, view<1xi32, #dense>
+  func.return
+}
+
+// ----
+func.def @access_only_uses_memory_space_facts(%input: buffer, %output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %global_input = buffer.assume.memory_space<global> %input : buffer
+  %global_output = buffer.assume.memory_space<global> %output : buffer
+  %generic_input = buffer.assume.memory_space<generic> %input : buffer
+  %host_output = buffer.assume.memory_space<host> %output : buffer
+  %input_view = buffer.view %global_input[%zero_offset] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %global_output[%zero_offset] : buffer -> view<1xi32, #dense>
+  %generic_view = buffer.view %generic_input[%zero_offset] : buffer -> view<1xi32, #dense>
+  %host_view = buffer.view %host_output[%zero_offset] : buffer -> view<1xi32, #dense>
+  sanitizer.assert.access<read> %input_view[%zero_index] : view<1xi32, #dense>
+  %global_value = view.load %input_view[%zero_index] : view<1xi32, #dense> -> i32
+  sanitizer.assert.access<write> %output_view[%zero_index] : view<1xi32, #dense>
+  view.store %global_value, %output_view[%zero_index] : i32, view<1xi32, #dense>
+  sanitizer.assert.access<read> %generic_view[%zero_index] : view<1xi32, #dense>
+  %generic_value = view.load %generic_view[%zero_index] : view<1xi32, #dense> -> i32
+  view.store %generic_value, %host_view[%zero_index] : i32, view<1xi32, #dense>
+  %bytes = index.constant 4 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero_offset] : buffer -> view<1xi32, #dense>
+  %scratch_value = view.load %scratch_view[%zero_index] : view<1xi32, #dense> -> i32
+  %private = buffer.alloca %bytes {base_alignment = 4, memory_space = private} : buffer
+  %private_view = buffer.view %private[%zero_offset] : buffer -> view<1xi32, #dense>
+  view.store %scratch_value, %private_view[%zero_index] : i32, view<1xi32, #dense>
+  func.return
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_instruments_static_scalar_view_memory(%input: view<2xi32, #dense>, %output: view<2xi32, #dense>) {
+  %value = view.load %input[1] : view<2xi32, #dense> -> i32
+  view.store %value, %output[1] : i32, view<2xi32, #dense>
+  func.return
+}
+
+// ----
+func.def @access_only_instruments_static_scalar_view_memory(%input: view<2xi32, #dense>, %output: view<2xi32, #dense>) {
+  sanitizer.assert.access<read> %input[1] : view<2xi32, #dense>
+  %value = view.load %input[1] : view<2xi32, #dense> -> i32
+  sanitizer.assert.access<write> %output[1] : view<2xi32, #dense>
+  view.store %value, %output[1] : i32, view<2xi32, #dense>
+  func.return
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_instruments_rank1_vector_memory(%layout: encoding<layout>, %input: view<64x4xi32, %layout>, %output: view<64x4xi32, %layout>, %row: index) {
+  %value = vector.load %input[%row, 0] : view<64x4xi32, %layout> -> vector<4xi32>
+  vector.store %value, %output[%row, 0] : vector<4xi32>, view<64x4xi32, %layout>
+  func.return
+}
+
+// ----
+func.def @access_only_instruments_rank1_vector_memory(%layout: encoding<layout>, %input: view<64x4xi32, %layout>, %output: view<64x4xi32, %layout>, %row: index) {
+  sanitizer.assert.access<read> %input[%row, 0] {static_extents = [1, 4]} : view<64x4xi32, %layout>
+  %value = vector.load %input[%row, 0] : view<64x4xi32, %layout> -> vector<4xi32>
+  sanitizer.assert.access<write> %output[%row, 0] {static_extents = [1, 4]} : view<64x4xi32, %layout>
+  vector.store %value, %output[%row, 0] : vector<4xi32>, view<64x4xi32, %layout>
+  func.return
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_instruments_dense_fragment_memory(%output: view<64x64xf32, #dense>, %row: index, %column: index, %value: vector<8xf32>) {
+  %four = index.constant 4 : index
+  vector.fragment.store<result> %value, %output[%row, %column] shape [%four, %four] : vector<8xf32>, view<64x64xf32, #dense>
+  func.return
+}
+
+// ----
+func.def @access_only_instruments_dense_fragment_memory(%output: view<64x64xf32, #dense>, %row: index, %column: index, %value: vector<8xf32>) {
+  %four = index.constant 4 : index
+  sanitizer.assert.accesses<write> %output[%row, %column] {static_count = 4, static_extents = [1, 4], static_strides = [1, 0]} : view<64x64xf32, #dense>
+  vector.fragment.store<result> %value, %output[%row, %column] shape [%four, %four] : vector<8xf32>, view<64x64xf32, #dense>
+  func.return
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_instruments_strided_fragment_memory(%buffer: buffer, %row: index, %column: index, %value: vector<8xf32>) {
+  %two = index.constant 2 : index
+  %sixty_four = index.constant 64 : index
+  %layout = encoding.layout.strided [1, %sixty_four] : encoding<layout>
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %output = buffer.view %global[%base] : buffer -> view<64x64xf32, %layout>
+  vector.fragment.store<result> %value, %output[%row, %column] shape [%two, %two] : vector<8xf32>, view<64x64xf32, %layout>
+  func.return
+}
+
+// ----
+func.def @access_only_instruments_strided_fragment_memory(%buffer: buffer, %row: index, %column: index, %value: vector<8xf32>) {
+  %two = index.constant 2 : index
+  %sixty_four = index.constant 64 : index
+  %layout = encoding.layout.strided [1, %sixty_four] : encoding<layout>
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %output = buffer.view %global[%base] : buffer -> view<64x64xf32, %layout>
+  sanitizer.assert.accesses<write> %output[%row, %column] {static_count = 2, static_extents = [2, 1], static_strides = [0, 1]} : view<64x64xf32, %layout>
+  vector.fragment.store<result> %value, %output[%row, %column] shape [%two, %two] : vector<8xf32>, view<64x64xf32, %layout>
+  func.return
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_instruments_non_contiguous_fragment_memory(%buffer: buffer, %row: index, %column: index, %value: vector<8xf32>) {
+  %two = index.constant 2 : index
+  %sixty_four = index.constant 64 : index
+  %layout = encoding.layout.strided [2, %sixty_four] : encoding<layout>
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %output = buffer.view %global[%base] : buffer -> view<64x64xf32, %layout>
+  vector.fragment.store<result> %value, %output[%row, %column] shape [%two, %two] : vector<8xf32>, view<64x64xf32, %layout>
+  func.return
+}
+
+// ----
+func.def @access_only_instruments_non_contiguous_fragment_memory(%buffer: buffer, %row: index, %column: index, %value: vector<8xf32>) {
+  %two = index.constant 2 : index
+  %sixty_four = index.constant 64 : index
+  %layout = encoding.layout.strided [2, %sixty_four] : encoding<layout>
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %output = buffer.view %global[%base] : buffer -> view<64x64xf32, %layout>
+  sanitizer.assert.accesses<write> %output[%row, %column] {static_count = 2, static_extents = [1, 1], static_strides = [1, 0]} : view<64x64xf32, %layout>
+  %10 = index.constant 1 : index
+  %11 = index.add %column, %10 : index
+  sanitizer.assert.accesses<write> %output[%row, %11] {static_count = 2, static_extents = [1, 1], static_strides = [1, 0]} : view<64x64xf32, %layout>
+  vector.fragment.store<result> %value, %output[%row, %column] shape [%two, %two] : vector<8xf32>, view<64x64xf32, %layout>
+  func.return
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_instruments_blocked_fragment_memory(%output: view<8x64x64xf32, #dense>, %block: index, %row: index, %column: index, %value: vector<32xf32>) {
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  vector.fragment.store<result> %value, %output[%block, %row, %column] shape [blocks(%two), %four, %four] : vector<32xf32>, view<8x64x64xf32, #dense>
+  func.return
+}
+
+// ----
+func.def @access_only_instruments_blocked_fragment_memory(%output: view<8x64x64xf32, #dense>, %block: index, %row: index, %column: index, %value: vector<32xf32>) {
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  sanitizer.assert.accesses<write> %output[%block, %row, %column] {static_count = 4, static_extents = [1, 1, 4], static_strides = [0, 1, 0]} : view<8x64x64xf32, #dense>
+  %7 = index.constant 1 : index
+  %8 = index.add %block, %7 : index
+  sanitizer.assert.accesses<write> %output[%8, %row, %column] {static_count = 4, static_extents = [1, 1, 4], static_strides = [0, 1, 0]} : view<8x64x64xf32, #dense>
+  vector.fragment.store<result> %value, %output[%block, %row, %column] shape [blocks(%two), %four, %four] : vector<32xf32>, view<8x64x64xf32, #dense>
+  func.return
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_skips_workgroup_vector_memory() {
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %bytes = index.constant 64 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero_offset] : buffer -> view<4x4xi32, #dense>
+  %value = vector.load %view[%zero_index, 0] : view<4x4xi32, #dense> -> vector<4xi32>
+  vector.store %value, %view[%zero_index, 0] : vector<4xi32>, view<4x4xi32, #dense>
+  func.return
+}
+
+// ----
+func.def @access_only_skips_workgroup_vector_memory() {
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %bytes = index.constant 64 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero_offset] : buffer -> view<4x4xi32, #dense>
+  %value = vector.load %view[%zero_index, 0] : view<4x4xi32, #dense> -> vector<4xi32>
+  vector.store %value, %view[%zero_index, 0] : vector<4xi32>, view<4x4xi32, #dense>
+  func.return
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_keeps_existing_vector_assertions(%layout: encoding<layout>, %input: view<16xi32, %layout>, %i: index) -> (vector<2xi32>) {
+  sanitizer.assert.access<read> %input[%i] {static_extents = [2]} : view<16xi32, %layout>
+  %value = vector.load %input[%i] : view<16xi32, %layout> -> vector<2xi32>
+  func.return %value : vector<2xi32>
+}
+
+// ----
+func.def @access_only_keeps_existing_vector_assertions(%layout: encoding<layout>, %input: view<16xi32, %layout>, %i: index) -> (vector<2xi32>) {
+  sanitizer.assert.access<read> %input[%i] {static_extents = [2]} : view<16xi32, %layout>
+  %value = vector.load %input[%i] : view<16xi32, %layout> -> vector<2xi32>
+  func.return %value : vector<2xi32>
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_skips_workgroup_vector_atomic_memory() {
+  %zero_offset = index.constant 0 : offset
+  %origin = index.constant 0 : index
+  %bytes = index.constant 64 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero_offset] : buffer -> view<16xi32, #dense>
+  %offsets = vector.splat %origin : vector<2xindex>
+  %one = scalar.constant 1 : i32
+  %value = vector.splat %one : vector<2xi32>
+  vector.atomic.reduce<addi> %value, %view[%origin][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xi32>, view<16xi32, #dense>, vector<2xindex>
+  func.return
+}
+
+// ----
+func.def @access_only_skips_workgroup_vector_atomic_memory() {
+  %zero_offset = index.constant 0 : offset
+  %origin = index.constant 0 : index
+  %bytes = index.constant 64 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero_offset] : buffer -> view<16xi32, #dense>
+  %offsets = vector.splat %origin : vector<2xindex>
+  %one = scalar.constant 1 : i32
+  %value = vector.splat %one : vector<2xi32>
+  vector.atomic.reduce<addi> %value, %view[%origin][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xi32>, view<16xi32, #dense>, vector<2xindex>
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-to-scalar,sanitizer-insert-assertions{checks=access},canonicalize,cse
+func.def @access_after_memory_scalarization_checks_masked_vector_memory(%input: view<16xf32, #dense>, %output: view<16xf32, #dense>, %origin: index, %mask: vector<2xi1>, %old: vector<2xf32>, %value: vector<2xf32>) -> (vector<2xf32>) {
+  %loaded = vector.load.mask %input[%origin], %mask, %old : view<16xf32, #dense>, vector<2xi1>, vector<2xf32>
+  vector.store.mask %value, %output[%origin], %mask : vector<2xf32>, view<16xf32, #dense>, vector<2xi1>
+  func.return %loaded : vector<2xf32>
+}
+
+// ----
+func.def @access_after_memory_scalarization_checks_masked_vector_memory(%input: view<16xf32, #dense>, %output: view<16xf32, #dense>, %origin: index, %mask: vector<2xi1>, %old: vector<2xf32>, %value: vector<2xf32>) -> (vector<2xf32>) {
+  %14 = vector.extract %mask[0] : vector<2xi1> -> i1
+  %15 = scf.if %14 -> (f32) {
+    sanitizer.assert.access<read> %input[%origin] : view<16xf32, #dense>
+    %16 = view.load %input[%origin] : view<16xf32, #dense> -> f32
+    scf.yield %16 : f32
+  } else {
+    %17 = vector.extract %old[0] : vector<2xf32> -> f32
+    scf.yield %17 : f32
+  }
+  %18 = vector.extract %mask[1] : vector<2xi1> -> i1
+  %19 = scf.if %18 -> (f32) {
+    %20 = index.constant 1 : index
+    %21 = index.add %origin, %20 : index
+    sanitizer.assert.access<read> %input[%21] : view<16xf32, #dense>
+    %22 = view.load %input[%21] : view<16xf32, #dense> -> f32
+    scf.yield %22 : f32
+  } else {
+    %23 = vector.extract %old[1] : vector<2xf32> -> f32
+    scf.yield %23 : f32
+  }
+  %loaded = vector.from_elements %15, %19 : vector<2xf32>
+  scf.if %14 {
+    %9 = vector.extract %value[0] : vector<2xf32> -> f32
+    sanitizer.assert.access<write> %output[%origin] : view<16xf32, #dense>
+    view.store %9, %output[%origin] : f32, view<16xf32, #dense>
+  } else {
+  }
+  scf.if %18 {
+    %11 = vector.extract %value[1] : vector<2xf32> -> f32
+    %12 = index.constant 1 : index
+    %13 = index.add %origin, %12 : index
+    sanitizer.assert.access<write> %output[%13] : view<16xf32, #dense>
+    view.store %11, %output[%13] : f32, view<16xf32, #dense>
+  } else {
+  }
+  func.return %loaded : vector<2xf32>
+}
+
+// ====
+
+// RUN: pass vector-memory-to-scalar,sanitizer-insert-assertions{checks=access},canonicalize,cse
+func.def @access_after_memory_scalarization_checks_per_lane_vector_memory(%input: view<16xf32, #dense>, %output: view<16xf32, #dense>, %origin: index, %offsets: vector<2xindex>, %value: vector<2xf32>) -> (vector<2xf32>) {
+  %loaded = vector.gather %input[%origin][%offsets] : view<16xf32, #dense>, vector<2xindex> -> vector<2xf32>
+  vector.scatter %value, %output[%origin][%offsets] : vector<2xf32>, view<16xf32, #dense>, vector<2xindex>
+  func.return %loaded : vector<2xf32>
+}
+
+// ----
+func.def @access_after_memory_scalarization_checks_per_lane_vector_memory(%input: view<16xf32, #dense>, %output: view<16xf32, #dense>, %origin: index, %offsets: vector<2xindex>, %value: vector<2xf32>) -> (vector<2xf32>) {
+  %13 = vector.extract %offsets[0] : vector<2xindex> -> index
+  %14 = index.add %origin, %13 : index
+  sanitizer.assert.access<read> %input[%14] : view<16xf32, #dense>
+  %15 = view.load %input[%14] : view<16xf32, #dense> -> f32
+  %16 = vector.extract %offsets[1] : vector<2xindex> -> index
+  %17 = index.add %origin, %16 : index
+  sanitizer.assert.access<read> %input[%17] : view<16xf32, #dense>
+  %18 = view.load %input[%17] : view<16xf32, #dense> -> f32
+  %loaded = vector.from_elements %15, %18 : vector<2xf32>
+  %7 = vector.extract %value[0] : vector<2xf32> -> f32
+  sanitizer.assert.access<write> %output[%14] : view<16xf32, #dense>
+  view.store %7, %output[%14] : f32, view<16xf32, #dense>
+  %10 = vector.extract %value[1] : vector<2xf32> -> f32
+  sanitizer.assert.access<write> %output[%17] : view<16xf32, #dense>
+  view.store %10, %output[%17] : f32, view<16xf32, #dense>
+  func.return %loaded : vector<2xf32>
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_instruments_vector_atomic_memory(%view: view<16xi32, #dense>, %origin: index, %offsets: vector<2xindex>, %value: vector<2xi32>, %expected: vector<2xi32>, %replacement: vector<2xi32>) -> (vector<2xi32>, vector<2xi32>) {
+  vector.atomic.reduce<addi> %value, %view[%origin][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xi32>, view<16xi32, #dense>, vector<2xindex>
+  %old = vector.atomic.rmw<addi> %value, %view[%origin][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xi32>, view<16xi32, #dense>, vector<2xindex>
+  %cmp = vector.atomic.cmpxchg %expected, %replacement, %view[%origin][%offsets] {success_ordering = acq_rel, failure_ordering = acquire, scope = workgroup} : vector<2xi32>, view<16xi32, #dense>, vector<2xindex> -> vector<2xi32>
+  func.return %old, %cmp : vector<2xi32>, vector<2xi32>
+}
+
+// ----
+func.def @access_only_instruments_vector_atomic_memory(%view: view<16xi32, #dense>, %origin: index, %offsets: vector<2xindex>, %value: vector<2xi32>, %expected: vector<2xi32>, %replacement: vector<2xi32>) -> (vector<2xi32>, vector<2xi32>) {
+  %18 = vector.extract %offsets[0] : vector<2xindex> -> index
+  %19 = index.add %origin, %18 : index
+  sanitizer.assert.access<read_write> %view[%19] : view<16xi32, #dense>
+  %20 = vector.extract %offsets[1] : vector<2xindex> -> index
+  %21 = index.add %origin, %20 : index
+  sanitizer.assert.access<read_write> %view[%21] : view<16xi32, #dense>
+  vector.atomic.reduce<addi> %value, %view[%origin][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xi32>, view<16xi32, #dense>, vector<2xindex>
+  %14 = vector.extract %offsets[0] : vector<2xindex> -> index
+  %15 = index.add %origin, %14 : index
+  sanitizer.assert.access<read_write> %view[%15] : view<16xi32, #dense>
+  %16 = vector.extract %offsets[1] : vector<2xindex> -> index
+  %17 = index.add %origin, %16 : index
+  sanitizer.assert.access<read_write> %view[%17] : view<16xi32, #dense>
+  %old = vector.atomic.rmw<addi> %value, %view[%origin][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xi32>, view<16xi32, #dense>, vector<2xindex>
+  %10 = vector.extract %offsets[0] : vector<2xindex> -> index
+  %11 = index.add %origin, %10 : index
+  sanitizer.assert.access<read_write> %view[%11] : view<16xi32, #dense>
+  %12 = vector.extract %offsets[1] : vector<2xindex> -> index
+  %13 = index.add %origin, %12 : index
+  sanitizer.assert.access<read_write> %view[%13] : view<16xi32, #dense>
+  %cmp = vector.atomic.cmpxchg %expected, %replacement, %view[%origin][%offsets] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<2xi32>, view<16xi32, #dense>, vector<2xindex> -> vector<2xi32>
+  func.return %old, %cmp : vector<2xi32>, vector<2xi32>
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_instruments_masked_vector_atomic_memory(%view: view<16xf32, #dense>, %origin: index, %offsets: vector<2xindex>, %mask: vector<2xi1>, %value: vector<2xf32>, %passthrough: vector<2xf32>) -> (vector<2xf32>) {
+  vector.atomic.reduce.mask<addf> %value, %view[%origin][%offsets], %mask {ordering = relaxed, scope = workgroup} : vector<2xf32>, view<16xf32, #dense>, vector<2xindex>, vector<2xi1>
+  %old = vector.atomic.rmw.mask<addf> %value, %view[%origin][%offsets], %mask, %passthrough {ordering = relaxed, scope = workgroup} : vector<2xf32>, view<16xf32, #dense>, vector<2xindex>, vector<2xi1>, vector<2xf32>
+  func.return %old : vector<2xf32>
+}
+
+// ----
+func.def @access_only_instruments_masked_vector_atomic_memory(%view: view<16xf32, #dense>, %origin: index, %offsets: vector<2xindex>, %mask: vector<2xi1>, %value: vector<2xf32>, %passthrough: vector<2xf32>) -> (vector<2xf32>) {
+  %14 = vector.extract %mask[0] : vector<2xi1> -> i1
+  scf.if %14 {
+    %15 = vector.extract %offsets[0] : vector<2xindex> -> index
+    %16 = index.add %origin, %15 : index
+    sanitizer.assert.access<read_write> %view[%16] : view<16xf32, #dense>
+  } else {
+  }
+  %17 = vector.extract %mask[1] : vector<2xi1> -> i1
+  scf.if %17 {
+    %18 = vector.extract %offsets[1] : vector<2xindex> -> index
+    %19 = index.add %origin, %18 : index
+    sanitizer.assert.access<read_write> %view[%19] : view<16xf32, #dense>
+  } else {
+  }
+  vector.atomic.reduce.mask<addf> %value, %view[%origin][%offsets], %mask {ordering = relaxed, scope = workgroup} : vector<2xf32>, view<16xf32, #dense>, vector<2xindex>, vector<2xi1>
+  %8 = vector.extract %mask[0] : vector<2xi1> -> i1
+  scf.if %8 {
+    %9 = vector.extract %offsets[0] : vector<2xindex> -> index
+    %10 = index.add %origin, %9 : index
+    sanitizer.assert.access<read_write> %view[%10] : view<16xf32, #dense>
+  } else {
+  }
+  %11 = vector.extract %mask[1] : vector<2xi1> -> i1
+  scf.if %11 {
+    %12 = vector.extract %offsets[1] : vector<2xindex> -> index
+    %13 = index.add %origin, %12 : index
+    sanitizer.assert.access<read_write> %view[%13] : view<16xf32, #dense>
+  } else {
+  }
+  %old = vector.atomic.rmw.mask<addf> %value, %view[%origin][%offsets], %mask, %passthrough {ordering = relaxed, scope = workgroup} : vector<2xf32>, view<16xf32, #dense>, vector<2xindex>, vector<2xi1>, vector<2xf32>
+  func.return %old : vector<2xf32>
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_rejects_dynamic_vector_memory(%layout: encoding<layout>, %n: index, %input: view<[%n]xf32, %layout>, %i: index) -> (vector<[%n]xf32>) {
+  // ERROR@+1: SUBRANGE/019 {op_name="vector.load"}
+  %value = vector.load %input[%i] : view<[%n]xf32, %layout> -> vector<[%n]xf32>
+  func.return %value : vector<[%n]xf32>
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_rejects_rank2_vector_memory(%layout: encoding<layout>, %input: view<4x4xf32, %layout>) -> (vector<2x2xf32>) {
+  // ERROR@+1: SUBRANGE/020 {op_name="vector.load", vector_rank="2"}
+  %value = vector.load %input[0, 0] : view<4x4xf32, %layout> -> vector<2x2xf32>
+  func.return %value : vector<2x2xf32>
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_rejects_dynamic_vector_atomic_memory(%n: index, %view: view<[%n]xi32, #dense>, %origin: index, %offsets: vector<[%n]xindex>, %value: vector<[%n]xi32>) {
+  // ERROR@+1: SUBRANGE/019 {op_name="vector.atomic.reduce"}
+  vector.atomic.reduce<addi> %value, %view[%origin][%offsets] {ordering = relaxed, scope = workgroup} : vector<[%n]xi32>, view<[%n]xi32, #dense>, vector<[%n]xindex>
+  func.return
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_rejects_rank2_vector_atomic_memory(%view: view<4x4xi32, #dense>, %offsets: vector<2x2xindex>, %value: vector<2x2xi32>) {
+  // ERROR@+1: SUBRANGE/020 {op_name="vector.atomic.reduce", vector_rank="2"}
+  vector.atomic.reduce<addi> %value, %view[0, 0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2x2xi32>, view<4x4xi32, #dense>, vector<2x2xindex>
+  func.return
+}
+
+// ====
+
+// RUN: pass sanitizer-insert-assertions{checks=access}
+func.def @access_only_rejects_masked_vector_memory(%layout: encoding<layout>, %input: view<16xf32, %layout>, %i: index, %mask: vector<4xi1>, %old: vector<4xf32>) -> (vector<4xf32>) {
+  // ERROR@+1: SUBRANGE/021 {op_name="vector.load.mask"}
+  %value = vector.load.mask %input[%i], %mask, %old : view<16xf32, %layout>, vector<4xi1>, vector<4xf32>
+  func.return %value : vector<4xf32>
+}
+
+// ====
+
+// RUN: with-locations pass sanitizer-insert-assertions{checks=value}
+
+// Inserted assertions carry compact sanitizer site payloads while keeping the
+// source location as the tagged location child.
+func.def @assertion_site_payload_locations(%n: index, %x: f32) -> (index, f32) {
+  %bounded = index.assume %n [range(%n, 0, 1024)] : index loc("sanitizer.loom":2:1)
+  %neg = scalar.negf<ninf> %x : f32 loc("sanitizer.loom":3:1)
+  func.return %bounded, %neg : index, f32 loc("sanitizer.loom":4:1)
+} loc("sanitizer.loom":1:1 to 5:1)
+
+// ----
+func.def @assertion_site_payload_locations(%n: index, %x: f32) -> (index, f32) {
+  %bounded = sanitizer.assert.value %n [range(%n, 0, 1024)] : index loc(tagged<sanitizer_site, "0002030201010000", "sanitizer.loom":2:1>)
+  %6 = sanitizer.assert.value %x [not_inf(%x)] : f32 loc(tagged<sanitizer_site, "00020a0601010000", "sanitizer.loom":3:1>)
+  %neg$5 = scalar.negf<ninf> %6 : f32 loc("sanitizer.loom":3:1)
+  %neg$7 = sanitizer.assert.value %neg$5 [not_inf(%neg$5)] : f32 loc(tagged<sanitizer_site, "00020a0601010000", "sanitizer.loom":3:1>)
+  func.return %bounded, %neg$7 : index, f32 loc("sanitizer.loom":4:1)
+} loc("sanitizer.loom":1:1 to 5:1)

@@ -321,7 +321,7 @@ static iree_status_t iree_hal_metal_allocator_allocate_buffer(
         &allocator->statistics, compat_params.type, allocation_size));
     *out_buffer = buffer;
   } else {
-    if (buffer) iree_hal_buffer_release(buffer);
+    iree_hal_buffer_release(buffer);
   }
 
   [metal_buffer release];  // -1

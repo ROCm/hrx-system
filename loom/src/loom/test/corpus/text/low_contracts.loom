@@ -1,0 +1,38 @@
+// Low function exactness modes and imported-code contracts.
+test.target<low_core> @test_target
+
+low.func.def allocation(assigned) schedule(constrained) target(@test_target) @test_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+  %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %sum : reg<test.i32>
+}
+
+low.func.def target(@test_target) @test_slot_roundtrip(%input: reg<test.i32>) -> (reg<test.i32>) {
+  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<scratch>
+  low.spill %input, %storage : reg<test.i32>, low.storage<scratch>
+  %reload = low.reload %storage : low.storage<scratch> -> reg<test.i32>
+  %addr = low.storage.address %storage : low.storage<scratch> -> reg<test.ptr>
+  low.return %reload : reg<test.i32>
+}
+
+test.target<low_core> @low_object_resource_target {abi = object_function}
+
+low.func.def target(@low_object_resource_target) abi(object_function) export("low_object_resource", {linkage = "dso_local"}) @low_object_resource() -> (reg<test.ptr>) {
+  %ptr = low.resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  low.return %ptr : reg<test.ptr>
+}
+
+test.target<low_core> @low_kernel_resource_target {abi = hal_kernel}
+
+low.kernel.def target(@low_kernel_resource_target) export("low_kernel_resource") workgroup_size(1, 1, 1) @low_kernel_resource() {
+  %binding = low.resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<test.ptr x4>
+  low.return
+}
+
+func.decl @extern_add(%lhs: i32, %rhs: i32) -> (i32)
+
+func.def @caller(%lhs: i32, %rhs: i32) -> (i32) {
+  %sum = low.invoke @test_add_i32(%lhs, %rhs) : (i32, i32) -> (i32)
+  func.return %sum : i32
+}
+
+low.func.decl allocation(fixed) schedule(locked) import(native, "test.add_i32") target(@test_target) @test_add_i32(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)

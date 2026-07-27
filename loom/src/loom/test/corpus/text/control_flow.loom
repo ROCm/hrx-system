@@ -1,0 +1,51 @@
+func.def @control(%variant: index, %cond: i1, %lo: index, %hi: index, %step: index, %a: f32, %b: f32, %gemm0: index, %gemm1: index, %fallback: index, %x0: index, %x1: index, %xf: index) -> (f32, index) {
+  %selected = scf.if %cond -> (f32) {
+    scf.yield %a : f32
+  } else {
+    scf.yield %b : f32
+  }
+  %sum = scf.for %iv = [%lo to %hi step %step](%acc = %selected : f32) -> (f32) {
+    %next = scalar.addf %acc, %acc : f32
+    scf.yield %next : f32
+  }
+  %ordinal, %wgx = scf.lookup %variant {
+    0 = (%gemm0, %x0),
+    1 = (%gemm1, %x1)
+  } default(%fallback, %xf) : index, index
+  test.use %wgx : index
+  func.return %sum, %ordinal : f32, index
+}
+
+func.def @loop_and_switch(%init: index, %limit: index, %one: index, %variant: index, %fallback: index) -> (index) {
+  %count = scf.while(%before = %init : index) -> (index) {
+    %keep_going = index.cmp slt, %before, %limit : index
+    scf.condition %keep_going, %before : i1, index
+  } do(%body: index) {
+    %next = index.add %body, %one : index
+    scf.yield %next : index
+  }
+  %result = scf.switch %variant -> (index) {
+    case 0 {
+      scf.yield %count : index
+    }
+    default {
+      scf.yield %fallback : index
+    }
+  }
+  func.return %result : index
+}
+
+func.def @resultless_control(%variant: index, %cond: i1, %lo: index, %hi: index, %step: index) {
+  scf.if %cond {
+  } else {
+  }
+  scf.for %iv = [%lo to %hi step %step] {
+  }
+  scf.switch %variant {
+    case 0 {
+    }
+    default {
+    }
+  }
+  func.return
+}

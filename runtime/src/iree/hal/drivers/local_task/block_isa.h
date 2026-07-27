@@ -351,7 +351,10 @@ static inline uint8_t iree_hal_cmd_region_width_bucket_from_tile_count(
 //
 // At execution, the processor builds iree_hal_executable_dispatch_state_v0_t
 // on the stack per-dispatch with direct pointer assignments:
-//   dispatch_state.constants = cmd->constants;
+//   dispatch_state.constants = {
+//       (const uint8_t*)cmd->constants,
+//       cmd->constant_count * sizeof(uint32_t),
+//   };
 //   dispatch_state.binding_ptrs =
 //       (void* const*)&state->binding_ptrs[cmd->binding_data_base];
 //   dispatch_state.binding_lengths =

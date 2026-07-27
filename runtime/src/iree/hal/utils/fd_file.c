@@ -380,9 +380,7 @@ static void iree_hal_fd_file_destroy(iree_hal_file_t* IREE_RESTRICT base_file) {
   iree_allocator_t host_allocator = file->host_allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (file->async_file) {
-    iree_async_file_release(file->async_file);
-  }
+  iree_async_file_release(file->async_file);
   iree_io_file_handle_release(file->handle);
 
   iree_allocator_free(host_allocator, file);

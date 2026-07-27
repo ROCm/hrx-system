@@ -1,0 +1,72 @@
+// RUN: roundtrip
+
+func.def @packed4_payload_word_offset(%weights: buffer, %block0: index, %word0: index) -> (i32) {
+  %block = index.assume %block0 [range(%block0, 0, 63)] : index
+  %word = index.assume %word0 [range(%word0, 0, 3)] : index
+  %block_byte_stride = index.constant 18 : offset
+  %payload_header_offset = index.constant 2 : offset
+  %word_byte_stride = index.constant 4 : offset
+  %block_base = index.scale %block, %block_byte_stride : index, offset -> offset
+  %payload_base = index.add %block_base, %payload_header_offset : offset
+  %word_byte_offset = index.scale %word, %word_byte_stride : index, offset -> offset
+  %byte_offset = index.add %payload_base, %word_byte_offset : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %word_view = buffer.view %weights_global[%byte_offset] : buffer -> view<1xi32, #dense>
+  %packed_word = view.load %word_view[0] : view<1xi32, #dense> -> i32
+  func.return %packed_word : i32
+}
+
+// ====
+
+func.def @packed5_split_payload_offsets(%weights: buffer, %block0: index, %word0: index) -> (i32, i32) {
+  %block = index.assume %block0 [range(%block0, 0, 63)] : index
+  %word = index.assume %word0 [range(%word0, 0, 3)] : index
+  %block_byte_stride = index.constant 22 : offset
+  %side_bits_header_offset = index.constant 2 : offset
+  %low_bits_header_offset = index.constant 6 : offset
+  %word_byte_stride = index.constant 4 : offset
+  %block_base = index.scale %block, %block_byte_stride : index, offset -> offset
+  %side_bits_byte_offset = index.add %block_base, %side_bits_header_offset : offset
+  %low_bits_base = index.add %block_base, %low_bits_header_offset : offset
+  %low_word_byte_offset = index.scale %word, %word_byte_stride : index, offset -> offset
+  %low_bits_byte_offset = index.add %low_bits_base, %low_word_byte_offset : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %side_bits_view = buffer.view %weights_global[%side_bits_byte_offset] : buffer -> view<1xi32, #dense>
+  %low_bits_view = buffer.view %weights_global[%low_bits_byte_offset] : buffer -> view<1xi32, #dense>
+  %side_bits_word = view.load %side_bits_view[0] : view<1xi32, #dense> -> i32
+  %low_bits_word = view.load %low_bits_view[0] : view<1xi32, #dense> -> i32
+  func.return %side_bits_word, %low_bits_word : i32, i32
+}
+
+// ====
+
+func.def @packed6_split_payload_offsets(%weights: buffer, %block0: index, %low_word0: index, %high_word0: index, %scale0: index) -> (i32, i32, f16) {
+  %block = index.assume %block0 [range(%block0, 0, 63)] : index
+  %low_word = index.assume %low_word0 [range(%low_word0, 0, 31)] : index
+  %high_word = index.assume %high_word0 [range(%high_word0, 0, 15)] : index
+  %scale = index.assume %scale0 [range(%scale0, 0, 15)] : index
+  %block_byte_stride = index.constant 210 : offset
+  %low_bits_header_offset = index.constant 0 : offset
+  %high_bits_header_offset = index.constant 128 : offset
+  %scale_header_offset = index.constant 192 : offset
+  %word_byte_stride = index.constant 4 : offset
+  %half_byte_stride = index.constant 2 : offset
+  %block_base = index.scale %block, %block_byte_stride : index, offset -> offset
+  %low_bits_base = index.add %block_base, %low_bits_header_offset : offset
+  %high_bits_base = index.add %block_base, %high_bits_header_offset : offset
+  %scale_base = index.add %block_base, %scale_header_offset : offset
+  %low_word_byte_offset = index.scale %low_word, %word_byte_stride : index, offset -> offset
+  %high_word_byte_offset = index.scale %high_word, %word_byte_stride : index, offset -> offset
+  %scale_element_byte_offset = index.scale %scale, %half_byte_stride : index, offset -> offset
+  %low_bits_byte_offset = index.add %low_bits_base, %low_word_byte_offset : offset
+  %high_bits_byte_offset = index.add %high_bits_base, %high_word_byte_offset : offset
+  %scale_byte_offset = index.add %scale_base, %scale_element_byte_offset : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %low_bits_view = buffer.view %weights_global[%low_bits_byte_offset] : buffer -> view<1xi32, #dense>
+  %high_bits_view = buffer.view %weights_global[%high_bits_byte_offset] : buffer -> view<1xi32, #dense>
+  %scale_view = buffer.view %weights_global[%scale_byte_offset] : buffer -> view<1xf16, #dense>
+  %low_bits_word = view.load %low_bits_view[0] : view<1xi32, #dense> -> i32
+  %high_bits_word = view.load %high_bits_view[0] : view<1xi32, #dense> -> i32
+  %scale_value = view.load %scale_view[0] : view<1xf16, #dense> -> f16
+  func.return %low_bits_word, %high_bits_word, %scale_value : i32, i32, f16
+}

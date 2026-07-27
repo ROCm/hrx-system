@@ -1,0 +1,1309 @@
+// RUN: pass canonicalize
+
+// Address-domain constants contribute exact value facts.
+func.def @constant_exact() -> (i64, i64) {
+  %c = index.constant 42 : index
+  %lo = test.fact_range_lo %c : index -> i64
+  %hi = test.fact_range_hi %c : index -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @constant_exact() -> (i64, i64) {
+  %lo = scalar.constant 42 : i64
+  %hi = scalar.constant 42 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// Offset arithmetic uses the same address-domain fact transfer as index
+// arithmetic.
+func.def @offset_add_sub_exact() -> (i64, i64) {
+  %base = index.constant 128 : offset
+  %delta = index.constant 64 : offset
+  %sum = index.add %base, %delta : offset
+  %back = index.sub %sum, %delta : offset
+  %sum_lo = test.fact_range_lo %sum : offset -> i64
+  %back_lo = test.fact_range_lo %back : offset -> i64
+  func.return %sum_lo, %back_lo : i64, i64
+}
+// ----
+func.def @offset_add_sub_exact() -> (i64, i64) {
+  %sum_lo = scalar.constant 192 : i64
+  %back_lo = scalar.constant 128 : i64
+  func.return %sum_lo, %back_lo : i64, i64
+}
+
+// ====
+
+// index.assume applies predicate facts to matching index and offset results.
+func.def @assume_refines_address_facts(%n: index, %base: offset) -> (i64, i64) {
+  %n2, %base2 = index.assume %n, %base [mul(%n, 16), range(%base, 64, 4096)] : index, offset
+  %n_div = test.fact_divisor %n2 : index -> i64
+  %base_lo = test.fact_range_lo %base2 : offset -> i64
+  func.return %n_div, %base_lo : i64, i64
+}
+// ----
+func.def @assume_refines_address_facts(%n: index, %base: offset) -> (i64, i64) {
+  %n_div = scalar.constant 16 : i64
+  %base_lo = scalar.constant 64 : i64
+  func.return %n_div, %base_lo : i64, i64
+}
+
+// ====
+
+// SSA values referenced as dynamic shape extents are non-negative by type
+// semantics. This applies to ordinary block arguments with shaped types.
+func.def @block_arg_shape_extent_non_negative(%n: index, %tile: tile<[%n]xf32>) -> (i1) {
+  %nn = test.fact_non_negative %n : index -> i1
+  func.return %nn : i1
+}
+// ----
+func.def @block_arg_shape_extent_non_negative(%n: index, %tile: tile<[%n]xf32>) -> (i1) {
+  %nn = scalar.constant true : i1
+  func.return %nn : i1
+}
+
+// ====
+
+// Dynamic extents introduced by op result types also seed non-negative facts,
+// even when the producing op has no dimension-specific fact callback.
+func.def @result_shape_extent_non_negative(%buffer: buffer, %offset: offset, %n: index, %layout: encoding<layout>) -> (i1) {
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%n]xf32, %layout>
+  test.use %view : view<[%n]xf32, %layout>
+  %nn = test.fact_non_negative %n : index -> i1
+  func.return %nn : i1
+}
+// ----
+func.def @result_shape_extent_non_negative(%buffer: buffer, %offset: offset, %n: index, %layout: encoding<layout>) -> (i1) {
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%n]xf32, %layout>
+  test.use %view : view<[%n]xf32, %layout>
+  %nn = scalar.constant true : i1
+  func.return %nn : i1
+}
+
+// ====
+
+// index.mul by a constant propagates divisibility.
+func.def @mul_divisibility(%x: index) -> (i64) {
+  %c64 = index.constant 64 : index
+  %r = index.mul %x, %c64 : index
+  %div = test.fact_divisor %r : index -> i64
+  func.return %div : i64
+}
+// ----
+func.def @mul_divisibility(%x: index) -> (i64) {
+  %div = scalar.constant 64 : i64
+  func.return %div : i64
+}
+
+// ====
+
+// index.add meets divisibility across operands.
+func.def @add_divisibility(%x: index, %y: index) -> (i64) {
+  %c64 = index.constant 64 : index
+  %c16 = index.constant 16 : index
+  %a = index.mul %x, %c64 : index
+  %b = index.mul %y, %c16 : index
+  %r = index.add %a, %b : index
+  %div = test.fact_divisor %r : index -> i64
+  func.return %div : i64
+}
+// ----
+func.def @add_divisibility(%x: index, %y: index) -> (i64) {
+  %div = scalar.constant 16 : i64
+  func.return %div : i64
+}
+
+// ====
+
+// index.madd keeps multiply-add coordinate facts in the index dialect.
+func.def @madd_divisibility(%x: index, %y: index) -> (i64) {
+  %c8 = index.constant 8 : index
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  %a = index.mul %x, %c8 : index
+  %c = index.mul %y, %c16 : index
+  %r = index.madd %a, %c4, %c : index
+  %div = test.fact_divisor %r : index -> i64
+  func.return %div : i64
+}
+// ----
+func.def @madd_divisibility(%x: index, %y: index) -> (i64) {
+  %div = scalar.constant 16 : i64
+  func.return %div : i64
+}
+
+// ====
+
+// index.madd composes finite non-negative coordinate ranges without local
+// per-result assumptions.
+func.def @madd_linear_lane_range(%workgroup0: index, %lane0: index) -> (i64, i64) {
+  %workgroup = index.assume %workgroup0 [range(%workgroup0, 0, 7)] : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
+  %workgroup_size = index.constant 256 : index
+  %linear = index.madd %workgroup, %workgroup_size, %lane : index
+  %lo = test.fact_range_lo %linear : index -> i64
+  %hi = test.fact_range_hi %linear : index -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @madd_linear_lane_range(%workgroup0: index, %lane0: index) -> (i64, i64) {
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 2047 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// Strided multidimensional offsets keep bounded flat-index facts when each
+// coordinate carries finite non-negative facts.
+func.def @madd_strided_offset_range(%row0: index, %column0: index, %stride0: index) -> (i64, i64) {
+  %row = index.assume %row0 [range(%row0, 0, 127)] : index
+  %column = index.assume %column0 [range(%column0, 0, 15)] : index
+  %stride = index.assume %stride0 [range(%stride0, 1, 4096)] : index
+  %linear = index.madd %row, %stride, %column : index
+  %lo = test.fact_range_lo %linear : index -> i64
+  %hi = test.fact_range_hi %linear : index -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @madd_strided_offset_range(%row0: index, %column0: index, %stride0: index) -> (i64, i64) {
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 520207 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// index.div by an exact positive constant scales known divisibility down.
+func.def @div_divisibility(%x: index) -> (i64) {
+  %c64 = index.constant 64 : index
+  %c8 = index.constant 8 : index
+  %aligned = index.mul %x, %c64 : index
+  %q = index.div %aligned, %c8 : index
+  %div = test.fact_divisor %q : index -> i64
+  func.return %div : i64
+}
+// ----
+func.def @div_divisibility(%x: index) -> (i64) {
+  %div = scalar.constant 8 : i64
+  func.return %div : i64
+}
+
+// ====
+
+// index.rem by an exact positive divisor folds to zero when the dividend is
+// known divisible by that divisor.
+func.def @rem_exact_zero(%x: index) -> (i64, i64) {
+  %c64 = index.constant 64 : index
+  %c8 = index.constant 8 : index
+  %x2 = index.assume %x [range(%x, 0, 4096)] : index
+  %aligned = index.mul %x2, %c64 : index
+  %r = index.rem %aligned, %c8 : index
+  %lo = test.fact_range_lo %r : index -> i64
+  %hi = test.fact_range_hi %r : index -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @rem_exact_zero(%x: index) -> (i64, i64) {
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 0 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// index.rem is also bounded by the non-negative dividend, not only by a wide
+// dynamic divisor range.
+func.def @rem_dynamic_divisor_uses_dividend_bound(%x0: index, %d0: index) -> (i64, i64) {
+  %x = index.assume %x0 [range(%x0, 0, 63)] : index
+  %d = index.assume %d0 [range(%d0, 1, 1024)] : index
+  %r = index.rem %x, %d : index
+  %lo = test.fact_range_lo %r : index -> i64
+  %hi = test.fact_range_hi %r : index -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @rem_dynamic_divisor_uses_dividend_bound(%x0: index, %d0: index) -> (i64, i64) {
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 63 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// Matvec-style lane grouping keeps non-negative finite facts without local
+// assumptions on every intermediate address expression.
+func.def @matvec_block_lane_linear_range(%lane0: index, %block_base0: index) -> (i64, i64, i1) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %block_base = index.assume %block_base0 [range(%block_base0, 0, 8), mul(%block_base0, 4)] : index
+  %lanes_per_group = index.constant 16 : index
+  %block_stride = index.constant 105 : index
+  %lane_group = index.div %lane, %lanes_per_group : index
+  %lane_offset = index.rem %lane, %lanes_per_group : index
+  %block = index.add %block_base, %lane_group : index
+  %block_origin = index.mul %block, %block_stride : index
+  %linear = index.add %block_origin, %lane_offset : index
+  %lo = test.fact_range_lo %linear : index -> i64
+  %hi = test.fact_range_hi %linear : index -> i64
+  %non_negative = test.fact_non_negative %linear : index -> i1
+  func.return %lo, %hi, %non_negative : i64, i64, i1
+}
+// ----
+func.def @matvec_block_lane_linear_range(%lane0: index, %block_base0: index) -> (i64, i64, i1) {
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 1170 : i64
+  %non_negative = scalar.constant true : i1
+  func.return %lo, %hi, %non_negative : i64, i64, i1
+}
+
+// ====
+
+// index.cast preserves facts across address/integer boundaries.
+func.def @cast_preserves_exact() -> (i64) {
+  %a = index.constant 100 : index
+  %r = index.cast %a : index to i64
+  func.return %r : i64
+}
+// ----
+func.def @cast_preserves_exact() -> (i64) {
+  %r = scalar.constant 100 : i64
+  func.return %r : i64
+}
+
+// ====
+
+// Fixed-width integer inputs bound address-domain cast results.
+func.def @cast_i32_to_index_uses_source_domain(%raw: i32) -> (i64, i64) {
+  %idx = index.cast %raw : i32 to index
+  %lo = test.fact_range_lo %idx : index -> i64
+  %hi = test.fact_range_hi %idx : index -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @cast_i32_to_index_uses_source_domain(%raw: i32) -> (i64, i64) {
+  %lo = scalar.constant -2147483648 : i64
+  %hi = scalar.constant 2147483647 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// Offset arguments use the unsigned address domain.
+func.def @offset_arg_uses_unsigned_domain(%offset: offset) -> (i64, i64, i1) {
+  %lo = test.fact_range_lo %offset : offset -> i64
+  %hi = test.fact_range_hi %offset : offset -> i64
+  %non_negative = test.fact_non_negative %offset : offset -> i1
+  func.return %lo, %hi, %non_negative : i64, i64, i1
+}
+
+// ----
+func.def @offset_arg_uses_unsigned_domain(%offset: offset) -> (i64, i64, i1) {
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 9223372036854775807 : i64
+  %non_negative = scalar.constant true : i1
+  func.return %lo, %hi, %non_negative : i64, i64, i1
+}
+
+// ====
+
+// Casts into offset zero-extend fixed-width integer payloads.
+func.def @cast_i32_to_offset_uses_unsigned_domain(%raw: i32) -> (i64, i64, i1) {
+  %offset = index.cast %raw : i32 to offset
+  %lo = test.fact_range_lo %offset : offset -> i64
+  %hi = test.fact_range_hi %offset : offset -> i64
+  %non_negative = test.fact_non_negative %offset : offset -> i1
+  func.return %lo, %hi, %non_negative : i64, i64, i1
+}
+
+// ----
+func.def @cast_i32_to_offset_uses_unsigned_domain(%raw: i32) -> (i64, i64, i1) {
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 4294967295 : i64
+  %non_negative = scalar.constant true : i1
+  func.return %lo, %hi, %non_negative : i64, i64, i1
+}
+
+// ====
+
+// Exact negative integer payloads become their unsigned bit pattern when cast
+// into offset.
+func.def @cast_negative_i32_to_offset_zero_extends() -> (i64, i64) {
+  %negative_one = scalar.constant -1 : i32
+  %offset = index.cast %negative_one : i32 to offset
+  %lo = test.fact_range_lo %offset : offset -> i64
+  %hi = test.fact_range_hi %offset : offset -> i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+func.def @cast_negative_i32_to_offset_zero_extends() -> (i64, i64) {
+  %lo = scalar.constant 4294967295 : i64
+  %hi = scalar.constant 4294967295 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// Dynamic extent facts combine with the fixed-width source domain before the
+// value enters index arithmetic.
+func.def @cast_i32_extent_to_index_uses_extent_domain(%buffer: buffer, %offset: offset, %n: i32, %layout: encoding<layout>) -> (i64, i64, i1) {
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%n]xf32, %layout>
+  test.use %view : view<[%n]xf32, %layout>
+  %idx = index.cast %n : i32 to index
+  %lo = test.fact_range_lo %idx : index -> i64
+  %hi = test.fact_range_hi %idx : index -> i64
+  %non_negative = test.fact_non_negative %idx : index -> i1
+  func.return %lo, %hi, %non_negative : i64, i64, i1
+}
+// ----
+func.def @cast_i32_extent_to_index_uses_extent_domain(%buffer: buffer, %offset: offset, %n: i32, %layout: encoding<layout>) -> (i64, i64, i1) {
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%n]xf32, %layout>
+  test.use %view : view<[%n]xf32, %layout>
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 2147483647 : i64
+  %non_negative = scalar.constant true : i1
+  func.return %lo, %hi, %non_negative : i64, i64, i1
+}
+
+// ====
+
+// Truncating casts only preserve source facts when the source range proves that
+// truncation cannot wrap.
+func.def @cast_index_to_i8_uses_result_domain(%raw: index) -> (i64, i64) {
+  %narrow = index.cast %raw : index to i8
+  %lo = test.fact_range_lo %narrow : i8 -> i64
+  %hi = test.fact_range_hi %narrow : i8 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @cast_index_to_i8_uses_result_domain(%raw: index) -> (i64, i64) {
+  %lo = scalar.constant -128 : i64
+  %hi = scalar.constant 127 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// index.add removes a fact-proven zero operand without requiring the other
+// operand to be constant.
+func.def @add_zero_identity(%x: index) -> (index) {
+  %zero = index.constant 0 : index
+  %r = index.add %x, %zero : index
+  func.return %r : index
+}
+// ----
+func.def @add_zero_identity(%x: index) -> (index) {
+  func.return %x : index
+}
+
+// ====
+
+// index.mul removes one and annihilates with zero.
+func.def @mul_identities(%x: index) -> (index, index) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %same = index.mul %x, %one : index
+  %zeroed = index.mul %x, %zero : index
+  func.return %same, %zeroed : index, index
+}
+// ----
+func.def @mul_identities(%x: index) -> (index, index) {
+  %zeroed = index.constant 0 : index
+  func.return %x, %zeroed : index, index
+}
+
+// ====
+
+func.def @mul_power_of_two_becomes_shift(%x: index) -> (index) {
+  %c8 = index.constant 8 : index
+  %scaled = index.mul %x, %c8 : index
+  func.return %scaled : index
+}
+// ----
+func.def @mul_power_of_two_becomes_shift(%x: index) -> (index) {
+  %4 = index.constant 3 : index
+  %scaled = index.shli %x, %4 : index
+  func.return %scaled : index
+}
+
+// ====
+
+// index.madd simplifies the common address form a*1 + c to add, keeping the
+// addend first because it is usually the base address.
+func.def @madd_identity_multiplier(%a: index, %c: index) -> (index) {
+  %one = index.constant 1 : index
+  %r = index.madd %a, %one, %c : index
+  func.return %r : index
+}
+// ----
+func.def @madd_identity_multiplier(%a: index, %c: index) -> (index) {
+  %r = index.add %c, %a : index
+  func.return %r : index
+}
+
+// ====
+
+// index.add absorbs a multiply into index.madd so address expressions stay as a
+// single explicit a*b+c op instead of a loose mul/add pair.
+func.def @add_mul_canonicalizes_to_madd(%i: index, %j: index) -> (index) {
+  %c4 = index.constant 4 : index
+  %scaled = index.mul %i, %c4 : index
+  %r = index.add %scaled, %j : index
+  func.return %r : index
+}
+// ----
+func.def @add_mul_canonicalizes_to_madd(%i: index, %j: index) -> (index) {
+  %c4 = index.constant 4 : index
+  %r = index.madd %i, %c4, %j : index
+  func.return %r : index
+}
+
+// ====
+
+func.def @add_shift_canonicalizes_to_madd(%i: index, %j: index) -> (index) {
+  %shift = index.constant 2 : index
+  %scaled = index.shli %i, %shift : index
+  %r = index.add %scaled, %j : index
+  func.return %r : index
+}
+// ----
+func.def @add_shift_canonicalizes_to_madd(%i: index, %j: index) -> (index) {
+  %6 = index.constant 4 : index
+  %r = index.madd %i, %6, %j : index
+  func.return %r : index
+}
+
+// ====
+
+// index.madd flattens nested exact scales so generated address expressions do
+// not preserve source grouping that would force extra multiply/shift work.
+func.def @madd_nested_scale_canonicalizes_to_single_madd(%i: index) -> (index) {
+  %c9 = index.constant 9 : index
+  %c16 = index.constant 16 : index
+  %c2 = index.constant 2 : index
+  %scaled = index.mul %i, %c9 : index
+  %r = index.madd %scaled, %c2, %c16 : index
+  func.return %r : index
+}
+// ----
+func.def @madd_nested_scale_canonicalizes_to_single_madd(%i: index) -> (index) {
+  %c16 = index.constant 16 : index
+  %7 = index.constant 18 : index
+  %r = index.madd %i, %7, %c16 : index
+  func.return %r : index
+}
+
+// ====
+
+// The nested-scale fold is symmetric across the multiply operands.
+func.def @madd_nested_scale_canonicalizes_swapped_factor(%i: index) -> (index) {
+  %c9 = index.constant 9 : index
+  %c16 = index.constant 16 : index
+  %c2 = index.constant 2 : index
+  %scaled = index.mul %i, %c9 : index
+  %r = index.madd %c2, %scaled, %c16 : index
+  func.return %r : index
+}
+// ----
+func.def @madd_nested_scale_canonicalizes_swapped_factor(%i: index) -> (index) {
+  %c16 = index.constant 16 : index
+  %7 = index.constant 18 : index
+  %r = index.madd %i, %7, %c16 : index
+  func.return %r : index
+}
+
+// ====
+
+// index.add collapses scaled quotient/remainder reconstruction back to a
+// single scaled coordinate.
+func.def @add_scaled_div_rem_reconstruction(%lane: index) -> (index) {
+  %bounded = index.assume %lane [range(%lane, 0, 1024)] : index
+  %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %quotient = index.div %bounded, %c2 : index
+  %remainder = index.rem %bounded, %c2 : index
+  %quotient_scaled = index.mul %quotient, %c16 : index
+  %remainder_scaled = index.mul %remainder, %c8 : index
+  %linear = index.add %quotient_scaled, %remainder_scaled : index
+  func.return %linear : index
+}
+// ----
+func.def @add_scaled_div_rem_reconstruction(%lane: index) -> (index) {
+  %bounded = index.assume %lane [range(%lane, 0, 1024)] : index
+  %12 = index.constant 3 : index
+  %linear = index.shli %bounded, %12 : index
+  func.return %linear : index
+}
+
+// ====
+
+// The same reconstruction folds after power-of-two div/rem canonicalization has
+// turned the pieces into shift/mask operations.
+func.def @add_scaled_shift_mask_reconstruction(%lane: index) -> (index) {
+  %bounded = index.assume %lane [range(%lane, 0, 1024)] : index
+  %shift = index.constant 1 : index
+  %mask = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %quotient = index.shrui %bounded, %shift : index
+  %remainder = index.andi %bounded, %mask : index
+  %quotient_scaled = index.mul %quotient, %c16 : index
+  %remainder_scaled = index.mul %remainder, %c8 : index
+  %linear = index.add %quotient_scaled, %remainder_scaled : index
+  func.return %linear : index
+}
+// ----
+func.def @add_scaled_shift_mask_reconstruction(%lane: index) -> (index) {
+  %bounded = index.assume %lane [range(%lane, 0, 1024)] : index
+  %13 = index.constant 3 : index
+  %linear = index.shli %bounded, %13 : index
+  func.return %linear : index
+}
+
+// ====
+
+// index.madd recognizes the same reconstruction after source normalization has
+// bounded each view axis with identity assumptions.
+func.def @madd_scaled_shift_mask_reconstruction_with_assumes(%lane: index) -> (index) {
+  %bounded = index.assume %lane [range(%lane, 0, 1024)] : index
+  %shift = index.constant 1 : index
+  %mask = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %quotient = index.shrui %bounded, %shift : index
+  %remainder = index.andi %bounded, %mask : index
+  %quotient_bounded = index.assume %quotient [range(%quotient, 0, 15)] : index
+  %remainder_scaled = index.mul %remainder, %c8 : index
+  %remainder_bounded = index.assume %remainder_scaled [range(%remainder_scaled, 0, 15)] : index
+  %linear = index.madd %quotient_bounded, %c16, %remainder_bounded : index
+  func.return %linear : index
+}
+// ----
+func.def @madd_scaled_shift_mask_reconstruction_with_assumes(%lane: index) -> (index) {
+  %bounded = index.assume %lane [range(%lane, 0, 1024)] : index
+  %14 = index.constant 3 : index
+  %linear = index.shli %bounded, %14 : index
+  func.return %linear : index
+}
+
+// ====
+
+// Negative inputs do not permit quotient/remainder reconstruction under signed
+// division semantics.
+func.def @add_scaled_div_rem_maybe_negative_preserved(%lane: index) -> (index) {
+  %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %quotient = index.div %lane, %c2 : index
+  %remainder = index.rem %lane, %c2 : index
+  %quotient_scaled = index.mul %quotient, %c16 : index
+  %remainder_scaled = index.mul %remainder, %c8 : index
+  %linear = index.add %quotient_scaled, %remainder_scaled : index
+  func.return %linear : index
+}
+// ----
+func.def @add_scaled_div_rem_maybe_negative_preserved(%lane: index) -> (index) {
+  %c2 = index.constant 2 : index
+  %c16 = index.constant 16 : index
+  %quotient = index.div %lane, %c2 : index
+  %remainder = index.rem %lane, %c2 : index
+  %11 = index.constant 3 : index
+  %remainder_scaled = index.shli %remainder, %11 : index
+  %linear = index.madd %quotient, %c16, %remainder_scaled : index
+  func.return %linear : index
+}
+
+// ====
+
+// Dividing a scaled non-negative coordinate by an exact positive divisor keeps
+// the address expression scaled when the scale divides evenly.
+func.def @div_scaled_coordinate(%i: index) -> (index) {
+  %i2 = index.assume %i [range(%i, 0, 1024)] : index
+  %c64 = index.constant 64 : index
+  %c8 = index.constant 8 : index
+  %scaled = index.mul %i2, %c64 : index
+  %q = index.div %scaled, %c8 : index
+  func.return %q : index
+}
+// ----
+func.def @div_scaled_coordinate(%i: index) -> (index) {
+  %i2 = index.assume %i [range(%i, 0, 1024)] : index
+  %8 = index.constant 3 : index
+  %q = index.shli %i2, %8 : index
+  func.return %q : index
+}
+
+// ====
+
+// Without a bounded non-negative numerator, scaled division stays conservative:
+// the scale may wrap before the quotient is taken.
+func.def @div_scaled_unknown_range_is_preserved(%i: index) -> (index) {
+  %c64 = index.constant 64 : index
+  %c8 = index.constant 8 : index
+  %scaled = index.mul %i, %c64 : index
+  %q = index.div %scaled, %c8 : index
+  func.return %q : index
+}
+
+// ----
+func.def @div_scaled_unknown_range_is_preserved(%i: index) -> (index) {
+  %c8 = index.constant 8 : index
+  %6 = index.constant 6 : index
+  %scaled = index.shli %i, %6 : index
+  %q = index.div %scaled, %c8 : index
+  func.return %q : index
+}
+
+// ====
+
+// The same rule applies to madd when both the scale and exact addend are
+// divisible by the quotient divisor.
+func.def @div_scaled_offset_coordinate(%i: index) -> (index) {
+  %i2 = index.assume %i [range(%i, 0, 1024)] : index
+  %c64 = index.constant 64 : index
+  %c16 = index.constant 16 : index
+  %c8 = index.constant 8 : index
+  %scaled = index.madd %i2, %c64, %c16 : index
+  %q = index.div %scaled, %c8 : index
+  func.return %q : index
+}
+// ----
+func.def @div_scaled_offset_coordinate(%i: index) -> (index) {
+  %i2 = index.assume %i [range(%i, 0, 1024)] : index
+  %c8 = index.constant 8 : index
+  %8 = index.constant 2 : index
+  %q = index.madd %i2, %c8, %8 : index
+  func.return %q : index
+}
+
+// ====
+
+// Positive self-division is exact.
+func.def @div_self_positive(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 1, 1024)] : index
+  %q = index.div %x2, %x2 : index
+  func.return %q : index
+}
+// ----
+func.def @div_self_positive(%x: index) -> (index) {
+  %q = index.constant 1 : index
+  func.return %q : index
+}
+
+// ====
+
+// Division by a power of two becomes a logical shift when the numerator is
+// known non-negative.
+func.def @div_power_of_two_nonnegative(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 1024)] : index
+  %divisor = index.constant 128 : index
+  %q = index.div %x2, %divisor : index
+  func.return %q : index
+}
+// ----
+func.def @div_power_of_two_nonnegative(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 1024)] : index
+  %5 = index.constant 7 : index
+  %q = index.shrui %x2, %5 : index
+  func.return %q : index
+}
+
+// ====
+
+// index.rem materializes zero when divisibility facts prove it.
+func.def @rem_divisible_coordinate(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 4096), mul(%x, 64)] : index
+  %c8 = index.constant 8 : index
+  %r = index.rem %x2, %c8 : index
+  func.return %r : index
+}
+// ----
+func.def @rem_divisible_coordinate(%x: index) -> (index) {
+  %r = index.constant 0 : index
+  func.return %r : index
+}
+
+// ====
+
+// Zero modulo any fact-proven positive divisor is zero, even when the divisor
+// itself is dynamic.
+func.def @rem_zero_dynamic_positive_divisor(%d: index) -> (index) {
+  %zero = index.constant 0 : index
+  %d2 = index.assume %d [range(%d, 1, 64)] : index
+  %r = index.rem %zero, %d2 : index
+  func.return %r : index
+}
+// ----
+func.def @rem_zero_dynamic_positive_divisor(%d: index) -> (index) {
+  %r = index.constant 0 : index
+  func.return %r : index
+}
+
+// ====
+
+// x % x only folds when the divisor is known positive, avoiding the x=0 case.
+func.def @rem_self_positive(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 1, 1024)] : index
+  %r = index.rem %x2, %x2 : index
+  func.return %r : index
+}
+// ----
+func.def @rem_self_positive(%x: index) -> (index) {
+  %r = index.constant 0 : index
+  func.return %r : index
+}
+
+// ====
+
+// Remainder by a power of two becomes a mask when the numerator is
+// known non-negative.
+func.def @rem_power_of_two_nonnegative(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 1024)] : index
+  %divisor = index.constant 128 : index
+  %r = index.rem %x2, %divisor : index
+  func.return %r : index
+}
+// ----
+func.def @rem_power_of_two_nonnegative(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 1024)] : index
+  %5 = index.constant 127 : index
+  %r = index.andi %x2, %5 : index
+  func.return %r : index
+}
+
+// ====
+
+// A non-negative coordinate already inside the divisor range is its own
+// remainder.
+func.def @rem_bounded_below_divisor(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %offset = index.add %x2, %c32 : index
+  %r = index.rem %offset, %c64 : index
+  func.return %r : index
+}
+// ----
+func.def @rem_bounded_below_divisor(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  %c32 = index.constant 32 : index
+  %offset = index.add %x2, %c32 : index
+  func.return %offset : index
+}
+
+// ====
+
+// Exact radix multiples do not affect a bounded coordinate's remainder.
+func.def @rem_strips_radix_aligned_offset(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  %c960 = index.constant 960 : index
+  %c64 = index.constant 64 : index
+  %offset = index.add %x2, %c960 : index
+  %r = index.rem %offset, %c64 : index
+  func.return %r : index
+}
+// ----
+func.def @rem_strips_radix_aligned_offset(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  func.return %x2 : index
+}
+
+// ====
+
+// A large exact offset reduces to its in-radix residue when the dynamic range
+// proves that the reduced expression cannot wrap.
+func.def @rem_reduces_offset_residue(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  %c992 = index.constant 992 : index
+  %c64 = index.constant 64 : index
+  %offset = index.add %x2, %c992 : index
+  %r = index.rem %offset, %c64 : index
+  func.return %r : index
+}
+// ----
+func.def @rem_reduces_offset_residue(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  %7 = index.constant 32 : index
+  %r = index.add %x2, %7 : index
+  func.return %r : index
+}
+
+// ====
+
+// Reduction is conservative when the dynamic range can cross the radix.
+func.def @rem_offset_residue_wrap_is_preserved(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 32)] : index
+  %c992 = index.constant 992 : index
+  %c64 = index.constant 64 : index
+  %offset = index.add %x2, %c992 : index
+  %r = index.rem %offset, %c64 : index
+  func.return %r : index
+}
+// ----
+func.def @rem_offset_residue_wrap_is_preserved(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 32)] : index
+  %c992 = index.constant 992 : index
+  %offset = index.add %x2, %c992 : index
+  %7 = index.constant 63 : index
+  %r = index.andi %offset, %7 : index
+  func.return %r : index
+}
+
+// ====
+
+// Without non-negative dividend facts, remainder by a positive literal stays
+// conservative.
+func.def @rem_maybe_negative_is_preserved(%x: index) -> (index) {
+  %c8 = index.constant 8 : index
+  %r = index.rem %x, %c8 : index
+  func.return %r : index
+}
+
+// ====
+
+// index.min/max propagate signed range and common-divisor facts in the index
+// domain.
+func.def @minmax_facts(%x: index, %y: index) -> (i64, i64, i64, i64, i64, i64) {
+  %lo = index.assume %x [range(%x, 4, 20), mul(%x, 4)] : index
+  %hi = index.assume %y [range(%y, 8, 16), mul(%y, 8)] : index
+  %min = index.min %lo, %hi : index
+  %max = index.max %lo, %hi : index
+  %min_lo = test.fact_range_lo %min : index -> i64
+  %min_hi = test.fact_range_hi %min : index -> i64
+  %min_div = test.fact_divisor %min : index -> i64
+  %max_lo = test.fact_range_lo %max : index -> i64
+  %max_hi = test.fact_range_hi %max : index -> i64
+  %max_div = test.fact_divisor %max : index -> i64
+  func.return %min_lo, %min_hi, %min_div, %max_lo, %max_hi, %max_div : i64, i64, i64, i64, i64, i64
+}
+// ----
+func.def @minmax_facts(%x: index, %y: index) -> (i64, i64, i64, i64, i64, i64) {
+  %min_lo = scalar.constant 4 : i64
+  %min_hi = scalar.constant 16 : i64
+  %min_div = scalar.constant 4 : i64
+  %max_lo = scalar.constant 8 : i64
+  %max_hi = scalar.constant 20 : i64
+  %max_div = scalar.constant 4 : i64
+  func.return %min_lo, %min_hi, %min_div, %max_lo, %max_hi, %max_div : i64, i64, i64, i64, i64, i64
+}
+
+// ====
+
+// Range-proven ordering selects the known lower or upper coordinate without
+// expanding into cmp/select IR.
+func.def @minmax_range_canonicalizes(%x: index, %y: index) -> (index, index) {
+  %lo = index.assume %x [range(%x, 0, 4)] : index
+  %hi = index.assume %y [range(%y, 8, 16)] : index
+  %min = index.min %lo, %hi : index
+  %max = index.max %lo, %hi : index
+  func.return %min, %max : index, index
+}
+// ----
+func.def @minmax_range_canonicalizes(%x: index, %y: index) -> (index, index) {
+  %lo = index.assume %x [range(%x, 0, 4)] : index
+  %hi = index.assume %y [range(%y, 8, 16)] : index
+  func.return %lo, %hi : index, index
+}
+
+// ====
+
+// Self and exact-constant min/max fold through the normal fact path.
+func.def @minmax_identities() -> (index, index, index, index) {
+  %a = index.constant 3 : index
+  %b = index.constant 7 : index
+  %min = index.min %a, %b : index
+  %max = index.max %a, %b : index
+  %self_min = index.min %a, %a : index
+  %self_max = index.max %b, %b : index
+  func.return %min, %max, %self_min, %self_max : index, index, index, index
+}
+// ----
+func.def @minmax_identities() -> (index, index, index, index) {
+  %min = index.constant 3 : index
+  %max = index.constant 7 : index
+  %self_min = index.constant 3 : index
+  %self_max = index.constant 7 : index
+  func.return %min, %max, %self_min, %self_max : index, index, index, index
+}
+
+// ====
+
+// index-domain bitwise ops reuse integer fact transfer in the index dialect.
+func.def @bitwise_facts(%x: index) -> (i64, i64, i1, i64, i64) {
+  %mask_aligned = index.constant -4 : index
+  %mask_small = index.constant 15 : index
+  %one = index.constant 1 : index
+  %shift4 = index.constant 4 : index
+  %shift3 = index.constant 3 : index
+  %aligned = index.assume %x [range(%x, 0, 4096), mul(%x, 64)] : index
+  %and_aligned = index.andi %x, %mask_aligned : index
+  %and_small = index.andi %x, %mask_small : index
+  %or_one = index.ori %x, %one : index
+  %shifted_left = index.shli %x, %shift4 : index
+  %shifted_right = index.shrui %aligned, %shift3 : index
+  %and_div = test.fact_divisor %and_aligned : index -> i64
+  %and_hi = test.fact_range_hi %and_small : index -> i64
+  %or_nz = test.fact_non_zero %or_one : index -> i1
+  %shl_div = test.fact_divisor %shifted_left : index -> i64
+  %shr_div = test.fact_divisor %shifted_right : index -> i64
+  func.return %and_div, %and_hi, %or_nz, %shl_div, %shr_div : i64, i64, i1, i64, i64
+}
+// ----
+func.def @bitwise_facts(%x: index) -> (i64, i64, i1, i64, i64) {
+  %and_div = scalar.constant 4 : i64
+  %and_hi = scalar.constant 15 : i64
+  %or_nz = scalar.constant true : i1
+  %shl_div = scalar.constant 16 : i64
+  %shr_div = scalar.constant 8 : i64
+  func.return %and_div, %and_hi, %or_nz, %shl_div, %shr_div : i64, i64, i1, i64, i64
+}
+
+// ====
+
+// Bit counts use index's 64-bit value width.
+func.def @bit_count_facts() -> (index, index, index) {
+  %one = index.constant 1 : index
+  %zero = index.constant 0 : index
+  %ones = index.constant -1 : index
+  %clz = index.ctlzi %one : index
+  %ctz = index.cttzi %zero : index
+  %pop = index.ctpopi %ones : index
+  func.return %clz, %ctz, %pop : index, index, index
+}
+// ----
+func.def @bit_count_facts() -> (index, index, index) {
+  %clz = index.constant 63 : index
+  %ctz = index.constant 64 : index
+  %pop = index.constant 64 : index
+  func.return %clz, %ctz, %pop : index, index, index
+}
+
+// ====
+
+// Exact bitwise and rotate facts fold to index constants.
+func.def @bitwise_exact_folds() -> (index, index, index, index) {
+  %a = index.constant 255 : index
+  %b = index.constant 15 : index
+  %v = index.constant 1 : index
+  %amount = index.constant 8 : index
+  %and = index.andi %a, %b : index
+  %or = index.ori %a, %b : index
+  %xor = index.xori %a, %b : index
+  %rot = index.rotli %v, %amount : index
+  func.return %and, %or, %xor, %rot : index, index, index, index
+}
+// ----
+func.def @bitwise_exact_folds() -> (index, index, index, index) {
+  %and = index.constant 15 : index
+  %or = index.constant 255 : index
+  %xor = index.constant 240 : index
+  %rot = index.constant 256 : index
+  func.return %and, %or, %xor, %rot : index, index, index, index
+}
+
+// ====
+
+func.def @bitwise_identities(%x: index) -> (index, index, index, index, index, index, index, index) {
+  %zero = index.constant 0 : index
+  %ones = index.constant -1 : index
+  %and_self = index.andi %x, %x : index
+  %and_zero = index.andi %x, %zero : index
+  %and_ones = index.andi %x, %ones : index
+  %or_self = index.ori %x, %x : index
+  %or_zero = index.ori %x, %zero : index
+  %or_ones = index.ori %x, %ones : index
+  %xor_zero = index.xori %x, %zero : index
+  %xor_self = index.xori %x, %x : index
+  func.return %and_self, %and_zero, %and_ones, %or_self, %or_zero, %or_ones, %xor_zero, %xor_self : index, index, index, index, index, index, index, index
+}
+// ----
+func.def @bitwise_identities(%x: index) -> (index, index, index, index, index, index, index, index) {
+  %ones = index.constant -1 : index
+  %and_zero = index.constant 0 : index
+  %xor_self = index.constant 0 : index
+  func.return %x, %and_zero, %x, %x, %x, %ones, %x, %xor_self : index, index, index, index, index, index, index, index
+}
+
+// ====
+
+func.def @xori_cancels_nested_operand(%x: index, %y: index) -> (index, index) {
+  %lhs_nested = index.xori %x, %y : index
+  %lhs_cancel = index.xori %lhs_nested, %y : index
+  %rhs_nested = index.xori %y, %x : index
+  %rhs_cancel = index.xori %x, %rhs_nested : index
+  func.return %lhs_cancel, %rhs_cancel : index, index
+}
+// ----
+func.def @xori_cancels_nested_operand(%x: index, %y: index) -> (index, index) {
+  func.return %x, %y : index, index
+}
+
+// ====
+
+func.def @xori_cancels_duplicate_exact_constants(%x: index) -> (index) {
+  %c1 = index.constant 7 : index
+  %c2 = index.constant 7 : index
+  %nested = index.xori %x, %c1 : index
+  %r = index.xori %nested, %c2 : index
+  func.return %r : index
+}
+// ----
+func.def @xori_cancels_duplicate_exact_constants(%x: index) -> (index) {
+  func.return %x : index
+}
+
+// ====
+
+func.def @shift_identities_and_reassociation(%x: index) -> (index, index, index, index, index, index) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %shl_zero_amount = index.shli %x, %zero : index
+  %shrsi_zero_amount = index.shrsi %x, %zero : index
+  %shrui_zero_amount = index.shrui %x, %zero : index
+  %shl_zero_value = index.shli %zero, %one : index
+  %inner_shl = index.shli %x, %one : index
+  %reassoc_shl = index.shli %inner_shl, %two : index
+  %inner_shr = index.shrui %x, %one : index
+  %reassoc_shr = index.shrui %inner_shr, %two : index
+  func.return %shl_zero_amount, %shrsi_zero_amount, %shrui_zero_amount, %shl_zero_value, %reassoc_shl, %reassoc_shr : index, index, index, index, index, index
+}
+// ----
+func.def @shift_identities_and_reassociation(%x: index) -> (index, index, index, index, index, index) {
+  %shl_zero_value = index.constant 0 : index
+  %20 = index.constant 3 : index
+  %reassoc_shl = index.shli %x, %20 : index
+  %18 = index.constant 3 : index
+  %reassoc_shr = index.shrui %x, %18 : index
+  func.return %x, %x, %x, %shl_zero_value, %reassoc_shl, %reassoc_shr : index, index, index, index, index, index
+}
+
+// ====
+
+func.def @shrsi_non_negative_becomes_shrui(%x: index, %amount: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 4096)] : index
+  %r = index.shrsi %x2, %amount : index
+  func.return %r : index
+}
+// ----
+func.def @shrsi_non_negative_becomes_shrui(%x: index, %amount: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 4096)] : index
+  %r = index.shrui %x2, %amount : index
+  func.return %r : index
+}
+
+// ====
+
+func.def @rotate_identities_and_direction(%x: index) -> (index, index, index) {
+  %zero = index.constant 0 : index
+  %eight = index.constant 8 : index
+  %rotl_zero = index.rotli %x, %zero : index
+  %rotr_zero = index.rotri %x, %zero : index
+  %rotr = index.rotri %x, %eight : index
+  func.return %rotl_zero, %rotr_zero, %rotr : index, index, index
+}
+// ----
+func.def @rotate_identities_and_direction(%x: index) -> (index, index, index) {
+  %9 = index.constant 56 : index
+  %rotr = index.rotli %x, %9 : index
+  func.return %x, %x, %rotr : index, index, index
+}
+
+// ====
+
+// index.cmp folds same-operand predicates and simple disjoint signed ranges.
+func.def @cmp_proven(%x: index, %y: index) -> (i1, i1) {
+  %same = index.cmp sle, %x, %x : index
+  %x2 = index.assume %x [range(%x, 0, 4)] : index
+  %y2 = index.assume %y [range(%y, 8, 16)] : index
+  %lt = index.cmp slt, %x2, %y2 : index
+  func.return %same, %lt : i1, i1
+}
+// ----
+func.def @cmp_proven(%x: index, %y: index) -> (i1, i1) {
+  %same = scalar.constant true : i1
+  %lt = scalar.constant true : i1
+  func.return %same, %lt : i1, i1
+}
+
+// ====
+
+// Distinct values with identical exact facts prove equality and inequality,
+// not just same-SSA comparisons.
+func.def @cmp_exact_equal_distinct_values() -> (i1, i1) {
+  %a = index.constant 5 : index
+  %b = index.constant 5 : index
+  %eq = index.cmp eq, %a, %b : index
+  %ne = index.cmp ne, %a, %b : index
+  func.return %eq, %ne : i1, i1
+}
+// ----
+func.def @cmp_exact_equal_distinct_values() -> (i1, i1) {
+  %eq = scalar.constant true : i1
+  %ne = scalar.constant false : i1
+  func.return %eq, %ne : i1, i1
+}
+
+// ====
+
+// Symbolic expressions cancel common scaled address prefixes that are not local
+// structural identities.
+func.def @symbolic_sub_cancels_scaled_prefix(%i: index, %j: index) -> (index) {
+  %c4 = index.constant 4 : index
+  %scaled = index.mul %i, %c4 : index
+  %address = index.add %scaled, %j : index
+  %delta = index.sub %address, %scaled : index
+  func.return %delta : index
+}
+// ----
+func.def @symbolic_sub_cancels_scaled_prefix(%i: index, %j: index) -> (index) {
+  func.return %j : index
+}
+
+// ====
+
+// Symbolic equality proves that structurally different but algebraically equal
+// address expressions compare equal.
+func.def @symbolic_cmp_equal_address_forms(%i: index, %j: index) -> (i1, i1) {
+  %c4 = index.constant 4 : index
+  %scaled = index.mul %i, %c4 : index
+  %add_form = index.add %scaled, %j : index
+  %madd_form = index.madd %i, %c4, %j : index
+  %eq = index.cmp eq, %add_form, %madd_form : index
+  %ne = index.cmp ne, %add_form, %madd_form : index
+  func.return %eq, %ne : i1, i1
+}
+// ----
+func.def @symbolic_cmp_equal_address_forms(%i: index, %j: index) -> (i1, i1) {
+  %eq = scalar.constant true : i1
+  %ne = scalar.constant false : i1
+  func.return %eq, %ne : i1, i1
+}
+
+// ====
+
+// Symbolic range proofs can establish ordered relations after common address
+// terms cancel, without requiring absolute ranges for the dynamic base.
+func.def @symbolic_cmp_proves_offset_order(%i: index, %j: index) -> (i1, i1) {
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  %base = index.madd %i, %c4, %j : index
+  %past = index.add %base, %c16 : index
+  %le = index.cmp sle, %base, %past : index
+  %gt = index.cmp sgt, %base, %past : index
+  func.return %le, %gt : i1, i1
+}
+// ----
+func.def @symbolic_cmp_proves_offset_order(%i: index, %j: index) -> (i1, i1) {
+  %le = scalar.constant true : i1
+  %gt = scalar.constant false : i1
+  func.return %le, %gt : i1, i1
+}
+
+// ====
+
+// Unsigned symbolic ordering uses the same proof only after both operands are
+// known non-negative.
+func.def @symbolic_unsigned_cmp_proves_non_negative_order(%i: index, %j: index) -> (i1) {
+  %i2 = index.assume %i [range(%i, 0, 1024)] : index
+  %j2 = index.assume %j [range(%j, 0, 16)] : index
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  %base = index.madd %i2, %c4, %j2 : index
+  %past = index.add %base, %c16 : index
+  %ule = index.cmp ule, %base, %past : index
+  func.return %ule : i1
+}
+// ----
+func.def @symbolic_unsigned_cmp_proves_non_negative_order(%i: index, %j: index) -> (i1) {
+  %ule = scalar.constant true : i1
+  func.return %ule : i1
+}
+
+// ====
+
+// Without non-negative facts, signed symbolic cancellation must not be reused
+// for unsigned ordering.
+func.def @symbolic_unsigned_cmp_unknown_sign_preserved(%i: index, %j: index) -> (i1) {
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  %base = index.madd %i, %c4, %j : index
+  %past = index.add %base, %c16 : index
+  %ule = index.cmp ule, %base, %past : index
+  func.return %ule : i1
+}
+
+// ====
+
+// Distinct nonlinear products remain symbolic variables. The cleanup is
+// conservative and keeps the compare when no exact relation is available.
+func.def @symbolic_cmp_unknown_dynamic_products_preserved(%a: index, %b: index, %c: index) -> (i1) {
+  %ab = index.mul %a, %b : index
+  %ac = index.mul %a, %c : index
+  %lt = index.cmp slt, %ab, %ac : index
+  func.return %lt : i1
+}
+
+// ====
+
+// Signed range proofs fold both true and false comparison results from
+// dynamic values refined by index.assume.
+func.def @cmp_signed_ranges(%x: index, %y: index) -> (i1, i1) {
+  %lo = index.assume %x [range(%x, 0, 4)] : index
+  %hi = index.assume %y [range(%y, 8, 16)] : index
+  %lt = index.cmp slt, %lo, %hi : index
+  %ge = index.cmp sge, %lo, %hi : index
+  func.return %lt, %ge : i1, i1
+}
+// ----
+func.def @cmp_signed_ranges(%x: index, %y: index) -> (i1, i1) {
+  %lt = scalar.constant true : i1
+  %ge = scalar.constant false : i1
+  func.return %lt, %ge : i1, i1
+}
+
+// ====
+
+// Unsigned range proofs reuse the signed interval rules only when both
+// operands are proven non-negative.
+func.def @cmp_unsigned_ranges(%x: index, %y: index) -> (i1, i1) {
+  %lo = index.assume %x [range(%x, 0, 4)] : index
+  %hi = index.assume %y [range(%y, 8, 16)] : index
+  %lt = index.cmp ult, %lo, %hi : index
+  %gt = index.cmp ugt, %lo, %hi : index
+  func.return %lt, %gt : i1, i1
+}
+// ----
+func.def @cmp_unsigned_ranges(%x: index, %y: index) -> (i1, i1) {
+  %lt = scalar.constant true : i1
+  %gt = scalar.constant false : i1
+  func.return %lt, %gt : i1, i1
+}
+
+// ====
+
+// A maybe-negative unsigned operand is intentionally inconclusive: signed
+// range separation would be wrong after unsigned interpretation.
+func.def @cmp_unsigned_maybe_negative_is_preserved(%x: index, %y: index) -> (i1) {
+  %maybe_negative = index.assume %x [range(%x, -4, 4)] : index
+  %positive = index.assume %y [range(%y, 8, 16)] : index
+  %lt = index.cmp ult, %maybe_negative, %positive : index
+  func.return %lt : i1
+}
+
+// ====
+
+// scf.select folds exact conditions and identical arms for index values.
+func.def @select_identities(%x: index, %y: index) -> (index, index) {
+  %false = scalar.constant 0 : i1
+  %a = scf.select %false, %x, %y : index
+  %b = scf.select %false, %x, %x : index
+  func.return %a, %b : index, index
+}
+// ----
+func.def @select_identities(%x: index, %y: index) -> (index, index) {
+  func.return %y, %x : index, index
+}

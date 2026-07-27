@@ -12,9 +12,10 @@ on:
       name:
         type: string
         default: Linux / CMake / GPU gfx942
-      runner_label:
+      runner_labels:
         type: string
-        default: linux-gfx942-1gpu-core42-ossci-rocm
+        description: "JSON array of labels that must all match the GPU runner."
+        required: true
       artifact_run_id:
         type: string
         default: ""
@@ -45,10 +46,10 @@ on:
         type: string
         description: "GitHub Actions run id containing HRX package artifacts. Empty means this workflow run."
         default: ""
-      runner_label:
+      runner_labels:
         type: string
-        description: "GitHub Actions runner label."
-        default: linux-gfx942-1gpu-core42-ossci-rocm
+        description: "JSON array of labels that must all match the GPU runner."
+        required: true
       device:
         type: string
         description: "libhrx CTS device spec."
@@ -85,7 +86,7 @@ permissions:
 jobs:
   test_core_linux_gpu:
     name: ${{ inputs.name || 'Linux / CMake / GPU gfx942' }}
-    runs-on: ${{ inputs.runner_label || 'linux-gfx942-1gpu-core42-ossci-rocm' }}
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
     timeout-minutes: 20
     env:
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/linux-gpu
@@ -151,13 +152,15 @@ jobs:
           "${HRX_PYTHON}" build_tools/ci_core_linux.py extract-packages
 
       - name: Report ROCm environment
+        id: rocm_environment
+        continue-on-error: ${{ inputs.experimental }}
         run: |
           export PATH="${HRX_PUBLIC_DEPS_DIR}/bin:${PATH}"
           export LD_LIBRARY_PATH="${HRX_PUBLIC_DEPS_DIR}/lib:${HRX_PUBLIC_DEPS_DIR}/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH:-}"
-          echo "rocminfo path: $(command -v rocminfo)"
-          rocminfo
+          bash .github/scripts/check_rocm_environment.sh
 
       - name: Run installed GPU tests
+        if: ${{ steps.rocm_environment.outcome == 'success' }}
         continue-on-error: ${{ inputs.experimental }}
         run: |
           "${HRX_PYTHON}" build_tools/ci_core_linux.py test

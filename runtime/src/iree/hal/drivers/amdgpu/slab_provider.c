@@ -9,6 +9,7 @@
 #include <stddef.h>
 
 #include "iree/hal/drivers/amdgpu/access_policy.h"
+#include "iree/hal/drivers/amdgpu/asan_state.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
@@ -45,11 +46,23 @@ typedef struct iree_hal_amdgpu_slab_provider_t {
   // Stable named-memory stream for HSA backing allocations from this provider.
   iree_hal_memory_trace_t trace;
 
-  // Minimum runtime allocation granule reported by the HSA pool.
+  // Flags selecting provider behavior.
+  iree_hal_amdgpu_slab_provider_flags_t flags;
+
+  // Minimum allocation-size granule for the active slab acquisition mode.
   iree_device_size_t allocation_granule;
 
-  // Base-pointer alignment guaranteed by HSA runtime allocations.
+  // Base-pointer alignment guaranteed by the active slab acquisition mode.
   iree_device_size_t allocation_alignment;
+
+  // HSA VMM memory type used when ASAN VMM placement is enabled.
+  iree_hal_amdgpu_vmem_memory_type_t vmem_memory_type;
+
+  // Translated HSA VMM memory type for hsa_amd_vmem_handle_create.
+  hsa_amd_memory_type_t hsa_vmem_memory_type;
+
+  // Borrowed ASAN state used when ASAN shadow support is enabled.
+  iree_hal_amdgpu_asan_state_t* asan_state;
 
   // HAL memory type bits derived from the HSA pool flags.
   iree_hal_memory_type_t memory_type;
@@ -68,11 +81,38 @@ typedef struct iree_hal_amdgpu_slab_handle_t {
   // HSA allocation byte length used when releasing the slab.
   iree_device_size_t allocation_size;
 
+  // Device-visible base pointer returned for the slab.
+  IREE_AMDGPU_DEVICE_PTR void* base_ptr;
+
+  // Physical VMM allocation handle when the slab is ASAN VMM-backed.
+  hsa_amd_vmem_alloc_handle_t vmem_allocation_handle;
+
+  // ASAN application range covering |base_ptr| for VMM-backed slabs.
+  iree_hal_amdgpu_asan_application_range_t* application_range;
+
+  // Intrusive ASAN quarantine node used for stale-pointer detection.
+  iree_hal_amdgpu_asan_quarantine_entry_t quarantine_entry;
+
   // Profiling session id owning |profile_allocation_id|.
   uint64_t profile_session_id;
 
   // Session-local allocation id for the slab acquire/release lifecycle.
   uint64_t profile_allocation_id;
+
+  // True when |base_ptr| is an active HSA VMM mapping.
+  uint32_t is_vmem_mapped : 1;
+
+  // True when any ASAN advice has published shadow bytes for this slab.
+  uint32_t has_asan_advice : 1;
+
+  // Borrowed HSA API table used to release slab backing allocations.
+  const iree_hal_amdgpu_libhsa_t* libhsa;
+
+  // Borrowed ASAN state used to return |application_range| for VMM slabs.
+  iree_hal_amdgpu_asan_state_t* asan_state;
+
+  // Host allocator used to release this handle.
+  iree_allocator_t host_allocator;
 } iree_hal_amdgpu_slab_handle_t;
 
 static const iree_hal_slab_provider_vtable_t
@@ -90,6 +130,18 @@ static const iree_hal_amdgpu_slab_provider_t*
 iree_hal_amdgpu_slab_provider_const_cast(
     const iree_hal_slab_provider_t* base_provider) {
   return (const iree_hal_amdgpu_slab_provider_t*)base_provider;
+}
+
+static bool iree_hal_amdgpu_slab_provider_uses_asan_vmm(
+    const iree_hal_amdgpu_slab_provider_t* provider) {
+  return iree_any_bit_set(provider->flags,
+                          IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_ASAN_VMM);
+}
+
+static bool iree_hal_amdgpu_slab_provider_uses_asan_shadow(
+    const iree_hal_amdgpu_slab_provider_t* provider) {
+  return iree_any_bit_set(provider->flags,
+                          IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_ASAN_SHADOW);
 }
 
 static bool iree_hal_amdgpu_slab_provider_record_memory_event(
@@ -140,6 +192,127 @@ static iree_status_t iree_hal_amdgpu_slab_provider_resolve_access_agents(
   return iree_hal_amdgpu_access_agent_list_resolve(
       provider->topology, domain, provider->queue_affinity_mask,
       out_agent_list);
+}
+
+static iree_status_t iree_hal_amdgpu_slab_provider_build_vmem_access_descs(
+    const iree_hal_amdgpu_slab_provider_t* provider,
+    iree_host_size_t access_desc_capacity,
+    hsa_amd_memory_access_desc_t* access_descs,
+    iree_host_size_t* out_access_desc_count) {
+  hsa_agent_t local_agent =
+      provider->topology->gpu_agents[provider->physical_device_ordinal];
+  return iree_hal_amdgpu_vmem_build_access_descs_for_topology(
+      provider->topology, local_agent, IREE_HAL_AMDGPU_ACCESS_MODE_SHARED,
+      access_desc_capacity, access_descs, out_access_desc_count);
+}
+
+static void iree_hal_amdgpu_slab_provider_finalize_vmem_handle(
+    void* user_data) {
+  iree_hal_amdgpu_slab_handle_t* slab_handle =
+      (iree_hal_amdgpu_slab_handle_t*)user_data;
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (slab_handle->is_vmem_mapped) {
+    iree_hal_amdgpu_hsa_cleanup_assert_success(
+        iree_hsa_amd_vmem_unmap_raw(slab_handle->libhsa, slab_handle->base_ptr,
+                                    slab_handle->allocation_size));
+  }
+  if (slab_handle->vmem_allocation_handle.handle) {
+    iree_hal_amdgpu_hsa_cleanup_assert_success(
+        iree_hsa_amd_vmem_handle_release_raw(
+            slab_handle->libhsa, slab_handle->vmem_allocation_handle));
+  }
+  iree_hal_amdgpu_asan_state_release_application_range(
+      slab_handle->asan_state, slab_handle->application_range);
+  iree_allocator_free(slab_handle->host_allocator, slab_handle);
+
+  IREE_TRACE_ZONE_END(z0);
+}
+
+static void iree_hal_amdgpu_slab_provider_finalize_hsa_allocation(
+    void* user_data) {
+  iree_hal_amdgpu_slab_handle_t* slab_handle =
+      (iree_hal_amdgpu_slab_handle_t*)user_data;
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (slab_handle->base_ptr) {
+    iree_hal_amdgpu_hsa_cleanup_assert_success(
+        iree_hsa_amd_memory_pool_free_raw(slab_handle->libhsa,
+                                          slab_handle->base_ptr));
+  }
+  iree_allocator_free(slab_handle->host_allocator, slab_handle);
+
+  IREE_TRACE_ZONE_END(z0);
+}
+
+static iree_status_t iree_hal_amdgpu_slab_provider_acquire_vmem_slab(
+    iree_hal_amdgpu_slab_provider_t* provider,
+    iree_device_size_t allocation_size,
+    iree_hal_amdgpu_slab_handle_t* slab_handle, void** out_base_ptr) {
+  IREE_ASSERT_ARGUMENT(out_base_ptr);
+  *out_base_ptr = NULL;
+  if (IREE_UNLIKELY(
+          !iree_hal_amdgpu_asan_state_is_enabled(provider->asan_state))) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU ASAN VMM slab acquisition requires enabled ASAN state");
+  }
+
+  uint64_t application_address = 0;
+  iree_status_t status = iree_hal_amdgpu_asan_state_reserve_application_range(
+      provider->asan_state, allocation_size, provider->allocation_granule,
+      &application_address, &slab_handle->application_range);
+  if (iree_status_is_ok(status)) {
+    slab_handle->base_ptr = (void*)(uintptr_t)application_address;
+  }
+
+  hsa_amd_memory_access_desc_t access_descs[IREE_HAL_AMDGPU_MAX_CPU_AGENT +
+                                            IREE_HAL_AMDGPU_MAX_GPU_AGENT];
+  iree_host_size_t access_desc_count = 0;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_slab_provider_build_vmem_access_descs(
+        provider, IREE_ARRAYSIZE(access_descs), access_descs,
+        &access_desc_count);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hsa_amd_vmem_handle_create(
+        IREE_LIBHSA(provider->libhsa), provider->memory_pool, allocation_size,
+        provider->hsa_vmem_memory_type, /*flags=*/0,
+        &slab_handle->vmem_allocation_handle);
+    if (!iree_status_is_ok(status)) {
+      status = iree_status_annotate_f(
+          status,
+          "creating AMDGPU ASAN VMM slab: physical_device_ordinal=%" PRIu32
+          ", memory_pool=0x%016" PRIx64 ", allocation_size=%" PRIu64
+          ", allocation_granule=%" PRIu64 ", vmem_memory_type=%d",
+          provider->physical_device_ordinal, provider->memory_pool.handle,
+          (uint64_t)allocation_size, (uint64_t)provider->allocation_granule,
+          (int)provider->vmem_memory_type);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hsa_amd_vmem_map(
+        IREE_LIBHSA(provider->libhsa), slab_handle->base_ptr, allocation_size,
+        /*offset=*/0, slab_handle->vmem_allocation_handle,
+        /*flags=*/0);
+    slab_handle->is_vmem_mapped = iree_status_is_ok(status);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hsa_amd_vmem_set_access(
+        IREE_LIBHSA(provider->libhsa), slab_handle->base_ptr, allocation_size,
+        access_descs, access_desc_count);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_asan_state_map_range(
+        provider->asan_state, application_address, allocation_size);
+  }
+
+  if (iree_status_is_ok(status)) {
+    *out_base_ptr = slab_handle->base_ptr;
+  } else {
+    iree_hal_amdgpu_slab_provider_finalize_vmem_handle(slab_handle);
+  }
+  return status;
 }
 
 IREE_API_EXPORT iree_status_t
@@ -281,6 +454,32 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
         IREE_STATUS_INVALID_ARGUMENT,
         "AMDGPU slab provider requires non-empty HAL buffer usage bits");
   }
+  const iree_hal_amdgpu_slab_provider_flags_t unsupported_flags =
+      options.flags & ~(IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_ASAN_SHADOW |
+                        IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_ASAN_VMM);
+  if (IREE_UNLIKELY(unsupported_flags)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU slab provider flags 0x%08x contain "
+                            "unsupported bits",
+                            unsupported_flags);
+  }
+  if (iree_any_bit_set(options.flags,
+                       IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_ASAN_SHADOW) &&
+      IREE_UNLIKELY(!options.asan_state)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU ASAN slab provider requires ASAN state");
+  }
+  if (iree_any_bit_set(options.flags,
+                       IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_ASAN_VMM) &&
+      IREE_UNLIKELY(!iree_all_bits_set(
+          options.flags, IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_ASAN_SHADOW))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU ASAN VMM slab provider also requires ASAN shadow support");
+  }
 
   iree_hal_amdgpu_slab_provider_t* provider = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -297,6 +496,9 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
   provider->physical_device_ordinal = (uint32_t)physical_device_ordinal;
   provider->buffer_pool = buffer_pool;
   provider->queue_affinity_mask = queue_affinity_mask;
+  provider->flags = options.flags;
+  provider->vmem_memory_type = options.vmem_memory_type;
+  provider->asan_state = options.asan_state;
   provider->total_acquired = IREE_ATOMIC_VAR_INIT(0);
   provider->total_released = IREE_ATOMIC_VAR_INIT(0);
 
@@ -308,9 +510,22 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
     status = iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
         libhsa, options.memory_pool, &properties);
   }
+  if (iree_status_is_ok(status) &&
+      iree_hal_amdgpu_slab_provider_uses_asan_vmm(provider)) {
+    status = iree_hal_amdgpu_vmem_translate_memory_type(
+        options.vmem_memory_type, &provider->hsa_vmem_memory_type);
+  }
   if (iree_status_is_ok(status)) {
-    provider->allocation_granule = properties.allocation_granule;
-    provider->allocation_alignment = properties.allocation_alignment;
+    if (iree_hal_amdgpu_slab_provider_uses_asan_vmm(provider)) {
+      status = iree_hal_amdgpu_vmem_query_alloc_granule(
+          libhsa, options.memory_pool, &provider->allocation_granule);
+      provider->allocation_alignment = provider->allocation_granule;
+    } else {
+      provider->allocation_granule = properties.allocation_granule;
+      provider->allocation_alignment = properties.allocation_alignment;
+    }
+  }
+  if (iree_status_is_ok(status)) {
     provider->memory_type = options.memory_type;
     provider->supported_usage = options.supported_usage;
     *out_provider = &provider->base;
@@ -364,15 +579,28 @@ static iree_status_t iree_hal_amdgpu_slab_provider_acquire_slab(
   if (iree_status_is_ok(status)) {
     memset(slab_handle, 0, sizeof(*slab_handle));
     slab_handle->allocation_size = allocation_size;
+    slab_handle->libhsa = provider->libhsa;
+    slab_handle->asan_state = provider->asan_state;
+    slab_handle->host_allocator = provider->host_allocator;
   }
 
   void* base_ptr = NULL;
-  if (iree_status_is_ok(status)) {
+  bool slab_handle_consumed = false;
+  if (iree_status_is_ok(status) &&
+      iree_hal_amdgpu_slab_provider_uses_asan_vmm(provider)) {
+    status = iree_hal_amdgpu_slab_provider_acquire_vmem_slab(
+        provider, allocation_size, slab_handle, &base_ptr);
+    slab_handle_consumed = !iree_status_is_ok(status);
+  } else if (iree_status_is_ok(status)) {
     status = iree_hsa_amd_memory_pool_allocate(
         IREE_LIBHSA(provider->libhsa), provider->memory_pool,
         (size_t)allocation_size, HSA_AMD_MEMORY_POOL_STANDARD_FLAG, &base_ptr);
+    if (iree_status_is_ok(status)) {
+      slab_handle->base_ptr = base_ptr;
+    }
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      !iree_hal_amdgpu_slab_provider_uses_asan_vmm(provider)) {
     iree_hal_amdgpu_access_agent_list_t access_agents;
     status = iree_hal_amdgpu_slab_provider_resolve_access_agents(
         provider, &access_agents);
@@ -380,6 +608,12 @@ static iree_status_t iree_hal_amdgpu_slab_provider_acquire_slab(
       status = iree_hal_amdgpu_access_allow_agent_list(
           provider->libhsa, &access_agents, base_ptr);
     }
+  }
+  if (iree_status_is_ok(status) &&
+      iree_hal_amdgpu_slab_provider_uses_asan_shadow(provider) &&
+      !iree_hal_amdgpu_slab_provider_uses_asan_vmm(provider)) {
+    status = iree_hal_amdgpu_asan_state_map_range(
+        provider->asan_state, (uint64_t)(uintptr_t)base_ptr, allocation_size);
   }
 
   if (iree_status_is_ok(status)) {
@@ -400,7 +634,7 @@ static iree_status_t iree_hal_amdgpu_slab_provider_acquire_slab(
         status,
         iree_hsa_amd_memory_pool_free(IREE_LIBHSA(provider->libhsa), base_ptr));
   }
-  if (!iree_status_is_ok(status)) {
+  if (!iree_status_is_ok(status) && !slab_handle_consumed) {
     iree_allocator_free(provider->host_allocator, slab_handle);
   }
 
@@ -421,9 +655,22 @@ static void iree_hal_amdgpu_slab_provider_release_slab(
         provider, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_SLAB_RELEASE, slab_handle,
         slab->base_ptr);
     iree_hal_memory_trace_free(&provider->trace, slab->base_ptr);
-    iree_hal_amdgpu_hsa_cleanup_assert_success(
-        iree_hsa_amd_memory_pool_free_raw(provider->libhsa, slab->base_ptr));
-    iree_allocator_free(provider->host_allocator, slab_handle);
+    if (iree_hal_amdgpu_slab_provider_uses_asan_shadow(provider) &&
+        slab_handle->has_asan_advice) {
+      iree_hal_amdgpu_asan_quarantine_release_fn_t release_fn =
+          iree_hal_amdgpu_slab_provider_uses_asan_vmm(provider)
+              ? iree_hal_amdgpu_slab_provider_finalize_vmem_handle
+              : iree_hal_amdgpu_slab_provider_finalize_hsa_allocation;
+      iree_hal_amdgpu_asan_state_quarantine_entry(
+          provider->asan_state, &slab_handle->quarantine_entry,
+          slab_handle->allocation_size, release_fn, slab_handle);
+    } else {
+      if (iree_hal_amdgpu_slab_provider_uses_asan_vmm(provider)) {
+        iree_hal_amdgpu_slab_provider_finalize_vmem_handle(slab_handle);
+      } else {
+        iree_hal_amdgpu_slab_provider_finalize_hsa_allocation(slab_handle);
+      }
+    }
     iree_atomic_fetch_add(&provider->total_released, 1,
                           iree_memory_order_relaxed);
   }
@@ -515,6 +762,67 @@ static iree_status_t iree_hal_amdgpu_slab_provider_wrap_buffer(
       out_buffer);
 }
 
+static iree_status_t iree_hal_amdgpu_slab_provider_validate_asan_options(
+    const iree_hal_slab_provider_t* base_provider,
+    const iree_hal_asan_pool_options_t* options) {
+  const iree_hal_amdgpu_slab_provider_t* provider =
+      iree_hal_amdgpu_slab_provider_const_cast(base_provider);
+  if (!iree_hal_amdgpu_slab_provider_uses_asan_shadow(provider)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU HSA memory-pool slab provider does not support HAL ASAN range "
+        "advice");
+  }
+  if (IREE_UNLIKELY(
+          !iree_hal_amdgpu_asan_state_is_enabled(provider->asan_state))) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU ASAN slab provider requires enabled ASAN state");
+  }
+  const iree_device_size_t shadow_granule_size =
+      (iree_device_size_t)1ull
+      << provider->asan_state->shadow_map.shadow_scale_shift;
+  if (IREE_UNLIKELY(options->shadow_granule_size != shadow_granule_size)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU ASAN pool shadow granule size %" PRIu64
+        " does not match device shadow granule size %" PRIu64,
+        (uint64_t)options->shadow_granule_size, (uint64_t)shadow_granule_size);
+  }
+  return iree_ok_status();
+}
+
+static void iree_hal_amdgpu_slab_provider_advise_asan_range(
+    iree_hal_slab_provider_t* base_provider, const iree_hal_slab_t* slab,
+    iree_device_size_t backing_offset,
+    iree_hal_asan_range_advice_flags_t advice_flags,
+    const iree_hal_asan_allocation_layout_t* layout) {
+  iree_hal_amdgpu_slab_provider_t* provider =
+      iree_hal_amdgpu_slab_provider_cast(base_provider);
+  IREE_ASSERT(iree_hal_amdgpu_slab_provider_uses_asan_shadow(provider));
+  IREE_ASSERT(iree_hal_amdgpu_asan_state_is_enabled(provider->asan_state));
+  iree_hal_amdgpu_slab_handle_t* slab_handle =
+      (iree_hal_amdgpu_slab_handle_t*)(uintptr_t)slab->provider_handle;
+  slab_handle->has_asan_advice = true;
+
+  const uint64_t mapped_address =
+      (uint64_t)(uintptr_t)slab->base_ptr + backing_offset;
+  switch (advice_flags) {
+    case IREE_HAL_ASAN_RANGE_ADVICE_FLAG_ALLOCATED:
+      iree_hal_amdgpu_asan_state_publish_allocated_range_raw(
+          provider->asan_state, mapped_address, layout->backing_length,
+          mapped_address + layout->user_offset, layout->user_length);
+      return;
+    case IREE_HAL_ASAN_RANGE_ADVICE_FLAG_RELEASED:
+      iree_hal_amdgpu_asan_state_publish_released_range(
+          provider->asan_state, mapped_address, layout->backing_length);
+      return;
+    default:
+      IREE_CHECK_UNREACHABLE("invalid ASAN range advice flags: 0x%08x",
+                             advice_flags);
+  }
+}
+
 static void iree_hal_amdgpu_slab_provider_prefault(
     iree_hal_slab_provider_t* base_provider, iree_hal_slab_t* slab) {
   (void)base_provider;
@@ -559,6 +867,9 @@ static const iree_hal_slab_provider_vtable_t
         .acquire_slab = iree_hal_amdgpu_slab_provider_acquire_slab,
         .release_slab = iree_hal_amdgpu_slab_provider_release_slab,
         .wrap_buffer = iree_hal_amdgpu_slab_provider_wrap_buffer,
+        .validate_asan_options =
+            iree_hal_amdgpu_slab_provider_validate_asan_options,
+        .advise_asan_range = iree_hal_amdgpu_slab_provider_advise_asan_range,
         .prefault = iree_hal_amdgpu_slab_provider_prefault,
         .trim = iree_hal_amdgpu_slab_provider_trim,
         .query_stats = iree_hal_amdgpu_slab_provider_query_stats,

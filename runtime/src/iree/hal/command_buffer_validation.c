@@ -622,18 +622,6 @@ iree_status_t iree_hal_command_buffer_dispatch_validation(
         workgroups_reqs));
   }
 
-  // Validate constants unless they are custom arguments (which we can't
-  // validate generally).
-  if (!iree_any_bit_set(flags,
-                        IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS)) {
-    if (IREE_UNLIKELY((constants.data_length % 4) != 0)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "invalid alignment %" PRIhsz
-                              ", must be 4-byte aligned",
-                              constants.data_length);
-    }
-  }
-
   // Validate indirect argument buffers.
   if (iree_hal_dispatch_uses_indirect_arguments(flags)) {
     // Expecting a single binding that can be read by the device.

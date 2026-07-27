@@ -40,6 +40,4 @@ EXPORT_FN("buffer_view.encoding_type", iree_hal_inline_module_buffer_view_encodi
 EXPORT_FN("buffer_view.rank", iree_hal_inline_module_buffer_view_rank, r, i)
 EXPORT_FN("buffer_view.trace", iree_hal_inline_module_buffer_view_trace, rCrD, v)
 
-EXPORT_FN("device.query.i64", iree_hal_inline_module_device_query_i64, rr, iI)
-
 // clang-format on

@@ -65,6 +65,9 @@ ARTIFACT_SETS = {
     },
 }
 
+ROCM_ARTIFACT_VARIANTS = ("release", "asan", "host-asan", "tsan")
+ROCM_ARTIFACT_VARIANT_LOG_KEY = "logs/compiler-runtime/ROCR-Runtime_configure.log"
+
 PACKAGE_NAMES = [
     "hrx-public-linux-x86_64",
     "hrx-public-deps-linux-x86_64",
@@ -83,6 +86,8 @@ PUBLIC_DEPS_OPTIONAL_GLOBS = [
     "lib/librocprofiler-register.so*",
     "lib/rocm_sysdeps/lib/*.so*",
 ]
+
+CORE_CTEST_EXCLUDE_REGEXES = ("^iree/hal/local/elf/elf_module_test$",)
 
 
 @dataclass(frozen=True)
@@ -496,7 +501,53 @@ def select_available(
     return selected, missing
 
 
-def discover_latest_run_id(s3, release_type: str, artifact_set: str) -> str:
+def read_s3_text(s3, bucket: str, key: str) -> str:
+    response = s3.get_object(Bucket=bucket, Key=key)
+    body = response.get("Body")
+    if body is None:
+        raise RuntimeError(f"S3 object has no body: s3://{bucket}/{key}")
+    return body.read().decode(errors="replace")
+
+
+def rocm_artifact_variant_from_configure_log(text: str) -> str:
+    if "Override ASAN GPU_TARGETS" in text or "SANITIZER = ASAN" in text:
+        return "asan"
+    if "Override TSAN GPU_TARGETS" in text or "SANITIZER = TSAN" in text:
+        return "tsan"
+    if "HOST_ASAN enabled" in text or "SANITIZER = HOST_ASAN" in text:
+        return "host-asan"
+    return "release"
+
+
+def rocm_artifact_variant(
+    s3, bucket: str, prefix: str, available: list[S3Object]
+) -> str:
+    key = prefix + ROCM_ARTIFACT_VARIANT_LOG_KEY
+    if not any(obj.key == key for obj in available):
+        return "release"
+    return rocm_artifact_variant_from_configure_log(read_s3_text(s3, bucket, key))
+
+
+def validate_rocm_artifact_variant(
+    s3,
+    bucket: str,
+    prefix: str,
+    available: list[S3Object],
+    expected_variant: str,
+) -> None:
+    actual_variant = rocm_artifact_variant(s3, bucket, prefix, available)
+    if actual_variant == expected_variant:
+        return
+    raise RuntimeError(
+        f"ROCm artifact prefix s3://{bucket}/{prefix} has variant "
+        f"{actual_variant!r}, but {expected_variant!r} was requested. Set "
+        "HRX_ROCM_ARTIFACT_VARIANT or choose a matching --run-id."
+    )
+
+
+def discover_latest_run_id(
+    s3, release_type: str, artifact_set: str, artifact_variant: str
+) -> str:
     bucket = release_bucket(release_type, "artifacts")
     paginator = s3.get_paginator("list_objects_v2")
     candidates: list[int] = []
@@ -509,22 +560,25 @@ def discover_latest_run_id(s3, release_type: str, artifact_set: str) -> str:
         prefix = f"{run_id}-{PLATFORM}/"
         available = list_prefix(s3, bucket, prefix)
         _, missing = select_available(available, prefix, wanted_artifacts(artifact_set))
-        if not missing:
+        if (
+            not missing
+            and rocm_artifact_variant(s3, bucket, prefix, available) == artifact_variant
+        ):
             return str(run_id)
     raise RuntimeError(
-        f"Could not discover a {release_type} Linux run with artifact set "
-        f"{artifact_set!r}. Pass --run-id explicitly."
+        f"Could not discover a {release_type} Linux {artifact_variant} run "
+        f"with artifact set {artifact_set!r}. Pass --run-id explicitly."
     )
 
 
 def download_one(s3, bucket: str, obj: S3Object, cache_dir: Path) -> Path:
-    dest = cache_dir / Path(obj.key).name
+    dest = s3_cache_path(cache_dir, bucket, obj.key)
     if dest.exists() and dest.stat().st_size == obj.size:
-        log(f"  == Cached {dest.name}")
+        log(f"  == Cached {obj.key}")
         return dest
     log(f"  ++ Downloading {obj.key}")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(dest.suffix + ".tmp")
+    tmp = dest.with_name(f"{dest.name}.{os.getpid()}.tmp")
     s3.download_file(bucket, obj.key, str(tmp))
     tmp.replace(dest)
     return dest
@@ -556,12 +610,20 @@ def verify_checksum(archive_path: Path, checksum_path: Path | None) -> None:
         )
 
 
+def s3_cache_path(cache_dir: Path, bucket: str, key: str) -> Path:
+    relpath = PurePosixPath(key)
+    if relpath.is_absolute() or ".." in relpath.parts:
+        raise RuntimeError(f"Unsafe S3 key: {key}")
+    return cache_dir / bucket / relpath
+
+
 def write_rocm_manifest(
     path: Path,
     *,
     release_type: str,
     run_id: str,
     bucket: str,
+    artifact_variant: str,
     artifact_set: str,
     artifacts: list[S3Object],
 ) -> None:
@@ -571,6 +633,7 @@ def write_rocm_manifest(
         "run_id": run_id,
         "platform": PLATFORM,
         "bucket": bucket,
+        "artifact_variant": artifact_variant,
         "artifact_set": artifact_set,
         "artifacts": [obj.__dict__ for obj in artifacts],
     }
@@ -582,8 +645,13 @@ def fetch_rocm(args: argparse.Namespace) -> None:
     s3 = create_s3_client()
     run_id = args.run_id
     if args.latest:
-        run_id = discover_latest_run_id(s3, args.release_type, args.artifact_set)
-        log(f"Resolved latest {args.release_type} Linux run id: {run_id}")
+        run_id = discover_latest_run_id(
+            s3, args.release_type, args.artifact_set, args.artifact_variant
+        )
+        log(
+            f"Resolved latest {args.release_type} Linux "
+            f"{args.artifact_variant} run id: {run_id}"
+        )
     if not run_id:
         raise RuntimeError("Pass --run-id or --latest")
 
@@ -592,6 +660,7 @@ def fetch_rocm(args: argparse.Namespace) -> None:
     available = list_prefix(s3, bucket, prefix)
     if not available:
         raise RuntimeError(f"No artifacts found at s3://{bucket}/{prefix}")
+    validate_rocm_artifact_variant(s3, bucket, prefix, available, args.artifact_variant)
 
     selected, missing = select_available(
         available, prefix, wanted_artifacts(args.artifact_set)
@@ -629,6 +698,7 @@ def fetch_rocm(args: argparse.Namespace) -> None:
         release_type=args.release_type,
         run_id=run_id,
         bucket=bucket,
+        artifact_variant=args.artifact_variant,
         artifact_set=args.artifact_set,
         artifacts=selected,
     )
@@ -694,6 +764,14 @@ def sanitizer_configure_options(sanitizer: str) -> list[str]:
     ]
 
 
+def amdgpu_device_binary_source_options(rocm_root: Path) -> list[str]:
+    return [
+        "IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source",
+        "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm",
+        f"IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH={rocm_root.as_posix()}",
+    ]
+
+
 def add_sanitizer_runtime_env(
     env: dict[str, str], *, sanitizer: str, rocm_root: Path
 ) -> dict[str, str]:
@@ -716,6 +794,10 @@ def add_sanitizer_runtime_env(
     env.setdefault("TSAN_OPTIONS", "symbolize=1")
     env.setdefault("UBSAN_OPTIONS", "print_stacktrace=1")
     return env
+
+
+def combine_ctest_exclude_regex(*regexes: str) -> str:
+    return "|".join(f"({regex})" for regex in regexes if regex)
 
 
 def build_core(args: argparse.Namespace) -> None:
@@ -749,6 +831,7 @@ def build_core(args: argparse.Namespace) -> None:
         f"CMAKE_BUILD_TYPE={args.build_type}",
         f"IREE_BUILD_TESTS={'ON' if ctest_enabled else 'OFF'}",
         "IREE_BUILD_BENCHMARKS=ON",
+        "LOOM_BUILD=ON",
         f"LIBHRX_BUILD_CTS={'ON' if ctest_enabled else 'OFF'}",
         f"HRX_INSTALL_TESTS={'ON' if ctest_enabled else 'OFF'}",
         f"LIBHRX_BUILD_PASSTHROUGH={'ON' if args.passthrough else 'OFF'}",
@@ -762,6 +845,8 @@ def build_core(args: argparse.Namespace) -> None:
         sanitizer_debug_options(args.sanitizer, assertions=args.assertions)
     )
     cmake_defines.extend(sanitizer_configure_options(args.sanitizer))
+    if args.amdgpu:
+        cmake_defines.extend(amdgpu_device_binary_source_options(rocm_root))
     cmake_defines.extend(cmake_options_from_env())
     cmake_defines.extend(args.cmake_option)
 
@@ -816,6 +901,7 @@ def test_core(args: argparse.Namespace) -> None:
 
     require_path(installed_tests_dir / "CTestTestfile.cmake", "installed CTest file")
     require_path(install_root / "lib" / "libhrx.so", "installed libhrx.so")
+    require_path(install_root / "lib" / "libloomc.so", "installed libloomc.so")
     require_path(install_root / "bin" / "hrx-info", "installed hrx-info")
 
     if rocm_root.exists():
@@ -847,8 +933,11 @@ def test_core(args: argparse.Namespace) -> None:
     ]
     if args.ctest_regex:
         ctest_cmd.extend(["-R", args.ctest_regex])
-    if args.ctest_exclude_regex:
-        ctest_cmd.extend(["-E", args.ctest_exclude_regex])
+    ctest_exclude_regex = combine_ctest_exclude_regex(
+        *CORE_CTEST_EXCLUDE_REGEXES, args.ctest_exclude_regex
+    )
+    if ctest_exclude_regex:
+        ctest_cmd.extend(["-E", ctest_exclude_regex])
     if args.ctest_label_regex:
         ctest_cmd.extend(["-L", args.ctest_label_regex])
     if args.ctest_label_exclude_regex:
@@ -875,30 +964,49 @@ def test_core(args: argparse.Namespace) -> None:
             f"-DCMAKE_C_FLAGS={sanitizer_link_flag}",
             f"-DCMAKE_CXX_FLAGS={sanitizer_link_flag}",
         ]
+    hrx_smoke_build_dir = smoke_build_dir / "hrx"
+    loomc_smoke_build_dir = smoke_build_dir / "loomc"
+    smoke_cmake_options = [
+        "-GNinja",
+        f"-DCMAKE_PREFIX_PATH={install_root};{rocm_root}",
+        f"-DCMAKE_C_COMPILER={rocm_tool(rocm_root, 'clang')}",
+        f"-DCMAKE_CXX_COMPILER={rocm_tool(rocm_root, 'clang++')}",
+        f"-DCMAKE_AR={rocm_tool(rocm_root, 'llvm-ar')}",
+        f"-DCMAKE_RANLIB={rocm_tool(rocm_root, 'llvm-ranlib')}",
+        *smoke_sanitizer_options,
+        f"-DCMAKE_EXE_LINKER_FLAGS={smoke_link_flags}",
+        f"-DCMAKE_SHARED_LINKER_FLAGS={smoke_link_flags}",
+        f"-DCMAKE_MODULE_LINKER_FLAGS={smoke_link_flags}",
+    ]
     run(
         [
             "cmake",
             "-S",
             REPO_ROOT / "libhrx" / "cts" / "package_smoke",
             "-B",
-            smoke_build_dir,
-            "-GNinja",
-            f"-DCMAKE_PREFIX_PATH={install_root};{rocm_root}",
-            f"-DCMAKE_C_COMPILER={rocm_tool(rocm_root, 'clang')}",
-            f"-DCMAKE_CXX_COMPILER={rocm_tool(rocm_root, 'clang++')}",
-            f"-DCMAKE_AR={rocm_tool(rocm_root, 'llvm-ar')}",
-            f"-DCMAKE_RANLIB={rocm_tool(rocm_root, 'llvm-ranlib')}",
-            *smoke_sanitizer_options,
-            f"-DCMAKE_EXE_LINKER_FLAGS={smoke_link_flags}",
-            f"-DCMAKE_SHARED_LINKER_FLAGS={smoke_link_flags}",
-            f"-DCMAKE_MODULE_LINKER_FLAGS={smoke_link_flags}",
+            hrx_smoke_build_dir,
+            *smoke_cmake_options,
         ],
         cwd=REPO_ROOT,
         env=env,
     )
-    run(["cmake", "--build", smoke_build_dir], cwd=REPO_ROOT, env=env)
-    run([smoke_build_dir / "hrx_package_smoke"], cwd=REPO_ROOT, env=env)
-    run([smoke_build_dir / "hrx_package_smoke_cxx"], cwd=REPO_ROOT, env=env)
+    run(["cmake", "--build", hrx_smoke_build_dir], cwd=REPO_ROOT, env=env)
+    run([hrx_smoke_build_dir / "hrx_package_smoke"], cwd=REPO_ROOT, env=env)
+    run([hrx_smoke_build_dir / "hrx_package_smoke_cxx"], cwd=REPO_ROOT, env=env)
+    run(
+        [
+            "cmake",
+            "-S",
+            REPO_ROOT / "loom" / "binding" / "c" / "packaging" / "package_smoke",
+            "-B",
+            loomc_smoke_build_dir,
+            *smoke_cmake_options,
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+    )
+    run(["cmake", "--build", loomc_smoke_build_dir], cwd=REPO_ROOT, env=env)
+    run([loomc_smoke_build_dir / "loomc_package_smoke"], cwd=REPO_ROOT, env=env)
 
 
 ROCM_BUILDENV_EXCLUDE_PATHS = {
@@ -909,18 +1017,24 @@ ROCM_BUILDENV_EXCLUDE_PATHS = {
     "hrx-tests-linux-x86_64-env.sh",
     "hrx-rocm-buildenv-linux-x86_64-env.sh",
     "include/hrx",
+    "include/loomc",
     "include/passthrough",
     "lib/cmake/hrx",
+    "lib/cmake/loomc",
     "lib/libhrx.so",
+    "lib/libloomc.so",
     "share/hrx-cts",
     "share/hrx-system",
 }
 
 ROCM_BUILDENV_EXCLUDE_PREFIXES = (
     "include/hrx/",
+    "include/loomc/",
     "include/passthrough/",
     "lib/cmake/hrx/",
+    "lib/cmake/loomc/",
     "lib/libhrx.so.",
+    "lib/libloomc.so.",
     "share/hrx-cts/",
     "share/hrx-system/",
 )
@@ -1172,6 +1286,10 @@ def package_core(args: argparse.Namespace) -> None:
         args.public_install_dir.resolve() / "lib" / "libhrx.so", "public libhrx.so"
     )
     require_path(
+        args.public_install_dir.resolve() / "lib" / "libloomc.so",
+        "public libloomc.so",
+    )
+    require_path(
         args.public_install_dir.resolve() / "bin" / "hrx-info", "public hrx-info"
     )
     require_path(
@@ -1181,6 +1299,14 @@ def package_core(args: argparse.Namespace) -> None:
         / "hrx"
         / "hrx-config.cmake",
         "public hrx CMake package",
+    )
+    require_path(
+        args.public_install_dir.resolve()
+        / "lib"
+        / "cmake"
+        / "loomc"
+        / "loomc-config.cmake",
+        "public loomc CMake package",
     )
     require_path(
         args.tests_install_dir.resolve()
@@ -1233,6 +1359,7 @@ def run_all(args: argparse.Namespace) -> None:
         run_id=args.run_id,
         latest=not bool(args.run_id),
         artifact_set=args.artifact_set,
+        artifact_variant=args.artifact_variant,
         rocm_root=args.rocm_root,
         download_cache_dir=args.download_cache_dir,
         download_concurrency=args.download_concurrency,
@@ -1256,6 +1383,11 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
         "--artifact-set",
         default=env_default("HRX_ARTIFACT_SET", "core"),
         choices=sorted(ARTIFACT_SETS),
+    )
+    parser.add_argument(
+        "--artifact-variant",
+        default=env_default("HRX_ROCM_ARTIFACT_VARIANT", "release"),
+        choices=ROCM_ARTIFACT_VARIANTS,
     )
     parser.add_argument(
         "--rocm-root",
@@ -1433,6 +1565,7 @@ def main(argv: list[str] | None = None) -> int:
                 run_id=args.run_id,
                 latest=not bool(args.run_id),
                 artifact_set=args.artifact_set,
+                artifact_variant=args.artifact_variant,
                 rocm_root=args.rocm_root,
                 download_cache_dir=args.download_cache_dir,
                 download_concurrency=args.download_concurrency,

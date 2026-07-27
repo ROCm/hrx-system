@@ -13,11 +13,34 @@
 #include "common/internal.h"
 
 // Thread-local storage for the last CUDA error.
-static iree_thread_local cudaError_t iree_cuda_thread_error = cudaSuccess;
+static IREE_THREAD_LOCAL cudaError_t iree_cuda_thread_error = cudaSuccess;
 
 // Sets the last error for the current thread.
 static void iree_cuda_set_error(cudaError_t error) {
   iree_cuda_thread_error = error;
+}
+
+static cudaError_t iree_cuda_error_from_cu_result(CUresult result) {
+  switch (result) {
+    case CUDA_SUCCESS:
+      return cudaSuccess;
+    case CUDA_ERROR_INVALID_VALUE:
+      return cudaErrorInvalidValue;
+    case CUDA_ERROR_OUT_OF_MEMORY:
+      return cudaErrorMemoryAllocation;
+    case CUDA_ERROR_NOT_INITIALIZED:
+      return cudaErrorInitializationError;
+    case CUDA_ERROR_INVALID_CONTEXT:
+      return cudaErrorIncompatibleDriverContext;
+    case CUDA_ERROR_INVALID_DEVICE:
+      return cudaErrorInvalidDevice;
+    case CUDA_ERROR_NOT_READY:
+      return cudaErrorNotReady;
+    case CUDA_ERROR_NOT_SUPPORTED:
+      return cudaErrorNotSupported;
+    default:
+      return cudaErrorUnknown;
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -410,10 +433,15 @@ cudaError_t CUDAAPI cudaMemset3DAsync(cudaPitchedPtr pitchedDevPtr, int value,
 }
 
 cudaError_t CUDAAPI cudaMemGetInfo(size_t* free, size_t* total) {
-  // TODO: Implement get memory info.
-  if (free) *free = 0;
-  if (total) *total = 0;
-  return cudaErrorNotSupported;
+  size_t free_memory = 0;
+  size_t total_memory = 0;
+  cudaError_t result =
+      iree_cuda_error_from_cu_result(cuMemGetInfo(&free_memory, &total_memory));
+  iree_cuda_set_error(result);
+  if (result != cudaSuccess) return result;
+  if (free) *free = free_memory;
+  if (total) *total = total_memory;
+  return cudaSuccess;
 }
 
 cudaError_t CUDAAPI cudaMemPrefetchAsync(const void* devPtr, size_t count,

@@ -298,10 +298,6 @@ bool ParseOptions(int argc, char** argv, Options* options) {
     }
   }
 
-  if (options->input_files.empty()) {
-    std::cerr << "at least one input file is required\n";
-    return false;
-  }
   if (options->output_header.empty() || options->output_impl.empty()) {
     std::cerr << "--output_header and --output_impl are required\n";
     return false;

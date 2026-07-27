@@ -1,0 +1,99 @@
+// RUN: roundtrip
+
+func.def @i32_reduce_add(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xi32, #dense> -> vector<4xi32>
+  %init = scalar.constant 0 : i32
+  %sum = vector.reduce<addi> %loaded, %init : vector<4xi32>, i32
+  %stored = vector.from_elements %sum : vector<1xi32>
+  vector.store %stored, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  func.return
+}
+
+// ====
+
+func.def @f32_reduce_add(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xf32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %init = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf> %loaded, %init : vector<4xf32>, f32
+  %stored = vector.from_elements %sum : vector<1xf32>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #dense>
+  func.return
+}
+
+// ====
+
+func.def @f32_reduce_add_fastmath(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xf32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %init = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf, reassoc|nnan|nsz> %loaded, %init : vector<4xf32>, f32
+  %stored = vector.from_elements %sum : vector<1xf32>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #dense>
+  func.return
+}
+
+// ====
+
+func.def @f32x64_reduce_add_fastmath(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xf32, #dense>
+  %loaded = vector.load %input_view[0] : view<64xf32, #dense> -> vector<64xf32>
+  %init = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf, reassoc|nnan|nsz> %loaded, %init : vector<64xf32>, f32
+  %stored = vector.from_elements %sum : vector<1xf32>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #dense>
+  func.return
+}
+
+// ====
+
+config.def @runtime.vector_width = 4 : index
+
+kernel.def @f32_configured_width_square_reduce() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%input: buffer, %output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %vector_width = config.get @runtime.vector_width : index
+  %vector_width_bounded = index.assume %vector_width [range(%vector_width, 2, 4)] : index
+  %element_count = index.constant 256 : index
+  %input_view = buffer.view %input[%zero_offset] : buffer -> view<[%element_count]xf32, #dense>
+  %output_view = buffer.view %output[%zero_offset] : buffer -> view<1xf32, #dense>
+  %linear0 = index.mul %lane, %vector_width_bounded : index
+  %linear = index.assume %linear0 [range(%linear0, 0, 252)] : index
+  %loaded = vector.load %input_view[%linear] : view<[%element_count]xf32, #dense> -> vector<[%vector_width_bounded]xf32>
+  %squared = vector.mulf<reassoc|nnan|ninf|nsz|contract> %loaded, %loaded : vector<[%vector_width_bounded]xf32>
+  %zero_f32 = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf, reassoc|nnan|ninf|nsz|contract> %squared, %zero_f32 : vector<[%vector_width_bounded]xf32>, f32
+  %stored = vector.from_elements %sum : vector<1xf32>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #dense>
+  kernel.return
+}
+
+// ====
+
+func.def @i32_reduce_minui_select_sentinel(%values: vector<4xi32>) -> (i32) {
+  %zero = scalar.constant 0 : i32
+  %zeros = vector.splat %zero : vector<4xi32>
+  %is_zero = vector.cmpi eq, %values, %zeros : vector<4xi32> -> vector<4xi1>
+  %start = scalar.constant 0 : i32
+  %step = scalar.constant 1 : i32
+  %indices = vector.iota %start step %step : vector<4xi32>
+  %sentinel = scalar.constant 2147483647 : i32
+  %sentinels = vector.splat %sentinel : vector<4xi32>
+  %selected = vector.select %is_zero, %indices, %sentinels : vector<4xi32>
+  %result = vector.reduce<minui> %selected, %sentinel : vector<4xi32>, i32
+  func.return %result : i32
+}

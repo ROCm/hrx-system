@@ -40,7 +40,7 @@ iree_cc_binary(
     ::elf_module
     iree::base
     iree::base::internal::cpu
-    iree::hal::local::elf::testdata::elementwise_mul
+    iree::hal::local::elf::testdata::elementwise_mul_compatibility
     iree::hal::local::executable_environment
     iree::hal::local::executable_library
   TESTONLY
@@ -52,6 +52,34 @@ iree_native_test(
   SRC
     ::elf_module_test_binary
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_binary(
+  NAME
+    elf_module_native_test_binary
+  SRCS
+    "elf_module_test_main.c"
+  DEFINES
+    "IREE_HAL_LOCAL_ELF_TEST_NATIVE_FIXTURE=1"
+  DEPS
+    ::elf_module
+    iree::base
+    iree::base::internal::cpu
+    iree::hal::local::elf::testdata::elementwise_mul_native
+    iree::hal::local::executable_environment
+    iree::hal::local::executable_library
+  TESTONLY
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_native_test(
+  NAME
+    "elf_module_native_test"
+  SRC
+    ::elf_module_native_test_binary
+)
+endif()
 
 iree_cc_library(
   NAME
@@ -88,23 +116,15 @@ iree_cc_library(
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
-# TODO(*): figure out how to make this work on Bazel+Windows.
-if(MSVC)
+if(WIN32 AND IREE_ARCH STREQUAL "x86_64")
   # CMake + MASM does not work well and CMake ends up passing all our C/C++
   # flags confusing MASM. We invoke MASM directly (ml.exe/ml64.exe) to keep it
   # quiet.
-  if(MSVC_C_ARCHITECTURE_ID MATCHES 64 OR MSVC_CXX_ARCHITECTURE_ID MATCHES 64)
-    set_source_files_properties(
-      arch/x86_64_msvc.asm
-      PROPERTIES
-      LANGUAGE ASM_MASM
-    )
-    target_sources(iree_hal_local_elf_arch PRIVATE "arch/x86_64_msvc.obj")
-    add_custom_command(
-      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/arch/x86_64_msvc.obj
-      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/arch/x86_64_msvc.asm
-      COMMAND ml64 /nologo /Zi /c /Fo ${CMAKE_CURRENT_BINARY_DIR}/arch/x86_64_msvc.obj ${CMAKE_CURRENT_SOURCE_DIR}/arch/x86_64_msvc.asm
-      VERBATIM
-    )
-  endif()
+  target_sources(iree_hal_local_elf_arch PRIVATE "arch/x86_64_msvc.obj")
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/arch/x86_64_msvc.obj
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/arch/x86_64_msvc.asm
+    COMMAND ml64 /nologo /Zi /c /Fo ${CMAKE_CURRENT_BINARY_DIR}/arch/x86_64_msvc.obj ${CMAKE_CURRENT_SOURCE_DIR}/arch/x86_64_msvc.asm
+    VERBATIM
+  )
 endif()

@@ -1,0 +1,25 @@
+// RUN: emit liveness-json @emit_mode_smoke
+
+func.def @emit_mode_smoke(%lhs: i32, %rhs: i32) -> (i32) {
+  %sum = test.addi %lhs, %rhs : i32
+  func.return %sum : i32
+}
+
+// ----
+{"format":"loom.liveness.v0","is_cfg":false,"block_count":1,"value_count":3,"blocks":[{"index":0,"label":null,"start_point":0,"end_point":2,"live_in":[],"live_out":[]}],"intervals":[{"value":{"id":0,"name":"lhs","type":"i32"},"class":{"type_kind":1,"type_kind_name":"scalar","element_type":5,"element_type_name":"i32","register_descriptor_set":null,"register_class_id":null},"start_point":0,"end_point":1,"unit_count":1},{"value":{"id":1,"name":"rhs","type":"i32"},"class":{"type_kind":1,"type_kind_name":"scalar","element_type":5,"element_type_name":"i32","register_descriptor_set":null,"register_class_id":null},"start_point":0,"end_point":1,"unit_count":1},{"value":{"id":3,"name":"sum","type":"i32"},"class":{"type_kind":1,"type_kind_name":"scalar","element_type":5,"element_type_name":"i32","register_descriptor_set":null,"register_class_id":null},"start_point":1,"end_point":2,"unit_count":1}],"pressure_summaries":[{"class":{"type_kind":1,"type_kind_name":"scalar","element_type":5,"element_type_name":"i32","register_descriptor_set":null,"register_class_id":null},"peak_live_units":2,"peak_live_values":2,"peak_block":0,"peak_op":0,"peak_point":0}]}
+
+// ====
+
+// RUN: emit liveness-json @missing_liveness_symbol
+
+// ERROR@+1: SYMBOL/002 {symbol_name="missing_liveness_symbol"}
+func.def @liveness_symbol_anchor() {
+  func.return
+}
+
+// ====
+
+// RUN: emit liveness-json @liveness_wrong_kind
+
+// ERROR@+1: SYMBOL/003 {symbol_name="liveness_wrong_kind", expected_kind="function body"}
+test.target<low_core> @liveness_wrong_kind

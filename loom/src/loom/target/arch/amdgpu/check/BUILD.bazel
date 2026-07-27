@@ -1,0 +1,56 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "occupancy",
+    testonly = True,
+    srcs = ["occupancy.c"],
+    hdrs = ["occupancy.h"],
+    target_compatible_with = select({
+        "//loom/config/emit:amdgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
+        "//loom/src/loom/target/arch/amdgpu/planning:storage_lease",
+        "//loom/src/loom/tools/loom-check:execute",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "provider",
+    testonly = True,
+    srcs = ["provider.c"],
+    hdrs = ["provider.h"],
+    target_compatible_with = select({
+        "//loom/config/emit:amdgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = [
+        "//loom/src/loom/target/arch/amdgpu:__pkg__",
+        "//loom/src/loom/tools/loom-check:__pkg__",
+    ],
+    deps = [
+        ":occupancy",
+        "//loom/src/loom/target/arch/amdgpu:provider",
+        "//loom/src/loom/target/emit/native/amdgpu:loom_check",
+        "//loom/src/loom/tools/loom-check:provider",
+        "//runtime/src/iree/base",
+    ],
+)

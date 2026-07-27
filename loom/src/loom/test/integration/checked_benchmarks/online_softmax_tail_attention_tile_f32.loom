@@ -1,0 +1,100 @@
+// Online softmax update over a tail-masked attention tile.
+//
+// This is the smallest checked benchmark for the attention tile update class:
+// a four-score block is masked to three valid lanes, exponentiated relative to
+// the running maximum, accumulated into the running softmax sum, and used to
+// update a four-channel value accumulator. The invalid value row is deliberately
+// nonzero so the correctness check proves the mask gates both the sum and the
+// value accumulation.
+// Numeric policy is ML-fast attention math: exp is approximate, reductions may
+// reassociate, and rescale/PV accumulation combines are contractable.
+kernel.def @online_softmax_tail_attention_tile_f32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%valid_count: i32, %old_state: buffer, %old_acc: buffer, %scores: buffer, %values: buffer, %new_state: buffer, %new_acc: buffer) {
+  %base = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %zero_i32 = scalar.constant 0 : i32
+  %one_i32 = scalar.constant 1 : i32
+  %zero_f32 = scalar.constant 0.0 : f32
+  %negative_large = scalar.constant -1000000000.0 : f32
+
+  %old_state_noalias, %old_acc_noalias, %scores_noalias, %values_noalias, %new_state_noalias, %new_acc_noalias = buffer.assume.noalias %old_state, %old_acc, %scores, %values, %new_state, %new_acc : buffer, buffer, buffer, buffer, buffer, buffer
+  %old_state_view = buffer.view %old_state_noalias[%base] : buffer -> view<2xf32, #dense>
+  %old_acc_view = buffer.view %old_acc_noalias[%base] : buffer -> view<4xf32, #dense>
+  %scores_view = buffer.view %scores_noalias[%base] : buffer -> view<4xf32, #dense>
+  %values_view = buffer.view %values_noalias[%base] : buffer -> view<4x4xf32, #dense>
+  %new_state_view = buffer.view %new_state_noalias[%base] : buffer -> view<2xf32, #dense>
+  %new_acc_view = buffer.view %new_acc_noalias[%base] : buffer -> view<4xf32, #dense>
+
+  %old_max = view.load %old_state_view[0] : view<2xf32, #dense> -> f32
+  %old_sum = view.load %old_state_view[1] : view<2xf32, #dense> -> f32
+  %old_acc_values = vector.load %old_acc_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %score_values = vector.load %scores_view[0] : view<4xf32, #dense> -> vector<4xf32>
+
+  %lanes = vector.iota %zero_i32 step %one_i32 : vector<4xi32>
+  %valid_limits = vector.splat %valid_count : vector<4xi32>
+  %valid = vector.cmpi slt, %lanes, %valid_limits : vector<4xi32> -> vector<4xi1>
+  %sentinels = vector.splat %negative_large : vector<4xf32>
+  %masked_scores = vector.select %valid, %score_values, %sentinels : vector<4xf32>
+  %block_max = vector.reduce<maxnumf, reassoc|nnan|nsz> %masked_scores, %negative_large : vector<4xf32>, f32
+  %new_max = scalar.maxnumf %old_max, %block_max : f32
+
+  %old_delta = scalar.subf %old_max, %new_max : f32
+  %old_scale = scalar.expf<afn> %old_delta : f32
+  %old_scale_vector = vector.splat %old_scale : vector<4xf32>
+  %rescaled_old_acc = vector.mulf<reassoc|nnan|nsz|contract> %old_acc_values, %old_scale_vector : vector<4xf32>
+  %rescaled_old_sum = scalar.mulf<reassoc|nnan|nsz|contract> %old_sum, %old_scale : f32
+
+  %new_max_vector = vector.splat %new_max : vector<4xf32>
+  %score_deltas = vector.subf %score_values, %new_max_vector : vector<4xf32>
+  %raw_weights = vector.expf<afn> %score_deltas : vector<4xf32>
+  %zero_weights = vector.splat %zero_f32 : vector<4xf32>
+  %weights = vector.select %valid, %raw_weights, %zero_weights : vector<4xf32>
+  %block_sum = vector.reduce<addf, reassoc|nnan|nsz> %weights, %zero_f32 : vector<4xf32>, f32
+  %new_sum = scalar.addf<reassoc|nnan|nsz|contract> %rescaled_old_sum, %block_sum : f32
+
+  %value0 = vector.load %values_view[0, 0] : view<4x4xf32, #dense> -> vector<4xf32>
+  %value1 = vector.load %values_view[1, 0] : view<4x4xf32, #dense> -> vector<4xf32>
+  %value2 = vector.load %values_view[2, 0] : view<4x4xf32, #dense> -> vector<4xf32>
+  %value3 = vector.load %values_view[3, 0] : view<4x4xf32, #dense> -> vector<4xf32>
+  %weight0 = vector.extract %weights[0] : vector<4xf32> -> f32
+  %weight1 = vector.extract %weights[1] : vector<4xf32> -> f32
+  %weight2 = vector.extract %weights[2] : vector<4xf32> -> f32
+  %weight3 = vector.extract %weights[3] : vector<4xf32> -> f32
+  %weight0_vector = vector.splat %weight0 : vector<4xf32>
+  %weight1_vector = vector.splat %weight1 : vector<4xf32>
+  %weight2_vector = vector.splat %weight2 : vector<4xf32>
+  %weight3_vector = vector.splat %weight3 : vector<4xf32>
+  %weighted_value0 = vector.mulf<reassoc|nnan|nsz|contract> %value0, %weight0_vector : vector<4xf32>
+  %weighted_value1 = vector.mulf<reassoc|nnan|nsz|contract> %value1, %weight1_vector : vector<4xf32>
+  %weighted_value2 = vector.mulf<reassoc|nnan|nsz|contract> %value2, %weight2_vector : vector<4xf32>
+  %weighted_value3 = vector.mulf<reassoc|nnan|nsz|contract> %value3, %weight3_vector : vector<4xf32>
+  %new_acc0 = vector.addf<reassoc|nnan|nsz|contract> %rescaled_old_acc, %weighted_value0 : vector<4xf32>
+  %new_acc1 = vector.addf<reassoc|nnan|nsz|contract> %new_acc0, %weighted_value1 : vector<4xf32>
+  %new_acc2 = vector.addf<reassoc|nnan|nsz|contract> %new_acc1, %weighted_value2 : vector<4xf32>
+  %new_acc3 = vector.addf<reassoc|nnan|nsz|contract> %new_acc2, %weighted_value3 : vector<4xf32>
+
+  view.store %new_max, %new_state_view[%zero_index] : f32, view<2xf32, #dense>
+  view.store %new_sum, %new_state_view[1] : f32, view<2xf32, #dense>
+  vector.store %new_acc3, %new_acc_view[0] : vector<4xf32>, view<4xf32, #dense>
+  kernel.return
+}
+
+check.case public @online_softmax_tail_attention_tile_f32_case {
+  %valid_count = check.literal value(3) : i32
+  %old_state = check.generate.iota offset(0.0) step(2.0) : tensor<2xf32>
+  %old_acc = check.generate.iota offset(100.0) step(1.0) : tensor<4xf32>
+  %scores = check.generate.fill value(0.0) : tensor<4xf32>
+  %values = check.generate.iota offset(0.0) step(1.0) : tensor<4x4xf32>
+  %new_state = check.generate.fill value(-1.0) : tensor<2xf32>
+  %new_acc = check.generate.fill value(-1.0) : tensor<4xf32>
+  %expected_state = check.generate.iota offset(0.0) step(5.0) : tensor<2xf32>
+  %expected_acc = check.generate.iota offset(112.0) step(4.0) : tensor<4xf32>
+  func.call @online_softmax_tail_attention_tile_f32(%valid_count, %old_state, %old_acc, %scores, %values, %new_state, %new_acc) : (i32, tensor<2xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4x4xf32>, tensor<2xf32>, tensor<4xf32>)
+  check.expect.close actual(%new_state) expected(%expected_state) atol(0.0001) rtol(0.0001) nan(same) : tensor<2xf32>
+  check.expect.close actual(%new_acc) expected(%expected_acc) atol(0.0001) rtol(0.0001) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.benchmark<@online_softmax_tail_attention_tile_f32_case> @online_softmax_tail_attention_tile_f32_smoke

@@ -24,6 +24,8 @@
 # GROUP: Optional test group to add the target to.
 # LABELS: Additional labels to apply to the test. The package path is added
 #     automatically.
+# SANITIZER_SUPPRESSIONS: Sanitizer/name pairs selecting suppression files.
+#     For example: lsan vulkan.
 # RESOURCE_GROUP: If set, tests sharing the same RESOURCE_GROUP name will not
 #     run concurrently under CTest. Maps to CTest's RESOURCE_LOCK property.
 #     Use for tests that compete for shared system resources (e.g.,
@@ -63,7 +65,7 @@ function(iree_cc_test)
     _RULE
     ""
     "NAME;RESOURCE_GROUP"
-    "ARGS;SRCS;COPTS;DEFINES;LINKOPTS;DATA;DEPS;LABELS;GROUP;TIMEOUT"
+    "ARGS;SRCS;COPTS;DEFINES;LINKOPTS;DATA;DEPS;LABELS;GROUP;TIMEOUT;ENV;SANITIZER_SUPPRESSIONS"
     ${ARGN}
   )
 
@@ -144,20 +146,13 @@ function(iree_cc_test)
   set(_IREE_TEST_CAN_REGISTER OFF)
 
   set(_ENVIRONMENT_VARS)
-  if(IREE_ENABLE_ASAN)
-    if("driver=hip" IN_LIST _RULE_LABELS)
-      set(_LSAN_SUPP_FILE
-          "${CMAKE_SOURCE_DIR}/build_tools/sanitizer/lsan_suppressions_rocm.txt")
-      list(APPEND _ENVIRONMENT_VARS
-          "LSAN_OPTIONS=suppressions=${_LSAN_SUPP_FILE}")
-    endif()
-    if("driver=vulkan" IN_LIST _RULE_LABELS)
-      set(_LSAN_SUPP_FILE
-          "${CMAKE_SOURCE_DIR}/build_tools/sanitizer/lsan_suppressions_vulkan.txt")
-      list(APPEND _ENVIRONMENT_VARS
-          "LSAN_OPTIONS=suppressions=${_LSAN_SUPP_FILE}")
-    endif()
+  if(_RULE_SANITIZER_SUPPRESSIONS)
+    iree_append_sanitizer_suppression_environment(
+      _ENVIRONMENT_VARS
+      ${_RULE_SANITIZER_SUPPRESSIONS}
+    )
   endif()
+  list(APPEND _ENVIRONMENT_VARS ${_RULE_ENV})
 
   # Case for cross-compiling towards Android.
   if(ANDROID)
@@ -249,6 +244,12 @@ function(iree_cc_test)
   list(APPEND _RULE_LABELS "${_PACKAGE_PATH}")
   set_property(TEST ${_NAME_PATH} PROPERTY LABELS "${_RULE_LABELS}")
   set_property(TEST ${_NAME_PATH} PROPERTY TIMEOUT ${_RULE_TIMEOUT})
+  iree_register_test_resource_build_target(
+    TEST_BUILD_TARGET
+      "${_NAME}"
+    LABELS
+      ${_RULE_LABELS}
+  )
 
   if(_RULE_RESOURCE_GROUP)
     set_property(TEST ${_NAME_PATH} PROPERTY RESOURCE_LOCK "${_RULE_RESOURCE_GROUP}")

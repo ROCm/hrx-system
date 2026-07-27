@@ -1,0 +1,127 @@
+// RUN: pass canonicalize
+
+// An unannotated function body with no read-like or write-like effects is pure
+// by structure. Canonicalize can stamp that fact onto call sites without a
+// recursive body walk.
+func.def @pure_by_body(%value: f32) -> (f32) {
+  %doubled = scalar.addf %value, %value : f32
+  func.return %doubled : f32
+}
+
+func.def @caller(%value: f32) -> (f32) {
+  %result = func.call @pure_by_body(%value) : (f32) -> (f32)
+  func.return %result : f32
+}
+
+// ----
+func.def @pure_by_body(%value: f32) -> (f32) {
+  %doubled = scalar.addf %value, %value : f32
+  func.return %doubled : f32
+}
+
+func.def @caller(%value: f32) -> (f32) {
+  %result = func.call pure @pure_by_body(%value) : (f32) -> (f32)
+  func.return %result : f32
+}
+
+// ====
+
+// Canonicalize's mini-DCE can erase dead region ops when their nested bodies
+// have no writes. The subtree erase removes child operand uses too, so view and
+// layout producers cascade away instead of lingering behind unreachable loads.
+func.def @dead_read_only_region_dies(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  %result = scf.if %cond -> (f32) {
+    %loaded = view.load %view[0] : view<1xf32, %layout> -> f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %value : f32
+  }
+  func.return
+}
+
+// ----
+func.def @dead_read_only_region_dies(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  func.return
+}
+
+// ====
+
+// Mini-DCE uses the same region effect summaries for scf.while: dead read-only
+// loop regions disappear, but write-bearing ones remain covered by DCE tests.
+func.def @dead_read_only_while_dies(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  %result = scf.while(%before = %value : f32) -> (f32) {
+    scf.condition %cond, %before : i1, f32
+  } do(%body: f32) {
+    %loaded = view.load %view[0] : view<1xf32, %layout> -> f32
+    scf.yield %loaded : f32
+  }
+  func.return
+}
+
+// ----
+func.def @dead_read_only_while_dies(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  func.return
+}
+
+// ====
+
+// Direct unused loads are dead in the canonicalizer worklist. Reads constrain
+// ordering while the value is live, but a plain non-volatile load is not an
+// observable effect by itself.
+func.def @dead_read_only_load_dies(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  %loaded = view.load %view[0] : view<1xf32, %layout> -> f32
+  func.return
+}
+
+// ----
+func.def @dead_read_only_load_dies(%buffer: buffer, %offset: offset) {
+  func.return
+}
+
+// ====
+
+// Exact facts produced by an unknown-effect op can fold downstream pure users,
+// but generic fact folding must not erase the effectful producer itself.
+func.def @effectful_exact_facts_do_not_erase_producer() -> (i64) {
+  %value = test.effectful_constant 42 : i64
+  %observed = test.fact_range_lo %value : i64 -> i64
+  func.return %observed : i64
+}
+
+// ----
+func.def @effectful_exact_facts_do_not_erase_producer() -> (i64) {
+  %value = test.effectful_constant 42 : i64
+  %observed = scalar.constant 42 : i64
+  func.return %observed : i64
+}
+
+// ====
+
+// Function-level canonicalization runs over every root region. Projected
+// regions keep distinct SSA values, but use the same logical signature facts.
+test.split_func @split_func_all_regions_canonicalize(%arg: i32) {
+  %cfg_zero = test.constant 0 : i32
+  %cfg_sum = test.addi %arg, %cfg_zero : i32
+  test.use %cfg_sum : i32
+  test.yield
+} launch {
+  %zero = test.constant 0 : i32
+  %sum = test.addi %arg, %zero : i32
+  test.use %sum : i32
+  test.yield
+}
+
+// ----
+test.split_func @split_func_all_regions_canonicalize(%arg: i32) {
+  test.use %arg : i32
+  test.yield
+} launch {
+  test.use %arg : i32
+  test.yield
+}

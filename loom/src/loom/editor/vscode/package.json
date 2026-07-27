@@ -1,0 +1,51 @@
+{
+  "name": "loom-syntax",
+  "displayName": "Loom Syntax",
+  "description": "Development extension for Loom and Loom test syntax highlighting.",
+  "version": "0.0.0",
+  "publisher": "loom-dev",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "loom",
+        "aliases": [
+          "Loom",
+          "loom"
+        ],
+        "extensions": [
+          ".loom"
+        ],
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "loom-test",
+        "aliases": [
+          "Loom Test",
+          "loom-test"
+        ],
+        "extensions": [
+          ".loom-test"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "loom",
+        "scopeName": "source.loom",
+        "path": "../textmate/loom.tmLanguage.json"
+      },
+      {
+        "language": "loom-test",
+        "scopeName": "source.loom-test",
+        "path": "../textmate/loom-test.tmLanguage.json"
+      }
+    ]
+  }
+}

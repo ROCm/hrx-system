@@ -1,0 +1,105 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+    "loom_config_compatible_with",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+LOOMC_TARGET_SPIRV_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target/arch:spirv",
+    "//loom/config/emit:spirv",
+])
+
+LOOMC_TARGET_LLVMIR_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:llvmir_artifacts",
+])
+
+LOOMC_TARGET_AMDGPU_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:amdgpu_artifacts",
+])
+
+loom_cc_library(
+    name = "iree_hal_execution_test_util",
+    testonly = True,
+    srcs = ["iree_hal_execution.cc"],
+    hdrs = ["iree_hal_execution.h"],
+    includes = ["../.."],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/iree_hal",
+        "//loom/binding/c/test:test_util",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+loom_cc_test(
+    name = "iree_hal_test",
+    srcs = ["iree_hal_test.cc"],
+    target_compatible_with = LOOMC_TARGET_SPIRV_COMPATIBLE_WITH,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/iree_hal",
+        "//loom/binding/c/target/spirv",
+        "//loom/binding/c/test:test_util",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "spirv_test",
+    srcs = ["spirv_test.cc"],
+    target_compatible_with = LOOMC_TARGET_SPIRV_COMPATIBLE_WITH,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/spirv",
+        "//loom/binding/c/test:test_util",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "llvmir_test",
+    srcs = ["llvmir_test.cc"],
+    target_compatible_with = LOOMC_TARGET_LLVMIR_COMPATIBLE_WITH,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/llvmir",
+        "//loom/binding/c/test:test_util",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "amdgpu_test",
+    srcs = ["amdgpu_test.cc"],
+    target_compatible_with = LOOMC_TARGET_AMDGPU_COMPATIBLE_WITH,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/amdgpu",
+        "//loom/binding/c/test:test_util",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

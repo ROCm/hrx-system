@@ -8,6 +8,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "iree/hal/topology_builder.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -18,6 +19,127 @@ using ::iree::testing::status::IsOk;
 using ::iree::testing::status::StatusIs;
 using ::testing::Eq;
 using ::testing::Ne;
+
+static iree_hal_topology_t* CreateSingleDeviceTopology() {
+  iree_hal_topology_builder_t builder;
+  iree_hal_topology_builder_initialize(&builder, 1);
+  iree_hal_topology_t* topology = NULL;
+  IREE_CHECK_OK(iree_hal_topology_builder_finalize(
+      &builder, iree_allocator_system(), &topology));
+  return topology;
+}
+
+typedef uint32_t TestDeviceSpecFlags;
+enum TestDeviceSpecFlagBits {
+  TEST_DEVICE_SPEC_FLAG_NONE = 0u,
+  TEST_DEVICE_SPEC_FLAG_NUMA_NODE = 1u << 0,
+  TEST_DEVICE_SPEC_FLAG_UUID = 1u << 1,
+  TEST_DEVICE_SPEC_FLAG_EXTERNAL_BUFFER_HANDLES = 1u << 2,
+  TEST_DEVICE_SPEC_FLAG_EXTERNAL_TIMEPOINT_HANDLES = 1u << 3,
+};
+
+static iree_hal_uuid_t MakeTestUuid(uint8_t value) {
+  iree_hal_uuid_t uuid = {{0}};
+  uuid.bytes[15] = value;
+  return uuid;
+}
+
+static iree_hal_device_spec_t* CreateTestDeviceSpec(
+    const char* driver_id, const char* backend_id, uint32_t logical_ordinal,
+    TestDeviceSpecFlags flags, uint32_t numa_node, iree_hal_uuid_t uuid) {
+  iree_hal_physical_device_identity_flags_t physical_identity_flags =
+      IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NONE;
+  if (flags & TEST_DEVICE_SPEC_FLAG_NUMA_NODE) {
+    physical_identity_flags |= IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NUMA_NODE;
+  }
+  if (flags & TEST_DEVICE_SPEC_FLAG_UUID) {
+    physical_identity_flags |= IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_UUID;
+  }
+
+  iree_hal_physical_device_spec_t physical_device = {
+      /*.identity=*/
+      {
+          /*.display_name=*/iree_make_cstring_view("test physical device"),
+          /*.backend_path=*/iree_make_cstring_view("test://physical"),
+          /*.vendor_id=*/0,
+          /*.device_id=*/0,
+          /*.revision_id=*/0,
+          /*.uuid=*/uuid,
+          /*.pci=*/{0, 0, 0, 0},
+          /*.numa=*/{numa_node},
+          /*.flags=*/physical_identity_flags,
+      },
+      /*.physical_ordinal=*/logical_ordinal,
+      /*.partition_ordinal=*/0,
+      /*.partition_count=*/1,
+      /*.physical_device_affinity=*/1ull << logical_ordinal,
+  };
+  iree_hal_device_identity_spec_t identity = {
+      /*.logical_device_id=*/iree_make_cstring_view(driver_id),
+      /*.display_name=*/iree_make_cstring_view("test logical device"),
+      /*.driver_id=*/iree_make_cstring_view(driver_id),
+      /*.driver_version=*/iree_make_cstring_view("test"),
+      /*.backend_id=*/iree_make_cstring_view(backend_id),
+      /*.device_path=*/iree_make_cstring_view("test://logical"),
+      /*.vendor_name=*/iree_make_cstring_view("test"),
+      /*.vendor_id=*/0,
+      /*.device_id=*/0,
+      /*.revision_id=*/0,
+      /*.logical_ordinal=*/logical_ordinal,
+      /*.physical_device_count=*/1,
+      /*.physical_devices=*/&physical_device,
+      /*.flags=*/IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
+  };
+
+  iree_hal_external_buffer_handle_spec_t external_buffer_handles[1] = {
+      {
+          /*.handle_type_mask=*/IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF,
+          /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
+              IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
+          /*.allowed_buffer_usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT,
+          /*.allowed_memory_access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+          /*.compatible_memory_type_mask=*/UINT32_MAX,
+          /*.flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS,
+      },
+  };
+  iree_hal_device_memory_spec_t memory = {
+      /*.heap_count=*/0,
+      /*.heaps=*/NULL,
+      /*.memory_type_count=*/0,
+      /*.memory_types=*/NULL,
+      /*.external_buffer_handle_count=*/
+      (flags & TEST_DEVICE_SPEC_FLAG_EXTERNAL_BUFFER_HANDLES) ? 1u : 0u,
+      /*.external_buffer_handles=*/external_buffer_handles,
+      /*.flags=*/IREE_HAL_DEVICE_MEMORY_SPEC_FLAG_NONE,
+  };
+  iree_hal_external_timepoint_handle_spec_t external_timepoint_handles[1] = {
+      {
+          /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_HIP_EVENT,
+          /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
+              IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
+          /*.compatibility=*/IREE_HAL_SEMAPHORE_COMPATIBILITY_DEVICE_WAIT,
+          /*.flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_NONE,
+      },
+  };
+  iree_hal_device_queue_spec_t queues = {
+      /*.family_count=*/0,
+      /*.families=*/NULL,
+      /*.external_timepoint_handle_count=*/
+      (flags & TEST_DEVICE_SPEC_FLAG_EXTERNAL_TIMEPOINT_HANDLES) ? 1u : 0u,
+      /*.external_timepoint_handles=*/external_timepoint_handles,
+      /*.flags=*/IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
+  };
+  iree_hal_device_spec_params_t params = {
+      /*.identity=*/&identity,
+      /*.memory=*/&memory,
+      /*.virtual_memory=*/NULL,
+      /*.queues=*/&queues,
+  };
+  iree_hal_device_spec_t* device_spec = NULL;
+  IREE_CHECK_OK(iree_hal_device_spec_create(&params, iree_allocator_system(),
+                                            &device_spec));
+  return device_spec;
+}
 
 //===----------------------------------------------------------------------===//
 // Scheduling word bitfield overlap tests
@@ -75,15 +197,17 @@ TEST(TopologyEdge, SchedulingWordBitfieldOverlap) {
 TEST(TopologyEdge, InteropWordBitfieldOverlap) {
   iree_hal_topology_edge_interop_word_t hi = 0;
 
-  // Set each handle type field to its maximum value (8 bits = 0xFF).
-  hi = iree_hal_topology_edge_set_semaphore_import_types(hi, 0xFF);
-  hi = iree_hal_topology_edge_set_semaphore_export_types(hi, 0xFF);
+  // Set each field to its maximum value.
+  hi = iree_hal_topology_edge_set_semaphore_import_timepoint_types(hi, 0xFFFF);
+  hi = iree_hal_topology_edge_set_semaphore_export_timepoint_types(hi, 0xFFFF);
   hi = iree_hal_topology_edge_set_buffer_import_types(hi, 0xFF);
   hi = iree_hal_topology_edge_set_buffer_export_types(hi, 0xFF);
 
   // Verify all fields retained their values.
-  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_types(hi), 0xFF);
-  EXPECT_EQ(iree_hal_topology_edge_semaphore_export_types(hi), 0xFF);
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(hi),
+            0xFFFF);
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_export_timepoint_types(hi),
+            0xFFFF);
   EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(hi), 0xFF);
   EXPECT_EQ(iree_hal_topology_edge_buffer_export_types(hi), 0xFF);
 }
@@ -112,14 +236,15 @@ TEST(TopologyEdge, SchedulingWordBitfieldIndependence) {
 TEST(TopologyEdge, InteropWordBitfieldIndependence) {
   iree_hal_topology_edge_interop_word_t hi = 0;
 
-  // Set semaphore import types.
-  hi = iree_hal_topology_edge_set_semaphore_import_types(
-      hi, IREE_HAL_TOPOLOGY_HANDLE_TYPE_OPAQUE_FD |
-              IREE_HAL_TOPOLOGY_HANDLE_TYPE_RDMA_MR);
-  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_types(hi),
-            IREE_HAL_TOPOLOGY_HANDLE_TYPE_OPAQUE_FD |
-                IREE_HAL_TOPOLOGY_HANDLE_TYPE_RDMA_MR);
-  EXPECT_EQ(iree_hal_topology_edge_semaphore_export_types(hi), 0);
+  // Set semaphore import timepoint types.
+  hi = iree_hal_topology_edge_set_semaphore_import_timepoint_types(
+      hi, IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT |
+              IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(hi),
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT |
+                IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_export_timepoint_types(hi),
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_NONE);
   EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(hi), 0);
 
   // Set buffer export types and verify semaphore import unchanged.
@@ -127,9 +252,9 @@ TEST(TopologyEdge, InteropWordBitfieldIndependence) {
       hi, IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF);
   EXPECT_EQ(iree_hal_topology_edge_buffer_export_types(hi),
             IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF);
-  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_types(hi),
-            IREE_HAL_TOPOLOGY_HANDLE_TYPE_OPAQUE_FD |
-                IREE_HAL_TOPOLOGY_HANDLE_TYPE_RDMA_MR);
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(hi),
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT |
+                IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
 }
 
 //===----------------------------------------------------------------------===//
@@ -179,26 +304,27 @@ TEST(TopologyEdge, CreateSelf) {
   EXPECT_EQ(iree_hal_topology_edge_link_class(edge.lo),
             IREE_HAL_TOPOLOGY_LINK_CLASS_SAME_DIE);
 
-  // Self-edges should have NATIVE handle types.
-  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_types(edge.hi),
-            IREE_HAL_TOPOLOGY_HANDLE_TYPE_NATIVE);
-  EXPECT_EQ(iree_hal_topology_edge_semaphore_export_types(edge.hi),
-            IREE_HAL_TOPOLOGY_HANDLE_TYPE_NATIVE);
+  // Self-edges require no external semaphore handles. Native synchronization is
+  // represented by the scheduling word.
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(edge.hi),
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_NONE);
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_export_timepoint_types(edge.hi),
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_NONE);
   EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(edge.hi),
             IREE_HAL_TOPOLOGY_HANDLE_TYPE_NATIVE);
   EXPECT_EQ(iree_hal_topology_edge_buffer_export_types(edge.hi),
             IREE_HAL_TOPOLOGY_HANDLE_TYPE_NATIVE);
 }
 
-// Tests creation of a cross-driver edge.
-TEST(TopologyEdge, CreateCrossDriver) {
-  iree_hal_topology_edge_t edge = iree_hal_topology_edge_make_cross_driver();
+// Tests creation of a conservative host-staged edge.
+TEST(TopologyEdge, CreateHostStaged) {
+  iree_hal_topology_edge_t edge = iree_hal_topology_edge_make_host_staged();
 
-  // Cross-driver edges use IMPORT for semaphores, COPY for buffers.
+  // Host-staged edges use host-mediated COPY for semaphores and buffers.
   EXPECT_EQ(iree_hal_topology_edge_wait_mode(edge.lo),
-            IREE_HAL_TOPOLOGY_INTEROP_MODE_IMPORT);
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
   EXPECT_EQ(iree_hal_topology_edge_signal_mode(edge.lo),
-            IREE_HAL_TOPOLOGY_INTEROP_MODE_IMPORT);
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
   EXPECT_EQ(iree_hal_topology_edge_buffer_read_mode_noncoherent(edge.lo),
             IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
   EXPECT_EQ(iree_hal_topology_edge_buffer_write_mode_noncoherent(edge.lo),
@@ -208,98 +334,198 @@ TEST(TopologyEdge, CreateCrossDriver) {
   EXPECT_EQ(iree_hal_topology_edge_buffer_write_mode_coherent(edge.lo),
             IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
 
-  // Cross-driver has moderate costs.
-  EXPECT_EQ(iree_hal_topology_edge_wait_cost(edge.lo), 5);
-  EXPECT_EQ(iree_hal_topology_edge_signal_cost(edge.lo), 5);
-  EXPECT_EQ(iree_hal_topology_edge_copy_cost(edge.lo), 10);
-  EXPECT_EQ(iree_hal_topology_edge_latency_class(edge.lo), 8);
-  EXPECT_EQ(iree_hal_topology_edge_numa_distance(edge.lo), 2);
+  // Host-staged paths have conservative costs.
+  EXPECT_EQ(iree_hal_topology_edge_wait_cost(edge.lo), 10);
+  EXPECT_EQ(iree_hal_topology_edge_signal_cost(edge.lo), 10);
+  EXPECT_EQ(iree_hal_topology_edge_copy_cost(edge.lo), 13);
+  EXPECT_EQ(iree_hal_topology_edge_latency_class(edge.lo), 11);
+  EXPECT_EQ(iree_hal_topology_edge_numa_distance(edge.lo), 0);
 
-  // No special capabilities for cross-driver.
   EXPECT_EQ(iree_hal_topology_edge_capability_flags(edge.lo),
             IREE_HAL_TOPOLOGY_CAPABILITY_NONE);
-
-  // Cross-driver uses PCIe link class by default.
   EXPECT_EQ(iree_hal_topology_edge_link_class(edge.lo),
-            IREE_HAL_TOPOLOGY_LINK_CLASS_PCIE_SAME_ROOT);
+            IREE_HAL_TOPOLOGY_LINK_CLASS_HOST_STAGED);
 
-  // No handle types set by default for cross-driver.
-  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_types(edge.hi), 0);
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(edge.hi),
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_NONE);
   EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(edge.hi), 0);
 }
 
 //===----------------------------------------------------------------------===//
-// Aliased device detection tests
+// Device spec projection tests
 //===----------------------------------------------------------------------===//
 
-// Tests that from_capabilities detects aliased same-driver devices and returns
-// a self-edge when driver_device_handle matches.
-TEST(TopologyEdge, AliasedDeviceDetection) {
-  iree_hal_device_capabilities_t caps = {0};
-  caps.flags = IREE_HAL_DEVICE_CAPABILITY_TIMELINE_SEMAPHORES;
-  caps.driver_device_handle = 0x12345678;
+TEST(TopologyEdge, SameBackendSpecDoesNotImplyNativeSynchronization) {
+  iree_hal_device_spec_t* spec_a = CreateTestDeviceSpec(
+      "hip", "hsa", 0, TEST_DEVICE_SPEC_FLAG_NONE, 0, MakeTestUuid(0));
+  iree_hal_device_spec_t* spec_b = CreateTestDeviceSpec(
+      "hip", "hsa", 1, TEST_DEVICE_SPEC_FLAG_NONE, 0, MakeTestUuid(0));
 
-  // Same driver, same handle → should return self-edge.
-  iree_hal_topology_edge_t edge = iree_hal_topology_edge_from_capabilities(
-      &caps, &caps, IREE_SV("hip"), IREE_SV("hip"));
+  iree_hal_topology_edge_t edge =
+      iree_hal_topology_edge_from_device_specs(spec_a, spec_b);
+  EXPECT_EQ(iree_hal_topology_edge_wait_mode(edge.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
+  EXPECT_EQ(iree_hal_topology_edge_signal_mode(edge.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
+  EXPECT_EQ(iree_hal_topology_edge_buffer_read_mode_noncoherent(edge.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
+  EXPECT_EQ(iree_hal_topology_edge_buffer_write_mode_coherent(edge.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
+  iree_hal_topology_capability_t capabilities =
+      iree_hal_topology_edge_capability_flags(edge.lo);
+  EXPECT_FALSE(capabilities & IREE_HAL_TOPOLOGY_CAPABILITY_SAME_RUNTIME_DOMAIN);
+  EXPECT_FALSE(capabilities & IREE_HAL_TOPOLOGY_CAPABILITY_TIMELINE_SEMAPHORE);
+  EXPECT_FALSE(capabilities & IREE_HAL_TOPOLOGY_CAPABILITY_P2P_COPY);
+  EXPECT_FALSE(capabilities & IREE_HAL_TOPOLOGY_CAPABILITY_PEER_COHERENT);
+  EXPECT_FALSE(capabilities & IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_SYSTEM);
+  EXPECT_EQ(iree_hal_topology_edge_link_class(edge.lo),
+            IREE_HAL_TOPOLOGY_LINK_CLASS_HOST_STAGED);
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(edge.hi),
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_NONE);
+  EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(edge.hi),
+            IREE_HAL_TOPOLOGY_HANDLE_TYPE_NONE);
 
+  iree_hal_device_spec_release(spec_b);
+  iree_hal_device_spec_release(spec_a);
+}
+
+TEST(TopologyEdge, RefineSameRuntimeDomainUsesNativeSynchronizationOnly) {
+  iree_hal_topology_edge_t edge = iree_hal_topology_edge_make_host_staged();
+
+  iree_hal_topology_edge_refine_same_runtime_domain(&edge);
   EXPECT_EQ(iree_hal_topology_edge_wait_mode(edge.lo),
             IREE_HAL_TOPOLOGY_INTEROP_MODE_NATIVE);
   EXPECT_EQ(iree_hal_topology_edge_signal_mode(edge.lo),
             IREE_HAL_TOPOLOGY_INTEROP_MODE_NATIVE);
   EXPECT_EQ(iree_hal_topology_edge_buffer_read_mode_noncoherent(edge.lo),
-            IREE_HAL_TOPOLOGY_INTEROP_MODE_NATIVE);
-  EXPECT_EQ(iree_hal_topology_edge_copy_cost(edge.lo), 0);
-  EXPECT_EQ(iree_hal_topology_edge_link_class(edge.lo),
-            IREE_HAL_TOPOLOGY_LINK_CLASS_SAME_DIE);
-}
-
-// Tests that different handles on the same driver are NOT treated as aliased.
-TEST(TopologyEdge, DifferentHandlesNotAliased) {
-  iree_hal_device_capabilities_t caps_a = {0};
-  caps_a.driver_device_handle = 0x11111111;
-
-  iree_hal_device_capabilities_t caps_b = {0};
-  caps_b.driver_device_handle = 0x22222222;
-
-  iree_hal_topology_edge_t edge = iree_hal_topology_edge_from_capabilities(
-      &caps_a, &caps_b, IREE_SV("hip"), IREE_SV("hip"));
-
-  // Different handles → should NOT be a self-edge.
-  // Same driver without P2P or UUID match gives cross-driver-like costs.
-  EXPECT_NE(iree_hal_topology_edge_copy_cost(edge.lo), 0);
-}
-
-// Tests that zero handle (sentinel for "not set") skips aliasing detection.
-TEST(TopologyEdge, ZeroHandleNoAliasing) {
-  iree_hal_device_capabilities_t caps = {0};
-  // driver_device_handle is 0 (default from zero-init).
-
-  iree_hal_topology_edge_t edge = iree_hal_topology_edge_from_capabilities(
-      &caps, &caps, IREE_SV("hip"), IREE_SV("hip"));
-
-  // Zero handle → no aliasing detection.
-  // Same driver but no UUID or P2P → non-zero copy cost.
-  EXPECT_NE(iree_hal_topology_edge_copy_cost(edge.lo), 0);
-}
-
-TEST(TopologyEdge, SharedVirtualAddressDoesNotImplyUnifiedMemory) {
-  iree_hal_device_capabilities_t caps = {0};
-  caps.flags = IREE_HAL_DEVICE_CAPABILITY_SHARED_VIRTUAL_ADDRESS;
-
-  iree_hal_topology_edge_t edge = iree_hal_topology_edge_from_capabilities(
-      &caps, &caps, IREE_SV("amdgpu"), IREE_SV("amdgpu"));
-  iree_hal_topology_capability_t topology_caps =
-      iree_hal_topology_edge_capability_flags(edge.lo);
-
-  EXPECT_TRUE(topology_caps &
-              IREE_HAL_TOPOLOGY_CAPABILITY_SHARED_VIRTUAL_ADDRESS);
-  EXPECT_FALSE(topology_caps & IREE_HAL_TOPOLOGY_CAPABILITY_UNIFIED_MEMORY);
-  EXPECT_FALSE(topology_caps & IREE_HAL_TOPOLOGY_CAPABILITY_PEER_COHERENT);
-  EXPECT_EQ(iree_hal_topology_edge_buffer_read_mode_coherent(edge.lo),
             IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
   EXPECT_EQ(iree_hal_topology_edge_buffer_write_mode_coherent(edge.lo),
             IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
+  iree_hal_topology_capability_t capabilities =
+      iree_hal_topology_edge_capability_flags(edge.lo);
+  EXPECT_TRUE(capabilities & IREE_HAL_TOPOLOGY_CAPABILITY_SAME_RUNTIME_DOMAIN);
+  EXPECT_TRUE(capabilities & IREE_HAL_TOPOLOGY_CAPABILITY_TIMELINE_SEMAPHORE);
+  EXPECT_FALSE(capabilities & IREE_HAL_TOPOLOGY_CAPABILITY_P2P_COPY);
+  EXPECT_FALSE(capabilities & IREE_HAL_TOPOLOGY_CAPABILITY_PEER_COHERENT);
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(edge.hi),
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_NONE);
+  EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(edge.hi),
+            IREE_HAL_TOPOLOGY_HANDLE_TYPE_NONE);
+}
+
+TEST(TopologyEdge, UnknownNumaDoesNotProjectDistanceFromNodeZero) {
+  iree_hal_device_spec_t* spec_a = CreateTestDeviceSpec(
+      "hip", "hsa", 0, TEST_DEVICE_SPEC_FLAG_NUMA_NODE, 1, MakeTestUuid(0));
+  iree_hal_device_spec_t* spec_b = CreateTestDeviceSpec(
+      "vulkan", "vulkan", 1, TEST_DEVICE_SPEC_FLAG_NONE, 0, MakeTestUuid(0));
+
+  iree_hal_topology_edge_t edge =
+      iree_hal_topology_edge_from_device_specs(spec_a, spec_b);
+  EXPECT_EQ(iree_hal_topology_edge_numa_distance(edge.lo), 0);
+
+  iree_hal_device_spec_release(spec_b);
+  iree_hal_device_spec_release(spec_a);
+}
+
+TEST(TopologyEdge, ExternalBufferHandlesUseImportModes) {
+  TestDeviceSpecFlags flags = TEST_DEVICE_SPEC_FLAG_EXTERNAL_BUFFER_HANDLES;
+  iree_hal_device_spec_t* spec_a =
+      CreateTestDeviceSpec("vulkan", "vulkan", 0, flags, 0, MakeTestUuid(0));
+  iree_hal_device_spec_t* spec_b =
+      CreateTestDeviceSpec("hip", "hsa", 1, flags, 0, MakeTestUuid(0));
+
+  iree_hal_topology_edge_t edge =
+      iree_hal_topology_edge_from_device_specs(spec_a, spec_b);
+  EXPECT_EQ(iree_hal_topology_edge_wait_mode(edge.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
+  EXPECT_EQ(iree_hal_topology_edge_buffer_read_mode_noncoherent(edge.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_IMPORT);
+  EXPECT_EQ(iree_hal_topology_edge_buffer_write_mode_coherent(edge.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_IMPORT);
+  EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(edge.hi),
+            IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF);
+  EXPECT_EQ(iree_hal_topology_edge_buffer_export_types(edge.hi),
+            IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF);
+  EXPECT_EQ(iree_hal_topology_edge_link_class(edge.lo),
+            IREE_HAL_TOPOLOGY_LINK_CLASS_OTHER);
+  EXPECT_FALSE(iree_hal_topology_edge_capability_flags(edge.lo) &
+               IREE_HAL_TOPOLOGY_CAPABILITY_P2P_COPY);
+
+  iree_hal_device_spec_release(spec_b);
+  iree_hal_device_spec_release(spec_a);
+}
+
+TEST(TopologyEdge, ExternalTimepointsUseImportModes) {
+  TestDeviceSpecFlags flags = TEST_DEVICE_SPEC_FLAG_EXTERNAL_TIMEPOINT_HANDLES;
+  iree_hal_device_spec_t* spec_a = CreateTestDeviceSpec(
+      "producer", "producer", 0, flags, 0, MakeTestUuid(0));
+  iree_hal_device_spec_t* spec_b = CreateTestDeviceSpec(
+      "consumer", "consumer", 1, flags, 0, MakeTestUuid(0));
+
+  iree_hal_topology_edge_t edge =
+      iree_hal_topology_edge_from_device_specs(spec_a, spec_b);
+  EXPECT_EQ(iree_hal_topology_edge_wait_mode(edge.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_IMPORT);
+  EXPECT_EQ(iree_hal_topology_edge_signal_mode(edge.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_IMPORT);
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(edge.hi),
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_export_timepoint_types(edge.hi),
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
+  EXPECT_TRUE(iree_hal_topology_edge_capability_flags(edge.lo) &
+              IREE_HAL_TOPOLOGY_CAPABILITY_TIMELINE_SEMAPHORE);
+  EXPECT_LT(iree_hal_topology_edge_wait_cost(edge.lo), 10);
+
+  iree_hal_device_spec_release(spec_b);
+  iree_hal_device_spec_release(spec_a);
+}
+
+TEST(TopologyEdge, ExternalTimepointExportWithoutImportStaysHostStaged) {
+  iree_hal_device_spec_t* spec_a = CreateTestDeviceSpec(
+      "hip", "hsa", 0, TEST_DEVICE_SPEC_FLAG_EXTERNAL_TIMEPOINT_HANDLES, 0,
+      MakeTestUuid(0));
+  iree_hal_device_spec_t* spec_b = CreateTestDeviceSpec(
+      "vulkan", "vulkan", 1, TEST_DEVICE_SPEC_FLAG_NONE, 0, MakeTestUuid(0));
+
+  iree_hal_topology_edge_t edge =
+      iree_hal_topology_edge_from_device_specs(spec_a, spec_b);
+  EXPECT_EQ(iree_hal_topology_edge_wait_mode(edge.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
+  EXPECT_EQ(iree_hal_topology_edge_signal_mode(edge.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(edge.hi),
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_NONE);
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_export_timepoint_types(edge.hi),
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_NONE);
+  EXPECT_FALSE(iree_hal_topology_edge_capability_flags(edge.lo) &
+               IREE_HAL_TOPOLOGY_CAPABILITY_TIMELINE_SEMAPHORE);
+
+  iree_hal_device_spec_release(spec_b);
+  iree_hal_device_spec_release(spec_a);
+}
+
+TEST(TopologyEdge, PhysicalUuidMatchingIsPlacementNotAliasing) {
+  TestDeviceSpecFlags flags = TEST_DEVICE_SPEC_FLAG_UUID;
+  iree_hal_uuid_t uuid = MakeTestUuid(42);
+  iree_hal_device_spec_t* spec_a =
+      CreateTestDeviceSpec("vulkan", "vulkan", 0, flags, 0, uuid);
+  iree_hal_device_spec_t* spec_b =
+      CreateTestDeviceSpec("hip", "hsa", 1, flags, 0, uuid);
+
+  iree_hal_topology_edge_t edge =
+      iree_hal_topology_edge_from_device_specs(spec_a, spec_b);
+  EXPECT_EQ(iree_hal_topology_edge_link_class(edge.lo),
+            IREE_HAL_TOPOLOGY_LINK_CLASS_SAME_DIE);
+  EXPECT_EQ(iree_hal_topology_edge_wait_mode(edge.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
+  EXPECT_EQ(iree_hal_topology_edge_buffer_read_mode_noncoherent(edge.lo),
+            IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
+  EXPECT_NE(iree_hal_topology_edge_copy_cost(edge.lo), 0);
+  EXPECT_EQ(iree_hal_topology_edge_capability_flags(edge.lo),
+            IREE_HAL_TOPOLOGY_CAPABILITY_NONE);
+
+  iree_hal_device_spec_release(spec_b);
+  iree_hal_device_spec_release(spec_a);
 }
 
 //===----------------------------------------------------------------------===//
@@ -364,8 +590,8 @@ TEST(TopologyEdge, Formatting) {
   // Should contain mode information.
   EXPECT_NE(std::strstr(buffer, "NATIVE"), nullptr);
 
-  // Test cross-driver edge formatting.
-  edge = iree_hal_topology_edge_make_cross_driver();
+  // Test host-staged edge formatting.
+  edge = iree_hal_topology_edge_make_host_staged();
   edge.lo = iree_hal_topology_edge_set_wait_mode(
       edge.lo, IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
   edge.lo = iree_hal_topology_edge_set_copy_cost(edge.lo, 13);
@@ -391,7 +617,7 @@ TEST(Topology, MatrixFormatting) {
     for (uint32_t j = 0; j < 3; ++j) {
       if (i != j) {
         iree_hal_topology_edge_t edge =
-            iree_hal_topology_edge_make_cross_driver();
+            iree_hal_topology_edge_make_host_staged();
         edge.lo = iree_hal_topology_edge_set_link_class(
             edge.lo, IREE_HAL_TOPOLOGY_LINK_CLASS_NVLINK_IF);
         IREE_ASSERT_OK(
@@ -400,16 +626,18 @@ TEST(Topology, MatrixFormatting) {
     }
   }
 
-  iree_hal_topology_t topology;
-  IREE_ASSERT_OK(iree_hal_topology_builder_finalize(&builder, &topology));
+  iree_hal_topology_t* topology = NULL;
+  IREE_ASSERT_OK(iree_hal_topology_builder_finalize(
+      &builder, iree_allocator_system(), &topology));
 
   // Dump the matrix for debugging.
   iree_string_builder_t sb;
   iree_string_builder_initialize(iree_allocator_system(), &sb);
-  IREE_ASSERT_OK(iree_hal_topology_dump_matrix(&topology, &sb));
+  IREE_ASSERT_OK(iree_hal_topology_dump_matrix(topology, &sb));
   printf("%.*s\n", (int)iree_string_builder_size(&sb),
          iree_string_builder_buffer(&sb));
   iree_string_builder_deinitialize(&sb);
+  iree_hal_topology_destroy(topology, iree_allocator_system());
 }
 
 //===----------------------------------------------------------------------===//
@@ -436,32 +664,33 @@ TEST(TopologyEdge, NewHandleTypes) {
   EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(hi), 0xFF);
 }
 
-// Tests RDMA-specific handle types in a realistic configuration.
-TEST(TopologyEdge, RdmaHandleTypes) {
+// Tests that buffer handle types and semaphore timepoint types are separate
+// fields even when they are used by the same edge.
+TEST(TopologyEdge, BufferHandlesAndTimepointTypesAreIndependent) {
   iree_hal_topology_edge_interop_word_t hi = 0;
 
-  // An RDMA-capable edge would support MR for buffers and SHM for semaphores.
+  // An RDMA-capable edge may support MR for buffers while semaphore interop
+  // uses API-specific timepoint objects.
   hi = iree_hal_topology_edge_set_buffer_import_types(
       hi, IREE_HAL_TOPOLOGY_HANDLE_TYPE_RDMA_MR |
               IREE_HAL_TOPOLOGY_HANDLE_TYPE_SHM);
   hi = iree_hal_topology_edge_set_buffer_export_types(
       hi, IREE_HAL_TOPOLOGY_HANDLE_TYPE_RDMA_MR |
               IREE_HAL_TOPOLOGY_HANDLE_TYPE_SHM);
-  hi = iree_hal_topology_edge_set_semaphore_import_types(
-      hi, IREE_HAL_TOPOLOGY_HANDLE_TYPE_SHM);
-  hi = iree_hal_topology_edge_set_semaphore_export_types(
-      hi, IREE_HAL_TOPOLOGY_HANDLE_TYPE_SHM);
+  hi = iree_hal_topology_edge_set_semaphore_import_timepoint_types(
+      hi, IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
+  hi = iree_hal_topology_edge_set_semaphore_export_timepoint_types(
+      hi, IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
 
-  // Verify RDMA_MR is set for buffers but not semaphores.
+  // Verify RDMA_MR is set for buffers while semaphores retain only the
+  // requested timepoint type.
   EXPECT_TRUE(iree_hal_topology_edge_buffer_import_types(hi) &
               IREE_HAL_TOPOLOGY_HANDLE_TYPE_RDMA_MR);
-  EXPECT_FALSE(iree_hal_topology_edge_semaphore_import_types(hi) &
-               IREE_HAL_TOPOLOGY_HANDLE_TYPE_RDMA_MR);
+  EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(hi),
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
 
-  // Verify SHM is set for both.
+  // Verify SHM is retained as a buffer handle.
   EXPECT_TRUE(iree_hal_topology_edge_buffer_import_types(hi) &
-              IREE_HAL_TOPOLOGY_HANDLE_TYPE_SHM);
-  EXPECT_TRUE(iree_hal_topology_edge_semaphore_import_types(hi) &
               IREE_HAL_TOPOLOGY_HANDLE_TYPE_SHM);
 }
 
@@ -476,7 +705,7 @@ TEST(TopologyInfo, QueryEdgeSameTopology) {
   iree_hal_topology_builder_t builder;
   iree_hal_topology_builder_initialize(&builder, 2);
 
-  iree_hal_topology_edge_t cross = iree_hal_topology_edge_make_cross_driver();
+  iree_hal_topology_edge_t cross = iree_hal_topology_edge_make_host_staged();
   cross.lo = iree_hal_topology_edge_set_copy_cost(cross.lo, 7);
   cross.lo = iree_hal_topology_edge_set_link_class(
       cross.lo, IREE_HAL_TOPOLOGY_LINK_CLASS_NVLINK_IF);
@@ -486,19 +715,20 @@ TEST(TopologyInfo, QueryEdgeSameTopology) {
   IREE_ASSERT_OK(iree_hal_topology_builder_set_edge(&builder, 0, 1, cross));
   IREE_ASSERT_OK(iree_hal_topology_builder_set_edge(&builder, 1, 0, cross));
 
-  iree_hal_topology_t topology;
-  IREE_ASSERT_OK(iree_hal_topology_builder_finalize(&builder, &topology));
+  iree_hal_topology_t* topology = NULL;
+  IREE_ASSERT_OK(iree_hal_topology_builder_finalize(
+      &builder, iree_allocator_system(), &topology));
 
   // Simulate two devices pointing at the same topology.
   iree_hal_device_topology_info_t info0 = {0};
-  info0.self_edge = topology.edges[0].lo;
+  info0.self_edge = iree_hal_topology_query_edge(topology, 0, 0).lo;
   info0.topology_index = 0;
-  info0.topology = &topology;
+  info0.topology = topology;
 
   iree_hal_device_topology_info_t info1 = {0};
-  info1.self_edge = topology.edges[3].lo;
+  info1.self_edge = iree_hal_topology_query_edge(topology, 1, 1).lo;
   info1.topology_index = 1;
-  info1.topology = &topology;
+  info1.topology = topology;
 
   // Query the edge from device 0 to device 1.
   iree_hal_topology_edge_t queried =
@@ -515,29 +745,29 @@ TEST(TopologyInfo, QueryEdgeSameTopology) {
   EXPECT_EQ(iree_hal_topology_edge_wait_mode(self.lo),
             IREE_HAL_TOPOLOGY_INTEROP_MODE_NATIVE);
   EXPECT_EQ(iree_hal_topology_edge_copy_cost(self.lo), 0);
+  iree_hal_topology_destroy(topology, iree_allocator_system());
 }
 
 // Tests that iree_hal_device_topology_query_edge returns empty when devices
 // are in different topologies or not in any topology.
 TEST(TopologyInfo, QueryEdgeDifferentTopologies) {
-  iree_hal_topology_t topology_a = {/*.device_count=*/1};
-  topology_a.edges[0] = iree_hal_topology_edge_make_self();
-
-  iree_hal_topology_t topology_b = {/*.device_count=*/1};
-  topology_b.edges[0] = iree_hal_topology_edge_make_self();
+  iree_hal_topology_t* topology_a = CreateSingleDeviceTopology();
+  iree_hal_topology_t* topology_b = CreateSingleDeviceTopology();
 
   iree_hal_device_topology_info_t info_a = {0};
   info_a.topology_index = 0;
-  info_a.topology = &topology_a;
+  info_a.topology = topology_a;
 
   iree_hal_device_topology_info_t info_b = {0};
   info_b.topology_index = 0;
-  info_b.topology = &topology_b;
+  info_b.topology = topology_b;
 
   // Different topologies: should return empty edge.
   iree_hal_topology_edge_t edge =
       iree_hal_device_topology_query_edge(&info_a, &info_b);
   EXPECT_TRUE(iree_hal_topology_edge_is_empty(edge));
+  iree_hal_topology_destroy(topology_b, iree_allocator_system());
+  iree_hal_topology_destroy(topology_a, iree_allocator_system());
 }
 
 // Tests that iree_hal_device_topology_query_edge returns empty when the
@@ -546,10 +776,9 @@ TEST(TopologyInfo, QueryEdgeStandaloneDevice) {
   iree_hal_device_topology_info_t info_standalone = {0};
   info_standalone.topology = NULL;
 
-  iree_hal_topology_t topology = {/*.device_count=*/1};
-  topology.edges[0] = iree_hal_topology_edge_make_self();
+  iree_hal_topology_t* topology = CreateSingleDeviceTopology();
   iree_hal_device_topology_info_t info_grouped = {0};
-  info_grouped.topology = &topology;
+  info_grouped.topology = topology;
 
   // NULL topology: should return empty edge.
   iree_hal_topology_edge_t edge =
@@ -561,6 +790,7 @@ TEST(TopologyInfo, QueryEdgeStandaloneDevice) {
   edge =
       iree_hal_device_topology_query_edge(&info_standalone, &info_standalone2);
   EXPECT_TRUE(iree_hal_topology_edge_is_empty(edge));
+  iree_hal_topology_destroy(topology, iree_allocator_system());
 }
 
 }  // namespace

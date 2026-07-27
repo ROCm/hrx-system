@@ -1,0 +1,490 @@
+// RUN: roundtrip
+
+kernel.def @empty_kernel() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%buffer: buffer) {
+  kernel.return
+}
+
+// ----
+kernel.def @empty_kernel() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%buffer: buffer) {
+  kernel.return
+}
+
+// ====
+
+kernel.def @clustered_kernel() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c4, %c4, %c1) workgroup_size(%c64, %c1, %c1) cluster_size(%c1, %c2, %c1) : index
+} launch() {
+  %cluster_x = kernel.cluster.id<x> : index
+  %cluster_y = kernel.cluster.id<y> : index
+  %cluster_z = kernel.cluster.id<z> : index
+  %local_x = kernel.cluster.workgroup.id<x> : index
+  %local_y = kernel.cluster.workgroup.id<y> : index
+  %local_z = kernel.cluster.workgroup.id<z> : index
+  %local_flat = kernel.cluster.workgroup.flat_id : index
+  %cluster_size_x = kernel.cluster.size<x> : index
+  %cluster_size_y = kernel.cluster.size<y> : index
+  %cluster_size_z = kernel.cluster.size<z> : index
+  %cluster_count_x = kernel.cluster.count<x> : index
+  %cluster_count_y = kernel.cluster.count<y> : index
+  %cluster_count_z = kernel.cluster.count<z> : index
+  kernel.return
+}
+
+// ----
+kernel.def @clustered_kernel() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c4, %c4, %c1) workgroup_size(%c64, %c1, %c1) cluster_size(%c1, %c2, %c1) : index
+} launch() {
+  %cluster_x = kernel.cluster.id<x> : index
+  %cluster_y = kernel.cluster.id<y> : index
+  %cluster_z = kernel.cluster.id<z> : index
+  %local_x = kernel.cluster.workgroup.id<x> : index
+  %local_y = kernel.cluster.workgroup.id<y> : index
+  %local_z = kernel.cluster.workgroup.id<z> : index
+  %local_flat = kernel.cluster.workgroup.flat_id : index
+  %cluster_size_x = kernel.cluster.size<x> : index
+  %cluster_size_y = kernel.cluster.size<y> : index
+  %cluster_size_z = kernel.cluster.size<z> : index
+  %cluster_count_x = kernel.cluster.count<x> : index
+  %cluster_count_y = kernel.cluster.count<y> : index
+  %cluster_count_z = kernel.cluster.count<z> : index
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def target(@test_target) export("entry") linkage(dso_local) @entry() {
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c16, %c4, %c1) : index
+} launch(%buffer: buffer) {
+  kernel.return
+}
+
+// ----
+test.target<low_core> @test_target
+
+kernel.def target(@test_target) export("entry") linkage(dso_local) @entry() {
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c16, %c4, %c1) : index
+} launch(%buffer: buffer) {
+  kernel.return
+}
+
+// ====
+
+kernel.def retain @retained_kernel() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def @workgroup_barrier() {
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def @subgroup_barrier() {
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @workitem_coordinates() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %x = kernel.workitem.id<x> : index
+  %y = kernel.workitem.id<y> : index
+  %z = kernel.workitem.id<z> : index
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @conditional_exit() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%done: i1) {
+  kernel.exit %done : i1
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @conditional_exit_with_body() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%done: i1) {
+  kernel.exit %done : i1 {
+  }
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @runtime_asserts() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%ok: i1) {
+  kernel.assert %ok : i1
+  kernel.assert %ok "finite input required" : i1
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @workgroup_coordinates() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %x = kernel.workgroup.id<x> : index
+  %y = kernel.workgroup.id<y> : index
+  %z = kernel.workgroup.id<z> : index
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @launch_queries() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %wg_size_x = kernel.workgroup.size<x> : index
+  %wg_size_y = kernel.workgroup.size<y> : index
+  %wg_size_z = kernel.workgroup.size<z> : index
+  %wg_count_x = kernel.workgroup.count<x> : index
+  %wg_count_y = kernel.workgroup.count<y> : index
+  %wg_count_z = kernel.workgroup.count<z> : index
+  %dispatch_x = kernel.workitem.dispatch.id<x> : index
+  %dispatch_y = kernel.workitem.dispatch.id<y> : index
+  %dispatch_z = kernel.workitem.dispatch.id<z> : index
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @subgroup_queries() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %id = kernel.subgroup.id : index
+  %count = kernel.subgroup.count : index
+  %size = kernel.subgroup.size : index
+  %lane = kernel.subgroup.lane.id : index
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @subgroup_collectives() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%value: f32, %vector: vector<4xf32>, %predicate: i1, %lane: i32, %offset: i32, %width: i32) {
+  %shuffle, %valid = kernel.subgroup.shuffle<xor> %value, %offset, %width : f32, i32, i32
+  %shuffle_vector, %valid_vector = kernel.subgroup.shuffle<down> %vector, %offset, %width : vector<4xf32>, i32, i32
+  %broadcast = kernel.subgroup.broadcast %value from %lane : f32, i32
+  %first = kernel.subgroup.broadcast.first %value : f32
+  %sum = kernel.subgroup.reduce<addf> %value : f32
+  %clustered_sum = kernel.subgroup.reduce<addf> %value {cluster_size = 4, cluster_stride = 2} : f32
+  %prefix = kernel.subgroup.scan<addf> %value {direction = forward, mode = inclusive} : f32
+  %reverse_prefix = kernel.subgroup.scan<addf> %value {cluster_size = 4, direction = reverse, mode = exclusive} : f32
+  %any = kernel.subgroup.vote.any %predicate : i1
+  %all = kernel.subgroup.vote.all %predicate : i1
+  %ballot = kernel.subgroup.vote.ballot %predicate : i1 -> i64
+  %active = kernel.subgroup.active.mask : i64
+  %match_any = kernel.subgroup.match.any %lane : i32 -> i64
+  %match_mask, %match_all = kernel.subgroup.match.all %lane : i32 -> i64, i1
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @workgroup_collectives() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%value: f32, %predicate: i1) {
+  %sum = kernel.workgroup.reduce<addf> %value : f32
+  %prefix = kernel.workgroup.scan<addf> %value {direction = forward, mode = inclusive} : f32
+  %any = kernel.workgroup.vote.any %predicate : i1
+  %all = kernel.workgroup.vote.all %predicate : i1
+  %count = kernel.workgroup.vote.count %predicate : i1 -> i32
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def @async_copy_global_to_workgroup(%source_buffer: buffer, %byte_offset: offset) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %global = buffer.assume.memory_space<global> %source_buffer : buffer
+  %source = buffer.view %global[%byte_offset] : buffer -> view<16xi8, %layout>
+  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<16xi8, %layout>
+  %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, %layout> to view<16xi8, %layout> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def @async_copy_masked(%source_buffer: buffer, %byte_offset: offset, %in_bounds: i1) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %global = buffer.assume.memory_space<global> %source_buffer : buffer
+  %source = buffer.view %global[%byte_offset] : buffer -> view<16xi8, %layout>
+  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<16xi8, %layout>
+  %copy = kernel.async.copy.mask %source to %dest, %in_bounds {cache_scope = cu, cache_temporal = non_temporal, direction = global_to_workgroup} : view<16xi8, %layout> to view<16xi8, %layout>, i1 -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def @async_copy_workgroup_to_global(%dest_buffer: buffer, %byte_offset: offset) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %source = buffer.view %scratch[%zero] : buffer -> view<16xi8, %layout>
+  %global = buffer.assume.memory_space<global> %dest_buffer : buffer
+  %dest = buffer.view %global[%byte_offset] : buffer -> view<16xi8, %layout>
+  %copy = kernel.async.copy %source to %dest {cache_scope = system, cache_temporal = writeback, direction = workgroup_to_global} : view<16xi8, %layout> to view<16xi8, %layout> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def @async_copy_reinterpreted_bytes(%source_buffer: buffer, %byte_offset: offset) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %global = buffer.assume.memory_space<global> %source_buffer : buffer
+  %source = buffer.view %global[%byte_offset] : buffer -> view<16xi8, %layout>
+  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<4xi32, %layout>
+  %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, %layout> to view<4xi32, %layout> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def @async_subgroup_gather(%source_buffer: buffer, %byte_offset: offset) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %global = buffer.assume.memory_space<global> %source_buffer : buffer
+  %source = buffer.view %global[%byte_offset] : buffer -> view<4xi8, %layout>
+  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<64x4xi8, %layout>
+  %copy = kernel.async.gather %source to %dest {cache_scope = cu, cache_temporal = regular} : view<4xi8, %layout> to view<64x4xi8, %layout> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def @async_subgroup_gather_padded_lane_slot(%source_buffer: buffer, %byte_offset: offset) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %global = buffer.assume.memory_space<global> %source_buffer : buffer
+  %source = buffer.view %global[%byte_offset] : buffer -> view<1xi8, %layout>
+  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<64x4xi8, %layout>
+  %copy = kernel.async.gather %source to %dest {cache_scope = cu, cache_temporal = regular} : view<1xi8, %layout> to view<64x4xi8, %layout> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def @async_subgroup_gather_gfx950_padded_lane_slot(%source_buffer: buffer, %byte_offset: offset) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 4096 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %global = buffer.assume.memory_space<global> %source_buffer : buffer
+  %source = buffer.view %global[%byte_offset] : buffer -> view<12xi8, %layout>
+  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<64x16xi8, %layout>
+  %copy = kernel.async.gather %source to %dest {cache_scope = cu, cache_temporal = regular} : view<12xi8, %layout> to view<64x16xi8, %layout> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def @async_cluster_gather_widths(%source_buffer: buffer, %byte_offset: offset) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %cluster_mask = scalar.constant 15 : i32
+  %global = buffer.assume.memory_space<global> %source_buffer : buffer
+  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %source_b8 = buffer.view %global[%byte_offset] : buffer -> view<1xi8, %layout>
+  %dest_b8 = buffer.view %scratch[%zero] : buffer -> view<1xi8, %layout>
+  %copy_b8 = kernel.async.cluster.gather %source_b8 to %dest_b8 using %cluster_mask {cache_scope = cu, cache_temporal = regular} : view<1xi8, %layout> to view<1xi8, %layout>, i32 -> kernel.async.token
+  %source_b32 = buffer.view %global[%byte_offset] : buffer -> view<4xi8, %layout>
+  %dest_b32 = buffer.view %scratch[%zero] : buffer -> view<4xi8, %layout>
+  %copy_b32 = kernel.async.cluster.gather %source_b32 to %dest_b32 using %cluster_mask {cache_scope = se, cache_temporal = high_temporal} : view<4xi8, %layout> to view<4xi8, %layout>, i32 -> kernel.async.token
+  %source_b64 = buffer.view %global[%byte_offset] : buffer -> view<8xi8, %layout>
+  %dest_b64 = buffer.view %scratch[%zero] : buffer -> view<8xi8, %layout>
+  %copy_b64 = kernel.async.cluster.gather %source_b64 to %dest_b64 using %cluster_mask {cache_scope = device, cache_temporal = non_temporal} : view<8xi8, %layout> to view<8xi8, %layout>, i32 -> kernel.async.token
+  %source_b128 = buffer.view %global[%byte_offset] : buffer -> view<16xi8, %layout>
+  %dest_b128 = buffer.view %scratch[%zero] : buffer -> view<16xi8, %layout>
+  %copy_b128 = kernel.async.cluster.gather %source_b128 to %dest_b128 using %cluster_mask {cache_scope = system, cache_temporal = bypass} : view<16xi8, %layout> to view<16xi8, %layout>, i32 -> kernel.async.token
+  %group = kernel.async.group %copy_b8, %copy_b32, %copy_b64, %copy_b128 : kernel.async.token, kernel.async.token, kernel.async.token, kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def @async_cluster_gather_masked(%source_buffer: buffer, %byte_offset: offset, %in_bounds: i1) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %cluster_mask = scalar.constant 3 : i32
+  %global = buffer.assume.memory_space<global> %source_buffer : buffer
+  %source = buffer.view %global[%byte_offset] : buffer -> view<4xi8, %layout>
+  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<4xi8, %layout>
+  %copy = kernel.async.cluster.gather.mask %source to %dest using %cluster_mask, %in_bounds {cache_scope = cu, cache_temporal = regular} : view<4xi8, %layout> to view<4xi8, %layout>, i32, i1 -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def @async_tensor_load_to_lds(%source_buffer: buffer, %byte_offset: offset) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 16384 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %i32_zero = scalar.constant 0 : i32
+  %d0 = vector.splat %i32_zero : vector<4xi32>
+  %d1 = vector.splat %i32_zero : vector<8xi32>
+  %d2 = vector.splat %i32_zero : vector<4xi32>
+  %d3 = vector.splat %i32_zero : vector<4xi32>
+  %desc = kernel.tensor.lds.descriptor dgroups(%d0, %d1, %d2, %d3) : vector<4xi32>, vector<8xi32>, vector<4xi32>, vector<4xi32> -> kernel.tensor.lds.descriptor
+  %global = buffer.assume.memory_space<global> %source_buffer : buffer
+  %source = buffer.view %global[%byte_offset] : buffer -> view<64x64xf32, %layout>
+  %scratch = buffer.alloca %bytes {base_alignment = 256, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<64x64xf32, %layout>
+  %copy = kernel.async.tensor.load.to.lds %source to %dest using %desc {cache_scope = cu, cache_temporal = regular} : view<64x64xf32, %layout> to view<64x64xf32, %layout>, kernel.tensor.lds.descriptor -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def @async_tensor_store_from_lds(%dest_buffer: buffer, %byte_offset: offset) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 16384 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %i32_zero = scalar.constant 0 : i32
+  %d0 = vector.splat %i32_zero : vector<4xi32>
+  %d1 = vector.splat %i32_zero : vector<8xi32>
+  %desc = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
+  %scratch = buffer.alloca %bytes {base_alignment = 256, memory_space = workgroup} : buffer
+  %source = buffer.view %scratch[%zero] : buffer -> view<64x64xf32, %layout>
+  %global = buffer.assume.memory_space<global> %dest_buffer : buffer
+  %dest = buffer.view %global[%byte_offset] : buffer -> view<64x64xf32, %layout>
+  %copy = kernel.async.tensor.store.from.lds %source to %dest using %desc {cache_scope = device, cache_temporal = non_temporal_writeback} : view<64x64xf32, %layout> to view<64x64xf32, %layout>, kernel.tensor.lds.descriptor -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def @async_empty_pipeline_marker() {
+  %group = kernel.async.group -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}

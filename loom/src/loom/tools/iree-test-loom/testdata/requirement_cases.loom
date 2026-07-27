@@ -1,0 +1,9 @@
+check.case @missing_provider_requirement {
+  check.requires<missing.provider> {}
+  check.return
+}
+
+check.case @missing_provider_skip_if {
+  check.skip_if<missing.provider> {} reason("human skip display text")
+  check.return
+}

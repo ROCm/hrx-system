@@ -72,6 +72,8 @@ typedef struct iree_hal_amdgpu_pm4_dispatch_record_t {
   uint64_t executable_id;
   // Dispatch workgroup counts.
   uint32_t workgroup_count[3];
+  // DISPATCH_DIRECT thread dimensions.
+  uint32_t dispatch_thread_count[3];
   // HAL command ordinal within this command buffer.
   uint32_t command_index;
   // Executable export ordinal dispatched by this command.
@@ -1389,7 +1391,7 @@ static iree_status_t iree_hal_amdgpu_pm4_dword_builder_emit_user_data(
 
 static iree_status_t iree_hal_amdgpu_pm4_dword_builder_emit_dispatch_direct(
     iree_hal_amdgpu_pm4_dword_builder_t* builder,
-    const uint32_t workgroup_count[3], uint32_t dispatch_initiator) {
+    const uint32_t dispatch_thread_count[3], uint32_t dispatch_initiator) {
   uint32_t* dispatch_dwords = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_append(
       builder, IREE_HAL_AMDGPU_PM4_DISPATCH_DIRECT_DWORD_COUNT,
@@ -1397,9 +1399,9 @@ static iree_status_t iree_hal_amdgpu_pm4_dword_builder_emit_dispatch_direct(
   dispatch_dwords[0] = iree_hal_amdgpu_pm4_make_compute_header(
       IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_DISPATCH_DIRECT,
       IREE_HAL_AMDGPU_PM4_DISPATCH_DIRECT_DWORD_COUNT);
-  dispatch_dwords[1] = workgroup_count[0];
-  dispatch_dwords[2] = workgroup_count[1];
-  dispatch_dwords[3] = workgroup_count[2];
+  dispatch_dwords[1] = dispatch_thread_count[0];
+  dispatch_dwords[2] = dispatch_thread_count[1];
+  dispatch_dwords[3] = dispatch_thread_count[2];
   dispatch_dwords[4] = dispatch_initiator;
   return iree_ok_status();
 }
@@ -2096,6 +2098,27 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_validate_dispatch_shape(
   return iree_ok_status();
 }
 
+static iree_status_t
+iree_hal_amdgpu_pm4_command_buffer_resolve_dispatch_thread_count(
+    const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor,
+    const iree_hal_dispatch_config_t config,
+    uint32_t out_dispatch_thread_count[3]) {
+  for (iree_host_size_t i = 0; i < 3; ++i) {
+    const uint64_t thread_count = (uint64_t)config.workgroup_count[i] *
+                                  descriptor->kernel_args.workgroup_size[i];
+    if (IREE_UNLIKELY(thread_count > UINT32_MAX)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "PM4 DISPATCH_DIRECT dimension %" PRIhsz
+          " overflows uint32_t (workgroup_count=%u, workgroup_size=%u)",
+          i, config.workgroup_count[i],
+          descriptor->kernel_args.workgroup_size[i]);
+    }
+    out_dispatch_thread_count[i] = (uint32_t)thread_count;
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_amdgpu_pm4_command_buffer_resolve_buffer_ref(
     const iree_hal_buffer_ref_t* buffer_ref, uint64_t* out_device_pointer) {
   *out_device_pointer = 0;
@@ -2184,14 +2207,22 @@ iree_hal_amdgpu_pm4_command_buffer_kernarg_range_preload_offset(
 static iree_status_t iree_hal_amdgpu_pm4_command_buffer_write_template(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
     const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
-    const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* layout,
+    const iree_hal_amdgpu_kernarg_layout_t* layout, uint32_t template_offset,
     const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     const iree_hal_amdgpu_pm4_binding_record_t* binding_records,
     uint32_t binding_record_count, uint8_t* template_bytes) {
-  uint64_t* binding_dst = (uint64_t*)template_bytes;
+  uint64_t* binding_ptrs = binding_record_count
+                               ? (uint64_t*)iree_alloca(binding_record_count *
+                                                        sizeof(binding_ptrs[0]))
+                               : NULL;
   for (uint32_t i = 0; i < binding_record_count; ++i) {
     const iree_hal_amdgpu_pm4_binding_record_t* binding_record =
         &binding_records[i];
+    if (IREE_UNLIKELY(binding_record->target_offset < template_offset)) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "PM4 command-buffer binding target offset precedes template");
+    }
     if (iree_any_bit_set(binding_record->flags,
                          IREE_HAL_AMDGPU_PM4_BINDING_RECORD_FLAG_DYNAMIC)) {
       if (IREE_UNLIKELY(command_buffer->resident_template_offset >
@@ -2200,7 +2231,6 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_write_template(
             IREE_STATUS_OUT_OF_RANGE,
             "PM4 command-buffer dynamic template fixup offset overflows");
       }
-      binding_dst[i] = 0;
       IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_fixup_entry_builder_append(
           &command_buffer->fixup_builder,
           (iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t){
@@ -2210,21 +2240,20 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_write_template(
               .binding_slot = binding_record->binding_slot,
               .binding_offset = binding_record->value,
           }));
+      binding_ptrs[i] = 0;
       continue;
     }
-    binding_dst[i] = binding_record->value;
+    binding_ptrs[i] = binding_record->value;
   }
 
-  const iree_host_size_t binding_bytes =
-      (iree_host_size_t)kernel_args->binding_count * sizeof(uint64_t);
-  if (constants.data_length > 0) {
-    memcpy(template_bytes + binding_bytes, constants.data,
-           constants.data_length);
-  }
-  if (layout->has_implicit_args) {
+  iree_hal_amdgpu_kernarg_layout_emplace_explicit_args(
+      layout, binding_ptrs, constants, template_bytes);
+  if (iree_any_bit_set(layout->flags,
+                       IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_IMPLICIT_ARGS)) {
     iree_amdgpu_kernel_implicit_args_t* implicit_args =
         (iree_amdgpu_kernel_implicit_args_t*)(template_bytes +
-                                              layout->implicit_args_offset);
+                                              layout
+                                                  ->implicit_args_byte_offset);
     iree_hal_amdgpu_pm4_command_buffer_write_implicit_args(kernel_args, config,
                                                            implicit_args);
   }
@@ -2252,7 +2281,8 @@ iree_hal_amdgpu_pm4_command_buffer_append_preloaded_binding_fixups(
     iree_host_size_t program_offset,
     const iree_hal_amdgpu_pm4_dispatch_launch_state_t* launch_state,
     const iree_hal_amdgpu_pm4_binding_record_t* binding_records,
-    uint32_t binding_record_count, uint32_t user_data_program_dword_offset) {
+    uint32_t binding_record_count, uint32_t template_offset,
+    uint32_t user_data_program_dword_offset) {
   if (launch_state->kernarg_preload_dword_count == 0) return iree_ok_status();
   for (uint32_t i = 0; i < binding_record_count; ++i) {
     const iree_hal_amdgpu_pm4_binding_record_t* binding_record =
@@ -2261,17 +2291,19 @@ iree_hal_amdgpu_pm4_command_buffer_append_preloaded_binding_fixups(
                           IREE_HAL_AMDGPU_PM4_BINDING_RECORD_FLAG_DYNAMIC)) {
       continue;
     }
-    if (IREE_UNLIKELY(i > UINT32_MAX / sizeof(uint64_t))) {
+    if (IREE_UNLIKELY(binding_record->target_offset < template_offset)) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
-          "PM4 command-buffer dynamic binding kernarg offset overflows");
+          "PM4 command-buffer dynamic binding target offset precedes template");
     }
+    const uint32_t binding_kernarg_offset =
+        binding_record->target_offset - template_offset;
     bool is_preloaded = false;
     uint32_t preload_dword_offset = 0;
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_pm4_command_buffer_kernarg_range_preload_offset(
-            launch_state, i * sizeof(uint64_t), sizeof(uint64_t), &is_preloaded,
-            &preload_dword_offset));
+            launch_state, binding_kernarg_offset, sizeof(uint64_t),
+            &is_preloaded, &preload_dword_offset));
     if (!is_preloaded) continue;
 
     const uint32_t user_data_payload_dword_offset =
@@ -2355,13 +2387,13 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_append_dispatch_record(
     iree_hal_amdgpu_pm4_command_buffer_t* command_buffer,
     const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor,
     uint64_t executable_id, uint32_t command_index, uint32_t export_ordinal,
-    const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
+    const iree_hal_dispatch_config_t config,
+    const uint32_t dispatch_thread_count[3], iree_const_byte_span_t constants,
     iree_hal_buffer_ref_list_t bindings,
     iree_hal_amdgpu_pm4_dispatch_record_flags_t flags,
     iree_hsa_fence_scope_t barrier_acquire_scope,
     iree_hsa_fence_scope_t barrier_release_scope) {
-  const iree_hal_amdgpu_device_kernel_args_t* kernel_args =
-      &descriptor->kernel_args;
+  const iree_hal_amdgpu_kernarg_layout_t* layout = descriptor->kernarg_layout;
   if (IREE_UNLIKELY(constants.data_length > UINT32_MAX)) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
@@ -2372,12 +2404,11 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_append_dispatch_record(
         IREE_STATUS_OUT_OF_RANGE,
         "PM4 command-buffer dispatch bindings exceed uint32_t storage");
   }
-  if (IREE_UNLIKELY(bindings.count > kernel_args->binding_count)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+  if (IREE_UNLIKELY(bindings.count != layout->binding_count)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "PM4 command-buffer dispatch binding count %" PRIhsz
-                            " exceeds executable binding count %u",
-                            bindings.count,
-                            (uint32_t)kernel_args->binding_count);
+                            " does not match executable binding count %u",
+                            bindings.count, (uint32_t)layout->binding_count);
   }
   if (IREE_UNLIKELY(bindings.count > 0 && !bindings.values)) {
     return iree_make_status(
@@ -2385,41 +2416,35 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_append_dispatch_record(
         "PM4 command-buffer dispatch bindings must be non-null when count is "
         "non-zero");
   }
-  const iree_host_size_t expected_constant_bytes =
-      (iree_host_size_t)kernel_args->constant_count * sizeof(uint32_t);
-  if (IREE_UNLIKELY(constants.data_length > expected_constant_bytes)) {
+  const iree_host_size_t expected_constant_bytes = layout->constant_byte_length;
+  if (IREE_UNLIKELY(constants.data_length != expected_constant_bytes)) {
     return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "PM4 command-buffer dispatch constants exceed executable constant "
-        "storage");
+        IREE_STATUS_INVALID_ARGUMENT,
+        "PM4 command-buffer dispatch constant byte length mismatch; expected "
+        "%" PRIhsz " but got %" PRIhsz,
+        expected_constant_bytes, constants.data_length);
   }
 
   iree_host_size_t template_offset = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_align_host_size(
-      command_buffer->record_template_byte_length,
-      kernel_args->kernarg_alignment, &template_offset));
+      command_buffer->record_template_byte_length, layout->kernarg_alignment,
+      &template_offset));
   if (IREE_UNLIKELY(template_offset > UINT32_MAX)) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "PM4 command-buffer kernarg template offset exceeds uint32_t storage");
   }
-  const iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout =
-      descriptor->hal_kernarg_layout;
   iree_host_size_t new_record_template_byte_length = 0;
-  if (!iree_host_size_checked_add(template_offset, layout.total_kernarg_size,
+  if (!iree_host_size_checked_add(template_offset, layout->kernarg_byte_length,
                                   &new_record_template_byte_length)) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "PM4 command-buffer kernarg template storage overflows");
   }
-  if (IREE_UNLIKELY(layout.total_kernarg_size > UINT32_MAX)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "PM4 command-buffer kernarg template length exceeds uint32_t storage");
-  }
-
   const iree_hal_amdgpu_pm4_dispatch_launch_state_t* launch_state =
       &descriptor->pm4_launch_state;
+  const iree_hal_amdgpu_kernarg_binding_slot_t* binding_slots =
+      iree_hal_amdgpu_kernarg_layout_binding_slots(layout);
   uint32_t dynamic_template_fixup_count = 0;
   uint32_t dynamic_preload_fixup_count = 0;
   for (iree_host_size_t i = 0; i < bindings.count; ++i) {
@@ -2441,16 +2466,13 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_append_dispatch_record(
             "storage");
       }
       ++dynamic_template_fixup_count;
-      if (IREE_UNLIKELY(i > UINT32_MAX / sizeof(uint64_t))) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "PM4 command-buffer dynamic binding kernarg offset overflows");
-      }
+      const uint32_t binding_target_offset =
+          (uint32_t)binding_slots[i].target_qword_index * sizeof(uint64_t);
       bool is_preloaded = false;
       uint32_t preload_dword_offset = 0;
       IREE_RETURN_IF_ERROR(
           iree_hal_amdgpu_pm4_command_buffer_kernarg_range_preload_offset(
-              launch_state, (uint32_t)i * sizeof(uint64_t), sizeof(uint64_t),
+              launch_state, binding_target_offset, sizeof(uint64_t),
               &is_preloaded, &preload_dword_offset));
       if (is_preloaded) {
         if (IREE_UNLIKELY(dynamic_preload_fixup_count == UINT32_MAX)) {
@@ -2576,7 +2598,7 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_append_dispatch_record(
   }
 
   const iree_host_size_t binding_record_count =
-      (iree_host_size_t)kernel_args->binding_count;
+      (iree_host_size_t)layout->binding_count;
   iree_host_size_t binding_record_bytes = 0;
   if (!iree_host_size_checked_mul(binding_record_count,
                                   sizeof(iree_hal_amdgpu_pm4_binding_record_t),
@@ -2616,10 +2638,13 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_append_dispatch_record(
   record->workgroup_count[0] = config.workgroup_count[0];
   record->workgroup_count[1] = config.workgroup_count[1];
   record->workgroup_count[2] = config.workgroup_count[2];
+  record->dispatch_thread_count[0] = dispatch_thread_count[0];
+  record->dispatch_thread_count[1] = dispatch_thread_count[1];
+  record->dispatch_thread_count[2] = dispatch_thread_count[2];
   record->command_index = command_index;
   record->export_ordinal = export_ordinal;
   record->template_offset = (uint32_t)template_offset;
-  record->template_length = (uint32_t)layout.total_kernarg_size;
+  record->template_length = (uint32_t)layout->kernarg_byte_length;
   record->constant_length = (uint32_t)constants.data_length;
   record->binding_record_count = (uint32_t)binding_record_count;
   record->flags = flags;
@@ -2637,16 +2662,17 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_append_dispatch_record(
       const iree_hal_buffer_ref_t* binding = &bindings.values[i];
       iree_hal_amdgpu_pm4_binding_record_t* binding_record =
           &binding_records[i];
-      if (IREE_UNLIKELY(i > UINT32_MAX / sizeof(uint64_t) ||
-                        (uint32_t)template_offset >
-                            UINT32_MAX - (uint32_t)i * sizeof(uint64_t))) {
+      const uint32_t binding_target_offset =
+          (uint32_t)binding_slots[i].target_qword_index * sizeof(uint64_t);
+      if (IREE_UNLIKELY((uint32_t)template_offset >
+                        UINT32_MAX - binding_target_offset)) {
         command_buffer->record_builder.length = record_builder_base_length;
         return iree_make_status(
             IREE_STATUS_OUT_OF_RANGE,
             "PM4 command-buffer binding target offset overflows");
       }
       binding_record->target_offset =
-          (uint32_t)template_offset + (uint32_t)i * sizeof(uint64_t);
+          (uint32_t)template_offset + binding_target_offset;
       if (!binding->buffer) {
         binding_record->value = binding->offset;
         binding_record->binding_slot = binding->buffer_slot;
@@ -2683,8 +2709,7 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_dispatch(
       record->descriptor;
   const iree_hal_amdgpu_device_kernel_args_t* kernel_args =
       &descriptor->kernel_args;
-  const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* layout =
-      &descriptor->hal_kernarg_layout;
+  const iree_hal_amdgpu_kernarg_layout_t* layout = descriptor->kernarg_layout;
   iree_const_byte_span_t constants = iree_make_const_byte_span(
       iree_hal_amdgpu_pm4_dispatch_record_constants(record),
       record->constant_length);
@@ -2713,15 +2738,16 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_dispatch(
   uint8_t* template_bytes = NULL;
   uint32_t template_offset = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_byte_builder_append_aligned(
-      &command_buffer->template_builder, kernel_args->kernarg_alignment,
-      layout->total_kernarg_size, &template_offset, &template_bytes));
+      &command_buffer->template_builder, layout->kernarg_alignment,
+      layout->kernarg_byte_length, &template_offset, &template_bytes));
   if (IREE_UNLIKELY(template_offset != record->template_offset)) {
     return iree_make_status(IREE_STATUS_INTERNAL,
                             "PM4 template materialization offset changed");
   }
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_command_buffer_write_template(
-      command_buffer, kernel_args, layout, config, constants, binding_records,
-      record->binding_record_count, template_bytes));
+      command_buffer, kernel_args, layout, record->template_offset, config,
+      constants, binding_records, record->binding_record_count,
+      template_bytes));
 
   if (iree_any_bit_set(
           record->flags,
@@ -2783,10 +2809,10 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_dispatch(
       iree_hal_amdgpu_pm4_command_buffer_append_preloaded_binding_fixups(
           &command_buffer->fixup_builder, /*program_offset=*/0, launch_state,
           binding_records, record->binding_record_count,
-          user_data_program_dword_offset));
+          record->template_offset, user_data_program_dword_offset));
   dword_count_before = command_buffer->dword_builder.dword_count;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_dispatch_direct(
-      &command_buffer->dword_builder, record->workgroup_count,
+      &command_buffer->dword_builder, record->dispatch_thread_count,
       launch_state->dispatch_initiator));
   command_buffer->publish_stats.dispatch_direct_dwords +=
       command_buffer->dword_builder.dword_count - dword_count_before;
@@ -2922,7 +2948,8 @@ iree_hal_amdgpu_pm4_command_buffer_materialize_profile_dispatch(
       iree_hal_amdgpu_pm4_command_buffer_append_preloaded_binding_fixups(
           &command_buffer->profile.fixup_builder,
           command_buffer->profile.program_offset, launch_state, binding_records,
-          record->binding_record_count, user_data_program_dword_offset));
+          record->binding_record_count, record->template_offset,
+          user_data_program_dword_offset));
 
   if (IREE_UNLIKELY(record->command_index >=
                     command_buffer->profile.plan.dispatch_count)) {
@@ -2948,7 +2975,7 @@ iree_hal_amdgpu_pm4_command_buffer_materialize_profile_dispatch(
           timestamp_binding_slot));
 
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_dispatch_direct(
-      &command_buffer->profile.dword_builder, record->workgroup_count,
+      &command_buffer->profile.dword_builder, record->dispatch_thread_count,
       launch_state->dispatch_initiator));
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dword_builder_emit_barrier(
       &command_buffer->profile.dword_builder,
@@ -3206,12 +3233,26 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_record_dispatch(
     iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags) {
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_pm4_command_buffer_check_dispatch_flags(flags));
+  if (IREE_UNLIKELY(
+          iree_hal_amdgpu_executable_requires_queue_scope(executable))) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "AMDGPU queue-scoped executable dispatch from PM4 command buffers is "
+        "not implemented");
+  }
 
   const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor = NULL;
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_device(
           executable, export_ordinal, command_buffer->device_ordinal,
           &descriptor));
+  if (IREE_UNLIKELY(descriptor->kernel_args.workgroup_cluster_size[0] != 0 ||
+                    descriptor->kernel_args.workgroup_cluster_size[1] != 0 ||
+                    descriptor->kernel_args.workgroup_cluster_size[2] != 0)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "clustered AMDGPU dispatch requires an AQL command buffer");
+  }
   if (IREE_UNLIKELY(!descriptor->pm4_launch_state_valid)) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
@@ -3231,21 +3272,21 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_record_dispatch(
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_pm4_command_buffer_validate_dispatch_shape(descriptor,
                                                                    config));
-    if (IREE_UNLIKELY(constants.data_length !=
-                      (iree_host_size_t)descriptor->kernel_args.constant_count *
-                          sizeof(uint32_t))) {
+    const iree_host_size_t expected_constant_length =
+        descriptor->kernarg_layout->constant_byte_length;
+    if (IREE_UNLIKELY(constants.data_length != expected_constant_length)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "dispatch constant count mismatch; expected %u but got %" PRIhsz,
-          (uint32_t)descriptor->kernel_args.constant_count,
-          constants.data_length / sizeof(uint32_t));
+          "dispatch constant byte length mismatch; expected %" PRIhsz
+          " but got %" PRIhsz,
+          expected_constant_length, constants.data_length);
     }
     if (IREE_UNLIKELY(bindings.count !=
-                      descriptor->kernel_args.binding_count)) {
+                      descriptor->kernarg_layout->binding_count)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "dispatch binding count mismatch; expected %u but got %" PRIhsz,
-          (uint32_t)descriptor->kernel_args.binding_count, bindings.count);
+          (uint32_t)descriptor->kernarg_layout->binding_count, bindings.count);
     }
     if (IREE_UNLIKELY(bindings.count > 0 && !bindings.values)) {
       return iree_make_status(
@@ -3269,6 +3310,10 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_record_dispatch(
       workgroup_count[2] == 0) {
     return iree_ok_status();
   }
+  uint32_t dispatch_thread_count[3] = {0, 0, 0};
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_pm4_command_buffer_resolve_dispatch_thread_count(
+          descriptor, config, dispatch_thread_count));
 
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_command_buffer_retain_dispatch(
       command_buffer, executable, bindings));
@@ -3313,10 +3358,10 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_record_dispatch(
       iree_hal_executable_function_index(export_ordinal);
   iree_status_t status =
       iree_hal_amdgpu_pm4_command_buffer_append_dispatch_record(
-          command_buffer, descriptor,
-          iree_hal_amdgpu_executable_profile_id(executable), command_index,
-          function_index, config, constants, bindings, record_flags,
-          barrier_acquire_scope, barrier_release_scope);
+          command_buffer, descriptor, iree_hal_amdgpu_executable_id(executable),
+          command_index, function_index, config, dispatch_thread_count,
+          constants, bindings, record_flags, barrier_acquire_scope,
+          barrier_release_scope);
   if (iree_status_is_ok(status)) {
     ++command_buffer->record_command_count;
   }
@@ -3488,11 +3533,7 @@ static void iree_hal_amdgpu_pm4_command_buffer_destroy(
     command_buffer->resident_allocation = NULL;
     memset(&command_buffer->program, 0, sizeof(command_buffer->program));
   } else {
-    iree_status_t release_status =
-        iree_hal_amdgpu_pm4_program_release(&command_buffer->program);
-    IREE_ASSERT(iree_status_is_ok(release_status),
-                "PM4 command-buffer program release failed");
-    iree_status_free(release_status);
+    iree_hal_amdgpu_pm4_program_deinitialize(&command_buffer->program);
   }
   iree_hal_amdgpu_pm4_command_buffer_fixup_reset(command_buffer);
   if (command_buffer->recording_state ==
@@ -3602,7 +3643,8 @@ void iree_hal_amdgpu_pm4_command_buffer_cancel_publication_reference(
 }
 
 void iree_hal_amdgpu_pm4_command_buffer_retire_publication_reference(
-    iree_hal_command_buffer_t* base_command_buffer, iree_status_t status) {
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_status_code_t status_code) {
   iree_hal_amdgpu_pm4_command_buffer_t* command_buffer =
       iree_hal_amdgpu_pm4_command_buffer_cast(base_command_buffer);
   iree_slim_mutex_lock(&command_buffer->publication_mutex);
@@ -3611,7 +3653,7 @@ void iree_hal_amdgpu_pm4_command_buffer_retire_publication_reference(
               "matching acquire");
   --command_buffer->publication_reference_count;
   if (command_buffer->publication_reference_count == 0 &&
-      iree_status_is_ok(status) &&
+      status_code == IREE_STATUS_OK &&
       !iree_hsa_signal_is_null(command_buffer->publication_signal)) {
     iree_hal_amdgpu_pm4_command_buffer_release_publication_resources_locked(
         command_buffer);

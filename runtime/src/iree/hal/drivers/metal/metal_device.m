@@ -16,10 +16,11 @@
 #include "iree/hal/drivers/metal/builtin_executables.h"
 #include "iree/hal/drivers/metal/direct_allocator.h"
 #include "iree/hal/drivers/metal/direct_command_buffer.h"
-#include "iree/hal/drivers/metal/nop_executable_cache.h"
+#include "iree/hal/drivers/metal/executable.h"
 #include "iree/hal/drivers/metal/shared_event.h"
 #include "iree/hal/drivers/metal/staging_buffer.h"
 #include "iree/hal/utils/deferred_command_buffer.h"
+#include "iree/hal/utils/device_spec_builder.h"
 #include "iree/hal/utils/file_registry.h"
 #include "iree/hal/utils/file_transfer.h"
 #include "iree/hal/utils/queue_emulation.h"
@@ -44,10 +45,16 @@ typedef struct iree_hal_metal_device_t {
   iree_allocator_t host_allocator;
   iree_hal_allocator_t* device_allocator;
 
+  // Immutable device facts captured at creation time.
+  iree_hal_device_spec_t* device_spec;
+
   // Proactor pool retained from create_params; provides async I/O proactors.
   iree_async_proactor_pool_t* proactor_pool;
   // Proactor borrowed from the pool for this device's async operations.
   iree_async_proactor_t* proactor;
+
+  // Sink copied from device creation parameters for device-originated events.
+  iree_hal_device_event_sink_t event_sink;
 
   // Shared frontier tracker for cross-device causal ordering. Retained after
   // topology assignment and released during device destruction.
@@ -129,6 +136,7 @@ static iree_status_t iree_hal_metal_device_create_internal(
 
   iree_host_size_t total_size = iree_sizeof_struct(*device) + identifier.size;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, total_size, (void**)&device));
+  memset(device, 0, total_size);
 
   iree_hal_resource_initialize(&iree_hal_metal_device_vtable, &device->resource);
   iree_string_view_append_to_buffer(identifier, &device->identifier,
@@ -137,11 +145,20 @@ static iree_status_t iree_hal_metal_device_create_internal(
   device->params = *params;
   device->host_allocator = host_allocator;
 
+  iree_status_t status =
+      iree_hal_device_spec_create_minimal(device->identifier, device->identifier, IREE_SV("metal"),
+                                          IREE_SV("metal"), host_allocator, &device->device_spec);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_device_release((iree_hal_device_t*)device);
+    return status;
+  }
+
   // Retain the proactor pool and acquire a proactor for this device.
   device->proactor_pool = create_params->proactor_pool;
+  device->event_sink = create_params->event_sink;
   iree_async_proactor_pool_retain(device->proactor_pool);
   iree_atomic_store(&device->epoch, 0, iree_memory_order_relaxed);
-  iree_status_t status = iree_async_proactor_pool_get(device->proactor_pool, 0, &device->proactor);
+  status = iree_async_proactor_pool_get(device->proactor_pool, 0, &device->proactor);
   if (!iree_status_is_ok(status)) {
     iree_hal_device_release((iree_hal_device_t*)device);
     return status;
@@ -197,12 +214,14 @@ iree_status_t iree_hal_metal_device_create(iree_string_view_t identifier,
                                            iree_allocator_t host_allocator,
                                            iree_hal_device_t** out_device) {
   IREE_ASSERT_ARGUMENT(create_params);
-  IREE_ASSERT_ARGUMENT(create_params->proactor_pool);
   IREE_ASSERT_ARGUMENT(out_device);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_status_t status = iree_hal_metal_device_create_internal(
-      identifier, params, device, create_params, host_allocator, out_device);
+  iree_status_t status = iree_hal_device_create_params_verify(create_params);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_metal_device_create_internal(identifier, params, device, create_params,
+                                                   host_allocator, out_device);
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -225,18 +244,25 @@ static void iree_hal_metal_device_destroy(iree_hal_device_t* base_device) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   [device->event_listener release];  // -1
-  dispatch_release(device->semaphore_notification_queue);
+  if (device->semaphore_notification_queue) {
+    dispatch_release(device->semaphore_notification_queue);
+  }
 
-  iree_hal_metal_builtin_executable_destroy(device->builtin_executable);
+  if (device->builtin_executable) {
+    iree_hal_metal_builtin_executable_destroy(device->builtin_executable);
+  }
 
   iree_hal_metal_device_clear_topology_info(device);
 
   iree_hal_allocator_release(device->device_allocator);
+  iree_hal_device_spec_release(device->device_spec);
   [device->command_buffer_descriptor release];  // -1
   [device->queue release];                      // -1
   [device->device release];                     // -1
 
-  iree_hal_metal_staging_buffer_deinitialize(&device->staging_buffer);
+  if (device->staging_buffer.metal_buffer) {
+    iree_hal_metal_staging_buffer_deinitialize(&device->staging_buffer);
+  }
   iree_arena_block_pool_deinitialize(&device->block_pool);
 
   iree_async_proactor_pool_release(device->proactor_pool);
@@ -261,12 +287,13 @@ static iree_hal_allocator_t* iree_hal_metal_device_allocator(iree_hal_device_t* 
   return device->device_allocator;
 }
 
-static void iree_hal_metal_replace_device_allocator(iree_hal_device_t* base_device,
-                                                    iree_hal_allocator_t* new_allocator) {
+static iree_status_t iree_hal_metal_replace_device_allocator(iree_hal_device_t* base_device,
+                                                             iree_hal_allocator_t* new_allocator) {
   iree_hal_metal_device_t* device = iree_hal_metal_device_cast(base_device);
   iree_hal_allocator_retain(new_allocator);
   iree_hal_allocator_release(device->device_allocator);
   device->device_allocator = new_allocator;
+  return iree_ok_status();
 }
 
 static void iree_hal_metal_replace_channel_provider(iree_hal_device_t* base_device,
@@ -281,30 +308,19 @@ static iree_status_t iree_hal_metal_device_trim(iree_hal_device_t* base_device) 
   return iree_hal_allocator_trim(device->device_allocator);
 }
 
-static iree_status_t iree_hal_metal_device_query_i64(iree_hal_device_t* base_device,
-                                                     iree_string_view_t category,
-                                                     iree_string_view_t key, int64_t* out_value) {
+static const iree_hal_device_spec_t* iree_hal_metal_device_spec(iree_hal_device_t* base_device) {
   iree_hal_metal_device_t* device = iree_hal_metal_device_cast(base_device);
-  *out_value = 0;
-
-  if (iree_string_view_equal(category, IREE_SV("hal.device.id"))) {
-    *out_value = iree_string_view_match_pattern(device->identifier, key) ? 1 : 0;
-    return iree_ok_status();
-  }
-
-  if (iree_string_view_equal(category, iree_make_cstring_view("hal.executable.format"))) {
-    *out_value = iree_string_view_equal(key, iree_make_cstring_view("metal-msl-fb")) ? 1 : 0;
-    return iree_ok_status();
-  }
-
-  return iree_make_status(IREE_STATUS_NOT_FOUND,
-                          "unknown device configuration key value '%.*s :: %.*s'",
-                          (int)category.size, category.data, (int)key.size, key.data);
+  return device->device_spec;
 }
 
-static iree_status_t iree_hal_metal_device_query_capabilities(
-    iree_hal_device_t* base_device, iree_hal_device_capabilities_t* out_capabilities) {
-  memset(out_capabilities, 0, sizeof(*out_capabilities));
+static iree_status_t iree_hal_metal_device_sample_observation(
+    iree_hal_device_t* base_device, iree_hal_device_observation_flags_t requested_flags,
+    iree_hal_device_observation_t* out_observation) {
+  iree_hal_metal_device_t* device = iree_hal_metal_device_cast(base_device);
+  if (iree_any_bit_set(requested_flags, IREE_HAL_DEVICE_OBSERVATION_FLAG_MEMORY)) {
+    IREE_RETURN_IF_ERROR(iree_hal_device_observation_populate_memory_total_from_spec(
+        device->device_spec, out_observation));
+  }
   return iree_ok_status();
 }
 
@@ -378,12 +394,13 @@ static iree_status_t iree_hal_metal_device_create_event(iree_hal_device_t* base_
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "event not yet supported");
 }
 
-static iree_status_t iree_hal_metal_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+static iree_status_t iree_hal_metal_device_load_executable(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params, iree_hal_executable_t** out_executable) {
   iree_hal_metal_device_t* device = iree_hal_metal_device_cast(base_device);
-  return iree_hal_metal_nop_executable_cache_create(device->device, identifier,
-                                                    device->host_allocator, out_executable_cache);
+  return iree_hal_metal_executable_create(device->device, load_params, device->host_allocator,
+                                          out_executable);
 }
 
 static iree_status_t iree_hal_metal_device_import_file(iree_hal_device_t* base_device,
@@ -782,15 +799,15 @@ static const iree_hal_device_vtable_t iree_hal_metal_device_vtable = {
     .replace_device_allocator = iree_hal_metal_replace_device_allocator,
     .replace_channel_provider = iree_hal_metal_replace_channel_provider,
     .trim = iree_hal_metal_device_trim,
-    .query_i64 = iree_hal_metal_device_query_i64,
-    .query_capabilities = iree_hal_metal_device_query_capabilities,
+    .device_spec = iree_hal_metal_device_spec,
+    .sample_observation = iree_hal_metal_device_sample_observation,
     .topology_info = iree_hal_metal_device_topology_info,
     .refine_topology_edge = iree_hal_metal_device_refine_topology_edge,
     .assign_topology_info = iree_hal_metal_device_assign_topology_info,
     .create_channel = iree_hal_metal_device_create_channel,
     .create_command_buffer = iree_hal_metal_device_create_command_buffer,
     .create_event = iree_hal_metal_device_create_event,
-    .create_executable_cache = iree_hal_metal_device_create_executable_cache,
+    .load_executable = iree_hal_metal_device_load_executable,
     .import_file = iree_hal_metal_device_import_file,
     .create_semaphore = iree_hal_metal_device_create_semaphore,
     .query_semaphore_compatibility = iree_hal_metal_device_query_semaphore_compatibility,

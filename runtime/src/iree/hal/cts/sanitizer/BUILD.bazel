@@ -1,0 +1,47 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# Sanitizer CTS tests.
+
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+iree_runtime_cc_library(
+    name = "sanitizer_test_util",
+    testonly = True,
+    hdrs = ["sanitizer_test_util.h"],
+    deps = [
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "asan_allocation_test",
+    testonly = True,
+    srcs = ["asan_allocation_test.cc"],
+    deps = [
+        ":sanitizer_test_util",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/cts/util:test_base",
+    ],
+    alwayslink = True,
+)
+
+# All sanitizer tests.
+iree_runtime_cc_library(
+    name = "all_tests",
+    testonly = True,
+    deps = [
+        ":asan_allocation_test",
+    ],
+)

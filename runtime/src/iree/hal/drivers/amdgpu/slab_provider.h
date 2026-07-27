@@ -11,6 +11,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
+#include "iree/hal/drivers/amdgpu/util/vmem.h"
 #include "iree/hal/memory/slab_provider.h"
 
 #ifdef __cplusplus
@@ -18,6 +19,7 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct iree_hal_amdgpu_topology_t iree_hal_amdgpu_topology_t;
+typedef struct iree_hal_amdgpu_asan_state_t iree_hal_amdgpu_asan_state_t;
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_slab_provider_t
@@ -38,10 +40,31 @@ typedef struct iree_hal_amdgpu_slab_provider_memory_pool_properties_t {
   iree_hal_buffer_usage_t supported_usage;
 } iree_hal_amdgpu_slab_provider_memory_pool_properties_t;
 
-// HSA memory pool and HAL capabilities exposed by a slab provider.
+typedef uint32_t iree_hal_amdgpu_slab_provider_flags_t;
+enum iree_hal_amdgpu_slab_provider_flag_bits_e {
+  IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_NONE = 0u,
+  // Slabs precommit ASAN shadow at acquisition time and publish precise
+  // suballocation shadow state through advise_asan_range().
+  IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_ASAN_SHADOW = 1u << 0,
+  // Slabs are acquired with HSA VMM and mapped into the ASAN-owned application
+  // virtual address window.
+  IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_ASAN_VMM = 1u << 1,
+};
+
+// HSA memory pool, mapping policy, and HAL capabilities exposed by a slab
+// provider.
 typedef struct iree_hal_amdgpu_slab_provider_options_t {
+  // Flags selecting provider behavior.
+  iree_hal_amdgpu_slab_provider_flags_t flags;
+
   // HSA memory pool used for slab allocations.
   hsa_amd_memory_pool_t memory_pool;
+
+  // HSA VMM memory type used when ASAN VMM placement is enabled.
+  iree_hal_amdgpu_vmem_memory_type_t vmem_memory_type;
+
+  // ASAN state used when ASAN shadow support is enabled.
+  iree_hal_amdgpu_asan_state_t* asan_state;
 
   // HAL memory type bits reported for buffers materialized from slabs.
   iree_hal_memory_type_t memory_type;
@@ -57,17 +80,24 @@ iree_status_t iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
 
 // Creates a slab provider backed by an HSA memory pool on one GPU agent.
 //
-// The provider acquires whole slabs with hsa_amd_memory_pool_allocate(), grants
-// every agent in |topology| access to the slab, and wraps slab slices as
-// iree_hal_amdgpu_buffer_t views. |queue_affinity_mask| identifies the HAL
-// queues in this physical memory domain; wrap_buffer() replaces
-// IREE_HAL_QUEUE_AFFINITY_ANY with that mask and rejects explicit affinities
-// outside it so placement metadata always routes PREFER_ORIGIN dealloca back
-// into the provider's domain. Materialized buffer view wrappers are allocated
-// from |buffer_pool|, which must be in the same physical-device lifetime domain
-// as the backing HSA memory. The provider borrows |device|, |libhsa|,
-// |topology|, and |buffer_pool|; the owning physical/logical device must
-// outlive the provider and every pool/buffer created from it.
+// The provider acquires whole slabs with hsa_amd_memory_pool_allocate() by
+// default. When IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_ASAN_SHADOW is set, the
+// provider commits ASAN shadow coverage for each whole slab before returning it
+// and later publishes suballocation poison state through advise_asan_range().
+// When IREE_HAL_AMDGPU_SLAB_PROVIDER_FLAG_ASAN_VMM is also set, slabs are HSA
+// VMM mappings inside |options.asan_state|'s application window instead of
+// ordinary HSA memory-pool allocations. In all allocation modes the provider
+// grants every agent in |topology| access to the slab and wraps slab slices as
+// iree_hal_amdgpu_buffer_t views.
+// |queue_affinity_mask| identifies the HAL queues in this physical memory
+// domain; wrap_buffer() replaces IREE_HAL_QUEUE_AFFINITY_ANY with that mask and
+// rejects explicit affinities outside it so placement metadata always routes
+// PREFER_ORIGIN dealloca back into the provider's domain. Materialized buffer
+// view wrappers are allocated from |buffer_pool|, which must be in the same
+// physical-device lifetime domain as the backing HSA memory. The provider
+// borrows |device|, |libhsa|, |topology|, |options.asan_state|, and
+// |buffer_pool|; the owning physical/logical device must outlive the provider
+// and every pool/buffer created from it.
 iree_status_t iree_hal_amdgpu_slab_provider_create(
     iree_hal_device_t* device, const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology,

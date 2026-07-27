@@ -1,0 +1,228 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+kernel.def target(@target) @private_f32_dynamic_roundtrip() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = private} : buffer
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %loaded = vector.load %input_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
+  vector.store %loaded, %scratch_view[%lane] : vector<1xf32>, view<64xf32, #dense>
+  %roundtrip = vector.load %scratch_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
+  vector.store %roundtrip, %output_view[%lane] : vector<1xf32>, view<64xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @private_f32_dynamic_roundtrip() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %16 = storage {byte_alignment = 4, byte_length = 256} : low.storage<private>
+  %18 = v_lshlrev_b32_src0_inline %lane, 2
+  %loaded = global_load_b32_saddr %18, %input_view
+  scratch_store_b32_vaddr %18, %loaded
+  %roundtrip = scratch_load_b32_vaddr %18
+  global_store_b32_saddr %18, %roundtrip, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+kernel.def target(@target) @private_root_static_offsets() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %one = index.constant 1 : index
+  %first_bytes = index.constant 8 : offset
+  %first = buffer.alloca %first_bytes {base_alignment = 4, memory_space = private} : buffer
+  %second_bytes = index.constant 16 : offset
+  %second = buffer.alloca %second_bytes {base_alignment = 8, memory_space = private} : buffer
+  %first_view = buffer.view %first[%zero] : buffer -> view<2xi32, #dense>
+  %second_view = buffer.view %second[%zero] : buffer -> view<4xi32, #dense>
+  %input_view = buffer.view %input[%zero] : buffer -> view<2xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<4xi32, #dense>
+  %lhs = view.load %input_view[0] : view<2xi32, #dense> -> i32
+  view.store %lhs, %first_view[0] : i32, view<2xi32, #dense>
+  %rhs = view.load %input_view[1] : view<2xi32, #dense> -> i32
+  view.store %rhs, %first_view[1] : i32, view<2xi32, #dense>
+  view.store %lhs, %second_view[1] : i32, view<4xi32, #dense>
+  view.store %rhs, %second_view[2] : i32, view<4xi32, #dense>
+  %second_index = index.add %lane, %one : index
+  %first_loaded = view.load %first_view[%lane] : view<2xi32, #dense> -> i32
+  %second_loaded = view.load %second_view[%second_index] : view<4xi32, #dense> -> i32
+  view.store %first_loaded, %output_view[%lane] : i32, view<4xi32, #dense>
+  view.store %second_loaded, %output_view[%second_index] : i32, view<4xi32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @private_root_static_offsets() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
+  %23 = storage {byte_alignment = 4, byte_length = 8} : low.storage<private>
+  %25 = storage {byte_alignment = 8, byte_length = 16} : low.storage<private>
+  %27 = v_mov_b32 0
+  %lhs = global_load_b32_saddr %27, %input_view
+  scratch_store_b32_vaddr %27, %lhs
+  %rhs = global_load_b32_saddr %27, %input_view {offset = 4}
+  scratch_store_b32_vaddr %27, %rhs {offset = 4}
+  scratch_store_b32_vaddr %27, %lhs {offset = 12}
+  scratch_store_b32_vaddr %27, %rhs {offset = 16}
+  %35 = v_lshlrev_b32_src0_inline %lane, 2
+  %first_loaded = scratch_load_b32_vaddr %35
+  %second_loaded = scratch_load_b32_vaddr %35 {offset = 12}
+  global_store_b32_saddr %35, %first_loaded, %output_view
+  global_store_b32_saddr %35, %second_loaded, %output_view {offset = 4}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+kernel.def target(@target) @private_f16_static_and_dynamic_roundtrip() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero_offset = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 2, memory_space = private} : buffer
+  %input_view = buffer.view %input[%zero_offset] : buffer -> view<2xf16, #dense>
+  %scratch_view = buffer.view %scratch[%zero_offset] : buffer -> view<2xf16, #dense>
+  %output_view = buffer.view %output[%zero_offset] : buffer -> view<2xf16, #dense>
+  %static_value = view.load %input_view[0] : view<2xf16, #dense> -> f16
+  view.store %static_value, %scratch_view[0] : f16, view<2xf16, #dense>
+  %dynamic_value = view.load %input_view[%lane] : view<2xf16, #dense> -> f16
+  view.store %dynamic_value, %scratch_view[%lane] : f16, view<2xf16, #dense>
+  %static_roundtrip = view.load %scratch_view[0] : view<2xf16, #dense> -> f16
+  view.store %static_roundtrip, %output_view[0] : f16, view<2xf16, #dense>
+  %dynamic_roundtrip = view.load %scratch_view[%lane] : view<2xf16, #dense> -> f16
+  view.store %dynamic_roundtrip, %output_view[%lane] : f16, view<2xf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @private_f16_static_and_dynamic_roundtrip() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %18 = storage {byte_alignment = 2, byte_length = 4} : low.storage<private>
+  %20 = v_mov_b32 0
+  %static_value = global_load_d16_b16_saddr %20, %input_view
+  %22 = v_bfe_u32_offset_0_width_16_low16 %static_value
+  scratch_store_b16_vaddr %20, %22
+  %24 = v_lshlrev_b32_src0_inline %lane, 1
+  %dynamic_value = global_load_d16_b16_saddr %24, %input_view
+  %26 = v_bfe_u32_offset_0_width_16_low16 %dynamic_value
+  scratch_store_b16_vaddr %24, %26
+  %static_roundtrip = scratch_load_u16_vaddr %20
+  global_store_short_saddr %20, %static_roundtrip, %output_view
+  %dynamic_roundtrip = scratch_load_u16_vaddr %24
+  global_store_short_saddr %24, %dynamic_roundtrip, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+kernel.def target(@target) @private_bf16_static_and_dynamic_roundtrip() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero_offset = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 2, memory_space = private} : buffer
+  %input_view = buffer.view %input[%zero_offset] : buffer -> view<2xbf16, #dense>
+  %scratch_view = buffer.view %scratch[%zero_offset] : buffer -> view<2xbf16, #dense>
+  %output_view = buffer.view %output[%zero_offset] : buffer -> view<2xbf16, #dense>
+  %static_value = view.load %input_view[0] : view<2xbf16, #dense> -> bf16
+  view.store %static_value, %scratch_view[0] : bf16, view<2xbf16, #dense>
+  %dynamic_value = view.load %input_view[%lane] : view<2xbf16, #dense> -> bf16
+  view.store %dynamic_value, %scratch_view[%lane] : bf16, view<2xbf16, #dense>
+  %static_roundtrip = view.load %scratch_view[0] : view<2xbf16, #dense> -> bf16
+  view.store %static_roundtrip, %output_view[0] : bf16, view<2xbf16, #dense>
+  %dynamic_roundtrip = view.load %scratch_view[%lane] : view<2xbf16, #dense> -> bf16
+  view.store %dynamic_roundtrip, %output_view[%lane] : bf16, view<2xbf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @private_bf16_static_and_dynamic_roundtrip() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %18 = storage {byte_alignment = 2, byte_length = 4} : low.storage<private>
+  %20 = v_mov_b32 0
+  %static_value = global_load_d16_b16_saddr %20, %input_view
+  %22 = v_bfe_u32_offset_0_width_16_low16 %static_value
+  scratch_store_b16_vaddr %20, %22
+  %24 = v_lshlrev_b32_src0_inline %lane, 1
+  %dynamic_value = global_load_d16_b16_saddr %24, %input_view
+  %26 = v_bfe_u32_offset_0_width_16_low16 %dynamic_value
+  scratch_store_b16_vaddr %24, %26
+  %static_roundtrip = scratch_load_u16_vaddr %20
+  global_store_short_saddr %20, %static_roundtrip, %output_view
+  %dynamic_roundtrip = scratch_load_u16_vaddr %24
+  global_store_short_saddr %24, %dynamic_roundtrip, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+kernel.def target(@target) @private_i8_static_and_dynamic_roundtrip() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero_offset = index.constant 0 : offset
+  %bytes = index.constant 2 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 1, memory_space = private} : buffer
+  %input_view = buffer.view %input[%zero_offset] : buffer -> view<2xi8, #dense>
+  %scratch_view = buffer.view %scratch[%zero_offset] : buffer -> view<2xi8, #dense>
+  %output_view = buffer.view %output[%zero_offset] : buffer -> view<2xi8, #dense>
+  %static_value = view.load %input_view[0] : view<2xi8, #dense> -> i8
+  view.store %static_value, %scratch_view[0] : i8, view<2xi8, #dense>
+  %dynamic_value = view.load %input_view[%lane] : view<2xi8, #dense> -> i8
+  view.store %dynamic_value, %scratch_view[%lane] : i8, view<2xi8, #dense>
+  %static_roundtrip = view.load %scratch_view[0] : view<2xi8, #dense> -> i8
+  view.store %static_roundtrip, %output_view[0] : i8, view<2xi8, #dense>
+  %dynamic_roundtrip = view.load %scratch_view[%lane] : view<2xi8, #dense> -> i8
+  view.store %dynamic_roundtrip, %output_view[%lane] : i8, view<2xi8, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @private_i8_static_and_dynamic_roundtrip() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 2} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 2} : reg<amdgpu.sgpr x2>
+  %18 = storage {byte_alignment = 1, byte_length = 2} : low.storage<private>
+  %20 = v_mov_b32 0
+  %static_value = global_load_i8_saddr %20, %input_view
+  scratch_store_b8_vaddr %20, %static_value
+  %dynamic_value = global_load_i8_saddr %lane, %input_view
+  scratch_store_b8_vaddr %lane, %dynamic_value
+  %static_roundtrip = scratch_load_i8_vaddr %20
+  global_store_b8_saddr %20, %static_roundtrip, %output_view
+  %dynamic_roundtrip = scratch_load_i8_vaddr %lane
+  global_store_b8_saddr %lane, %dynamic_roundtrip, %output_view
+  return
+}

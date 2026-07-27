@@ -1,0 +1,9 @@
+# Optional static-analysis tools. This lock is intentionally separate from
+# requirements-dev.lock.txt so analyzer dependency churn does not pollute the
+# core developer tool environment.
+semgrep==1.96.0
+
+# Semgrep 1.96.0 imports pkg_resources through OpenTelemetry without declaring
+# setuptools. Keep the setuptools<81 compatibility boundary explicit while this
+# Semgrep pin is active.
+setuptools<81

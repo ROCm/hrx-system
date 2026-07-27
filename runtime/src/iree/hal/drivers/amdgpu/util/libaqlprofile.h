@@ -62,6 +62,9 @@ enum iree_hal_amdgpu_aqlprofile_parameter_name_e {
 typedef uint32_t iree_hal_amdgpu_aqlprofile_block_name_t;
 enum iree_hal_amdgpu_aqlprofile_block_name_e {
   IREE_HAL_AMDGPU_AQLPROFILE_BLOCK_NAME_SQ = 6,
+  IREE_HAL_AMDGPU_AQLPROFILE_BLOCK_NAME_TA = 10,
+  IREE_HAL_AMDGPU_AQLPROFILE_BLOCK_NAME_TCC = 12,
+  IREE_HAL_AMDGPU_AQLPROFILE_BLOCK_NAME_TCP = 13,
 };
 
 typedef union iree_hal_amdgpu_aqlprofile_buffer_desc_flags_t {

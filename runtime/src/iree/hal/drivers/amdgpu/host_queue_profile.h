@@ -63,7 +63,8 @@ void iree_hal_amdgpu_host_queue_set_profile_flags(
     iree_hal_amdgpu_host_queue_t* queue,
     iree_hal_amdgpu_host_queue_profile_flags_t flags);
 
-// Initializes one reserved device-timestamped queue operation event.
+// Initializes one reserved device-timestamped queue operation event. Callers
+// must publish host writes before committing packets that reference the record.
 iree_hal_amdgpu_profile_queue_device_event_t*
 iree_hal_amdgpu_host_queue_initialize_profile_queue_device_event(
     iree_hal_amdgpu_host_queue_t* queue,

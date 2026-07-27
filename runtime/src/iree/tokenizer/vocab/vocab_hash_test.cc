@@ -32,7 +32,7 @@ std::vector<uint8_t> BuildStringTable(
 
 TEST(VocabHashTest, EmptyVocab) {
   iree_tokenizer_vocab_hash_t* hash = nullptr;
-  iree_const_byte_span_t empty_table = {nullptr, 0};
+  iree_const_byte_span_t empty_table = iree_const_byte_span_empty();
   IREE_ASSERT_OK(iree_tokenizer_vocab_hash_build(
       nullptr, 0, empty_table, IREE_TOKENIZER_VOCAB_HASH_DEFAULT_LOAD_PERCENT,
       iree_allocator_system(), &hash));

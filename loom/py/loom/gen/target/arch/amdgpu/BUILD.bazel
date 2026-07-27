@@ -1,0 +1,89 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_test")
+
+package(
+    default_visibility = ["//loom/py/loom/gen:__subpackages__"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+GENERATOR_VISIBILITY = [
+    "//loom/py/loom/gen:__subpackages__",
+    "//loom/src/loom/target/arch/amdgpu:__pkg__",
+    "//loom/src/loom/target/arch/amdgpu:__subpackages__",
+]
+
+iree_py_binary(
+    name = "config_tables",
+    srcs = [
+        "__init__.py",
+        "amdgpu_config_tables.py",
+    ],
+    main = "amdgpu_config_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/target/arch/amdgpu:encoding_info",
+        "//loom/py/loom/target/arch/amdgpu:target_info",
+    ],
+)
+
+iree_py_test(
+    name = "config_tables_test",
+    srcs = [
+        "amdgpu_config_tables_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.target.arch.amdgpu.amdgpu_config_tables_test"],
+    main = "pytest_style_runner.py",
+    deps = [":config_tables"],
+)
+
+iree_py_binary(
+    name = "low_aliases",
+    srcs = [
+        "__init__.py",
+        "amdgpu_low_aliases.py",
+    ],
+    main = "amdgpu_low_aliases.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/target/arch/amdgpu:descriptors",
+        "//loom/py/loom/target/arch/amdgpu:low_aliases",
+    ],
+)
+
+iree_py_binary(
+    name = "target_info",
+    srcs = [
+        "__init__.py",
+        "amdgpu_target_info.py",
+    ],
+    main = "amdgpu_target_info.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/target:low_descriptors",
+        "//loom/py/loom/target/arch/amdgpu:isa_xml",
+        "//loom/py/loom/target/arch/amdgpu:target_info",
+    ],
+)
+
+iree_py_test(
+    name = "target_info_test",
+    srcs = [
+        "amdgpu_target_info_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.target.arch.amdgpu.amdgpu_target_info_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":target_info",
+        "//loom/py/loom/target/arch/amdgpu:target_info",
+    ],
+)

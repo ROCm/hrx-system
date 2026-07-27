@@ -33,6 +33,38 @@ typedef struct iree_hal_streaming_graph_edge_t {
   iree_hal_streaming_graph_node_t* to;    // Dependent (waits for 'from')
 } iree_hal_streaming_graph_edge_t;
 
+// Graph-owned host allocation that backs staged host/device copy nodes.
+typedef struct iree_hal_streaming_graph_owned_host_allocation_t {
+  // Next allocation in the graph-owned singly-linked list.
+  struct iree_hal_streaming_graph_owned_host_allocation_t* next;
+  // Streaming buffer wrapper for this host-visible allocation.
+  iree_hal_streaming_buffer_t* buffer;
+  // Host pointer returned by the streaming host allocation.
+  void* host_ptr;
+  // Device pointer associated with the host-visible allocation.
+  iree_hal_streaming_deviceptr_t device_ptr;
+  // Allocation size in bytes.
+  iree_device_size_t size;
+} iree_hal_streaming_graph_owned_host_allocation_t;
+
+typedef iree_status_t (*iree_hal_streaming_graph_user_object_retain_fn_t)(
+    void* object, uint64_t count);
+typedef void (*iree_hal_streaming_graph_user_object_release_fn_t)(
+    void* object, uint64_t count);
+
+typedef struct iree_hal_streaming_graph_user_object_ref_t {
+  // Next retained user object in the graph-owned singly-linked list.
+  struct iree_hal_streaming_graph_user_object_ref_t* next;
+  // Opaque API object retained by this graph template.
+  void* object;
+  // Number of references currently held by this graph template.
+  uint64_t count;
+  // Callback used when cloning this graph template.
+  iree_hal_streaming_graph_user_object_retain_fn_t retain;
+  // Callback used when destroying this graph template or releasing references.
+  iree_hal_streaming_graph_user_object_release_fn_t release;
+} iree_hal_streaming_graph_user_object_ref_t;
+
 // Graph structure (template).
 typedef struct iree_hal_streaming_graph_t {
   iree_atomic_ref_count_t ref_count;
@@ -45,6 +77,14 @@ typedef struct iree_hal_streaming_graph_t {
   iree_hal_streaming_node_block_t* node_blocks;
   iree_hal_streaming_node_block_t* current_node_block;
   iree_host_size_t node_count;
+  // Number of direct child graph nodes in this graph template.
+  iree_host_size_t child_graph_node_count;
+  // Process-unique identifier used for graph debug output and clone provenance.
+  uint64_t debug_id;
+  // Debug identifier of the graph this template was cloned from, or zero.
+  uint64_t clone_source_graph_debug_id;
+  // Next stable source ID assigned to graph nodes created in this template.
+  uint32_t next_clone_source_node_index;
 
   // Root nodes stored in chained blocks.
   iree_hal_streaming_node_block_t* root_blocks;
@@ -55,12 +95,22 @@ typedef struct iree_hal_streaming_graph_t {
   iree_hal_streaming_graph_edge_t* additional_edges;
   iree_host_size_t additional_edge_count;
 
+  // Host allocations owned by this graph template.
+  iree_hal_streaming_graph_owned_host_allocation_t* owned_host_allocations;
+  // Opaque user objects retained by this graph template.
+  iree_hal_streaming_graph_user_object_ref_t* user_object_refs;
+
+  // True when the graph contains HIP memory allocation or free nodes.
+  bool has_graph_memory_nodes;
+  // Number of live executable graphs instantiated from memory-node graph.
+  uint32_t active_graph_memory_exec_count;
+
+  // Graph creation flags.
   uint32_t flags;
+  // Streaming context that owns graph resources.
   iree_hal_streaming_context_t* context;
 
-  // Mutex only needed for instantiate/clone operations per CUDA docs.
-  iree_slim_mutex_t mutex;
-
+  // Host allocator used for graph object allocation.
   iree_allocator_t host_allocator;
 } iree_hal_streaming_graph_t;
 
@@ -70,6 +120,8 @@ enum iree_hal_streaming_graph_partition_type_e {
   IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_RECORDABLE = 0,
   // Must be separate host call.
   IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_HOST_CALL,
+  // Must be launched as a nested executable graph.
+  IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_GRAPH,
   // Barrier node.
   IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_EMPTY,
 };
@@ -99,9 +151,16 @@ iree_status_t iree_hal_streaming_graph_exec_create(
     iree_allocator_t host_allocator,
     iree_hal_streaming_graph_exec_t** out_exec);
 
-iree_status_t iree_hal_streaming_graph_exec_instantiate_locked(
+iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
     iree_hal_streaming_graph_exec_t* exec,
     iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count);
+
+iree_status_t iree_hal_streaming_graph_exec_rebuild_from_template(
+    iree_hal_streaming_graph_exec_t* exec);
+
+bool iree_hal_streaming_graph_exec_owns_node(
+    iree_hal_streaming_graph_exec_t* exec,
+    iree_hal_streaming_graph_node_t* node);
 
 // Augmented node for sorting and partitioning.
 typedef struct iree_hal_streaming_graph_sort_node_t {
@@ -157,6 +216,7 @@ typedef struct iree_hal_streaming_graph_schedule_t {
 // after node creation (can be NULL if none).
 iree_status_t iree_hal_streaming_graph_schedule_nodes(
     iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count,
+    const uint8_t* disabled_nodes, iree_host_size_t disabled_node_count,
     iree_hal_streaming_graph_edge_t* additional_edges,
     iree_arena_allocator_t* arena,
     iree_hal_streaming_graph_schedule_t* out_schedule);
@@ -168,6 +228,11 @@ iree_status_t iree_hal_streaming_graph_add_dependencies(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** from_nodes,
     iree_hal_streaming_graph_node_t** to_nodes, iree_host_size_t count);
+
+// Allocates a host-visible staging buffer owned by |graph|.
+iree_status_t iree_hal_streaming_graph_allocate_host_staging(
+    iree_hal_streaming_graph_t* graph, iree_device_size_t size,
+    iree_hal_streaming_buffer_t** out_buffer);
 
 #ifdef __cplusplus
 }

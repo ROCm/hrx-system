@@ -1,0 +1,45 @@
+// RUN: roundtrip
+
+// Multi-region function-like op with region-local projections of one logical
+// function signature. The body receives the signature args through FuncArgs;
+// the config region spells its own block args so the two regions have distinct
+// SSA values with matching types.
+test.split_func @projected(%arg: i32, %other: index) {
+  test.use %arg : i32
+  test.use %other : index
+  test.yield
+} launch {
+  test.use %arg : i32
+  test.use %other : index
+  test.yield
+}
+
+// ====
+
+// TemplateParam is an ordinary attribute value in angle brackets, so symbol
+// attributes keep their @ spelling and symbol-reference semantics.
+test.record @template_param_target
+
+test.func @template_param_symbol() {
+  test.template_param_symbol<@template_param_target>
+  test.template_param_symbol_flags<@template_param_target, debug|trace>
+  test.yield
+}
+
+// ====
+
+// Owned-resource operations model generic lifetime effects without depending
+// on a target dialect.
+test.func @owned_resources(%size: index) {
+  %fresh = test.resource.alloc %size : index -> pool<16>
+  test.resource.borrow %fresh : pool<16>
+  test.resource.borrow_ref %fresh : pool<16>
+  %retained = test.resource.retain %fresh : pool<16> -> pool<16>
+  %alias = test.resource.alias %retained : pool<16> -> pool<16>
+  %borrowed = test.resource.borrowed %alias : pool<16> -> pool<16>
+  test.resource.release %retained : pool<16>
+  test.resource.discard %alias : pool<16>
+  test.resource.escape %borrowed : pool<16>
+  test.resource.consume %fresh : pool<16>
+  test.yield
+}

@@ -75,8 +75,10 @@ void iree_hal_local_transient_buffer_stage_backing(iree_hal_buffer_t* buffer,
 void iree_hal_local_transient_buffer_commit(iree_hal_buffer_t* buffer);
 
 // Decommits the backing buffer and returns the wrapper to the uncommitted
-// state. Any staged-but-uncommitted backing view is also released. Safe to
-// call on an already-uncommitted wrapper.
+// state. Any staged-but-uncommitted backing view is also released. Queue
+// implementations use this in the dealloca wait-satisfied/signal-before window
+// so target-visible release effects occur before user-visible completion. Safe
+// to call on an already-uncommitted wrapper.
 void iree_hal_local_transient_buffer_decommit(iree_hal_buffer_t* buffer);
 
 // Returns true if queue_dealloca has been accepted for the transient buffer.
@@ -112,7 +114,9 @@ bool iree_hal_local_transient_buffer_query_reservation(
 //
 // |death_frontier| is forwarded to iree_hal_pool_release_reservation() when
 // the reservation is still owned. Pass NULL for an immediately reusable
-// reservation in synchronous/drain-ordered paths.
+// reservation in synchronous/drain-ordered paths. This updates pool reuse
+// metadata; target-visible release effects are performed by the queue before
+// publishing dealloca completion.
 void iree_hal_local_transient_buffer_release_reservation(
     iree_hal_buffer_t* buffer, const iree_async_frontier_t* death_frontier);
 

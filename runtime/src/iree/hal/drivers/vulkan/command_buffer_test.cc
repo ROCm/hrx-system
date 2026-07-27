@@ -172,7 +172,8 @@ TEST_F(VulkanCommandBufferTest, ReplaysDebugGroupsAsDebugUtilsLabels) {
   iree_hal_vulkan_debug_utils_t debug_utils;
   debug_utils.flags = IREE_HAL_VULKAN_DEBUG_UTILS_FLAG_COMMAND_LABELS;
   iree_hal_vulkan_builtins_t builtins = {};
-  iree_hal_buffer_binding_table_t binding_table = {};
+  iree_hal_buffer_binding_table_t binding_table =
+      iree_hal_buffer_binding_table_empty();
   VkDevice logical_device =
       reinterpret_cast<VkDevice>(static_cast<uintptr_t>(0x1234));
   VkCommandBuffer native_command_buffer =

@@ -1,0 +1,354 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_reduce.loom-test
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i32_reduce_add(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xi32, #dense> -> vector<4xi32>
+  %init = scalar.constant 0 : i32
+  %sum = vector.reduce<addi> %loaded, %init : vector<4xi32>, i32
+  %stored = vector.from_elements %sum : vector<1xi32>
+  vector.store %stored, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i32_reduce_add() asm<amdgpu.rdna3.core> {
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %12 = v_mov_b32 0
+  %loaded = global_load_b128_saddr %12, %input_view
+  %14 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %15 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = v_add_u32 %14, %15
+  %17 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %18 = v_add_u32 %16, %17
+  %19 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %stored = v_add_u32 %18, %19
+  global_store_b32_saddr %12, %stored, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f32_reduce_add(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xf32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %init = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf> %loaded, %init : vector<4xf32>, f32
+  %stored = vector.from_elements %sum : vector<1xf32>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32_reduce_add() asm<amdgpu.rdna3.core> {
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %12 = v_mov_b32 0
+  %loaded = global_load_b128_saddr %12, %input_view
+  %14 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %15 = v_add_f32_lit %14, 0
+  %16 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %17 = v_add_f32 %15, %16
+  %18 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = v_add_f32 %17, %18
+  %20 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %stored = v_add_f32 %19, %20
+  global_store_b32_saddr %12, %stored, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f32_reduce_add_fastmath(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xf32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %init = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf, reassoc|nnan|nsz> %loaded, %init : vector<4xf32>, f32
+  %stored = vector.from_elements %sum : vector<1xf32>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32_reduce_add_fastmath() asm<amdgpu.rdna3.core> {
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %12 = v_mov_b32 0
+  %loaded = global_load_b128_saddr %12, %input_view
+  %14 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %15 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %17 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %18 = v_add_f32 %14, %15
+  %19 = v_add_f32 %16, %17
+  %stored = v_add_f32 %18, %19
+  global_store_b32_saddr %12, %stored, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f32x64_reduce_add_fastmath(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xf32, #dense>
+  %loaded = vector.load %input_view[0] : view<64xf32, #dense> -> vector<64xf32>
+  %init = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf, reassoc|nnan|nsz> %loaded, %init : vector<64xf32>, f32
+  %stored = vector.from_elements %sum : vector<1xf32>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32x64_reduce_add_fastmath() asm<amdgpu.rdna3.core> {
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %44 = v_mov_b32 0
+  %45 = global_load_b128_saddr %44, %input_view
+  %46 = slice %45[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %47 = slice %45[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %48 = slice %45[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %49 = slice %45[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %50 = v_add_f32 %46, %47
+  %51 = v_add_f32 %48, %49
+  %52 = v_add_f32 %50, %51
+  %54 = global_load_b128_saddr %44, %input_view {offset = 16}
+  %55 = slice %54[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %56 = v_add_f32 %52, %55
+  %57 = slice %54[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %58 = v_add_f32 %56, %57
+  %59 = slice %54[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %60 = v_add_f32 %58, %59
+  %61 = slice %54[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %62 = v_add_f32 %60, %61
+  %64 = global_load_b128_saddr %44, %input_view {offset = 32}
+  %65 = slice %64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %66 = v_add_f32 %62, %65
+  %67 = slice %64[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %68 = v_add_f32 %66, %67
+  %69 = slice %64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %70 = v_add_f32 %68, %69
+  %71 = slice %64[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %72 = v_add_f32 %70, %71
+  %74 = global_load_b128_saddr %44, %input_view {offset = 48}
+  %75 = slice %74[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %76 = v_add_f32 %72, %75
+  %77 = slice %74[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %78 = v_add_f32 %76, %77
+  %79 = slice %74[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %80 = v_add_f32 %78, %79
+  %81 = slice %74[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %82 = v_add_f32 %80, %81
+  %84 = global_load_b128_saddr %44, %input_view {offset = 64}
+  %85 = slice %84[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %86 = v_add_f32 %82, %85
+  %87 = slice %84[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %88 = v_add_f32 %86, %87
+  %89 = slice %84[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %90 = v_add_f32 %88, %89
+  %91 = slice %84[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %92 = v_add_f32 %90, %91
+  %94 = global_load_b128_saddr %44, %input_view {offset = 80}
+  %95 = slice %94[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %96 = v_add_f32 %92, %95
+  %97 = slice %94[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %98 = v_add_f32 %96, %97
+  %99 = slice %94[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %100 = v_add_f32 %98, %99
+  %101 = slice %94[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %102 = v_add_f32 %100, %101
+  %104 = global_load_b128_saddr %44, %input_view {offset = 96}
+  %105 = slice %104[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %106 = v_add_f32 %102, %105
+  %107 = slice %104[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %108 = v_add_f32 %106, %107
+  %109 = slice %104[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %110 = v_add_f32 %108, %109
+  %111 = slice %104[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %112 = v_add_f32 %110, %111
+  %114 = global_load_b128_saddr %44, %input_view {offset = 112}
+  %115 = slice %114[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %116 = v_add_f32 %112, %115
+  %117 = slice %114[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %118 = v_add_f32 %116, %117
+  %119 = slice %114[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %120 = v_add_f32 %118, %119
+  %121 = slice %114[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %122 = v_add_f32 %120, %121
+  %124 = global_load_b128_saddr %44, %input_view {offset = 128}
+  %125 = slice %124[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %126 = v_add_f32 %122, %125
+  %127 = slice %124[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %128 = v_add_f32 %126, %127
+  %129 = slice %124[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %130 = v_add_f32 %128, %129
+  %131 = slice %124[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %132 = v_add_f32 %130, %131
+  %134 = global_load_b128_saddr %44, %input_view {offset = 144}
+  %135 = slice %134[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %136 = v_add_f32 %132, %135
+  %137 = slice %134[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %138 = v_add_f32 %136, %137
+  %139 = slice %134[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %140 = v_add_f32 %138, %139
+  %141 = slice %134[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %142 = v_add_f32 %140, %141
+  %144 = global_load_b128_saddr %44, %input_view {offset = 160}
+  %145 = slice %144[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %146 = v_add_f32 %142, %145
+  %147 = slice %144[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %148 = v_add_f32 %146, %147
+  %149 = slice %144[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %150 = v_add_f32 %148, %149
+  %151 = slice %144[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %152 = v_add_f32 %150, %151
+  %154 = global_load_b128_saddr %44, %input_view {offset = 176}
+  %155 = slice %154[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %156 = v_add_f32 %152, %155
+  %157 = slice %154[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %158 = v_add_f32 %156, %157
+  %159 = slice %154[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %160 = v_add_f32 %158, %159
+  %161 = slice %154[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %162 = v_add_f32 %160, %161
+  %164 = global_load_b128_saddr %44, %input_view {offset = 192}
+  %165 = slice %164[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %166 = v_add_f32 %162, %165
+  %167 = slice %164[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %168 = v_add_f32 %166, %167
+  %169 = slice %164[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %170 = v_add_f32 %168, %169
+  %171 = slice %164[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %172 = v_add_f32 %170, %171
+  %174 = global_load_b128_saddr %44, %input_view {offset = 208}
+  %175 = slice %174[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %176 = v_add_f32 %172, %175
+  %177 = slice %174[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %178 = v_add_f32 %176, %177
+  %179 = slice %174[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %180 = v_add_f32 %178, %179
+  %181 = slice %174[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %182 = v_add_f32 %180, %181
+  %184 = global_load_b128_saddr %44, %input_view {offset = 224}
+  %185 = slice %184[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %186 = v_add_f32 %182, %185
+  %187 = slice %184[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %188 = v_add_f32 %186, %187
+  %189 = slice %184[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %190 = v_add_f32 %188, %189
+  %191 = slice %184[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %192 = v_add_f32 %190, %191
+  %194 = global_load_b128_saddr %44, %input_view {offset = 240}
+  %195 = slice %194[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %196 = v_add_f32 %192, %195
+  %197 = slice %194[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %198 = v_add_f32 %196, %197
+  %199 = slice %194[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %200 = v_add_f32 %198, %199
+  %201 = slice %194[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %stored = v_add_f32 %200, %201
+  global_store_b32_saddr %44, %stored, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+config.def @runtime.vector_width = 4 : index
+
+kernel.def target(@target) @f32_configured_width_square_reduce() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%input: buffer, %output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %vector_width = config.get @runtime.vector_width : index
+  %vector_width_bounded = index.assume %vector_width [range(%vector_width, 2, 4)] : index
+  %element_count = index.constant 256 : index
+  %input_view = buffer.view %input[%zero_offset] : buffer -> view<[%element_count]xf32, #dense>
+  %output_view = buffer.view %output[%zero_offset] : buffer -> view<1xf32, #dense>
+  %linear0 = index.mul %lane, %vector_width_bounded : index
+  %linear = index.assume %linear0 [range(%linear0, 0, 252)] : index
+  %loaded = vector.load %input_view[%linear] : view<[%element_count]xf32, #dense> -> vector<[%vector_width_bounded]xf32>
+  %squared = vector.mulf<reassoc|nnan|ninf|nsz|contract> %loaded, %loaded : vector<[%vector_width_bounded]xf32>
+  %zero_f32 = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf, reassoc|nnan|ninf|nsz|contract> %squared, %zero_f32 : vector<[%vector_width_bounded]xf32>, f32
+  %stored = vector.from_elements %sum : vector<1xf32>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_configured_width_square_reduce() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %28 = v_lshlrev_b32_src0_inline %lane, 4
+  %loaded = global_load_b128_saddr %28, %input_view
+  %31 = v_mov_b32 0
+  %32 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %34 = v_fmac_f32 %31, %32, %32
+  %35 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %37 = v_mul_f32 %35, %35
+  %38 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %40 = v_mul_f32 %38, %38
+  %41 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %43 = v_mul_f32 %41, %41
+  %44 = v_add_f32 %34, %37
+  %45 = v_add_f32 %40, %43
+  %stored = v_add_f32 %44, %45
+  %47 = v_mov_b32 0
+  global_store_b32_saddr %47, %stored, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i32_reduce_minui_select_sentinel(%values: vector<4xi32>) -> (i32) {
+  %zero = scalar.constant 0 : i32
+  %zeros = vector.splat %zero : vector<4xi32>
+  %is_zero = vector.cmpi eq, %values, %zeros : vector<4xi32> -> vector<4xi1>
+  %start = scalar.constant 0 : i32
+  %step = scalar.constant 1 : i32
+  %indices = vector.iota %start step %step : vector<4xi32>
+  %sentinel = scalar.constant 2147483647 : i32
+  %sentinels = vector.splat %sentinel : vector<4xi32>
+  %selected = vector.select %is_zero, %indices, %sentinels : vector<4xi32>
+  %result = vector.reduce<minui> %selected, %sentinel : vector<4xi32>, i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i32_reduce_minui_select_sentinel(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %26 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %27 = v_cmp_eq_i32_src1_inline %26 {rhs = 0}
+  %28 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %29 = v_cmp_eq_i32_src1_inline %28 {rhs = 0}
+  %30 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %31 = v_cmp_eq_i32_src1_inline %30 {rhs = 0}
+  %32 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %33 = v_cmp_eq_i32_src1_inline %32 {rhs = 0}
+  %50 = v_cndmask_b32_src0_lit_src1_inline %27 {imm32 = 2147483647, true_value = 0}
+  %52 = v_cndmask_b32_src0_lit_src1_inline %29 {imm32 = 2147483647, true_value = 1}
+  %54 = v_cndmask_b32_src0_lit_src1_inline %31 {imm32 = 2147483647, true_value = 2}
+  %56 = v_cndmask_b32_src0_lit_src1_inline %33 {imm32 = 2147483647, true_value = 3}
+  %60 = v_min_u32 %50, %52
+  %62 = v_min_u32 %60, %54
+  %result = v_min_u32 %62, %56
+  return %result
+}

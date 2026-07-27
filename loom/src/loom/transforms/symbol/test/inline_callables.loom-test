@@ -1,0 +1,226 @@
+// RUN: pass inline-callables
+
+func.def inline @double(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.call @double(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public @entry(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  func.return %doubled : i32
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+func.def @double(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.call hot inline @double(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public @entry(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  func.return %doubled : i32
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+func.def cold noinline @serializer(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.call @serializer(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+func.def noinline @double(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="double", failure_code="policy_conflict"}
+  %result = func.call inline @double(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+func.def inline @inner(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def inline @outer(%value: i32) -> (i32) {
+  %inner = func.call @inner(%value) : (i32) -> (i32)
+  %sum = test.addi %inner, %value : i32
+  func.return %sum : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.call @outer(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public @entry(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  %sum = test.addi %doubled, %arg : i32
+  func.return %sum : i32
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+func.def inline @double(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @entry_a(%arg: i32) -> (i32) {
+  %result = func.call @double(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public @entry_b(%arg: i32) -> (i32) {
+  %result = func.call @double(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public @entry_a(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  func.return %doubled : i32
+}
+
+func.def public @entry_b(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  func.return %doubled : i32
+}
+
+// ====
+
+// RUN: with-locations pass inline-callables
+
+func.def inline @sanitizer_site_source(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32 loc(tagged<sanitizer_site, "0102", "source.loom":7:8>)
+  func.return %doubled : i32 loc("callee.loom":3:1)
+} loc("callee.loom":1:1 to 4:1)
+
+func.def public @preserves_sanitizer_site_location(%arg: i32) -> (i32) {
+  %result = func.call @sanitizer_site_source(%arg) : (i32) -> (i32) loc("entry.loom":2:1)
+  func.return %result : i32 loc("entry.loom":3:1)
+} loc("entry.loom":1:1 to 4:1)
+
+// ----
+func.def public @preserves_sanitizer_site_location(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32 loc(tagged<sanitizer_site, "0102", "source.loom":7:8>)
+  func.return %doubled : i32 loc("entry.loom":3:1)
+} loc("entry.loom":1:1 to 4:1)
+
+// ====
+
+// RUN: pass inline-callables
+
+func.template<test.addi> hot inline @double_template(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.call @double_template(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public @entry(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  func.return %doubled : i32
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+func.def inline @unpack_block(%packed: i32) -> (i32) {
+  %unpacked = test.addi %packed, %packed : i32
+  func.return %unpacked : i32
+}
+
+func.def inline @apply_scale(%value: i32, %scale: i32) -> (i32) {
+  %scaled = test.addi %value, %scale : i32
+  func.return %scaled : i32
+}
+
+func.def inline @decode_block(%packed: i32, %scale: i32) -> (i32) {
+  %unpacked = func.call @unpack_block(%packed) : (i32) -> (i32)
+  %decoded = func.call @apply_scale(%unpacked, %scale) : (i32, i32) -> (i32)
+  func.return %decoded : i32
+}
+
+func.def public @block_quant_entry(%packed: i32, %scale: i32) -> (i32) {
+  %result = func.call @decode_block(%packed, %scale) : (i32, i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public @block_quant_entry(%packed: i32, %scale: i32) -> (i32) {
+  %unpacked = test.addi %packed, %packed : i32
+  %scaled = test.addi %unpacked, %scale : i32
+  func.return %scaled : i32
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+func.decl inline @extern_a(%value: i32) -> (i32)
+func.decl inline @extern_b(%value: i32) -> (i32)
+
+func.def public @entry(%arg: i32) -> (i32, i32) {
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="extern_a", failure_code="callee_missing_body"}
+  %a = func.call @extern_a(%arg) : (i32) -> (i32)
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="extern_b", failure_code="callee_missing_body"}
+  %b = func.call @extern_b(%arg) : (i32) -> (i32)
+  func.return %a, %b : i32, i32
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+func.def inline @cycle_a(%value: i32) -> (i32) {
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="cycle_b", failure_code="required_cycle"}
+  %result = func.call @cycle_b(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def inline @cycle_b(%value: i32) -> (i32) {
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="cycle_a", failure_code="required_cycle"}
+  %result = func.call @cycle_a(%value) : (i32) -> (i32)
+  func.return %result : i32
+}

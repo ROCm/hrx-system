@@ -1,0 +1,37 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i16_table_lookup_rejected(%codes: vector<4xi16>) -> (vector<4xf32>) {
+  %g0 = scalar.constant -1.0 : f32
+  %g1 = scalar.constant 0.0 : f32
+  %g2 = scalar.constant 1.0 : f32
+  %g3 = scalar.constant 2.0 : f32
+  %grid = vector.from_elements %g0, %g1, %g2, %g3 : vector<4xf32>
+  // ERROR@+1: AMDGPU/023 {constraint_key="table_lookup.shape"}
+  %decoded = vector.table.lookup %grid[%codes] : vector<4xf32>, vector<4xi16> -> vector<4xf32>
+  func.return %decoded : vector<4xf32>
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i8_table_lookup_unknown_codes_rejected(%grid: vector<4xi8>, %codes: vector<4xi8>) -> (vector<4xi8>) {
+  // ERROR@+1: AMDGPU/023 {constraint_key="table_lookup.shape"}
+  %decoded = vector.table.lookup %grid[%codes] : vector<4xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i8_table_lookup_wide_table_rejected(%grid: vector<5xi8>) -> (vector<4xi8>) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c3 = scalar.constant 3 : i32
+  %wide_codes = vector.from_elements %c0, %c1, %c2, %c3 : vector<4xi32>
+  %codes = vector.bitpack<8> %wide_codes : vector<4xi32> -> vector<4xi8>
+  // ERROR@+1: AMDGPU/023 {constraint_key="table_lookup.shape"}
+  %decoded = vector.table.lookup %grid[%codes] : vector<5xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}

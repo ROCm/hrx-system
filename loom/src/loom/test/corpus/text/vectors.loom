@@ -1,0 +1,21 @@
+func.def @vectors(%x: f32, %i: i32, %n: index, %a: vector<4xf32>, %b: vector<4xf32>, %matrix: vector<2x2xf32>, %codes: vector<16xi8>, %iv: vector<4xi32>) -> (vector<4xf32>, i32) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %splat = vector.splat %x : vector<4xf32>
+  %lanes = vector.iota %c0 step %c1 : vector<4xindex>
+  %mask = vector.mask.range [%c0 to %n step %c1] : index -> vector<4xi1>
+  %sum = vector.addf %a, %b : vector<4xf32>
+  %selected = vector.select %mask, %sum, %splat : vector<4xf32>
+  %transposed = vector.transpose<[1, 0]> %matrix : vector<2x2xf32> -> vector<2x2xf32>
+  %shuffled = vector.shuffle<[3, 2, 1, 0]> %selected : vector<4xf32>
+  %lane0 = vector.extract %shuffled[0] : vector<4xf32> -> f32
+  %updated = vector.insert %lane0 into %selected[%n] : f32, vector<4xf32>
+  %from = vector.from_elements %x, %x, %x, %x : vector<4xf32>
+  %reduced = vector.reduce<addf> %from, %x : vector<4xf32>, f32
+  %cmp = vector.cmpi slt, %iv, %iv : vector<4xi32> -> vector<4xi1>
+  %packed = vector.bitpack<4> %codes : vector<16xi8> -> vector<8xi8>
+  %unpacked = vector.bitunpacks<4> %packed : vector<8xi8> -> vector<16xi8>
+  %dot4 = vector.dot4i<s8s8> %unpacked, %unpacked, %iv : vector<16xi8>, vector<16xi8>, vector<4xi32>
+  test.use %i, %lanes, %transposed, %updated, %reduced, %cmp : i32, vector<4xindex>, vector<2x2xf32>, vector<4xf32>, f32, vector<4xi1>
+  func.return %updated, %i : vector<4xf32>, i32
+}

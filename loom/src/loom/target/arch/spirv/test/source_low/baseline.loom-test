@@ -1,0 +1,151 @@
+// RUN: emit low-allocation @spirv_iadd_ids_allocate_logical_ids
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target(@target) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @spirv_iadd_ids_allocate_logical_ids(%lhs: reg<spirv.id>, %rhs: reg<spirv.id>) -> (reg<spirv.id>) asm<spirv.logical.core> {
+  %sum = OpIAdd %lhs, %rhs
+  return %sum
+}
+
+// ----
+low-allocation @spirv_iadd_ids_allocate_logical_ids
+target: target
+descriptor_set: spirv.logical.core
+mode: virtual
+assignments: 3
+remarks: 0
+spills: 0
+copies: coalesced=0 materialized=0
+classes:
+  spirv.id: assignments=3 units=3 target_ids=2 physical=0 spill_slots=0 unassigned=0
+
+// ====
+
+// RUN: verify
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target(@target) @spirv_private_storage_address() asm<spirv.logical.core> {
+  // ERROR@+1: SPIRV/017 {function_name="spirv_private_storage_address", op_name="low.storage.reserve"}
+  %storage = storage {byte_alignment = 4, byte_length = 256} : low.storage<private>
+  // ERROR@+1: SPIRV/017 {function_name="spirv_private_storage_address", op_name="low.storage.address"}
+  %ptr = storage_address %storage : low.storage<private> -> reg<spirv.ptr.workgroup.array.i32>
+  return
+}
+
+// ====
+
+// RUN: verify
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target(@target) @spirv_workgroup_storage_address_scalar_mismatch() asm<spirv.logical.core> {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<workgroup>
+  %i32_ptr = storage_address %storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  // ERROR@+1: SPIRV/017 {function_name="spirv_workgroup_storage_address_scalar_mismatch", op_name="low.storage.address"}
+  %f32_ptr = storage_address %storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.f32>
+  return
+}
+
+// ====
+
+// RUN: verify
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target(@target) @spirv_workgroup_storage_address_unaligned_scalar() asm<spirv.logical.core> {
+  %storage = storage {byte_alignment = 2, byte_length = 16} : low.storage<workgroup>
+  // ERROR@+1: SPIRV/017 {function_name="spirv_workgroup_storage_address_unaligned_scalar", op_name="low.storage.address"}
+  %ptr = storage_address %storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  return
+}
+
+// ====
+
+// RUN: verify
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target(@target) @spirv_workgroup_storage_address_too_many_elements() asm<spirv.logical.core> {
+  %storage = storage {byte_alignment = 4, byte_length = 17179869184} : low.storage<workgroup>
+  // ERROR@+1: SPIRV/017 {function_name="spirv_workgroup_storage_address_too_many_elements", op_name="low.storage.address"}
+  %ptr = storage_address %storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  return
+}
+
+// ====
+
+// RUN: verify
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target(@target) abi_layout({spirv_result_value_types = [23]}) @spirv_constant_requires_immediate() -> (reg<spirv.id>) {
+  // ERROR@+1: TARGET/047 {function_name="spirv_constant_requires_immediate", opcode="spirv.op_constant.i32", immediate_name="i32_value"}
+  %c0 = low.const<spirv.op_constant.i32> : reg<spirv.id>
+  low.return %c0 : reg<spirv.id>
+}
+
+// ====
+
+// RUN: emit low-allocation @spirv_storage_buffer_load_store
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target(@target) abi_layout({spirv_result_value_types = [23]}) @spirv_storage_buffer_load_store(%base: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id>) asm<spirv.logical.core> {
+  %ptr = OpPtrAccessChain.storage_buffer.i32.byte_offset %base, %byte_offset
+  %loaded = OpLoad.storage_buffer.i32 %ptr
+  OpStore.storage_buffer.i32 %ptr, %loaded
+  return %loaded
+}
+
+// ----
+low-allocation @spirv_storage_buffer_load_store
+target: target
+descriptor_set: spirv.logical.core
+mode: virtual
+assignments: 4
+remarks: 0
+spills: 0
+copies: coalesced=0 materialized=0
+classes:
+  spirv.id: assignments=1 units=1 target_ids=1 physical=0 spill_slots=0 unassigned=0
+  spirv.offset64: assignments=1 units=1 target_ids=1 physical=0 spill_slots=0 unassigned=0
+  spirv.ptr.storage_buffer: assignments=2 units=2 target_ids=1 physical=0 spill_slots=0 unassigned=0
+
+// ====
+
+// RUN: emit low-allocation @spirv_storage_buffer_bda_addressing
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target(@target) abi_layout({spirv_result_value_types = [23]}) @spirv_storage_buffer_bda_addressing(%base: reg<spirv.ptr.storage_buffer>, %row: reg<spirv.offset64>, %column: reg<spirv.offset64>) -> (reg<spirv.id>) asm<spirv.logical.core> {
+  %byte_offset = OpIAdd.offset64 %row, %column
+  %ptr = OpPtrAccessChain.storage_buffer.i32.byte_offset %base, %byte_offset
+  %loaded = OpLoad.storage_buffer.i32 %ptr
+  return %loaded
+}
+
+// ----
+low-allocation @spirv_storage_buffer_bda_addressing
+target: target
+descriptor_set: spirv.logical.core
+mode: virtual
+assignments: 6
+remarks: 0
+spills: 0
+copies: coalesced=0 materialized=0
+classes:
+  spirv.id: assignments=1 units=1 target_ids=1 physical=0 spill_slots=0 unassigned=0
+  spirv.offset64: assignments=3 units=3 target_ids=2 physical=0 spill_slots=0 unassigned=0
+  spirv.ptr.storage_buffer: assignments=2 units=2 target_ids=1 physical=0 spill_slots=0 unassigned=0
+
+// ====
+
+// RUN: pass low-materialize-allocation{budgets=spirv.id=1,spill-storage-spaces=workgroup}
+
+spirv.target<vulkan1_3> @target
+
+// ERROR@+1: BACKEND/019 {function_name="spirv_private_spill_requires_function_storage", value_class="spirv.id", spill_slot_space="private", storage_space="private"}
+low.func.def target(@target) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23, 23]}) @spirv_private_spill_requires_function_storage(%lhs: reg<spirv.id>, %rhs: reg<spirv.id>) -> (reg<spirv.id>, reg<spirv.id>) asm<spirv.logical.core> {
+  return %lhs, %rhs
+}

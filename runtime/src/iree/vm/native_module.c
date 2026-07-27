@@ -530,7 +530,8 @@ IREE_API_EXPORT iree_status_t iree_vm_native_module_initialize(
       module->user_interface.self ? module->user_interface.self : module;
 
   // Base interface that routes through our thunks.
-  iree_vm_module_initialize(&module->base_interface, module);
+  IREE_RETURN_IF_ERROR(
+      iree_vm_module_initialize(&module->base_interface, module));
   module->base_interface.destroy = iree_vm_native_module_destroy;
   module->base_interface.name = iree_vm_native_module_name;
   module->base_interface.signature = iree_vm_native_module_signature;

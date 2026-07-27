@@ -18,6 +18,19 @@ function(iree_runtime_configure_amdgpu_toolchain)
   set(IREE_CLANG_BINARY "${CMAKE_C_COMPILER}" CACHE FILEPATH
     "Clang used by IREE runtime AMDGPU device binary builds." FORCE)
 
+  execute_process(
+    COMMAND "${IREE_CLANG_BINARY}" -print-prog-name=llvm-ar
+    OUTPUT_VARIABLE _llvm_ar_from_clang
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  if(EXISTS "${_llvm_ar_from_clang}")
+    set(IREE_LLVM_AR_BINARY "${_llvm_ar_from_clang}" CACHE FILEPATH
+      "llvm-ar used by IREE runtime AMDGPU device binary builds." FORCE)
+  else()
+    find_program(_llvm_ar_fallback llvm-ar REQUIRED)
+    set(IREE_LLVM_AR_BINARY "${_llvm_ar_fallback}" CACHE FILEPATH
+      "llvm-ar used by IREE runtime AMDGPU device binary builds." FORCE)
+  endif()
+
   set(_probe_src "${CMAKE_BINARY_DIR}/CMakeFiles/iree-runtime-amdgcn-probe.c")
   set(_probe_obj "${CMAKE_BINARY_DIR}/CMakeFiles/iree-runtime-amdgcn-probe.bc")
   file(WRITE "${_probe_src}" "void iree_runtime_amdgcn_probe(void) {}\n")

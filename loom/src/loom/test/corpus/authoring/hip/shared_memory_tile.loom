@@ -1,0 +1,55 @@
+// HIP -> Loom shared-memory tile recipe.
+//
+// HIP concept tags: `__shared__`, `__syncthreads`, LDS, workgroup memory,
+// cross-lane exchange, tile staging, `ds_write`, `ds_read`, barrier.
+//
+// Position: shared memory is ordinary workgroup-address-space storage. The
+// source names the allocation, the typed view, the synchronization point, and
+// the cross-lane access pattern. AMDGPU lowering is then expected to select LDS
+// operations for the workgroup-memory loads/stores.
+kernel.def @shared_memory_tile_reverse() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %last_lane = index.constant 63 : index
+  %reverse_lane = index.sub %last_lane, %lane : index
+  %scratch_bytes = index.constant 256 : offset
+
+  // HIP concept:
+  //   __shared__ int scratch[64];
+  // Loom spelling: allocate workgroup-memory storage and create a typed view.
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<64xi32, #dense>
+  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<64xi32, #dense>
+
+  // HIP concept:
+  //   scratch[threadIdx.x] = input[threadIdx.x];
+  %loaded = vector.load %input_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
+
+  // HIP concept:
+  //   __syncthreads();
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+
+  // HIP concept:
+  //   output[threadIdx.x] = scratch[63 - threadIdx.x];
+  %reversed = vector.load %scratch_view[%reverse_lane] : view<64xi32, #dense> -> vector<1xi32>
+  vector.store %reversed, %output_view[%lane] : vector<1xi32>, view<64xi32, #dense>
+  kernel.return
+}
+
+check.case @case_shared_memory_tile_reverse {
+  %input = check.generate.iota offset(1) step(1) : tensor<64xi32>
+  %output = check.generate.fill value(0) : tensor<64xi32>
+  %expected = check.generate.iota offset(64) step(-1) : tensor<64xi32>
+  func.call @shared_memory_tile_reverse(%input, %output) : (tensor<64xi32>, tensor<64xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
+  check.return
+}
+
+check.benchmark<@case_shared_memory_tile_reverse> @bench_shared_memory_tile_reverse

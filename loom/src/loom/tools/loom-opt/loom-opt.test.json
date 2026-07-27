@@ -1,0 +1,690 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "prints agent documentation",
+      "run": {
+        "tool": "loom-opt",
+        "args": ["--agents_md"]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "## loom-opt",
+            "--pass-report=json",
+            "--diagnostic-format=json",
+            "--dump-ir-after-all",
+            "--pass-help=unroll-scf-for"
+          ]
+        }
+      }
+    },
+    {
+      "name": "lists registered passes",
+      "run": {
+        "tool": "loom-opt",
+        "args": ["--list-passes"]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "branch-fusion",
+            "canonicalize",
+            "cse",
+            "dce",
+            "source-to-low",
+            "symbol-dce",
+            "vector-to-scalar"
+          ]
+        }
+      }
+    },
+    {
+      "name": "prints pass help",
+      "run": {
+        "tool": "loom-opt",
+        "args": ["--pass-help=canonicalize"]
+      },
+      "stdout": {
+        "contains": [
+          "canonicalize",
+          "kind: func",
+          "options:",
+          "max-iterations: uint32 [1..4294967295]"
+        ]
+      }
+    },
+    {
+      "name": "runs canonicalize and dce pipeline",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=canonicalize{max-iterations=2}",
+          "--pass=dce"
+        ],
+        "stdin": {
+          "text": "func.def @dce_single(%x: i32) -> (i32) {\n  %dead = scalar.constant 42 : i32\n  func.return %x : i32\n}\n"
+        }
+      },
+      "stdout": {
+        "contains": [
+          "func.def @dce_single(%x: i32) -> (i32) {",
+          "func.return %x : i32"
+        ],
+        "not_contains": ["%dead"]
+      }
+    },
+    {
+      "name": "runs shared source-low compile pipeline",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pipeline=source-low"
+        ],
+        "stdin": {
+          "text": "amdgpu.target<gfx1100> @target\nkernel.def target(@target) @f32_arith() {\n  %c1 = index.constant 1 : index\n  %c64 = index.constant 64 : index\n  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index\n} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {\n  %tid = kernel.workitem.id<x> : index\n  %zero = index.constant 0 : offset\n  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>\n  %lhs = vector.load %lhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %rhs = vector.load %rhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %sum = vector.addf %lhs, %rhs : vector<1xf32>\n  vector.store %sum, %output_view[%tid] : vector<1xf32>, view<64xf32, #dense>\n  kernel.return\n}\n"
+        }
+      },
+      "stdout": {
+        "contains": [
+          "low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_arith()",
+          "reg<amdgpu.sgpr x2>",
+          "low.op<amdgpu.v_add_f32>"
+        ],
+        "not_contains": [
+          "\nkernel.def target(@target) @f32_arith"
+        ]
+      }
+    },
+    {
+      "name": "dumps shared source-low stage as JSONL",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pipeline=source-low",
+          "--dump-ir-after=source-to-low",
+          "--dump-ir-format=jsonl",
+          "--dump-ir-output=stderr",
+          "--output={tmp}/source-low.loom"
+        ],
+        "stdin": {
+          "text": "amdgpu.target<gfx1100> @target\nkernel.def target(@target) @f32_arith() {\n  %c1 = index.constant 1 : index\n  %c64 = index.constant 64 : index\n  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index\n} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {\n  %tid = kernel.workitem.id<x> : index\n  %zero = index.constant 0 : offset\n  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>\n  %lhs = vector.load %lhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %rhs = vector.load %rhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %sum = vector.addf %lhs, %rhs : vector<1xf32>\n  vector.store %sum, %output_view[%tid] : vector<1xf32>, view<64xf32, #dense>\n  kernel.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"tool\":\"loom-opt\"",
+          "\"stage\":\"source-low\"",
+          "\"pipeline\":\"__loom_opt_source_low\"",
+          "\"pass\":\"source-to-low\"",
+          "\"point\":\"after\""
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/source-low.loom",
+          "non_empty": true
+        }
+      ]
+    },
+    {
+      "name": "runs default prepared-low compile pipeline",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pipeline=default"
+        ],
+        "stdin": {
+          "text": "amdgpu.target<gfx1100> @target\nkernel.def target(@target) @f32_arith() {\n  %c1 = index.constant 1 : index\n  %c64 = index.constant 64 : index\n  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index\n} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {\n  %tid = kernel.workitem.id<x> : index\n  %zero = index.constant 0 : offset\n  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>\n  %lhs = vector.load %lhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %rhs = vector.load %rhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %sum = vector.addf %lhs, %rhs : vector<1xf32>\n  vector.store %sum, %output_view[%tid] : vector<1xf32>, view<64xf32, #dense>\n  kernel.return\n}\n"
+        }
+      },
+      "stdout": {
+        "contains": [
+          "low.kernel.def target(@target) abi_layout({",
+          "uses_kernarg_segment_ptr = true",
+          "low.live_in<amdgpu.kernarg_segment_ptr>",
+          "low.op<amdgpu.s_load_dwordx4_offset_only>"
+        ]
+      }
+    },
+    {
+      "name": "dumps selected pass IR as JSONL",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=dce",
+          "--dump-ir-after=dce",
+          "--dump-ir-format=jsonl",
+          "--dump-ir-output=stderr",
+          "--output={tmp}/dumped.loom"
+        ],
+        "stdin": {
+          "text": "func.def @trace_smoke(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"tool\":\"loom-opt\"",
+          "\"stage\":\"command-line\"",
+          "\"pass\":\"dce\"",
+          "\"point\":\"after\"",
+          "\"ir\":\""
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/dumped.loom",
+          "non_empty": true
+        }
+      ]
+    },
+    {
+      "name": "dumps function pass IR as whole-module JSONL",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pipeline=@trace_pipeline",
+          "--dump-ir-after=dce",
+          "--dump-ir-format=jsonl",
+          "--dump-ir-output=stderr",
+          "--output={tmp}/dumped-whole-module.loom"
+        ],
+        "stdin": {
+          "text": "pass.pipeline<module> @trace_pipeline pipeline {\n  for func {\n    dce\n  }\n}\n\nfunc.def @first(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n\nfunc.def @second(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"anchor\":\"func\"",
+          "\"symbol\":\"first\"",
+          "\"symbol\":\"second\"",
+          "func.def @first",
+          "func.def @second"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/dumped-whole-module.loom",
+          "non_empty": true
+        }
+      ]
+    },
+    {
+      "name": "dumps selected before and after IR to a bundle",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=dce",
+          "--dump-ir-before=dce",
+          "--dump-ir-after=dce",
+          "--dump-ir-format=jsonl",
+          "--dump-ir-output={tmp}/trace-bundle/",
+          "--output={tmp}/bundle-out.loom"
+        ],
+        "stdin": {
+          "text": "func.def @trace_bundle(%x: i32) -> (i32) {\n  %dead = scalar.constant 42 : i32\n  func.return %x : i32\n}\n"
+        }
+      },
+      "files": [
+        {
+          "path": "{tmp}/trace-bundle/trace.jsonl",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/trace-bundle/ir/000000-before-dce.loom",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/trace-bundle/ir/000001-after-dce.loom",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/bundle-out.loom",
+          "non_empty": true
+        }
+      ]
+    },
+    {
+      "name": "reports template selection fallback statistics",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=select-templates",
+          "--pass-report=json",
+          "--output={tmp}/selected.loom"
+        ],
+        "stdin": {
+          "text": "func.template<demo.report> priority(10) @aligned(%m: index) -> (index) where [mul(%m, 16)] {\n  func.return %m : index\n}\n\nfunc.template<demo.report> priority(1) @fallback(%m: index) -> (index) {\n  func.return %m : index\n}\n\nfunc.def public @entry() -> (index) {\n  %n = index.constant 15 : index\n  %result = func.apply<demo.report>(%n) : (index) -> (index)\n  func.return %result : index\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"select-templates\"",
+          "\"status\":{\"code\":0,\"name\":\"OK\"}",
+          "\"apply-sites\":1",
+          "\"selected-sites\":1",
+          "\"fallback-selected-sites\":1",
+          "\"unresolved-sites\":0",
+          "\"rejected-sites\":0",
+          "\"category\":\"template-selection\"",
+          "\"outcome\":\"fallback_selected\"",
+          "\"function\":\"entry\"",
+          "\"selected_provider\":\"fallback\"",
+          "\"selected_priority\":1",
+          "\"highest_provider_priority\":10",
+          "\"provider_count\":2",
+          "\"target_applicable_count\":2",
+          "\"possible_count\":1",
+          "\"best_exact_count\":1"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/selected.loom",
+          "contains": ["func.call inline @fallback"]
+        }
+      ]
+    },
+    {
+      "name": "reports exact static scf loop without unroll policy",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=unroll-scf-for",
+          "--pass-report=json",
+          "--output={tmp}/structured-loop.loom"
+        ],
+        "stdin": {
+          "text": "func.def @static_loop_without_unroll_policy() {\n  %start = index.constant 0 : index\n  %end = index.constant 32 : index\n  %step = index.constant 16 : index\n  scf.for %i = [%start to %end step %step] {\n    test.use %i : index\n  }\n  func.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"unroll-scf-for\"",
+          "\"category\":\"scf-unroll\"",
+          "\"outcome\":\"structured\"",
+          "\"op\":\"scf.for\"",
+          "\"policy\":\"absent\"",
+          "\"trip_count_state\":\"exact\"",
+          "\"trip_count\":2",
+          "\"step\":16",
+          "\"lower_bound_kind\":\"static\"",
+          "\"lower\":0"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/structured-loop.loom",
+          "contains": ["scf.for %i"]
+        }
+      ]
+    },
+    {
+      "name": "reports config-specialized sequence loop trip count",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=unroll-scf-for",
+          "--pass-report=json",
+          "--output={tmp}/structured-sequence-loop.loom"
+        ],
+        "stdin": {
+          "text": "config.def @runtime.sequence_width = 128 : index\nconfig.def @runtime.workgroup_size = 64 : index\n\nfunc.def @structured_sequence_loop(%lane0: index) {\n  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index\n  %sequence_width = config.get @runtime.sequence_width : index\n  %workgroup_size = config.get @runtime.workgroup_size : index\n  scf.for %column = [%lane to %sequence_width step %workgroup_size] {\n    test.use %column : index\n  }\n  func.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"unroll-scf-for\"",
+          "\"category\":\"scf-unroll\"",
+          "\"outcome\":\"structured\"",
+          "\"policy\":\"absent\"",
+          "\"trip_count_state\":\"exact\"",
+          "\"trip_count\":2",
+          "\"step\":64",
+          "\"lower_bound_kind\":\"dynamic\"",
+          "\"lower_range_min\":0",
+          "\"lower_range_max\":63"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/structured-sequence-loop.loom",
+          "contains": ["scf.for %column"]
+        }
+      ]
+    },
+    {
+      "name": "reports dynamic lower full unroll",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=unroll-scf-for",
+          "--pass-report=json",
+          "--output={tmp}/dynamic-lower-full-unroll.loom"
+        ],
+        "stdin": {
+          "text": "func.def @dynamic_lower_full_unroll(%slot0: index) {\n  %slot = index.assume %slot0 [range(%slot0, 0, 7)] : index\n  %end = index.constant 16 : index\n  %step = index.constant 8 : index\n  scf.for %i = [%slot to %end step %step] unroll {\n    test.use %i : index\n  }\n  func.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"unroll-scf-for\"",
+          "\"category\":\"scf-unroll\"",
+          "\"outcome\":\"unrolled\"",
+          "\"op\":\"scf.for\"",
+          "\"policy\":\"bare\"",
+          "\"schedule\":\"linear\"",
+          "\"trip_count\":2",
+          "\"step\":8",
+          "\"lower_bound_kind\":\"dynamic\"",
+          "\"lower_range_min\":0",
+          "\"lower_range_max\":7"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/dynamic-lower-full-unroll.loom",
+          "not_contains": ["scf.for"]
+        }
+      ]
+    },
+    {
+      "name": "reports no-op unroll factor policy clearing",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=unroll-scf-for",
+          "--pass-report=json",
+          "--output={tmp}/cleared-unroll-factor.loom"
+        ],
+        "stdin": {
+          "text": "func.def @clear_noop_factor() {\n  %start = index.constant 0 : index\n  %end = index.constant 4 : index\n  %step = index.constant 1 : index\n  %factor = index.constant 1 : index\n  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {\n    test.use %i : index\n  }\n  func.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"unroll-scf-for\"",
+          "\"category\":\"scf-unroll\"",
+          "\"outcome\":\"cleared\"",
+          "\"policy\":\"factor\"",
+          "\"schedule\":\"interleaved\"",
+          "\"unroll_factor\":1",
+          "\"clear_reason\":\"factor_le_one\""
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/cleared-unroll-factor.loom",
+          "contains": ["scf.for %i"],
+          "not_contains": ["unroll(%factor)", "schedule(interleaved)"]
+        }
+      ]
+    },
+    {
+      "name": "reports dynamic linear stripmine with guarded tail",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=unroll-scf-for",
+          "--pass-report=json",
+          "--output={tmp}/linear-stripmine-tail.loom"
+        ],
+        "stdin": {
+          "text": "func.def @linear_stripmine_tail(%end: index) {\n  %start = index.constant 0 : index\n  %step = index.constant 1 : index\n  %factor = index.constant 2 : index\n  scf.for %i = [%start to %end step %step] unroll(%factor) {\n    test.use %i : index\n  }\n  func.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"unroll-scf-for\"",
+          "\"category\":\"scf-unroll\"",
+          "\"outcome\":\"stripmined\"",
+          "\"policy\":\"factor\"",
+          "\"schedule\":\"linear\"",
+          "\"unroll_factor\":2",
+          "\"tail_strategy\":\"guarded_lanes\"",
+          "\"trip_count_state\":\"unresolved\""
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/linear-stripmine-tail.loom",
+          "contains": ["scf.if"]
+        }
+      ]
+    },
+    {
+      "name": "reports dynamic interleaved stripmine with tail loop",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=unroll-scf-for",
+          "--pass-report=json",
+          "--output={tmp}/interleaved-stripmine-tail.loom"
+        ],
+        "stdin": {
+          "text": "func.def @interleaved_stripmine_tail(%end: index) {\n  %start = index.constant 0 : index\n  %step = index.constant 1 : index\n  %factor = index.constant 2 : index\n  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {\n    test.use %i : index\n  }\n  func.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"unroll-scf-for\"",
+          "\"category\":\"scf-unroll\"",
+          "\"outcome\":\"stripmined\"",
+          "\"policy\":\"factor\"",
+          "\"schedule\":\"interleaved\"",
+          "\"unroll_factor\":2",
+          "\"tail_strategy\":\"tail_loop\"",
+          "\"trip_count_state\":\"unresolved\""
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/interleaved-stripmine-tail.loom",
+          "contains": ["scf.for %i"]
+        }
+      ]
+    },
+    {
+      "name": "reports exact linear stripmine with guarded tail",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=unroll-scf-for",
+          "--pass-report=json",
+          "--output={tmp}/linear-exact-stripmine-tail.loom"
+        ],
+        "stdin": {
+          "text": "func.def @linear_exact_stripmine_tail() {\n  %start = index.constant 0 : index\n  %end = index.constant 5 : index\n  %step = index.constant 1 : index\n  %factor = index.constant 2 : index\n  scf.for %i = [%start to %end step %step] unroll(%factor) {\n    test.use %i : index\n  }\n  func.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"unroll-scf-for\"",
+          "\"category\":\"scf-unroll\"",
+          "\"outcome\":\"stripmined\"",
+          "\"policy\":\"factor\"",
+          "\"schedule\":\"linear\"",
+          "\"unroll_factor\":2",
+          "\"step\":1",
+          "\"tail_strategy\":\"guarded_lanes\"",
+          "\"trip_count_state\":\"exact\"",
+          "\"trip_count\":5",
+          "\"lower_bound_kind\":\"static\"",
+          "\"lower\":0"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/linear-exact-stripmine-tail.loom",
+          "contains": ["scf.if"]
+        }
+      ]
+    },
+    {
+      "name": "reports exact interleaved stripmine with dynamic lower",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=unroll-scf-for",
+          "--pass-report=json",
+          "--output={tmp}/interleaved-dynamic-lower-stripmine-tail.loom"
+        ],
+        "stdin": {
+          "text": "func.def @interleaved_dynamic_lower_stripmine_tail(%lane0: index) {\n  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index\n  %end = index.constant 192 : index\n  %step = index.constant 64 : index\n  %factor = index.constant 2 : index\n  scf.for %column = [%lane to %end step %step] unroll(%factor) schedule(interleaved) {\n    test.use %column : index\n  }\n  func.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"unroll-scf-for\"",
+          "\"category\":\"scf-unroll\"",
+          "\"outcome\":\"stripmined\"",
+          "\"policy\":\"factor\"",
+          "\"schedule\":\"interleaved\"",
+          "\"unroll_factor\":2",
+          "\"step\":64",
+          "\"tail_strategy\":\"tail_loop\"",
+          "\"trip_count_state\":\"exact\"",
+          "\"trip_count\":3",
+          "\"lower_bound_kind\":\"dynamic\"",
+          "\"lower_range_min\":0",
+          "\"lower_range_max\":63"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/interleaved-dynamic-lower-stripmine-tail.loom",
+          "contains": ["scf.for %column"]
+        }
+      ]
+    },
+    {
+      "name": "prints full target register types in text diagnostics",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--output={tmp}/unused.loom"
+        ],
+        "stdin": {
+          "text": "amdgpu.target<gfx1100> @target\n\nlow.func.def target(@target) @bad_return(%predicate: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) {\n  low.return %predicate : reg<amdgpu.sgpr x2>\n}\n"
+        }
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "yielded value has type reg<amdgpu.sgpr x2>",
+          "but expected reg<amdgpu.sgpr>"
+        ],
+        "not_contains": [
+          "reg<...>"
+        ]
+      }
+    },
+    {
+      "name": "prints full target register types in json diagnostics",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--diagnostic-format=json",
+          "--output={tmp}/unused.loom"
+        ],
+        "stdin": {
+          "text": "amdgpu.target<gfx1100> @target\n\nlow.func.def target(@target) @bad_return_json(%predicate: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) {\n  low.return %predicate : reg<amdgpu.sgpr x2>\n}\n"
+        }
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "\"message\":\"yielded value has type reg<amdgpu.sgpr x2>",
+          "\"yield_type\":\"reg<amdgpu.sgpr x2>\"",
+          "\"expected_type\":\"reg<amdgpu.sgpr>\""
+        ],
+        "not_contains": [
+          "reg<...>"
+        ]
+      }
+    },
+    {
+      "name": "materializes config values",
+      "run": {
+        "tool": "loom-opt",
+        "args": ["--config=model36.model.hidden_size=4096"],
+        "stdin": {
+          "text": "config.decl @model36.model.hidden_size : index\n\nfunc.def @read_config() -> (index) {\n  %hidden = config.get @model36.model.hidden_size : index\n  func.return %hidden : index\n}\n"
+        }
+      },
+      "stdout": {
+        "contains": [
+          "config.def @model36.model.hidden_size = 4096 : index",
+          "%hidden = config.get @model36.model.hidden_size : index"
+        ],
+        "not_contains": ["config.decl @model36.model.hidden_size"]
+      }
+    },
+    {
+      "name": "rejects duplicate config binding",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--config=answer=40",
+          "--config=@answer=41",
+          "--output={tmp}/unused.loom"
+        ],
+        "stdin": {
+          "text": "config.decl @answer : index\n"
+        }
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": ["duplicate config binding for 'answer'"]
+      }
+    },
+    {
+      "name": "writes pass pipeline reproducer",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pipeline=@boom",
+          "--pass-reproducer={tmp}/pass.repro",
+          "--dump-ir-after=dce",
+          "--dump-ir-format=jsonl",
+          "--dump-ir-output={tmp}/failed-pass-trace.jsonl",
+          "--output={tmp}/unused.loom"
+        ],
+        "stdin": {
+          "text": "pass.pipeline<module> @boom pipeline {\n  for func {\n    dce\n  }\n  fail \"boom\"\n}\n\nfunc.def @reproducer_input(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+        }
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "pass pipeline reproducer written to",
+          "boom"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/pass.repro",
+          "contains": [
+            "\"status\": {\"code\":",
+            "\"name\":"
+          ]
+        },
+        {
+          "path": "{tmp}/failed-pass-trace.jsonl",
+          "contains": [
+            "\"status\":{\"code\":",
+            "\"name\":"
+          ]
+        }
+      ]
+    }
+  ]
+}

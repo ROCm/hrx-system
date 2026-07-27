@@ -1,0 +1,119 @@
+// RUN: roundtrip
+
+// Dense view over an opaque buffer root with a dynamic logical extent.
+func.def @dense_view(%buffer: buffer, %offset: offset, %m: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%m]xf32, %layout>
+  test.use %view : view<[%m]xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Scratch roots carry explicit memory-space and root-alignment facts.
+func.def @workgroup_scratch_view(%bytes: offset) {
+  %zero = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<16xf32, %layout>
+  test.use %view : view<16xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Buffer arguments can be explicitly refined when ABI or kernel-boundary facts
+// establish a concrete memory space.
+func.def @global_arg_view(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %view = buffer.view %global[%offset] : buffer -> view<16xf32, %layout>
+  test.use %view : view<16xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Strided view and logical subview share the same explicit layout value.
+func.def @strided_subview(%buffer: buffer, %offset: offset, %row_stride: index, %row: index, %m: index, %n: index) {
+  %layout = encoding.layout.strided [%row_stride, 1] : encoding<layout>
+  %source = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%n]xf32, %layout>
+  %sub = view.subview %source[%row, 0] : view<[%m]x[%n]xf32, %layout> -> view<16x[%n]xf32, %layout>
+  test.use %sub : view<16x[%n]xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Static strides are carried in the same index-list shape as dynamic strides.
+func.def @static_strided_view(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.strided [4096, 1] : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<8x16xi8, %layout>
+  test.use %view : view<8x16xi8, %layout>
+  func.return
+}
+
+// ====
+
+// Refinement is an explicit SSA edge from a wider symbolic view type to a
+// narrower type that later memory ops can consume directly.
+func.def @refine_view(%buffer: buffer, %offset: offset, %m: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%m]xf32, %layout>
+  %refined = view.refine %view : view<[%m]xf32, %layout> -> view<16xf32, %layout>
+  test.use %refined : view<16xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Scalar loads and stores are the register-scalar substrate used by reference
+// lowering once vector memory ops have been scalarized.
+func.def @scalar_view_memory(%buffer: buffer, %offset: offset, %row: index, %col: index, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<8x16xf32, %layout>
+  %loaded = view.load %view[%row, %col] {cache_scope = device, cache_temporal = non_temporal} : view<8x16xf32, %layout> -> f32
+  view.store %value, %view[0, %col] {cache_scope = system, cache_temporal = writeback} : f32, view<8x16xf32, %layout>
+  test.use %loaded : f32
+  func.return
+}
+
+// ====
+
+// Scalar atomics are the element-level substrate for vector atomic reference
+// lowering. Ordering and scope remain explicit after scalarization.
+func.def @scalar_view_atomics(%buffer: buffer, %offset: offset, %row: index, %col: index, %ivalue: i32, %fvalue: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %iview = buffer.view %buffer[%offset] : buffer -> view<8x16xi32, %layout>
+  %fview = buffer.view %buffer[%offset] : buffer -> view<8x16xf32, %layout>
+  view.atomic.reduce<addi> %ivalue, %iview[%row, %col] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : i32, view<8x16xi32, %layout>
+  view.atomic.reduce<addf> %fvalue, %fview[%row, 0] {ordering = release, scope = device} : f32, view<8x16xf32, %layout>
+  %oldi = view.atomic.rmw<xchgi> %ivalue, %iview[0, %col] {ordering = acq_rel, scope = system} : i32, view<8x16xi32, %layout> -> i32
+  %oldf = view.atomic.rmw<addf> %fvalue, %fview[%row, %col] {ordering = seq_cst, scope = device} : f32, view<8x16xf32, %layout> -> f32
+  %cmp = view.atomic.cmpxchg %ivalue, %ivalue, %iview[%row, %col] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<8x16xi32, %layout> -> i32
+  test.use %oldi, %oldf, %cmp : i32, f32, i32
+  func.return
+}
+
+// ====
+
+// Encoded physical storage composes an address layout with a storage schema.
+// Loads from this view still produce physical i8 records; decode is explicit.
+func.def @encoded_physical_storage_view(%buffer: buffer, %offset: offset, %m: index, %kb: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%kb]x18xi8, %storage>
+  test.use %view : view<[%m]x[%kb]x18xi8, %storage>
+  func.return
+}
+
+// ====
+
+// Prefetch is a compiler hint over a logical view origin, not a semantic load.
+func.def @prefetch_hint(%buffer: buffer, %offset: offset, %row: index, %col: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<8x16xf32, %layout>
+  view.prefetch %view[%row, %col] {intent = read, locality = l2} : view<8x16xf32, %layout>
+  func.return
+}

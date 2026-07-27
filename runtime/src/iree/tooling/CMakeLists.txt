@@ -136,12 +136,45 @@ iree_cc_library(
     "function_io.c"
   DEPS
     ::numpy_io
+    ::value_io
     iree::base
     iree::hal
     iree::io::stream
     iree::modules::hal
     iree::vm
   PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    value_io
+  HDRS
+    "value_io.h"
+  SRCS
+    "value_io.c"
+  DEPS
+    ::numpy_io
+    iree::base
+    iree::hal
+    iree::io::stream
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    value_io_test
+  SRCS
+    "value_io_test.cc"
+  DEPS
+    ::value_io
+    iree::base
+    iree::hal
+    iree::io::file_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+  LABELS
+    "requires-filesystem"
 )
 
 iree_cc_test(
@@ -233,6 +266,8 @@ iree_cc_library(
     "parameter_util.c"
   DEPS
     iree::base
+    iree::base::internal::json
+    iree::base::internal::path
     iree::base::tooling::flags
     iree::hal
     iree::io::file_handle
@@ -244,6 +279,24 @@ iree_cc_library(
     iree::modules::io::parameters
     iree::vm
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    parameter_util_test
+  SRCS
+    "parameter_util_test.cc"
+  DEPS
+    ::parameter_util
+    iree::base
+    iree::base::internal::path
+    iree::io::file_handle
+    iree::io::parameter_index
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+  LABELS
+    "requires-filesystem"
 )
 
 iree_cc_library(

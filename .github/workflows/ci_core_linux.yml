@@ -36,6 +36,10 @@ on:
       - main
       - main-staging
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   actions: read
   contents: read
@@ -68,14 +72,6 @@ jobs:
             # so local/source coverage remains intact.
             ctest_exclude_regex: "^iree/async/platform/io_uring/cts/core_tests$"
             package: false
-          - variant: MSAN
-            sanitizer: msan
-            assertions: true
-            # TODO(#20): MSAN builds/install are useful, but installed tests
-            # need an instrumented host C++ runtime/test dependency stack.
-            run_tests: false
-            ctest_exclude_regex: ""
-            package: false
           - variant: UBSAN
             sanitizer: ubsan
             assertions: true
@@ -96,7 +92,7 @@ jobs:
       test_gpu: ${{ inputs.test_gpu || false }}
       run_tests: ${{ matrix.run_tests }}
       ctest_exclude_regex: ${{ matrix.ctest_exclude_regex }}
-      ctest_label_exclude_regex: "runtime-resource="
+      ctest_label_exclude_regex: "runtime-resource=|manual"
       cmake_options: |
         -DIREE_HAL_AMDGPU_TARGETS=gfx942;gfx1151;gfx1201
       package: ${{ matrix.package }}
@@ -111,25 +107,26 @@ jobs:
         include:
           - name: Linux / CMake / GPU gfx942
             chip: gfx942
-            runner_label: linux-gfx942-1gpu-core42-ossci-rocm
-            ctest_exclude_regex: "(^iree/hal/drivers/amdgpu/allocator_test$)|(^iree/hal/drivers/amdgpu/host_queue_command_buffer_test$)|(^iree/hal/drivers/amdgpu/pm4_command_buffer_benchmark_test$)"
-            experimental: false
-          - name: Linux / CMake / GPU gfx1201 (experimental)
-            chip: gfx1201
-            runner_label: gpu_navi4x
+            runner_labels: '["linux-gfx942-1gpu-ccs-csp-ossci-rocm"]'
             ctest_exclude_regex: ""
-            experimental: true
+            experimental: false
+          - name: Linux / CMake / GPU gfx1201
+            chip: gfx1201
+            runner_labels: '["self-hosted", "Linux", "X64", "gpu_navi4x"]'
+            ctest_exclude_regex: ""
+            experimental: false
     uses: ./.github/workflows/test_core_linux_gpu.yml
     permissions:
       actions: read
       contents: read
     with:
       name: ${{ matrix.name }}
-      runner_label: ${{ matrix.runner_label }}
+      runner_labels: ${{ matrix.runner_labels }}
       artifact_run_id: ${{ github.run_id }}
       device: gpu:0
       ctest_exclude_regex: ${{ matrix.ctest_exclude_regex }}
       ctest_label_regex: runtime-resource=amd-gpu
+      ctest_label_exclude_regex: manual
       ctest_parallelism: 1
       experimental: ${{ matrix.experimental }}
 

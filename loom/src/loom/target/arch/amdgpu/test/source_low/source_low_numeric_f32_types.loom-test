@@ -1,0 +1,26 @@
+// RUN: pass source-to-low,low-dce
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+func.def target(@target) @f32_exact_scalar_div(%lhs: f32, %rhs: f32) -> (f32) {
+  %quotient = scalar.divf %lhs, %rhs : f32
+  func.return %quotient : f32
+}
+
+// ----
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target(@target) abi(hal_kernel) @f32_exact_scalar_div(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+  %7, %8 = low.op<amdgpu.v_div_scale_f32>(%rhs, %rhs, %lhs) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>, reg<amdgpu.vcc>
+  %9 = low.op<amdgpu.v_rcp_f32>(%7) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %10 = low.op<amdgpu.v_xor_b32.lit>(%7) {imm32 = 2147483648} : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %11 = low.op<amdgpu.v_fmaak_f32>(%10, %9) {imm32 = 1065353216} : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %12 = low.op<amdgpu.v_fma_f32>(%11, %9, %9) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %13, %14 = low.op<amdgpu.v_div_scale_f32>(%lhs, %rhs, %lhs) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>, reg<amdgpu.vcc>
+  %15 = low.op<amdgpu.v_mul_f32>(%13, %12) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %16 = low.op<amdgpu.v_fma_f32>(%10, %15, %13) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %17 = low.op<amdgpu.v_fma_f32>(%16, %12, %15) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %18 = low.op<amdgpu.v_fma_f32>(%10, %17, %13) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %19 = low.op<amdgpu.v_div_fmas_f32>(%18, %12, %17, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vcc>) -> reg<amdgpu.vgpr>
+  %quotient = low.op<amdgpu.v_div_fixup_f32>(%19, %rhs, %lhs) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.return %quotient : reg<amdgpu.vgpr>
+}

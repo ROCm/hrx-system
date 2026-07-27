@@ -548,9 +548,10 @@ iree_status_t iree_hal_local_profile_recorder_create(
       iree_hal_profile_chunk_metadata_t metadata =
           iree_hal_local_profile_recorder_metadata(
               recorder, IREE_HAL_PROFILE_CONTENT_TYPE_SESSION);
-      status = iree_status_join(status, iree_hal_profile_sink_end_session(
-                                            recorder->options.sink, &metadata,
-                                            iree_status_code(status)));
+      iree_status_code_t status_code = iree_status_code(status);
+      status = iree_status_join(
+          status, iree_hal_profile_sink_end_session(recorder->options.sink,
+                                                    &metadata, status_code));
     }
     iree_hal_local_profile_recorder_destroy(recorder);
   }
@@ -769,7 +770,7 @@ static iree_status_t iree_hal_local_profile_append_executable_function_records(
     record.record_length = (uint32_t)record_length;
     record.executable_id = executable_id;
     record.function_ordinal = (uint32_t)i;
-    record.constant_count = function_info.constant_count;
+    record.constant_byte_length = function_info.constant_byte_length;
     record.binding_count = function_info.binding_count;
     record.parameter_count = function_info.parameter_count;
     memcpy(record.workgroup_size, function_info.workgroup_size,
@@ -1680,9 +1681,10 @@ iree_status_t iree_hal_local_profile_recorder_end(
   iree_hal_profile_chunk_metadata_t metadata =
       iree_hal_local_profile_recorder_metadata(
           recorder, IREE_HAL_PROFILE_CONTENT_TYPE_SESSION);
+  iree_status_code_t status_code = iree_status_code(status);
   status = iree_status_join(
-      status, iree_hal_profile_sink_end_session(
-                  recorder->options.sink, &metadata, iree_status_code(status)));
+      status, iree_hal_profile_sink_end_session(recorder->options.sink,
+                                                &metadata, status_code));
   recorder->active = false;
   return status;
 }

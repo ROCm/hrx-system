@@ -1,0 +1,12 @@
+// RUN: format bytecode
+
+// Read-only artifact payloads are RECORD symbols with bytes attributes. Keep
+// them in the bytecode path so compiler-owned tables can survive loombc without
+// using the RESOURCES section.
+global.rodata @loom_sanitizer_sites = bytes("4c534954010000000100020304050607"), align 8
+
+// ====
+
+// Empty payloads remain representable so stripping diagnostic data can leave a
+// distinct symbol without inventing filler bytes.
+global.rodata @empty_rodata = bytes("")

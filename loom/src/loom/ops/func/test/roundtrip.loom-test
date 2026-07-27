@@ -1,0 +1,121 @@
+// RUN: roundtrip
+
+// Function definition and call ops.
+func.def @identity(%x: f32) -> (f32) {
+  func.return %x : f32
+}
+
+func.def @call_identity(%x: f32) -> (f32) {
+  %r = func.call @identity(%x) : (f32) -> (f32)
+  func.return %r : f32
+}
+
+// ====
+
+// Inline policy and temperature modifiers on function definitions and calls.
+func.def hot inline @hot_inline_identity(%x: f32) -> (f32) {
+  func.return %x : f32
+}
+
+func.def cold noinline @cold_serializer(%x: f32) -> (f32) {
+  func.return %x : f32
+}
+
+func.def @call_with_edge_policy(%x: f32) -> (f32) {
+  %r = func.call hot inline @hot_inline_identity(%x) : (f32) -> (f32)
+  func.return %r : f32
+}
+
+// ====
+
+// External function declaration with no body.
+func.decl @extern_matmul(%a: f32, %b: f32) -> (f32)
+
+// ====
+
+// Declaration contract carrying author inline policy for provider-backed import.
+func.decl hot inline @extern_small_helper(%x: f32) -> (f32)
+
+// ====
+
+// Declaration with import source module.
+func.decl import("linalg_lib") @matmul(%a: f32, %b: f32) -> (f32)
+
+// ====
+
+// Declaration with import source module and aliased symbol name.
+func.decl import("math_lib", "matmul_v2") @my_matmul(%a: f32) -> (f32)
+
+// ====
+
+// Public re-exported import declaration.
+func.decl public import("upstream") @relu(%x: f32) -> (f32)
+
+// ====
+
+// Retained private callable symbols remain ordinary private symbols but are
+// preserved by symbol DCE.
+func.def retain @retained_identity(%x: f32) -> (f32) {
+  func.return %x : f32
+}
+
+func.decl retain @retained_extern(%x: f32) -> (f32)
+
+func.template<test.effect> retain @retained_template(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.ukernel<test.effect> retain @retained_ukernel(%value: i32) -> (i32)
+
+// ====
+
+// Multiple function definitions in a single module.
+func.def @first(%a: i32, %b: i32) -> (i32) {
+  func.return %a : i32
+}
+
+func.def @second(%x: f32) -> (f32) {
+  func.return %x : f32
+}
+
+func.def @third() {
+  func.return
+}
+
+// ====
+
+// Initializer and deinitializer calling conventions with zero-operand return.
+func.def initializer @setup() {
+  func.return
+}
+
+func.def deinitializer @teardown() {
+  func.return
+}
+
+// ====
+
+// Template and ukernel policy modifiers share the same author-facing spelling;
+// func.apply names the implementation contract key rather than a direct symbol.
+func.template<test.effect> hot inline @pure_template(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.ukernel<test.effect> cold noinline @opaque_template(%value: i32) -> (i32)
+
+func.def @apply_with_edge_policy(%value: i32) -> (i32) {
+  %result = func.apply<test.effect>(%value) cold : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// Provider target applicability is expressed with the same target(@...) spelling
+// as executable roots.
+test.target<low_core> @gfx1100
+
+func.template<test.effect> target(@gfx1100) priority(10) @gfx11_template(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.ukernel<test.effect> target(@gfx1100) priority(5) @gfx11_opaque(%value: i32) -> (i32)

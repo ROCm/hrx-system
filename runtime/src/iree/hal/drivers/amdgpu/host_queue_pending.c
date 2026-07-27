@@ -188,7 +188,7 @@ static void iree_hal_amdgpu_pending_op_release_execute_binding_resource_set(
 }
 
 static void iree_hal_amdgpu_pending_op_fail_host_action(
-    iree_hal_amdgpu_pending_op_t* op, iree_status_t status) {
+    iree_hal_amdgpu_pending_op_t* op, const iree_status_t status) {
   if (op->type != IREE_HAL_AMDGPU_PENDING_OP_HOST_ACTION ||
       !op->host_action.action.fn) {
     return;
@@ -609,10 +609,7 @@ static iree_status_t iree_hal_amdgpu_pending_op_enqueue_waits(
 static void iree_hal_amdgpu_alloca_memory_wait_resolved(
     iree_hal_amdgpu_pending_op_t* op, iree_status_t status) {
   iree_hal_amdgpu_alloca_memory_wait_t* wait = op->alloca_op.memory_wait;
-  if (iree_status_is_ok(status) &&
-      wait->kind == IREE_HAL_AMDGPU_ALLOCA_MEMORY_WAIT_POOL_NOTIFICATION) {
-    wait->kind = IREE_HAL_AMDGPU_ALLOCA_MEMORY_WAIT_NONE;
-  }
+  const bool resolved_successfully = iree_status_is_ok(status);
 
   int32_t expected_state =
       IREE_HAL_AMDGPU_PENDING_OP_LIFECYCLE_ARMING_MEMORY_WAIT;
@@ -621,6 +618,10 @@ static void iree_hal_amdgpu_alloca_memory_wait_resolved(
           IREE_HAL_AMDGPU_PENDING_OP_LIFECYCLE_COMPLETING,
           iree_memory_order_acq_rel, iree_memory_order_acquire)) {
     iree_hal_amdgpu_pending_op_record_error_status(op, status);
+    if (resolved_successfully &&
+        wait->kind == IREE_HAL_AMDGPU_ALLOCA_MEMORY_WAIT_POOL_NOTIFICATION) {
+      wait->kind = IREE_HAL_AMDGPU_ALLOCA_MEMORY_WAIT_NONE;
+    }
     iree_hal_amdgpu_alloca_memory_wait_publish_callback_complete(op);
     return;
   }
@@ -630,8 +631,12 @@ static void iree_hal_amdgpu_alloca_memory_wait_resolved(
           &op->lifecycle_state, &expected_state,
           IREE_HAL_AMDGPU_PENDING_OP_LIFECYCLE_COMPLETING,
           iree_memory_order_acq_rel, iree_memory_order_acquire)) {
+    if (resolved_successfully &&
+        wait->kind == IREE_HAL_AMDGPU_ALLOCA_MEMORY_WAIT_POOL_NOTIFICATION) {
+      wait->kind = IREE_HAL_AMDGPU_ALLOCA_MEMORY_WAIT_NONE;
+    }
     iree_hal_amdgpu_alloca_memory_wait_publish_callback_complete(op);
-    if (!iree_status_is_ok(status)) {
+    if (!resolved_successfully) {
       iree_hal_amdgpu_pending_op_fail(op, status);
     } else {
       iree_hal_amdgpu_pending_op_issue(op);

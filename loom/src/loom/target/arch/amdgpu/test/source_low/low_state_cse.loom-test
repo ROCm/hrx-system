@@ -1,0 +1,22 @@
+// RUN: pass cse
+
+amdgpu.target<gfx942> @target
+
+low.func.def target(@target) @m0_state_writes_do_not_cse(%value0: reg<amdgpu.vgpr>, %value1: reg<amdgpu.vgpr>) {
+  %m0a = low.const<amdgpu.s_mov_b32_m0.imm> {imm32 = 0} : reg<amdgpu.m0>
+  low.op<amdgpu.ds_write_addtid_b32>(%value0, %m0a) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.m0>)
+  %m0b = low.const<amdgpu.s_mov_b32_m0.imm> {imm32 = 0} : reg<amdgpu.m0>
+  low.op<amdgpu.ds_write_addtid_b32>(%value1, %m0b) {offset = 4} : (reg<amdgpu.vgpr>, reg<amdgpu.m0>)
+  low.return
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target(@target) @m0_state_writes_do_not_cse(%value0: reg<amdgpu.vgpr>, %value1: reg<amdgpu.vgpr>) {
+  %m0a = low.const<amdgpu.s_mov_b32_m0.imm> {imm32 = 0} : reg<amdgpu.m0>
+  low.op<amdgpu.ds_write_addtid_b32>(%value0, %m0a) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.m0>)
+  %m0b = low.const<amdgpu.s_mov_b32_m0.imm> {imm32 = 0} : reg<amdgpu.m0>
+  low.op<amdgpu.ds_write_addtid_b32>(%value1, %m0b) {offset = 4} : (reg<amdgpu.vgpr>, reg<amdgpu.m0>)
+  low.return
+}

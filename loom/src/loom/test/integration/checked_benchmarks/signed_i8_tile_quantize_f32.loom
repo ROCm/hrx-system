@@ -1,0 +1,81 @@
+// F32 tile quantization to signed 8-bit storage.
+//
+// This case preserves two source-level contracts that quantized kernels rely
+// on before packed dot/dequantize consumers see the data: explicit nearest-even
+// rounding for tie values, and an ML-fast reciprocal scale path where the source
+// permits approximate reciprocal formation. The source chooses those contracts
+// directly instead of asking the backend to reinterpret strict round or divide.
+kernel.def @signed_i8_tile_quantize_even_ties_f32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%values: buffer, %inverse_scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+
+  %values_noalias, %inverse_scale_noalias, %output_noalias = buffer.assume.noalias %values, %inverse_scale, %output : buffer, buffer, buffer
+  %values_view = buffer.view %values_noalias[%base] : buffer -> view<4xf32, #dense>
+  %inverse_scale_view = buffer.view %inverse_scale_noalias[%base] : buffer -> view<1xf32, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<2xi8, #dense>
+
+  %value_vector = vector.load %values_view[%zero] : view<4xf32, #dense> -> vector<4xf32>
+  %inverse_scale_scalar = view.load %inverse_scale_view[%zero] : view<1xf32, #dense> -> f32
+  %inverse_scale_vector = vector.splat %inverse_scale_scalar : vector<4xf32>
+  %scaled = vector.mulf %value_vector, %inverse_scale_vector : vector<4xf32>
+  %rounded = vector.roundevenf %scaled : vector<4xf32>
+  %i32_values = vector.fptosi %rounded : vector<4xf32> to vector<4xi32>
+  %i8_values = vector.trunci %i32_values : vector<4xi32> to vector<4xi8>
+  %first = vector.extract %i8_values[0] : vector<4xi8> -> i8
+  %last = vector.extract %i8_values[3] : vector<4xi8> -> i8
+  view.store %first, %output_view[%zero] : i8, view<2xi8, #dense>
+  view.store %last, %output_view[%one] : i8, view<2xi8, #dense>
+  kernel.return
+}
+
+kernel.def @signed_i8_tile_quantize_arcp_f32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%values: buffer, %amax: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+
+  %values_noalias, %amax_noalias, %output_noalias = buffer.assume.noalias %values, %amax, %output : buffer, buffer, buffer
+  %values_view = buffer.view %values_noalias[%base] : buffer -> view<4xf32, #dense>
+  %amax_view = buffer.view %amax_noalias[%base] : buffer -> view<1xf32, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xi8, #dense>
+
+  %value_vector = vector.load %values_view[%zero] : view<4xf32, #dense> -> vector<4xf32>
+  %amax_scalar = view.load %amax_view[%zero] : view<1xf32, #dense> -> f32
+  %scale_limit = scalar.constant 127.0 : f32
+  %inverse_scale = scalar.divf<nnan|ninf|nsz|arcp> %scale_limit, %amax_scalar : f32
+  %inverse_scale_vector = vector.splat %inverse_scale : vector<4xf32>
+  %scaled = vector.mulf<nnan|ninf|nsz|arcp> %value_vector, %inverse_scale_vector : vector<4xf32>
+  %rounded = vector.roundf<afn> %scaled : vector<4xf32>
+  %i32_values = vector.fptosi %rounded : vector<4xf32> to vector<4xi32>
+  %i8_values = vector.trunci %i32_values : vector<4xi32> to vector<4xi8>
+  vector.store %i8_values, %output_view[%zero] : vector<4xi8>, view<4xi8, #dense>
+  kernel.return
+}
+
+check.case public @signed_i8_tile_quantize_even_ties_f32_case {
+  %values = check.generate.iota offset(-1.5) step(1.0) : tensor<4xf32>
+  %inverse_scale = check.generate.fill value(1.0) : tensor<1xf32>
+  %output = check.generate.fill value(-1) : tensor<2xi8>
+  %expected = check.generate.iota offset(-2) step(4) : tensor<2xi8>
+  func.call @signed_i8_tile_quantize_even_ties_f32(%values, %inverse_scale, %output) : (tensor<4xf32>, tensor<1xf32>, tensor<2xi8>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<2xi8>
+  check.return
+}
+
+check.case public @signed_i8_tile_quantize_arcp_f32_case {
+  %values = check.generate.iota offset(-1.5) step(1.0) : tensor<4xf32>
+  %amax = check.generate.fill value(63.5) : tensor<1xf32>
+  %output = check.generate.fill value(0) : tensor<4xi8>
+  %expected = check.generate.iota offset(-3) step(2) : tensor<4xi8>
+  func.call @signed_i8_tile_quantize_arcp_f32(%values, %amax, %output) : (tensor<4xf32>, tensor<1xf32>, tensor<4xi8>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<4xi8>
+  check.return
+}
+
+check.benchmark<@signed_i8_tile_quantize_even_ties_f32_case> @signed_i8_tile_quantize_even_ties_f32_smoke
+check.benchmark<@signed_i8_tile_quantize_arcp_f32_case> @signed_i8_tile_quantize_arcp_f32_smoke

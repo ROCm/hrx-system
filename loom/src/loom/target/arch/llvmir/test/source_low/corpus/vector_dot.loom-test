@@ -1,0 +1,295 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_dot.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32_dotf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %acc: f32) -> (f32) {
+  %dot = vector.dotf %lhs, %rhs, %acc : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32_dotf(%lhs: reg<llvmir.f32 x4>, %rhs: reg<llvmir.f32 x4>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %21 = extract.v4f32 %lhs, 0
+  %22 = extract.v4f32 %rhs, 0
+  %23 = fma.f32 %21, %22, %acc
+  %24 = extract.v4f32 %lhs, 1
+  %25 = extract.v4f32 %rhs, 1
+  %26 = fma.f32 %24, %25, %23
+  %27 = extract.v4f32 %lhs, 2
+  %28 = extract.v4f32 %rhs, 2
+  %29 = fma.f32 %27, %28, %26
+  %30 = extract.v4f32 %lhs, 3
+  %31 = extract.v4f32 %rhs, 3
+  %dot = fma.f32 %30, %31, %29
+  return %dot
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32_dotf_zero_seed(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (f32) {
+  %zero = scalar.constant 0.0 : f32
+  %dot = vector.dotf %lhs, %rhs, %zero : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32_dotf_zero_seed(%lhs: reg<llvmir.f32 x4>, %rhs: reg<llvmir.f32 x4>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %zero = const.f32 0
+  %21 = extract.v4f32 %lhs, 0
+  %22 = extract.v4f32 %rhs, 0
+  %23 = fma.f32 %21, %22, %zero
+  %24 = extract.v4f32 %lhs, 1
+  %25 = extract.v4f32 %rhs, 1
+  %26 = fma.f32 %24, %25, %23
+  %27 = extract.v4f32 %lhs, 2
+  %28 = extract.v4f32 %rhs, 2
+  %29 = fma.f32 %27, %28, %26
+  %30 = extract.v4f32 %lhs, 3
+  %31 = extract.v4f32 %rhs, 3
+  %dot = fma.f32 %30, %31, %29
+  return %dot
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32_contract_product_reduce(%lhs: vector<8xf32>, %rhs: vector<8xf32>, %acc: f32) -> (f32) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<8xf32>
+  %dot = vector.reduce<addf, reassoc|nnan|ninf|nsz|contract> %product, %acc : vector<8xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32_contract_product_reduce(%lhs: reg<llvmir.f32 x8>, %rhs: reg<llvmir.f32 x8>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %35 = extract.v8f32 %lhs, 0
+  %36 = extract.v8f32 %rhs, 0
+  %37 = fma.f32 %35, %36, %acc
+  %38 = extract.v8f32 %lhs, 1
+  %39 = extract.v8f32 %rhs, 1
+  %40 = fma.f32 %38, %39, %37
+  %41 = extract.v8f32 %lhs, 2
+  %42 = extract.v8f32 %rhs, 2
+  %43 = fma.f32 %41, %42, %40
+  %44 = extract.v8f32 %lhs, 3
+  %45 = extract.v8f32 %rhs, 3
+  %46 = fma.f32 %44, %45, %43
+  %47 = extract.v8f32 %lhs, 4
+  %48 = extract.v8f32 %rhs, 4
+  %49 = fma.f32 %47, %48, %46
+  %50 = extract.v8f32 %lhs, 5
+  %51 = extract.v8f32 %rhs, 5
+  %52 = fma.f32 %50, %51, %49
+  %53 = extract.v8f32 %lhs, 6
+  %54 = extract.v8f32 %rhs, 6
+  %55 = fma.f32 %53, %54, %52
+  %56 = extract.v8f32 %lhs, 7
+  %57 = extract.v8f32 %rhs, 7
+  %dot = fma.f32 %56, %57, %55
+  return %dot
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32_exact_product_reduce(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %acc: f32) -> (f32) {
+  %product = vector.mulf %lhs, %rhs : vector<4xf32>
+  %dot = vector.reduce<addf> %product, %acc : vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32_exact_product_reduce(%lhs: reg<llvmir.f32 x4>, %rhs: reg<llvmir.f32 x4>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %26 = extract.v4f32 %lhs, 0
+  %27 = extract.v4f32 %rhs, 0
+  %28 = mul.f32 %26, %27
+  %29 = add.f32 %acc, %28
+  %30 = extract.v4f32 %lhs, 1
+  %31 = extract.v4f32 %rhs, 1
+  %32 = mul.f32 %30, %31
+  %33 = add.f32 %29, %32
+  %34 = extract.v4f32 %lhs, 2
+  %35 = extract.v4f32 %rhs, 2
+  %36 = mul.f32 %34, %35
+  %37 = add.f32 %33, %36
+  %38 = extract.v4f32 %lhs, 3
+  %39 = extract.v4f32 %rhs, 3
+  %40 = mul.f32 %38, %39
+  %dot = add.f32 %37, %40
+  return %dot
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f16_dot2f(%lhs: vector<8xf16>, %rhs: vector<8xf16>, %acc: vector<4xf32>) -> (vector<4xf32>) {
+  %dot = vector.dot2f %lhs, %rhs, %acc : vector<8xf16>, vector<8xf16>, vector<4xf32>
+  func.return %dot : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f16_dot2f(%lhs: reg<llvmir.f16 x8>, %rhs: reg<llvmir.f16 x8>, %acc: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+  %54 = extract.v4f32 %acc, 0
+  %55 = extract.v8f16 %lhs, 0
+  %56 = extract.v8f16 %rhs, 0
+  %57 = fpext.f16.f32 %55
+  %58 = fpext.f16.f32 %56
+  %59 = fma.f32 %57, %58, %54
+  %60 = extract.v8f16 %lhs, 1
+  %61 = extract.v8f16 %rhs, 1
+  %62 = fpext.f16.f32 %60
+  %63 = fpext.f16.f32 %61
+  %64 = fma.f32 %62, %63, %59
+  %65 = extract.v4f32 %acc, 1
+  %66 = extract.v8f16 %lhs, 2
+  %67 = extract.v8f16 %rhs, 2
+  %68 = fpext.f16.f32 %66
+  %69 = fpext.f16.f32 %67
+  %70 = fma.f32 %68, %69, %65
+  %71 = extract.v8f16 %lhs, 3
+  %72 = extract.v8f16 %rhs, 3
+  %73 = fpext.f16.f32 %71
+  %74 = fpext.f16.f32 %72
+  %75 = fma.f32 %73, %74, %70
+  %76 = extract.v4f32 %acc, 2
+  %77 = extract.v8f16 %lhs, 4
+  %78 = extract.v8f16 %rhs, 4
+  %79 = fpext.f16.f32 %77
+  %80 = fpext.f16.f32 %78
+  %81 = fma.f32 %79, %80, %76
+  %82 = extract.v8f16 %lhs, 5
+  %83 = extract.v8f16 %rhs, 5
+  %84 = fpext.f16.f32 %82
+  %85 = fpext.f16.f32 %83
+  %86 = fma.f32 %84, %85, %81
+  %87 = extract.v4f32 %acc, 3
+  %88 = extract.v8f16 %lhs, 6
+  %89 = extract.v8f16 %rhs, 6
+  %90 = fpext.f16.f32 %88
+  %91 = fpext.f16.f32 %89
+  %92 = fma.f32 %90, %91, %87
+  %93 = extract.v8f16 %lhs, 7
+  %94 = extract.v8f16 %rhs, 7
+  %95 = fpext.f16.f32 %93
+  %96 = fpext.f16.f32 %94
+  %97 = fma.f32 %95, %96, %92
+  %dot = from_elements.v4f32 %64, %75, %86, %97
+  return %dot
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @bf16_dot2f(%lhs: vector<8xbf16>, %rhs: vector<8xbf16>, %acc: vector<4xf32>) -> (vector<4xf32>) {
+  %dot = vector.dot2f %lhs, %rhs, %acc : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+  func.return %dot : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @bf16_dot2f(%lhs: reg<llvmir.bf16 x8>, %rhs: reg<llvmir.bf16 x8>, %acc: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+  %54 = extract.v4f32 %acc, 0
+  %55 = extract.v8bf16 %lhs, 0
+  %56 = extract.v8bf16 %rhs, 0
+  %57 = fpext.bf16.f32 %55
+  %58 = fpext.bf16.f32 %56
+  %59 = fma.f32 %57, %58, %54
+  %60 = extract.v8bf16 %lhs, 1
+  %61 = extract.v8bf16 %rhs, 1
+  %62 = fpext.bf16.f32 %60
+  %63 = fpext.bf16.f32 %61
+  %64 = fma.f32 %62, %63, %59
+  %65 = extract.v4f32 %acc, 1
+  %66 = extract.v8bf16 %lhs, 2
+  %67 = extract.v8bf16 %rhs, 2
+  %68 = fpext.bf16.f32 %66
+  %69 = fpext.bf16.f32 %67
+  %70 = fma.f32 %68, %69, %65
+  %71 = extract.v8bf16 %lhs, 3
+  %72 = extract.v8bf16 %rhs, 3
+  %73 = fpext.bf16.f32 %71
+  %74 = fpext.bf16.f32 %72
+  %75 = fma.f32 %73, %74, %70
+  %76 = extract.v4f32 %acc, 2
+  %77 = extract.v8bf16 %lhs, 4
+  %78 = extract.v8bf16 %rhs, 4
+  %79 = fpext.bf16.f32 %77
+  %80 = fpext.bf16.f32 %78
+  %81 = fma.f32 %79, %80, %76
+  %82 = extract.v8bf16 %lhs, 5
+  %83 = extract.v8bf16 %rhs, 5
+  %84 = fpext.bf16.f32 %82
+  %85 = fpext.bf16.f32 %83
+  %86 = fma.f32 %84, %85, %81
+  %87 = extract.v4f32 %acc, 3
+  %88 = extract.v8bf16 %lhs, 6
+  %89 = extract.v8bf16 %rhs, 6
+  %90 = fpext.bf16.f32 %88
+  %91 = fpext.bf16.f32 %89
+  %92 = fma.f32 %90, %91, %87
+  %93 = extract.v8bf16 %lhs, 7
+  %94 = extract.v8bf16 %rhs, 7
+  %95 = fpext.bf16.f32 %93
+  %96 = fpext.bf16.f32 %94
+  %97 = fma.f32 %95, %96, %92
+  %dot = from_elements.v4f32 %64, %75, %86, %97
+  return %dot
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32_uniform_smem_vector_operands(%lhs: vector<4xf32>, %weights: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %weights_noalias = buffer.assume.noalias %weights_global : buffer
+  %weights_view = buffer.view %weights_noalias[%base] : buffer -> view<2x4xf32, #dense>
+  %rhs = vector.load %weights_view[0, 0] : view<2x4xf32, #dense> -> vector<4xf32>
+  %bias_vector = vector.load %weights_view[1, 0] : view<2x4xf32, #dense> -> vector<4xf32>
+  %bias = vector.extract %bias_vector[0] : vector<4xf32> -> f32
+  %scaled = vector.mulf %lhs, %rhs : vector<4xf32>
+  %dot = vector.dotf %scaled, %rhs, %bias : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32_uniform_smem_vector_operands(%lhs: reg<llvmir.f32 x4>, %weights_view: reg<llvmir.ptr>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %bias = load.f32 %weights_view, 16
+  %47 = extract.v4f32 %lhs, 0
+  %48 = load.f32 %weights_view, 0
+  %49 = mul.f32 %47, %48
+  %50 = fma.f32 %49, %48, %bias
+  %51 = extract.v4f32 %lhs, 1
+  %52 = load.f32 %weights_view, 4
+  %53 = mul.f32 %51, %52
+  %54 = fma.f32 %53, %52, %50
+  %55 = extract.v4f32 %lhs, 2
+  %56 = load.f32 %weights_view, 8
+  %57 = mul.f32 %55, %56
+  %58 = fma.f32 %57, %56, %54
+  %59 = extract.v4f32 %lhs, 3
+  %60 = load.f32 %weights_view, 12
+  %61 = mul.f32 %59, %60
+  %dot = fma.f32 %61, %60, %58
+  return %dot
+}

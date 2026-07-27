@@ -1,0 +1,91 @@
+// RDNA3 wave64 f16 result fragments must preserve the same logical element
+// layout when stored directly to f32 memory or round-tripped through f16 LDS.
+//
+// The fragment carries lane-dependent values so a row-block permutation cannot
+// hide behind uniform data.
+amdgpu.target<gfx1100> @gfx1100_wave64 {subgroup_size = 64}
+
+kernel.def target(@gfx1100_wave64) @fragment_result_f16_lds_roundtrip() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%direct_buffer: buffer, %roundtrip_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %sixteen = index.constant 16 : index
+  %sixty_four = index.constant 64 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %scratch_bytes = index.constant 512 : offset
+
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %lane_i32 = index.cast %lane : index to i32
+  %lane_f32 = scalar.uitofp %lane_i32 : i32 to f32
+  %lane_f16 = scalar.fptrunc %lane_f32 : f32 to f16
+  %one_f32 = scalar.constant 1.0 : f32
+  %two_f32 = scalar.constant 2.0 : f32
+  %three_f32 = scalar.constant 3.0 : f32
+  %four_f32 = scalar.constant 4.0 : f32
+  %five_f32 = scalar.constant 5.0 : f32
+  %six_f32 = scalar.constant 6.0 : f32
+  %seven_f32 = scalar.constant 7.0 : f32
+  %lane_plus1_f32 = scalar.addf %lane_f32, %one_f32 : f32
+  %lane_plus2_f32 = scalar.addf %lane_f32, %two_f32 : f32
+  %lane_plus3_f32 = scalar.addf %lane_f32, %three_f32 : f32
+  %lane_plus4_f32 = scalar.addf %lane_f32, %four_f32 : f32
+  %lane_plus5_f32 = scalar.addf %lane_f32, %five_f32 : f32
+  %lane_plus6_f32 = scalar.addf %lane_f32, %six_f32 : f32
+  %lane_plus7_f32 = scalar.addf %lane_f32, %seven_f32 : f32
+  %lane_plus1_f16 = scalar.fptrunc %lane_plus1_f32 : f32 to f16
+  %lane_plus2_f16 = scalar.fptrunc %lane_plus2_f32 : f32 to f16
+  %lane_plus3_f16 = scalar.fptrunc %lane_plus3_f32 : f32 to f16
+  %lane_plus4_f16 = scalar.fptrunc %lane_plus4_f32 : f32 to f16
+  %lane_plus5_f16 = scalar.fptrunc %lane_plus5_f32 : f32 to f16
+  %lane_plus6_f16 = scalar.fptrunc %lane_plus6_f32 : f32 to f16
+  %lane_plus7_f16 = scalar.fptrunc %lane_plus7_f32 : f32 to f16
+
+  %init_values = vector.from_elements %lane_f16, %lane_plus1_f16, %lane_plus2_f16, %lane_plus3_f16, %lane_plus4_f16, %lane_plus5_f16, %lane_plus6_f16, %lane_plus7_f16 : vector<8xf16>
+  %lhs_values = vector.constant 0.0 : vector<16xf16>
+  %rhs_values = vector.constant 0.0 : vector<16xf16>
+
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xf16>
+  %init = vector.fragment<init> %init_values shape [%m, %n] : vector<8xf16>
+  %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf16>
+
+  %direct_global = buffer.assume.memory_space<global> %direct_buffer : buffer
+  %direct_view = buffer.view %direct_global[%base] : buffer -> view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %direct_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf32, #dense>
+
+  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xf16, #dense>
+  vector.fragment.store<result> %result, %scratch_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf16, #dense>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+
+  %roundtrip_global = buffer.assume.memory_space<global> %roundtrip_buffer : buffer
+  %roundtrip_view = buffer.view %roundtrip_global[%base] : buffer -> view<256xf32, #dense>
+  scf.for %i = [%zero to %four step %one] {
+    %linear_lane = index.mul %i, %sixty_four : index
+    %linear = index.add %linear_lane, %lane : index
+    %row = index.div %linear, %sixteen : index
+    %column = index.rem %linear, %sixteen : index
+    %value_f16 = view.load %scratch_view[%row, %column] : view<16x16xf16, #dense> -> f16
+    %value = scalar.extf %value_f16 : f16 to f32
+    view.store %value, %roundtrip_view[%linear] : f32, view<256xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @fragment_result_f16_lds_roundtrip_case {
+  %direct = check.generate.fill value(0.0) : tensor<256xf32>
+  %roundtrip = check.generate.fill value(0.0) : tensor<256xf32>
+  func.call @fragment_result_f16_lds_roundtrip(%direct, %roundtrip) : (tensor<256xf32>, tensor<256xf32>)
+  check.expect.close actual(%roundtrip) expected(%direct) atol(0.0) rtol(0.0) nan(same) : tensor<256xf32>
+  check.return
+}
+
+check.benchmark<@fragment_result_f16_lds_roundtrip_case> @fragment_result_f16_lds_roundtrip_smoke

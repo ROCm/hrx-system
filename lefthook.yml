@@ -13,6 +13,11 @@ pre-commit:
     precommit:
       run: python dev.py bazel precommit --profile paranoid --commit
 
+commit-msg:
+  commands:
+    commit-message:
+      run: python build_tools/lefthook/commit_msg.py {1}
+
 fix:
   commands:
     fix:

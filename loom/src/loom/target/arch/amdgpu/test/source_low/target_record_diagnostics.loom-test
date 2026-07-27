@@ -1,0 +1,19 @@
+// RUN: verify
+
+// ERROR@+1: AMDGPU/026 {target_name="gfx942_wave32", subgroup_size="32", processor="gfx942"}
+amdgpu.target<gfx942> @gfx942_wave32 {subgroup_size = 32}
+
+// ====
+
+// ERROR@+1: AMDGPU/026 {target_name="gfx950_wave32", subgroup_size="32", processor="gfx950"}
+amdgpu.target<gfx950> @gfx950_wave32 {subgroup_size = 32}
+
+// ====
+
+// ERROR@+1: AMDGPU/026 {target_name="gfx1250_wave64", subgroup_size="64", processor="gfx1250"}
+amdgpu.target<gfx1250> @gfx1250_wave64 {subgroup_size = 64}
+
+// ====
+
+// ERROR@+1: AMDGPU/026 {target_name="gfx1100_zero", subgroup_size="0", processor="gfx1100"}
+amdgpu.target<gfx1100> @gfx1100_zero {subgroup_size = 0}

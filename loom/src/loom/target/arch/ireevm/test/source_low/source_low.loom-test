@@ -1,0 +1,50 @@
+// RUN: emit source-low output=low
+ireevm.target<core> @vm_target
+
+func.def target(@vm_target) @vm_add(%lhs: i32, %rhs: i32) -> (i32) {
+  %sum = scalar.addi %lhs, %rhs : i32
+  func.return %sum : i32
+}
+// ----
+low.func.def target(@vm_target) abi(vm_module_function) @vm_add(%lhs: reg<ireevm.i32>, %rhs: reg<ireevm.i32>) -> (reg<ireevm.i32>) asm<ireevm.core> {
+  %sum = ireevm.add.i32 %lhs, %rhs
+  return %sum
+}
+
+// ====
+
+// RUN: emit source-low output=low
+ireevm.target<core> @vm_target
+
+ireevm.import.decl target(@vm_target) symbol("hal.buffer.length") @hal_buffer_length(%buffer: ireevm.ref<ireevm.list<i32>>) -> (i32)
+
+func.def target(@vm_target) @vm_import_length(%buffer: ireevm.ref<ireevm.list<i32>>) -> (i32) {
+  %length = func.call @hal_buffer_length(%buffer) : (ireevm.ref<ireevm.list<i32>>) -> (i32)
+  func.return %length : i32
+}
+// ----
+low.func.decl import(vm, "hal.buffer.length") target(@vm_target) @hal_buffer_length(%buffer: reg<ireevm.ref>) -> (reg<ireevm.i32>)
+
+low.func.def target(@vm_target) abi(vm_module_function) @vm_import_length(%buffer: reg<ireevm.ref>) -> (reg<ireevm.i32>) asm<ireevm.core> {
+  %length = low.func.call @hal_buffer_length(%buffer) : (reg<ireevm.ref>) -> (reg<ireevm.i32>)
+  return %length
+}
+
+// ====
+
+// RUN: emit source-low output=low
+ireevm.target<core> @vm_target
+
+func.def target(@vm_target) @vm_wide_scalar(%lhs: i64, %rhs: i64, %x: f32, %y: f32) -> (i64, f32, i1) {
+  %sum = scalar.addi %lhs, %rhs : i64
+  %product = scalar.mulf %x, %y : f32
+  %predicate = scalar.cmpi sgt, %lhs, %rhs : i64
+  func.return %sum, %product, %predicate : i64, f32, i1
+}
+// ----
+low.func.def target(@vm_target) abi(vm_module_function) @vm_wide_scalar(%lhs: reg<ireevm.i64 x2>, %rhs: reg<ireevm.i64 x2>, %x: reg<ireevm.f32>, %y: reg<ireevm.f32>) -> (reg<ireevm.i64 x2>, reg<ireevm.f32>, reg<ireevm.i32>) asm<ireevm.core> {
+  %sum = ireevm.add.i64 %lhs, %rhs
+  %product = ireevm.mul.f32 %x, %y
+  %predicate = ireevm.cmp.lt.s.i64 %rhs, %lhs
+  return %sum, %product, %predicate
+}

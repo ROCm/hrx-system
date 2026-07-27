@@ -141,7 +141,7 @@ struct ReplayRecordSummary {
   iree_host_size_t inline_file_object_count = 0;
   uint64_t inline_file_reference_length = 0;
   iree_host_size_t assign_topology_record_count = 0;
-  iree_host_size_t query_capabilities_record_count = 0;
+  iree_host_size_t refine_topology_record_count = 0;
   iree_host_size_t allocate_buffer_record_count = 0;
   iree_host_size_t import_buffer_record_count = 0;
   iree_host_size_t buffer_map_range_record_count = 0;
@@ -239,8 +239,8 @@ static ReplayRecordSummary ParseReplayRecordSummary(
             IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_ASSIGN_TOPOLOGY_INFO) {
           ++summary.assign_topology_record_count;
         } else if (record.header.operation_code ==
-                   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUERY_CAPABILITIES) {
-          ++summary.query_capabilities_record_count;
+                   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_REFINE_TOPOLOGY_EDGE) {
+          ++summary.refine_topology_record_count;
         } else if (record.header.operation_code ==
                    IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_ALLOCATE_BUFFER) {
           ++summary.allocate_buffer_record_count;
@@ -365,9 +365,10 @@ TEST(ReplayRecorderTest, WrapDeviceGroupRecordsOrderedDeviceOperations) {
 
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
-  iree_hal_device_capabilities_t capabilities;
-  IREE_ASSERT_OK(
-      iree_hal_device_query_capabilities(wrapped_device, &capabilities));
+  iree_hal_topology_edge_t edge = {};
+  IREE_ASSERT_OK(iree_hal_device_refine_topology_edge(
+      wrapped_device, iree_hal_device_group_device_at(wrapped_group, 1),
+      &edge));
 
   IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
   iree_hal_replay_recorder_release(recorder);
@@ -378,7 +379,7 @@ TEST(ReplayRecorderTest, WrapDeviceGroupRecordsOrderedDeviceOperations) {
   EXPECT_EQ(1u, summary.session_record_count);
   EXPECT_EQ(2u, summary.device_object_record_count);
   EXPECT_EQ(2u, summary.assign_topology_record_count);
-  EXPECT_EQ(1u, summary.query_capabilities_record_count);
+  EXPECT_EQ(1u, summary.refine_topology_record_count);
 }
 
 TEST(ReplayRecorderTest, WrappedDeviceRecordsHostCallAsUnsupported) {

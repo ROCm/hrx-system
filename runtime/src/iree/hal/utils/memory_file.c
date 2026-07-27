@@ -189,10 +189,8 @@ static void iree_hal_memory_file_destroy(
   iree_allocator_t host_allocator = file->host_allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (file->imported_buffer) {
-    iree_hal_buffer_release(file->imported_buffer);
-    file->imported_buffer = NULL;
-  }
+  iree_hal_buffer_release(file->imported_buffer);
+  file->imported_buffer = NULL;
 
   iree_hal_memory_file_storage_release(file->storage);
 

@@ -1,0 +1,97 @@
+// Fragment result stores through a dynamic strided destination layout.
+//
+// The four tile origins force both row and column origin terms to participate
+// in address formation. The destination layout is authored with a dynamic
+// second stride even though the value is constant, matching kernels that keep
+// layout metadata parameterized while lowering f16 accumulator fragments into
+// f32 global memory.
+amdgpu.target<gfx1100> @gfx1100_wave64 {subgroup_size = 64}
+
+kernel.def target(@gfx1100_wave64) @fragment_result_dynamic_strided_f16acc_f32_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %sixteen = index.constant 16 : index
+  %sixty_four = index.constant 64 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %layout = encoding.layout.strided [1, %sixty_four] : encoding<layout>
+
+  %out_global = buffer.assume.memory_space<global> %out_buffer : buffer
+  %out_aligned = buffer.assume.alignment %out_global {minimum_alignment = 16} : buffer
+  %out_view = buffer.view %out_aligned[%base] : buffer -> view<64x64xf32, %layout>
+
+  %lhs_values = vector.constant 0.0 : vector<16xf16>
+  %rhs_values = vector.constant 0.0 : vector<16xf16>
+  %init_values0 = vector.constant 1.0 : vector<8xf16>
+  %init_values1 = vector.constant 2.0 : vector<8xf16>
+  %init_values2 = vector.constant 3.0 : vector<8xf16>
+  %init_values3 = vector.constant 4.0 : vector<8xf16>
+
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xf16>
+  %init0 = vector.fragment<init> %init_values0 shape [%m, %n] : vector<8xf16>
+  %init1 = vector.fragment<init> %init_values1 shape [%m, %n] : vector<8xf16>
+  %init2 = vector.fragment<init> %init_values2 shape [%m, %n] : vector<8xf16>
+  %init3 = vector.fragment<init> %init_values3 shape [%m, %n] : vector<8xf16>
+
+  %result0 = vector.mma %lhs, %rhs, %init0 : vector<16xf16>, vector<16xf16>, vector<8xf16>
+  %result1 = vector.mma %lhs, %rhs, %init1 : vector<16xf16>, vector<16xf16>, vector<8xf16>
+  %result2 = vector.mma %lhs, %rhs, %init2 : vector<16xf16>, vector<16xf16>, vector<8xf16>
+  %result3 = vector.mma %lhs, %rhs, %init3 : vector<16xf16>, vector<16xf16>, vector<8xf16>
+
+  vector.fragment.store<result> %result0, %out_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
+  vector.fragment.store<result> %result1, %out_view[%zero, %sixteen] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
+  vector.fragment.store<result> %result2, %out_view[%sixteen, %zero] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
+  vector.fragment.store<result> %result3, %out_view[%sixteen, %sixteen] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
+  kernel.return
+}
+
+kernel.def @fill_fragment_result_dynamic_strided_f16acc_f32_store_expected() {
+  %unit = index.constant 1 : index
+  %workgroups = index.constant 4 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %wg = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %sixteen = index.constant 16 : index
+  %sixty_four = index.constant 64 : index
+
+  %tile_row = index.div %wg, %two : index
+  %tile_column = index.rem %wg, %two : index
+  %row_origin = index.mul %tile_row, %sixteen : index
+  %column_origin = index.mul %tile_column, %sixteen : index
+  %local_row = index.rem %lane, %sixteen : index
+  %local_column = index.div %lane, %sixteen : index
+  %row = index.add %row_origin, %local_row : index
+  %column = index.add %column_origin, %local_column : index
+  %element_index = index.madd %column, %sixty_four, %row : index
+
+  %tile_value_index = index.add %wg, %one : index
+  %tile_value_i32 = index.cast %tile_value_index : index to i32
+  %tile_value = scalar.uitofp %tile_value_i32 : i32 to f32
+
+  %out_global = buffer.assume.memory_space<global> %out_buffer : buffer
+  %out_view = buffer.view %out_global[%base] : buffer -> view<4096xf32, #dense>
+  view.store %tile_value, %out_view[%element_index] : f32, view<4096xf32, #dense>
+  kernel.return
+}
+
+check.case public @fragment_result_dynamic_strided_f16acc_f32_store_case {
+  %actual = check.generate.fill value(0.0) : tensor<4096xf32>
+  %expected = check.generate.fill value(0.0) : tensor<4096xf32>
+  func.call @fragment_result_dynamic_strided_f16acc_f32_store(%actual) : (tensor<4096xf32>)
+  func.call @fill_fragment_result_dynamic_strided_f16acc_f32_store_expected(%expected) : (tensor<4096xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096xf32>
+  check.return
+}
+
+check.benchmark<@fragment_result_dynamic_strided_f16acc_f32_store_case> @fragment_result_dynamic_strided_f16acc_f32_store_smoke

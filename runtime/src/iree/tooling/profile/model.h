@@ -21,8 +21,8 @@ typedef struct iree_profile_model_function_t {
   iree_hal_profile_executable_function_flags_t flags;
   // Function ordinal used by dispatch event records.
   uint32_t function_ordinal;
-  // Number of HAL ABI constant words expected by this function.
-  uint32_t constant_count;
+  // Byte length of HAL ABI constants expected by this function.
+  uint32_t constant_byte_length;
   // Number of HAL ABI binding pointer slots expected by this function.
   uint32_t binding_count;
   // Number of reflected parameters associated with this function.

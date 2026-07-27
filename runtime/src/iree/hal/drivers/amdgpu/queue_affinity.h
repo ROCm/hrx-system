@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMDGPU_QUEUE_AFFINITY_H_
 #define IREE_HAL_DRIVERS_AMDGPU_QUEUE_AFFINITY_H_
 
+#include "iree/async/frontier.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 
@@ -85,6 +86,25 @@ iree_status_t iree_hal_amdgpu_queue_affinity_resolve(
 bool iree_hal_amdgpu_queue_affinity_try_resolve(
     iree_hal_amdgpu_queue_affinity_domain_t domain,
     iree_hal_queue_affinity_t requested_affinity,
+    iree_hal_amdgpu_queue_affinity_resolved_t* out_resolved);
+
+// Constructs the causal axis for |queue_ordinal| within one topology-assigned
+// HAL device. |base_axis| supplies the session, machine, and logical device
+// index; the flattened logical queue ordinal supplies the queue index. This
+// preserves distinct device-group identities while keeping every physical
+// queue in a composite logical device uniquely addressable.
+iree_status_t iree_hal_amdgpu_queue_affinity_make_axis(
+    iree_hal_amdgpu_queue_affinity_domain_t domain, iree_async_axis_t base_axis,
+    iree_host_size_t queue_ordinal,
+    iree_hal_amdgpu_queue_affinity_resolved_t* out_resolved,
+    iree_async_axis_t* out_axis);
+
+// Attempts to resolve |candidate_axis| as a queue in the same topology device
+// as |local_axis|. Returns false for axes from another session, machine,
+// logical device, or queue domain, and for queue indices outside |domain|.
+bool iree_hal_amdgpu_queue_affinity_try_resolve_axis(
+    iree_hal_amdgpu_queue_affinity_domain_t domain,
+    iree_async_axis_t local_axis, iree_async_axis_t candidate_axis,
     iree_hal_amdgpu_queue_affinity_resolved_t* out_resolved);
 
 // Builds the queue affinity mask for one physical device in |domain|.

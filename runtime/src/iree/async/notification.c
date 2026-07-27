@@ -39,7 +39,9 @@ IREE_API_EXPORT iree_status_t iree_async_notification_create_shared(
 
 IREE_API_EXPORT void iree_async_notification_retain(
     iree_async_notification_t* notification) {
-  iree_atomic_ref_count_inc(&notification->ref_count);
+  if (notification) {
+    iree_atomic_ref_count_inc(&notification->ref_count);
+  }
 }
 
 IREE_API_EXPORT void iree_async_notification_release(

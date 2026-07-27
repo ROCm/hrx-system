@@ -1,0 +1,264 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_bitpack.loom-test
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i32x4_to_i8x4_bitpack(%codes: vector<4xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i32x4_to_i8x4_bitpack(%codes: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = slice %codes[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %6 = slice %codes[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %7 = slice %codes[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %8 = slice %codes[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %9 = v_perm_b32_src2_lit %5, %6, 4
+  %10 = v_perm_b32_src2_lit %7, %8, 4
+  %packed = v_perm_b32_src2_lit %9, %10, 16778500
+  return %packed
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i32x8_to_i4x8_bitpack(%codes: vector<8xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<4> %codes : vector<8xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i32x8_to_i4x8_bitpack(%codes: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = slice %codes[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %6 = v_and_b32_src0_inline %5, 15
+  %7 = slice %codes[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %8 = v_and_b32_src0_inline %7, 15
+  %9 = v_lshl_add_u32_shift_imm %8, %6, 4
+  %10 = slice %codes[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %11 = v_and_b32_src0_inline %10, 15
+  %12 = v_lshl_add_u32_shift_imm %11, %9, 8
+  %13 = slice %codes[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %14 = v_and_b32_src0_inline %13, 15
+  %15 = v_lshl_add_u32_shift_imm %14, %12, 12
+  %16 = slice %codes[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %17 = v_and_b32_src0_inline %16, 15
+  %18 = v_lshl_add_u32_shift_imm %17, %15, 16
+  %19 = slice %codes[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %20 = v_and_b32_src0_inline %19, 15
+  %21 = v_lshl_add_u32_shift_imm %20, %18, 20
+  %22 = slice %codes[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %23 = v_and_b32_src0_inline %22, 15
+  %24 = v_lshl_add_u32_shift_imm %23, %21, 24
+  %25 = slice %codes[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %26 = v_and_b32_src0_inline %25, 15
+  %packed = v_lshl_add_u32_shift_imm %26, %24, 28
+  return %packed
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i32x16_to_i2x16_bitpack(%codes: vector<16xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<2> %codes : vector<16xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i32x16_to_i2x16_bitpack(%codes: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = slice %codes[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %6 = v_and_b32_src0_inline %5, 3
+  %7 = slice %codes[1] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %8 = v_and_b32_src0_inline %7, 3
+  %9 = v_lshl_add_u32_shift_imm %8, %6, 2
+  %10 = slice %codes[2] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %11 = v_and_b32_src0_inline %10, 3
+  %12 = v_lshl_add_u32_shift_imm %11, %9, 4
+  %13 = slice %codes[3] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %14 = v_and_b32_src0_inline %13, 3
+  %15 = v_lshl_add_u32_shift_imm %14, %12, 6
+  %16 = slice %codes[4] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %17 = v_and_b32_src0_inline %16, 3
+  %18 = v_lshl_add_u32_shift_imm %17, %15, 8
+  %19 = slice %codes[5] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %20 = v_and_b32_src0_inline %19, 3
+  %21 = v_lshl_add_u32_shift_imm %20, %18, 10
+  %22 = slice %codes[6] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %23 = v_and_b32_src0_inline %22, 3
+  %24 = v_lshl_add_u32_shift_imm %23, %21, 12
+  %25 = slice %codes[7] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %26 = v_and_b32_src0_inline %25, 3
+  %27 = v_lshl_add_u32_shift_imm %26, %24, 14
+  %28 = slice %codes[8] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %29 = v_and_b32_src0_inline %28, 3
+  %30 = v_lshl_add_u32_shift_imm %29, %27, 16
+  %31 = slice %codes[9] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %32 = v_and_b32_src0_inline %31, 3
+  %33 = v_lshl_add_u32_shift_imm %32, %30, 18
+  %34 = slice %codes[10] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %35 = v_and_b32_src0_inline %34, 3
+  %36 = v_lshl_add_u32_shift_imm %35, %33, 20
+  %37 = slice %codes[11] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %38 = v_and_b32_src0_inline %37, 3
+  %39 = v_lshl_add_u32_shift_imm %38, %36, 22
+  %40 = slice %codes[12] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %41 = v_and_b32_src0_inline %40, 3
+  %42 = v_lshl_add_u32_shift_imm %41, %39, 24
+  %43 = slice %codes[13] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %44 = v_and_b32_src0_inline %43, 3
+  %45 = v_lshl_add_u32_shift_imm %44, %42, 26
+  %46 = slice %codes[14] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %47 = v_and_b32_src0_inline %46, 3
+  %48 = v_lshl_add_u32_shift_imm %47, %45, 28
+  %49 = slice %codes[15] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %50 = v_and_b32_src0_inline %49, 3
+  %packed = v_lshl_add_u32_shift_imm %50, %48, 30
+  return %packed
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i32x32_to_i1x32_bitpack(%mask: vector<32xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<1> %mask : vector<32xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i32x32_to_i1x32_bitpack(%mask: reg<amdgpu.vgpr x32>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = slice %mask[0] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %6 = v_and_b32_src0_inline %5, 1
+  %7 = slice %mask[1] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %8 = v_and_b32_src0_inline %7, 1
+  %9 = v_lshl_add_u32_shift_imm %8, %6, 1
+  %10 = slice %mask[2] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %11 = v_and_b32_src0_inline %10, 1
+  %12 = v_lshl_add_u32_shift_imm %11, %9, 2
+  %13 = slice %mask[3] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %14 = v_and_b32_src0_inline %13, 1
+  %15 = v_lshl_add_u32_shift_imm %14, %12, 3
+  %16 = slice %mask[4] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %17 = v_and_b32_src0_inline %16, 1
+  %18 = v_lshl_add_u32_shift_imm %17, %15, 4
+  %19 = slice %mask[5] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %20 = v_and_b32_src0_inline %19, 1
+  %21 = v_lshl_add_u32_shift_imm %20, %18, 5
+  %22 = slice %mask[6] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %23 = v_and_b32_src0_inline %22, 1
+  %24 = v_lshl_add_u32_shift_imm %23, %21, 6
+  %25 = slice %mask[7] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %26 = v_and_b32_src0_inline %25, 1
+  %27 = v_lshl_add_u32_shift_imm %26, %24, 7
+  %28 = slice %mask[8] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %29 = v_and_b32_src0_inline %28, 1
+  %30 = v_lshl_add_u32_shift_imm %29, %27, 8
+  %31 = slice %mask[9] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %32 = v_and_b32_src0_inline %31, 1
+  %33 = v_lshl_add_u32_shift_imm %32, %30, 9
+  %34 = slice %mask[10] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %35 = v_and_b32_src0_inline %34, 1
+  %36 = v_lshl_add_u32_shift_imm %35, %33, 10
+  %37 = slice %mask[11] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %38 = v_and_b32_src0_inline %37, 1
+  %39 = v_lshl_add_u32_shift_imm %38, %36, 11
+  %40 = slice %mask[12] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %41 = v_and_b32_src0_inline %40, 1
+  %42 = v_lshl_add_u32_shift_imm %41, %39, 12
+  %43 = slice %mask[13] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %44 = v_and_b32_src0_inline %43, 1
+  %45 = v_lshl_add_u32_shift_imm %44, %42, 13
+  %46 = slice %mask[14] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %47 = v_and_b32_src0_inline %46, 1
+  %48 = v_lshl_add_u32_shift_imm %47, %45, 14
+  %49 = slice %mask[15] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %50 = v_and_b32_src0_inline %49, 1
+  %51 = v_lshl_add_u32_shift_imm %50, %48, 15
+  %52 = slice %mask[16] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %53 = v_and_b32_src0_inline %52, 1
+  %54 = v_lshl_add_u32_shift_imm %53, %51, 16
+  %55 = slice %mask[17] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %56 = v_and_b32_src0_inline %55, 1
+  %57 = v_lshl_add_u32_shift_imm %56, %54, 17
+  %58 = slice %mask[18] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %59 = v_and_b32_src0_inline %58, 1
+  %60 = v_lshl_add_u32_shift_imm %59, %57, 18
+  %61 = slice %mask[19] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %62 = v_and_b32_src0_inline %61, 1
+  %63 = v_lshl_add_u32_shift_imm %62, %60, 19
+  %64 = slice %mask[20] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %65 = v_and_b32_src0_inline %64, 1
+  %66 = v_lshl_add_u32_shift_imm %65, %63, 20
+  %67 = slice %mask[21] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %68 = v_and_b32_src0_inline %67, 1
+  %69 = v_lshl_add_u32_shift_imm %68, %66, 21
+  %70 = slice %mask[22] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %71 = v_and_b32_src0_inline %70, 1
+  %72 = v_lshl_add_u32_shift_imm %71, %69, 22
+  %73 = slice %mask[23] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %74 = v_and_b32_src0_inline %73, 1
+  %75 = v_lshl_add_u32_shift_imm %74, %72, 23
+  %76 = slice %mask[24] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %77 = v_and_b32_src0_inline %76, 1
+  %78 = v_lshl_add_u32_shift_imm %77, %75, 24
+  %79 = slice %mask[25] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %80 = v_and_b32_src0_inline %79, 1
+  %81 = v_lshl_add_u32_shift_imm %80, %78, 25
+  %82 = slice %mask[26] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %83 = v_and_b32_src0_inline %82, 1
+  %84 = v_lshl_add_u32_shift_imm %83, %81, 26
+  %85 = slice %mask[27] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %86 = v_and_b32_src0_inline %85, 1
+  %87 = v_lshl_add_u32_shift_imm %86, %84, 27
+  %88 = slice %mask[28] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %89 = v_and_b32_src0_inline %88, 1
+  %90 = v_lshl_add_u32_shift_imm %89, %87, 28
+  %91 = slice %mask[29] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %92 = v_and_b32_src0_inline %91, 1
+  %93 = v_lshl_add_u32_shift_imm %92, %90, 29
+  %94 = slice %mask[30] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %95 = v_and_b32_src0_inline %94, 1
+  %96 = v_lshl_add_u32_shift_imm %95, %93, 30
+  %97 = slice %mask[31] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %98 = v_and_b32_src0_inline %97, 1
+  %packed = v_lshl_add_u32_shift_imm %98, %96, 31
+  return %packed
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+kernel.def target(@target) @uniform_global_i32x4_to_i8x4_bitpack_store() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%values: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %values_noalias, %output_noalias = buffer.assume.noalias %values, %output : buffer, buffer
+  %values_view = buffer.view %values_noalias[%base] : buffer -> view<4xi32, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xi8, #dense>
+  %codes = vector.load %values_view[%index] : view<4xi32, #dense> -> vector<4xi32>
+  %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
+  vector.store %packed, %output_view[%index] : vector<4xi8>, view<4xi8, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_global_i32x4_to_i8x4_bitpack_store() asm<amdgpu.rdna3.core> {
+  %values_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %13 = s_mov_b32 0
+  %codes = s_load_dwordx4 %values_view, %13
+  %15 = slice %codes[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %16 = v_mov_b32_copy %15
+  %17 = slice %codes[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %18 = v_mov_b32_copy %17
+  %19 = slice %codes[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %20 = v_mov_b32_copy %19
+  %21 = slice %codes[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %22 = v_mov_b32_copy %21
+  %28 = v_perm_b32_src2_lit %16, %18, 4
+  %29 = v_perm_b32_src2_lit %20, %22, 4
+  %packed = v_perm_b32_src2_lit %28, %29, 16778500
+  %31 = v_mov_b32 0
+  global_store_b32_saddr %31, %packed, %output_view
+  return
+}

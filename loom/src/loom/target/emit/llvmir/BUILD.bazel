@@ -1,0 +1,337 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+load(
+    "//loom/build_tools/bazel:loom_check.bzl",
+    "loom_check_test_suite",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_LLVMIR_ARTIFACT_EMITTER_VISIBILITY = [
+    "//loom/binding/c/target/llvmir:__pkg__",
+    "//loom/src/loom/tools/loom-compile:__pkg__",
+]
+
+_LLVMIR_LOOM_CHECK_VISIBILITY = ["//loom/src/loom/tools/loom-check:__pkg__"]
+
+_LLVMIR_TARGET_VISIBILITY = [
+    "//loom/src/loom/target/emit/llvmir/amdgpu:__pkg__",
+    "//loom/src/loom/target/emit/llvmir/x86:__pkg__",
+]
+
+#===------------------------------------------------------------------------===#
+# Target-neutral LLVMIR core
+#===------------------------------------------------------------------------===#
+
+loom_cc_library(
+    name = "core",
+    srcs = [
+        "bitcode_record_writer.c",
+        "bitcode_writer.c",
+        "bitstream_writer.c",
+        "builder.c",
+        "intrinsics_builtin.c",
+        "module.c",
+        "text_writer.c",
+        "types.h",
+        "verify.c",
+    ],
+    hdrs = [
+        "bitcode_format.h",
+        "bitcode_record_writer.h",
+        "bitcode_writer.h",
+        "bitstream_writer.h",
+        "builder.h",
+        "intrinsics_builtin.h",
+        "llvmir.h",
+        "module.h",
+        "text_writer.h",
+        "verify.h",
+    ],
+    visibility = _LLVMIR_TARGET_VISIBILITY,
+    deps = [
+        "//loom/src/loom/ops:atomic",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_library(
+    name = "target_env",
+    srcs = ["target_env.c"],
+    hdrs = ["target_env.h"],
+    visibility = _LLVMIR_TARGET_VISIBILITY,
+    deps = [
+        ":core",
+        "//loom/src/loom/target:launch",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "target_presets",
+    srcs = ["target_presets.c"],
+    hdrs = ["target_presets.h"],
+    visibility = _LLVMIR_TARGET_VISIBILITY,
+    deps = [
+        ":target_env",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "module_emitter",
+    srcs = ["module_emitter.c"],
+    hdrs = ["module_emitter.h"],
+    deps = [
+        ":core",
+        ":target_env",
+        ":target_presets",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:atomic",
+        "//loom/src/loom/ops/llvmir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:launch",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/llvmir/descriptors:descriptors_ids",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "artifact_emitter",
+    srcs = ["artifact_emitter.c"],
+    hdrs = ["artifact_emitter.h"],
+    visibility = _LLVMIR_ARTIFACT_EMITTER_VISIBILITY,
+    deps = [
+        ":core",
+        ":module_emitter",
+        ":target_presets",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_library(
+    name = "test_modules_core",
+    testonly = True,
+    srcs = ["test_modules.c"],
+    hdrs = ["test_modules.h"],
+    defines = ["LOOM_LLVMIR_TEST_MODULE_ENABLE_TARGET_SCENARIOS=0"],
+    deps = [
+        ":core",
+        ":target_env",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "test_modules_target_scenarios",
+    testonly = True,
+    srcs = ["test_modules.c"],
+    hdrs = ["test_modules.h"],
+    deps = [
+        ":core",
+        ":target_env",
+        "//loom/src/loom/target/emit/llvmir/amdgpu:intrinsics",
+        "//loom/src/loom/target/emit/llvmir/amdgpu:target_env",
+        "//loom/src/loom/target/emit/llvmir/x86:intrinsics",
+        "//loom/src/loom/target/emit/llvmir/x86:target_env",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "loom_check",
+    testonly = True,
+    srcs = ["check/loom_check.c"],
+    hdrs = ["check/loom_check.h"],
+    visibility = _LLVMIR_LOOM_CHECK_VISIBILITY,
+    deps = [
+        ":core",
+        ":module_emitter",
+        ":target_env",
+        ":target_presets",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/llvmir",
+        "//loom/src/loom/target/tool:llvm",
+        "//loom/src/loom/tools/loom-check:execute",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_check_test_suite(
+    name = "file_test",
+    srcs = [
+        "test/diagnostics.loom-test",
+        "test/emit.loom-test",
+        "test/target_low.loom-test",
+        "test/toolchain.loom-test",
+    ],
+)
+
+loom_cc_test(
+    name = "bitcode_record_writer_test",
+    srcs = ["bitcode_record_writer_test.cc"],
+    deps = [
+        ":core",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "bitstream_writer_test",
+    srcs = ["bitstream_writer_test.cc"],
+    deps = [
+        ":core",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "bitcode_writer_test",
+    srcs = ["bitcode_writer_test.cc"],
+    deps = [
+        ":core",
+        ":target_env",
+        ":test_modules_core",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "bitcode_writer_target_test",
+    srcs = ["bitcode_writer_test.cc"],
+    defines = ["LOOM_LLVMIR_BITCODE_WRITER_TEST_TARGET_SCENARIOS=1"],
+    deps = [
+        ":core",
+        ":target_env",
+        ":test_modules_target_scenarios",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "text_writer_test",
+    srcs = ["text_writer_test.cc"],
+    deps = [
+        ":core",
+        ":test_modules_core",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "text_writer_target_test",
+    srcs = ["text_writer_test.cc"],
+    defines = ["LOOM_LLVMIR_TEXT_WRITER_TEST_TARGET_SCENARIOS=1"],
+    deps = [
+        ":core",
+        ":test_modules_target_scenarios",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "module_emitter_test",
+    srcs = ["module_emitter_test.cc"],
+    deps = [
+        ":core",
+        ":module_emitter",
+        ":target_presets",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/target/arch/llvmir/descriptors:low_registry",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//loom/src/loom/testing:module_ptr",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "target_env_test",
+    srcs = ["target_env_test.cc"],
+    deps = [
+        ":core",
+        ":target_env",
+        ":target_presets",
+        "//loom/src/loom/target/emit/llvmir/x86:target_env",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "tool_test",
+    srcs = ["tool_test.cc"],
+    tags = ["requires-filesystem"],
+    deps = [
+        ":core",
+        ":test_modules_target_scenarios",
+        "//loom/src/loom/target/tool:llvm",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+)
+
+loom_cc_test(
+    name = "verify_test",
+    srcs = ["verify_test.cc"],
+    deps = [
+        ":core",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

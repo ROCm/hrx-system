@@ -57,7 +57,7 @@ static int iree_hal_hip_cleanup_thread_main(void* param) {
 
     iree_slim_mutex_lock(&thread->mutex);
     exit |= thread->do_exit;
-    iree_status_t status = thread->failure_status;
+    iree_status_t status = iree_status_clone(thread->failure_status);
     while (!iree_hal_hip_callback_queue_empty(&thread->queue)) {
       iree_hal_hip_cleanup_thread_callback_t callback =
           iree_hal_hip_callback_queue_at(&thread->queue, 0);
@@ -72,27 +72,27 @@ static int iree_hal_hip_cleanup_thread_main(void* param) {
             hipEventSynchronize(iree_hal_hip_event_handle(callback.event)));
       }
 
-      status = iree_status_join(
-          status,
-          callback.callback(callback.user_data, callback.event, status));
+      iree_status_t callback_input_status = iree_status_clone(status);
+      iree_status_t callback_status = callback.callback(
+          callback.user_data, callback.event, callback_input_status);
+      status = iree_status_join(status, callback_status);
       iree_slim_mutex_lock(&thread->mutex);
       if (!iree_status_is_ok(status)) {
-        thread->failure_status = status;
-      }
-      if (!iree_status_is_ok(thread->failure_status)) {
-        status = iree_status_clone(thread->failure_status);
+        iree_status_ignore(thread->failure_status);
+        thread->failure_status = iree_status_clone(status);
       }
     }
     iree_slim_mutex_unlock(&thread->mutex);
 
     if (!iree_status_is_ok(status) || exit) {
+      iree_status_ignore(status);
       break;
     }
   }
   return 0;
 }
 
-iree_status_t iree_hal_hip_cleanup_thread_initialize(
+iree_status_t iree_hal_hip_cleanup_thread_allocate(
     const iree_hal_hip_dynamic_symbols_t* symbols,
     iree_allocator_t host_allocator,
     iree_hal_hip_cleanup_thread_t** out_thread) {
@@ -129,8 +129,7 @@ iree_status_t iree_hal_hip_cleanup_thread_initialize(
   return status;
 }
 
-void iree_hal_hip_cleanup_thread_deinitialize(
-    iree_hal_hip_cleanup_thread_t* thread) {
+void iree_hal_hip_cleanup_thread_free(iree_hal_hip_cleanup_thread_t* thread) {
   if (!thread) return;
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -143,6 +142,7 @@ void iree_hal_hip_cleanup_thread_deinitialize(
   iree_thread_release(thread->thread);
 
   iree_hal_hip_callback_queue_deinitialize(&thread->queue);
+  iree_status_ignore(thread->failure_status);
   iree_slim_mutex_deinitialize(&thread->mutex);
   iree_allocator_free(thread->host_allocator, thread);
   IREE_TRACE_ZONE_END(z0);
@@ -156,7 +156,7 @@ iree_status_t iree_hal_hip_cleanup_thread_add_cleanup(
   if (!iree_status_is_ok(thread->failure_status)) {
     IREE_TRACE_ZONE_END(z0);
     iree_slim_mutex_unlock(&thread->mutex);
-    return thread->failure_status;
+    return iree_status_clone(thread->failure_status);
   }
 
   iree_hal_hip_cleanup_thread_callback_t callback_data = {
@@ -164,11 +164,13 @@ iree_status_t iree_hal_hip_cleanup_thread_add_cleanup(
       .user_data = user_data,
       .event = event,
   };
-  iree_hal_hip_callback_queue_push_back(&thread->queue, callback_data);
+  iree_status_t status =
+      iree_hal_hip_callback_queue_push_back(&thread->queue, callback_data);
   iree_slim_mutex_unlock(&thread->mutex);
-  iree_notification_post(&thread->notification, IREE_ALL_WAITERS);
+  if (iree_status_is_ok(status)) {
+    iree_notification_post(&thread->notification, IREE_ALL_WAITERS);
+  }
 
   IREE_TRACE_ZONE_END(z0);
-
-  return iree_ok_status();
+  return status;
 }

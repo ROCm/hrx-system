@@ -1,0 +1,144 @@
+// RUN: roundtrip
+
+func.def @i32x4_arith(%lhs: vector<4xi32>, %rhs: vector<4xi32>) -> (vector<4xi32>) {
+  %sum = vector.addi %lhs, %rhs : vector<4xi32>
+  %diff = vector.subi %sum, %rhs : vector<4xi32>
+  func.return %diff : vector<4xi32>
+}
+
+// ====
+
+func.def @f32x4_arith(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (vector<4xf32>) {
+  %sum = vector.addf %lhs, %rhs : vector<4xf32>
+  %product = vector.mulf %sum, %rhs : vector<4xf32>
+  func.return %product : vector<4xf32>
+}
+
+// ====
+
+func.def @f32x4_lane_extract(%v: vector<4xf32>, %x: f32) -> (f32) {
+  %lane = vector.extract %v[2] : vector<4xf32> -> f32
+  %sum = scalar.addf %lane, %x : f32
+  func.return %sum : f32
+}
+
+// ====
+
+func.def @f32x4_lane_edit(%v: vector<4xf32>, %x: f32) -> (vector<4xf32>) {
+  %lane = vector.extract %v[1] : vector<4xf32> -> f32
+  %sum = scalar.addf %lane, %x : f32
+  %updated = vector.insert %sum into %v[2] : f32, vector<4xf32>
+  func.return %updated : vector<4xf32>
+}
+
+// ====
+
+func.def @i32x4_splat_add(%value: i32, %rhs: vector<4xi32>) -> (vector<4xi32>) {
+  %splat = vector.splat %value : vector<4xi32>
+  %sum = vector.addi %splat, %rhs : vector<4xi32>
+  func.return %sum : vector<4xi32>
+}
+
+// ====
+
+func.def @i32x4_lane_edit(%v: vector<4xi32>, %x: i32) -> (vector<4xi32>) {
+  %lane = vector.extract %v[1] : vector<4xi32> -> i32
+  %sum = scalar.addi %lane, %x : i32
+  %updated = vector.insert %sum into %v[2] : i32, vector<4xi32>
+  func.return %updated : vector<4xi32>
+}
+
+// ====
+
+func.def @i32x4_shuffle(%v: vector<4xi32>) -> (vector<4xi32>) {
+  %shuffled = vector.shuffle<[3, 2, 1, 0]> %v : vector<4xi32>
+  func.return %shuffled : vector<4xi32>
+}
+
+// ====
+
+func.def @i32x4_shuffle_reduce(%v: vector<4xi32>, %init: i32) -> (i32) {
+  %reversed = vector.shuffle<[3, 2, 1, 0]> %v : vector<4xi32>
+  %sum = vector.reduce<addi> %reversed, %init : vector<4xi32>, i32
+  func.return %sum : i32
+}
+
+// ====
+
+func.def @f32x4_shuffle(%v: vector<4xf32>) -> (vector<4xf32>) {
+  %shuffled = vector.shuffle<[3, 1, 2, 0]> %v : vector<4xf32>
+  func.return %shuffled : vector<4xf32>
+}
+
+// ====
+
+func.def @f32x4_shuffle_reduce(%v: vector<4xf32>, %init: f32) -> (f32) {
+  %shuffled = vector.shuffle<[3, 1, 2, 0]> %v : vector<4xf32>
+  %sum = vector.reduce<addf> %shuffled, %init : vector<4xf32>, f32
+  func.return %sum : f32
+}
+
+// ====
+
+func.def @i32x4_select(%lhs: vector<4xi32>, %rhs: vector<4xi32>, %true_value: vector<4xi32>, %false_value: vector<4xi32>) -> (vector<4xi32>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xi32>
+  func.return %selected : vector<4xi32>
+}
+
+// ====
+
+func.def @f32x4_select(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %true_value: vector<4xf32>, %false_value: vector<4xf32>) -> (vector<4xf32>) {
+  %mask = vector.cmpf olt, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xf32>
+  func.return %selected : vector<4xf32>
+}
+
+// ====
+
+func.def @i32x4_memory_copy(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<4xi32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xi32, #dense> -> vector<4xi32>
+  vector.store %loaded, %output_view[0] : vector<4xi32>, view<4xi32, #dense>
+  func.return
+}
+
+// ====
+
+func.def @i32x4_memory_indexed(%input: buffer, %output: buffer, %i: index) {
+  %bounded_i = index.assume %i [range(%i, 0, 12)] : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<16xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<16xi32, #dense>
+  %loaded = vector.load %input_view[%bounded_i] : view<16xi32, #dense> -> vector<4xi32>
+  vector.store %loaded, %output_view[%bounded_i] : vector<4xi32>, view<16xi32, #dense>
+  func.return
+}
+
+// ====
+
+func.def @f32x4_memory_copy(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<4xf32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  vector.store %loaded, %output_view[0] : vector<4xf32>, view<4xf32, #dense>
+  func.return
+}
+
+// ====
+
+func.def @f32x4_memory_indexed_add(%lhs: buffer, %rhs: buffer, %output: buffer, %i: index) {
+  %bounded_i = index.assume %i [range(%i, 0, 12)] : index
+  %zero = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs[%zero] : buffer -> view<16xf32, #dense>
+  %rhs_view = buffer.view %rhs[%zero] : buffer -> view<16xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<16xf32, #dense>
+  %lhs_v = vector.load %lhs_view[%bounded_i] : view<16xf32, #dense> -> vector<4xf32>
+  %rhs_v = vector.load %rhs_view[%bounded_i] : view<16xf32, #dense> -> vector<4xf32>
+  %sum = vector.addf %lhs_v, %rhs_v : vector<4xf32>
+  vector.store %sum, %output_view[%bounded_i] : vector<4xf32>, view<16xf32, #dense>
+  func.return
+}

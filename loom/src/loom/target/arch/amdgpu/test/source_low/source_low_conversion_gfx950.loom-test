@@ -1,0 +1,19 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @vector_fptrunc_bf16x3(%input: vector<3xf32>) -> (vector<3xbf16>) {
+  %converted = vector.fptrunc %input : vector<3xf32> to vector<3xbf16>
+  func.return %converted : vector<3xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_bf16x3(%input: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.cdna4.core> {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %6 = slice %input[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %7 = v_cvt_pk_bf16_f32 %5, %6
+  %8 = slice %input[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %9 = v_mov_b32 0
+  %10 = v_cvt_pk_bf16_f32 %8, %9
+  %converted = concat(%7, %10) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %converted
+}

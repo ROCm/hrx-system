@@ -7,13 +7,14 @@ iree_add_all_subdirs()
 iree_cc_library(
   NAME
     common
-  COPTS
-    "-Wno-unused-variable"
   HDRS
     "fat_binary.h"
     "graph.h"
     "hrx_bridge.h"
     "internal.h"
+    "kernel_arguments.h"
+    "kpack.h"
+    "tls.h"
   SRCS
     "context.c"
     "device.c"
@@ -23,12 +24,15 @@ iree_cc_library(
     "graph_analysis.c"
     "graph_exec.c"
     "init.c"
+    "kernel_arguments.c"
+    "kpack.c"
     "mem_pool.c"
     "memory.c"
     "module.c"
     "peer.c"
     "registry.c"
     "stream.c"
+    "tls.c"
   DEPS
     flatcc::parsing
     iree::async
@@ -39,7 +43,7 @@ iree_cc_library(
     iree::hal
     iree::hal::utils::resource_set
     iree::io::file_handle
-    libhrx::src::libhrx::hrx
+    libhrx::src::libhrx::hrx_static
     libhrx_defs
   INCLUDES
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>"
@@ -49,6 +53,19 @@ iree_cc_library(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../../include>"
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    tls_test
+  SRCS
+    "tls_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
 )
 
 iree_cc_test(
@@ -63,6 +80,47 @@ iree_cc_test(
     iree::testing::gtest_main
     libhrx_defs
 )
+
+iree_cc_test(
+  NAME
+    graph_test
+  SRCS
+    "graph_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    fat_binary_test
+  SRCS
+    "fat_binary_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    kpack_test
+  SRCS
+    "kpack_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+endif()
 
 iree_cc_binary_benchmark(
   NAME
@@ -82,7 +140,6 @@ iree_cc_binary_benchmark(
 
 set_target_properties(libhrx_src_binding_common_common PROPERTIES
   POSITION_INDEPENDENT_CODE ON
-  INTERPROCEDURAL_OPTIMIZATION TRUE
 )
 
 # CCOB fat binaries use zstd for compression (used by rocBLAS/hipBLAS and
@@ -92,9 +149,14 @@ option(HRX_ENABLE_ZSTD "Enable zstd decompression for CCOB fat binaries" ON)
 if(HRX_ENABLE_ZSTD)
   find_package(PkgConfig QUIET)
   if(PkgConfig_FOUND)
-    pkg_check_modules(ZSTD QUIET libzstd)
+    pkg_check_modules(HRX_ZSTD QUIET libzstd)
   endif()
-  if(ZSTD_FOUND)
+  if(HRX_ZSTD_FOUND)
+    find_library(HRX_ZSTD_LIBRARY
+      NAMES zstd
+      HINTS ${HRX_ZSTD_LIBRARY_DIRS}
+      REQUIRED
+    )
     foreach(_hrx_common_target
         libhrx_src_binding_common_common
         libhrx_src_binding_common_common.objects)
@@ -102,14 +164,34 @@ if(HRX_ENABLE_ZSTD)
         HRX_ENABLE_ZSTD=1
       )
       target_include_directories(${_hrx_common_target} PRIVATE
-        ${ZSTD_INCLUDE_DIRS}
+        ${HRX_ZSTD_INCLUDE_DIRS}
+      )
+      target_compile_options(${_hrx_common_target} PRIVATE
+        ${HRX_ZSTD_CFLAGS_OTHER}
       )
     endforeach()
     target_link_libraries(libhrx_src_binding_common_common PUBLIC
-      ${ZSTD_LIBRARIES}
+      ${HRX_ZSTD_LIBRARY}
     )
+    target_link_options(libhrx_src_binding_common_common PUBLIC
+      ${HRX_ZSTD_LDFLAGS_OTHER}
+    )
+    # Let the kpack unit test compile and run its zstd-per-kernel round-trip
+    # (KpackArchive.ZstdGetKernelRoundTrips), which is HRX_ENABLE_ZSTD-gated.
+    if(TARGET libhrx_src_binding_common_kpack_test)
+      target_compile_definitions(libhrx_src_binding_common_kpack_test PRIVATE
+        HRX_ENABLE_ZSTD=1
+      )
+      target_include_directories(libhrx_src_binding_common_kpack_test PRIVATE
+        ${HRX_ZSTD_INCLUDE_DIRS}
+      )
+      target_compile_options(libhrx_src_binding_common_kpack_test PRIVATE
+        ${HRX_ZSTD_CFLAGS_OTHER}
+      )
+    endif()
     message(STATUS
-      "hrx-runtime: CCOB zstd decompression ENABLED (libzstd ${ZSTD_VERSION})"
+      "hrx-runtime: CCOB zstd decompression ENABLED "
+      "(libzstd ${HRX_ZSTD_VERSION})"
     )
   else()
     message(STATUS

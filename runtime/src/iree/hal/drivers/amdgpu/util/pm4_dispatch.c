@@ -9,8 +9,38 @@
 #include <inttypes.h>
 #include <string.h>
 
+enum {
+  IREE_HAL_AMDGPU_PM4_DISPATCH_LDS_GRANULE_SIZE = 512u,
+};
+
 static uint32_t iree_hal_amdgpu_pm4_compute_num_thread(uint16_t value) {
   return (uint32_t)value;
+}
+
+static bool iree_hal_amdgpu_pm4_dispatch_granulated_lds_size(
+    uint32_t byte_count, uint32_t* out_granulated_lds_size) {
+  const uint64_t granulated_lds_size =
+      ((uint64_t)byte_count + IREE_HAL_AMDGPU_PM4_DISPATCH_LDS_GRANULE_SIZE -
+       1u) /
+      IREE_HAL_AMDGPU_PM4_DISPATCH_LDS_GRANULE_SIZE;
+  if (granulated_lds_size >
+      (IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE_MASK >>
+       IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE_SHIFT)) {
+    return false;
+  }
+  *out_granulated_lds_size = (uint32_t)granulated_lds_size;
+  return true;
+}
+
+static uint32_t iree_hal_amdgpu_pm4_dispatch_compute_pgm_rsrc2(
+    const iree_hal_amdgpu_kernel_descriptor_t* descriptor,
+    uint32_t granulated_lds_size) {
+  const uint32_t granulated_lds_size_field =
+      granulated_lds_size
+      << IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE_SHIFT;
+  return (descriptor->compute_pgm_rsrc2 &
+          ~IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE_MASK) |
+         granulated_lds_size_field;
 }
 
 static uint32_t iree_hal_amdgpu_pm4_kernel_descriptor_user_sgpr_count(
@@ -147,6 +177,14 @@ static iree_status_t iree_hal_amdgpu_pm4_dispatch_validate_descriptor(
         IREE_STATUS_UNIMPLEMENTED,
         "PM4 dispatch scratch setup is required by COMPUTE_PGM_RSRC2");
   }
+  uint32_t granulated_lds_size = 0;
+  if (IREE_UNLIKELY(!iree_hal_amdgpu_pm4_dispatch_granulated_lds_size(
+          descriptor->group_segment_fixed_size, &granulated_lds_size))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "PM4 dispatch static LDS size %" PRIu32
+                            " exceeds COMPUTE_PGM_RSRC2 LDS encoding",
+                            descriptor->group_segment_fixed_size);
+  }
   const uint32_t allowed_properties =
       iree_hal_amdgpu_pm4_dispatch_allowed_kernel_code_properties(
           gfxip_version);
@@ -247,6 +285,11 @@ static bool iree_hal_amdgpu_pm4_dispatch_descriptor_is_supported(
   if (iree_any_bit_set(
           descriptor->compute_pgm_rsrc2,
           IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT)) {
+    return false;
+  }
+  uint32_t granulated_lds_size = 0;
+  if (!iree_hal_amdgpu_pm4_dispatch_granulated_lds_size(
+          descriptor->group_segment_fixed_size, &granulated_lds_size)) {
     return false;
   }
   const uint32_t allowed_properties =
@@ -384,7 +427,13 @@ iree_status_t iree_hal_amdgpu_pm4_dispatch_launch_state_initialize(
   out_state->program[5] = 0;
 
   out_state->resources[0] = descriptor->compute_pgm_rsrc1;
-  out_state->resources[1] = descriptor->compute_pgm_rsrc2;
+  uint32_t granulated_lds_size = 0;
+  const bool granulated_lds_size_valid =
+      iree_hal_amdgpu_pm4_dispatch_granulated_lds_size(
+          descriptor->group_segment_fixed_size, &granulated_lds_size);
+  IREE_ASSERT(granulated_lds_size_valid);
+  out_state->resources[1] = iree_hal_amdgpu_pm4_dispatch_compute_pgm_rsrc2(
+      descriptor, granulated_lds_size);
   out_state->resource3 = descriptor->compute_pgm_rsrc3;
   out_state->resource3_register_address =
       iree_hal_amdgpu_pm4_dispatch_resource3_register_address(gfxip_version);
@@ -414,7 +463,8 @@ iree_status_t iree_hal_amdgpu_pm4_dispatch_launch_state_initialize(
       iree_hal_amdgpu_pm4_kernel_descriptor_user_data_prefix_count(descriptor);
 
   iree_hal_amdgpu_pm4_dispatch_initiator_flags_t initiator_flags =
-      IREE_HAL_AMDGPU_PM4_DISPATCH_INITIATOR_FORCE_START_AT_000;
+      IREE_HAL_AMDGPU_PM4_DISPATCH_INITIATOR_FORCE_START_AT_000 |
+      IREE_HAL_AMDGPU_PM4_DISPATCH_INITIATOR_USE_THREAD_DIMENSIONS;
   if (iree_any_bit_set(flags,
                        IREE_HAL_AMDGPU_PM4_DISPATCH_LAUNCH_FLAG_ORDER_MODE)) {
     initiator_flags |= IREE_HAL_AMDGPU_PM4_DISPATCH_INITIATOR_ORDER_MODE;

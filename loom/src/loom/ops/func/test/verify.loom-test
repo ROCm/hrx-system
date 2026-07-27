@@ -1,0 +1,22 @@
+// RUN: verify
+
+// Target-independent source functions are valid without any target record.
+func.def @semantic() {
+  func.return
+}
+
+// ====
+
+// ABI contracts can remain target-independent until invocation selection.
+func.def abi(object_function) @targetless_abi() {
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// Targeted function contracts are valid when the target record is present.
+func.def target(@test_target) abi(object_function) export("semantic") @targeted_semantic() {
+  func.return
+}

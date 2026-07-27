@@ -1,0 +1,136 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "symbol_policy",
+    srcs = ["symbol_policy.c"],
+    hdrs = ["symbol_policy.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/config",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "linker",
+    srcs = ["linker.c"],
+    hdrs = ["linker.h"],
+    deps = [
+        ":symbol_policy",
+        "//loom/src/loom/analysis:symbol_dependencies",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:symbol_map",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/config",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/rewrite:materialize",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "linker_test",
+    srcs = ["linker_test.cc"],
+    deps = [
+        ":linker",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/config",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "module_index",
+    srcs = ["module_index.c"],
+    hdrs = ["module_index.h"],
+    deps = [
+        ":symbol_policy",
+        "//loom/src/loom/format/bytecode:reader",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "module_index_test",
+    srcs = ["module_index_test.cc"],
+    deps = [
+        ":module_index",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/check",
+        "//loom/src/loom/ops/config",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "planner",
+    srcs = ["planner.c"],
+    hdrs = ["planner.h"],
+    deps = [
+        ":module_index",
+        "//loom/src/loom/analysis:symbol_dependencies",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "planner_test",
+    srcs = ["planner_test.cc"],
+    deps = [
+        ":module_index",
+        ":planner",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/check",
+        "//loom/src/loom/ops/config",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

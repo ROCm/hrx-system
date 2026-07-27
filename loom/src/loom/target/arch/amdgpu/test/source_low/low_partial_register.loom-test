@@ -1,0 +1,17 @@
+// RUN: verify
+
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @d16_pair(%addr: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %low = ds_load_u16_d16 %addr
+  %full = ds_load_u16_d16_hi %low, %addr
+  return %full
+}
+
+// ====
+
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @d16_low_is_not_full(%addr: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %low = ds_load_u16_d16 %addr
+  // ERROR@+1: DOMINANCE/011 "low.return" "operand"
+  return %low
+}

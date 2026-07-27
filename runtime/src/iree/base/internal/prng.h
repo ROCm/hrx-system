@@ -72,8 +72,8 @@ static inline void iree_prng_xoroshiro128_initialize(
   // unsound.
   iree_prng_splitmix64_state_t init_state;
   iree_prng_splitmix64_initialize(seed, &init_state);
-  out_state->value[0] = iree_prng_splitmix64_next(&seed);
-  out_state->value[1] = iree_prng_splitmix64_next(&seed);
+  out_state->value[0] = iree_prng_splitmix64_next(&init_state);
+  out_state->value[1] = iree_prng_splitmix64_next(&init_state);
 
   // A state of 0 will never produce anything but zeros so ensure that doesn't
   // happen; of course, after running splitmix that should be closer to the

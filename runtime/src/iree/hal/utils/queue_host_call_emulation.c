@@ -44,10 +44,12 @@ static iree_status_t iree_hal_emulated_host_call_issue(
 
   if (is_nonblocking || iree_status_is_deferred(call_status)) {
     // User callback will signal in the future (or they are fire-and-forget).
+    iree_status_ignore(call_status);
   } else if (iree_status_is_ok(call_status)) {
     // Signal callback completed synchronously.
-    iree_hal_semaphore_list_signal(signal_semaphore_list,
-                                   /*frontier=*/NULL);
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_semaphore_list_signal(signal_semaphore_list,
+                                           /*frontier=*/NULL));
   } else {
     // If the user function failed we propagate the error to the semaphore list
     // (blocking) or ignore it (non-blocking, where we lost our chance).
@@ -104,7 +106,7 @@ static int iree_hal_emulated_host_call_main(void* entry_arg) {
   // progress after this point regardless of how long the host call takes.
   const bool is_nonblocking =
       iree_any_bit_set(state->flags, IREE_HAL_HOST_CALL_FLAG_NON_BLOCKING);
-  if (is_nonblocking) {
+  if (iree_status_is_ok(status) && is_nonblocking) {
     // NOTE: the signals can fail in which case we never perform the call.
     // That's ok as failure to signal is considered a device-loss/death
     // situation as there's no telling what has gone wrong.

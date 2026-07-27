@@ -1,0 +1,75 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_test",
+    "loom_generated_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+#===------------------------------------------------------------------------===#
+# Synthetic test dialect
+#===------------------------------------------------------------------------===#
+
+loom_generated_cc_library(
+    name = "test",
+    srcs = [
+        "canonicalize.c",
+        "facts.c",
+        "registry.c",
+        "symbol_facts.c",
+        "verify.c",
+    ],
+    hdrs = [
+        "facts.h",
+        "ops.h",
+        "registry.h",
+    ],
+    args = ["--dialect=test"],
+    generated_src_flags = [
+        "--builders",
+        "--tables",
+    ],
+    generated_srcs = [
+        "builders.c",
+        "tables.c",
+    ],
+    generator = "//loom/py/loom/gen/ops:c_tables_test_generator",
+    deps = [
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:storage_facts",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/test:target_record_table",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "ops_test",
+    srcs = ["ops_test.cc"],
+    deps = [
+        ":test",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

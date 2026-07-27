@@ -15,6 +15,79 @@
 // Module management
 //===----------------------------------------------------------------------===//
 
+static iree_status_t iree_hal_streaming_fat_binary_target_append_unique(
+    iree_hal_streaming_fat_binary_target_t* targets,
+    iree_host_size_t target_capacity, iree_host_size_t* target_count,
+    const iree_hal_executable_target_t* executable_target) {
+  if (executable_target == NULL ||
+      iree_string_view_is_empty(executable_target->target_key)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "fat-binary target is missing its target key");
+  }
+  for (iree_host_size_t i = 0; i < *target_count; ++i) {
+    if (iree_string_view_equal(targets[i].executable_target->target_key,
+                               executable_target->target_key)) {
+      return iree_ok_status();
+    }
+  }
+  if (*target_count >= target_capacity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "fat-binary target capacity exceeded");
+  }
+  targets[*target_count].executable_target = executable_target;
+  *target_count += 1;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_streaming_fat_binary_targets_from_device(
+    iree_hal_device_t* device, iree_host_size_t target_capacity,
+    iree_hal_streaming_fat_binary_target_t* targets,
+    iree_host_size_t* out_target_count) {
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(targets);
+  IREE_ASSERT_ARGUMENT(out_target_count);
+
+  iree_host_size_t target_count = 0;
+  const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(device);
+
+  iree_hal_executable_target_selection_t selection = {
+      .family = IREE_SV("amdgpu"),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+  };
+  iree_hal_executable_target_selection_result_t result =
+      iree_hal_device_spec_select_executable_target(device_spec, &selection);
+  if (result.outcome == IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU HAL device spec does not report an exact executable target");
+  }
+  if (result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU HAL device spec reports ambiguous exact executable targets");
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_fat_binary_target_append_unique(
+      targets, target_capacity, &target_count, result.target));
+
+  selection.kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC;
+  result =
+      iree_hal_device_spec_select_executable_target(device_spec, &selection);
+  if (result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU HAL device spec reports ambiguous generic executable targets");
+  }
+  if (result.outcome == IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED) {
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_fat_binary_target_append_unique(
+        targets, target_capacity, &target_count, result.target));
+  }
+
+  *out_target_count = target_count;
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_streaming_module_extract_metadata(
     iree_hal_streaming_module_t* module) {
   IREE_ASSERT_ARGUMENT(module);
@@ -107,52 +180,28 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
                                    (void**)&parameters);
   }
 
-  iree_host_size_t constants_size = 0;
-
   // Analyze each export to determine operation counts.
-  // We count the total operations per symbol with copy coalescing.
   iree_host_size_t total_ops = 0;
   for (iree_host_size_t i = 0, parameter_base = 0;
        iree_status_is_ok(status) && i < module->symbol_count; ++i) {
     const iree_host_size_t parameter_count = export_infos[i].parameter_count;
     if (!parameter_count) continue;
-    // Query parameters to analyze coalescing opportunities.
+    // Query parameters before allocating symbol-owned operation storage.
     status = iree_hal_executable_export_parameters(
         export_executables[i], export_ordinals[i], parameter_count,
         &parameters[parameter_base]);
     if (!iree_status_is_ok(status)) break;
-    // TOOD re-enable coalescing, which doesn't work for
-    //      args arrays
-    // uint32_t src_offset = 0;
-    //  int32_t last_constant_end = -1;
     for (uint16_t j = 0; j < parameter_count; ++j) {
       const iree_hal_executable_export_parameter_t* parameter =
           &parameters[parameter_base + j];
-      if (parameter->type ==
-          IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING) {
+      const bool is_binding_parameter =
+          parameter->type == IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING;
+      if (is_binding_parameter) {
         ++symbol_op_counts[i].resolve_count;
         ++total_ops;
-        // src_offset += parameter->size;
-        //  last_constant_end = -1;  // break contiguity
       } else {
-        //// CONSTANT or BUFFER_PTR - check for contiguity.
-        //// Calculate source offset based on parameter order and sizes.
-        // if (src_offset != last_constant_end) {
-        //  New copy operation needed.
         ++symbol_op_counts[i].copy_count;
         ++total_ops;
-
-        if (parameters[parameter_base + j].offset +
-                parameters[parameter_base + j].size >
-            constants_size) {
-          // Track the maximum extent needed for the constants buffer.
-          // Constants are packed at their kernarg offsets within the buffer.
-          constants_size = parameters[parameter_base + j].offset +
-                           parameters[parameter_base + j].size;
-        }
-        //}
-        // src_offset += parameter->size;
-        // last_constant_end = src_offset;
       }
     }
     parameter_base += parameter_count;
@@ -178,6 +227,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
   for (iree_host_size_t i = 0, parameter_base = 0;
        iree_status_is_ok(status) && i < module->symbol_count; ++i) {
     iree_hal_streaming_symbol_t* symbol = &module->symbols[i];
+    memset(symbol, 0, sizeof(*symbol));
     symbol->module = module;
     symbol->name = export_infos[i].name;
     symbol->type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
@@ -195,96 +245,162 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
 
     // Initialize parameter info.
     iree_hal_streaming_parameter_info_t* parameter_info = &symbol->parameters;
-    parameter_info->binding_count = export_infos[i].binding_count;
+    if (export_infos[i].constant_byte_length > UINT16_MAX) {
+      status = iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "function constant metadata exceeds supported parameter size");
+      continue;
+    }
+    // Executable binding_count describes normal HAL dispatch bindings. Native
+    // HIP packing uses the same reflected BINDING parameters and only consults
+    // their optional target ABI offsets while constructing custom kernargs.
+    parameter_info->buffer_size = 0;
+    parameter_info->constant_bytes = 0;
+    parameter_info->direct_arg_bytes = 0;
+    parameter_info->binding_count = symbol_op_counts[i].resolve_count;
     parameter_info->copy_count = symbol_op_counts[i].copy_count;
     parameter_info->ops = current_ops;
     const uint16_t parameter_count = export_infos[i].parameter_count;
     if (parameter_count == 0) {
       // No parameters.
-      parameter_info->constant_bytes = 0;
-      parameter_info->buffer_size = 0;
       continue;
     }
 
-    // Build operations with coalescing.
-    // Copy ops go first, then resolve ops.
-    uint16_t src_offset = 0;
+    // Build one operation per reflected parameter. Copy ops go first, then
+    // resolve ops.
+    uint16_t source_offset = 0;
+    iree_host_size_t direct_arg_offset = 0;
     uint16_t buffer_size = 0;
-    size_t this_kernel_constants_size = 0;  // Per-kernel constants size
+    iree_host_size_t this_kernel_direct_arg_size = 0;
     iree_hal_streaming_parameter_op_t* copy_ops_start = current_ops;
     iree_hal_streaming_parameter_op_t* resolve_ops_start =
         current_ops + symbol_op_counts[i].copy_count;
+    for (uint16_t j = 0; j < symbol_op_counts[i].resolve_count; ++j) {
+      // This sentinel is replaced when its dense HAL binding ordinal is
+      // reflected below. It detects duplicate metadata before the operation
+      // table becomes visible to dispatch.
+      resolve_ops_start[j].resolve.destination_ordinal = UINT16_MAX;
+    }
     uint16_t copy_count = 0;
     uint16_t resolve_count = 0;
-    for (uint16_t j = 0; j < parameter_count; ++j) {
+    for (uint16_t j = 0; iree_status_is_ok(status) && j < parameter_count;
+         ++j) {
       const iree_hal_executable_export_parameter_t* parameter =
           &parameters[parameter_base + j];
-      if (parameter->type ==
-          IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING) {
-        // Update offsets. Bindings are passed as pointers.
-        // |parameter->offset| is the kernarg byte offset for all parameter
-        // types when the backend populates it (e.g. AMDGPU HSACO). The
-        // binding-list ordinal is recovered by iteration: |resolve_count|
-        // is the running count of BINDING parameters seen so far, which is
-        // exactly the index of this parameter in the bindings list.
+      const bool is_binding_parameter =
+          parameter->type == IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING;
+      iree_host_size_t native_abi_destination_offset = direct_arg_offset;
+      if (parameter->flags &
+          IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET) {
+        native_abi_destination_offset = parameter->native_abi_offset;
+      }
+      iree_host_size_t source_extent = 0;
+      iree_host_size_t native_extent = 0;
+      iree_host_size_t next_direct_arg_offset = 0;
+      if (IREE_UNLIKELY(
+              native_abi_destination_offset > UINT16_MAX ||
+              !iree_host_size_checked_add((iree_host_size_t)source_offset,
+                                          parameter->size, &source_extent) ||
+              source_extent > UINT16_MAX ||
+              !iree_host_size_checked_add(native_abi_destination_offset,
+                                          parameter->size, &native_extent) ||
+              native_extent > UINT16_MAX ||
+              !iree_host_size_checked_add(direct_arg_offset, parameter->size,
+                                          &next_direct_arg_offset))) {
+        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "kernel parameter layout exceeds metadata "
+                                  "field width");
+        break;
+      }
+      if (!is_binding_parameter) {
+        iree_host_size_t constant_destination_extent = 0;
+        if (IREE_UNLIKELY(!iree_host_size_checked_add(
+                              (iree_host_size_t)parameter->offset,
+                              parameter->size, &constant_destination_extent) ||
+                          constant_destination_extent >
+                              export_infos[i].constant_byte_length)) {
+          status = iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "kernel constant parameter exceeds the reflected constants "
+              "range");
+          break;
+        }
+      }
+      const uint16_t next_source_offset = (uint16_t)source_extent;
+      if (is_binding_parameter) {
+        if (IREE_UNLIKELY(parameter->offset >=
+                          symbol_op_counts[i].resolve_count)) {
+          status = iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "kernel binding parameter ordinal %u exceeds binding count %u",
+              parameter->offset, symbol_op_counts[i].resolve_count);
+          break;
+        }
         iree_hal_streaming_parameter_resolve_op_t* op =
-            &resolve_ops_start[resolve_count].resolve;
-        op->src_offset = src_offset;
-        op->dst_ordinal = resolve_count;
-        op->src_ordinal = j;
-        op->dst_offset = parameter->offset;
-        src_offset += parameter->size;
-        buffer_size = src_offset;
+            &resolve_ops_start[parameter->offset].resolve;
+        if (IREE_UNLIKELY(op->destination_ordinal != UINT16_MAX)) {
+          status = iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "kernel metadata assigns binding ordinal %u more than once",
+              parameter->offset);
+          break;
+        }
+        op->reserved = 0;
+        op->source_offset = source_offset;
+        op->destination_ordinal = parameter->offset;
+        op->source_ordinal = j;
+        // Native launches place raw device pointers at target ABI offsets.
+        op->native_abi_destination_offset =
+            (uint16_t)native_abi_destination_offset;
+        source_offset = next_source_offset;
+        buffer_size = source_offset;
         ++resolve_count;
 
-        // For native kernels with CUSTOM_DIRECT_ARGUMENTS, bindings are also
-        // part of the constants buffer. Track their extent as well.
-        size_t param_extent = (size_t)parameter->offset + parameter->size;
-        if (param_extent > this_kernel_constants_size) {
-          this_kernel_constants_size = param_extent;
+        if (native_extent > this_kernel_direct_arg_size) {
+          this_kernel_direct_arg_size = native_extent;
         }
+        direct_arg_offset = iree_max(native_extent, next_direct_arg_offset);
       } else {
-        // TODO: fix coalescing. It does not work when we have
-        // parameter arrays because each constant comes in as a
-        // separate parameter with its own offset.
-        //// CONSTANT or BUFFER_PTR - try to coalesce and choose offsets.
-        // if (active_copy &&
-        //     active_copy->src_offset + active_copy->size == src_offset) {
-        //   // Extend the current copy operation.
-        //   active_copy->size += parameter->size;
-        // } else {
-        //  Start a new copy operation.
+        // Constants use two layouts: a dense HAL constants buffer in source
+        // order, and the target ABI byte image used by native HIP launches.
         iree_hal_streaming_parameter_copy_op_t* op =
             &copy_ops_start[copy_count].copy;
         op->size = parameter->size;
-        op->src_offset = src_offset;
-        op->src_ordinal = j;
-        op->dst_offset = parameter->offset;  // offset in constants
+        op->source_offset = source_offset;
+        op->source_ordinal = j;
+        op->native_abi_destination_offset =
+            (uint16_t)native_abi_destination_offset;
+        op->constant_destination_offset = parameter->offset;
         ++copy_count;
-        // active_copy = op;
-        // }
-        src_offset += parameter->size;
-        buffer_size = src_offset;
+        source_offset = next_source_offset;
+        buffer_size = source_offset;
 
-        // Track per-kernel constants size based on actual parameter extent
-        size_t param_extent = parameter->offset + parameter->size;
-        if (param_extent > this_kernel_constants_size) {
-          this_kernel_constants_size = param_extent;
+        if (native_extent > this_kernel_direct_arg_size) {
+          this_kernel_direct_arg_size = native_extent;
         }
+        direct_arg_offset = iree_max(native_extent, next_direct_arg_offset);
       }
     }
+    if (!iree_status_is_ok(status)) break;
     parameter_info->buffer_size = buffer_size;
-    // The HAL expects the constants buffer to span the entire kernarg
-    // segment reported by the export (includes padding between args and
-    // trailing alignment). The per-parameter extent we tracked above
-    // typically matches, but pad up to the export's declared size to
-    // satisfy the strict length check in the dispatch code path.
-    size_t export_constant_bytes =
-        (size_t)export_infos[i].constant_count * sizeof(uint32_t);
-    if (export_constant_bytes > this_kernel_constants_size) {
-      this_kernel_constants_size = export_constant_bytes;
+    if (IREE_UNLIKELY(export_infos[i].constant_byte_length > UINT16_MAX)) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "kernel constant layout exceeds metadata "
+                                "field width");
+      break;
     }
-    parameter_info->constant_bytes = this_kernel_constants_size;
+    parameter_info->constant_bytes =
+        (uint16_t)export_infos[i].constant_byte_length;
+    if (buffer_size > this_kernel_direct_arg_size) {
+      this_kernel_direct_arg_size = buffer_size;
+    }
+    if (IREE_UNLIKELY(this_kernel_direct_arg_size > UINT16_MAX)) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "kernel direct argument layout exceeds "
+                                "metadata field width");
+      break;
+    }
+    parameter_info->direct_arg_bytes = (uint16_t)this_kernel_direct_arg_size;
 
     // Advance to next symbol's ops.
     parameter_base += parameter_count;
@@ -300,82 +416,80 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
 static void iree_hal_streaming_module_destroy(
     iree_hal_streaming_module_t* module);
 
+static iree_status_t iree_hal_streaming_module_load_executable(
+    iree_hal_streaming_context_t* context,
+    iree_hal_executable_load_flags_t load_flags,
+    const iree_hal_executable_target_t* executable_target,
+    iree_const_byte_span_t executable_data,
+    iree_hal_executable_t** out_executable) {
+  iree_hal_executable_load_params_t load_params;
+  iree_hal_executable_load_params_initialize(&load_params);
+  load_params.flags = load_flags;
+  load_params.executable_data = executable_data;
+  return iree_hal_device_load_executable(
+      context->device, context->queue_affinity, executable_target, &load_params,
+      out_executable);
+}
+
 iree_status_t iree_hal_streaming_module_create_from_memory(
     iree_hal_streaming_context_t* context,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_const_byte_span_t image, iree_allocator_t host_allocator,
-    iree_hal_streaming_module_t** out_module) {
+    iree_hal_executable_load_flags_t load_flags, iree_const_byte_span_t image,
+    iree_allocator_t host_allocator, iree_hal_streaming_module_t** out_module) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(image.data);
   IREE_ASSERT_ARGUMENT(out_module);
   *out_module = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Allocate module structure up-front — we stash the fat-binary extract
-  // directly on it so the (possibly decompressed) ELF backing store lives
-  // as long as the HAL executable that may still alias it.
+  // Allocate the module structure up-front for terminal cleanup.
   iree_hal_streaming_module_t* module = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       iree_allocator_malloc(host_allocator, sizeof(*module), (void**)&module));
   memset(module, 0, sizeof(*module));
   iree_atomic_ref_count_init(&module->ref_count);
+  iree_slim_mutex_initialize(&module->global_mutex);
   module->context = context;
   iree_hal_streaming_context_retain(context);
   module->host_allocator = host_allocator;
-  module->cache = context->executable_cache;
-  iree_hal_executable_cache_retain(module->cache);
 
-  // HIP / CUDA hand us anything the toolchain emits — raw AMDGPU ELFs,
+  // HIP toolchains hand us several container formats: raw AMDGPU ELFs,
   // __CLANG_OFFLOAD_BUNDLE__ archives, CCOB (zstd-compressed bundles), and
-  // __hipFatBinaryWrapper-wrapped combinations of all of the above. Unwrap
-  // everything here and only forward a raw ELF (or native flatbuffer) to
-  // the HAL executable cache, which knows how to deal with just those two.
-  iree_const_byte_span_t executable_data = image;
+  // __hipFatBinaryWrapper-wrapped combinations of those. Unwrap everything here
+  // and only forward raw ELF plus its selected target to the HAL device.
+  iree_hal_streaming_fat_binary_extract_t fat_extract = {0};
   const bool try_fat_unwrap = context->device_entry != NULL &&
                               iree_hal_streaming_fat_binary_is_supported(image);
   iree_status_t status = iree_ok_status();
   if (try_fat_unwrap) {
-    iree_string_view_t target_arch =
-        iree_make_cstring_view(context->device_entry->gcn_arch_name);
-    status = iree_hal_streaming_fat_binary_extract_for_target(
-        image, target_arch, host_allocator, &module->fat_extract);
+    iree_hal_streaming_fat_binary_target_t targets[2] = {0};
+    iree_host_size_t target_count = 0;
+    status = iree_hal_streaming_fat_binary_targets_from_device(
+        context->device_entry->hal_device, IREE_ARRAYSIZE(targets), targets,
+        &target_count);
     if (iree_status_is_ok(status)) {
-      // Multiple matches are possible (e.g. Tensile feature-specialized
-      // kernels). Load all of them below and merge their exports into one HIP
-      // module namespace.
-      executable_data = module->fat_extract.matches[0].data;
+      status = iree_hal_streaming_fat_binary_extract_for_targets(
+          image, target_count, targets, host_allocator, &fat_extract);
     }
-  }
-
-  // Attempt to infer the file format and size.
-  // A good API would take that in as otherwise we're trusting arbitrary user
-  // data.
-  char executable_format[64];
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_executable_cache_infer_format(
-        context->executable_cache, caching_mode, executable_data,
-        sizeof(executable_format), executable_format,
-        &executable_data.data_length);
+  } else {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "module binary is not a supported HRX AMDGPU "
+                              "ELF, offload bundle, CCOB, or HIP fat binary");
   }
 
   // Create HAL executable from binary.
   if (iree_status_is_ok(status)) {
-    iree_hal_executable_params_t params;
-    iree_hal_executable_params_initialize(&params);
-    params.caching_mode = caching_mode;
-    params.executable_format = iree_make_cstring_view(executable_format);
-    params.executable_data = executable_data;
-    status = iree_hal_executable_cache_prepare_executable(
-        module->cache, &params, &module->executable);
+    status = iree_hal_streaming_module_load_executable(
+        context, load_flags, fat_extract.matches[0].executable_target,
+        fat_extract.matches[0].data, &module->executable);
   }
 
   // If the fat binary had multiple matching HSACO entries, prepare all of
   // them and expose their exports through the same hipModule_t. Native HIP lets
   // libraries such as hipBLAS/Tensile probe one module handle for a kernel that
   // may live in a later matching code object.
-  if (iree_status_is_ok(status) && module->fat_extract.match_count > 1) {
-    module->executable_count = module->fat_extract.match_count;
+  if (iree_status_is_ok(status) && fat_extract.match_count > 1) {
+    module->executable_count = fat_extract.match_count;
     status = iree_allocator_malloc(
         host_allocator, module->executable_count * sizeof(*module->executables),
         (void**)&module->executables);
@@ -386,20 +500,9 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
     }
     for (iree_host_size_t i = 1;
          iree_status_is_ok(status) && i < module->executable_count; ++i) {
-      iree_const_byte_span_t match_data = module->fat_extract.matches[i].data;
-      char match_format[64];
-      status = iree_hal_executable_cache_infer_format(
-          context->executable_cache, caching_mode, match_data,
-          sizeof(match_format), match_format, &match_data.data_length);
-      if (!iree_status_is_ok(status)) break;
-
-      iree_hal_executable_params_t params;
-      iree_hal_executable_params_initialize(&params);
-      params.caching_mode = caching_mode;
-      params.executable_format = iree_make_cstring_view(match_format);
-      params.executable_data = match_data;
-      status = iree_hal_executable_cache_prepare_executable(
-          module->cache, &params, &module->executables[i]);
+      status = iree_hal_streaming_module_load_executable(
+          context, load_flags, fat_extract.matches[i].executable_target,
+          fat_extract.matches[i].data, &module->executables[i]);
     }
   }
 
@@ -408,6 +511,7 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
     status = iree_hal_streaming_module_extract_metadata(module);
   }
 
+  iree_hal_streaming_fat_binary_extract_reset(&fat_extract);
   if (iree_status_is_ok(status)) {
     *out_module = module;
   } else {
@@ -419,7 +523,7 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
 
 iree_status_t iree_hal_streaming_module_create_from_file(
     iree_hal_streaming_context_t* context,
-    iree_hal_executable_caching_mode_t caching_mode, iree_string_view_t path,
+    iree_hal_executable_load_flags_t load_flags, iree_string_view_t path,
     iree_allocator_t host_allocator, iree_hal_streaming_module_t** out_module) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_module);
@@ -452,16 +556,10 @@ iree_status_t iree_hal_streaming_module_create_from_file(
   // Create the module from the mapped memory.
   iree_hal_streaming_module_t* module = NULL;
   status = iree_hal_streaming_module_create_from_memory(
-      context,
-      caching_mode | IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA,
-      image, host_allocator, &module);
+      context, load_flags, image, host_allocator, &module);
 
-  if (iree_status_is_ok(status)) {
-    module->file_mapping = file_mapping;
-    *out_module = module;
-  } else {
-    iree_io_file_mapping_release(file_mapping);
-  }
+  iree_io_file_mapping_release(file_mapping);
+  if (iree_status_is_ok(status)) *out_module = module;
 
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -472,15 +570,20 @@ static void iree_hal_streaming_module_destroy(
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_allocator_t host_allocator = module->host_allocator;
 
-  // Release file mapping if present.
-  iree_io_file_mapping_release(module->file_mapping);
-
   // Release symbol metadata.
   iree_allocator_free(module->host_allocator, module->symbols);
 
-  // Release executable before the fat-binary extract: the HAL's code
-  // object reader may still alias pointers into the (possibly owned)
-  // backing store held by the extract until the executable drops.
+  // Release cached executable globals while both the context pointer map and
+  // executable-owned global buffers are still live.
+  for (iree_host_size_t i = 0; i < module->global_count; ++i) {
+    iree_hal_streaming_memory_release_wrapped_buffer(
+        module->globals[i]->global_buffer);
+    iree_allocator_free(host_allocator, module->globals[i]);
+  }
+  iree_allocator_free(host_allocator, module->globals);
+  iree_slim_mutex_deinitialize(&module->global_mutex);
+
+  // Release loaded executables.
   if (module->executables) {
     for (iree_host_size_t i = 0; i < module->executable_count; ++i) {
       iree_hal_executable_release(module->executables[i]);
@@ -489,12 +592,6 @@ static void iree_hal_streaming_module_destroy(
   } else {
     iree_hal_executable_release(module->executable);
   }
-
-  // Drop fat-binary / offload-bundle unpacking buffers.
-  iree_hal_streaming_fat_binary_extract_reset(&module->fat_extract);
-
-  // Release executable cache.
-  iree_hal_executable_cache_release(module->cache);
 
   // Release context.
   iree_hal_streaming_context_release(module->context);
@@ -517,6 +614,15 @@ void iree_hal_streaming_module_release(iree_hal_streaming_module_t* module) {
   }
 }
 
+static bool iree_hal_streaming_module_symbol_name_matches(
+    iree_string_view_t symbol_name, iree_string_view_t name) {
+  if (iree_string_view_equal(symbol_name, name)) return true;
+  iree_string_view_t stripped_name =
+      iree_string_view_strip_suffix(name, IREE_SV(".kd"));
+  return stripped_name.size != name.size &&
+         iree_string_view_equal(symbol_name, stripped_name);
+}
+
 iree_status_t iree_hal_streaming_module_symbol(
     iree_hal_streaming_module_t* module, const char* name,
     iree_hal_streaming_symbol_type_t expected_type,
@@ -528,12 +634,9 @@ iree_status_t iree_hal_streaming_module_symbol(
 
   iree_string_view_t name_view =
       iree_string_view_trim(iree_make_cstring_view(name));
-  iree_string_view_t stripped_name =
-      iree_string_view_strip_suffix(name_view, IREE_SV(".kd"));
   for (uint32_t i = 0; i < module->symbol_count; ++i) {
-    if (iree_string_view_equal(module->symbols[i].name, name_view) ||
-        (stripped_name.size != name_view.size &&
-         iree_string_view_equal(module->symbols[i].name, stripped_name))) {
+    if (iree_hal_streaming_module_symbol_name_matches(module->symbols[i].name,
+                                                      name_view)) {
       // Check if the symbol type matches expected type.
       if (module->symbols[i].type == expected_type) {
         // Return symbol info as pointer.
@@ -546,7 +649,6 @@ iree_status_t iree_hal_streaming_module_symbol(
             (int)name_view.size, name_view.data, expected_type,
             module->symbols[i].type);
       }
-      break;
     }
   }
   return iree_make_status(IREE_STATUS_NOT_FOUND,
@@ -561,6 +663,161 @@ iree_status_t iree_hal_streaming_module_function(
       module, name, IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION, out_function);
 }
 
+static iree_hal_streaming_symbol_t*
+iree_hal_streaming_module_find_global_locked(
+    iree_hal_streaming_module_t* module, iree_string_view_t name) {
+  for (iree_host_size_t i = 0; i < module->global_count; ++i) {
+    iree_hal_streaming_symbol_t* symbol = module->globals[i];
+    if (iree_hal_streaming_module_symbol_name_matches(symbol->name, name)) {
+      return symbol;
+    }
+  }
+  return NULL;
+}
+
+static iree_status_t iree_hal_streaming_module_grow_globals_locked(
+    iree_hal_streaming_module_t* module, iree_host_size_t minimum_capacity) {
+  if (minimum_capacity <= module->global_capacity) return iree_ok_status();
+
+  const iree_host_size_t minimum_allocated_capacity =
+      minimum_capacity < 4 ? 4 : minimum_capacity;
+  return iree_allocator_grow_array(
+      module->host_allocator, minimum_allocated_capacity,
+      sizeof(*module->globals), &module->global_capacity,
+      (void**)&module->globals);
+}
+
+static iree_status_t iree_hal_streaming_module_create_global_symbol_locked(
+    iree_hal_streaming_module_t* module, iree_hal_executable_t* executable,
+    iree_hal_executable_global_t global_handle,
+    iree_hal_streaming_symbol_t** out_symbol) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_symbol);
+  *out_symbol = NULL;
+
+  iree_hal_executable_global_info_t global_info;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_executable_global_info(executable, global_handle, &global_info));
+
+  iree_hal_buffer_t* global_buffer = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_executable_global_buffer(
+      executable, global_handle, IREE_HAL_QUEUE_AFFINITY_ANY, &global_buffer));
+
+  iree_hal_streaming_buffer_t* streaming_buffer = NULL;
+  iree_status_t status = iree_hal_streaming_memory_wrap_buffer(
+      module->context, global_buffer,
+      IREE_HAL_STREAMING_BUFFER_CONTEXT_BORROWED, &streaming_buffer);
+
+  iree_hal_streaming_symbol_t* symbol = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(module->host_allocator, sizeof(*symbol),
+                                   (void**)&symbol);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(symbol, 0, sizeof(*symbol));
+    symbol->module = module;
+    symbol->name = global_info.name;
+    symbol->type = IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL;
+    symbol->executable = executable;
+    symbol->global_handle = global_handle;
+    symbol->global_buffer = streaming_buffer;
+    symbol->device_address =
+        iree_hal_streaming_buffer_device_pointer(streaming_buffer);
+    symbol->size_bytes = global_info.byte_length;
+    status = iree_hal_streaming_module_grow_globals_locked(
+        module, module->global_count + 1);
+  }
+
+  if (iree_status_is_ok(status)) {
+    module->globals[module->global_count++] = symbol;
+    *out_symbol = symbol;
+  } else {
+    iree_allocator_free(module->host_allocator, symbol);
+    iree_hal_streaming_memory_release_wrapped_buffer(streaming_buffer);
+  }
+  return status;
+}
+
+iree_status_t iree_hal_streaming_module_try_lookup_global_symbol(
+    iree_hal_streaming_module_t* module, const char* name, bool* out_found,
+    iree_hal_streaming_symbol_t** out_global) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(name);
+  IREE_ASSERT_ARGUMENT(out_found);
+  IREE_ASSERT_ARGUMENT(out_global);
+  *out_found = false;
+  *out_global = NULL;
+
+  iree_string_view_t name_view =
+      iree_string_view_trim(iree_make_cstring_view(name));
+
+  for (iree_host_size_t i = 0; i < module->symbol_count; ++i) {
+    iree_hal_streaming_symbol_t* symbol = &module->symbols[i];
+    if ((symbol->type == IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL ||
+         symbol->type == IREE_HAL_STREAMING_SYMBOL_TYPE_DATA) &&
+        iree_hal_streaming_module_symbol_name_matches(symbol->name,
+                                                      name_view)) {
+      *out_found = true;
+      *out_global = symbol;
+      return iree_ok_status();
+    }
+  }
+
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&module->global_mutex);
+
+  iree_hal_streaming_symbol_t* cached_symbol =
+      iree_hal_streaming_module_find_global_locked(module, name_view);
+  if (cached_symbol) {
+    *out_found = true;
+    *out_global = cached_symbol;
+  } else {
+    const iree_host_size_t executable_count =
+        module->executable_count ? module->executable_count : 1;
+    for (iree_host_size_t executable_ordinal = 0;
+         executable_ordinal < executable_count; ++executable_ordinal) {
+      iree_hal_executable_t* executable =
+          module->executables ? module->executables[executable_ordinal]
+                              : module->executable;
+      iree_hal_executable_global_t global_handle =
+          iree_hal_executable_global_invalid();
+      bool found = false;
+      status = iree_hal_executable_try_lookup_global_by_name(
+          executable, name_view, &found, &global_handle);
+      if (!iree_status_is_ok(status)) break;
+      if (!found) continue;
+      status = iree_hal_streaming_module_create_global_symbol_locked(
+          module, executable, global_handle, out_global);
+      if (iree_status_is_ok(status)) *out_found = true;
+      break;
+    }
+  }
+
+  iree_slim_mutex_unlock(&module->global_mutex);
+  return status;
+}
+
+iree_status_t iree_hal_streaming_module_global_symbol(
+    iree_hal_streaming_module_t* module, const char* name,
+    iree_hal_streaming_symbol_t** out_global) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(name);
+  IREE_ASSERT_ARGUMENT(out_global);
+  *out_global = NULL;
+
+  bool found = false;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_module_try_lookup_global_symbol(
+      module, name, &found, out_global));
+  if (found) return iree_ok_status();
+
+  iree_string_view_t name_view =
+      iree_string_view_trim(iree_make_cstring_view(name));
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "global '%.*s' not found in module",
+                          (int)name_view.size, name_view.data);
+}
+
 iree_status_t iree_hal_streaming_module_global(
     iree_hal_streaming_module_t* module, const char* name,
     iree_hal_streaming_deviceptr_t* out_device_ptr,
@@ -571,15 +828,9 @@ iree_status_t iree_hal_streaming_module_global(
   *out_device_ptr = 0;
   if (out_size) *out_size = 0;
 
-  // Module globals live entirely in the streaming layer: every exported
-  // global is discovered at module load time (see
-  // iree_hal_streaming_module_extract_metadata) and cached in
-  // module->symbols[]. We intentionally do NOT fall back to a HAL-level
-  // executable lookup; the IREE HAL does not expose a by-name global
-  // lookup and all supported lookups are resolved here.
   iree_hal_streaming_symbol_t* symbol = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_module_symbol(
-      module, name, IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL, &symbol));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_streaming_module_global_symbol(module, name, &symbol));
 
   *out_device_ptr = symbol->device_address;
   if (out_size) *out_size = symbol->size_bytes;

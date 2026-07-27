@@ -84,24 +84,27 @@ static iree_status_t iree_hal_cpu_slab_provider_wrap_buffer(
                                    provider->host_allocator, out_buffer);
 }
 
-static void iree_hal_cpu_slab_provider_query_properties(
+static iree_status_t iree_hal_cpu_slab_provider_validate_asan_options(
     const iree_hal_slab_provider_t* base_provider,
-    iree_hal_memory_type_t* out_memory_type,
-    iree_hal_buffer_usage_t* out_supported_usage) {
-  *out_memory_type =
-      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-      IREE_HAL_MEMORY_TYPE_HOST_COHERENT | IREE_HAL_MEMORY_TYPE_HOST_CACHED;
-  *out_supported_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-                         IREE_HAL_BUFFER_USAGE_DISPATCH |
-                         IREE_HAL_BUFFER_USAGE_SHARING_EXPORT |
-                         IREE_HAL_BUFFER_USAGE_SHARING_REPLICATE |
-                         IREE_HAL_BUFFER_USAGE_SHARING_CONCURRENT |
-                         IREE_HAL_BUFFER_USAGE_SHARING_IMMUTABLE |
-                         IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
-                         IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT |
-                         IREE_HAL_BUFFER_USAGE_MAPPING_OPTIONAL |
-                         IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM |
-                         IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE;
+    const iree_hal_asan_pool_options_t* options) {
+  (void)base_provider;
+  (void)options;
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "CPU slab provider does not support HAL ASAN range advice");
+}
+
+static void iree_hal_cpu_slab_provider_advise_asan_range(
+    iree_hal_slab_provider_t* base_provider, const iree_hal_slab_t* slab,
+    iree_device_size_t backing_offset,
+    iree_hal_asan_range_advice_flags_t advice_flags,
+    const iree_hal_asan_allocation_layout_t* layout) {
+  (void)base_provider;
+  (void)slab;
+  (void)backing_offset;
+  (void)advice_flags;
+  (void)layout;
+  IREE_ASSERT(false, "CPU slab provider cannot advise ASAN ranges");
 }
 
 // Forces the OS to back all virtual pages in the slab with physical memory
@@ -159,12 +162,35 @@ static void iree_hal_cpu_slab_provider_query_stats(
   }
 }
 
+static void iree_hal_cpu_slab_provider_query_properties(
+    const iree_hal_slab_provider_t* base_provider,
+    iree_hal_memory_type_t* out_memory_type,
+    iree_hal_buffer_usage_t* out_supported_usage) {
+  *out_memory_type =
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+      IREE_HAL_MEMORY_TYPE_HOST_COHERENT | IREE_HAL_MEMORY_TYPE_HOST_CACHED;
+  *out_supported_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
+                         IREE_HAL_BUFFER_USAGE_DISPATCH |
+                         IREE_HAL_BUFFER_USAGE_SHARING_EXPORT |
+                         IREE_HAL_BUFFER_USAGE_SHARING_REPLICATE |
+                         IREE_HAL_BUFFER_USAGE_SHARING_CONCURRENT |
+                         IREE_HAL_BUFFER_USAGE_SHARING_IMMUTABLE |
+                         IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
+                         IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT |
+                         IREE_HAL_BUFFER_USAGE_MAPPING_OPTIONAL |
+                         IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM |
+                         IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE;
+}
+
 static const iree_hal_slab_provider_vtable_t iree_hal_cpu_slab_provider_vtable =
     {
         .destroy = iree_hal_cpu_slab_provider_destroy,
         .acquire_slab = iree_hal_cpu_slab_provider_acquire_slab,
         .release_slab = iree_hal_cpu_slab_provider_release_slab,
         .wrap_buffer = iree_hal_cpu_slab_provider_wrap_buffer,
+        .validate_asan_options =
+            iree_hal_cpu_slab_provider_validate_asan_options,
+        .advise_asan_range = iree_hal_cpu_slab_provider_advise_asan_range,
         .prefault = iree_hal_cpu_slab_provider_prefault,
         .trim = iree_hal_cpu_slab_provider_trim,
         .query_stats = iree_hal_cpu_slab_provider_query_stats,

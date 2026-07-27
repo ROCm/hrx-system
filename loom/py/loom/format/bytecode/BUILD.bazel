@@ -1,0 +1,50 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_library(
+    name = "bytecode",
+    srcs = [
+        "__init__.py",
+        "encoding.py",
+        "op_decls.py",
+        "reader.py",
+        "writer.py",
+    ],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom/format:package",
+        "//loom/py/loom/target:descriptor_sets",
+    ],
+)
+
+iree_py_test(
+    name = "bytecode_test",
+    srcs = [
+        "encoding_test.py",
+        "reader_test.py",
+        "writer_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = [
+        "loom.format.bytecode.encoding_test",
+        "loom.format.bytecode.reader_test",
+        "loom.format.bytecode.writer_test",
+    ],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":bytecode",
+        "//loom/py/loom/dialect:package",
+        "//loom/py/loom/format/text",
+        "//loom/py/loom/target/test:descriptors",
+    ],
+)

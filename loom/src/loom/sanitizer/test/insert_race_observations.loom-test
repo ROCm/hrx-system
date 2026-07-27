@@ -1,0 +1,285 @@
+// RUN: pass sanitizer-insert-race-observations{checks=race}
+
+kernel.def @workgroup_load_store_and_barrier() {
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch() {
+  %zero = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
+  %value = view.load %view[%lane] : view<64xi32, #dense> -> i32
+  view.store %value, %view[%lane] : i32, view<64xi32, #dense>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.return
+}
+
+// ----
+kernel.def @workgroup_load_store_and_barrier() {
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch() {
+  %zero = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
+  sanitizer.race.access<read> %view[%lane] : view<64xi32, #dense>
+  %value = view.load %view[%lane] : view<64xi32, #dense> -> i32
+  sanitizer.race.access<write> %view[%lane] : view<64xi32, #dense>
+  view.store %value, %view[%lane] : i32, view<64xi32, #dense>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  sanitizer.race.sync<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.return
+}
+
+// ====
+
+kernel.def @workgroup_vector_load_store_lanes() {
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch() {
+  %zero = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %bytes = index.constant 1024 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<64x4xi32, #dense>
+  %value = vector.load %view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
+  vector.store %value, %view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  kernel.return
+}
+
+// ----
+kernel.def @workgroup_vector_load_store_lanes() {
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch() {
+  %zero = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %bytes = index.constant 1024 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<64x4xi32, #dense>
+  sanitizer.race.access<read> %view[%lane, 0] : view<64x4xi32, #dense>
+  sanitizer.race.access<read> %view[%lane, 1] : view<64x4xi32, #dense>
+  sanitizer.race.access<read> %view[%lane, 2] : view<64x4xi32, #dense>
+  sanitizer.race.access<read> %view[%lane, 3] : view<64x4xi32, #dense>
+  %value = vector.load %view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
+  sanitizer.race.access<write> %view[%lane, 0] : view<64x4xi32, #dense>
+  sanitizer.race.access<write> %view[%lane, 1] : view<64x4xi32, #dense>
+  sanitizer.race.access<write> %view[%lane, 2] : view<64x4xi32, #dense>
+  sanitizer.race.access<write> %view[%lane, 3] : view<64x4xi32, #dense>
+  vector.store %value, %view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @workgroup_vector_dynamic_lane_offsets() {
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch() {
+  %zero = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %bytes = index.constant 512 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 8, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<128xi32, #dense>
+  %value = vector.load %view[%lane] : view<128xi32, #dense> -> vector<2xi32>
+  vector.store %value, %view[%lane] : vector<2xi32>, view<128xi32, #dense>
+  kernel.return
+}
+
+// ----
+kernel.def @workgroup_vector_dynamic_lane_offsets() {
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch() {
+  %zero = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %bytes = index.constant 512 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 8, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<128xi32, #dense>
+  sanitizer.race.access<read> %view[%lane] : view<128xi32, #dense>
+  %10 = index.constant 1 : index
+  %11 = index.add %lane, %10 : index
+  sanitizer.race.access<read> %view[%11] : view<128xi32, #dense>
+  %value = vector.load %view[%lane] : view<128xi32, #dense> -> vector<2xi32>
+  sanitizer.race.access<write> %view[%lane] : view<128xi32, #dense>
+  %8 = index.constant 1 : index
+  %9 = index.add %lane, %8 : index
+  sanitizer.race.access<write> %view[%9] : view<128xi32, #dense>
+  vector.store %value, %view[%lane] : vector<2xi32>, view<128xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @masked_vector_workgroup_access_requires_lane_activity() {
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%mask: vector<4xi1>, %old: vector<4xi32>) {
+  %zero = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %bytes = index.constant 1024 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<64x4xi32, #dense>
+  // ERROR@+1: LOWERING/046 {op_name="vector.load.mask", phase_name="sanitizer-insert-race-observations", reason="local-memory vector operation requires lane-activity-aware race observation"}
+  %value = vector.load.mask %view[%lane, 0], %mask, %old : view<64x4xi32, #dense>, vector<4xi1>, vector<4xi32>
+  vector.store %value, %view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @workgroup_atomics_are_observed() {
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch() {
+  %zero = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
+  %value = scalar.constant 1 : i32
+  view.atomic.reduce<addi> %value, %view[%lane] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense>
+  %old = view.atomic.rmw<addi> %value, %view[%lane] {ordering = release, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  %cmp = view.atomic.cmpxchg %old, %value, %view[%lane] {success_ordering = acq_rel, failure_ordering = acquire, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}
+
+// ----
+kernel.def @workgroup_atomics_are_observed() {
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch() {
+  %zero = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
+  %value = scalar.constant 1 : i32
+  sanitizer.race.access<read_write> %view[%lane] {atomic = true, ordering = relaxed, scope = workgroup} : view<64xi32, #dense>
+  view.atomic.reduce<addi> %value, %view[%lane] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense>
+  sanitizer.race.access<read_write> %view[%lane] {atomic = true, ordering = release, scope = workgroup} : view<64xi32, #dense>
+  %old = view.atomic.rmw<addi> %value, %view[%lane] {ordering = release, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  sanitizer.race.access<read_write> %view[%lane] {atomic = true, ordering = acq_rel, scope = workgroup} : view<64xi32, #dense>
+  %cmp = view.atomic.cmpxchg %old, %value, %view[%lane] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}
+
+// ====
+
+kernel.def @non_workgroup_memory_is_not_observed() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%input: buffer) {
+  %zero = index.constant 0 : offset
+  %i = index.constant 0 : index
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %global_view = buffer.view %global[%zero] : buffer -> view<1xi32, #dense>
+  %global_value = view.load %global_view[%i] : view<1xi32, #dense> -> i32
+  %bytes = index.constant 4 : offset
+  %private = buffer.alloca %bytes {base_alignment = 4, memory_space = private} : buffer
+  %private_view = buffer.view %private[%zero] : buffer -> view<1xi32, #dense>
+  view.store %global_value, %private_view[%i] : i32, view<1xi32, #dense>
+  kernel.return
+}
+
+// ----
+kernel.def @non_workgroup_memory_is_not_observed() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%input: buffer) {
+  %zero = index.constant 0 : offset
+  %i = index.constant 0 : index
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %global_view = buffer.view %global[%zero] : buffer -> view<1xi32, #dense>
+  %global_value = view.load %global_view[%i] : view<1xi32, #dense> -> i32
+  %bytes = index.constant 4 : offset
+  %private = buffer.alloca %bytes {base_alignment = 4, memory_space = private} : buffer
+  %private_view = buffer.view %private[%zero] : buffer -> view<1xi32, #dense>
+  view.store %global_value, %private_view[%i] : i32, view<1xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @existing_observations_are_preserved() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  %zero = index.constant 0 : offset
+  %i = index.constant 0 : index
+  %bytes = index.constant 4 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<1xi32, #dense>
+  sanitizer.race.access<read> %view[%i] : view<1xi32, #dense>
+  %value = view.load %view[%i] : view<1xi32, #dense> -> i32
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  sanitizer.race.sync<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.return
+}
+
+// ----
+kernel.def @existing_observations_are_preserved() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  %zero = index.constant 0 : offset
+  %i = index.constant 0 : index
+  %bytes = index.constant 4 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<1xi32, #dense>
+  sanitizer.race.access<read> %view[%i] : view<1xi32, #dense>
+  %value = view.load %view[%i] : view<1xi32, #dense> -> i32
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  sanitizer.race.sync<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.return
+}
+
+// ====
+
+// RUN: with-locations pass sanitizer-insert-race-observations{checks=race}
+
+kernel.def @race_site_payload_locations() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  %zero = index.constant 0 : offset
+  %i = index.constant 0 : index
+  %bytes = index.constant 4 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<1xi32, #dense>
+  %value = view.load %view[%i] : view<1xi32, #dense> -> i32 loc("race.loom":8:1)
+  view.store %value, %view[%i] : i32, view<1xi32, #dense> loc("race.loom":9:1)
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup} loc("race.loom":10:1)
+  kernel.return
+}
+
+// ----
+kernel.def @race_site_payload_locations() {
+  %one = index.constant 1 : index loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":2:3 to 2:34)
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":3:3 to 3:93)
+} launch() {
+  %zero = index.constant 0 : offset loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":5:3 to 5:36)
+  %i = index.constant 0 : index loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":6:3 to 6:32)
+  %bytes = index.constant 4 : offset loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":7:3 to 7:37)
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":8:3 to 8:90)
+  %view = buffer.view %scratch[%zero] : buffer -> view<1xi32, #dense> loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":9:3 to 9:70)
+  sanitizer.race.access<read> %view[%i] : view<1xi32, #dense> loc(tagged<sanitizer_site, "00050f0402010000", "race.loom":8:1>)
+  %value = view.load %view[%i] : view<1xi32, #dense> -> i32 loc("race.loom":8:1)
+  sanitizer.race.access<write> %view[%i] : view<1xi32, #dense> loc(tagged<sanitizer_site, "00050f0402010000", "race.loom":9:1>)
+  view.store %value, %view[%i] : i32, view<1xi32, #dense> loc("race.loom":9:1)
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup} loc("race.loom":10:1)
+  sanitizer.race.sync<workgroup> {ordering = acq_rel, scope = workgroup} loc(tagged<sanitizer_site, "00050f0402010000", "race.loom":10:1>)
+  kernel.return loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":13:3 to 13:16)
+} loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":1:1 to 14:2)

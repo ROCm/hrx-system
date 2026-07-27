@@ -16,6 +16,26 @@ using ::iree::testing::status::IsOk;
 using ::iree::testing::status::StatusIs;
 
 //===----------------------------------------------------------------------===//
+// Byte span tests
+//===----------------------------------------------------------------------===//
+
+TEST(ByteSpanTest, Empty) {
+  uint8_t storage[1] = {0};
+  EXPECT_TRUE(iree_byte_span_is_empty(iree_byte_span_empty()));
+  EXPECT_TRUE(iree_byte_span_is_empty(iree_make_byte_span(storage, 0)));
+  EXPECT_FALSE(iree_byte_span_is_empty(iree_make_byte_span(NULL, 1)));
+}
+
+TEST(ConstByteSpanTest, Empty) {
+  const uint8_t storage[1] = {0};
+  EXPECT_TRUE(iree_const_byte_span_is_empty(iree_const_byte_span_empty()));
+  EXPECT_TRUE(
+      iree_const_byte_span_is_empty(iree_make_const_byte_span(storage, 0)));
+  EXPECT_FALSE(
+      iree_const_byte_span_is_empty(iree_make_const_byte_span(NULL, 1)));
+}
+
+//===----------------------------------------------------------------------===//
 // Checked arithmetic tests - iree_host_size_t
 //===----------------------------------------------------------------------===//
 
@@ -148,6 +168,162 @@ TEST(CheckedArithmetic, AlignNearMaxNoOverflow) {
   iree_host_size_t max_aligned = IREE_HOST_SIZE_MAX & ~(iree_host_size_t)15;
   EXPECT_TRUE(iree_host_size_checked_align(max_aligned, 16, &result));
   EXPECT_EQ(result, max_aligned);
+}
+
+//===----------------------------------------------------------------------===//
+// Checked arithmetic tests - fixed-width integers
+//===----------------------------------------------------------------------===//
+
+TEST(CheckedArithmeticUnsignedI64, AddNoOverflow) {
+  uint64_t result = 0;
+  EXPECT_TRUE(iree_checked_add_u64(UINT64_MAX - 1, 1, &result));
+  EXPECT_EQ(result, UINT64_MAX);
+}
+
+TEST(CheckedArithmeticUnsignedI64, AddOverflow) {
+  uint64_t result = 0;
+  EXPECT_FALSE(iree_checked_add_u64(UINT64_MAX, 1, &result));
+}
+
+TEST(CheckedArithmeticUnsignedI64, Align) {
+  uint64_t result = 0;
+  EXPECT_TRUE(iree_checked_align_u64(0, 16, &result));
+  EXPECT_EQ(result, 0u);
+  EXPECT_TRUE(iree_checked_align_u64(100, 16, &result));
+  EXPECT_EQ(result, 112u);
+  EXPECT_TRUE(iree_checked_align_u64(112, 16, &result));
+  EXPECT_EQ(result, 112u);
+  EXPECT_TRUE(iree_checked_align_u64(UINT64_MAX & ~(uint64_t)15, 16, &result));
+  EXPECT_EQ(result, UINT64_MAX & ~(uint64_t)15);
+  EXPECT_FALSE(iree_checked_align_u64(UINT64_MAX - 5, 16, &result));
+}
+
+TEST(CheckedArithmeticUnsignedI64, MulNoOverflow) {
+  uint64_t result = 0;
+  EXPECT_TRUE(iree_checked_mul_u64(UINT64_MAX, 1, &result));
+  EXPECT_EQ(result, UINT64_MAX);
+}
+
+TEST(CheckedArithmeticUnsignedI64, MulOverflow) {
+  uint64_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_u64(UINT64_MAX, 2, &result));
+}
+
+TEST(CheckedArithmeticSignedI32, AddNoOverflow) {
+  int32_t result = 0;
+  EXPECT_TRUE(iree_checked_add_i32(-100, 250, &result));
+  EXPECT_EQ(result, 150);
+}
+
+TEST(CheckedArithmeticSignedI32, AddOverflowPositive) {
+  int32_t result = 0;
+  EXPECT_FALSE(iree_checked_add_i32(INT32_MAX, 1, &result));
+}
+
+TEST(CheckedArithmeticSignedI32, AddOverflowNegative) {
+  int32_t result = 0;
+  EXPECT_FALSE(iree_checked_add_i32(INT32_MIN, -1, &result));
+}
+
+TEST(CheckedArithmeticSignedI32, MulNoOverflow) {
+  int32_t result = 0;
+  EXPECT_TRUE(iree_checked_mul_i32(-100, 200, &result));
+  EXPECT_EQ(result, -20000);
+}
+
+TEST(CheckedArithmeticSignedI32, MulOverflowPositive) {
+  int32_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_i32(INT32_MAX, 2, &result));
+}
+
+TEST(CheckedArithmeticSignedI32, MulOverflowNegative) {
+  int32_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_i32(INT32_MIN, -1, &result));
+}
+
+TEST(CheckedArithmeticSignedI32, MulAddNoOverflow) {
+  int32_t result = 0;
+  EXPECT_TRUE(iree_checked_mul_add_i32(100, -10, 20, &result));
+  EXPECT_EQ(result, -100);
+}
+
+TEST(CheckedArithmeticSignedI32, MulAddMulOverflow) {
+  int32_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_add_i32(0, INT32_MAX, 2, &result));
+}
+
+TEST(CheckedArithmeticSignedI32, MulAddAddOverflow) {
+  int32_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_add_i32(INT32_MAX, 1, 1, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, AddNoOverflow) {
+  int64_t result = 0;
+  EXPECT_TRUE(iree_checked_add_i64(-100, 250, &result));
+  EXPECT_EQ(result, 150);
+}
+
+TEST(CheckedArithmeticSignedI64, AddOverflowPositive) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_add_i64(INT64_MAX, 1, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, AddOverflowNegative) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_add_i64(INT64_MIN, -1, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, SubNoOverflow) {
+  int64_t result = 0;
+  EXPECT_TRUE(iree_checked_sub_i64(-100, 250, &result));
+  EXPECT_EQ(result, -350);
+}
+
+TEST(CheckedArithmeticSignedI64, SubOverflowPositive) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_sub_i64(INT64_MAX, -1, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, SubOverflowNegative) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_sub_i64(INT64_MIN, 1, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, MulNoOverflow) {
+  int64_t result = 0;
+  EXPECT_TRUE(iree_checked_mul_i64(-100, 200, &result));
+  EXPECT_EQ(result, -20000);
+}
+
+TEST(CheckedArithmeticSignedI64, MulOverflowPositive) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_i64(INT64_MAX, 2, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, MulOverflowNegative) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_i64(INT64_MIN, -1, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, MulOverflowBothNegative) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_i64(INT64_MIN, -2, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, MulAddNoOverflow) {
+  int64_t result = 0;
+  EXPECT_TRUE(iree_checked_mul_add_i64(100, -10, 20, &result));
+  EXPECT_EQ(result, -100);
+}
+
+TEST(CheckedArithmeticSignedI64, MulAddMulOverflow) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_add_i64(0, INT64_MAX, 2, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, MulAddAddOverflow) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_add_i64(INT64_MAX, 1, 1, &result));
 }
 
 //===----------------------------------------------------------------------===//

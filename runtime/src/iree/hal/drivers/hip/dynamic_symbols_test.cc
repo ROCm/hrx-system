@@ -40,6 +40,12 @@ TEST(DynamicSymbolsTest, CreateFromSystemLoader) {
   if (device_count > 0) {
     hipDevice_t device;
     HIP_CHECK_ERRORS(symbols.hipDeviceGet(&device, /*ordinal=*/0));
+    HIP_CHECK_ERRORS(symbols.hipSetDevice(/*deviceId=*/0));
+
+    size_t available_bytes = 0;
+    size_t total_bytes = 0;
+    HIP_CHECK_ERRORS(symbols.hipMemGetInfo(&available_bytes, &total_bytes));
+    ASSERT_LE(available_bytes, total_bytes);
   }
 
   iree_hal_hip_dynamic_symbols_deinitialize(&symbols);

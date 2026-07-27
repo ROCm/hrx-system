@@ -1,0 +1,78 @@
+// RUN: roundtrip
+
+func.def @dot4i_s8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ====
+
+func.def @dot4i_u8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<u8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ====
+
+func.def @dot8i4_u4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<u4u4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ====
+
+func.def @dot4i_u8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ====
+
+func.def @dot4i_s8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<s8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ====
+
+func.def @dot8i4_s4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<s4s4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ====
+
+func.def @dot8i4_u4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<u4s4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ====
+
+func.def @dot8i4_s4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<s4u4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ====
+
+// Q4 offset-binary storage can stay packed for dot8i4. Xoring each nibble with
+// 8 converts the left operand from code-8 into signed i4 bits.
+func.def @dot8i4_s4u4_q4_offset_binary(%rows: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %offset_to_signed_mask = vector.constant -2004318072 : vector<1xi32>
+  %signed_rows = vector.xori %rows, %offset_to_signed_mask : vector<1xi32>
+  %dot = vector.dot8i4<s4u4> %signed_rows, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ====
+
+// Q6 offset-binary storage can stay packed for dot4i. Subtracting 32 from each
+// byte converts the left operand from code-32 into signed i8 bits.
+func.def @dot4i_s8s8_q6_offset_binary(%codes: vector<1xi32>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %offset_to_signed_bias = vector.constant -32 : vector<4xi8>
+  %bytes = vector.bitcast %codes : vector<1xi32> to vector<4xi8>
+  %signed_bytes = vector.addi %bytes, %offset_to_signed_bias : vector<4xi8>
+  %dot = vector.dot4i<s8s8> %signed_bytes, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}

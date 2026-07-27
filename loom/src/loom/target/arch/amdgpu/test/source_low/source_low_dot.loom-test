@@ -1,0 +1,226 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_dot.loom-test
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f32_dotf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %acc: f32) -> (f32) {
+  %dot = vector.dotf %lhs, %rhs, %acc : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32_dotf(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %9 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %10 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %11 = v_fma_f32 %9, %10, %acc
+  %12 = slice %lhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %13 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %14 = v_fmac_f32 %11, %12, %13
+  %15 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %17 = v_fmac_f32 %14, %15, %16
+  %18 = slice %lhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %dot = v_fmac_f32 %17, %18, %19
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f32_dotf_zero_seed(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (f32) {
+  %zero = scalar.constant 0.0 : f32
+  %dot = vector.dotf %lhs, %rhs, %zero : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32_dotf_zero_seed(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %9 = v_mov_b32 0
+  %10 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %11 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %12 = v_fmac_f32 %9, %10, %11
+  %13 = slice %lhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %14 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %15 = v_fmac_f32 %12, %13, %14
+  %16 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %17 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %18 = v_fmac_f32 %15, %16, %17
+  %19 = slice %lhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %20 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %dot = v_fmac_f32 %18, %19, %20
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f32_contract_product_reduce(%lhs: vector<8xf32>, %rhs: vector<8xf32>, %acc: f32) -> (f32) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<8xf32>
+  %dot = vector.reduce<addf, reassoc|nnan|ninf|nsz|contract> %product, %acc : vector<8xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32_contract_product_reduce(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %11 = slice %lhs[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %12 = slice %rhs[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %13 = v_fma_f32 %11, %12, %acc
+  %14 = slice %lhs[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %15 = slice %rhs[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %16 = v_mul_f32 %14, %15
+  %17 = slice %lhs[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %18 = slice %rhs[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %19 = v_mul_f32 %17, %18
+  %20 = slice %lhs[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %21 = slice %rhs[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %22 = v_mul_f32 %20, %21
+  %23 = slice %lhs[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %24 = slice %rhs[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %25 = v_fmac_f32 %13, %23, %24
+  %26 = slice %lhs[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %27 = slice %rhs[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %28 = v_fmac_f32 %16, %26, %27
+  %29 = slice %lhs[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %30 = slice %rhs[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %31 = v_fmac_f32 %19, %29, %30
+  %32 = slice %lhs[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %33 = slice %rhs[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %34 = v_fmac_f32 %22, %32, %33
+  %35 = v_add_f32 %25, %28
+  %36 = v_add_f32 %31, %34
+  %dot = v_add_f32 %35, %36
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f32_exact_product_reduce(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %acc: f32) -> (f32) {
+  %product = vector.mulf %lhs, %rhs : vector<4xf32>
+  %dot = vector.reduce<addf> %product, %acc : vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32_exact_product_reduce(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %10 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %11 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %12 = v_mul_f32 %10, %11
+  %13 = slice %lhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %14 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %15 = v_mul_f32 %13, %14
+  %16 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %17 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %18 = v_mul_f32 %16, %17
+  %19 = slice %lhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %20 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %21 = v_mul_f32 %19, %20
+  %24 = v_add_f32 %acc, %12
+  %26 = v_add_f32 %24, %15
+  %28 = v_add_f32 %26, %18
+  %dot = v_add_f32 %28, %21
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f16_dot2f(%lhs: vector<8xf16>, %rhs: vector<8xf16>, %acc: vector<4xf32>) -> (vector<4xf32>) {
+  %dot = vector.dot2f %lhs, %rhs, %acc : vector<8xf16>, vector<8xf16>, vector<4xf32>
+  func.return %dot : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f16_dot2f(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+  %9 = copy %acc : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %10 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %11 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %12 = slice %9[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %13 = v_dot2_f32_f16 %10, %11, %12
+  %14 = slice %lhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %15 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = slice %9[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %17 = v_dot2_f32_f16 %14, %15, %16
+  %18 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %20 = slice %9[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %21 = v_dot2_f32_f16 %18, %19, %20
+  %22 = slice %lhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %23 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %24 = slice %9[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %25 = v_dot2_f32_f16 %22, %23, %24
+  %dot = concat(%13, %17, %21, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @bf16_dot2f(%lhs: vector<8xbf16>, %rhs: vector<8xbf16>, %acc: vector<4xf32>) -> (vector<4xf32>) {
+  %dot = vector.dot2f %lhs, %rhs, %acc : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+  func.return %dot : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @bf16_dot2f(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+  %9 = copy %acc : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %10 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %11 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %12 = slice %9[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %13 = v_dot2_f32_bf16 %10, %11, %12
+  %14 = slice %lhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %15 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = slice %9[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %17 = v_dot2_f32_bf16 %14, %15, %16
+  %18 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %20 = slice %9[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %21 = v_dot2_f32_bf16 %18, %19, %20
+  %22 = slice %lhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %23 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %24 = slice %9[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %25 = v_dot2_f32_bf16 %22, %23, %24
+  %dot = concat(%13, %17, %21, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f32_uniform_smem_vector_operands(%lhs: vector<4xf32>, %weights: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %weights_noalias = buffer.assume.noalias %weights_global : buffer
+  %weights_view = buffer.view %weights_noalias[%base] : buffer -> view<2x4xf32, #dense>
+  %rhs = vector.load %weights_view[0, 0] : view<2x4xf32, #dense> -> vector<4xf32>
+  %bias_vector = vector.load %weights_view[1, 0] : view<2x4xf32, #dense> -> vector<4xf32>
+  %bias = vector.extract %bias_vector[0] : vector<4xf32> -> f32
+  %scaled = vector.mulf %lhs, %rhs : vector<4xf32>
+  %dot = vector.dotf %scaled, %rhs, %bias : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32_uniform_smem_vector_operands(%lhs: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %weights_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
+  %19 = s_mov_b32 0
+  %rhs = s_load_dwordx4 %weights_view, %19
+  %bias = s_load_dword %weights_view, %19 {offset = 16}
+  %23 = slice %rhs[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %24 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %25 = v_mul_f32 %23, %24
+  %26 = slice %rhs[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %27 = slice %lhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %28 = v_mul_f32 %26, %27
+  %29 = slice %rhs[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %30 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %31 = v_mul_f32 %29, %30
+  %32 = slice %rhs[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %33 = slice %lhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %34 = v_mul_f32 %32, %33
+  %38 = v_fma_f32 %25, %23, %bias
+  %41 = v_fma_f32 %28, %26, %38
+  %44 = v_fma_f32 %31, %29, %41
+  %dot = v_fma_f32 %34, %32, %44
+  return %dot
+}

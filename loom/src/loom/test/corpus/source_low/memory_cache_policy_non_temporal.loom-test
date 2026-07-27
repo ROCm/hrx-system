@@ -1,0 +1,15 @@
+// RUN: roundtrip
+
+kernel.def @cache_device_non_temporal_load_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64x4xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xi32, #dense>
+  %loaded = vector.load %input_view[%lane, 0] {cache_scope = device, cache_temporal = non_temporal} : view<64x4xi32, #dense> -> vector<4xi32>
+  vector.store %loaded, %output_view[%lane, 0] {cache_scope = device, cache_temporal = non_temporal} : vector<4xi32>, view<64x4xi32, #dense>
+  kernel.return
+}

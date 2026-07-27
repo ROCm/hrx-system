@@ -140,8 +140,9 @@ static iree_status_t CreateHostVisibleTransferBuffer(
     iree_hal_allocator_t* allocator, iree_device_size_t buffer_size,
     iree_hal_buffer_t** out_buffer) {
   iree_hal_buffer_params_t params = {0};
-  params.type =
-      IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+  params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL |
+                IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+                IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
   return iree_hal_allocator_allocate_buffer(allocator, params, buffer_size,
                                             out_buffer);
@@ -205,7 +206,7 @@ static void RunDefaultPoolServesHostLocalMappedAlloca(
       buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_WRITE,
       /*byte_offset=*/0, /*byte_length=*/8, &mapping));
   memset(mapping.contents.data, 0, 8);
-  iree_hal_buffer_unmap_range(&mapping);
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
   Ref<iree_hal_semaphore_t> dealloca_signal;
   IREE_ASSERT_OK(
@@ -361,7 +362,7 @@ static bool HostActionStateWasCalled(void* user_data) {
 }
 
 static void RecordHostAction(iree_hal_amdgpu_reclaim_entry_t* entry,
-                             void* user_data, iree_status_t status) {
+                             void* user_data, const iree_status_t status) {
   HostActionState* state = (HostActionState*)user_data;
   iree_atomic_store(&state->had_entry, entry ? 1 : 0,
                     iree_memory_order_release);
@@ -412,8 +413,8 @@ TEST_F(HostQueuePendingTest,
   IREE_ASSERT_OK(iree_hal_amdgpu_host_queue_enqueue_host_action(
       queue, wait_list,
       iree_hal_amdgpu_reclaim_action_t{
-          .fn = RecordHostAction,
-          .user_data = &action_state,
+          /*.fn=*/RecordHostAction,
+          /*.user_data=*/&action_state,
       },
       /*operation_resources=*/NULL, /*operation_resource_count=*/0));
 
@@ -522,8 +523,8 @@ TEST_F(HostQueuePendingTest, CapacityParkedHostActionRetriesAfterPostDrain) {
     status = iree_hal_amdgpu_host_queue_enqueue_host_action(
         queue, iree_hal_semaphore_list_empty(),
         iree_hal_amdgpu_reclaim_action_t{
-            .fn = RecordHostAction,
-            .user_data = &action_state,
+            /*.fn=*/RecordHostAction,
+            /*.user_data=*/&action_state,
         },
         /*operation_resources=*/NULL, /*operation_resource_count=*/0);
   }
@@ -657,6 +658,134 @@ TEST_F(HostQueuePendingTest, QueueAllocaTlsfGrowthRetriesThroughColdPath) {
 
   iree_hal_buffer_release(buffer1);
   iree_hal_buffer_release(buffer0);
+}
+
+TEST_F(HostQueuePendingTest,
+       QueueOpsWaitForPoolBlockedAllocaBackingMaterialization) {
+  const iree_device_size_t allocation_size = 4096;
+  const uint32_t expected_value = 0xCACE1100u;
+
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.preallocate_pools = 0;
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  iree_hal_amdgpu_host_queue_t* queue = test_device.first_host_queue();
+  ASSERT_NE(queue, nullptr);
+
+  Ref<iree_hal_pool_t> pool;
+  IREE_ASSERT_OK(CreateExplicitFixedBlockPool(test_device.base_device(),
+                                              allocation_size, pool.out()));
+
+  Ref<iree_hal_semaphore_t> alloca0_signal;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), alloca0_signal.out()));
+  uint64_t alloca0_signal_value = 1;
+  iree_hal_semaphore_t* alloca0_signal_ptr = alloca0_signal.get();
+  const iree_hal_semaphore_list_t alloca0_signal_list =
+      MakeSemaphoreList(&alloca0_signal_ptr, &alloca0_signal_value);
+
+  iree_hal_buffer_t* buffer0 = NULL;
+  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
+      test_device.base_device(), kQueueAffinity0,
+      iree_hal_semaphore_list_empty(), alloca0_signal_list, pool,
+      MakeTransientBufferParams(), allocation_size, IREE_HAL_ALLOCA_FLAG_NONE,
+      &buffer0));
+  ASSERT_NE(buffer0, nullptr);
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(alloca0_signal, alloca0_signal_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+
+  Ref<iree_hal_semaphore_t> alloca1_signal;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), alloca1_signal.out()));
+  uint64_t alloca1_signal_value = 1;
+  iree_hal_semaphore_t* alloca1_signal_ptr = alloca1_signal.get();
+  const iree_hal_semaphore_list_t alloca1_signal_list =
+      MakeSemaphoreList(&alloca1_signal_ptr, &alloca1_signal_value);
+
+  iree_hal_buffer_t* buffer1 = NULL;
+  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
+      test_device.base_device(), kQueueAffinity0,
+      iree_hal_semaphore_list_empty(), alloca1_signal_list, pool,
+      MakeTransientBufferParams(), allocation_size, IREE_HAL_ALLOCA_FLAG_NONE,
+      &buffer1));
+  ASSERT_NE(buffer1, nullptr);
+  EXPECT_FALSE(iree_hal_semaphore_list_poll(alloca1_signal_list));
+  ASSERT_TRUE(HostQueueHasPendingOps(queue));
+
+  Ref<iree_hal_semaphore_t> update_signal;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), update_signal.out()));
+  uint64_t update_signal_value = 1;
+  iree_hal_semaphore_t* update_signal_ptr = update_signal.get();
+  const iree_hal_semaphore_list_t update_signal_list =
+      MakeSemaphoreList(&update_signal_ptr, &update_signal_value);
+  IREE_ASSERT_OK(iree_hal_device_queue_update(
+      test_device.base_device(), kQueueAffinity0, alloca1_signal_list,
+      update_signal_list, &expected_value, /*source_offset=*/0, buffer1,
+      /*target_offset=*/0, sizeof(expected_value), IREE_HAL_UPDATE_FLAG_NONE));
+
+  Ref<iree_hal_buffer_t> readback_buffer;
+  IREE_ASSERT_OK(CreateHostVisibleTransferBuffer(
+      test_device.allocator(), sizeof(expected_value), readback_buffer.out()));
+  Ref<iree_hal_semaphore_t> copy_signal;
+  IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(), copy_signal.out()));
+  uint64_t copy_signal_value = 1;
+  iree_hal_semaphore_t* copy_signal_ptr = copy_signal.get();
+  const iree_hal_semaphore_list_t copy_signal_list =
+      MakeSemaphoreList(&copy_signal_ptr, &copy_signal_value);
+  IREE_ASSERT_OK(iree_hal_device_queue_copy(
+      test_device.base_device(), kQueueAffinity0, update_signal_list,
+      copy_signal_list, buffer1, /*source_offset=*/0, readback_buffer,
+      /*target_offset=*/0, sizeof(expected_value), IREE_HAL_COPY_FLAG_NONE));
+
+  Ref<iree_hal_semaphore_t> dealloca0_signal;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), dealloca0_signal.out()));
+  uint64_t dealloca0_signal_value = 1;
+  iree_hal_semaphore_t* dealloca0_signal_ptr = dealloca0_signal.get();
+  const iree_hal_semaphore_list_t dealloca0_signal_list =
+      MakeSemaphoreList(&dealloca0_signal_ptr, &dealloca0_signal_value);
+  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
+      test_device.base_device(), kQueueAffinity0,
+      iree_hal_semaphore_list_empty(), dealloca0_signal_list, buffer0,
+      IREE_HAL_DEALLOCA_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      dealloca0_signal, dealloca0_signal_value, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE));
+  iree_hal_buffer_release(buffer0);
+
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(copy_signal, copy_signal_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  iree_hal_buffer_mapping_t mapping;
+  IREE_ASSERT_OK(
+      iree_hal_buffer_map_range(readback_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
+                                IREE_HAL_MEMORY_ACCESS_READ, /*byte_offset=*/0,
+                                sizeof(expected_value), &mapping));
+  uint32_t actual_value = 0;
+  memcpy(&actual_value, mapping.contents.data, sizeof(actual_value));
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
+  EXPECT_EQ(actual_value, expected_value);
+
+  Ref<iree_hal_semaphore_t> dealloca1_signal;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), dealloca1_signal.out()));
+  uint64_t dealloca1_signal_value = 1;
+  iree_hal_semaphore_t* dealloca1_signal_ptr = dealloca1_signal.get();
+  const iree_hal_semaphore_list_t dealloca1_signal_list =
+      MakeSemaphoreList(&dealloca1_signal_ptr, &dealloca1_signal_value);
+  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
+      test_device.base_device(), kQueueAffinity0, copy_signal_list,
+      dealloca1_signal_list, buffer1, IREE_HAL_DEALLOCA_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      dealloca1_signal, dealloca1_signal_value, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE));
+  iree_hal_buffer_release(buffer1);
+  EXPECT_FALSE(HostQueueHasPendingOps(queue));
 }
 
 TEST_F(HostQueuePendingTest, CancelPendingAllocaFrontierWait) {

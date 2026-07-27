@@ -1,0 +1,153 @@
+// Paged decode attention tile with online-softmax state update.
+//
+// This spells paged KV traversal with explicit offset-domain arithmetic and
+// composes it with the work a decode attention tile performs: one page-table
+// load, four dynamic key/value row loads, QK dot scores, tail masking, running
+// max/sum update, and PV accumulation. The checked row chooses data where every
+// valid score is exactly 1.0, making the expected state and value accumulator
+// small enough to audit by inspection while still exercising the full dataflow.
+// Numeric policy is ML-fast attention math: QK/PV accumulation, online-softmax
+// rescale, and final combines are contractable, while exp is approximate.
+kernel.def @paged_decode_attention_tile_f32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%block_id0: index, %lane_start0: index, %valid_count: i32, %old_state: buffer, %old_acc: buffer, %query: buffer, %page_table: buffer, %key_pool: buffer, %value_pool: buffer, %new_state: buffer, %new_acc: buffer) {
+  %base = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %one_index = index.constant 1 : index
+  %two_index = index.constant 2 : index
+  %three_index = index.constant 3 : index
+  %zero_i32 = scalar.constant 0 : i32
+  %one_i32 = scalar.constant 1 : i32
+  %zero_f32 = scalar.constant 0.0 : f32
+  %negative_large = scalar.constant -1000000000.0 : f32
+
+  %block_id = index.assume %block_id0 [range(%block_id0, 0, 1)] : index
+  %lane_start = index.assume %lane_start0 [range(%lane_start0, 0, 3)] : index
+  %page_entry_byte_stride = index.constant 4 : offset
+  %page_byte_stride = index.constant 128 : offset
+  %lane_byte_stride = index.constant 16 : offset
+
+  %old_state_noalias, %old_acc_noalias, %query_noalias, %page_table_noalias, %key_pool_noalias, %value_pool_noalias, %new_state_noalias, %new_acc_noalias = buffer.assume.noalias %old_state, %old_acc, %query, %page_table, %key_pool, %value_pool, %new_state, %new_acc : buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %old_state_view = buffer.view %old_state_noalias[%base] : buffer -> view<2xf32, #dense>
+  %old_acc_view = buffer.view %old_acc_noalias[%base] : buffer -> view<4xf32, #dense>
+  %query_view = buffer.view %query_noalias[%base] : buffer -> view<4xf32, #dense>
+  %new_state_view = buffer.view %new_state_noalias[%base] : buffer -> view<2xf32, #dense>
+  %new_acc_view = buffer.view %new_acc_noalias[%base] : buffer -> view<4xf32, #dense>
+
+  %page_entry_offset = index.scale %block_id, %page_entry_byte_stride : index, offset -> offset
+  %page_table_view = buffer.view %page_table_noalias[%page_entry_offset] : buffer -> view<1xi32, #dense>
+  %page_i32 = view.load %page_table_view[0] : view<1xi32, #dense> -> i32
+  %page0 = index.cast %page_i32 : i32 to index
+  %page = index.assume %page0 [range(%page0, 0, 1)] : index
+
+  %lane1 = index.add %lane_start, %one_index : index
+  %lane2 = index.add %lane_start, %two_index : index
+  %lane3 = index.add %lane_start, %three_index : index
+  %page_base = index.scale %page, %page_byte_stride : index, offset -> offset
+  %lane0_offset = index.scale %lane_start, %lane_byte_stride : index, offset -> offset
+  %lane1_offset = index.scale %lane1, %lane_byte_stride : index, offset -> offset
+  %lane2_offset = index.scale %lane2, %lane_byte_stride : index, offset -> offset
+  %lane3_offset = index.scale %lane3, %lane_byte_stride : index, offset -> offset
+  %row0_offset = index.add %page_base, %lane0_offset : offset
+  %row1_offset = index.add %page_base, %lane1_offset : offset
+  %row2_offset = index.add %page_base, %lane2_offset : offset
+  %row3_offset = index.add %page_base, %lane3_offset : offset
+
+  %key0_view = buffer.view %key_pool_noalias[%row0_offset] : buffer -> view<4xf32, #dense>
+  %key1_view = buffer.view %key_pool_noalias[%row1_offset] : buffer -> view<4xf32, #dense>
+  %key2_view = buffer.view %key_pool_noalias[%row2_offset] : buffer -> view<4xf32, #dense>
+  %key3_view = buffer.view %key_pool_noalias[%row3_offset] : buffer -> view<4xf32, #dense>
+  %value0_view = buffer.view %value_pool_noalias[%row0_offset] : buffer -> view<4xf32, #dense>
+  %value1_view = buffer.view %value_pool_noalias[%row1_offset] : buffer -> view<4xf32, #dense>
+  %value2_view = buffer.view %value_pool_noalias[%row2_offset] : buffer -> view<4xf32, #dense>
+  %value3_view = buffer.view %value_pool_noalias[%row3_offset] : buffer -> view<4xf32, #dense>
+
+  %old_max = view.load %old_state_view[0] : view<2xf32, #dense> -> f32
+  %old_sum = view.load %old_state_view[1] : view<2xf32, #dense> -> f32
+  %old_acc_values = vector.load %old_acc_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %query_values = vector.load %query_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %key0 = vector.load %key0_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %key1 = vector.load %key1_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %key2 = vector.load %key2_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %key3 = vector.load %key3_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %score0 = vector.dotf %query_values, %key0, %zero_f32 : vector<4xf32>, vector<4xf32>, f32
+  %score1 = vector.dotf %query_values, %key1, %zero_f32 : vector<4xf32>, vector<4xf32>, f32
+  %score2 = vector.dotf %query_values, %key2, %zero_f32 : vector<4xf32>, vector<4xf32>, f32
+  %score3 = vector.dotf %query_values, %key3, %zero_f32 : vector<4xf32>, vector<4xf32>, f32
+  %score_zeros = vector.splat %zero_f32 : vector<4xf32>
+  %scores01 = vector.insert %score0 into %score_zeros[0] : f32, vector<4xf32>
+  %scores02 = vector.insert %score1 into %scores01[1] : f32, vector<4xf32>
+  %scores03 = vector.insert %score2 into %scores02[2] : f32, vector<4xf32>
+  %scores = vector.insert %score3 into %scores03[3] : f32, vector<4xf32>
+
+  %lanes = vector.iota %zero_i32 step %one_i32 : vector<4xi32>
+  %valid_limits = vector.splat %valid_count : vector<4xi32>
+  %valid = vector.cmpi slt, %lanes, %valid_limits : vector<4xi32> -> vector<4xi1>
+  %sentinels = vector.splat %negative_large : vector<4xf32>
+  %masked_scores = vector.select %valid, %scores, %sentinels : vector<4xf32>
+  %block_max = vector.reduce<maxnumf, reassoc|nnan|nsz> %masked_scores, %negative_large : vector<4xf32>, f32
+  %new_max = scalar.maxnumf %old_max, %block_max : f32
+
+  %old_delta = scalar.subf %old_max, %new_max : f32
+  %old_scale = scalar.expf<afn> %old_delta : f32
+  %old_scale_vector = vector.splat %old_scale : vector<4xf32>
+  %rescaled_old_acc = vector.mulf<reassoc|nnan|nsz|contract> %old_acc_values, %old_scale_vector : vector<4xf32>
+  %rescaled_old_sum = scalar.mulf<reassoc|nnan|nsz|contract> %old_sum, %old_scale : f32
+
+  %new_max_vector = vector.splat %new_max : vector<4xf32>
+  %score_deltas = vector.subf %scores, %new_max_vector : vector<4xf32>
+  %raw_weights = vector.expf<afn> %score_deltas : vector<4xf32>
+  %zero_weights = vector.splat %zero_f32 : vector<4xf32>
+  %weights = vector.select %valid, %raw_weights, %zero_weights : vector<4xf32>
+  %block_sum = vector.reduce<addf, reassoc|nnan|nsz> %weights, %zero_f32 : vector<4xf32>, f32
+  %new_sum = scalar.addf<reassoc|nnan|nsz|contract> %rescaled_old_sum, %block_sum : f32
+
+  %value0 = vector.load %value0_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %value1 = vector.load %value1_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %value2 = vector.load %value2_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %value3 = vector.load %value3_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %weight0 = vector.extract %weights[0] : vector<4xf32> -> f32
+  %weight1 = vector.extract %weights[1] : vector<4xf32> -> f32
+  %weight2 = vector.extract %weights[2] : vector<4xf32> -> f32
+  %weight3 = vector.extract %weights[3] : vector<4xf32> -> f32
+  %weight0_vector = vector.splat %weight0 : vector<4xf32>
+  %weight1_vector = vector.splat %weight1 : vector<4xf32>
+  %weight2_vector = vector.splat %weight2 : vector<4xf32>
+  %weight3_vector = vector.splat %weight3 : vector<4xf32>
+  %weighted_value0 = vector.mulf<reassoc|nnan|nsz|contract> %value0, %weight0_vector : vector<4xf32>
+  %weighted_value1 = vector.mulf<reassoc|nnan|nsz|contract> %value1, %weight1_vector : vector<4xf32>
+  %weighted_value2 = vector.mulf<reassoc|nnan|nsz|contract> %value2, %weight2_vector : vector<4xf32>
+  %weighted_value3 = vector.mulf<reassoc|nnan|nsz|contract> %value3, %weight3_vector : vector<4xf32>
+  %new_acc0 = vector.addf<reassoc|nnan|nsz|contract> %rescaled_old_acc, %weighted_value0 : vector<4xf32>
+  %new_acc1 = vector.addf<reassoc|nnan|nsz|contract> %new_acc0, %weighted_value1 : vector<4xf32>
+  %new_acc2 = vector.addf<reassoc|nnan|nsz|contract> %new_acc1, %weighted_value2 : vector<4xf32>
+  %new_acc3 = vector.addf<reassoc|nnan|nsz|contract> %new_acc2, %weighted_value3 : vector<4xf32>
+
+  view.store %new_max, %new_state_view[%zero_index] : f32, view<2xf32, #dense>
+  view.store %new_sum, %new_state_view[1] : f32, view<2xf32, #dense>
+  vector.store %new_acc3, %new_acc_view[0] : vector<4xf32>, view<4xf32, #dense>
+  kernel.return
+}
+
+check.case public @paged_decode_attention_tile_tail_case {
+  %block_id = check.literal value(0) : index
+  %lane_start = check.literal value(0) : index
+  %valid_count = check.literal value(3) : i32
+  %old_state = check.generate.iota offset(1.0) step(1.0) : tensor<2xf32>
+  %old_acc = check.generate.iota offset(100.0) step(1.0) : tensor<4xf32>
+  %query = check.generate.fill value(1.0) : tensor<4xf32>
+  %page_table = check.generate.iota offset(1) step(-1) : tensor<2xi32>
+  %key_pool = check.generate.fill value(0.25) : tensor<64xf32>
+  %value_pool = check.generate.iota offset(0.0) step(1.0) : tensor<64xf32>
+  %new_state = check.generate.fill value(-1.0) : tensor<2xf32>
+  %new_acc = check.generate.fill value(-1.0) : tensor<4xf32>
+  %expected_state = check.generate.iota offset(1.0) step(4.0) : tensor<2xf32>
+  %expected_acc = check.generate.iota offset(208.0) step(4.0) : tensor<4xf32>
+  func.call @paged_decode_attention_tile_f32(%block_id, %lane_start, %valid_count, %old_state, %old_acc, %query, %page_table, %key_pool, %value_pool, %new_state, %new_acc) : (index, index, i32, tensor<2xf32>, tensor<4xf32>, tensor<4xf32>, tensor<2xi32>, tensor<64xf32>, tensor<64xf32>, tensor<2xf32>, tensor<4xf32>)
+  check.expect.close actual(%new_state) expected(%expected_state) atol(0.0001) rtol(0.0001) nan(same) : tensor<2xf32>
+  check.expect.close actual(%new_acc) expected(%expected_acc) atol(0.0001) rtol(0.0001) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.benchmark<@paged_decode_attention_tile_tail_case> @paged_decode_attention_tile_tail

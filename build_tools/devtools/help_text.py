@@ -18,6 +18,40 @@ class CommandHelp:
     epilog: str | None = None
 
 
+ROOT_COMMAND_EPILOG = """Common build-system commands:
+  python dev.py bazel configure
+  python dev.py bazel build
+  python dev.py bazel test
+  python dev.py bazel precommit
+  python dev.py bazel presubmit
+  python dev.py bazel run
+  python dev.py bazel try
+  python dev.py bazel fuzz
+  python dev.py bazel compile-commands
+  python dev.py bazel clang-tidy
+  python dev.py importers setup tilelang
+
+  python dev.py cmake configure
+  python dev.py cmake build
+  python dev.py cmake test
+  python dev.py cmake precommit
+  python dev.py cmake presubmit
+  python dev.py cmake run
+  python dev.py cmake try
+  python dev.py cmake fuzz
+  python dev.py cmake compile-commands
+  python dev.py cmake clang-tidy
+
+Most developer scratch/state defaults under .tmp/. Set IREE_DEVTOOLS_TMP to
+redirect scratch that does not need to be a Bazel workspace package.
+
+Use `python dev.py bazel --help` or `python dev.py cmake --help` for the full
+subcommand list for that build system. Optional importer environments use
+locked requirement files outside the base Bazel module lock; set one up with
+`python dev.py importers setup <name>` and select it for build-system commands
+with `--importer-env <name>`."""
+
+
 def root_command_help(command: str) -> CommandHelp:
     if command == "setup":
         return CommandHelp(
@@ -38,6 +72,23 @@ tool environment.""",
   python dev.py doctor
   python dev.py doctor --system
   python dev.py doctor --tool-root ../.tools/iree-x""",
+        )
+    if command == "importers":
+        return CommandHelp(
+            description="Manage optional importer Python environments.",
+            epilog="""Examples:
+  python dev.py importers setup tilelang
+  python dev.py importers setup mlir
+  python dev.py importers doctor tilelang
+  python dev.py importers doctor mlir
+  python dev.py importers env tilelang
+  python dev.py importers env mlir --format shell
+
+Importer environments are explicit, locked Python environments under .tmp/.
+They keep heavyweight frontend packages out of the base Bazel module lock while
+still giving Bazel, CMake, and CI one deterministic package surface. Select a
+ready environment for build-system commands with `--importer-env <name>`.
+Importer docs live under loom/py/loom/importers/.""",
         )
     return CommandHelp(description=f"Run {command}.")
 
@@ -85,9 +136,15 @@ validate the commit being replaced.""",
   python dev.py bazel configure
   python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON
   python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=pinned
+  python dev.py bazel configure -DLOOM_TARGET_AMDGPU=ON
+  python dev.py bazel configure --importer-env tilelang
+  python dev.py bazel configure --importer-env mlir
+  python dev.py bazel configure --//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null --repo_env=IREE_ROCM_PATH=/opt/rocm
 
 This writes .bazelrc.configured. Published portable build options live in
-BUILDING.md. Use .bazelrc.local for checkout-specific Bazel overrides.""",
+BUILDING.md. Use .bazelrc.local for checkout-specific Bazel overrides.
+`--importer-env <name>` writes the matching Loom importer build setting
+without adding frontend packages to the base module lock.""",
             )
         return CommandHelp(
             description="Configure the CMake package/install-test build tree.",
@@ -98,13 +155,17 @@ BUILDING.md. Use .bazelrc.local for checkout-specific Bazel overrides.""",
   python dev.py cmake configure -DCMAKE_BUILD_TYPE=Debug
   python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON -DLIBHRX_BUILD=OFF
   python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
+  python dev.py cmake configure --importer-env tilelang
+  python dev.py cmake configure --importer-env mlir
   python dev.py --cmake-build-dir build/cmake-asan cmake configure -DIREE_ENABLE_ASAN=ON
 
 The first configure uses build/cmake unless --cmake-build-dir or
 IREE_CMAKE_BUILD_DIR selects another tree. The selected tree is recorded for
 later iree-cmake-build, iree-cmake-test, iree-cmake-run, iree-cmake-try, and
 iree-cmake-fuzz invocations.
-Published project build options live in BUILDING.md.""",
+Published project build options live in BUILDING.md. `--importer-env <name>`
+adds the matching `-DLOOM_IMPORT_<NAME>=ON` option and runs configure with the
+locked importer environment on PYTHONPATH.""",
         )
     if command == "build":
         if lane == "bazel":
@@ -140,7 +201,12 @@ CMake.""",
                 epilog="""Examples:
   python dev.py bazel test
   python dev.py bazel test //build_tools/devtools:cli_test
-  python dev.py bazel test //libhrx/...""",
+  python dev.py bazel test //libhrx/...
+  python dev.py bazel test --importer-env tilelang //loom/py/loom/importers/tilelang:tilelang_import_test
+  python dev.py bazel test --importer-env mlir //loom/py/loom/importers/mlir:mlir_import_test
+
+`--importer-env <name>` selects the Bazel importer config and forwards the
+locked importer site-packages path through Bazel test_env.""",
             )
         return CommandHelp(
             description="Run CTest in the configured CMake build tree.",
@@ -149,8 +215,12 @@ CMake.""",
   python dev.py cmake test
   python dev.py cmake test -R hrx
   python dev.py cmake test --rerun-failed
+  python dev.py cmake test --importer-env tilelang -R tilelang
+  python dev.py cmake test --importer-env mlir -R mlir
 
-CTest runs in the selected CMake build tree with --output-on-failure.""",
+CTest runs in the selected CMake build tree with --output-on-failure.
+`--importer-env <name>` runs CTest with the locked importer site-packages path
+on PYTHONPATH.""",
         )
     if command == "query" and lane == "bazel":
         return CommandHelp(
@@ -183,12 +253,88 @@ cquery evaluates select(), platform constraints, and configured target state."""
   python dev.py bazel info execution_root
   python dev.py bazel info bazel-bin""",
         )
+    if command == "shutdown" and lane == "bazel":
+        return CommandHelp(
+            description="Stop the Bazel server for this checkout.",
+            arguments="Native bazel shutdown options.",
+            epilog="""Examples:
+  python dev.py bazel shutdown
+
+Use this after changing host policies or startup options that Bazel and its
+child processes may have cached.""",
+        )
+    if command == "compile-commands":
+        if lane == "bazel":
+            return CommandHelp(
+                description="Generate a Bazel-backed compile_commands.json.",
+                arguments="Bazel target patterns and build options.",
+                epilog="""Examples:
+  python dev.py bazel compile-commands
+  python dev.py bazel compile-commands //runtime/src/iree/base/...
+  python dev.py bazel compile-commands --config=asan //runtime/...
+  python dev.py bazel compile-commands -o .cache/compile_commands/runtime.json //runtime/...
+
+With no explicit targets, this generates compile commands for //runtime/...,
+//libhrx/..., and //loom/.... The wrapper builds the compile-command aspect
+output group, reads the Bazel build event stream to find generated fragments,
+and merges them into one local database. The default output is
+compile_commands.json at the repository root.""",
+            )
+        return CommandHelp(
+            description="Print or copy the configured CMake compile_commands.json path.",
+            arguments="Optional -o/--output path.",
+            epilog="""Examples:
+  python dev.py cmake compile-commands
+  python dev.py cmake compile-commands -o .cache/compile_commands/cmake.json
+
+CMake writes compile_commands.json during configure. This command resolves the
+configured build directory, prints that file path by default, and copies it to
+the requested output path when -o/--output is supplied.""",
+        )
+    if command == "clang-tidy" and lane == "bazel":
+        return CommandHelp(
+            description="Run Bazel-backed clang-tidy checks.",
+            epilog="""Examples:
+  python dev.py bazel clang-tidy
+  python dev.py bazel clang-tidy --base origin/main
+  python dev.py bazel clang-tidy --all --profile ci
+  python dev.py bazel clang-tidy --fix runtime/src/iree/vm/native_module.c
+  python dev.py bazel clang-tidy runtime/src/iree/vm/native_module.c
+  python dev.py bazel clang-tidy //runtime/src/iree/vm:all
+
+With no input option, this checks local staged, unstaged, and untracked files.
+Repo-relative paths and git scopes use the presubmit clang-tidy provider, which
+maps files to owning Bazel packages. Bazel target patterns run the clang-tidy
+aspect directly. The ci profile adds Bazel --keep_going so one run reports the
+full failure set. --fix is restricted to bounded path and git scopes; it exports
+fixes through Bazel, applies them outside Bazel, then re-runs the check.""",
+        )
+    if command == "clang-tidy" and lane == "cmake":
+        return CommandHelp(
+            description="Run CMake-backed clang-tidy checks.",
+            epilog="""Examples:
+  python dev.py cmake clang-tidy
+  python dev.py cmake clang-tidy --base origin/main
+  python dev.py cmake clang-tidy --all --profile ci
+  python dev.py cmake clang-tidy --fix runtime/src/iree/vm/native_module.c
+  python dev.py cmake clang-tidy runtime/src/iree/vm/native_module.c
+  python dev.py --cmake-build-dir build/cmake-asan cmake clang-tidy runtime/src/iree/base/status.c
+
+With no input option, this checks local staged, unstaged, and untracked files.
+Repo-relative paths and git scopes use the configured CMake compile database.
+The scan materializes generated compile inputs, then runs through
+run-clang-tidy with parallelism controlled by IREE_CLANG_TIDY_JOBS. --fix
+applies fixes through run-clang-tidy, then re-runs the check. Run
+`python dev.py cmake configure` first. Select a build tree with --cmake-build-dir
+or IREE_CMAKE_BUILD_DIR.""",
+        )
     if command == "presubmit":
         return CommandHelp(
             description=f"Run CI-shaped acceptance checks for {build_system_name}.",
             epilog=f"""Examples:
   python dev.py {lane} presubmit
   python dev.py {lane} presubmit --profile paranoid
+  python dev.py {lane} presubmit --base origin/main
   python dev.py {lane} presubmit --no-project-tests
   python dev.py {lane} presubmit --verbose
 
@@ -200,6 +346,8 @@ Profiles:
 The default profile is ci. This is intentionally the expensive full-tree check
 that approximates the project test workflows a developer can run locally. Use
 --no-project-tests only for CI jobs that have separate project test workflows.
+`--base` runs the same presubmit profile on the branch diff and lets static
+analysis providers conservatively escalate when a change affects wider state.
 Use `python dev.py {lane} precommit` for local changes only.""",
         )
     if command == "precommit":
@@ -287,9 +435,10 @@ while the binary runs.""",
   python dev.py bazel try -k -e 'int main() { return 0; }'
   python dev.py bazel try -c -o build/snippet -e 'int main() { return 0; }'
 
-Temporary packages are written under .iree-bazel-try/. The tool infers common
-deps from quoted iree/..., loom/..., and loomc/... includes and accepts
-explicit --dep labels.""",
+Temporary packages are written under .iree/bazel-try/ so Bazel can address
+them as // workspace labels while .tmp/ remains hidden from Bazel package
+scans. The tool infers common deps from quoted iree/...,
+loom/..., and loomc/... includes and accepts explicit --dep labels.""",
         )
     if command == "try" and lane == "cmake":
         return CommandHelp(
@@ -303,7 +452,8 @@ explicit --dep labels.""",
   python dev.py cmake try --compile-only --output build/snippet -e 'int main() { return 0; }'
 
 This derives a temporary build tree from the configured CMake build tree and
-injects one generated CMake file into the real repository configure. Run
+injects one generated CMake file into the real repository configure. The
+temporary root defaults under .tmp/ and follows IREE_DEVTOOLS_TMP when set. Run
 iree-cmake-configure first. Quoted iree/... and hrx_... includes infer common
 deps; add --dep TARGET for anything inference misses.""",
         )
@@ -372,8 +522,12 @@ def agent_markdown(lanes: tuple[str, ...], *, command: str | None = None) -> str
 
 def command_agent_markdown(lane: str, command: str) -> str:
     if lane == "bazel":
+        if command == "compile-commands":
+            return bazel_command_agent_markdown(command)
         return with_common_wrapper_flags(bazel_command_agent_markdown(command))
     if lane == "cmake":
+        if command == "compile-commands":
+            return cmake_command_agent_markdown(command)
         return with_common_wrapper_flags(cmake_command_agent_markdown(command))
     raise ValueError(f"unknown lane: {lane}")
 
@@ -392,10 +546,10 @@ def agent_markdown_header() -> str:
     return """## Developer Commands
 
 Run from the repository root. Prefer generated wrapper aliases such as
-`iree-bazel-build` and `iree-cmake-build`; checked-in
-`build_tools/bin/iree-*-*` launchers are available for root-relative scripts and
-unconfigured shells. Long flags accept hyphen or underscore spellings, such as
-`--dry-run` and `--dry_run`. Common wrapper flags work after the wrapper name:
+`iree-bazel-build` and `iree-cmake-build`; use `python dev.py ...` for
+bootstrapping before setup has generated those aliases. Common wrapper flags
+accept hyphen or underscore spellings, such as `--dry-run` and `--dry_run`, and
+work after the wrapper name:
 `-n/--dry-run`, `-v/--verbose`, `--system`, `--venv`, `--tool-root DIR`, and
 `--cmake-build-dir DIR`. Command-specific debugging flags include
 `iree-bazel-run -p/--print-path` and `iree-bazel-try -k/--keep`. Use `--`
@@ -420,6 +574,7 @@ iree-bazel-build [targets...]
 iree-bazel-test [targets...]
 iree-bazel-query 'deps(//runtime/src/iree/base)'
 iree-bazel-cquery --output=files //runtime/src/iree/base
+python dev.py bazel compile-commands
 iree-bazel-info execution_root
 iree-bazel-dev precommit [paths...]
 iree-bazel-dev presubmit
@@ -429,7 +584,8 @@ iree-bazel-dev presubmit
 `iree-bazel-cquery` when select() resolution, platform constraints, or output
 files matter. `iree-bazel-run` executes built binaries without holding the Bazel
 lock. More specialized tools are available: `iree-bazel-try` for scratch C/C++
-builds and `iree-bazel-fuzz` for fuzzing sessions.
+builds and `iree-bazel-fuzz` for fuzzing sessions. Use
+`python dev.py bazel compile-commands` for clang tooling.
 
 Outputs: `bazel-bin/`, `bazel-testlogs/`, and `bazel-out/`."""
 
@@ -443,6 +599,8 @@ maps to `cmake --build ... --target TARGET`.
 
 ```bash
 iree-cmake-configure
+iree-cmake-configure --fresh
+iree-cmake-configure --fresh -GNinja
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF
@@ -450,6 +608,8 @@ iree-cmake-build hrx::hrx
 iree-cmake-test -R hrx
 iree-cmake-run iree::tools::iree-run-module -- --help
 iree-cmake-fuzz iree::tokenizer::special_tokens_fuzz -- -max_total_time=60
+python dev.py cmake compile-commands
+python dev.py cmake clang-tidy
 iree-cmake-dev precommit
 iree-cmake-dev presubmit
 ```
@@ -459,7 +619,9 @@ affected project CMake/CTest checks. `iree-cmake-dev presubmit` is the
 full-tree CI-shaped check. `iree-cmake-run` resolves an already-built
 executable and does not build implicitly. `iree-cmake-try` builds temporary
 C/C++ snippets against the configured tree. `iree-cmake-fuzz` builds and execs
-a configured libFuzzer target."""
+a configured libFuzzer target. `python dev.py cmake compile-commands` prints
+the configured compile database path for clang tooling. `python dev.py cmake
+clang-tidy` runs IREE clang-tidy checks against that compile database."""
 
 
 def bazel_command_agent_markdown(command: str) -> str:
@@ -557,6 +719,48 @@ iree-bazel-info bazel-bin
 Use this instead of guessing output roots when debugging generated files,
 execution roots, or wrapper-resolved binary paths."""
 
+    if command == "compile-commands":
+        return """## python dev.py bazel compile-commands
+
+Generate a `compile_commands.json` from the configured Bazel graph. This is the
+entry point for clangd, clang-tidy, and other compile-database consumers that
+need Bazel's actual configured C/C++ flags.
+
+```bash
+python dev.py bazel compile-commands
+python dev.py bazel compile-commands //runtime/src/iree/base/...
+python dev.py bazel compile-commands --config=asan //runtime/...
+python dev.py bazel compile-commands -o .cache/compile_commands/runtime.json //runtime/...
+```
+
+With no explicit targets, this covers `//runtime/...`, `//libhrx/...`, and
+`//loom/...`. The wrapper builds the compile-command aspect output group, reads
+the Bazel build event stream to find generated fragments, and merges them into
+the requested output path. Use `-k/--keep` to inspect the captured build event
+stream."""
+
+    if command == "clang-tidy":
+        return """## python dev.py bazel clang-tidy
+
+Run Bazel-backed clang-tidy checks from the repository root. Use git scopes or
+repo-relative paths while iterating, and explicit Bazel targets when you want to
+exercise one package or subtree directly.
+
+```bash
+python dev.py bazel clang-tidy
+python dev.py bazel clang-tidy --base origin/main
+python dev.py bazel clang-tidy --all --profile ci
+python dev.py bazel clang-tidy --fix runtime/src/iree/vm/native_module.c
+python dev.py bazel clang-tidy runtime/src/iree/vm/native_module.c
+python dev.py bazel clang-tidy //runtime/src/iree/vm:all
+```
+
+Git scopes and repo-relative paths route through the presubmit provider so the
+tool can map files to owning Bazel packages. Explicit Bazel targets run the
+clang-tidy aspect directly. The ci profile uses Bazel `--keep_going`.
+`--fix` is restricted to bounded path and git scopes; it exports replacements
+through Bazel, applies them outside Bazel, then re-runs the normal check."""
+
     if command == "run":
         return """## iree-bazel-run
 
@@ -580,9 +784,11 @@ it."""
         return """## iree-bazel-try
 
 Use `iree-bazel-try` for one-shot C/C++ probes without creating a permanent
-BUILD target. It writes a temporary package under `.iree-bazel-try/`, builds it
-with Bazel, then execs the snippet unless `--compile-only` is used. The scratch
-package is removed by default.
+BUILD target. It writes a temporary package under `.iree/bazel-try/` so the
+snippet has a valid Bazel workspace label while `.tmp/` remains hidden from
+Bazel package scans. The tool builds the snippet with Bazel, then execs the
+snippet unless `--compile-only` is used. The scratch package is removed by
+default.
 
 ```bash
 iree-bazel-try -e 'int main() { return 0; }'
@@ -620,6 +826,42 @@ Corpus and artifact directories live under
 
 
 def cmake_command_agent_markdown(command: str) -> str:
+    if command == "compile-commands":
+        return """## python dev.py cmake compile-commands
+
+Print or copy the configured CMake `compile_commands.json`.
+
+```bash
+python dev.py cmake configure
+python dev.py cmake compile-commands
+python dev.py cmake compile-commands -o .cache/compile_commands/cmake.json
+```
+
+CMake writes the compile database during configure. This command resolves the
+recorded build directory, prints the compile database path by default, and
+copies it when `-o/--output` is supplied."""
+
+    if command == "clang-tidy":
+        return """## python dev.py cmake clang-tidy
+
+Run CMake-backed clang-tidy checks from the repository root.
+
+```bash
+python dev.py cmake configure
+python dev.py cmake clang-tidy
+python dev.py cmake clang-tidy --base origin/main
+python dev.py cmake clang-tidy --fix runtime/src/iree/base/status.c
+python dev.py cmake clang-tidy runtime/src/iree/base/status.c
+python dev.py --cmake-build-dir build/cmake-asan cmake clang-tidy runtime/src/iree/base/status.c
+```
+
+The command builds the IREE clang-tidy plugin with CMake, materializes generated
+compile inputs, and runs `run-clang-tidy` against source files using the
+configured CMake `compile_commands.json`. The scan uses parallelism controlled
+by `IREE_CLANG_TIDY_JOBS`. `--fix` applies fixes through `run-clang-tidy`, then
+re-runs the normal check. Select the CMake build tree with `--cmake-build-dir`
+or `IREE_CMAKE_BUILD_DIR`."""
+
     if command == "configure":
         return """## iree-cmake-configure
 
@@ -634,7 +876,10 @@ iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF
 
 The first configure uses `build/cmake` unless `--cmake-build-dir` or
 `IREE_CMAKE_BUILD_DIR` selects another tree. The selected tree is recorded for
-later CMake wrappers."""
+later CMake wrappers. `--fresh` preserves the configured generator unless `-G`
+selects another one. Switching generators removes the complete build tree first
+so nested CMake and FetchContent subbuilds cannot retain mixed generator state.
+Recursive cleanup is limited to build trees owned by this checkout."""
 
     if command == "build":
         return """## iree-cmake-build
@@ -686,10 +931,10 @@ without running it."""
         return """## iree-cmake-try
 
 Use `iree-cmake-try` for one-shot C/C++ probes against the configured CMake
-tree. It creates a temporary build under `.iree-cmake-try/`, copies the existing
-cache configuration, injects one generated CMake file into the real repository
-configure, builds the snippet target, then runs it unless `--compile-only` is
-used.
+tree. It creates a temporary build under `.tmp/iree-cmake-try/` by default,
+copies the existing cache configuration, injects one generated CMake file into
+the real repository configure, builds the snippet target, then runs it unless
+`--compile-only` is used. Set `IREE_DEVTOOLS_TMP` to redirect the scratch root.
 
 ```bash
 iree-cmake-configure

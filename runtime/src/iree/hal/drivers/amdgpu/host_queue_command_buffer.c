@@ -88,10 +88,10 @@ iree_status_t iree_hal_amdgpu_host_queue_create_binding_table_resource_set(
 
 static void iree_hal_amdgpu_host_queue_retire_pm4_publication_reference(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
-    iree_status_t status) {
+    const iree_status_t status) {
   (void)entry;
   iree_hal_amdgpu_pm4_command_buffer_retire_publication_reference(
-      (iree_hal_command_buffer_t*)user_data, status);
+      (iree_hal_command_buffer_t*)user_data, iree_status_code(status));
 }
 
 static iree_hal_amdgpu_reclaim_action_t
@@ -180,7 +180,8 @@ iree_hal_amdgpu_host_queue_should_profile_all_pm4_command_buffer_dispatches(
   const uint32_t physical_device_ordinal = queue->device_ordinal <= UINT32_MAX
                                                ? (uint32_t)queue->device_ordinal
                                                : UINT32_MAX;
-  const uint32_t queue_ordinal = iree_async_axis_queue_index(queue->axis);
+  const uint32_t queue_ordinal =
+      iree_hal_amdgpu_host_queue_profile_queue_ordinal(queue);
   return iree_hal_profile_capture_filter_matches_location(
       filter, command_buffer_id, /*command_index=*/0, physical_device_ordinal,
       queue_ordinal);
@@ -193,7 +194,8 @@ iree_hal_amdgpu_host_queue_should_profile_pm4_command_buffer_dispatch(
   const uint32_t physical_device_ordinal = queue->device_ordinal <= UINT32_MAX
                                                ? (uint32_t)queue->device_ordinal
                                                : UINT32_MAX;
-  const uint32_t queue_ordinal = iree_async_axis_queue_index(queue->axis);
+  const uint32_t queue_ordinal =
+      iree_hal_amdgpu_host_queue_profile_queue_ordinal(queue);
   iree_hal_amdgpu_logical_device_t* logical_device =
       (iree_hal_amdgpu_logical_device_t*)queue->logical_device;
   return iree_hal_amdgpu_logical_device_should_profile_dispatch(

@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amdgpu/util/hsaco_metadata.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 //===----------------------------------------------------------------------===//
@@ -36,15 +37,15 @@
 #define IREE_HAL_AMDGPU_ELF64_SYMBOL_SIZE 24
 
 static uint16_t iree_hal_amdgpu_hsaco_metadata_load_le_u16(const uint8_t* ptr) {
-  return iree_unaligned_load_le((const uint16_t*)ptr);
+  return iree_unaligned_load_le_u16(ptr);
 }
 
 static uint32_t iree_hal_amdgpu_hsaco_metadata_load_le_u32(const uint8_t* ptr) {
-  return iree_unaligned_load_le((const uint32_t*)ptr);
+  return iree_unaligned_load_le_u32(ptr);
 }
 
 static uint64_t iree_hal_amdgpu_hsaco_metadata_load_le_u64(const uint8_t* ptr) {
-  return iree_unaligned_load_le((const uint64_t*)ptr);
+  return iree_unaligned_load_le_u64(ptr);
 }
 
 static bool iree_hal_amdgpu_hsaco_metadata_range_in_bounds(
@@ -630,6 +631,7 @@ typedef struct iree_hal_amdgpu_hsaco_metadata_kernel_fields_t {
   bool has_group_segment_fixed_size;
   bool has_private_segment_fixed_size;
   bool has_required_workgroup_size;
+  bool has_workgroup_cluster_size;
   bool has_args;
 } iree_hal_amdgpu_hsaco_metadata_kernel_fields_t;
 
@@ -779,6 +781,37 @@ static iree_status_t iree_hal_amdgpu_hsaco_metadata_parse_workgroup_size(
   for (iree_host_size_t i = 0; i < 3; ++i) {
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_msgpack_read_uint32(reader, &out_value[i]));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+iree_hal_amdgpu_hsaco_metadata_parse_workgroup_cluster_size(
+    iree_hal_amdgpu_msgpack_reader_t* reader, uint8_t out_value[3]) {
+  uint32_t value_count = 0;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_msgpack_read_array_count(reader, &value_count));
+  if (value_count != 3) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU cluster dimensions metadata must have "
+                            "three elements");
+  }
+  uint32_t dimensions[3] = {0};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(dimensions); ++i) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_msgpack_read_uint32(reader, &dimensions[i]));
+    if (dimensions[i] == 0 || dimensions[i] > UINT8_MAX) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "AMDGPU cluster dimension %" PRIhsz
+                              " must be a positive u8 value; got %" PRIu32,
+                              i, dimensions[i]);
+    }
+    out_value[i] = (uint8_t)dimensions[i];
+  }
+  if (dimensions[0] == 1 && dimensions[1] == 1 && dimensions[2] == 1) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU metadata must omit the trivial 1x1x1 cluster shape");
   }
   return iree_ok_status();
 }
@@ -1002,6 +1035,15 @@ static iree_status_t iree_hal_amdgpu_hsaco_metadata_parse_kernel(
           reader, out_kernel->required_workgroup_size));
       out_kernel->has_required_workgroup_size = true;
       fields.has_required_workgroup_size = true;
+    } else if (iree_string_view_equal(key, IREE_SV(".cluster_dims"))) {
+      if (fields.has_workgroup_cluster_size) {
+        return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);
+      }
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_hsaco_metadata_parse_workgroup_cluster_size(
+              reader, out_kernel->workgroup_cluster_size));
+      out_kernel->has_workgroup_cluster_size = true;
+      fields.has_workgroup_cluster_size = true;
     } else if (iree_string_view_equal(key, IREE_SV(".args"))) {
       if (fields.has_args) {
         return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);
@@ -1604,350 +1646,6 @@ void iree_hal_amdgpu_hsaco_metadata_deinitialize(
   }
   memset(metadata, 0, sizeof(*metadata));
   IREE_TRACE_ZONE_END(z0);
-}
-
-static bool iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(
-    iree_hal_amdgpu_hsaco_metadata_arg_kind_t kind) {
-  return kind == IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN ||
-         kind == IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN_NONE;
-}
-
-static iree_status_t iree_hal_amdgpu_hsaco_metadata_add_parameter_name_size(
-    const iree_hal_amdgpu_hsaco_metadata_arg_t* arg,
-    iree_host_size_t* inout_name_storage_size) {
-  if (!iree_host_size_checked_add(*inout_name_storage_size, arg->name.size,
-                                  inout_name_storage_size)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU metadata reflected parameter name storage overflow");
-  }
-  return iree_ok_status();
-}
-
-iree_status_t
-iree_hal_amdgpu_hsaco_metadata_calculate_flatbuffer_hal_export_parameter_requirements(
-    const iree_hal_amdgpu_hsaco_metadata_kernel_t* kernel,
-    iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t*
-        out_requirements) {
-  IREE_ASSERT_ARGUMENT(kernel);
-  IREE_ASSERT_ARGUMENT(out_requirements);
-  memset(out_requirements, 0, sizeof(*out_requirements));
-
-  iree_host_size_t parameter_count = 0;
-  iree_host_size_t binding_count = 0;
-  iree_host_size_t constant_byte_count = 0;
-  iree_host_size_t name_storage_size = 0;
-  for (iree_host_size_t i = 0; i < kernel->arg_count; ++i) {
-    const iree_hal_amdgpu_hsaco_metadata_arg_t* arg = &kernel->args[i];
-    if (iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(arg->kind)) {
-      continue;
-    }
-    switch (arg->kind) {
-      case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_GLOBAL_BUFFER:
-        if (arg->size != sizeof(uint64_t)) {
-          return iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "AMDGPU kernel `%.*s` global_buffer argument %" PRIhsz
-              " has unsupported size %u",
-              (int)kernel->symbol_name.size, kernel->symbol_name.data, i,
-              arg->size);
-        }
-        ++parameter_count;
-        ++binding_count;
-        IREE_RETURN_IF_ERROR(
-            iree_hal_amdgpu_hsaco_metadata_add_parameter_name_size(
-                arg, &name_storage_size));
-        break;
-      case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_BY_VALUE: {
-        if (arg->size % sizeof(uint32_t) != 0) {
-          return iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "AMDGPU kernel `%.*s` by_value argument %" PRIhsz
-              " size %u is not a whole number of HAL constants",
-              (int)kernel->symbol_name.size, kernel->symbol_name.data, i,
-              arg->size);
-        }
-        if (arg->size > UINT16_MAX) {
-          return iree_make_status(
-              IREE_STATUS_OUT_OF_RANGE,
-              "AMDGPU kernel `%.*s` by_value argument %" PRIhsz
-              " size %u exceeds HAL parameter size range",
-              (int)kernel->symbol_name.size, kernel->symbol_name.data, i,
-              arg->size);
-        }
-        ++parameter_count;
-        if (!iree_host_size_checked_add(constant_byte_count, arg->size,
-                                        &constant_byte_count)) {
-          return iree_make_status(
-              IREE_STATUS_OUT_OF_RANGE,
-              "AMDGPU metadata reflected constant byte count overflow");
-        }
-        IREE_RETURN_IF_ERROR(
-            iree_hal_amdgpu_hsaco_metadata_add_parameter_name_size(
-                arg, &name_storage_size));
-        break;
-      }
-      default:
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AMDGPU kernel `%.*s` argument %" PRIhsz
-            " uses unsupported reflected value_kind `%.*s`",
-            (int)kernel->symbol_name.size, kernel->symbol_name.data, i,
-            (int)arg->value_kind.size, arg->value_kind.data);
-    }
-  }
-
-  if (constant_byte_count > UINT16_MAX) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU metadata reflected constant byte count exceeds HAL range");
-  }
-  const iree_host_size_t constant_count =
-      constant_byte_count / sizeof(uint32_t);
-  if (parameter_count > UINT16_MAX || binding_count > UINT16_MAX ||
-      constant_count > UINT16_MAX) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU metadata reflected parameter counts exceed HAL ranges");
-  }
-
-  out_requirements->parameter_count = (uint16_t)parameter_count;
-  out_requirements->constant_count = (uint16_t)constant_count;
-  out_requirements->binding_count = (uint16_t)binding_count;
-  out_requirements->name_storage_size = name_storage_size;
-  return iree_ok_status();
-}
-
-iree_status_t
-iree_hal_amdgpu_hsaco_metadata_populate_flatbuffer_hal_export_parameters(
-    const iree_hal_amdgpu_hsaco_metadata_kernel_t* kernel,
-    iree_host_size_t parameter_capacity,
-    iree_hal_executable_function_parameter_t* out_parameters,
-    iree_host_size_t name_storage_capacity, char* name_storage) {
-  IREE_ASSERT_ARGUMENT(kernel);
-  IREE_ASSERT_ARGUMENT(out_parameters || parameter_capacity == 0);
-  IREE_ASSERT_ARGUMENT(name_storage || name_storage_capacity == 0);
-
-  iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t requirements;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_hsaco_metadata_calculate_flatbuffer_hal_export_parameter_requirements(
-          kernel, &requirements));
-  if (parameter_capacity < requirements.parameter_count ||
-      name_storage_capacity < requirements.name_storage_size) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "AMDGPU metadata export parameter output capacity too small");
-  }
-  if ((requirements.parameter_count != 0 && !out_parameters) ||
-      (requirements.name_storage_size != 0 && !name_storage)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU metadata export parameter output storage is null");
-  }
-
-  iree_host_size_t parameter_index = 0;
-  uint16_t binding_ordinal = 0;
-  uint16_t constant_offset = 0;
-  iree_host_size_t name_storage_offset = 0;
-  for (iree_host_size_t i = 0; i < kernel->arg_count; ++i) {
-    const iree_hal_amdgpu_hsaco_metadata_arg_t* arg = &kernel->args[i];
-    if (iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(arg->kind)) {
-      continue;
-    }
-
-    iree_hal_executable_function_parameter_t* parameter =
-        &out_parameters[parameter_index++];
-    memset(parameter, 0, sizeof(*parameter));
-    parameter->flags = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NONE;
-    parameter->size = (uint16_t)arg->size;
-    if (!iree_string_view_is_empty(arg->name)) {
-      memcpy(name_storage + name_storage_offset, arg->name.data,
-             arg->name.size);
-      parameter->name = iree_make_string_view(
-          name_storage + name_storage_offset, arg->name.size);
-      name_storage_offset += arg->name.size;
-    } else {
-      parameter->name = iree_string_view_empty();
-    }
-
-    switch (arg->kind) {
-      case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_GLOBAL_BUFFER:
-        parameter->type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING;
-        parameter->offset = binding_ordinal++;
-        break;
-      case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_BY_VALUE:
-        parameter->type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT;
-        parameter->offset = constant_offset;
-        constant_offset = (uint16_t)(constant_offset + arg->size);
-        break;
-      default:
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AMDGPU kernel `%.*s` argument %" PRIhsz
-            " uses unsupported reflected value_kind `%.*s`",
-            (int)kernel->symbol_name.size, kernel->symbol_name.data, i,
-            (int)arg->value_kind.size, arg->value_kind.data);
-    }
-  }
-  return iree_ok_status();
-}
-
-iree_status_t
-iree_hal_amdgpu_hsaco_metadata_calculate_native_kernarg_export_parameter_requirements(
-    const iree_hal_amdgpu_hsaco_metadata_kernel_t* kernel,
-    iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t*
-        out_requirements) {
-  IREE_ASSERT_ARGUMENT(kernel);
-  IREE_ASSERT_ARGUMENT(out_requirements);
-  memset(out_requirements, 0, sizeof(*out_requirements));
-
-  iree_host_size_t parameter_count = 0;
-  iree_host_size_t binding_count = 0;
-  iree_host_size_t name_storage_size = 0;
-  for (iree_host_size_t i = 0; i < kernel->arg_count; ++i) {
-    const iree_hal_amdgpu_hsaco_metadata_arg_t* arg = &kernel->args[i];
-    if (iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(arg->kind)) {
-      continue;
-    }
-    if (arg->offset > UINT16_MAX) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU kernel `%.*s` argument %" PRIhsz
-          " kernarg offset exceeds HAL parameter offset range",
-          (int)kernel->symbol_name.size, kernel->symbol_name.data, i);
-    }
-    switch (arg->kind) {
-      case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_GLOBAL_BUFFER:
-        if (arg->size != sizeof(uint64_t)) {
-          return iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "AMDGPU kernel `%.*s` global_buffer argument %" PRIhsz
-              " has unsupported size %u",
-              (int)kernel->symbol_name.size, kernel->symbol_name.data, i,
-              arg->size);
-        }
-        ++parameter_count;
-        ++binding_count;
-        IREE_RETURN_IF_ERROR(
-            iree_hal_amdgpu_hsaco_metadata_add_parameter_name_size(
-                arg, &name_storage_size));
-        break;
-      case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_BY_VALUE:
-        if (arg->size > UINT16_MAX) {
-          return iree_make_status(
-              IREE_STATUS_OUT_OF_RANGE,
-              "AMDGPU kernel `%.*s` by_value argument %" PRIhsz
-              " size %u exceeds HAL parameter size range",
-              (int)kernel->symbol_name.size, kernel->symbol_name.data, i,
-              arg->size);
-        }
-        ++parameter_count;
-        IREE_RETURN_IF_ERROR(
-            iree_hal_amdgpu_hsaco_metadata_add_parameter_name_size(
-                arg, &name_storage_size));
-        break;
-      default:
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AMDGPU kernel `%.*s` argument %" PRIhsz
-            " uses unsupported reflected value_kind `%.*s`",
-            (int)kernel->symbol_name.size, kernel->symbol_name.data, i,
-            (int)arg->value_kind.size, arg->value_kind.data);
-    }
-  }
-
-  iree_host_size_t aligned_constant_byte_count = 0;
-  if (!iree_host_size_checked_align(kernel->kernarg_segment_size,
-                                    sizeof(uint32_t),
-                                    &aligned_constant_byte_count)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU metadata kernarg segment size alignment overflow");
-  }
-  const iree_host_size_t constant_count =
-      aligned_constant_byte_count / sizeof(uint32_t);
-  if (parameter_count > UINT16_MAX || binding_count > UINT16_MAX ||
-      constant_count > UINT16_MAX) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU metadata reflected parameter counts exceed HAL ranges");
-  }
-
-  out_requirements->parameter_count = (uint16_t)parameter_count;
-  out_requirements->constant_count = (uint16_t)constant_count;
-  out_requirements->binding_count = (uint16_t)binding_count;
-  out_requirements->name_storage_size = name_storage_size;
-  return iree_ok_status();
-}
-
-iree_status_t
-iree_hal_amdgpu_hsaco_metadata_populate_native_kernarg_export_parameters(
-    const iree_hal_amdgpu_hsaco_metadata_kernel_t* kernel,
-    iree_host_size_t parameter_capacity,
-    iree_hal_executable_function_parameter_t* out_parameters,
-    iree_host_size_t name_storage_capacity, char* name_storage) {
-  IREE_ASSERT_ARGUMENT(kernel);
-  IREE_ASSERT_ARGUMENT(out_parameters || parameter_capacity == 0);
-  IREE_ASSERT_ARGUMENT(name_storage || name_storage_capacity == 0);
-
-  iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t requirements;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_hsaco_metadata_calculate_native_kernarg_export_parameter_requirements(
-          kernel, &requirements));
-  if (parameter_capacity < requirements.parameter_count ||
-      name_storage_capacity < requirements.name_storage_size) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "AMDGPU metadata export parameter output capacity too small");
-  }
-  if ((requirements.parameter_count != 0 && !out_parameters) ||
-      (requirements.name_storage_size != 0 && !name_storage)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU metadata export parameter output storage is null");
-  }
-
-  iree_host_size_t parameter_index = 0;
-  iree_host_size_t name_storage_offset = 0;
-  for (iree_host_size_t i = 0; i < kernel->arg_count; ++i) {
-    const iree_hal_amdgpu_hsaco_metadata_arg_t* arg = &kernel->args[i];
-    if (iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(arg->kind)) {
-      continue;
-    }
-
-    iree_hal_executable_function_parameter_t* parameter =
-        &out_parameters[parameter_index++];
-    memset(parameter, 0, sizeof(*parameter));
-    parameter->flags = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NONE;
-    parameter->size = (uint16_t)arg->size;
-    parameter->offset = (uint16_t)arg->offset;
-    if (!iree_string_view_is_empty(arg->name)) {
-      memcpy(name_storage + name_storage_offset, arg->name.data,
-             arg->name.size);
-      parameter->name = iree_make_string_view(
-          name_storage + name_storage_offset, arg->name.size);
-      name_storage_offset += arg->name.size;
-    } else {
-      parameter->name = iree_string_view_empty();
-    }
-
-    switch (arg->kind) {
-      case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_GLOBAL_BUFFER:
-        parameter->type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING;
-        break;
-      case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_BY_VALUE:
-        parameter->type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT;
-        break;
-      default:
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AMDGPU kernel `%.*s` argument %" PRIhsz
-            " uses unsupported reflected value_kind `%.*s`",
-            (int)kernel->symbol_name.size, kernel->symbol_name.data, i,
-            (int)arg->value_kind.size, arg->value_kind.data);
-    }
-  }
-  return iree_ok_status();
 }
 
 iree_status_t iree_hal_amdgpu_hsaco_metadata_find_kernel_by_symbol(

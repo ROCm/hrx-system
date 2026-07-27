@@ -32,6 +32,7 @@ iree_cc_library(
     iree::base::threading
     iree::hal
     iree::hal::local
+    iree::hal::local::device_spec_builder
     iree::hal::local::executable_environment
     iree::hal::local::inline_dispatch
     iree::hal::local::profile

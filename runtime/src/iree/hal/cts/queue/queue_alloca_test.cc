@@ -64,7 +64,7 @@ class QueueAllocaTest : public CtsTestBase<> {
           IREE_STATUS_FAILED_PRECONDITION,
           "queue pool backend query returned an incomplete backend bundle");
     }
-    iree_hal_passthrough_pool_options_t options = {0};
+    iree_hal_passthrough_pool_options_t options = {};
     return iree_hal_passthrough_pool_create(options, backend.slab_provider,
                                             backend.notification,
                                             iree_allocator_system(), out_pool);
@@ -409,6 +409,8 @@ TEST_P(QueueAllocaTest, ExplicitFixedBlockPoolCrossQueueWaitFrontier) {
 // between the releasing dealloca and the next alloca. Depending on scheduling,
 // the dealloca may still be in flight or may have already published its death
 // frontier; both cases must leave the second allocation usable.
+// The initial host wait establishes queue 0 as the sole block owner before the
+// deallocation/reallocation race begins.
 TEST_P(QueueAllocaTest, ExplicitFixedBlockPoolPendingDeallocaWaitFrontier) {
   IREE_TRACE_SCOPE();
 
@@ -435,6 +437,9 @@ TEST_P(QueueAllocaTest, ExplicitFixedBlockPoolPendingDeallocaWaitFrontier) {
       queue0_params, allocation_size, IREE_HAL_ALLOCA_FLAG_NONE,
       queue0_buffer.out()));
   ASSERT_NE(queue0_buffer.get(), nullptr);
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(queue0_alloca_signal,
+                                              iree_infinite_timeout(),
+                                              IREE_ASYNC_WAIT_FLAG_NONE));
 
   SemaphoreList queue0_dealloca_signal(device_, {0}, {1});
   IREE_ASSERT_OK(iree_hal_device_queue_dealloca(

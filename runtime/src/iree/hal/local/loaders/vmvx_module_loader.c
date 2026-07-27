@@ -124,7 +124,7 @@ typedef struct iree_hal_vmvx_worker_state_t {
 static iree_status_t iree_hal_vmvx_worker_state_initialize(
     iree_vm_instance_t* instance, iree_host_size_t module_count,
     iree_vm_module_t** modules, iree_vm_module_t* bytecode_module,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* executable_params,
     iree_allocator_t host_allocator, iree_hal_vmvx_worker_state_t* out_state) {
   IREE_ASSERT_ARGUMENT(out_state);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -165,10 +165,8 @@ static void iree_hal_vmvx_worker_state_deinitialize(
     iree_hal_vmvx_worker_state_t* state) {
   IREE_ASSERT_ARGUMENT(state);
   IREE_TRACE_ZONE_BEGIN(z0);
-  if (state->context) {
-    iree_vm_context_release(state->context);
-    state->context = NULL;
-  }
+  iree_vm_context_release(state->context);
+  state->context = NULL;
   IREE_TRACE_ZONE_END(z0);
 }
 
@@ -217,7 +215,7 @@ static iree_status_t iree_hal_vmvx_executable_create(
     iree_vm_instance_t* instance, iree_host_size_t module_count,
     iree_vm_module_t** modules, iree_vm_module_t* bytecode_module,
     iree_host_size_t worker_capacity,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* executable_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(instance);
   IREE_ASSERT_ARGUMENT(bytecode_module);
@@ -311,7 +309,8 @@ static iree_status_t iree_hal_vmvx_executable_create(
       if (!iree_string_view_is_empty(constant_count_str)) {
         iree_string_view_atoi_uint32(constant_count_str, &constant_count);
       }
-      dispatch_attrs[i].constant_count = (uint8_t)constant_count;
+      dispatch_attrs[i].constant_byte_length =
+          constant_count * sizeof(uint32_t);
 
       iree_string_view_t binding_count_str =
           iree_vm_function_lookup_attr_by_name(
@@ -432,9 +431,7 @@ static iree_status_t iree_hal_vmvx_executable_issue_call(
                             dispatch_state->binding_lengths[i]),
         iree_allocator_null(), binding_buffer);
     iree_vm_ref_t ref = {0};
-    status =
-        iree_vm_ref_wrap_assign(binding_buffer, iree_vm_buffer_type(), &ref);
-    if (!iree_status_is_ok(status)) break;
+    iree_vm_ref_wrap_assign(binding_buffer, iree_vm_buffer_type(), &ref);
     status = iree_vm_list_push_ref_retain(binding_list, &ref);
     if (!iree_status_is_ok(status)) break;
   }
@@ -455,8 +452,8 @@ static iree_status_t iree_hal_vmvx_executable_issue_call(
   iree_vm_buffer_t constants_buffer;
   iree_vm_buffer_initialize(
       IREE_VM_BUFFER_ACCESS_ORIGIN_HOST,
-      iree_make_byte_span((void*)dispatch_state->constants,
-                          sizeof(uint32_t) * dispatch_state->constant_count),
+      iree_make_byte_span((void*)dispatch_state->constants.data,
+                          dispatch_state->constants.data_length),
       iree_allocator_null(), &constants_buffer);
 
   // Prepare call argument buffer. We've verified the signature on creation and
@@ -591,7 +588,7 @@ static iree_status_t iree_hal_vmvx_executable_export_info(
           IREE_HAL_EXECUTABLE_DISPATCH_FLAG_V0_WORKGROUP_SIZE_DYNAMIC)) {
     out_info->flags |= IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC;
   }
-  out_info->constant_count = dispatch_attrs->constant_count;
+  out_info->constant_byte_length = dispatch_attrs->constant_byte_length;
   out_info->binding_count = dispatch_attrs->binding_count;
   out_info->parameter_count = dispatch_attrs->parameter_count;
   out_info->workgroup_size[0] = dispatch_attrs->workgroup_size_x;
@@ -644,15 +641,35 @@ static iree_status_t iree_hal_vmvx_executable_lookup_export_by_name(
       (int)name.size, name.data);
 }
 
-static iree_status_t iree_hal_vmvx_executable_lookup_global_by_name(
+static iree_status_t iree_hal_vmvx_executable_try_lookup_global_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+    bool* out_found, iree_hal_executable_global_t* out_global) {
   (void)base_executable;
   (void)name;
+  *out_found = false;
+  *out_global = iree_hal_executable_global_invalid();
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_vmvx_executable_global_info(
+    iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
+    iree_hal_executable_global_info_t* out_info) {
+  (void)base_executable;
+  (void)global;
+  memset(out_info, 0, sizeof(*out_info));
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "invalid VMVX executable global");
+}
+
+static iree_status_t iree_hal_vmvx_executable_global_buffer(
+    iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
+    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+  (void)base_executable;
+  (void)global;
   (void)queue_affinity;
   *out_buffer = NULL;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "VMVX executable global lookup not implemented");
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "invalid VMVX executable global");
 }
 
 static const iree_hal_local_executable_vtable_t
@@ -666,8 +683,10 @@ static const iree_hal_local_executable_vtable_t
                     iree_hal_vmvx_executable_export_parameters,
                 .lookup_function_by_name =
                     iree_hal_vmvx_executable_lookup_export_by_name,
-                .lookup_global_by_name =
-                    iree_hal_vmvx_executable_lookup_global_by_name,
+                .try_lookup_global_by_name =
+                    iree_hal_vmvx_executable_try_lookup_global_by_name,
+                .global_info = iree_hal_vmvx_executable_global_info,
+                .global_buffer = iree_hal_vmvx_executable_global_buffer,
             },
         .issue_call = iree_hal_vmvx_executable_issue_call,
 };
@@ -774,40 +793,51 @@ static void iree_hal_vmvx_module_loader_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
-static iree_status_t iree_hal_vmvx_module_loader_infer_format(
+static bool iree_hal_vmvx_module_loader_query_target_support(
     iree_hal_executable_loader_t* base_executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size) {
-  // Infer the total size of the bytecode archive, if needed.
-  if (executable_data.data_length == 0) {
-    IREE_RETURN_IF_ERROR(iree_vm_bytecode_archive_infer_size(
-        executable_data, out_inferred_size));
-  }
-
-  // Write the format string.
-  iree_string_view_t format = IREE_SV("vmvx-bytecode-fb");
-  if (format.size >= executable_format_capacity) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "executable format buffer too small");
-  }
-  memcpy(executable_format, format.data, format.size + /*NUL*/ 1);
-
-  return iree_ok_status();
+    const iree_hal_executable_target_t* target) {
+  return iree_string_view_equal(target->family, IREE_SV("ireevm")) &&
+         iree_string_view_equal(target->target_key, IREE_SV("bytecode"));
 }
 
-static bool iree_hal_vmvx_module_loader_query_support(
+static void iree_hal_vmvx_module_loader_query_spec(
     iree_hal_executable_loader_t* base_executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_string_view_t executable_format) {
-  return iree_string_view_equal(executable_format,
-                                iree_make_cstring_view("vmvx-bytecode-fb"));
+    iree_hal_device_executable_spec_t* out_executable_spec) {
+  static const iree_hal_executable_target_t target = {
+      .family = IREE_SVL("ireevm"),
+      .target_key = IREE_SVL("bytecode"),
+      .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_VIRTUAL,
+      .priority = 100,
+      .physical_device_affinity = 1ull,
+      .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+  };
+  *out_executable_spec = (iree_hal_device_executable_spec_t){
+      .target_count = 1,
+      .targets = &target,
+      .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
+  };
 }
 
-static iree_status_t iree_hal_vmvx_module_loader_try_load(
+static bool iree_hal_vmvx_module_loader_claims_executable(
     iree_hal_executable_loader_t* base_executable_loader,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params) {
+  static const uint8_t zip_magic[] = {'P', 'K', 0x03, 0x04};
+  static const uint8_t module_identifier[] = {'I', 'R', 'E', 'E'};
+  const iree_const_byte_span_t executable_data = load_params->executable_data;
+  if (executable_data.data_length >= sizeof(zip_magic) &&
+      memcmp(executable_data.data, zip_magic, sizeof(zip_magic)) == 0) {
+    return true;
+  }
+  return executable_data.data_length >= 8 + sizeof(module_identifier) &&
+         memcmp(executable_data.data + 8, module_identifier,
+                sizeof(module_identifier)) == 0;
+}
+
+static iree_status_t iree_hal_vmvx_module_loader_load(
+    iree_hal_executable_loader_t* base_executable_loader,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* executable_params,
     iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable) {
   iree_hal_vmvx_module_loader_t* executable_loader =
       (iree_hal_vmvx_module_loader_t*)base_executable_loader;
@@ -866,7 +896,9 @@ static iree_status_t iree_hal_vmvx_module_loader_try_load(
 static const iree_hal_executable_loader_vtable_t
     iree_hal_vmvx_module_loader_vtable = {
         .destroy = iree_hal_vmvx_module_loader_destroy,
-        .infer_format = iree_hal_vmvx_module_loader_infer_format,
-        .query_support = iree_hal_vmvx_module_loader_query_support,
-        .try_load = iree_hal_vmvx_module_loader_try_load,
+        .query_target_support =
+            iree_hal_vmvx_module_loader_query_target_support,
+        .query_spec = iree_hal_vmvx_module_loader_query_spec,
+        .claims_executable = iree_hal_vmvx_module_loader_claims_executable,
+        .load = iree_hal_vmvx_module_loader_load,
 };

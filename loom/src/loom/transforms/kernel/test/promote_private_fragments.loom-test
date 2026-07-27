@@ -1,0 +1,598 @@
+// RUN: pass promote-private-fragments,dce
+
+func.def @promote_static_fragment_load(%input: buffer, %output: buffer) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %fragment_bytes = index.constant 16 : offset
+  %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 4, memory_space = private} : buffer
+  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %start = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%start to %end step %step] {
+    %copy = view.load %input_view[%lane] : view<4xf32, #dense> -> f32
+    view.store %copy, %fragment[%lane] : f32, view<4xf32, #dense>
+  }
+  %selected = view.load %fragment[2] : view<4xf32, #dense> -> f32
+  view.store %selected, %output_view[2] : f32, view<4xf32, #dense>
+  func.return
+}
+
+// ----
+func.def @promote_static_fragment_load(%input: buffer, %output: buffer) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %fragment_vector = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %selected = vector.extract %fragment_vector[2] : vector<4xf32> -> f32
+  view.store %selected, %output_view[2] : f32, view<4xf32, #dense>
+  func.return
+}
+
+// ====
+
+func.def @promote_trailing_axis_fragment(%input: buffer, %output: buffer, %row: index, %lane: index) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<8x4xi32, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<4xi32, #dense>
+  %fragment_bytes = index.constant 16 : offset
+  %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 4, memory_space = private} : buffer
+  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<4xi32, #dense>
+  %start = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %copy_lane = [%start to %end step %step] {
+    %copy = view.load %input_view[%row, %copy_lane] : view<8x4xi32, #dense> -> i32
+    view.store %copy, %fragment[%copy_lane] : i32, view<4xi32, #dense>
+  }
+  %selected = view.load %fragment[%lane] : view<4xi32, #dense> -> i32
+  view.store %selected, %output_view[%lane] : i32, view<4xi32, #dense>
+  func.return
+}
+
+// ----
+func.def @promote_trailing_axis_fragment(%input: buffer, %output: buffer, %row: index, %lane: index) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<8x4xi32, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<4xi32, #dense>
+  %fragment_vector = vector.load %input_view[%row, 0] : view<8x4xi32, #dense> -> vector<4xi32>
+  %selected = vector.extract %fragment_vector[%lane] : vector<4xi32> -> i32
+  view.store %selected, %output_view[%lane] : i32, view<4xi32, #dense>
+  func.return
+}
+
+// ====
+
+// Partial initialization stays explicit. The pass only promotes full-copy
+// fragments because anything else needs a stronger dataflow representation.
+func.def @keeps_partial_fragment_copy(%input: buffer, %output: buffer) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %fragment_bytes = index.constant 16 : offset
+  %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 4, memory_space = private} : buffer
+  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %start = index.constant 0 : index
+  %partial_end = index.constant 3 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%start to %partial_end step %step] {
+    %copy = view.load %input_view[%lane] : view<4xf32, #dense> -> f32
+    view.store %copy, %fragment[%lane] : f32, view<4xf32, #dense>
+  }
+  %selected = view.load %fragment[2] : view<4xf32, #dense> -> f32
+  view.store %selected, %output_view[2] : f32, view<4xf32, #dense>
+  func.return
+}
+
+// ----
+func.def @keeps_partial_fragment_copy(%input: buffer, %output: buffer) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %fragment_bytes = index.constant 16 : offset
+  %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 4, memory_space = private} : buffer
+  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %start = index.constant 0 : index
+  %partial_end = index.constant 3 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%start to %partial_end step %step] {
+    %copy = view.load %input_view[%lane] : view<4xf32, #dense> -> f32
+    view.store %copy, %fragment[%lane] : f32, view<4xf32, #dense>
+  }
+  %selected = view.load %fragment[2] : view<4xf32, #dense> -> f32
+  view.store %selected, %output_view[2] : f32, view<4xf32, #dense>
+  func.return
+}
+
+// ====
+
+func.def @forward_dominated_private_lane(%input: buffer, %output: buffer, %lane: index, %cond: i1) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %fragment_bytes = index.constant 128 : offset
+  %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 2, memory_space = private} : buffer
+  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %copy = view.load %input_view[%lane] : view<64xf16, #dense> -> f16
+  view.store %copy, %fragment[%lane] : f16, view<64xf16, #dense>
+  scf.if %cond {
+    %selected = view.load %fragment[%lane] : view<64xf16, #dense> -> f16
+    view.store %selected, %output_view[%lane] : f16, view<64xf16, #dense>
+  }
+  func.return
+}
+
+// ----
+func.def @forward_dominated_private_lane(%input: buffer, %output: buffer, %lane: index, %cond: i1) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %copy = view.load %input_view[%lane] : view<64xf16, #dense> -> f16
+  scf.if %cond {
+    view.store %copy, %output_view[%lane] : f16, view<64xf16, #dense>
+  }
+  func.return
+}
+
+// ====
+
+func.def @forward_linear_scalar_slot(%output: buffer, %lhs: i64, %rhs: i64) {
+  %zero_bytes = index.constant 0 : offset
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %slot_bytes = index.constant 8 : offset
+  %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 8, memory_space = private} : buffer
+  %slot = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %slot_index = index.constant 0 : index
+  %initial = scalar.constant 0 : i64
+  view.store %initial, %slot[%slot_index] : i64, view<1xi64, #dense>
+  %loaded_initial = view.load %slot[%slot_index] : view<1xi64, #dense> -> i64
+  %sum = scalar.addi %loaded_initial, %lhs : i64
+  view.store %sum, %slot[%slot_index] : i64, view<1xi64, #dense>
+  %loaded_sum = view.load %slot[%slot_index] : view<1xi64, #dense> -> i64
+  %result = scalar.xori %loaded_sum, %rhs : i64
+  view.store %result, %slot[%slot_index] : i64, view<1xi64, #dense>
+  view.store %result, %output_view[%slot_index] : i64, view<1xi64, #dense>
+  func.return
+}
+
+// ----
+func.def @forward_linear_scalar_slot(%output: buffer, %lhs: i64, %rhs: i64) {
+  %zero_bytes = index.constant 0 : offset
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %slot_index = index.constant 0 : index
+  %initial = scalar.constant 0 : i64
+  %sum = scalar.addi %initial, %lhs : i64
+  %result = scalar.xori %sum, %rhs : i64
+  view.store %result, %output_view[%slot_index] : i64, view<1xi64, #dense>
+  func.return
+}
+
+// ====
+
+func.def @forward_static_private_slots(%input: buffer, %output: buffer) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<2xf32, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<2xf32, #dense>
+  %slot_bytes = index.constant 8 : offset
+  %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 4, memory_space = private} : buffer
+  %slots = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<2xf32, #dense>
+  %lane0 = index.constant 0 : index
+  %lane1 = index.constant 1 : index
+  %loaded0 = view.load %input_view[%lane0] : view<2xf32, #dense> -> f32
+  view.store %loaded0, %slots[%lane0] : f32, view<2xf32, #dense>
+  %loaded1 = view.load %input_view[%lane1] : view<2xf32, #dense> -> f32
+  view.store %loaded1, %slots[%lane1] : f32, view<2xf32, #dense>
+  %selected0 = view.load %slots[%lane0] : view<2xf32, #dense> -> f32
+  %selected1 = view.load %slots[%lane1] : view<2xf32, #dense> -> f32
+  view.store %selected1, %output_view[%lane0] : f32, view<2xf32, #dense>
+  view.store %selected0, %output_view[%lane1] : f32, view<2xf32, #dense>
+  func.return
+}
+
+// ----
+func.def @forward_static_private_slots(%input: buffer, %output: buffer) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<2xf32, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<2xf32, #dense>
+  %lane0 = index.constant 0 : index
+  %lane1 = index.constant 1 : index
+  %loaded0 = view.load %input_view[%lane0] : view<2xf32, #dense> -> f32
+  %loaded1 = view.load %input_view[%lane1] : view<2xf32, #dense> -> f32
+  view.store %loaded1, %output_view[%lane0] : f32, view<2xf32, #dense>
+  view.store %loaded0, %output_view[%lane1] : f32, view<2xf32, #dense>
+  func.return
+}
+
+// ====
+
+func.def @erase_noop_private_slot_before_static_forward(%output: buffer, %lhs: i64, %rhs: i64) {
+  %zero_bytes = index.constant 0 : offset
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %slot_bytes = index.constant 16 : offset
+  %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 8, memory_space = private} : buffer
+  %slots = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<2xi64, #dense>
+  %slot0 = index.constant 0 : index
+  %slot1 = index.constant 1 : index
+  %initial = scalar.constant 0 : i64
+  view.store %initial, %slots[%slot0] : i64, view<2xi64, #dense>
+  %loaded_initial = view.load %slots[%slot0] : view<2xi64, #dense> -> i64
+  %sum = scalar.addi %loaded_initial, %lhs : i64
+  view.store %sum, %slots[%slot0] : i64, view<2xi64, #dense>
+  %dead_slot = view.load %slots[%slot1] : view<2xi64, #dense> -> i64
+  view.store %dead_slot, %slots[%slot1] : i64, view<2xi64, #dense>
+  %loaded_sum = view.load %slots[%slot0] : view<2xi64, #dense> -> i64
+  %result = scalar.xori %loaded_sum, %rhs : i64
+  view.store %result, %slots[%slot0] : i64, view<2xi64, #dense>
+  view.store %result, %output_view[%slot0] : i64, view<1xi64, #dense>
+  func.return
+}
+
+// ----
+func.def @erase_noop_private_slot_before_static_forward(%output: buffer, %lhs: i64, %rhs: i64) {
+  %zero_bytes = index.constant 0 : offset
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %slot0 = index.constant 0 : index
+  %initial = scalar.constant 0 : i64
+  %sum = scalar.addi %initial, %lhs : i64
+  %result = scalar.xori %sum, %rhs : i64
+  view.store %result, %output_view[%slot0] : i64, view<1xi64, #dense>
+  func.return
+}
+
+// ====
+
+func.def @keeps_conditionally_stored_scalar_slot(%output: buffer, %value: i64, %cond: i1) {
+  %zero_bytes = index.constant 0 : offset
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %slot_bytes = index.constant 8 : offset
+  %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 8, memory_space = private} : buffer
+  %slot = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %slot_index = index.constant 0 : index
+  %initial = scalar.constant 0 : i64
+  view.store %initial, %slot[%slot_index] : i64, view<1xi64, #dense>
+  scf.if %cond {
+    view.store %value, %slot[%slot_index] : i64, view<1xi64, #dense>
+  }
+  %selected = view.load %slot[%slot_index] : view<1xi64, #dense> -> i64
+  view.store %selected, %output_view[%slot_index] : i64, view<1xi64, #dense>
+  func.return
+}
+
+// ----
+func.def @keeps_conditionally_stored_scalar_slot(%output: buffer, %value: i64, %cond: i1) {
+  %zero_bytes = index.constant 0 : offset
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %slot_bytes = index.constant 8 : offset
+  %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 8, memory_space = private} : buffer
+  %slot = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %slot_index = index.constant 0 : index
+  %initial = scalar.constant 0 : i64
+  view.store %initial, %slot[%slot_index] : i64, view<1xi64, #dense>
+  scf.if %cond {
+    view.store %value, %slot[%slot_index] : i64, view<1xi64, #dense>
+  }
+  %selected = view.load %slot[%slot_index] : view<1xi64, #dense> -> i64
+  view.store %selected, %output_view[%slot_index] : i64, view<1xi64, #dense>
+  func.return
+}
+
+// ====
+
+func.def @forward_branch_local_accumulator(%input: buffer, %output: buffer, %cond: i1) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<2xf32, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xf32, #dense>
+  %slot_bytes = index.constant 4 : offset
+  %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 4, memory_space = private} : buffer
+  %slot = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<1xf32, #dense>
+  %slot_index = index.constant 0 : index
+  %initial = scalar.constant 0.0 : f32
+  view.store %initial, %slot[%slot_index] : f32, view<1xf32, #dense>
+  scf.if %cond {
+    %lhs = view.load %input_view[0] : view<2xf32, #dense> -> f32
+    %rhs = view.load %input_view[1] : view<2xf32, #dense> -> f32
+    %loaded_initial = view.load %slot[%slot_index] : view<1xf32, #dense> -> f32
+    %sum = scalar.addf %loaded_initial, %lhs : f32
+    view.store %sum, %slot[%slot_index] : f32, view<1xf32, #dense>
+    %result = scalar.addf %sum, %rhs : f32
+    view.store %result, %slot[%slot_index] : f32, view<1xf32, #dense>
+    view.store %result, %output_view[%slot_index] : f32, view<1xf32, #dense>
+  }
+  func.return
+}
+
+// ----
+func.def @forward_branch_local_accumulator(%input: buffer, %output: buffer, %cond: i1) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<2xf32, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xf32, #dense>
+  %slot_index = index.constant 0 : index
+  %initial = scalar.constant 0.0 : f32
+  scf.if %cond {
+    %lhs = view.load %input_view[0] : view<2xf32, #dense> -> f32
+    %rhs = view.load %input_view[1] : view<2xf32, #dense> -> f32
+    %sum = scalar.addf %initial, %lhs : f32
+    %result = scalar.addf %sum, %rhs : f32
+    view.store %result, %output_view[%slot_index] : f32, view<1xf32, #dense>
+  }
+  func.return
+}
+
+// ====
+
+kernel.def @forward_kernel_branch_local_accumulator() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %cond: i1) {
+  %zero_bytes = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<2xf32, %layout>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xf32, %layout>
+  %slot_bytes = index.constant 4 : offset
+  %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 4, memory_space = private} : buffer
+  %slot = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<1xf32, %layout>
+  %slot_index = index.constant 0 : index
+  %initial = scalar.constant 0.0 : f32
+  view.store %initial, %slot[%slot_index] : f32, view<1xf32, %layout>
+  scf.if %cond {
+    %lhs = view.load %input_view[0] : view<2xf32, %layout> -> f32
+    %rhs = view.load %input_view[1] : view<2xf32, %layout> -> f32
+    %loaded_initial = view.load %slot[%slot_index] : view<1xf32, %layout> -> f32
+    %sum = scalar.addf %loaded_initial, %lhs : f32
+    view.store %sum, %slot[%slot_index] : f32, view<1xf32, %layout>
+    %result = scalar.addf %sum, %rhs : f32
+    view.store %result, %slot[%slot_index] : f32, view<1xf32, %layout>
+    view.store %result, %output_view[%slot_index] : f32, view<1xf32, %layout>
+  }
+  kernel.return
+}
+
+// ----
+kernel.def @forward_kernel_branch_local_accumulator() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %cond: i1) {
+  %zero_bytes = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<2xf32, %layout>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xf32, %layout>
+  %slot_index = index.constant 0 : index
+  %initial = scalar.constant 0.0 : f32
+  scf.if %cond {
+    %lhs = view.load %input_view[0] : view<2xf32, %layout> -> f32
+    %rhs = view.load %input_view[1] : view<2xf32, %layout> -> f32
+    %sum = scalar.addf %initial, %lhs : f32
+    %result = scalar.addf %sum, %rhs : f32
+    view.store %result, %output_view[%slot_index] : f32, view<1xf32, %layout>
+  }
+  kernel.return
+}
+
+// ====
+
+kernel.def @forward_imported_branch_accumulator() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %sum_output: buffer, %normalized_output: buffer, %limit: index) {
+  %zero_bytes = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
+  %sum_output_view = buffer.view %sum_output[%zero_bytes] : buffer -> view<[%limit]xf32, %layout>
+  %normalized_output_view = buffer.view %normalized_output[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
+  %slot_bytes = index.constant 4 : offset
+  %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 4, memory_space = private} : buffer
+  %slot = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<1xf32, %layout>
+  %slot_index = index.constant 0 : index
+  %initial = scalar.constant 9.9999999999999995e-21 : f32
+  view.store %initial, %slot[%slot_index] : f32, view<1xf32, %layout>
+  %workgroup = kernel.workgroup.id<x> : index
+  %workitem = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 128 : index
+  %row = index.madd %workgroup, %workgroup_size, %workitem : index
+  %in_bounds = index.cmp slt, %row, %limit : index
+  scf.if %in_bounds {
+    %bounded_row = index.assume %row [lt(%row, %limit)] : index
+    %lane = index.constant 1 : index
+    %lhs = view.load %input_view[%bounded_row, %slot_index] : view<[%limit]x2xf32, %layout> -> f32
+    %rhs = view.load %input_view[%bounded_row, %lane] : view<[%limit]x2xf32, %layout> -> f32
+    %loaded_initial = view.load %slot[%slot_index] : view<1xf32, %layout> -> f32
+    %sum = scalar.addf %loaded_initial, %lhs : f32
+    view.store %sum, %slot[%slot_index] : f32, view<1xf32, %layout>
+    %result = scalar.addf %sum, %rhs : f32
+    view.store %result, %slot[%slot_index] : f32, view<1xf32, %layout>
+    view.store %result, %sum_output_view[%bounded_row] : f32, view<[%limit]xf32, %layout>
+    %lhs_normalized = scalar.divf %lhs, %result : f32
+    view.store %lhs_normalized, %normalized_output_view[%bounded_row, %slot_index] : f32, view<[%limit]x2xf32, %layout>
+    %rhs_normalized = scalar.divf %rhs, %result : f32
+    view.store %rhs_normalized, %normalized_output_view[%bounded_row, %lane] : f32, view<[%limit]x2xf32, %layout>
+  }
+  kernel.return
+}
+
+// ----
+kernel.def @forward_imported_branch_accumulator() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %sum_output: buffer, %normalized_output: buffer, %limit: index) {
+  %zero_bytes = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
+  %sum_output_view = buffer.view %sum_output[%zero_bytes] : buffer -> view<[%limit]xf32, %layout>
+  %normalized_output_view = buffer.view %normalized_output[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
+  %slot_index = index.constant 0 : index
+  %initial = scalar.constant 9.9999999999999995e-21 : f32
+  %workgroup = kernel.workgroup.id<x> : index
+  %workitem = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 128 : index
+  %row = index.madd %workgroup, %workgroup_size, %workitem : index
+  %in_bounds = index.cmp slt, %row, %limit : index
+  scf.if %in_bounds {
+    %bounded_row = index.assume %row [lt(%row, %limit)] : index
+    %lane = index.constant 1 : index
+    %lhs = view.load %input_view[%bounded_row, %slot_index] : view<[%limit]x2xf32, %layout> -> f32
+    %rhs = view.load %input_view[%bounded_row, %lane] : view<[%limit]x2xf32, %layout> -> f32
+    %sum = scalar.addf %initial, %lhs : f32
+    %result = scalar.addf %sum, %rhs : f32
+    view.store %result, %sum_output_view[%bounded_row] : f32, view<[%limit]xf32, %layout>
+    %lhs_normalized = scalar.divf %lhs, %result : f32
+    view.store %lhs_normalized, %normalized_output_view[%bounded_row, %slot_index] : f32, view<[%limit]x2xf32, %layout>
+    %rhs_normalized = scalar.divf %rhs, %result : f32
+    view.store %rhs_normalized, %normalized_output_view[%bounded_row, %lane] : f32, view<[%limit]x2xf32, %layout>
+  }
+  kernel.return
+}
+
+// ====
+
+kernel.def @forward_fragment_and_accumulator() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %sum_output: buffer, %normalized_output: buffer, %limit: index) {
+  %zero_bytes = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
+  %sum_output_view = buffer.view %sum_output[%zero_bytes] : buffer -> view<[%limit]xf32, %layout>
+  %normalized_output_view = buffer.view %normalized_output[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
+  %fragment_bytes = index.constant 8 : offset
+  %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 4, memory_space = private} : buffer
+  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<2xf32, %layout>
+  %slot_bytes = index.constant 4 : offset
+  %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 4, memory_space = private} : buffer
+  %slot = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<1xf32, %layout>
+  %slot_index = index.constant 0 : index
+  %initial = scalar.constant 9.9999999999999995e-21 : f32
+  view.store %initial, %slot[%slot_index] : f32, view<1xf32, %layout>
+  %workgroup = kernel.workgroup.id<x> : index
+  %workitem = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 128 : index
+  %row = index.madd %workgroup, %workgroup_size, %workitem : index
+  %in_bounds = index.cmp slt, %row, %limit : index
+  scf.if %in_bounds {
+    %bounded_row = index.assume %row [lt(%row, %limit)] : index
+    %end = index.constant 2 : index
+    %step = index.constant 1 : index
+    scf.for %lane = [%slot_index to %end step %step] {
+      %copy = view.load %input_view[%bounded_row, %lane] : view<[%limit]x2xf32, %layout> -> f32
+      view.store %copy, %fragment[%lane] : f32, view<2xf32, %layout>
+    }
+    %lhs = view.load %fragment[%slot_index] : view<2xf32, %layout> -> f32
+    %loaded_initial = view.load %slot[%slot_index] : view<1xf32, %layout> -> f32
+    %sum = scalar.addf %loaded_initial, %lhs : f32
+    view.store %sum, %slot[%slot_index] : f32, view<1xf32, %layout>
+    %lane = index.constant 1 : index
+    %rhs = view.load %fragment[%lane] : view<2xf32, %layout> -> f32
+    %result = scalar.addf %sum, %rhs : f32
+    view.store %result, %slot[%slot_index] : f32, view<1xf32, %layout>
+    view.store %result, %sum_output_view[%bounded_row] : f32, view<[%limit]xf32, %layout>
+    scf.for %output_lane = [%slot_index to %end step %step] {
+      %numerator = view.load %fragment[%output_lane] : view<2xf32, %layout> -> f32
+      %normalized = scalar.divf %numerator, %result : f32
+      view.store %normalized, %normalized_output_view[%bounded_row, %output_lane] : f32, view<[%limit]x2xf32, %layout>
+    }
+  }
+  kernel.return
+}
+
+// ----
+kernel.def @forward_fragment_and_accumulator() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %sum_output: buffer, %normalized_output: buffer, %limit: index) {
+  %zero_bytes = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
+  %sum_output_view = buffer.view %sum_output[%zero_bytes] : buffer -> view<[%limit]xf32, %layout>
+  %normalized_output_view = buffer.view %normalized_output[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
+  %slot_index = index.constant 0 : index
+  %initial = scalar.constant 9.9999999999999995e-21 : f32
+  %workgroup = kernel.workgroup.id<x> : index
+  %workitem = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 128 : index
+  %row = index.madd %workgroup, %workgroup_size, %workitem : index
+  %in_bounds = index.cmp slt, %row, %limit : index
+  scf.if %in_bounds {
+    %bounded_row = index.assume %row [lt(%row, %limit)] : index
+    %end = index.constant 2 : index
+    %step = index.constant 1 : index
+    %fragment_vector = vector.load %input_view[%bounded_row, 0] : view<[%limit]x2xf32, %layout> -> vector<2xf32>
+    %lhs = vector.extract %fragment_vector[%slot_index] : vector<2xf32> -> f32
+    %sum = scalar.addf %initial, %lhs : f32
+    %lane = index.constant 1 : index
+    %rhs = vector.extract %fragment_vector[%lane] : vector<2xf32> -> f32
+    %result = scalar.addf %sum, %rhs : f32
+    view.store %result, %sum_output_view[%bounded_row] : f32, view<[%limit]xf32, %layout>
+    scf.for %output_lane = [%slot_index to %end step %step] {
+      %numerator = vector.extract %fragment_vector[%output_lane] : vector<2xf32> -> f32
+      %normalized = scalar.divf %numerator, %result : f32
+      view.store %normalized, %normalized_output_view[%bounded_row, %output_lane] : f32, view<[%limit]x2xf32, %layout>
+    }
+  }
+  kernel.return
+}
+
+// ====
+
+func.def @keeps_mismatched_private_lane(%input: buffer, %output: buffer, %store_lane: index, %load_lane: index) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %fragment_bytes = index.constant 128 : offset
+  %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 2, memory_space = private} : buffer
+  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %copy = view.load %input_view[%store_lane] : view<64xf16, #dense> -> f16
+  view.store %copy, %fragment[%store_lane] : f16, view<64xf16, #dense>
+  %selected = view.load %fragment[%load_lane] : view<64xf16, #dense> -> f16
+  view.store %selected, %output_view[%load_lane] : f16, view<64xf16, #dense>
+  func.return
+}
+
+// ----
+func.def @keeps_mismatched_private_lane(%input: buffer, %output: buffer, %store_lane: index, %load_lane: index) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %fragment_bytes = index.constant 128 : offset
+  %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 2, memory_space = private} : buffer
+  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %copy = view.load %input_view[%store_lane] : view<64xf16, #dense> -> f16
+  view.store %copy, %fragment[%store_lane] : f16, view<64xf16, #dense>
+  %selected = view.load %fragment[%load_lane] : view<64xf16, #dense> -> f16
+  view.store %selected, %output_view[%load_lane] : f16, view<64xf16, #dense>
+  func.return
+}
+
+// ====
+
+func.def @keeps_conditionally_stored_private_lane(%input: buffer, %output: buffer, %lane: index, %cond: i1) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %fragment_bytes = index.constant 128 : offset
+  %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 2, memory_space = private} : buffer
+  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %copy = view.load %input_view[%lane] : view<64xf16, #dense> -> f16
+  scf.if %cond {
+    view.store %copy, %fragment[%lane] : f16, view<64xf16, #dense>
+  }
+  %selected = view.load %fragment[%lane] : view<64xf16, #dense> -> f16
+  view.store %selected, %output_view[%lane] : f16, view<64xf16, #dense>
+  func.return
+}
+
+// ----
+func.def @keeps_conditionally_stored_private_lane(%input: buffer, %output: buffer, %lane: index, %cond: i1) {
+  %zero_bytes = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %fragment_bytes = index.constant 128 : offset
+  %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 2, memory_space = private} : buffer
+  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %copy = view.load %input_view[%lane] : view<64xf16, #dense> -> f16
+  scf.if %cond {
+    view.store %copy, %fragment[%lane] : f16, view<64xf16, #dense>
+  }
+  %selected = view.load %fragment[%lane] : view<64xf16, #dense> -> f16
+  view.store %selected, %output_view[%lane] : f16, view<64xf16, #dense>
+  func.return
+}

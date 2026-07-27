@@ -6,24 +6,48 @@
 
 #include "iree/hal/local/executable_library_util.h"
 
+iree_status_t iree_hal_executable_library_validate_query_result(
+    const iree_hal_executable_library_header_t* const* query_result,
+    const iree_hal_executable_library_v0_t** out_library) {
+  IREE_ASSERT_ARGUMENT(out_library);
+  *out_library = NULL;
+  if (!query_result || !*query_result) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "executable does not support this version of the runtime (%08X)",
+        IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST);
+  }
+  const iree_hal_executable_library_header_t* header = *query_result;
+  if (header->version < IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_6 ||
+      header->version > IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "executable library version %u is outside the supported range "
+        "[%u, %u]",
+        header->version, IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_6,
+        IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST);
+  }
+  *out_library = iree_hal_executable_library_v0_from_query_result(query_result);
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_executable_library_verify(
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     const iree_hal_executable_library_v0_t* library) {
   // Tooling and testing may disable verification to make it easier to define
   // libraries. The compiler should never produce anything that fails
   // verification, though, and should always have it enabled.
-  const bool disable_verification =
-      iree_all_bits_set(executable_params->caching_mode,
-                        IREE_HAL_EXECUTABLE_CACHING_MODE_DISABLE_VERIFICATION);
+  const bool disable_verification = iree_all_bits_set(
+      load_params->flags, IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION);
   if (disable_verification) return iree_ok_status();
 
   // Check to make sure that the constant table has values for all constants.
-  if (library->constants.count != executable_params->constant_count) {
+  if (library->constants.count != load_params->constant_count) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "executable requires %u constants but caller "
                             "provided %" PRIhsz "; must match",
                             library->constants.count,
-                            executable_params->constant_count);
+                            load_params->constant_count);
   }
 
   // Validate that dispatch attributes are present.
@@ -41,13 +65,13 @@ iree_status_t iree_hal_executable_library_verify(
   for (uint32_t i = 0; i < library->exports.count; ++i) {
     const iree_hal_executable_dispatch_attrs_v0_t dispatch_attrs =
         library->exports.attrs[i];
-    if (dispatch_attrs.constant_count >
-        IREE_HAL_EXECUTABLE_MAX_CONSTANT_COUNT) {
+    if (dispatch_attrs.constant_byte_length >
+        IREE_HAL_EXECUTABLE_MAX_CONSTANT_BYTE_LENGTH) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
-          "dispatch requiring %u constants exceeds limit of %d",
-          dispatch_attrs.constant_count,
-          IREE_HAL_EXECUTABLE_MAX_CONSTANT_COUNT);
+          "dispatch requiring %u constant bytes exceeds limit of %" PRIhsz,
+          dispatch_attrs.constant_byte_length,
+          (iree_host_size_t)IREE_HAL_EXECUTABLE_MAX_CONSTANT_BYTE_LENGTH);
     }
     if (dispatch_attrs.binding_count > IREE_HAL_EXECUTABLE_MAX_BINDING_COUNT) {
       return iree_make_status(
@@ -170,7 +194,7 @@ iree_status_t iree_hal_executable_library_export_info(
           IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC;
     }
 
-    out_info->constant_count = attrs->constant_count;
+    out_info->constant_byte_length = attrs->constant_byte_length;
     out_info->binding_count = attrs->binding_count;
     out_info->parameter_count = attrs->parameter_count;
 
@@ -219,6 +243,7 @@ iree_status_t iree_hal_executable_library_export_parameters(
   for (iree_host_size_t i = 0; i < count; ++i) {
     const iree_hal_executable_dispatch_parameter_v0_t* src = &export_params[i];
     iree_hal_executable_function_parameter_t* dst = &out_parameters[i];
+    memset(dst, 0, sizeof(*dst));
     switch (src->type) {
       case IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_CONSTANT:
         dst->type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT;

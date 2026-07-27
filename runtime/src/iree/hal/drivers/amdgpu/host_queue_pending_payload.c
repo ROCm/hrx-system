@@ -316,11 +316,9 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_update(
     iree_hal_amdgpu_pending_op_t** out_op) {
   const uint8_t* source_bytes = NULL;
   iree_host_size_t source_length = 0;
-  uint8_t* target_device_ptr = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_prepare_update_copy(
       target_buffer, target_offset, source_buffer, source_offset, length, flags,
-      &source_bytes, &source_length, &target_device_ptr));
-  (void)target_device_ptr;
+      &source_bytes, &source_length, /*out_target_device_ptr=*/NULL));
 
   uint16_t max_resources = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_count_reclaim_resources(

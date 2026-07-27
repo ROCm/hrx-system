@@ -94,6 +94,21 @@ hrx_status_t hrx_buffer_table_insert(hrx_buffer_table_t* table,
   return hrx_ok_status();
 }
 
+hrx_status_t hrx_buffer_table_insert_if_new(hrx_buffer_table_t* table,
+                                            uint64_t device_ptr, void* host_ptr,
+                                            size_t size, hrx_buffer_t buffer,
+                                            void* user_data) {
+  hrx_status_t status = hrx_buffer_table_insert(table, device_ptr, host_ptr,
+                                                size, buffer, user_data);
+  if (!hrx_status_is_ok(status) &&
+      hrx_status_code(status) == HRX_STATUS_ALREADY_EXISTS) {
+    // Already registered — that is the intended idempotent outcome here.
+    hrx_status_ignore(status);
+    return hrx_ok_status();
+  }
+  return status;
+}
+
 hrx_status_t hrx_buffer_table_remove(hrx_buffer_table_t* table,
                                      uint64_t any_ptr) {
   iree_slim_mutex_lock(&table->mutex);

@@ -464,7 +464,7 @@ IREE_API_EXPORT iree_status_t iree_vm_buffer_hash(
   uint64_t m;
 
   for (; source != end; source += 8) {
-    m = iree_unaligned_load_le_u64((const uint64_t*)source);
+    m = iree_unaligned_load_le_u64(source);
     v3 ^= m;
     for (int i = 0; i < cROUNDS; ++i) {
       SIPROUND(v0, v1, v2, v3);

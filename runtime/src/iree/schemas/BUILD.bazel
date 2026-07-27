@@ -21,14 +21,6 @@ FLATCC_ARGS = [
 ]
 
 iree_runtime_flatbuffer_c_library(
-    name = "amdgpu_executable_def_c_fbs",
-    srcs = ["amdgpu_executable_def.fbs"],
-    flatcc_args = FLATCC_ARGS,
-    flatcc_includes = ["executable_debug_info.fbs"],
-    deps = [":executable_debug_info_c_fbs"],
-)
-
-iree_runtime_flatbuffer_c_library(
     name = "bytecode_module_def_c_fbs",
     srcs = ["bytecode_module_def.fbs"],
     flatcc_args = FLATCC_ARGS,
@@ -59,14 +51,6 @@ iree_runtime_flatbuffer_c_library(
 iree_runtime_flatbuffer_c_library(
     name = "metal_executable_def_c_fbs",
     srcs = ["metal_executable_def.fbs"],
-    flatcc_args = FLATCC_ARGS,
-    flatcc_includes = ["executable_debug_info.fbs"],
-    deps = [":executable_debug_info_c_fbs"],
-)
-
-iree_runtime_flatbuffer_c_library(
-    name = "vulkan_executable_def_c_fbs",
-    srcs = ["vulkan_executable_def.fbs"],
     flatcc_args = FLATCC_ARGS,
     flatcc_includes = ["executable_debug_info.fbs"],
     deps = [":executable_debug_info_c_fbs"],

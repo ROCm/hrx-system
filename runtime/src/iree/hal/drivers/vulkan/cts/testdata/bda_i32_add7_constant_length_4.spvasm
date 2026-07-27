@@ -1,0 +1,146 @@
+; SPIR-V
+; Version: 1.6
+; Generator: Khronos Glslang Reference Front End; 11
+; Bound: 76
+; Schema: 0
+               OpCapability Shader
+               OpCapability Int64
+               OpCapability PhysicalStorageBufferAddresses
+          %1 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %main "main" %root %gl_GlobalInvocationID
+               OpExecutionMode %main LocalSize 1 1 1
+               OpSource GLSL 460
+               OpSourceExtension "GL_EXT_buffer_reference"
+               OpSourceExtension "GL_EXT_scalar_block_layout"
+               OpSourceExtension "GL_EXT_shader_explicit_arithmetic_types_int64"
+               OpName %main "main"
+               OpName %AddressTable "AddressTable"
+               OpMemberName %AddressTable 0 "address"
+               OpName %binding_table "binding_table"
+               OpName %Root "Root"
+               OpMemberName %Root 0 "binding_table_address"
+               OpMemberName %Root 1 "constants_address"
+               OpMemberName %Root 2 "binding_base"
+               OpMemberName %Root 3 "constant_base"
+               OpMemberName %Root 4 "flags"
+               OpMemberName %Root 5 "reserved0"
+               OpName %root "root"
+               OpName %InputBuffer "InputBuffer"
+               OpMemberName %InputBuffer 0 "value"
+               OpName %input_buffer "input_buffer"
+               OpName %OutputBuffer "OutputBuffer"
+               OpMemberName %OutputBuffer 0 "value"
+               OpName %output_buffer "output_buffer"
+               OpName %index "index"
+               OpName %gl_GlobalInvocationID "gl_GlobalInvocationID"
+               OpModuleProcessed "iree.vulkan.bda.v1"
+               OpModuleProcessed "iree.vulkan.bda.v1.bindings=2"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=4"
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %AddressTable Block
+               OpMemberDecorate %AddressTable 0 NonWritable
+               OpMemberDecorate %AddressTable 0 Offset 0
+               OpDecorate %binding_table AliasedPointer
+               OpDecorate %Root Block
+               OpMemberDecorate %Root 0 Offset 0
+               OpMemberDecorate %Root 1 Offset 8
+               OpMemberDecorate %Root 2 Offset 16
+               OpMemberDecorate %Root 3 Offset 20
+               OpMemberDecorate %Root 4 Offset 24
+               OpMemberDecorate %Root 5 Offset 28
+               OpDecorate %_runtimearr_int ArrayStride 4
+               OpDecorate %InputBuffer Block
+               OpMemberDecorate %InputBuffer 0 NonWritable
+               OpMemberDecorate %InputBuffer 0 Offset 0
+               OpDecorate %input_buffer AliasedPointer
+               OpDecorate %_runtimearr_int_0 ArrayStride 4
+               OpDecorate %OutputBuffer Block
+               OpMemberDecorate %OutputBuffer 0 NonReadable
+               OpMemberDecorate %OutputBuffer 0 Offset 0
+               OpDecorate %output_buffer AliasedPointer
+               OpDecorate %gl_GlobalInvocationID BuiltIn GlobalInvocationId
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+               OpTypeForwardPointer %_ptr_PhysicalStorageBuffer_AddressTable PhysicalStorageBuffer
+      %ulong = OpTypeInt 64 0
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+%AddressTable = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer_AddressTable = OpTypePointer PhysicalStorageBuffer %AddressTable
+%_ptr_Function__ptr_PhysicalStorageBuffer_AddressTable = OpTypePointer Function %_ptr_PhysicalStorageBuffer_AddressTable
+       %uint = OpTypeInt 32 0
+       %Root = OpTypeStruct %ulong %ulong %uint %uint %uint %uint
+%_ptr_PushConstant_Root = OpTypePointer PushConstant %Root
+       %root = OpVariable %_ptr_PushConstant_Root PushConstant
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+      %int_2 = OpConstant %int 2
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+    %ulong_8 = OpConstant %ulong 8
+               OpTypeForwardPointer %_ptr_PhysicalStorageBuffer_InputBuffer PhysicalStorageBuffer
+%_runtimearr_int = OpTypeRuntimeArray %int
+%InputBuffer = OpTypeStruct %_runtimearr_int
+%_ptr_PhysicalStorageBuffer_InputBuffer = OpTypePointer PhysicalStorageBuffer %InputBuffer
+%_ptr_Function__ptr_PhysicalStorageBuffer_InputBuffer = OpTypePointer Function %_ptr_PhysicalStorageBuffer_InputBuffer
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+               OpTypeForwardPointer %_ptr_PhysicalStorageBuffer_OutputBuffer PhysicalStorageBuffer
+%_runtimearr_int_0 = OpTypeRuntimeArray %int
+%OutputBuffer = OpTypeStruct %_runtimearr_int_0
+%_ptr_PhysicalStorageBuffer_OutputBuffer = OpTypePointer PhysicalStorageBuffer %OutputBuffer
+%_ptr_Function__ptr_PhysicalStorageBuffer_OutputBuffer = OpTypePointer Function %_ptr_PhysicalStorageBuffer_OutputBuffer
+      %int_1 = OpConstant %int 1
+%_ptr_Function_uint = OpTypePointer Function %uint
+     %v3uint = OpTypeVector %uint 3
+%_ptr_Input_v3uint = OpTypePointer Input %v3uint
+%gl_GlobalInvocationID = OpVariable %_ptr_Input_v3uint Input
+     %uint_0 = OpConstant %uint 0
+%_ptr_Input_uint = OpTypePointer Input %uint
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+      %int_4 = OpConstant %int 4
+      %int_7 = OpConstant %int 7
+     %uint_1 = OpConstant %uint 1
+         %75 = OpConstantComposite %v3uint %uint_1 %uint_1 %uint_1
+       %main = OpFunction %void None %3
+          %5 = OpLabel
+%binding_table = OpVariable %_ptr_Function__ptr_PhysicalStorageBuffer_AddressTable Function
+%input_buffer = OpVariable %_ptr_Function__ptr_PhysicalStorageBuffer_InputBuffer Function
+%output_buffer = OpVariable %_ptr_Function__ptr_PhysicalStorageBuffer_OutputBuffer Function
+      %index = OpVariable %_ptr_Function_uint Function
+         %19 = OpAccessChain %_ptr_PushConstant_ulong %root %int_0
+         %20 = OpLoad %ulong %19
+         %23 = OpAccessChain %_ptr_PushConstant_uint %root %int_2
+         %24 = OpLoad %uint %23
+         %25 = OpUConvert %ulong %24
+         %27 = OpIMul %ulong %25 %ulong_8
+         %28 = OpIAdd %ulong %20 %27
+         %29 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_AddressTable %28
+               OpStore %binding_table %29
+         %35 = OpLoad %_ptr_PhysicalStorageBuffer_AddressTable %binding_table
+         %37 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %35 %int_0 %int_0
+         %38 = OpLoad %ulong %37 Aligned 8
+         %39 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_InputBuffer %38
+               OpStore %input_buffer %39
+         %45 = OpLoad %_ptr_PhysicalStorageBuffer_AddressTable %binding_table
+         %47 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %45 %int_0 %int_1
+         %48 = OpLoad %ulong %47 Aligned 8
+         %49 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_OutputBuffer %48
+               OpStore %output_buffer %49
+         %57 = OpAccessChain %_ptr_Input_uint %gl_GlobalInvocationID %uint_0
+         %58 = OpLoad %uint %57
+               OpStore %index %58
+         %59 = OpLoad %_ptr_PhysicalStorageBuffer_OutputBuffer %output_buffer
+         %60 = OpLoad %uint %index
+         %61 = OpLoad %_ptr_PhysicalStorageBuffer_InputBuffer %input_buffer
+         %62 = OpLoad %uint %index
+         %64 = OpAccessChain %_ptr_PhysicalStorageBuffer_int %61 %int_0 %62
+         %65 = OpLoad %int %64 Aligned 4
+         %67 = OpAccessChain %_ptr_PushConstant_uint %root %int_4
+         %68 = OpLoad %uint %67
+         %69 = OpBitcast %int %68
+         %70 = OpIAdd %int %65 %69
+         %72 = OpIAdd %int %70 %int_7
+         %73 = OpAccessChain %_ptr_PhysicalStorageBuffer_int %59 %int_0 %60
+               OpStore %73 %72 Aligned 4
+               OpReturn
+               OpFunctionEnd

@@ -52,15 +52,13 @@ typedef uint64_t iree_hal_amdgpu_device_affinity_t;
   iree_hal_amdgpu_device_affinity_t _device_bits = (device_affinity);          \
   for (int device_index = 0, _device_ordinal_base = 0,                         \
            device_count = iree_hal_amdgpu_device_affinity_count(_device_bits), \
-           _bit_offset = 0,                                                    \
-           device_ordinal =                                                    \
-               iree_hal_amdgpu_device_affinity_find_first_set(_device_bits);   \
-       device_index < device_count;                                            \
+           _bit_offset = 0, device_ordinal = 0;                                \
+       device_index < device_count && _device_bits != 0 &&                     \
+       ((_bit_offset =                                                         \
+             iree_hal_amdgpu_device_affinity_find_first_set(_device_bits)),    \
+        (device_ordinal = _device_ordinal_base + _bit_offset), 1);             \
        ++device_index, _device_ordinal_base += _bit_offset + 1,                \
            _device_bits = iree_hal_amdgpu_device_affinity_shr(                 \
-               _device_bits, _bit_offset + 1),                                 \
-           _bit_offset =                                                       \
-               iree_hal_amdgpu_device_affinity_find_first_set(_device_bits),   \
-           device_ordinal = _device_ordinal_base + _bit_offset)
+               _device_bits, _bit_offset + 1))
 
 #endif  // IREE_HAL_DRIVERS_AMDGPU_UTIL_AFFINITY_H_

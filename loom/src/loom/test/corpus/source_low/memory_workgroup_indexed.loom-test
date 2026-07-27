@@ -1,0 +1,282 @@
+// RUN: roundtrip
+
+kernel.def @wave_sized_workgroup_memory_workitem_x_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xi32, #dense>
+  %one = vector.constant 1 : vector<1xi32>
+  vector.store %one, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  %loaded = vector.load %scratch_view[%lane] : view<32xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @wave_sized_workgroup_memory_workitem_x_i8x4() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi8, #dense>
+  %one = vector.constant 1 : vector<4xi8>
+  vector.store %one, %scratch_view[%lane] : vector<4xi8>, view<64xi8, #dense>
+  %loaded = vector.load %scratch_view[%lane] : view<64xi8, #dense> -> vector<4xi8>
+  vector.store %loaded, %scratch_view[%lane] : vector<4xi8>, view<64xi8, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @cross_wave_workgroup_memory_workitem_x_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
+  %one = vector.constant 1 : vector<1xi32>
+  vector.store %one, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
+  %loaded = vector.load %scratch_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @workgroup_memory_scalar_loop_index_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 8 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 32 : offset
+  %zero_index = index.constant 0 : index
+  %eight = index.constant 8 : index
+  %one_index = index.constant 1 : index
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<8xi32, #dense>
+  %one = vector.constant 1 : vector<1xi32>
+  scf.for %i = [%zero_index to %eight step %one_index] {
+    vector.store %one, %scratch_view[%i] : vector<1xi32>, view<8xi32, #dense>
+    %loaded = vector.load %scratch_view[%i] : view<8xi32, #dense> -> vector<1xi32>
+    vector.store %loaded, %scratch_view[%i] : vector<1xi32>, view<8xi32, #dense>
+  }
+  kernel.return
+}
+
+// ====
+
+kernel.def @wave_sized_workgroup_memory_workitem_x_b32_static_offset() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %four = index.constant 4 : index
+  %element_index = index.add %lane, %four : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 160 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<40xi32, #dense>
+  %one = vector.constant 1 : vector<1xi32>
+  vector.store %one, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #dense>
+  %loaded = vector.load %scratch_view[%element_index] : view<40xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @wave_sized_workgroup_memory_second_allocation_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %first_scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %second_scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %first_view = buffer.view %first_scratch[%zero] : buffer -> view<32xi32, #dense>
+  %second_view = buffer.view %second_scratch[%zero] : buffer -> view<32xi32, #dense>
+  %one = vector.constant 1 : vector<1xi32>
+  %two = vector.constant 2 : vector<1xi32>
+  vector.store %one, %first_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  vector.store %two, %second_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  %loaded = vector.load %second_view[%lane] : view<32xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %first_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @wave_sized_workgroup_memory_view_base_and_element_offset_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %four = index.constant 4 : index
+  %element_index = index.add %lane, %four : index
+  %base = index.constant 32 : offset
+  %bytes = index.constant 224 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<40xi32, #dense>
+  %one = vector.constant 1 : vector<1xi32>
+  vector.store %one, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #dense>
+  %loaded = vector.load %scratch_view[%element_index] : view<40xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @wave_sized_workgroup_memory_interleaved_addtid_and_vaddr_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %two = index.constant 2 : index
+  %scaled_lane = index.mul %lane, %two : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
+  %one = vector.constant 1 : vector<1xi32>
+  %other = vector.constant 2 : vector<1xi32>
+  vector.store %one, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
+  vector.store %other, %scratch_view[%scaled_lane] : vector<1xi32>, view<64xi32, #dense>
+  %loaded = vector.load %scratch_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%scaled_lane] : vector<1xi32>, view<64xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @wave_sized_workgroup_memory_roundtrip_lane_cast_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane : index to i32
+  %lane_index = index.cast %lane_i32 : i32 to index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xi32, #dense>
+  %one = vector.constant 1 : vector<1xi32>
+  vector.store %one, %scratch_view[%lane_index] : vector<1xi32>, view<32xi32, #dense>
+  %loaded = vector.load %scratch_view[%lane_index] : view<32xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane_index] : vector<1xi32>, view<32xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @wave_sized_workgroup_memory_select_same_lane_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %limit = index.constant 32 : index
+  %inside = index.cmp ult, %lane, %limit : index
+  %selected_lane = scf.select %inside, %lane, %lane : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xi32, #dense>
+  %one = vector.constant 1 : vector<1xi32>
+  vector.store %one, %scratch_view[%selected_lane] : vector<1xi32>, view<32xi32, #dense>
+  %loaded = vector.load %scratch_view[%selected_lane] : view<32xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%selected_lane] : vector<1xi32>, view<32xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @wave_sized_workgroup_memory_select_scaled_lane_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %two = index.constant 2 : index
+  %scaled_lane = index.mul %lane, %two : index
+  %limit = index.constant 16 : index
+  %inside = index.cmp ult, %lane, %limit : index
+  %element_index = scf.select %inside, %lane, %scaled_lane : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
+  %one = vector.constant 1 : vector<1xi32>
+  vector.store %one, %scratch_view[%element_index] : vector<1xi32>, view<64xi32, #dense>
+  %loaded = vector.load %scratch_view[%element_index] : view<64xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<64xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @wave_sized_workgroup_memory_guarded_lane_store_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %limit = index.constant 16 : index
+  %inside = index.cmp ult, %lane, %limit : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xi32, #dense>
+  %initial = vector.constant 0 : vector<1xi32>
+  %replacement = vector.constant 1 : vector<1xi32>
+  vector.store %initial, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  scf.if %inside {
+    vector.store %replacement, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  }
+  %loaded = vector.load %scratch_view[%lane] : view<32xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @wave_sized_workgroup_memory_guarded_lane_load_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %limit = index.constant 16 : index
+  %inside = index.cmp ult, %lane, %limit : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xi32, #dense>
+  %one = vector.constant 1 : vector<1xi32>
+  vector.store %one, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  scf.if %inside {
+    %loaded = vector.load %scratch_view[%lane] : view<32xi32, #dense> -> vector<1xi32>
+    vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  }
+  kernel.return
+}

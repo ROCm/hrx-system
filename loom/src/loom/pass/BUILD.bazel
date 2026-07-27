@@ -1,0 +1,382 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "environment",
+    srcs = ["environment.c"],
+    hdrs = ["environment.h"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "types",
+    hdrs = ["types.h"],
+    deps = [
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "value_facts",
+    srcs = ["value_facts.c"],
+    hdrs = ["value_facts.h"],
+    deps = [
+        ":types",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "pipeline",
+    srcs = ["pipeline.c"],
+    hdrs = ["pipeline.h"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "builder",
+    srcs = ["builder.c"],
+    hdrs = ["builder.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/pass",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "builder_test",
+    srcs = ["builder_test.cc"],
+    deps = [
+        ":builder",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/pass",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "pipeline_test",
+    srcs = ["pipeline_test.cc"],
+    deps = [
+        ":pipeline",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "predicate",
+    srcs = ["predicate.c"],
+    hdrs = ["predicate.h"],
+    deps = [
+        ":types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "registry",
+    srcs = ["registry.c"],
+    hdrs = ["registry.h"],
+    deps = [
+        ":environment",
+        ":pipeline",
+        ":types",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "invocation",
+    srcs = ["invocation.c"],
+    hdrs = ["invocation.h"],
+    deps = [
+        ":registry",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/pass",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "verify",
+    srcs = ["verify.c"],
+    hdrs = ["verify.h"],
+    deps = [
+        ":environment",
+        ":invocation",
+        ":predicate",
+        ":registry",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/pass",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "program",
+    srcs = ["program.c"],
+    hdrs = ["program.h"],
+    deps = [
+        ":environment",
+        ":invocation",
+        ":registry",
+        ":verify",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/pass",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "report",
+    srcs = ["report.c"],
+    hdrs = ["report.h"],
+    deps = [
+        ":environment",
+        ":program",
+        ":registry",
+        ":types",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "trace",
+    srcs = ["trace.c"],
+    hdrs = ["trace.h"],
+    deps = [
+        ":program",
+        ":types",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "interpreter",
+    srcs = ["interpreter.c"],
+    hdrs = ["interpreter.h"],
+    deps = [
+        ":environment",
+        ":predicate",
+        ":program",
+        ":report",
+        ":trace",
+        ":value_facts",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/pass",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "tooling",
+    srcs = ["tooling.c"],
+    hdrs = ["tooling.h"],
+    deps = [
+        ":builder",
+        ":environment",
+        ":interpreter",
+        ":pipeline",
+        ":program",
+        ":registry",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/pass",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "builtin_registry",
+    srcs = ["builtin_registry.c"],
+    hdrs = ["builtin_registry.h"],
+    visibility = [
+        "//loom/binding/c:__pkg__",
+        "//loom/src/loom/codegen/low:__pkg__",
+        "//loom/src/loom/target/arch/amdgpu:__pkg__",
+        "//loom/src/loom/tooling/compile:__pkg__",
+        "//loom/src/loom/tools/loom-check:__pkg__",
+        "//loom/src/loom/tools/loom-opt:__pkg__",
+    ],
+    deps = [
+        ":registry",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/codegen/low/pipeline:pass_requirements",
+        "//loom/src/loom/codegen/low/transforms:allocation",
+        "//loom/src/loom/codegen/low/transforms:cfg_tuple_decomposition",
+        "//loom/src/loom/codegen/low/transforms:dce",
+        "//loom/src/loom/codegen/low/transforms:operand_forms",
+        "//loom/src/loom/codegen/low/transforms/pipeline:source_to_low",
+        "//loom/src/loom/codegen/low/transforms/pipeline:target_legalize",
+        "//loom/src/loom/sanitizer:pipeline_passes",
+        "//loom/src/loom/sanitizer:race_insertion",
+        "//loom/src/loom/transforms/cfg:branch_fusion",
+        "//loom/src/loom/transforms/cfg:branch_sink",
+        "//loom/src/loom/transforms/cfg:cfg_simplify",
+        "//loom/src/loom/transforms/cleanup:canonicalize",
+        "//loom/src/loom/transforms/cleanup:cse",
+        "//loom/src/loom/transforms/cleanup:dce",
+        "//loom/src/loom/transforms/cleanup:strip_hints",
+        "//loom/src/loom/transforms/kernel:kernel_async_legality",
+        "//loom/src/loom/transforms/kernel:kernel_resources",
+        "//loom/src/loom/transforms/kernel:promote_private_fragments",
+        "//loom/src/loom/transforms/kernel:stage_loop_carried_fragments",
+        "//loom/src/loom/transforms/loop:licm",
+        "//loom/src/loom/transforms/loop:loop_fusion",
+        "//loom/src/loom/transforms/math:legalize",
+        "//loom/src/loom/transforms/ownership:ownership_lifetime",
+        "//loom/src/loom/transforms/scf:scf_to_cfg",
+        "//loom/src/loom/transforms/scf:scf_unroll",
+        "//loom/src/loom/transforms/symbol:inline_callables",
+        "//loom/src/loom/transforms/symbol:refine_boundaries",
+        "//loom/src/loom/transforms/symbol:symbol_dce",
+        "//loom/src/loom/transforms/symbol:template_selection",
+        "//loom/src/loom/transforms/vector:bank_sroa",
+        "//loom/src/loom/transforms/vector:memory_footprint",
+        "//loom/src/loom/transforms/vector:sink_single_use_reads",
+        "//loom/src/loom/transforms/vector:to_scalar",
+        "//loom/src/loom/transforms/view:linearize_view_accesses",
+    ],
+)
+
+loom_cc_test(
+    name = "invocation_test",
+    srcs = ["invocation_test.cc"],
+    deps = [
+        ":invocation",
+        "//loom/src/loom/ops/pass",
+        "//loom/src/loom/pass/test:harness",
+        "//loom/src/loom/pass/test:registry",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "verify_test",
+    srcs = ["verify_test.cc"],
+    deps = [
+        ":verify",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/pass",
+        "//loom/src/loom/pass/test:harness",
+        "//loom/src/loom/pass/test:registry",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "interpreter_test",
+    srcs = ["interpreter_test.cc"],
+    deps = [
+        ":interpreter",
+        ":program",
+        ":report",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/pass/test:harness",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "value_facts_test",
+    srcs = ["value_facts_test.cc"],
+    deps = [
+        ":value_facts",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/pass/test:harness",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "tooling_test",
+    srcs = ["tooling_test.cc"],
+    deps = [
+        ":tooling",
+        "//loom/src/loom/pass/test:harness",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "program_test",
+    srcs = ["program_test.cc"],
+    deps = [
+        ":program",
+        "//loom/src/loom/ops/pass",
+        "//loom/src/loom/pass/test:harness",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "builtin_registry_test",
+    srcs = ["builtin_registry_test.cc"],
+    deps = [
+        ":builtin_registry",
+        ":registry",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/pass/testing:registry_verify",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "registry_test",
+    srcs = ["registry_test.cc"],
+    deps = [
+        ":registry",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

@@ -51,15 +51,15 @@ iree_status_t iree_hal_embedded_elf_executable_plugin_load_from_memory(
   if (iree_status_is_ok(status)) {
     // Query the plugin interface.
     // This may fail if the version cannot be satisfied.
-    const iree_hal_executable_plugin_header_t** header_ptr =
-        (const iree_hal_executable_plugin_header_t**)iree_elf_call_p_ip(
+    const iree_hal_executable_plugin_header_t* const* query_result =
+        (const iree_hal_executable_plugin_header_t* const*)iree_elf_call_p_ip(
             query_fn, IREE_HAL_EXECUTABLE_PLUGIN_VERSION_LATEST,
             /*reserved=*/NULL);
 
     status = iree_hal_executable_plugin_initialize(
         &iree_hal_memory_embedded_elf_executable_plugin_vtable,
-        IREE_HAL_EXECUTABLE_PLUGIN_FEATURE_STANDALONE, header_ptr, param_count,
-        params, /*resolve_thunk=*/
+        IREE_HAL_EXECUTABLE_PLUGIN_FEATURE_STANDALONE, query_result,
+        param_count, params, /*resolve_thunk=*/
         (iree_hal_executable_plugin_resolve_thunk_t)iree_elf_call_p_ppp,
         host_allocator, &plugin->base);
   }
@@ -147,15 +147,15 @@ iree_status_t iree_hal_embedded_elf_executable_plugin_load_from_file(
   if (iree_status_is_ok(status)) {
     // Query the plugin interface.
     // This may fail if the version cannot be satisfied.
-    const iree_hal_executable_plugin_header_t** header =
-        (const iree_hal_executable_plugin_header_t**)iree_elf_call_p_ip(
+    const iree_hal_executable_plugin_header_t* const* query_result =
+        (const iree_hal_executable_plugin_header_t* const*)iree_elf_call_p_ip(
             query_fn, IREE_HAL_EXECUTABLE_PLUGIN_VERSION_LATEST,
             /*reserved=*/NULL);
 
     status = iree_hal_executable_plugin_initialize(
         &iree_hal_file_embedded_elf_executable_plugin_vtable,
-        IREE_HAL_EXECUTABLE_PLUGIN_FEATURE_STANDALONE, header, param_count,
-        params, /*resolve_thunk=*/
+        IREE_HAL_EXECUTABLE_PLUGIN_FEATURE_STANDALONE, query_result,
+        param_count, params, /*resolve_thunk=*/
         (iree_hal_executable_plugin_resolve_thunk_t)iree_elf_call_p_ppp,
         host_allocator, &plugin->base);
   }

@@ -6,8 +6,6 @@
 #include <catch2/catch_session.hpp>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <filesystem>
 #include <string>
 
 #include "hrx_loader.hpp"
@@ -15,25 +13,18 @@
 
 hrx_device_t g_test_device = nullptr;
 hrx_accelerator_type_t g_test_device_type = HRX_ACCELERATOR_CPU;
+std::string g_test_hip_library_path;
 
 namespace {
 
-void seedInstalledCtsSourceDir(const char* argv0) {
-  if (std::getenv("HRX_CTS_SOURCE_DIR") || !argv0) {
-    return;
-  }
-
-  std::filesystem::path executable_dir =
-      std::filesystem::path(argv0).parent_path();
-  if (executable_dir.empty()) {
-    return;
-  }
-
-  std::error_code ec;
-  if (std::filesystem::is_directory(executable_dir / "testdata", ec)) {
-    std::string source_dir = executable_dir.string();
-    setenv("HRX_CTS_SOURCE_DIR", source_dir.c_str(), /*overwrite=*/0);
-  }
+void printStatusAndConsume(HrxLoader& loader, const char* context,
+                           hrx_status_t status) {
+  char* message = nullptr;
+  size_t message_length = 0;
+  loader.status_to_string(status, &message, &message_length);
+  fprintf(stderr, "%s: %s\n", context, message ? message : "(unknown error)");
+  loader.status_free_message(message);
+  loader.status_ignore(status);
 }
 
 }  // namespace
@@ -42,6 +33,7 @@ int main(int argc, char* argv[]) {
   Catch::Session session;
 
   std::string hrx_library;
+  std::string hip_library;
   const char* hrx_device_env = std::getenv("HRX_CTS_DEVICE");
   std::string hrx_device_spec =
       hrx_device_env && hrx_device_env[0] ? hrx_device_env : "cpu:0";
@@ -50,14 +42,15 @@ int main(int argc, char* argv[]) {
   auto cli = session.cli() |
              Catch::Clara::Opt(hrx_library,
                                "path")["--hrx-library"]("Path to libhrx.so") |
+             Catch::Clara::Opt(hip_library, "path")["--hip-library"](
+                 "Path to libamdhip64.so") |
              Catch::Clara::Opt(hrx_device_spec, "spec")["--hrx-device"](
-                 "Device spec (gpu:N or cpu:N)");
+                 "Device spec (gpu:N, cpu:N, or none)");
   session.cli(cli);
 
   int ret = session.applyCommandLine(argc, argv);
   if (ret != 0) return ret;
-
-  seedInstalledCtsSourceDir(argc > 0 ? argv[0] : nullptr);
+  g_test_hip_library_path = hip_library;
 
   // Load library.
   if (!hrx_library.empty()) {
@@ -71,6 +64,11 @@ int main(int argc, char* argv[]) {
     int major, minor, patch;
     loader.runtime_version(&major, &minor, &patch);
     printf("HRX CTS using libhrx v%d.%d.%d\n", major, minor, patch);
+
+    if (hrx_device_spec == "none") {
+      ret = session.run();
+      return ret;
+    }
 
     // Parse device spec.
     hrx_accelerator_type_t type = HRX_ACCELERATOR_CPU;
@@ -88,23 +86,23 @@ int main(int argc, char* argv[]) {
     if (type == HRX_ACCELERATOR_GPU) {
       status = loader.gpu_initialize(0);
       if (!hrx_status_is_ok(status)) {
-        fprintf(stderr, "Failed to initialize GPU accelerator\n");
-        loader.status_ignore(status);
+        printStatusAndConsume(loader, "Failed to initialize GPU accelerator",
+                              status);
         return 1;
       }
       status = loader.gpu_device_get(index, &g_test_device);
     } else {
       status = loader.cpu_initialize(0);
       if (!hrx_status_is_ok(status)) {
-        fprintf(stderr, "Failed to initialize CPU accelerator\n");
-        loader.status_ignore(status);
+        printStatusAndConsume(loader, "Failed to initialize CPU accelerator",
+                              status);
         return 1;
       }
       status = loader.cpu_device_get(index, &g_test_device);
     }
     if (!hrx_status_is_ok(status)) {
-      fprintf(stderr, "Failed to get device %s\n", hrx_device_spec.c_str());
-      loader.status_ignore(status);
+      std::string context = "Failed to get device " + hrx_device_spec;
+      printStatusAndConsume(loader, context.c_str(), status);
       return 1;
     }
     g_test_device_type = type;
@@ -122,10 +120,12 @@ int main(int argc, char* argv[]) {
   ret = session.run();
 
   // Shutdown.
-  if (g_test_device_type == HRX_ACCELERATOR_GPU) {
-    hrx().status_ignore(hrx().gpu_shutdown());
-  } else {
-    hrx().status_ignore(hrx().cpu_shutdown());
+  if (g_test_device) {
+    if (g_test_device_type == HRX_ACCELERATOR_GPU) {
+      hrx().status_ignore(hrx().gpu_shutdown());
+    } else {
+      hrx().status_ignore(hrx().cpu_shutdown());
+    }
   }
 
   return ret;

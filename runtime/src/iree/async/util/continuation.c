@@ -8,11 +8,10 @@
 
 iree_host_size_t iree_async_continuation_dispatch(
     iree_async_continuation_submit_fn_t submit_fn, void* submit_context,
-    iree_async_continuation_list_t* continuations, iree_status_t status) {
+    iree_async_continuation_list_t* continuations,
+    iree_status_code_t status_code) {
   iree_host_size_t continuation_count = continuations->count;
   if (continuation_count == 0) {
-    // No continuations - caller still owns the status for their callback.
-    // Do not consume it here.
     return 0;
   }
 
@@ -24,7 +23,7 @@ iree_host_size_t iree_async_continuation_dispatch(
   // re-enter this function.
   continuations->count = 0;
 
-  if (iree_status_is_ok(status)) {
+  if (status_code == IREE_STATUS_OK) {
     // Triggering operation succeeded - submit continuations.
     iree_async_operation_list_t continuation_list = {
         .values = continuation_operations + continuation_start,
@@ -44,7 +43,7 @@ iree_host_size_t iree_async_continuation_dispatch(
           ++invoked;
         }
       }
-      iree_status_ignore(submit_status);
+      iree_status_free(submit_status);
       return invoked;
     }
     // Operations submitted - completions will be counted via CQEs.
@@ -56,9 +55,6 @@ iree_host_size_t iree_async_continuation_dispatch(
     // We don't submit-then-cancel because some operations (like NOP) complete
     // immediately in the kernel before cancel can take effect. Invoking
     // callbacks directly ensures continuations consistently receive CANCELLED.
-    //
-    // Note: We do NOT consume the incoming status here - the caller still
-    // owns it and will use it for the triggering operation's callback.
     iree_host_size_t invoked = 0;
     for (iree_host_size_t i = 0; i < continuation_count; ++i) {
       iree_async_operation_t* operation =

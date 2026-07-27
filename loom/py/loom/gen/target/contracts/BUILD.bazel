@@ -1,0 +1,299 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//loom/py/loom/gen:__subpackages__"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+GENERATOR_VISIBILITY = [
+    "//loom/py/loom/gen:__subpackages__",
+    "//loom/src/loom/target/arch/amdgpu/contracts:__pkg__",
+    "//loom/src/loom/target/arch/ireevm/contracts:__pkg__",
+    "//loom/src/loom/target/arch/llvmir/contracts:__pkg__",
+    "//loom/src/loom/target/arch/spirv/contracts:__pkg__",
+    "//loom/src/loom/target/arch/x86/contracts:__pkg__",
+    "//loom/src/loom/target/emit/wasm/contracts:__pkg__",
+    "//loom/src/loom/target/test/contracts:__pkg__",
+]
+
+CONTRACT_FRAGMENT_DEPS = [
+    "//loom/py/loom:core",
+    "//loom/py/loom/gen/support",
+    "//loom/py/loom/gen/target:package",
+    "//loom/py/loom/target/contracts",
+]
+
+iree_py_library(
+    name = "contract_fragments",
+    srcs = [
+        "__init__.py",
+        "contract_fragments.py",
+    ],
+    deps = CONTRACT_FRAGMENT_DEPS,
+)
+
+CONTRACT_FRAGMENT_SHARD_DEPS = [
+    ":contract_fragments",
+    "//loom/py/loom/target:contract_fragments",
+]
+
+iree_py_library(
+    name = "contract_fragment",
+    srcs = [
+        "__init__.py",
+        "contract_fragment.py",
+    ],
+    deps = CONTRACT_FRAGMENT_SHARD_DEPS,
+)
+
+LOWER_RULE_DEPS = [
+    "//loom/py/loom:core",
+    "//loom/py/loom/gen/support",
+    "//loom/py/loom/gen/target:package",
+    "//loom/py/loom/target:low_descriptors",
+    "//loom/py/loom/target/contracts",
+]
+
+iree_py_library(
+    name = "lower_rules",
+    srcs = [
+        "__init__.py",
+        "lower_rule_rows.py",
+        "lower_rule_spelling.py",
+        "lower_rules.py",
+    ],
+    deps = LOWER_RULE_DEPS,
+)
+
+LOWER_RULE_SHARD_DEPS = [
+    ":lower_rules",
+    "//loom/py/loom/target:contract_fragments",
+]
+
+iree_py_library(
+    name = "lower_rule_shard",
+    srcs = [
+        "__init__.py",
+        "lower_rule_shard.py",
+    ],
+    deps = LOWER_RULE_SHARD_DEPS,
+)
+
+iree_py_binary(
+    name = "amdgpu_contract_fragment",
+    srcs = [
+        "__init__.py",
+        "contract_fragment.py",
+    ],
+    main = "contract_fragment.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":contract_fragment",
+        "//loom/py/loom/target/arch/amdgpu/contracts",
+    ],
+)
+
+iree_py_binary(
+    name = "amdgpu_lower_rule_shard",
+    srcs = [
+        "__init__.py",
+        "lower_rule_shard.py",
+    ],
+    main = "lower_rule_shard.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":lower_rule_shard",
+        "//loom/py/loom/target/arch/amdgpu/contracts",
+    ],
+)
+
+iree_py_binary(
+    name = "ireevm_contract_fragment",
+    srcs = [
+        "__init__.py",
+        "contract_fragment.py",
+    ],
+    main = "contract_fragment.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":contract_fragment",
+        "//loom/py/loom/target/arch/ireevm/contracts",
+    ],
+)
+
+iree_py_binary(
+    name = "ireevm_lower_rule_shard",
+    srcs = [
+        "__init__.py",
+        "lower_rule_shard.py",
+    ],
+    main = "lower_rule_shard.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":lower_rule_shard",
+        "//loom/py/loom/target/arch/ireevm/contracts",
+    ],
+)
+
+iree_py_binary(
+    name = "llvmir_contract_fragment",
+    srcs = [
+        "__init__.py",
+        "contract_fragment.py",
+    ],
+    main = "contract_fragment.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":contract_fragment",
+        "//loom/py/loom/target/arch/llvmir:contracts",
+    ],
+)
+
+iree_py_binary(
+    name = "llvmir_lower_rule_shard",
+    srcs = [
+        "__init__.py",
+        "lower_rule_shard.py",
+    ],
+    main = "lower_rule_shard.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":lower_rule_shard",
+        "//loom/py/loom/target/arch/llvmir:contracts",
+    ],
+)
+
+iree_py_binary(
+    name = "spirv_contract_fragment",
+    srcs = [
+        "__init__.py",
+        "contract_fragment.py",
+    ],
+    main = "contract_fragment.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":contract_fragment",
+        "//loom/py/loom/target/arch/spirv/contracts",
+    ],
+)
+
+iree_py_binary(
+    name = "spirv_lower_rule_shard",
+    srcs = [
+        "__init__.py",
+        "lower_rule_shard.py",
+    ],
+    main = "lower_rule_shard.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":lower_rule_shard",
+        "//loom/py/loom/target/arch/spirv/contracts",
+    ],
+)
+
+iree_py_binary(
+    name = "test_low_contract_fragment",
+    srcs = [
+        "__init__.py",
+        "contract_fragment.py",
+    ],
+    main = "contract_fragment.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":contract_fragment",
+        "//loom/py/loom/target/test:contracts",
+    ],
+)
+
+iree_py_binary(
+    name = "test_low_lower_rule_shard",
+    srcs = [
+        "__init__.py",
+        "lower_rule_shard.py",
+    ],
+    main = "lower_rule_shard.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":lower_rule_shard",
+        "//loom/py/loom/target/test:contracts",
+    ],
+)
+
+iree_py_binary(
+    name = "wasm_contract_fragment",
+    srcs = [
+        "__init__.py",
+        "contract_fragment.py",
+    ],
+    main = "contract_fragment.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":contract_fragment",
+        "//loom/py/loom/target/emit/wasm:contracts",
+    ],
+)
+
+iree_py_binary(
+    name = "wasm_lower_rule_shard",
+    srcs = [
+        "__init__.py",
+        "lower_rule_shard.py",
+    ],
+    main = "lower_rule_shard.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":lower_rule_shard",
+        "//loom/py/loom/target/emit/wasm:contracts",
+    ],
+)
+
+iree_py_binary(
+    name = "x86_contract_fragment",
+    srcs = [
+        "__init__.py",
+        "contract_fragment.py",
+    ],
+    main = "contract_fragment.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":contract_fragment",
+        "//loom/py/loom/target/arch/x86/contracts",
+    ],
+)
+
+iree_py_binary(
+    name = "x86_lower_rule_shard",
+    srcs = [
+        "__init__.py",
+        "lower_rule_shard.py",
+    ],
+    main = "lower_rule_shard.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":lower_rule_shard",
+        "//loom/py/loom/target/arch/x86/contracts",
+    ],
+)
+
+iree_py_test(
+    name = "lower_rules_test",
+    srcs = [
+        "lower_rules_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.target.contracts.lower_rules_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":lower_rules",
+        "//loom/py/loom/dialect/scalar",
+        "//loom/py/loom/dialect/vector",
+        "//loom/py/loom/target/contracts",
+        "//loom/py/loom/target/test:descriptors",
+    ],
+)

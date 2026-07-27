@@ -26,7 +26,7 @@ extern "C" {
 #define IREE_HAL_VULKAN_MAX_QUEUE_LANES 3
 
 // Maximum recognized device extension names enabled during VkDevice creation.
-#define IREE_HAL_VULKAN_MAX_DEVICE_EXTENSION_NAMES 8
+#define IREE_HAL_VULKAN_MAX_DEVICE_EXTENSION_NAMES 9
 
 // Maximum queue-family create infos needed for current queue role assignment.
 #define IREE_HAL_VULKAN_MAX_QUEUE_CREATE_INFOS 3
@@ -79,9 +79,6 @@ typedef struct iree_hal_vulkan_device_plan_t {
 
   // Recognized Vulkan device extension bits enabled on the logical device.
   iree_hal_vulkan_device_extensions_t enabled_extensions;
-
-  // Executable dispatch ABI bits enabled for the logical device.
-  iree_hal_vulkan_dispatch_abis_t enabled_dispatch_abis;
 
   // Vulkan extension names enabled during driver-owned VkDevice creation.
   const char*

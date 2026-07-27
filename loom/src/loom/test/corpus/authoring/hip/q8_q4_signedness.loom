@@ -1,0 +1,111 @@
+// HIP -> Loom packed signedness recipe.
+//
+// HIP concept tags: `q8`, `q4`, `uint8_t`, `int8_t`, `u8`, `s8`, `u4`,
+// `s4`, `sign_extend`, `zero_extend`, `v_dot4_i32_iu8`, `dp4a`, packed bytes,
+// packed nibbles.
+//
+// Position: the storage bit pattern and the numeric interpretation are
+// separate authoring choices. Spell unsigned unpack with `bitunpacku`, signed
+// unpack with `bitunpacks`, and mixed dot signedness in the dot op kind.
+kernel.def @q8_q4_unpack_signedness() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%q8_packed: buffer, %q8_unsigned_output: buffer, %q8_signed_output: buffer, %q4_packed: buffer, %q4_unsigned_output: buffer, %q4_signed_output: buffer) {
+  %base = index.constant 0 : offset
+
+  // HIP concept:
+  //   uint32_t q8_word = *reinterpret_cast<const uint32_t *>(q8_bytes);
+  //   uint8_t u = byte(q8_word);  int8_t s = byte(q8_word);
+  // Loom spelling: load the packed word once, then choose zero-extension or
+  // sign-extension by selecting `vector.bitunpacku<8>` or
+  // `vector.bitunpacks<8>`. The all-ones check case below makes this visible:
+  // unsigned bytes become 255, signed bytes become -1.
+  %q8_packed_noalias, %q8_unsigned_noalias, %q8_signed_noalias = buffer.assume.noalias %q8_packed, %q8_unsigned_output, %q8_signed_output : buffer, buffer, buffer
+  %q8_words = buffer.view %q8_packed_noalias[%base] : buffer -> view<1xi32, #dense>
+  %q8_unsigned_words = buffer.view %q8_unsigned_noalias[%base] : buffer -> view<4xi32, #dense>
+  %q8_signed_words = buffer.view %q8_signed_noalias[%base] : buffer -> view<4xi32, #dense>
+  %q8_word = vector.load %q8_words[0] : view<1xi32, #dense> -> vector<1xi32>
+  %q8_unsigned = vector.bitunpacku<8> %q8_word : vector<1xi32> -> vector<4xi32>
+  %q8_signed = vector.bitunpacks<8> %q8_word : vector<1xi32> -> vector<4xi32>
+  vector.store %q8_unsigned, %q8_unsigned_words[0] : vector<4xi32>, view<4xi32, #dense>
+  vector.store %q8_signed, %q8_signed_words[0] : vector<4xi32>, view<4xi32, #dense>
+
+  // HIP concept:
+  //   uint32_t q4_word = *reinterpret_cast<const uint32_t *>(q4_nibbles);
+  //   uint4_t code = nibble(q4_word);  int4_t signed_code = signext(code);
+  // Loom spelling: the same unpack contract works for nibble storage. This is
+  // not Q4_0 offset-binary dequantization; it is the raw unsigned/signed field
+  // interpretation a packed dot or scalar reference path consumes.
+  %q4_packed_noalias, %q4_unsigned_noalias, %q4_signed_noalias = buffer.assume.noalias %q4_packed, %q4_unsigned_output, %q4_signed_output : buffer, buffer, buffer
+  %q4_words = buffer.view %q4_packed_noalias[%base] : buffer -> view<1xi32, #dense>
+  %q4_unsigned_words = buffer.view %q4_unsigned_noalias[%base] : buffer -> view<8xi32, #dense>
+  %q4_signed_words = buffer.view %q4_signed_noalias[%base] : buffer -> view<8xi32, #dense>
+  %q4_word = vector.load %q4_words[0] : view<1xi32, #dense> -> vector<1xi32>
+  %q4_unsigned = vector.bitunpacku<4> %q4_word : vector<1xi32> -> vector<8xi32>
+  %q4_signed = vector.bitunpacks<4> %q4_word : vector<1xi32> -> vector<8xi32>
+  vector.store %q4_unsigned, %q4_unsigned_words[0] : vector<8xi32>, view<8xi32, #dense>
+  vector.store %q4_signed, %q4_signed_words[0] : vector<8xi32>, view<8xi32, #dense>
+
+  kernel.return
+}
+
+// HIP concept:
+//   v_dot4_i32_iu8 / dp4a style operation where the left operand is unsigned
+//   bytes and the right operand is signed bytes.
+// Loom spelling: the signedness is part of the operation kind:
+//   vector.dot4i<u8s8> lhs, rhs, acc
+// The i8 lane values carry raw 8-bit storage; the kind chooses interpretation.
+kernel.def @q8_mixed_u8s8_dot4_all_ones() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %lhs0 = scalar.constant -1 : i8
+  %rhs0 = scalar.constant -1 : i8
+  %zero = scalar.constant 0 : i32
+  %output_words = buffer.view %output[%base] : buffer -> view<1xi32, #dense>
+  %lhs = vector.from_elements %lhs0, %lhs0, %lhs0, %lhs0 : vector<4xi8>
+  %rhs = vector.from_elements %rhs0, %rhs0, %rhs0, %rhs0 : vector<4xi8>
+  %acc = vector.from_elements %zero : vector<1xi32>
+  %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  %result = vector.extract %dot[0] : vector<1xi32> -> i32
+  view.store %result, %output_words[%zero_index] : i32, view<1xi32, #dense>
+  kernel.return
+}
+
+// HIP concept: all-ones packed bytes distinguish unsigned and signed paths.
+// Loom spelling: use ordinary checked tensors for the unpacked results. The
+// packed input is one i32 with bit pattern 0xffffffff.
+check.case @case_q8_q4_signedness {
+  %q8_packed = check.generate.fill value(-1) : tensor<1xi32>
+  %q8_unsigned_output = check.generate.fill value(0) : tensor<4xi32>
+  %q8_signed_output = check.generate.fill value(0) : tensor<4xi32>
+  %q4_packed = check.generate.fill value(-1) : tensor<1xi32>
+  %q4_unsigned_output = check.generate.fill value(0) : tensor<8xi32>
+  %q4_signed_output = check.generate.fill value(0) : tensor<8xi32>
+  %q8_unsigned_expected = check.generate.fill value(255) : tensor<4xi32>
+  %q8_signed_expected = check.generate.fill value(-1) : tensor<4xi32>
+  %q4_unsigned_expected = check.generate.fill value(15) : tensor<8xi32>
+  %q4_signed_expected = check.generate.fill value(-1) : tensor<8xi32>
+  func.call @q8_q4_unpack_signedness(%q8_packed, %q8_unsigned_output, %q8_signed_output, %q4_packed, %q4_unsigned_output, %q4_signed_output) : (tensor<1xi32>, tensor<4xi32>, tensor<4xi32>, tensor<1xi32>, tensor<8xi32>, tensor<8xi32>)
+  check.expect.equal actual(%q8_unsigned_output) expected(%q8_unsigned_expected) : tensor<4xi32>
+  check.expect.equal actual(%q8_signed_output) expected(%q8_signed_expected) : tensor<4xi32>
+  check.expect.equal actual(%q4_unsigned_output) expected(%q4_unsigned_expected) : tensor<8xi32>
+  check.expect.equal actual(%q4_signed_output) expected(%q4_signed_expected) : tensor<8xi32>
+  check.return
+}
+
+// HIP concept: the same all-ones bytes produce 4 * 255 * -1 for u8*s8.
+// Loom spelling: store the scalar result to a one-element output tensor so the
+// same checked shape can run through the normal kernel invocation harness.
+check.case @case_q8_mixed_dot4_signedness {
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  %expected = check.generate.fill value(-1020) : tensor<1xi32>
+  func.call @q8_mixed_u8s8_dot4_all_ones(%output) : (tensor<1xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.benchmark<@case_q8_q4_signedness> @bench_q8_q4_signedness
+check.benchmark<@case_q8_mixed_dot4_signedness> @bench_q8_mixed_dot4_signedness

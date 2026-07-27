@@ -1,0 +1,44 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_generated_textual_header",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_X86_TARGET_RECORDS_VISIBILITY = [
+    "//loom/src/loom/target/arch/x86:__pkg__",
+    "//loom/src/loom/target/arch/x86/descriptors:__pkg__",
+    "//loom/src/loom/target/arch/x86/ops:__pkg__",
+]
+
+loom_generated_textual_header(
+    name = "target_profiles_gen",
+    generator = "//loom/py/loom/gen/target/arch/x86:target_profiles",
+    output = "target_profiles.inl",
+    output_flag = "--native-output",
+    visibility = _X86_TARGET_RECORDS_VISIBILITY,
+)
+
+loom_cc_library(
+    name = "target_records",
+    srcs = ["target_records.c"],
+    hdrs = ["target_records.h"],
+    textual_hdrs = [":target_profiles.inl"],
+    visibility = _X86_TARGET_RECORDS_VISIBILITY,
+    deps = [
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/x86:feature_bits",
+        "//runtime/src/iree/base",
+    ],
+)

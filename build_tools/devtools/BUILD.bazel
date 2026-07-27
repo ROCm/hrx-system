@@ -27,11 +27,14 @@ py_library(
         "fuzz.py",
         "help_text.py",
         "hooks.py",
+        "importers.py",
         "presubmit.py",
         "project_presubmit.py",
         "setup.py",
         "smoke_test_lib.py",
+        "source_lock.py",
     ],
+    deps = ["//build_tools/bazel:compile_commands_merge_lib"],
 )
 
 py_binary(
@@ -84,6 +87,17 @@ py_test(
         "ci_config.py",
         "ci_test.py",
     ],
+    data = [
+        "//:.github/scripts/check_vulkan_hardware_environment.sh",
+        "//:.github/scripts/fetch_rocm_toolchain.sh",
+        "//:.github/workflows/ci_core_linux.yml",
+        "//:.github/workflows/ci_importers.yml",
+        "//:.github/workflows/ci_iree_bazel.yml",
+        "//:.github/workflows/ci_iree_cmake.yml",
+        "//:.github/workflows/ci_libhrx_bazel.yml",
+        "//:.github/workflows/presubmit.yml",
+        "//:.github/workflows/test_core_linux_gpu.yml",
+    ],
     main = "ci_test.py",
 )
 
@@ -104,10 +118,12 @@ py_test(
         "fuzz.py",
         "help_text.py",
         "hooks.py",
+        "importers.py",
         "presubmit.py",
         "setup.py",
     ],
     main = "cli_test.py",
+    deps = ["//build_tools/bazel:compile_commands_merge_lib"],
 )
 
 py_test(
@@ -145,12 +161,40 @@ py_test(
 )
 
 py_test(
+    name = "environment_test",
+    srcs = [
+        "environment.py",
+        "environment_test.py",
+    ],
+    main = "environment_test.py",
+)
+
+py_test(
+    name = "install_test",
+    srcs = [
+        "__init__.py",
+        "install.py",
+        "install_test.py",
+    ],
+    main = "install_test.py",
+)
+
+py_test(
     name = "project_presubmit_test",
     srcs = [
         "project_presubmit.py",
         "project_presubmit_test.py",
     ],
     main = "project_presubmit_test.py",
+)
+
+py_test(
+    name = "source_lock_test",
+    srcs = [
+        "source_lock.py",
+        "source_lock_test.py",
+    ],
+    main = "source_lock_test.py",
 )
 
 py_test(

@@ -1,0 +1,52 @@
+// RUN: pass dce
+
+// Access assertions execute even though they produce no SSA values.
+func.def @access_assertion_survives_dce(%layout: encoding<layout>, %view: view<4xf32, %layout>, %i: index) {
+  sanitizer.assert.access<read> %view[%i] : view<4xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Assertions with unused checked results still execute and must not be dropped.
+func.def @unused_assertion_survives_dce(%n: index) {
+  %checked = sanitizer.assert.value %n [ge(%n, 0)] : index
+  func.return
+}
+
+// ====
+
+// Operation assertions execute even though they produce no SSA values.
+func.def @op_assertion_survives_dce(%n: index) {
+  sanitizer.assert.op %n [ge(%n, 0)] : index
+  func.return
+}
+
+// ====
+
+// Layout assertion results are checked aliases, but an unused alias still
+// leaves the executable assertion boundary in place.
+func.def @layout_assertion_survives_dce(%m: index, %layout: encoding<layout>, %view: view<[%m]xf32, %layout>) {
+  %checked = sanitizer.assert.layout %view : view<[%m]xf32, %layout> -> view<4xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Identical assertions represent distinct report/trap sites and are not CSE
+// candidates.
+// RUN: pass cse
+func.def @assertions_do_not_cse(%n: index) -> (index, index) {
+  %lhs = sanitizer.assert.value %n [ge(%n, 0)] : index
+  %rhs = sanitizer.assert.value %n [ge(%n, 0)] : index
+  func.return %lhs, %rhs : index, index
+}
+
+// ====
+
+// RUN: pass cse
+func.def @access_assertions_do_not_cse(%layout: encoding<layout>, %view: view<4xf32, %layout>, %i: index) {
+  sanitizer.assert.access<read> %view[%i] : view<4xf32, %layout>
+  sanitizer.assert.access<read> %view[%i] : view<4xf32, %layout>
+  func.return
+}

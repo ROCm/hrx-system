@@ -719,7 +719,8 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_read(
 
   memcpy(target_buffer, source_mapping.contents.data, data_length);
 
-  iree_hal_buffer_unmap_range(&source_mapping);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_unmap_range(&source_mapping));
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -751,7 +752,8 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_write(
                                                  IREE_HAL_WHOLE_BUFFER);
   }
 
-  iree_hal_buffer_unmap_range(&target_mapping);
+  status =
+      iree_status_join(status, iree_hal_buffer_unmap_range(&target_mapping));
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -793,7 +795,8 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_copy(
                                 IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE,
                                 target_offset, data_length, &target_mapping);
   if (!iree_status_is_ok(status)) {
-    iree_hal_buffer_unmap_range(&source_mapping);
+    status =
+        iree_status_join(status, iree_hal_buffer_unmap_range(&source_mapping));
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
@@ -815,8 +818,12 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_copy(
   // bail but we need to have mapped to resolve IREE_HAL_WHOLE_BUFFERs that may
   // result in zero lengths.
   if (IREE_UNLIKELY(adjusted_data_length == 0)) {
+    status =
+        iree_status_join(status, iree_hal_buffer_unmap_range(&source_mapping));
+    status =
+        iree_status_join(status, iree_hal_buffer_unmap_range(&target_mapping));
     IREE_TRACE_ZONE_END(z0);
-    return iree_ok_status();
+    return status;
   }
 
   memcpy(target_mapping.contents.data, source_mapping.contents.data,
@@ -828,8 +835,10 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_copy(
                                                  adjusted_data_length);
   }
 
-  iree_hal_buffer_unmap_range(&source_mapping);
-  iree_hal_buffer_unmap_range(&target_mapping);
+  status =
+      iree_status_join(status, iree_hal_buffer_unmap_range(&source_mapping));
+  status =
+      iree_status_join(status, iree_hal_buffer_unmap_range(&target_mapping));
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

@@ -30,12 +30,14 @@ class RuntimePresubmitTest(unittest.TestCase):
         command = self.presubmit.bazel_test_command()
 
         self.assertEqual(command[:3], ["bazel", "test", "--config=presubmit"])
-        self.assertEqual(command[-1], "//runtime/...")
+        self.assertIn("--", command)
+        self.assertIn("//runtime/...", command)
 
         tag_filter = next(
             arg for arg in command if arg.startswith("--test_tag_filters=")
         )
         self.assertIn("-iree-run-requirement=runtime.resource.amd_gpu", tag_filter)
+        self.assertIn("-//runtime/src/iree/hal/local/elf:elf_module_test", command)
 
 
 if __name__ == "__main__":

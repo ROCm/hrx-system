@@ -1,0 +1,27 @@
+// RUN: emit source-low output=low
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @spirv_workgroup_storage_i32_roundtrip(%value: i32, %index: index) -> (i32) {
+  %bytes = index.constant 16 : offset
+  %scale = index.constant 4 : index
+  %byte_index = index.mul %index, %scale : index
+  %byte_offset = index.cast %byte_index : index to offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%byte_offset] : buffer -> view<1xi32, #dense>
+  view.store %value, %scratch_view[0] : i32, view<1xi32, #dense>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  %loaded = view.load %scratch_view[0] : view<1xi32, #dense> -> i32
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @spirv_workgroup_storage_i32_roundtrip(%value: reg<spirv.id>, %index: reg<spirv.id>) -> (reg<spirv.id>) asm<spirv.logical.core> {
+  %scratch = storage {byte_alignment = 4, byte_length = 16} : low.storage<workgroup>
+  %20 = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %scratch_view = OpAccessChain.workgroup.i32.element_index %20, %index
+  OpStore.workgroup.i32 %scratch_view, %value
+  OpControlBarrier.workgroup.workgroup.acq_rel
+  %loaded = OpLoad.workgroup.i32 %scratch_view
+  return %loaded
+}

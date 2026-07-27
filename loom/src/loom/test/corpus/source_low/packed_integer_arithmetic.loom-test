@@ -1,0 +1,78 @@
+// RUN: roundtrip
+
+func.def @i8x8_bitwise_storage_tuple(%lhs: vector<8xi8>, %rhs: vector<8xi8>) -> (vector<8xi8>, vector<8xi8>, vector<8xi8>) {
+  %and = vector.andi %lhs, %rhs : vector<8xi8>
+  %or = vector.ori %lhs, %rhs : vector<8xi8>
+  %xor = vector.xori %lhs, %rhs : vector<8xi8>
+  func.return %and, %or, %xor : vector<8xi8>, vector<8xi8>, vector<8xi8>
+}
+
+// ====
+
+func.def @i16x4_bitwise_storage_tuple(%lhs: vector<4xi16>, %rhs: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>) {
+  %and = vector.andi %lhs, %rhs : vector<4xi16>
+  %or = vector.ori %lhs, %rhs : vector<4xi16>
+  %xor = vector.xori %lhs, %rhs : vector<4xi16>
+  func.return %and, %or, %xor : vector<4xi16>, vector<4xi16>, vector<4xi16>
+}
+
+// ====
+
+func.def @i16x4_add_sub_storage_tuple(%lhs: vector<4xi16>, %rhs: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>) {
+  %sum = vector.addi %lhs, %rhs : vector<4xi16>
+  %diff = vector.subi %lhs, %rhs : vector<4xi16>
+  func.return %sum, %diff : vector<4xi16>, vector<4xi16>
+}
+
+// ====
+
+func.def @i16x4_mul_minmax_storage_tuple(%lhs: vector<4xi16>, %rhs: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>, vector<4xi16>, vector<4xi16>) {
+  %product = vector.muli %lhs, %rhs : vector<4xi16>
+  %smin = vector.minsi %lhs, %rhs : vector<4xi16>
+  %smax = vector.maxsi %lhs, %rhs : vector<4xi16>
+  %umin = vector.minui %lhs, %rhs : vector<4xi16>
+  %umax = vector.maxui %lhs, %rhs : vector<4xi16>
+  func.return %product, %smin, %smax, %umin, %umax : vector<4xi16>, vector<4xi16>, vector<4xi16>, vector<4xi16>, vector<4xi16>
+}
+
+// ====
+
+func.def @i16x4_shift_storage_tuple(%value: vector<4xi16>, %shift: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>) {
+  %left = vector.shli %value, %shift : vector<4xi16>
+  %signed_right = vector.shrsi %value, %shift : vector<4xi16>
+  %unsigned_right = vector.shrui %value, %shift : vector<4xi16>
+  func.return %left, %signed_right, %unsigned_right : vector<4xi16>, vector<4xi16>, vector<4xi16>
+}
+
+// ====
+
+func.def @i16x4_bitcast_mul_maxui_chain(%packed: vector<2xi32>, %scale: vector<4xi16>, %limit: vector<4xi16>) -> (vector<4xi16>) {
+  %lanes = vector.bitcast %packed : vector<2xi32> to vector<4xi16>
+  %product = vector.muli %lanes, %scale : vector<4xi16>
+  %result = vector.maxui %product, %limit : vector<4xi16>
+  func.return %result : vector<4xi16>
+}
+
+// ====
+
+func.def @i16x4_select_xori(%lhs: i32, %rhs: i32, %true_value: vector<4xi16>, %false_value: vector<4xi16>, %mask: vector<4xi16>) -> (vector<4xi16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %predicate = vector.splat %condition : vector<4xi1>
+  %selected = vector.select %predicate, %true_value, %false_value : vector<4xi16>
+  %result = vector.xori %selected, %mask : vector<4xi16>
+  func.return %result : vector<4xi16>
+}
+
+// ====
+
+func.def @i16x4_cfg_arg_andi(%lhs: i32, %rhs: i32, %true_value: vector<4xi16>, %false_value: vector<4xi16>, %mask: vector<4xi16>) -> (vector<4xi16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  cfg.cond_br %condition, ^then, ^else
+^then:
+  cfg.br ^join(%true_value: vector<4xi16>)
+^else:
+  cfg.br ^join(%false_value: vector<4xi16>)
+^join(%selected: vector<4xi16>):
+  %result = vector.andi %selected, %mask : vector<4xi16>
+  func.return %result : vector<4xi16>
+}

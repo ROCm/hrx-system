@@ -1,0 +1,51 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @i32_to_u8x4_bitunpack(%packed: vector<1xi32>) -> (vector<4xi32>) {
+  %unpacked = vector.bitunpacku<8> %packed : vector<1xi32> -> vector<4xi32>
+  func.return %unpacked : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i32_to_u8x4_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna4.core> {
+  %5 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 0, src0_sext = 0}
+  %6 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 1, src0_sext = 0}
+  %7 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 2, src0_sext = 0}
+  %8 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 3, src0_sext = 0}
+  %unpacked = concat(%5, %6, %7, %8) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %unpacked
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @i32_to_s8x4_bitunpack(%packed: vector<1xi32>) -> (vector<4xi32>) {
+  %unpacked = vector.bitunpacks<8> %packed : vector<1xi32> -> vector<4xi32>
+  func.return %unpacked : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i32_to_s8x4_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna4.core> {
+  %5 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 0, src0_sext = 1}
+  %6 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 1, src0_sext = 1}
+  %7 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 2, src0_sext = 1}
+  %8 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 3, src0_sext = 1}
+  %unpacked = concat(%5, %6, %7, %8) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %unpacked
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @i32_to_u16x2_bitunpack(%packed: vector<1xi32>) -> (vector<2xi32>) {
+  %unpacked = vector.bitunpacku<16> %packed : vector<1xi32> -> vector<2xi32>
+  func.return %unpacked : vector<2xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i32_to_u16x2_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.cdna4.core> {
+  %5 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 4, src0_sext = 0}
+  %6 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 5, src0_sext = 0}
+  %unpacked = concat(%5, %6) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %unpacked
+}

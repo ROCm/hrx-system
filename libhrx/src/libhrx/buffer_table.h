@@ -32,34 +32,39 @@ typedef struct hrx_buffer_table_t {
   size_t capacity;
 } hrx_buffer_table_t;
 
-HRX_API void hrx_buffer_table_initialize(hrx_buffer_table_t* table);
-HRX_API void hrx_buffer_table_deinitialize(hrx_buffer_table_t* table);
+void hrx_buffer_table_initialize(hrx_buffer_table_t* table);
+void hrx_buffer_table_deinitialize(hrx_buffer_table_t* table);
 
-HRX_API hrx_status_t hrx_buffer_table_insert(hrx_buffer_table_t* table,
-                                             uint64_t device_ptr,
-                                             void* host_ptr, size_t size,
-                                             hrx_buffer_t buffer,
-                                             void* user_data);
+hrx_status_t hrx_buffer_table_insert(hrx_buffer_table_t* table,
+                                     uint64_t device_ptr, void* host_ptr,
+                                     size_t size, hrx_buffer_t buffer,
+                                     void* user_data);
 
-HRX_API hrx_status_t hrx_buffer_table_remove(hrx_buffer_table_t* table,
-                                             uint64_t any_ptr);
+// Like hrx_buffer_table_insert, but treats an already-registered pointer as
+// success (returns OK). Genuine failures (e.g. out-of-memory growing the
+// table) are propagated to the caller instead of being silently dropped.
+hrx_status_t hrx_buffer_table_insert_if_new(hrx_buffer_table_t* table,
+                                            uint64_t device_ptr, void* host_ptr,
+                                            size_t size, hrx_buffer_t buffer,
+                                            void* user_data);
+
+hrx_status_t hrx_buffer_table_remove(hrx_buffer_table_t* table,
+                                     uint64_t any_ptr);
 
 // Looks up a buffer containing |any_ptr| (device or host).
 // Returns the buffer, byte offset within it, and optional user_data.
 // Any out-parameter may be NULL if not needed.
-HRX_API hrx_status_t hrx_buffer_table_find(hrx_buffer_table_t* table,
-                                           uint64_t any_ptr,
-                                           hrx_buffer_t* out_buffer,
-                                           size_t* out_offset,
-                                           void** out_user_data);
+hrx_status_t hrx_buffer_table_find(hrx_buffer_table_t* table, uint64_t any_ptr,
+                                   hrx_buffer_t* out_buffer, size_t* out_offset,
+                                   void** out_user_data);
 
 // Looks up a buffer containing the entire range [any_ptr, any_ptr + size).
 // Returns NOT_FOUND if no single buffer covers the full range.
-HRX_API hrx_status_t hrx_buffer_table_find_range(hrx_buffer_table_t* table,
-                                                 uint64_t any_ptr, size_t size,
-                                                 hrx_buffer_t* out_buffer,
-                                                 size_t* out_offset,
-                                                 void** out_user_data);
+hrx_status_t hrx_buffer_table_find_range(hrx_buffer_table_t* table,
+                                         uint64_t any_ptr, size_t size,
+                                         hrx_buffer_t* out_buffer,
+                                         size_t* out_offset,
+                                         void** out_user_data);
 
 #ifdef __cplusplus
 }

@@ -1,0 +1,58 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_generated_textual_header",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_LLVMIR_VISIBILITY = [
+    "//loom/src/loom/target/emit/llvmir:__pkg__",
+    "//loom/src/loom/tools/loom-compile:__pkg__",
+]
+
+_LLVMIR_TARGET_ENV_VISIBILITY = _LLVMIR_VISIBILITY + [
+    "//loom/src/loom/tools/loom-check:__pkg__",
+]
+
+loom_cc_library(
+    name = "intrinsics",
+    srcs = ["intrinsics.c"],
+    hdrs = ["intrinsics.h"],
+    visibility = _LLVMIR_VISIBILITY,
+    deps = [
+        "//loom/src/loom/target/emit/llvmir:core",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_generated_textual_header(
+    name = "target_profiles_gen",
+    generator = "//loom/py/loom/gen/target/arch/x86:target_profiles",
+    output = "target_profiles.inl",
+    output_flag = "--llvmir-output",
+)
+
+loom_cc_library(
+    name = "target_env",
+    srcs = ["target_env.c"],
+    hdrs = ["target_env.h"],
+    textual_hdrs = [":target_profiles.inl"],
+    visibility = _LLVMIR_TARGET_ENV_VISIBILITY,
+    deps = [
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/x86:feature_bits",
+        "//loom/src/loom/target/emit/llvmir:target_presets",
+        "//runtime/src/iree/base",
+    ],
+)

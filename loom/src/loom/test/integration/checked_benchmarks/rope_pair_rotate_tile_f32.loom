@@ -1,0 +1,67 @@
+// RoPE pair rotation over a four-lane tile.
+//
+// Angle values are loaded from buffers so the compiler must lower dynamic
+// sin/cos and pair arithmetic. The checked cases keep the expected data simple:
+// identity rotation preserves even/odd lanes, while a quarter turn swaps lanes
+// and negates the original odd values.
+// Numeric policy is ML-fast: dynamic sin/cos use approximate target math, and
+// the pair rotation products plus add/sub combines are contractable.
+kernel.def @rope_pair_rotate_tile_f32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%even: buffer, %odd: buffer, %angles: buffer, %rotated_even: buffer, %rotated_odd: buffer) {
+  %base = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+
+  %even_noalias, %odd_noalias, %angles_noalias, %rotated_even_noalias, %rotated_odd_noalias = buffer.assume.noalias %even, %odd, %angles, %rotated_even, %rotated_odd : buffer, buffer, buffer, buffer, buffer
+  %even_view = buffer.view %even_noalias[%base] : buffer -> view<4xf32, #dense>
+  %odd_view = buffer.view %odd_noalias[%base] : buffer -> view<4xf32, #dense>
+  %angles_view = buffer.view %angles_noalias[%base] : buffer -> view<4xf32, #dense>
+  %rotated_even_view = buffer.view %rotated_even_noalias[%base] : buffer -> view<4xf32, #dense>
+  %rotated_odd_view = buffer.view %rotated_odd_noalias[%base] : buffer -> view<4xf32, #dense>
+
+  %even_values = vector.load %even_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %odd_values = vector.load %odd_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %angle_values = vector.load %angles_view[0] : view<4xf32, #dense> -> vector<4xf32>
+
+  %sine = vector.sinf<afn> %angle_values : vector<4xf32>
+  %cosine = vector.cosf<afn> %angle_values : vector<4xf32>
+  %even_cos = vector.mulf<reassoc|nnan|nsz|contract> %even_values, %cosine : vector<4xf32>
+  %odd_sin = vector.mulf<reassoc|nnan|nsz|contract> %odd_values, %sine : vector<4xf32>
+  %new_even = vector.subf<reassoc|nnan|nsz|contract> %even_cos, %odd_sin : vector<4xf32>
+  %even_sin = vector.mulf<reassoc|nnan|nsz|contract> %even_values, %sine : vector<4xf32>
+  %odd_cos = vector.mulf<reassoc|nnan|nsz|contract> %odd_values, %cosine : vector<4xf32>
+  %new_odd = vector.addf<reassoc|nnan|nsz|contract> %even_sin, %odd_cos : vector<4xf32>
+
+  vector.store %new_even, %rotated_even_view[%zero_index] : vector<4xf32>, view<4xf32, #dense>
+  vector.store %new_odd, %rotated_odd_view[%zero_index] : vector<4xf32>, view<4xf32, #dense>
+  kernel.return
+}
+
+check.case public @rope_pair_rotate_tile_identity_case {
+  %even = check.generate.iota offset(1.0) step(1.0) : tensor<4xf32>
+  %odd = check.generate.iota offset(10.0) step(1.0) : tensor<4xf32>
+  %angles = check.generate.fill value(0.0) : tensor<4xf32>
+  %rotated_even = check.generate.fill value(-99.0) : tensor<4xf32>
+  %rotated_odd = check.generate.fill value(-99.0) : tensor<4xf32>
+  func.call @rope_pair_rotate_tile_f32(%even, %odd, %angles, %rotated_even, %rotated_odd) : (tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>)
+  check.expect.close actual(%rotated_even) expected(%even) atol(0.0001) rtol(0.0001) nan(same) : tensor<4xf32>
+  check.expect.close actual(%rotated_odd) expected(%odd) atol(0.0001) rtol(0.0001) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.case public @rope_pair_rotate_tile_quarter_turn_case {
+  %even = check.generate.iota offset(1.0) step(1.0) : tensor<4xf32>
+  %odd = check.generate.iota offset(10.0) step(1.0) : tensor<4xf32>
+  %angles = check.generate.fill value(1.5707963267948966) : tensor<4xf32>
+  %rotated_even = check.generate.fill value(-99.0) : tensor<4xf32>
+  %rotated_odd = check.generate.fill value(-99.0) : tensor<4xf32>
+  %expected_even = check.generate.iota offset(-10.0) step(-1.0) : tensor<4xf32>
+  func.call @rope_pair_rotate_tile_f32(%even, %odd, %angles, %rotated_even, %rotated_odd) : (tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>)
+  check.expect.close actual(%rotated_even) expected(%expected_even) atol(0.0005) rtol(0.0005) nan(same) : tensor<4xf32>
+  check.expect.close actual(%rotated_odd) expected(%even) atol(0.0005) rtol(0.0005) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.benchmark<@rope_pair_rotate_tile_identity_case> @rope_pair_rotate_tile_identity_smoke
+check.benchmark<@rope_pair_rotate_tile_quarter_turn_case> @rope_pair_rotate_tile_quarter_turn_smoke

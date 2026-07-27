@@ -1,0 +1,18 @@
+// RUN: roundtrip
+
+config.decl @runtime.column_count : %value: index where [range(%value, 4, 64), mul(%value, 4)]
+
+kernel.def @config_decl_facts_bound_dynamic_view() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %columns = config.get @runtime.column_count : index
+  %input_view = buffer.view %input[%base] : buffer -> view<[%columns]xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%columns]xi32, #dense>
+  %loaded = vector.load %input_view[%lane] : view<[%columns]xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<[%columns]xi32, #dense>
+  kernel.return
+}

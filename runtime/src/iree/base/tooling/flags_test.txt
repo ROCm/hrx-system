@@ -61,6 +61,10 @@
 // RUN: ( flags_demo --test_string="with some space" ) | FileCheck --check-prefix=FLAG-STRING-SPACES %s
 // FLAG-STRING-SPACES: FLAG[test_string] = with some space
 
+// RUN: ( flags_demo --test-bool=true --test-string=hyphenated ) | FileCheck --check-prefix=FLAG-HYPHEN-ALIASES %s
+// FLAG-HYPHEN-ALIASES: FLAG[test_bool] = true
+// FLAG-HYPHEN-ALIASES: FLAG[test_string] = hyphenated
+
 // RUN: ( flags_demo --test_callback=1 ) | FileCheck --check-prefix=FLAG-CALLBACK-1 %s
 // FLAG-CALLBACK-1: FLAG[test_callback] = 1
 // RUN: ( flags_demo --test_callback=4 ) | FileCheck --check-prefix=FLAG-CALLBACK-4 %s
@@ -101,7 +105,7 @@
 // FLAGFILE: FLAG[test_float] = 55.1
 --test_float=55.1
 // FLAGFILE: FLAG[test_string] = override spaces
---test_string="override spaces"
+--test-string="override spaces"
 
 
 # NOTE: above two lines are to test that vertical whitespace is ok.

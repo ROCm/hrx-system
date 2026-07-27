@@ -1,0 +1,794 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "control_uniformity",
+    srcs = ["control_uniformity.c"],
+    hdrs = ["control_uniformity.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "availability",
+    srcs = ["availability.c"],
+    hdrs = ["availability.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:dominance",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "availability_test",
+    srcs = ["availability_test.cc"],
+    deps = [
+        ":availability",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "condition_facts",
+    srcs = ["condition_facts.c"],
+    hdrs = ["condition_facts.h"],
+    deps = [
+        ":integer_relation",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "condition_facts_test",
+    srcs = ["condition_facts_test.cc"],
+    deps = [
+        ":condition_facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "cfg_condition_facts",
+    srcs = ["cfg_condition_facts.c"],
+    hdrs = ["cfg_condition_facts.h"],
+    deps = [
+        ":condition_facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:dominance",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "cfg_condition_facts_test",
+    srcs = ["cfg_condition_facts_test.cc"],
+    deps = [
+        ":cfg_condition_facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:dominance",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "func_provider_catalog",
+    srcs = ["func_provider_catalog.c"],
+    hdrs = ["func_provider_catalog.h"],
+    deps = [
+        ":symbol_facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "func_provider_catalog_test",
+    srcs = ["func_provider_catalog_test.cc"],
+    deps = [
+        ":func_provider_catalog",
+        ":symbol_facts",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "matrix_fragment_layout",
+    srcs = ["matrix_fragment_layout.c"],
+    hdrs = ["matrix_fragment_layout.h"],
+    deps = [
+        ":contract_roles",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "matrix_fragment_layout_test",
+    srcs = ["matrix_fragment_layout_test.cc"],
+    deps = [
+        ":matrix_fragment_layout",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "consumption",
+    srcs = ["consumption.c"],
+    hdrs = ["consumption.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:cfg_graph",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "ownership",
+    srcs = ["ownership.c"],
+    hdrs = ["ownership.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "ownership_lifetime",
+    srcs = ["ownership_lifetime.c"],
+    hdrs = ["ownership_lifetime.h"],
+    deps = [
+        ":liveness",
+        ":ownership",
+        ":scc",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "ownership_test",
+    srcs = ["ownership_test.cc"],
+    deps = [
+        ":ownership",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/testing:module_ptr",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "kernel_async_legality",
+    srcs = ["kernel_async_legality.c"],
+    hdrs = ["kernel_async_legality.h"],
+    deps = [
+        ":control_uniformity",
+        ":movement",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "kernel_launch_config",
+    srcs = ["kernel_launch_config.c"],
+    hdrs = ["kernel_launch_config.h"],
+    deps = [
+        ":symbol_facts",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/target:function_contract",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "kernel_launch_config_test",
+    srcs = ["kernel_launch_config_test.cc"],
+    deps = [
+        ":kernel_launch_config",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/testing:context",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "vector_memory_footprint",
+    srcs = ["vector_memory_footprint.c"],
+    hdrs = ["vector_memory_footprint.h"],
+    deps = [
+        ":cfg_condition_facts",
+        ":condition_facts",
+        ":symbolic_expr",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/config",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:dominance",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "policy",
+    hdrs = ["policy.h"],
+)
+
+loom_cc_library(
+    name = "contract_roles",
+    hdrs = ["contract_roles.h"],
+)
+
+loom_cc_library(
+    name = "contract",
+    srcs = ["contract.c"],
+    hdrs = ["contract.h"],
+    deps = [
+        ":contract_roles",
+        ":policy",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "contract_test",
+    srcs = ["contract_test.cc"],
+    deps = [
+        ":contract",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "contract_storage",
+    srcs = ["contract_storage.c"],
+    hdrs = ["contract_storage.h"],
+    deps = [
+        ":contract",
+        "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:numeric_format",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "contract_storage_test",
+    srcs = ["contract_storage_test.cc"],
+    deps = [
+        ":contract_storage",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "contract_preparation",
+    srcs = ["contract_preparation.c"],
+    hdrs = ["contract_preparation.h"],
+    deps = [
+        ":contract_storage",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "contract_preparation_test",
+    srcs = ["contract_preparation_test.cc"],
+    deps = [
+        ":contract_preparation",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "contract_vector",
+    srcs = ["contract_vector.c"],
+    hdrs = ["contract_vector.h"],
+    deps = [
+        ":contract",
+        ":contract_storage",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "contract_vector_test",
+    srcs = ["contract_vector_test.cc"],
+    deps = [
+        ":contract_vector",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/testing:module_ptr",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "liveness",
+    srcs = ["liveness.c"],
+    hdrs = ["liveness.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:segmented_storage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "liveness_json",
+    srcs = ["liveness_json.c"],
+    hdrs = ["liveness_json.h"],
+    deps = [
+        ":liveness",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "liveness_test",
+    srcs = ["liveness_test.cc"],
+    deps = [
+        ":liveness",
+        ":liveness_json",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/test:descriptors",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "integer_relation",
+    srcs = ["integer_relation.c"],
+    hdrs = ["integer_relation.h"],
+)
+
+loom_cc_library(
+    name = "loop_domain",
+    srcs = ["loop_domain.c"],
+    hdrs = ["loop_domain.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "loop_domain_test",
+    srcs = ["loop_domain_test.cc"],
+    deps = [
+        ":loop_domain",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "movement",
+    srcs = ["movement.c"],
+    hdrs = ["movement.h"],
+    deps = [
+        ":view_regions",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "movement_test",
+    srcs = ["movement_test.cc"],
+    deps = [
+        ":movement",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "motion",
+    srcs = ["motion.c"],
+    hdrs = ["motion.h"],
+    deps = [
+        ":availability",
+        ":loop_domain",
+        ":movement",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "motion_test",
+    srcs = ["motion_test.cc"],
+    deps = [
+        ":motion",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "scc",
+    srcs = ["scc.c"],
+    hdrs = ["scc.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "scc_test",
+    srcs = ["scc_test.cc"],
+    deps = [
+        ":scc",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "symbol_dependencies",
+    srcs = ["symbol_dependencies.c"],
+    hdrs = ["symbol_dependencies.h"],
+    deps = [
+        ":scc",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "symbol_dependencies_test",
+    srcs = ["symbol_dependencies_test.cc"],
+    deps = [
+        ":symbol_dependencies",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/config",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "symbol_facts",
+    srcs = ["symbol_facts.c"],
+    hdrs = ["symbol_facts.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "symbol_facts_test",
+    srcs = ["symbol_facts_test.cc"],
+    deps = [
+        ":symbol_facts",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "symbol_liveness",
+    srcs = ["symbol_liveness.c"],
+    hdrs = ["symbol_liveness.h"],
+    deps = [
+        ":symbol_dependencies",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "symbol_liveness_test",
+    srcs = ["symbol_liveness_test.cc"],
+    deps = [
+        ":symbol_dependencies",
+        ":symbol_liveness",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "symbolic_expr",
+    srcs = ["symbolic_expr.c"],
+    hdrs = ["symbolic_expr.h"],
+    deps = [
+        ":condition_facts",
+        ":integer_relation",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "type_refinement",
+    srcs = ["type_refinement.c"],
+    hdrs = ["type_refinement.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:type_refinement",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "type_refinement_test",
+    srcs = ["type_refinement_test.cc"],
+    deps = [
+        ":type_refinement",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ir:type_refinement",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "view_regions",
+    srcs = ["view_regions.c"],
+    hdrs = ["view_regions.h"],
+    deps = [
+        ":symbolic_expr",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "view_regions_test",
+    srcs = ["view_regions_test.cc"],
+    deps = [
+        ":view_regions",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "symbolic_expr_test",
+    srcs = ["symbolic_expr_test.cc"],
+    deps = [
+        ":condition_facts",
+        ":symbolic_expr",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

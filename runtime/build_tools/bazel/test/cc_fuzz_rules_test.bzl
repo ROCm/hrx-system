@@ -32,7 +32,7 @@ def _test_runtime_fuzz_adds_runtime_include_root(name, **kwargs):
         iree_runtime_cc_fuzz,
         name = name + "_subject",
         srcs = [name + "_subject.cc"],
-        tags = ["driver=amdgpu"],
+        tags = ["requires-gpu-amd"],
     )
     analysis_test(
         name = name,
@@ -49,7 +49,7 @@ def _test_runtime_fuzz_adds_runtime_include_root_impl(env, target):
     _expect_path_suffix(env, paths, "runtime/src")
     tags = target[TestingAspectInfo].attrs.tags
     for expected_tag in [
-        "driver=amdgpu",
+        "requires-gpu-amd",
         "fuzz",
         "manual",
     ]:

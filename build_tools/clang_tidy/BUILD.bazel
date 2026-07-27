@@ -1,0 +1,246 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@iree_clang_tidy_llvm//:config.bzl", "CLANG_TIDY_LLVM_COPTS", "CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_python//python:defs.bzl", "py_binary", "py_test")
+load(":clang_tidy.bzl", "iree_clang_tidy")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "clang_tidy.bzl",
+    "llvm_repo.bzl",
+])
+
+filegroup(
+    name = "plugin_sources",
+    srcs = glob([
+        "iree/*.cc",
+        "iree/*.h",
+    ]),
+)
+
+filegroup(
+    name = "cmake_project",
+    srcs = [
+        "CMakeLists.txt",
+        "README.md",
+        ":plugin_sources",
+    ],
+)
+
+filegroup(
+    name = "testdata",
+    srcs = glob([
+        "fixtures/*",
+        "test/*",
+    ]),
+)
+
+py_binary(
+    name = "run_clang_tidy_action",
+    srcs = ["run_clang_tidy_action.py"],
+    main = "run_clang_tidy_action.py",
+)
+
+cc_binary(
+    name = "IREEClangTidyPlugin.so",
+    srcs = [
+        "iree/ExtentChecks.cc",
+        "iree/ExtentChecks.h",
+        "iree/IreeTidyModule.cc",
+        "iree/LifecycleChecks.cc",
+        "iree/LifecycleChecks.h",
+        "iree/RefCountChecks.cc",
+        "iree/RefCountChecks.h",
+        "iree/SmokeCheck.cc",
+        "iree/SmokeCheck.h",
+        "iree/StatusChecks.cc",
+        "iree/StatusChecks.h",
+        "iree/StyleChecks.cc",
+        "iree/StyleChecks.h",
+        "iree/TraceChecks.cc",
+        "iree/TraceChecks.h",
+    ],
+    copts = CLANG_TIDY_LLVM_COPTS,
+    includes = ["."],
+    linkshared = True,
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
+    deps = [
+        "@iree_clang_tidy_llvm//:llvm_headers",
+    ],
+)
+
+py_test(
+    name = "extent_checks_test",
+    srcs = [
+        "test/clang_tidy_test.py",
+        "test/extent_checks_test.py",
+    ],
+    args = [
+        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
+        "--plugin=$(location :IREEClangTidyPlugin.so)",
+    ],
+    data = [
+        "test/extent_checks.c",
+        "test/extent_checks.cc",
+        ":IREEClangTidyPlugin.so",
+        "@iree_clang_tidy_llvm//:clang-tidy",
+    ],
+    imports = ["test"],
+    main = "test/extent_checks_test.py",
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
+)
+
+py_test(
+    name = "plugin_smoke_test",
+    srcs = [
+        "test/clang_tidy_test.py",
+        "test/smoke_test.py",
+    ],
+    args = [
+        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
+        "--plugin=$(location :IREEClangTidyPlugin.so)",
+    ],
+    data = [
+        "test/smoke.c",
+        ":IREEClangTidyPlugin.so",
+        "@iree_clang_tidy_llvm//:clang-tidy",
+    ],
+    imports = ["test"],
+    main = "test/smoke_test.py",
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
+)
+
+py_test(
+    name = "status_checks_test",
+    srcs = [
+        "test/clang_tidy_test.py",
+        "test/status_checks_test.py",
+    ],
+    args = [
+        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
+        "--plugin=$(location :IREEClangTidyPlugin.so)",
+    ],
+    data = [
+        "test/status_checks.c",
+        "test/status_checks.cc",
+        ":IREEClangTidyPlugin.so",
+        "@iree_clang_tidy_llvm//:clang-tidy",
+    ],
+    imports = ["test"],
+    main = "test/status_checks_test.py",
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
+)
+
+py_test(
+    name = "lifecycle_checks_test",
+    srcs = [
+        "test/clang_tidy_test.py",
+        "test/lifecycle_checks_test.py",
+    ],
+    args = [
+        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
+        "--plugin=$(location :IREEClangTidyPlugin.so)",
+    ],
+    data = [
+        "test/lifecycle_checks.c",
+        "test/non_identifier_functions.cc",
+        ":IREEClangTidyPlugin.so",
+        "@iree_clang_tidy_llvm//:clang-tidy",
+    ],
+    imports = ["test"],
+    main = "test/lifecycle_checks_test.py",
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
+)
+
+py_test(
+    name = "refcount_checks_test",
+    srcs = [
+        "test/clang_tidy_test.py",
+        "test/refcount_checks_test.py",
+    ],
+    args = [
+        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
+        "--plugin=$(location :IREEClangTidyPlugin.so)",
+    ],
+    data = [
+        "test/non_identifier_functions.cc",
+        "test/refcount_checks.c",
+        ":IREEClangTidyPlugin.so",
+        "@iree_clang_tidy_llvm//:clang-tidy",
+    ],
+    imports = ["test"],
+    main = "test/refcount_checks_test.py",
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
+)
+
+py_test(
+    name = "trace_checks_test",
+    srcs = [
+        "test/clang_tidy_test.py",
+        "test/trace_checks_test.py",
+    ],
+    args = [
+        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
+        "--plugin=$(location :IREEClangTidyPlugin.so)",
+    ],
+    data = [
+        "test/trace_checks.c",
+        ":IREEClangTidyPlugin.so",
+        "@iree_clang_tidy_llvm//:clang-tidy",
+    ],
+    imports = ["test"],
+    main = "test/trace_checks_test.py",
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
+)
+
+py_test(
+    name = "style_checks_test",
+    srcs = [
+        "test/clang_tidy_test.py",
+        "test/style_checks_test.py",
+    ],
+    args = [
+        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
+        "--plugin=$(location :IREEClangTidyPlugin.so)",
+    ],
+    data = [
+        "fixtures/status_macro_scope.c",
+        "test/status_macro_scope_test.cc",
+        "test/style_checks.c",
+        "test/style_checks.cc",
+        ":IREEClangTidyPlugin.so",
+        "@iree_clang_tidy_llvm//:clang-tidy",
+    ],
+    imports = ["test"],
+    main = "test/style_checks_test.py",
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
+)
+
+cc_library(
+    name = "action_smoke_subject",
+    testonly = True,
+    srcs = ["test/action_smoke.c"],
+    tags = ["manual"],
+)
+
+iree_clang_tidy(
+    name = "action_smoke",
+    testonly = True,
+    tags = ["manual"],
+    targets = [":action_smoke_subject"],
+)

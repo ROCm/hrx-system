@@ -947,8 +947,7 @@ TEST_P(SemaphoreSubmissionTest, PropagateFailSignal) {
   uint64_t value = 1234;
   iree_status_t query_status = iree_hal_semaphore_query(semaphore2, &value);
   EXPECT_GE(value, IREE_HAL_SEMAPHORE_FAILURE_VALUE);
-  EXPECT_FALSE(iree_status_is_ok(query_status));
-  iree_status_ignore(query_status);
+  IREE_EXPECT_NOT_OK(query_status);
   iree_status_ignore(status);
 
   signal_thread.join();

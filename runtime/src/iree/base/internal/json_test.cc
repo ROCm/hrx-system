@@ -586,6 +586,81 @@ TEST(JsonEnumerateObjectTest, WhitespaceBeforeClose) {
   EXPECT_EQ(entries[0].value, "123");
 }
 
+struct TypedObjectEntry {
+  std::string key;
+  iree_json_value_type_t type;
+  std::string value;
+};
+
+static iree_status_t CollectTypedObjectEntries(void* user_data,
+                                               iree_string_view_t key,
+                                               iree_json_value_type_t type,
+                                               iree_string_view_t value) {
+  auto* entries = static_cast<std::vector<TypedObjectEntry>*>(user_data);
+  entries->push_back({std::string(key.data, key.size), type,
+                      std::string(value.data, value.size)});
+  return iree_ok_status();
+}
+
+TEST(JsonEnumerateObjectTypedTest, AllTypes) {
+  std::vector<TypedObjectEntry> entries;
+  IREE_ASSERT_OK(iree_json_enumerate_object_typed(
+      IREE_SV(
+          R"({"s":"string","n":123,"o":{"key":1},"a":[1,2],"t":true,"f":false,"z":null})"),
+      CollectTypedObjectEntries, &entries));
+  ASSERT_EQ(entries.size(), 7);
+
+  EXPECT_EQ(entries[0].key, "s");
+  EXPECT_EQ(entries[0].type, IREE_JSON_VALUE_TYPE_STRING);
+  EXPECT_EQ(entries[0].value, "string");
+
+  EXPECT_EQ(entries[1].key, "n");
+  EXPECT_EQ(entries[1].type, IREE_JSON_VALUE_TYPE_NUMBER);
+  EXPECT_EQ(entries[1].value, "123");
+
+  EXPECT_EQ(entries[2].key, "o");
+  EXPECT_EQ(entries[2].type, IREE_JSON_VALUE_TYPE_OBJECT);
+  EXPECT_EQ(entries[2].value, R"({"key":1})");
+
+  EXPECT_EQ(entries[3].key, "a");
+  EXPECT_EQ(entries[3].type, IREE_JSON_VALUE_TYPE_ARRAY);
+  EXPECT_EQ(entries[3].value, "[1,2]");
+
+  EXPECT_EQ(entries[4].key, "t");
+  EXPECT_EQ(entries[4].type, IREE_JSON_VALUE_TYPE_TRUE);
+  EXPECT_EQ(entries[4].value, "true");
+
+  EXPECT_EQ(entries[5].key, "f");
+  EXPECT_EQ(entries[5].type, IREE_JSON_VALUE_TYPE_FALSE);
+  EXPECT_EQ(entries[5].value, "false");
+
+  EXPECT_EQ(entries[6].key, "z");
+  EXPECT_EQ(entries[6].type, IREE_JSON_VALUE_TYPE_NULL);
+  EXPECT_EQ(entries[6].value, "null");
+}
+
+TEST(JsonEnumerateObjectTypedTest, ObjectsVsStringsWithBraces) {
+  std::vector<TypedObjectEntry> entries;
+  IREE_ASSERT_OK(iree_json_enumerate_object_typed(
+      IREE_SV(R"({"object":{"a":1},"string":"{not_object}"})"),
+      CollectTypedObjectEntries, &entries));
+  ASSERT_EQ(entries.size(), 2);
+
+  EXPECT_EQ(entries[0].key, "object");
+  EXPECT_EQ(entries[0].type, IREE_JSON_VALUE_TYPE_OBJECT);
+  EXPECT_EQ(entries[0].value, R"({"a":1})");
+
+  EXPECT_EQ(entries[1].key, "string");
+  EXPECT_EQ(entries[1].type, IREE_JSON_VALUE_TYPE_STRING);
+  EXPECT_EQ(entries[1].value, "{not_object}");
+}
+
+TEST(JsonConsumeInsignificantTest, ConsumesJsoncWhitespaceAndComments) {
+  iree_string_view_t str = IREE_SV(" // line\n /* block */ value");
+  IREE_ASSERT_OK(iree_json_consume_insignificant(&str));
+  EXPECT_SV_EQ(str, IREE_SV("value"));
+}
+
 //===----------------------------------------------------------------------===//
 // Lookup Object Value Tests
 //===----------------------------------------------------------------------===//

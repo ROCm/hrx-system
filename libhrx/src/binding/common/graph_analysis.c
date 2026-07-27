@@ -8,16 +8,6 @@
 #include "common/internal.h"
 #include "iree/base/internal/math.h"
 
-// IREE_PREFETCH_RO was removed from main IREE. Provide a fallback definition.
-#ifndef IREE_PREFETCH_RO
-#if defined(__GNUC__) || defined(__clang__)
-#define IREE_PREFETCH_RO(ptr, locality) \
-  __builtin_prefetch((ptr), /*rw=*/0, locality)
-#else
-#define IREE_PREFETCH_RO(ptr, locality) ((void)0)
-#endif
-#endif  // IREE_PREFETCH_RO
-
 //===----------------------------------------------------------------------===//
 // Tuning Parameters and Heuristics
 //===----------------------------------------------------------------------===//
@@ -121,8 +111,8 @@
 // - Time Complexity: O(N + E) for all phases
 // - Space Complexity: O(N) with 24 bytes per node + O(P) partitions
 // - Cache Behavior: Sequential access patterns, prefetch-friendly
-// - Scalability: Handles 1-100,000 nodes efficiently (as much as possible given
-//                the design constraints imposed by the CUDA Graphs API)
+// - Scalability: Handles 1-100,000 nodes efficiently within the ordering and
+//                mutability constraints of the graph API.
 //
 // Worst case scenarios:
 // 1. All non-recordable nodes: P = N partitions, O(N) space
@@ -135,7 +125,21 @@
 // Phase 1: Preparation - Linearize and Detect Sorting
 //===----------------------------------------------------------------------===//
 
-// Linearize nodes from chained blocks and detects if already sorted.
+typedef struct iree_hal_streaming_graph_prepare_result_t {
+  // Number of active nodes copied into the sort array.
+  uint32_t active_node_count;
+  // True if active nodes are already in topological order.
+  bool is_sorted;
+} iree_hal_streaming_graph_prepare_result_t;
+
+static uint32_t iree_hal_streaming_graph_node_map_lookup(
+    const uint32_t* node_index_map, iree_host_size_t node_index_map_count,
+    const iree_hal_streaming_graph_node_t* node) {
+  if (!node || node->node_index >= node_index_map_count) return UINT32_MAX;
+  return node_index_map[node->node_index];
+}
+
+// Linearizes nodes from chained blocks and detects if already sorted.
 // Returns true if nodes are already in topological order.
 //
 // Algorithm:
@@ -145,34 +149,47 @@
 // 4. Cache node type to avoid indirection later
 //
 // Complexity: O(N * avg_deps) ~= O(N) for sparse graphs
-static bool iree_hal_streaming_graph_prepare_nodes(
-    iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count,
-    iree_hal_streaming_graph_sort_node_t* sort_nodes,
-    uint32_t* node_index_map) {
+static iree_hal_streaming_graph_prepare_result_t
+iree_hal_streaming_graph_prepare_nodes(
+    iree_hal_streaming_node_block_t* node_blocks, const uint8_t* disabled_nodes,
+    iree_host_size_t disabled_node_count,
+    iree_hal_streaming_graph_sort_node_t* sort_nodes, uint32_t* node_index_map,
+    iree_host_size_t node_index_map_count) {
+  for (iree_host_size_t i = 0; i < node_index_map_count; ++i) {
+    node_index_map[i] = UINT32_MAX;
+  }
+
   // Linearize from chained blocks.
   uint32_t index = 0;
   for (iree_hal_streaming_node_block_t* block = node_blocks; block;
        block = block->next) {
     if (block->next) {
-      IREE_PREFETCH_RO(block->next, 1);  // Prefetch next block.
+      IREE_BUILTIN_PREFETCH_RO(block->next, IREE_BUILTIN_PREFETCH_LOCALITY_L3);
     }
 
     for (iree_host_size_t i = 0; i < block->count; ++i) {
       iree_hal_streaming_graph_node_t* node = block->nodes[i];
-      // TODO(benvanik): see if the allocation is guaranteed calloc - if so, we
-      // can initialize fewer fields.
+      const bool is_disabled =
+          (node->flags & IREE_HAL_STREAMING_GRAPH_NODE_FLAG_DISABLED) != 0 ||
+          (disabled_nodes && node->node_index < disabled_node_count &&
+           disabled_nodes[node->node_index]);
+      // Initialize all fields explicitly because arena allocation does not
+      // guarantee zeroed storage.
       sort_nodes[index] = (iree_hal_streaming_graph_sort_node_t){
           .original_index = index,
           .sorted_index = index,  // Initially assume sorted.
           .max_dependency_index = 0,
           .partition_id = 0,
           .in_degree = 0,
-          .type = (uint8_t)node->type,
+          .type = is_disabled ? IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EMPTY
+                              : (uint8_t)node->type,
           .stream_id = 0,
           .node = node,
       };
       // Map the node's original index to its position in sort_nodes.
-      node_index_map[node->node_index] = index;
+      if (node->node_index < node_index_map_count) {
+        node_index_map[node->node_index] = index;
+      }
       ++index;
     }
   }
@@ -183,13 +200,14 @@ static bool iree_hal_streaming_graph_prepare_nodes(
   // possibly store this bit back on the graph to avoid needing to do this walk
   // on subsequent instantiations.
   bool is_sorted = true;
-  for (uint32_t i = 0; is_sorted && i < node_count; ++i) {
+  for (uint32_t i = 0; is_sorted && i < index; ++i) {
     iree_hal_streaming_graph_node_t* node = sort_nodes[i].node;
     if (node->dependency_count > 0) {
       for (uint32_t j = 0; j < node->dependency_count; ++j) {
         // Look up dependency's position in sort_nodes using the mapping.
-        uint32_t dep_index = node_index_map[node->dependencies[j]->node_index];
-        if (dep_index >= i) {
+        uint32_t dep_index = iree_hal_streaming_graph_node_map_lookup(
+            node_index_map, node_index_map_count, node->dependencies[j]);
+        if (dep_index != UINT32_MAX && dep_index >= i) {
           is_sorted = false;
           break;
         }
@@ -197,7 +215,10 @@ static bool iree_hal_streaming_graph_prepare_nodes(
     }
   }
 
-  return is_sorted;
+  return (iree_hal_streaming_graph_prepare_result_t){
+      .active_node_count = index,
+      .is_sorted = is_sorted,
+  };
 }
 
 //===----------------------------------------------------------------------===//
@@ -216,7 +237,8 @@ static bool iree_hal_streaming_graph_prepare_nodes(
 // Complexity: O(N + E) where E = total edges (embedded + additional)
 static iree_status_t iree_hal_streaming_graph_topological_sort(
     iree_hal_streaming_graph_sort_node_t* nodes, uint32_t node_count,
-    uint32_t* node_index_map, iree_hal_streaming_graph_edge_t* additional_edges,
+    uint32_t* node_index_map, iree_host_size_t node_index_map_count,
+    iree_hal_streaming_graph_edge_t* additional_edges,
     iree_arena_allocator_t* arena, bool is_already_sorted) {
   if (is_already_sorted && !additional_edges) {
     // Fast path: just compute max dependencies.
@@ -227,8 +249,9 @@ static iree_status_t iree_hal_streaming_graph_topological_sort(
       uint32_t max_dep = 0;
       for (uint32_t j = 0; j < nodes[i].node->dependency_count; ++j) {
         // Use the mapping for O(1) lookup.
-        const uint32_t dep_index =
-            node_index_map[nodes[i].node->dependencies[j]->node_index];
+        const uint32_t dep_index = iree_hal_streaming_graph_node_map_lookup(
+            node_index_map, node_index_map_count,
+            nodes[i].node->dependencies[j]);
         if (dep_index < i && dep_index != UINT32_MAX) {
           max_dep = iree_max(max_dep, dep_index);
         }
@@ -245,15 +268,26 @@ static iree_status_t iree_hal_streaming_graph_topological_sort(
 
   // Step 1: Calculate in-degrees from embedded dependencies.
   for (uint32_t i = 0; i < node_count; ++i) {
-    nodes[i].in_degree = (uint16_t)nodes[i].node->dependency_count;
+    uint16_t in_degree = 0;
+    for (uint32_t j = 0; j < nodes[i].node->dependency_count; ++j) {
+      const uint32_t dep_index = iree_hal_streaming_graph_node_map_lookup(
+          node_index_map, node_index_map_count, nodes[i].node->dependencies[j]);
+      if (dep_index != UINT32_MAX) {
+        ++in_degree;
+      }
+    }
+    nodes[i].in_degree = in_degree;
   }
 
   // Step 1b: Add in-degrees from additional edges.
   iree_hal_streaming_graph_edge_t* edge = additional_edges;
   while (edge) {
     // Find the 'to' node in our nodes array and increment its in-degree.
-    uint32_t to_index = node_index_map[edge->to->node_index];
-    if (to_index < node_count) {
+    const uint32_t from_index = iree_hal_streaming_graph_node_map_lookup(
+        node_index_map, node_index_map_count, edge->from);
+    const uint32_t to_index = iree_hal_streaming_graph_node_map_lookup(
+        node_index_map, node_index_map_count, edge->to);
+    if (from_index != UINT32_MAX && to_index < node_count) {
       ++nodes[to_index].in_degree;
     }
     edge = edge->next;
@@ -278,8 +312,9 @@ static iree_status_t iree_hal_streaming_graph_topological_sort(
     uint32_t max_dep = 0;
     for (uint32_t j = 0; j < nodes[current].node->dependency_count; ++j) {
       // Use the mapping for O(1) lookup.
-      uint32_t dep_index =
-          node_index_map[nodes[current].node->dependencies[j]->node_index];
+      uint32_t dep_index = iree_hal_streaming_graph_node_map_lookup(
+          node_index_map, node_index_map_count,
+          nodes[current].node->dependencies[j]);
       if (dep_index != UINT32_MAX) {
         uint32_t dep_sorted_index = nodes[dep_index].sorted_index;
         max_dep = iree_max(max_dep, dep_sorted_index);
@@ -290,7 +325,8 @@ static iree_status_t iree_hal_streaming_graph_topological_sort(
     edge = additional_edges;
     while (edge) {
       if (edge->to == nodes[current].node) {
-        uint32_t from_index = node_index_map[edge->from->node_index];
+        uint32_t from_index = iree_hal_streaming_graph_node_map_lookup(
+            node_index_map, node_index_map_count, edge->from);
         if (from_index != UINT32_MAX) {
           uint32_t from_sorted_index = nodes[from_index].sorted_index;
           max_dep = iree_max(max_dep, from_sorted_index);
@@ -320,7 +356,8 @@ static iree_status_t iree_hal_streaming_graph_topological_sort(
     edge = additional_edges;
     while (edge) {
       if (edge->from == nodes[current].node) {
-        uint32_t to_index = node_index_map[edge->to->node_index];
+        uint32_t to_index = iree_hal_streaming_graph_node_map_lookup(
+            node_index_map, node_index_map_count, edge->to);
         if (to_index < node_count && to_index != current) {
           if (--nodes[to_index].in_degree == 0) {
             queue[queue_tail++] = to_index;
@@ -337,9 +374,8 @@ static iree_status_t iree_hal_streaming_graph_topological_sort(
                             sorted_count, node_count);
   }
 
-  // Step 4: Reorder array in-place based on sorted_index.
-  // Use cycle-following algorithm to minimize copies.
-  // TODO: see if we can use a faster sort (or switch based on count).
+  // Step 4: Reorder array in-place based on sorted_index. The cycle-following
+  // algorithm minimizes copies and keeps memory usage bounded.
   iree_hal_streaming_graph_sort_node_t temp;
   for (uint32_t i = 0; i < node_count; ++i) {
     while (nodes[i].sorted_index != i) {
@@ -352,7 +388,9 @@ static iree_status_t iree_hal_streaming_graph_topological_sort(
 
   // Update the mapping to reflect the new sorted order.
   for (uint32_t i = 0; i < node_count; ++i) {
-    node_index_map[nodes[i].node->node_index] = i;
+    if (nodes[i].node->node_index < node_index_map_count) {
+      node_index_map[nodes[i].node->node_index] = i;
+    }
   }
 
   return iree_ok_status();
@@ -396,7 +434,7 @@ typedef struct iree_uint32x2_t {
 // Returns [partition_count, block_count].
 static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
     iree_hal_streaming_graph_sort_node_t* nodes, uint32_t node_count,
-    uint32_t* node_index_map,
+    uint32_t* node_index_map, iree_host_size_t node_index_map_count,
     iree_hal_streaming_graph_partition_t* partitions) {
   uint32_t partition_count = 0;
   uint32_t block_count = 0;
@@ -418,6 +456,9 @@ static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
           break;
         case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL:
           partition_type = IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_HOST_CALL;
+          break;
+        case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH:
+          partition_type = IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_GRAPH;
           break;
         default:
           partition_type = IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_EMPTY;
@@ -452,9 +493,12 @@ static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
         bool deps_satisfied = true;
         for (uint32_t j = 0; j < nodes[i].node->dependency_count; ++j) {
           // Use the mapping for O(1) lookup.
-          uint32_t dep_index =
-              node_index_map[nodes[i].node->dependencies[j]->node_index];
-          if (dep_index >= recordable_start && dep_index < i) {
+          uint32_t dep_index = iree_hal_streaming_graph_node_map_lookup(
+              node_index_map, node_index_map_count,
+              nodes[i].node->dependencies[j]);
+          if (dep_index == UINT32_MAX) {
+            // Disabled dependencies are absent from the executable graph.
+          } else if (dep_index >= recordable_start && dep_index < i) {
             // Dependency is within this partition - OK.
           } else if (dep_index >= i) {
             // Dependency is ahead - can't include this node.
@@ -478,8 +522,9 @@ static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
         // Check dependencies within this partition.
         for (uint32_t j = 0; j < nodes[i].node->dependency_count; ++j) {
           // Use the mapping for O(1) lookup.
-          uint32_t dep_index =
-              node_index_map[nodes[i].node->dependencies[j]->node_index];
+          uint32_t dep_index = iree_hal_streaming_graph_node_map_lookup(
+              node_index_map, node_index_map_count,
+              nodes[i].node->dependencies[j]);
           if (dep_index >= recordable_start && dep_index < i) {
             // Dependency is within this partition.
             uint8_t dep_stream = nodes[dep_index].stream_id;
@@ -566,54 +611,123 @@ static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
 
 iree_status_t iree_hal_streaming_graph_schedule_nodes(
     iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count,
+    const uint8_t* disabled_nodes, iree_host_size_t disabled_node_count,
     iree_hal_streaming_graph_edge_t* additional_edges,
     iree_arena_allocator_t* arena,
     iree_hal_streaming_graph_schedule_t* out_schedule) {
   IREE_ASSERT_ARGUMENT(out_schedule);
 
-  if (node_count == 0) {
+  iree_host_size_t actual_node_count = 0;
+  iree_host_size_t node_index_map_count = 0;
+  uint32_t max_node_index = 0;
+  bool has_node = false;
+  for (iree_hal_streaming_node_block_t* block = node_blocks; block;
+       block = block->next) {
+    for (iree_host_size_t i = 0; i < block->count; ++i) {
+      iree_hal_streaming_graph_node_t* node = block->nodes[i];
+      ++actual_node_count;
+      if (!has_node || node->node_index > max_node_index) {
+        max_node_index = node->node_index;
+      }
+      has_node = true;
+    }
+  }
+  for (iree_hal_streaming_graph_edge_t* edge = additional_edges; edge;
+       edge = edge->next) {
+    if (edge->from && (!has_node || edge->from->node_index > max_node_index)) {
+      max_node_index = edge->from->node_index;
+      has_node = true;
+    }
+    if (edge->to && edge->to->node_index > max_node_index) {
+      max_node_index = edge->to->node_index;
+      has_node = true;
+    }
+  }
+
+  if (actual_node_count == 0) {
     memset(out_schedule, 0, sizeof(*out_schedule));
     return iree_ok_status();
+  }
+  if (IREE_UNLIKELY(
+          actual_node_count > UINT32_MAX ||
+          !iree_host_size_checked_add((iree_host_size_t)max_node_index, 1,
+                                      &node_index_map_count))) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "graph node index map size overflow");
   }
 
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, node_count);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, actual_node_count);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, node_index_map_count);
 
   // Allocate all working memory from arena.
   iree_hal_streaming_graph_sort_node_t* sorted_nodes = NULL;
-  const iree_host_size_t sorted_nodes_size = node_count * sizeof(*sorted_nodes);
+  iree_host_size_t sorted_nodes_size = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+          actual_node_count, sizeof(*sorted_nodes), &sorted_nodes_size))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "graph sort node allocation size overflow");
+  }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_arena_allocate(arena, sorted_nodes_size, (void**)&sorted_nodes));
 
   // Allocate mapping from original node_index to sorted position.
   uint32_t* node_index_map = NULL;
-  const iree_host_size_t map_size = node_count * sizeof(*node_index_map);
+  iree_host_size_t map_size = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+          node_index_map_count, sizeof(*node_index_map), &map_size))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "graph node index map allocation size overflow");
+  }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_arena_allocate(arena, map_size, (void**)&node_index_map));
 
   // Phase 1: Prepare - linearize and detect if sorted.
-  const bool is_sorted = iree_hal_streaming_graph_prepare_nodes(
-      node_blocks, node_count, sorted_nodes, node_index_map);
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, is_sorted);
+  const iree_hal_streaming_graph_prepare_result_t prepare_result =
+      iree_hal_streaming_graph_prepare_nodes(
+          node_blocks, disabled_nodes, disabled_node_count, sorted_nodes,
+          node_index_map, node_index_map_count);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, prepare_result.is_sorted);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, prepare_result.active_node_count);
+
+  if (prepare_result.active_node_count == 0) {
+    out_schedule->sorted_nodes = sorted_nodes;
+    out_schedule->node_index_map = node_index_map;
+    out_schedule->partitions = NULL;
+    out_schedule->partition_count = 0;
+    out_schedule->block_count = 0;
+    IREE_TRACE_ZONE_END(z0);
+    return iree_ok_status();
+  }
 
   // Phase 2: Sort - topological ordering.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_streaming_graph_topological_sort(
-              sorted_nodes, node_count, node_index_map, additional_edges, arena,
-              is_sorted));
+              sorted_nodes, prepare_result.active_node_count, node_index_map,
+              node_index_map_count, additional_edges, arena,
+              prepare_result.is_sorted));
 
-  // TODO: try to avoid allocating an O(node) partition capacity? We could use
-  // linked blocks, though it does make walking the partitions slightly more
-  // complicated.
+  // Allocate the worst-case partition table up front. A graph where every
+  // active node must be isolated needs one partition per node.
   iree_hal_streaming_graph_partition_t* partitions = NULL;
-  const iree_host_size_t partitions_size = node_count * sizeof(*partitions);
+  iree_host_size_t partitions_size = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+          actual_node_count, sizeof(*partitions), &partitions_size))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "graph partition allocation size overflow");
+  }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_arena_allocate(arena, partitions_size, (void**)&partitions));
 
   // Phase 3: Partition - group into executable blocks.
   const iree_uint32x2_t partition_block_counts =
       iree_hal_streaming_graph_partition_with_streams(
-          sorted_nodes, node_count, node_index_map, partitions);
+          sorted_nodes, prepare_result.active_node_count, node_index_map,
+          node_index_map_count, partitions);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, partition_block_counts.values[0]);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, partition_block_counts.values[1]);
 

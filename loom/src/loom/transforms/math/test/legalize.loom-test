@@ -1,0 +1,34 @@
+// RUN: pass legalize-math
+
+func.def public @no_math_policy_needed() -> (index) {
+  %result = index.constant 4 : index
+  func.return %result : index
+}
+
+// ----
+func.def public @no_math_policy_needed() -> (index) {
+  %result = index.constant 4 : index
+  func.return %result : index
+}
+
+// ====
+
+func.def public @targetless_math_policy(%input: f32) -> (f32) {
+  %result = scalar.logisticf %input : f32
+  func.return %result : f32
+}
+
+// ----
+func.def public @targetless_math_policy(%input: f32) -> (f32) {
+  %result = scalar.logisticf %input : f32
+  func.return %result : f32
+}
+
+// ====
+
+test.target<low_core> @test_target
+func.def target(@test_target) @target_without_math_policy(%input: f32) -> (f32) {
+  // ERROR@+1: LOWERING/034 {op_name="scalar.logisticf", phase_name="legalize-math", contract_key="test.low.core"}
+  %result = scalar.logisticf %input : f32
+  func.return %result : f32
+}

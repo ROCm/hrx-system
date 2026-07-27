@@ -1,0 +1,9 @@
+func.def @duplicate_symbol() {
+  func.return
+}
+
+check.case @duplicate_symbol {
+  check.return
+}
+
+check.benchmark<@duplicate_symbol> @duplicate_symbol_latency

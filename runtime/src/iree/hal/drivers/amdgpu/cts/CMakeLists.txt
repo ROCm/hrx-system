@@ -8,11 +8,11 @@
 ################################################################################
 
 iree_amdgpu_expand_target_selectors(
-  _IREE_HAL_AMDGPU_EXACT_TARGETS
-  "${IREE_AMDGPU_TARGET_EXPANSION_EXACT}"
+  _IREE_HAL_AMDGPU_CODE_OBJECT_TARGETS
+  "${IREE_AMDGPU_TARGET_EXPANSION_CODE_OBJECT}"
   ${IREE_HAL_AMDGPU_TARGETS}
 )
-if(NOT _IREE_HAL_AMDGPU_EXACT_TARGETS)
+if(NOT _IREE_HAL_AMDGPU_CODE_OBJECT_TARGETS)
   return()
 endif()
 
@@ -21,13 +21,30 @@ iree_add_all_subdirs()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
+    backend_factories
+  HDRS
+    "backend_factories.h"
+  SRCS
+    "backend_factories.cc"
+  DEPS
+    iree::hal
+    iree::hal::cts::util::registry
+    iree::hal::drivers::amdgpu
+    iree::hal::executable::amdgpu::executable_target
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
     backends
   SRCS
     "backends.cc"
   DEPS
-    iree::hal
+    ::backend_factories
     iree::hal::cts::util::registry
-    iree::hal::drivers::amdgpu::registration
   TESTONLY
   ALWAYSLINK
   PUBLIC
@@ -35,30 +52,397 @@ iree_cc_library(
 endif()
 
 if(IREE_HAL_DRIVER_AMDGPU)
-iree_hal_cts_testdata(
-  FORMAT_NAME
-    amdgpu
-  FORMAT_VARIANT_TOKEN
-    "{AMDGPU_TARGET}"
-  FORMAT_VARIANTS
-    ${_IREE_HAL_AMDGPU_EXACT_TARGETS}
-  TARGET_DEVICE
-    "amdgpu"
-  IDENTIFIER
-    "iree_cts_testdata_amdgpu"
-  BACKEND_NAME
-    "amdgpu"
-  FORMAT_STRING
-    [=["amdgcn-amd-amdhsa--{AMDGPU_TARGET}"]=]
-  TESTDATA_DIR
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/testdata"
+iree_cc_library(
+  NAME
+    sanitizer_backends
+  SRCS
+    "sanitizer_backends.cc"
+  DEPS
+    ::backend_factories
+    iree::hal::cts::util::registry
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
 )
 endif()
 
 if(IREE_HAL_DRIVER_AMDGPU)
-iree_hal_cts_test_suite(
-  BACKENDS_LIB
+iree_amdgpu_hal_cts_testdata(
+  NAME
+    testdata_amdgpu
+  TARGET
+    amdgcn-amd-amdhsa
+  TARGETS
+    ${IREE_HAL_AMDGPU_TARGETS}
+  TARGET_NAME
+    amdgpu
+  IDENTIFIER
+    "iree_cts_testdata_amdgpu"
+  BACKEND_NAME
+    "amdgpu"
+  TARGET_FAMILY
+    "amdgpu"
+  INTERNAL_HDRS
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/abi/amdgpu_abi_bitcode_hdrs.stamp"
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/device/bitcode_hdrs.stamp"
+  SRCS
+    "testdata/command_buffer_dispatch_constants_bindings_test.c"
+    "testdata/command_buffer_dispatch_constants_test.c"
+    "testdata/command_buffer_dispatch_indirect_parameters_test.c"
+    "testdata/command_buffer_dispatch_multi_entrypoint_test.c"
+    "testdata/command_buffer_dispatch_multi_workgroup_test.c"
+    "testdata/command_buffer_dispatch_test.c"
+    "testdata/executable_test.c"
+  TESTONLY
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_amdgpu_hal_cts_testdata(
+  NAME
+    asan_executable_testdata_amdgpu
+  TARGET
+    amdgcn-amd-amdhsa
+  TARGETS
+    ${IREE_HAL_AMDGPU_TARGETS}
+  TARGET_NAME
+    amdgpu_asan_executable
+  IDENTIFIER
+    "iree_cts_asan_executable_testdata_amdgpu"
+  BACKEND_NAME
+    "amdgpu"
+  TARGET_FAMILY
+    "amdgpu"
+  INTERNAL_HDRS
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/abi/amdgpu_abi_bitcode_hdrs.stamp"
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/device/bitcode_hdrs.stamp"
+  SRCS
+    "testdata/asan_executable_test.c"
+  TESTONLY
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_amdgpu_hal_cts_testdata(
+  NAME
+    asan_executable_enabled_testdata_amdgpu
+  TARGET
+    amdgcn-amd-amdhsa
+  TARGETS
+    ${IREE_HAL_AMDGPU_TARGETS}
+  TARGET_NAME
+    amdgpu_asan_executable
+  IDENTIFIER
+    "iree_cts_asan_executable_enabled_testdata_amdgpu"
+  BACKEND_NAME
+    "amdgpu_asan"
+  TARGET_FAMILY
+    "amdgpu"
+  INTERNAL_HDRS
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/abi/amdgpu_abi_bitcode_hdrs.stamp"
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/device/bitcode_hdrs.stamp"
+  SRCS
+    "testdata/asan_executable_test.c"
+  TESTONLY
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_amdgpu_hal_cts_testdata(
+  NAME
+    feedback_executable_testdata_amdgpu
+  TARGET
+    amdgcn-amd-amdhsa
+  TARGETS
+    ${IREE_HAL_AMDGPU_TARGETS}
+  TARGET_NAME
+    amdgpu_feedback_executable
+  IDENTIFIER
+    "iree_cts_feedback_executable_testdata_amdgpu"
+  BACKEND_NAME
+    "amdgpu"
+  TARGET_FAMILY
+    "amdgpu"
+  INTERNAL_HDRS
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/abi/amdgpu_abi_bitcode_hdrs.stamp"
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/device/bitcode_hdrs.stamp"
+  SRCS
+    "testdata/feedback_executable_test.c"
+  TESTONLY
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_amdgpu_hal_cts_testdata(
+  NAME
+    tsan_executable_testdata_amdgpu
+  TARGET
+    amdgcn-amd-amdhsa
+  TARGETS
+    ${IREE_HAL_AMDGPU_TARGETS}
+  TARGET_NAME
+    amdgpu_tsan_executable
+  IDENTIFIER
+    "iree_cts_tsan_executable_testdata_amdgpu"
+  BACKEND_NAME
+    "amdgpu"
+  TARGET_FAMILY
+    "amdgpu"
+  INTERNAL_HDRS
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/abi/amdgpu_abi_bitcode_hdrs.stamp"
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/device/bitcode_hdrs.stamp"
+  SRCS
+    "testdata/tsan_executable_test.c"
+  TESTONLY
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_amdgpu_hal_cts_testdata(
+  NAME
+    tsan_executable_enabled_testdata_amdgpu
+  TARGET
+    amdgcn-amd-amdhsa
+  TARGETS
+    ${IREE_HAL_AMDGPU_TARGETS}
+  TARGET_NAME
+    amdgpu_tsan_executable
+  IDENTIFIER
+    "iree_cts_tsan_executable_enabled_testdata_amdgpu"
+  BACKEND_NAME
+    "amdgpu_tsan"
+  TARGET_FAMILY
+    "amdgpu"
+  INTERNAL_HDRS
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/abi/amdgpu_abi_bitcode_hdrs.stamp"
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/device/bitcode_hdrs.stamp"
+  SRCS
+    "testdata/tsan_executable_test.c"
+  TESTONLY
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_amdgpu_hal_cts_testdata(
+  NAME
+    asan_testdata_amdgpu
+  TARGET
+    amdgcn-amd-amdhsa
+  TARGETS
+    ${IREE_HAL_AMDGPU_TARGETS}
+  TARGET_NAME
+    amdgpu_asan
+  IDENTIFIER
+    "iree_cts_asan_testdata_amdgpu"
+  BACKEND_NAME
+    "amdgpu_asan"
+  TARGET_FAMILY
+    "amdgpu"
+  INTERNAL_HDRS
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/abi/amdgpu_abi_bitcode_hdrs.stamp"
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/device/bitcode_hdrs.stamp"
+  SRCS
+    "testdata/asan_allocation_test.c"
+    "testdata/manual_asan_noop_test.c"
+    "testdata/manual_asan_test.c"
+  DEPS
+    runtime::src::iree::hal::drivers::amdgpu::device::asanrtl_{AMDGPU_CODE_OBJECT_TARGET_FRAGMENT}
+  INTERNALIZE
+    OFF
+  TESTONLY
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    asan_executable_test
+  SRCS
+    "asan_executable_test.cc"
+  DEPS
+    iree::hal::cts::sanitizer::sanitizer_test_util
+    iree::hal::drivers::amdgpu::abi
+    iree::hal::drivers::amdgpu::headers
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    asan_executable_tests
+  SRCS
+    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
+  DEPS
+    ::asan_executable_enabled_testdata_amdgpu
+    ::asan_executable_test
+    ::sanitizer_backends
+    iree::base::tooling::flags
+    iree::hal::cts::util::registry
+    iree::hal::cts::util::test_base
+    iree::testing::gtest
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    sanitizer_executable_load_test
+  SRCS
+    "sanitizer_executable_load_test.cc"
+  DEPS
+    iree::hal::cts::sanitizer::sanitizer_test_util
+    iree::hal::drivers::amdgpu::abi
+    iree::testing::gtest
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    sanitizer_executable_load_tests
+  SRCS
+    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
+  DEPS
+    ::asan_executable_testdata_amdgpu
     ::backends
+    ::feedback_executable_testdata_amdgpu
+    ::sanitizer_executable_load_test
+    ::tsan_executable_testdata_amdgpu
+    iree::base::tooling::flags
+    iree::hal::cts::util::registry
+    iree::hal::cts::util::test_base
+    iree::testing::gtest
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    tsan_executable_test
+  SRCS
+    "tsan_executable_test.cc"
+  DEPS
+    iree::hal::cts::sanitizer::sanitizer_test_util
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::amdgpu::abi
+    iree::hal::drivers::amdgpu::headers
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    tsan_executable_tests
+  SRCS
+    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
+  DEPS
+    ::sanitizer_backends
+    ::tsan_executable_enabled_testdata_amdgpu
+    ::tsan_executable_test
+    iree::base::tooling::flags
+    iree::hal::cts::util::registry
+    iree::hal::cts::util::test_base
+    iree::testing::gtest
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    manual_asan_executable_test
+  SRCS
+    "manual_asan_executable_test.cc"
+  DEPS
+    iree::hal
+    iree::hal::cts::sanitizer::sanitizer_test_util
+    iree::hal::cts::util::registry
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::amdgpu::buffer
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    asan_allocation_tests
+  SRCS
+    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
+  DEPS
+    ::asan_testdata_amdgpu
+    ::sanitizer_backends
+    iree::base::tooling::flags
+    iree::hal::cts::sanitizer::asan_allocation_test
+    iree::hal::cts::util::registry
+    iree::hal::cts::util::test_base
+    iree::testing::gtest
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    manual_asan_executable_tests
+  SRCS
+    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
+  DEPS
+    ::asan_testdata_amdgpu
+    ::manual_asan_executable_test
+    ::sanitizer_backends
+    iree::base::tooling::flags
+    iree::hal::cts::util::registry
+    iree::hal::cts::util::test_base
+    iree::testing::gtest
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_runtime_hal_cts_test_suite(
+  BACKENDS
+    ::backends
+  TESTDATA_LIBS
+    ::testdata_amdgpu
   LABELS
     "iree-build-requirement=runtime.hal.amdgpu"
     "iree-run-requirement=runtime.resource.amd_gpu"

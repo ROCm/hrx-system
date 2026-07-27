@@ -1,0 +1,104 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/amdgpu:descriptor_sets.bzl",
+    "loom_amdgpu_selected_descriptor_set_generator_args",
+)
+load(
+    "//loom/build_tools/amdgpu:target_config.bzl",
+    "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY",
+)
+load("//loom/build_tools/amdgpu/isa_xml:archive.bzl", "AMDGPU_ISA_XML_ARCHIVE")
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_generated_cc_library",
+    "loom_low_descriptor_data_archive",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_AMDGPU_TARGET_REF_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/refs:target_refs"
+
+_DESCRIPTOR_SET_CDNA3 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.cdna3.core"]
+
+_DESCRIPTOR_SET_CDNA4 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.cdna4.core"]
+
+_DESCRIPTOR_SET_RDNA3 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna3.core"]
+
+_DESCRIPTOR_SET_RDNA3_5 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna3_5.core"]
+
+_DESCRIPTOR_SET_RDNA4 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4.core"]
+
+_DESCRIPTOR_SET_RDNA4_GFX125X = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4.gfx125x.core"]
+
+_AMDGPU_TARGET_REF_ARGS = {
+    _DESCRIPTOR_SET_CDNA3: [
+        "--descriptor-set=amdgpu.cdna3.core",
+        "--isa-xml=cdna3:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna3.xml)",
+    ],
+    _DESCRIPTOR_SET_CDNA4: [
+        "--descriptor-set=amdgpu.cdna4.core",
+        "--isa-xml=cdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna4.xml)",
+    ],
+    _DESCRIPTOR_SET_RDNA3: [
+        "--descriptor-set=amdgpu.rdna3.core",
+        "--isa-xml=rdna3:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3.xml)",
+    ],
+    _DESCRIPTOR_SET_RDNA3_5: [
+        "--descriptor-set=amdgpu.rdna3_5.core",
+        "--isa-xml=rdna3_5:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml)",
+    ],
+    _DESCRIPTOR_SET_RDNA4: [
+        "--descriptor-set=amdgpu.rdna4.core",
+        "--isa-xml=rdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna4.xml)",
+    ],
+    _DESCRIPTOR_SET_RDNA4_GFX125X: [
+        "--descriptor-set=amdgpu.rdna4.gfx125x.core",
+        "--isa-xml=rdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna4.xml)",
+    ],
+}
+
+_AMDGPU_TARGET_REFS_VISIBILITY = [
+    "//loom/src/loom/target/arch/amdgpu:__pkg__",
+    "//loom/src/loom/target/arch/amdgpu:__subpackages__",
+    "//loom/src/loom/target/emit/native/amdgpu:__pkg__",
+    "//loom/src/loom/tooling/target/amdgpu:__pkg__",
+]
+
+loom_low_descriptor_data_archive(
+    name = "amdgpu_isa_xml",
+    repo_name = AMDGPU_ISA_XML_ARCHIVE["repo_name"],
+    sha256 = AMDGPU_ISA_XML_ARCHIVE["sha256"],
+    urls = AMDGPU_ISA_XML_ARCHIVE["urls"],
+)
+
+loom_generated_cc_library(
+    name = "target_refs",
+    srcs = ["target_refs.c"],
+    hdrs = ["target_refs.h"],
+    args = ["--public-header=loom/target/arch/amdgpu/refs/target_refs.h"] +
+           loom_amdgpu_selected_descriptor_set_generator_args(_AMDGPU_TARGET_REF_ARGS),
+    generated_hdr_flags = ["--header"],
+    generated_hdrs = ["target_refs_tables.h"],
+    generator = _AMDGPU_TARGET_REF_GENERATOR,
+    inputs = [
+        "@amdgpu_isa_xml//:amdgpu_isa_cdna3.xml",
+        "@amdgpu_isa_xml//:amdgpu_isa_cdna4.xml",
+        "@amdgpu_isa_xml//:amdgpu_isa_rdna3.xml",
+        "@amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml",
+        "@amdgpu_isa_xml//:amdgpu_isa_rdna4.xml",
+    ],
+    source = "target_refs_data.c",
+    visibility = _AMDGPU_TARGET_REFS_VISIBILITY,
+    deps = [
+        "//loom/src/loom/codegen/low:descriptors",
+    ],
+)

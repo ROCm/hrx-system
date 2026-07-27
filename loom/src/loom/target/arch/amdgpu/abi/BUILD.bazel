@@ -1,0 +1,93 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_AMDGPU_LOWER_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/lower:__pkg__"]
+
+_AMDGPU_NATIVE_VISIBILITY = ["//loom/src/loom/target/emit/native/amdgpu:__pkg__"]
+
+_AMDGPU_TOOLING_VISIBILITY = ["//loom/src/loom/tooling/target/amdgpu:__pkg__"]
+
+loom_cc_library(
+    name = "asan",
+    hdrs = ["asan.h"],
+    visibility = (
+        _AMDGPU_LOWER_VISIBILITY +
+        _AMDGPU_NATIVE_VISIBILITY +
+        _AMDGPU_TOOLING_VISIBILITY
+    ),
+)
+
+loom_cc_test(
+    name = "asan_test",
+    srcs = ["asan_test.cc"],
+    deps = [
+        ":asan",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "feedback",
+    hdrs = ["feedback.h"],
+    visibility = (
+        _AMDGPU_LOWER_VISIBILITY +
+        _AMDGPU_NATIVE_VISIBILITY +
+        _AMDGPU_TOOLING_VISIBILITY
+    ),
+)
+
+loom_cc_test(
+    name = "feedback_test",
+    srcs = ["feedback_test.cc"],
+    deps = [
+        ":feedback",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "tsan",
+    hdrs = ["tsan.h"],
+    visibility = (
+        _AMDGPU_LOWER_VISIBILITY +
+        _AMDGPU_NATIVE_VISIBILITY +
+        _AMDGPU_TOOLING_VISIBILITY
+    ),
+)
+
+loom_cc_library(
+    name = "signal",
+    hdrs = ["signal.h"],
+    visibility = (
+        _AMDGPU_LOWER_VISIBILITY +
+        _AMDGPU_NATIVE_VISIBILITY +
+        _AMDGPU_TOOLING_VISIBILITY
+    ),
+)
+
+loom_cc_test(
+    name = "signal_test",
+    srcs = ["signal_test.cc"],
+    deps = [
+        ":signal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

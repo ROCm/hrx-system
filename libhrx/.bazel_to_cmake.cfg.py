@@ -23,7 +23,18 @@ class HrxBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             return values.unconditional
         return values
 
+    def _filter_cmake_library_headers(self, headers):
+        # CMake already exposes this header through the parent include path.
+        # Converting its repository-absolute Bazel label would incorrectly
+        # prefix libhrx's nested PROJECT_SOURCE_DIR a second time.
+        return [
+            header
+            for header in (headers or [])
+            if header != "//libhrx/src:iree_hal_compat.h"
+        ]
+
     def hrx_cc_library(self, deps=[], **kwargs):
+        kwargs["hdrs"] = self._filter_cmake_library_headers(kwargs.get("hdrs"))
         self.cc_library(
             deps=deps + ["//runtime/src:defines", "//libhrx:defines"],
             **kwargs,
@@ -55,11 +66,7 @@ class HrxBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
 
     def hrx_cc_shared_library(self, deps=[], **kwargs):
         kwargs["copts"] = self._drop_selects(kwargs.get("copts"))
-        kwargs["hdrs"] = [
-            hdr
-            for hdr in (kwargs.get("hdrs") or [])
-            if hdr != "//libhrx/src:iree_hal_compat.h"
-        ]
+        kwargs["hdrs"] = self._filter_cmake_library_headers(kwargs.get("hdrs"))
         self.cc_library(
             deps=deps + ["//runtime/src:defines", "//libhrx:defines"],
             shared=True,
@@ -97,9 +104,12 @@ class HrxBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def hrx_cts_test(self, name, deps=[], **kwargs):
         srcs = kwargs.get("srcs")
         copts = kwargs.get("copts")
+        data = kwargs.get("data")
         defines = kwargs.get("defines")
+        env = kwargs.get("env")
         includes = kwargs.get("includes")
         tags = kwargs.get("tags")
+        args = kwargs.get("args")
         full_deps = (
             [
                 ":core",
@@ -116,6 +126,11 @@ class HrxBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         srcs_block = self._convert_srcs_block(srcs)
         copts_block = self._convert_string_list_block("COPTS", copts, sort=False)
         defines_block = self._convert_string_list_block("DEFINES", defines)
+        data_block = self._convert_target_list_block(
+            "DATA",
+            ["//libhrx/src/libhrx:hrx"] + (data or []),
+            omit_empty=True,
+        )
         deps_block, platform_deps_block = self._convert_platform_select_deps(
             "hrx_cts_" + name,
             full_deps,
@@ -123,10 +138,17 @@ class HrxBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         includes_block = self._convert_includes_block(includes)
         args_block = self._convert_string_list_block(
             "ARGS",
-            [
-                "--hrx-library",
-                "$<TARGET_FILE:libhrx::src::libhrx::hrx>",
-            ],
+            self._convert_location_args(
+                [
+                    "--hrx-library",
+                    "$<TARGET_FILE:libhrx::src::libhrx::hrx>",
+                ]
+                + (args or [])
+            ),
+            sort=False,
+        )
+        env_block = self._convert_string_list_block(
+            "ENV", self._convert_native_test_env(env), sort=False
         )
         if platform_deps_block:
             self._converter.body += platform_deps_block
@@ -137,8 +159,10 @@ class HrxBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             f"{srcs_block}"
             f"{copts_block}"
             f"{defines_block}"
+            f"{data_block}"
             f"{deps_block}"
             f"{args_block}"
+            f"{env_block}"
             f"{includes_block}"
             f"{labels_block}"
             f")\n\n"
@@ -161,9 +185,6 @@ PROJECT_CONFIG = bazel_to_cmake_config.ProjectConfig(
     target_mappings={
         "//build_tools/amdgpu:target_map_h": [],
         "//libhrx:defines": ["libhrx_defs"],
-        "//libhrx/src/libhrx:hrx_static": [
-            "libhrx::src::libhrx::hrx",
-        ],
     },
     convert_unmatched_target=convert_unmatched_target,
 )

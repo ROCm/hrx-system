@@ -1,0 +1,201 @@
+// RUN: roundtrip
+
+// Top-level parser/printer smoke: standalone ops and a variadic terminator.
+%a = test.constant 1 : i32
+%b = test.constant 2 : i32
+%c = test.addi %a, %b : i32
+%d = test.addi %c, %a : i32
+%e = test.clause_constant value(3) : i32
+test.clause_copy source(%e) target(%d) : i32
+
+// ====
+
+// Top-level conversion op.
+%input = test.constant 42 : i32
+%converted = test.convert %input : i32 -> f32
+
+// ====
+
+// Top-level comparison op.
+%lhs = test.constant 1 : i32
+%rhs = test.constant 2 : i32
+%equal = test.cmp eq, %lhs, %rhs : i32
+
+// ====
+
+// Top-level variadic yield with heterogeneous operand types.
+%fa = test.constant 1.0 : f32
+%ib = test.constant 2 : i32
+test.yield %fa, %ib : f32, i32
+
+// ====
+
+// Constants with various scalar types.
+func.def @constants() -> (i32, i64, index) {
+  %c0 = test.constant 42 : i32
+  %c1 = test.constant -1 : i64
+  %c2 = test.constant 0 : index
+  func.return %c0, %c1, %c2 : i32, i64, index
+}
+
+// ====
+
+// Binary and unary arithmetic ops.
+func.def @arithmetic(%a: i32, %b: i32) -> (i32, i32) {
+  %sum = test.addi %a, %b : i32
+  %neg = test.neg %a : i32
+  func.return %sum, %neg : i32, i32
+}
+
+// ====
+
+// Cast and convert ops with different source and destination types.
+func.def @cast_and_convert(%x: i32) -> (f32, f32) {
+  %casted = test.cast %x : i32 to f32
+  %converted = test.convert %x : i32 -> f32
+  func.return %casted, %converted : f32, f32
+}
+
+// ====
+
+// Comparison op with predicate keyword. Result is always i1.
+func.def @compare(%a: i32, %b: i32) -> (i1) {
+  %result = test.cmp eq, %a, %b : i32
+  func.return %result : i1
+}
+
+// ====
+
+// Counter op with immediate value.
+func.def @counter() -> (i32) {
+  %c = test.counter 3 : i32
+  func.return %c : i32
+}
+
+// ====
+
+// Variadic ops: reduce with multiple operands.
+func.def @variadic_reduce(%a: i32, %b: i32, %c: i32) -> (i32) {
+  %sum = test.reduce %a, %b, %c : i32
+  func.return %sum : i32
+}
+
+// ====
+
+// Map op with binding list and region body.
+func.def @map_negate(%tile: f32) -> (f32) {
+  %r = test.map(%element = %tile : f32) {
+    %negated = test.neg %element : f32
+    test.yield %negated : f32
+  } -> (f32)
+  func.return %r : f32
+}
+
+// ====
+
+// Branch op with then/else regions.
+func.def @branch(%cond: i1) -> (f32) {
+  %r = test.branch %cond -> (f32) {
+    %a = test.constant 1.0 : f32
+    test.yield %a : f32
+  } else {
+    %b = test.constant 2.0 : f32
+    test.yield %b : f32
+  }
+  func.return %r : f32
+}
+
+// ====
+
+// Optional-region op with only the required body.
+func.def @optional_region_without_else(%cond: i1) {
+  test.optional_region %cond {
+    test.yield
+  }
+  func.return
+}
+
+// ====
+
+// Optional-region op with the trailing region present.
+func.def @optional_region_with_else(%cond: i1) {
+  test.optional_region %cond {
+    test.yield
+  } else {
+    test.yield
+  }
+  func.return
+}
+
+// ====
+
+// Loop op with induction variable and iter_args.
+func.def @loop_sum(%lo: index, %hi: index, %step: index, %init: f32) -> (f32) {
+  %r = test.loop %iv = %lo to %hi step %step iter_args(%acc = %init : f32) -> (f32) {
+    test.yield %acc : f32
+  }
+  func.return %r : f32
+}
+
+// ====
+
+// Loop without iter_args — just IV and no results.
+func.def @simple_loop(%lo: index, %hi: index, %step: index) {
+  test.loop %iv = %lo to %hi step %step {
+  }
+}
+
+// ====
+
+// Alternate region syntax is declarative parser/printer metadata. The op still
+// stores an ordinary region.
+func.def @alternate_region_syntax() {
+  test.region_syntax do {
+    test.yield
+  }
+  func.return
+}
+
+// ====
+
+// Invoke op with symbol reference.
+func.def @callee(%x: f32) -> (f32) {
+  func.return %x : f32
+}
+
+func.def @caller(%input: f32) -> (f32) {
+  %r = test.invoke @callee(%input) : (f32) -> (f32)
+  func.return %r : f32
+}
+
+// ====
+
+// Slice op with static index list.
+func.def @slice_tile(%tile: tile<64x64xf16>) -> (tile<16x16xf16>) {
+  %sub = test.slice %tile[0, 32] : tile<64x64xf16> -> (tile<16x16xf16>)
+  func.return %sub : tile<16x16xf16>
+}
+
+// ====
+
+// RUN: with-locations roundtrip
+
+%c = test.constant 42 : i32 loc(tagged<sanitizer_site, "01", "model.loom":5:6>)
+
+// ====
+
+// Canonical AttrDict printing sorts keys recursively and canonicalizes empty
+// optional dict attrs to absence.
+func.def @canonical_attr_dict(%x: f32) -> (f32) {
+  %configured = test.attrs %x {meta = {phase = "link", opt = 3}, axis = 0} : f32
+  %passthrough = test.attrs %configured {} : f32
+  func.return %passthrough : f32
+}
+// ----
+func.def @canonical_attr_dict(%x: f32) -> (f32) {
+  %configured = test.attrs %x {axis = 0, meta = {opt = 3, phase = "link"}} : f32
+  %passthrough = test.attrs %configured : f32
+  func.return %passthrough : f32
+}
+
+// ====

@@ -322,15 +322,15 @@ std::string HasMatchBenchmark::digits_1m_;
 // Match at start - should exit immediately.
 BENCHMARK_DEFINE_F(HasMatchBenchmark, EarlyMatch)(benchmark::State& state) {
   iree_tokenizer_regex_dfa_t dfa;
-  iree_tokenizer_regex_dfa_load(
-      iree_make_const_byte_span(alpha_dfa_.data(), alpha_dfa_.size()), &dfa);
+  IREE_CHECK_OK(iree_tokenizer_regex_dfa_load(
+      iree_make_const_byte_span(alpha_dfa_.data(), alpha_dfa_.size()), &dfa));
 
   iree_string_view_t text =
       iree_make_string_view(words_1m_.data(), words_1m_.size());
 
   for (auto _ : state) {
     bool has_match = false;
-    iree_tokenizer_regex_has_match(&dfa, text, &has_match);
+    IREE_CHECK_OK(iree_tokenizer_regex_has_match(&dfa, text, &has_match));
     benchmark::DoNotOptimize(has_match);
   }
   state.SetItemsProcessed(state.iterations());
@@ -340,15 +340,15 @@ BENCHMARK_REGISTER_F(HasMatchBenchmark, EarlyMatch);
 // No match - must scan entire input.
 BENCHMARK_DEFINE_F(HasMatchBenchmark, NoMatch)(benchmark::State& state) {
   iree_tokenizer_regex_dfa_t dfa;
-  iree_tokenizer_regex_dfa_load(
-      iree_make_const_byte_span(alpha_dfa_.data(), alpha_dfa_.size()), &dfa);
+  IREE_CHECK_OK(iree_tokenizer_regex_dfa_load(
+      iree_make_const_byte_span(alpha_dfa_.data(), alpha_dfa_.size()), &dfa));
 
   iree_string_view_t text =
       iree_make_string_view(digits_1m_.data(), digits_1m_.size());
 
   for (auto _ : state) {
     bool has_match = false;
-    iree_tokenizer_regex_has_match(&dfa, text, &has_match);
+    IREE_CHECK_OK(iree_tokenizer_regex_has_match(&dfa, text, &has_match));
     benchmark::DoNotOptimize(has_match);
   }
   state.SetBytesProcessed(state.iterations() * digits_1m_.size());
@@ -387,8 +387,8 @@ std::string StreamingBenchmark::text_1m_;
 
 BENCHMARK_DEFINE_F(StreamingBenchmark, ChunkSize)(benchmark::State& state) {
   iree_tokenizer_regex_dfa_t dfa;
-  iree_tokenizer_regex_dfa_load(
-      iree_make_const_byte_span(alpha_dfa_.data(), alpha_dfa_.size()), &dfa);
+  IREE_CHECK_OK(iree_tokenizer_regex_dfa_load(
+      iree_make_const_byte_span(alpha_dfa_.data(), alpha_dfa_.size()), &dfa));
 
   for (auto _ : state) {
     iree_tokenizer_regex_exec_state_t exec_state;
@@ -398,13 +398,13 @@ BENCHMARK_DEFINE_F(StreamingBenchmark, ChunkSize)(benchmark::State& state) {
     for (size_t offset = 0; offset < text_1m_.size();
          offset += (size_t)chunk_size_) {
       size_t length = std::min((size_t)chunk_size_, text_1m_.size() - offset);
-      iree_tokenizer_regex_exec_feed(
+      IREE_CHECK_OK(iree_tokenizer_regex_exec_feed(
           &dfa, &exec_state,
           iree_make_string_view(text_1m_.data() + offset, length), offset,
-          /*stride=*/NULL, CountCallback, &count);
+          /*stride=*/NULL, CountCallback, &count));
     }
-    iree_tokenizer_regex_exec_finalize(&dfa, &exec_state, text_1m_.size(),
-                                       CountCallback, &count);
+    IREE_CHECK_OK(iree_tokenizer_regex_exec_finalize(
+        &dfa, &exec_state, text_1m_.size(), CountCallback, &count));
     benchmark::DoNotOptimize(count);
   }
   state.SetBytesProcessed(state.iterations() * text_1m_.size());
@@ -426,8 +426,8 @@ void BM_DfaLoad(benchmark::State& state) {
 
   for (auto _ : state) {
     iree_tokenizer_regex_dfa_t dfa;
-    iree_tokenizer_regex_dfa_load(
-        iree_make_const_byte_span(dfa_data.data(), dfa_data.size()), &dfa);
+    IREE_CHECK_OK(iree_tokenizer_regex_dfa_load(
+        iree_make_const_byte_span(dfa_data.data(), dfa_data.size()), &dfa));
     benchmark::DoNotOptimize(dfa.header);
   }
 }
@@ -604,7 +604,8 @@ BENCHMARK_DEFINE_F(CompiledPatternBenchmark, LlamaPattern)
 
   for (auto _ : state) {
     iree_host_size_t count = 0;
-    iree_tokenizer_regex_count_matches(llama_pattern_->dfa(), text, &count);
+    IREE_CHECK_OK(iree_tokenizer_regex_count_matches(llama_pattern_->dfa(),
+                                                     text, &count));
     benchmark::DoNotOptimize(count);
   }
   state.SetBytesProcessed(state.iterations() * shakespeare_.size());
@@ -625,8 +626,8 @@ BENCHMARK_DEFINE_F(CompiledPatternBenchmark, SimpleWordPattern)
 
   for (auto _ : state) {
     iree_host_size_t count = 0;
-    iree_tokenizer_regex_count_matches(simple_word_pattern_->dfa(), text,
-                                       &count);
+    IREE_CHECK_OK(iree_tokenizer_regex_count_matches(
+        simple_word_pattern_->dfa(), text, &count));
     benchmark::DoNotOptimize(count);
   }
   state.SetBytesProcessed(state.iterations() * shakespeare_.size());
@@ -647,8 +648,8 @@ BENCHMARK_DEFINE_F(CompiledPatternBenchmark, WhitespaceSplit)
 
   for (auto _ : state) {
     iree_host_size_t count = 0;
-    iree_tokenizer_regex_count_matches(whitespace_pattern_->dfa(), text,
-                                       &count);
+    IREE_CHECK_OK(iree_tokenizer_regex_count_matches(whitespace_pattern_->dfa(),
+                                                     text, &count));
     benchmark::DoNotOptimize(count);
   }
   state.SetBytesProcessed(state.iterations() * shakespeare_.size());
@@ -747,8 +748,8 @@ BENCHMARK_DEFINE_F(PathologicalBenchmark, RepeatedDots)
 
   for (auto _ : state) {
     iree_host_size_t count = 0;
-    iree_tokenizer_regex_count_matches(repeated_dot_pattern_->dfa(), text,
-                                       &count);
+    IREE_CHECK_OK(iree_tokenizer_regex_count_matches(
+        repeated_dot_pattern_->dfa(), text, &count));
     benchmark::DoNotOptimize(count);
   }
   state.SetBytesProcessed(state.iterations() * binary_input_.size());
@@ -769,8 +770,8 @@ BENCHMARK_DEFINE_F(PathologicalBenchmark, DotAlternation)
 
   for (auto _ : state) {
     iree_host_size_t count = 0;
-    iree_tokenizer_regex_count_matches(dot_alternation_pattern_->dfa(), text,
-                                       &count);
+    IREE_CHECK_OK(iree_tokenizer_regex_count_matches(
+        dot_alternation_pattern_->dfa(), text, &count));
     benchmark::DoNotOptimize(count);
   }
   state.SetBytesProcessed(state.iterations() * binary_input_.size());

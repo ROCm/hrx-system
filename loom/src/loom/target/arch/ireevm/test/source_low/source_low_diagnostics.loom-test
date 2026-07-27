@@ -1,0 +1,27 @@
+// RUN: emit source-low output=low
+
+ireevm.target<core> @target
+
+func.def target(@target) @unsupported_source_op(%lhs: i32, %rhs: i32) -> (i32) {
+  // ERROR@+1: TARGET/001 {op_name="scalar.ceildivsi"}
+  %quotient = scalar.ceildivsi %lhs, %rhs : i32
+  func.return %quotient : i32
+}
+
+// ====
+
+ireevm.target<core> @target
+
+func.def target(@target) @unsupported_source_type(%value: f16) {
+  // ERROR@-1: TARGET/033 {field_name="source", actual_type="f16"}
+  func.return
+}
+
+// ====
+
+ireevm.target<core> @target
+
+func.def target(@target) @unsupported_bare_list(%value: ireevm.list<i32>) {
+  // ERROR@-1: TARGET/031 {type_constraint="type.target_low_mapping"}
+  func.return
+}

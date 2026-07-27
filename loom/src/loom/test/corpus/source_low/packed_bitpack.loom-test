@@ -1,0 +1,44 @@
+// RUN: roundtrip
+
+func.def @i32x4_to_i8x4_bitpack(%codes: vector<4xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ====
+
+func.def @i32x8_to_i4x8_bitpack(%codes: vector<8xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<4> %codes : vector<8xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ====
+
+func.def @i32x16_to_i2x16_bitpack(%codes: vector<16xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<2> %codes : vector<16xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ====
+
+func.def @i32x32_to_i1x32_bitpack(%mask: vector<32xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<1> %mask : vector<32xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ====
+
+kernel.def @uniform_global_i32x4_to_i8x4_bitpack_store() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%values: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %values_noalias, %output_noalias = buffer.assume.noalias %values, %output : buffer, buffer
+  %values_view = buffer.view %values_noalias[%base] : buffer -> view<4xi32, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xi8, #dense>
+  %codes = vector.load %values_view[%index] : view<4xi32, #dense> -> vector<4xi32>
+  %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
+  vector.store %packed, %output_view[%index] : vector<4xi8>, view<4xi8, #dense>
+  kernel.return
+}

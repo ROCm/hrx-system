@@ -1,0 +1,55 @@
+// HIP -> Loom vector-width shared-memory recipe.
+//
+// HIP concept tags: `__shared__`, `__syncthreads`, LDS, workgroup memory,
+// `uint4`, `int4`, vectorized load/store, ds_store_b128, ds_load_b128.
+//
+// Position: wide LDS traffic should be visible in source as a vector-width
+// memory contract. This recipe stages one vector<4xi32> row per work item
+// through workgroup memory so the emitted kernel must preserve both the LDS
+// allocation and the 128-bit local-memory access width.
+kernel.def @shared_memory_vector_tile_roundtrip() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %scratch_bytes = index.constant 1024 : offset
+
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<64x4xi32, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<64x4xi32, #dense>
+
+  // HIP concept:
+  //   __shared__ int4 scratch[64];
+  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<64x4xi32, #dense>
+
+  // HIP concept:
+  //   reinterpret_cast<int4 *>(scratch)[threadIdx.x] =
+  //       reinterpret_cast<const int4 *>(input)[threadIdx.x];
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
+  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+
+  // HIP concept:
+  //   __syncthreads();
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+
+  // HIP concept:
+  //   reinterpret_cast<int4 *>(output)[threadIdx.x] =
+  //       reinterpret_cast<const int4 *>(scratch)[threadIdx.x];
+  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  kernel.return
+}
+
+check.case @case_shared_memory_vector_tile_roundtrip {
+  %input = check.generate.iota offset(1) step(1) : tensor<64x4xi32>
+  %output = check.generate.fill value(0) : tensor<64x4xi32>
+  %expected = check.generate.iota offset(1) step(1) : tensor<64x4xi32>
+  func.call @shared_memory_vector_tile_roundtrip(%input, %output) : (tensor<64x4xi32>, tensor<64x4xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<64x4xi32>
+  check.return
+}
+
+check.benchmark<@case_shared_memory_vector_tile_roundtrip> @bench_shared_memory_vector_tile_roundtrip

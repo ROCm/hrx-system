@@ -19,6 +19,7 @@ except ModuleNotFoundError:
 
 CI_DRY_RUN_COMMANDS = (
     ("iree-bazel-cpu",),
+    ("iree-bazel-repository-build",),
     ("iree-bazel-cpu-asan",),
     ("iree-bazel-cpu-msan",),
     ("iree-bazel-cpu-tsan",),
@@ -30,18 +31,31 @@ CI_DRY_RUN_COMMANDS = (
     ("iree-bazel-amdgpu-tsan",),
     ("iree-bazel-amdgpu-ubsan",),
     ("iree-bazel-amdgpu-sanitizers",),
+    ("iree-bazel-vulkan",),
+    ("iree-bazel-vulkan-asan",),
+    ("iree-bazel-vulkan-msan",),
+    ("iree-bazel-vulkan-tsan",),
+    ("iree-bazel-vulkan-ubsan",),
+    ("iree-bazel-vulkan-sanitizers",),
     ("iree-cmake-cpu",),
     ("iree-cmake-cpu-asan",),
     ("iree-cmake-cpu-msan",),
     ("iree-cmake-cpu-tsan",),
     ("iree-cmake-cpu-ubsan",),
     ("iree-cmake-cpu-sanitizers",),
+    ("iree-cmake-sanitizer-smoke",),
     ("iree-cmake-amdgpu",),
     ("iree-cmake-amdgpu-asan",),
     ("iree-cmake-amdgpu-msan",),
     ("iree-cmake-amdgpu-tsan",),
     ("iree-cmake-amdgpu-ubsan",),
     ("iree-cmake-amdgpu-sanitizers",),
+    ("iree-cmake-vulkan",),
+    ("iree-cmake-vulkan-asan",),
+    ("iree-cmake-vulkan-msan",),
+    ("iree-cmake-vulkan-tsan",),
+    ("iree-cmake-vulkan-ubsan",),
+    ("iree-cmake-vulkan-sanitizers",),
 )
 
 
@@ -70,6 +84,7 @@ def run_dry_run_scenario(checkout: Path) -> None:
     smoke_test_lib.run_dev_command(
         checkout, ["--dry-run", "bazel", "info", "execution_root"]
     )
+    smoke_test_lib.run_dev_command(checkout, ["--dry-run", "bazel", "shutdown"])
     smoke_test_lib.run_dev_command(
         checkout,
         [
@@ -84,6 +99,15 @@ def run_dry_run_scenario(checkout: Path) -> None:
     smoke_test_lib.run_dev_command(
         checkout,
         ["--dry-run", "bazel", "try", "-e", "int main() { return 0; }"],
+    )
+    smoke_test_lib.run_dev_command(
+        checkout,
+        [
+            "--dry-run",
+            "bazel",
+            "compile-commands",
+            "//runtime/src/iree/base/...",
+        ],
     )
     smoke_test_lib.run_dev_command(
         checkout,
@@ -128,6 +152,16 @@ def run_dry_run_scenario(checkout: Path) -> None:
             "--cmake-build-dir",
             "build/smoke-cmake",
             "hrx",
+        ],
+    )
+    smoke_test_lib.run_dev_command(
+        checkout,
+        [
+            "--dry-run",
+            "--cmake-build-dir",
+            "build/smoke-cmake",
+            "cmake",
+            "compile-commands",
         ],
     )
     smoke_test_lib.run_dev_command(
@@ -194,8 +228,7 @@ def run_dry_run_scenario(checkout: Path) -> None:
     smoke_test_lib.assert_absent(checkout / ".bazelrc.configured")
     smoke_test_lib.assert_absent(checkout / ".venv")
     smoke_test_lib.assert_absent(checkout / ".iree")
-    smoke_test_lib.assert_absent(checkout / ".iree-bazel-try")
-    smoke_test_lib.assert_absent(checkout / ".iree-cmake-try")
+    smoke_test_lib.assert_absent(checkout / ".tmp/iree-cmake-try")
     smoke_test_lib.assert_absent(checkout / "lefthook-local.yml")
     smoke_test_lib.assert_absent(tool_root)
 

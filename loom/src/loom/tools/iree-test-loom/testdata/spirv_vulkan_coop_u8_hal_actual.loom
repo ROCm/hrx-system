@@ -1,0 +1,71 @@
+spirv.target<vulkan1_3> @target {abi = hal_kernel}
+
+kernel.def target(@target) @dense_projection_tiled_u8_128() {
+  %m_tiles = index.constant 8 : index
+  %n_tiles = index.constant 8 : index
+  %unit = index.constant 1 : index
+  %subgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%n_tiles, %m_tiles, %unit) workgroup_size(%subgroup_size, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %init_buffer: buffer, %out_buffer: buffer) {
+  %workgroup_n = kernel.workgroup.id<x> : index
+  %workgroup_m = kernel.workgroup.id<y> : index
+  %k_tiles = index.constant 4 : index
+  %n_tiles = index.constant 8 : index
+  %unit = index.constant 1 : index
+  %zero = index.constant 0 : index
+  %lhs_tile_bytes = index.constant 512 : index
+  %rhs_tile_bytes = index.constant 512 : index
+  %acc_tile_bytes = index.constant 1024 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 32 : index
+  %lhs_storage = encoding.define #physical_storage<layout=#dense, schema=#matrix_operand<element_format=u8, payload_elements=32, payload_registers=8>> : encoding<storage>
+  %rhs_storage = encoding.define #physical_storage<layout=#dense, schema=#matrix_operand<element_format=u8, payload_elements=32, payload_registers=8>> : encoding<storage>
+  %acc_storage = encoding.define #physical_storage<layout=#dense, schema=#matrix_operand<element_format=u32, payload_elements=8, payload_registers=8>> : encoding<storage>
+  %out_tile_index = index.madd %workgroup_m, %n_tiles, %workgroup_n : index
+  %out_byte_index = index.mul %out_tile_index, %acc_tile_bytes : index
+  %out_byte_offset = index.cast %out_byte_index : index to offset
+  %out_byte_offset_aligned = index.assume %out_byte_offset [mul(%out_byte_offset, 16)] : offset
+  %lhs_aligned = buffer.assume.alignment %lhs_buffer {minimum_alignment = 16} : buffer
+  %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 16} : buffer
+  %init_aligned = buffer.assume.alignment %init_buffer {minimum_alignment = 16} : buffer
+  %out_aligned = buffer.assume.alignment %out_buffer {minimum_alignment = 16} : buffer
+  %init_view = buffer.view %init_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xi32, %acc_storage>
+  %out_view = buffer.view %out_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xi32, %acc_storage>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xi32, %acc_storage> -> vector<8xi32>
+  %result = scf.for %kt = [%zero to %k_tiles step %unit](%acc = %init : vector<8xi32>) -> (vector<8xi32>) {
+    %lhs_tile_index = index.madd %workgroup_m, %k_tiles, %kt : index
+    %rhs_tile_index = index.madd %kt, %n_tiles, %workgroup_n : index
+    %lhs_byte_index = index.mul %lhs_tile_index, %lhs_tile_bytes : index
+    %rhs_byte_index = index.mul %rhs_tile_index, %rhs_tile_bytes : index
+    %lhs_byte_offset = index.cast %lhs_byte_index : index to offset
+    %rhs_byte_offset = index.cast %rhs_byte_index : index to offset
+    %lhs_byte_offset_aligned = index.assume %lhs_byte_offset [mul(%lhs_byte_offset, 16)] : offset
+    %rhs_byte_offset_aligned = index.assume %rhs_byte_offset [mul(%rhs_byte_offset, 16)] : offset
+    %lhs_view = buffer.view %lhs_aligned[%lhs_byte_offset_aligned] : buffer -> view<16x32xi8, %lhs_storage>
+    %rhs_view = buffer.view %rhs_aligned[%rhs_byte_offset_aligned] : buffer -> view<32x16xi8, %rhs_storage>
+    %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x32xi8, %lhs_storage> -> vector<32xi8>
+    %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<32x16xi8, %rhs_storage> -> vector<32xi8>
+    %next = vector.mma %lhs, %rhs, %acc : vector<32xi8>, vector<32xi8>, vector<8xi32>
+    scf.yield %next : vector<8xi32>
+  }
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xi32>, view<16x16xi32, %acc_storage>
+  kernel.return
+}
+
+check.case @dense_projection_tiled_u8_128_case {
+  check.requires<hal.vulkan.feature> {feature = "cooperative_matrix_khr"}
+  check.requires<hal.vulkan.feature> {feature = "shader_int8"}
+  check.requires<hal.vulkan.feature> {feature = "storage_buffer_8bit_access"}
+  check.requires<hal.spirv.cooperative_matrix> {row = "khr.cooperative_matrix.u8.16x16x32.u32.subgroup"}
+  %lhs = check.generate.fill value(1) : tensor<8x4x16x32xi8>
+  %rhs = check.generate.fill value(2) : tensor<4x8x32x16xi8>
+  %init = check.generate.fill value(5) : tensor<8x8x16x16xi32>
+  %output = check.generate.fill value(0) : tensor<8x8x16x16xi32>
+  func.call @dense_projection_tiled_u8_128(%lhs, %rhs, %init, %output) : (tensor<8x4x16x32xi8>, tensor<4x8x32x16xi8>, tensor<8x8x16x16xi32>, tensor<8x8x16x16xi32>)
+  %expected = check.oracle.call<reference.tiled_matmul> {accumulator = "i32", lhs = "u8", result = "i32", rhs = "u8"} callee(@dense_projection_tiled_u8_128) inputs(%lhs, %rhs, %init) : (tensor<8x4x16x32xi8>, tensor<4x8x32x16xi8>, tensor<8x8x16x16xi32>) -> (tensor<8x8x16x16xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<8x8x16x16xi32>
+  check.return
+}
+
+check.benchmark<@dense_projection_tiled_u8_128_case>

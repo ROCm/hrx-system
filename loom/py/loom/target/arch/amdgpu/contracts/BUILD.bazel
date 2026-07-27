@@ -1,0 +1,68 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_library(
+    name = "contracts",
+    srcs = [
+        "__init__.py",
+        "arithmetic.py",
+        "async.py",
+        "buffer.py",
+        "compare.py",
+        "config.py",
+        "dispatch_ownership.py",
+        "dot.py",
+        "integer.py",
+        "materializers.py",
+        "matrix.py",
+        "memory.py",
+        "reduce.py",
+        "sanitizer.py",
+        "view.py",
+    ],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom/dialect/buffer",
+        "//loom/py/loom/dialect/config",
+        "//loom/py/loom/dialect/index",
+        "//loom/py/loom/dialect/kernel",
+        "//loom/py/loom/dialect/sanitizer",
+        "//loom/py/loom/dialect/scalar",
+        "//loom/py/loom/dialect/vector",
+        "//loom/py/loom/dialect/view",
+        "//loom/py/loom/target:contract_fragments",
+        "//loom/py/loom/target/arch/amdgpu:descriptors",
+        "//loom/py/loom/target/contracts",
+    ],
+)
+
+iree_py_test(
+    name = "contracts_test",
+    srcs = [
+        "arithmetic_test.py",
+        "dispatch_ownership_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = [
+        "loom.target.arch.amdgpu.contracts.arithmetic_test",
+        "loom.target.arch.amdgpu.contracts.dispatch_ownership_test",
+    ],
+    data = [
+        "//loom/src/loom/target/arch/amdgpu/lower:registry.c",
+        "//loom/src/loom/target/arch/amdgpu/lower:registry_tables.inl",
+    ],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":contracts",
+    ],
+)

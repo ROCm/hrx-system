@@ -163,6 +163,132 @@ typedef enum iree_status_code_e {
   IREE_STATUS_CODE_MASK = 0x1Fu,
 } iree_status_code_t;
 
+// Status ownership and lifetime contract.
+//
+// iree_status_t is an owned, linear C value. A status value is returned by
+// value, copied by ordinary C assignment, and not automatically destroyed when
+// it leaves scope. Any operation that produces an iree_status_t transfers
+// ownership of that status to the caller. The owner must eventually transfer
+// that ownership again or consume it exactly once.
+//
+// Assigning one local iree_status_t variable to another local transfers
+// ownership to the destination. The source variable must not be read, returned,
+// or consumed again unless it is first reset to a fresh value.
+//
+// Valid terminal ownership actions are:
+//
+// * return the status from the current status-returning function;
+// * store it into an owning field, callback argument, or output slot whose
+//   contract says it now owns the status;
+// * consume it with iree_status_free, iree_status_ignore,
+//   iree_status_consume_code, or iree_status_abort;
+// * pass it to a status transfer helper such as iree_status_join,
+//   iree_status_annotate, iree_status_annotate_f, or iree_status_freeze and
+//   then return, store, or consume the helper's returned status; or
+// * in C++ code, wrap it in iree::Status or pass it to a test helper such as
+//   IREE_EXPECT_OK/IREE_ASSERT_OK that takes ownership.
+//
+// Reading a status is not a terminal ownership action. Predicates and accessors
+// such as iree_status_is_ok, iree_status_code, iree_status_message,
+// iree_status_source_location, and formatting functions observe the status but
+// leave ownership unchanged. A status that was only checked still needs to be
+// returned, stored, or consumed on every non-OK path.
+//
+// A function parameter typed as non-const iree_status_t by value participates
+// in that ownership protocol. Callbacks and helpers that accept a non-const
+// by-value status receive ownership: they must return it, store it into an
+// owning destination, consume it, or transfer it to another owning status API.
+// If the caller still needs the original status after such a call, the caller
+// must pass iree_status_clone(status) and keep owning the original.
+//
+// If a callee only needs to test success/failure or record a scalar result,
+// pass iree_status_code_t instead. If a C callee needs to inspect, format, or
+// clone the full status without consuming the caller's owned value, spell the
+// parameter as const iree_status_t. The const qualifier is an IREE/tooling
+// convention rather than a C ownership guarantee: clang-tidy treats it as a
+// borrowed full-status parameter and rejects consuming, returning, storing, or
+// otherwise transferring the borrowed value. In C++ helpers, pass
+// const iree_status_t& for the same borrowed full-status case.
+//
+// iree_status_free and iree_status_ignore both consume ownership, but they
+// communicate different intent. Use iree_status_free when the failure has been
+// handled, reported, propagated through another channel, or otherwise accounted
+// for. Use iree_status_ignore only when the failure is deliberately unhandled
+// and the code is explicitly choosing to discard it.
+//
+// Consuming a status does not mutate the caller's local variable. These APIs
+// take the status by value; after iree_status_free(status) or
+// iree_status_ignore(status), the local |status| variable still contains the
+// old bits and must not be read, returned, or consumed again unless it is first
+// reset to a fresh value such as iree_ok_status(). A common reset pattern for
+// stored statuses is:
+//
+//   stored_status = iree_status_ignore(stored_status);
+//
+// iree_status_join consumes both of its arguments and returns the status that
+// remains owned by the caller. This is the normal way to preserve a primary
+// failure while still reporting cleanup failures:
+//
+//   iree_status_t status = do_work();
+//   status = iree_status_join(status, do_cleanup());
+//   return status;
+//
+// A single full expression should mention an owned status at most once when any
+// mention transfers ownership. C does not sequence function argument
+// evaluation, so expressions like iree_status_join(status, callback(status))
+// have no portable ownership order. Sequence the operations through temporary
+// locals, and clone first when two independent consumers need equivalent status
+// payloads.
+//
+// iree_status_annotate, iree_status_annotate_f, and iree_status_freeze consume
+// their input status and return the replacement status. The returned value is
+// the new owned value:
+//
+//   if (!iree_status_is_ok(status)) {
+//     return iree_status_annotate_f(status, "while opening '%.*s'",
+//                                   (int)path.size, path.data);
+//   }
+//
+// iree_status_clone is different: it observes the input status and returns a
+// second owned status. Both the original and the clone then require independent
+// ownership handling.
+//
+// OK statuses and code-only statuses may not have heap storage, but they still
+// participate in the same ownership protocol. That uniformity keeps callers
+// independent of IREE_STATUS_MODE and lets debug builds attach source
+// locations, annotations, payloads, and stack traces without changing call-site
+// control flow.
+//
+// iree_make_status and the allocation/annotation helpers may allocate and may
+// capture source locations, annotations, payloads, or stack traces. They
+// represent real operation failures, not ordinary non-error control flow,
+// retry state, or parser lookahead. Expected alternatives are usually modeled
+// with enums, booleans, optionals, or ordinary result values instead of by
+// manufacturing and discarding statuses.
+//
+// For simple propagation with no local cleanup:
+//
+//   IREE_RETURN_IF_ERROR(do_work());
+//   return iree_ok_status();
+//
+// For local cleanup or output publication, keep one terminal status value and
+// gate success-only effects on iree_status_is_ok(status):
+//
+//   iree_status_t status = create_resource(&resource);
+//   if (iree_status_is_ok(status)) {
+//     *out_resource = resource;
+//   } else {
+//     destroy_resource(resource);
+//   }
+//   return status;
+//
+// The repo-owned clang-tidy checks enforce the mechanically provable part of
+// this contract: status-returning call results are not silently discarded,
+// local status owners are not overwritten or left unconsumed, consumed status
+// variables are not reused, a single full expression does not combine a
+// transfer with another use of the same local status, and by-value status
+// parameters are not merely observed as borrowed values.
+//
 // Opaque status structure containing an iree_status_code_t and optional status
 // object with more detailed information and payloads.
 //
@@ -531,6 +657,9 @@ IREE_API_EXPORT IREE_MUST_USE_RESULT iree_status_t IREE_PRINTF_ATTRIBUTE(2, 3)
 // If |buffer_capacity| is insufficient, then |out_buffer_length| is the
 // number of characters that would have been written if |buffer_capacity|
 // had been sufficiently large, not counting the terminating null character.
+// Returns false when formatting fails or when |buffer| is non-NULL but
+// |buffer_capacity| is insufficient for the formatted status and a terminating
+// null character.
 IREE_API_EXPORT bool iree_status_format(iree_status_t status,
                                         iree_host_size_t buffer_capacity,
                                         char* buffer,

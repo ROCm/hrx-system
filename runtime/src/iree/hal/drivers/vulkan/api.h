@@ -138,7 +138,8 @@ typedef enum iree_hal_vulkan_feature_bits_t {
   IREE_HAL_VULKAN_FEATURE_REQUIRED_BASELINE =
       IREE_HAL_VULKAN_FEATURE_ENABLE_TIMELINE_SEMAPHORES |
       IREE_HAL_VULKAN_FEATURE_ENABLE_SYNCHRONIZATION2 |
-      IREE_HAL_VULKAN_FEATURE_ENABLE_SCALAR_BLOCK_LAYOUT,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SCALAR_BLOCK_LAYOUT |
+      IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES,
   // Recognized feature bits accepted by public Vulkan HAL APIs.
   IREE_HAL_VULKAN_FEATURE_ALL_RECOGNIZED =
       IREE_HAL_VULKAN_FEATURE_ENABLE_ROBUST_BUFFER_ACCESS |
@@ -181,12 +182,14 @@ typedef enum iree_hal_vulkan_device_extension_bits_t {
   IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_EXTERNAL_MEMORY_HOST = 1u << 4,
   // VK_EXT_calibrated_timestamps.
   IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_CALIBRATED_TIMESTAMPS = 1u << 5,
+  // VK_EXT_memory_budget.
+  IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_MEMORY_BUDGET = 1u << 6,
   // VK_KHR_push_descriptor.
-  IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_PUSH_DESCRIPTOR = 1u << 6,
+  IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_PUSH_DESCRIPTOR = 1u << 7,
   // VK_KHR_cooperative_matrix.
-  IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_COOPERATIVE_MATRIX = 1u << 7,
+  IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_COOPERATIVE_MATRIX = 1u << 8,
   // VK_KHR_shader_bfloat16.
-  IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_BFLOAT16 = 1u << 8,
+  IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_BFLOAT16 = 1u << 9,
   // Recognized extension bits accepted by public Vulkan HAL APIs.
   IREE_HAL_VULKAN_DEVICE_EXTENSION_ALL_RECOGNIZED =
       IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_PORTABILITY_SUBSET |
@@ -195,6 +198,7 @@ typedef enum iree_hal_vulkan_device_extension_bits_t {
       IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_EXTERNAL_MEMORY_WIN32 |
       IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_EXTERNAL_MEMORY_HOST |
       IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_CALIBRATED_TIMESTAMPS |
+      IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_MEMORY_BUDGET |
       IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_PUSH_DESCRIPTOR |
       IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_COOPERATIVE_MATRIX |
       IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_BFLOAT16,
@@ -210,6 +214,15 @@ typedef uint32_t iree_hal_vulkan_device_extensions_t;
 #define IREE_HAL_VULKAN_KHR_SHADER_BFLOAT16_EXTENSION_NAME \
   VK_KHR_SHADER_BFLOAT16_EXTENSION_NAME
 #endif  // !VK_KHR_SHADER_BFLOAT16_EXTENSION_NAME
+
+#if !defined(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)
+// VK_EXT_memory_budget extension name used when Vulkan headers predate the
+// name macro.
+#define IREE_HAL_VULKAN_EXT_MEMORY_BUDGET_EXTENSION_NAME "VK_EXT_memory_budget"
+#else
+#define IREE_HAL_VULKAN_EXT_MEMORY_BUDGET_EXTENSION_NAME \
+  VK_EXT_MEMORY_BUDGET_EXTENSION_NAME
+#endif  // !VK_EXT_MEMORY_BUDGET_EXTENSION_NAME
 
 // Populates recognized Vulkan device extension bits from an enabled extension
 // name list. Unknown extension names are ignored.
@@ -361,42 +374,10 @@ typedef enum iree_hal_vulkan_device_flag_bits_t {
 
 typedef uint32_t iree_hal_vulkan_device_flags_t;
 
-typedef enum iree_hal_vulkan_dispatch_abi_bits_t {
-  // No executable dispatch ABIs are enabled.
-  IREE_HAL_VULKAN_DISPATCH_ABI_NONE = 0u,
-  // Descriptor-set based storage-buffer dispatch ABI.
-  IREE_HAL_VULKAN_DISPATCH_ABI_DESCRIPTOR = 1u << 0,
-  // Buffer-device-address based storage-buffer dispatch ABI.
-  IREE_HAL_VULKAN_DISPATCH_ABI_BDA = 1u << 1,
-  // Recognized executable dispatch ABI bits accepted by public APIs.
-  IREE_HAL_VULKAN_DISPATCH_ABI_ALL_RECOGNIZED =
-      IREE_HAL_VULKAN_DISPATCH_ABI_DESCRIPTOR |
-      IREE_HAL_VULKAN_DISPATCH_ABI_BDA,
-} iree_hal_vulkan_dispatch_abi_bits_t;
-
-typedef uint32_t iree_hal_vulkan_dispatch_abis_t;
-
-// Parses a dispatch ABI option string.
-//
-// Accepted values are "descriptor", "bda", and "all". The output is a
-// non-empty bitmask suitable for iree_hal_vulkan_device_options_t.
-IREE_API_EXPORT iree_status_t iree_hal_vulkan_dispatch_abis_parse(
-    iree_string_view_t value, iree_hal_vulkan_dispatch_abis_t* out_abis);
-
-// Verifies that |dispatch_abis| contains a non-empty recognized ABI bit set.
-IREE_API_EXPORT iree_status_t iree_hal_vulkan_dispatch_abis_verify(
-    iree_hal_vulkan_dispatch_abis_t dispatch_abis);
-
 // Parameters configuring an iree_hal_vulkan_device_t.
 typedef struct iree_hal_vulkan_device_options_t {
   // Device behavior flags.
   iree_hal_vulkan_device_flags_t flags;
-
-  // Requested executable dispatch ABIs for this logical device.
-  //
-  // Device creation enables the subset whose required Vulkan features are
-  // present. Requesting only an unsupported ABI fails loudly.
-  iree_hal_vulkan_dispatch_abis_t dispatch_abis;
 
   // Maximum cached native BDA replay instances retained per queue lane.
   //

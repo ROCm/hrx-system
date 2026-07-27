@@ -168,6 +168,7 @@ iree_cc_library(
     iree::base::threading::thread
     iree::hal
     iree::hal::local
+    iree::hal::local::device_spec_builder
     iree::hal::local::executable_environment
     iree::hal::local::executable_library
     iree::hal::local::profile

@@ -10,6 +10,7 @@
 #include "iree/io/stream.h"
 #include "iree/modules/hal/module.h"
 #include "iree/tooling/numpy_io.h"
+#include "iree/tooling/value_io.h"
 
 //===----------------------------------------------------------------------===//
 // Utilities
@@ -84,6 +85,7 @@ iree_status_t iree_io_stream_list_allocate(iree_io_stdio_stream_mode_t mode,
   iree_io_stream_list_t* list = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(host_allocator, sizeof(*list), (void**)&list));
+  memset(list, 0, sizeof(*list));
   list->host_allocator = host_allocator;
   list->mode = mode;
 
@@ -194,8 +196,10 @@ static iree_status_t iree_io_stream_list_open_existing(
     }
   }
 
-  iree_io_stream_retain(entry->stream);
-  *out_stream = entry->stream;
+  if (iree_status_is_ok(status)) {
+    iree_io_stream_retain(entry->stream);
+    *out_stream = entry->stream;
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -336,48 +340,45 @@ static iree_status_t iree_tooling_parse_primitive_into(
       z0, iree_tooling_consume_cconv_any(cconv, &cconv_type));
 
   iree_status_t status = iree_ok_status();
+  iree_tooling_value_t parsed_value = {0};
   switch (cconv_type) {
     case IREE_VM_CCONV_TYPE_I32: {
-      iree_vm_value_t value = iree_vm_value_make_i32(0);
-      if (iree_string_view_atoi_int32(string, &value.i32)) {
+      status = iree_tooling_value_parse(IREE_TOOLING_VALUE_KIND_I32, string,
+                                        &parsed_value);
+      if (iree_status_is_ok(status)) {
+        iree_vm_value_t value =
+            iree_vm_value_make_i32(parsed_value.storage.i32);
         status = iree_vm_list_push_value(list, &value);
-      } else {
-        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "parsing value `%.*s` as i32",
-                                  (int)string.size, string.data);
       }
       break;
     }
     case IREE_VM_CCONV_TYPE_F32: {
-      iree_vm_value_t value = iree_vm_value_make_f32(0.0f);
-      if (iree_string_view_atof(string, &value.f32)) {
+      status = iree_tooling_value_parse(IREE_TOOLING_VALUE_KIND_F32, string,
+                                        &parsed_value);
+      if (iree_status_is_ok(status)) {
+        iree_vm_value_t value =
+            iree_vm_value_make_f32(parsed_value.storage.f32);
         status = iree_vm_list_push_value(list, &value);
-      } else {
-        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "parsing value `%.*s` as f32",
-                                  (int)string.size, string.data);
       }
       break;
     }
     case IREE_VM_CCONV_TYPE_I64: {
-      iree_vm_value_t value = iree_vm_value_make_i64(0ll);
-      if (iree_string_view_atoi_int64(string, &value.i64)) {
+      status = iree_tooling_value_parse(IREE_TOOLING_VALUE_KIND_I64, string,
+                                        &parsed_value);
+      if (iree_status_is_ok(status)) {
+        iree_vm_value_t value =
+            iree_vm_value_make_i64(parsed_value.storage.i64);
         status = iree_vm_list_push_value(list, &value);
-      } else {
-        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "parsing value `%.*s` as i64",
-                                  (int)string.size, string.data);
       }
       break;
     }
     case IREE_VM_CCONV_TYPE_F64: {
-      iree_vm_value_t value = iree_vm_value_make_f64(0.0);
-      if (iree_string_view_atod(string, &value.f64)) {
+      status = iree_tooling_value_parse(IREE_TOOLING_VALUE_KIND_F64, string,
+                                        &parsed_value);
+      if (iree_status_is_ok(status)) {
+        iree_vm_value_t value =
+            iree_vm_value_make_f64(parsed_value.storage.f64);
         status = iree_vm_list_push_value(list, &value);
-      } else {
-        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "parsing value `%.*s` as f64",
-                                  (int)string.size, string.data);
       }
       break;
     }
@@ -392,104 +393,21 @@ static iree_status_t iree_tooling_parse_primitive_into(
   return status;
 }
 
-static iree_status_t iree_tooling_parse_buffer_view_file_callback(
-    iree_hal_buffer_mapping_t* mapping, void* user_data) {
-  iree_io_stream_t* stream = (iree_io_stream_t*)user_data;
-  return iree_io_stream_read(stream, mapping->contents.data_length,
-                             mapping->contents.data,
-                             /*out_buffer_length=*/NULL);
-}
-
-// Creates a HAL buffer view with the given |metadata| and reads the contents
-// from the file reference in |string| which has the prefix `@` to indicate
-// the contents starting from 0 and `+` for the next contents in an already
-// opened stream.
-// The file contents are directly read in to memory with no processing.
-static iree_status_t iree_tooling_parse_buffer_view_file(
-    iree_string_view_t metadata, iree_string_view_t string,
-    iree_hal_device_t* device, iree_hal_allocator_t* device_allocator,
-    iree_io_stream_list_t* stream_list,
-    iree_hal_buffer_view_t** out_buffer_view) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_TRACE_ZONE_APPEND_TEXT(z0, string.data, string.size);
-
-  // Parse shape and element type used to allocate the buffer view.
-  iree_hal_element_type_t element_type = IREE_HAL_ELEMENT_TYPE_NONE;
-  iree_host_size_t shape_rank = 0;
-  iree_hal_dim_t shape[128] = {0};
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_parse_shape_and_element_type(
-                                            metadata, IREE_ARRAYSIZE(shape),
-                                            &shape_rank, shape, &element_type));
-
-  // TODO(benvanik): allow specifying the encoding.
-  iree_hal_encoding_type_t encoding_type =
-      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR;
-
-  // @ = open new
-  // + = append
-  bool is_append = !iree_string_view_starts_with(string, IREE_SV("@"));
-  iree_string_view_t path =
-      iree_string_view_substr(string, 1, IREE_HOST_SIZE_MAX);
-
-  // Open (or retrieve) the file.
-  iree_io_stream_t* stream = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_io_stream_list_open(stream_list, path, is_append, &stream));
-
-  // TODO(benvanik): support mapping on allocators that can handle importing
-  // host memory. We only want to do this when it won't hurt performance
-  // (unified memory systems and where the mapped memory meets alignment
-  // requirements). For now we always wire new device memory to read into.
-  // A real application would want to either do the import or use
-  // iree_hal_file_t to stream the file contents into device memory without
-  // going through host memory.
-
-  // Read the stream contents into the buffer.
-  iree_hal_buffer_params_t buffer_params = {
-      .usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
-      .access = IREE_HAL_MEMORY_ACCESS_ALL,
-      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-  };
-  iree_status_t status = iree_hal_buffer_view_generate_buffer(
-      device, device_allocator, shape_rank, shape, element_type, encoding_type,
-      buffer_params, iree_tooling_parse_buffer_view_file_callback, stream,
-      out_buffer_view);
-
-  iree_io_stream_release(stream);
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
 // Parses a shaped tensor type into a HAL buffer view.
 static iree_status_t iree_tooling_parse_tensor(
     iree_string_view_t string, iree_hal_device_t* device,
-    iree_hal_allocator_t* device_allocator, iree_io_stream_list_t* stream_list,
-    iree_allocator_t host_allocator, iree_hal_buffer_view_t** out_buffer_view) {
-  // If contents are sourced from a file then route to that, and otherwise
-  // parse as a normal HAL buffer view with inline contents (or none).
-  iree_string_view_t metadata, contents;
-  if (iree_string_view_split(string, '=', &metadata, &contents) != -1) {
-    if (iree_string_view_starts_with(contents, IREE_SV("@")) ||
-        iree_string_view_starts_with(contents, IREE_SV("+"))) {
-      return iree_tooling_parse_buffer_view_file(metadata, contents, device,
-                                                 device_allocator, stream_list,
-                                                 out_buffer_view);
-    }
-  }
-
-  IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_TRACE_ZONE_APPEND_TEXT(z0, string.data, string.size);
-  iree_status_t status = iree_hal_buffer_view_parse(
-      string, device, device_allocator, out_buffer_view);
-  IREE_TRACE_ZONE_END(z0);
-  return status;
+    iree_hal_allocator_t* device_allocator,
+    iree_tooling_value_io_context_t* value_io_context,
+    iree_hal_buffer_view_t** out_buffer_view) {
+  return iree_tooling_buffer_view_spec_parse(value_io_context, string, device,
+                                             device_allocator, out_buffer_view);
 }
 
 // Parses a shaped tensor type into a HAL buffer view and appends it to |list|.
 static iree_status_t iree_tooling_parse_tensor_into(
     iree_string_view_t* cconv, iree_string_view_t string, iree_vm_list_t* list,
     iree_hal_device_t* device, iree_hal_allocator_t* device_allocator,
-    iree_io_stream_list_t* stream_list, iree_allocator_t host_allocator) {
+    iree_tooling_value_io_context_t* value_io_context) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Expect a ref holding the buffer view.
@@ -512,7 +430,7 @@ static iree_status_t iree_tooling_parse_tensor_into(
   iree_hal_buffer_view_t* buffer_view = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_tooling_parse_tensor(string, device, device_allocator,
-                                    stream_list, host_allocator, &buffer_view));
+                                    value_io_context, &buffer_view));
 
   // Add buffer view to list.
   iree_vm_ref_t buffer_view_ref = iree_hal_buffer_view_move_ref(buffer_view);
@@ -528,24 +446,23 @@ static iree_status_t iree_tooling_parse_tensor_into(
 static iree_status_t iree_tooling_parse_storage_into(
     iree_string_view_t* cconv, iree_string_view_t string, iree_vm_list_t* list,
     iree_hal_device_t* device, iree_hal_allocator_t* device_allocator,
-    iree_io_stream_list_t* stream_list, iree_allocator_t host_allocator) {
+    iree_tooling_value_io_context_t* value_io_context) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Expect a ref holding the buffer.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_tooling_consume_cconv(cconv, 'r'));
 
-  // Parse the tensor contents.
-  iree_hal_buffer_view_t* buffer_view = NULL;
+  // Parse the tensor contents as storage.
+  iree_hal_buffer_t* buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_tooling_parse_tensor(string, device, device_allocator,
-                                    stream_list, host_allocator, &buffer_view));
+      z0, iree_tooling_storage_buffer_spec_parse(
+              value_io_context, string, device, device_allocator, &buffer));
 
   // Add just the storage buffer to the list - we don't need the metadata.
-  iree_vm_ref_t buffer_ref =
-      iree_hal_buffer_move_ref(iree_hal_buffer_view_buffer(buffer_view));
+  iree_vm_ref_t buffer_ref = iree_hal_buffer_move_ref(buffer);
   iree_status_t status = iree_vm_list_push_ref_retain(list, &buffer_ref);
 
-  iree_hal_buffer_view_release(buffer_view);
+  iree_hal_buffer_release(buffer);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -586,7 +503,7 @@ static iree_status_t iree_tooling_parse_ndarray_into(
 static iree_status_t iree_tooling_parse_file_into(
     iree_string_view_t* cconv, iree_string_view_t string, iree_vm_list_t* list,
     iree_hal_device_t* device, iree_hal_allocator_t* device_allocator,
-    iree_io_stream_list_t* stream_list, iree_allocator_t host_allocator) {
+    iree_io_stream_list_t* stream_list) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, string.data, string.size);
 
@@ -601,9 +518,10 @@ static iree_status_t iree_tooling_parse_file_into(
   // Today we only support numpy files here but could make this pluggable or at
   // least a little smarter (sniff file header/etc) instead of relying on ext.
   if (!iree_string_view_ends_with(path, IREE_SV(".npy"))) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "only numpy (.npy) files are supported for metadata-less variant I/O");
+    IREE_RETURN_AND_END_ZONE(
+        z0, iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                             "only numpy (.npy) files are supported for "
+                             "metadata-less variant I/O"));
   }
 
   // Open (or retrieve) the file.
@@ -633,7 +551,9 @@ static iree_status_t iree_tooling_parse_file_into(
 static iree_status_t iree_tooling_parse_variant_into(
     iree_string_view_t* cconv, iree_string_view_t string, iree_vm_list_t* list,
     iree_hal_device_t* device, iree_hal_allocator_t* device_allocator,
-    iree_io_stream_list_t* stream_list, iree_allocator_t host_allocator) {
+    iree_io_stream_list_t* stream_list,
+    iree_tooling_value_io_context_t* value_io_context,
+    iree_allocator_t host_allocator) {
   if (iree_string_view_is_empty(string)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "no value specified for input");
@@ -644,12 +564,10 @@ static iree_status_t iree_tooling_parse_variant_into(
              iree_string_view_starts_with(string, IREE_SV("+")) ||
              iree_string_view_starts_with(string, IREE_SV("*"))) {
     return iree_tooling_parse_file_into(cconv, string, list, device,
-                                        device_allocator, stream_list,
-                                        host_allocator);
-  } else if (iree_string_view_consume_prefix(&string, IREE_SV("&"))) {
+                                        device_allocator, stream_list);
+  } else if (iree_string_view_starts_with(string, IREE_SV("&"))) {
     return iree_tooling_parse_storage_into(cconv, string, list, device,
-                                           device_allocator, stream_list,
-                                           host_allocator);
+                                           device_allocator, value_io_context);
   } else if (!iree_string_view_starts_with(*cconv, IREE_SV("r"))) {
     return iree_tooling_parse_primitive_into(cconv, string, list, device,
                                              device_allocator, host_allocator);
@@ -658,8 +576,7 @@ static iree_status_t iree_tooling_parse_variant_into(
   // NOTE: we could support more things here - strings, VM buffers or lists,
   // etc. Today if it's not a null or primitive value it's a tensor.
   return iree_tooling_parse_tensor_into(cconv, string, list, device,
-                                        device_allocator, stream_list,
-                                        host_allocator);
+                                        device_allocator, value_io_context);
 }
 
 static iree_status_t iree_tooling_parse_variants_into(
@@ -672,23 +589,27 @@ static iree_status_t iree_tooling_parse_variants_into(
   // List of opened streams used for allowing multiple arguments to source from
   // the same file sequentially.
   iree_io_stream_list_t* stream_list = NULL;
-  IREE_RETURN_IF_ERROR(iree_io_stream_list_allocate(
-      IREE_IO_STDIO_STREAM_MODE_READ, host_allocator, &stream_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_io_stream_list_allocate(IREE_IO_STDIO_STREAM_MODE_READ,
+                                       host_allocator, &stream_list));
+  iree_tooling_value_io_context_t* value_io_context = NULL;
+  iree_status_t status =
+      iree_tooling_value_io_context_allocate(host_allocator, &value_io_context);
 
   // Parse each variant string. Note that some strings may expand to zero or
   // more variants and so we need to consume the cconv based on how many were
   // parsed.
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < specs.count; ++i) {
+  for (iree_host_size_t i = 0; i < specs.count && iree_status_is_ok(status);
+       ++i) {
     iree_string_view_t string = iree_string_view_trim(specs.values[i]);
     status = iree_status_annotate_f(
         iree_tooling_parse_variant_into(&cconv, string, list, device,
                                         device_allocator, stream_list,
-                                        host_allocator),
+                                        value_io_context, host_allocator),
         "parsing input `%.*s`", (int)string.size, string.data);
-    if (!iree_status_is_ok(status)) break;
   }
 
+  iree_tooling_value_io_context_free(value_io_context);
   iree_io_stream_list_free(stream_list);
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -1078,17 +999,20 @@ static iree_status_t iree_tooling_write_variant_to_binary_file(
       iree_hal_buffer_view_byte_length(buffer_view);
 
   // Map the buffer memory into a host pointer so we can access it.
-  iree_hal_buffer_mapping_t mapping;
+  iree_hal_buffer_mapping_t mapping = {{0}};
   iree_status_t status = iree_hal_buffer_map_range(
       iree_hal_buffer_view_buffer(buffer_view), IREE_HAL_MAPPING_MODE_SCOPED,
       IREE_HAL_MEMORY_ACCESS_READ, 0, IREE_HAL_WHOLE_BUFFER, &mapping);
+  bool mapping_active = iree_status_is_ok(status);
 
   // Write to the file from the mapped memory.
   if (iree_status_is_ok(status)) {
     status = iree_io_stream_write(stream, byte_length, mapping.contents.data);
   }
 
-  iree_status_ignore(iree_hal_buffer_unmap_range(&mapping));
+  if (mapping_active) {
+    status = iree_status_join(status, iree_hal_buffer_unmap_range(&mapping));
+  }
 
   iree_hal_buffer_view_release(buffer_view);
   return status;

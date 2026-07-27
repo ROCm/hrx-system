@@ -1,0 +1,21 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx942> @target
+func.def target(@target) @i32_uniform_vector_reduce(%value0: i32, %value1: i32, %value2: i32, %value3: i32) -> (i32) {
+  %values = vector.from_elements %value0, %value1, %value2, %value3 : vector<4xi32>
+  %init = scalar.constant 0 : i32
+  %sum = vector.reduce<addi> %values, %init : vector<4xi32>, i32
+  func.return %sum : i32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i32_uniform_vector_reduce(%value0: reg<amdgpu.sgpr>, %value1: reg<amdgpu.sgpr>, %value2: reg<amdgpu.sgpr>, %value3: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+  %13 = v_mov_b32_copy %value0
+  %14 = v_mov_b32_copy %value1
+  %15 = v_mov_b32_copy %value2
+  %16 = v_mov_b32_copy %value3
+  %20 = v_add_u32 %13, %14
+  %22 = v_add_u32 %20, %15
+  %sum = v_add_u32 %22, %16
+  return %sum
+}

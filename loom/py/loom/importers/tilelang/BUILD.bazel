@@ -1,0 +1,177 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "iree_cmake_extra_content", "iree_select")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_TILELANG_IMPORTER_COMPATIBLE = iree_select({
+    "//loom/config/import:tilelang": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+iree_py_library(
+    name = "core",
+    srcs = [
+        "abi.py",
+        "analysis.py",
+        "buffers.py",
+        "context.py",
+        "converter.py",
+        "coverage.py",
+        "model.py",
+        "nodes.py",
+        "types.py",
+    ],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom:package",
+        "//loom/py/loom/importers/core",
+    ],
+)
+
+iree_py_library(
+    name = "oracle",
+    srcs = [
+        "differential.py",
+        "oracle.py",
+    ],
+    deps = [
+        ":core",
+        "//loom/py/loom/tools:amdgpu_asm",
+    ],
+)
+
+# Keep oracle capture out of the minimal importer library. Source/code-object
+# oracle paths may need local TileLang codegen hooks and ROCm/LLVM tools; the
+# semantic importer must remain usable without those capabilities.
+iree_py_library(
+    name = "tilelang",
+    srcs = [
+        "__init__.py",
+        "defaults.py",
+        "importer.py",
+    ],
+    deps = [
+        ":core",
+        "//loom/py/loom/importers/tilelang/ops",
+    ],
+)
+
+iree_py_library(
+    name = "tilelang_packages",
+)
+
+iree_cmake_extra_content(
+    content = """
+if(LOOM_IMPORT_TILELANG)
+""",
+    inline = True,
+)
+
+iree_py_test(
+    name = "tilelang_test",
+    srcs = [
+        "analysis_test.py",
+        "calls_test.py",
+        "context_test.py",
+        "corpus_test.py",
+        "coverage_test.py",
+        "differential_test.py",
+        "oracle_test.py",
+        "testdata/__init__.py",
+        "testdata/tilekernels/__init__.py",
+        "testdata/tilekernels/engram.py",
+        "testdata/tilekernels/moe_expand.py",
+        "testdata/tilekernels/moe_gate.py",
+        "testdata/tilekernels/moe_histogram.py",
+        "testdata/tilekernels/moe_normalize.py",
+        "testdata/tilekernels/moe_reduce.py",
+        "testdata/tilekernels/transpose.py",
+        "types_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = [
+        "loom.importers.tilelang.analysis_test",
+        "loom.importers.tilelang.calls_test",
+        "loom.importers.tilelang.context_test",
+        "loom.importers.tilelang.corpus_test",
+        "loom.importers.tilelang.coverage_test",
+        "loom.importers.tilelang.differential_test",
+        "loom.importers.tilelang.oracle_test",
+        "loom.importers.tilelang.types_test",
+    ],
+    main = "pytest_style_runner.py",
+    target_compatible_with = _TILELANG_IMPORTER_COMPATIBLE,
+    deps = [
+        ":oracle",
+        ":tilelang",
+        ":tilelang_packages",
+        "//loom/py/loom/importers/check/tilelang",
+    ],
+)
+
+filegroup(
+    name = "tilelang_import_tests",
+    srcs = [
+        "testdata/allocations.py",
+        "testdata/analysis.py",
+        "testdata/control_flow.py",
+        "testdata/diagnostics.py",
+        "testdata/fp8.py",
+        "testdata/lowered_metadata.py",
+        "testdata/memory_effects.py",
+        "testdata/scalar_calls.py",
+        "testdata/tilekernels/engram.py",
+        "testdata/tilekernels/mhc.py",
+        "testdata/tilekernels/moe_expand.py",
+        "testdata/tilekernels/moe_gate.py",
+        "testdata/tilekernels/moe_histogram.py",
+        "testdata/tilekernels/moe_normalize.py",
+        "testdata/tilekernels/moe_reduce.py",
+        "testdata/tilekernels/moe_routing.py",
+        "testdata/tilekernels/transpose.py",
+        "testdata/tileops.py",
+        "testdata/topology.py",
+        "testdata/vector_arithmetic.py",
+        "testdata/vector_casts.py",
+        "testdata/vector_memory.py",
+    ],
+)
+
+iree_py_test(
+    name = "tilelang_import_test",
+    srcs = ["//loom/py/loom/importers/check:import_test.py"],
+    args = [
+        "tilelang",
+        "--fail-on-skip",
+        "--loom-opt=$(location //loom/src/loom/tools/loom-opt:loom-opt)",
+        "$(locations :tilelang_import_tests)",
+    ],
+    data = [
+        ":tilelang_import_tests",
+        "//loom/src/loom/tools/loom-opt",
+    ],
+    main = "import_test.py",
+    target_compatible_with = _TILELANG_IMPORTER_COMPATIBLE,
+    deps = [
+        ":tilelang_packages",
+        "//loom/py/loom/importers/check",
+        "//loom/py/loom/importers/check/mlir",
+        "//loom/py/loom/importers/check/tilelang",
+    ],
+)
+
+iree_cmake_extra_content(
+    content = """
+endif()
+""",
+    inline = True,
+)

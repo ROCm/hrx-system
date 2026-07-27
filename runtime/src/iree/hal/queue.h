@@ -77,19 +77,17 @@ typedef uint64_t iree_hal_queue_affinity_t;
 //    compact_queue_list[queue_index];     // 0 to my_queue_affinity count
 //    full_queue_list[queue_ordinal];      // 0 to available queues
 //  }
-#define IREE_HAL_FOR_QUEUE_AFFINITY(queue_affinity)                           \
-  iree_hal_queue_affinity_t _queue_bits = (queue_affinity);                   \
-  for (int queue_index = 0, _queue_ordinal_base = 0,                          \
-           queue_count = iree_hal_queue_affinity_count(_queue_bits),          \
-           _bit_offset = 0,                                                   \
-           queue_ordinal =                                                    \
-               iree_hal_queue_affinity_find_first_set(_queue_bits);           \
-       queue_index < queue_count;                                             \
-       ++queue_index, _queue_ordinal_base += _bit_offset + 1,                 \
-           _queue_bits =                                                      \
-               iree_hal_queue_affinity_shr(_queue_bits, _bit_offset + 1),     \
-           _bit_offset = iree_hal_queue_affinity_find_first_set(_queue_bits), \
-           queue_ordinal = _queue_ordinal_base + _bit_offset)
+#define IREE_HAL_FOR_QUEUE_AFFINITY(queue_affinity)                          \
+  iree_hal_queue_affinity_t _queue_bits = (queue_affinity);                  \
+  for (int queue_index = 0, _queue_ordinal_base = 0,                         \
+           queue_count = iree_hal_queue_affinity_count(_queue_bits),         \
+           _bit_offset = 0, queue_ordinal = 0;                               \
+       queue_index < queue_count && _queue_bits != 0 &&                      \
+       ((_bit_offset = iree_hal_queue_affinity_find_first_set(_queue_bits)), \
+        (queue_ordinal = _queue_ordinal_base + _bit_offset), 1);             \
+       ++queue_index, _queue_ordinal_base += _bit_offset + 1,                \
+           _queue_bits =                                                     \
+               iree_hal_queue_affinity_shr(_queue_bits, _bit_offset + 1))
 
 #ifdef __cplusplus
 }  // extern "C"

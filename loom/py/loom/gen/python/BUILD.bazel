@@ -1,0 +1,53 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//loom/py/loom/gen:__subpackages__"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_library(
+    name = "python",
+    srcs = [
+        "__init__.py",
+        "builders_pyi.py",
+        "package_inits.py",
+    ],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom/gen:bootstrap",
+        "//loom/py/loom/gen/support",
+    ],
+)
+
+iree_py_test(
+    name = "builders_pyi_test",
+    srcs = [
+        "builders_pyi_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.python.builders_pyi_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":python",
+    ],
+)
+
+iree_py_test(
+    name = "package_inits_test",
+    srcs = [
+        "package_inits_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.python.package_inits_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":python",
+        "//loom/py/loom/gen/support",
+    ],
+)

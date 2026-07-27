@@ -1,0 +1,139 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "canonicalize",
+    srcs = ["canonicalize.c"],
+    hdrs = ["canonicalize.h"],
+    visibility = [
+        "//loom/src/loom/pass:__pkg__",
+        "//loom/src/loom/transforms/symbol:__pkg__",
+    ],
+    deps = [
+        "//loom/src/loom/analysis:condition_facts",
+        "//loom/src/loom/analysis:symbolic_expr",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:special_values",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/pass:pipeline",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:greedy",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/rewrite:type_propagation",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+loom_cc_test(
+    name = "canonicalize_test",
+    srcs = ["canonicalize_test.cc"],
+    deps = [
+        ":canonicalize",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "cse",
+    srcs = ["cse.c"],
+    hdrs = ["cse.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target:selection",
+        "//loom/src/loom/util:dominance",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "cse_test",
+    srcs = ["cse_test.cc"],
+    deps = [
+        ":cse",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:rewriter",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "dce",
+    srcs = ["dce.c"],
+    hdrs = ["dce.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/pass:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "dce_test",
+    srcs = ["dce_test.cc"],
+    deps = [
+        ":dce",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/pass:types",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "strip_hints",
+    srcs = ["strip_hints.c"],
+    hdrs = ["strip_hints.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/pass:types",
+        "//runtime/src/iree/base",
+    ],
+)

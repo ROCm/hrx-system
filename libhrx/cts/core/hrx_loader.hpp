@@ -17,15 +17,29 @@ class HrxLoaderError : public std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
+class HrxDynamicLibrary {
+ public:
+  HrxDynamicLibrary() = default;
+  HrxDynamicLibrary(const HrxDynamicLibrary&) = delete;
+  HrxDynamicLibrary& operator=(const HrxDynamicLibrary&) = delete;
+  ~HrxDynamicLibrary();
+
+  void load(const std::string& path);
+  void* loadSymbol(const char* name);
+
+ private:
+  void* handle_ = nullptr;
+};
+
 class HrxLoader {
  public:
   static HrxLoader& instance();
   static void setLibraryPath(const std::string& path);
 
-  // Host allocator. system_value is a data symbol loaded via dlsym.
-  hrx_host_allocator_t* host_allocator_system_ptr;
+  // Host allocator.
+  decltype(&hrx_host_allocator_system) host_allocator_system_fn;
   hrx_host_allocator_t host_allocator_system() {
-    return *host_allocator_system_ptr;
+    return host_allocator_system_fn();
   }
 
   decltype(&hrx_host_allocator_malloc) host_allocator_malloc;
@@ -184,13 +198,22 @@ class HrxLoader {
   decltype(&hrx_allocator_virtual_memory_protect)
       allocator_virtual_memory_protect;
 
+  // Memory pools.
+  decltype(&hrx_mem_pool_create) mem_pool_create;
+  decltype(&hrx_mem_pool_retain) mem_pool_retain;
+  decltype(&hrx_mem_pool_release) mem_pool_release;
+  decltype(&hrx_mem_pool_get_attribute) mem_pool_get_attribute;
+  decltype(&hrx_mem_pool_set_attribute) mem_pool_set_attribute;
+  decltype(&hrx_mem_pool_trim) mem_pool_trim;
+  decltype(&hrx_mem_pool_allocate_buffer) mem_pool_allocate_buffer;
+
  private:
   HrxLoader();
   ~HrxLoader();
   void load(const std::string& path);
   void* loadSymbol(const char* name);
 
-  void* handle_ = nullptr;
+  HrxDynamicLibrary library_;
   static std::string library_path_;
 };
 

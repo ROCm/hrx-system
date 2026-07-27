@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "keeps valid loom-authored amdgpu asan access silent",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../test/corpus/sanitizer/amdgpu_asan_actual.loom",
+          "--case=@asan_global_store_valid_case",
+          "--device=amdgpu",
+          "--sanitizer=asan",
+          "--sanitizer-reporting=report-only",
+          "--amdgpu_asan=true",
+          "--amdgpu_asan_report_policy=report-only"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            {
+              "regex": "\"case\":\"asan_global_store_valid_case\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reports loom-authored amdgpu asan redzone store",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../test/corpus/sanitizer/amdgpu_asan_actual.loom",
+          "--case=@asan_global_store_redzone_case",
+          "--device=amdgpu",
+          "--sanitizer=asan",
+          "--sanitizer-reporting=report-only",
+          "--amdgpu_asan=true",
+          "--amdgpu_asan_report_policy=report-only"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            {
+              "regex": "\"case\":\"asan_global_store_redzone_case\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    }
+  ]
+}

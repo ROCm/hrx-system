@@ -3,9 +3,65 @@
 //
 // Device operations. Generic across accelerator types once you have a handle.
 
+#include <stdint.h>
 #include <string.h>
 
 #include "hrx_internal.h"
+
+hrx_status_t hrx_device_query_total_memory_from_spec(
+    hrx_device_t device, bool* out_known, iree_device_size_t* out_total) {
+  if (!device || !out_known || !out_total) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
+  }
+  *out_known = false;
+  *out_total = 0;
+
+  iree_hal_device_observation_t observation;
+  iree_hal_device_observation_initialize(
+      IREE_HAL_DEVICE_OBSERVATION_FLAG_MEMORY, &observation);
+  iree_status_t status =
+      iree_hal_device_observation_populate_memory_total_from_spec(
+          iree_hal_device_spec(device->hal_device), &observation);
+  if (!iree_status_is_ok(status)) return hrx_status_from_iree(status);
+  if (iree_all_bits_set(observation.memory.flags,
+                        IREE_HAL_DEVICE_MEMORY_OBSERVATION_FLAG_TOTAL_BYTES)) {
+    *out_known = true;
+    *out_total = observation.memory.total_bytes;
+  }
+  return hrx_ok_status();
+}
+
+static hrx_status_t hrx_device_sample_memory(
+    hrx_device_t device, iree_device_size_t* out_total,
+    iree_device_size_t* out_available) {
+  iree_hal_device_observation_t observation;
+  iree_status_t status = iree_hal_device_sample_observation(
+      device->hal_device, IREE_HAL_DEVICE_OBSERVATION_FLAG_MEMORY,
+      &observation);
+  if (!iree_status_is_ok(status)) return hrx_status_from_iree(status);
+  if (!iree_all_bits_set(observation.provided_flags,
+                         IREE_HAL_DEVICE_OBSERVATION_FLAG_MEMORY)) {
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
+                           "HAL device did not provide a memory observation");
+  }
+  if (!iree_all_bits_set(observation.memory.flags,
+                         IREE_HAL_DEVICE_MEMORY_OBSERVATION_FLAG_TOTAL_BYTES)) {
+    return hrx_make_status(
+        HRX_STATUS_UNAVAILABLE,
+        "HAL device did not provide total memory in its observation");
+  }
+  if (out_available &&
+      !iree_all_bits_set(
+          observation.memory.flags,
+          IREE_HAL_DEVICE_MEMORY_OBSERVATION_FLAG_AVAILABLE_BYTES)) {
+    return hrx_make_status(
+        HRX_STATUS_UNAVAILABLE,
+        "HAL device did not provide available memory in its observation");
+  }
+  *out_total = observation.memory.total_bytes;
+  if (out_available) *out_available = observation.memory.available_bytes;
+  return hrx_ok_status();
+}
 
 hrx_status_t hrx_device_get_property(hrx_device_t device,
                                      hrx_device_property_t prop, void* value,
@@ -38,17 +94,18 @@ hrx_status_t hrx_device_get_property(hrx_device_t device,
         return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                                "buffer too small for uint64_t");
       }
-      // Query from HAL device.
-      int64_t mem_size = 0;
-      iree_status_t s = iree_hal_device_query_i64(
-          device->hal_device, iree_make_cstring_view("hal.device"),
-          iree_make_cstring_view("memory.total"), &mem_size);
-      if (!iree_status_is_ok(s) || mem_size <= 0) {
-        iree_status_ignore(s);
-        mem_size = 8LL * 1024 * 1024 * 1024;  // Conservative fallback.
+      iree_device_size_t total_bytes = 0;
+      bool total_memory_known = false;
+      hrx_status_t status = hrx_device_query_total_memory_from_spec(
+          device, &total_memory_known, &total_bytes);
+      if (!hrx_status_is_ok(status)) return status;
+      if (!total_memory_known) {
+        return hrx_make_status(
+            HRX_STATUS_UNAVAILABLE,
+            "HAL device spec did not provide a known total memory capacity");
       }
-      *(uint64_t*)value = (uint64_t)mem_size;
-      return hrx_ok_status();
+      *(uint64_t*)value = (uint64_t)total_bytes;
+      return status;
     }
     case HRX_DEVICE_PROPERTY_COMPUTE_UNITS:
     case HRX_DEVICE_PROPERTY_MAX_WORKGROUP_SIZE: {
@@ -71,7 +128,7 @@ hrx_status_t hrx_device_synchronize(hrx_device_t device) {
   }
   // Deprecated no-op compatibility shim. IREE requires callers to wait on
   // explicit semaphore payloads; an empty wait list returns immediately.
-  iree_hal_semaphore_list_t empty = {0};
+  iree_hal_semaphore_list_t empty = iree_hal_semaphore_list_empty();
   iree_status_t status = iree_hal_device_wait_semaphores(
       device->hal_device, IREE_ASYNC_WAIT_MODE_ALL, empty,
       iree_infinite_timeout(), /*flags=*/0);
@@ -89,21 +146,23 @@ hrx_status_t hrx_device_get_type(hrx_device_t device,
 }
 
 void hrx_device_retain(hrx_device_t device) {
+  if (!device) return;
   iree_hal_device_retain(device->hal_device);
   iree_hal_device_group_retain(device->hal_device_group);
   iree_atomic_ref_count_inc(&device->ref_count);
 }
 
 void hrx_device_release(hrx_device_t device) {
+  if (!device) return;
   iree_hal_device_t* hal_device = device->hal_device;
   iree_hal_device_group_t* hal_device_group = device->hal_device_group;
   if (iree_atomic_ref_count_dec(&device->ref_count) == 1) {
     iree_hal_allocator_release(device->allocator.hal_allocator);
-    iree_hal_device_group_release(hal_device_group);
     device->allocator.hal_allocator = NULL;
     device->hal_device = NULL;
     device->hal_device_group = NULL;
   }
+  iree_hal_device_group_release(hal_device_group);
   iree_hal_device_release(hal_device);
 }
 
@@ -113,33 +172,18 @@ hrx_status_t hrx_device_memory_info(hrx_device_t device, size_t* free_bytes,
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
 
-  int64_t total = 0;
-  iree_status_t s = iree_hal_device_query_i64(
-      device->hal_device, iree_make_cstring_view("hal.device"),
-      iree_make_cstring_view("memory.total"), &total);
-  if (!iree_status_is_ok(s)) {
-    iree_status_ignore(s);
-    total = 0;
+  iree_device_size_t total = 0;
+  iree_device_size_t available = 0;
+  hrx_status_t status = hrx_device_sample_memory(device, &total, &available);
+  if (!hrx_status_is_ok(status)) return status;
+  if (total > SIZE_MAX || available > SIZE_MAX) {
+    return hrx_make_status(
+        HRX_STATUS_OUT_OF_RANGE,
+        "HAL memory observation exceeds the representable size_t range");
   }
-  if (total <= 0) {
-    total = 8LL * 1024 * 1024 * 1024;
-  }
-
-  int64_t free_mem = 0;
-  s = iree_hal_device_query_i64(
-      device->hal_device, iree_make_cstring_view("hal.device"),
-      iree_make_cstring_view("memory.free"), &free_mem);
-  if (!iree_status_is_ok(s)) {
-    iree_status_ignore(s);
-    free_mem = total;
-  }
-  if (free_mem <= 0) {
-    free_mem = total;
-  }
-
   *total_bytes = (size_t)total;
-  *free_bytes = (size_t)free_mem;
-  return hrx_ok_status();
+  *free_bytes = (size_t)available;
+  return status;
 }
 
 hrx_status_t hrx_device_can_access_peer(hrx_device_t device_a,

@@ -1,0 +1,214 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/sanitizer:suppressions.bzl", "vulkan_suppressions")
+load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "iree_select",
+    "loom_cc_binary",
+    "loom_cc_library",
+    "loom_config_compatible_with",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+exports_files([
+    "testdata/amdgpu_unused_kernargs.loom",
+])
+
+_AMDGPU_TARGET_COPTS = iree_select({
+    "//loom/config/target:amdgpu_artifacts": [
+        "-DIREE_TEST_LOOM_HAVE_AMDGPU=1",
+    ],
+    "//conditions:default": [],
+})
+
+_AMDGPU_TARGET_DEPS = iree_select({
+    "//loom/config/target:amdgpu_artifacts": [
+        "//loom/src/loom/target/arch/amdgpu:provider",
+        "//loom/src/loom/tooling/target/amdgpu:artifact_provider",
+        "//loom/src/loom/tooling/target/amdgpu:testbench_requirements",
+    ],
+    "//conditions:default": [],
+})
+
+_IREE_VM_EXECUTION_COPTS = iree_select({
+    "//loom/config/execute:iree_vm": [
+        "-DIREE_TEST_LOOM_HAVE_IREE_VM=1",
+    ],
+    "//conditions:default": [],
+})
+
+_IREE_VM_EXECUTION_DEPS = iree_select({
+    "//loom/config/execute:iree_vm": [
+        "//loom/src/loom/tooling/execution/ireevm:provider",
+    ],
+    "//conditions:default": [],
+})
+
+_SPIRV_VULKAN_TARGET_COPTS = iree_select({
+    "//loom/config/target:spirv_vulkan_artifacts": [
+        "-DIREE_TEST_LOOM_HAVE_SPIRV=1",
+    ],
+    "//conditions:default": [],
+})
+
+_SPIRV_VULKAN_TARGET_DEPS = iree_select({
+    "//loom/config/target:spirv_vulkan_artifacts": [
+        "//loom/src/loom/target/arch/spirv:provider",
+        "//loom/src/loom/tooling/target/spirv:artifact_provider",
+        "//loom/src/loom/tooling/target/spirv:testbench_requirements",
+    ],
+    "//conditions:default": [],
+})
+
+_IREE_TEST_LOOM_TARGET_COPTS = (
+    _AMDGPU_TARGET_COPTS +
+    _IREE_VM_EXECUTION_COPTS +
+    _SPIRV_VULKAN_TARGET_COPTS
+)
+
+_IREE_TEST_LOOM_TARGET_DEPS = (
+    _AMDGPU_TARGET_DEPS +
+    _IREE_VM_EXECUTION_DEPS +
+    _SPIRV_VULKAN_TARGET_DEPS
+)
+
+_AMDGPU_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/execute:amdgpu_hal",
+])
+
+_AMDGPU_EXECUTION_TEST_TAGS = [
+    "iree-run-requirement=runtime.resource.amd_gpu",
+    "requires-gpu-amd",
+    "runtime-resource=amd-gpu",
+]
+
+_SPIRV_VULKAN_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/execute:spirv_vulkan_hal",
+])
+
+loom_cc_library(
+    name = "main",
+    srcs = ["main.c"],
+    hdrs = ["main.h"],
+    deps = [
+        "//loom/src/loom/sanitizer:options",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/tooling/cli:help",
+        "//loom/src/loom/tooling/config",
+        "//loom/src/loom/tooling/context",
+        "//loom/src/loom/tooling/execution:session",
+        "//loom/src/loom/tooling/execution/hal:artifact",
+        "//loom/src/loom/tooling/execution/hal:testbench_actual",
+        "//loom/src/loom/tooling/io:file",
+        "//loom/src/loom/tooling/testbench:device_event",
+        "//loom/src/loom/tooling/testbench:executor",
+        "//loom/src/loom/tooling/testbench:issue_report",
+        "//loom/src/loom/tooling/testbench:reference",
+        "//loom/src/loom/tooling/testbench:requirements",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_binary(
+    name = "iree-test-loom",
+    srcs = ["iree-test-loom.c"],
+    copts = _IREE_TEST_LOOM_TARGET_COPTS,
+    deps = [
+        ":main",
+        "//loom/src/loom/tooling/execution:execution_provider",
+        "//runtime/src/iree/base",
+    ] + _IREE_TEST_LOOM_TARGET_DEPS,
+)
+
+iree_execution_test_suite(
+    name = "execution_test",
+    data = [
+        "testdata/planning_issue_cases.loom",
+        "testdata/requirement_cases.loom",
+        "testdata/scalar_cases.loom",
+    ],
+    manifests = ["iree-test-loom.test.json"],
+    tags = ["hostonly"],
+    tools = {
+        "iree-test-loom": ":iree-test-loom",
+    },
+)
+
+iree_execution_test_suite(
+    name = "amdgpu_execution_test",
+    data = [
+        "testdata/amdgpu_compile_rejection.loom",
+        "testdata/amdgpu_hal_actual.loom",
+        "testdata/amdgpu_unused_kernargs.loom",
+        "testdata/generated_tensor_cases.loom",
+    ],
+    manifests = ["iree-test-loom_amdgpu.test.json"],
+    tags = _AMDGPU_EXECUTION_TEST_TAGS,
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    tools = {
+        "iree-test-loom": ":iree-test-loom",
+    },
+)
+
+# Host TSAN and AMDGPU ASAN require incompatible process address-space layouts.
+iree_execution_test_suite(
+    name = "amdgpu_asan_execution_test",
+    data = [
+        "//loom/src/loom/test/corpus/sanitizer:amdgpu_asan_actual.loom",
+    ],
+    manifests = ["iree-test-loom_amdgpu_asan.test.json"],
+    tags = _AMDGPU_EXECUTION_TEST_TAGS + ["notsan"],
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    tools = {
+        "iree-test-loom": ":iree-test-loom",
+    },
+)
+
+iree_execution_test_suite(
+    name = "amdgpu_tsan_execution_test",
+    data = [
+        "//loom/src/loom/test/corpus/sanitizer:amdgpu_tsan_actual.loom",
+    ],
+    manifests = ["iree-test-loom_amdgpu_tsan.test.json"],
+    tags = _AMDGPU_EXECUTION_TEST_TAGS,
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    tools = {
+        "iree-test-loom": ":iree-test-loom",
+    },
+)
+
+iree_execution_test_suite(
+    name = "spirv_vulkan_execution_test",
+    data = [
+        "testdata/spirv_vulkan_coop_hal_actual.loom",
+        "testdata/spirv_vulkan_coop_u8_hal_actual.loom",
+        "testdata/spirv_vulkan_hal_actual.loom",
+        "testdata/spirv_vulkan_quantized_hal_actual.loom",
+    ],
+    manifests = ["iree-test-loom_spirv_vulkan.test.json"],
+    sanitizer_suppressions = vulkan_suppressions,
+    tags = [
+        "iree-run-requirement=runtime.resource.vulkan_device",
+        "requires-gpu-vulkan",
+        "runtime-resource=vulkan-device",
+    ],
+    target_compatible_with = _SPIRV_VULKAN_HAL_COMPATIBLE_WITH,
+    tools = {
+        "iree-test-loom": ":iree-test-loom",
+    },
+)

@@ -1,0 +1,35 @@
+rules:
+  - id: iree.c.no-goto-error-handling
+    languages:
+      - c
+    severity: ERROR
+    message: >-
+      IREE C runtime code uses scoped status handling and terminal cleanup
+      blocks instead of goto-based error handling.
+    pattern-regex: "\\bgoto\\s+[A-Za-z_][A-Za-z0-9_]*\\s*;"
+    paths:
+      include:
+        - /runtime/src/iree/**/*.c
+        - /loom/src/loom/**/*.c
+
+  - id: iree.tests.raw-status-is-ok-expectation
+    languages:
+      - cpp
+    severity: WARNING
+    message: >-
+      Status-owning test assertions should use IREE_EXPECT_OK, IREE_ASSERT_OK,
+      IREE_EXPECT_STATUS_IS, or IREE_ASSERT_STATUS_IS so failure paths consume
+      the status cleanly and print useful diagnostics.
+    pattern-either:
+      - pattern: EXPECT_TRUE(iree_status_is_ok($STATUS))
+      - pattern: ASSERT_TRUE(iree_status_is_ok($STATUS))
+      - pattern: EXPECT_FALSE(iree_status_is_ok($STATUS))
+      - pattern: ASSERT_FALSE(iree_status_is_ok($STATUS))
+    paths:
+      include:
+        - /runtime/src/iree/**/*test.cc
+        - /runtime/src/iree/**/*_test.h
+        - /loom/src/loom/**/*test.cc
+        - /loom/src/loom/**/*_test.h
+        - /libhrx/**/*test.cc
+        - /libhrx/**/*_test.h

@@ -705,7 +705,7 @@ static void iree_hal_amdgpu_staging_transfer_fail_signals(
 }
 
 static void iree_hal_amdgpu_staging_transfer_fail_signals_with_borrowed_status(
-    iree_hal_amdgpu_staging_transfer_t* transfer, iree_status_t status) {
+    iree_hal_amdgpu_staging_transfer_t* transfer, const iree_status_t status) {
   if (iree_status_is_ok(status) ||
       iree_hal_semaphore_list_is_empty(transfer->signal_semaphore_list)) {
     return;
@@ -800,7 +800,7 @@ static iree_status_t iree_hal_amdgpu_staging_chunk_submit_write(
 
 static void iree_hal_amdgpu_staging_copy_pre_signal(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
-    iree_status_t status) {
+    const iree_status_t status) {
   (void)entry;
   iree_hal_amdgpu_staging_chunk_t* chunk =
       (iree_hal_amdgpu_staging_chunk_t*)user_data;
@@ -1152,7 +1152,7 @@ static iree_status_t iree_hal_amdgpu_staging_transfer_start(
 
 static void iree_hal_amdgpu_staging_transfer_execute(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
-    iree_status_t status) {
+    const iree_status_t status) {
   (void)entry;
   iree_hal_amdgpu_staging_transfer_t* transfer =
       (iree_hal_amdgpu_staging_transfer_t*)user_data;

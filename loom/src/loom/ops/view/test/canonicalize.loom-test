@@ -1,0 +1,33 @@
+// RUN: pass canonicalize
+
+func.def @adjacent_f16_view_loads_to_vector_load(%input: buffer, %base: index) -> (f16, f16) {
+  %zero = index.constant 0 : offset
+  %one = index.constant 1 : index
+  %view = buffer.view %input[%zero] : buffer -> view<32xf16, #dense>
+  %next = index.add %base, %one : index
+  %a = view.load %view[%base] : view<32xf16, #dense> -> f16
+  %b = view.load %view[%next] : view<32xf16, #dense> -> f16
+  func.return %a, %b : f16, f16
+}
+
+// ----
+func.def @adjacent_f16_view_loads_to_vector_load(%input: buffer, %base: index) -> (f16, f16) {
+  %zero = index.constant 0 : offset
+  %view = buffer.view %input[%zero] : buffer -> view<32xf16, #dense>
+  %10 = vector.load %view[%base] : view<32xf16, #dense> -> vector<2xf16>
+  %a = vector.extract %10[0] : vector<2xf16> -> f16
+  %b = vector.extract %10[1] : vector<2xf16> -> f16
+  func.return %a, %b : f16, f16
+}
+
+// ====
+
+func.def @non_adjacent_f16_view_loads_stay_scalar(%input: buffer, %base: index) -> (f16, f16) {
+  %zero = index.constant 0 : offset
+  %two = index.constant 2 : index
+  %view = buffer.view %input[%zero] : buffer -> view<32xf16, #dense>
+  %next = index.add %base, %two : index
+  %a = view.load %view[%base] : view<32xf16, #dense> -> f16
+  %b = view.load %view[%next] : view<32xf16, #dense> -> f16
+  func.return %a, %b : f16, f16
+}

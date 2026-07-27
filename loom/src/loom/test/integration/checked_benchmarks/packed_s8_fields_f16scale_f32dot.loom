@@ -1,0 +1,54 @@
+// Packed signed 8-bit fields with f16 scale and f32 dot accumulation.
+//
+// This is the smallest checked benchmark for the packed-field dequantize/dot
+// class: one packed i32 load per lane, sign-extension of the four byte fields,
+// f16-to-f32 scale application, f32 RHS vector load, f32 dot accumulation, and
+// per-lane output store. The generated RHS iota makes the expected result
+// lane-dependent: dot([-3, -1, 2, 7] * 0.5, [4L+1..4L+4]) = 14.5 + 10L.
+// Numeric policy is ML-fast dot math: the explicit dot operation is the
+// accumulation contract, so comparisons should look for dot/FMA selection.
+kernel.def @packed_s8_fields_f16scale_f32dot() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%packed_fields: buffer, %scales: buffer, %rhs: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %four = index.constant 4 : index
+  %lane = kernel.workitem.id<x> : index
+
+  %fields_noalias, %scales_noalias, %rhs_noalias, %output_noalias = buffer.assume.noalias %packed_fields, %scales, %rhs, %output : buffer, buffer, buffer, buffer
+  %field_view = buffer.view %fields_noalias[%base] : buffer -> view<4xi32, #dense>
+  %scale_view = buffer.view %scales_noalias[%base] : buffer -> view<4xf16, #dense>
+  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<16xf32, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xf32, #dense>
+
+  %rhs_base0 = index.mul %lane, %four : index
+  %rhs_base = index.assume %rhs_base0 [range(%rhs_base0, 0, 12), mul(%rhs_base0, 4)] : index
+  %packed = vector.load %field_view[%lane] : view<4xi32, #dense> -> vector<1xi32>
+  %scale_f16 = view.load %scale_view[%lane] : view<4xf16, #dense> -> f16
+  %rhs_values = vector.load %rhs_view[%rhs_base] : view<16xf32, #dense> -> vector<4xf32>
+
+  %field_i32 = vector.bitunpacks<8> %packed : vector<1xi32> -> vector<4xi32>
+  %field_f32 = vector.sitofp %field_i32 : vector<4xi32> to vector<4xf32>
+  %scale_f32 = scalar.extf %scale_f16 : f16 to f32
+  %scale_vector = vector.splat %scale_f32 : vector<4xf32>
+  %scaled_fields = vector.mulf<reassoc|nnan|ninf|nsz|contract> %field_f32, %scale_vector : vector<4xf32>
+  %zero_f32 = scalar.constant 0.0 : f32
+  %dot = vector.dotf %scaled_fields, %rhs_values, %zero_f32 : vector<4xf32>, vector<4xf32>, f32
+  view.store %dot, %output_view[%lane] : f32, view<4xf32, #dense>
+  kernel.return
+}
+
+check.case public @packed_s8_fields_f16scale_f32dot_case {
+  %packed_fields = check.generate.fill value(117637117) : tensor<4xi32>
+  %scales = check.generate.fill value(0.5) : tensor<4xf16>
+  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<16xf32>
+  %output = check.generate.fill value(0.0) : tensor<4xf32>
+  %expected = check.generate.iota offset(14.5) step(10.0) : tensor<4xf32>
+  func.call @packed_s8_fields_f16scale_f32dot(%packed_fields, %scales, %rhs, %output) : (tensor<4xi32>, tensor<4xf16>, tensor<16xf32>, tensor<4xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.benchmark<@packed_s8_fields_f16scale_f32dot_case> @packed_s8_fields_f16scale_f32dot_smoke

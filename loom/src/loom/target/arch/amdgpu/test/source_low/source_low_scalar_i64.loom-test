@@ -1,0 +1,309 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i64.loom-test
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @scalar_i64_bitwise_sgpr(%lhs: i64, %rhs: i64) -> (i64, i64, i64) {
+  %and = scalar.andi %lhs, %rhs : i64
+  %or = scalar.ori %and, %lhs : i64
+  %xor = scalar.xori %or, %rhs : i64
+  func.return %and, %or, %xor : i64, i64, i64
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scalar_i64_bitwise_sgpr(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  %and = s_and_b64 %lhs, %rhs
+  %or = s_or_b64 %and, %lhs
+  %xor = s_xor_b64 %or, %rhs
+  return %and, %or, %xor
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @scalar_i64_addi_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>) -> (i64) {
+  %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
+  %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
+  %sum = scalar.addi %lhs, %rhs : i64
+  func.return %sum : i64
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scalar_i64_addi_vgpr(%lhs_values: reg<amdgpu.vgpr x4>, %rhs_values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %9 = slice %lhs_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %10 = slice %lhs_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %12 = slice %rhs_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %13 = slice %rhs_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19, %20 = v_add_co_u32 %9, %12
+  %21, %22 = v_add_co_ci_u32 %10, %13, %20
+  %sum = concat(%19, %21) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %sum
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @scalar_i64_subi_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>) -> (i64) {
+  %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
+  %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
+  %difference = scalar.subi %lhs, %rhs : i64
+  func.return %difference : i64
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scalar_i64_subi_vgpr(%lhs_values: reg<amdgpu.vgpr x4>, %rhs_values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %9 = slice %lhs_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %10 = slice %lhs_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %12 = slice %rhs_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %13 = slice %rhs_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19, %20 = v_sub_co_u32 %9, %12
+  %21, %22 = v_sub_co_ci_u32 %10, %13, %20
+  %difference = concat(%19, %21) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %difference
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @scalar_i64_shli_vgpr(%value_values: vector<2xi64>, %shift_values: vector<2xi64>) -> (i64) {
+  %value = vector.extract %value_values[0] : vector<2xi64> -> i64
+  %shift = vector.extract %shift_values[0] : vector<2xi64> -> i64
+  %shifted = scalar.shli %value, %shift : i64
+  func.return %shifted : i64
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scalar_i64_shli_vgpr(%value_values: reg<amdgpu.vgpr x4>, %shift_values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %9 = slice %value_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %10 = slice %value_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %value = concat(%9, %10) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %12 = slice %shift_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %shifted = v_lshlrev_b64 %12, %value
+  return %shifted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @scalar_i64_muli_bitwise_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>, %mask_values: vector<2xi64>) -> (i64) {
+  %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
+  %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
+  %mask = vector.extract %mask_values[0] : vector<2xi64> -> i64
+  %product = scalar.muli %lhs, %rhs : i64
+  %mixed = scalar.xori %product, %mask : i64
+  func.return %mixed : i64
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scalar_i64_muli_bitwise_vgpr(%lhs_values: reg<amdgpu.vgpr x4>, %rhs_values: reg<amdgpu.vgpr x4>, %mask_values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %13 = slice %lhs_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %14 = slice %lhs_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = slice %rhs_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %17 = slice %rhs_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = slice %mask_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %20 = slice %mask_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %26 = v_mul_lo_u32 %13, %16
+  %27 = v_mul_hi_u32 %13, %16
+  %28 = v_mul_lo_u32 %13, %17
+  %29 = v_mul_lo_u32 %14, %16
+  %30 = v_add_u32 %27, %28
+  %31 = v_add_u32 %30, %29
+  %35 = v_xor_b32 %26, %19
+  %38 = v_xor_b32 %31, %20
+  %mixed = concat(%35, %38) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %mixed
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @scalar_i64_compare_eq_scc(%lhs: i64, %rhs: i64) -> (i1) {
+  %cmp = scalar.cmpi eq, %lhs, %rhs : i64
+  func.return %cmp : i1
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scalar_i64_compare_eq_scc(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.scc>) asm<amdgpu.rdna3.core> {
+  %cmp = s_cmp_eq_u64 %lhs, %rhs
+  return %cmp
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @scalar_i64_compare_ne_scc(%lhs: i64, %rhs: i64) -> (i1) {
+  %cmp = scalar.cmpi ne, %lhs, %rhs : i64
+  func.return %cmp : i1
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scalar_i64_compare_ne_scc(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.scc>) asm<amdgpu.rdna3.core> {
+  %cmp = s_cmp_lg_u64 %lhs, %rhs
+  return %cmp
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @scalar_i64_compare_slt_return(%lhs: i64, %rhs: i64) -> (i1) {
+  %cmp = scalar.cmpi slt, %lhs, %rhs : i64
+  func.return %cmp : i1
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scalar_i64_compare_slt_return(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  %7 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %8 = v_mov_b32_copy %7
+  %9 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %10 = v_mov_b32_copy %9
+  %11 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %12 = v_mov_b32_copy %11
+  %13 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %14 = v_mov_b32_copy %13
+  %15 = v_cmp_lt_i32 %10, %14
+  %16 = v_cmp_lt_u32 %8, %12
+  %17 = v_cmp_eq_i32 %10, %14
+  %18 = s_and_b64 %17, %16
+  %cmp = s_or_b64 %15, %18
+  return %cmp
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @scalar_i64_compare_slt_if(%lhs: i64, %rhs: i64, %then_value: i32, %else_value: i32) -> (i32) {
+  %cmp = scalar.cmpi slt, %lhs, %rhs : i64
+  %result = scf.if %cmp -> (i32) {
+    scf.yield %then_value : i32
+  } else {
+    scf.yield %else_value : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scalar_i64_compare_slt_if(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %then_value: reg<amdgpu.sgpr>, %else_value: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %13 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %14 = v_mov_b32_copy %13
+  %15 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %16 = v_mov_b32_copy %15
+  %17 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = v_mov_b32_copy %17
+  %19 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %20 = v_mov_b32_copy %19
+  %21 = v_cmp_lt_i32 %16, %20
+  %22 = v_cmp_lt_u32 %14, %18
+  %23 = v_cmp_eq_i32 %16, %20
+  %24 = s_and_b64 %23, %22
+  %cmp = s_or_b64 %21, %24
+  %26 = v_mov_b32_copy %then_value
+  %27 = v_mov_b32_copy %else_value
+  %result = v_cndmask_b32 %27, %26, %cmp
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @scalar_i64_compare_constant_select(%lhs: i64, %true_value: f32, %false_value: f32) -> (f32) {
+  %limit = scalar.constant 4294967296 : i64
+  %cmp = scalar.cmpi ult, %lhs, %limit : i64
+  %result = scf.select %cmp, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scalar_i64_compare_constant_select(%lhs: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %11 = s_mov_b32 0
+  %12 = s_mov_b32 1
+  %14 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %15 = v_mov_b32_copy %14
+  %16 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %17 = v_mov_b32_copy %16
+  %19 = v_mov_b32_copy %11
+  %21 = v_mov_b32_copy %12
+  %22 = v_cmp_lt_u32 %17, %21
+  %23 = v_cmp_lt_u32 %15, %19
+  %24 = v_cmp_eq_i32 %17, %21
+  %25 = s_and_b64 %24, %23
+  %cmp = s_or_b64 %22, %25
+  %result = v_cndmask_b32 %false_value, %true_value, %cmp
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @scalar_i64_compare_all_predicates_vgpr_select(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>, %true_value: f32, %false_value: f32) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32, f32) {
+  %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
+  %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  %eq_result = scf.select %eq, %true_value, %false_value : f32
+  %ne_result = scf.select %ne, %true_value, %false_value : f32
+  %slt_result = scf.select %slt, %true_value, %false_value : f32
+  %sle_result = scf.select %sle, %true_value, %false_value : f32
+  %sgt_result = scf.select %sgt, %true_value, %false_value : f32
+  %sge_result = scf.select %sge, %true_value, %false_value : f32
+  %ult_result = scf.select %ult, %true_value, %false_value : f32
+  %ule_result = scf.select %ule, %true_value, %false_value : f32
+  %ugt_result = scf.select %ugt, %true_value, %false_value : f32
+  %uge_result = scf.select %uge, %true_value, %false_value : f32
+  func.return %eq_result, %ne_result, %slt_result, %sle_result, %sgt_result, %sge_result, %ult_result, %ule_result, %ugt_result, %uge_result : f32, f32, f32, f32, f32, f32, f32, f32, f32, f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scalar_i64_compare_all_predicates_vgpr_select(%lhs_values: reg<amdgpu.vgpr x4>, %rhs_values: reg<amdgpu.vgpr x4>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %50 = slice %lhs_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %51 = slice %lhs_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %53 = slice %rhs_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %54 = slice %rhs_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %60 = v_cmp_eq_i32 %51, %54
+  %61 = v_cmp_eq_i32 %50, %53
+  %eq = s_and_b64 %60, %61
+  %67 = v_cmp_ne_i32 %51, %54
+  %68 = v_cmp_ne_i32 %50, %53
+  %ne = s_or_b64 %67, %68
+  %74 = v_cmp_lt_i32 %51, %54
+  %75 = v_cmp_lt_u32 %50, %53
+  %77 = s_and_b64 %60, %75
+  %slt = s_or_b64 %74, %77
+  %84 = v_cmp_le_u32 %50, %53
+  %86 = s_and_b64 %60, %84
+  %sle = s_or_b64 %74, %86
+  %92 = v_cmp_gt_i32 %51, %54
+  %93 = v_cmp_gt_u32 %50, %53
+  %95 = s_and_b64 %60, %93
+  %sgt = s_or_b64 %92, %95
+  %102 = v_cmp_ge_u32 %50, %53
+  %104 = s_and_b64 %60, %102
+  %sge = s_or_b64 %92, %104
+  %110 = v_cmp_lt_u32 %51, %54
+  %113 = s_and_b64 %60, %75
+  %ult = s_or_b64 %110, %113
+  %122 = s_and_b64 %60, %84
+  %ule = s_or_b64 %110, %122
+  %128 = v_cmp_gt_u32 %51, %54
+  %131 = s_and_b64 %60, %93
+  %ugt = s_or_b64 %128, %131
+  %140 = s_and_b64 %60, %102
+  %uge = s_or_b64 %128, %140
+  %eq_result = v_cndmask_b32 %false_value, %true_value, %eq
+  %ne_result = v_cndmask_b32 %false_value, %true_value, %ne
+  %slt_result = v_cndmask_b32 %false_value, %true_value, %slt
+  %sle_result = v_cndmask_b32 %false_value, %true_value, %sle
+  %sgt_result = v_cndmask_b32 %false_value, %true_value, %sgt
+  %sge_result = v_cndmask_b32 %false_value, %true_value, %sge
+  %ult_result = v_cndmask_b32 %false_value, %true_value, %ult
+  %ule_result = v_cndmask_b32 %false_value, %true_value, %ule
+  %ugt_result = v_cndmask_b32 %false_value, %true_value, %ugt
+  %uge_result = v_cndmask_b32 %false_value, %true_value, %uge
+  return %eq_result, %ne_result, %slt_result, %sle_result, %sgt_result, %sge_result, %ult_result, %ule_result, %ugt_result, %uge_result
+}

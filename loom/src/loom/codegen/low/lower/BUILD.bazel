@@ -1,0 +1,141 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_LOWER_VISIBILITY = [
+    "//loom/src/loom/codegen/low/testing:__pkg__",
+    "//loom/src/loom/codegen/low/transforms/pipeline:__pkg__",
+    "//loom/src/loom/target:__pkg__",
+    "//loom/src/loom/target/all:__pkg__",
+    "//loom/src/loom/target/arch:__subpackages__",
+    "//loom/src/loom/target/configured:__pkg__",
+    "//loom/src/loom/target/emit:__subpackages__",
+    "//loom/src/loom/target/reporting:__pkg__",
+    "//loom/src/loom/target/test:__subpackages__",
+    "//loom/src/loom/tools/loom-check:__pkg__",
+    "//loom/src/loom/tools/loom-check:__pkg__",
+]
+
+loom_cc_library(
+    name = "lower",
+    srcs = [
+        "contract_query.c",
+        "lower.c",
+        "lower_context.c",
+        "lower_policy.c",
+        "lower_report.c",
+        "lower_rules.c",
+    ],
+    hdrs = [
+        "contract_query.h",
+        "lower.h",
+        "lower_internal.h",
+        "lower_rules.h",
+    ],
+    visibility = _LOWER_VISIBILITY,
+    deps = [
+        "//loom/src/loom/analysis:contract_vector",
+        "//loom/src/loom/analysis:kernel_async_legality",
+        "//loom/src/loom/analysis:symbolic_expr",
+        "//loom/src/loom/analysis:vector_memory_footprint",
+        "//loom/src/loom/analysis:view_regions",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:memory_access",
+        "//loom/src/loom/codegen/low:memory_access_ir",
+        "//loom/src/loom/codegen/low:source_memory_plan",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/sanitizer:options",
+        "//loom/src/loom/target:contract",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:low_legality",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "source_selection",
+    srcs = ["source_selection.c"],
+    hdrs = ["source_selection.h"],
+    visibility = [
+        "//loom/src/loom/codegen/low/testing:__pkg__",
+        "//loom/src/loom/codegen/low/transforms/pipeline:__pkg__",
+    ],
+    deps = [
+        ":lower",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:function_contract",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "contract_query_test",
+    srcs = ["contract_query_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "lower_policy_registry_test",
+    srcs = ["lower_policy_registry_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/target/test:lower",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

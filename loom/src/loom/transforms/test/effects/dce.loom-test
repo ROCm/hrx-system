@@ -1,0 +1,168 @@
+// A pure func.call with unused results is ordinary dead computation after
+// canonicalize stamps the call-site purity attr.
+// RUN: pass canonicalize,dce
+func.def @pure_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def @dead_pure_call_dies(%value: i32) {
+  %dead = func.call @pure_identity(%value) : (i32) -> (i32)
+  func.return
+}
+
+// ----
+func.def @pure_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def @dead_pure_call_dies(%value: i32) {
+  func.return
+}
+
+// ====
+
+// Explicitly pure func.apply contract demands use the same effective-trait path.
+// RUN: pass canonicalize,dce
+func.def @dead_pure_apply_dies(%value: i32) {
+  %dead = func.apply<test.effect>(%value) pure : (i32) -> (i32)
+  func.return
+}
+
+// ----
+func.def @dead_pure_apply_dies(%value: i32) {
+  func.return
+}
+
+// ====
+
+// An unresolved external call keeps its unknown effects. DCE must not erase it
+// just because the result is unused.
+// RUN: pass canonicalize,dce
+func.decl @unknown_effects(%value: i32) -> (i32)
+
+func.def @dead_unknown_effect_call_stays(%value: i32) {
+  %dead = func.call @unknown_effects(%value) : (i32) -> (i32)
+  func.return
+}
+
+// ====
+
+// A convergent op with an unused result is not dead: the dynamic participant
+// set at this point is part of the program semantics.
+// RUN: pass dce
+func.def @dead_convergent_stays(%value: i32) {
+  %dead = test.convergent %value : i32
+  func.return
+}
+
+// ====
+
+// A parent region op with an unused result is not dead when its body contains
+// convergent work. Dropping the scf.if would drop the participant set.
+// RUN: pass dce
+func.def @nested_convergent_keeps_parent(%cond: i1, %value: i32) {
+  %result = scf.if %cond -> (i32) {
+    %inner = test.convergent %value : i32
+    scf.yield %inner : i32
+  } else {
+    scf.yield %value : i32
+  }
+  func.return
+}
+
+// ====
+
+// A parent region op with an unused result is not dead when a nested body
+// writes memory. Dropping the scf.if would drop the store.
+// RUN: pass dce
+func.def @nested_write_keeps_parent(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  %result = scf.if %cond -> (f32) {
+    view.store %value, %view[0] : f32, view<1xf32, %layout>
+    scf.yield %value : f32
+  } else {
+    scf.yield %value : f32
+  }
+  func.return
+}
+
+// ====
+
+// The same transitive write summary applies to loop-like region ops. Even with
+// an unused result, erasing the while would erase the nested store.
+// RUN: pass dce
+func.def @nested_while_write_keeps_parent(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  %result = scf.while(%before = %value : f32) -> (f32) {
+    scf.condition %cond, %before : i1, f32
+  } do(%body: f32) {
+    view.store %body, %view[0] : f32, view<1xf32, %layout>
+    scf.yield %body : f32
+  }
+  func.return
+}
+
+// ====
+
+// Read-only nested work with an unused parent result is still removable.
+// Reads with no observer are computation, not an effect barrier.
+// RUN: pass dce
+func.def @nested_read_only_parent_dies(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  %result = scf.if %cond -> (f32) {
+    %loaded = view.load %view[0] : view<1xf32, %layout> -> f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %value : f32
+  }
+  func.return
+}
+
+// ----
+func.def @nested_read_only_parent_dies(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  func.return
+}
+
+// ====
+
+// Read-only work nested in scf.while is equally removable when the parent
+// result is unused.
+// RUN: pass dce
+func.def @nested_while_read_only_parent_dies(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  %result = scf.while(%before = %value : f32) -> (f32) {
+    scf.condition %cond, %before : i1, f32
+  } do(%body: f32) {
+    %loaded = view.load %view[0] : view<1xf32, %layout> -> f32
+    scf.yield %loaded : f32
+  }
+  func.return
+}
+
+// ----
+func.def @nested_while_read_only_parent_dies(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  func.return
+}
+
+// ====
+
+// Function-level DCE scans every root region of a function-like op.
+// RUN: pass dce
+test.split_func @split_func_all_regions_dce(%arg: i32) {
+  %config_dead = test.constant 2 : i32
+  test.yield
+} launch {
+  %body_dead = test.constant 1 : i32
+  test.yield
+}
+
+// ----
+test.split_func @split_func_all_regions_dce(%arg: i32) {
+  test.yield
+} launch {
+  test.yield
+}

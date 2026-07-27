@@ -49,8 +49,9 @@ enum iree_hal_device_profiling_data_family_bits_t {
   // when they cannot retain complete selected events.
   IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS = 1ull << 3,
 
-  // Explicitly selected hardware/software counter samples attributed to
-  // individual operations. Requested counters are described by |counter_sets|.
+  // Hardware/software counter samples attributed to individual operations.
+  // Empty |counter_sets| requests the target's default best-effort counter set;
+  // explicit counter names are strict.
   IREE_HAL_DEVICE_PROFILING_DATA_COUNTER_SAMPLES = 1ull << 4,
 
   // Executable/code-object/function metadata needed for offline analysis. Some
@@ -82,9 +83,10 @@ enum iree_hal_device_profiling_data_family_bits_t {
   // in dispatch or host-execution event families.
   IREE_HAL_DEVICE_PROFILING_DATA_COMMAND_REGION_EVENTS = 1ull << 9,
 
-  // Explicitly selected hardware/software counter ranges. Requested counters
-  // are described by |counter_sets| and are sampled over producer-defined time
-  // ranges without requiring operation attribution.
+  // Hardware/software counter ranges sampled over producer-defined time ranges
+  // without requiring operation attribution. Empty |counter_sets| requests the
+  // target's default best-effort counter set; explicit counter names are
+  // strict.
   IREE_HAL_DEVICE_PROFILING_DATA_COUNTER_RANGES = 1ull << 10,
 };
 
@@ -210,11 +212,14 @@ enum iree_hal_profile_counter_set_selection_flag_bits_t {
 // Caller-provided hardware counter set selection.
 //
 // The selection describes one named group of hardware counters requested for a
-// profiling session. All pointers are borrowed and must remain valid for the
-// duration of iree_hal_device_profiling_begin. A producer that supports the
-// selected counters emits one counter-set metadata record, one counter metadata
-// record per resolved counter, and counter-sample records using the same
-// |counter_set_id|.
+// profiling session. An empty counter name list asks the implementation to
+// choose the target's default best-effort counter set. A non-empty counter name
+// list is strict: producers must either capture every named counter or fail
+// iree_hal_device_profiling_begin. All pointers are borrowed and must remain
+// valid for the duration of iree_hal_device_profiling_begin. A producer that
+// supports the selected counters emits one counter-set metadata record, one
+// counter metadata record per resolved counter, and counter-sample records
+// using the same |counter_set_id|.
 typedef struct iree_hal_profile_counter_set_selection_t {
   // Flags controlling counter set selection behavior.
   iree_hal_profile_counter_set_selection_flags_t flags;
@@ -251,14 +256,14 @@ typedef struct iree_hal_device_profiling_options_t {
   // string views it contains before returning from profiling_begin.
   iree_hal_profile_capture_filter_t capture_filter;
 
-  // Number of explicitly requested hardware/software counter sets. Must be
-  // nonzero when requesting counter samples or counter ranges.
+  // Number of requested hardware/software counter sets. If zero when requesting
+  // counter samples or counter ranges, the implementation selects the target's
+  // default best-effort counter set.
   iree_host_size_t counter_set_count;
 
-  // Borrowed begin-call-only array of explicitly requested counter sets.
-  // Implementations must either capture every requested counter set exactly or
-  // fail profiling_begin; silently dropping counters would make the profile
-  // bundle misleading.
+  // Borrowed begin-call-only array of requested counter sets. Empty selections
+  // are target-default and best-effort; selections with explicit counter names
+  // are strict.
   const iree_hal_profile_counter_set_selection_t* counter_sets;
 } iree_hal_device_profiling_options_t;
 

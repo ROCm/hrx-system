@@ -1,0 +1,47 @@
+// RUN: emit source-low output=low sanitizer=race
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @race_access_global_rejected(%input: buffer) {
+  %zero = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%zero] : buffer -> view<1xi32, #dense>
+  // ERROR@+1: AMDGPU/023 {constraint_key="target_contract.sanitizer_race.workgroup_memory_required"}
+  sanitizer.race.access<read> %view[0] : view<1xi32, #dense>
+  func.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @race_sync_requires_fixed_workgroup() {
+  // ERROR@+1: AMDGPU/023 {constraint_key="target_contract.sanitizer_race.fixed_power_of_two_workgroup_required"}
+  sanitizer.race.sync<workgroup> {ordering = acq_rel, scope = workgroup}
+  func.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @race_sync_global_rejected() {
+  // ERROR@+1: AMDGPU/023 {constraint_key="target_contract.sanitizer_race.workgroup_memory_required"}
+  sanitizer.race.sync<global> {ordering = acq_rel, scope = workgroup}
+  func.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @race_sync_device_scope_rejected() {
+  // ERROR@+1: AMDGPU/023 {constraint_key="target_contract.sanitizer_race.workgroup_scope_required"}
+  sanitizer.race.sync<workgroup> {ordering = acq_rel, scope = device}
+  func.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @race_sync_acquire_rejected() {
+  // ERROR@+1: AMDGPU/023 {constraint_key="target_contract.sanitizer_race.acq_rel_sync_required"}
+  sanitizer.race.sync<workgroup> {ordering = acquire, scope = workgroup}
+  func.return
+}

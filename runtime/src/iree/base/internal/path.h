@@ -7,6 +7,8 @@
 #ifndef IREE_BASE_INTERNAL_PATH_H_
 #define IREE_BASE_INTERNAL_PATH_H_
 
+#include <stddef.h>
+
 #include "iree/base/api.h"
 
 #ifdef __cplusplus
@@ -69,6 +71,23 @@ iree_string_view_t iree_file_path_extension(iree_string_view_t path);
 
 // Returns true if |path| _likely_ represents a system dynamic library.
 bool iree_file_path_is_dynamic_library(iree_string_view_t path);
+
+#if defined(IREE_PLATFORM_WINDOWS)
+
+// Converts the UTF-8 |path| to a NUL-terminated UTF-16 path suitable for
+// passing to Win32 APIs.
+//
+// Relative filesystem paths are resolved to absolute extended-length paths so
+// that the result does not depend on the embedding process having opted in to
+// long-path support. Existing extended-length (`\\?\`) and device (`\\.\`)
+// paths are preserved. Embedded NUL characters and invalid UTF-8 are rejected.
+//
+// The caller must free |*out_path| with |allocator|.
+iree_status_t iree_file_path_to_win32(iree_string_view_t path,
+                                      iree_allocator_t allocator,
+                                      wchar_t** out_path);
+
+#endif  // IREE_PLATFORM_WINDOWS
 
 //===----------------------------------------------------------------------===//
 // URIs

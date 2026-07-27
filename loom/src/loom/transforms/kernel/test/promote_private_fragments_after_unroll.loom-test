@@ -1,0 +1,42 @@
+// RUN: pass unroll-scf-for,canonicalize,cse,promote-private-fragments,dce
+
+func.def @forward_after_unrolled_private_init(%output: buffer, %lhs: i64, %rhs: i64) {
+  %zero_bytes = index.constant 0 : offset
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %slot_bytes = index.constant 16 : offset
+  %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 8, memory_space = private} : buffer
+  %slots = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<2xi64, #dense>
+  %start = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  scf.for %j = [%start to %end step %step] unroll {
+    %zero = scalar.constant 0 : i64
+    view.store %zero, %slots[%j] : i64, view<2xi64, #dense>
+  }
+  %slot0 = index.constant 0 : index
+  %slot1 = index.constant 1 : index
+  %loaded0 = view.load %slots[%slot0] : view<2xi64, #dense> -> i64
+  %sum = scalar.addi %loaded0, %lhs : i64
+  view.store %sum, %slots[%slot0] : i64, view<2xi64, #dense>
+  %loaded1 = view.load %slots[%slot1] : view<2xi64, #dense> -> i64
+  %xor = scalar.xori %loaded1, %rhs : i64
+  view.store %xor, %slots[%slot1] : i64, view<2xi64, #dense>
+  %final0 = view.load %slots[%slot0] : view<2xi64, #dense> -> i64
+  %final1 = view.load %slots[%slot1] : view<2xi64, #dense> -> i64
+  %result = scalar.ori %final0, %final1 : i64
+  view.store %result, %output_view[%slot0] : i64, view<1xi64, #dense>
+  func.return
+}
+
+// ----
+func.def @forward_after_unrolled_private_init(%output: buffer, %lhs: i64, %rhs: i64) {
+  %zero_bytes = index.constant 0 : offset
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %j_0 = index.constant 0 : index
+  %zero = scalar.constant 0 : i64
+  %sum = scalar.addi %zero, %lhs : i64
+  %xor = scalar.xori %zero, %rhs : i64
+  %result = scalar.ori %sum, %xor : i64
+  view.store %result, %output_view[%j_0] : i64, view<1xi64, #dense>
+  func.return
+}

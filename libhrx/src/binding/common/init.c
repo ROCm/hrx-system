@@ -41,6 +41,13 @@ iree_hal_streaming_device_t* iree_hal_streaming_device_entry(
   return device;
 }
 
+static uint32_t iree_hal_streaming_u32_or_default(uint64_t value,
+                                                  uint32_t default_value) {
+  if (value == 0) return default_value;
+  if (value > UINT32_MAX) return UINT32_MAX;
+  return (uint32_t)value;
+}
+
 // Queries device info and populates device properties.
 static iree_status_t iree_hal_streaming_query_device_info(
     iree_hal_streaming_device_t* device) {
@@ -91,100 +98,93 @@ static iree_status_t iree_hal_streaming_query_device_info(
     memcpy(device->gcn_arch_name, "gfx942", 7);
   }
 
-  // Query memory info from the HAL device.
-  int64_t total_memory = 0;
-  iree_status_t status =
-      iree_hal_device_query_i64(device->hal_device, IREE_SV("hal.device"),
-                                IREE_SV("memory.total"), &total_memory);
-  if (iree_status_is_ok(status) && total_memory > 0) {
-    device->total_memory = (iree_device_size_t)total_memory;
-  } else {
-    // Fall back to known HIP-visible memory sizes when the HAL cannot query
-    // VRAM. rocBLAS/hipBLASLt use this value when selecting solution kernels.
-    iree_status_ignore(status);
-    if (device->info.name.data &&
-        strstr(device->info.name.data, "Radeon PRO W7900")) {
-      device->total_memory = 48301604864ULL;
-    } else {
-      device->total_memory = 8ULL * 1024 * 1024 * 1024;
-    }
+  // Query total memory from the immutable HAL device spec.
+  uint64_t total_memory = 0;
+  iree_status_t status = HRX_CALL(hrx_device_get_property(
+      device->hrx_device, HRX_DEVICE_PROPERTY_TOTAL_MEMORY, &total_memory,
+      sizeof(total_memory)));
+  if (!iree_status_is_ok(status)) return status;
+  if (total_memory > IREE_DEVICE_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "HRX device total memory exceeds the representable "
+                            "iree_device_size_t range");
   }
+  device->total_memory = (iree_device_size_t)total_memory;
   device->free_memory = device->total_memory;
+
+  const iree_hal_device_spec_t* device_spec =
+      iree_hal_device_spec(device->hal_device);
+  const iree_hal_device_dispatch_spec_t* dispatch =
+      iree_hal_device_spec_dispatch(device_spec);
+  const iree_hal_device_launch_spec_t* launch =
+      dispatch ? &dispatch->launch : NULL;
+  const iree_hal_device_subgroup_spec_t* subgroup =
+      dispatch ? &dispatch->subgroup : NULL;
+  const iree_hal_device_execution_spec_t* execution =
+      dispatch ? &dispatch->execution : NULL;
+  const bool is_gfx1100 = strncmp(device->gcn_arch_name, "gfx1100", 7) == 0;
+  const bool is_gfx942 = strncmp(device->gcn_arch_name, "gfx942", 6) == 0;
 
   // Query cooperative launch support.
   // TODO: Query from actual device properties.
   // Cooperative launch requires Pascal (SM 6.0) or newer.
   device->supports_cooperative_launch = (device->compute_capability_major >= 6);
 
-  // Query thread/block limits.
-  device->max_threads_per_block = 1024;
-  device->max_block_dim[0] = 1024;
-  device->max_block_dim[1] = 1024;
-  device->max_block_dim[2] = 64;
-  device->max_grid_dim[0] = 2147483647;
-  device->max_grid_dim[1] = 65535;
-  device->max_grid_dim[2] = 65535;
-
-  // Query warp/wavefront size from the HAL device.
-  // AMD GPUs use 64, NVIDIA uses 32, RDNA may use 32 or 64.
-  int64_t warp_size = 0;
-  status = iree_hal_device_query_i64(device->hal_device, IREE_SV("hal.device"),
-                                     IREE_SV("warp_size"), &warp_size);
-  if (iree_status_is_ok(status) && warp_size > 0) {
-    device->warp_size = (uint32_t)warp_size;
-  } else {
-    // Fall back to 64 for AMD (HIP) or 32 for CUDA.
-    // Since this streaming layer is primarily used with HIP/AMD, default to 64.
-    iree_status_ignore(status);
-    device->warp_size = 64;
+  device->max_threads_per_block = iree_hal_streaming_u32_or_default(
+      launch ? launch->maximum_workgroup_invocations : 0, 1024);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(device->max_block_dim); ++i) {
+    device->max_block_dim[i] = iree_hal_streaming_u32_or_default(
+        launch ? launch->maximum_workgroup_size[i] : 0, i == 2 ? 64 : 1024);
+    device->max_grid_dim[i] = iree_hal_streaming_u32_or_default(
+        launch ? launch->maximum_workgroup_count[i] : 0,
+        i == 0 ? 2147483647u : 65535u);
   }
-  if (strncmp(device->gcn_arch_name, "gfx1100", 7) == 0) {
+
+  device->warp_size = iree_hal_streaming_u32_or_default(
+      subgroup ? subgroup->default_size : 0, 64);
+  if (is_gfx1100) {
     // HIP reports wave32 as the warp size for RDNA3 devices. IREE/HSA may
     // expose the hardware wavefront width instead, which in turn prevents the
     // CU-to-WGP compatibility adjustment below.
     device->warp_size = 32;
   }
 
-  // Query multiprocessor (compute unit) count from the device.
-  int64_t mp_count = 0;
-  status =
-      iree_hal_device_query_i64(device->hal_device, IREE_SV("hal.dispatch"),
-                                IREE_SV("concurrency"), &mp_count);
-  if (iree_status_is_ok(status) && mp_count > 0) {
-    uint32_t multiprocessor_count = (uint32_t)mp_count;
-    // IREE/HSA reports raw compute units, while HIP reports RDNA devices in
-    // WGP-like units. Keep this HIP-compatible because rocBLAS/hipBLASLt query
-    // the physical multiprocessor count when selecting GEMM solutions.
-    if (device->compute_capability_major >= 10 && device->warp_size == 32 &&
-        multiprocessor_count > 1 && (multiprocessor_count % 2) == 0) {
-      multiprocessor_count /= 2;
-    }
-    device->multiprocessor_count = multiprocessor_count;
-  } else {
-    // Fall back to generic value if query fails.
-    // The HSA backend supports hal.dispatch.concurrency and will return
-    // the actual CU count. For HIP backend, we use a generic fallback
-    // which may cause different kernel variants to be selected.
-    iree_status_ignore(status);
-    device->multiprocessor_count = 80;
+  uint32_t multiprocessor_count = iree_hal_streaming_u32_or_default(
+      execution ? execution->unit_count : 0, 80);
+  // IREE/HSA reports raw compute units, while HIP reports RDNA devices in
+  // WGP-like units. Keep this HIP-compatible because rocBLAS/hipBLASLt query
+  // the physical multiprocessor count when selecting GEMM solutions.
+  if (device->compute_capability_major >= 10 && device->warp_size == 32 &&
+      multiprocessor_count > 1 && (multiprocessor_count % 2) == 0) {
+    multiprocessor_count /= 2;
   }
+  device->multiprocessor_count = multiprocessor_count;
 
-  // Query occupancy calculation properties.
-  // These are typical values for modern GPUs.
-  device->max_threads_per_multiprocessor = 2048;
-  device->max_blocks_per_multiprocessor = 32;
-  device->max_registers_per_multiprocessor = 65536;
-  device->max_shared_memory_per_multiprocessor = 49152;  // 48KB.
-  device->max_registers_per_block = 65536;
-  device->max_shared_memory_per_block = 49152;  // 48KB.
-  if (strncmp(device->gcn_arch_name, "gfx942", 6) == 0) {
-    // Temporary MI300X compatibility values from native HIP.
-    device->max_blocks_per_multiprocessor = 2;
-    device->max_shared_memory_per_multiprocessor = 19922944;
-    device->max_shared_memory_per_block = 65536;
-  } else if (strncmp(device->gcn_arch_name, "gfx1100", 7) == 0) {
-    device->max_shared_memory_per_block = 65536;
+  device->max_threads_per_multiprocessor = iree_hal_streaming_u32_or_default(
+      execution ? execution->maximum_resident_invocation_count : 0, 2048);
+  device->max_blocks_per_multiprocessor = iree_hal_streaming_u32_or_default(
+      execution ? execution->maximum_resident_workgroup_count : 0,
+      is_gfx942 ? 2 : 32);
+  uint64_t maximum_register_count =
+      execution ? execution->maximum_register_count : 0;
+  if (maximum_register_count == 0 && execution) {
+    maximum_register_count = execution->maximum_workgroup_register_count;
   }
+  device->max_registers_per_multiprocessor =
+      iree_hal_streaming_u32_or_default(maximum_register_count, 65536);
+  uint64_t maximum_local_memory_size =
+      execution ? execution->maximum_local_memory_size : 0;
+  if (maximum_local_memory_size == 0 && execution) {
+    maximum_local_memory_size = execution->maximum_workgroup_local_memory_size;
+  }
+  device->max_shared_memory_per_multiprocessor =
+      iree_hal_streaming_u32_or_default(maximum_local_memory_size,
+                                        is_gfx942 ? 19922944u : 49152u);
+  device->max_registers_per_block = iree_hal_streaming_u32_or_default(
+      execution ? execution->maximum_workgroup_register_count : 0, 65536);
+  device->max_shared_memory_per_block = iree_hal_streaming_u32_or_default(
+      execution ? execution->maximum_workgroup_local_memory_size : 0,
+      (is_gfx942 || is_gfx1100) ? 65536u : 49152u);
 
   return iree_ok_status();
 }
@@ -192,6 +192,7 @@ static iree_status_t iree_hal_streaming_query_device_info(
 // Initializes a single device from a pyre device handle.
 static iree_status_t iree_hal_streaming_initialize_device(
     iree_hal_streaming_device_registry_t* registry, hrx_device_t hrx_dev,
+    iree_hal_streaming_device_ordinal_t ordinal,
     iree_hal_streaming_device_t* out_device) {
   IREE_ASSERT_ARGUMENT(registry);
   IREE_ASSERT_ARGUMENT(hrx_dev);
@@ -199,6 +200,10 @@ static iree_status_t iree_hal_streaming_initialize_device(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   memset(out_device, 0, sizeof(*out_device));
+  // The entry was just zeroed, so the ordinal MUST be (re)assigned here.
+  // Per-device pools, peer lookups, and context->device_ordinal all key off
+  // it; if it stays 0 every device aliases device 0.
+  out_device->ordinal = ordinal;
 
   // Store pyre device and extract HAL device for direct HAL usage.
   out_device->hrx_device = hrx_dev;
@@ -275,6 +280,13 @@ static iree_status_t iree_hal_streaming_initialize_device(
   out_device->default_mem_pool = NULL;
   out_device->current_mem_pool = NULL;
 
+  iree_slim_mutex_initialize(&out_device->graph_memory_mutex);
+  out_device->graph_memory_used_current = 0;
+  out_device->graph_memory_used_high = 0;
+  out_device->graph_memory_reserved_current = 0;
+  out_device->graph_memory_reserved_high = 0;
+  out_device->graph_memory_reusable_size_entries = NULL;
+
   if (!iree_status_is_ok(status)) {
     iree_hal_streaming_deinitialize_device(out_device);
   }
@@ -306,20 +318,25 @@ static void iree_hal_streaming_deinitialize_device(
   device->info.name = iree_string_view_empty();
 
   // Release memory pools.
-  if (device->current_mem_pool) {
-    hrx_mem_pool_release(device->current_mem_pool);
-    device->current_mem_pool = NULL;
-  }
-  if (device->default_mem_pool) {
-    hrx_mem_pool_release(device->default_mem_pool);
-    device->default_mem_pool = NULL;
-  }
+  hrx_mem_pool_release(device->current_mem_pool);
+  device->current_mem_pool = NULL;
+  hrx_mem_pool_release(device->default_mem_pool);
+  device->default_mem_pool = NULL;
 
   // Release primary context (may not exist if never accessed).
-  if (device->primary_context) {
-    iree_hal_streaming_context_release(device->primary_context);
-    device->primary_context = NULL;
+  iree_hal_streaming_context_release(device->primary_context);
+  device->primary_context = NULL;
+
+  iree_hal_streaming_graph_memory_size_entry_t* graph_memory_entry =
+      device->graph_memory_reusable_size_entries;
+  device->graph_memory_reusable_size_entries = NULL;
+  while (graph_memory_entry) {
+    iree_hal_streaming_graph_memory_size_entry_t* next_entry =
+        graph_memory_entry->next;
+    iree_allocator_free(host_allocator, graph_memory_entry);
+    graph_memory_entry = next_entry;
   }
+  iree_slim_mutex_deinitialize(&device->graph_memory_mutex);
 
   // Deinitialize primary context mutex.
   iree_slim_mutex_deinitialize(&device->primary_context_mutex);
@@ -344,9 +361,9 @@ static iree_status_t iree_hal_streaming_query_p2p_capabilities(
   registry->p2p_link_count = registry->device_count * registry->device_count;
   const iree_host_size_t topology_size =
       registry->p2p_link_count * sizeof(iree_hal_streaming_p2p_link_t);
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(registry->host_allocator,
-                                             topology_size,
-                                             (void**)&registry->p2p_topology));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_allocator_malloc(registry->host_allocator, topology_size,
+                                (void**)&registry->p2p_topology));
   memset(registry->p2p_topology, 0, topology_size);
 
   // Populate P2P links for all device pairs.
@@ -522,10 +539,9 @@ iree_status_t iree_hal_streaming_init_global(
 
       iree_hal_streaming_device_t* device =
           &device_registry->devices[device_registry->device_count];
-      device->ordinal = device_registry->device_count;
 
-      dev_status = iree_hal_streaming_initialize_device(device_registry,
-                                                        hrx_dev, device);
+      dev_status = iree_hal_streaming_initialize_device(
+          device_registry, hrx_dev, device_registry->device_count, device);
       if (!iree_status_is_ok(dev_status)) {
         iree_status_ignore(dev_status);
         continue;

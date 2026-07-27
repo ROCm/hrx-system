@@ -18,7 +18,7 @@ iree_genrule(
   OUTS
     op_table.h
   CMD
-    "python3 $(rootpath generate_vm_isa.py) --schema $(rootpath isa.json) --op-table $(execpath op_table.h)"
+    "${Python3_EXECUTABLE} $(rootpath generate_vm_isa.py) --schema $(rootpath isa.json) --op-table $(execpath op_table.h)"
 )
 
 iree_genrule(
@@ -31,16 +31,16 @@ iree_genrule(
     encoding_table.c
     encoding_table.h
   CMD
-    "python3 $(rootpath generate_vm_isa.py) --schema $(rootpath isa.json) --encoding-table-source $(execpath encoding_table.c) --encoding-table-header $(execpath encoding_table.h)"
+    "${Python3_EXECUTABLE} $(rootpath generate_vm_isa.py) --schema $(rootpath isa.json) --encoding-table-source $(execpath encoding_table.c) --encoding-table-header $(execpath encoding_table.h)"
 )
 
 iree_cc_library(
   NAME
     isa
   HDRS
-    ":encoding_table.h"
-    ":op_table.h"
+    "encoding_table.h"
     "isa.h"
+    "op_table.h"
   SRCS
     "encoding_table.c"
   DEPS

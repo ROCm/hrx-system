@@ -397,6 +397,7 @@ static iree_status_t iree_tooling_load_hal_async_module(
   iree_hal_device_create_params_t create_params =
       iree_hal_device_create_params_default();
   create_params.proactor_pool = proactor_pool;
+  create_params.event_sink = iree_hal_device_event_sink_stderr();
   iree_hal_device_list_t* device_list = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_hal_create_devices_from_flags(

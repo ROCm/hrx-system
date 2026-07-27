@@ -1,0 +1,26 @@
+amdgpu.target<gfx1100> @gfx1100
+amdgpu.target<gfx1200> @gfx1200
+
+// RDNA3 provider selected when the invocation target materializes @gfx1100.
+func.template<authoring.link.scale_i32> target(@gfx1100) priority(20) @scale_i32_gfx1100(%value: i32) -> (i32) {
+  %two = scalar.constant 2 : i32
+  %scaled = scalar.muli %value, %two : i32
+  func.return %scaled : i32
+}
+
+// RDNA4 provider selected by @gfx1200 invocations. It is semantically the same
+// as the RDNA3 provider so the generic correctness case remains target-neutral.
+func.template<authoring.link.scale_i32> target(@gfx1200) priority(20) @scale_i32_gfx1200(%value: i32) -> (i32) {
+  %scaled = scalar.addi %value, %value : i32
+  func.return %scaled : i32
+}
+
+// Fallback provider used when no target-specific implementation applies.
+func.template<authoring.link.scale_i32> priority(1) @scale_i32_fallback(%value: i32) -> (i32) {
+  %scaled = scalar.addi %value, %value : i32
+  func.return %scaled : i32
+}
+
+func.template<authoring.link.unused> @unused_provider(%value: i32) -> (i32) {
+  func.return %value : i32
+}

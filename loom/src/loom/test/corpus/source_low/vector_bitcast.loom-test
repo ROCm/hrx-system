@@ -1,0 +1,50 @@
+// RUN: roundtrip
+
+func.def @i32_to_i8x4_bitcast(%word: vector<1xi32>) -> (vector<4xi8>) {
+  %bytes = vector.bitcast %word : vector<1xi32> to vector<4xi8>
+  func.return %bytes : vector<4xi8>
+}
+
+// ====
+
+func.def @i32x2_to_i8x8_bitcast(%words: vector<2xi32>) -> (vector<8xi8>) {
+  %bytes = vector.bitcast %words : vector<2xi32> to vector<8xi8>
+  func.return %bytes : vector<8xi8>
+}
+
+// ====
+
+func.def @f32x2_to_i32x2_bitcast(%floats: vector<2xf32>) -> (vector<2xi32>) {
+  %bits = vector.bitcast %floats : vector<2xf32> to vector<2xi32>
+  func.return %bits : vector<2xi32>
+}
+
+// ====
+
+func.def @f16x2_to_i32_bitcast(%halves: vector<2xf16>) -> (vector<1xi32>) {
+  %bits = vector.bitcast %halves : vector<2xf16> to vector<1xi32>
+  func.return %bits : vector<1xi32>
+}
+
+// ====
+
+func.def @bf16x2_to_i32_bitcast(%halves: vector<2xbf16>) -> (vector<1xi32>) {
+  %bits = vector.bitcast %halves : vector<2xbf16> to vector<1xi32>
+  func.return %bits : vector<1xi32>
+}
+
+// ====
+
+func.def @i8x2_f16_shape_changing_bitcast(%bytes: vector<2xi8>, %half: vector<1xf16>) -> (vector<1xf16>, vector<2xi8>) {
+  %to_half = vector.bitcast %bytes : vector<2xi8> to vector<1xf16>
+  %to_bytes = vector.bitcast %half : vector<1xf16> to vector<2xi8>
+  func.return %to_half, %to_bytes : vector<1xf16>, vector<2xi8>
+}
+
+// ====
+
+func.def @i8x2_bf16_shape_changing_bitcast(%bytes: vector<2xi8>, %half: vector<1xbf16>) -> (vector<1xbf16>, vector<2xi8>) {
+  %to_half = vector.bitcast %bytes : vector<2xi8> to vector<1xbf16>
+  %to_bytes = vector.bitcast %half : vector<1xbf16> to vector<2xi8>
+  func.return %to_half, %to_bytes : vector<1xbf16>, vector<2xi8>
+}

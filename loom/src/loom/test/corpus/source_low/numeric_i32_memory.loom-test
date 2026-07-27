@@ -1,0 +1,90 @@
+// RUN: roundtrip
+
+kernel.def @i32_bitwise() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %loaded = vector.load %input_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
+  %mask = vector.constant 15 : vector<1xi32>
+  %masked = vector.andi %loaded, %mask : vector<1xi32>
+  %tag = vector.constant 240 : vector<1xi32>
+  %with_tag = vector.ori %masked, %tag : vector<1xi32>
+  %result = vector.xori %with_tag, %loaded : vector<1xi32>
+  vector.store %result, %output_view[%lane] : vector<1xi32>, view<64xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @i32_shift() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %loaded = vector.load %input_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
+  %shift = vector.constant 3 : vector<1xi32>
+  %left = vector.shli %loaded, %shift : vector<1xi32>
+  %logical = vector.shrui %loaded, %shift : vector<1xi32>
+  %arithmetic = vector.shrsi %loaded, %shift : vector<1xi32>
+  %joined = vector.ori %left, %logical : vector<1xi32>
+  %result = vector.xori %joined, %arithmetic : vector<1xi32>
+  vector.store %result, %output_view[%lane] : vector<1xi32>, view<64xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @i32_negative_literal() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %loaded = vector.load %input_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
+  %mask = vector.constant -1 : vector<1xi32>
+  %result = vector.xori %loaded, %mask : vector<1xi32>
+  vector.store %result, %output_view[%lane] : vector<1xi32>, view<64xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @i32_scalarized() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64x4xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xi32, #dense>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
+  %lane0 = vector.extract %loaded[0] : vector<4xi32> -> i32
+  %lane1 = vector.extract %loaded[1] : vector<4xi32> -> i32
+  %mask = scalar.constant 255 : i32
+  %masked = scalar.andi %lane0, %mask : i32
+  %shift = scalar.constant 3 : i32
+  %left = scalar.shli %masked, %shift : i32
+  %logical = scalar.shrui %lane1, %shift : i32
+  %tag = scalar.constant 240 : i32
+  %tagged = scalar.ori %left, %tag : i32
+  %invert = scalar.constant -1 : i32
+  %mixed = scalar.xori %tagged, %invert : i32
+  %lane2 = vector.extract %loaded[2] : vector<4xi32> -> i32
+  %lane3 = vector.extract %loaded[3] : vector<4xi32> -> i32
+  %result = vector.from_elements %mixed, %logical, %lane2, %lane3 : vector<4xi32>
+  vector.store %result, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  kernel.return
+}

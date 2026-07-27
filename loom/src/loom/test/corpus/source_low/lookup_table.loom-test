@@ -1,0 +1,103 @@
+// RUN: roundtrip
+
+kernel.def @f32_table_lookup_i8_codes() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%codes_buffer: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base_offset = index.constant 0 : offset
+  %code_stride = index.constant 4 : index
+  %base = index.mul %lane, %code_stride : index
+  %codes_view = buffer.view %codes_buffer[%base_offset] : buffer -> view<8xi8, #dense>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<8xf32, #dense>
+  %codes = vector.load %codes_view[%base] : view<8xi8, #dense> -> vector<4xi8>
+  %g0 = scalar.constant -1.0 : f32
+  %g1 = scalar.constant -0.5 : f32
+  %g2 = scalar.constant 0.5 : f32
+  %g3 = scalar.constant 1.5 : f32
+  %grid = vector.from_elements %g0, %g1, %g2, %g3 : vector<4xf32>
+  %decoded = vector.table.lookup %grid[%codes] : vector<4xf32>, vector<4xi8> -> vector<4xf32>
+  vector.store %decoded, %output_view[%base] : vector<4xf32>, view<8xf32, #dense>
+  kernel.return
+}
+
+// ====
+
+func.def @f32_table_lookup_i32_codes(%codes: vector<2xi32>) -> (vector<2xf32>) {
+  %g0 = scalar.constant 2.0 : f32
+  %g1 = scalar.constant -3.0 : f32
+  %g2 = scalar.constant 5.0 : f32
+  %grid = vector.from_elements %g0, %g1, %g2 : vector<3xf32>
+  %decoded = vector.table.lookup %grid[%codes] : vector<3xf32>, vector<2xi32> -> vector<2xf32>
+  func.return %decoded : vector<2xf32>
+}
+
+// ====
+
+func.def @f32_table_lookup_dynamic_grid(%grid: vector<3xf32>, %codes: vector<2xi32>) -> (vector<2xf32>) {
+  %decoded = vector.table.lookup %grid[%codes] : vector<3xf32>, vector<2xi32> -> vector<2xf32>
+  func.return %decoded : vector<2xf32>
+}
+
+// ====
+
+func.def @i8_table_lookup_fact_known_codes(%grid: vector<4xi8>) -> (vector<4xi8>) {
+  %c0 = scalar.constant 0 : i8
+  %c1 = scalar.constant 1 : i8
+  %c2 = scalar.constant 2 : i8
+  %c3 = scalar.constant 3 : i8
+  %codes = vector.from_elements %c2, %c0, %c3, %c1 : vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<4xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ====
+
+func.def @i8_table_lookup_constant_table() -> (vector<4xi8>) {
+  %g0 = scalar.constant -4 : i8
+  %g1 = scalar.constant -1 : i8
+  %g2 = scalar.constant 2 : i8
+  %g3 = scalar.constant 7 : i8
+  %grid = vector.from_elements %g0, %g1, %g2, %g3 : vector<4xi8>
+  %c0 = scalar.constant 0 : i8
+  %c1 = scalar.constant 1 : i8
+  %c2 = scalar.constant 2 : i8
+  %c3 = scalar.constant 3 : i8
+  %codes = vector.from_elements %c3, %c2, %c1, %c0 : vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<4xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ====
+
+func.def @i8_table_lookup_u4_dynamic_table(%grid: vector<16xi8>, %packed: vector<2xi8>) -> (vector<4xi8>) {
+  %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ====
+
+func.def @i8_table_lookup_u4_constant_table(%packed: vector<2xi8>) -> (vector<4xi8>) {
+  %g0 = scalar.constant 0 : i8
+  %g1 = scalar.constant -1 : i8
+  %g2 = scalar.constant 2 : i8
+  %g3 = scalar.constant -3 : i8
+  %g4 = scalar.constant 4 : i8
+  %g5 = scalar.constant -5 : i8
+  %g6 = scalar.constant 6 : i8
+  %g7 = scalar.constant -7 : i8
+  %g8 = scalar.constant 8 : i8
+  %g9 = scalar.constant -9 : i8
+  %g10 = scalar.constant 10 : i8
+  %g11 = scalar.constant -11 : i8
+  %g12 = scalar.constant 12 : i8
+  %g13 = scalar.constant -13 : i8
+  %g14 = scalar.constant 14 : i8
+  %g15 = scalar.constant -15 : i8
+  %grid = vector.from_elements %g0, %g1, %g2, %g3, %g4, %g5, %g6, %g7, %g8, %g9, %g10, %g11, %g12, %g13, %g14, %g15 : vector<16xi8>
+  %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}

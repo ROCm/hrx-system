@@ -15,14 +15,13 @@
 #include "iree/async/notification.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/internal/arena.h"
-#include "iree/base/internal/cpu.h"
 #include "iree/hal/drivers/local_sync/sync_event.h"
 #include "iree/hal/drivers/local_sync/sync_semaphore.h"
+#include "iree/hal/local/device_spec_builder.h"
 #include "iree/hal/local/executable_environment.h"
 #include "iree/hal/local/inline_command_buffer.h"
 #include "iree/hal/local/inline_dispatch.h"
 #include "iree/hal/local/local_executable.h"
-#include "iree/hal/local/local_executable_cache.h"
 #include "iree/hal/local/profile.h"
 #include "iree/hal/local/transient_buffer.h"
 #include "iree/hal/memory/cpu_slab_provider.h"
@@ -48,6 +47,9 @@ typedef struct iree_hal_sync_device_t {
   // Borrowed from the pool -- valid as long as the pool is retained.
   iree_async_proactor_t* proactor;
 
+  // Sink copied from device creation parameters for device-originated events.
+  iree_hal_device_event_sink_t event_sink;
+
   // Shared frontier tracker for cross-device causal ordering. Retained after
   // topology assignment and released during device destruction.
   iree_async_frontier_tracker_t* frontier_tracker;
@@ -68,6 +70,9 @@ typedef struct iree_hal_sync_device_t {
 
   // Optional provider used for creating/configuring collective channels.
   iree_hal_channel_provider_t* channel_provider;
+
+  // Immutable device facts captured at creation time.
+  iree_hal_device_spec_t* device_spec;
 
   iree_hal_device_topology_info_t topology_info;
 
@@ -165,12 +170,14 @@ iree_status_t iree_hal_sync_device_create(
     iree_hal_device_t** out_device) {
   IREE_ASSERT_ARGUMENT(params);
   IREE_ASSERT_ARGUMENT(create_params);
-  IREE_ASSERT_ARGUMENT(create_params->proactor_pool);
   IREE_ASSERT_ARGUMENT(!loader_count || loaders);
   IREE_ASSERT_ARGUMENT(device_allocator);
   IREE_ASSERT_ARGUMENT(out_device);
   *out_device = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_device_create_params_verify(create_params));
 
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
                                     iree_hal_sync_device_check_params(params));
@@ -199,12 +206,27 @@ iree_status_t iree_hal_sync_device_create(
 
   // Retain the proactor pool and acquire a proactor for this device.
   device->proactor_pool = create_params->proactor_pool;
+  device->event_sink = create_params->event_sink;
   iree_async_proactor_pool_retain(device->proactor_pool);
   iree_atomic_store(&device->epoch, 0, iree_memory_order_relaxed);
   iree_atomic_store(&device->next_profile_submission_id, 0,
                     iree_memory_order_relaxed);
   iree_status_t status =
       iree_async_proactor_pool_get(device->proactor_pool, 0, &device->proactor);
+  if (iree_status_is_ok(status)) {
+    iree_hal_local_device_spec_params_t spec_params = {
+        .logical_device_id = identifier,
+        .display_name = identifier,
+        .driver_id = IREE_SV("local-sync"),
+        .backend_id = IREE_SV("local"),
+        .queue_count = 1,
+        .default_queue_worker_count = 1,
+        .loader_count = loader_count,
+        .loaders = loaders,
+    };
+    status = iree_hal_local_device_spec_create(&spec_params, host_allocator,
+                                               &device->device_spec);
+  }
 
   if (iree_status_is_ok(status)) {
     status = iree_hal_sync_device_create_default_pool(
@@ -264,6 +286,7 @@ static void iree_hal_sync_device_destroy(iree_hal_device_t* base_device) {
   iree_hal_sync_device_clear_topology_info(device);
   iree_hal_allocator_release(device->device_allocator);
   iree_hal_channel_provider_release(device->channel_provider);
+  iree_hal_device_spec_release(device->device_spec);
   iree_async_proactor_pool_release(device->proactor_pool);
 
   iree_arena_block_pool_deinitialize(&device->large_block_pool);
@@ -291,12 +314,13 @@ static iree_hal_allocator_t* iree_hal_sync_device_allocator(
   return device->device_allocator;
 }
 
-static void iree_hal_sync_replace_device_allocator(
+static iree_status_t iree_hal_sync_replace_device_allocator(
     iree_hal_device_t* base_device, iree_hal_allocator_t* new_allocator) {
   iree_hal_sync_device_t* device = iree_hal_sync_device_cast(base_device);
   iree_hal_allocator_retain(new_allocator);
   iree_hal_allocator_release(device->device_allocator);
   device->device_allocator = new_allocator;
+  return iree_ok_status();
 }
 
 static void iree_hal_sync_replace_channel_provider(
@@ -313,51 +337,23 @@ static iree_status_t iree_hal_sync_device_trim(iree_hal_device_t* base_device) {
   return iree_hal_allocator_trim(device->device_allocator);
 }
 
-static iree_status_t iree_hal_sync_device_query_i64(
-    iree_hal_device_t* base_device, iree_string_view_t category,
-    iree_string_view_t key, int64_t* out_value) {
+static const iree_hal_device_spec_t* iree_hal_sync_device_spec(
+    iree_hal_device_t* base_device) {
   iree_hal_sync_device_t* device = iree_hal_sync_device_cast(base_device);
-  *out_value = 0;
-
-  if (iree_string_view_equal(category, IREE_SV("hal.device.id"))) {
-    *out_value =
-        iree_string_view_match_pattern(device->identifier, key) ? 1 : 0;
-    return iree_ok_status();
-  }
-
-  if (iree_string_view_equal(category, IREE_SV("hal.executable.format"))) {
-    *out_value =
-        iree_hal_query_any_executable_loader_support(
-            device->loader_count, device->loaders, /*caching_mode=*/0, key)
-            ? 1
-            : 0;
-    return iree_ok_status();
-  }
-
-  if (iree_string_view_equal(category, IREE_SV("hal.device"))) {
-    if (iree_string_view_equal(key, IREE_SV("concurrency"))) {
-      *out_value = 1;
-      return iree_ok_status();
-    }
-  } else if (iree_string_view_equal(category, IREE_SV("hal.dispatch"))) {
-    if (iree_string_view_equal(key, IREE_SV("concurrency"))) {
-      *out_value = 1;
-      return iree_ok_status();
-    }
-  } else if (iree_string_view_equal(category, IREE_SV("hal.cpu"))) {
-    return iree_cpu_lookup_data_by_key(key, out_value);
-  }
-
-  return iree_make_status(
-      IREE_STATUS_NOT_FOUND,
-      "unknown device configuration key value '%.*s :: %.*s'",
-      (int)category.size, category.data, (int)key.size, key.data);
+  return device->device_spec;
 }
 
-static iree_status_t iree_hal_sync_device_query_capabilities(
+static iree_status_t iree_hal_sync_device_sample_observation(
     iree_hal_device_t* base_device,
-    iree_hal_device_capabilities_t* out_capabilities) {
-  memset(out_capabilities, 0, sizeof(*out_capabilities));
+    iree_hal_device_observation_flags_t requested_flags,
+    iree_hal_device_observation_t* out_observation) {
+  iree_hal_sync_device_t* device = iree_hal_sync_device_cast(base_device);
+  if (iree_any_bit_set(requested_flags,
+                       IREE_HAL_DEVICE_OBSERVATION_FLAG_MEMORY)) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_device_observation_populate_memory_total_from_spec(
+            device->device_spec, out_observation));
+  }
   return iree_ok_status();
 }
 
@@ -428,13 +424,30 @@ static iree_status_t iree_hal_sync_device_create_event(
                                     out_event);
 }
 
-static iree_status_t iree_hal_sync_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+static iree_status_t iree_hal_sync_device_load_executable(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
   iree_hal_sync_device_t* device = iree_hal_sync_device_cast(base_device);
-  return iree_hal_local_executable_cache_create(
-      identifier, /*worker_capacity=*/1, device->loader_count, device->loaders,
-      iree_hal_device_host_allocator(base_device), out_executable_cache);
+  const iree_hal_device_identity_spec_t* identity =
+      iree_hal_device_spec_identity(device->device_spec);
+  IREE_ASSERT_EQ(identity->physical_device_count, 1);
+  const iree_hal_physical_device_affinity_t physical_device_affinity =
+      identity->physical_devices[0].physical_device_affinity;
+  if (!iree_all_bits_set(target->physical_device_affinity,
+                         physical_device_affinity)) {
+    return iree_make_status(
+        IREE_STATUS_INCOMPATIBLE,
+        "local executable target `%.*s:%.*s` affinity 0x%016" PRIx64
+        " does not cover physical-device affinity 0x%016" PRIx64,
+        (int)target->family.size, target->family.data,
+        (int)target->target_key.size, target->target_key.data,
+        target->physical_device_affinity, physical_device_affinity);
+  }
+  return iree_hal_executable_loader_select_and_load(
+      device->loader_count, device->loaders, target, load_params,
+      /*worker_capacity=*/1, out_executable);
 }
 
 static iree_status_t iree_hal_sync_device_import_file(
@@ -659,7 +672,7 @@ static void iree_hal_sync_device_profile_record_memory_event(
     event.offset = reservation->offset;
     if (type != IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_QUEUE_ALLOCA &&
         type != IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_QUEUE_DEALLOCA) {
-      event.length = reservation->length;
+      event.length = reservation->byte_length;
     }
   }
   iree_hal_sync_device_profile_populate_memory_event_pool_stats(pool, &event);
@@ -716,7 +729,7 @@ static void iree_hal_sync_device_profile_operation_record_begin(
 static void iree_hal_sync_device_profile_operation_record_end(
     iree_hal_sync_device_t* device,
     const iree_hal_sync_device_profile_operation_t* operation,
-    iree_status_t operation_status) {
+    iree_status_code_t operation_status_code) {
   iree_hal_local_profile_recorder_t* recorder = device->profile_recorder;
   if (IREE_UNLIKELY(!recorder || operation->submission_id == 0)) {
     return;
@@ -730,7 +743,7 @@ static void iree_hal_sync_device_profile_operation_record_end(
       iree_hal_local_profile_host_execution_event_info_default();
   event_info.type = operation->type;
   event_info.flags = operation->host_flags;
-  event_info.status_code = iree_status_code(operation_status);
+  event_info.status_code = operation_status_code;
   event_info.scope = operation->scope;
   event_info.submission_id = operation->submission_id;
   event_info.command_buffer_id = operation->command_buffer_id;
@@ -804,32 +817,69 @@ static iree_status_t iree_hal_sync_device_profiled_queue_op_end(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     const iree_hal_sync_device_profile_operation_t* operation,
     iree_status_t operation_status) {
-  iree_hal_sync_device_profile_operation_record_end(device, operation,
-                                                    operation_status);
+  iree_hal_sync_device_profile_operation_record_end(
+      device, operation, iree_status_code(operation_status));
   return iree_hal_sync_device_queue_op_end(device, signal_semaphore_list,
                                            operation_status);
 }
 
+static iree_status_t iree_hal_sync_device_create_queue_alloca_buffer(
+    iree_hal_sync_device_t* device, iree_hal_device_t* base_device,
+    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_params_t params,
+    iree_device_size_t allocation_size, iree_device_size_t byte_length,
+    iree_hal_alloca_flags_t flags,
+    iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
+  iree_hal_buffer_placement_t placement = {
+      .device = base_device,
+      .queue_affinity = queue_affinity,
+      .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_ASYNCHRONOUS,
+  };
+  if (iree_all_bits_set(flags, IREE_HAL_ALLOCA_FLAG_INDETERMINATE_LIFETIME)) {
+    placement.flags |= IREE_HAL_BUFFER_PLACEMENT_FLAG_INDETERMINATE_LIFETIME;
+  }
+  return iree_hal_local_transient_buffer_create(
+      placement, params, allocation_size, byte_length, device->host_allocator,
+      out_buffer);
+}
+
 static iree_status_t iree_hal_sync_device_queue_alloca_direct_profiled(
-    iree_hal_sync_device_t* device,
+    iree_hal_sync_device_t* device, iree_hal_device_t* base_device,
+    iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_params_t params, iree_device_size_t allocation_size,
+    iree_hal_alloca_flags_t flags,
     iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
   iree_hal_sync_device_profile_operation_t profile_operation;
   iree_hal_sync_device_profile_operation_initialize(
       IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ALLOCA, allocation_size,
       /*operation_count=*/1, &profile_operation);
 
-  bool queue_op_begun = false;
-  iree_status_t status = iree_hal_sync_device_profiled_queue_op_begin(
-      device, wait_semaphore_list, signal_semaphore_list, &profile_operation);
-  queue_op_begun = iree_status_is_ok(status);
+  iree_hal_buffer_t* transient_buffer = NULL;
+  iree_status_t status = iree_hal_sync_device_create_queue_alloca_buffer(
+      device, base_device, queue_affinity, params, allocation_size,
+      allocation_size, flags, &transient_buffer);
+  if (iree_status_is_ok(status)) {
+    iree_hal_sync_device_profile_operation_set_transient_buffer(
+        &profile_operation, transient_buffer);
+  }
 
-  iree_hal_buffer_t* buffer = NULL;
+  bool queue_op_begun = false;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_sync_device_profiled_queue_op_begin(
+        device, wait_semaphore_list, signal_semaphore_list, &profile_operation);
+    queue_op_begun = iree_status_is_ok(status);
+  }
+
+  iree_hal_buffer_t* backing_buffer = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_hal_allocator_allocate_buffer(
-        device->device_allocator, params, allocation_size, &buffer);
+        device->device_allocator, params, allocation_size, &backing_buffer);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_local_transient_buffer_stage_backing(transient_buffer,
+                                                  backing_buffer);
+    iree_hal_local_transient_buffer_commit(transient_buffer);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_sync_device_profile_record_memory_event(
@@ -839,41 +889,57 @@ static iree_status_t iree_hal_sync_device_queue_alloca_direct_profiled(
         /*pool=*/NULL, params, /*reservation=*/NULL,
         /*frontier_entry_count=*/0);
   }
+  iree_hal_buffer_release(backing_buffer);
   if (queue_op_begun) {
     status = iree_hal_sync_device_profiled_queue_op_end(
         device, signal_semaphore_list, &profile_operation, status);
   }
   if (iree_status_is_ok(status)) {
-    *out_buffer = buffer;
+    *out_buffer = transient_buffer;
   } else {
-    iree_hal_buffer_release(buffer);
+    iree_hal_buffer_release(transient_buffer);
   }
   return status;
 }
 
 static iree_status_t iree_hal_sync_device_queue_alloca_direct(
-    iree_hal_sync_device_t* device,
+    iree_hal_sync_device_t* device, iree_hal_device_t* base_device,
+    iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_params_t params, iree_device_size_t allocation_size,
+    iree_hal_alloca_flags_t flags,
     iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
-  iree_status_t status =
-      iree_hal_sync_device_queue_op_begin(device, wait_semaphore_list);
-  bool queue_op_begun = iree_status_is_ok(status);
+  iree_hal_buffer_t* transient_buffer = NULL;
+  iree_status_t status = iree_hal_sync_device_create_queue_alloca_buffer(
+      device, base_device, queue_affinity, params, allocation_size,
+      allocation_size, flags, &transient_buffer);
 
-  iree_hal_buffer_t* buffer = NULL;
+  bool queue_op_begun = false;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_sync_device_queue_op_begin(device, wait_semaphore_list);
+    queue_op_begun = iree_status_is_ok(status);
+  }
+
+  iree_hal_buffer_t* backing_buffer = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_hal_allocator_allocate_buffer(
-        device->device_allocator, params, allocation_size, &buffer);
+        device->device_allocator, params, allocation_size, &backing_buffer);
   }
+  if (iree_status_is_ok(status)) {
+    iree_hal_local_transient_buffer_stage_backing(transient_buffer,
+                                                  backing_buffer);
+    iree_hal_local_transient_buffer_commit(transient_buffer);
+  }
+  iree_hal_buffer_release(backing_buffer);
   if (queue_op_begun) {
     status = iree_hal_sync_device_queue_op_end(device, signal_semaphore_list,
                                                status);
   }
   if (iree_status_is_ok(status)) {
-    *out_buffer = buffer;
+    *out_buffer = transient_buffer;
   } else {
-    iree_hal_buffer_release(buffer);
+    iree_hal_buffer_release(transient_buffer);
   }
   return status;
 }
@@ -893,26 +959,21 @@ static iree_status_t iree_hal_sync_device_queue_alloca_profiled(
 
   if (allocation_size == 0) {
     return iree_hal_sync_device_queue_alloca_direct_profiled(
-        device, wait_semaphore_list, signal_semaphore_list, params,
-        allocation_size, out_buffer);
+        device, base_device, queue_affinity, wait_semaphore_list,
+        signal_semaphore_list, params, allocation_size, flags, out_buffer);
   }
   if (!allocation_pool) {
     return iree_hal_sync_device_queue_alloca_direct_profiled(
-        device, wait_semaphore_list, signal_semaphore_list, params,
-        allocation_size, out_buffer);
+        device, base_device, queue_affinity, wait_semaphore_list,
+        signal_semaphore_list, params, allocation_size, flags, out_buffer);
   }
 
   iree_hal_buffer_t* backing_buffer = NULL;
   iree_hal_buffer_t* transient_buffer = NULL;
   bool queue_op_begun = false;
-  iree_hal_buffer_placement_t placement = {
-      .device = base_device,
-      .queue_affinity = queue_affinity,
-      .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_ASYNCHRONOUS,
-  };
-  iree_status_t status = iree_hal_local_transient_buffer_create(
-      placement, params, allocation_size, allocation_size,
-      device->host_allocator, &transient_buffer);
+  iree_status_t status = iree_hal_sync_device_create_queue_alloca_buffer(
+      device, base_device, queue_affinity, params, allocation_size,
+      allocation_size, flags, &transient_buffer);
   if (iree_status_is_ok(status)) {
     iree_hal_sync_device_profile_operation_set_transient_buffer(
         &profile_operation, transient_buffer);
@@ -959,7 +1020,14 @@ static iree_status_t iree_hal_sync_device_queue_alloca(
     iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
   iree_hal_sync_device_t* device = iree_hal_sync_device_cast(base_device);
   iree_hal_pool_t* allocation_pool = pool;
+  if (iree_hal_queue_affinity_is_empty(queue_affinity)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "queue alloca affinity must not be empty");
+  }
+  queue_affinity = ((iree_hal_queue_affinity_t)1)
+                   << iree_hal_queue_affinity_find_first_set(queue_affinity);
   iree_hal_buffer_params_canonicalize(&params);
+  params.queue_affinity = queue_affinity;
   iree_hal_allocator_query_buffer_compatibility(
       device->device_allocator, params, allocation_size, &params,
       /*out_allocation_size=*/NULL);
@@ -972,13 +1040,13 @@ static iree_status_t iree_hal_sync_device_queue_alloca(
 
   if (allocation_size == 0) {
     return iree_hal_sync_device_queue_alloca_direct(
-        device, wait_semaphore_list, signal_semaphore_list, params,
-        allocation_size, out_buffer);
+        device, base_device, queue_affinity, wait_semaphore_list,
+        signal_semaphore_list, params, allocation_size, flags, out_buffer);
   }
   if (!allocation_pool) {
     return iree_hal_sync_device_queue_alloca_direct(
-        device, wait_semaphore_list, signal_semaphore_list, params,
-        allocation_size, out_buffer);
+        device, base_device, queue_affinity, wait_semaphore_list,
+        signal_semaphore_list, params, allocation_size, flags, out_buffer);
   }
 
   IREE_RETURN_IF_ERROR(
@@ -990,15 +1058,10 @@ static iree_status_t iree_hal_sync_device_queue_alloca(
       allocation_pool, params, allocation_size,
       /*requester_frontier=*/NULL, iree_infinite_timeout(), &backing_buffer);
   if (iree_status_is_ok(status)) {
-    iree_hal_buffer_placement_t placement = {
-        .device = base_device,
-        .queue_affinity = queue_affinity,
-        .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_ASYNCHRONOUS,
-    };
-    status = iree_hal_local_transient_buffer_create(
-        placement, params, iree_hal_buffer_allocation_size(backing_buffer),
-        iree_hal_buffer_byte_length(backing_buffer), device->host_allocator,
-        &transient_buffer);
+    status = iree_hal_sync_device_create_queue_alloca_buffer(
+        device, base_device, queue_affinity, params,
+        iree_hal_buffer_allocation_size(backing_buffer),
+        iree_hal_buffer_byte_length(backing_buffer), flags, &transient_buffer);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_local_transient_buffer_stage_backing(transient_buffer,
@@ -1446,7 +1509,7 @@ static iree_status_t iree_hal_sync_device_queue_host_call_profiled(
 
   if (is_nonblocking || call_status_code == IREE_STATUS_DEFERRED) {
     iree_hal_sync_device_profile_operation_record_end(
-        device, &profile_operation, iree_status_from_code(call_status_code));
+        device, &profile_operation, call_status_code);
     // Dependencies have already been signaled by contract; the callback status
     // cannot be represented on the queue timeline. Deferred callbacks will
     // signal in the future or are fire-and-forget.
@@ -1458,7 +1521,7 @@ static iree_status_t iree_hal_sync_device_queue_host_call_profiled(
         device, signal_semaphore_list, &profile_operation, call_status);
   } else {
     iree_hal_sync_device_profile_operation_record_end(
-        device, &profile_operation, call_status);
+        device, &profile_operation, iree_status_code(call_status));
     iree_async_frontier_tracker_fail_axis(
         device->frontier_tracker, device->axis,
         iree_status_from_code(iree_status_code(call_status)));
@@ -1733,15 +1796,15 @@ static const iree_hal_device_vtable_t iree_hal_sync_device_vtable = {
     .replace_device_allocator = iree_hal_sync_replace_device_allocator,
     .replace_channel_provider = iree_hal_sync_replace_channel_provider,
     .trim = iree_hal_sync_device_trim,
-    .query_i64 = iree_hal_sync_device_query_i64,
-    .query_capabilities = iree_hal_sync_device_query_capabilities,
+    .device_spec = iree_hal_sync_device_spec,
+    .sample_observation = iree_hal_sync_device_sample_observation,
     .topology_info = iree_hal_sync_device_topology_info,
     .refine_topology_edge = iree_hal_sync_device_refine_topology_edge,
     .assign_topology_info = iree_hal_sync_device_assign_topology_info,
     .create_channel = iree_hal_sync_device_create_channel,
     .create_command_buffer = iree_hal_sync_device_create_command_buffer,
     .create_event = iree_hal_sync_device_create_event,
-    .create_executable_cache = iree_hal_sync_device_create_executable_cache,
+    .load_executable = iree_hal_sync_device_load_executable,
     .import_file = iree_hal_sync_device_import_file,
     .create_semaphore = iree_hal_sync_device_create_semaphore,
     .query_semaphore_compatibility =

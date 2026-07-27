@@ -1,0 +1,141 @@
+// RUN: pass sink-single-use-reads
+
+func.def @sinks_vector_load_to_single_same_block_use(%input: buffer, %base: offset, %a: i32, %b: i32) -> (f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %input[%base] : buffer -> view<16xf32, %layout>
+  %loaded = vector.load %view[0] : view<16xf32, %layout> -> vector<4xf32>
+  %sum = test.addi %a, %b : i32
+  %lane = vector.extract %loaded[0] : vector<4xf32> -> f32
+  test.use %sum : i32
+  func.return %lane : f32
+}
+
+// ----
+func.def @sinks_vector_load_to_single_same_block_use(%input: buffer, %base: offset, %a: i32, %b: i32) -> (f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %input[%base] : buffer -> view<16xf32, %layout>
+  %sum = test.addi %a, %b : i32
+  %loaded = vector.load %view[0] : view<16xf32, %layout> -> vector<4xf32>
+  %lane = vector.extract %loaded[0] : vector<4xf32> -> f32
+  test.use %sum : i32
+  func.return %lane : f32
+}
+
+// ====
+
+func.def @keeps_vector_load_before_intervening_use(%input: buffer, %base: offset, %a: i32, %b: i32) -> (f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %input[%base] : buffer -> view<16xf32, %layout>
+  %loaded = vector.load %view[0] : view<16xf32, %layout> -> vector<4xf32>
+  %sum = test.addi %a, %b : i32
+  test.use %sum : i32
+  %lane = vector.extract %loaded[0] : vector<4xf32> -> f32
+  func.return %lane : f32
+}
+
+// ----
+func.def @keeps_vector_load_before_intervening_use(%input: buffer, %base: offset, %a: i32, %b: i32) -> (f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %input[%base] : buffer -> view<16xf32, %layout>
+  %loaded = vector.load %view[0] : view<16xf32, %layout> -> vector<4xf32>
+  %sum = test.addi %a, %b : i32
+  test.use %sum : i32
+  %lane = vector.extract %loaded[0] : vector<4xf32> -> f32
+  func.return %lane : f32
+}
+
+// ====
+
+func.def @keeps_vector_load_before_intervening_write(%input: buffer, %output: buffer, %base: offset, %value: vector<4xf32>) -> (f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<16xf32, %layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xf32, %layout>
+  %loaded = vector.load %input_view[0] : view<16xf32, %layout> -> vector<4xf32>
+  vector.store %value, %output_view[0] : vector<4xf32>, view<16xf32, %layout>
+  %lane = vector.extract %loaded[0] : vector<4xf32> -> f32
+  func.return %lane : f32
+}
+
+// ----
+func.def @keeps_vector_load_before_intervening_write(%input: buffer, %output: buffer, %base: offset, %value: vector<4xf32>) -> (f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<16xf32, %layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xf32, %layout>
+  %loaded = vector.load %input_view[0] : view<16xf32, %layout> -> vector<4xf32>
+  vector.store %value, %output_view[0] : vector<4xf32>, view<16xf32, %layout>
+  %lane = vector.extract %loaded[0] : vector<4xf32> -> f32
+  func.return %lane : f32
+}
+
+// ====
+
+func.def @keeps_vector_load_with_multiple_operand_uses(%input: buffer, %base: offset, %a: i32, %b: i32) -> (f32, f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %input[%base] : buffer -> view<16xf32, %layout>
+  %loaded = vector.load %view[0] : view<16xf32, %layout> -> vector<4xf32>
+  %sum = test.addi %a, %b : i32
+  %lane0 = vector.extract %loaded[0] : vector<4xf32> -> f32
+  %lane1 = vector.extract %loaded[1] : vector<4xf32> -> f32
+  test.use %sum : i32
+  func.return %lane0, %lane1 : f32, f32
+}
+
+// ----
+func.def @keeps_vector_load_with_multiple_operand_uses(%input: buffer, %base: offset, %a: i32, %b: i32) -> (f32, f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %input[%base] : buffer -> view<16xf32, %layout>
+  %loaded = vector.load %view[0] : view<16xf32, %layout> -> vector<4xf32>
+  %sum = test.addi %a, %b : i32
+  %lane0 = vector.extract %loaded[0] : vector<4xf32> -> f32
+  %lane1 = vector.extract %loaded[1] : vector<4xf32> -> f32
+  test.use %sum : i32
+  func.return %lane0, %lane1 : f32, f32
+}
+
+// ====
+
+func.def @keeps_single_lane_vector_load_in_place(%input: buffer, %base: offset, %a: i32, %b: i32) -> (f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %input[%base] : buffer -> view<16xf32, %layout>
+  %loaded = vector.load %view[0] : view<16xf32, %layout> -> vector<1xf32>
+  %sum = test.addi %a, %b : i32
+  %lane = vector.extract %loaded[0] : vector<1xf32> -> f32
+  test.use %sum : i32
+  func.return %lane : f32
+}
+
+// ----
+func.def @keeps_single_lane_vector_load_in_place(%input: buffer, %base: offset, %a: i32, %b: i32) -> (f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %input[%base] : buffer -> view<16xf32, %layout>
+  %loaded = vector.load %view[0] : view<16xf32, %layout> -> vector<1xf32>
+  %sum = test.addi %a, %b : i32
+  %lane = vector.extract %loaded[0] : vector<1xf32> -> f32
+  test.use %sum : i32
+  func.return %lane : f32
+}
+
+// ====
+
+func.def @sinks_fragment_rhs_load_to_mma(%rhs_buffer: buffer, %base: offset, %lhs: vector<16xbf16>, %init: vector<8xf32>, %scale: vector<8xf32>) -> (vector<8xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xbf16, %layout>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%m, %n] : view<16x16xbf16, %layout> -> vector<16xbf16>
+  %scaled = vector.mulf %init, %scale : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %scaled : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+func.def @sinks_fragment_rhs_load_to_mma(%rhs_buffer: buffer, %base: offset, %lhs: vector<16xbf16>, %init: vector<8xf32>, %scale: vector<8xf32>) -> (vector<8xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xbf16, %layout>
+  %scaled = vector.mulf %init, %scale : vector<8xf32>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%m, %n] : view<16x16xbf16, %layout> -> vector<16xbf16>
+  %result = vector.mma %lhs, %rhs, %scaled : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}

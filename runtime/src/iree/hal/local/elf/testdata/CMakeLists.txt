@@ -9,18 +9,62 @@
 
 iree_add_all_subdirs()
 
-file(GLOB _GLOB_ELEMENTWISE_MUL_X_SO LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS elementwise_mul_*.so)
 iree_c_embed_data(
   NAME
-    elementwise_mul
+    elementwise_mul_compatibility
   SRCS
-    "${_GLOB_ELEMENTWISE_MUL_X_SO}"
+    "elementwise_mul_arm_32.so"
+    "elementwise_mul_arm_64.so"
+    "elementwise_mul_riscv_32.so"
+    "elementwise_mul_riscv_64.so"
+    "elementwise_mul_x86_32.so"
+    "elementwise_mul_x86_64.so"
   C_FILE_OUTPUT
-    "elementwise_mul.c"
+    "elementwise_mul_compatibility.c"
   H_FILE_OUTPUT
-    "elementwise_mul.h"
+    "elementwise_mul_compatibility.h"
+  TESTONLY
   FLATTEN
   PUBLIC
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+set(_elementwise_mul_library_so_platform_linkopts "")
+if(CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT MSVC)
+  list(APPEND _elementwise_mul_library_so_platform_linkopts "-fno-sanitize-link-runtime")
+endif()
+iree_cc_library(
+  NAME
+    elementwise_mul_library.so
+  COPTS
+    "-fno-sanitize=all"
+  SRCS
+    "elementwise_mul_library.c"
+  DEPS
+    iree::hal::local::executable_library
+  LINKOPTS
+    "-nostdlib"
+    "-Wl,--hash-style=sysv"
+    ${_elementwise_mul_library_so_platform_linkopts}
+  TESTONLY
+  SHARED
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_c_embed_data(
+  NAME
+    elementwise_mul_native
+  SRCS
+    "$<TARGET_FILE:iree::hal::local::elf::testdata::elementwise_mul_library.so>"
+  C_FILE_OUTPUT
+    "elementwise_mul_native.c"
+  H_FILE_OUTPUT
+    "elementwise_mul_native.h"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

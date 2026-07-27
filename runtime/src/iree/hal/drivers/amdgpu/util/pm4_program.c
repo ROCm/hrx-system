@@ -96,16 +96,17 @@ iree_status_t iree_hal_amdgpu_pm4_program_initialize_with_stats(
   return status;
 }
 
-iree_status_t iree_hal_amdgpu_pm4_program_release(
+void iree_hal_amdgpu_pm4_program_deinitialize(
     iree_hal_amdgpu_pm4_program_t* program) {
-  if (!program || !program->dwords) return iree_ok_status();
+  if (!program) return;
+  if (!program->dwords) {
+    memset(program, 0, sizeof(*program));
+    return;
+  }
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, program->byte_length);
-  iree_status_t status = iree_hsa_amd_memory_pool_free(
-      IREE_LIBHSA(program->libhsa), program->dwords);
-  if (iree_status_is_ok(status)) {
-    memset(program, 0, sizeof(*program));
-  }
+  iree_status_ignore(iree_hsa_amd_memory_pool_free(IREE_LIBHSA(program->libhsa),
+                                                   program->dwords));
+  memset(program, 0, sizeof(*program));
   IREE_TRACE_ZONE_END(z0);
-  return status;
 }

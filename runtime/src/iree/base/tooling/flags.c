@@ -73,6 +73,10 @@ typedef struct iree_flag_t {
 typedef struct iree_flag_registry_t {
   const char* program_name;
   const char* usage;
+  // Optional filter applied to default `--help` output.
+  iree_flag_help_filter_fn_t help_filter;
+  // User data passed to |help_filter|.
+  void* help_filter_user_data;
 
   // Total number of entries in the |flags| list.
   int flag_count;
@@ -87,6 +91,8 @@ typedef struct iree_flag_registry_t {
 static iree_flag_registry_t iree_flag_registry = {
     .program_name = NULL,
     .usage = NULL,
+    .help_filter = NULL,
+    .help_filter_user_data = NULL,
     .flag_count = 0,
 };
 
@@ -115,12 +121,30 @@ int iree_flag_register(const char* file, int line, iree_flag_type_t type,
   return flag_ordinal;
 }
 
+static bool iree_flag_name_char_equal(char lhs, char rhs) {
+  return lhs == rhs || (lhs == '_' && rhs == '-') || (lhs == '-' && rhs == '_');
+}
+
+static bool iree_flag_name_equal(iree_string_view_t registered_name,
+                                 iree_string_view_t query_name) {
+  if (registered_name.size != query_name.size) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < registered_name.size; ++i) {
+    if (!iree_flag_name_char_equal(registered_name.data[i],
+                                   query_name.data[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Returns the flag registration with the given |name| or NULL if not found.
 static iree_flag_t* iree_flag_lookup(iree_string_view_t name) {
   iree_flag_registry_t* registry = &iree_flag_registry;
   for (int i = 0; i < registry->flag_count; ++i) {
     iree_flag_t* flag = &registry->flags[i];
-    if (iree_string_view_equal(flag->name, name)) {
+    if (iree_flag_name_equal(flag->name, name)) {
       return flag;
     }
   }
@@ -223,6 +247,13 @@ void iree_flags_set_usage(const char* program_name, const char* usage) {
   iree_flag_registry_t* registry = &iree_flag_registry;
   registry->program_name = program_name;
   registry->usage = usage;
+}
+
+void iree_flags_set_help_filter(iree_flag_help_filter_fn_t filter,
+                                void* user_data) {
+  iree_flag_registry_t* registry = &iree_flag_registry;
+  registry->help_filter = filter;
+  registry->help_filter_user_data = user_data;
 }
 
 // Parses a flag value from the given string and stores it.
@@ -340,10 +371,69 @@ static void iree_flag_dump(iree_flag_dump_mode_t mode, FILE* file,
   iree_flag_print(file, flag);
 }
 
+static void iree_flags_dump_filtered(iree_flag_dump_mode_t mode, FILE* file,
+                                     iree_flag_help_filter_fn_t filter,
+                                     void* filter_user_data) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Always sort the registry; though we may dump flags multiple times this is
+  // not a hot path and this is easier than trying to keep track of whether we
+  // need to or not.
+  iree_flag_registry_sort(&iree_flag_registry);
+
+  const char* last_file = NULL;
+  for (size_t i = 0; i < iree_flag_registry.flag_count; ++i) {
+    iree_flag_t* flag = &iree_flag_registry.flags[i];
+    if (filter != NULL && !filter(iree_make_cstring_view(flag->file),
+                                  flag->name, filter_user_data)) {
+      continue;
+    }
+    if (iree_all_bits_set(mode, IREE_FLAG_DUMP_MODE_VERBOSE)) {
+      if (last_file) {
+        fprintf(file, "\n");
+      }
+      if (!last_file || strcmp(flag->file, last_file) != 0) {
+        fprintf(file,
+                "# "
+                "===-----------------------------------------------------------"
+                "-----------===\n");
+        fprintf(file, "# Flags in %s\n", flag->file);
+        fprintf(file,
+                "# "
+                "===-----------------------------------------------------------"
+                "-----------===\n\n");
+        last_file = flag->file;
+      }
+    }
+    iree_flag_dump(mode, file, flag);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+}
+
+void iree_flags_dump(iree_flag_dump_mode_t mode, FILE* file) {
+  iree_flags_dump_filtered(mode, file, /*filter=*/NULL,
+                           /*filter_user_data=*/NULL);
+}
+
 static iree_status_t iree_flags_parse_help(iree_string_view_t flag_name,
                                            void* storage,
                                            iree_string_view_t value) {
   iree_flag_registry_t* registry = &iree_flag_registry;
+  iree_flag_help_filter_fn_t help_filter = NULL;
+  void* help_filter_user_data = NULL;
+  if (iree_string_view_is_empty(value)) {
+    help_filter = registry->help_filter;
+    help_filter_user_data = registry->help_filter_user_data;
+  } else if (!iree_string_view_equal(value, iree_make_cstring_view("all"))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported --%.*s value '%.*s'; use --%.*s or "
+                            "--%.*s=all",
+                            (int)flag_name.size, flag_name.data,
+                            (int)value.size, value.data, (int)flag_name.size,
+                            flag_name.data, (int)flag_name.size,
+                            flag_name.data);
+  }
 
   fprintf(stdout,
           "# "
@@ -358,14 +448,15 @@ static iree_status_t iree_flags_parse_help(iree_string_view_t flag_name,
   if (registry->usage) {
     fprintf(stdout, "%s\n", registry->usage);
   }
-  iree_flags_dump(IREE_FLAG_DUMP_MODE_VERBOSE, stdout);
+  iree_flags_dump_filtered(IREE_FLAG_DUMP_MODE_VERBOSE, stdout, help_filter,
+                           help_filter_user_data);
   fprintf(stdout, "\n");
 
   return iree_ok_status();
 }
 static void iree_flags_print_help(iree_string_view_t flag_name, void* storage,
                                   FILE* file) {
-  fprintf(file, "# --%.*s\n", (int)flag_name.size, flag_name.data);
+  fprintf(file, "# --%.*s[=all]\n", (int)flag_name.size, flag_name.data);
 }
 IREE_FLAG_CALLBACK(iree_flags_parse_help, iree_flags_print_help, NULL, help,
                    "Displays command line usage information.");
@@ -463,42 +554,9 @@ void iree_flags_parse_checked(iree_flags_parse_mode_t mode, int* argc,
   fprintf(stderr, "\x1b[31mFLAGS ERROR: (╯°□°)╯︵👻\x1b[0m\n");
   iree_status_fprint(stderr, status);
   fflush(stderr);
+  iree_status_free(status);
 
   exit(EXIT_FAILURE);
-}
-
-void iree_flags_dump(iree_flag_dump_mode_t mode, FILE* file) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Always sort the registry; though we may dump flags multiple times this is
-  // not a hot path and this is easier than trying to keep track of whether we
-  // need to or not.
-  iree_flag_registry_sort(&iree_flag_registry);
-
-  const char* last_file = NULL;
-  for (size_t i = 0; i < iree_flag_registry.flag_count; ++i) {
-    iree_flag_t* flag = &iree_flag_registry.flags[i];
-    if (iree_all_bits_set(mode, IREE_FLAG_DUMP_MODE_VERBOSE)) {
-      if (last_file) {
-        fprintf(file, "\n");
-      }
-      if (!last_file || strcmp(flag->file, last_file) != 0) {
-        fprintf(file,
-                "# "
-                "===-----------------------------------------------------------"
-                "-----------===\n");
-        fprintf(file, "# Flags in %s\n", flag->file);
-        fprintf(file,
-                "# "
-                "===-----------------------------------------------------------"
-                "-----------===\n\n");
-        last_file = flag->file;
-      }
-    }
-    iree_flag_dump(mode, file, flag);
-  }
-
-  IREE_TRACE_ZONE_END(z0);
 }
 
 //===----------------------------------------------------------------------===//
@@ -616,6 +674,12 @@ IREE_FLAG_CALLBACK(iree_flags_parse_flagfile, iree_flags_print_flagfile, NULL,
 #else
 
 void iree_flags_set_usage(const char* program_name, const char* usage) {}
+
+void iree_flags_set_help_filter(iree_flag_help_filter_fn_t filter,
+                                void* user_data) {
+  (void)filter;
+  (void)user_data;
+}
 
 int iree_flags_parse(iree_flags_parse_mode_t mode, int* argc, char*** argv) {
   return 0;

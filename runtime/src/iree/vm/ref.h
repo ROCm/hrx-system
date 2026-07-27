@@ -202,15 +202,13 @@ static inline iree_vm_ref_t iree_vm_ref_null(void) {
 //  iree_vm_ref_t my_ref;
 //  iree_vm_ref_wrap_assign(new MyType(), IREE_VM_REF_TYPE_MY_TYPE, &my_ref);
 //  iree_vm_ref_release(&my_ref);
-IREE_API_EXPORT iree_status_t iree_vm_ref_wrap_assign(void* ptr,
-                                                      iree_vm_ref_type_t type,
-                                                      iree_vm_ref_t* out_ref);
+IREE_API_EXPORT void iree_vm_ref_wrap_assign(void* ptr, iree_vm_ref_type_t type,
+                                             iree_vm_ref_t* out_ref);
 
 // Wraps a raw pointer in a iree_vm_ref_t reference and retains it in |out_ref|.
 // |out_ref| will be released if it already contains a reference.
-IREE_API_EXPORT iree_status_t iree_vm_ref_wrap_retain(void* ptr,
-                                                      iree_vm_ref_type_t type,
-                                                      iree_vm_ref_t* out_ref);
+IREE_API_EXPORT void iree_vm_ref_wrap_retain(void* ptr, iree_vm_ref_type_t type,
+                                             iree_vm_ref_t* out_ref);
 
 // Checks that the given reference-counted pointer |ref| is of |type|.
 static inline iree_status_t iree_vm_ref_check(const iree_vm_ref_t ref,

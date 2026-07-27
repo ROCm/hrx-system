@@ -630,7 +630,7 @@ static void BM_Validate(benchmark::State& state) {
   for (auto _ : state) {
     iree_status_t status = iree_async_frontier_validate(storage.frontier());
     benchmark::DoNotOptimize(status);
-    // status is ok_status (NULL pointer), no free needed.
+    IREE_CHECK_OK(status);
   }
   state.SetItemsProcessed(state.iterations());
 }

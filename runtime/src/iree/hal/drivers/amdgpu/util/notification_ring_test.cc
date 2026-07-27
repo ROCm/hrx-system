@@ -41,14 +41,26 @@ typedef struct RetireCallbackState {
   iree_hal_amdgpu_reclaim_entry_t* entry;
   // Submission epoch observed by the callback.
   uint64_t epoch;
+  // Retire flags observed by the callback.
+  iree_hal_amdgpu_reclaim_retire_flags_t flags;
   // Number of times the callback has run.
   int callback_count;
 } RetireCallbackState;
 
 static void VerifySemaphoreNotVisibleBeforePreSignalAction(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
-    iree_status_t status) {
-  IREE_EXPECT_OK(status);
+    const iree_status_t status) {
+  IREE_EXPECT_OK(iree_status_clone(status));
+  EXPECT_NE(entry, nullptr);
+  auto* state = static_cast<PreSignalActionState*>(user_data);
+  EXPECT_EQ(iree_async_semaphore_query(state->semaphore), 0u);
+  ++state->callback_count;
+}
+
+static void VerifySemaphoreNotVisibleBeforeFailedPreSignalAction(
+    iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
+    const iree_status_t status) {
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_ABORTED);
   EXPECT_NE(entry, nullptr);
   auto* state = static_cast<PreSignalActionState*>(user_data);
   EXPECT_EQ(iree_async_semaphore_query(state->semaphore), 0u);
@@ -56,12 +68,14 @@ static void VerifySemaphoreNotVisibleBeforePreSignalAction(
 }
 
 static void VerifySemaphoreNotVisibleBeforeRetireCallback(
-    iree_hal_amdgpu_reclaim_entry_t* entry, uint64_t epoch, void* user_data) {
+    iree_hal_amdgpu_reclaim_entry_t* entry, uint64_t epoch,
+    iree_hal_amdgpu_reclaim_retire_flags_t flags, void* user_data) {
   EXPECT_NE(entry, nullptr);
   auto* state = static_cast<RetireCallbackState*>(user_data);
   EXPECT_EQ(iree_async_semaphore_query(state->semaphore), 0u);
   state->entry = entry;
   state->epoch = epoch;
+  state->flags = flags;
   ++state->callback_count;
 }
 
@@ -131,6 +145,7 @@ struct NotificationRingTest : public ::testing::Test {
   // appropriate epoch signal value (INITIAL - N).
   void SimulateCompletions(iree_hal_amdgpu_notification_ring_t* ring,
                            uint64_t total_completed) {
+    iree_hal_amdgpu_notification_ring_publish_epoch(ring, total_completed);
     hsa_signal_value_t target_value =
         (hsa_signal_value_t)(IREE_HAL_AMDGPU_EPOCH_INITIAL_VALUE -
                              total_completed);
@@ -702,15 +717,15 @@ TEST_F(NotificationRingTest, PreSignalActionRunsBeforeSemaphorePublication) {
   IREE_ASSERT_OK_AND_ASSIGN(auto ring, InitializeRing());
   iree_async_semaphore_t* semaphore = CreateSemaphore();
   PreSignalActionState action_state = {
-      .semaphore = semaphore,
-      .callback_count = 0,
+      /*.semaphore=*/semaphore,
+      /*.callback_count=*/0,
   };
 
   iree_hal_amdgpu_reclaim_entry_t* reclaim_entry =
       ReclaimEntryForNextEpoch(ring.get());
   reclaim_entry->pre_signal_action = {
-      .fn = VerifySemaphoreNotVisibleBeforePreSignalAction,
-      .user_data = &action_state,
+      /*.fn=*/VerifySemaphoreNotVisibleBeforePreSignalAction,
+      /*.user_data=*/&action_state,
   };
   uint64_t epoch = iree_hal_amdgpu_notification_ring_advance_epoch(ring.get());
   PushNotification(ring.get(), epoch, semaphore, 1);
@@ -731,10 +746,11 @@ TEST_F(NotificationRingTest, RetireCallbackRunsBeforeSemaphorePublication) {
   IREE_ASSERT_OK_AND_ASSIGN(auto ring, InitializeRing());
   iree_async_semaphore_t* semaphore = CreateSemaphore();
   RetireCallbackState callback_state = {
-      .semaphore = semaphore,
-      .entry = nullptr,
-      .epoch = 0,
-      .callback_count = 0,
+      /*.semaphore=*/semaphore,
+      /*.entry=*/nullptr,
+      /*.epoch=*/0,
+      /*.flags=*/IREE_HAL_AMDGPU_RECLAIM_RETIRE_FLAG_NONE,
+      /*.callback_count=*/0,
   };
 
   iree_hal_amdgpu_reclaim_entry_t* reclaim_entry =
@@ -754,7 +770,55 @@ TEST_F(NotificationRingTest, RetireCallbackRunsBeforeSemaphorePublication) {
   EXPECT_EQ(callback_state.callback_count, 1);
   EXPECT_EQ(callback_state.entry, reclaim_entry);
   EXPECT_EQ(callback_state.epoch, epoch);
+  EXPECT_EQ(callback_state.flags, IREE_HAL_AMDGPU_RECLAIM_RETIRE_FLAG_NONE);
   EXPECT_EQ(iree_async_semaphore_query(semaphore), 1u);
+
+  iree_async_semaphore_release(semaphore);
+}
+
+TEST_F(NotificationRingTest, FailAllRetireCallbackRunsBeforeSemaphoreFailure) {
+  IREE_ASSERT_OK_AND_ASSIGN(auto ring, InitializeRing());
+  iree_async_semaphore_t* semaphore = CreateSemaphore();
+  PreSignalActionState action_state = {
+      /*.semaphore=*/semaphore,
+      /*.callback_count=*/0,
+  };
+  RetireCallbackState callback_state = {
+      /*.semaphore=*/semaphore,
+      /*.entry=*/nullptr,
+      /*.epoch=*/0,
+      /*.flags=*/IREE_HAL_AMDGPU_RECLAIM_RETIRE_FLAG_NONE,
+      /*.callback_count=*/0,
+  };
+
+  iree_hal_amdgpu_reclaim_entry_t* reclaim_entry =
+      ReclaimEntryForNextEpoch(ring.get(), /*kernarg_write_position=*/64,
+                               /*queue_upload_write_position=*/256);
+  reclaim_entry->pre_signal_action = {
+      /*.fn=*/VerifySemaphoreNotVisibleBeforeFailedPreSignalAction,
+      /*.user_data=*/&action_state,
+  };
+  uint64_t epoch = iree_hal_amdgpu_notification_ring_advance_epoch(ring.get());
+  PushNotification(ring.get(), epoch, semaphore, 1);
+  iree_hal_amdgpu_notification_ring_publish_epoch(ring.get(), epoch);
+
+  iree_status_t error_status =
+      iree_make_status(IREE_STATUS_ABORTED, "forced queue failure");
+  iree_hal_amdgpu_reclaim_positions_t reclaim_positions = {0};
+  EXPECT_EQ(iree_hal_amdgpu_notification_ring_fail_all_reclaim_positions(
+                ring.get(), error_status,
+                VerifySemaphoreNotVisibleBeforeRetireCallback, &callback_state,
+                &reclaim_positions),
+            1u);
+  iree_status_free(error_status);
+
+  EXPECT_EQ(action_state.callback_count, 1);
+  EXPECT_EQ(callback_state.callback_count, 1);
+  EXPECT_EQ(callback_state.entry, reclaim_entry);
+  EXPECT_EQ(callback_state.epoch, epoch);
+  EXPECT_EQ(callback_state.flags, IREE_HAL_AMDGPU_RECLAIM_RETIRE_FLAG_FAILED);
+  EXPECT_EQ(reclaim_positions.kernarg_write_position, 64u);
+  EXPECT_EQ(reclaim_positions.queue_upload_write_position, 256u);
 
   iree_async_semaphore_release(semaphore);
 }

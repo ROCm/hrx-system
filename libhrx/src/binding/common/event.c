@@ -35,6 +35,10 @@ iree_status_t iree_hal_streaming_event_create(
   iree_hal_streaming_context_retain(context);
   event->record_time_ns = 0;
   event->ipc_handle = NULL;
+  event->capture_graph = NULL;
+  event->capture_dependencies = NULL;
+  event->capture_dependency_count = 0;
+  event->capture_dependency_capacity = 0;
   event->semaphore = NULL;
   event->host_allocator = host_allocator;
 
@@ -57,17 +61,16 @@ static void iree_hal_streaming_event_destroy(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Release semaphore.
-  if (event->semaphore) {
-    iree_hal_semaphore_release(event->semaphore);
-  }
+  iree_hal_semaphore_release(event->semaphore);
 
   // Release recording stream reference.
-  if (event->recording_stream) {
-    iree_hal_streaming_stream_release(event->recording_stream);
-  }
+  iree_hal_streaming_stream_release(event->recording_stream);
 
   // Release context.
   iree_hal_streaming_context_release(event->context);
+
+  iree_hal_streaming_graph_release(event->capture_graph);
+  iree_allocator_free(event->host_allocator, event->capture_dependencies);
 
   // Free event memory.
   iree_allocator_t host_allocator = event->host_allocator;
@@ -114,12 +117,33 @@ iree_status_t iree_hal_streaming_event_record(
 
   // Check if we're capturing to a graph.
   if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
-    // Event record during graph capture is not yet implemented.
-    // TODO(graph-capture): Add event node to graph.
+    event->record_time_ns = iree_time_now();
+    if (event->recording_stream != stream) {
+      iree_hal_streaming_stream_release(event->recording_stream);
+      event->recording_stream = stream;
+      iree_hal_streaming_stream_retain(stream);
+    }
+    if (event->capture_dependency_capacity < stream->capture_dependency_count) {
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_allocator_realloc(event->host_allocator,
+                                     stream->capture_dependency_count *
+                                         sizeof(*event->capture_dependencies),
+                                     (void**)&event->capture_dependencies));
+      event->capture_dependency_capacity = stream->capture_dependency_count;
+    }
+    if (stream->capture_dependency_count > 0) {
+      memcpy(event->capture_dependencies, stream->capture_dependencies,
+             stream->capture_dependency_count *
+                 sizeof(*event->capture_dependencies));
+    }
+    event->capture_dependency_count = stream->capture_dependency_count;
+    if (event->capture_graph != stream->capture_graph) {
+      iree_hal_streaming_graph_release(event->capture_graph);
+      event->capture_graph = stream->capture_graph;
+      iree_hal_streaming_graph_retain(event->capture_graph);
+    }
     IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "event record during graph capture not yet implemented");
+    return iree_ok_status();
   }
 
   event->record_time_ns = iree_time_now();
@@ -127,9 +151,7 @@ iree_status_t iree_hal_streaming_event_record(
   // Set recording stream so we can track when we cross streams in a signal/wait
   // sequence.
   if (event->recording_stream != stream) {
-    if (event->recording_stream) {
-      iree_hal_streaming_stream_release(event->recording_stream);
-    }
+    iree_hal_streaming_stream_release(event->recording_stream);
     event->recording_stream = stream;
     iree_hal_streaming_stream_retain(stream);
   }
@@ -138,10 +160,11 @@ iree_status_t iree_hal_streaming_event_record(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
                                     iree_hal_streaming_stream_flush(stream));
 
+  iree_slim_mutex_lock(&stream->mutex);
+
   // Use stream's current pending value as wait value and increment for signal.
   uint64_t wait_value = stream->pending_value;
   event->signal_value = wait_value + 1;
-  stream->pending_value = event->signal_value;
 
   // Create a queue barrier to signal the event semaphore.
   // This waits for the stream's last submission to complete before signaling.
@@ -159,10 +182,19 @@ iree_status_t iree_hal_streaming_event_record(
       .payload_values = signal_values,
   };
 
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_device_queue_barrier(
-              stream->context->device, stream->queue_affinity, wait_semaphores,
-              signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE));
+  iree_status_t status = iree_hal_device_queue_barrier(
+      stream->context->device, stream->queue_affinity, wait_semaphores,
+      signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_queue_flush(stream->context->device,
+                                         stream->queue_affinity);
+  }
+  if (iree_status_is_ok(status)) {
+    stream->pending_value = event->signal_value;
+    stream->submitted_value = event->signal_value;
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();

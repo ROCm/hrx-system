@@ -28,6 +28,20 @@
 
 #if defined(IREE_AMDGPU_TARGET_DEVICE)
 
+static inline IREE_AMDGPU_ATTRIBUTE_ALWAYS_INLINE uint32_t
+iree_hsa_signal_mailbox_message_id(uint32_t event_id) {
+#if defined(__GFX10__)
+  return event_id & 0x7FFFFFu;
+#elif defined(__GFX9__) || defined(__GFX11__) || defined(__GFX12__)
+  return event_id & 0xFFFFFFu;
+#else
+  // Matches ROCm device-libs for pre-gfx9 targets. IREE does not build
+  // device binaries for those targets today, but keeping the fallback preserves
+  // the source-level signal contract.
+  return event_id & 0xFFu;
+#endif  // __GFX*
+}
+
 static inline IREE_AMDGPU_ATTRIBUTE_ALWAYS_INLINE void
 iree_hsa_signal_update_mailbox(
     const iree_amd_signal_t* IREE_AMDGPU_RESTRICT signal) {
@@ -38,8 +52,9 @@ iree_hsa_signal_update_mailbox(
     iree_amdgpu_scoped_atomic_store(mailbox, event_id,
                                     iree_amdgpu_memory_order_release,
                                     iree_amdgpu_memory_scope_system);
-    __builtin_amdgcn_s_sendmsg(1 | (0 << 4),
-                               __builtin_amdgcn_readfirstlane(event_id) & 0xFF);
+    __builtin_amdgcn_s_sendmsg(
+        1 | (0 << 4), __builtin_amdgcn_readfirstlane(
+                          iree_hsa_signal_mailbox_message_id(event_id)));
   }
 }
 

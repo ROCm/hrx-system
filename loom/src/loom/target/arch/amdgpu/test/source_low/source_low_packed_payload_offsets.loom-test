@@ -1,0 +1,144 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_payload_offsets.loom-test
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @packed4_payload_word_offset(%weights: buffer, %block0: index, %word0: index) -> (i32) {
+  %block = index.assume %block0 [range(%block0, 0, 63)] : index
+  %word = index.assume %word0 [range(%word0, 0, 3)] : index
+  %block_byte_stride = index.constant 18 : offset
+  %payload_header_offset = index.constant 2 : offset
+  %word_byte_stride = index.constant 4 : offset
+  %block_base = index.scale %block, %block_byte_stride : index, offset -> offset
+  %payload_base = index.add %block_base, %payload_header_offset : offset
+  %word_byte_offset = index.scale %word, %word_byte_stride : index, offset -> offset
+  %byte_offset = index.add %payload_base, %word_byte_offset : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %word_view = buffer.view %weights_global[%byte_offset] : buffer -> view<1xi32, #dense>
+  %packed_word = view.load %word_view[0] : view<1xi32, #dense> -> i32
+  func.return %packed_word : i32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @packed4_payload_word_offset(%block: reg<amdgpu.sgpr>, %word: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %word_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %27 = v_mov_b32 0
+  %28 = s_mul_i32_rhs_inline %block, 18
+  %29 = s_lshl_b32_rhs_inline %word, 2
+  %30 = s_add_u32 %28, %29
+  %31 = slice %word_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32 = slice %word_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %33 = s_mov_b32 0
+  %34 = s_add_u32 %31, %30
+  %35 = s_addc_u32 %32, %33
+  %36 = concat(%34, %35) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %packed_word = global_load_b32_saddr %27, %36 {offset = 2}
+  return %packed_word
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @packed5_split_payload_offsets(%weights: buffer, %block0: index, %word0: index) -> (i32, i32) {
+  %block = index.assume %block0 [range(%block0, 0, 63)] : index
+  %word = index.assume %word0 [range(%word0, 0, 3)] : index
+  %block_byte_stride = index.constant 22 : offset
+  %side_bits_header_offset = index.constant 2 : offset
+  %low_bits_header_offset = index.constant 6 : offset
+  %word_byte_stride = index.constant 4 : offset
+  %block_base = index.scale %block, %block_byte_stride : index, offset -> offset
+  %side_bits_byte_offset = index.add %block_base, %side_bits_header_offset : offset
+  %low_bits_base = index.add %block_base, %low_bits_header_offset : offset
+  %low_word_byte_offset = index.scale %word, %word_byte_stride : index, offset -> offset
+  %low_bits_byte_offset = index.add %low_bits_base, %low_word_byte_offset : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %side_bits_view = buffer.view %weights_global[%side_bits_byte_offset] : buffer -> view<1xi32, #dense>
+  %low_bits_view = buffer.view %weights_global[%low_bits_byte_offset] : buffer -> view<1xi32, #dense>
+  %side_bits_word = view.load %side_bits_view[0] : view<1xi32, #dense> -> i32
+  %low_bits_word = view.load %low_bits_view[0] : view<1xi32, #dense> -> i32
+  func.return %side_bits_word, %low_bits_word : i32, i32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @packed5_split_payload_offsets(%block: reg<amdgpu.sgpr>, %word: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %low_bits_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %35 = v_mov_b32 0
+  %36 = s_mul_i32_rhs_inline %block, 22
+  %37 = slice %low_bits_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = slice %low_bits_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39 = s_mov_b32 0
+  %40 = s_add_u32 %37, %36
+  %41 = s_addc_u32 %38, %39
+  %42 = concat(%40, %41) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %side_bits_word = global_load_b32_saddr %35, %42 {offset = 2}
+  %46 = s_lshl_b32_rhs_inline %word, 2
+  %47 = s_add_u32 %36, %46
+  %51 = s_add_u32 %37, %47
+  %52 = s_addc_u32 %38, %39
+  %53 = concat(%51, %52) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %low_bits_word = global_load_b32_saddr %35, %53 {offset = 6}
+  return %side_bits_word, %low_bits_word
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @packed6_split_payload_offsets(%weights: buffer, %block0: index, %low_word0: index, %high_word0: index, %scale0: index) -> (i32, i32, f16) {
+  %block = index.assume %block0 [range(%block0, 0, 63)] : index
+  %low_word = index.assume %low_word0 [range(%low_word0, 0, 31)] : index
+  %high_word = index.assume %high_word0 [range(%high_word0, 0, 15)] : index
+  %scale = index.assume %scale0 [range(%scale0, 0, 15)] : index
+  %block_byte_stride = index.constant 210 : offset
+  %low_bits_header_offset = index.constant 0 : offset
+  %high_bits_header_offset = index.constant 128 : offset
+  %scale_header_offset = index.constant 192 : offset
+  %word_byte_stride = index.constant 4 : offset
+  %half_byte_stride = index.constant 2 : offset
+  %block_base = index.scale %block, %block_byte_stride : index, offset -> offset
+  %low_bits_base = index.add %block_base, %low_bits_header_offset : offset
+  %high_bits_base = index.add %block_base, %high_bits_header_offset : offset
+  %scale_base = index.add %block_base, %scale_header_offset : offset
+  %low_word_byte_offset = index.scale %low_word, %word_byte_stride : index, offset -> offset
+  %high_word_byte_offset = index.scale %high_word, %word_byte_stride : index, offset -> offset
+  %scale_element_byte_offset = index.scale %scale, %half_byte_stride : index, offset -> offset
+  %low_bits_byte_offset = index.add %low_bits_base, %low_word_byte_offset : offset
+  %high_bits_byte_offset = index.add %high_bits_base, %high_word_byte_offset : offset
+  %scale_byte_offset = index.add %scale_base, %scale_element_byte_offset : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %low_bits_view = buffer.view %weights_global[%low_bits_byte_offset] : buffer -> view<1xi32, #dense>
+  %high_bits_view = buffer.view %weights_global[%high_bits_byte_offset] : buffer -> view<1xi32, #dense>
+  %scale_view = buffer.view %weights_global[%scale_byte_offset] : buffer -> view<1xf16, #dense>
+  %low_bits_word = view.load %low_bits_view[0] : view<1xi32, #dense> -> i32
+  %high_bits_word = view.load %high_bits_view[0] : view<1xi32, #dense> -> i32
+  %scale_value = view.load %scale_view[0] : view<1xf16, #dense> -> f16
+  func.return %low_bits_word, %high_bits_word, %scale_value : i32, i32, f16
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @packed6_split_payload_offsets(%block: reg<amdgpu.sgpr>, %low_word: reg<amdgpu.sgpr>, %high_word: reg<amdgpu.sgpr>, %scale: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %scale_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %57 = v_mov_b32 0
+  %58 = s_mov_b32 210
+  %59 = s_mul_i32 %block, %58
+  %60 = s_lshl_b32_rhs_inline %low_word, 2
+  %61 = s_add_u32 %59, %60
+  %62 = slice %scale_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %63 = slice %scale_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %64 = s_mov_b32 0
+  %65 = s_add_u32 %62, %61
+  %66 = s_addc_u32 %63, %64
+  %67 = concat(%65, %66) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %low_bits_word = global_load_b32_saddr %57, %67
+  %72 = s_lshl_b32_rhs_inline %high_word, 2
+  %73 = s_add_u32 %59, %72
+  %77 = s_add_u32 %62, %73
+  %78 = s_addc_u32 %63, %64
+  %79 = concat(%77, %78) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %high_bits_word = global_load_b32_saddr %57, %79 {offset = 128}
+  %84 = s_lshl_b32_rhs_inline %scale, 1
+  %85 = s_add_u32 %59, %84
+  %89 = s_add_u32 %62, %85
+  %90 = s_addc_u32 %63, %64
+  %91 = concat(%89, %90) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %scale_value = global_load_u16_saddr %57, %91 {offset = 192}
+  return %low_bits_word, %high_bits_word, %scale_value
+}

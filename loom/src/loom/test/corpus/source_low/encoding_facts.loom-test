@@ -1,0 +1,56 @@
+// RUN: pass canonicalize
+
+func.def @mixed_dynamic_strided_layout_facts() -> (i64, i64, i64, i64) {
+  %sixty_four = index.constant 64 : index
+  %layout = encoding.layout.strided [1, %sixty_four] : encoding<layout>
+  %constant_hi = test.fact_range_hi %sixty_four : index -> i64
+  %kind = test.fact_encoding_layout_kind %layout : encoding<layout> -> i64
+  %stride0 = test.fact_encoding_layout_stride_hi %layout[0] : encoding<layout> -> i64
+  %stride1 = test.fact_encoding_layout_stride_hi %layout[1] : encoding<layout> -> i64
+  func.return %constant_hi, %kind, %stride0, %stride1 : i64, i64, i64, i64
+}
+
+// ----
+func.def @mixed_dynamic_strided_layout_facts() -> (i64, i64, i64, i64) {
+  %constant_hi = scalar.constant 64 : i64
+  %kind = scalar.constant 2 : i64
+  %stride0 = scalar.constant 1 : i64
+  %stride1 = scalar.constant 64 : i64
+  func.return %constant_hi, %kind, %stride0, %stride1 : i64, i64, i64, i64
+}
+
+// ====
+
+func.def @assumed_strided_layout_facts() -> (i64, i64, i64) {
+  %dense = encoding.layout.dense : encoding<layout>
+  %layout = encoding.layout.assume.strided %dense {rank = 2} : encoding<layout>
+  %kind = test.fact_encoding_layout_kind %layout : encoding<layout> -> i64
+  %stride0 = test.fact_encoding_layout_stride_hi %layout[0] : encoding<layout> -> i64
+  %stride1 = test.fact_encoding_layout_stride_hi %layout[1] : encoding<layout> -> i64
+  func.return %kind, %stride0, %stride1 : i64, i64, i64
+}
+
+// ----
+func.def @assumed_strided_layout_facts() -> (i64, i64, i64) {
+  %kind = scalar.constant 2 : i64
+  %stride0 = scalar.constant 9223372036854775807 : i64
+  %stride1 = scalar.constant 9223372036854775807 : i64
+  func.return %kind, %stride0, %stride1 : i64, i64, i64
+}
+
+// ====
+
+func.def @predicate_attribute_keeps_dynamic_bound(%origin0: index, %count: index) -> (index) {
+  %one = index.constant 1 : index
+  %max_vector_origin = index.sub %count, %one : index
+  %origin = index.assume %origin0 [lt(%origin0, %max_vector_origin)] : index
+  func.return %origin : index
+}
+
+// ----
+func.def @predicate_attribute_keeps_dynamic_bound(%origin0: index, %count: index) -> (index) {
+  %one = index.constant 1 : index
+  %max_vector_origin = index.sub %count, %one : index
+  %origin = index.assume %origin0 [lt(%origin0, %max_vector_origin)] : index
+  func.return %origin : index
+}

@@ -1,0 +1,44 @@
+// Memset-style byte fill with dynamic extent and an ABI-sized pattern argument.
+// Runtime integrations often carry fill patterns in wider scalar slots than the
+// stored element type; the kernel keeps that as ordinary Loom IR by narrowing
+// the 64-bit pattern at the use site instead of baking the ABI detail into a
+// target-specific source generator.
+kernel.def @memset_i8(%element_length: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %rounding = index.constant 255 : index
+  %rounded_length = index.add %element_length, %rounding : index
+  %workgroups = index.div %rounded_length, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%element_length: index, %target: buffer, %pattern: i64) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 256 : index
+  %zero_offset = index.constant 0 : offset
+  %element_index = index.madd %workgroup, %workgroup_size, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_length : index
+  %pattern_i8 = scalar.trunci %pattern : i64 to i8
+  %target_view = buffer.view %target[%zero_offset] : buffer -> view<[%element_length]xi8, #dense>
+  scf.if %in_bounds {
+    view.store %pattern_i8, %target_view[%element_index] : i8, view<[%element_length]xi8, #dense>
+  }
+  kernel.return
+}
+
+check.case public @memset_i8_case {
+  // Cover one partial workgroup, one exact workgroup boundary, and one
+  // multi-workgroup tail. The pattern value intentionally exceeds i8 so the
+  // kernel must exercise the low-byte truncation path.
+  %element_length = check.param.choice values([17, 256, 1009]) name("element_length") : index
+  %pattern = check.literal value(346) : i64
+  %target = check.generate.fill value(0) : tensor<[%element_length]xi8>
+  %expected = check.generate.fill value(90) : tensor<[%element_length]xi8>
+  func.call @memset_i8(%element_length, %target, %pattern) : (index, tensor<[%element_length]xi8>, i64)
+  check.expect.equal actual(%target) expected(%expected) : tensor<[%element_length]xi8>
+  check.return
+}
+
+check.benchmark<@memset_i8_case>
+check.benchmark<@memset_i8_case> @memset_i8_tail {element_length = 17}
+check.benchmark<@memset_i8_case> @memset_i8_workgroup {element_length = 256}
+check.benchmark<@memset_i8_case> @memset_i8_large_tail {element_length = 1009}

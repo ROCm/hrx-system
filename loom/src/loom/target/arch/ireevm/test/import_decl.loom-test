@@ -1,0 +1,45 @@
+// RUN: roundtrip
+
+// IREE VM import declarations are ordinary function-like symbols. Source IR
+// keeps using func.call instead of target-private call ops.
+ireevm.target<core> @vm_target
+
+ireevm.import.decl target(@vm_target) symbol("hal.buffer.length") @hal_buffer_length(%buffer: ireevm.ref<ireevm.list<i32>>) -> (i64)
+
+func.def target(@vm_target) @call_import(%buffer: ireevm.ref<ireevm.list<i32>>) -> (i64) {
+  %length = func.call @hal_buffer_length(%buffer) : (ireevm.ref<ireevm.list<i32>>) -> (i64)
+  func.return %length : i64
+}
+
+// ====
+
+// Generic func-like declaration modifiers remain available for linker contracts
+// and call analyses.
+ireevm.target<core> @vm_target
+
+ireevm.import.decl public target(@vm_target) symbol("hal.buffer.map") pure @hal_buffer_map(%buffer: i32, %access: i32) -> (i64)
+
+// ====
+
+// Explicit ref lifetime operations round-trip on the low-level target dialect.
+ireevm.target<core> @vm_target
+
+func.def target(@vm_target) @explicit_ref_lifetime(%resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = ireevm.ref.retain %resource : ireevm.ref<ireevm.list<i32>> -> ireevm.ref<ireevm.list<i32>>
+  ireevm.ref.release %owned : ireevm.ref<ireevm.list<i32>>
+  ireevm.ref.discard %resource : ireevm.ref<ireevm.list<i32>>
+  func.return
+}
+
+// ====
+
+// VM host buffers are heap objects carried by refs and accessed with explicit
+// element offsets.
+ireevm.target<core> @vm_target
+
+func.def target(@vm_target) @explicit_buffer_ops(%buffer: ireevm.ref<ireevm.buffer>, %offset: i64, %value: i32) -> (i64, i32) {
+  %length = ireevm.buffer.length %buffer : ireevm.ref<ireevm.buffer> -> i64
+  %loaded = ireevm.buffer.load.i32 %buffer[%offset] : ireevm.ref<ireevm.buffer>, i64 -> i32
+  ireevm.buffer.store.i32 %value, %buffer[%offset] : i32, ireevm.ref<ireevm.buffer>, i64
+  func.return %length, %loaded : i64, i32
+}

@@ -28,12 +28,14 @@ iree_cc_library(
     iree::async::types
     iree::async::util::message_pool
     iree::async::util::operation_pool
+    iree::async::util::semaphore_wait
     iree::async::util::sequence_emulation
     iree::async::util::signal
     iree::base
     iree::base::internal
     iree::base::internal::atomic_slist
     iree::base::internal::memory
+    iree::base::internal::path
   PUBLIC
 )
 endif()

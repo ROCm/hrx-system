@@ -43,6 +43,18 @@ IREE_TYPED_ATOMIC_SLIST_WRAPPER(iree_atomic_arena_block, iree_arena_block_t,
 #define iree_arena_block_trailer(block_pool, ptr) \
   (iree_arena_block_t*)((const uint8_t*)(ptr) + (block_pool)->usable_block_size)
 
+// Monotonic system allocation statistics for one block pool.
+typedef struct iree_arena_block_pool_statistics_t {
+  // Number of fixed-size blocks allocated from the system.
+  uint64_t block_system_allocation_count;
+  // Total bytes of fixed-size blocks allocated from the system.
+  uint64_t block_system_allocation_bytes;
+  // Number of oversized arena allocations made from the system.
+  uint64_t oversized_allocation_count;
+  // Total bytes of oversized arena allocations made from the system.
+  uint64_t oversized_allocation_bytes;
+} iree_arena_block_pool_statistics_t;
+
 // A simple atomic fixed-size block pool.
 // Blocks are allocated from the system as required and kept in the pool to
 // satisfy future requests. Blocks are all of a uniform size specified when the
@@ -56,18 +68,48 @@ typedef struct iree_arena_block_pool_t {
   // Block size, in bytes. All blocks in the available_slist will have this
   // byte size which includes the iree_arena_block_t footer.
   iree_host_size_t total_block_size;
-  // Block size, in bytes, of the usable bytes within a block.
+  // Raw payload bytes preceding the block trailer. Arena allocations are
+  // rounded to iree_max_align_t and may not consume a trailing partial unit;
+  // use iree_arena_block_pool_max_allocation_size for that limit.
   iree_host_size_t usable_block_size;
   // Allocator used for allocating/freeing each allocation block.
   iree_allocator_t block_allocator;
   // Linked list of free blocks (LIFO).
   iree_atomic_arena_block_slist_t available_slist;
+  IREE_STATISTICS(struct {
+    // Number of fixed-size blocks allocated from the system.
+    iree_atomic_int64_t block_system_allocation_count;
+    // Number of oversized arena allocations made from the system.
+    iree_atomic_int64_t oversized_allocation_count;
+    // Total bytes of oversized arena allocations made from the system.
+    iree_atomic_int64_t oversized_allocation_bytes;
+  } statistics;)
 } iree_arena_block_pool_t;
+
+// Returns true when |total_block_size| can be initialized without alignment
+// overflow and has room for the required block trailer.
+static inline bool iree_arena_block_pool_is_valid_total_size(
+    iree_host_size_t total_block_size) {
+  return total_block_size >= sizeof(iree_arena_block_t) &&
+         total_block_size <=
+             IREE_HOST_SIZE_MAX - (iree_alignof(iree_arena_block_t) - 1);
+}
+
+// Returns the largest naturally aligned arena allocation that remains within
+// one fixed-size block. Raw acquired blocks may use all of usable_block_size,
+// while iree_arena_allocate rounds each request up to iree_max_align_t.
+static inline iree_host_size_t iree_arena_block_pool_max_allocation_size(
+    const iree_arena_block_pool_t* block_pool) {
+  return block_pool->usable_block_size &
+         ~(iree_host_size_t)(iree_max_align_t - 1);
+}
 
 // Initializes a new block pool in |out_block_pool|.
 // |block_allocator| will be used to allocate and free blocks for the pool.
-// Each block allocated will be |total_block_size| but have a slightly smaller
-// usable size due to the tracking overhead. Prefer powers of two.
+// Each block allocated will be at least |total_block_size| but have a slightly
+// smaller usable size due to the tracking overhead. The block size is aligned
+// upward during initialization so the trailer remains naturally aligned. Prefer
+// powers of two.
 void iree_arena_block_pool_initialize(iree_host_size_t total_block_size,
                                       iree_allocator_t block_allocator,
                                       iree_arena_block_pool_t* out_block_pool);
@@ -84,6 +126,18 @@ iree_status_t iree_arena_block_pool_preallocate(
 // Trims the pool by freeing unused blocks back to the allocator.
 // Acquired blocks are not freed and remain valid.
 void iree_arena_block_pool_trim(iree_arena_block_pool_t* block_pool);
+
+// Queries a monotonic snapshot of system allocation statistics.
+//
+// Individual fields may be sampled at adjacent instants when workers are
+// concurrently acquiring blocks. The snapshot is exact when the pool is
+// quiescent and is always safe to use for before/after deltas. Fixed-size block
+// preallocation and free-list misses are counted while free-list reuse is not.
+// Oversized allocation sizes include the arena tracking header. All fields are
+// zero when statistics are disabled at compile time.
+void iree_arena_block_pool_query_statistics(
+    const iree_arena_block_pool_t* block_pool,
+    iree_arena_block_pool_statistics_t* out_statistics);
 
 // Acquires a single block from the pool and returns it in |out_block|.
 // The first usable byte of the block is returned in |out_ptr|.
@@ -104,9 +158,15 @@ void iree_arena_block_pool_release(iree_arena_block_pool_t* block_pool,
 // iree_arena_allocator_t
 //===----------------------------------------------------------------------===//
 
-typedef struct iree_arena_oversized_allocation_t {
+// Padded to iree_max_align_t so that the data pointer following this
+// header inherits the system allocator's alignment guarantee.
+typedef struct iree_alignas(iree_max_align_t)
+    iree_arena_oversized_allocation_t {
   struct iree_arena_oversized_allocation_t* next;
 } iree_arena_oversized_allocation_t;
+
+static_assert(sizeof(iree_arena_oversized_allocation_t) % iree_max_align_t == 0,
+              "oversized header must be a multiple of iree_max_align_t");
 
 // A lightweight bump-pointer arena allocator using a shared block pool.
 // As allocations are made from the arena and block capacity is exhausted new
@@ -140,6 +200,28 @@ typedef struct iree_arena_allocator_t {
   iree_host_size_t block_bytes_remaining;
 } iree_arena_allocator_t;
 
+// Saved allocation state used to discard speculative arena allocations.
+//
+// Checkpoints are restored in stack order. Restoring a checkpoint invalidates
+// every allocation made by its arena after the checkpoint was saved while
+// preserving allocations that predate it.
+typedef struct iree_arena_checkpoint_t {
+  // Arena this checkpoint was saved from.
+  iree_arena_allocator_t* arena;
+  // Oversized-allocation list head at the checkpoint.
+  iree_arena_oversized_allocation_t* allocation_head;
+  // Current fixed-size block at the checkpoint.
+  iree_arena_block_t* block_head;
+  // Oldest fixed-size block retained by the arena at the checkpoint.
+  iree_arena_block_t* block_tail;
+  // Total bytes owned by the arena at the checkpoint.
+  iree_host_size_t total_allocation_size;
+  // Total bytes consumed from the arena at the checkpoint.
+  iree_host_size_t used_allocation_size;
+  // Unused bytes in |block_head| at the checkpoint.
+  iree_host_size_t block_bytes_remaining;
+} iree_arena_checkpoint_t;
+
 // Initializes an arena that will use |block_pool| for allocating blocks as
 // needed.
 void iree_arena_initialize(iree_arena_block_pool_t* block_pool,
@@ -150,6 +232,13 @@ void iree_arena_deinitialize(iree_arena_allocator_t* arena);
 
 // Resets the entire arena and returns allocated blocks to the parent pool.
 void iree_arena_reset(iree_arena_allocator_t* arena);
+
+// Saves the current allocation state of |arena| for a later restore.
+iree_arena_checkpoint_t iree_arena_checkpoint_save(
+    iree_arena_allocator_t* arena);
+
+// Restores |checkpoint| and invalidates allocations made after it was saved.
+void iree_arena_checkpoint_restore(const iree_arena_checkpoint_t* checkpoint);
 
 // Allocates |byte_length| contiguous bytes from the arena.
 // The returned bytes will have undefined contents and must be initialized by
@@ -165,6 +254,38 @@ iree_status_t iree_arena_allocate_aligned(iree_arena_allocator_t* arena,
                                           iree_host_size_t byte_length,
                                           iree_host_size_t min_alignment,
                                           void** out_ptr);
+
+// Allocates an array of |count| elements of |element_size| bytes from
+// the arena with checked multiplication. Returns
+// IREE_STATUS_RESOURCE_EXHAUSTED on size overflow.
+iree_status_t iree_arena_allocate_array(iree_arena_allocator_t* arena,
+                                        iree_host_size_t count,
+                                        iree_host_size_t element_size,
+                                        void** out_ptr);
+
+// Allocates an array of |count| elements of |element_size| bytes from
+// the arena with the returned pointer aligned to at least |min_alignment|.
+// Uses checked multiplication. Returns IREE_STATUS_RESOURCE_EXHAUSTED
+// on size overflow.
+iree_status_t iree_arena_allocate_array_aligned(iree_arena_allocator_t* arena,
+                                                iree_host_size_t count,
+                                                iree_host_size_t element_size,
+                                                iree_host_size_t min_alignment,
+                                                void** out_ptr);
+
+// Grows an array allocation using a 2x doubling strategy.
+// The new capacity is max(|minimum_capacity|, |*inout_capacity| * 2).
+// On success |*inout_capacity| is updated and |*inout_ptr| points to
+// the new allocation with existing elements copied. The old allocation
+// is abandoned in the arena (arenas cannot free individual allocations).
+// Copies |existing_count| * |element_size| bytes from the old array.
+// Returns IREE_STATUS_OUT_OF_RANGE if the capacity calculation overflows.
+iree_status_t iree_arena_grow_array(iree_arena_allocator_t* arena,
+                                    iree_host_size_t existing_count,
+                                    iree_host_size_t minimum_capacity,
+                                    iree_host_size_t element_size,
+                                    iree_host_size_t* inout_capacity,
+                                    void** inout_ptr);
 
 // Returns an iree_allocator_t that allocates from the given |arena|.
 // Frees are ignored as arenas can only be reset as a whole.

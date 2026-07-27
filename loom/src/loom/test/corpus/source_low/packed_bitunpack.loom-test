@@ -1,0 +1,65 @@
+// RUN: roundtrip
+
+func.def @i32_to_u8x4_bitunpack(%packed: vector<1xi32>) -> (vector<4xi32>) {
+  %unpacked = vector.bitunpacku<8> %packed : vector<1xi32> -> vector<4xi32>
+  func.return %unpacked : vector<4xi32>
+}
+
+// ====
+
+func.def @i32_to_s8x4_bitunpack(%packed: vector<1xi32>) -> (vector<4xi32>) {
+  %unpacked = vector.bitunpacks<8> %packed : vector<1xi32> -> vector<4xi32>
+  func.return %unpacked : vector<4xi32>
+}
+
+// ====
+
+func.def @i32_to_u4x8_bitunpack(%packed: vector<1xi32>) -> (vector<8xi32>) {
+  %unpacked = vector.bitunpacku<4> %packed : vector<1xi32> -> vector<8xi32>
+  func.return %unpacked : vector<8xi32>
+}
+
+// ====
+
+func.def @i8x2_to_u2x8_bitunpack(%packed: vector<2xi8>) -> (vector<8xi32>) {
+  %unpacked = vector.bitunpacku<2> %packed : vector<2xi8> -> vector<8xi32>
+  func.return %unpacked : vector<8xi32>
+}
+
+// ====
+
+func.def @i32_to_u8x4_bitunpack_i8_result(%packed: vector<1xi32>) -> (vector<4xi8>) {
+  %unpacked = vector.bitunpacku<8> %packed : vector<1xi32> -> vector<4xi8>
+  func.return %unpacked : vector<4xi8>
+}
+
+// ====
+
+func.def @i8x2_to_u4x4_bitunpack_i8_result(%packed: vector<2xi8>) -> (vector<4xi8>) {
+  %unpacked = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+  func.return %unpacked : vector<4xi8>
+}
+
+// ====
+
+func.def @i8x2_to_s4x4_bitunpack_i8_result(%packed: vector<2xi8>) -> (vector<4xi8>) {
+  %unpacked = vector.bitunpacks<4> %packed : vector<2xi8> -> vector<4xi8>
+  func.return %unpacked : vector<4xi8>
+}
+
+// ====
+
+kernel.def @uniform_global_i32_to_u8x4_bitunpack_store() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%values: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %values_noalias, %output_noalias = buffer.assume.noalias %values, %output : buffer, buffer
+  %values_view = buffer.view %values_noalias[%base] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xi32, #dense>
+  %packed = vector.load %values_view[%index] : view<1xi32, #dense> -> vector<1xi32>
+  %unpacked = vector.bitunpacku<8> %packed : vector<1xi32> -> vector<4xi32>
+  vector.store %unpacked, %output_view[%index] : vector<4xi32>, view<4xi32, #dense>
+  kernel.return
+}

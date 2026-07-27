@@ -1,0 +1,65 @@
+// Weighted expert route gather and combine.
+//
+// MoE routing does not end at top-k selection: selected expert ids immediately
+// drive indexed movement, optional duplicate handling, and weighted output
+// combine. This motif starts at that boundary. Route ids are ordinary runtime
+// data, payload rows are gathered dynamically, and weights determine the final
+// combined vector.
+// Numeric policy is ML-fast weighted routing: payload scale products and the
+// final weighted combine are contractable, including the duplicate-route case.
+kernel.def @weighted_expert_route_gather_f32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%route_ids: buffer, %route_weights: buffer, %expert_payloads: buffer, %combined_payload: buffer) {
+  %base = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+
+  %route_ids_noalias, %route_weights_noalias, %expert_payloads_noalias, %combined_payload_noalias = buffer.assume.noalias %route_ids, %route_weights, %expert_payloads, %combined_payload : buffer, buffer, buffer, buffer
+  %route_ids_view = buffer.view %route_ids_noalias[%base] : buffer -> view<2xi32, #dense>
+  %route_weights_view = buffer.view %route_weights_noalias[%base] : buffer -> view<2xf32, #dense>
+  %expert_payloads_view = buffer.view %expert_payloads_noalias[%base] : buffer -> view<4x4xf32, #dense>
+  %combined_payload_view = buffer.view %combined_payload_noalias[%base] : buffer -> view<4xf32, #dense>
+
+  %route_id0_i32 = view.load %route_ids_view[0] : view<2xi32, #dense> -> i32
+  %route_id1_i32 = view.load %route_ids_view[1] : view<2xi32, #dense> -> i32
+  %route_id0_index0 = index.cast %route_id0_i32 : i32 to index
+  %route_id1_index0 = index.cast %route_id1_i32 : i32 to index
+  %route_id0 = index.assume %route_id0_index0 [range(%route_id0_index0, 0, 3)] : index
+  %route_id1 = index.assume %route_id1_index0 [range(%route_id1_index0, 0, 3)] : index
+  %weight0 = view.load %route_weights_view[0] : view<2xf32, #dense> -> f32
+  %weight1 = view.load %route_weights_view[1] : view<2xf32, #dense> -> f32
+  %payload0 = vector.load %expert_payloads_view[%route_id0, %zero_index] : view<4x4xf32, #dense> -> vector<4xf32>
+  %payload1 = vector.load %expert_payloads_view[%route_id1, %zero_index] : view<4x4xf32, #dense> -> vector<4xf32>
+  %weight0_vector = vector.splat %weight0 : vector<4xf32>
+  %weight1_vector = vector.splat %weight1 : vector<4xf32>
+  %weighted_payload0 = vector.mulf<reassoc|nnan|nsz|contract> %payload0, %weight0_vector : vector<4xf32>
+  %weighted_payload1 = vector.mulf<reassoc|nnan|nsz|contract> %payload1, %weight1_vector : vector<4xf32>
+  %combined = vector.addf<reassoc|nnan|nsz|contract> %weighted_payload0, %weighted_payload1 : vector<4xf32>
+  vector.store %combined, %combined_payload_view[%zero_index] : vector<4xf32>, view<4xf32, #dense>
+  kernel.return
+}
+
+check.case public @weighted_expert_route_gather_distinct_case {
+  %route_ids = check.generate.iota offset(2) step(-1) : tensor<2xi32>
+  %route_weights = check.generate.iota offset(0.25) step(0.5) : tensor<2xf32>
+  %expert_payloads = check.generate.iota offset(0.0) step(1.0) : tensor<4x4xf32>
+  %combined_payload = check.generate.fill value(-1.0) : tensor<4xf32>
+  %expected = check.generate.iota offset(5.0) step(1.0) : tensor<4xf32>
+  func.call @weighted_expert_route_gather_f32(%route_ids, %route_weights, %expert_payloads, %combined_payload) : (tensor<2xi32>, tensor<2xf32>, tensor<4x4xf32>, tensor<4xf32>)
+  check.expect.close actual(%combined_payload) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.case public @weighted_expert_route_gather_duplicate_case {
+  %route_ids = check.generate.fill value(1) : tensor<2xi32>
+  %route_weights = check.generate.fill value(0.5) : tensor<2xf32>
+  %expert_payloads = check.generate.iota offset(0.0) step(1.0) : tensor<4x4xf32>
+  %combined_payload = check.generate.fill value(-1.0) : tensor<4xf32>
+  %expected = check.generate.iota offset(4.0) step(1.0) : tensor<4xf32>
+  func.call @weighted_expert_route_gather_f32(%route_ids, %route_weights, %expert_payloads, %combined_payload) : (tensor<2xi32>, tensor<2xf32>, tensor<4x4xf32>, tensor<4xf32>)
+  check.expect.close actual(%combined_payload) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.benchmark<@weighted_expert_route_gather_distinct_case> @weighted_expert_route_gather_distinct
+check.benchmark<@weighted_expert_route_gather_duplicate_case> @weighted_expert_route_gather_duplicate

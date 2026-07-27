@@ -216,7 +216,7 @@ static bool iree_tooling_compare_variants(int result_index,
     return true;  // both empty
   } else if (iree_vm_variant_is_value(actual_variant) &&
              iree_vm_variant_is_value(expected_variant)) {
-    if (!iree_vm_type_def_equal(expected_variant.type, actual_variant.type)) {
+    if (iree_vm_type_def_equal(expected_variant.type, actual_variant.type)) {
       return iree_tooling_compare_values(result_index, expected_variant,
                                          actual_variant, builder);
     }

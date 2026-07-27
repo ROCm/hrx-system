@@ -52,13 +52,15 @@ static hsa_status_t iree_hal_amdgpu_find_global_memory_pool_iterator(
   return HSA_STATUS_SUCCESS;
 }
 
-iree_status_t iree_hal_amdgpu_find_global_memory_pool(
+static iree_status_t iree_hal_amdgpu_query_global_memory_pool(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
-    hsa_amd_memory_pool_global_flag_t match_flags,
+    hsa_amd_memory_pool_global_flag_t match_flags, bool* out_available,
     hsa_amd_memory_pool_t* out_pool) {
   IREE_ASSERT_ARGUMENT(libhsa);
+  IREE_ASSERT_ARGUMENT(out_available);
   IREE_ASSERT_ARGUMENT(out_pool);
   IREE_TRACE_ZONE_BEGIN(z0);
+  *out_available = false;
   memset(out_pool, 0, sizeof(*out_pool));
 
   iree_hal_amdgpu_find_global_memory_pool_state_t find_state = {
@@ -70,14 +72,34 @@ iree_status_t iree_hal_amdgpu_find_global_memory_pool(
       z0, iree_hsa_amd_agent_iterate_memory_pools(
               IREE_LIBHSA(libhsa), agent,
               iree_hal_amdgpu_find_global_memory_pool_iterator, &find_state));
-  if (!find_state.best_pool.handle) {
+  if (find_state.best_pool.handle) {
+    *out_available = true;
+    *out_pool = find_state.best_pool;
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amdgpu_find_global_memory_pool(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
+    hsa_amd_memory_pool_global_flag_t match_flags,
+    hsa_amd_memory_pool_t* out_pool) {
+  IREE_ASSERT_ARGUMENT(libhsa);
+  IREE_ASSERT_ARGUMENT(out_pool);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  bool available = false;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_amdgpu_query_global_memory_pool(libhsa, agent, match_flags,
+                                                   &available, out_pool));
+  if (!available) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_make_status(IREE_STATUS_NOT_FOUND,
                              "no memory pool matching the required flags %u",
                              match_flags));
   }
 
-  *out_pool = find_state.best_pool;
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -97,6 +119,16 @@ iree_status_t iree_hal_amdgpu_find_fine_global_memory_pool(
       HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED |
           HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED,
       out_pool);
+}
+
+iree_status_t iree_hal_amdgpu_query_fine_global_memory_pool(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
+    bool* out_available, hsa_amd_memory_pool_t* out_pool) {
+  return iree_hal_amdgpu_query_global_memory_pool(
+      libhsa, agent,
+      HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED |
+          HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED,
+      out_available, out_pool);
 }
 
 bool iree_hal_amdgpu_try_find_coarse_global_memory_pool(
@@ -133,11 +165,7 @@ bool iree_hal_amdgpu_try_find_fine_global_memory_pool(
   return find_state.best_pool.handle != 0;
 }
 
-//===----------------------------------------------------------------------===//
-// iree_hal_amdgpu_vmem_ringbuffer_t
-//===----------------------------------------------------------------------===//
-
-static iree_status_t iree_hal_amdgpu_vmem_translate_memory_type(
+iree_status_t iree_hal_amdgpu_vmem_translate_memory_type(
     iree_hal_amdgpu_vmem_memory_type_t memory_type,
     hsa_amd_memory_type_t* out_hsa_memory_type) {
   IREE_ASSERT_ARGUMENT(out_hsa_memory_type);
@@ -154,6 +182,109 @@ static iree_status_t iree_hal_amdgpu_vmem_translate_memory_type(
                               (int)memory_type);
   }
 }
+
+iree_status_t iree_hal_amdgpu_vmem_query_alloc_granule(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_amd_memory_pool_t memory_pool,
+    iree_device_size_t* out_allocation_granule) {
+  IREE_ASSERT_ARGUMENT(libhsa);
+  IREE_ASSERT_ARGUMENT(out_allocation_granule);
+  *out_allocation_granule = 0;
+
+  size_t alloc_rec_granule = 0;
+  IREE_RETURN_IF_ERROR(iree_hsa_amd_memory_pool_get_info(
+      IREE_LIBHSA(libhsa), memory_pool,
+      HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE, &alloc_rec_granule));
+  if (alloc_rec_granule == 0 ||
+      !iree_device_size_is_power_of_two(alloc_rec_granule)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "invalid HSA VMM allocation granule for an AMDGPU memory pool: "
+        "%" PRIhsz,
+        (iree_host_size_t)alloc_rec_granule);
+  }
+
+  *out_allocation_granule = (iree_device_size_t)alloc_rec_granule;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amdgpu_vmem_build_access_descs_for_topology(
+    const iree_hal_amdgpu_topology_t* topology, hsa_agent_t local_agent,
+    iree_hal_amdgpu_vmem_access_mode_t access_mode,
+    iree_host_size_t access_desc_capacity,
+    hsa_amd_memory_access_desc_t* access_descs,
+    iree_host_size_t* out_access_desc_count) {
+  IREE_ASSERT_ARGUMENT(topology);
+  IREE_ASSERT_ARGUMENT(access_descs);
+  IREE_ASSERT_ARGUMENT(out_access_desc_count);
+  *out_access_desc_count = 0;
+
+  if (IREE_UNLIKELY(access_desc_capacity < topology->all_agent_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU VMM access descriptor capacity %" PRIhsz
+                            " is smaller than topology agent count %" PRIhsz,
+                            access_desc_capacity, topology->all_agent_count);
+  }
+
+  switch (access_mode) {
+    case IREE_HAL_AMDGPU_ACCESS_MODE_SHARED: {
+      // All devices get read/write access.
+      for (iree_host_size_t i = 0; i < topology->all_agent_count; ++i) {
+        access_descs[(*out_access_desc_count)++] =
+            (hsa_amd_memory_access_desc_t){
+                .agent_handle = topology->all_agents[i],
+                .permissions = HSA_ACCESS_PERMISSION_RW,
+            };
+      }
+      return iree_ok_status();
+    }
+    case IREE_HAL_AMDGPU_ACCESS_MODE_EXCLUSIVE: {
+      // Only the local agent can access the allocation.
+      access_descs[(*out_access_desc_count)++] = (hsa_amd_memory_access_desc_t){
+          .agent_handle = local_agent,
+          .permissions = HSA_ACCESS_PERMISSION_RW,
+      };
+      return iree_ok_status();
+    }
+    case IREE_HAL_AMDGPU_ACCESS_MODE_EXCLUSIVE_CONSUMER: {
+      // Local agent gets read, all other agents get write.
+      for (iree_host_size_t i = 0; i < topology->all_agent_count; ++i) {
+        hsa_agent_t agent = topology->all_agents[i];
+        hsa_access_permission_t permissions = agent.handle == local_agent.handle
+                                                  ? HSA_ACCESS_PERMISSION_RO
+                                                  : HSA_ACCESS_PERMISSION_WO;
+        access_descs[(*out_access_desc_count)++] =
+            (hsa_amd_memory_access_desc_t){
+                .agent_handle = agent,
+                .permissions = permissions,
+            };
+      }
+      return iree_ok_status();
+    }
+    case IREE_HAL_AMDGPU_ACCESS_MODE_EXCLUSIVE_PRODUCER: {
+      // Local agent gets write, all other agents get read.
+      for (iree_host_size_t i = 0; i < topology->all_agent_count; ++i) {
+        hsa_agent_t agent = topology->all_agents[i];
+        hsa_access_permission_t permissions = agent.handle == local_agent.handle
+                                                  ? HSA_ACCESS_PERMISSION_WO
+                                                  : HSA_ACCESS_PERMISSION_RO;
+        access_descs[(*out_access_desc_count)++] =
+            (hsa_amd_memory_access_desc_t){
+                .agent_handle = agent,
+                .permissions = permissions,
+            };
+      }
+      return iree_ok_status();
+    }
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unsupported AMDGPU VMM access mode: %d",
+                              (int)access_mode);
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// iree_hal_amdgpu_vmem_ringbuffer_t
+//===----------------------------------------------------------------------===//
 
 iree_status_t iree_hal_amdgpu_vmem_ringbuffer_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t local_agent,
@@ -174,16 +305,15 @@ iree_status_t iree_hal_amdgpu_vmem_ringbuffer_initialize(
                                                      &hsa_memory_type));
 
   // hsa_amd_vmem_handle_create wants values aligned to this value.
-  size_t alloc_rec_granule = 0;
+  iree_device_size_t alloc_rec_granule = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hsa_amd_memory_pool_get_info(
-              IREE_LIBHSA(libhsa), memory_pool,
-              HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE,
-              &alloc_rec_granule));
+      z0, iree_hal_amdgpu_vmem_query_alloc_granule(libhsa, memory_pool,
+                                                   &alloc_rec_granule));
 
   // Round up capacity and alignment to the allocation granule.
-  const size_t alignment = alloc_rec_granule;
-  const size_t capacity = iree_device_align(min_capacity, alloc_rec_granule);
+  const size_t alignment = (size_t)alloc_rec_granule;
+  const size_t capacity =
+      (size_t)iree_device_align(min_capacity, alloc_rec_granule);
   out_ringbuffer->capacity = capacity;
 
   // Reserve the virtual address space for the 3x the capacity. We'll map the
@@ -254,62 +384,10 @@ iree_status_t iree_hal_amdgpu_vmem_ringbuffer_initialize_with_topology(
       (hsa_amd_memory_access_desc_t*)iree_alloca(
           topology->all_agent_count * sizeof(hsa_amd_memory_access_desc_t));
 
-  // Populate the access list.
-  switch (access_mode) {
-    case IREE_HAL_AMDGPU_ACCESS_MODE_SHARED: {
-      // All devices get read/write access.
-      for (iree_host_size_t i = 0; i < topology->all_agent_count; ++i) {
-        access_descs[access_desc_count++] = (hsa_amd_memory_access_desc_t){
-            .agent_handle = topology->all_agents[i],
-            .permissions = HSA_ACCESS_PERMISSION_RW,
-        };
-      }
-    } break;
-    case IREE_HAL_AMDGPU_ACCESS_MODE_EXCLUSIVE: {
-      // Only the local agent can access the ringbuffer.
-      access_descs[access_desc_count++] = (hsa_amd_memory_access_desc_t){
-          .agent_handle = local_agent,
-          .permissions = HSA_ACCESS_PERMISSION_RW,
-      };
-    } break;
-    case IREE_HAL_AMDGPU_ACCESS_MODE_EXCLUSIVE_CONSUMER: {
-      // Local agent gets read, all agents get write.
-      for (iree_host_size_t i = 0; i < topology->all_agent_count; ++i) {
-        hsa_agent_t agent = topology->all_agents[i];
-        hsa_access_permission_t permissions = HSA_ACCESS_PERMISSION_NONE;
-        if (agent.handle == local_agent.handle) {
-          permissions = HSA_ACCESS_PERMISSION_RO;
-        } else {
-          permissions = HSA_ACCESS_PERMISSION_WO;
-        }
-        access_descs[access_desc_count++] = (hsa_amd_memory_access_desc_t){
-            .agent_handle = topology->all_agents[i],
-            .permissions = permissions,
-        };
-      }
-    } break;
-    case IREE_HAL_AMDGPU_ACCESS_MODE_EXCLUSIVE_PRODUCER: {
-      // Local agent gets write, all agents get read.
-      for (iree_host_size_t i = 0; i < topology->all_agent_count; ++i) {
-        hsa_agent_t agent = topology->all_agents[i];
-        hsa_access_permission_t permissions = HSA_ACCESS_PERMISSION_NONE;
-        if (agent.handle == local_agent.handle) {
-          permissions = HSA_ACCESS_PERMISSION_WO;
-        } else {
-          permissions = HSA_ACCESS_PERMISSION_RO;
-        }
-        access_descs[access_desc_count++] = (hsa_amd_memory_access_desc_t){
-            .agent_handle = topology->all_agents[i],
-            .permissions = permissions,
-        };
-      }
-    } break;
-    default: {
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                               "unhandled access mode"));
-    } break;
-  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_amdgpu_vmem_build_access_descs_for_topology(
+              topology, local_agent, access_mode, topology->all_agent_count,
+              access_descs, &access_desc_count));
 
   // Route to the explicit initializer.
   iree_status_t status = iree_hal_amdgpu_vmem_ringbuffer_initialize(

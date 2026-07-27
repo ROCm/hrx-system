@@ -11,11 +11,20 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amdgpu/abi/kernel_args.h"
 #include "iree/hal/drivers/amdgpu/device/dispatch.h"
+#include "iree/hal/drivers/amdgpu/kernarg_layout.h"
+#include "iree/hal/drivers/amdgpu/physical_device_capabilities.h"
 #include "iree/hal/drivers/amdgpu/profile_metadata.h"
+#include "iree/hal/drivers/amdgpu/queue_scope.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_dispatch.h"
 
+typedef struct iree_hal_amdgpu_asan_state_t iree_hal_amdgpu_asan_state_t;
+typedef struct iree_hal_amdgpu_feedback_state_t
+    iree_hal_amdgpu_feedback_state_t;
+typedef struct iree_hal_amdgpu_physical_device_t
+    iree_hal_amdgpu_physical_device_t;
 typedef struct iree_hal_amdgpu_topology_t iree_hal_amdgpu_topology_t;
+typedef struct iree_hal_amdgpu_tsan_state_t iree_hal_amdgpu_tsan_state_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,8 +43,8 @@ iree_status_t iree_hal_amdgpu_verify_device_isa_commonality(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology);
 
-// Returns whether the IREE HAL executable |format| is supported by all GPU
-// devices in |topology|. Some devices may support multiple ISAs.
+// Returns whether |target_key| is supported by |device_agent|. Some devices may
+// support multiple ISAs.
 //
 // Supports AMDGPU target IDs in both compiler spelling (`gfx1100`,
 // `gfx942:xnack-`) and the canonical ISA names reported by HSA
@@ -43,24 +52,14 @@ iree_status_t iree_hal_amdgpu_verify_device_isa_commonality(
 // compatibility so generic code-object targets and explicit feature modes can
 // be checked without relying on string equality.
 //
-// Optionally |out_isa| can be used to get the agent ISA for the given format.
-// Note that this will be from the first device but should match all other
-// devices in the topology.
-iree_status_t iree_hal_amdgpu_executable_format_supported(
+// Optionally |out_isa| can be used to get the agent ISA matching the target.
+iree_status_t iree_hal_amdgpu_executable_target_supported(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
-    iree_string_view_t format, bool* out_supported, hsa_isa_t* out_isa);
+    iree_string_view_t target_key, bool* out_supported, hsa_isa_t* out_isa);
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_executable_t
 //===----------------------------------------------------------------------===//
-
-// The maximum number of per-dispatch bindings allowed.
-// This is limited by the field size in iree_hal_amdgpu_device_kernel_args_t.
-#define IREE_HAL_AMDGPU_MAX_DISPATCH_BINDING_COUNT UINT16_MAX
-
-// The maximum number of per-dispatch constants allowed.
-// This is limited by the field size in iree_hal_amdgpu_device_kernel_args_t.
-#define IREE_HAL_AMDGPU_MAX_DISPATCH_CONSTANT_COUNT UINT16_MAX
 
 // Host-resident dispatch metadata precomputed for one executable export on one
 // physical device.
@@ -72,16 +71,20 @@ iree_status_t iree_hal_amdgpu_executable_format_supported(
 typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
   // Device-specific kernel arguments with a valid kernel_object for dispatch.
   iree_hal_amdgpu_device_kernel_args_t kernel_args;
-  // HAL ABI kernarg layout derived from |kernel_args|.
-  iree_hal_amdgpu_device_dispatch_kernarg_layout_t hal_kernarg_layout;
+  // Native kernarg layout for normal metadata-described dispatches.
+  const iree_hal_amdgpu_kernarg_layout_t* kernarg_layout;
   // Custom direct-argument kernarg layout derived from |kernel_args|.
   iree_hal_amdgpu_device_dispatch_kernarg_layout_t custom_kernarg_layout;
-  // Queue kernarg-ring block count for HAL ABI dispatches.
-  uint32_t hal_kernarg_block_count;
+  // Queue kernarg-ring block count for normal metadata-described dispatches.
+  uint32_t kernarg_block_count;
   // Queue kernarg-ring block count for custom direct-argument dispatches.
   uint32_t custom_kernarg_block_count;
   // Maximum static workgroup count accepted for each dimension.
   uint32_t max_workgroup_count[3];
+  // Cluster-count limits for this descriptor's physical device.
+  iree_hal_amdgpu_dispatch_dimension_limits_t workgroup_cluster_count_limits;
+  // Physical device ordinal owning |workgroup_cluster_count_limits|.
+  iree_host_size_t physical_device_ordinal;
   // Maximum dynamic group-memory byte count accepted for this export.
   uint32_t max_dynamic_workgroup_local_memory;
   // PM4 launch state for the default executable workgroup size.
@@ -99,25 +102,40 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
   bool pm4_launch_state_valid;
 } iree_hal_amdgpu_executable_dispatch_descriptor_t;
 
-// Infers the format of the executable and calculates its total size.
-// If executable_data.data_length is 0 attempts to infer size from the data.
-// Returns the canonical target-ID format string and total size of the
-// executable data.
-//
-// Wrapped AMDGPU flatbuffers infer the target ID from the embedded ELF image
-// instead of trusting the flatbuffer metadata target label.
-iree_status_t iree_hal_amdgpu_executable_infer_format(
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_allocator_t host_allocator, iree_host_size_t* out_inferred_size);
-
-// Creates a AMDGPU executable from a binary in memory. Each executable may
+// Creates an AMDGPU executable from a binary in memory. Each executable may
 // contain multiple entry points and be composed of several modules presented to
-// the HAL as a single instance. See iree_hal_executable_params_t for more
+// the HAL as a single instance. See iree_hal_executable_load_params_t for more
 // information about the lifetime of the resources referenced within.
 //
 // |libhsa| and |topology| are captured by-reference and must remain valid for
-// the lifetime of the cache.
+// the lifetime of the executable.
+//
+// |queue_affinity| selects the physical devices onto which the executable is
+// loaded. |target| must be an exact borrowed row from |device|'s immutable spec
+// and cover every selected physical device.
+//
+// |executable_id| is a non-zero logical-device-local identifier assigned to
+// this executable before it is visible to profiling or device-originated
+// diagnostics.
+//
+// |asan_state| is captured by-reference for this load and used to publish ASAN
+// config globals when enabled. It may be NULL when ASAN is unavailable.
+//
+// |feedback_state| is captured by-reference for this load and used to publish
+// feedback config globals when enabled. It may be NULL when feedback is
+// unavailable.
+//
+// |tsan_state| is captured by-reference for this load and used to publish TSAN
+// config globals when enabled. It may be NULL when TSAN is unavailable.
+//
+// |queue_scopes| captures immutable queue identities for the owning logical
+// device. Executables with queue-scoped globals may load one HSA executable
+// variant per physical queue ordinal and publish per-queue config without
+// mutating state on each dispatch.
+//
+// |physical_device_list| contains |physical_device_count| devices in topology
+// ordinal order. It is used only during creation to validate metadata against
+// every selected device's immutable capabilities.
 //
 // Exact code-object image bytes and loader load ranges are retained in profile
 // metadata for offline trace/disassembly workflows. Executable trace profiling
@@ -126,13 +144,21 @@ iree_status_t iree_hal_amdgpu_executable_infer_format(
 iree_status_t iree_hal_amdgpu_executable_create(
     iree_hal_device_t* device, const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology,
-    const iree_hal_executable_params_t* executable_params,
+    iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    uint64_t executable_id, iree_hal_amdgpu_feedback_state_t* feedback_state,
+    iree_hal_amdgpu_asan_state_t* asan_state,
+    iree_hal_amdgpu_tsan_state_t* tsan_state,
+    iree_host_size_t physical_device_count,
+    iree_hal_amdgpu_physical_device_t* const* physical_device_list,
+    iree_host_size_t queue_scope_count,
+    const iree_hal_amdgpu_queue_scope_t* queue_scopes,
     iree_hal_amdgpu_profile_metadata_registry_t* profile_metadata,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
 
-// Returns the producer-local profile executable id assigned at creation.
-uint64_t iree_hal_amdgpu_executable_profile_id(
-    iree_hal_executable_t* executable);
+// Returns the logical-device-local executable id assigned at creation.
+uint64_t iree_hal_amdgpu_executable_id(iree_hal_executable_t* executable);
 
 // Returns metadata about an exported kernel function in host memory.
 // The returned pointers will remain valid for the lifetime of the executable.
@@ -168,6 +194,22 @@ iree_status_t iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_device(
     iree_hal_executable_function_t export_ordinal,
     iree_host_size_t device_ordinal,
     const iree_hal_amdgpu_executable_dispatch_descriptor_t** out_descriptor);
+
+// Returns host-resident dispatch metadata for an exported kernel function on a
+// queue.
+//
+// Queue-scoped executable variants require this lookup so the selected kernel
+// object and executable globals match the queue that will receive the dispatch.
+// Non-queue-scoped executables collapse this to the existing per-device lookup.
+iree_status_t iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue(
+    iree_hal_executable_t* executable,
+    iree_hal_executable_function_t export_ordinal,
+    iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_amdgpu_executable_dispatch_descriptor_t** out_descriptor);
+
+// Returns true when dispatches must select executable metadata by queue.
+bool iree_hal_amdgpu_executable_requires_queue_scope(
+    iree_hal_executable_t* executable);
 
 // Returns PM4 compute launch state for an exported kernel function on a
 // physical device.

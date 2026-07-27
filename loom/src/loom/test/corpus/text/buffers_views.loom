@@ -1,0 +1,19 @@
+func.def @views(%buffer: buffer, %offset: offset, %row_stride: index, %row: index, %col: index, %value: f32) -> (f32) {
+  %layout = encoding.layout.strided [%row_stride, 1] : encoding<layout>
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %view = buffer.view %global[%offset] : buffer -> view<8x16xf32, %layout>
+  %sub = view.subview %view[%row, 0] : view<8x16xf32, %layout> -> view<1x16xf32, %layout>
+  view.prefetch %sub[0, %col] {intent = read, locality = l2} : view<1x16xf32, %layout>
+  %loaded = view.load %sub[0, %col] {cache_scope = device, cache_temporal = non_temporal} : view<1x16xf32, %layout> -> f32
+  view.store %value, %sub[0, %col] {cache_scope = system, cache_temporal = writeback} : f32, view<1x16xf32, %layout>
+  func.return %loaded : f32
+}
+
+func.def @scratch(%bytes: offset) {
+  %zero = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<16xi32, %layout>
+  test.use %view : view<16xi32, %layout>
+  func.return
+}

@@ -61,7 +61,7 @@ enum {
   IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_RELEASE_SCOPE_MASK = 0x30u,
 };
 
-// Binding source flags used to form HAL dispatch kernarg pointer prefixes.
+// Binding source flags used to patch native dispatch kernarg pointers.
 typedef enum iree_hal_amdgpu_command_buffer_binding_source_flag_bits_e {
   IREE_HAL_AMDGPU_COMMAND_BUFFER_BINDING_SOURCE_FLAG_NONE = 0u,
   IREE_HAL_AMDGPU_COMMAND_BUFFER_BINDING_SOURCE_FLAG_DYNAMIC = 1u << 0,
@@ -74,17 +74,21 @@ typedef enum iree_hal_amdgpu_command_buffer_binding_source_flag_bits_e {
 typedef enum iree_hal_amdgpu_command_buffer_dispatch_flag_bits_e {
   IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_NONE = 0u,
   IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_INDIRECT_PARAMETERS = 1u << 0,
+  // |kernel_object| stores a host pointer to a uint64_t table indexed by the
+  // executing queue's physical_queue_ordinal instead of a direct HSA kernel
+  // object. Used when executable globals are queue scoped.
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_QUEUE_SCOPED_KERNEL_OBJECT =
+      1u << 1,
+  // The dispatch uses the AMD extended packet with |workgroup_cluster_size|.
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_WORKGROUP_CLUSTER = 1u << 2,
 } iree_hal_amdgpu_command_buffer_dispatch_flag_bits_t;
 
-// Kernarg formation strategy for a dispatch command.
-typedef enum iree_hal_amdgpu_command_buffer_kernarg_strategy_e {
-  IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_HAL = 0,
-  IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_CUSTOM_DIRECT = 1,
-  IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_INDIRECT = 2,
-  IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_PREPUBLISHED = 3,
-  IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_PATCHED_TEMPLATE = 4,
-  IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_DYNAMIC_BINDINGS = 5,
-} iree_hal_amdgpu_command_buffer_kernarg_strategy_t;
+// Kernarg storage mode for a dispatch command.
+typedef enum iree_hal_amdgpu_command_buffer_kernarg_storage_mode_e {
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_NATIVE_INLINE = 0,
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT = 1,
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_PREPUBLISHED = 2,
+} iree_hal_amdgpu_command_buffer_kernarg_storage_mode_t;
 
 // Binding reference kind constants embedded in command records.
 enum iree_hal_amdgpu_command_buffer_binding_kind_e {
@@ -208,7 +212,7 @@ iree_hal_amdgpu_command_buffer_command_flags_release_scope(uint8_t flags) {
       IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_RELEASE_SCOPE_SHIFT);
 }
 
-// Source record used to emit one HAL ABI dispatch binding pointer.
+// Source record used to patch one native dispatch kernarg pointer.
 typedef struct IREE_AMDGPU_ALIGNAS(8)
     iree_hal_amdgpu_command_buffer_binding_source_t {
   // Static raw source: final raw device pointer.
@@ -222,8 +226,8 @@ typedef struct IREE_AMDGPU_ALIGNAS(8)
   // Dynamic source queue_execute binding table slot or static buffer ordinal.
   // Must be zero for raw static sources.
   uint32_t slot;
-  // Destination HAL ABI binding pointer ordinal for compact patch lists.
-  uint16_t target_binding_ordinal;
+  // Destination native kernarg qword index for compact patch lists.
+  uint16_t target_qword_index;
   // Source flags from
   // iree_hal_amdgpu_command_buffer_binding_source_flag_bits_t.
   uint8_t flags;
@@ -273,48 +277,50 @@ typedef struct IREE_AMDGPU_ALIGNAS(8)
     iree_hal_amdgpu_command_buffer_dispatch_command_t {
   // Common command record header.
   iree_hal_amdgpu_command_buffer_command_header_t header;
-  // HSA kernel object for the command buffer's selected physical device.
+  // HSA kernel object, or a host pointer to per-queue kernel objects when
+  // QUEUE_SCOPED_KERNEL_OBJECT is set in |dispatch_flags|.
   uint64_t kernel_object;
   // Byte offset from the block header to this dispatch's first binding source.
   uint32_t binding_source_offset;
   // Strategy-specific payload reference.
-  // HAL/CUSTOM_DIRECT/INDIRECT: byte offset from this command record to
-  // constants/implicit tail bytes.
-  // PATCHED_TEMPLATE: command-buffer rodata ordinal for the immutable kernarg
-  // template copied into queue-owned kernargs before dynamic binding patches.
+  // NATIVE_INLINE/CUSTOM_DIRECT: byte offset from this command record to the
+  // complete inline kernarg template copied into queue-owned kernargs.
   // PREPUBLISHED: byte offset from the command-buffer prepublished kernarg
-  // storage to the final kernargs.
+  // storage to the final native kernargs.
   uint32_t payload_reference;
-  // Number of HAL ABI binding pointer slots emitted before the tail payload.
+  // Number of HAL dispatch binding pointer slots in the export layout.
   uint16_t binding_count;
   // Total kernarg reservation size in 8-byte qwords.
   uint16_t kernarg_length_qwords;
-  // Strategy-specific payload count.
+  // Number of binding source records that patch native kernarg qwords.
   union {
-    // Inline tail payload size in 8-byte qwords.
-    uint16_t tail_length_qwords;
-    // Number of dynamic binding patch records following this command.
-    uint16_t patch_source_count;
+    // Binding source records before any indirect-parameter source record.
+    uint16_t binding_source_count;
+    // Reserved alternate name for zero-initialization.
+    uint16_t reserved0;
   } payload;
-  // Kernarg strategy from iree_hal_amdgpu_command_buffer_kernarg_strategy_t.
-  uint8_t kernarg_strategy;
+  // Kernarg storage mode from
+  // iree_hal_amdgpu_command_buffer_kernarg_storage_mode_t.
+  uint8_t kernarg_storage_mode;
   // Dispatch flags from iree_hal_amdgpu_command_buffer_dispatch_flag_bits_t.
   uint8_t dispatch_flags;
-  // AQL dispatch packet setup field.
-  uint16_t setup;
+  // Immutable workgroup cluster size, or zeroes for ordinary dispatch.
+  uint8_t workgroup_cluster_size[3];
+  // Reserved byte that must be zero in version 0.
+  uint8_t reserved1;
   // Executable export ordinal used for profiling and diagnostics.
   uint32_t export_ordinal;
   // AQL dispatch packet workgroup size fields.
   uint16_t workgroup_size[3];
   // Kernarg qword offset of implicit args, or UINT16_MAX when absent.
   uint16_t implicit_args_offset_qwords;
-  // AQL dispatch packet grid size fields.
-  uint32_t grid_size[3];
+  // Direct dispatch size in workgroups.
+  uint32_t workgroup_count[3];
   // AQL dispatch packet private segment size field.
   uint32_t private_segment_size;
   // AQL dispatch packet group segment size field.
   uint32_t group_segment_size;
-  // Session-local profile executable id used for event attribution.
+  // Logical-device-local executable id used for event attribution.
   uint64_t executable_id;
 } iree_hal_amdgpu_command_buffer_dispatch_command_t;
 IREE_AMDGPU_STATIC_ASSERT(

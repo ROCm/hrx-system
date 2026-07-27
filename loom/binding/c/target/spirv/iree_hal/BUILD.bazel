@@ -1,0 +1,37 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_config_compatible_with",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_SPIRV_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:spirv_vulkan_artifacts",
+])
+
+loom_cc_library(
+    name = "iree_hal",
+    srcs = ["iree_hal.c"],
+    hdrs = ["//loom/binding/c:include/loomc/target/spirv/iree_hal.h"],
+    linkstatic = True,
+    target_compatible_with = _SPIRV_COMPATIBLE_WITH,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/iree_hal",
+        "//loom/binding/c/target/spirv",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/vulkan:device_spec",
+    ],
+    alwayslink = True,
+)

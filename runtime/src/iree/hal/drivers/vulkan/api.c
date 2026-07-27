@@ -81,6 +81,11 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_extensions_from_names(
   }
   if (iree_hal_vulkan_extension_name_list_contains(
           extension_count, extension_names,
+          IREE_HAL_VULKAN_EXT_MEMORY_BUDGET_EXTENSION_NAME)) {
+    extensions |= IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_MEMORY_BUDGET;
+  }
+  if (iree_hal_vulkan_extension_name_list_contains(
+          extension_count, extension_names,
           VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) {
     extensions |= IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_PUSH_DESCRIPTOR;
   }
@@ -137,9 +142,7 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_query_extensibility_set(
   if (set == (target_set)) {                                             \
     iree_status_t add_status = iree_hal_vulkan_add_extensibility_string( \
         (value), string_capacity, out_string_count, out_string_values);  \
-    if (!iree_status_is_ok(add_status) && iree_status_is_ok(status)) {   \
-      status = add_status;                                               \
-    }                                                                    \
+    status = iree_status_join(status, add_status);                       \
   }
 
   switch (set) {
@@ -265,7 +268,6 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_syms_create_from_system_loader(
 }
 
 IREE_API_EXPORT void iree_hal_vulkan_syms_retain(iree_hal_vulkan_syms_t* syms) {
-  IREE_ASSERT_ARGUMENT(syms);
   if (syms) {
     iree_atomic_ref_count_inc(&syms->ref_count);
   }
@@ -273,7 +275,6 @@ IREE_API_EXPORT void iree_hal_vulkan_syms_retain(iree_hal_vulkan_syms_t* syms) {
 
 IREE_API_EXPORT void iree_hal_vulkan_syms_release(
     iree_hal_vulkan_syms_t* syms) {
-  IREE_ASSERT_ARGUMENT(syms);
   if (syms && iree_atomic_ref_count_dec(&syms->ref_count) == 1) {
     iree_allocator_t host_allocator = syms->host_allocator;
     iree_hal_vulkan_libvulkan_deinitialize(&syms->libvulkan);

@@ -25,10 +25,19 @@ typedef struct iree_status_handle_t* iree_status_t;
 #define IREE_STRING_VIEW_NPOS IREE_HOST_SIZE_MAX
 
 // A string view (ala std::string_view) into a non-NUL-terminated string.
+//
+// String views are empty when size is zero. Empty views may have NULL or
+// non-NULL data pointers. A view with non-zero size and NULL data is malformed
+// and must be rejected at API boundaries before data is accessed.
+#if !defined(IREE_STRING_VIEW_T_DEFINED_)
+#define IREE_STRING_VIEW_T_DEFINED_
 typedef struct iree_string_view_t {
   const char* data;
   iree_host_size_t size;
 } iree_string_view_t;
+#else
+typedef struct iree_string_view_t iree_string_view_t;
+#endif  // !IREE_STRING_VIEW_T_DEFINED_
 
 // Returns an empty string view ("").
 static inline iree_string_view_t iree_string_view_empty(void) {
@@ -37,7 +46,9 @@ static inline iree_string_view_t iree_string_view_empty(void) {
 }
 
 // Returns true if the given string view is the empty string.
-#define iree_string_view_is_empty(sv) (((sv).data == NULL) || ((sv).size == 0))
+static inline bool iree_string_view_is_empty(iree_string_view_t sv) {
+  return sv.size == 0;
+}
 
 static inline iree_string_view_t iree_make_string_view(
     const char* str, iree_host_size_t str_length) {
@@ -53,6 +64,10 @@ static inline iree_string_view_t iree_make_cstring_view(const char* str) {
 }
 
 // A mutable string view into a non-NUL-terminated char buffer.
+//
+// Mutable string views are empty when size is zero. Empty views may have NULL
+// or non-NULL data pointers. A view with non-zero size and NULL data is
+// malformed and must be rejected at API boundaries before data is accessed.
 // Unlike iree_string_view_t, the data pointer is non-const for writing.
 // Useful for output buffers where we track capacity and written length.
 typedef struct iree_mutable_string_view_t {
@@ -67,8 +82,10 @@ static inline iree_mutable_string_view_t iree_mutable_string_view_empty(void) {
 }
 
 // Returns true if the given mutable string view is empty.
-#define iree_mutable_string_view_is_empty(sv) \
-  (((sv).data == NULL) || ((sv).size == 0))
+static inline bool iree_mutable_string_view_is_empty(
+    iree_mutable_string_view_t sv) {
+  return sv.size == 0;
+}
 
 static inline iree_mutable_string_view_t iree_make_mutable_string_view(
     char* str, iree_host_size_t str_length) {
@@ -84,6 +101,8 @@ static inline iree_string_view_t iree_make_const_string_view(
 }
 
 // A pair of strings.
+#if !defined(IREE_STRING_PAIR_T_DEFINED_)
+#define IREE_STRING_PAIR_T_DEFINED_
 typedef struct iree_string_pair_t {
   union {
     iree_string_view_t first;
@@ -94,6 +113,9 @@ typedef struct iree_string_pair_t {
     iree_string_view_t value;
   };
 } iree_string_pair_t;
+#else
+typedef struct iree_string_pair_t iree_string_pair_t;
+#endif  // !IREE_STRING_PAIR_T_DEFINED_
 
 // Returns an empty string pair ("", "").
 static inline iree_string_pair_t iree_string_pair_empty(void) {
@@ -174,6 +196,12 @@ IREE_API_EXPORT int iree_string_view_compare(iree_string_view_t lhs,
 // Returns the found character position or IREE_STRING_VIEW_NPOS if not found.
 IREE_API_EXPORT iree_host_size_t iree_string_view_find_char(
     iree_string_view_t value, char c, iree_host_size_t pos);
+
+// Finds the first occurrence of substring |needle| in |value| starting at
+// |pos|. Returns the byte offset of the match or IREE_STRING_VIEW_NPOS if
+// not found.
+IREE_API_EXPORT iree_host_size_t iree_string_view_find(
+    iree_string_view_t value, iree_string_view_t needle, iree_host_size_t pos);
 
 // Returns the index of the first occurrence of one of the characters in |s| or
 // IREE_STRING_VIEW_NPOS if none of the characters were found.

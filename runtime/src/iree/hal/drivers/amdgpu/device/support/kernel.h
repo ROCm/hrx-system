@@ -38,6 +38,9 @@
   ((const iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT) \
        __builtin_amdgcn_dispatch_ptr())
 
+// Returns the AQL dispatch ID of the packet being executed.
+#define iree_amdgcn_dispatch_id() ((uint64_t)__builtin_amdgcn_dispatch_id())
+
 // __ockl_get_global_id(0) / get_global_id_x using OLD_ABI.
 static inline IREE_AMDGPU_ATTRIBUTE_ALWAYS_INLINE size_t
 iree_hal_amdgpu_device_global_id_x(void) {

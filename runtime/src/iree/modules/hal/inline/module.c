@@ -7,7 +7,6 @@
 #include "iree/modules/hal/inline/module.h"
 
 #include "iree/base/api.h"
-#include "iree/base/internal/cpu.h"
 #include "iree/hal/api.h"
 #include "iree/modules/hal/utils/buffer_diagnostics.h"
 #include "iree/vm/api.h"
@@ -87,6 +86,10 @@ static iree_status_t iree_hal_inline_storage_buffer_create(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(host_allocator, sizeof(*storage),
                                 (void**)&storage));
+  memset(storage, 0, sizeof(*storage));
+  storage->host_allocator = host_allocator;
+  storage->hal_buffer = hal_buffer;
+  iree_hal_buffer_retain(storage->hal_buffer);
 
   // Map the HAL buffer into host-accessible memory. It almost always is but
   // it's possible the buffer we were passed was allocated on a real device that
@@ -122,7 +125,7 @@ static void iree_hal_inline_storage_buffer_destroy(
     iree_hal_inline_storage_buffer_t* storage) {
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_allocator_t host_allocator = storage->host_allocator;
-  iree_hal_buffer_unmap_range(&storage->mapping);
+  iree_status_ignore(iree_hal_buffer_unmap_range(&storage->mapping));
   iree_hal_buffer_release(storage->hal_buffer);
   iree_allocator_free(host_allocator, storage);
   IREE_TRACE_ZONE_END(z0);
@@ -538,37 +541,6 @@ IREE_VM_ABI_EXPORT(iree_hal_inline_module_buffer_view_trace,  //
         state->debug_sink.buffer_view_trace.user_data, key_str,
         buffer_view_count, buffer_views, state->host_allocator);
   }
-  return iree_ok_status();
-}
-
-//===----------------------------------------------------------------------===//
-// iree_hal_device_t
-//===----------------------------------------------------------------------===//
-
-IREE_VM_ABI_EXPORT(iree_hal_inline_module_device_query_i64,  //
-                   iree_hal_inline_module_state_t,           //
-                   rr, iI) {
-  iree_vm_buffer_t* category = NULL;
-  IREE_RETURN_IF_ERROR(iree_vm_buffer_check_deref(args->r0, &category));
-  iree_string_view_t category_str = iree_vm_buffer_as_string(category);
-  iree_vm_buffer_t* key = NULL;
-  IREE_RETURN_IF_ERROR(iree_vm_buffer_check_deref(args->r1, &key));
-  iree_string_view_t key_str = iree_vm_buffer_as_string(key);
-
-  // TODO(benvanik): allow injection of a query function on the module. This
-  // would let us extend the queryable configuration with either synthetic
-  // properties or user-provided ones. For now we could at least provide
-  // compile-time configuration (like hosting architecture) but nothing dynamic
-  // (like cache sizes).
-
-  iree_status_t query_status = iree_status_from_code(IREE_STATUS_NOT_FOUND);
-  int64_t value = 0;
-  if (iree_string_view_equal(category_str, IREE_SV("hal.cpu"))) {
-    query_status = iree_cpu_lookup_data_by_key(key_str, &value);
-  }
-
-  rets->i0 = iree_status_consume_code(query_status) == IREE_STATUS_OK ? 1 : 0;
-  rets->i1 = value;
   return iree_ok_status();
 }
 

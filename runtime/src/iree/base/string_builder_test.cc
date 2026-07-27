@@ -144,6 +144,9 @@ TEST(StringBuilderTest, AppendString) {
   EXPECT_EQ(iree_string_builder_size(builder), 0);
   IREE_EXPECT_OK(iree_string_builder_append_cstring(builder, ""));
   EXPECT_EQ(builder.ToString(), "");
+  IREE_EXPECT_OK(
+      iree_string_builder_append_string(builder, iree_string_view_empty()));
+  EXPECT_EQ(builder.ToString(), "");
   IREE_EXPECT_OK(iree_string_builder_append_cstring(builder, "a"));
   EXPECT_EQ(builder.ToString(), "a");
   EXPECT_EQ(strlen(builder.builder.buffer), 1);  // NUL check

@@ -258,9 +258,9 @@ static iree_status_t iree_hal_hip_driver_dump_device_info(
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_format(
         builder, "\n- amdhip64_dylib_path: %s", path_builder.buffer);
-    iree_string_builder_deinitialize(&path_builder);
-    IREE_RETURN_IF_ERROR(status);
   }
+  iree_string_builder_deinitialize(&path_builder);
+  IREE_RETURN_IF_ERROR(status);
 
   hipDevice_t device = IREE_DEVICE_ID_TO_HIPDEVICE(device_id);
 

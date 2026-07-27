@@ -1,0 +1,83 @@
+// RUN: roundtrip
+
+func.def @i8x4_addi_arguments(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (vector<4xi8>) {
+  %sum = vector.addi %lhs, %rhs : vector<4xi8>
+  func.return %sum : vector<4xi8>
+}
+
+// ====
+
+func.def @i8x8_addi_storage_tuple(%lhs: vector<8xi8>, %rhs: vector<8xi8>) -> (vector<8xi8>) {
+  %sum = vector.addi %lhs, %rhs : vector<8xi8>
+  func.return %sum : vector<8xi8>
+}
+
+// ====
+
+func.def @i8x4_subi_arguments(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (vector<4xi8>) {
+  %diff = vector.subi %lhs, %rhs : vector<4xi8>
+  func.return %diff : vector<4xi8>
+}
+
+// ====
+
+func.def @i8x8_subi_storage_tuple(%lhs: vector<8xi8>, %rhs: vector<8xi8>) -> (vector<8xi8>) {
+  %diff = vector.subi %lhs, %rhs : vector<8xi8>
+  func.return %diff : vector<8xi8>
+}
+
+// ====
+
+func.def @i8x4_addi_chain(%packed: vector<1xi32>, %bias: vector<4xi8>, %delta: vector<4xi8>) -> (vector<4xi8>) {
+  %bytes = vector.bitcast %packed : vector<1xi32> to vector<4xi8>
+  %biased = vector.addi %bytes, %bias : vector<4xi8>
+  %result = vector.addi %biased, %delta : vector<4xi8>
+  func.return %result : vector<4xi8>
+}
+
+// ====
+
+func.def @i8x4_select_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xi8>
+  %result = vector.addi %selected, %bias : vector<4xi8>
+  func.return %result : vector<4xi8>
+}
+
+// ====
+
+func.def @i8x4_select_subi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xi8>
+  %result = vector.subi %selected, %bias : vector<4xi8>
+  func.return %result : vector<4xi8>
+}
+
+// ====
+
+func.def @i8x4_scf_if_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %selected = scf.if %condition -> (vector<4xi8>) {
+    scf.yield %true_value : vector<4xi8>
+  } else {
+    scf.yield %false_value : vector<4xi8>
+  }
+  %result = vector.addi %selected, %bias : vector<4xi8>
+  func.return %result : vector<4xi8>
+}
+
+// ====
+
+func.def @i8x4_cfg_arg_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  cfg.cond_br %condition, ^then, ^else
+^then:
+  cfg.br ^join(%true_value: vector<4xi8>)
+^else:
+  cfg.br ^join(%false_value: vector<4xi8>)
+^join(%selected: vector<4xi8>):
+  %result = vector.addi %selected, %bias : vector<4xi8>
+  func.return %result : vector<4xi8>
+}

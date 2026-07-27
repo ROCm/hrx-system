@@ -8,7 +8,6 @@
 #define IREE_VM_BYTECODE_ARCHIVE_H_
 
 #include "iree/base/api.h"
-#include "iree/vm/api.h"
 
 #ifdef __cplusplus
 extern "C" {

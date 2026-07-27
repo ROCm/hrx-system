@@ -1,0 +1,59 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_test", "loom_generated_cc_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_generated_cc_library(
+    name = "target",
+    srcs = [
+        "facts.c",
+        "verify.c",
+    ],
+    hdrs = [
+        "facts.h",
+        "ops.h",
+    ],
+    args = ["--dialect=target"],
+    generated_src_flags = [
+        "--builders",
+        "--tables",
+    ],
+    generated_srcs = [
+        "builders.c",
+        "tables.c",
+    ],
+    generator = "//loom/py/loom/gen/ops:c_tables_target_generator",
+    deps = [
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "facts_test",
+    srcs = ["facts_test.cc"],
+    deps = [
+        ":target",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

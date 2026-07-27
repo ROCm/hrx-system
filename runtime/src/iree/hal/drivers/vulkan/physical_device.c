@@ -9,6 +9,8 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "iree/base/internal/debugging.h"
+
 //===----------------------------------------------------------------------===//
 // Shared formatting utilities
 //===----------------------------------------------------------------------===//
@@ -124,6 +126,11 @@ iree_hal_vulkan_available_device_extensions_from_list(
         IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_CALIBRATED_TIMESTAMPS;
   }
   if (iree_hal_vulkan_extension_list_contains(
+          extension_count, extensions,
+          IREE_HAL_VULKAN_EXT_MEMORY_BUDGET_EXTENSION_NAME)) {
+    available_extensions |= IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_MEMORY_BUDGET;
+  }
+  if (iree_hal_vulkan_extension_list_contains(
           extension_count, extensions, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) {
     available_extensions |=
         IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_PUSH_DESCRIPTOR;
@@ -166,18 +173,23 @@ static iree_status_t iree_hal_vulkan_query_calibrated_timestamp_time_domains(
   *out_time_domains = IREE_HAL_VULKAN_TIME_DOMAIN_NONE;
 
   uint32_t time_domain_count = 0;
-  IREE_RETURN_IF_ERROR(iree_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  iree_status_t status = iree_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(
       IREE_VULKAN_INSTANCE(&instance->syms), handle, &time_domain_count,
-      /*pTimeDomains=*/NULL));
+      /*pTimeDomains=*/NULL);
+  IREE_LEAK_CHECK_DISABLE_POP();
+  IREE_RETURN_IF_ERROR(status);
   if (time_domain_count == 0) return iree_ok_status();
 
   VkTimeDomainEXT* time_domains = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       host_allocator, time_domain_count, sizeof(*time_domains),
       (void**)&time_domains));
-  iree_status_t status = iree_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  status = iree_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(
       IREE_VULKAN_INSTANCE(&instance->syms), handle, &time_domain_count,
       time_domains);
+  IREE_LEAK_CHECK_DISABLE_POP();
   if (iree_status_is_ok(status)) {
     iree_hal_vulkan_time_domain_flags_t flags =
         IREE_HAL_VULKAN_TIME_DOMAIN_NONE;
@@ -203,8 +215,10 @@ static iree_status_t iree_hal_vulkan_query_cooperative_matrix(
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
       .pNext = &snapshot->cooperative_matrix_features,
   };
+  IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_vkGetPhysicalDeviceFeatures2(IREE_VULKAN_INSTANCE(&instance->syms),
                                     handle, &features2);
+  IREE_LEAK_CHECK_DISABLE_POP();
 
   snapshot->cooperative_matrix_properties =
       (VkPhysicalDeviceCooperativeMatrixPropertiesKHR){
@@ -215,13 +229,18 @@ static iree_status_t iree_hal_vulkan_query_cooperative_matrix(
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
       .pNext = &snapshot->cooperative_matrix_properties,
   };
+  IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_vkGetPhysicalDeviceProperties2(IREE_VULKAN_INSTANCE(&instance->syms),
                                       handle, &properties2);
+  IREE_LEAK_CHECK_DISABLE_POP();
 
   uint32_t property_count = 0;
-  IREE_RETURN_IF_ERROR(iree_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR(
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  iree_status_t status = iree_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR(
       IREE_VULKAN_INSTANCE(&instance->syms), handle, &property_count,
-      /*pProperties=*/NULL));
+      /*pProperties=*/NULL);
+  IREE_LEAK_CHECK_DISABLE_POP();
+  IREE_RETURN_IF_ERROR(status);
   if (!property_count) return iree_ok_status();
 
   VkCooperativeMatrixPropertiesKHR* properties = NULL;
@@ -234,9 +253,11 @@ static iree_status_t iree_hal_vulkan_query_cooperative_matrix(
     };
   }
 
-  iree_status_t status = iree_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR(
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  status = iree_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR(
       IREE_VULKAN_INSTANCE(&instance->syms), handle, &property_count,
       properties);
+  IREE_LEAK_CHECK_DISABLE_POP();
   if (iree_status_is_ok(status)) {
     snapshot->cooperative_matrix_property_count = property_count;
     snapshot->cooperative_matrix_property_rows = properties;
@@ -258,8 +279,10 @@ static void iree_hal_vulkan_query_shader_bfloat16_features(
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
       .pNext = &snapshot->shader_bfloat16_features,
   };
+  IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_vkGetPhysicalDeviceFeatures2(IREE_VULKAN_INSTANCE(&instance->syms),
                                     handle, &features2);
+  IREE_LEAK_CHECK_DISABLE_POP();
 }
 
 static bool iree_hal_vulkan_layer_list_contains(uint32_t layer_count,
@@ -281,8 +304,11 @@ static iree_status_t iree_hal_vulkan_enumerate_instance_extensions(
   *out_extensions = NULL;
 
   uint32_t extension_count = 0;
-  IREE_RETURN_IF_ERROR(iree_vkEnumerateInstanceExtensionProperties(
-      IREE_LIBVULKAN(libvulkan), /*pLayerName=*/NULL, &extension_count, NULL));
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  iree_status_t status = iree_vkEnumerateInstanceExtensionProperties(
+      IREE_LIBVULKAN(libvulkan), /*pLayerName=*/NULL, &extension_count, NULL);
+  IREE_LEAK_CHECK_DISABLE_POP();
+  IREE_RETURN_IF_ERROR(status);
   if (!extension_count) return iree_ok_status();
 
   VkExtensionProperties* extensions = NULL;
@@ -290,9 +316,11 @@ static iree_status_t iree_hal_vulkan_enumerate_instance_extensions(
       host_allocator, extension_count * sizeof(*extensions),
       (void**)&extensions));
 
-  iree_status_t status = iree_vkEnumerateInstanceExtensionProperties(
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  status = iree_vkEnumerateInstanceExtensionProperties(
       IREE_LIBVULKAN(libvulkan), /*pLayerName=*/NULL, &extension_count,
       extensions);
+  IREE_LEAK_CHECK_DISABLE_POP();
   if (iree_status_is_ok(status)) {
     *out_extension_count = extension_count;
     *out_extensions = extensions;
@@ -312,16 +340,21 @@ static iree_status_t iree_hal_vulkan_enumerate_instance_layers(
   *out_layers = NULL;
 
   uint32_t layer_count = 0;
-  IREE_RETURN_IF_ERROR(iree_vkEnumerateInstanceLayerProperties(
-      IREE_LIBVULKAN(libvulkan), &layer_count, NULL));
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  iree_status_t status = iree_vkEnumerateInstanceLayerProperties(
+      IREE_LIBVULKAN(libvulkan), &layer_count, NULL);
+  IREE_LEAK_CHECK_DISABLE_POP();
+  IREE_RETURN_IF_ERROR(status);
   if (!layer_count) return iree_ok_status();
 
   VkLayerProperties* layers = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       host_allocator, layer_count * sizeof(*layers), (void**)&layers));
 
-  iree_status_t status = iree_vkEnumerateInstanceLayerProperties(
-      IREE_LIBVULKAN(libvulkan), &layer_count, layers);
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  status = iree_vkEnumerateInstanceLayerProperties(IREE_LIBVULKAN(libvulkan),
+                                                   &layer_count, layers);
+  IREE_LEAK_CHECK_DISABLE_POP();
   if (iree_status_is_ok(status)) {
     *out_layer_count = layer_count;
     *out_layers = layers;
@@ -347,9 +380,11 @@ iree_status_t iree_hal_vulkan_instance_initialize(
   memset(out_instance, 0, sizeof(*out_instance));
 
   uint32_t loader_api_version = VK_API_VERSION_1_0;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_vkEnumerateInstanceVersion(IREE_LIBVULKAN(libvulkan),
-                                          &loader_api_version));
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  iree_status_t status = iree_vkEnumerateInstanceVersion(
+      IREE_LIBVULKAN(libvulkan), &loader_api_version);
+  IREE_LEAK_CHECK_DISABLE_POP();
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   const uint32_t requested_api_version =
       iree_hal_vulkan_resolve_api_version(options);
   if (loader_api_version < requested_api_version) {
@@ -374,7 +409,7 @@ iree_status_t iree_hal_vulkan_instance_initialize(
 
   uint32_t available_layer_count = 0;
   VkLayerProperties* available_layers = NULL;
-  iree_status_t status = iree_hal_vulkan_enumerate_instance_layers(
+  status = iree_hal_vulkan_enumerate_instance_layers(
       libvulkan, host_allocator, &available_layer_count, &available_layers);
 
   const char* enabled_extensions[8] = {0};
@@ -438,8 +473,10 @@ iree_status_t iree_hal_vulkan_instance_initialize(
   };
 
   if (iree_status_is_ok(status)) {
+    IREE_LEAK_CHECK_DISABLE_PUSH();
     status = iree_vkCreateInstance(IREE_LIBVULKAN(libvulkan), &create_info,
                                    /*pAllocator=*/NULL, &out_instance->handle);
+    IREE_LEAK_CHECK_DISABLE_POP();
   }
 
   iree_allocator_free(host_allocator, available_layers);
@@ -513,8 +550,10 @@ iree_status_t iree_hal_vulkan_physical_device_snapshot_initialize(
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
       .pNext = &out_snapshot->properties11,
   };
+  IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_vkGetPhysicalDeviceProperties2(IREE_VULKAN_INSTANCE(&instance->syms),
                                       handle, &out_snapshot->properties2);
+  IREE_LEAK_CHECK_DISABLE_POP();
 
   out_snapshot->features13 = (VkPhysicalDeviceVulkan13Features){
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
@@ -531,19 +570,25 @@ iree_status_t iree_hal_vulkan_physical_device_snapshot_initialize(
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
       .pNext = &out_snapshot->features11,
   };
+  IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_vkGetPhysicalDeviceFeatures2(IREE_VULKAN_INSTANCE(&instance->syms),
                                     handle, &out_snapshot->features2);
+  IREE_LEAK_CHECK_DISABLE_POP();
 
   out_snapshot->memory_properties2 = (VkPhysicalDeviceMemoryProperties2){
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2,
   };
+  IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_vkGetPhysicalDeviceMemoryProperties2(
       IREE_VULKAN_INSTANCE(&instance->syms), handle,
       &out_snapshot->memory_properties2);
+  IREE_LEAK_CHECK_DISABLE_POP();
 
+  IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_vkGetPhysicalDeviceQueueFamilyProperties2(
       IREE_VULKAN_INSTANCE(&instance->syms), handle,
       &out_snapshot->queue_family_count, NULL);
+  IREE_LEAK_CHECK_DISABLE_POP();
   iree_status_t status = iree_ok_status();
   if (out_snapshot->queue_family_count) {
     status = iree_allocator_malloc(host_allocator,
@@ -558,16 +603,20 @@ iree_status_t iree_hal_vulkan_physical_device_snapshot_initialize(
       };
     }
     if (iree_status_is_ok(status)) {
+      IREE_LEAK_CHECK_DISABLE_PUSH();
       iree_vkGetPhysicalDeviceQueueFamilyProperties2(
           IREE_VULKAN_INSTANCE(&instance->syms), handle,
           &out_snapshot->queue_family_count, out_snapshot->queue_families);
+      IREE_LEAK_CHECK_DISABLE_POP();
     }
   }
 
   if (iree_status_is_ok(status)) {
+    IREE_LEAK_CHECK_DISABLE_PUSH();
     status = iree_vkEnumerateDeviceExtensionProperties(
         IREE_VULKAN_INSTANCE(&instance->syms), handle, /*pLayerName=*/NULL,
         &out_snapshot->extension_count, NULL);
+    IREE_LEAK_CHECK_DISABLE_POP();
   }
   if (iree_status_is_ok(status) && out_snapshot->extension_count) {
     status = iree_allocator_malloc(
@@ -575,9 +624,11 @@ iree_status_t iree_hal_vulkan_physical_device_snapshot_initialize(
         out_snapshot->extension_count * sizeof(out_snapshot->extensions[0]),
         (void**)&out_snapshot->extensions);
     if (iree_status_is_ok(status)) {
+      IREE_LEAK_CHECK_DISABLE_PUSH();
       status = iree_vkEnumerateDeviceExtensionProperties(
           IREE_VULKAN_INSTANCE(&instance->syms), handle, /*pLayerName=*/NULL,
           &out_snapshot->extension_count, out_snapshot->extensions);
+      IREE_LEAK_CHECK_DISABLE_POP();
     }
   }
   if (iree_status_is_ok(status)) {
@@ -606,8 +657,10 @@ iree_status_t iree_hal_vulkan_physical_device_snapshot_initialize(
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
         .pNext = &out_snapshot->external_memory_host_properties,
     };
+    IREE_LEAK_CHECK_DISABLE_PUSH();
     iree_vkGetPhysicalDeviceProperties2(IREE_VULKAN_INSTANCE(&instance->syms),
                                         handle, &properties2);
+    IREE_LEAK_CHECK_DISABLE_POP();
   }
   if (iree_status_is_ok(status) &&
       iree_hal_vulkan_physical_device_has_extension(
@@ -621,8 +674,10 @@ iree_status_t iree_hal_vulkan_physical_device_snapshot_initialize(
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
         .pNext = &out_snapshot->push_descriptor_properties,
     };
+    IREE_LEAK_CHECK_DISABLE_PUSH();
     iree_vkGetPhysicalDeviceProperties2(IREE_VULKAN_INSTANCE(&instance->syms),
                                         handle, &properties2);
+    IREE_LEAK_CHECK_DISABLE_POP();
   }
   if (iree_status_is_ok(status) &&
       iree_hal_vulkan_physical_device_has_extension(
@@ -678,6 +733,7 @@ bool iree_hal_vulkan_physical_device_supports_baseline(
   const VkPhysicalDeviceProperties* properties =
       &snapshot->properties2.properties;
   return properties->apiVersion >= VK_API_VERSION_1_3 &&
+         snapshot->features12.bufferDeviceAddress &&
          snapshot->features12.timelineSemaphore &&
          snapshot->features12.scalarBlockLayout &&
          snapshot->features13.synchronization2 &&
@@ -765,9 +821,12 @@ iree_status_t iree_hal_vulkan_enumerate_physical_device_handles(
   *out_physical_devices = NULL;
 
   uint32_t physical_device_count = 0;
-  IREE_RETURN_IF_ERROR(iree_vkEnumeratePhysicalDevices(
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  iree_status_t status = iree_vkEnumeratePhysicalDevices(
       IREE_VULKAN_INSTANCE(&instance->syms), instance->handle,
-      &physical_device_count, NULL));
+      &physical_device_count, NULL);
+  IREE_LEAK_CHECK_DISABLE_POP();
+  IREE_RETURN_IF_ERROR(status);
   if (!physical_device_count) return iree_ok_status();
 
   VkPhysicalDevice* physical_devices = NULL;
@@ -775,9 +834,11 @@ iree_status_t iree_hal_vulkan_enumerate_physical_device_handles(
       host_allocator, physical_device_count * sizeof(*physical_devices),
       (void**)&physical_devices));
 
-  iree_status_t status = iree_vkEnumeratePhysicalDevices(
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  status = iree_vkEnumeratePhysicalDevices(
       IREE_VULKAN_INSTANCE(&instance->syms), instance->handle,
       &physical_device_count, physical_devices);
+  IREE_LEAK_CHECK_DISABLE_POP();
   if (iree_status_is_ok(status)) {
     *out_physical_device_count = physical_device_count;
     *out_physical_devices = physical_devices;
@@ -934,6 +995,10 @@ static iree_status_t iree_hal_vulkan_append_baseline_report(
   if (!snapshot->features12.timelineSemaphore) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
         builder, IREE_SV("  missing: timelineSemaphore\n")));
+  }
+  if (!snapshot->features12.bufferDeviceAddress) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
+        builder, IREE_SV("  missing: bufferDeviceAddress\n")));
   }
   if (!snapshot->features12.scalarBlockLayout) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_string(

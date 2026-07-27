@@ -28,8 +28,8 @@ iree_cc_library(
 endif()
 
 if(IREE_HAL_DRIVER_CUDA)
-iree_hal_cts_test_suite(
-  BACKENDS_LIB
+iree_runtime_hal_cts_test_suite(
+  BACKENDS
     ::backends
   NAME
     graph
@@ -45,8 +45,8 @@ iree_hal_cts_test_suite(
 endif()
 
 if(IREE_HAL_DRIVER_CUDA)
-iree_hal_cts_test_suite(
-  BACKENDS_LIB
+iree_runtime_hal_cts_test_suite(
+  BACKENDS
     ::backends
   NAME
     stream

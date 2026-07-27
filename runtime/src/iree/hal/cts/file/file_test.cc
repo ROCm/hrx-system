@@ -184,15 +184,15 @@ class FileTest : public CtsTestBase<> {
   Ref<iree_hal_buffer_t> CreateBufferWithData(
       const std::vector<uint8_t>& contents) {
     Ref<iree_hal_buffer_t> buffer;
-    CreateDeviceBufferWithData(contents.data(),
-                               static_cast<iree_device_size_t>(contents.size()),
-                               buffer.out());
+    IREE_CHECK_OK(CreateDeviceBufferWithData(
+        contents.data(), static_cast<iree_device_size_t>(contents.size()),
+        buffer.out()));
     return buffer;
   }
 
   Ref<iree_hal_buffer_t> CreateZeroedBuffer(iree_device_size_t length) {
     Ref<iree_hal_buffer_t> buffer;
-    CreateZeroedDeviceBuffer(length, buffer.out());
+    IREE_CHECK_OK(CreateZeroedDeviceBuffer(length, buffer.out()));
     return buffer;
   }
 

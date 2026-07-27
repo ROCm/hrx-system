@@ -56,6 +56,8 @@ IREE_API_EXPORT iree_status_t iree_hal_driver_create_device_by_ordinal(
   *out_device = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (uint64_t)device_ordinal);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_device_create_params_verify(create_params));
 
   // Query the devices from the driver.
   iree_host_size_t device_info_count = 0;
@@ -104,6 +106,8 @@ IREE_API_EXPORT iree_status_t iree_hal_driver_create_device_by_id(
   *out_device = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (uint64_t)device_id);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_device_create_params_verify(create_params));
   iree_status_t status = _VTABLE_DISPATCH(driver, create_device_by_id)(
       driver, device_id, param_count, params, create_params, host_allocator,
       out_device);
@@ -125,6 +129,8 @@ IREE_API_EXPORT iree_status_t iree_hal_driver_create_device_by_path(
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, driver_name.data, driver_name.size);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, device_path.data, device_path.size);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_device_create_params_verify(create_params));
   iree_status_t status = _VTABLE_DISPATCH(driver, create_device_by_path)(
       driver, driver_name, device_path, param_count, params, create_params,
       host_allocator, out_device);
@@ -142,6 +148,8 @@ IREE_API_EXPORT iree_status_t iree_hal_driver_create_device_by_uri(
   *out_device = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, device_uri.data, device_uri.size);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_device_create_params_verify(create_params));
 
   iree_string_view_t driver_name, device_path, params_str;
   iree_uri_split(device_uri, &driver_name, &device_path, &params_str);
@@ -187,6 +195,8 @@ IREE_API_EXPORT iree_status_t iree_hal_driver_create_default_device(
   IREE_ASSERT_ARGUMENT(out_device);
   *out_device = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_device_create_params_verify(create_params));
   iree_status_t status = _VTABLE_DISPATCH(driver, create_device_by_id)(
       driver, IREE_HAL_DEVICE_ID_DEFAULT, /*param_count=*/0, /*params=*/NULL,
       create_params, host_allocator, out_device);

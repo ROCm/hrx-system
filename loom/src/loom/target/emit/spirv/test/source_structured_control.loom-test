@@ -1,0 +1,290 @@
+// RUN: emit spirv-dis input=source-low control-flow=structured-low validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @source_if(%lhs: i32, %rhs: i32, %a: i32, %b: i32) -> (i32) {
+  %less = scalar.cmpi slt, %lhs, %rhs : i32
+  %result = scf.if %less -> (i32) {
+    %sum = scalar.addi %a, %b : i32
+    scf.yield %sum : i32
+  } else {
+    %difference = scalar.subi %a, %b : i32
+    scf.yield %difference : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %source_if "source_if"
+               OpExecutionMode %source_if LocalSize 1 1 1
+               OpName %source_if "source_if"
+               OpName %lhs "lhs"
+               OpName %rhs "rhs"
+               OpName %a "a"
+               OpName %b "b"
+               OpName %less "less"
+               OpName %sum "sum"
+               OpName %difference "difference"
+               OpName %result "result"
+               OpMemberDecorate %_struct_5 0 Offset 0
+               OpDecorate %_struct_5 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %8 DescriptorSet 0
+               OpDecorate %8 Binding 1
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 2
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 3
+               OpDecorate %11 DescriptorSet 0
+               OpDecorate %11 Binding 4
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+  %_struct_5 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_5 = OpTypePointer StorageBuffer %_struct_5
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+          %4 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %8 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+         %10 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+         %11 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+       %void = OpTypeVoid
+         %13 = OpTypeFunction %void
+       %bool = OpTypeBool
+  %source_if = OpFunction %void None %13
+         %14 = OpLabel
+         %15 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+        %lhs = OpLoad %int %15 Aligned 4
+         %17 = OpAccessChain %_ptr_StorageBuffer_int %8 %int_0
+        %rhs = OpLoad %int %17 Aligned 4
+         %19 = OpAccessChain %_ptr_StorageBuffer_int %9 %int_0
+          %a = OpLoad %int %19 Aligned 4
+         %21 = OpAccessChain %_ptr_StorageBuffer_int %10 %int_0
+          %b = OpLoad %int %21 Aligned 4
+       %less = OpSLessThan %bool %lhs %rhs
+               OpSelectionMerge %26 None
+               OpBranchConditional %less %25 %27
+         %25 = OpLabel
+        %sum = OpIAdd %int %a %b
+               OpBranch %26
+         %27 = OpLabel
+ %difference = OpISub %int %a %b
+               OpBranch %26
+         %26 = OpLabel
+     %result = OpPhi %int %sum %25 %difference %27
+         %31 = OpAccessChain %_ptr_StorageBuffer_int %11 %int_0
+               OpStore %31 %result Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+// RUN: emit spirv-dis input=source-low control-flow=structured-low validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @source_for(%start: index, %limit: index, %step: index, %seed: index) -> (index) {
+  %result = scf.for %i = [%start to %limit step %step](%acc = %seed : index) -> (index) unroll {
+    %next = index.add %acc, %i : index
+    scf.yield %next : index
+  }
+  func.return %result : index
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %source_for "source_for"
+               OpExecutionMode %source_for LocalSize 1 1 1
+               OpName %source_for "source_for"
+               OpName %start "start"
+               OpName %limit "limit"
+               OpName %step "step"
+               OpName %seed "seed"
+               OpName %i "i"
+               OpName %acc "acc"
+               OpName %next "next"
+               OpName %result "result"
+               OpMemberDecorate %_struct_5 0 Offset 0
+               OpDecorate %_struct_5 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %8 DescriptorSet 0
+               OpDecorate %8 Binding 1
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 2
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 3
+               OpDecorate %11 DescriptorSet 0
+               OpDecorate %11 Binding 4
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+  %_struct_5 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_5 = OpTypePointer StorageBuffer %_struct_5
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+          %4 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %8 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+         %10 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+         %11 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+       %void = OpTypeVoid
+         %13 = OpTypeFunction %void
+       %bool = OpTypeBool
+ %source_for = OpFunction %void None %13
+         %14 = OpLabel
+         %15 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+      %start = OpLoad %int %15 Aligned 4
+         %17 = OpAccessChain %_ptr_StorageBuffer_int %8 %int_0
+      %limit = OpLoad %int %17 Aligned 4
+         %19 = OpAccessChain %_ptr_StorageBuffer_int %9 %int_0
+       %step = OpLoad %int %19 Aligned 4
+         %21 = OpAccessChain %_ptr_StorageBuffer_int %10 %int_0
+       %seed = OpLoad %int %21 Aligned 4
+               OpBranch %23
+         %23 = OpLabel
+          %i = OpPhi %int %start %14 %27 %26
+        %acc = OpPhi %int %seed %14 %next %26
+         %32 = OpSLessThan %bool %i %limit
+               OpLoopMerge %25 %26 Unroll
+               OpBranchConditional %32 %24 %25
+         %24 = OpLabel
+       %next = OpIAdd %int %acc %i
+               OpBranch %26
+         %26 = OpLabel
+         %27 = OpIAdd %int %i %step
+               OpBranch %23
+         %25 = OpLabel
+     %result = OpPhi %int %acc %23
+         %34 = OpAccessChain %_ptr_StorageBuffer_int %11 %int_0
+               OpStore %34 %result Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+// RUN: emit spirv-dis input=source-low control-flow=structured-low validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @source_for_if(%start: index, %limit: index, %step: index, %pivot: index, %seed: index) -> (index) {
+  %result = scf.for %i = [%start to %limit step %step](%acc = %seed : index) -> (index) {
+    %before = index.cmp slt, %i, %pivot : index
+    %next = scf.if %before -> (index) {
+      %sum = index.add %acc, %i : index
+      scf.yield %sum : index
+    } else {
+      %difference = index.sub %acc, %i : index
+      scf.yield %difference : index
+    }
+    scf.yield %next : index
+  }
+  func.return %result : index
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %source_for_if "source_for_if"
+               OpExecutionMode %source_for_if LocalSize 1 1 1
+               OpName %source_for_if "source_for_if"
+               OpName %start "start"
+               OpName %limit "limit"
+               OpName %step "step"
+               OpName %pivot "pivot"
+               OpName %seed "seed"
+               OpName %i "i"
+               OpName %acc "acc"
+               OpName %before "before"
+               OpName %sum "sum"
+               OpName %difference "difference"
+               OpName %next "next"
+               OpName %result "result"
+               OpMemberDecorate %_struct_5 0 Offset 0
+               OpDecorate %_struct_5 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %8 DescriptorSet 0
+               OpDecorate %8 Binding 1
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 2
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 3
+               OpDecorate %11 DescriptorSet 0
+               OpDecorate %11 Binding 4
+               OpDecorate %12 DescriptorSet 0
+               OpDecorate %12 Binding 5
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+  %_struct_5 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_5 = OpTypePointer StorageBuffer %_struct_5
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+          %4 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %8 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+         %10 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+         %11 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+         %12 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+       %void = OpTypeVoid
+         %14 = OpTypeFunction %void
+       %bool = OpTypeBool
+%source_for_if = OpFunction %void None %14
+         %15 = OpLabel
+         %16 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+      %start = OpLoad %int %16 Aligned 4
+         %18 = OpAccessChain %_ptr_StorageBuffer_int %8 %int_0
+      %limit = OpLoad %int %18 Aligned 4
+         %20 = OpAccessChain %_ptr_StorageBuffer_int %9 %int_0
+       %step = OpLoad %int %20 Aligned 4
+         %22 = OpAccessChain %_ptr_StorageBuffer_int %10 %int_0
+      %pivot = OpLoad %int %22 Aligned 4
+         %24 = OpAccessChain %_ptr_StorageBuffer_int %11 %int_0
+       %seed = OpLoad %int %24 Aligned 4
+               OpBranch %26
+         %26 = OpLabel
+          %i = OpPhi %int %start %15 %30 %29
+        %acc = OpPhi %int %seed %15 %next %29
+         %35 = OpSLessThan %bool %i %limit
+               OpLoopMerge %28 %29 None
+               OpBranchConditional %35 %27 %28
+         %27 = OpLabel
+     %before = OpSLessThan %bool %i %pivot
+               OpSelectionMerge %38 None
+               OpBranchConditional %before %37 %39
+         %37 = OpLabel
+        %sum = OpIAdd %int %acc %i
+               OpBranch %38
+         %39 = OpLabel
+ %difference = OpISub %int %acc %i
+               OpBranch %38
+         %38 = OpLabel
+       %next = OpPhi %int %sum %37 %difference %39
+               OpBranch %29
+         %29 = OpLabel
+         %30 = OpIAdd %int %i %step
+               OpBranch %26
+         %28 = OpLabel
+     %result = OpPhi %int %acc %26
+         %43 = OpAccessChain %_ptr_StorageBuffer_int %12 %int_0
+               OpStore %43 %result Aligned 4
+               OpReturn
+               OpFunctionEnd

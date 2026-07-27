@@ -1,0 +1,113 @@
+// RUN: roundtrip
+
+kernel.def @async_gather_dword() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%zero] : buffer -> view<64x4xi8, #dense>
+  %source = view.subview %source_base[%tid, 0] : view<64x4xi8, #dense> -> view<1x4xi8, #dense>
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<64x1x4xi8, #dense>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4xi8, #dense> to view<64x1x4xi8, #dense> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ====
+
+kernel.def @async_gather_b128() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%zero] : buffer -> view<64x16xi8, #dense>
+  %source = view.subview %source_base[%tid, 0] : view<64x16xi8, #dense> -> view<1x16xi8, #dense>
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<64x1x16xi8, #dense>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x16xi8, #dense> to view<64x1x16xi8, #dense> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ====
+
+kernel.def @async_gather_two_stage() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 2048 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%zero] : buffer -> view<64x1x16xi8, #dense>
+  %source = view.subview %source_base[%tid, 0, 0] : view<64x1x16xi8, #dense> -> view<1x1x16xi8, #dense>
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %dest_base = buffer.view %scratch[%zero] : buffer -> view<2x64x1x16xi8, #dense>
+  %dest0 = view.subview %dest_base[0, 0, 0, 0] : view<2x64x1x16xi8, #dense> -> view<1x64x1x16xi8, #dense>
+  %dest1 = view.subview %dest_base[1, 0, 0, 0] : view<2x64x1x16xi8, #dense> -> view<1x64x1x16xi8, #dense>
+  %copy0 = kernel.async.gather %source to %dest0 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8, #dense> to view<1x64x1x16xi8, #dense> -> kernel.async.token
+  %load0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
+  %copy1 = kernel.async.gather %source to %dest1 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8, #dense> to view<1x64x1x16xi8, #dense> -> kernel.async.token
+  %load1 = kernel.async.group %copy1 : kernel.async.token -> kernel.async.group
+  kernel.async.wait %load0 {newer_groups = 1} : kernel.async.group
+  kernel.async.wait %load1 {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ====
+
+kernel.def @async_gather_multi_packet_newer_group() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 3072 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%zero] : buffer -> view<64x1x16xi8, #dense>
+  %source = view.subview %source_base[%tid, 0, 0] : view<64x1x16xi8, #dense> -> view<1x1x16xi8, #dense>
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %dest_base = buffer.view %scratch[%zero] : buffer -> view<3x64x1x16xi8, #dense>
+  %dest0 = view.subview %dest_base[0, 0, 0, 0] : view<3x64x1x16xi8, #dense> -> view<1x64x1x16xi8, #dense>
+  %dest1a = view.subview %dest_base[1, 0, 0, 0] : view<3x64x1x16xi8, #dense> -> view<1x64x1x16xi8, #dense>
+  %dest1b = view.subview %dest_base[2, 0, 0, 0] : view<3x64x1x16xi8, #dense> -> view<1x64x1x16xi8, #dense>
+  %copy0 = kernel.async.gather %source to %dest0 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8, #dense> to view<1x64x1x16xi8, #dense> -> kernel.async.token
+  %load0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
+  %copy1a = kernel.async.gather %source to %dest1a {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8, #dense> to view<1x64x1x16xi8, #dense> -> kernel.async.token
+  %copy1b = kernel.async.gather %source to %dest1b {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8, #dense> to view<1x64x1x16xi8, #dense> -> kernel.async.token
+  %load1 = kernel.async.group %copy1a, %copy1b : kernel.async.token, kernel.async.token -> kernel.async.group
+  kernel.async.wait %load0 {newer_groups = 1} : kernel.async.group
+  kernel.async.wait %load1 {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ====
+
+kernel.def @async_gather_second_lds_slot() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %pad_bytes = index.constant 256 : offset
+  %scratch_bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%zero] : buffer -> view<64x16xi8, #dense>
+  %source = view.subview %source_base[%tid, 0] : view<64x16xi8, #dense> -> view<1x16xi8, #dense>
+  %pad = buffer.alloca %pad_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<64x1x16xi8, #dense>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x16xi8, #dense> to view<64x1x16xi8, #dense> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}

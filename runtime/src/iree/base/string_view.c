@@ -68,6 +68,26 @@ IREE_API_EXPORT iree_host_size_t iree_string_view_find_char(
   return result != NULL ? result - value.data : IREE_STRING_VIEW_NPOS;
 }
 
+IREE_API_EXPORT iree_host_size_t iree_string_view_find(
+    iree_string_view_t value, iree_string_view_t needle, iree_host_size_t pos) {
+  if (needle.size == 0) return pos <= value.size ? pos : IREE_STRING_VIEW_NPOS;
+  if (needle.size > value.size) return IREE_STRING_VIEW_NPOS;
+  // Safe: needle.size <= value.size, so subtraction cannot underflow.
+  if (pos > value.size - needle.size) return IREE_STRING_VIEW_NPOS;
+  // Single character: delegate to memchr.
+  if (needle.size == 1) {
+    return iree_string_view_find_char(value, needle.data[0], pos);
+  }
+  // Brute-force scan. Fine for the string sizes we deal with.
+  iree_host_size_t limit = value.size - needle.size;
+  for (iree_host_size_t i = pos; i <= limit; ++i) {
+    if (memcmp(value.data + i, needle.data, needle.size) == 0) {
+      return i;
+    }
+  }
+  return IREE_STRING_VIEW_NPOS;
+}
+
 IREE_API_EXPORT iree_host_size_t iree_string_view_find_first_of(
     iree_string_view_t value, iree_string_view_t s, iree_host_size_t pos) {
   if (iree_string_view_is_empty(value) || iree_string_view_is_empty(s)) {
@@ -378,13 +398,15 @@ IREE_API_EXPORT bool iree_string_view_atoi_int32_base(iree_string_view_t value,
                                                       int32_t* out_value) {
   // Copy to scratch memory with a NUL terminator.
   char temp[16] = {0};
-  if (value.size >= IREE_ARRAYSIZE(temp)) return false;
+  if (iree_string_view_is_empty(value) || value.size >= IREE_ARRAYSIZE(temp)) {
+    return false;
+  }
   memcpy(temp, value.data, value.size);
 
   // Attempt to parse.
   errno = 0;
   char* end = NULL;
-  long parsed_value = strtol(temp, &end, 0);
+  long parsed_value = strtol(temp, &end, base);
   if (temp == end) return false;
   if ((parsed_value == LONG_MIN || parsed_value == LONG_MAX) &&
       errno == ERANGE) {
@@ -404,7 +426,9 @@ IREE_API_EXPORT bool iree_string_view_atoi_uint32_base(iree_string_view_t value,
                                                        uint32_t* out_value) {
   // Copy to scratch memory with a NUL terminator.
   char temp[16] = {0};
-  if (value.size >= IREE_ARRAYSIZE(temp)) return false;
+  if (iree_string_view_is_empty(value) || value.size >= IREE_ARRAYSIZE(temp)) {
+    return false;
+  }
   memcpy(temp, value.data, value.size);
 
   // Attempt to parse.
@@ -427,7 +451,9 @@ IREE_API_EXPORT bool iree_string_view_atoi_int64_base(iree_string_view_t value,
                                                       int64_t* out_value) {
   // Copy to scratch memory with a NUL terminator.
   char temp[32] = {0};
-  if (value.size >= IREE_ARRAYSIZE(temp)) return false;
+  if (iree_string_view_is_empty(value) || value.size >= IREE_ARRAYSIZE(temp)) {
+    return false;
+  }
   memcpy(temp, value.data, value.size);
 
   // Attempt to parse.
@@ -453,7 +479,9 @@ IREE_API_EXPORT bool iree_string_view_atoi_uint64_base(iree_string_view_t value,
                                                        uint64_t* out_value) {
   // Copy to scratch memory with a NUL terminator.
   char temp[32] = {0};
-  if (value.size >= IREE_ARRAYSIZE(temp)) return false;
+  if (iree_string_view_is_empty(value) || value.size >= IREE_ARRAYSIZE(temp)) {
+    return false;
+  }
   memcpy(temp, value.data, value.size);
 
   // Attempt to parse.
@@ -475,7 +503,9 @@ IREE_API_EXPORT bool iree_string_view_atof(iree_string_view_t value,
                                            float* out_value) {
   // Copy to scratch memory with a NUL terminator.
   char temp[32] = {0};
-  if (value.size >= IREE_ARRAYSIZE(temp)) return false;
+  if (iree_string_view_is_empty(value) || value.size >= IREE_ARRAYSIZE(temp)) {
+    return false;
+  }
   memcpy(temp, value.data, value.size);
 
   // Attempt to parse.
@@ -490,7 +520,9 @@ IREE_API_EXPORT bool iree_string_view_atod(iree_string_view_t value,
                                            double* out_value) {
   // Copy to scratch memory with a NUL terminator.
   char temp[32] = {0};
-  if (value.size >= IREE_ARRAYSIZE(temp)) return false;
+  if (iree_string_view_is_empty(value) || value.size >= IREE_ARRAYSIZE(temp)) {
+    return false;
+  }
   memcpy(temp, value.data, value.size);
 
   // Attempt to parse.

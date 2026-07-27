@@ -1,0 +1,28 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f32_independent_dotf_shared_zero_seed(%lhs0: vector<2xf32>, %rhs0: vector<2xf32>, %lhs1: vector<2xf32>, %rhs1: vector<2xf32>) -> (f32, f32) {
+  %zero = scalar.constant 0.0 : f32
+  %dot0 = vector.dotf %lhs0, %rhs0, %zero : vector<2xf32>, vector<2xf32>, f32
+  %dot1 = vector.dotf %lhs1, %rhs1, %zero : vector<2xf32>, vector<2xf32>, f32
+  func.return %dot0, %dot1 : f32, f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32_independent_dotf_shared_zero_seed(%lhs0: reg<amdgpu.vgpr x2>, %rhs0: reg<amdgpu.vgpr x2>, %lhs1: reg<amdgpu.vgpr x2>, %rhs1: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %16 = v_mov_b32 0
+  %17 = slice %lhs0[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = slice %rhs0[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = v_fmac_f32 %16, %17, %18
+  %20 = slice %lhs0[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = slice %rhs0[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %dot0 = v_fmac_f32 %19, %20, %21
+  %23 = v_mov_b32 0
+  %24 = slice %lhs1[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %25 = slice %rhs1[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %26 = v_fmac_f32 %23, %24, %25
+  %27 = slice %lhs1[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %28 = slice %rhs1[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %dot1 = v_fmac_f32 %26, %27, %28
+  return %dot0, %dot1
+}

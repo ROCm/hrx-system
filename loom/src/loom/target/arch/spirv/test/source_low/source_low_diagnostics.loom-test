@@ -1,0 +1,119 @@
+// RUN: emit source-low output=low
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @unsupported_scalar_pow_math(%base: f32, %exponent: f32) -> (f32) {
+  // ERROR@+1: LOWERING/036 {op_name="scalar.powf", phase_name="legalize-math", policy_name="spirv-math", math_op="powf", lane_domain="scalar", element_type="f32", constraint_key="math.op.native_arithmetic"}
+  %result = scalar.powf<afn> %base, %exponent : f32
+  func.return %result : f32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @unsupported_vector_tanh_math(%input: vector<4xf32>) -> (vector<4xf32>) {
+  // ERROR@+1: LOWERING/036 {op_name="vector.tanhf", phase_name="legalize-math", policy_name="spirv-math", math_op="tanhf", lane_domain="vector", element_type="f32", constraint_key="math.scalar"}
+  %result = vector.tanhf<afn> %input : vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @unsupported_source_op(%lhs: i32, %rhs: i32) -> (i32) {
+  // ERROR@+1: TARGET/001 {op_name="scalar.ceildivui"}
+  %quotient = scalar.ceildivui %lhs, %rhs : i32
+  func.return %quotient : i32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @unresolved_apply_rejected_at_source_low(%value: i32) -> (i32) {
+  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.missing", failure_code="no_provider"}
+  %result = func.apply<demo.missing>(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @unsigned_i16_requires_target_features(%lhs: i16, %rhs: i16) -> (i16) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_udiv.u16", constraint_key="descriptor_available"}
+  %quotient = scalar.divui %lhs, %rhs : i16
+  func.return %quotient : i16
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @unsigned_i16_conversion_requires_target_features(%lhs: i16) -> (i32) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_u_convert.u16.u32", constraint_key="descriptor_available"}
+  %wide = scalar.extui %lhs : i16 to i32
+  func.return %wide : i32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @unsupported_semantic_math(%input: f32) -> (f32) {
+  // ERROR@+1: LOWERING/036 {op_name="scalar.logisticf", phase_name="legalize-math", policy_name="spirv-math", math_op="logisticf", lane_domain="scalar", element_type="f32", constraint_key="math.op.native_arithmetic"}
+  %result = scalar.logisticf %input : f32
+  func.return %result : f32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @unsupported_source_type(%value: f8E4M3) {
+  // ERROR@-1: TARGET/031 {target_key="target", export_name="unsupported_source_type", config_key="target", op_name="func.def", function_name="unsupported_source_type", actual_type="f8E4M3", type_constraint="scalar.fp8_decode_or_contract"}
+  func.return
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @storage_buffer_f16_requires_target_features(%input: buffer, %output: buffer, %byte_offset: offset) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_ptr_access_chain.storage_buffer.f16.byte_offset", constraint_key="descriptor_available"}
+  %input_view = buffer.view %input[%byte_offset] : buffer -> view<1xf16, #dense>
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_load.storage_buffer.f16", constraint_key="descriptor_available"}
+  %loaded = view.load %input_view[0] : view<1xf16, #dense> -> f16
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_ptr_access_chain.storage_buffer.f16.byte_offset", constraint_key="descriptor_available"}
+  %output_view = buffer.view %output[%byte_offset] : buffer -> view<1xf16, #dense>
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_store.storage_buffer.f16", constraint_key="descriptor_available"}
+  view.store %loaded, %output_view[0] : f16, view<1xf16, #dense>
+  func.return
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @storage_buffer_i32_requires_known_root_alignment(%input: buffer, %byte_offset: offset) -> (i32) {
+  %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 4)] : offset
+  %input_view = buffer.view %input[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
+  // ERROR@+1: TARGET/050 {required_alignment="4", known_alignment="1"}
+  %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32
+  func.return %loaded : i32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @storage_buffer_i32_rejects_misaligned_static_offset(%input: buffer) -> (i32) {
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %two = index.constant 2 : offset
+  %input_view = buffer.view %input_aligned[%two] : buffer -> view<1xi32, #dense>
+  // ERROR@+1: TARGET/050 {required_alignment="4", known_alignment="2"}
+  %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32
+  func.return %loaded : i32
+}

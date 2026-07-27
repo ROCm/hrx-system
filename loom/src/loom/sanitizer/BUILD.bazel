@@ -1,0 +1,187 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "options",
+    srcs = ["options.c"],
+    hdrs = ["options.h"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "pipeline_passes",
+    srcs = ["pipeline_passes.c"],
+    hdrs = ["pipeline_passes.h"],
+    deps = [
+        ":memory",
+        ":options",
+        ":site_location",
+        ":site_payload",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/sanitizer",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/pass:pipeline",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:rewriter",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "race_insertion",
+    srcs = ["race_insertion.c"],
+    hdrs = ["race_insertion.h"],
+    deps = [
+        ":memory",
+        ":options",
+        ":site_location",
+        ":site_payload",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:atomic",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/sanitizer",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/pass:pipeline",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "memory",
+    srcs = ["memory.c"],
+    hdrs = ["memory.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:fact_table",
+    ],
+)
+
+loom_cc_library(
+    name = "site_location",
+    srcs = ["site_location.c"],
+    hdrs = ["site_location.h"],
+    deps = [
+        ":site_payload",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "site_collection",
+    srcs = ["site_collection.c"],
+    hdrs = ["site_collection.h"],
+    deps = [
+        ":site_payload",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/sanitizer",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "site_payload",
+    srcs = ["site_payload.c"],
+    hdrs = ["site_payload.h"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "site_table",
+    srcs = ["site_table.c"],
+    hdrs = ["site_table.h"],
+    deps = [
+        ":site_collection",
+        ":site_payload",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "site_collection_test",
+    srcs = ["site_collection_test.cc"],
+    deps = [
+        ":site_collection",
+        ":site_payload",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/sanitizer",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "site_table_test",
+    srcs = ["site_table_test.cc"],
+    deps = [
+        ":site_collection",
+        ":site_payload",
+        ":site_table",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/sanitizer",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "options_test",
+    srcs = ["options_test.cc"],
+    deps = [
+        ":options",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "site_payload_test",
+    srcs = ["site_payload_test.cc"],
+    deps = [
+        ":site_payload",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

@@ -3,11 +3,61 @@
 
 #include "hrx_loader.hpp"
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 
 #include <cstdlib>
 
 std::string HrxLoader::library_path_;
+
+HrxDynamicLibrary::~HrxDynamicLibrary() {
+  if (!handle_) return;
+#if defined(_WIN32)
+  FreeLibrary(reinterpret_cast<HMODULE>(handle_));
+#else
+  dlclose(handle_);
+#endif
+}
+
+void HrxDynamicLibrary::load(const std::string& path) {
+  if (handle_) {
+    throw HrxLoaderError("Dynamic library is already loaded");
+  }
+#if defined(_WIN32)
+  handle_ = reinterpret_cast<void*>(LoadLibraryA(path.c_str()));
+  if (!handle_) {
+    throw HrxLoaderError("Failed to load " + path);
+  }
+#else
+  handle_ = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  if (!handle_) {
+    throw HrxLoaderError(std::string("Failed to load ") + path + ": " +
+                         dlerror());
+  }
+#endif
+}
+
+void* HrxDynamicLibrary::loadSymbol(const char* name) {
+#if defined(_WIN32)
+  void* symbol = reinterpret_cast<void*>(
+      GetProcAddress(reinterpret_cast<HMODULE>(handle_), name));
+#else
+  void* symbol = dlsym(handle_, name);
+#endif
+  if (!symbol) {
+#if defined(_WIN32)
+    throw HrxLoaderError(std::string("Failed to load symbol: ") + name);
+#else
+    throw HrxLoaderError(std::string("Failed to load symbol: ") + name + " (" +
+                         dlerror() + ")");
+#endif
+  }
+  return symbol;
+}
 
 void HrxLoader::setLibraryPath(const std::string& path) {
   library_path_ = path;
@@ -30,33 +80,19 @@ HrxLoader::HrxLoader() {
   load(path);
 }
 
-HrxLoader::~HrxLoader() {
-  if (handle_) {
-    dlclose(handle_);
-  }
-}
+HrxLoader::~HrxLoader() = default;
 
 void* HrxLoader::loadSymbol(const char* name) {
-  void* sym = dlsym(handle_, name);
-  if (!sym) {
-    throw HrxLoaderError(std::string("Failed to load symbol: ") + name + " (" +
-                         dlerror() + ")");
-  }
-  return sym;
+  return library_.loadSymbol(name);
 }
 
 void HrxLoader::load(const std::string& path) {
-  handle_ = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
-  if (!handle_) {
-    throw HrxLoaderError(std::string("Failed to load ") + path + ": " +
-                         dlerror());
-  }
+  library_.load(path);
 
 #define LOAD(name) name = (decltype(name))loadSymbol("hrx_" #name)
 #define LOAD_FULL(field, sym) field = (decltype(field))loadSymbol(#sym)
 
-  host_allocator_system_ptr =
-      (hrx_host_allocator_t*)loadSymbol("hrx_host_allocator_system_value");
+  LOAD_FULL(host_allocator_system_fn, hrx_host_allocator_system);
 
   LOAD(host_allocator_malloc);
   LOAD(host_allocator_malloc_uninitialized);
@@ -187,6 +223,14 @@ void HrxLoader::load(const std::string& path) {
   LOAD(allocator_virtual_memory_map);
   LOAD(allocator_virtual_memory_unmap);
   LOAD(allocator_virtual_memory_protect);
+
+  LOAD(mem_pool_create);
+  LOAD(mem_pool_retain);
+  LOAD(mem_pool_release);
+  LOAD(mem_pool_get_attribute);
+  LOAD(mem_pool_set_attribute);
+  LOAD(mem_pool_trim);
+  LOAD(mem_pool_allocate_buffer);
 
 #undef LOAD
 #undef LOAD_FULL

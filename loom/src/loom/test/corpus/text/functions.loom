@@ -1,0 +1,13 @@
+func.decl public import("math", "dot") pure @dot(%a: f32, %b: f32) -> (f32)
+
+func.template<tile.contract> device priority(10) @contract_impl(%a: tile<4xf32>) -> (tile<4xf32>) {
+  func.return %a : tile<4xf32>
+}
+
+func.ukernel<tile.contract> device priority(5) @contract_asm(%a: tile<4xf32>) -> (tile<4xf32>)
+
+func.def public pure @caller(%m: index, %a: f32, %b: f32, %tile: tile<4xf32>) -> (f32, tile<4xf32>) where [mul(%m, 16)] {
+  %r = func.call @dot(%a, %b) : (f32, f32) -> (f32)
+  %expanded = func.apply<tile.contract>(%tile) : (tile<4xf32>) -> (tile<4xf32>)
+  func.return %r, %expanded : f32, tile<4xf32>
+}

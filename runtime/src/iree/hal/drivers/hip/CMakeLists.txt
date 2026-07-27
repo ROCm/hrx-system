@@ -45,14 +45,13 @@ iree_cc_library(
     "memory_pools.h"
     "native_executable.c"
     "native_executable.h"
-    "nop_executable_cache.c"
-    "nop_executable_cache.h"
     "per_device_information.h"
     "rccl_channel.c"
     "rccl_channel.h"
     "stream_command_buffer.c"
     "stream_command_buffer.h"
   DEPS
+    ::device_spec_builder
     ::dynamic_symbols
     iree::async
     iree::async::util::proactor_pool
@@ -81,6 +80,45 @@ iree_cc_library(
   DEFINES
     ${_hip_platform_defines}
   PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_HIP)
+iree_cc_library(
+  NAME
+    device_spec_builder
+  HDRS
+    "device_spec_builder.h"
+  SRCS
+    "device_spec_builder.c"
+  DEPS
+    iree::base
+    iree::base::core_headers
+    iree::hal
+    iree::hal::executable::amdgpu::executable_target
+    iree::hal::utils::device_spec_builder
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_HIP)
+iree_cc_test(
+  NAME
+    device_spec_test
+  SRCS
+    "device_spec_test.cc"
+  DEPS
+    ::device_spec_builder
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.hip"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-hip-tests
 )
 endif()
 

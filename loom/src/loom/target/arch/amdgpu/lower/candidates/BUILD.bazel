@@ -1,0 +1,66 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_generated_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_AMDGPU_LOWER_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/lower:__pkg__"]
+
+loom_generated_cc_library(
+    name = "arithmetic_candidates",
+    hdrs = ["arithmetic_candidates.h"],
+    generator = "//loom/py/loom/gen/target/arch/amdgpu/lower/candidates:arithmetic_candidates",
+    visibility = _AMDGPU_LOWER_VISIBILITY,
+    deps = [
+        "//loom/src/loom/target/arch/amdgpu/lower:kinds",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+    ],
+)
+
+loom_generated_cc_library(
+    name = "async_gather_candidates",
+    hdrs = ["async_gather_candidates.h"],
+    generator = "//loom/py/loom/gen/target/arch/amdgpu/lower/candidates:async_gather_candidates",
+    visibility = _AMDGPU_LOWER_VISIBILITY,
+    deps = [
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_generated_cc_library(
+    name = "atomic_candidates",
+    hdrs = ["atomic_candidates.h"],
+    generator = "//loom/py/loom/gen/target/arch/amdgpu/lower/candidates:atomic_candidates",
+    visibility = _AMDGPU_LOWER_VISIBILITY,
+    deps = [
+        "//loom/src/loom/ops:atomic",
+        "//loom/src/loom/target/arch/amdgpu/lower:kinds",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_generated_cc_library(
+    name = "compare_candidates",
+    hdrs = ["compare_candidates.h"],
+    generator = "//loom/py/loom/gen/target/arch/amdgpu/lower/candidates:compare_candidates",
+    visibility = _AMDGPU_LOWER_VISIBILITY,
+    deps = [
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+    ],
+)

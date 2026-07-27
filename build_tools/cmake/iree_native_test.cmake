@@ -12,9 +12,7 @@
 #
 # Parameters:
 # NAME: name of target
-# DRIVER: If specified, will pass --device=DRIVER to the test binary and adds
-#     a driver label to the test.
-#     TODO(scotttodd): Remove automatic args/labels, push those up a level
+# DRIVER: If specified, will pass --device=DRIVER to the test binary.
 # DATA: Additional input files needed by the test binary. When running tests on
 #     a separate device (e.g. Android), these files will be pushed to the
 #     device. TEST_INPUT_FILE_ARG is automatically added if specified.
@@ -23,6 +21,7 @@
 #     File-related arguments can be passed with `{{}}` locator,
 #     e.g., --input=@{{foo.npy}}. The locator is used to portably
 #     pass the file arguments to tests and add the file to DATA.
+# ENV: Additional KEY=VALUE environment variables set while the test runs.
 # SRC: binary target to run as the test.
 # WILL_FAIL: The target will run, but its pass/fail status will be inverted.
 # DISABLED: The target will be skipped and its status will be 'Not Run'.
@@ -30,6 +29,8 @@
 #     run concurrently under CTest.
 # LABELS: Additional labels to apply to the test. The package path is added
 #     automatically.
+# SANITIZER_SUPPRESSIONS: Sanitizer/name pairs selecting suppression files.
+#     For example: lsan vulkan.
 # TIMEOUT: Test target timeout in seconds.
 #
 # Note: the DATA argument is not actually adding dependencies because CMake
@@ -59,7 +60,7 @@ function(iree_native_test)
     _RULE
     ""
     "NAME;SRC;DRIVER;WILL_FAIL;DISABLED;RESOURCE_GROUP"
-    "ARGS;LABELS;DATA;TIMEOUT"
+    "ARGS;ENV;LABELS;DATA;TIMEOUT;SANITIZER_SUPPRESSIONS"
     ${ARGN}
   )
 
@@ -71,21 +72,19 @@ function(iree_native_test)
   set(_TEST_NAME "${_PACKAGE_PATH}/${_RULE_NAME}")
   set(_IREE_TEST_CAN_REGISTER OFF)
 
-  # If driver was specified, add the corresponding test arg and label.
+  # If driver was specified, add the corresponding test arg.
   if(DEFINED _RULE_DRIVER)
     list(APPEND _RULE_ARGS "--device=${_RULE_DRIVER}")
-    list(APPEND _RULE_LABELS "driver=${_RULE_DRIVER}")
-
-    # Suppress known GPU driver library leaks for ASAN tests.
-    if(_RULE_DRIVER STREQUAL "hip" AND IREE_ENABLE_ASAN)
-      set(_LSAN_SUPP_FILE "${CMAKE_SOURCE_DIR}/build_tools/sanitizer/lsan_suppressions_rocm.txt")
-      list(APPEND _TEST_ENVIRONMENT_VARS "LSAN_OPTIONS=suppressions=${_LSAN_SUPP_FILE}")
-    endif()
-    if(_RULE_DRIVER STREQUAL "vulkan" AND IREE_ENABLE_ASAN)
-      set(_LSAN_SUPP_FILE "${CMAKE_SOURCE_DIR}/build_tools/sanitizer/lsan_suppressions_vulkan.txt")
-      list(APPEND _TEST_ENVIRONMENT_VARS "LSAN_OPTIONS=suppressions=${_LSAN_SUPP_FILE}")
-    endif()
   endif()
+
+  set(_TEST_ENVIRONMENT_VARS)
+  if(_RULE_SANITIZER_SUPPRESSIONS)
+    iree_append_sanitizer_suppression_environment(
+      _TEST_ENVIRONMENT_VARS
+      ${_RULE_SANITIZER_SUPPRESSIONS}
+    )
+  endif()
+  list(APPEND _TEST_ENVIRONMENT_VARS ${_RULE_ENV})
 
   if(ANDROID)
     set(_ANDROID_ABS_DIR "/data/local/tmp/${_PACKAGE_PATH}/${_RULE_NAME}")
@@ -151,7 +150,8 @@ function(iree_native_test)
         ${_TEST_ARGS}
     )
     iree_configure_test(${_TEST_NAME})
-    set_property(TEST ${_TEST_NAME} PROPERTY ENVIRONMENT "QEMU_CPU_FLAGS=${RISCV_QEMU_CPU_FLAGS}")
+    set_property(TEST ${_TEST_NAME} APPEND PROPERTY ENVIRONMENT
+      "QEMU_CPU_FLAGS=${RISCV_QEMU_CPU_FLAGS}")
   elseif(IREE_ARCH STREQUAL "arm_64" AND "requires-arm-sme" IN_LIST _RULE_LABELS)
     add_test(
       NAME
@@ -172,11 +172,12 @@ function(iree_native_test)
     )
     iree_configure_test(${_TEST_NAME})
     set(_IREE_TEST_CAN_REGISTER ON)
+  endif()
 
-    # Apply test environment variables after we add the test.
-    if(DEFINED _TEST_ENVIRONMENT_VARS)
-      set_property(TEST ${_TEST_NAME} PROPERTY ENVIRONMENT ${_TEST_ENVIRONMENT_VARS})
-    endif()
+  # Apply accumulated test environment variables after the test exists.
+  if(_TEST_ENVIRONMENT_VARS)
+    set_property(TEST ${_TEST_NAME} APPEND PROPERTY ENVIRONMENT
+      ${_TEST_ENVIRONMENT_VARS})
   endif()
 
   if (NOT DEFINED _RULE_TIMEOUT OR "${_RULE_TIMEOUT}" STREQUAL "")
@@ -187,6 +188,12 @@ function(iree_native_test)
   set_property(TEST ${_TEST_NAME} PROPERTY LABELS "${_RULE_LABELS}")
   set_property(TEST "${_TEST_NAME}" PROPERTY REQUIRED_FILES "${_RULE_DATA}")
   set_property(TEST ${_TEST_NAME} PROPERTY TIMEOUT ${_RULE_TIMEOUT})
+  iree_register_test_resource_build_target(
+    TEST_BUILD_TARGET
+      "${_SRC_TARGET}"
+    LABELS
+      ${_RULE_LABELS}
+  )
   if(_RULE_RESOURCE_GROUP)
     set_property(TEST ${_TEST_NAME} PROPERTY RESOURCE_LOCK "${_RULE_RESOURCE_GROUP}")
   endif()

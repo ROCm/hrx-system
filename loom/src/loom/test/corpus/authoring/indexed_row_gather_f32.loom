@@ -1,0 +1,63 @@
+// Indexed row gather with loaded row ids and real dynamic view extents.
+//
+// This is the compact authoring shape for indexed row gathers. The source
+// keeps row and column coordinates in `index`, lets kernel ABI buffers publish
+// their global memory-space facts, states only aliasing explicitly, and guards
+// an i32 row id before casting it to an index.
+kernel.def @indexed_row_gather_f32(%nrows: index, %ncols: index, %source_rows: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %rounding = index.constant 255 : index
+  %total = index.mul %nrows, %ncols : index
+  %rounded = index.add %total, %rounding : index
+  %workgroups = index.div %rounded, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%nrows: index, %ncols: index, %source_rows: index, %source: buffer, %indices: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero_i32 = scalar.constant 0 : i32
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 256 : index
+
+  %linear = index.madd %workgroup, %workgroup_size, %lane : index
+  %total = index.mul %nrows, %ncols : index
+  %in_bounds = index.cmp ult, %linear, %total : index
+
+  %source_noalias, %indices_noalias, %output_noalias = buffer.assume.noalias %source, %indices, %output : buffer, buffer, buffer
+  %source_view = buffer.view %source_noalias[%base] : buffer -> view<[%source_rows]x[%ncols]xf32, #dense>
+  %indices_view = buffer.view %indices_noalias[%base] : buffer -> view<[%nrows]xi32, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%nrows]x[%ncols]xf32, #dense>
+
+  scf.if %in_bounds {
+    %column = index.rem %linear, %ncols : index
+    %row = index.div %linear, %ncols : index
+    %source_row_i32 = view.load %indices_view[%row] : view<[%nrows]xi32, #dense> -> i32
+    %source_row_nonnegative = scalar.cmpi sge, %source_row_i32, %zero_i32 : i32
+    scf.if %source_row_nonnegative {
+      %source_row = index.cast %source_row_i32 : i32 to index
+      %source_row_valid = index.cmp ult, %source_row, %source_rows : index
+      scf.if %source_row_valid {
+        %value = view.load %source_view[%source_row, %column] : view<[%source_rows]x[%ncols]xf32, #dense> -> f32
+        view.store %value, %output_view[%row, %column] : f32, view<[%nrows]x[%ncols]xf32, #dense>
+      }
+    }
+  }
+  kernel.return
+}
+
+check.case public @indexed_row_gather_f32_case {
+  %nrows = check.param.choice values([1, 5]) name("nrows") : index
+  %ncols = check.literal value(4) : index
+  %source_rows = check.literal value(2) : index
+  %source = check.generate.fill value(7.0) : tensor<2x4xf32>
+  %indices = check.generate.fill value(1) : tensor<[%nrows]xi32>
+  %output = check.generate.fill value(0.0) : tensor<[%nrows]x4xf32>
+  %expected = check.generate.fill value(7.0) : tensor<[%nrows]x4xf32>
+  func.call @indexed_row_gather_f32(%nrows, %ncols, %source_rows, %source, %indices, %output) : (index, index, index, tensor<2x4xf32>, tensor<[%nrows]xi32>, tensor<[%nrows]x4xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%nrows]x4xf32>
+  check.return
+}
+
+check.benchmark<@indexed_row_gather_f32_case>
+check.benchmark<@indexed_row_gather_f32_case> @indexed_row_gather_f32_single {nrows = 1}
+check.benchmark<@indexed_row_gather_f32_case> @indexed_row_gather_f32_rows {nrows = 5}

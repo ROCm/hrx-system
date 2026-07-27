@@ -1,0 +1,6 @@
+check.case @unsupported_constant_case {
+  %value = index.constant 0 : index
+  check.return
+}
+
+check.benchmark<@unsupported_constant_case> @unsupported_constant_latency

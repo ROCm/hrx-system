@@ -101,6 +101,14 @@ enum iree_flag_dump_mode_bits_t {
 };
 typedef uint32_t iree_flag_dump_mode_t;
 
+// Callback used to decide whether a registered flag appears in default
+// `--help` output. Returning true includes the flag. This only affects the
+// built-in help printer; `--help=all` and iree_flags_dump print the full
+// registry.
+typedef bool(IREE_API_PTR* iree_flag_help_filter_fn_t)(
+    iree_string_view_t flag_file, iree_string_view_t flag_name,
+    void* user_data);
+
 #define IREE_FLAG_CTYPE_bool bool
 #define IREE_FLAG_CTYPE_int32_t int32_t
 #define IREE_FLAG_CTYPE_int64_t int64_t
@@ -160,21 +168,36 @@ int iree_flag_register(const char* file, int line, iree_flag_type_t type,
                        iree_flag_print_callback_fn_t print_callback,
                        iree_string_view_t name, iree_string_view_t description);
 
-// Defines a flag with the given |type| and |name|.
+// Defines a flag with the given |type|, C storage |name|, and command-line
+// |flag_name|.
 //
 // Conceptually the flag is just a variable and can be loaded/stored:
-//   IREE_FLAG(bool, foo, true, "hello");
+//   IREE_FLAG_NAMED(bool, foo, "my-flag", true, "hello");
 //  =>
 //   static bool FLAG_foo = true;
 //  ...
 //   if (FLAG_foo) do_something();
 //
-// If flag parsing is enabled with IREE_FLAGS_ENABLE_CLI == 1 then the flag
-// value can be specified on the command line with --name:
-//   --foo
-//   --foo=true
+// If flag parsing is enabled with IREE_FLAGS_ENABLE_CLI == 1 then the value can
+// be specified with the registered command-line name:
+//   --my-flag
+//   --my-flag=true
+// Registered '-' and '_' characters match each other on command lines and in
+// flagfiles so callers can choose the canonical public spelling independently
+// from the C storage identifier.
 //
 // See iree_flag_type_t for the types supported and how they are parsed.
+#define IREE_FLAG_NAMED(type, name, flag_name, default_value, description) \
+  static IREE_FLAG_CTYPE_##type FLAG_##name = (default_value);             \
+  IREE_STATIC_INITIALIZER(iree_flag_register_##name) {                     \
+    iree_flag_register(__FILE__, __LINE__, IREE_FLAG_TYPE_##type,          \
+                       (void**)&(FLAG_##name), /*parse_callback=*/NULL,    \
+                       /*print_callback=*/NULL,                            \
+                       iree_make_cstring_view(flag_name),                  \
+                       iree_make_cstring_view(description));               \
+  }
+
+// Defines a flag whose C storage identifier is also its command-line name.
 #define IREE_FLAG(type, name, default_value, description)                      \
   static IREE_FLAG_CTYPE_##type FLAG_##name = (default_value);                 \
   IREE_STATIC_INITIALIZER(iree_flag_register_##name) {                         \
@@ -184,10 +207,11 @@ int iree_flag_register(const char* file, int line, iree_flag_type_t type,
                        iree_make_cstring_view(description));                   \
   }
 
-// Defines a flag issues |callback| for custom parsing.
+// Defines a flag that issues callbacks for custom parsing with an explicit
+// command-line |flag_name|.
 //
 // Usage:
-//  iree_status_t parse_callback(const char* flag_name, void* storage,
+//  iree_status_t parse_callback(iree_string_view_t flag_name, void* storage,
 //                               iree_string_view_t value) {
 //    // Parse |value| and store in |storage|, however you want.
 //    // Returning IREE_STATUS_INVALID_ARGUMENT will trigger --help.
@@ -195,31 +219,46 @@ int iree_flag_register(const char* file, int line, iree_flag_type_t type,
 //    printf("hello! %d", (*storage_ptr)++);
 //    return iree_ok_status();
 //  }
-//  void print_callback(const char* flag_name, void* storage, FILE* file) {
+//  void print_callback(iree_string_view_t flag_name, void* storage,
+//                      FILE* file) {
 //    // Print the value in |storage|, however you want. For repeated fields
 //    // you can print multiple separated by newlines.
 //    int* storage_ptr = (int*)storage;
-//    fprintf(file, "--say_hello=%d\n", *storage_ptr);
+//    fprintf(file, "--%.*s=%d\n", (int)flag_name.size, flag_name.data,
+//            *storage_ptr);
 //  }
 //  int my_storage = 0;
-//  IREE_FLAG_CALLBACK(parse_callback, print_callback, &my_storage,
-//                     say_hello, "Say hello!");
-#define IREE_FLAG_CALLBACK(parse_callback, print_callback, storage, name, \
-                           description)                                   \
+//  IREE_FLAG_CALLBACK_NAMED(parse_callback, print_callback, &my_storage,
+//                           say_hello, "say-hello", "Say hello!");
+#define IREE_FLAG_CALLBACK_NAMED(parse_callback, print_callback, storage, \
+                                 name, flag_name, description)            \
   IREE_STATIC_INITIALIZER(iree_flag_register_##name) {                    \
     iree_flag_register(__FILE__, __LINE__, IREE_FLAG_TYPE_callback,       \
                        (void*)storage, parse_callback, print_callback,    \
-                       iree_make_cstring_view(#name),                     \
+                       iree_make_cstring_view(flag_name),                 \
                        iree_make_cstring_view(description));              \
   }
 
+// Defines a callback flag whose C storage identifier is also its command-line
+// name.
+#define IREE_FLAG_CALLBACK(parse_callback, print_callback, storage, name, \
+                           description)                                   \
+  IREE_FLAG_CALLBACK_NAMED(parse_callback, print_callback, storage, name, \
+                           #name, description)
+
 #else
 
+#define IREE_FLAG_NAMED(type, name, flag_name, default_value, description) \
+  static const IREE_FLAG_CTYPE_##type FLAG_##name = (default_value);
 #define IREE_FLAG(type, name, default_value, description) \
   static const IREE_FLAG_CTYPE_##type FLAG_##name = (default_value);
 
+#define IREE_FLAG_CALLBACK_NAMED(parse_callback, print_callback, storage, \
+                                 name, flag_name, description)
 #define IREE_FLAG_CALLBACK(parse_callback, print_callback, storage, name, \
-                           description)
+                           description)                                   \
+  IREE_FLAG_CALLBACK_NAMED(parse_callback, print_callback, storage, name, \
+                           #name, description)
 
 #endif  // IREE_FLAGS_ENABLE_CLI
 
@@ -246,43 +285,51 @@ iree_status_t iree_flag_string_list_parse(iree_string_view_t flag_name,
 void iree_flag_string_list_print(iree_string_view_t flag_name, void* storage,
                                  FILE* file);
 
-// Defines a repeated flag representing a dynamically sized list of values.
+// Defines a repeated flag representing a dynamically sized list of values with
+// an explicit command-line |flag_name|.
 //
 // Usage:
-//   IREE_FLAG_LIST(string, foo, "hello");
+//   IREE_FLAG_LIST_NAMED(string, foo, "my-flag", "hello");
 //   ...
 //   const iree_flag_string_list_t list = FLAG_foo_list();
 //   for (iree_host_size_t i = 0; i < list.count; ++i) {
 //     printf("value: %.*s", (int)list.values[i].size, list.values[i].data);
 //   }
 //   ...
-//   ./binary --foo=a --foo=b
+//   ./binary --my-flag=a --my-flag=b
 //   > value: a
 //   > value: b
-#define IREE_FLAG_LIST(type, name, description)                             \
-  static iree_flag_##type##_list_storage_t FLAG_##name##_storage = {        \
-      /*.capacity=*/1 /* inline by default */,                              \
-      /*.count=*/0,                                                         \
-  };                                                                        \
-  IREE_FLAG_CALLBACK(iree_flag_##type##_list_parse,                         \
-                     iree_flag_##type##_list_print, &FLAG_##name##_storage, \
-                     name, description);                                    \
-  static const iree_flag_##type##_list_t FLAG_##name##_list(void) {         \
-    const iree_flag_##type##_list_t list = {                                \
-        /*.count=*/FLAG_##name##_storage.count,                             \
-        /*.values=*/FLAG_##name##_storage.count == 1                        \
-            ? &FLAG_##name##_storage.inline_value                           \
-            : FLAG_##name##_storage.values,                                 \
-    };                                                                      \
-    return list;                                                            \
+#define IREE_FLAG_LIST_NAMED(type, name, flag_name, description)     \
+  static iree_flag_##type##_list_storage_t FLAG_##name##_storage = { \
+      /*.capacity=*/1 /* inline by default */,                       \
+      /*.count=*/0,                                                  \
+  };                                                                 \
+  IREE_FLAG_CALLBACK_NAMED(                                          \
+      iree_flag_##type##_list_parse, iree_flag_##type##_list_print,  \
+      &FLAG_##name##_storage, name, flag_name, description);         \
+  static const iree_flag_##type##_list_t FLAG_##name##_list(void) {  \
+    const iree_flag_##type##_list_t list = {                         \
+        /*.count=*/FLAG_##name##_storage.count,                      \
+        /*.values=*/FLAG_##name##_storage.count == 1                 \
+            ? &FLAG_##name##_storage.inline_value                    \
+            : FLAG_##name##_storage.values,                          \
+    };                                                               \
+    return list;                                                     \
   }
+
+// Defines a repeated flag whose C storage identifier is also its command-line
+// name.
+#define IREE_FLAG_LIST(type, name, description) \
+  IREE_FLAG_LIST_NAMED(type, name, #name, description)
 
 #else
 
-#define IREE_FLAG_LIST(type, name, description)                     \
+#define IREE_FLAG_LIST_NAMED(type, name, flag_name, description)    \
   static const iree_flag_##type##_list_t FLAG_##name##_list(void) { \
     return (iree_flag_##type##_list_t){0, NULL};                    \
   }
+#define IREE_FLAG_LIST(type, name, description) \
+  IREE_FLAG_LIST_NAMED(type, name, #name, description)
 
 #endif  // IREE_FLAGS_ENABLE_CLI
 
@@ -307,6 +354,11 @@ typedef uint32_t iree_flags_parse_mode_t;
 // Sets the usage information printed when --help is passed on the command line.
 // Both strings must remain live for the lifetime of the program.
 void iree_flags_set_usage(const char* program_name, const char* usage);
+
+// Sets an optional filter for the default `--help` output. The filter is not
+// applied to `--help=all` or iree_flags_dump.
+void iree_flags_set_help_filter(iree_flag_help_filter_fn_t filter,
+                                void* user_data);
 
 // Parses flags from the given command line arguments.
 // All flag-style arguments ('--foo', '-f', etc) will be consumed and argc/argv

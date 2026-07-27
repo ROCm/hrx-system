@@ -1,0 +1,153 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_dot_integer.loom-test
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @dot4i_s8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @dot4i_s8s8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %dot = v_dot4_i32_i8 %lhs, %rhs, %acc
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @dot4i_u8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<u8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @dot4i_u8u8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %dot = v_dot4_u32_u8 %lhs, %rhs, %acc
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @dot8i4_u4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<u4u4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @dot8i4_u4u4(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %dot = v_dot8_u32_u4 %lhs, %rhs, %acc
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @dot4i_u8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @dot4i_u8s8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %dot = v_dot4_i32_iu8_u8s8 %lhs, %rhs, %acc
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @dot4i_s8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<s8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @dot4i_s8u8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %dot = v_dot4_i32_iu8_s8u8 %lhs, %rhs, %acc
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @dot8i4_s4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<s4s4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @dot8i4_s4s4(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %dot = v_dot8_i32_i4 %lhs, %rhs, %acc
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @dot8i4_u4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<u4s4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @dot8i4_u4s4(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %dot = v_dot8_i32_iu4_u4s4 %lhs, %rhs, %acc
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @dot8i4_s4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<s4u4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @dot8i4_s4u4(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %dot = v_dot8_i32_iu4_s4u4 %lhs, %rhs, %acc
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @dot8i4_s4u4_q4_offset_binary(%rows: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %offset_to_signed_mask = vector.constant -2004318072 : vector<1xi32>
+  %signed_rows = vector.xori %rows, %offset_to_signed_mask : vector<1xi32>
+  %dot = vector.dot8i4<s4u4> %signed_rows, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @dot8i4_s4u4_q4_offset_binary(%rows: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %signed_rows = v_xor_b32_lit %rows, 2290649224
+  %dot = v_dot8_i32_iu4_s4u4 %signed_rows, %rhs, %acc
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @dot4i_s8s8_q6_offset_binary(%codes: vector<1xi32>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %offset_to_signed_bias = vector.constant -32 : vector<4xi8>
+  %bytes = vector.bitcast %codes : vector<1xi32> to vector<4xi8>
+  %signed_bytes = vector.addi %bytes, %offset_to_signed_bias : vector<4xi8>
+  %dot = vector.dot4i<s8s8> %signed_bytes, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @dot4i_s8s8_q6_offset_binary(%bytes: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %offset_to_signed_bias = v_mov_b32 3772834016
+  %13 = v_and_b32_lit %bytes, 2139062143
+  %14 = v_and_b32_lit %offset_to_signed_bias, 2139062143
+  %15 = v_add_u32 %13, %14
+  %16 = v_xor_b32 %bytes, %offset_to_signed_bias
+  %17 = v_and_b32_lit %16, 2155905152
+  %signed_bytes = v_xor_b32 %15, %17
+  %dot = v_dot4_i32_i8 %signed_bytes, %rhs, %acc
+  return %dot
+}

@@ -19,6 +19,8 @@
 #include <io.h>      // _commit
 #include <werapi.h>  // WerRegisterExcludedMemoryBlock
 
+#include "iree/base/internal/path.h"
+
 #else
 
 #include <fcntl.h>     // open
@@ -196,19 +198,10 @@ iree_io_file_handle_flush(iree_io_file_handle_t* handle) {
 
 static iree_status_t iree_io_file_handle_platform_open(
     iree_io_file_mode_t mode, iree_string_view_t path, uint64_t initial_size,
+    iree_allocator_t host_allocator,
     iree_io_file_handle_primitive_t* out_handle_primitive) {
   IREE_ASSERT_ARGUMENT(out_handle_primitive);
   memset(out_handle_primitive, 0, sizeof(*out_handle_primitive));
-
-  // Convert path from a string view to a NUL-terminated C string.
-  if (path.size >= IREE_MAX_PATH) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "path length %" PRIhsz
-                            " exceeds maximum character length of %d",
-                            path.size, IREE_MAX_PATH);
-  }
-  char* path_str = iree_alloca(path.size + 1);
-  iree_string_view_to_cstring(path, path_str, path.size + 1);
 
   DWORD desired_access = 0;
   if (iree_all_bits_set(mode, IREE_IO_FILE_MODE_READ)) {
@@ -243,11 +236,20 @@ static iree_status_t iree_io_file_handle_platform_open(
     flags |= FILE_FLAG_OVERLAPPED;
   }
 
+  // Convert from the runtime's UTF-8 representation only at the Win32 API
+  // boundary. The converted path is absolute and extended-length.
+  wchar_t* win32_path = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_file_path_to_win32(path, host_allocator, &win32_path));
+
   // Create or open the file.
-  HANDLE handle = CreateFileA(path_str, desired_access, share_mode, NULL,
+  HANDLE handle = CreateFileW(win32_path, desired_access, share_mode, NULL,
                               creation_disposition, flags, NULL);
+  DWORD open_error =
+      handle == INVALID_HANDLE_VALUE ? GetLastError() : ERROR_SUCCESS;
+  iree_allocator_free(host_allocator, win32_path);
   if (handle == INVALID_HANDLE_VALUE) {
-    return iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+    return iree_make_status(iree_status_code_from_win32_error(open_error),
                             "failed to open file '%.*s'", (int)path.size,
                             path.data);
   }
@@ -263,8 +265,9 @@ static iree_status_t iree_io_file_handle_platform_open(
     file_size.QuadPart = initial_size;
     if (!SetFilePointerEx(handle, file_size, NULL, FILE_BEGIN) ||
         !SetEndOfFile(handle)) {
+      DWORD resize_error = GetLastError();
       CloseHandle(handle);
-      return iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+      return iree_make_status(iree_status_code_from_win32_error(resize_error),
                               "failed to extend file '%.*s' to %" PRIu64
                               " bytes (out of disk space or permission denied)",
                               (int)path.size, path.data, initial_size);
@@ -321,9 +324,11 @@ static void iree_io_file_handle_platform_close(
 
 static iree_status_t iree_io_file_handle_platform_open(
     iree_io_file_mode_t mode, iree_string_view_t path, uint64_t initial_size,
+    iree_allocator_t host_allocator,
     iree_io_file_handle_primitive_t* out_handle_primitive) {
   IREE_ASSERT_ARGUMENT(out_handle_primitive);
   memset(out_handle_primitive, 0, sizeof(*out_handle_primitive));
+  (void)host_allocator;
 
   // Convert path from a string view to a NUL-terminated C string.
   if (path.size >= IREE_MAX_PATH) {
@@ -379,7 +384,9 @@ static iree_status_t iree_io_file_handle_platform_open(
     // Zero-extend the file up to the total file size specified by the
     // caller. Note that `ftruncate` extends too.
     if (ftruncate(fd, (off_t)initial_size) == -1) {
-      return iree_make_status(iree_status_code_from_errno(errno),
+      int truncate_error = errno;
+      iree_close(fd);
+      return iree_make_status(iree_status_code_from_errno(truncate_error),
                               "failed to extend file '%.*s' to %" PRIu64
                               " bytes (out of disk space or permission denied)",
                               (int)path.size, path.data, initial_size);
@@ -428,7 +435,7 @@ static iree_status_t iree_io_file_handle_create_or_open(
 
   iree_io_file_handle_primitive_t handle_primitive = {0};
   IREE_RETURN_IF_ERROR(iree_io_file_handle_platform_open(
-      mode, path, initial_size, &handle_primitive));
+      mode, path, initial_size, host_allocator, &handle_primitive));
 
   iree_io_file_access_t allowed_access = 0;
   if (iree_all_bits_set(mode, IREE_IO_FILE_MODE_READ)) {
@@ -847,9 +854,10 @@ static iree_status_t iree_io_platform_map_file_view(
                               offset_li.LowPart, (SIZE_T)adjusted_length,
                               /*lpBaseAddress=*/NULL);
   if (!ptr) {
+    DWORD map_error = GetLastError();
     CloseHandle(mapping);
     return iree_make_status(
-        iree_status_code_from_win32_error(GetLastError()),
+        iree_status_code_from_win32_error(map_error),
         "failed to map file handle range %" PRIu64 "-%" PRIu64 " (%" PRIhsz
         " bytes) from file of %" PRIu64 " total bytes",
         offset, offset + adjusted_length, adjusted_length, file_size);

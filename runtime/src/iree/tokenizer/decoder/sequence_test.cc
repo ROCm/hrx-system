@@ -51,10 +51,7 @@ class SequenceDecoderTest : public ::testing::Test {
     iree_status_t status = iree_tokenizer_decoder_sequence_allocate(
         raw_children.data(), raw_children.size(), iree_allocator_system(),
         &raw_decoder);
-    if (!iree_status_is_ok(status)) {
-      // Children are cleaned up when vector goes out of scope.
-      return ScopedDecoder(nullptr);
-    }
+    IREE_CHECK_OK(status);
 
     // Success: release all children to sequence ownership.
     for (auto& child : children) {

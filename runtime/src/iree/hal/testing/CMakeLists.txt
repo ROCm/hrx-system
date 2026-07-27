@@ -19,6 +19,7 @@ iree_cc_library(
   DEPS
     iree::base
     iree::hal
+    iree::hal::utils::device_spec_builder
   TESTONLY
   PUBLIC
 )

@@ -1,0 +1,104 @@
+// Top-2 routing composed with indexed expert payload gather.
+//
+// Routing kernels are small but branch-heavy: score comparisons choose ordered
+// expert ids, and those ids immediately feed indexed row movement. The two
+// checked cases below cover both strictly ordered scores and the equal-score
+// first-wins policy used by the update helper.
+// Numeric policy is routing-focused rather than FMA-focused: score comparisons
+// preserve exact first-wins behavior, and the payload combine has no product
+// contraction opportunity.
+func.def inline @top2_route_update(%score: f32, %expert_id: i32, %expert_row: index, %best_score: f32, %best_id: i32, %best_row: index, %second_score: f32, %second_id: i32, %second_row: index) -> (f32, i32, index, f32, i32, index) {
+  %beats_best = scalar.cmpf olt, %best_score, %score : f32
+  %beats_second = scalar.cmpf olt, %second_score, %score : f32
+  %candidate_second_score = scf.select %beats_second, %score, %second_score : f32
+  %candidate_second_id = scf.select %beats_second, %expert_id, %second_id : i32
+  %candidate_second_row = scf.select %beats_second, %expert_row, %second_row : index
+  %new_best_score = scf.select %beats_best, %score, %best_score : f32
+  %new_best_id = scf.select %beats_best, %expert_id, %best_id : i32
+  %new_best_row = scf.select %beats_best, %expert_row, %best_row : index
+  %new_second_score = scf.select %beats_best, %best_score, %candidate_second_score : f32
+  %new_second_id = scf.select %beats_best, %best_id, %candidate_second_id : i32
+  %new_second_row = scf.select %beats_best, %best_row, %candidate_second_row : index
+  func.return %new_best_score, %new_best_id, %new_best_row, %new_second_score, %new_second_id, %new_second_row : f32, i32, index, f32, i32, index
+}
+
+kernel.def @top2_routing_expert_gather_f32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%scores: buffer, %expert_payloads: buffer, %route_ids: buffer, %route_scores: buffer, %combined_payload: buffer) {
+  %base = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %one_index = index.constant 1 : index
+  %two_index = index.constant 2 : index
+  %three_index = index.constant 3 : index
+  %invalid_id = scalar.constant -1 : i32
+  %zero_i32 = scalar.constant 0 : i32
+  %one_i32 = scalar.constant 1 : i32
+  %two_i32 = scalar.constant 2 : i32
+  %three_i32 = scalar.constant 3 : i32
+  %negative_large = scalar.constant -1000000000.0 : f32
+
+  %scores_noalias, %expert_payloads_noalias, %route_ids_noalias, %route_scores_noalias, %combined_payload_noalias = buffer.assume.noalias %scores, %expert_payloads, %route_ids, %route_scores, %combined_payload : buffer, buffer, buffer, buffer, buffer
+  %scores_view = buffer.view %scores_noalias[%base] : buffer -> view<4xf32, #dense>
+  %expert_payloads_view = buffer.view %expert_payloads_noalias[%base] : buffer -> view<4x4xf32, #dense>
+  %route_ids_view = buffer.view %route_ids_noalias[%base] : buffer -> view<2xi32, #dense>
+  %route_scores_view = buffer.view %route_scores_noalias[%base] : buffer -> view<2xf32, #dense>
+  %combined_payload_view = buffer.view %combined_payload_noalias[%base] : buffer -> view<4xf32, #dense>
+
+  %score_values = vector.load %scores_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %score0 = vector.extract %score_values[0] : vector<4xf32> -> f32
+  %score1 = vector.extract %score_values[1] : vector<4xf32> -> f32
+  %score2 = vector.extract %score_values[2] : vector<4xf32> -> f32
+  %score3 = vector.extract %score_values[3] : vector<4xf32> -> f32
+
+  %best_score0, %best_id0, %best_row0, %second_score0, %second_id0, %second_row0 = func.call @top2_route_update(%score0, %zero_i32, %zero_index, %negative_large, %invalid_id, %zero_index, %negative_large, %invalid_id, %zero_index) : (f32, i32, index, f32, i32, index, f32, i32, index) -> (f32, i32, index, f32, i32, index)
+  %best_score1, %best_id1, %best_row1, %second_score1, %second_id1, %second_row1 = func.call @top2_route_update(%score1, %one_i32, %one_index, %best_score0, %best_id0, %best_row0, %second_score0, %second_id0, %second_row0) : (f32, i32, index, f32, i32, index, f32, i32, index) -> (f32, i32, index, f32, i32, index)
+  %best_score2, %best_id2, %best_row2, %second_score2, %second_id2, %second_row2 = func.call @top2_route_update(%score2, %two_i32, %two_index, %best_score1, %best_id1, %best_row1, %second_score1, %second_id1, %second_row1) : (f32, i32, index, f32, i32, index, f32, i32, index) -> (f32, i32, index, f32, i32, index)
+  %best_score3, %best_id3, %best_row3, %second_score3, %second_id3, %second_row3 = func.call @top2_route_update(%score3, %three_i32, %three_index, %best_score2, %best_id2, %best_row2, %second_score2, %second_id2, %second_row2) : (f32, i32, index, f32, i32, index, f32, i32, index) -> (f32, i32, index, f32, i32, index)
+
+  %best_payload = vector.load %expert_payloads_view[%best_row3, %zero_index] : view<4x4xf32, #dense> -> vector<4xf32>
+  %second_payload = vector.load %expert_payloads_view[%second_row3, %zero_index] : view<4x4xf32, #dense> -> vector<4xf32>
+  %combined = vector.addf<reassoc|nnan|nsz> %best_payload, %second_payload : vector<4xf32>
+
+  view.store %best_id3, %route_ids_view[%zero_index] : i32, view<2xi32, #dense>
+  view.store %second_id3, %route_ids_view[%one_index] : i32, view<2xi32, #dense>
+  view.store %best_score3, %route_scores_view[%zero_index] : f32, view<2xf32, #dense>
+  view.store %second_score3, %route_scores_view[%one_index] : f32, view<2xf32, #dense>
+  vector.store %combined, %combined_payload_view[0] : vector<4xf32>, view<4xf32, #dense>
+  kernel.return
+}
+
+check.case public @top2_routing_expert_gather_ordered_case {
+  %scores = check.generate.iota offset(0.0) step(1.0) : tensor<4xf32>
+  %expert_payloads = check.generate.iota offset(0.0) step(1.0) : tensor<4x4xf32>
+  %route_ids = check.generate.fill value(-1) : tensor<2xi32>
+  %route_scores = check.generate.fill value(-1.0) : tensor<2xf32>
+  %combined_payload = check.generate.fill value(-1.0) : tensor<4xf32>
+  %expected_route_ids = check.generate.iota offset(3) step(-1) : tensor<2xi32>
+  %expected_route_scores = check.generate.iota offset(3.0) step(-1.0) : tensor<2xf32>
+  %expected_payload = check.generate.iota offset(20.0) step(2.0) : tensor<4xf32>
+  func.call @top2_routing_expert_gather_f32(%scores, %expert_payloads, %route_ids, %route_scores, %combined_payload) : (tensor<4xf32>, tensor<4x4xf32>, tensor<2xi32>, tensor<2xf32>, tensor<4xf32>)
+  check.expect.equal actual(%route_ids) expected(%expected_route_ids) : tensor<2xi32>
+  check.expect.close actual(%route_scores) expected(%expected_route_scores) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.close actual(%combined_payload) expected(%expected_payload) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.case public @top2_routing_expert_gather_tie_case {
+  %scores = check.generate.fill value(3.0) : tensor<4xf32>
+  %expert_payloads = check.generate.iota offset(0.0) step(1.0) : tensor<4x4xf32>
+  %route_ids = check.generate.fill value(-1) : tensor<2xi32>
+  %route_scores = check.generate.fill value(-1.0) : tensor<2xf32>
+  %combined_payload = check.generate.fill value(-1.0) : tensor<4xf32>
+  %expected_route_ids = check.generate.iota offset(0) step(1) : tensor<2xi32>
+  %expected_route_scores = check.generate.fill value(3.0) : tensor<2xf32>
+  %expected_payload = check.generate.iota offset(4.0) step(2.0) : tensor<4xf32>
+  func.call @top2_routing_expert_gather_f32(%scores, %expert_payloads, %route_ids, %route_scores, %combined_payload) : (tensor<4xf32>, tensor<4x4xf32>, tensor<2xi32>, tensor<2xf32>, tensor<4xf32>)
+  check.expect.equal actual(%route_ids) expected(%expected_route_ids) : tensor<2xi32>
+  check.expect.close actual(%route_scores) expected(%expected_route_scores) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.close actual(%combined_payload) expected(%expected_payload) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.benchmark<@top2_routing_expert_gather_ordered_case> @top2_routing_expert_gather_ordered_smoke
+check.benchmark<@top2_routing_expert_gather_tie_case> @top2_routing_expert_gather_tie_smoke

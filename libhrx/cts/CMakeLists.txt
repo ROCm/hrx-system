@@ -11,30 +11,29 @@ iree_add_all_subdirs()
 
 iree_amdgpu_binary_variants_embed_data(
   NAME
-    amdgpu_executable_noop_kernels
+    amdgpu_executable_test_kernels
   TARGET
     amdgcn-amd-amdhsa
   TARGETS
     ${IREE_HAL_AMDGPU_TARGETS}
   BINARY_NAME_PREFIX
-    hrx_cts_noop_kernel
+    hrx_cts_executable_kernel
   C_FILE_OUTPUT
-    "amdgpu_executable_noop_kernels.c"
+    "amdgpu_executable_test_kernels.c"
   H_FILE_OUTPUT
-    "amdgpu_executable_noop_kernels.h"
+    "amdgpu_executable_test_kernels.h"
   IDENTIFIER
-    "hrx_cts_amdgpu_executable_noop_kernels"
+    "hrx_cts_amdgpu_executable_test_kernels"
   SRCS
-    "tests/executable/noop_kernel.c"
+    "tests/executable/executable_kernels.c"
   TESTONLY
+  FLATTEN
   PUBLIC
 )
 
 iree_cc_library(
   NAME
     core
-  COPTS
-    "-fexceptions"
   HDRS
     "core/hrx_loader.hpp"
     "core/hrx_test_fixture.hpp"
@@ -58,6 +57,8 @@ hrx_cc_test(
     hrx_cts_host_allocator
   SRCS
     "tests/host_allocator/host_allocator_test.cpp"
+  DATA
+    libhrx::src::libhrx::hrx
   DEPS
     ::core
     iree::third_party::catch2
@@ -72,6 +73,8 @@ hrx_cc_test(
     hrx_cts_lifecycle
   SRCS
     "tests/lifecycle/lifecycle_test.cpp"
+  DATA
+    libhrx::src::libhrx::hrx
   DEPS
     ::core
     iree::third_party::catch2
@@ -88,6 +91,8 @@ hrx_cc_test(
     hrx_cts_device
   SRCS
     "tests/device/device_test.cpp"
+  DATA
+    libhrx::src::libhrx::hrx
   DEPS
     ::core
     iree::third_party::catch2
@@ -104,6 +109,8 @@ hrx_cc_test(
     hrx_cts_allocator
   SRCS
     "tests/allocator/allocator_test.cpp"
+  DATA
+    libhrx::src::libhrx::hrx
   DEPS
     ::core
     iree::third_party::catch2
@@ -120,6 +127,8 @@ hrx_cc_test(
     hrx_cts_semaphore
   SRCS
     "tests/semaphore/semaphore_test.cpp"
+  DATA
+    libhrx::src::libhrx::hrx
   DEPS
     ::core
     iree::third_party::catch2
@@ -136,6 +145,8 @@ hrx_cc_test(
     hrx_cts_stream
   SRCS
     "tests/stream/stream_test.cpp"
+  DATA
+    libhrx::src::libhrx::hrx
   DEPS
     ::core
     iree::third_party::catch2
@@ -152,6 +163,8 @@ hrx_cc_test(
     hrx_cts_memory
   SRCS
     "tests/memory/memory_test.cpp"
+  DATA
+    libhrx::src::libhrx::hrx
   DEPS
     ::core
     iree::third_party::catch2
@@ -168,6 +181,8 @@ hrx_cc_test(
     hrx_cts_transfer
   SRCS
     "tests/transfer/transfer_test.cpp"
+  DATA
+    libhrx::src::libhrx::hrx
   DEPS
     ::core
     iree::third_party::catch2
@@ -184,6 +199,8 @@ hrx_cc_test(
     hrx_cts_stream_ops
   SRCS
     "tests/stream_ops/stream_ops_test.cpp"
+  DATA
+    libhrx::src::libhrx::hrx
   DEPS
     ::core
     iree::third_party::catch2
@@ -199,9 +216,12 @@ hrx_cc_test(
   NAME
     hrx_cts_executable
   SRCS
+    "core/amdgpu_executable_test_data.hpp"
     "tests/executable/executable_test.cpp"
+  DATA
+    libhrx::src::libhrx::hrx
   DEPS
-    ::amdgpu_executable_noop_kernels
+    ::amdgpu_executable_test_kernels
     ::core
     iree::third_party::catch2
     libhrx_defs
@@ -212,11 +232,41 @@ hrx_cc_test(
     "runtime-resource=amd-gpu"
 )
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    hip_module_execution_test
+  SRCS
+    "core/amdgpu_executable_test_data.hpp"
+    "tests/hip/module_execution_test.cpp"
+  COPTS
+    "-Wno-attributes"
+  DATA
+    libhrx::src::binding::hip::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    ::amdgpu_executable_test_kernels
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx::src::binding::hip::launch_params
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  LABELS
+    "runtime-resource=amd-gpu"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    hsa
+)
+endif()
+
 hrx_cc_test(
   NAME
     hrx_cts_queue_ops
   SRCS
     "tests/queue_ops/queue_ops_test.cpp"
+  DATA
+    libhrx::src::libhrx::hrx
   DEPS
     ::core
     iree::third_party::catch2
@@ -233,6 +283,8 @@ hrx_cc_test(
     hrx_cts_status
   SRCS
     "tests/status/status_test.cpp"
+  DATA
+    libhrx::src::libhrx::hrx
   DEPS
     ::core
     iree::third_party::catch2
@@ -247,6 +299,8 @@ hrx_cc_test(
     hrx_cts_refcount
   SRCS
     "tests/refcount/refcount_test.cpp"
+  DATA
+    libhrx::src::libhrx::hrx
   DEPS
     ::core
     iree::third_party::catch2
@@ -263,6 +317,8 @@ hrx_cc_test(
     hrx_cts_virtual_memory
   SRCS
     "tests/virtual_memory/virtual_memory_test.cpp"
+  DATA
+    libhrx::src::libhrx::hrx
   DEPS
     ::core
     iree::third_party::catch2
@@ -279,10 +335,12 @@ hrx_cc_test(
     hrx_cts_cxx_api
   SRCS
     "tests/cxx_api/cxx_api_test.cpp"
+  DATA
+    libhrx::src::libhrx::hrx
   DEPS
     ::core
     iree::third_party::catch2
-    libhrx::src::libhrx::hrx
+    libhrx::src::libhrx::hrx_static
     libhrx_defs
   ARGS
     "--hrx-library"
@@ -290,3 +348,9 @@ hrx_cc_test(
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
+
+# The CTS catches loader failures and therefore opts back into C++ exceptions.
+# MSVC and clang-cl inherit /EHsc from the first-party compiler policy.
+if(NOT MSVC)
+  target_compile_options(libhrx_cts_core PRIVATE "-fexceptions")
+endif()

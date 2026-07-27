@@ -7,11 +7,8 @@
 # Runtime-only CTS test binaries for the HIP HAL driver.
 
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
-load(
-    "//build_tools/bazel:iree_hal_cts_test_suite.bzl",
-    "iree_hal_cts_test_suite",
-)
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:hal_cts.bzl", "iree_runtime_hal_cts_test_suite")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -46,17 +43,17 @@ iree_runtime_cc_library(
     alwayslink = True,
 )
 
-iree_hal_cts_test_suite(
+iree_runtime_hal_cts_test_suite(
     name = "stream",
     args = ["--hip_use_streams=true"],
-    backends_lib = ":backends",
+    backends = ":backends",
 )
 
-iree_hal_cts_test_suite(
+iree_runtime_hal_cts_test_suite(
     name = "graph",
     args = [
         "--hip_use_streams=false",
         "--gtest_filter=-CTS/QueueTransferTest.*:CTS/AsyncTransientBufferTest.*:CTS/TransientBufferTest.*",
     ],
-    backends_lib = ":backends",
+    backends = ":backends",
 )

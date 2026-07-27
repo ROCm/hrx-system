@@ -81,9 +81,10 @@ iree_hal_amdgpu_aql_program_block_next(
 // Recording Output
 //===----------------------------------------------------------------------===//
 
-void iree_hal_amdgpu_aql_program_release(
+void iree_hal_amdgpu_aql_program_deinitialize(
     iree_hal_amdgpu_aql_program_t* program) {
   if (!program->first_block) {
+    memset(program, 0, sizeof(*program));
     return;
   }
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -134,7 +135,7 @@ void iree_hal_amdgpu_aql_program_builder_deinitialize(
         .block_pool = builder->block_pool,
         .first_block = builder->first_block,
     };
-    iree_hal_amdgpu_aql_program_release(&program);
+    iree_hal_amdgpu_aql_program_deinitialize(&program);
   }
 
   memset(builder, 0, sizeof(*builder));
@@ -308,10 +309,10 @@ static iree_status_t iree_hal_amdgpu_aql_program_builder_split_block(
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "command-buffer block count overflow");
   }
-  const iree_hal_amdgpu_aql_program_builder_flags_t carried_flags =
+  iree_hal_amdgpu_aql_program_builder_flags_t carried_flags =
       builder->current_block.flags &
       IREE_HAL_AMDGPU_AQL_PROGRAM_BUILDER_FLAG_HAS_PENDING_EXECUTION_BARRIER;
-  const uint8_t carried_acquire_scope =
+  uint8_t carried_acquire_scope =
       carried_flags ? builder->current_block.pending_barrier_acquire_scope
                     : IREE_HSA_FENCE_SCOPE_NONE;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_aql_program_builder_append_terminator(
@@ -644,4 +645,10 @@ void iree_hal_amdgpu_aql_program_builder_set_pending_barrier_scopes(
   if (acquire_scope > builder->current_block.pending_barrier_acquire_scope) {
     builder->current_block.pending_barrier_acquire_scope = acquire_scope;
   }
+}
+
+void iree_hal_amdgpu_aql_program_builder_or_current_block_flags(
+    iree_hal_amdgpu_aql_program_builder_t* builder,
+    iree_hal_amdgpu_command_buffer_block_flags_t flags) {
+  builder->current_block.header->flags |= flags;
 }

@@ -10,6 +10,7 @@
 #include <stddef.h>
 
 #include "iree/base/api.h"
+#include "iree/base/cpu_data.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,6 +28,12 @@ void iree_cpu_initialize(iree_allocator_t temp_allocator);
 // Extraneous fields will be ignored and unspecified fields will be set to zero.
 void iree_cpu_initialize_with_data(iree_host_size_t field_count,
                                    const uint64_t* fields);
+
+// Queries CPU data from the current platform into |out_cpu_data|.
+//
+// This does not read or mutate the process-global CPU data cache.
+void iree_cpu_query_data(iree_allocator_t temp_allocator,
+                         iree_cpu_data_t* out_cpu_data);
 
 // Returns all fields up to IREE_CPU_DATA_FIELD_COUNT.
 // Data will be zeroed until initialized with iree_cpu_initialize.
@@ -51,11 +58,6 @@ uint64_t iree_cpu_data_field(iree_host_size_t field);
 // available the remaining fields will be set to zero.
 // See iree/schemas/cpu_data.h for interpretation.
 void iree_cpu_read_data(iree_host_size_t field_count, uint64_t* out_fields);
-
-// Looks up a canonical value in the CPU data fields.
-// Keys are defined in iree/schemas/cpu_data.h.
-iree_status_t iree_cpu_lookup_data_by_key(iree_string_view_t key,
-                                          int64_t* IREE_RESTRICT out_value);
 
 //===----------------------------------------------------------------------===//
 // Processor identification

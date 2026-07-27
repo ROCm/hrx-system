@@ -140,11 +140,15 @@ static iree_status_t iree_hal_webgpu_poll_until_complete(
   while (!request->completed) {
     iree_status_t poll_status =
         iree_async_proactor_poll(proactor, iree_infinite_timeout(), NULL);
-    // DEADLINE_EXCEEDED means poll found nothing this iteration — retry.
-    if (!iree_status_is_ok(poll_status) &&
-        !iree_status_is_deadline_exceeded(poll_status)) {
-      return poll_status;
+    if (iree_status_is_ok(poll_status)) {
+      continue;
     }
+    // DEADLINE_EXCEEDED means poll found nothing this iteration — retry.
+    if (iree_status_is_deadline_exceeded(poll_status)) {
+      iree_status_free(poll_status);
+      continue;
+    }
+    return poll_status;
   }
   return request->result_status;
 }
@@ -233,8 +237,10 @@ static iree_status_t iree_hal_webgpu_driver_create_device_async(
     const iree_hal_device_create_params_t* create_params,
     iree_allocator_t host_allocator, iree_hal_device_t** out_device) {
   IREE_ASSERT_ARGUMENT(create_params);
-  IREE_ASSERT_ARGUMENT(create_params->proactor_pool);
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_device_create_params_verify(create_params));
 
   // Async device creation requires blocking waits (Atomics.wait), which are
   // only available on Web Workers. On the main thread, callers must obtain

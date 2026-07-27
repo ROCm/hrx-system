@@ -1,0 +1,165 @@
+// RUN: pass canonicalize
+
+// Assertions refine the alias results on the path where execution continues.
+// The assertion itself remains because the incoming operand facts do not prove
+// the predicates before the check.
+func.def @assert_refines_integer_facts(%n: index) -> (i64) {
+  %checked = sanitizer.assert.value %n [range(%n, 0, 4096), mul(%n, 16)] : index
+  %divisor = test.fact_divisor %checked : index -> i64
+  func.return %divisor : i64
+}
+
+// ----
+func.def @assert_refines_integer_facts(%n: index) -> (i64) {
+  %checked = sanitizer.assert.value %n [range(%n, 0, 4096), mul(%n, 16)] : index
+  %divisor = scalar.constant 16 : i64
+  func.return %divisor : i64
+}
+
+// ====
+
+// Predicate assertions refine the checked alias with nonzero, positive,
+// power-of-two, and divisibility facts where the fact lattice represents them.
+func.def @assert_refines_integer_predicate_facts(%n: index) -> (i1, i1, i1, i64) {
+  %checked = sanitizer.assert.value %n [ne(%n, 0), gt(%n, 0), pow2(%n), mul(%n, 64)] : index
+  %nonzero = test.fact_non_zero %checked : index -> i1
+  %positive = test.fact_positive %checked : index -> i1
+  %power_of_two = test.fact_power_of_two %checked : index -> i1
+  %divisor = test.fact_divisor %checked : index -> i64
+  func.return %nonzero, %positive, %power_of_two, %divisor : i1, i1, i1, i64
+}
+
+// ----
+func.def @assert_refines_integer_predicate_facts(%n: index) -> (i1, i1, i1, i64) {
+  %checked = sanitizer.assert.value %n [ne(%n, 0), gt(%n, 0), pow2(%n), mul(%n, 64)] : index
+  %nonzero = scalar.constant true : i1
+  %positive = scalar.constant true : i1
+  %power_of_two = scalar.constant true : i1
+  %divisor = scalar.constant 64 : i64
+  func.return %nonzero, %positive, %power_of_two, %divisor : i1, i1, i1, i64
+}
+
+// ====
+
+// Assertion facts attach to the checked result. The original SSA value remains
+// unknown, so speculation outside the checked path cannot observe the asserted
+// range.
+func.def @assert_does_not_rewrite_original_facts(%n: index) -> (i64, i64) {
+  %checked = sanitizer.assert.value %n [range(%n, 0, 15)] : index
+  %original_hi = test.fact_range_hi %n : index -> i64
+  %checked_hi = test.fact_range_hi %checked : index -> i64
+  func.return %original_hi, %checked_hi : i64, i64
+}
+
+// ----
+func.def @assert_does_not_rewrite_original_facts(%n: index) -> (i64, i64) {
+  %checked = sanitizer.assert.value %n [range(%n, 0, 15)] : index
+  %original_hi = scalar.constant 9223372036854775807 : i64
+  %checked_hi = scalar.constant 15 : i64
+  func.return %original_hi, %checked_hi : i64, i64
+}
+
+// ====
+
+// Float predicate assertions refine the checked alias. Normal scalar predicate
+// ops can consume those facts without knowing they came from sanitizer IR.
+func.def @assert_refines_float_predicate_facts(%x: f32) -> (i1, i1, i1) {
+  %checked = sanitizer.assert.value %x [not_nan(%x), not_inf(%x), finite(%x)] : f32
+  %is_nan = scalar.isnanf %checked : f32
+  %is_inf = scalar.isinff %checked : f32
+  %is_finite = scalar.isfinitef %checked : f32
+  func.return %is_nan, %is_inf, %is_finite : i1, i1, i1
+}
+
+// ----
+func.def @assert_refines_float_predicate_facts(%x: f32) -> (i1, i1, i1) {
+  %checked = sanitizer.assert.value %x [not_nan(%x), not_inf(%x), finite(%x)] : f32
+  %is_nan = scalar.constant false : i1
+  %is_inf = scalar.constant false : i1
+  %is_finite = scalar.constant true : i1
+  func.return %is_nan, %is_inf, %is_finite : i1, i1, i1
+}
+
+// ====
+
+// Vector predicate ops see the same checked scalar float facts after splat
+// creates a uniform element vector.
+func.def @assert_refines_vector_float_predicate_facts(%x: f32) -> (i1, i1) {
+  %checked = sanitizer.assert.value %x [finite(%x)] : f32
+  %vector = vector.splat %checked : vector<4xf32>
+  %is_nan_vector = vector.isnanf %vector : vector<4xf32> -> vector<4xi1>
+  %is_finite_vector = vector.isfinitef %vector : vector<4xf32> -> vector<4xi1>
+  %is_nan = vector.extract %is_nan_vector[0] : vector<4xi1> -> i1
+  %is_finite = vector.extract %is_finite_vector[0] : vector<4xi1> -> i1
+  func.return %is_nan, %is_finite : i1, i1
+}
+
+// ----
+func.def @assert_refines_vector_float_predicate_facts(%x: f32) -> (i1, i1) {
+  %checked = sanitizer.assert.value %x [finite(%x)] : f32
+  %is_nan = scalar.constant false : i1
+  %is_finite = scalar.constant true : i1
+  func.return %is_nan, %is_finite : i1, i1
+}
+
+// ====
+
+// Float assertion facts attach to the checked alias. The original value stays
+// unknown, while the continuing checked path is known non-NaN.
+func.def @assert_float_facts_attach_to_alias(%x: f32) -> (i1, i1) {
+  %checked = sanitizer.assert.value %x [not_inf(%x)] : f32
+  %original_is_inf = scalar.isinff %x : f32
+  %checked_is_inf = scalar.isinff %checked : f32
+  func.return %original_is_inf, %checked_is_inf : i1, i1
+}
+
+// ----
+func.def @assert_float_facts_attach_to_alias(%x: f32) -> (i1, i1) {
+  %checked = sanitizer.assert.value %x [not_inf(%x)] : f32
+  %original_is_inf = scalar.isinff %x : f32
+  %checked_is_inf = scalar.constant false : i1
+  func.return %original_is_inf, %checked_is_inf : i1, i1
+}
+
+// ====
+
+// Exact relational operands can refine the checked result without inventing a
+// separate assume op.
+func.def @assert_uses_exact_relational_rhs(%n: index) -> (i64) {
+  %limit = index.constant 128 : index
+  %checked, %limit_checked = sanitizer.assert.value %n, %limit [lt(%n, %limit)] : index, index
+  %upper = test.fact_range_hi %checked : index -> i64
+  func.return %upper : i64
+}
+
+// ----
+func.def @assert_uses_exact_relational_rhs(%n: index) -> (i64) {
+  %limit = index.constant 128 : index
+  %checked, %limit_checked = sanitizer.assert.value %n, %limit [lt(%n, %limit)] : index, index
+  %upper = scalar.constant 127 : i64
+  func.return %upper : i64
+}
+
+// ====
+
+// Layout assertions refine view-reference facts on the continuing path. The
+// assertion remains because the dynamic source shape has not been proven to
+// satisfy the refined static result shape.
+func.def @layout_assert_refines_view_facts(%buffer: buffer, %m: index) -> (i64) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%m]xf32, %layout>
+  %checked = sanitizer.assert.layout %view : view<[%m]xf32, %layout> -> view<4xf32, %layout>
+  %length_hi = test.fact_view_byte_length_hi %checked : view<4xf32, %layout> -> i64
+  func.return %length_hi : i64
+}
+
+// ----
+func.def @layout_assert_refines_view_facts(%buffer: buffer, %m: index) -> (i64) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%m]xf32, %layout>
+  %checked = sanitizer.assert.layout %view : view<[%m]xf32, %layout> -> view<4xf32, %layout>
+  %length_hi = scalar.constant 16 : i64
+  func.return %length_hi : i64
+}

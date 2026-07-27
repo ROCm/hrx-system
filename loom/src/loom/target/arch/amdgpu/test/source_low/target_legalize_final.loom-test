@@ -1,0 +1,32 @@
+// RUN: pass target-legalize{mode=final}
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @index_uniform_madd(%row_i32: i32, %column_i32: i32) -> (index) {
+  %row_index = index.cast %row_i32 : i32 to index
+  %column_index = index.cast %column_i32 : i32 to index
+  %row = index.assume %row_index [range(%row_index, 0, 7)] : index
+  %column = index.assume %column_index [range(%column_index, 0, 6)] : index
+  %row_stride = index.constant 7 : index
+  %linear = index.madd %row, %row_stride, %column : index
+  func.return %linear : index
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_match_all_f32_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %value = scalar.constant 1.0 : f32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_match.target_legalization"}
+  %mask, %all = kernel.subgroup.match.all %value : f32 -> i32, i1
+  cfg.cond_br %all, ^then, ^else
+^then:
+  kernel.return
+^else:
+  kernel.return
+}

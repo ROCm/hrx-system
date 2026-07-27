@@ -1,0 +1,69 @@
+// Split-KV online-softmax block combine.
+//
+// Decode attention implementations often split the KV sequence across multiple
+// independent tiles and then combine each tile's partial max, sum, and value
+// accumulator. This motif keeps that combine boundary explicit: the larger
+// block max becomes the combined max, lower-max blocks are rescaled by
+// exp(block_max - combined_max), and both sums and value accumulators are
+// accumulated in the combined frame.
+// Numeric policy is ML-fast attention math: exp is approximate and the rescaled
+// partial sums/accumulators are contractable when combined.
+kernel.def @split_kv_online_softmax_combine_f32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%state0: buffer, %acc0: buffer, %state1: buffer, %acc1: buffer, %combined_state: buffer, %combined_acc: buffer) {
+  %base = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+
+  %state0_noalias, %acc0_noalias, %state1_noalias, %acc1_noalias, %combined_state_noalias, %combined_acc_noalias = buffer.assume.noalias %state0, %acc0, %state1, %acc1, %combined_state, %combined_acc : buffer, buffer, buffer, buffer, buffer, buffer
+  %state0_view = buffer.view %state0_noalias[%base] : buffer -> view<2xf32, #dense>
+  %acc0_view = buffer.view %acc0_noalias[%base] : buffer -> view<4xf32, #dense>
+  %state1_view = buffer.view %state1_noalias[%base] : buffer -> view<2xf32, #dense>
+  %acc1_view = buffer.view %acc1_noalias[%base] : buffer -> view<4xf32, #dense>
+  %combined_state_view = buffer.view %combined_state_noalias[%base] : buffer -> view<2xf32, #dense>
+  %combined_acc_view = buffer.view %combined_acc_noalias[%base] : buffer -> view<4xf32, #dense>
+
+  %max0 = view.load %state0_view[0] : view<2xf32, #dense> -> f32
+  %sum0 = view.load %state0_view[1] : view<2xf32, #dense> -> f32
+  %max1 = view.load %state1_view[0] : view<2xf32, #dense> -> f32
+  %sum1 = view.load %state1_view[1] : view<2xf32, #dense> -> f32
+  %acc0_values = vector.load %acc0_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %acc1_values = vector.load %acc1_view[0] : view<4xf32, #dense> -> vector<4xf32>
+
+  %combined_max = scalar.maxnumf %max0, %max1 : f32
+  %delta0 = scalar.subf %max0, %combined_max : f32
+  %delta1 = scalar.subf %max1, %combined_max : f32
+  %scale0 = scalar.expf<afn> %delta0 : f32
+  %scale1 = scalar.expf<afn> %delta1 : f32
+  %scaled_sum0 = scalar.mulf<reassoc|nnan|nsz|contract> %sum0, %scale0 : f32
+  %scaled_sum1 = scalar.mulf<reassoc|nnan|nsz|contract> %sum1, %scale1 : f32
+  %combined_sum = scalar.addf<reassoc|nnan|nsz|contract> %scaled_sum0, %scaled_sum1 : f32
+
+  %scale0_vector = vector.splat %scale0 : vector<4xf32>
+  %scale1_vector = vector.splat %scale1 : vector<4xf32>
+  %scaled_acc0 = vector.mulf<reassoc|nnan|nsz|contract> %acc0_values, %scale0_vector : vector<4xf32>
+  %scaled_acc1 = vector.mulf<reassoc|nnan|nsz|contract> %acc1_values, %scale1_vector : vector<4xf32>
+  %combined_acc_values = vector.addf<reassoc|nnan|nsz|contract> %scaled_acc0, %scaled_acc1 : vector<4xf32>
+
+  view.store %combined_max, %combined_state_view[%zero_index] : f32, view<2xf32, #dense>
+  view.store %combined_sum, %combined_state_view[1] : f32, view<2xf32, #dense>
+  vector.store %combined_acc_values, %combined_acc_view[0] : vector<4xf32>, view<4xf32, #dense>
+  kernel.return
+}
+
+check.case public @split_kv_online_softmax_combine_f32_case {
+  %state0 = check.generate.iota offset(1.0) step(1.0) : tensor<2xf32>
+  %acc0 = check.generate.iota offset(10.0) step(1.0) : tensor<4xf32>
+  %state1 = check.generate.iota offset(0.3068528194400547) step(3.6931471805599454) : tensor<2xf32>
+  %acc1 = check.generate.iota offset(20.0) step(2.0) : tensor<4xf32>
+  %combined_state = check.generate.fill value(-1.0) : tensor<2xf32>
+  %combined_acc = check.generate.fill value(-1.0) : tensor<4xf32>
+  %expected_state = check.generate.iota offset(1.0) step(3.0) : tensor<2xf32>
+  %expected_acc = check.generate.iota offset(20.0) step(2.0) : tensor<4xf32>
+  func.call @split_kv_online_softmax_combine_f32(%state0, %acc0, %state1, %acc1, %combined_state, %combined_acc) : (tensor<2xf32>, tensor<4xf32>, tensor<2xf32>, tensor<4xf32>, tensor<2xf32>, tensor<4xf32>)
+  check.expect.close actual(%combined_state) expected(%expected_state) atol(0.0001) rtol(0.0001) nan(same) : tensor<2xf32>
+  check.expect.close actual(%combined_acc) expected(%expected_acc) atol(0.0001) rtol(0.0001) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.benchmark<@split_kv_online_softmax_combine_f32_case> @split_kv_online_softmax_combine_f32_smoke

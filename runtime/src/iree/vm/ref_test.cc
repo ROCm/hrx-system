@@ -66,7 +66,7 @@ static iree_vm_ref_t MakeRef(InstancePtr& instance, const char* type_name) {
   T::kTypeID = registration;
 
   iree_vm_ref_t ref = {0};
-  IREE_CHECK_OK(iree_vm_ref_wrap_assign(new T(), T::kTypeID, &ref));
+  iree_vm_ref_wrap_assign(new T(), T::kTypeID, &ref);
   return ref;
 }
 
@@ -112,8 +112,8 @@ TEST(VMRefTest, WrappingCStruct) {
   auto instance = MakeInstance();
   RegisterTypeC(instance);
   iree_vm_ref_t ref = {0};
-  IREE_EXPECT_OK(iree_vm_ref_wrap_assign(new ref_object_c_t(),
-                                         ref_object_c_registration, &ref));
+  iree_vm_ref_wrap_assign(new ref_object_c_t(), ref_object_c_registration,
+                          &ref);
   EXPECT_EQ(1, ReadCounter(&ref));
   iree_vm_ref_release(&ref);
 }
@@ -144,8 +144,7 @@ TEST(VMRefTest, WrappingSubclassedRefObject) {
   allocated_derived_types = 0;
 
   iree_vm_ref_t ref = {0};
-  IREE_EXPECT_OK(
-      iree_vm_ref_wrap_assign(new DerivedType(), registration, &ref));
+  iree_vm_ref_wrap_assign(new DerivedType(), registration, &ref);
   EXPECT_EQ(1, ReadCounter(&ref));
   EXPECT_EQ(1, allocated_derived_types);
 

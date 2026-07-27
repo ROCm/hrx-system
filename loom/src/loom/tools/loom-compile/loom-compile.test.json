@@ -1,0 +1,410 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "prints agent documentation",
+      "run": {
+        "tool": "loom-compile",
+        "args": ["--agents_md"]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "## loom-compile",
+            "--backend=amdgpu-hal",
+            "--compile-report=summary",
+            "--artifact-manifest=summary",
+            "--emit-target-artifact=kernel.hsaco",
+            "--dump-ir-after-all",
+            "Prepared-low reproducers",
+            "--pipeline=none",
+            "whole-module snapshots",
+            ".entries.rows[]",
+            "post-run slicing",
+            "target_capability_rows.rows[]",
+            "matrix_fp8_native_kind",
+            ".schedule_band_summary_rows.rows[]",
+            "dynamic_instruction_mix",
+            "max_band_node_count",
+            ".wait_reason_summary_rows.rows[]",
+            ".wait_action_rows.rows[]",
+            "group_by",
+            "full_drains",
+            "semantic_tag",
+            "Matrix-family schedule evidence",
+            "rounding=finite_only",
+            "fp8_packed_bf16_decode_repair_zero_subnormal",
+            "jq -r"
+          ]
+        }
+      }
+    },
+    {
+      "name": "compiles branchy module",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/branchy.loom",
+            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @branchy(%lhs: i32, %rhs: i32) -> (i32) {\n  %c0 = scalar.constant 0 : i32\n  %is_zero = scalar.cmpi eq, %lhs, %c0 : i32\n  cfg.cond_br %is_zero, ^then, ^else\n^then:\n  %sum = scalar.addi %rhs, %rhs : i32\n  func.return %sum : i32\n^else:\n  %diff = scalar.subi %lhs, %rhs : i32\n  func.return %diff : i32\n}\n"
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/branchy.loom",
+              "--output={tmp}/branchy.vmfb",
+              "--compile-report=summary"
+            ]
+          },
+          "stderr": {
+            "save": "{tmp}/compile_report.json",
+            "contains": [
+              "\"artifact_kind\":\"vm-archive\"",
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/branchy.vmfb",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "compiles bytecode module",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/branchy.loom",
+            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @branchy(%lhs: i32, %rhs: i32) -> (i32) {\n  %c0 = scalar.constant 0 : i32\n  %is_zero = scalar.cmpi eq, %lhs, %c0 : i32\n  cfg.cond_br %is_zero, ^then, ^else\n^then:\n  %sum = scalar.addi %rhs, %rhs : i32\n  func.return %sum : i32\n^else:\n  %diff = scalar.subi %lhs, %rhs : i32\n  func.return %diff : i32\n}\n"
+          }
+        },
+        {
+          "name": "encode-source",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "{tmp}/branchy.loom",
+              "--from=text",
+              "--to=bytecode",
+              "--output={tmp}/branchy.loombc"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/branchy.loombc",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/branchy.loombc",
+              "--output={tmp}/branchy.vmfb",
+              "--compile-report=summary"
+            ]
+          },
+          "stderr": {
+            "contains": [
+              "\"artifact_kind\":\"vm-archive\"",
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/branchy.vmfb",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rooted compile retains template provider",
+      "steps": [
+        {
+          "name": "compile-root",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/rooted_template_provider.loom",
+              "--root=@entry",
+              "--output={tmp}/rooted_template.vmfb",
+              "--compile-report=summary"
+            ]
+          },
+          "stderr": {
+            "contains": [
+              "\"artifact_kind\":\"vm-archive\"",
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
+            ],
+            "not_contains": [
+              "no_provider"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/rooted_template.vmfb",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "dumps compile pipeline IR as JSONL",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/trace.loom",
+            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @trace(%lhs: i32, %rhs: i32) -> (i32) {\n  %sum = scalar.addi %lhs, %rhs : i32\n  func.return %sum : i32\n}\n"
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/trace.loom",
+              "--output={tmp}/trace.vmfb",
+              "--dump-ir-after-all",
+              "--dump-ir-format=jsonl",
+              "--dump-ir-output=stderr"
+            ]
+          },
+          "stderr": {
+            "contains": [
+              "\"tool\":\"loom-compile\"",
+              "\"stage\":\"prepared-low\"",
+              "\"pipeline\":\"__loom_compile_default\"",
+              "\"point\":\"after\"",
+              "\"ir\":\""
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/trace.vmfb",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "enables sanitizer checks in default pipeline",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/sanitizer.loom",
+            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @sanitizer(%lhs: i32, %rhs: i32) -> (i32) {\n  %sum = scalar.addi %lhs, %rhs : i32\n  func.return %sum : i32\n}\n"
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/sanitizer.loom",
+              "--output={tmp}/sanitizer.vmfb",
+              "--sanitizer=access",
+              "--dump-ir-before=sanitizer-insert-assertions",
+              "--dump-ir-format=jsonl",
+              "--dump-ir-output=stderr"
+            ]
+          },
+          "stderr": {
+            "contains": [
+              "\"tool\":\"loom-compile\"",
+              "\"pass\":\"sanitizer-insert-assertions\"",
+              "\"point\":\"before\""
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/sanitizer.vmfb",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "writes detailed compile report file",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/branchy.loom",
+            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @branchy(%lhs: i32, %rhs: i32) -> (i32) {\n  %c0 = scalar.constant 0 : i32\n  %is_zero = scalar.cmpi eq, %lhs, %c0 : i32\n  cfg.cond_br %is_zero, ^then, ^else\n^then:\n  %sum = scalar.addi %rhs, %rhs : i32\n  func.return %sum : i32\n^else:\n  %diff = scalar.subi %lhs, %rhs : i32\n  func.return %diff : i32\n}\n"
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/branchy.loom",
+              "--output={tmp}/branchy.vmfb",
+              "--compile-report=details",
+              "--compile-report-output={tmp}/report.json"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/branchy.vmfb",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/report.json",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "inspect-report",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/branchy.loom",
+              "--output={tmp}/unused.vmfb",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "\"artifact_kind\":\"vm-archive\"",
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "reports pass diagnostic failure status",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/bad_return.loom",
+            "text": "amdgpu.target<gfx1100> @target\n\nlow.func.def target(@target) @bad_return(%predicate: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) {\n  low.return %predicate : reg<amdgpu.sgpr x2>\n}\n"
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/bad_return.loom",
+              "--pipeline=canonicalize",
+              "--output={tmp}/unused.vmfb",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stdout": {
+            "contains": [
+              "\"status\":{\"code\":9,\"name\":\"FAILED_PRECONDITION\"}"
+            ],
+            "not_contains": [
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
+            ]
+          },
+          "stderr": {
+            "contains": [
+              "yielded value has type",
+              "but expected"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "applies config file and reports invalid config states",
+      "steps": [
+        {
+          "name": "write-config",
+          "write": {
+            "path": "{tmp}/config.json",
+            "text": "{\"model36\": {\"model\": {\"delta\": 32}}}\n"
+          }
+        },
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/configured.loom",
+            "text": "ireevm.target<core> @vm_target\n\nconfig.decl @model36.model.delta : i32\n\nfunc.def public target(@vm_target) @configured(%lhs: i32) -> (i32) {\n  %delta = config.get @model36.model.delta : i32\n  %sum = scalar.addi %lhs, %delta : i32\n  func.return %sum : i32\n}\n"
+          }
+        },
+        {
+          "name": "compile-configured",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/configured.loom",
+              "--config-file={tmp}/config.json",
+              "--output={tmp}/configured.vmfb"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/configured.vmfb",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "reject-duplicate-config",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/configured.loom",
+              "--config-file={tmp}/config.json",
+              "--config=model36.model.delta=16",
+              "--output={tmp}/unused.vmfb"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": ["duplicate config binding for 'model36.model.delta'"]
+          }
+        },
+        {
+          "name": "reject-unresolved-config",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/configured.loom",
+              "--pipeline=none",
+              "--output={tmp}/unused.vmfb"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "unresolved config '@model36.model.delta' remains for final compilation"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

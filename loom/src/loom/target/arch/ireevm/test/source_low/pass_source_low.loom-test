@@ -1,0 +1,190 @@
+// RUN: pass source-to-low
+ireevm.target<core> @vm_target
+
+func.def target(@vm_target) @vm_add(%lhs: i32, %rhs: i32) -> (i32) {
+  %sum = scalar.addi %lhs, %rhs : i32
+  func.return %sum : i32
+}
+
+// ----
+ireevm.target<core> @vm_target
+
+low.func.def target(@vm_target) abi(vm_module_function) @vm_add(%lhs: reg<ireevm.i32>, %rhs: reg<ireevm.i32>) -> (reg<ireevm.i32>) {
+  %sum = low.op<ireevm.add.i32>(%lhs, %rhs) : (reg<ireevm.i32>, reg<ireevm.i32>) -> reg<ireevm.i32>
+  low.return %sum : reg<ireevm.i32>
+}
+
+// ====
+
+ireevm.target<core> @vm_target
+
+func.def target(@vm_target) @vm_constants() -> (i32, i64, f32, f64) {
+  %i32 = scalar.constant 42 : i32
+  %i64 = scalar.constant 9223372036854775807 : i64
+  %f32 = scalar.constant 1.5 : f32
+  %f64 = scalar.constant 2.25 : f64
+  func.return %i32, %i64, %f32, %f64 : i32, i64, f32, f64
+}
+
+// ----
+ireevm.target<core> @vm_target
+
+low.func.def target(@vm_target) abi(vm_module_function) @vm_constants() -> (reg<ireevm.i32>, reg<ireevm.i64 x2>, reg<ireevm.f32>, reg<ireevm.f64 x2>) {
+  %i32 = low.const<ireevm.const.i32> {i32_value = 42} : reg<ireevm.i32>
+  %i64 = low.const<ireevm.const.i64> {i64_value = 9223372036854775807} : reg<ireevm.i64 x2>
+  %f32 = low.const<ireevm.const.f32> {f32_bits = 1069547520} : reg<ireevm.f32>
+  %f64 = low.const<ireevm.const.f64> {f64_bits = 4612248968380809216} : reg<ireevm.f64 x2>
+  low.return %i32, %i64, %f32, %f64 : reg<ireevm.i32>, reg<ireevm.i64 x2>, reg<ireevm.f32>, reg<ireevm.f64 x2>
+}
+
+// ====
+
+ireevm.target<core> @vm_target
+
+func.def target(@vm_target) @vm_i64_ops(%lhs: i64, %rhs: i64, %amount: i32) -> (i64, i64, i1, i64) {
+  %sum = scalar.addi %lhs, %rhs : i64
+  %product = scalar.muli %sum, %rhs : i64
+  %signed_less = scalar.cmpi slt, %lhs, %rhs : i64
+  %widened = scalar.extsi %amount : i32 to i64
+  %mixed = scalar.xori %product, %widened : i64
+  func.return %sum, %mixed, %signed_less, %widened : i64, i64, i1, i64
+}
+
+// ----
+ireevm.target<core> @vm_target
+
+low.func.def target(@vm_target) abi(vm_module_function) @vm_i64_ops(%lhs: reg<ireevm.i64 x2>, %rhs: reg<ireevm.i64 x2>, %amount: reg<ireevm.i32>) -> (reg<ireevm.i64 x2>, reg<ireevm.i64 x2>, reg<ireevm.i32>, reg<ireevm.i64 x2>) {
+  %sum = low.op<ireevm.add.i64>(%lhs, %rhs) : (reg<ireevm.i64 x2>, reg<ireevm.i64 x2>) -> reg<ireevm.i64 x2>
+  %product = low.op<ireevm.mul.i64>(%sum, %rhs) : (reg<ireevm.i64 x2>, reg<ireevm.i64 x2>) -> reg<ireevm.i64 x2>
+  %signed_less = low.op<ireevm.cmp.lt.s.i64>(%lhs, %rhs) : (reg<ireevm.i64 x2>, reg<ireevm.i64 x2>) -> reg<ireevm.i32>
+  %widened = low.op<ireevm.ext.s.i32.i64>(%amount) : (reg<ireevm.i32>) -> reg<ireevm.i64 x2>
+  %mixed = low.op<ireevm.xor.i64>(%product, %widened) : (reg<ireevm.i64 x2>, reg<ireevm.i64 x2>) -> reg<ireevm.i64 x2>
+  low.return %sum, %mixed, %signed_less, %widened : reg<ireevm.i64 x2>, reg<ireevm.i64 x2>, reg<ireevm.i32>, reg<ireevm.i64 x2>
+}
+
+// ====
+
+ireevm.target<core> @vm_target
+
+func.def target(@vm_target) @vm_float_ops(%x: f32, %y: f32, %wide: f64) -> (f32, f64, i1, i64) {
+  %sum = scalar.addf %x, %y : f32
+  %root = scalar.sqrtf %sum : f32
+  %extended = scalar.extf %root : f32 to f64
+  %wide_sum = scalar.addf %extended, %wide : f64
+  %ordered = scalar.cmpf olt, %extended, %wide_sum : f64
+  %bits = scalar.bitcast %wide_sum : f64 to i64
+  func.return %root, %wide_sum, %ordered, %bits : f32, f64, i1, i64
+}
+
+// ----
+ireevm.target<core> @vm_target
+
+low.func.def target(@vm_target) abi(vm_module_function) @vm_float_ops(%x: reg<ireevm.f32>, %y: reg<ireevm.f32>, %wide: reg<ireevm.f64 x2>) -> (reg<ireevm.f32>, reg<ireevm.f64 x2>, reg<ireevm.i32>, reg<ireevm.i64 x2>) {
+  %sum = low.op<ireevm.add.f32>(%x, %y) : (reg<ireevm.f32>, reg<ireevm.f32>) -> reg<ireevm.f32>
+  %root = low.op<ireevm.sqrt.f32>(%sum) : (reg<ireevm.f32>) -> reg<ireevm.f32>
+  %extended = low.op<ireevm.ext.f32.f64>(%root) : (reg<ireevm.f32>) -> reg<ireevm.f64 x2>
+  %wide_sum = low.op<ireevm.add.f64>(%extended, %wide) : (reg<ireevm.f64 x2>, reg<ireevm.f64 x2>) -> reg<ireevm.f64 x2>
+  %ordered = low.op<ireevm.cmp.lt.o.f64>(%extended, %wide_sum) : (reg<ireevm.f64 x2>, reg<ireevm.f64 x2>) -> reg<ireevm.i32>
+  %bits = low.op<ireevm.bitcast.f64.i64>(%wide_sum) : (reg<ireevm.f64 x2>) -> reg<ireevm.i64 x2>
+  low.return %root, %wide_sum, %ordered, %bits : reg<ireevm.f32>, reg<ireevm.f64 x2>, reg<ireevm.i32>, reg<ireevm.i64 x2>
+}
+
+// ====
+
+ireevm.target<core> @vm_target
+
+func.def target(@vm_target) @vm_i64_cfg(%start: i64, %limit: i64, %step: i64) -> (i64) {
+  cfg.br ^loop(%start: i64)
+^loop(%current: i64):
+  %keep_going = scalar.cmpi slt, %current, %limit : i64
+  cfg.cond_br %keep_going, ^body, ^exit
+^body:
+  %next = scalar.addi %current, %step : i64
+  cfg.br ^loop(%next: i64)
+^exit:
+  func.return %current : i64
+}
+
+// ----
+ireevm.target<core> @vm_target
+
+low.func.def target(@vm_target) abi(vm_module_function) @vm_i64_cfg(%start: reg<ireevm.i64 x2>, %limit: reg<ireevm.i64 x2>, %step: reg<ireevm.i64 x2>) -> (reg<ireevm.i64 x2>) {
+  low.br ^loop(%start: reg<ireevm.i64 x2>)
+^loop(%current: reg<ireevm.i64 x2>):
+  %keep_going = low.op<ireevm.cmp.lt.s.i64>(%current, %limit) : (reg<ireevm.i64 x2>, reg<ireevm.i64 x2>) -> reg<ireevm.i32>
+  low.cond_br %keep_going, ^body, ^exit : reg<ireevm.i32>
+^body:
+  %next = low.op<ireevm.add.i64>(%current, %step) : (reg<ireevm.i64 x2>, reg<ireevm.i64 x2>) -> reg<ireevm.i64 x2>
+  low.br ^loop(%next: reg<ireevm.i64 x2>)
+^exit:
+  low.return %current : reg<ireevm.i64 x2>
+}
+
+// ====
+
+// RUN: pass ireevm-ref-lifetime,source-to-low
+ireevm.target<core> @vm_target
+
+func.def target(@vm_target) @vm_ref_retain_release(%resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = ireevm.ref.retain %resource : ireevm.ref<ireevm.list<i32>> -> ireevm.ref<ireevm.list<i32>>
+  func.return
+}
+
+// ----
+ireevm.target<core> @vm_target
+
+low.func.def target(@vm_target) abi(vm_module_function) @vm_ref_retain_release(%resource: reg<ireevm.ref>) {
+  %owned = low.op<ireevm.ref.retain>(%resource) : (reg<ireevm.ref>) -> reg<ireevm.ref>
+  low.op<ireevm.ref.release>(%resource) : (reg<ireevm.ref>)
+  low.op<ireevm.ref.release>(%owned) : (reg<ireevm.ref>)
+  low.return
+}
+
+// ====
+
+// RUN: pass ireevm-ref-lifetime,source-to-low
+ireevm.target<core> @vm_target
+
+func.def target(@vm_target) @vm_buffer_address_math(%buffer: ireevm.ref<ireevm.buffer>, %base: i64, %delta: i64, %i32_value: i32, %i64_value: i64, %f32_value: f32, %f64_value: f64) -> (i64, i32, i32, i32, i32, i32, i64, f32, f64) {
+  %offset = scalar.addi %base, %delta : i64
+  %length = ireevm.buffer.length %buffer : ireevm.ref<ireevm.buffer> -> i64
+  %load_i8u = ireevm.buffer.load.i8.u %buffer[%offset] : ireevm.ref<ireevm.buffer>, i64 -> i32
+  %load_i8s = ireevm.buffer.load.i8.s %buffer[%offset] : ireevm.ref<ireevm.buffer>, i64 -> i32
+  %load_i16u = ireevm.buffer.load.i16.u %buffer[%offset] : ireevm.ref<ireevm.buffer>, i64 -> i32
+  %load_i16s = ireevm.buffer.load.i16.s %buffer[%offset] : ireevm.ref<ireevm.buffer>, i64 -> i32
+  %load_i32 = ireevm.buffer.load.i32 %buffer[%offset] : ireevm.ref<ireevm.buffer>, i64 -> i32
+  %load_i64 = ireevm.buffer.load.i64 %buffer[%offset] : ireevm.ref<ireevm.buffer>, i64 -> i64
+  %load_f32 = ireevm.buffer.load.f32 %buffer[%offset] : ireevm.ref<ireevm.buffer>, i64 -> f32
+  %load_f64 = ireevm.buffer.load.f64 %buffer[%offset] : ireevm.ref<ireevm.buffer>, i64 -> f64
+  ireevm.buffer.store.i8 %i32_value, %buffer[%offset] : i32, ireevm.ref<ireevm.buffer>, i64
+  ireevm.buffer.store.i16 %i32_value, %buffer[%offset] : i32, ireevm.ref<ireevm.buffer>, i64
+  ireevm.buffer.store.i32 %i32_value, %buffer[%offset] : i32, ireevm.ref<ireevm.buffer>, i64
+  ireevm.buffer.store.i64 %i64_value, %buffer[%offset] : i64, ireevm.ref<ireevm.buffer>, i64
+  ireevm.buffer.store.f32 %f32_value, %buffer[%offset] : f32, ireevm.ref<ireevm.buffer>, i64
+  ireevm.buffer.store.f64 %f64_value, %buffer[%offset] : f64, ireevm.ref<ireevm.buffer>, i64
+  func.return %length, %load_i8u, %load_i8s, %load_i16u, %load_i16s, %load_i32, %load_i64, %load_f32, %load_f64 : i64, i32, i32, i32, i32, i32, i64, f32, f64
+}
+
+// ----
+ireevm.target<core> @vm_target
+
+low.func.def target(@vm_target) abi(vm_module_function) @vm_buffer_address_math(%buffer: reg<ireevm.ref>, %base: reg<ireevm.i64 x2>, %delta: reg<ireevm.i64 x2>, %i32_value: reg<ireevm.i32>, %i64_value: reg<ireevm.i64 x2>, %f32_value: reg<ireevm.f32>, %f64_value: reg<ireevm.f64 x2>) -> (reg<ireevm.i64 x2>, reg<ireevm.i32>, reg<ireevm.i32>, reg<ireevm.i32>, reg<ireevm.i32>, reg<ireevm.i32>, reg<ireevm.i64 x2>, reg<ireevm.f32>, reg<ireevm.f64 x2>) {
+  %offset = low.op<ireevm.add.i64>(%base, %delta) : (reg<ireevm.i64 x2>, reg<ireevm.i64 x2>) -> reg<ireevm.i64 x2>
+  %length = low.op<ireevm.buffer.length>(%buffer) : (reg<ireevm.ref>) -> reg<ireevm.i64 x2>
+  %load_i8u = low.op<ireevm.buffer.load.i8.u>(%buffer, %offset) : (reg<ireevm.ref>, reg<ireevm.i64 x2>) -> reg<ireevm.i32>
+  %load_i8s = low.op<ireevm.buffer.load.i8.s>(%buffer, %offset) : (reg<ireevm.ref>, reg<ireevm.i64 x2>) -> reg<ireevm.i32>
+  %load_i16u = low.op<ireevm.buffer.load.i16.u>(%buffer, %offset) : (reg<ireevm.ref>, reg<ireevm.i64 x2>) -> reg<ireevm.i32>
+  %load_i16s = low.op<ireevm.buffer.load.i16.s>(%buffer, %offset) : (reg<ireevm.ref>, reg<ireevm.i64 x2>) -> reg<ireevm.i32>
+  %load_i32 = low.op<ireevm.buffer.load.i32>(%buffer, %offset) : (reg<ireevm.ref>, reg<ireevm.i64 x2>) -> reg<ireevm.i32>
+  %load_i64 = low.op<ireevm.buffer.load.i64>(%buffer, %offset) : (reg<ireevm.ref>, reg<ireevm.i64 x2>) -> reg<ireevm.i64 x2>
+  %load_f32 = low.op<ireevm.buffer.load.f32>(%buffer, %offset) : (reg<ireevm.ref>, reg<ireevm.i64 x2>) -> reg<ireevm.f32>
+  %load_f64 = low.op<ireevm.buffer.load.f64>(%buffer, %offset) : (reg<ireevm.ref>, reg<ireevm.i64 x2>) -> reg<ireevm.f64 x2>
+  low.op<ireevm.buffer.store.i8>(%buffer, %offset, %i32_value) : (reg<ireevm.ref>, reg<ireevm.i64 x2>, reg<ireevm.i32>)
+  low.op<ireevm.buffer.store.i16>(%buffer, %offset, %i32_value) : (reg<ireevm.ref>, reg<ireevm.i64 x2>, reg<ireevm.i32>)
+  low.op<ireevm.buffer.store.i32>(%buffer, %offset, %i32_value) : (reg<ireevm.ref>, reg<ireevm.i64 x2>, reg<ireevm.i32>)
+  low.op<ireevm.buffer.store.i64>(%buffer, %offset, %i64_value) : (reg<ireevm.ref>, reg<ireevm.i64 x2>, reg<ireevm.i64 x2>)
+  low.op<ireevm.buffer.store.f32>(%buffer, %offset, %f32_value) : (reg<ireevm.ref>, reg<ireevm.i64 x2>, reg<ireevm.f32>)
+  low.op<ireevm.buffer.store.f64>(%buffer, %offset, %f64_value) : (reg<ireevm.ref>, reg<ireevm.i64 x2>, reg<ireevm.f64 x2>)
+  low.op<ireevm.ref.release>(%buffer) : (reg<ireevm.ref>)
+  low.return %length, %load_i8u, %load_i8s, %load_i16u, %load_i16s, %load_i32, %load_i64, %load_f32, %load_f64 : reg<ireevm.i64 x2>, reg<ireevm.i32>, reg<ireevm.i32>, reg<ireevm.i32>, reg<ireevm.i32>, reg<ireevm.i32>, reg<ireevm.i64 x2>, reg<ireevm.f32>, reg<ireevm.f64 x2>
+}

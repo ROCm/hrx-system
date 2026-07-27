@@ -8,12 +8,6 @@
 
 #include <string.h>
 
-#if !defined(IREE_HAL_AMDGPU_ENABLE_AQLPROFILE)
-#define IREE_HAL_AMDGPU_ENABLE_AQLPROFILE 0
-#endif  // !IREE_HAL_AMDGPU_ENABLE_AQLPROFILE
-
-#if IREE_HAL_AMDGPU_ENABLE_AQLPROFILE
-
 // Some ROCm aqlprofile SDK headers define these C tag types without matching
 // typedefs, then use the untagged names in public prototypes.
 typedef struct aqlprofile_att_buffer_status_t aqlprofile_att_buffer_status_t;
@@ -481,56 +475,3 @@ iree_status_t iree_status_from_aqlprofile_status(
       "%s failed with hsa_status=0x%08X (%s)%s%s", symbol, (uint32_t)hsa_status,
       error_string, message ? ": " : "", message ? message : "");
 }
-
-#else  // IREE_HAL_AMDGPU_ENABLE_AQLPROFILE
-
-iree_status_t iree_hal_amdgpu_libaqlprofile_initialize(
-    const iree_hal_amdgpu_libhsa_t* libhsa,
-    iree_string_view_list_t search_paths, iree_allocator_t host_allocator,
-    iree_hal_amdgpu_libaqlprofile_t* out_libaqlprofile) {
-  IREE_ASSERT_ARGUMENT(libhsa);
-  IREE_ASSERT_ARGUMENT(out_libaqlprofile);
-  (void)libhsa;
-  (void)search_paths;
-  (void)host_allocator;
-  memset(out_libaqlprofile, 0, sizeof(*out_libaqlprofile));
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "AMDGPU aqlprofile support is disabled at build time");
-}
-
-void iree_hal_amdgpu_libaqlprofile_deinitialize(
-    iree_hal_amdgpu_libaqlprofile_t* libaqlprofile) {
-  IREE_ASSERT_ARGUMENT(libaqlprofile);
-  memset(libaqlprofile, 0, sizeof(*libaqlprofile));
-}
-
-bool iree_hal_amdgpu_libaqlprofile_has_att_support(
-    const iree_hal_amdgpu_libaqlprofile_t* libaqlprofile) {
-  (void)libaqlprofile;
-  return false;
-}
-
-iree_status_t iree_hal_amdgpu_libaqlprofile_require_att_support(
-    const iree_hal_amdgpu_libaqlprofile_t* libaqlprofile,
-    const char* context_message) {
-  (void)libaqlprofile;
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "AMDGPU aqlprofile support is disabled at build time%s%s",
-      context_message ? ": " : "", context_message ? context_message : "");
-}
-
-iree_status_t iree_status_from_aqlprofile_status(
-    const iree_hal_amdgpu_libaqlprofile_t* libaqlprofile, const char* file,
-    uint32_t line, hsa_status_t hsa_status, const char* symbol,
-    const char* message) {
-  (void)libaqlprofile;
-  if (hsa_status == HSA_STATUS_SUCCESS) return iree_ok_status();
-  return iree_make_status_with_location(
-      file, line, IREE_STATUS_INTERNAL,
-      "%s failed with hsa_status=0x%08X from AMDGPU aqlprofile%s%s", symbol,
-      (uint32_t)hsa_status, message ? ": " : "", message ? message : "");
-}
-
-#endif  // IREE_HAL_AMDGPU_ENABLE_AQLPROFILE

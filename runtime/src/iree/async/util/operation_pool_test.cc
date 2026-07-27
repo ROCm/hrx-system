@@ -232,7 +232,7 @@ TEST_F(OperationPoolTest, ConcurrentAcquireRelease) {
         iree_async_operation_t* operation = nullptr;
         iree_status_t status = iree_async_operation_pool_acquire(
             pool_, sizeof(iree_async_operation_t), &operation);
-        ASSERT_TRUE(iree_status_is_ok(status));
+        IREE_ASSERT_OK(status);
         ASSERT_NE(operation, nullptr);
 
         // Simulate some work.
@@ -265,7 +265,7 @@ TEST_F(OperationPoolTest, ConcurrentMixedSizes) {
         iree_async_operation_t* operation = nullptr;
         iree_status_t status =
             iree_async_operation_pool_acquire(pool_, size, &operation);
-        ASSERT_TRUE(iree_status_is_ok(status));
+        IREE_ASSERT_OK(status);
         ASSERT_NE(operation, nullptr);
 
         iree_async_operation_pool_release(pool_, operation);

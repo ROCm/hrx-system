@@ -40,6 +40,11 @@ DeviceCreateContext::DeviceCreateContext() = default;
 DeviceCreateContext::~DeviceCreateContext() = default;
 
 iree_status_t DeviceCreateContext::Initialize(iree_allocator_t host_allocator) {
+  return Initialize(host_allocator, iree_hal_device_event_sink_discard());
+}
+
+iree_status_t DeviceCreateContext::Initialize(
+    iree_allocator_t host_allocator, iree_hal_device_event_sink_t event_sink) {
   if (state_) return iree_ok_status();
 
   auto state = std::make_unique<State>();
@@ -57,6 +62,7 @@ iree_status_t DeviceCreateContext::Initialize(iree_allocator_t host_allocator) {
 
   if (iree_status_is_ok(status)) {
     state->params.proactor_pool = state->proactor_pool;
+    state->params.event_sink = event_sink;
     state_ = std::move(state);
   }
   return status;

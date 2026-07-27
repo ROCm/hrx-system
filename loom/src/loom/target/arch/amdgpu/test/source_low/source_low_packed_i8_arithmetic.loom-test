@@ -1,0 +1,243 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_i8_arithmetic.loom-test
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i8x4_addi_arguments(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (vector<4xi8>) {
+  %sum = vector.addi %lhs, %rhs : vector<4xi8>
+  func.return %sum : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i8x4_addi_arguments(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %7 = v_and_b32_lit %lhs, 2139062143
+  %8 = v_and_b32_lit %rhs, 2139062143
+  %9 = v_add_u32 %7, %8
+  %10 = v_xor_b32 %lhs, %rhs
+  %11 = v_and_b32_lit %10, 2155905152
+  %sum = v_xor_b32 %9, %11
+  return %sum
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i8x8_addi_storage_tuple(%lhs: vector<8xi8>, %rhs: vector<8xi8>) -> (vector<8xi8>) {
+  %sum = vector.addi %lhs, %rhs : vector<8xi8>
+  func.return %sum : vector<8xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i8x8_addi_storage_tuple(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %7 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %8 = v_and_b32_lit %7, 2139062143
+  %9 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %10 = v_and_b32_lit %9, 2139062143
+  %11 = v_add_u32 %8, %10
+  %14 = v_xor_b32 %7, %9
+  %15 = v_and_b32_lit %14, 2155905152
+  %16 = v_xor_b32 %11, %15
+  %17 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = v_and_b32_lit %17, 2139062143
+  %19 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %20 = v_and_b32_lit %19, 2139062143
+  %21 = v_add_u32 %18, %20
+  %24 = v_xor_b32 %17, %19
+  %25 = v_and_b32_lit %24, 2155905152
+  %26 = v_xor_b32 %21, %25
+  %sum = concat(%16, %26) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %sum
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i8x4_subi_arguments(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (vector<4xi8>) {
+  %diff = vector.subi %lhs, %rhs : vector<4xi8>
+  func.return %diff : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i8x4_subi_arguments(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %7 = v_or_b32_lit %lhs, 2155905152
+  %8 = v_and_b32_lit %rhs, 2139062143
+  %9 = v_sub_nc_u32 %7, %8
+  %10 = v_xor_b32 %lhs, %rhs
+  %11 = v_xor_b32_lit %10, 2155905152
+  %12 = v_and_b32_lit %11, 2155905152
+  %diff = v_xor_b32 %9, %12
+  return %diff
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i8x8_subi_storage_tuple(%lhs: vector<8xi8>, %rhs: vector<8xi8>) -> (vector<8xi8>) {
+  %diff = vector.subi %lhs, %rhs : vector<8xi8>
+  func.return %diff : vector<8xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i8x8_subi_storage_tuple(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %7 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %8 = v_or_b32_lit %7, 2155905152
+  %9 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %10 = v_and_b32_lit %9, 2139062143
+  %11 = v_sub_nc_u32 %8, %10
+  %14 = v_xor_b32 %7, %9
+  %15 = v_xor_b32_lit %14, 2155905152
+  %16 = v_and_b32_lit %15, 2155905152
+  %17 = v_xor_b32 %11, %16
+  %18 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = v_or_b32_lit %18, 2155905152
+  %20 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = v_and_b32_lit %20, 2139062143
+  %22 = v_sub_nc_u32 %19, %21
+  %25 = v_xor_b32 %18, %20
+  %26 = v_xor_b32_lit %25, 2155905152
+  %27 = v_and_b32_lit %26, 2155905152
+  %28 = v_xor_b32 %22, %27
+  %diff = concat(%17, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %diff
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i8x4_addi_chain(%packed: vector<1xi32>, %bias: vector<4xi8>, %delta: vector<4xi8>) -> (vector<4xi8>) {
+  %bytes = vector.bitcast %packed : vector<1xi32> to vector<4xi8>
+  %biased = vector.addi %bytes, %bias : vector<4xi8>
+  %result = vector.addi %biased, %delta : vector<4xi8>
+  func.return %result : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i8x4_addi_chain(%bytes: reg<amdgpu.vgpr>, %bias: reg<amdgpu.vgpr>, %delta: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %11 = v_and_b32_lit %bytes, 2139062143
+  %12 = v_and_b32_lit %bias, 2139062143
+  %13 = v_add_u32 %11, %12
+  %14 = v_xor_b32 %bytes, %bias
+  %15 = v_and_b32_lit %14, 2155905152
+  %biased = v_xor_b32 %13, %15
+  %17 = v_and_b32_lit %biased, 2139062143
+  %18 = v_and_b32_lit %delta, 2139062143
+  %19 = v_add_u32 %17, %18
+  %20 = v_xor_b32 %biased, %delta
+  %21 = v_and_b32_lit %20, 2155905152
+  %result = v_xor_b32 %19, %21
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i8x4_select_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xi8>
+  %result = vector.addi %selected, %bias : vector<4xi8>
+  func.return %result : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i8x4_select_addi(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>, %bias: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %16 = v_mov_b32_copy %lhs
+  %17 = v_mov_b32_copy %rhs
+  %condition = v_cmp_lt_i32 %16, %17
+  %selected = v_cndmask_b32 %false_value, %true_value, %condition
+  %20 = v_and_b32_lit %selected, 2139062143
+  %21 = v_and_b32_lit %bias, 2139062143
+  %22 = v_add_u32 %20, %21
+  %23 = v_xor_b32 %selected, %bias
+  %24 = v_and_b32_lit %23, 2155905152
+  %result = v_xor_b32 %22, %24
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i8x4_select_subi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xi8>
+  %result = vector.subi %selected, %bias : vector<4xi8>
+  func.return %result : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i8x4_select_subi(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>, %bias: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %16 = v_mov_b32_copy %lhs
+  %17 = v_mov_b32_copy %rhs
+  %condition = v_cmp_lt_i32 %16, %17
+  %selected = v_cndmask_b32 %false_value, %true_value, %condition
+  %20 = v_or_b32_lit %selected, 2155905152
+  %21 = v_and_b32_lit %bias, 2139062143
+  %22 = v_sub_nc_u32 %20, %21
+  %23 = v_xor_b32 %selected, %bias
+  %24 = v_xor_b32_lit %23, 2155905152
+  %25 = v_and_b32_lit %24, 2155905152
+  %result = v_xor_b32 %22, %25
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i8x4_scf_if_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %selected = scf.if %condition -> (vector<4xi8>) {
+    scf.yield %true_value : vector<4xi8>
+  } else {
+    scf.yield %false_value : vector<4xi8>
+  }
+  %result = vector.addi %selected, %bias : vector<4xi8>
+  func.return %result : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i8x4_scf_if_addi(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>, %bias: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %16 = v_mov_b32_copy %lhs
+  %17 = v_mov_b32_copy %rhs
+  %condition = v_cmp_lt_i32 %16, %17
+  %selected = v_cndmask_b32 %false_value, %true_value, %condition
+  %20 = v_and_b32_lit %selected, 2139062143
+  %21 = v_and_b32_lit %bias, 2139062143
+  %22 = v_add_u32 %20, %21
+  %23 = v_xor_b32 %selected, %bias
+  %24 = v_and_b32_lit %23, 2155905152
+  %result = v_xor_b32 %22, %24
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i8x4_cfg_arg_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  cfg.cond_br %condition, ^then, ^else
+^then:
+  cfg.br ^join(%true_value: vector<4xi8>)
+^else:
+  cfg.br ^join(%false_value: vector<4xi8>)
+^join(%selected: vector<4xi8>):
+  %result = vector.addi %selected, %bias : vector<4xi8>
+  func.return %result : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i8x4_cfg_arg_addi(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>, %bias: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %condition = s_cmp_lt_i32 %lhs, %rhs
+  low.cond_br %condition, ^then, ^else : reg<amdgpu.scc>
+^then:
+  low.br ^join(%true_value: reg<amdgpu.vgpr>)
+^else:
+  low.br ^join(%false_value: reg<amdgpu.vgpr>)
+^join(%selected: reg<amdgpu.vgpr>):
+  %17 = v_and_b32_lit %selected, 2139062143
+  %18 = v_and_b32_lit %bias, 2139062143
+  %19 = v_add_u32 %17, %18
+  %20 = v_xor_b32 %selected, %bias
+  %21 = v_and_b32_lit %20, 2155905152
+  %result = v_xor_b32 %19, %21
+  return %result
+}

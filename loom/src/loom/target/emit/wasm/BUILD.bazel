@@ -1,0 +1,143 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_generated_cc_library",
+)
+load(
+    "//loom/build_tools/bazel:loom_check.bzl",
+    "loom_check_test_suite",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_WASM_CHECK_VISIBILITY = ["//loom/src/loom/tools/loom-check:__pkg__"]
+
+#===------------------------------------------------------------------------===#
+# Wasm emission
+#===------------------------------------------------------------------------===#
+
+loom_generated_cc_library(
+    name = "error_defs",
+    args = [
+        "--catalog-symbol=loom_wasm_error_catalog",
+        "--fallback-catalog-symbol=loom_error_catalog_core",
+        "--fallback-public-header=loom/error/error_catalog.h",
+        "--public-header=loom/target/emit/wasm/error_catalog.h",
+        "--shard=wasm",
+    ],
+    generated_hdr_flags = ["--header"],
+    generated_hdrs = ["error_catalog.h"],
+    generator = "//loom/py/loom/gen/error:c_errors",
+    source = "error_catalog.c",
+    visibility = ["//loom/src/loom/target/emit/wasm/lower:__pkg__"],
+    deps = ["//loom/src/loom/error:error_defs"],
+)
+
+loom_cc_library(
+    name = "binary_writer",
+    srcs = ["binary_writer.c"],
+    hdrs = ["binary_writer.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
+    name = "types",
+    srcs = ["types.c"],
+    hdrs = ["types.h"],
+    deps = [
+        "//loom/src/loom/target/arch/wasm/descriptors:descriptors_ids",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "function_body",
+    srcs = ["function_body.c"],
+    hdrs = ["function_body.h"],
+    deps = [
+        ":binary_writer",
+        ":types",
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/wasm/descriptors",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "module_binary",
+    srcs = ["module_binary.c"],
+    hdrs = ["module_binary.h"],
+    deps = [
+        ":binary_writer",
+        ":function_body",
+        ":types",
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/wasm/descriptors",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "loom_check",
+    testonly = True,
+    srcs = ["check/loom_check.c"],
+    hdrs = ["check/loom_check.h"],
+    deps = [
+        ":module_binary",
+        "//loom/src/loom/target/tool:wasm",
+        "//loom/src/loom/tools/loom-check:execute",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "check_provider",
+    testonly = True,
+    srcs = ["check/provider.c"],
+    hdrs = ["check/provider.h"],
+    visibility = _WASM_CHECK_VISIBILITY,
+    deps = [
+        ":loom_check",
+        "//loom/src/loom/tools/loom-check:provider",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_check_test_suite(
+    name = "loom_check_file_test",
+    srcs = [
+        "test/assembly.loom-test",
+    ],
+    data = [
+        "@wasi_sdk//:llvm-objdump",
+    ],
+    env = {
+        "LOOM_WASM_LLVM_OBJDUMP": "$(rootpath @wasi_sdk//:llvm-objdump)",
+    },
+    test_name_prefix_to_strip = "test/",
+)

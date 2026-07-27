@@ -142,25 +142,30 @@ iree_status_t iree_tokenizer_normalizer_sequence_allocate(
   // Sequences with 0 or 1 children should not be created - the JSON parser
   // handles these cases by returning NULL (empty) or the single child directly.
   if (child_count < 2) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "sequence normalizer requires at least 2 children, got %" PRIhsz
-        "; use NULL for empty or pass single child directly",
-        child_count);
+    IREE_RETURN_AND_END_ZONE(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "sequence normalizer requires at least 2 "
+                             "children, got %" PRIhsz
+                             "; use NULL for empty or pass single child "
+                             "directly",
+                             child_count));
   }
   if (child_count > IREE_TOKENIZER_NORMALIZER_SEQUENCE_MAX_DEPTH) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "sequence normalizer child count %" PRIhsz " exceeds maximum %" PRIu32,
-        child_count, IREE_TOKENIZER_NORMALIZER_SEQUENCE_MAX_DEPTH);
+    IREE_RETURN_AND_END_ZONE(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "sequence normalizer child count %" PRIhsz
+                             " exceeds maximum %" PRIu32,
+                             child_count,
+                             IREE_TOKENIZER_NORMALIZER_SEQUENCE_MAX_DEPTH));
   }
 
   // Validate no NULL children.
   for (iree_host_size_t i = 0; i < child_count; ++i) {
     if (!children[i]) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "sequence normalizer child %" PRIhsz " is NULL",
-                              i);
+      IREE_RETURN_AND_END_ZONE(
+          z0,
+          iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                           "sequence normalizer child %" PRIhsz " is NULL", i));
     }
   }
 
@@ -183,11 +188,12 @@ iree_status_t iree_tokenizer_normalizer_sequence_allocate(
 
   // Validate flattened count against maximum depth.
   if (flattened_count > IREE_TOKENIZER_NORMALIZER_SEQUENCE_MAX_DEPTH) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "flattened sequence normalizer child count "
-                            "%" PRIhsz " exceeds maximum %" PRIu32,
-                            flattened_count,
-                            IREE_TOKENIZER_NORMALIZER_SEQUENCE_MAX_DEPTH);
+    IREE_RETURN_AND_END_ZONE(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "flattened sequence normalizer child count "
+                             "%" PRIhsz " exceeds maximum %" PRIu32,
+                             flattened_count,
+                             IREE_TOKENIZER_NORMALIZER_SEQUENCE_MAX_DEPTH));
   }
 
   // Build flattened children array, transferring ownership as we go.
@@ -220,6 +226,7 @@ iree_status_t iree_tokenizer_normalizer_sequence_allocate(
   // Return that child directly instead of wrapping in a sequence.
   if (flattened_count == 1) {
     *out_normalizer = flattened_children[0];
+    IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
 
@@ -243,6 +250,7 @@ iree_status_t iree_tokenizer_normalizer_sequence_allocate(
     for (iree_host_size_t i = 0; i < flattened_count; ++i) {
       iree_tokenizer_normalizer_free(flattened_children[i]);
     }
+    IREE_TRACE_ZONE_END(z0);
     return status;
   }
 

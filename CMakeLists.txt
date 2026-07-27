@@ -10,7 +10,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # HRX is the top-level build/product. The runtime subtree is still the IREE
 # runtime subsystem, and intentionally keeps IREE_* options and iree:: targets.
-project(HRX VERSION 0.1.0 LANGUAGES C CXX ASM)
+project(HRX VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
@@ -72,13 +72,6 @@ option(IREE_DEV_MODE
   OFF)
 option(LIBHRX_BUILD
   "Build libhrx and HRX compatibility targets." ON)
-if(LIBHRX_BUILD)
-  if(DEFINED IREE_HAL_DRIVER_AMDGPU AND NOT IREE_HAL_DRIVER_AMDGPU)
-    message(FATAL_ERROR
-      "LIBHRX_BUILD=ON requires IREE_HAL_DRIVER_AMDGPU=ON.")
-  endif()
-  set(IREE_HAL_DRIVER_AMDGPU_DEFAULT ON)
-endif()
 
 set(IREE_USE_LINKER "" CACHE STRING "")
 cmake_dependent_option(IREE_ENABLE_LLD
@@ -105,16 +98,20 @@ hrx_fix_ndebug()
 
 list(APPEND CMAKE_MODULE_PATH
   "${CMAKE_CURRENT_LIST_DIR}/build_tools/cmake"
+  "${CMAKE_CURRENT_LIST_DIR}/build_tools/spirv"
+  "${CMAKE_CURRENT_LIST_DIR}/build_tools/sanitizer"
 )
 
 include("${CMAKE_CURRENT_LIST_DIR}/MODULE.cmake.lock")
 
 include("${CMAKE_CURRENT_LIST_DIR}/runtime/project.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/libhrx/project.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/loom/project.cmake")
 
 # Shared repository CMake primitives.
 include(iree_macros)
 include(iree_copts)
+include(iree_sanitizer_suppressions)
 include(iree_cc_binary)
 include(iree_cc_library)
 include(iree_cc_test)
@@ -122,23 +119,28 @@ include(iree_cc_fuzz)
 include(iree_import_binary)
 include(iree_install_support)
 include(iree_c_embed_data)
+include(iree_spirv_asm_module)
 include(iree_add_all_subdirs)
 include(iree_configure_testing)
 include(iree_native_test)
+include(iree_execution_test_suite)
 include(iree_cc_binary_benchmark)
 include(iree_genrule)
 include(iree_python)
 include(iree_setup_toolchain)
+include(hrx_optimization)
 
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/googletest/googletest.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/google_benchmark/google_benchmark.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/flatcc/flatcc.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/libbacktrace/libbacktrace.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/rocm/headers.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/spirv_tools/spirv_tools.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/vulkan_headers/vulkan_headers.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/catch2/catch2.cmake")
 
 iree_setup_toolchain()
+hrx_configure_ipo()
 if(IREE_BUILD_TESTS)
   iree_configure_googletest()
 endif()
@@ -160,11 +162,16 @@ endif()
 if(IREE_HAL_DRIVER_VULKAN)
   iree_configure_vulkan_headers()
 endif()
+if(IREE_BUILD_TESTS AND (IREE_HAL_DRIVER_VULKAN OR
+    (LOOM_BUILD AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)))
+  iree_configure_spirv_tools()
+endif()
 if(LIBHRX_BUILD AND LIBHRX_BUILD_CTS)
   iree_configure_catch2()
 endif()
 iree_runtime_configure_project()
 libhrx_configure_project()
+loom_configure_project()
 
 message(STATUS "HRX/IREE HAL drivers:")
 if(IREE_HAL_DRIVER_AMDGPU)
@@ -187,7 +194,17 @@ if(IREE_HAL_DRIVER_VULKAN)
 endif()
 
 add_subdirectory(build_tools/embed_data)
+add_subdirectory(build_tools/spirv)
 add_subdirectory(runtime/src)
+
+if(LOOM_BUILD)
+  add_subdirectory(loom/py/loom)
+  add_subdirectory(loom/src)
+  add_subdirectory(loom/binding/c)
+  hrx_installed_tests_install_source_tree(
+    "${PROJECT_SOURCE_DIR}/loom/src/loom" "loom/src/loom"
+    _HRX_INSTALLED_LOOM_SOURCE_TREE)
+endif()
 
 if(LIBHRX_BUILD)
   add_subdirectory(libhrx)
@@ -201,6 +218,7 @@ if(IREE_CMAKE_TRY_FILE)
 endif()
 
 if(IREE_BUILD_TESTS)
+  iree_finalize_test_build_targets()
   iree_create_ctest_customization()
   hrx_create_installed_tests()
 endif()

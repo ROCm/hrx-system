@@ -94,6 +94,12 @@ static inline iree_json_value_type_t iree_json_infer_value_type(char c) {
 iree_status_t iree_json_consume_value(iree_string_view_t* str,
                                       iree_string_view_t* out_value);
 
+// Consumes leading JSON whitespace and JSONC comments from |str|.
+//
+// This is useful for validating that a cursor has no trailing content after a
+// parsed value while preserving the parser's JSONC comment policy in one place.
+iree_status_t iree_json_consume_insignificant(iree_string_view_t* str);
+
 // Consumes the literal |keyword| from |str|.
 // Returns the keyword in |out_value| on success.
 iree_status_t iree_json_consume_keyword(iree_string_view_t* str,
@@ -145,6 +151,29 @@ typedef iree_status_t(IREE_API_PTR* iree_json_object_visitor_fn_t)(
 iree_status_t iree_json_enumerate_object(iree_string_view_t object_value,
                                          iree_json_object_visitor_fn_t visitor,
                                          void* user_data);
+
+// Extended callback for object enumeration that includes value type.
+// |key| is the raw key string (without quotes, may contain escape sequences).
+// |type| is the JSON type of the value, inferred before quote stripping.
+// |value| is the value (strings without quotes, objects/arrays with
+// delimiters).
+// Return iree_ok_status() to continue, or any error status to abort.
+// To stop early without error, use iree_status_from_code(IREE_STATUS_CANCELLED)
+// (not iree_make_status which may allocate).
+typedef iree_status_t(IREE_API_PTR* iree_json_object_visitor_typed_fn_t)(
+    void* user_data, iree_string_view_t key, iree_json_value_type_t type,
+    iree_string_view_t value);
+
+// Enumerates all key-value pairs in a JSON object with value type information.
+// |object_value| must include the surrounding braces.
+// The type is determined from the first character of raw JSON before any
+// processing (e.g., before quotes are stripped from strings).
+// Returning IREE_STATUS_CANCELLED from the visitor stops enumeration early
+// (not treated as an error). Use iree_status_from_code(IREE_STATUS_CANCELLED)
+// to avoid allocation.
+iree_status_t iree_json_enumerate_object_typed(
+    iree_string_view_t object_value,
+    iree_json_object_visitor_typed_fn_t visitor, void* user_data);
 
 // Looks up a key in a JSON object and returns its value.
 // |object_value| must include the surrounding braces.

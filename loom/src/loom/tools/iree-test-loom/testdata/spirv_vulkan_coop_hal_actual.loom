@@ -1,0 +1,276 @@
+spirv.target<vulkan1_3> @target {abi = hal_kernel}
+
+kernel.def target(@target) @cooperative_matrix_f16_two_tiles() {
+  %two = index.constant 2 : index
+  %unit = index.constant 1 : index
+  %subgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%two, %unit, %unit) workgroup_size(%subgroup_size, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %init_buffer: buffer, %out_buffer: buffer) {
+  %workgroup_x = kernel.workgroup.id<x> : index
+  %lhs_tile_bytes = index.constant 512 : index
+  %acc_tile_bytes = index.constant 1024 : index
+  %lhs_byte_index = index.mul %workgroup_x, %lhs_tile_bytes : index
+  %acc_byte_index = index.mul %workgroup_x, %acc_tile_bytes : index
+  %lhs_byte_offset = index.cast %lhs_byte_index : index to offset
+  %acc_byte_offset = index.cast %acc_byte_index : index to offset
+  %lhs_byte_offset_aligned = index.assume %lhs_byte_offset [mul(%lhs_byte_offset, 16)] : offset
+  %acc_byte_offset_aligned = index.assume %acc_byte_offset [mul(%acc_byte_offset, 16)] : offset
+  %zero_offset = index.constant 0 : offset
+  %zero_offset_aligned = index.assume %zero_offset [mul(%zero_offset, 16)] : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs_aligned = buffer.assume.alignment %lhs_buffer {minimum_alignment = 16} : buffer
+  %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 16} : buffer
+  %init_aligned = buffer.assume.alignment %init_buffer {minimum_alignment = 16} : buffer
+  %out_aligned = buffer.assume.alignment %out_buffer {minimum_alignment = 16} : buffer
+  %lhs_view = buffer.view %lhs_aligned[%lhs_byte_offset_aligned] : buffer -> view<16x16xf16, #dense>
+  %rhs_view = buffer.view %rhs_aligned[%zero_offset_aligned] : buffer -> view<16x16xf16, #dense>
+  %init_view = buffer.view %init_aligned[%acc_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
+  %out_view = buffer.view %out_aligned[%acc_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, #dense> -> vector<16xf16>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  kernel.return
+}
+
+check.case @cooperative_matrix_f16_two_tiles_case {
+  check.requires<hal.vulkan.feature> {feature = "cooperative_matrix_khr"}
+  check.requires<hal.vulkan.feature> {feature = "shader_float16"}
+  check.requires<hal.vulkan.feature> {feature = "storage_buffer_16bit_access"}
+  check.requires<hal.spirv.cooperative_matrix> {row = "khr.cooperative_matrix.f16.16x16x16.f32.subgroup"}
+  %lhs = check.generate.iota offset(1.0) step(1.0) : tensor<32x16xf16>
+  %rhs = check.generate.iota offset(0.5) step(0.5) : tensor<16x16xf16>
+  %init = check.generate.iota offset(0.25) step(0.25) : tensor<32x16xf32>
+  %output = check.generate.fill value(0.0) : tensor<32x16xf32>
+  func.call @cooperative_matrix_f16_two_tiles(%lhs, %rhs, %init, %output) : (tensor<32x16xf16>, tensor<16x16xf16>, tensor<32x16xf32>, tensor<32x16xf32>)
+  %expected = check.oracle.call<reference.matmul> callee(@cooperative_matrix_f16_two_tiles) inputs(%lhs, %rhs, %init) : (tensor<32x16xf16>, tensor<16x16xf16>, tensor<32x16xf32>) -> (tensor<32x16xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.5) rtol(0.001) nan(different) : tensor<32x16xf32>
+  check.return
+}
+
+kernel.def target(@target) @dense_projection_tiled_f16_128() {
+  %m_tiles = index.constant 8 : index
+  %n_tiles = index.constant 8 : index
+  %unit = index.constant 1 : index
+  %subgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%n_tiles, %m_tiles, %unit) workgroup_size(%subgroup_size, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %init_buffer: buffer, %out_buffer: buffer) {
+  %workgroup_n = kernel.workgroup.id<x> : index
+  %workgroup_m = kernel.workgroup.id<y> : index
+  %k_tiles = index.constant 8 : index
+  %n_tiles = index.constant 8 : index
+  %unit = index.constant 1 : index
+  %zero = index.constant 0 : index
+  %lhs_tile_bytes = index.constant 512 : index
+  %rhs_tile_bytes = index.constant 512 : index
+  %acc_tile_bytes = index.constant 1024 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %out_tile_index = index.madd %workgroup_m, %n_tiles, %workgroup_n : index
+  %out_byte_index = index.mul %out_tile_index, %acc_tile_bytes : index
+  %out_byte_offset = index.cast %out_byte_index : index to offset
+  %out_byte_offset_aligned = index.assume %out_byte_offset [mul(%out_byte_offset, 16)] : offset
+  %lhs_aligned = buffer.assume.alignment %lhs_buffer {minimum_alignment = 16} : buffer
+  %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 16} : buffer
+  %init_aligned = buffer.assume.alignment %init_buffer {minimum_alignment = 16} : buffer
+  %out_aligned = buffer.assume.alignment %out_buffer {minimum_alignment = 16} : buffer
+  %init_view = buffer.view %init_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
+  %out_view = buffer.view %out_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
+  %result = scf.for %kt = [%zero to %k_tiles step %unit](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+    %lhs_tile_index = index.madd %workgroup_m, %k_tiles, %kt : index
+    %rhs_tile_index = index.madd %kt, %n_tiles, %workgroup_n : index
+    %lhs_byte_index = index.mul %lhs_tile_index, %lhs_tile_bytes : index
+    %rhs_byte_index = index.mul %rhs_tile_index, %rhs_tile_bytes : index
+    %lhs_byte_offset = index.cast %lhs_byte_index : index to offset
+    %rhs_byte_offset = index.cast %rhs_byte_index : index to offset
+    %lhs_byte_offset_aligned = index.assume %lhs_byte_offset [mul(%lhs_byte_offset, 16)] : offset
+    %rhs_byte_offset_aligned = index.assume %rhs_byte_offset [mul(%rhs_byte_offset, 16)] : offset
+    %lhs_view = buffer.view %lhs_aligned[%lhs_byte_offset_aligned] : buffer -> view<16x16xf16, #dense>
+    %rhs_view = buffer.view %rhs_aligned[%rhs_byte_offset_aligned] : buffer -> view<16x16xf16, #dense>
+    %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>
+    %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, #dense> -> vector<16xf16>
+    %next = vector.mma %lhs, %rhs, %acc : vector<16xf16>, vector<16xf16>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  kernel.return
+}
+
+check.case @dense_projection_tiled_f16_128_case {
+  check.requires<hal.vulkan.feature> {feature = "cooperative_matrix_khr"}
+  check.requires<hal.vulkan.feature> {feature = "shader_float16"}
+  check.requires<hal.vulkan.feature> {feature = "storage_buffer_16bit_access"}
+  check.requires<hal.spirv.cooperative_matrix> {row = "khr.cooperative_matrix.f16.16x16x16.f32.subgroup"}
+  %lhs = check.generate.iota offset(0.125) step(0.000244140625) : tensor<8x8x16x16xf16>
+  %rhs = check.generate.iota offset(-0.25) step(0.0001220703125) : tensor<8x8x16x16xf16>
+  %init = check.generate.iota offset(0.5) step(0.00006103515625) : tensor<8x8x16x16xf32>
+  %output = check.generate.fill value(0.0) : tensor<8x8x16x16xf32>
+  func.call @dense_projection_tiled_f16_128(%lhs, %rhs, %init, %output) : (tensor<8x8x16x16xf16>, tensor<8x8x16x16xf16>, tensor<8x8x16x16xf32>, tensor<8x8x16x16xf32>)
+  %expected = check.oracle.call<reference.tiled_matmul> callee(@dense_projection_tiled_f16_128) inputs(%lhs, %rhs, %init) : (tensor<8x8x16x16xf16>, tensor<8x8x16x16xf16>, tensor<8x8x16x16xf32>) -> (tensor<8x8x16x16xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(1.0) rtol(0.01) nan(different) : tensor<8x8x16x16xf32>
+  check.return
+}
+
+check.benchmark<@dense_projection_tiled_f16_128_case>
+
+kernel.def target(@target) @narrow_score_tiled_f16_128x16_m1() {
+  %m_tiles = index.constant 8 : index
+  %unit = index.constant 1 : index
+  %subgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %m_tiles, %unit) workgroup_size(%subgroup_size, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %init_buffer: buffer, %out_buffer: buffer) {
+  %workgroup_m = kernel.workgroup.id<y> : index
+  %k_tiles = index.constant 8 : index
+  %n_tiles = index.constant 1 : index
+  %unit = index.constant 1 : index
+  %zero = index.constant 0 : index
+  %lhs_tile_bytes = index.constant 512 : index
+  %rhs_tile_bytes = index.constant 512 : index
+  %acc_tile_bytes = index.constant 1024 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %out_tile_index = index.madd %workgroup_m, %n_tiles, %zero : index
+  %out_byte_index = index.mul %out_tile_index, %acc_tile_bytes : index
+  %out_byte_offset = index.cast %out_byte_index : index to offset
+  %out_byte_offset_aligned = index.assume %out_byte_offset [mul(%out_byte_offset, 16)] : offset
+  %lhs_aligned = buffer.assume.alignment %lhs_buffer {minimum_alignment = 16} : buffer
+  %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 16} : buffer
+  %init_aligned = buffer.assume.alignment %init_buffer {minimum_alignment = 16} : buffer
+  %out_aligned = buffer.assume.alignment %out_buffer {minimum_alignment = 16} : buffer
+  %init_view = buffer.view %init_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
+  %out_view = buffer.view %out_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
+  %result = scf.for %kt = [%zero to %k_tiles step %unit](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+    %lhs_tile_index = index.madd %workgroup_m, %k_tiles, %kt : index
+    %rhs_tile_index = index.madd %kt, %n_tiles, %zero : index
+    %lhs_byte_index = index.mul %lhs_tile_index, %lhs_tile_bytes : index
+    %rhs_byte_index = index.mul %rhs_tile_index, %rhs_tile_bytes : index
+    %lhs_byte_offset = index.cast %lhs_byte_index : index to offset
+    %rhs_byte_offset = index.cast %rhs_byte_index : index to offset
+    %lhs_byte_offset_aligned = index.assume %lhs_byte_offset [mul(%lhs_byte_offset, 16)] : offset
+    %rhs_byte_offset_aligned = index.assume %rhs_byte_offset [mul(%rhs_byte_offset, 16)] : offset
+    %lhs_view = buffer.view %lhs_aligned[%lhs_byte_offset_aligned] : buffer -> view<16x16xf16, #dense>
+    %rhs_view = buffer.view %rhs_aligned[%rhs_byte_offset_aligned] : buffer -> view<16x16xf16, #dense>
+    %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>
+    %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, #dense> -> vector<16xf16>
+    %next = vector.mma %lhs, %rhs, %acc : vector<16xf16>, vector<16xf16>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  kernel.return
+}
+
+kernel.def target(@target) @narrow_score_tiled_f16_128x16_m2() {
+  %m_tile_pairs = index.constant 4 : index
+  %unit = index.constant 1 : index
+  %subgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %m_tile_pairs, %unit) workgroup_size(%subgroup_size, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %init_buffer: buffer, %out_buffer: buffer) {
+  %workgroup_pair = kernel.workgroup.id<y> : index
+  %k_tiles = index.constant 8 : index
+  %n_tiles = index.constant 1 : index
+  %unit = index.constant 1 : index
+  %zero = index.constant 0 : index
+  %two = index.constant 2 : index
+  %lhs_tile_bytes = index.constant 512 : index
+  %rhs_tile_bytes = index.constant 512 : index
+  %acc_tile_bytes = index.constant 1024 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %workgroup_m0 = index.mul %workgroup_pair, %two : index
+  %workgroup_m1 = index.add %workgroup_m0, %unit : index
+  %lhs_aligned = buffer.assume.alignment %lhs_buffer {minimum_alignment = 16} : buffer
+  %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 16} : buffer
+  %init_aligned = buffer.assume.alignment %init_buffer {minimum_alignment = 16} : buffer
+  %out_aligned = buffer.assume.alignment %out_buffer {minimum_alignment = 16} : buffer
+  %out_tile_index0 = index.madd %workgroup_m0, %n_tiles, %zero : index
+  %out_byte_index0 = index.mul %out_tile_index0, %acc_tile_bytes : index
+  %out_byte_offset0 = index.cast %out_byte_index0 : index to offset
+  %out_byte_offset_aligned0 = index.assume %out_byte_offset0 [mul(%out_byte_offset0, 16)] : offset
+  %init_view0 = buffer.view %init_aligned[%out_byte_offset_aligned0] : buffer -> view<16x16xf32, #dense>
+  %out_view0 = buffer.view %out_aligned[%out_byte_offset_aligned0] : buffer -> view<16x16xf32, #dense>
+  %init0 = vector.fragment.load<init> %init_view0[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
+  %result0 = scf.for %kt0 = [%zero to %k_tiles step %unit](%acc0 = %init0 : vector<8xf32>) -> (vector<8xf32>) {
+    %lhs_tile_index0 = index.madd %workgroup_m0, %k_tiles, %kt0 : index
+    %rhs_tile_index0 = index.madd %kt0, %n_tiles, %zero : index
+    %lhs_byte_index0 = index.mul %lhs_tile_index0, %lhs_tile_bytes : index
+    %rhs_byte_index0 = index.mul %rhs_tile_index0, %rhs_tile_bytes : index
+    %lhs_byte_offset0 = index.cast %lhs_byte_index0 : index to offset
+    %rhs_byte_offset0 = index.cast %rhs_byte_index0 : index to offset
+    %lhs_byte_offset_aligned0 = index.assume %lhs_byte_offset0 [mul(%lhs_byte_offset0, 16)] : offset
+    %rhs_byte_offset_aligned0 = index.assume %rhs_byte_offset0 [mul(%rhs_byte_offset0, 16)] : offset
+    %lhs_view0 = buffer.view %lhs_aligned[%lhs_byte_offset_aligned0] : buffer -> view<16x16xf16, #dense>
+    %rhs_view0 = buffer.view %rhs_aligned[%rhs_byte_offset_aligned0] : buffer -> view<16x16xf16, #dense>
+    %lhs0 = vector.fragment.load<lhs> %lhs_view0[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>
+    %rhs0 = vector.fragment.load<rhs> %rhs_view0[0, 0] shape [%k, %n] : view<16x16xf16, #dense> -> vector<16xf16>
+    %next0 = vector.mma %lhs0, %rhs0, %acc0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+    scf.yield %next0 : vector<8xf32>
+  }
+  vector.fragment.store<result> %result0, %out_view0[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  %out_tile_index1 = index.madd %workgroup_m1, %n_tiles, %zero : index
+  %out_byte_index1 = index.mul %out_tile_index1, %acc_tile_bytes : index
+  %out_byte_offset1 = index.cast %out_byte_index1 : index to offset
+  %out_byte_offset_aligned1 = index.assume %out_byte_offset1 [mul(%out_byte_offset1, 16)] : offset
+  %init_view1 = buffer.view %init_aligned[%out_byte_offset_aligned1] : buffer -> view<16x16xf32, #dense>
+  %out_view1 = buffer.view %out_aligned[%out_byte_offset_aligned1] : buffer -> view<16x16xf32, #dense>
+  %init1 = vector.fragment.load<init> %init_view1[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
+  %result1 = scf.for %kt1 = [%zero to %k_tiles step %unit](%acc1 = %init1 : vector<8xf32>) -> (vector<8xf32>) {
+    %lhs_tile_index1 = index.madd %workgroup_m1, %k_tiles, %kt1 : index
+    %rhs_tile_index1 = index.madd %kt1, %n_tiles, %zero : index
+    %lhs_byte_index1 = index.mul %lhs_tile_index1, %lhs_tile_bytes : index
+    %rhs_byte_index1 = index.mul %rhs_tile_index1, %rhs_tile_bytes : index
+    %lhs_byte_offset1 = index.cast %lhs_byte_index1 : index to offset
+    %rhs_byte_offset1 = index.cast %rhs_byte_index1 : index to offset
+    %lhs_byte_offset_aligned1 = index.assume %lhs_byte_offset1 [mul(%lhs_byte_offset1, 16)] : offset
+    %rhs_byte_offset_aligned1 = index.assume %rhs_byte_offset1 [mul(%rhs_byte_offset1, 16)] : offset
+    %lhs_view1 = buffer.view %lhs_aligned[%lhs_byte_offset_aligned1] : buffer -> view<16x16xf16, #dense>
+    %rhs_view1 = buffer.view %rhs_aligned[%rhs_byte_offset_aligned1] : buffer -> view<16x16xf16, #dense>
+    %lhs1 = vector.fragment.load<lhs> %lhs_view1[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>
+    %rhs1 = vector.fragment.load<rhs> %rhs_view1[0, 0] shape [%k, %n] : view<16x16xf16, #dense> -> vector<16xf16>
+    %next1 = vector.mma %lhs1, %rhs1, %acc1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+    scf.yield %next1 : vector<8xf32>
+  }
+  vector.fragment.store<result> %result1, %out_view1[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  kernel.return
+}
+
+check.case @narrow_score_tiled_f16_128x16_m1_case {
+  check.requires<hal.vulkan.feature> {feature = "cooperative_matrix_khr"}
+  check.requires<hal.vulkan.feature> {feature = "shader_float16"}
+  check.requires<hal.vulkan.feature> {feature = "storage_buffer_16bit_access"}
+  check.requires<hal.spirv.cooperative_matrix> {row = "khr.cooperative_matrix.f16.16x16x16.f32.subgroup"}
+  %lhs = check.generate.iota offset(-0.375) step(0.00018310546875) : tensor<8x8x16x16xf16>
+  %rhs = check.generate.iota offset(0.0625) step(0.000244140625) : tensor<8x1x16x16xf16>
+  %init = check.generate.iota offset(-0.125) step(0.000030517578125) : tensor<8x1x16x16xf32>
+  %output = check.generate.fill value(0.0) : tensor<8x1x16x16xf32>
+  func.call @narrow_score_tiled_f16_128x16_m1(%lhs, %rhs, %init, %output) : (tensor<8x8x16x16xf16>, tensor<8x1x16x16xf16>, tensor<8x1x16x16xf32>, tensor<8x1x16x16xf32>)
+  %expected = check.oracle.call<reference.tiled_matmul> callee(@narrow_score_tiled_f16_128x16_m1) inputs(%lhs, %rhs, %init) : (tensor<8x8x16x16xf16>, tensor<8x1x16x16xf16>, tensor<8x1x16x16xf32>) -> (tensor<8x1x16x16xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(1.0) rtol(0.01) nan(different) : tensor<8x1x16x16xf32>
+  check.return
+}
+
+check.case @narrow_score_tiled_f16_128x16_m2_case {
+  check.requires<hal.vulkan.feature> {feature = "cooperative_matrix_khr"}
+  check.requires<hal.vulkan.feature> {feature = "shader_float16"}
+  check.requires<hal.vulkan.feature> {feature = "storage_buffer_16bit_access"}
+  check.requires<hal.spirv.cooperative_matrix> {row = "khr.cooperative_matrix.f16.16x16x16.f32.subgroup"}
+  %lhs = check.generate.iota offset(-0.375) step(0.00018310546875) : tensor<8x8x16x16xf16>
+  %rhs = check.generate.iota offset(0.0625) step(0.000244140625) : tensor<8x1x16x16xf16>
+  %init = check.generate.iota offset(-0.125) step(0.000030517578125) : tensor<8x1x16x16xf32>
+  %output = check.generate.fill value(0.0) : tensor<8x1x16x16xf32>
+  func.call @narrow_score_tiled_f16_128x16_m2(%lhs, %rhs, %init, %output) : (tensor<8x8x16x16xf16>, tensor<8x1x16x16xf16>, tensor<8x1x16x16xf32>, tensor<8x1x16x16xf32>)
+  %expected = check.oracle.call<reference.tiled_matmul> callee(@narrow_score_tiled_f16_128x16_m2) inputs(%lhs, %rhs, %init) : (tensor<8x8x16x16xf16>, tensor<8x1x16x16xf16>, tensor<8x1x16x16xf32>) -> (tensor<8x1x16x16xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(1.0) rtol(0.01) nan(different) : tensor<8x1x16x16xf32>
+  check.return
+}
+
+check.benchmark<@narrow_score_tiled_f16_128x16_m1_case>
+
+check.benchmark<@narrow_score_tiled_f16_128x16_m2_case>

@@ -55,7 +55,7 @@ def _test_runtime_benchmark_smoke_test_applies_resource_group_tags(name, **kwarg
         resource_group = "gpu",
         srcs = [name + "_subject.cc"],
         tags = [
-            "driver=amdgpu",
+            "requires-gpu-amd",
             "manual",
         ],
     )
@@ -72,7 +72,7 @@ def _test_runtime_benchmark_smoke_test_applies_resource_group_tags(name, **kwarg
 def _test_runtime_benchmark_smoke_test_applies_resource_group_tags_impl(env, target):
     tags = target[TestingAspectInfo].attrs.tags
     for expected_tag in [
-        "driver=amdgpu",
+        "requires-gpu-amd",
         "exclusive-if-local",
         "resource_group:gpu",
     ]:
