@@ -3753,6 +3753,26 @@ low.func.def target(@gfx11_target) @gfx11_concat_late_packet_cycle(%resource: re
 
 // ====
 
+// RUN: emit amdgpu-assembly @gfx11_concat_two_packet_cycles waits=none fixed=%vaddr:physical_register:4:1 fixed=%a:physical_register:1:1 fixed=%b:physical_register:0:1 fixed=%c:physical_register:3:1 fixed=%d:physical_register:2:1 fixed=%packed:physical_register:0:4
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_concat_two_packet_cycles(%resource: reg<amdgpu.sgpr x4>, %soffset: reg<amdgpu.sgpr>, %vaddr: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %d: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %packed = concat(%a, %b, %c, %d) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  buffer_store_b128 %packed, %resource, %vaddr, %soffset
+  return
+}
+
+// ----
+  v_mov_b32 v5, v0
+  v_mov_b32 v0, v1
+  v_mov_b32 v1, v5
+  v_mov_b32 v5, v2
+  v_mov_b32 v2, v3
+  v_mov_b32 v3, v5
+  buffer_store_b128 v[0:3], v4, s[0:3], s4 offen offset:0
+  s_endpgm
+
+// ====
+
 // RUN: emit amdgpu-assembly @gfx11_concat_packet_cycle_after_initial_noop waits=none fixed=%a:physical_register:0:1 fixed=%b:physical_register:2:1 fixed=%c:physical_register:3:1 fixed=%d:physical_register:1:1 fixed=%packed:physical_register:0:4
 amdgpu.target<gfx1100> @gfx11_target
 low.func.def target(@gfx11_target) @gfx11_concat_packet_cycle_after_initial_noop(%resource: reg<amdgpu.sgpr x4>, %soffset: reg<amdgpu.sgpr>, %vaddr: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %d: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {

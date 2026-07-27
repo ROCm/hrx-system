@@ -55,11 +55,13 @@ typedef struct loom_low_allocation_move_plan_t {
   loom_low_move_sequence_scratch_t sequence_scratch;
 } loom_low_allocation_move_plan_t;
 
-// Initializes a plan for at most |raw_move_capacity| parallel input rows.
-// Final storage reserves two rows per input, covering every possible cycle.
+// Initializes a plan for at most |move_input_capacity| input rows across all
+// groups and |raw_group_capacity| rows in any one group. Final storage reserves
+// one extra row per possible two-row cycle.
 iree_status_t loom_low_allocation_move_plan_initialize(
     const loom_low_allocation_move_plan_context_t* context,
-    iree_arena_allocator_t* arena, iree_host_size_t raw_move_capacity,
+    iree_arena_allocator_t* arena, iree_host_size_t move_input_capacity,
+    iree_host_size_t raw_group_capacity,
     loom_low_allocation_move_plan_t* out_plan);
 
 // Returns reusable storage for constructing one raw parallel move group.

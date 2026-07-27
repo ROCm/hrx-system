@@ -224,11 +224,15 @@ iree_status_t loom_low_allocate_function(
         .unit_liveness = &state.unit_liveness,
         .assignment_map = state.interval_assignment.assignment_map,
     };
-    const iree_host_size_t raw_move_capacity =
+    const iree_host_size_t move_input_capacity =
         state.placement.branch_unit_count +
         state.placement.packet_move_unit_count;
+    const iree_host_size_t raw_group_capacity =
+        iree_max(state.placement.branch_unit_count,
+                 state.placement.packet_move_unit_count);
     status = loom_low_allocation_move_plan_initialize(
-        &move_plan_context, arena, raw_move_capacity, &state.move_plan);
+        &move_plan_context, arena, move_input_capacity, raw_group_capacity,
+        &state.move_plan);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0 &&
       assignment_is_final) {
