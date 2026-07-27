@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from loom.gen.target.arch.amdgpu.planning import amdgpu_wait_packet_tables
+from loom.gen.target.arch.amdgpu.descriptors import amdgpu_wait_packet_tables
 from loom.target.arch.amdgpu.descriptors import (
     _COUNTER_ALU,
     _COUNTER_LDS,

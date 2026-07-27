@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Generator: AMDGPU wait-packet descriptor planning tables."""
+"""Generator: AMDGPU descriptor-derived wait-packet tables."""
 
 from __future__ import annotations
 
@@ -595,7 +595,7 @@ def _generated_header() -> list[str]:
         "",
         *line_comment_header(
             "//",
-            generator=("loom.gen.target.arch.amdgpu.planning.amdgpu_wait_packet_tables"),
+            generator=("loom.gen.target.arch.amdgpu.descriptors.amdgpu_wait_packet_tables"),
         ),
         "",
     ]
@@ -713,7 +713,7 @@ def _write_output(path: Path, contents: str) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate AMDGPU wait-packet planning table fragments.")
+    parser = argparse.ArgumentParser(description="Generate AMDGPU descriptor-derived wait-packet table fragments.")
     parser.add_argument(
         "--isa-xml",
         action="append",
