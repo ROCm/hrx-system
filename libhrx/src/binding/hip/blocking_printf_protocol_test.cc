@@ -7,8 +7,11 @@
 #include "binding/hip/blocking_printf_protocol.h"
 
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 
 #include "iree/testing/gtest.h"
@@ -25,6 +28,66 @@ static uint64_t MakeDescriptor(uint64_t flags, iree_host_size_t length) {
   return flags | ((uint64_t)length << 5);
 }
 
+struct OutputEvent {
+  // Legacy output stream selected by the message control qword.
+  iree_hip_blocking_printf_stream_t stream;
+  // Complete formatted message copied during the callback.
+  std::string text;
+};
+
+struct ServiceRecorder {
+  // Complete messages observed by the output callback.
+  std::vector<OutputEvent> output_events;
+  // Status code consumed by the structural error callback.
+  iree_status_code_t failure_code = IREE_STATUS_OK;
+  // Number of structural error callbacks observed.
+  int failure_count = 0;
+  // Packet header inspected while a callback is active.
+  iree_hip_hostcall_packet_header_t* observed_header = nullptr;
+  // Whether the output callback observed its packet still READY.
+  bool output_observed_ready = false;
+  // Whether the error callback observed its packet still READY.
+  bool failure_observed_ready = false;
+  // Whether the output callback waits for |output_release|.
+  bool gate_output = false;
+  // Set after the gated output callback has been entered.
+  std::atomic<bool> output_entered{false};
+  // Set to release the gated output callback.
+  std::atomic<bool> output_release{false};
+};
+
+static bool HeaderIsReady(
+    const iree_hip_hostcall_packet_header_t* packet_header) {
+  return packet_header &&
+         iree_any_bit_set(iree_atomic_load(&packet_header->control,
+                                           iree_memory_order_acquire),
+                          IREE_HIP_HOSTCALL_PACKET_CONTROL_READY);
+}
+
+static void CaptureOutput(void* user_data,
+                          iree_hip_blocking_printf_stream_t stream,
+                          iree_string_view_t text) {
+  ServiceRecorder* recorder = (ServiceRecorder*)user_data;
+  OutputEvent event;
+  event.stream = stream;
+  if (text.size != 0) event.text.assign(text.data, text.size);
+  recorder->output_events.push_back(std::move(event));
+  recorder->output_observed_ready = HeaderIsReady(recorder->observed_header);
+  recorder->output_entered.store(true, std::memory_order_release);
+  while (recorder->gate_output &&
+         !recorder->output_release.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+}
+
+static void CaptureFailure(void* user_data, iree_status_t status) {
+  ServiceRecorder* recorder = (ServiceRecorder*)user_data;
+  recorder->failure_code = iree_status_code(status);
+  ++recorder->failure_count;
+  recorder->failure_observed_ready = HeaderIsReady(recorder->observed_header);
+  iree_status_free(status);
+}
+
 class BlockingPrintfProtocolTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -35,18 +98,21 @@ class BlockingPrintfProtocolTest : public ::testing::Test {
                     sizeof(uint64_t));
     iree_hip_blocking_printf_protocol_initialize(
         storage_.data(), kDeviceAddress, kDoorbellToken, &layout_, &protocol_);
-    iree_hip_hostcall_message_table_initialize(iree_allocator_system(),
-                                               &message_table_);
-    output_stream_ = tmpfile();
-    error_stream_ = tmpfile();
-    ASSERT_NE(nullptr, output_stream_);
-    ASSERT_NE(nullptr, error_stream_);
+    iree_hip_blocking_printf_output_sink_t output_sink = {
+        /*.fn=*/CaptureOutput,
+        /*.user_data=*/&recorder_,
+    };
+    iree_hal_amdgpu_error_callback_t error_callback = {
+        /*.fn=*/CaptureFailure,
+        /*.user_data=*/&recorder_,
+    };
+    iree_hip_blocking_printf_service_initialize(
+        &protocol_, output_sink, error_callback, iree_allocator_system(),
+        &service_);
   }
 
   void TearDown() override {
-    if (output_stream_) fclose(output_stream_);
-    if (error_stream_) fclose(error_stream_);
-    iree_hip_hostcall_message_table_deinitialize(&message_table_);
+    iree_hip_blocking_printf_service_deinitialize(&service_);
   }
 
   uint64_t PacketTag(uint32_t packet_index) const {
@@ -76,15 +142,13 @@ class BlockingPrintfProtocolTest : public ::testing::Test {
     memcpy(payload + 1, message.data(), message.size() * sizeof(message[0]));
   }
 
-  std::string ReadStream(FILE* stream) {
-    const long end = ftell(stream);
-    EXPECT_GE(end, 0);
-    EXPECT_EQ(0, fseek(stream, 0, SEEK_SET));
-    std::string value(end > 0 ? (size_t)end : 0, '\0');
-    if (!value.empty()) {
-      EXPECT_EQ(value.size(), fread(value.data(), 1, value.size(), stream));
-    }
-    return value;
+  void PublishPacket(uint32_t packet_index) {
+    iree_atomic_store(&protocol_.buffer_header->ready_stack,
+                      PacketTag(packet_index), iree_memory_order_release);
+  }
+
+  void ProcessReady() {
+    iree_hip_blocking_printf_service_process_ready(&service_);
   }
 
   static constexpr uint64_t kDeviceAddress = UINT64_C(0x10000000);
@@ -92,9 +156,8 @@ class BlockingPrintfProtocolTest : public ::testing::Test {
   iree_hip_blocking_printf_protocol_layout_t layout_ = {};
   std::vector<uint64_t> storage_;
   iree_hip_blocking_printf_protocol_t protocol_ = {};
-  iree_hip_hostcall_message_table_t message_table_ = {};
-  FILE* output_stream_ = nullptr;
-  FILE* error_stream_ = nullptr;
+  ServiceRecorder recorder_;
+  iree_hip_blocking_printf_service_t service_ = {};
 };
 
 TEST_F(BlockingPrintfProtocolTest, InitializesTaggedFreeStack) {
@@ -148,12 +211,6 @@ TEST(BlockingPrintfProtocolLayoutTest, InitializesOnlyResidentWavePackets) {
   EXPECT_EQ(1u, protocol.packet_headers[2].next);
   EXPECT_EQ(4u, protocol.packet_headers[1].next);
   EXPECT_EQ(0u, protocol.packet_headers[0].next);
-
-  iree_atomic_store(&protocol.buffer_header->ready_stack, 3,
-                    iree_memory_order_release);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_hip_blocking_printf_protocol_fail_ready(&protocol));
 }
 
 TEST(BlockingPrintfProtocolLayoutTest, RejectsInvalidCapacity) {
@@ -167,19 +224,22 @@ TEST(BlockingPrintfProtocolLayoutTest, RejectsInvalidCapacity) {
                             UINT32_MAX, UINT32_MAX, &layout));
 }
 
-TEST_F(BlockingPrintfProtocolTest, FormatsAndCompletesPublishedPacket) {
+TEST_F(BlockingPrintfProtocolTest,
+       PublishesCompleteOutputBeforeCompletingPacket) {
   PreparePacket(/*packet_index=*/1, /*next=*/0,
                 IREE_HIP_HOSTCALL_SERVICE_PRINTF, /*activemask=*/1);
   SetCompletePrintfFragment(/*packet_index=*/1, /*lane=*/0, /*control=*/0,
                             "value=%d\n", /*argument=*/42);
-  iree_atomic_store(&protocol_.buffer_header->ready_stack, PacketTag(1),
-                    iree_memory_order_release);
+  recorder_.observed_header = &protocol_.packet_headers[1];
+  PublishPacket(1);
 
-  IREE_ASSERT_OK(iree_hip_blocking_printf_protocol_process_ready(
-      &protocol_, &message_table_, output_stream_, error_stream_));
+  ProcessReady();
 
-  EXPECT_EQ("value=42\n", ReadStream(output_stream_));
-  EXPECT_TRUE(ReadStream(error_stream_).empty());
+  ASSERT_EQ(1u, recorder_.output_events.size());
+  EXPECT_EQ(IREE_HIP_BLOCKING_PRINTF_STREAM_STDOUT,
+            recorder_.output_events[0].stream);
+  EXPECT_EQ("value=42\n", recorder_.output_events[0].text);
+  EXPECT_TRUE(recorder_.output_observed_ready);
   EXPECT_EQ(9u, protocol_.packet_payloads[1].slots[0][0]);
   EXPECT_EQ(0u, protocol_.packet_payloads[1].slots[0][1]);
   EXPECT_EQ(0u, iree_atomic_load(&protocol_.packet_headers[1].control,
@@ -188,19 +248,47 @@ TEST_F(BlockingPrintfProtocolTest, FormatsAndCompletesPublishedPacket) {
                                  iree_memory_order_relaxed));
 }
 
+TEST_F(BlockingPrintfProtocolTest, HoldsCompletionUntilOutputReturns) {
+  PreparePacket(/*packet_index=*/1, /*next=*/0,
+                IREE_HIP_HOSTCALL_SERVICE_PRINTF, /*activemask=*/1);
+  SetCompletePrintfFragment(/*packet_index=*/1, /*lane=*/0, /*control=*/0,
+                            "value=%d\n", /*argument=*/42);
+  recorder_.observed_header = &protocol_.packet_headers[1];
+  recorder_.gate_output = true;
+  PublishPacket(1);
+
+  std::atomic<bool> process_returned{false};
+  std::thread service_thread([&]() {
+    ProcessReady();
+    process_returned.store(true, std::memory_order_release);
+  });
+  while (!recorder_.output_entered.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+
+  EXPECT_TRUE(HeaderIsReady(&protocol_.packet_headers[1]));
+  EXPECT_FALSE(process_returned.load(std::memory_order_acquire));
+  EXPECT_NE(9u, protocol_.packet_payloads[1].slots[0][0]);
+
+  recorder_.output_release.store(true, std::memory_order_release);
+  service_thread.join();
+
+  EXPECT_TRUE(process_returned.load(std::memory_order_acquire));
+  EXPECT_EQ(9u, protocol_.packet_payloads[1].slots[0][0]);
+  EXPECT_FALSE(HeaderIsReady(&protocol_.packet_headers[1]));
+}
+
 TEST_F(BlockingPrintfProtocolTest, ContinuesThenCompletesPublishedMessage) {
   PreparePacket(/*packet_index=*/1, /*next=*/0,
                 IREE_HIP_HOSTCALL_SERVICE_PRINTF, /*activemask=*/1);
   uint64_t* payload = protocol_.packet_payloads[1].slots[0];
   payload[0] = MakeDescriptor(kFragmentBegin, /*length=*/1);
   payload[1] = 0;
-  iree_atomic_store(&protocol_.buffer_header->ready_stack, PacketTag(1),
-                    iree_memory_order_release);
-  IREE_ASSERT_OK(iree_hip_blocking_printf_protocol_process_ready(
-      &protocol_, &message_table_, output_stream_, error_stream_));
+  PublishPacket(1);
+  ProcessReady();
   const uint64_t continuation_descriptor = payload[0];
   EXPECT_EQ(0u, continuation_descriptor & kFragmentBegin);
-  EXPECT_EQ(0, ftell(output_stream_));
+  EXPECT_TRUE(recorder_.output_events.empty());
 
   std::array<uint64_t, 3> tail = {0, 0, 42};
   const char format[] = "value=%d\n";
@@ -210,12 +298,11 @@ TEST_F(BlockingPrintfProtocolTest, ContinuesThenCompletesPublishedMessage) {
   payload[0] = (continuation_descriptor & ~(UINT64_C(7) << 5)) |
                MakeDescriptor(kFragmentEnd, tail.size());
   memcpy(payload + 1, tail.data(), sizeof(tail));
-  iree_atomic_store(&protocol_.buffer_header->ready_stack, PacketTag(1),
-                    iree_memory_order_release);
-  IREE_ASSERT_OK(iree_hip_blocking_printf_protocol_process_ready(
-      &protocol_, &message_table_, output_stream_, error_stream_));
+  PublishPacket(1);
+  ProcessReady();
 
-  EXPECT_EQ("value=42\n", ReadStream(output_stream_));
+  ASSERT_EQ(1u, recorder_.output_events.size());
+  EXPECT_EQ("value=42\n", recorder_.output_events[0].text);
   EXPECT_EQ(9u, payload[0]);
 }
 
@@ -224,35 +311,17 @@ TEST_F(BlockingPrintfProtocolTest, RoutesControlBitToStandardError) {
                 IREE_HIP_HOSTCALL_SERVICE_PRINTF, /*activemask=*/1);
   SetCompletePrintfFragment(/*packet_index=*/1, /*lane=*/0, /*control=*/1,
                             "error=%u", /*argument=*/7);
-  iree_atomic_store(&protocol_.buffer_header->ready_stack, PacketTag(1),
-                    iree_memory_order_release);
+  PublishPacket(1);
 
-  IREE_ASSERT_OK(iree_hip_blocking_printf_protocol_process_ready(
-      &protocol_, &message_table_, output_stream_, error_stream_));
+  ProcessReady();
 
-  EXPECT_TRUE(ReadStream(output_stream_).empty());
-  EXPECT_EQ("error=7", ReadStream(error_stream_));
+  ASSERT_EQ(1u, recorder_.output_events.size());
+  EXPECT_EQ(IREE_HIP_BLOCKING_PRINTF_STREAM_STDERR,
+            recorder_.output_events[0].stream);
+  EXPECT_EQ("error=7", recorder_.output_events[0].text);
 }
 
-TEST_F(BlockingPrintfProtocolTest, RejectsUnsupportedServiceAfterCompletion) {
-  PreparePacket(/*packet_index=*/1, /*next=*/0, /*service=*/99,
-                /*activemask=*/UINT64_C(0x3));
-  iree_atomic_store(&protocol_.buffer_header->ready_stack, PacketTag(1),
-                    iree_memory_order_release);
-
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_UNIMPLEMENTED,
-      iree_hip_blocking_printf_protocol_process_ready(
-          &protocol_, &message_table_, output_stream_, error_stream_));
-
-  EXPECT_EQ(UINT64_MAX, protocol_.packet_payloads[1].slots[0][0]);
-  EXPECT_EQ(UINT64_MAX, protocol_.packet_payloads[1].slots[1][0]);
-  EXPECT_EQ(0u, iree_atomic_load(&protocol_.packet_headers[1].control,
-                                 iree_memory_order_acquire));
-}
-
-TEST_F(BlockingPrintfProtocolTest,
-       FailureStopsOutputButCompletesDetachedChain) {
+TEST_F(BlockingPrintfProtocolTest, LocalFailureDoesNotPoisonService) {
   PreparePacket(/*packet_index=*/0, /*next=*/PacketTag(1),
                 IREE_HIP_HOSTCALL_SERVICE_PRINTF, /*activemask=*/1);
   // A zero-length complete fragment has no required control qword.
@@ -262,39 +331,110 @@ TEST_F(BlockingPrintfProtocolTest,
   PreparePacket(/*packet_index=*/1, /*next=*/0,
                 IREE_HIP_HOSTCALL_SERVICE_PRINTF, /*activemask=*/1);
   SetCompletePrintfFragment(/*packet_index=*/1, /*lane=*/0, /*control=*/0,
-                            "must not print", /*argument=*/0);
-  iree_atomic_store(&protocol_.buffer_header->ready_stack, PacketTag(0),
-                    iree_memory_order_release);
+                            "still works", /*argument=*/0);
+  PublishPacket(0);
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_hip_blocking_printf_protocol_process_ready(
-          &protocol_, &message_table_, output_stream_, error_stream_));
+  ProcessReady();
 
-  EXPECT_TRUE(ReadStream(output_stream_).empty());
+  EXPECT_EQ(0, recorder_.failure_count);
+  ASSERT_EQ(1u, recorder_.output_events.size());
+  EXPECT_EQ("still works", recorder_.output_events[0].text);
   EXPECT_EQ(UINT64_MAX, protocol_.packet_payloads[0].slots[0][0]);
+  EXPECT_EQ(11u, protocol_.packet_payloads[1].slots[0][0]);
+  EXPECT_FALSE(HeaderIsReady(&protocol_.packet_headers[0]));
+  EXPECT_FALSE(HeaderIsReady(&protocol_.packet_headers[1]));
+}
+
+TEST_F(BlockingPrintfProtocolTest, FormatsLargeMessage) {
+  constexpr iree_host_size_t kFragmentQwordCount =
+      IREE_HIP_HOSTCALL_PACKET_SLOT_QWORD_COUNT - 1;
+  const std::string expected_output(1024 * 1024 + 1, 'x');
+  std::vector<uint64_t> message(
+      1 +
+      (expected_output.size() + 1 + sizeof(uint64_t) - 1) / sizeof(uint64_t));
+  memcpy(message.data() + 1, expected_output.data(), expected_output.size());
+
+  uint64_t* payload = protocol_.packet_payloads[1].slots[0];
+  uint64_t continuation_descriptor = 0;
+  for (iree_host_size_t offset = 0; offset < message.size();) {
+    const iree_host_size_t fragment_count =
+        iree_min(kFragmentQwordCount, message.size() - offset);
+    const bool is_first = offset == 0;
+    const bool is_last = offset + fragment_count == message.size();
+    const uint64_t flags =
+        (is_first ? kFragmentBegin : 0) | (is_last ? kFragmentEnd : 0);
+    PreparePacket(/*packet_index=*/1, /*next=*/0,
+                  IREE_HIP_HOSTCALL_SERVICE_PRINTF, /*activemask=*/1);
+    payload[0] = (continuation_descriptor & ~(UINT64_C(7) << 5)) |
+                 MakeDescriptor(flags, fragment_count);
+    memcpy(payload + 1, message.data() + offset,
+           fragment_count * sizeof(message[0]));
+    PublishPacket(1);
+    ProcessReady();
+    continuation_descriptor = payload[0];
+    offset += fragment_count;
+  }
+
+  EXPECT_EQ(0, recorder_.failure_count);
+  ASSERT_EQ(1u, recorder_.output_events.size());
+  EXPECT_EQ(expected_output, recorder_.output_events[0].text);
+  EXPECT_EQ(expected_output.size(), payload[0]);
+  EXPECT_FALSE(HeaderIsReady(&protocol_.packet_headers[1]));
+}
+
+TEST_F(BlockingPrintfProtocolTest,
+       StructuralFailurePrecedesReleaseAndFailCompletesLaterPackets) {
+  PreparePacket(/*packet_index=*/0, /*next=*/PacketTag(1), /*service=*/99,
+                /*activemask=*/UINT64_C(0x3));
+  PreparePacket(/*packet_index=*/1, /*next=*/0,
+                IREE_HIP_HOSTCALL_SERVICE_PRINTF, /*activemask=*/1);
+  SetCompletePrintfFragment(/*packet_index=*/1, /*lane=*/0, /*control=*/0,
+                            "must not print", /*argument=*/0);
+  recorder_.observed_header = &protocol_.packet_headers[0];
+  PublishPacket(0);
+
+  ProcessReady();
+
+  EXPECT_EQ(1, recorder_.failure_count);
+  EXPECT_EQ(IREE_STATUS_UNIMPLEMENTED, recorder_.failure_code);
+  EXPECT_TRUE(recorder_.failure_observed_ready);
+  EXPECT_TRUE(recorder_.output_events.empty());
+  EXPECT_EQ(UINT64_MAX, protocol_.packet_payloads[0].slots[0][0]);
+  EXPECT_EQ(UINT64_MAX, protocol_.packet_payloads[0].slots[1][0]);
   EXPECT_EQ(UINT64_MAX, protocol_.packet_payloads[1].slots[0][0]);
-  EXPECT_EQ(0u, iree_atomic_load(&protocol_.packet_headers[0].control,
-                                 iree_memory_order_acquire));
-  EXPECT_EQ(0u, iree_atomic_load(&protocol_.packet_headers[1].control,
-                                 iree_memory_order_acquire));
+  EXPECT_FALSE(HeaderIsReady(&protocol_.packet_headers[0]));
+  EXPECT_FALSE(HeaderIsReady(&protocol_.packet_headers[1]));
+
+  PreparePacket(/*packet_index=*/1, /*next=*/0,
+                IREE_HIP_HOSTCALL_SERVICE_PRINTF, /*activemask=*/1);
+  SetCompletePrintfFragment(/*packet_index=*/1, /*lane=*/0, /*control=*/0,
+                            "not printed", /*argument=*/0);
+  PublishPacket(1);
+  ProcessReady();
+
+  EXPECT_EQ(1, recorder_.failure_count);
+  EXPECT_TRUE(recorder_.output_events.empty());
+  EXPECT_EQ(UINT64_MAX, protocol_.packet_payloads[1].slots[0][0]);
+  EXPECT_FALSE(HeaderIsReady(&protocol_.packet_headers[1]));
 }
 
 TEST_F(BlockingPrintfProtocolTest, BoundsCyclicReadyStack) {
-  PreparePacket(/*packet_index=*/0, /*next=*/PacketTag(1), /*service=*/99,
-                /*activemask=*/1);
-  PreparePacket(/*packet_index=*/1, /*next=*/PacketTag(0), /*service=*/99,
-                /*activemask=*/1);
-  iree_atomic_store(&protocol_.buffer_header->ready_stack, PacketTag(0),
-                    iree_memory_order_release);
+  PreparePacket(/*packet_index=*/0, /*next=*/PacketTag(1),
+                IREE_HIP_HOSTCALL_SERVICE_PRINTF, /*activemask=*/1);
+  SetCompletePrintfFragment(/*packet_index=*/0, /*lane=*/0, /*control=*/0,
+                            "first", /*argument=*/0);
+  PreparePacket(/*packet_index=*/1, /*next=*/PacketTag(0),
+                IREE_HIP_HOSTCALL_SERVICE_PRINTF, /*activemask=*/1);
+  SetCompletePrintfFragment(/*packet_index=*/1, /*lane=*/0, /*control=*/0,
+                            "second", /*argument=*/0);
+  PublishPacket(0);
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_hip_blocking_printf_protocol_fail_ready(&protocol_));
-  EXPECT_EQ(0u, iree_atomic_load(&protocol_.packet_headers[0].control,
-                                 iree_memory_order_acquire));
-  EXPECT_EQ(0u, iree_atomic_load(&protocol_.packet_headers[1].control,
-                                 iree_memory_order_acquire));
+  ProcessReady();
+
+  EXPECT_EQ(1, recorder_.failure_count);
+  EXPECT_EQ(IREE_STATUS_INVALID_ARGUMENT, recorder_.failure_code);
+  EXPECT_FALSE(HeaderIsReady(&protocol_.packet_headers[0]));
+  EXPECT_FALSE(HeaderIsReady(&protocol_.packet_headers[1]));
 }
 
 }  // namespace

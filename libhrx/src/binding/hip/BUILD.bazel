@@ -66,6 +66,7 @@ hrx_cc_library(
         ":hostcall_message",
         ":printf_format",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amdgpu",
     ],
 )
 

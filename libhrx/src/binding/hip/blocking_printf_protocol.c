@@ -157,26 +157,88 @@ static void iree_hip_blocking_printf_protocol_fail_packet(
   iree_hip_blocking_printf_protocol_release_packet(packet_header);
 }
 
+void iree_hip_blocking_printf_service_initialize(
+    iree_hip_blocking_printf_protocol_t* protocol,
+    iree_hip_blocking_printf_output_sink_t output_sink,
+    iree_hal_amdgpu_error_callback_t error_callback,
+    iree_allocator_t host_allocator,
+    iree_hip_blocking_printf_service_t* out_service) {
+  IREE_ASSERT_ARGUMENT(protocol);
+  IREE_ASSERT_ARGUMENT(output_sink.fn);
+  IREE_ASSERT_ARGUMENT(error_callback.fn);
+  IREE_ASSERT_ARGUMENT(out_service);
+  memset(out_service, 0, sizeof(*out_service));
+  out_service->protocol = protocol;
+  out_service->output_sink = output_sink;
+  out_service->error_callback = error_callback;
+  iree_hip_hostcall_message_table_initialize(host_allocator,
+                                             &out_service->message_table);
+  iree_string_builder_initialize(host_allocator,
+                                 &out_service->encoded_message_builder);
+  iree_string_builder_initialize(host_allocator, &out_service->text_builder);
+  iree_string_builder_initialize(host_allocator,
+                                 &out_service->format_scratch_builder);
+}
+
+void iree_hip_blocking_printf_service_deinitialize(
+    iree_hip_blocking_printf_service_t* service) {
+  IREE_ASSERT_ARGUMENT(service);
+  iree_string_builder_deinitialize(&service->format_scratch_builder);
+  iree_string_builder_deinitialize(&service->text_builder);
+  iree_string_builder_deinitialize(&service->encoded_message_builder);
+  iree_hip_hostcall_message_table_deinitialize(&service->message_table);
+  memset(service, 0, sizeof(*service));
+}
+
+static void iree_hip_blocking_printf_service_fail(
+    iree_hip_blocking_printf_service_t* service, iree_status_t status) {
+  if (service->has_failed) {
+    iree_status_free(status);
+    return;
+  }
+  service->has_failed = true;
+  service->error_callback.fn(service->error_callback.user_data, status);
+}
+
 static iree_status_t iree_hip_blocking_printf_protocol_format_message(
-    const iree_hip_hostcall_message_result_t* message, FILE* output_stream,
-    FILE* error_stream, int* out_count) {
+    iree_hip_blocking_printf_service_t* service,
+    const iree_hip_hostcall_message_result_t* message, int* out_count) {
   *out_count = -1;
+  iree_string_builder_reset(&service->encoded_message_builder);
+  iree_string_builder_reset(&service->text_builder);
   if (IREE_UNLIKELY(message->count == 0)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "blocking printf message has no control qword");
   }
 
-  const uint64_t control = message->data[0];
+  const iree_host_size_t encoded_message_size =
+      message->count * sizeof(uint64_t);
+  char* encoded_message_data = NULL;
+  iree_host_size_t encoded_message_capacity = 0;
+  IREE_RETURN_IF_ERROR(iree_string_builder_reserve_for_append(
+      &service->encoded_message_builder, encoded_message_size,
+      &encoded_message_data, &encoded_message_capacity));
+  iree_hip_hostcall_message_copy(
+      &service->message_table, message->message_id,
+      iree_make_byte_span(encoded_message_data, encoded_message_size));
+  iree_string_builder_commit_append(&service->encoded_message_builder,
+                                    encoded_message_size);
+
+  uint64_t control = 0;
+  memcpy(&control, encoded_message_data, sizeof(control));
   if (IREE_UNLIKELY(control & ~UINT64_C(1))) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "blocking printf control qword has reserved bits set");
   }
-  FILE* stream = (control & UINT64_C(1)) ? error_stream : output_stream;
+  const iree_hip_blocking_printf_stream_t stream =
+      (control & UINT64_C(1)) ? IREE_HIP_BLOCKING_PRINTF_STREAM_STDERR
+                              : IREE_HIP_BLOCKING_PRINTF_STREAM_STDOUT;
 
   const iree_host_size_t message_length =
-      (message->count - 1) * sizeof(message->data[0]);
-  const uint8_t* message_bytes = (const uint8_t*)(message->data + 1);
+      encoded_message_size - sizeof(control);
+  const uint8_t* message_bytes =
+      (const uint8_t*)encoded_message_data + sizeof(control);
   const char* format_end = memchr(message_bytes, '\0', message_length);
   if (IREE_UNLIKELY(!format_end)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -187,95 +249,107 @@ static iree_status_t iree_hip_blocking_printf_protocol_format_message(
       (iree_host_size_t)(format_end - (const char*)message_bytes);
   const iree_host_size_t argument_offset =
       iree_host_align(format_length + 1, sizeof(uint64_t));
+  if (IREE_UNLIKELY(argument_offset > message_length)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "blocking printf format padding exceeds the message");
+  }
 
-  return iree_hip_printf_format(
-      stream, iree_make_string_view((const char*)message_bytes, format_length),
-      message_bytes + argument_offset, message_length - argument_offset,
-      out_count);
+  IREE_RETURN_IF_ERROR(iree_hip_printf_format(
+      &service->text_builder, &service->format_scratch_builder,
+      iree_make_string_view((const char*)message_bytes, format_length),
+      message_bytes + argument_offset, message_length - argument_offset));
+  *out_count = (int)iree_string_builder_size(&service->text_builder);
+  service->output_sink.fn(service->output_sink.user_data, stream,
+                          iree_string_builder_view(&service->text_builder));
+  return iree_ok_status();
 }
 
-static iree_status_t iree_hip_blocking_printf_protocol_process_lane(
+static void iree_hip_blocking_printf_protocol_process_lane(
+    iree_hip_blocking_printf_service_t* service,
     uint64_t payload[IREE_HIP_HOSTCALL_PACKET_SLOT_QWORD_COUNT],
-    iree_hip_hostcall_message_table_t* message_table, FILE* output_stream,
-    FILE* error_stream) {
+    iree_hip_hostcall_message_table_t* message_table) {
   iree_hip_hostcall_message_result_t message;
   iree_status_t status = iree_hip_hostcall_message_consume_fragment(
       message_table, payload, &message);
   if (!iree_status_is_ok(status)) {
     iree_hip_blocking_printf_protocol_complete_error(payload);
-    return status;
+    if (iree_status_is_resource_exhausted(status)) {
+      // An allocation failure belongs to this printf. The fragment consumer
+      // has already discarded its partial message, so later requests remain
+      // independent and safe to interpret.
+      iree_status_free(status);
+    } else {
+      iree_hip_blocking_printf_service_fail(service, status);
+    }
+    return;
   }
 
   if (message.type == IREE_HIP_HOSTCALL_MESSAGE_RESULT_CONTINUE) {
     payload[0] = message.continuation_descriptor;
     payload[1] = 0;
-    return iree_ok_status();
+    return;
   }
 
   int result = -1;
-  status = iree_hip_blocking_printf_protocol_format_message(
-      &message, output_stream, error_stream, &result);
+  status = iree_hip_blocking_printf_protocol_format_message(service, &message,
+                                                            &result);
   iree_hip_hostcall_message_release(message_table, message.message_id);
   if (iree_status_is_ok(status)) {
     payload[0] = (uint64_t)(int64_t)result;
     payload[1] = 0;
   } else {
+    // Formatting failures are the printf ABI's local -1 result, not a
+    // structural failure of the packet transport.
+    iree_status_free(status);
     iree_hip_blocking_printf_protocol_complete_error(payload);
   }
-  return status;
 }
 
-static iree_status_t iree_hip_blocking_printf_protocol_process_packet(
+static void iree_hip_blocking_printf_protocol_process_packet(
+    iree_hip_blocking_printf_service_t* service,
     iree_hip_hostcall_packet_header_t* packet_header,
-    iree_hip_hostcall_packet_payload_t* packet_payload,
-    iree_hip_hostcall_message_table_t* message_table, FILE* output_stream,
-    FILE* error_stream) {
+    iree_hip_hostcall_packet_payload_t* packet_payload) {
   if (IREE_UNLIKELY(packet_header->service !=
                     IREE_HIP_HOSTCALL_SERVICE_PRINTF)) {
-    const uint32_t service = packet_header->service;
+    const uint32_t service_id = packet_header->service;
+    iree_hip_blocking_printf_service_fail(
+        service,
+        iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                         "blocking hostcall service %" PRIu32 " is unsupported",
+                         service_id));
     iree_hip_blocking_printf_protocol_fail_packet(packet_header,
                                                   packet_payload);
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "blocking hostcall service %" PRIu32 " is unsupported", service);
+    return;
   }
 
-  iree_status_t status = iree_ok_status();
   uint64_t activemask = packet_header->activemask;
   while (activemask != 0) {
     const uint32_t lane = (uint32_t)__builtin_ctzll(activemask);
     activemask &= activemask - 1;
     uint64_t* payload = packet_payload->slots[lane];
-    if (iree_status_is_ok(status)) {
-      status = iree_hip_blocking_printf_protocol_process_lane(
-          payload, message_table, output_stream, error_stream);
+    if (!service->has_failed) {
+      iree_hip_blocking_printf_protocol_process_lane(service, payload,
+                                                     &service->message_table);
     } else {
       iree_hip_blocking_printf_protocol_complete_error(payload);
     }
   }
   iree_hip_blocking_printf_protocol_release_packet(packet_header);
-  return status;
 }
 
-typedef enum iree_hip_blocking_printf_drain_mode_e {
-  IREE_HIP_BLOCKING_PRINTF_DRAIN_MODE_PROCESS = 0,
-  IREE_HIP_BLOCKING_PRINTF_DRAIN_MODE_FAIL = 1,
-} iree_hip_blocking_printf_drain_mode_t;
-
-static iree_status_t iree_hip_blocking_printf_protocol_drain_ready(
-    iree_hip_blocking_printf_protocol_t* protocol,
-    iree_hip_blocking_printf_drain_mode_t mode,
-    iree_hip_hostcall_message_table_t* message_table, FILE* output_stream,
-    FILE* error_stream) {
+void iree_hip_blocking_printf_service_process_ready(
+    iree_hip_blocking_printf_service_t* service) {
+  IREE_ASSERT_ARGUMENT(service);
+  iree_hip_blocking_printf_protocol_t* protocol = service->protocol;
   uint64_t next = iree_atomic_exchange(&protocol->buffer_header->ready_stack, 0,
                                        iree_memory_order_acquire);
-  iree_status_t status = iree_ok_status();
   uint32_t packet_ordinal = 0;
   while (next != 0 && packet_ordinal < protocol->packet_count) {
     const uint32_t packet_index = (uint32_t)(next & protocol->index_mask);
     if (IREE_UNLIKELY(packet_index >= protocol->packet_count)) {
-      status = iree_status_join(
-          status,
+      iree_hip_blocking_printf_service_fail(
+          service,
           iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
               "blocking printf ready stack references packet index %" PRIu32
@@ -290,8 +364,8 @@ static iree_status_t iree_hip_blocking_printf_protocol_drain_ready(
     const uint32_t control =
         iree_atomic_load(&packet_header->control, iree_memory_order_relaxed);
     if (IREE_UNLIKELY(!(control & IREE_HIP_HOSTCALL_PACKET_CONTROL_READY))) {
-      status = iree_status_join(
-          status,
+      iree_hip_blocking_printf_service_fail(
+          service,
           iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
               "blocking printf ready stack repeats or references an unready "
@@ -300,12 +374,9 @@ static iree_status_t iree_hip_blocking_printf_protocol_drain_ready(
     }
 
     next = packet_header->next;
-    if (mode == IREE_HIP_BLOCKING_PRINTF_DRAIN_MODE_PROCESS &&
-        iree_status_is_ok(status)) {
-      status = iree_status_join(
-          status, iree_hip_blocking_printf_protocol_process_packet(
-                      packet_header, packet_payload, message_table,
-                      output_stream, error_stream));
+    if (!service->has_failed) {
+      iree_hip_blocking_printf_protocol_process_packet(service, packet_header,
+                                                       packet_payload);
     } else {
       iree_hip_blocking_printf_protocol_fail_packet(packet_header,
                                                     packet_payload);
@@ -314,31 +385,9 @@ static iree_status_t iree_hip_blocking_printf_protocol_drain_ready(
   }
 
   if (IREE_UNLIKELY(next != 0 && packet_ordinal == protocol->packet_count)) {
-    status = iree_status_join(
-        status, iree_make_status(
-                    IREE_STATUS_INVALID_ARGUMENT,
-                    "blocking printf ready stack exceeds the packet pool"));
+    iree_hip_blocking_printf_service_fail(
+        service, iree_make_status(
+                     IREE_STATUS_INVALID_ARGUMENT,
+                     "blocking printf ready stack exceeds the packet pool"));
   }
-  return status;
-}
-
-iree_status_t iree_hip_blocking_printf_protocol_process_ready(
-    iree_hip_blocking_printf_protocol_t* protocol,
-    iree_hip_hostcall_message_table_t* message_table, FILE* output_stream,
-    FILE* error_stream) {
-  IREE_ASSERT_ARGUMENT(protocol);
-  IREE_ASSERT_ARGUMENT(message_table);
-  IREE_ASSERT_ARGUMENT(output_stream);
-  IREE_ASSERT_ARGUMENT(error_stream);
-  return iree_hip_blocking_printf_protocol_drain_ready(
-      protocol, IREE_HIP_BLOCKING_PRINTF_DRAIN_MODE_PROCESS, message_table,
-      output_stream, error_stream);
-}
-
-iree_status_t iree_hip_blocking_printf_protocol_fail_ready(
-    iree_hip_blocking_printf_protocol_t* protocol) {
-  IREE_ASSERT_ARGUMENT(protocol);
-  return iree_hip_blocking_printf_protocol_drain_ready(
-      protocol, IREE_HIP_BLOCKING_PRINTF_DRAIN_MODE_FAIL,
-      /*message_table=*/NULL, /*output_stream=*/NULL, /*error_stream=*/NULL);
 }
