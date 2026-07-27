@@ -34,9 +34,17 @@
 typedef struct iree_hal_remote_pending_signal_batch_t {
   // Number of pending signal entries plus the submitter hold.
   iree_atomic_int32_t remaining;
+
   // Allocator used to free the batch allocation.
   iree_allocator_t host_allocator;
-  // Trailing: iree_hal_remote_pending_signal_t entries[count]
+
+  // Number of pending signal entries in trailing storage.
+  iree_host_size_t entry_count;
+
+  // Byte offset from this header to the trailing signal entries.
+  iree_host_size_t entries_offset;
+
+  // Trailing iree_hal_remote_pending_signal_t entries.
 } iree_hal_remote_pending_signal_batch_t;
 
 // Per-semaphore signal context within a batch. Each entry holds a frontier
@@ -90,22 +98,22 @@ static void iree_hal_remote_pending_signal_callback(void* user_data,
 #define IREE_HAL_REMOTE_CLIENT_FILE_INLINE_UPDATE_MAX_LENGTH \
   (IREE_NET_QUEUE_FRAME_DEFAULT_MAX_SIZE / 2)
 
-// Registers frontier waiters for each signal semaphore. Each waiter fires when
-// the server echoes the submission epoch in an ADVANCE frame, signaling the
-// proxy semaphore to its target value.
-//
-// All per-semaphore entries are allocated in a single batch with an atomic ref
-// count. The submitter holds a ref during registration; each successfully
-// registered waiter adds a ref. The last ref to be released frees the batch.
-// On partial failure, |*out_registered_count| reflects how many waiters were
-// successfully registered (for error-path semaphore failure by the caller).
-static iree_status_t iree_hal_remote_client_device_register_signal_waiters(
+static iree_hal_remote_pending_signal_t*
+iree_hal_remote_pending_signal_batch_entries(
+    iree_hal_remote_pending_signal_batch_t* batch) {
+  return (iree_hal_remote_pending_signal_t*)((uint8_t*)batch +
+                                             batch->entries_offset);
+}
+
+// Allocates and retains all signal waiter state before transport admission.
+static iree_status_t iree_hal_remote_client_prepare_signal_waiters(
     iree_hal_remote_client_device_t* device,
     const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_async_axis_t axis, uint64_t epoch,
-    iree_host_size_t* out_registered_count) {
-  *out_registered_count = 0;
-  if (signal_semaphore_list.count == 0) return iree_ok_status();
+    iree_hal_remote_pending_signal_batch_t** out_batch) {
+  *out_batch = NULL;
+  if (signal_semaphore_list.count == 0) {
+    return iree_ok_status();
+  }
 
   iree_hal_remote_pending_signal_batch_t* batch = NULL;
   iree_host_size_t total_size = 0;
@@ -120,18 +128,48 @@ static iree_status_t iree_hal_remote_client_device_register_signal_waiters(
 
   iree_atomic_store(&batch->remaining, 1, iree_memory_order_relaxed);
   batch->host_allocator = device->host_allocator;
+  batch->entry_count = signal_semaphore_list.count;
+  batch->entries_offset = entries_offset;
 
   iree_hal_remote_pending_signal_t* entries =
       (iree_hal_remote_pending_signal_t*)((uint8_t*)batch + entries_offset);
+  memset(entries, 0, signal_semaphore_list.count * sizeof(*entries));
+  for (iree_host_size_t i = 0; i < signal_semaphore_list.count; ++i) {
+    entries[i].semaphore = signal_semaphore_list.semaphores[i];
+    iree_hal_semaphore_retain(entries[i].semaphore);
+    entries[i].value = signal_semaphore_list.payload_values[i];
+    entries[i].batch = batch;
+  }
+
+  *out_batch = batch;
+  return iree_ok_status();
+}
+
+// Releases a prepared batch that has not registered any frontier waiters.
+static void iree_hal_remote_client_discard_signal_waiters(
+    iree_hal_remote_pending_signal_batch_t* batch) {
+  if (!batch) return;
+  iree_hal_remote_pending_signal_t* entries =
+      iree_hal_remote_pending_signal_batch_entries(batch);
+  for (iree_host_size_t i = 0; i < batch->entry_count; ++i) {
+    iree_hal_semaphore_release(entries[i].semaphore);
+  }
+  iree_allocator_free(batch->host_allocator, batch);
+}
+
+// Publishes and consumes prepared signal waiters at the assigned epoch.
+static iree_status_t iree_hal_remote_client_register_signal_waiters(
+    iree_hal_remote_client_device_t* device,
+    iree_hal_remote_pending_signal_batch_t* batch, iree_async_axis_t axis,
+    uint64_t epoch) {
+  if (!batch) return iree_ok_status();
+  iree_hal_remote_pending_signal_t* entries =
+      iree_hal_remote_pending_signal_batch_entries(batch);
 
   iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < signal_semaphore_list.count; ++i) {
+  iree_host_size_t registered_count = 0;
+  for (iree_host_size_t i = 0; i < batch->entry_count; ++i) {
     iree_hal_remote_pending_signal_t* pending = &entries[i];
-    pending->semaphore = signal_semaphore_list.semaphores[i];
-    iree_hal_semaphore_retain(pending->semaphore);
-    pending->value = signal_semaphore_list.payload_values[i];
-    pending->batch = batch;
-
     iree_async_single_frontier_initialize(&pending->frontier, axis, epoch);
 
     // Add a ref for this waiter before registration. If registration fails
@@ -156,11 +194,17 @@ static iree_status_t iree_hal_remote_client_device_register_signal_waiters(
     iree_hal_remote_client_semaphore_record_epoch(pending->semaphore,
                                                   pending->value, axis, epoch);
 
-    ++*out_registered_count;
+    ++registered_count;
   }
 
-  // Release the submitter hold. If no waiters were registered (or all
-  // failed), this is the last ref and frees the batch immediately.
+  if (!iree_status_is_ok(status)) {
+    for (iree_host_size_t i = registered_count + 1; i < batch->entry_count;
+         ++i) {
+      iree_hal_semaphore_release(entries[i].semaphore);
+    }
+  }
+
+  // Release the submitter hold. Registered waiters now own the batch.
   if (iree_atomic_fetch_sub(&batch->remaining, 1, iree_memory_order_acq_rel) ==
       1) {
     iree_allocator_free(batch->host_allocator, batch);
@@ -692,51 +736,6 @@ static iree_status_t iree_hal_remote_client_device_defer_submit(
 // Common submission path
 //===----------------------------------------------------------------------===//
 
-static iree_status_t iree_hal_remote_client_device_send_queue_op(
-    iree_hal_remote_client_device_t* device,
-    const iree_async_frontier_t* wait_frontier,
-    const iree_async_frontier_t* signal_frontier,
-    iree_hal_remote_queue_payload_writer_t payload_writer) {
-  iree_net_queue_channel_t* queue_channel =
-      (iree_net_queue_channel_t*)iree_atomic_load(&device->queue_channel,
-                                                  iree_memory_order_acquire);
-
-  iree_status_t status = iree_ok_status();
-  if (!queue_channel) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "queue channel not available");
-  } else {
-    iree_net_queue_channel_command_reservation_t reservation;
-    status = iree_net_queue_channel_begin_command(
-        queue_channel, /*stream_id=*/0,
-        wait_frontier ? wait_frontier->entry_count : 0,
-        signal_frontier ? signal_frontier->entry_count : 0,
-        payload_writer.payload_length, &reservation);
-    if (iree_status_is_ok(status)) {
-      if (wait_frontier) {
-        memcpy(
-            reservation.wait_entries, wait_frontier->entries,
-            wait_frontier->entry_count * sizeof(iree_async_frontier_entry_t));
-      }
-      if (signal_frontier) {
-        memcpy(
-            reservation.signal_entries, signal_frontier->entries,
-            signal_frontier->entry_count * sizeof(iree_async_frontier_entry_t));
-      }
-      status = payload_writer.write(payload_writer.user_data,
-                                    reservation.command_payload);
-      if (iree_status_is_ok(status)) {
-        status =
-            iree_net_queue_channel_commit_command(queue_channel, &reservation);
-      } else {
-        iree_net_queue_channel_abort_command(queue_channel, &reservation);
-      }
-    }
-  }
-
-  return status;
-}
-
 // Common submission path for all queue operations. Handles wait frontier
 // encoding, host/cross-device gates, epoch assignment, transport submission,
 // signal waiter registration, and error-path semaphore failure.
@@ -775,42 +774,61 @@ static iree_status_t iree_hal_remote_client_device_submit_queue_op_writer(
 
   uint64_t epoch = 0;
   if (iree_status_is_ok(status) && !deferred) {
-    // Assign epoch on the remote queue axis (atomic: deferred callbacks may
-    // run on the proactor thread concurrently with app-thread submissions).
-    epoch = (uint64_t)iree_atomic_fetch_add(&device->next_submission_epoch, 1,
-                                            iree_memory_order_relaxed);
-    if (out_epoch) *out_epoch = epoch;
+    iree_hal_remote_pending_signal_batch_t* signal_batch = NULL;
+    status = iree_hal_remote_client_prepare_signal_waiters(
+        device, signal_semaphore_list, &signal_batch);
 
-    iree_async_single_frontier_t signal_frontier_storage;
-    iree_async_single_frontier_initialize(&signal_frontier_storage,
-                                          device->remote_queue_axis, epoch);
-    iree_async_frontier_t* signal_frontier =
-        iree_async_single_frontier_as_frontier(&signal_frontier_storage);
-
-    // Build wait frontier (NULL if no entries). Stack-allocated with inline
-    // storage for the fixed frontier entries gathered above.
-    iree_hal_remote_frontier_storage_t wait_frontier_storage;
-    iree_async_frontier_t* wait_frontier = NULL;
-    if (wait_entry_count > 0) {
-      memset(&wait_frontier_storage, 0, sizeof(wait_frontier_storage));
-      iree_async_frontier_initialize(
-          iree_async_fixed_frontier_as_frontier(&wait_frontier_storage),
-          (uint8_t)wait_entry_count);
-      memcpy(wait_frontier_storage.entries, wait_entries,
-             wait_entry_count * sizeof(iree_async_frontier_entry_t));
-      wait_frontier =
-          iree_async_fixed_frontier_as_frontier(&wait_frontier_storage);
-    }
-
-    status = iree_hal_remote_client_device_send_queue_op(
-        device, wait_frontier, signal_frontier, payload_writer);
-
-    iree_host_size_t registered_count = 0;
+    iree_net_queue_channel_t* queue_channel = NULL;
+    iree_net_queue_channel_command_reservation_t reservation;
     if (iree_status_is_ok(status)) {
-      status = iree_hal_remote_client_device_register_signal_waiters(
-          device, signal_semaphore_list, device->remote_queue_axis, epoch,
-          &registered_count);
+      queue_channel = (iree_net_queue_channel_t*)iree_atomic_load(
+          &device->queue_channel, iree_memory_order_acquire);
+      if (!queue_channel) {
+        status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                  "queue channel not available");
+      } else {
+        status = iree_net_queue_channel_begin_command(
+            queue_channel, /*stream_id=*/0, (uint8_t)wait_entry_count,
+            /*signal_frontier_entry_count=*/1, payload_writer.payload_length,
+            &reservation);
+      }
     }
+    if (iree_status_is_ok(status)) {
+      if (wait_entry_count > 0) {
+        memcpy(reservation.wait_entries, wait_entries,
+               wait_entry_count * sizeof(iree_async_frontier_entry_t));
+      }
+      status = payload_writer.write(payload_writer.user_data,
+                                    reservation.command_payload);
+      if (!iree_status_is_ok(status)) {
+        iree_net_queue_channel_abort_command(queue_channel, &reservation);
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      // Epoch assignment occurs only after transport admission and payload
+      // construction. Deferred callbacks and application threads may race.
+      epoch = (uint64_t)iree_atomic_fetch_add(&device->next_submission_epoch, 1,
+                                              iree_memory_order_relaxed);
+      reservation.signal_entries[0] = (iree_async_frontier_entry_t){
+          .axis = device->remote_queue_axis,
+          .epoch = epoch,
+      };
+      status = iree_hal_remote_client_register_signal_waiters(
+          device, signal_batch, device->remote_queue_axis, epoch);
+      signal_batch = NULL;
+      if (iree_status_is_ok(status)) {
+        status =
+            iree_net_queue_channel_commit_command(queue_channel, &reservation);
+      } else {
+        iree_net_queue_channel_abort_command(queue_channel, &reservation);
+      }
+      if (!iree_status_is_ok(status)) {
+        iree_hal_remote_client_device_fail(device, iree_status_clone(status));
+      } else if (out_epoch) {
+        *out_epoch = epoch;
+      }
+    }
+    iree_hal_remote_client_discard_signal_waiters(signal_batch);
   }
 
   if (!iree_status_is_ok(status) && signal_semaphore_list.count > 0) {

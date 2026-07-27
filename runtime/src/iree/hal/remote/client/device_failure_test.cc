@@ -22,9 +22,12 @@
 #include "iree/hal/remote/protocol/common.h"
 #include "iree/hal/remote/protocol/control.h"
 #include "iree/hal/remote/server/api.h"
+#include "iree/hal/remote/util/queue_header_pool.h"
 #include "iree/hal/remote/util/recv_pool.h"
 #include "iree/hal/testing/mock_device.h"
 #include "iree/net/carrier/loopback/factory.h"
+#include "iree/net/channel/queue/queue_channel.h"
+#include "iree/net/channel/util/frame_sender.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -61,6 +64,81 @@ class CompletionNotification {
   std::atomic<bool> completed_{false};
 };
 
+struct FailingCommitEndpoint {
+  // Callbacks installed by the queue channel.
+  iree_net_message_endpoint_callbacks_t callbacks = {};
+
+  // Bytes owned between begin_send and commit_send or abort_send.
+  std::vector<uint8_t> reservation;
+
+  static void SetCallbacks(void* self,
+                           iree_net_message_endpoint_callbacks_t callbacks) {
+    static_cast<FailingCommitEndpoint*>(self)->callbacks = callbacks;
+  }
+
+  static iree_status_t Activate(void* self) {
+    (void)self;
+    return iree_ok_status();
+  }
+
+  static iree_status_t Deactivate(
+      void* self, iree_net_message_endpoint_deactivate_fn_t callback,
+      void* user_data) {
+    (void)self;
+    if (callback) callback(user_data);
+    return iree_ok_status();
+  }
+
+  static iree_status_t Send(
+      void* self, const iree_net_message_endpoint_send_params_t* params) {
+    (void)self;
+    (void)params;
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "scatter-gather send is not expected");
+  }
+
+  static iree_net_carrier_send_budget_t QuerySendBudget(void* self) {
+    (void)self;
+    return {IREE_HOST_SIZE_MAX, UINT32_MAX};
+  }
+
+  static iree_status_t BeginSend(void* self, iree_host_size_t size,
+                                 void** out_ptr,
+                                 iree_net_carrier_send_handle_t* out_handle) {
+    auto* endpoint = static_cast<FailingCommitEndpoint*>(self);
+    endpoint->reservation.resize(size);
+    *out_ptr = endpoint->reservation.data();
+    *out_handle = 1;
+    return iree_ok_status();
+  }
+
+  static iree_status_t CommitSend(void* self,
+                                  iree_net_carrier_send_handle_t handle) {
+    auto* endpoint = static_cast<FailingCommitEndpoint*>(self);
+    IREE_ASSERT(handle == 1);
+    endpoint->reservation.clear();
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "injected queue commit failure");
+  }
+
+  static void AbortSend(void* self, iree_net_carrier_send_handle_t handle) {
+    auto* endpoint = static_cast<FailingCommitEndpoint*>(self);
+    IREE_ASSERT(handle == 1);
+    endpoint->reservation.clear();
+  }
+
+  iree_net_message_endpoint_t endpoint() { return {this, &vtable}; }
+
+  static const iree_net_message_endpoint_vtable_t vtable;
+};
+
+const iree_net_message_endpoint_vtable_t FailingCommitEndpoint::vtable = {
+    FailingCommitEndpoint::SetCallbacks,    FailingCommitEndpoint::Activate,
+    FailingCommitEndpoint::Deactivate,      FailingCommitEndpoint::Send,
+    FailingCommitEndpoint::QuerySendBudget, FailingCommitEndpoint::BeginSend,
+    FailingCommitEndpoint::CommitSend,      FailingCommitEndpoint::AbortSend,
+};
+
 class RemoteClientDeviceFailureTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -90,6 +168,7 @@ class RemoteClientDeviceFailureTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    RestoreProductionQueueChannel();
     if (client_device_) {
       DeactivateDeviceAndWait();
       iree_hal_device_release(client_device_);
@@ -228,6 +307,59 @@ class RemoteClientDeviceFailureTest : public ::testing::Test {
     });
   }
 
+  static iree_status_t OnUnexpectedQueueCommand(
+      void* user_data, uint32_t stream_id,
+      const iree_async_frontier_t* wait_frontier,
+      const iree_async_frontier_t* signal_frontier,
+      iree_const_byte_span_t command_data, iree_async_buffer_lease_t* lease) {
+    (void)user_data;
+    (void)stream_id;
+    (void)wait_frontier;
+    (void)signal_frontier;
+    (void)command_data;
+    (void)lease;
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "test endpoint does not receive commands");
+  }
+
+  void InstallFailingCommitQueueChannel() {
+    iree_async_buffer_pool_t* header_pool = nullptr;
+    IREE_ASSERT_OK(iree_hal_remote_create_queue_header_pool(
+        /*buffer_count=*/4, /*buffer_size=*/2048, iree_allocator_system(),
+        &header_pool));
+    iree_net_queue_channel_callbacks_t callbacks = {};
+    callbacks.on_command = OnUnexpectedQueueCommand;
+    IREE_ASSERT_OK(iree_net_queue_channel_create(
+        failing_commit_endpoint_.endpoint(), IREE_NET_FRAME_SENDER_MAX_SPANS,
+        header_pool, callbacks, iree_allocator_system(),
+        &injected_queue_channel_));
+    IREE_ASSERT_OK(iree_net_queue_channel_activate(injected_queue_channel_));
+
+    iree_hal_remote_client_device_t* device =
+        iree_hal_remote_client_device_cast(client_device_);
+    production_queue_channel_ =
+        reinterpret_cast<iree_net_queue_channel_t*>(iree_atomic_exchange(
+            &device->queue_channel,
+            reinterpret_cast<intptr_t>(injected_queue_channel_),
+            iree_memory_order_acq_rel));
+  }
+
+  void RestoreProductionQueueChannel() {
+    if (!injected_queue_channel_) return;
+    iree_hal_remote_client_device_t* device =
+        iree_hal_remote_client_device_cast(client_device_);
+    auto* removed_queue_channel =
+        reinterpret_cast<iree_net_queue_channel_t*>(iree_atomic_exchange(
+            &device->queue_channel,
+            reinterpret_cast<intptr_t>(production_queue_channel_),
+            iree_memory_order_acq_rel));
+    EXPECT_EQ(removed_queue_channel, injected_queue_channel_);
+    iree_net_queue_channel_detach(removed_queue_channel);
+    iree_net_queue_channel_release(removed_queue_channel);
+    injected_queue_channel_ = nullptr;
+    production_queue_channel_ = nullptr;
+  }
+
   static void OnClientConnected(void* user_data, iree_status_t status) {
     auto* self = static_cast<RemoteClientDeviceFailureTest*>(user_data);
     self->client_connect_status_ = iree_status_code(status);
@@ -274,6 +406,9 @@ class RemoteClientDeviceFailureTest : public ::testing::Test {
   int client_error_count_ = 0;
   iree_status_code_t client_error_status_ = IREE_STATUS_OK;
   std::vector<std::string> callback_order_;
+  FailingCommitEndpoint failing_commit_endpoint_;
+  iree_net_queue_channel_t* injected_queue_channel_ = nullptr;
+  iree_net_queue_channel_t* production_queue_channel_ = nullptr;
 };
 
 TEST_F(RemoteClientDeviceFailureTest,
@@ -392,6 +527,74 @@ TEST_F(RemoteClientDeviceFailureTest,
   EXPECT_TRUE(iree_status_is_aborted(status));
   iree_status_free(status);
 
+  iree_hal_semaphore_release(semaphore);
+}
+
+TEST_F(RemoteClientDeviceFailureTest,
+       QueueAdmissionFailureDoesNotConsumeEpoch) {
+  CreateAndConnectClient();
+  iree_hal_remote_client_device_t* device =
+      iree_hal_remote_client_device_cast(client_device_);
+  uint64_t next_epoch_before = static_cast<uint64_t>(iree_atomic_load(
+      &device->next_submission_epoch, iree_memory_order_relaxed));
+  auto* queue_channel = reinterpret_cast<iree_net_queue_channel_t*>(
+      iree_atomic_load(&device->queue_channel, iree_memory_order_acquire));
+  iree_net_queue_channel_detach(queue_channel);
+
+  iree_status_t status = iree_hal_device_queue_barrier(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), iree_hal_semaphore_list_empty(),
+      IREE_HAL_EXECUTE_FLAG_NONE);
+  EXPECT_TRUE(iree_status_is_failed_precondition(status));
+  iree_status_free(status);
+
+  uint64_t next_epoch_after = static_cast<uint64_t>(iree_atomic_load(
+      &device->next_submission_epoch, iree_memory_order_relaxed));
+  EXPECT_EQ(next_epoch_after, next_epoch_before);
+  EXPECT_EQ(iree_hal_remote_client_device_state(client_device_),
+            IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED);
+  EXPECT_EQ(client_error_count_, 0);
+}
+
+TEST_F(RemoteClientDeviceFailureTest,
+       QueueCommitFailureTerminalizesAssignedEpoch) {
+  CreateAndConnectClient();
+  InstallFailingCommitQueueChannel();
+  iree_hal_remote_client_device_t* device =
+      iree_hal_remote_client_device_cast(client_device_);
+  uint64_t next_epoch_before = static_cast<uint64_t>(iree_atomic_load(
+      &device->next_submission_epoch, iree_memory_order_relaxed));
+
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  iree_hal_semaphore_t* signal_semaphores[] = {semaphore};
+  uint64_t signal_values[] = {1};
+  iree_hal_semaphore_list_t signal_list = {
+      /*.count=*/IREE_ARRAYSIZE(signal_semaphores),
+      /*.semaphores=*/signal_semaphores,
+      /*.payload_values=*/signal_values,
+  };
+
+  iree_status_t submit_status = iree_hal_device_queue_barrier(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), signal_list, IREE_HAL_EXECUTE_FLAG_NONE);
+  EXPECT_TRUE(iree_status_is_unavailable(submit_status));
+  iree_status_free(submit_status);
+
+  uint64_t next_epoch_after = static_cast<uint64_t>(iree_atomic_load(
+      &device->next_submission_epoch, iree_memory_order_relaxed));
+  EXPECT_EQ(next_epoch_after, next_epoch_before + 1);
+  EXPECT_EQ(iree_hal_remote_client_device_state(client_device_),
+            IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
+  EXPECT_EQ(client_error_count_, 1);
+  EXPECT_EQ(client_error_status_, IREE_STATUS_UNAVAILABLE);
+
+  iree_status_t wait_status = iree_hal_semaphore_wait(
+      semaphore, 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+  EXPECT_TRUE(iree_status_is_unavailable(wait_status));
+  iree_status_free(wait_status);
   iree_hal_semaphore_release(semaphore);
 }
 

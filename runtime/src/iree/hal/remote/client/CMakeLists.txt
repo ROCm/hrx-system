@@ -142,10 +142,13 @@ iree_cc_test(
     iree::hal::remote::protocol::common
     iree::hal::remote::protocol::control
     iree::hal::remote::server
+    iree::hal::remote::util::queue_header_pool
     iree::hal::remote::util::recv_pool
     iree::hal::testing::mock_device
     iree::net::carrier::loopback::factory
     iree::net::channel::bulk::transfer_table
+    iree::net::channel::queue::queue_channel
+    iree::net::channel::util::frame_sender
     iree::net::channel::util::sequence_window
     iree::net::session
     iree::testing::gtest

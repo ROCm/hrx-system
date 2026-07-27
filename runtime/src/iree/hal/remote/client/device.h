@@ -118,10 +118,10 @@ typedef struct iree_hal_remote_client_device_t {
   // frontiers for queue submissions. Valid after on_session_ready.
   iree_async_axis_t remote_queue_axis;
 
-  // Monotonically increasing epoch counter for signal frontiers.
-  // Each queue submission assigns the next epoch on remote_queue_axis.
-  // Atomic because immediate sends (app thread) and deferred sends
-  // (proactor thread, via gate timepoint callbacks) can race.
+  // Next epoch assigned to a transport-admitted queue command. Assignment
+  // occurs after payload construction and before signal waiter publication.
+  // Any later publication failure terminalizes |remote_queue_axis|. Atomic
+  // because application and deferred proactor submissions may race.
   iree_atomic_int64_t next_submission_epoch;
 
   // Monotonically increasing generation counter for provisional resource IDs.
