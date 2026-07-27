@@ -1915,37 +1915,57 @@ static iree_status_t iree_async_proactor_iocp_poll(
       iree_async_proactor_run_progress(base_proactor);
   completed_count += progress_count;
 
-  // Phase 3: Calculate effective timeout considering timer deadlines.
-  DWORD timeout_ms =
-      iree_async_proactor_iocp_calculate_timeout_ms(proactor, timeout);
-  if (completed_count > 0 || base_proactor->progress_list) timeout_ms = 0;
+  // Freeze relative timeouts before a possible multi-wait loop.
+  iree_convert_timeout_to_absolute(&timeout);
 
-  // Phase 4: Dequeue completions from the IOCP port.
+  // Phases 3-5: wait until an IOCP entry, timer, or user deadline completes.
+  // GetQueuedCompletionStatusEx may report WAIT_TIMEOUT slightly before the
+  // nanosecond deadline used to derive its millisecond timeout. Treat that as
+  // an internal wake and continue waiting instead of exposing a premature
+  // DEADLINE_EXCEEDED status to the caller.
   OVERLAPPED_ENTRY entries[IREE_ASYNC_IOCP_MAX_COMPLETIONS_PER_POLL];
   ULONG entry_count = 0;
   iree_status_t gqcs_status = iree_ok_status();
-  BOOL success =
-      GetQueuedCompletionStatusEx((HANDLE)proactor->completion_port, entries,
-                                  IREE_ASYNC_IOCP_MAX_COMPLETIONS_PER_POLL,
-                                  &entry_count, timeout_ms, FALSE);
+  bool retry_wait = false;
+  do {
+    // Phase 3: Calculate the effective timeout considering timer deadlines.
+    DWORD timeout_ms =
+        iree_async_proactor_iocp_calculate_timeout_ms(proactor, timeout);
+    const bool force_nonblocking =
+        completed_count > 0 || base_proactor->progress_list;
+    if (force_nonblocking) timeout_ms = 0;
 
-  if (!success) {
-    DWORD error = GetLastError();
-    if (error != WAIT_TIMEOUT) {
-      // Stash the error but continue through remaining phases so that timer
-      // expirations, notification waits, and re-drains still run. The error
-      // is returned after all phases complete.
-      gqcs_status =
-          iree_make_status(IREE_STATUS_INTERNAL,
-                           "GetQueuedCompletionStatusEx failed (error %lu)",
-                           (unsigned long)error);
+    // Phase 4: Dequeue completions from the IOCP port.
+    entry_count = 0;
+    BOOL success =
+        GetQueuedCompletionStatusEx((HANDLE)proactor->completion_port, entries,
+                                    IREE_ASYNC_IOCP_MAX_COMPLETIONS_PER_POLL,
+                                    &entry_count, timeout_ms, FALSE);
+    bool wait_timed_out = false;
+    if (!success) {
+      DWORD error = GetLastError();
+      wait_timed_out = error == WAIT_TIMEOUT;
+      if (!wait_timed_out) {
+        // Stash the error but continue through remaining phases so that timer
+        // expirations, notification waits, and re-drains still run. The error
+        // is returned after all phases complete.
+        gqcs_status =
+            iree_make_status(IREE_STATUS_INTERNAL,
+                             "GetQueuedCompletionStatusEx failed (error %lu)",
+                             (unsigned long)error);
+      }
     }
-    // WAIT_TIMEOUT: no completions, fall through to timer processing.
-  }
 
-  // Phase 5: Process expired timers (before GQCS completions for consistent
-  // ordering — timer callbacks fire before I/O callbacks in the same poll).
-  completed_count += iree_async_proactor_iocp_process_expired_timers(proactor);
+    // Phase 5: Process expired timers (before GQCS completions for consistent
+    // ordering — timer callbacks fire before I/O callbacks in the same poll).
+    completed_count +=
+        iree_async_proactor_iocp_process_expired_timers(proactor);
+
+    retry_wait = wait_timed_out && entry_count == 0 && completed_count == 0 &&
+                 !force_nonblocking &&
+                 (iree_timeout_is_infinite(timeout) ||
+                  iree_time_now() < iree_timeout_as_deadline_ns(timeout));
+  } while (retry_wait);
 
   // Phase 6: Process GQCS completions.
   for (ULONG i = 0; i < entry_count; ++i) {

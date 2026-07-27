@@ -140,6 +140,16 @@ TEST(FilePathTest, DirnameDoubleSlash) {
   EXPECT_SV_EQ(iree_file_path_dirname(_SV("foo//")), _SV("foo/"));
 }
 
+#if defined(IREE_PLATFORM_WINDOWS)
+TEST(FilePathTest, DirnameWindowsNative) {
+  EXPECT_SV_EQ(iree_file_path_dirname(_SV("\\")), _SV("\\"));
+  EXPECT_SV_EQ(iree_file_path_dirname(_SV("\\foo")), _SV("\\"));
+  EXPECT_SV_EQ(iree_file_path_dirname(_SV("foo\\bar")), _SV("foo"));
+  EXPECT_SV_EQ(iree_file_path_dirname(_SV("C:\\foo")), _SV("C:\\"));
+  EXPECT_SV_EQ(iree_file_path_dirname(_SV("C:\\foo\\bar")), _SV("C:\\foo"));
+}
+#endif  // IREE_PLATFORM_WINDOWS
+
 TEST(FilePathTest, BasenameEmpty) {
   EXPECT_SV_EQ(iree_file_path_basename(_SV("")), _SV(""));
 }
@@ -162,6 +172,16 @@ TEST(FilePathTest, BasenameRelative) {
 TEST(FilePathTest, BasenameDoubleSlash) {
   EXPECT_SV_EQ(iree_file_path_basename(_SV("foo//")), _SV(""));
 }
+
+#if defined(IREE_PLATFORM_WINDOWS)
+TEST(FilePathTest, BasenameWindowsNative) {
+  EXPECT_SV_EQ(iree_file_path_basename(_SV("\\")), _SV(""));
+  EXPECT_SV_EQ(iree_file_path_basename(_SV("\\foo")), _SV("foo"));
+  EXPECT_SV_EQ(iree_file_path_basename(_SV("foo\\bar")), _SV("bar"));
+  EXPECT_SV_EQ(iree_file_path_basename(_SV("C:\\foo")), _SV("foo"));
+  EXPECT_SV_EQ(iree_file_path_basename(_SV("C:\\foo\\bar")), _SV("bar"));
+}
+#endif  // IREE_PLATFORM_WINDOWS
 
 TEST(FilePathTest, Stem) {
   EXPECT_SV_EQ(iree_file_path_stem(_SV("")), _SV(""));
