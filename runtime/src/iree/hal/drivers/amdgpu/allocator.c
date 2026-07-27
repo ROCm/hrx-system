@@ -16,6 +16,8 @@
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/system.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
+#include "iree/hal/drivers/amdgpu/util/vmem.h"
+#include "iree/hal/drivers/amdgpu/virtual_memory.h"
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_allocator_t
@@ -71,6 +73,9 @@ typedef struct iree_hal_amdgpu_allocator_t {
 
   // Cached HSA memory pool properties used for placement and heap queries.
   iree_hal_amdgpu_allocator_memory_pools_t memory_pools;
+
+  // Generic VMM ownership and mapping state for this allocator.
+  iree_hal_amdgpu_virtual_memory_state_t* virtual_memory;
 
   IREE_STATISTICS(
       // Aggregate allocation statistics reported through the HAL allocator API.
@@ -479,6 +484,7 @@ static iree_status_t iree_hal_amdgpu_allocator_query_device_pointer_range(
 
 static bool iree_hal_amdgpu_allocator_resolve_placement(
     iree_hal_amdgpu_allocator_t* allocator, iree_hal_buffer_params_t* params,
+    bool allow_vmm_host_access,
     iree_hal_amdgpu_allocator_placement_t* out_placement) {
   memset(out_placement, 0, sizeof(*out_placement));
 
@@ -510,6 +516,12 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
   const bool device_fine_direct_host_access =
       allocator->memory_pools.device_fine[device_ordinal].memory_pool.handle &&
       physical_device && physical_device->memory_system.svm.direct_host_access;
+  // VMM physical handles have no host pointer until access is granted for the
+  // host agent. They can therefore use a fine-grained device pool even when
+  // ordinary buffers cannot promise direct host mapping.
+  const bool device_fine_vmm_host_access =
+      allow_vmm_host_access &&
+      allocator->memory_pools.device_fine[device_ordinal].memory_pool.handle;
 
   const iree_hal_amdgpu_allocator_memory_pool_t* memory_pool = NULL;
   iree_hal_memory_type_t memory_type = 0;
@@ -529,13 +541,15 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
                   IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
                   IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
   } else if (requires_host_access && requires_device_local) {
-    if (!device_fine_direct_host_access) return false;
+    if (!device_fine_direct_host_access && !device_fine_vmm_host_access) {
+      return false;
+    }
     memory_pool = &allocator->memory_pools.device_fine[device_ordinal];
     memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
                   IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
                   IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
   } else if (requires_host_access && prefers_device_local &&
-             device_fine_direct_host_access) {
+             (device_fine_direct_host_access || device_fine_vmm_host_access)) {
     memory_pool = &allocator->memory_pools.device_fine[device_ordinal];
     memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
                   IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
@@ -582,6 +596,67 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
   out_placement->physical_device_ordinal = (uint32_t)device_ordinal;
   out_placement->memory_type = memory_type;
   return true;
+}
+
+static bool iree_hal_amdgpu_allocator_supports_virtual_memory_internal(
+    const iree_hal_amdgpu_allocator_t* allocator) {
+  return allocator->virtual_memory != NULL &&
+         !iree_hal_amdgpu_asan_state_is_enabled(
+             &allocator->logical_device->asan);
+}
+
+static iree_status_t iree_hal_amdgpu_allocator_require_virtual_memory(
+    const iree_hal_amdgpu_allocator_t* allocator) {
+  if (iree_hal_amdgpu_allocator_supports_virtual_memory_internal(allocator)) {
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_UNAVAILABLE,
+      "AMDGPU virtual memory is unavailable while address sanitization is "
+      "enabled");
+}
+
+static iree_hal_buffer_params_t iree_hal_amdgpu_allocator_virtual_buffer_params(
+    iree_hal_queue_affinity_t queue_affinity) {
+  return (iree_hal_buffer_params_t){
+      .type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE |
+              IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH,
+      .queue_affinity = queue_affinity,
+  };
+}
+
+static iree_status_t iree_hal_amdgpu_allocator_resolve_virtual_memory_placement(
+    iree_hal_amdgpu_allocator_t* allocator, iree_hal_buffer_params_t* params,
+    iree_hal_amdgpu_virtual_memory_placement_t* out_placement) {
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_require_virtual_memory(allocator));
+  iree_hal_buffer_params_canonicalize(params);
+
+  iree_hal_amdgpu_allocator_placement_t memory_placement;
+  if (!iree_hal_amdgpu_allocator_resolve_placement(
+          allocator, params, /*allow_vmm_host_access=*/true,
+          &memory_placement)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU virtual-memory parameters cannot be placed on this device");
+  }
+
+  iree_device_size_t allocation_granule = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_vmem_query_alloc_granule(
+      allocator->libhsa, memory_placement.memory_pool->memory_pool,
+      &allocation_granule));
+  *out_placement = (iree_hal_amdgpu_virtual_memory_placement_t){
+      .memory_pool = memory_placement.memory_pool->memory_pool,
+      .device = (iree_hal_device_t*)allocator->logical_device,
+      .queue_affinity = params->queue_affinity,
+      .memory_type = memory_placement.memory_type,
+      .buffer_usage = params->usage,
+      .allocation_granule = allocation_granule,
+      .max_allocation_size = memory_placement.memory_pool->max_allocation_size,
+  };
+  return iree_ok_status();
 }
 
 iree_status_t iree_hal_amdgpu_allocator_create(
@@ -643,6 +718,11 @@ iree_status_t iree_hal_amdgpu_allocator_create(
   }
 
   if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_virtual_memory_state_create(
+        libhsa, topology, host_allocator, &allocator->virtual_memory);
+  }
+
+  if (iree_status_is_ok(status)) {
     *out_allocator = (iree_hal_allocator_t*)allocator;
   } else {
     iree_hal_allocator_release((iree_hal_allocator_t*)allocator);
@@ -657,6 +737,7 @@ static void iree_hal_amdgpu_allocator_destroy(
       iree_hal_amdgpu_allocator_cast(base_allocator);
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_hal_amdgpu_virtual_memory_state_destroy(allocator->virtual_memory);
   iree_allocator_free(allocator->host_allocator, allocator);
 
   IREE_TRACE_ZONE_END(z0);
@@ -806,8 +887,8 @@ iree_hal_amdgpu_allocator_query_buffer_compatibility(
       iree_hal_amdgpu_allocator_cast(base_allocator);
 
   iree_hal_amdgpu_allocator_placement_t placement;
-  if (!iree_hal_amdgpu_allocator_resolve_placement(allocator, params,
-                                                   &placement)) {
+  if (!iree_hal_amdgpu_allocator_resolve_placement(
+          allocator, params, /*allow_vmm_host_access=*/false, &placement)) {
     return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
   }
   if (!iree_device_size_is_valid_alignment(params->min_alignment)) {
@@ -1126,8 +1207,9 @@ static iree_status_t iree_hal_amdgpu_allocator_allocate_buffer(
   const iree_hal_queue_affinity_t requested_queue_affinity =
       params->queue_affinity;
   iree_hal_amdgpu_allocator_placement_t memory_placement;
-  if (!iree_hal_amdgpu_allocator_resolve_placement(allocator, &compat_params,
-                                                   &memory_placement)) {
+  if (!iree_hal_amdgpu_allocator_resolve_placement(
+          allocator, &compat_params, /*allow_vmm_host_access=*/false,
+          &memory_placement)) {
 #if IREE_STATUS_MODE
     iree_bitfield_string_temp_t temp0, temp1;
     iree_string_view_t memory_type_str =
@@ -1415,8 +1497,9 @@ static iree_status_t iree_hal_amdgpu_allocator_import_device_allocation(
 
   iree_hal_buffer_params_t compat_params = *params;
   iree_hal_amdgpu_allocator_placement_t memory_placement;
-  if (!iree_hal_amdgpu_allocator_resolve_placement(allocator, &compat_params,
-                                                   &memory_placement)) {
+  if (!iree_hal_amdgpu_allocator_resolve_placement(
+          allocator, &compat_params, /*allow_vmm_host_access=*/false,
+          &memory_placement)) {
 #if IREE_STATUS_MODE
     iree_bitfield_string_temp_t temp0, temp1;
     iree_string_view_t memory_type_str =
@@ -1754,7 +1837,9 @@ static iree_status_t iree_hal_amdgpu_allocator_export_buffer(
 
 static bool iree_hal_amdgpu_allocator_supports_virtual_memory(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator) {
-  return false;
+  iree_hal_amdgpu_allocator_t* allocator =
+      iree_hal_amdgpu_allocator_cast(base_allocator);
+  return iree_hal_amdgpu_allocator_supports_virtual_memory_internal(allocator);
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_query_granularity(
@@ -1762,26 +1847,48 @@ static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_query_granularity(
     iree_hal_buffer_params_t params,
     iree_device_size_t* IREE_RESTRICT out_minimum_page_size,
     iree_device_size_t* IREE_RESTRICT out_recommended_page_size) {
+  IREE_ASSERT_ARGUMENT(out_minimum_page_size);
+  IREE_ASSERT_ARGUMENT(out_recommended_page_size);
   *out_minimum_page_size = 0;
   *out_recommended_page_size = 0;
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "AMDGPU allocator does not support virtual memory");
+  iree_hal_amdgpu_allocator_t* allocator =
+      iree_hal_amdgpu_allocator_cast(base_allocator);
+  iree_hal_amdgpu_virtual_memory_placement_t placement;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_resolve_virtual_memory_placement(
+          allocator, &params, &placement));
+  *out_minimum_page_size = placement.allocation_granule;
+  *out_recommended_page_size = placement.allocation_granule;
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_reserve(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
     iree_hal_queue_affinity_t queue_affinity, iree_device_size_t size,
     iree_hal_buffer_t** IREE_RESTRICT out_virtual_buffer) {
+  IREE_ASSERT_ARGUMENT(out_virtual_buffer);
   *out_virtual_buffer = NULL;
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "AMDGPU allocator does not support virtual memory");
+  iree_hal_amdgpu_allocator_t* allocator =
+      iree_hal_amdgpu_allocator_cast(base_allocator);
+  iree_hal_buffer_params_t params =
+      iree_hal_amdgpu_allocator_virtual_buffer_params(queue_affinity);
+  iree_hal_amdgpu_virtual_memory_placement_t placement;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_resolve_virtual_memory_placement(
+          allocator, &params, &placement));
+  return iree_hal_amdgpu_virtual_memory_reserve(
+      allocator->virtual_memory, placement, size, out_virtual_buffer);
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_release(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer) {
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "AMDGPU allocator does not support virtual memory");
+  iree_hal_amdgpu_allocator_t* allocator =
+      iree_hal_amdgpu_allocator_cast(base_allocator);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_require_virtual_memory(allocator));
+  return iree_hal_amdgpu_virtual_memory_release(allocator->virtual_memory,
+                                                virtual_buffer);
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_physical_memory_allocate(
@@ -1789,16 +1896,28 @@ static iree_status_t iree_hal_amdgpu_allocator_physical_memory_allocate(
     iree_hal_buffer_params_t params, iree_device_size_t size,
     iree_allocator_t host_allocator,
     iree_hal_physical_memory_t** IREE_RESTRICT out_physical_memory) {
+  IREE_ASSERT_ARGUMENT(out_physical_memory);
   *out_physical_memory = NULL;
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "AMDGPU allocator does not support virtual memory");
+  iree_hal_amdgpu_allocator_t* allocator =
+      iree_hal_amdgpu_allocator_cast(base_allocator);
+  iree_hal_amdgpu_virtual_memory_placement_t placement;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_resolve_virtual_memory_placement(
+          allocator, &params, &placement));
+  return iree_hal_amdgpu_physical_memory_allocate(
+      allocator->virtual_memory, placement, size, host_allocator,
+      out_physical_memory);
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_physical_memory_free(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
     iree_hal_physical_memory_t* IREE_RESTRICT physical_memory) {
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "AMDGPU allocator does not support virtual memory");
+  iree_hal_amdgpu_allocator_t* allocator =
+      iree_hal_amdgpu_allocator_cast(base_allocator);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_require_virtual_memory(allocator));
+  return iree_hal_amdgpu_physical_memory_free(allocator->virtual_memory,
+                                              physical_memory);
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_map(
@@ -1807,16 +1926,25 @@ static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_map(
     iree_device_size_t virtual_offset,
     iree_hal_physical_memory_t* IREE_RESTRICT physical_memory,
     iree_device_size_t physical_offset, iree_device_size_t size) {
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "AMDGPU allocator does not support virtual memory");
+  iree_hal_amdgpu_allocator_t* allocator =
+      iree_hal_amdgpu_allocator_cast(base_allocator);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_require_virtual_memory(allocator));
+  return iree_hal_amdgpu_virtual_memory_map(
+      allocator->virtual_memory, virtual_buffer, virtual_offset,
+      physical_memory, physical_offset, size);
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_unmap(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size) {
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "AMDGPU allocator does not support virtual memory");
+  iree_hal_amdgpu_allocator_t* allocator =
+      iree_hal_amdgpu_allocator_cast(base_allocator);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_require_virtual_memory(allocator));
+  return iree_hal_amdgpu_virtual_memory_unmap(
+      allocator->virtual_memory, virtual_buffer, virtual_offset, size);
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_protect(
@@ -1825,8 +1953,13 @@ static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_protect(
     iree_device_size_t virtual_offset, iree_device_size_t size,
     iree_hal_queue_affinity_t queue_affinity,
     iree_hal_memory_protection_t protection) {
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "AMDGPU allocator does not support virtual memory");
+  iree_hal_amdgpu_allocator_t* allocator =
+      iree_hal_amdgpu_allocator_cast(base_allocator);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_require_virtual_memory(allocator));
+  return iree_hal_amdgpu_virtual_memory_protect(
+      allocator->virtual_memory, virtual_buffer, virtual_offset, size,
+      queue_affinity, protection);
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_advise(
@@ -1834,8 +1967,13 @@ static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_advise(
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
     iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_advice_t advice) {
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "AMDGPU allocator does not support virtual memory");
+  iree_hal_amdgpu_allocator_t* allocator =
+      iree_hal_amdgpu_allocator_cast(base_allocator);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_require_virtual_memory(allocator));
+  return iree_hal_amdgpu_virtual_memory_advise(allocator->virtual_memory,
+                                               virtual_buffer, virtual_offset,
+                                               size, queue_affinity, advice);
 }
 
 static const iree_hal_allocator_vtable_t iree_hal_amdgpu_allocator_vtable = {
