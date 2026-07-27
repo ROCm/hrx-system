@@ -790,21 +790,19 @@ static iree_status_t loom_low_allocation_insert_reloads_for_uses(
 }
 
 static iree_status_t loom_low_allocation_materialize_block_arg_edges(
-    loom_module_t* module, const loom_op_t* function_op,
+    loom_module_t* module, const loom_low_allocation_table_t* table,
     const loom_low_allocation_spill_plan_t* plan,
     loom_value_id_t storage_value_id, loom_block_t* block, uint16_t arg_index,
     uint32_t reload_count, iree_arena_allocator_t* arena,
     loom_low_materialized_traffic_t* out_store_traffic) {
   *out_store_traffic = (loom_low_materialized_traffic_t){0};
-  loom_region_t* body = loom_low_function_body((loom_op_t*)function_op);
-  if (!body) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "low function has no body");
-  }
 
   loom_low_materialized_traffic_t store_traffic = {0};
-  loom_block_t* predecessor_block = NULL;
-  loom_region_for_each_block(body, predecessor_block) {
+  const loom_cfg_block_index_span_t predecessors = loom_cfg_graph_predecessors(
+      &table->cfg_graph, loom_block_region_index(block));
+  for (iree_host_size_t i = 0; i < predecessors.count; ++i) {
+    loom_block_t* predecessor_block =
+        (loom_block_t*)table->cfg_graph.blocks[predecessors.values[i]].block;
     loom_op_t* branch_op =
         (loom_op_t*)loom_block_const_last_op(predecessor_block);
     if (!branch_op || !loom_low_br_isa(branch_op) ||
@@ -927,9 +925,8 @@ static iree_status_t loom_low_allocation_materialize_one_spill_plan(
   if (is_block_arg && !block_arg_is_entry) {
     loom_low_materialized_traffic_t inserted_store_traffic = {0};
     IREE_RETURN_IF_ERROR(loom_low_allocation_materialize_block_arg_edges(
-        module, table->function_op, plan, storage_value_id, block_arg_block,
-        block_arg_index, inserted_reload_traffic.count, arena,
-        &inserted_store_traffic));
+        module, table, plan, storage_value_id, block_arg_block, block_arg_index,
+        inserted_reload_traffic.count, arena, &inserted_store_traffic));
     if (inserted_store_traffic.count > UINT32_MAX - result->spill_count) {
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "materialized spill count overflow");

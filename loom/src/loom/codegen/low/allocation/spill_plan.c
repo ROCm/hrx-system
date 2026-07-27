@@ -198,8 +198,8 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
 }
 
 static iree_status_t loom_low_allocation_spill_plan_value_store_count(
-    const loom_module_t* module, loom_region_t* body, loom_value_id_t value_id,
-    const loom_value_t* value, uint32_t reload_count,
+    const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
+    loom_value_id_t value_id, const loom_value_t* value, uint32_t reload_count,
     uint32_t* out_store_count) {
   *out_store_count = 0;
   if (reload_count == 0) {
@@ -212,15 +212,19 @@ static iree_status_t loom_low_allocation_spill_plan_value_store_count(
 
   const loom_block_t* block = loom_value_def_block(value);
   const uint16_t arg_index = loom_value_def_index(value);
-  if (block == loom_region_entry_block(body)) {
+  if (block == loom_region_const_entry_block(cfg_graph->region)) {
     *out_store_count = 1;
     return iree_ok_status();
   }
 
   uint32_t store_count = 0;
-  loom_block_t* predecessor_block = NULL;
-  loom_region_for_each_block(body, predecessor_block) {
-    const loom_op_t* terminator = loom_block_const_last_op(predecessor_block);
+  const loom_cfg_edge_index_span_t predecessor_edges =
+      loom_cfg_graph_predecessor_edges(cfg_graph,
+                                       loom_block_region_index(block));
+  for (iree_host_size_t i = 0; i < predecessor_edges.count; ++i) {
+    const loom_cfg_edge_info_t* edge =
+        loom_cfg_graph_edge(cfg_graph, predecessor_edges.values[i]);
+    const loom_op_t* terminator = edge->terminator;
     if (!terminator || !loom_low_br_isa(terminator) ||
         loom_low_br_dest(terminator) != block) {
       continue;
@@ -258,12 +262,12 @@ static iree_status_t loom_low_allocation_spill_plan_value_store_count(
 }
 
 iree_status_t loom_low_allocation_spill_plan_traffic(
-    const loom_module_t* module, loom_region_t* body,
+    const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
     const loom_low_allocation_assignment_t* assignment,
     uint16_t alloc_unit_bits,
     loom_low_allocation_spill_plan_traffic_t* out_traffic) {
   IREE_ASSERT_ARGUMENT(module);
-  IREE_ASSERT_ARGUMENT(body);
+  IREE_ASSERT_ARGUMENT(cfg_graph);
   IREE_ASSERT_ARGUMENT(assignment);
   IREE_ASSERT_ARGUMENT(out_traffic);
   *out_traffic = (loom_low_allocation_spill_plan_traffic_t){0};
@@ -281,10 +285,11 @@ iree_status_t loom_low_allocation_spill_plan_traffic(
   uint32_t reload_count = 0;
   uint64_t reload_bytes = 0;
   loom_low_allocation_spill_plan_value_reload_traffic(
-      assignment, byte_size, value, body, &reload_count, &reload_bytes);
+      assignment, byte_size, value, cfg_graph->region, &reload_count,
+      &reload_bytes);
   uint32_t store_count = 0;
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_value_store_count(
-      module, body, value_id, value, reload_count, &store_count));
+      module, cfg_graph, value_id, value, reload_count, &store_count));
   *out_traffic = (loom_low_allocation_spill_plan_traffic_t){
       .store_count = store_count,
       .store_bytes = (uint64_t)store_count * byte_size,
@@ -295,14 +300,14 @@ iree_status_t loom_low_allocation_spill_plan_traffic(
 }
 
 iree_status_t loom_low_allocation_spill_plan_record(
-    const loom_module_t* module, loom_region_t* body,
+    const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
     const loom_low_allocation_assignment_t* assignment,
     uint32_t assignment_index, uint16_t alloc_unit_bits,
     loom_low_spill_slot_space_t spill_slot_space,
     loom_low_allocation_spill_plan_t* spill_plans,
     iree_host_size_t* inout_spill_plan_count) {
   IREE_ASSERT_ARGUMENT(module);
-  IREE_ASSERT_ARGUMENT(body);
+  IREE_ASSERT_ARGUMENT(cfg_graph);
   IREE_ASSERT_ARGUMENT(assignment);
   IREE_ASSERT_ARGUMENT(spill_plans);
   IREE_ASSERT_ARGUMENT(inout_spill_plan_count);
@@ -318,7 +323,7 @@ iree_status_t loom_low_allocation_spill_plan_record(
   }
   loom_low_allocation_spill_plan_traffic_t traffic = {0};
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_traffic(
-      module, body, assignment, alloc_unit_bits, &traffic));
+      module, cfg_graph, assignment, alloc_unit_bits, &traffic));
   spill_plans[(*inout_spill_plan_count)++] = (loom_low_allocation_spill_plan_t){
       .value_id = assignment->value_id,
       .assignment_index = assignment_index,

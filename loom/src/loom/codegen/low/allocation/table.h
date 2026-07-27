@@ -18,6 +18,7 @@
 #include "loom/codegen/low/storage_lease.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/ir.h"
+#include "loom/util/cfg_graph.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -368,6 +369,10 @@ typedef struct loom_low_allocation_table_t {
   const loom_low_allocation_resolved_reserved_range_t* reserved_ranges;
   // Number of records in |reserved_ranges|.
   iree_host_size_t reserved_range_count;
+  // Function CFG used to construct this allocation. Its block adjacency
+  // remains valid while spill materialization rewrites branch payloads without
+  // changing topology; edge terminator pointers remain snapshot facts.
+  loom_cfg_graph_t cfg_graph;
 } loom_low_allocation_table_t;
 
 // Active allocation-owned lease over the module value-ordinal scratch map.

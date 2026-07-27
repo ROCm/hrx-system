@@ -31,8 +31,8 @@ extern "C" {
 typedef struct loom_low_allocation_search_context_t {
   // Module containing the allocated low function.
   const loom_module_t* module;
-  // Low function body being allocated.
-  loom_region_t* body;
+  // Function control-flow graph used to construct |liveness|.
+  const loom_cfg_graph_t* cfg_graph;
   // Descriptor set selected for the low function.
   const loom_low_descriptor_set_t* descriptor_set;
   // Liveness facts for the allocated low function body.
