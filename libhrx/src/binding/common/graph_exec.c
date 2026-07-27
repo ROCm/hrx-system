@@ -2231,7 +2231,14 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     }
   }
 
-  if (iree_status_is_ok(status) && exec->semaphore_count > 0) {
+  // The base values advance even when a block failed to submit. Blocks that did
+  // submit have already signaled their new values, and a timeline value may be
+  // signaled only once; a launch that rewound the bases would make the next
+  // launch signal those values a second time and fail the semaphores for good.
+  // Entries for blocks that never submitted are unchanged, and the block that
+  // waits on such an entry is rebased by the same amount as the block that
+  // signals it, so skipping a value is invisible to both.
+  if (exec->semaphore_count > 0) {
     memcpy(exec->semaphore_base_values, new_base_values,
            exec->semaphore_count * sizeof(uint64_t));
   }
