@@ -204,8 +204,8 @@ low.func.def target(@test_target) @stale_slice_plan(%wide: reg<test.i32 x4>) -> 
   options.has_supported_storage_spaces = true;
   options.supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_PRIVATE;
   options.record_materialized_spills = true;
-  IREE_ASSERT_OK(loom_low_allocation_materialize_spills(
-      module.get(), &table, &options, &arena, &result));
+  IREE_ASSERT_OK(loom_low_allocation_materialize_spills(&table, &options,
+                                                        &arena, &result));
 
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_EQ(result.storage_count, 2u);
@@ -299,8 +299,8 @@ low.func.def target(@test_target) @split_storage_declarations(
   loom_low_allocation_materialization_options_t options = {};
   options.has_supported_storage_spaces = true;
   options.supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_PRIVATE;
-  IREE_ASSERT_OK(loom_low_allocation_materialize_spills(
-      module.get(), &table, &options, &arena, &result));
+  IREE_ASSERT_OK(loom_low_allocation_materialize_spills(&table, &options,
+                                                        &arena, &result));
 
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_EQ(result.storage_count, 1u);
