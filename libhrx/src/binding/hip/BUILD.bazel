@@ -71,6 +71,20 @@ hrx_cc_library(
 )
 
 hrx_cc_library(
+    name = "blocking_printf_provider",
+    srcs = ["blocking_printf_provider.c"],
+    hdrs = ["blocking_printf_provider.h"],
+    includes = ["../.."],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":blocking_printf_protocol",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu",
+    ],
+)
+
+hrx_cc_library(
     name = "launch_params",
     srcs = ["launch_params.c"],
     hdrs = [
@@ -115,6 +129,7 @@ hrx_cc_shared_library(
     ],
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
+        ":blocking_printf_provider",
         ":launch_params",
         "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
@@ -198,6 +213,18 @@ hrx_cc_test(
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
         ":blocking_printf_protocol",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "blocking_printf_provider_test",
+    srcs = ["blocking_printf_provider_test.cc"],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":blocking_printf_protocol",
+        ":blocking_printf_provider",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
