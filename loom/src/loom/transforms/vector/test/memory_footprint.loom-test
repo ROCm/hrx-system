@@ -976,6 +976,108 @@ func.def @expand_compress_tail_uses_upper_bound(%buffer: buffer, %base: offset, 
 
 // ====
 
+func.def @masked_tail_uses_active_storage_root_end() {
+  %byte_length = index.constant 40 : offset
+  %base = index.constant 0 : offset
+  %origin = index.constant 8 : index
+  %limit = index.constant 10 : index
+  %step = index.constant 1 : index
+  %old = vector.constant 0.0 : vector<4xf32>
+  %scratch = buffer.alloca %byte_length {base_alignment = 16, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32, #dense>
+  %mask = vector.mask.range [%origin to %limit step %step] : index -> vector<4xi1>
+  %loaded = vector.load.mask %view[%origin], %mask, %old : view<16xf32, #dense>, vector<4xi1>, vector<4xf32>
+  test.use %loaded : vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @masked_tail_rejects_active_storage_root_overflow() {
+  %byte_length = index.constant 40 : offset
+  %base = index.constant 0 : offset
+  %origin = index.constant 8 : index
+  %limit = index.constant 11 : index
+  %step = index.constant 1 : index
+  %old = vector.constant 0.0 : vector<4xf32>
+  %scratch = buffer.alloca %byte_length {base_alignment = 16, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32, #dense>
+  %mask = vector.mask.range [%origin to %limit step %step] : index -> vector<4xi1>
+  // ERROR@+1: SUBRANGE/026 {op_name="vector.load.mask", maximum_access_byte_end="44", root_byte_extent="40"}
+  %loaded = vector.load.mask %view[%origin], %mask, %old : view<16xf32, #dense>, vector<4xi1>, vector<4xf32>
+  test.use %loaded : vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @saturated_tail_clamps_to_vector_extent() {
+  %byte_length = index.constant 48 : offset
+  %base = index.constant 0 : offset
+  %origin = index.constant 8 : index
+  %limit = index.constant 100 : index
+  %step = index.constant 1 : index
+  %old = vector.constant 0.0 : vector<4xf32>
+  %scratch = buffer.alloca %byte_length {base_alignment = 16, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<32xf32, #dense>
+  %mask = vector.mask.range [%origin to %limit step %step] : index -> vector<4xi1>
+  %loaded = vector.load.mask %view[%origin], %mask, %old : view<32xf32, #dense>, vector<4xi1>, vector<4xf32>
+  test.use %loaded : vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @dynamic_empty_tail_skips_access(%origin0: index, %limit0: index, %old: vector<4xf32>) {
+  %origin = index.assume %origin0 [range(%origin0, 16, 31)] : index
+  %limit = index.assume %limit0 [range(%limit0, 0, 31)] : index
+  %empty = index.cmp ule, %limit, %origin : index
+  %byte_length = index.constant 40 : offset
+  %base = index.constant 0 : offset
+  %step = index.constant 1 : index
+  %scratch = buffer.alloca %byte_length {base_alignment = 16, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32, #dense>
+  scf.if %empty {
+    %mask = vector.mask.range [%origin to %limit step %step] : index -> vector<4xi1>
+    %loaded = vector.load.mask %view[%origin], %mask, %old : view<16xf32, #dense>, vector<4xi1>, vector<4xf32>
+    test.use %loaded : vector<4xf32>
+  } else {
+  }
+  func.return
+}
+
+// ====
+
+func.def @opaque_mask_requires_full_storage_root_footprint(%mask: vector<4xi1>, %old: vector<4xf32>) {
+  %byte_length = index.constant 40 : offset
+  %base = index.constant 0 : offset
+  %origin = index.constant 8 : index
+  %scratch = buffer.alloca %byte_length {base_alignment = 16, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32, #dense>
+  // ERROR@+1: SUBRANGE/026 {op_name="vector.load.mask", maximum_access_byte_end="48", root_byte_extent="40"}
+  %loaded = vector.load.mask %view[%origin], %mask, %old : view<16xf32, #dense>, vector<4xi1>, vector<4xf32>
+  test.use %loaded : vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @opaque_gather_mask_requires_full_storage_root_footprint(%mask: vector<4xi1>, %old: vector<4xf32>) {
+  %byte_length = index.constant 16 : offset
+  %base = index.constant 4 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %scratch = buffer.alloca %byte_length {base_alignment = 16, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<4xf32, #dense>
+  %offsets = vector.iota %c0 step %c1 : vector<4xindex>
+  // ERROR@+1: SUBRANGE/026 {op_name="vector.gather.mask", maximum_access_byte_end="20", root_byte_extent="16"}
+  %loaded = vector.gather.mask %view[%c0][%offsets], %mask, %old : view<4xf32, #dense>, vector<4xindex>, vector<4xi1>, vector<4xf32>
+  test.use %loaded : vector<4xf32>
+  func.return
+}
+
+// ====
+
 func.def @iota_gather_in_bounds(%buffer: buffer, %base: offset) {
   %layout = encoding.layout.dense : encoding<layout>
   %c0 = index.constant 0 : index
