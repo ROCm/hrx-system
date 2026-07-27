@@ -659,14 +659,21 @@ static iree_status_t loom_low_allocation_insert_reloads_for_uses(
         module, assignment, plan, body, storage_value_id, uses, use_count,
         arena, &slice_reload_plan, &reload_traffic));
   }
+  if (!slice_reload_plan.group_indices_by_use) {
+    for (uint32_t i = 0; i < use_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_low_allocation_insert_full_reload_for_use(
+          module, plan, storage_value_id, uses[i]));
+    }
+    reload_traffic.count = use_count;
+    reload_traffic.bytes = (uint64_t)use_count * plan->byte_size;
+    *out_reload_traffic = reload_traffic;
+    return iree_ok_status();
+  }
+
   for (uint32_t i = 0; i < use_count; ++i) {
-    const uint32_t group_index = slice_reload_plan.group_indices_by_use
-                                     ? slice_reload_plan.group_indices_by_use[i]
-                                     : UINT32_MAX;
+    const uint32_t group_index = slice_reload_plan.group_indices_by_use[i];
     if (group_index != UINT32_MAX) {
       IREE_ASSERT_LT(group_index, slice_reload_plan.group_count);
-    }
-    if (group_index != UINT32_MAX) {
       loom_op_t* slice_op = loom_use_user_op(uses[i]);
       if (slice_reload_plan.groups[group_index].use_full_reload) {
         IREE_RETURN_IF_ERROR(loom_op_set_operand(
