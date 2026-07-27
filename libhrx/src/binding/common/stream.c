@@ -783,20 +783,40 @@ iree_status_t iree_hal_streaming_stream_wait_event(
   // Reserve the next stream timeline value and submit a barrier that completes
   // only after the event is signaled. The value is submitted, not completed;
   // query/synchronize advance completed_value after observing the semaphore.
-  uint64_t signal_value = stream->pending_value + 1;
+  uint64_t wait_value = stream->pending_value;
+  uint64_t signal_value = wait_value + 1;
 
+  // The barrier waits on the point the event was recorded at and on everything
+  // already on this stream. Both waits are needed: dropping the stream wait
+  // would let this barrier signal the next stream value before the value below
+  // it, which both breaks the ordering every later operation on the stream
+  // relies on and signals the stream timeline out of order. The stream wait is
+  // dropped when the stream has never submitted, and the event wait when the
+  // event has never had a record submitted, as neither has a point to wait for.
   // The recorded point is copied out under the event's own mutex; reading the
   // event's fields in place would read them under this stream's mutex, which is
-  // not the mutex a record of this event takes. An event with no submitted
-  // record has no point to wait for.
+  // not the mutex a record of this event takes.
   iree_hal_semaphore_t* event_semaphore = NULL;
   uint64_t event_signal_value = 0;
   iree_hal_streaming_event_acquire_recorded_point(event, &event_semaphore,
                                                   &event_signal_value);
+  iree_hal_semaphore_t* wait_semaphore_storage[2];
+  uint64_t wait_value_storage[2];
+  iree_host_size_t wait_count = 0;
+  if (wait_value > 0) {
+    wait_semaphore_storage[wait_count] = stream->timeline_semaphore;
+    wait_value_storage[wait_count] = wait_value;
+    ++wait_count;
+  }
+  if (event_semaphore) {
+    wait_semaphore_storage[wait_count] = event_semaphore;
+    wait_value_storage[wait_count] = event_signal_value;
+    ++wait_count;
+  }
   iree_hal_semaphore_list_t wait_semaphores = {
-      .count = event_semaphore ? 1 : 0,
-      .semaphores = &event_semaphore,
-      .payload_values = &event_signal_value,
+      .count = wait_count,
+      .semaphores = wait_semaphore_storage,
+      .payload_values = wait_value_storage,
   };
   iree_hal_semaphore_list_t signal_semaphores = {
       .count = 1,
