@@ -25,6 +25,39 @@ iree_py_library(
     loom::py::loom::target::arch::amdgpu::target_info
 )
 
+iree_py_library(
+  NAME
+    wait_packet_tables
+  MAIN
+    "amdgpu_wait_packet_tables.py"
+  SRCS
+    "__init__.py"
+    "amdgpu_wait_packet_tables.py"
+  DEPS
+    loom::py::loom::gen::support::support
+    loom::py::loom::target::low_descriptors
+    loom::py::loom::target::arch::amdgpu::descriptors
+    loom::py::loom::target::arch::amdgpu::isa_xml
+    loom::py::loom::target::arch::amdgpu::target_info
+)
+
+iree_py_library(
+  NAME
+    vopd_component_tables
+  MAIN
+    "amdgpu_vopd_component_tables.py"
+  SRCS
+    "__init__.py"
+    "amdgpu_vopd_component_tables.py"
+  DEPS
+    loom::py::loom::gen::support::support
+    loom::py::loom::gen::target::low::low_descriptors
+    loom::py::loom::target::low_descriptors
+    loom::py::loom::target::arch::amdgpu::descriptors
+    loom::py::loom::target::arch::amdgpu::isa_xml
+    loom::py::loom::target::arch::amdgpu::target_info
+)
+
 iree_py_test(
   NAME
     descriptors_test
@@ -36,6 +69,36 @@ iree_py_test(
     loom::py::loom::gen::target::arch::amdgpu::descriptors::descriptors
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::target_info
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+)
+
+iree_py_test(
+  NAME
+    vopd_component_tables_test
+  SRCS
+    "../../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.gen.target.arch.amdgpu.descriptors.amdgpu_vopd_component_tables_test"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::vopd_component_tables
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+)
+
+iree_py_test(
+  NAME
+    wait_packet_tables_test
+  SRCS
+    "../../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.gen.target.arch.amdgpu.descriptors.amdgpu_wait_packet_tables_test"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::wait_packet_tables
+    loom::py::loom::target::low_descriptors
+    loom::py::loom::target::arch::amdgpu::descriptors
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"

@@ -32,6 +32,10 @@ package(
 
 _AMDGPU_DESCRIPTOR_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:descriptors"
 
+_AMDGPU_WAIT_PACKET_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:wait_packet_tables"
+
+_AMDGPU_VOPD_COMPONENT_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/descriptors:vopd_component_tables"
+
 _AMDGPU_CONFIG_TABLES_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:config_tables"
 
 _DESCRIPTOR_SET_CDNA3 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.cdna3.core"]
@@ -59,6 +63,136 @@ loom_low_descriptor_data_archive(
     repo_name = AMDGPU_ISA_XML_ARCHIVE["repo_name"],
     sha256 = AMDGPU_ISA_XML_ARCHIVE["sha256"],
     urls = AMDGPU_ISA_XML_ARCHIVE["urls"],
+)
+
+_AMDGPU_ISA_XML_ARGS = [
+    "--isa-xml=cdna3:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna3.xml)",
+    "--isa-xml=cdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna4.xml)",
+    "--isa-xml=rdna3:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3.xml)",
+    "--isa-xml=rdna3_5:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml)",
+    "--isa-xml=rdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna4.xml)",
+]
+
+_AMDGPU_ISA_XML_INPUTS = [
+    "@amdgpu_isa_xml//:amdgpu_isa_cdna3.xml",
+    "@amdgpu_isa_xml//:amdgpu_isa_cdna4.xml",
+    "@amdgpu_isa_xml//:amdgpu_isa_rdna3.xml",
+    "@amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml",
+    "@amdgpu_isa_xml//:amdgpu_isa_rdna4.xml",
+]
+
+_AMDGPU_PLANNING_FACT_VISIBILITY = [
+    "//loom/src/loom/target/arch/amdgpu/planning:__pkg__",
+]
+
+loom_generated_textual_header(
+    name = "wait_packet_descriptor_ranges_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_WAIT_PACKET_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "wait_packet_descriptor_ranges.inl",
+    output_flag = "--descriptor-ranges",
+    visibility = _AMDGPU_PLANNING_FACT_VISIBILITY,
+)
+
+loom_generated_textual_header(
+    name = "wait_packet_descriptors_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_WAIT_PACKET_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "wait_packet_descriptors.inl",
+    output_flag = "--descriptor-rows",
+    visibility = _AMDGPU_PLANNING_FACT_VISIBILITY,
+)
+
+loom_generated_textual_header(
+    name = "wait_packet_descriptor_lookups_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_WAIT_PACKET_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "wait_packet_descriptor_lookups.inl",
+    output_flag = "--descriptor-lookups",
+    visibility = _AMDGPU_PLANNING_FACT_VISIBILITY,
+)
+
+loom_generated_textual_header(
+    name = "wait_packet_immediates_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_WAIT_PACKET_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "wait_packet_immediates.inl",
+    output_flag = "--immediate-rows",
+    visibility = _AMDGPU_PLANNING_FACT_VISIBILITY,
+)
+
+loom_generated_textual_header(
+    name = "wait_packet_selections_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_WAIT_PACKET_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "wait_packet_selections.inl",
+    output_flag = "--selection-rows",
+    visibility = _AMDGPU_PLANNING_FACT_VISIBILITY,
+)
+
+loom_generated_textual_header(
+    name = "vopd_component_rules_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_VOPD_COMPONENT_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "vopd_component_rules.inl",
+    output_flag = "--component-rules",
+    visibility = _AMDGPU_PLANNING_FACT_VISIBILITY,
+)
+
+loom_generated_textual_header(
+    name = "vopd_component_descriptor_lookup_ranges_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_VOPD_COMPONENT_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "vopd_component_descriptor_lookup_ranges.inl",
+    output_flag = "--descriptor-lookup-ranges",
+    visibility = _AMDGPU_PLANNING_FACT_VISIBILITY,
+)
+
+loom_generated_textual_header(
+    name = "vopd_component_descriptor_lookups_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_VOPD_COMPONENT_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "vopd_component_descriptor_lookups.inl",
+    output_flag = "--descriptor-lookups",
+    visibility = _AMDGPU_PLANNING_FACT_VISIBILITY,
+)
+
+loom_generated_textual_header(
+    name = "vopd_pair_affinity_ranges_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_VOPD_COMPONENT_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "vopd_pair_affinity_ranges.inl",
+    output_flag = "--pair-affinity-ranges",
+    visibility = _AMDGPU_PLANNING_FACT_VISIBILITY,
+)
+
+loom_generated_textual_header(
+    name = "vopd_pair_affinities_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_VOPD_COMPONENT_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "vopd_pair_affinities.inl",
+    output_flag = "--pair-affinities",
+    visibility = _AMDGPU_PLANNING_FACT_VISIBILITY,
+)
+
+loom_generated_textual_header(
+    name = "vopd_pair_placement_recipes_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_VOPD_COMPONENT_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "vopd_pair_placement_recipes.inl",
+    output_flag = "--pair-placement-recipes",
+    visibility = _AMDGPU_PLANNING_FACT_VISIBILITY,
 )
 
 loom_low_descriptor_cc_library(

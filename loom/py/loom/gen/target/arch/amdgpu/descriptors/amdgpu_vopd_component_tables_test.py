@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from loom.gen.target.arch.amdgpu.planning import amdgpu_vopd_component_tables
+from loom.gen.target.arch.amdgpu.descriptors import amdgpu_vopd_component_tables
 from loom.target.arch.amdgpu.target_info import sorted_descriptor_set_infos
 
 
