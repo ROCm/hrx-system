@@ -14,6 +14,7 @@
 #include "iree/hal/drivers/amdgpu/aql_command_buffer_profile.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/device/blit.h"
+#include "iree/hal/drivers/amdgpu/device/dispatch.h"
 #include "iree/hal/drivers/amdgpu/executable.h"
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/transient_buffer.h"
@@ -1762,22 +1763,6 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_qword_length(
   return iree_ok_status();
 }
 
-static void iree_hal_amdgpu_aql_command_buffer_write_implicit_args(
-    const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
-    const iree_hal_dispatch_config_t config,
-    iree_amdgpu_kernel_implicit_args_t* implicit_args) {
-  implicit_args->block_count[0] = config.workgroup_count[0];
-  implicit_args->block_count[1] = config.workgroup_count[1];
-  implicit_args->block_count[2] = config.workgroup_count[2];
-  implicit_args->group_size[0] = kernel_args->workgroup_size[0];
-  implicit_args->group_size[1] = kernel_args->workgroup_size[1];
-  implicit_args->group_size[2] = kernel_args->workgroup_size[2];
-  implicit_args->grid_dims = 3;
-  implicit_args->printf_buffer = NULL;
-  implicit_args->hostcall_buffer = NULL;
-  implicit_args->dynamic_lds_size = config.dynamic_workgroup_local_memory;
-}
-
 static iree_status_t iree_hal_amdgpu_aql_command_buffer_write_dispatch_tail(
     const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
     const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* layout,
@@ -1800,8 +1785,9 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_write_dispatch_tail(
         iree_amdgpu_kernel_implicit_args_t* implicit_args =
             (iree_amdgpu_kernel_implicit_args_t*)(tail_payload +
                                                   layout->implicit_args_offset);
-        iree_hal_amdgpu_aql_command_buffer_write_implicit_args(
-            kernel_args, config, implicit_args);
+        iree_hal_amdgpu_device_dispatch_initialize_implicit_args(
+            kernel_args, config.workgroup_count,
+            config.dynamic_workgroup_local_memory, implicit_args);
       }
       return iree_ok_status();
     }
@@ -1859,8 +1845,9 @@ iree_hal_amdgpu_aql_command_buffer_record_prepublished_dispatch_kernargs(
             (iree_amdgpu_kernel_implicit_args_t*)(kernarg_data +
                                                   kernarg_layout
                                                       ->implicit_args_byte_offset);
-        iree_hal_amdgpu_aql_command_buffer_write_implicit_args(
-            kernel_args, config, implicit_args);
+        iree_hal_amdgpu_device_dispatch_initialize_implicit_args(
+            kernel_args, config.workgroup_count,
+            config.dynamic_workgroup_local_memory, implicit_args);
       }
     }
   }
@@ -1915,8 +1902,9 @@ iree_hal_amdgpu_aql_command_buffer_write_inline_dispatch_kernargs(
           (iree_amdgpu_kernel_implicit_args_t*)(kernarg_data +
                                                 kernarg_layout
                                                     ->implicit_args_byte_offset);
-      iree_hal_amdgpu_aql_command_buffer_write_implicit_args(
-          kernel_args, config, implicit_args);
+      iree_hal_amdgpu_device_dispatch_initialize_implicit_args(
+          kernel_args, config.workgroup_count,
+          config.dynamic_workgroup_local_memory, implicit_args);
     }
   }
   return status;

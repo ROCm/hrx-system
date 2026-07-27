@@ -517,17 +517,9 @@ static void iree_hal_amdgpu_host_queue_emplace_native_implicit_args(
       iree_hal_amdgpu_host_queue_native_implicit_args(layout, kernarg_data);
   if (!implicit_args) return;
 
-  memset(implicit_args, 0, IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE);
-  implicit_args->block_count[0] = workgroup_count[0];
-  implicit_args->block_count[1] = workgroup_count[1];
-  implicit_args->block_count[2] = workgroup_count[2];
-  implicit_args->group_size[0] = kernel_args->workgroup_size[0];
-  implicit_args->group_size[1] = kernel_args->workgroup_size[1];
-  implicit_args->group_size[2] = kernel_args->workgroup_size[2];
-  implicit_args->grid_dims = 3;
-  implicit_args->printf_buffer = NULL;
-  implicit_args->hostcall_buffer = NULL;
-  implicit_args->dynamic_lds_size = dynamic_workgroup_local_memory;
+  iree_hal_amdgpu_device_dispatch_initialize_implicit_args(
+      kernel_args, workgroup_count, dynamic_workgroup_local_memory,
+      implicit_args);
 }
 
 static void iree_hal_amdgpu_host_queue_emplace_dispatch_kernargs(
