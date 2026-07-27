@@ -36,11 +36,11 @@ loom_low_allocation_assignment_t Assignment(
   return assignment;
 }
 
-loom_low_allocation_unit_location_t Location(
+loom_low_move_location_t Location(
     uint16_t reg_class_id, uint32_t location,
     loom_low_allocation_location_kind_t location_kind =
         LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-  loom_low_allocation_unit_location_t unit_location = {};
+  loom_low_move_location_t unit_location = {};
   unit_location.location_kind = location_kind;
   unit_location.value_class = ValueClass(reg_class_id);
   unit_location.descriptor_reg_class_id = reg_class_id;
@@ -66,7 +66,7 @@ TEST(LowAllocationUnitLocationTest, MapsAssignmentUnitLocations) {
   const loom_low_allocation_assignment_t assignment =
       Assignment(/*reg_class_id=*/3);
 
-  loom_low_allocation_unit_location_t unit_location = {};
+  loom_low_move_location_t unit_location = {};
   IREE_ASSERT_OK(loom_low_allocation_assignment_unit_location(
       &assignment, /*unit_index=*/1, &unit_location));
 
@@ -82,20 +82,20 @@ TEST(LowAllocationUnitLocationTest, RejectsOutOfRangeAssignmentUnit) {
   const loom_low_allocation_assignment_t assignment =
       Assignment(/*reg_class_id=*/3);
 
-  loom_low_allocation_unit_location_t unit_location = {};
+  loom_low_move_location_t unit_location = {};
   IREE_EXPECT_STATUS_IS(StatusCode::kOutOfRange,
                         loom_low_allocation_assignment_unit_location(
                             &assignment, /*unit_index=*/3, &unit_location));
 }
 
 TEST(LowAllocationUnitLocationTest, ComparesLocationsAndStorageClasses) {
-  const loom_low_allocation_unit_location_t location =
+  const loom_low_move_location_t location =
       Location(/*reg_class_id=*/1, /*location=*/4);
-  const loom_low_allocation_unit_location_t same_location =
+  const loom_low_move_location_t same_location =
       Location(/*reg_class_id=*/1, /*location=*/4);
-  const loom_low_allocation_unit_location_t sibling_location =
+  const loom_low_move_location_t sibling_location =
       Location(/*reg_class_id=*/1, /*location=*/5);
-  const loom_low_allocation_unit_location_t different_class =
+  const loom_low_move_location_t different_class =
       Location(/*reg_class_id=*/2, /*location=*/4);
 
   EXPECT_TRUE(
@@ -109,13 +109,13 @@ TEST(LowAllocationUnitLocationTest, ComparesLocationsAndStorageClasses) {
 }
 
 TEST(LowAllocationUnitLocationTest, ClassifiesRegisterMoves) {
-  const loom_low_allocation_unit_location_t source =
+  const loom_low_move_location_t source =
       Location(/*reg_class_id=*/1, /*location=*/4);
-  const loom_low_allocation_unit_location_t destination =
+  const loom_low_move_location_t destination =
       Location(/*reg_class_id=*/1, /*location=*/5);
-  const loom_low_allocation_unit_location_t identical_destination =
+  const loom_low_move_location_t identical_destination =
       Location(/*reg_class_id=*/1, /*location=*/4);
-  const loom_low_allocation_unit_location_t spill_destination = Location(
+  const loom_low_move_location_t spill_destination = Location(
       /*reg_class_id=*/1, /*location=*/0,
       LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT);
 
@@ -139,11 +139,11 @@ TEST(LowAllocationUnitLocationTest, DetectsLiveUnitAtPoint) {
   assignment.unit_end_point_start = 0;
   const uint32_t unit_end_points[] = {5, 9};
 
-  const loom_low_allocation_unit_location_t first_unit =
+  const loom_low_move_location_t first_unit =
       Location(/*reg_class_id=*/0, /*location=*/4);
-  const loom_low_allocation_unit_location_t second_unit =
+  const loom_low_move_location_t second_unit =
       Location(/*reg_class_id=*/0, /*location=*/5);
-  const loom_low_allocation_unit_location_t outside_unit =
+  const loom_low_move_location_t outside_unit =
       Location(/*reg_class_id=*/0, /*location=*/6);
 
   EXPECT_TRUE(loom_low_allocation_unit_location_is_live_at_point(

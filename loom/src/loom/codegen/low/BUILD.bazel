@@ -350,6 +350,7 @@ loom_cc_library(
     hdrs = ["move_sequence.h"],
     deps = [
         ":allocation",
+        "//loom/src/loom/codegen/low/allocation:move",
         "//loom/src/loom/codegen/low/allocation:move_topology",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",

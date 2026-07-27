@@ -9,32 +9,24 @@
 #include <string.h>
 
 #include "loom/codegen/low/allocation/live_range.h"
+#include "loom/codegen/low/allocation/move.h"
 #include "loom/codegen/low/allocation/move_topology.h"
 #include "loom/codegen/low/allocation/unit_location.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 
-typedef struct loom_low_allocation_packet_unit_move_t {
-  // Unit overwritten by the packet-local move.
-  loom_low_allocation_unit_location_t destination;
-  // Unit read by the packet-local move.
-  loom_low_allocation_unit_location_t source;
-} loom_low_allocation_packet_unit_move_t;
-
 static iree_status_t loom_low_allocation_packet_move_append_unit_move(
     const loom_low_allocation_assignment_t* source_assignment,
     uint32_t source_unit_index,
     const loom_low_allocation_assignment_t* destination_assignment,
-    uint32_t destination_unit_index,
-    loom_low_allocation_packet_unit_move_t* moves,
+    uint32_t destination_unit_index, loom_low_move_t* moves,
     iree_host_size_t move_capacity, iree_host_size_t* inout_move_count) {
   if (*inout_move_count >= move_capacity) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "packet-local move count exceeds reserved capacity");
   }
-  loom_low_allocation_packet_unit_move_t* move =
-      moves ? &moves[*inout_move_count] : NULL;
+  loom_low_move_t* move = moves ? &moves[*inout_move_count] : NULL;
   if (move) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_assignment_unit_location(
         source_assignment, source_unit_index, &move->source));
@@ -47,8 +39,8 @@ static iree_status_t loom_low_allocation_packet_move_append_unit_move(
 
 static iree_status_t loom_low_allocation_packet_moves_for_copy(
     const loom_low_allocation_packet_move_context_t* context,
-    const loom_op_t* op, loom_low_allocation_packet_unit_move_t* moves,
-    iree_host_size_t move_capacity, iree_host_size_t* out_move_count) {
+    const loom_op_t* op, loom_low_move_t* moves, iree_host_size_t move_capacity,
+    iree_host_size_t* out_move_count) {
   *out_move_count = 0;
   const loom_low_allocation_assignment_t* source_assignment = NULL;
   IREE_RETURN_IF_ERROR(
@@ -75,8 +67,8 @@ static iree_status_t loom_low_allocation_packet_moves_for_copy(
 
 static iree_status_t loom_low_allocation_packet_moves_for_slice(
     const loom_low_allocation_packet_move_context_t* context,
-    const loom_op_t* op, loom_low_allocation_packet_unit_move_t* moves,
-    iree_host_size_t move_capacity, iree_host_size_t* out_move_count) {
+    const loom_op_t* op, loom_low_move_t* moves, iree_host_size_t move_capacity,
+    iree_host_size_t* out_move_count) {
   *out_move_count = 0;
   const int64_t offset = loom_low_slice_offset(op);
   if (offset < 0 || offset > UINT32_MAX) {
@@ -111,8 +103,8 @@ static iree_status_t loom_low_allocation_packet_moves_for_slice(
 
 static iree_status_t loom_low_allocation_packet_moves_for_concat(
     const loom_low_allocation_packet_move_context_t* context,
-    const loom_op_t* op, loom_low_allocation_packet_unit_move_t* moves,
-    iree_host_size_t move_capacity, iree_host_size_t* out_move_count) {
+    const loom_op_t* op, loom_low_move_t* moves, iree_host_size_t move_capacity,
+    iree_host_size_t* out_move_count) {
   *out_move_count = 0;
   if (!loom_low_allocation_move_topology_concat_requires_packet_materialization_for_module(
           context->module, op)) {
@@ -157,8 +149,8 @@ static iree_status_t loom_low_allocation_packet_moves_for_concat(
 
 static iree_status_t loom_low_allocation_packet_moves_for_op(
     const loom_low_allocation_packet_move_context_t* context,
-    const loom_op_t* op, loom_low_allocation_packet_unit_move_t* moves,
-    iree_host_size_t move_capacity, iree_host_size_t* out_move_count) {
+    const loom_op_t* op, loom_low_move_t* moves, iree_host_size_t move_capacity,
+    iree_host_size_t* out_move_count) {
   switch (loom_low_allocation_move_topology_packet_move_op_kind(op)) {
     case LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_COPY:
       return loom_low_allocation_packet_moves_for_copy(
@@ -231,9 +223,8 @@ static iree_status_t loom_low_allocation_packet_move_count_capacity(
 }
 
 static bool loom_low_allocation_packet_move_uses_location(
-    const loom_low_allocation_packet_unit_move_t* moves,
-    iree_host_size_t move_count,
-    const loom_low_allocation_unit_location_t* location) {
+    const loom_low_move_t* moves, iree_host_size_t move_count,
+    const loom_low_move_location_t* location) {
   for (iree_host_size_t i = 0; i < move_count; ++i) {
     if (!loom_low_allocation_unit_locations_form_register_move(
             &moves[i].source, &moves[i].destination)) {
@@ -249,14 +240,13 @@ static bool loom_low_allocation_packet_move_uses_location(
 }
 
 static iree_status_t loom_low_allocation_packet_move_find_destination(
-    const loom_low_allocation_packet_unit_move_t* moves,
-    iree_host_size_t move_count,
-    const loom_low_allocation_unit_location_t* destination, bool* out_found,
-    loom_low_allocation_unit_location_t* out_source) {
+    const loom_low_move_t* moves, iree_host_size_t move_count,
+    const loom_low_move_location_t* destination, bool* out_found,
+    loom_low_move_location_t* out_source) {
   *out_found = false;
-  *out_source = (loom_low_allocation_unit_location_t){0};
+  *out_source = (loom_low_move_location_t){0};
   for (iree_host_size_t i = 0; i < move_count; ++i) {
-    const loom_low_allocation_packet_unit_move_t* move = &moves[i];
+    const loom_low_move_t* move = &moves[i];
     if (!loom_low_allocation_unit_locations_form_register_move(
             &move->source, &move->destination)) {
       continue;
@@ -281,12 +271,11 @@ static iree_status_t loom_low_allocation_packet_move_find_destination(
 }
 
 static iree_status_t loom_low_allocation_packet_move_starts_cycle(
-    const loom_low_allocation_packet_unit_move_t* moves,
-    iree_host_size_t move_count,
-    const loom_low_allocation_unit_location_t* destination,
-    const loom_low_allocation_unit_location_t* source, bool* out_has_cycle) {
+    const loom_low_move_t* moves, iree_host_size_t move_count,
+    const loom_low_move_location_t* destination,
+    const loom_low_move_location_t* source, bool* out_has_cycle) {
   *out_has_cycle = false;
-  loom_low_allocation_unit_location_t next_destination = *source;
+  loom_low_move_location_t next_destination = *source;
   for (iree_host_size_t step = 0; step < move_count; ++step) {
     if (loom_low_allocation_unit_locations_equal(&next_destination,
                                                  destination)) {
@@ -294,7 +283,7 @@ static iree_status_t loom_low_allocation_packet_move_starts_cycle(
       return iree_ok_status();
     }
     bool found = false;
-    loom_low_allocation_unit_location_t next_source = {0};
+    loom_low_move_location_t next_source = {0};
     IREE_RETURN_IF_ERROR(loom_low_allocation_packet_move_find_destination(
         moves, move_count, &next_destination, &found, &next_source));
     if (!found) {
@@ -310,13 +299,11 @@ static iree_status_t loom_low_allocation_packet_move_starts_cycle(
 }
 
 static iree_status_t loom_low_allocation_packet_move_class_has_cycle(
-    const loom_low_allocation_packet_unit_move_t* moves,
-    iree_host_size_t move_count,
-    const loom_low_allocation_unit_location_t* storage_class,
-    bool* out_has_cycle) {
+    const loom_low_move_t* moves, iree_host_size_t move_count,
+    const loom_low_move_location_t* storage_class, bool* out_has_cycle) {
   *out_has_cycle = false;
   for (iree_host_size_t i = 0; i < move_count; ++i) {
-    const loom_low_allocation_packet_unit_move_t* move = &moves[i];
+    const loom_low_move_t* move = &moves[i];
     if (!loom_low_allocation_unit_storage_classes_equal(storage_class,
                                                         &move->destination) ||
         !loom_low_allocation_unit_locations_form_register_move(
@@ -333,9 +320,8 @@ static iree_status_t loom_low_allocation_packet_move_class_has_cycle(
 }
 
 static bool loom_low_allocation_packet_move_class_seen_before(
-    const loom_low_allocation_packet_unit_move_t* moves,
-    iree_host_size_t stop_move_index,
-    const loom_low_allocation_unit_location_t* storage_class) {
+    const loom_low_move_t* moves, iree_host_size_t stop_move_index,
+    const loom_low_move_location_t* storage_class) {
   for (iree_host_size_t i = 0; i < stop_move_index; ++i) {
     if (!loom_low_allocation_unit_locations_form_register_move(
             &moves[i].source, &moves[i].destination)) {
@@ -352,11 +338,9 @@ static bool loom_low_allocation_packet_move_class_seen_before(
 static iree_status_t loom_low_allocation_packet_move_find_temporary(
     const loom_low_allocation_packet_move_context_t* context,
     const loom_op_t* op, uint32_t program_point,
-    const loom_low_allocation_unit_location_t* storage_class,
-    const loom_low_allocation_packet_unit_move_t* moves,
-    iree_host_size_t move_count,
-    loom_low_allocation_unit_location_t* out_temporary) {
-  *out_temporary = (loom_low_allocation_unit_location_t){0};
+    const loom_low_move_location_t* storage_class, const loom_low_move_t* moves,
+    iree_host_size_t move_count, loom_low_move_location_t* out_temporary) {
+  *out_temporary = (loom_low_move_location_t){0};
   if (!loom_low_allocation_location_kind_is_register_like(
           storage_class->location_kind)) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_target_constraints_emit_failure(
@@ -399,7 +383,7 @@ static iree_status_t loom_low_allocation_packet_move_find_temporary(
   }
 
   for (uint32_t location = 0; location <= last_location; ++location) {
-    loom_low_allocation_unit_location_t temporary = {
+    loom_low_move_location_t temporary = {
         .location_kind = storage_class->location_kind,
         .value_class = storage_class->value_class,
         .descriptor_reg_class_id = storage_class->descriptor_reg_class_id,
@@ -442,7 +426,7 @@ static iree_status_t loom_low_allocation_packet_move_plan_record_for_op(
   if (move_capacity == 0) {
     return iree_ok_status();
   }
-  loom_low_allocation_packet_unit_move_t* moves = NULL;
+  loom_low_move_t* moves = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, move_capacity, sizeof(*moves), (void**)&moves));
   iree_host_size_t move_count = 0;
@@ -451,7 +435,7 @@ static iree_status_t loom_low_allocation_packet_move_plan_record_for_op(
   const iree_host_size_t temporary_start = plan->temporary_count;
 
   for (iree_host_size_t i = 0; i < move_count; ++i) {
-    const loom_low_allocation_packet_unit_move_t* move = &moves[i];
+    const loom_low_move_t* move = &moves[i];
     if (!loom_low_allocation_unit_locations_form_register_move(
             &move->source, &move->destination)) {
       continue;
@@ -472,7 +456,7 @@ static iree_status_t loom_low_allocation_packet_move_plan_record_for_op(
           IREE_STATUS_OUT_OF_RANGE,
           "packet-local move temporary table exceeds u32 range");
     }
-    loom_low_allocation_unit_location_t temporary = {0};
+    loom_low_move_location_t temporary = {0};
     IREE_RETURN_IF_ERROR(loom_low_allocation_packet_move_find_temporary(
         context, op, program_point, &move->destination, moves, move_count,
         &temporary));

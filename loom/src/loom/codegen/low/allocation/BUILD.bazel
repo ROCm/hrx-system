@@ -94,6 +94,7 @@ loom_cc_library(
         ":assignment",
         ":assignment_map",
         ":live_range",
+        ":move",
         ":table",
         ":target_constraints",
         ":unit_liveness",
@@ -552,6 +553,7 @@ loom_cc_library(
     deps = [
         ":assignment",
         ":live_range",
+        ":move",
         ":storage",
         "//loom/src/loom/codegen/low:descriptors",
         "//runtime/src/iree/base",
@@ -565,6 +567,15 @@ loom_cc_test(
         ":unit_location",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "move",
+    hdrs = ["move.h"],
+    deps = [
+        ":assignment",
+        "//runtime/src/iree/base",
     ],
 )
 
@@ -608,6 +619,7 @@ loom_cc_library(
         ":assignment",
         ":assignment_map",
         ":live_range",
+        ":move",
         ":move_topology",
         ":table",
         ":target_constraints",
