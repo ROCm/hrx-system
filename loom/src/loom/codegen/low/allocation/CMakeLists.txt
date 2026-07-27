@@ -101,6 +101,7 @@ loom_cc_library(
     ::assignment
     ::assignment_map
     ::live_range
+    ::move
     ::table
     ::target_constraints
     ::unit_liveness
@@ -617,6 +618,7 @@ loom_cc_library(
   DEPS
     ::assignment
     ::live_range
+    ::move
     ::storage
     iree::base
     loom::codegen::low::descriptors
@@ -632,6 +634,17 @@ loom_cc_test(
     ::unit_location
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
+    move
+  HDRS
+    "move.h"
+  DEPS
+    ::assignment
+    iree::base
+  PUBLIC
 )
 
 loom_cc_library(
@@ -681,6 +694,7 @@ loom_cc_library(
     ::assignment
     ::assignment_map
     ::live_range
+    ::move
     ::move_topology
     ::table
     ::target_constraints

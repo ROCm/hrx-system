@@ -364,6 +364,7 @@ loom_cc_library(
     ::allocation
     iree::base
     iree::base::internal::arena
+    loom::codegen::low::allocation::move
     loom::codegen::low::allocation::move_topology
     loom::ops::low
   PUBLIC

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/allocation/live_range.h"
+#include "loom/codegen/low/allocation/move.h"
 #include "loom/codegen/low/allocation/unit_location.h"
 #include "loom/ops/low/ops.h"
 
@@ -325,8 +326,8 @@ static iree_status_t loom_low_allocation_edge_copy_count_groups(
 static iree_status_t loom_low_allocation_edge_copy_unit_locations(
     const loom_low_allocation_edge_copy_context_t* context,
     const loom_low_allocation_edge_copy_t* edge_copy, uint32_t unit_index,
-    loom_low_allocation_unit_location_t* out_source,
-    loom_low_allocation_unit_location_t* out_destination) {
+    loom_low_move_location_t* out_source,
+    loom_low_move_location_t* out_destination) {
   const loom_low_allocation_assignment_t* source_assignment =
       &context->assignment_map.assignments[edge_copy->source_assignment_index];
   const loom_low_allocation_assignment_t* destination_assignment =
@@ -352,8 +353,8 @@ static iree_status_t loom_low_allocation_edge_copy_group_unit_count(
         &plan->copies[group->copy_start + i];
     for (uint32_t unit_index = 0; unit_index < edge_copy->unit_count;
          ++unit_index) {
-      loom_low_allocation_unit_location_t source = {0};
-      loom_low_allocation_unit_location_t destination = {0};
+      loom_low_move_location_t source = {0};
+      loom_low_move_location_t destination = {0};
       IREE_RETURN_IF_ERROR(loom_low_allocation_edge_copy_unit_locations(
           context, edge_copy, unit_index, &source, &destination));
       if (!loom_low_allocation_unit_locations_form_register_move(
@@ -374,17 +375,17 @@ static iree_status_t loom_low_allocation_edge_copy_group_find_destination(
     const loom_low_allocation_edge_copy_context_t* context,
     const loom_low_allocation_edge_copy_plan_t* plan,
     const loom_low_allocation_edge_copy_group_t* group,
-    const loom_low_allocation_unit_location_t* destination, bool* out_found,
-    loom_low_allocation_unit_location_t* out_source) {
+    const loom_low_move_location_t* destination, bool* out_found,
+    loom_low_move_location_t* out_source) {
   *out_found = false;
-  *out_source = (loom_low_allocation_unit_location_t){0};
+  *out_source = (loom_low_move_location_t){0};
   for (uint32_t i = 0; i < group->copy_count; ++i) {
     const loom_low_allocation_edge_copy_t* edge_copy =
         &plan->copies[group->copy_start + i];
     for (uint32_t unit_index = 0; unit_index < edge_copy->unit_count;
          ++unit_index) {
-      loom_low_allocation_unit_location_t source = {0};
-      loom_low_allocation_unit_location_t candidate_destination = {0};
+      loom_low_move_location_t source = {0};
+      loom_low_move_location_t candidate_destination = {0};
       IREE_RETURN_IF_ERROR(loom_low_allocation_edge_copy_unit_locations(
           context, edge_copy, unit_index, &source, &candidate_destination));
       if (!loom_low_allocation_unit_locations_form_register_move(
@@ -415,11 +416,11 @@ static iree_status_t loom_low_allocation_edge_copy_unit_starts_cycle(
     const loom_low_allocation_edge_copy_context_t* context,
     const loom_low_allocation_edge_copy_plan_t* plan,
     const loom_low_allocation_edge_copy_group_t* group,
-    const loom_low_allocation_unit_location_t* destination,
-    const loom_low_allocation_unit_location_t* source, uint32_t max_unit_count,
+    const loom_low_move_location_t* destination,
+    const loom_low_move_location_t* source, uint32_t max_unit_count,
     bool* out_has_cycle) {
   *out_has_cycle = false;
-  loom_low_allocation_unit_location_t next_destination = *source;
+  loom_low_move_location_t next_destination = *source;
   for (uint32_t step = 0; step < max_unit_count; ++step) {
     if (loom_low_allocation_unit_locations_equal(&next_destination,
                                                  destination)) {
@@ -427,7 +428,7 @@ static iree_status_t loom_low_allocation_edge_copy_unit_starts_cycle(
       return iree_ok_status();
     }
     bool found = false;
-    loom_low_allocation_unit_location_t next_source = {0};
+    loom_low_move_location_t next_source = {0};
     IREE_RETURN_IF_ERROR(loom_low_allocation_edge_copy_group_find_destination(
         context, plan, group, &next_destination, &found, &next_source));
     if (!found) {
@@ -446,8 +447,8 @@ static iree_status_t loom_low_allocation_edge_copy_class_seen_before(
     const loom_low_allocation_edge_copy_context_t* context,
     const loom_low_allocation_edge_copy_plan_t* plan,
     const loom_low_allocation_edge_copy_group_t* group,
-    const loom_low_allocation_unit_location_t* storage_class,
-    uint32_t stop_copy_index, uint32_t stop_unit_index, bool* out_seen) {
+    const loom_low_move_location_t* storage_class, uint32_t stop_copy_index,
+    uint32_t stop_unit_index, bool* out_seen) {
   *out_seen = false;
   for (uint32_t copy_index = 0; copy_index <= stop_copy_index; ++copy_index) {
     const loom_low_allocation_edge_copy_t* edge_copy =
@@ -457,8 +458,8 @@ static iree_status_t loom_low_allocation_edge_copy_class_seen_before(
       unit_limit = stop_unit_index;
     }
     for (uint32_t unit_index = 0; unit_index < unit_limit; ++unit_index) {
-      loom_low_allocation_unit_location_t source = {0};
-      loom_low_allocation_unit_location_t destination = {0};
+      loom_low_move_location_t source = {0};
+      loom_low_move_location_t destination = {0};
       IREE_RETURN_IF_ERROR(loom_low_allocation_edge_copy_unit_locations(
           context, edge_copy, unit_index, &source, &destination));
       if (!loom_low_allocation_unit_locations_form_register_move(
@@ -479,8 +480,7 @@ static iree_status_t loom_low_allocation_edge_copy_class_has_cycle(
     const loom_low_allocation_edge_copy_context_t* context,
     const loom_low_allocation_edge_copy_plan_t* plan,
     const loom_low_allocation_edge_copy_group_t* group,
-    const loom_low_allocation_unit_location_t* storage_class,
-    bool* out_has_cycle) {
+    const loom_low_move_location_t* storage_class, bool* out_has_cycle) {
   *out_has_cycle = false;
   uint32_t unit_count = 0;
   IREE_RETURN_IF_ERROR(loom_low_allocation_edge_copy_group_unit_count(
@@ -490,8 +490,8 @@ static iree_status_t loom_low_allocation_edge_copy_class_has_cycle(
         &plan->copies[group->copy_start + i];
     for (uint32_t unit_index = 0; unit_index < edge_copy->unit_count;
          ++unit_index) {
-      loom_low_allocation_unit_location_t source = {0};
-      loom_low_allocation_unit_location_t destination = {0};
+      loom_low_move_location_t source = {0};
+      loom_low_move_location_t destination = {0};
       IREE_RETURN_IF_ERROR(loom_low_allocation_edge_copy_unit_locations(
           context, edge_copy, unit_index, &source, &destination));
       if (!loom_low_allocation_unit_storage_classes_equal(storage_class,
@@ -521,8 +521,8 @@ static iree_status_t loom_low_allocation_edge_copy_count_temporaries_for_group(
         &plan->copies[group->copy_start + i];
     for (uint32_t unit_index = 0; unit_index < edge_copy->unit_count;
          ++unit_index) {
-      loom_low_allocation_unit_location_t source = {0};
-      loom_low_allocation_unit_location_t destination = {0};
+      loom_low_move_location_t source = {0};
+      loom_low_move_location_t destination = {0};
       IREE_RETURN_IF_ERROR(loom_low_allocation_edge_copy_unit_locations(
           context, edge_copy, unit_index, &source, &destination));
       if (!loom_low_allocation_unit_locations_form_register_move(
@@ -555,15 +555,15 @@ static iree_status_t loom_low_allocation_edge_copy_group_uses_location(
     const loom_low_allocation_edge_copy_context_t* context,
     const loom_low_allocation_edge_copy_plan_t* plan,
     const loom_low_allocation_edge_copy_group_t* group,
-    const loom_low_allocation_unit_location_t* location, bool* out_uses) {
+    const loom_low_move_location_t* location, bool* out_uses) {
   *out_uses = false;
   for (uint32_t i = 0; i < group->copy_count; ++i) {
     const loom_low_allocation_edge_copy_t* edge_copy =
         &plan->copies[group->copy_start + i];
     for (uint32_t unit_index = 0; unit_index < edge_copy->unit_count;
          ++unit_index) {
-      loom_low_allocation_unit_location_t source = {0};
-      loom_low_allocation_unit_location_t destination = {0};
+      loom_low_move_location_t source = {0};
+      loom_low_move_location_t destination = {0};
       IREE_RETURN_IF_ERROR(loom_low_allocation_edge_copy_unit_locations(
           context, edge_copy, unit_index, &source, &destination));
       if (!loom_low_allocation_unit_locations_form_register_move(
@@ -584,9 +584,9 @@ static iree_status_t loom_low_allocation_edge_copy_find_temporary(
     const loom_low_allocation_edge_copy_context_t* context,
     const loom_low_allocation_edge_copy_plan_t* plan,
     const loom_low_allocation_edge_copy_group_t* group,
-    const loom_low_allocation_unit_location_t* storage_class,
-    loom_low_allocation_unit_location_t* out_temporary) {
-  *out_temporary = (loom_low_allocation_unit_location_t){0};
+    const loom_low_move_location_t* storage_class,
+    loom_low_move_location_t* out_temporary) {
+  *out_temporary = (loom_low_move_location_t){0};
   if (!loom_low_allocation_location_kind_is_register_like(
           storage_class->location_kind)) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_target_constraints_emit_failure(
@@ -633,7 +633,7 @@ static iree_status_t loom_low_allocation_edge_copy_find_temporary(
   }
 
   for (uint32_t location = 0; location <= last_location; ++location) {
-    loom_low_allocation_unit_location_t temporary = {
+    loom_low_move_location_t temporary = {
         .location_kind = storage_class->location_kind,
         .value_class = storage_class->value_class,
         .descriptor_reg_class_id = storage_class->descriptor_reg_class_id,
@@ -685,8 +685,8 @@ loom_low_allocation_edge_copy_plan_record_temporaries_for_group(
         &plan->copies[group->copy_start + i];
     for (uint32_t unit_index = 0; unit_index < edge_copy->unit_count;
          ++unit_index) {
-      loom_low_allocation_unit_location_t source = {0};
-      loom_low_allocation_unit_location_t destination = {0};
+      loom_low_move_location_t source = {0};
+      loom_low_move_location_t destination = {0};
       IREE_RETURN_IF_ERROR(loom_low_allocation_edge_copy_unit_locations(
           context, edge_copy, unit_index, &source, &destination));
       if (!loom_low_allocation_unit_locations_form_register_move(
@@ -705,7 +705,7 @@ loom_low_allocation_edge_copy_plan_record_temporaries_for_group(
       if (!has_cycle) {
         continue;
       }
-      loom_low_allocation_unit_location_t temporary = {0};
+      loom_low_move_location_t temporary = {0};
       IREE_RETURN_IF_ERROR(loom_low_allocation_edge_copy_find_temporary(
           context, plan, group, &destination, &temporary));
       if (context->target_constraints->error_count != 0) {

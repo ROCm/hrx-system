@@ -12,30 +12,11 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/allocation.h"
+#include "loom/codegen/low/allocation/move.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// One target-visible allocation unit.
-typedef struct loom_low_move_location_t {
-  // Target-visible storage kind.
-  loom_low_allocation_location_kind_t location_kind;
-  // Storage class for the unit.
-  loom_liveness_value_class_t value_class;
-  // Descriptor-set-local register class ID for |value_class|.
-  uint16_t descriptor_reg_class_id;
-  // Physical register, target ID, or spill slot ordinal.
-  uint32_t location;
-} loom_low_move_location_t;
-
-// One parallel move from an old source unit to a destination unit.
-typedef struct loom_low_move_t {
-  // Unit overwritten by the move.
-  loom_low_move_location_t destination;
-  // Unit read by the move.
-  loom_low_move_location_t source;
-} loom_low_move_t;
 
 typedef struct loom_low_move_sequence_node_t loom_low_move_sequence_node_t;
 typedef struct loom_low_move_sequence_location_entry_t
