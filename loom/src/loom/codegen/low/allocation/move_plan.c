@@ -166,20 +166,22 @@ static iree_status_t loom_low_allocation_move_plan_resolve_temporary(
 
 iree_status_t loom_low_allocation_move_plan_initialize(
     const loom_low_allocation_move_plan_context_t* context,
-    iree_arena_allocator_t* arena, iree_host_size_t raw_move_capacity,
+    iree_arena_allocator_t* arena, iree_host_size_t move_input_capacity,
+    iree_host_size_t raw_group_capacity,
     loom_low_allocation_move_plan_t* out_plan) {
   *out_plan = (loom_low_allocation_move_plan_t){
       .context = *context,
   };
-  if (raw_move_capacity == 0) {
+  if (move_input_capacity == 0) {
     return iree_ok_status();
   }
-  const iree_host_size_t move_capacity = raw_move_capacity + raw_move_capacity;
+  const iree_host_size_t move_capacity =
+      move_input_capacity + move_input_capacity / 2;
   out_plan->move_capacity = move_capacity;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, move_capacity,
                                                  sizeof(*out_plan->moves),
                                                  (void**)&out_plan->moves));
-  return loom_low_move_sequence_scratch_initialize(arena, raw_move_capacity,
+  return loom_low_move_sequence_scratch_initialize(arena, raw_group_capacity,
                                                    &out_plan->sequence_scratch);
 }
 
