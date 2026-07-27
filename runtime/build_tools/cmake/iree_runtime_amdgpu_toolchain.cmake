@@ -12,7 +12,8 @@ function(iree_runtime_configure_amdgpu_toolchain)
     message(FATAL_ERROR
       "IREE_HAL_DRIVER_AMDGPU=ON requires the configured C compiler to be "
       "Clang-family and capable of targeting amdgcn-amd-amdhsa. Configure "
-      "with ROCm/LLVM clang instead of relying on a separate ROCm path knob.")
+      "with the host LLVM Clang toolchain; IREE_ROCM_PATH supplies device "
+      "libraries and runtime components, not the host compiler.")
   endif()
 
   set(IREE_CLANG_BINARY "${CMAKE_C_COMPILER}" CACHE FILEPATH
@@ -98,4 +99,75 @@ function(iree_runtime_configure_amdgpu_toolchain)
   endif()
   set(IREE_CLANG_BUILTIN_HEADERS_PATH "${_clang_resource_dir}/include" CACHE PATH
     "Clang resource include directory used by AMDGPU device binary builds." FORCE)
+
+  set(IREE_ROCM_DEVICE_LIBRARIES_PATH
+    "${IREE_ROCM_DEVICE_LIBRARIES_PATH}" CACHE PATH
+    "ROCm bitcode libraries used by HIP device fixture builds.")
+  if(NOT IREE_ROCM_DEVICE_LIBRARIES_PATH)
+    get_filename_component(
+      _clang_llvm_root "${_clang_resource_dir}/../../.." ABSOLUTE)
+    set(_rocm_device_library_candidates
+      "${_clang_llvm_root}/amdgcn/bitcode")
+    foreach(_rocm_root
+        "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH}"
+        "${IREE_ROCM_PATH}"
+        "$ENV{ROCM_PATH}"
+        "$ENV{ROCM_ROOT}"
+        "$ENV{ROCM_HOME}"
+        "$ENV{HIP_PATH}")
+      if(NOT _rocm_root)
+        continue()
+      endif()
+      list(APPEND _rocm_device_library_candidates
+        "${_rocm_root}/amdgcn/bitcode"
+        "${_rocm_root}/lib/amdgcn/bitcode"
+        "${_rocm_root}/llvm/amdgcn/bitcode"
+        "${_rocm_root}/lib/llvm/amdgcn/bitcode")
+      file(GLOB _packaged_rocm_device_library_candidates
+        LIST_DIRECTORIES true
+        "${_rocm_root}/lib/python*/site-packages/_rocm_sdk_*/llvm/amdgcn/bitcode"
+        "${_rocm_root}/lib64/python*/site-packages/_rocm_sdk_*/llvm/amdgcn/bitcode")
+      list(APPEND _rocm_device_library_candidates
+        ${_packaged_rocm_device_library_candidates})
+    endforeach()
+    list(REMOVE_DUPLICATES _rocm_device_library_candidates)
+    foreach(_candidate ${_rocm_device_library_candidates})
+      if(EXISTS "${_candidate}/hip.bc" AND
+         EXISTS "${_candidate}/ockl.bc" AND
+         EXISTS "${_candidate}/ocml.bc")
+        set(IREE_ROCM_DEVICE_LIBRARIES_PATH "${_candidate}" CACHE PATH
+          "ROCm bitcode libraries used by HIP device fixture builds." FORCE)
+        break()
+      endif()
+    endforeach()
+  endif()
+
+  set(IREE_AMDGPU_HIP_DEVICE_LIBRARIES_AVAILABLE OFF CACHE INTERNAL
+    "Whether the AMDGPU toolchain can link HIP device fixtures." FORCE)
+  if(IREE_ROCM_DEVICE_LIBRARIES_PATH)
+    foreach(_device_library hip.bc ockl.bc ocml.bc)
+      if(NOT EXISTS
+          "${IREE_ROCM_DEVICE_LIBRARIES_PATH}/${_device_library}")
+        message(FATAL_ERROR
+          "ROCm device library directory is incomplete: "
+          "${IREE_ROCM_DEVICE_LIBRARIES_PATH}/${_device_library} is missing")
+      endif()
+    endforeach()
+
+    execute_process(
+      COMMAND "${IREE_CLANG_BINARY}" -print-prog-name=clang-offload-bundler
+      OUTPUT_VARIABLE _offload_bundler_from_clang
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(EXISTS "${_offload_bundler_from_clang}")
+      set(IREE_CLANG_OFFLOAD_BUNDLER_BINARY
+        "${_offload_bundler_from_clang}" CACHE FILEPATH
+        "clang-offload-bundler used by HIP device fixture builds." FORCE)
+    else()
+      message(FATAL_ERROR
+        "ROCm device libraries are available, but "
+        "${IREE_CLANG_BINARY} cannot locate clang-offload-bundler")
+    endif()
+    set(IREE_AMDGPU_HIP_DEVICE_LIBRARIES_AVAILABLE ON CACHE INTERNAL
+      "Whether the AMDGPU toolchain can link HIP device fixtures." FORCE)
+  endif()
 endfunction()

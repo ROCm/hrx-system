@@ -13,6 +13,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "hrx_runtime.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -1197,7 +1199,11 @@ typedef struct hipGraphNodeParams {
 
 // Initialization
 HIPAPI hipError_t hipInit(unsigned int flags);
-HIPAPI hipError_t hipHALDeinit(void);  // HAL extension
+// Deinitializes the embedded HRX runtime.
+HIPAPI hipError_t hipHALDeinit(void);
+// Sets the event sink used by the embedded HRX runtime. Must be called before
+// hipInit or after hipHALDeinit; otherwise returns hipErrorSetOnActiveProcess.
+HIPAPI hipError_t hipHRXSetDeviceEventSink(hrx_device_event_sink_t sink);
 HIPAPI hipError_t hipDriverGetVersion(int* driverVersion);
 HIPAPI hipError_t hipRuntimeGetVersion(int* runtimeVersion);
 HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,

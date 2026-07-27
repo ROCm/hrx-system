@@ -542,7 +542,6 @@ static IREE_THREAD_LOCAL struct {
 
 static iree_slim_mutex_t iree_hip_global_init_mutex;
 static iree_once_flag iree_hip_global_init_mutex_once = IREE_ONCE_FLAG_INIT;
-static bool iree_hip_blocking_printf_provider_initialized = false;
 static iree_hip_blocking_printf_provider_t iree_hip_blocking_printf_provider;
 
 typedef struct iree_hip_per_thread_stream_state_t {
@@ -1100,13 +1099,12 @@ static hipError_t iree_hip_ensure_initialized(void) {
   iree_call_once(&iree_hip_global_init_mutex_once,
                  iree_hip_initialize_global_init_mutex);
   iree_slim_mutex_lock(&iree_hip_global_init_mutex);
-  if (!iree_hip_blocking_printf_provider_initialized) {
+  if (!iree_hal_streaming_device_registry()) {
     iree_hal_device_event_sink_t event_sink = {0};
     hrx_runtime_try_get_hal_device_event_sink(&event_sink);
     iree_hip_blocking_printf_provider_initialize(
         event_sink, iree_allocator_system(),
         &iree_hip_blocking_printf_provider);
-    iree_hip_blocking_printf_provider_initialized = true;
   }
 
   const iree_hal_device_create_params_extension_t* device_extension =
@@ -1308,11 +1306,27 @@ HIPAPI hipError_t hipInit(unsigned int flags) {
   return result;
 }
 
-// Custom function to deinitialize the HAL backend.
-// This is not a standard HIP API function.
+HIPAPI hipError_t hipHRXSetDeviceEventSink(hrx_device_event_sink_t sink) {
+  iree_call_once(&iree_hip_global_init_mutex_once,
+                 iree_hip_initialize_global_init_mutex);
+  iree_slim_mutex_lock(&iree_hip_global_init_mutex);
+  const hipError_t result =
+      iree_hal_streaming_device_registry()
+          ? hipErrorSetOnActiveProcess
+          : hrx_status_to_hip_result(hrx_runtime_set_device_event_sink(sink));
+  iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
+  return result;
+}
+
+// Deinitializes the embedded HRX runtime.
+// This is an HRX extension, not a standard HIP API function.
 HIPAPI hipError_t hipHALDeinit(void) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  iree_call_once(&iree_hip_global_init_mutex_once,
+                 iree_hip_initialize_global_init_mutex);
+  iree_slim_mutex_lock(&iree_hip_global_init_mutex);
   iree_hal_streaming_cleanup_global();
+  iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }

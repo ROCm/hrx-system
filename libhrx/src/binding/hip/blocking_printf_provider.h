@@ -13,7 +13,7 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Process-lifetime HIP blocking printf provider configuration.
+// HIP blocking printf provider configuration.
 typedef struct iree_hip_blocking_printf_provider_t {
   // Host allocator used for physical-device provider contexts.
   iree_allocator_t host_allocator;
@@ -25,7 +25,7 @@ typedef struct iree_hip_blocking_printf_provider_t {
   iree_hal_amdgpu_hostcall_provider_extension_t device_extension;
 } iree_hip_blocking_printf_provider_t;
 
-// Initializes one immutable process-lifetime provider configuration.
+// Initializes one provider configuration that remains immutable while active.
 void iree_hip_blocking_printf_provider_initialize(
     iree_hal_device_event_sink_t event_sink, iree_allocator_t host_allocator,
     iree_hip_blocking_printf_provider_t* out_provider);
