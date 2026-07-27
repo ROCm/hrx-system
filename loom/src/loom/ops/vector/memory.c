@@ -503,3 +503,27 @@ bool loom_vector_memory_access_static_lane_byte_offset(
   return iree_checked_mul_i64(element_offset, access->static_element_byte_count,
                               out_byte_offset);
 }
+
+bool loom_vector_memory_access_linear_element_end_facts(
+    const loom_vector_memory_access_t* access,
+    const loom_value_facts_t* axis_exclusive_end_facts,
+    loom_value_facts_t* out_element_end_facts) {
+  loom_value_facts_t maximum_element_offset = loom_value_facts_exact_i64(0);
+  const loom_value_facts_t one = loom_value_facts_exact_i64(1);
+  for (uint8_t axis = 0; axis < access->view_rank; ++axis) {
+    int64_t stride = 0;
+    if (!loom_vector_memory_access_static_axis_stride(access, axis, &stride)) {
+      return false;
+    }
+    loom_value_facts_t maximum_index = loom_value_facts_unknown();
+    loom_value_facts_subi(&axis_exclusive_end_facts[axis], &one,
+                          &maximum_index);
+    const loom_value_facts_t stride_facts = loom_value_facts_exact_i64(stride);
+    loom_value_facts_t contribution = loom_value_facts_unknown();
+    loom_value_facts_muli(&maximum_index, &stride_facts, &contribution);
+    loom_value_facts_addi(&maximum_element_offset, &contribution,
+                          &maximum_element_offset);
+  }
+  loom_value_facts_addi(&maximum_element_offset, &one, out_element_end_facts);
+  return true;
+}

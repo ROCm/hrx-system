@@ -262,6 +262,15 @@ bool loom_vector_memory_access_static_lane_byte_offset(
     const int64_t* lane_indices, uint8_t lane_index_count,
     int64_t* out_byte_offset);
 
+// Computes facts for the exclusive linear element end of a rectangular access.
+// |axis_exclusive_end_facts| contains one view coordinate per view axis and
+// must have at least access->view_rank entries. Returns false when the address
+// layout does not provide exact element strides.
+bool loom_vector_memory_access_linear_element_end_facts(
+    const loom_vector_memory_access_t* access,
+    const loom_value_facts_t* axis_exclusive_end_facts,
+    loom_value_facts_t* out_element_end_facts);
+
 #ifdef __cplusplus
 }
 #endif

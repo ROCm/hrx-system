@@ -12,6 +12,7 @@
 
 #include "loom/analysis/cfg_condition_facts.h"
 #include "loom/analysis/condition_facts.h"
+#include "loom/analysis/memory_root_bounds.h"
 #include "loom/analysis/symbolic_expr.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
@@ -611,6 +612,22 @@ static iree_status_t loom_vector_memory_footprint_prove_equal(
   return iree_ok_status();
 }
 
+static iree_status_t loom_vector_memory_footprint_check_root_element_end(
+    loom_vector_memory_footprint_state_t* state,
+    const loom_vector_memory_footprint_access_t* access,
+    const loom_vector_memory_access_t* memory_access,
+    loom_value_facts_t element_end_facts) {
+  if (memory_access->static_element_byte_count <= 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_memory_root_bounds_verify_exact_root(
+      state->module, state->fact_table, state->options->emitter, access->op,
+      access->view, memory_access->static_element_byte_count, element_end_facts,
+      &state->current_access_failed));
+  state->result->error_count += state->current_access_failed;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vector_memory_footprint_dim_expr(
     loom_vector_memory_footprint_state_t* state, loom_type_t type, uint8_t axis,
     loom_symbolic_expr_t* out_expression) {
@@ -883,7 +900,8 @@ loom_vector_memory_footprint_prove_axis_upper_bound_from_origin_relation(
 static iree_status_t loom_vector_memory_footprint_check_direct_axis(
     loom_vector_memory_footprint_state_t* state,
     const loom_vector_memory_footprint_access_t* access,
-    const loom_vector_memory_access_t* memory_access, uint8_t view_axis) {
+    const loom_vector_memory_access_t* memory_access, uint8_t view_axis,
+    loom_value_facts_t* out_exclusive_end_facts) {
   loom_symbolic_expr_t origin = {0};
   bool origin_known = false;
   IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_origin_expr(
@@ -953,6 +971,7 @@ static iree_status_t loom_vector_memory_footprint_check_direct_axis(
         unit_extent ? IREE_SV("vector_footprint.scalar_axis_upper_bound")
                     : IREE_SV("vector_footprint.full_vector_upper_bound"));
   }
+  *out_exclusive_end_facts = end.facts;
   return iree_ok_status();
 }
 
@@ -972,11 +991,22 @@ static iree_status_t loom_vector_memory_footprint_check_direct(
     return loom_vector_memory_footprint_fail_unresolved_layout(state, access);
   }
 
+  loom_value_facts_t
+      axis_exclusive_end_facts[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {0};
   for (uint8_t axis = 0; axis < memory_access.view_rank; ++axis) {
     IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_check_direct_axis(
-        state, access, &memory_access, axis));
+        state, access, &memory_access, axis, &axis_exclusive_end_facts[axis]));
     if (state->current_access_failed) {
       return iree_ok_status();
+    }
+  }
+  if (access->mask == LOOM_VALUE_ID_INVALID &&
+      access->axis_scale.vector_axis == UINT8_MAX) {
+    loom_value_facts_t element_end_facts = loom_value_facts_unknown();
+    if (loom_vector_memory_access_linear_element_end_facts(
+            &memory_access, axis_exclusive_end_facts, &element_end_facts)) {
+      return loom_vector_memory_footprint_check_root_element_end(
+          state, access, &memory_access, element_end_facts);
     }
   }
   return iree_ok_status();
@@ -985,7 +1015,8 @@ static iree_status_t loom_vector_memory_footprint_check_direct(
 static iree_status_t loom_vector_memory_footprint_check_origin_axis(
     loom_vector_memory_footprint_state_t* state,
     const loom_vector_memory_footprint_access_t* access,
-    const loom_vector_memory_access_t* memory_access, uint8_t view_axis) {
+    const loom_vector_memory_access_t* memory_access, uint8_t view_axis,
+    loom_value_facts_t* out_exclusive_end_facts) {
   loom_symbolic_expr_t origin = {0};
   bool origin_known = false;
   IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_origin_expr(
@@ -1030,6 +1061,7 @@ static iree_status_t loom_vector_memory_footprint_check_origin_axis(
         LOOM_ERR_SUBRANGE_011,
         IREE_SV("vector_footprint.scalar_axis_upper_bound"));
   }
+  *out_exclusive_end_facts = exclusive_end.facts;
   return iree_ok_status();
 }
 
@@ -1049,12 +1081,20 @@ static iree_status_t loom_vector_memory_footprint_check_scalar(
     return loom_vector_memory_footprint_fail_unresolved_layout(state, access);
   }
 
+  loom_value_facts_t
+      axis_exclusive_end_facts[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {0};
   for (uint8_t axis = 0; axis < memory_access.view_rank; ++axis) {
     IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_check_origin_axis(
-        state, access, &memory_access, axis));
+        state, access, &memory_access, axis, &axis_exclusive_end_facts[axis]));
     if (state->current_access_failed) {
       return iree_ok_status();
     }
+  }
+  loom_value_facts_t element_end_facts = loom_value_facts_unknown();
+  if (loom_vector_memory_access_linear_element_end_facts(
+          &memory_access, axis_exclusive_end_facts, &element_end_facts)) {
+    return loom_vector_memory_footprint_check_root_element_end(
+        state, access, &memory_access, element_end_facts);
   }
   return iree_ok_status();
 }
@@ -1383,8 +1423,9 @@ static iree_status_t loom_vector_memory_footprint_check_offsets(
 
   for (uint8_t view_axis = 0; view_axis < memory_access.view_rank;
        ++view_axis) {
+    loom_value_facts_t axis_exclusive_end_facts = loom_value_facts_unknown();
     IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_check_origin_axis(
-        state, access, &memory_access, view_axis));
+        state, access, &memory_access, view_axis, &axis_exclusive_end_facts));
     if (state->current_access_failed) {
       return iree_ok_status();
     }
@@ -1445,6 +1486,10 @@ static iree_status_t loom_vector_memory_footprint_check_offsets(
   if (!upper_proven) {
     return loom_vector_memory_footprint_fail_linear_span(state, access,
                                                          LOOM_ERR_SUBRANGE_016);
+  }
+  if (access->mask == LOOM_VALUE_ID_INVALID) {
+    return loom_vector_memory_footprint_check_root_element_end(
+        state, access, &memory_access, exclusive_end.facts);
   }
   return iree_ok_status();
 }
