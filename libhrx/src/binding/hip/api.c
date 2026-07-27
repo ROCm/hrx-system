@@ -11255,7 +11255,8 @@ HIPAPI hipError_t hipEventElapsedTime(float* ms, hipEvent_t start,
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
 
-  if (start_event->record_time_ns == 0 || stop_event->record_time_ns == 0) {
+  if (iree_hal_streaming_event_record_time_ns(start_event) == 0 ||
+      iree_hal_streaming_event_record_time_ns(stop_event) == 0) {
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
 

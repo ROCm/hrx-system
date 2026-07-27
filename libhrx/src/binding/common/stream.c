@@ -784,10 +784,19 @@ iree_status_t iree_hal_streaming_stream_wait_event(
   // only after the event is signaled. The value is submitted, not completed;
   // query/synchronize advance completed_value after observing the semaphore.
   uint64_t signal_value = stream->pending_value + 1;
+
+  // The recorded point is copied out under the event's own mutex; reading the
+  // event's fields in place would read them under this stream's mutex, which is
+  // not the mutex a record of this event takes. An event with no submitted
+  // record has no point to wait for.
+  iree_hal_semaphore_t* event_semaphore = NULL;
+  uint64_t event_signal_value = 0;
+  iree_hal_streaming_event_acquire_recorded_point(event, &event_semaphore,
+                                                  &event_signal_value);
   iree_hal_semaphore_list_t wait_semaphores = {
-      .count = 1,
-      .semaphores = &event->semaphore,
-      .payload_values = &event->signal_value,
+      .count = event_semaphore ? 1 : 0,
+      .semaphores = &event_semaphore,
+      .payload_values = &event_signal_value,
   };
   iree_hal_semaphore_list_t signal_semaphores = {
       .count = 1,
@@ -808,6 +817,7 @@ iree_status_t iree_hal_streaming_stream_wait_event(
   }
 
   iree_slim_mutex_unlock(&stream->mutex);
+  iree_hal_semaphore_release(event_semaphore);
   if (!iree_status_is_ok(status) && added_memory_reuse_dependency) {
     iree_hal_streaming_stream_remove_uncommitted_memory_reuse_dependency(
         stream, source_stream_id);

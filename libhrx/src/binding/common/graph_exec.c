@@ -2059,10 +2059,9 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
         (block_index == 0 ? external_wait_semaphores.count : 0) +
         (block_waits_event ? 1 : 0);
     const iree_host_size_t total_signal_count =
-        block->signal_semaphore_count +
-        (block_index == exec->block_count - 1 ? external_signal_semaphores.count
-                                              : 0) +
-        (block_records_event ? 1 : 0);
+        block->signal_semaphore_count + (block_index == exec->block_count - 1
+                                             ? external_signal_semaphores.count
+                                             : 0);
     iree_host_size_t total_semaphores = 0;
     if (IREE_UNLIKELY(!iree_host_size_checked_add(
             total_wait_count, total_signal_count, &total_semaphores))) {
@@ -2134,11 +2133,20 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
           exec->semaphore_base_values[semaphore_index] + delta;
       ++wait_count;
     }
+    // Point the block waits on when it waits for an event, retained across the
+    // submission so a concurrent record of the same event cannot drop the last
+    // reference to a timeline this block is about to name.
+    iree_hal_semaphore_t* event_wait_semaphore = NULL;
     if (block_waits_event) {
-      iree_hal_streaming_event_t* event = ptrs.attrs->event.event;
-      wait_sems[wait_count] = event->semaphore;
-      wait_vals[wait_count] = event->signal_value;
-      ++wait_count;
+      uint64_t event_wait_value = 0;
+      iree_hal_streaming_event_acquire_recorded_point(
+          ptrs.attrs->event.event, &event_wait_semaphore, &event_wait_value);
+      // A wait on an event with no submitted record has nothing to wait for.
+      if (event_wait_semaphore) {
+        wait_sems[wait_count] = event_wait_semaphore;
+        wait_vals[wait_count] = event_wait_value;
+        ++wait_count;
+      }
     }
 
     iree_host_size_t signal_count = 0;
@@ -2159,23 +2167,25 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
         ++signal_count;
       }
     }
-    if (block_records_event) {
-      iree_hal_streaming_event_t* event = ptrs.attrs->event.event;
-      if (IREE_UNLIKELY(event->signal_value == UINT64_MAX)) {
-        status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                  "event signal value overflow");
-      } else if (event->recording_stream != stream) {
-        iree_hal_streaming_stream_retain(stream);
-        iree_hal_streaming_stream_release(event->recording_stream);
-        event->recording_stream = stream;
-      }
-      if (iree_status_is_ok(status)) {
-        event->record_time_ns = iree_time_now();
-        ++event->signal_value;
-        signal_sems[signal_count] = event->semaphore;
-        signal_vals[signal_count] = event->signal_value;
-        ++signal_count;
-      }
+
+    // A record node marks the point its own block reaches, which is the first
+    // value the block signals: a record node always occupies a partition of its
+    // own, so that value is signaled exactly when the node's dependencies have
+    // completed and by nothing else. Reusing the block's existing signal rather
+    // than adding one of its own is what keeps the event off any timeline it
+    // would have to reserve values on, and the timeline it names is advanced
+    // only by launches that reach this block, all of which run under one
+    // executable mutex: a top-level launch holds its own, while a child graph's
+    // blocks are submitted under the parent's, which is the only mutex that can
+    // reach them because each instantiation of a parent owns a private child
+    // executable.
+    //
+    // Every partition but the last signals at least one of the executable's
+    // internal semaphores, and the last partition's block carries the launch's
+    // external signals, so a record block always has a value to name.
+    if (block_records_event && IREE_UNLIKELY(signal_count == 0)) {
+      status = iree_make_status(IREE_STATUS_INTERNAL,
+                                "event record block signals no timeline value");
     }
 
     iree_hal_semaphore_list_t wait_semaphores = {
@@ -2189,9 +2199,30 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
         .payload_values = signal_vals,
     };
     if (iree_status_is_ok(status)) {
+      // Sampled before the submission so the timestamp reflects when the launch
+      // issued the record.
+      const iree_time_t record_time_ns =
+          block_records_event ? iree_time_now() : 0;
       status = iree_hal_streaming_graph_submit_block(
           block, &ptrs, stream, wait_semaphores, signal_semaphores);
+      // A rejected block signals nothing, so the event keeps its previous point
+      // rather than naming one that will never be reached. Later blocks in this
+      // launch that wait on the event read the committed point, so the commit
+      // stays inside the iteration that submitted it.
+      //
+      // The event's recording stream is left alone: it carries the capture
+      // state a stream wait picks up from the stream that captured the event,
+      // and a graph launch is not a capture. Exchanging it here would also drop
+      // a reference to another stream while this stream's mutex is held, and
+      // stream teardown re-enters the streaming layer to synchronize that
+      // stream and unregister it from its context.
+      if (block_records_event && iree_status_is_ok(status)) {
+        iree_hal_streaming_event_commit_recorded_point(
+            ptrs.attrs->event.event, signal_sems[0], signal_vals[0],
+            record_time_ns);
+      }
     }
+    iree_hal_semaphore_release(event_wait_semaphore);
     if (free_value_array) {
       iree_allocator_free(exec->host_allocator, value_array);
     }
