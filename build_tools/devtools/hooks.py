@@ -8,17 +8,40 @@
 
 from __future__ import annotations
 
-from build_tools.devtools.command_plan import CommandPlan, CommandStep, WriteFileStep
+from build_tools.devtools.command_plan import (
+    CommandPlan,
+    CommandStep,
+    WriteFileStep,
+    quote_command,
+)
 from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment
 
 
-def hook_content(lane: str, profile: str) -> str:
+def hook_content(lane: str, profile: str, python_executable: str) -> str:
     if lane not in ("bazel", "cmake"):
         raise ValueError(f"unknown lane: {lane}")
     lane_name = {
         "bazel": "Bazel",
         "cmake": "CMake",
     }[lane]
+    precommit_command = quote_command(
+        [
+            python_executable,
+            str(REPO_ROOT / "dev.py"),
+            lane,
+            "precommit",
+            "--profile",
+            profile,
+            "--commit",
+        ]
+    )
+    commit_message_command = quote_command(
+        [
+            python_executable,
+            str(REPO_ROOT / "build_tools/lefthook/commit_msg.py"),
+            "{1}",
+        ]
+    )
     return f"""# Copyright 2026 The IREE Authors
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
@@ -29,7 +52,14 @@ def hook_content(lane: str, profile: str) -> str:
 pre-commit:
   commands:
     precommit:
-      run: python dev.py {lane} precommit --profile {profile} --commit
+      run: >-
+        {precommit_command}
+
+commit-msg:
+  commands:
+    commit-message:
+      run: >-
+        {commit_message_command}
 """
 
 
@@ -40,7 +70,7 @@ def hook_plan(
     plan.add(
         WriteFileStep(
             path=REPO_ROOT / "lefthook-local.yml",
-            content=hook_content(lane, profile),
+            content=hook_content(lane, profile, tool_env.python),
             label=f"select {lane} hook policy with {profile} profile",
         )
     )

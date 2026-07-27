@@ -1178,8 +1178,14 @@ class CliTest(unittest.TestCase):
 
         self.assertIsInstance(step, WriteFileStep)
         self.assertIn("python dev.py bazel hook --profile ci", step.content)
+        self.assertIn(str(cli.REPO_ROOT / "dev.py"), step.content)
         self.assertIn(
-            "run: python dev.py bazel precommit --profile ci --commit",
+            str(cli.REPO_ROOT / "build_tools/lefthook/commit_msg.py"),
+            step.content,
+        )
+        self.assertNotIn("run: python dev.py", step.content)
+        self.assertIn(
+            "bazel precommit --profile ci --commit",
             step.content,
         )
 
@@ -1190,8 +1196,10 @@ class CliTest(unittest.TestCase):
         step = plan.steps[0]
 
         self.assertIsInstance(step, WriteFileStep)
+        self.assertIn(str(cli.REPO_ROOT / "dev.py"), step.content)
+        self.assertNotIn("run: python dev.py", step.content)
         self.assertIn(
-            "run: python dev.py cmake precommit --profile default --commit",
+            "cmake precommit --profile default --commit",
             step.content,
         )
 
