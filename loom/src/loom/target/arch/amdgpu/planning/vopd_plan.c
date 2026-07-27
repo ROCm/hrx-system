@@ -750,10 +750,9 @@ static iree_status_t loom_amdgpu_vopd_mark_transparent_packets(
       continue;
     }
 
-    loom_amdgpu_structural_packet_info_t info = {0};
-    IREE_RETURN_IF_ERROR(loom_amdgpu_structural_packet_analyze(
-        builder->allocation, packet.node->op, packet.node->source_ordinal, 0,
-        &info));
+    const loom_amdgpu_structural_packet_info_t info =
+        loom_amdgpu_structural_packet_analyze(
+            builder->schedule, builder->allocation, packet.node, 0);
     if (iree_any_bit_set(
             info.flags,
             LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_FORWARDS_DEPENDENCIES)) {

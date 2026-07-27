@@ -694,8 +694,17 @@ loom_amdgpu_wait_state_structural_delay_alu_type(
   if (!builder->has_delay_alu) {
     return LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER;
   }
+  if (iree_any_bit_set(info->flags,
+                       LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MOVEMENT)) {
+    if (info->vector_alu_instruction_count != 0) {
+      return LOOM_AMDGPU_DELAY_ALU_TYPE_VALU;
+    }
+    if (info->scalar_alu_instruction_count != 0) {
+      return LOOM_AMDGPU_DELAY_ALU_TYPE_SALU;
+    }
+  }
   return iree_any_bit_set(info->flags,
-                          LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_WRITES_SALU)
+                          LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_READS_SCC)
              ? LOOM_AMDGPU_DELAY_ALU_TYPE_SALU
              : LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER;
 }
@@ -1781,9 +1790,9 @@ static iree_status_t loom_amdgpu_wait_state_packet_analyze(
     loom_amdgpu_wait_state_packet_info_t* out_info) {
   *out_info = (loom_amdgpu_wait_state_packet_info_t){0};
   if (packet->descriptor == NULL) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_structural_packet_analyze(
-        builder->allocation, packet->node->op, packet->node->source_ordinal, 0,
-        &out_info->structural));
+    out_info->structural = loom_amdgpu_structural_packet_analyze(
+        builder->schedule, builder->allocation, packet->node,
+        LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_ISSUE_PIPELINES);
     out_info->instruction_count = out_info->structural.instruction_count;
     if (iree_any_bit_set(out_info->structural.flags,
                          LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_WRITES_VALU)) {
@@ -2115,8 +2124,18 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
   } else if (info.instruction_count != 0) {
     loom_amdgpu_wait_state_delay_alu_clear_results(builder, packet);
   }
-  loom_amdgpu_wait_state_delay_alu_advance_counters(
-      builder, info.delay_alu_type, info.instruction_count);
+  if (iree_any_bit_set(info.flags,
+                       LOOM_AMDGPU_WAIT_STATE_PACKET_FLAG_DESCRIPTOR)) {
+    loom_amdgpu_wait_state_delay_alu_advance_counters(
+        builder, info.delay_alu_type, info.instruction_count);
+  } else {
+    loom_amdgpu_wait_state_delay_alu_advance_counters(
+        builder, LOOM_AMDGPU_DELAY_ALU_TYPE_VALU,
+        info.structural.vector_alu_instruction_count);
+    loom_amdgpu_wait_state_delay_alu_advance_counters(
+        builder, LOOM_AMDGPU_DELAY_ALU_TYPE_SALU,
+        info.structural.scalar_alu_instruction_count);
+  }
   if (info.instruction_count > UINT32_MAX) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,

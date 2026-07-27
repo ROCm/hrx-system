@@ -113,8 +113,11 @@ loom_cc_library(
     iree::base
     loom::codegen::low::allocation
     loom::codegen::low::allocation::move_topology
+    loom::codegen::low::packet
+    loom::codegen::low::schedule
     loom::ir
     loom::ops::low
+    loom::target::arch::amdgpu::refs::target_refs
   PUBLIC
 )
 endif()

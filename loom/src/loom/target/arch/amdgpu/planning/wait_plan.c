@@ -500,23 +500,17 @@ static const loom_low_allocation_assignment_t* loom_amdgpu_wait_plan_assignment(
                                                              value_id, NULL);
 }
 
-static iree_status_t loom_amdgpu_wait_plan_classify_structural_node(
-    const loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index,
-    loom_amdgpu_structural_packet_flags_t* out_flags) {
-  *out_flags = 0;
-  if (node_index >= builder->schedule->node_count) {
-    return iree_ok_status();
-  }
+static loom_amdgpu_structural_packet_flags_t
+loom_amdgpu_wait_plan_classify_structural_node(
+    const loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
   const loom_low_schedule_node_t* node = &builder->schedule->nodes[node_index];
   if (node->kind != LOOM_LOW_SCHEDULE_NODE_STRUCTURAL || node->op == NULL) {
-    return iree_ok_status();
+    return 0;
   }
-  loom_amdgpu_structural_packet_info_t info = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_structural_packet_analyze(
-      builder->allocation, node->op, node->source_ordinal,
-      LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION, &info));
-  *out_flags = info.flags;
-  return iree_ok_status();
+  return loom_amdgpu_structural_packet_analyze(
+             builder->schedule, builder->allocation, node,
+             LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION)
+      .flags;
 }
 
 static bool loom_amdgpu_wait_plan_node_forwards_dependencies(
@@ -1779,9 +1773,8 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
     IREE_ASSERT_EQ(
         frontier_node->write_counter_mask & ~node_state->hazard_counter_mask,
         0u);
-    loom_amdgpu_structural_packet_flags_t structural_flags = 0;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_classify_structural_node(
-        builder, (uint32_t)i, &structural_flags));
+    const loom_amdgpu_structural_packet_flags_t structural_flags =
+        loom_amdgpu_wait_plan_classify_structural_node(builder, (uint32_t)i);
     if (iree_any_bit_set(
             structural_flags,
             LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_FORWARDS_DEPENDENCIES)) {

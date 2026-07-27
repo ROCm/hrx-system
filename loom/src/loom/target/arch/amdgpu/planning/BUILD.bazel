@@ -117,9 +117,12 @@ loom_cc_library(
     hdrs = ["structural_packet.h"],
     deps = [
         "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low/allocation:move_topology",
+        "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
     ],
 )
