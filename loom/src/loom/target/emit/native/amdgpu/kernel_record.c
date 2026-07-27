@@ -243,10 +243,10 @@ static iree_status_t loom_amdgpu_kernel_record_validate_function_shape(
 }
 
 static iree_status_t loom_amdgpu_kernel_record_build_storage_layout(
-    const loom_module_t* module, const loom_op_t* function_op,
+    const loom_low_storage_layout_t* source_layout,
     iree_arena_allocator_t* arena, loom_amdgpu_storage_layout_t* out_layout) {
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_storage_layout_build(module, function_op, arena, out_layout));
+      loom_amdgpu_storage_layout_build(source_layout, arena, out_layout));
   if (out_layout->segment_sizes.group_segment_fixed_size > UINT32_MAX ||
       out_layout->segment_sizes.private_segment_fixed_size > UINT32_MAX) {
     return iree_make_status(
@@ -720,7 +720,7 @@ iree_status_t loom_amdgpu_kernel_record_build(
 
   loom_amdgpu_storage_layout_t storage_layout = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build_storage_layout(
-      schedule->module, schedule->function_op, scratch_arena, &storage_layout));
+      &schedule->storage_layout, scratch_arena, &storage_layout));
   loom_amdgpu_kernel_record_hidden_user_sgprs_t hidden_user_sgprs = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_collect_hidden_user_sgprs(
       allocation, abi_layout, &hidden_user_sgprs));

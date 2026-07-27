@@ -107,6 +107,18 @@ typedef struct loom_low_storage_layout_t {
   iree_host_size_t record_count;
 } loom_low_storage_layout_t;
 
+// Mutable one-pass builder for a verified function-local storage layout.
+typedef struct loom_low_storage_layout_builder_t {
+  // Packed byte sizes accumulated for each storage space.
+  loom_low_storage_layout_space_sizes_t space_sizes;
+  // Arena-owned records accumulated in declaration order.
+  loom_low_storage_layout_record_t* records;
+  // Number of initialized records.
+  iree_host_size_t record_count;
+  // Allocated capacity of |records|.
+  iree_host_size_t record_capacity;
+} loom_low_storage_layout_builder_t;
+
 typedef struct loom_low_storage_layout_reference_t {
   // Root reservation containing the referenced storage bytes.
   loom_low_storage_layout_reservation_t reservation;
@@ -116,66 +128,37 @@ typedef struct loom_low_storage_layout_reference_t {
   uint64_t byte_length;
 } loom_low_storage_layout_reference_t;
 
-// Callback invoked for each packed low.storage.reserve reservation.
-typedef iree_status_t (*loom_low_storage_layout_reservation_callback_t)(
-    void* user_data, loom_value_id_t storage_value_id,
-    const loom_low_storage_layout_reservation_t* reservation);
+// Initializes an empty one-pass layout builder.
+void loom_low_storage_layout_builder_initialize(
+    loom_low_storage_layout_builder_t* out_builder);
 
-// Callback used to resolve a root low.storage.reserve placement while walking a
-// low.storage.view chain.
-typedef iree_status_t (*loom_low_storage_layout_reservation_lookup_fn_t)(
-    void* user_data, loom_value_id_t storage_value_id,
-    loom_low_storage_layout_reservation_t* out_reservation);
+// Packs one verified low.storage.reserve into |builder|. Aggregate byte-size
+// overflow and arena growth are returned as status.
+iree_status_t loom_low_storage_layout_builder_append(
+    const loom_module_t* module, const loom_op_t* reserve_op,
+    iree_arena_allocator_t* arena, loom_low_storage_layout_builder_t* builder);
 
-// Visits packed low.storage.reserve ops in |function_op| in function body
-// declaration order.
-iree_status_t loom_low_storage_layout_visit_reservations(
-    const loom_module_t* module, const loom_op_t* function_op,
-    loom_low_storage_layout_reservation_callback_t callback, void* user_data);
+// Publishes the current arena-owned builder contents as an immutable layout.
+void loom_low_storage_layout_builder_finish(
+    const loom_low_storage_layout_builder_t* builder,
+    loom_low_storage_layout_t* out_layout);
 
-// Computes packed byte usage for low.storage.reserve ops in |function_op|.
-iree_status_t loom_low_storage_layout_collect_space_sizes(
-    const loom_module_t* module, const loom_op_t* function_op,
-    loom_low_storage_layout_space_sizes_t* out_sizes);
+// Accumulates one verified low.storage.reserve into |sizes| without retaining a
+// record. Aggregate byte-size overflow is returned as status.
+iree_status_t loom_low_storage_layout_accumulate_reservation(
+    const loom_module_t* module, const loom_op_t* reserve_op,
+    loom_low_storage_layout_space_sizes_t* sizes);
 
-// Builds the complete reservation layout for low.storage.reserve ops in
-// |function_op|. Records are arena-owned and remain valid for |arena|'s
-// lifetime.
-iree_status_t loom_low_storage_layout_build(
-    const loom_module_t* module, const loom_op_t* function_op,
-    iree_arena_allocator_t* arena, loom_low_storage_layout_t* out_layout);
-
-// Looks up a low.storage.reserve result in a previously built layout.
-iree_status_t loom_low_storage_layout_lookup_reservation(
+// Looks up a verified low.storage.reserve result in |layout|.
+void loom_low_storage_layout_lookup_reservation(
     const loom_low_storage_layout_t* layout, loom_value_id_t storage_value_id,
     loom_low_storage_layout_reservation_t* out_reservation);
 
-// Resolves a low.storage.reserve result by scanning |function_op| without
-// materializing a full record table.
-iree_status_t loom_low_storage_layout_resolve_reservation(
-    const loom_module_t* module, const loom_op_t* function_op,
-    loom_value_id_t storage_value_id,
-    loom_low_storage_layout_reservation_t* out_reservation);
-
-// Resolves a low.storage.reserve or low.storage.view handle against |layout|.
-iree_status_t loom_low_storage_layout_lookup_reference(
+// Resolves a verified low.storage.reserve or low.storage.view handle against
+// |layout|. The layout and storage value must belong to the same immutable
+// function.
+void loom_low_storage_layout_lookup_reference(
     const loom_low_storage_layout_t* layout, const loom_module_t* module,
-    loom_value_id_t storage_value_id,
-    loom_low_storage_layout_reference_t* out_reference);
-
-// Resolves a low.storage.reserve or low.storage.view handle by asking
-// |lookup_reservation| for the root low.storage.reserve placement. Targets that
-// project generic storage spaces onto target-specific segments can use this to
-// share storage-view validation while keeping target segment offsets.
-iree_status_t loom_low_storage_layout_resolve_reference_from_reservations(
-    const loom_module_t* module, loom_value_id_t storage_value_id,
-    loom_low_storage_layout_reservation_lookup_fn_t lookup_reservation,
-    void* lookup_user_data, loom_low_storage_layout_reference_t* out_reference);
-
-// Resolves a low.storage.reserve or low.storage.view handle by scanning
-// |function_op| without materializing a full record table.
-iree_status_t loom_low_storage_layout_resolve_reference(
-    const loom_module_t* module, const loom_op_t* function_op,
     loom_value_id_t storage_value_id,
     loom_low_storage_layout_reference_t* out_reference);
 

@@ -54,44 +54,17 @@ typedef struct loom_amdgpu_storage_layout_t {
   iree_host_size_t record_count;
 } loom_amdgpu_storage_layout_t;
 
-// Computes fixed AMDGPU segment sizes for every low.storage.reserve in
-// |function_op|. Scratch and private storage both contribute to the AMDGPU
-// private segment; stack storage is rejected until its ABI lowering is
-// represented in the native path.
-iree_status_t loom_amdgpu_storage_layout_collect_segment_sizes(
-    const loom_module_t* module, const loom_op_t* function_op,
-    loom_amdgpu_storage_layout_segment_sizes_t* out_sizes);
-
-// Builds the full fixed-segment layout for every low.storage.reserve in
-// |function_op|. Records are arena-owned and stay valid for the arena lifetime.
+// Projects a generic function-local layout into AMDGPU fixed segments in one
+// reservation-record traversal. Records are arena-owned and stay valid for the
+// arena lifetime.
 iree_status_t loom_amdgpu_storage_layout_build(
-    const loom_module_t* module, const loom_op_t* function_op,
+    const loom_low_storage_layout_t* source_layout,
     iree_arena_allocator_t* arena, loom_amdgpu_storage_layout_t* out_layout);
 
-// Looks up |storage_value_id| in a previously built layout.
-iree_status_t loom_amdgpu_storage_layout_lookup(
-    const loom_amdgpu_storage_layout_t* layout,
-    loom_value_id_t storage_value_id,
-    loom_amdgpu_storage_layout_reservation_t* out_reservation);
-
-// Resolves a low.storage.reserve or low.storage.view handle against a
+// Resolves a verified low.storage.reserve or low.storage.view handle against a
 // previously built AMDGPU fixed-segment layout.
-iree_status_t loom_amdgpu_storage_layout_lookup_reference(
+void loom_amdgpu_storage_layout_lookup_reference(
     const loom_amdgpu_storage_layout_t* layout, const loom_module_t* module,
-    loom_value_id_t storage_value_id,
-    loom_amdgpu_storage_layout_reference_t* out_reference);
-
-// Resolves one storage reservation from |function_op| without materializing the
-// complete layout record table.
-iree_status_t loom_amdgpu_storage_layout_resolve(
-    const loom_module_t* module, const loom_op_t* function_op,
-    loom_value_id_t storage_value_id,
-    loom_amdgpu_storage_layout_reservation_t* out_reservation);
-
-// Resolves a low.storage.reserve or low.storage.view handle from |function_op|
-// without materializing the complete layout record table.
-iree_status_t loom_amdgpu_storage_layout_resolve_reference(
-    const loom_module_t* module, const loom_op_t* function_op,
     loom_value_id_t storage_value_id,
     loom_amdgpu_storage_layout_reference_t* out_reference);
 

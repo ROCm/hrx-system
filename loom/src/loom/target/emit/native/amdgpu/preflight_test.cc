@@ -67,6 +67,8 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
   void SetUp() override {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
+    iree_arena_initialize(&block_pool_, &table_arena_);
+    loom_low_storage_layout_builder_initialize(&storage_layout_builder_);
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
@@ -79,6 +81,7 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
   void TearDown() override {
     loom_module_free(module_);
     loom_context_deinitialize(&context_);
+    iree_arena_deinitialize(&table_arena_);
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
@@ -136,15 +139,19 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     IREE_CHECK_OK(loom_low_storage_reserve_build(
         &body_builder_, byte_length, byte_alignment, loom_type_storage(space),
         LOOM_LOCATION_UNKNOWN, &op));
+    IREE_CHECK_OK(loom_low_storage_layout_builder_append(
+        module_, op, &table_arena_, &storage_layout_builder_));
     return loom_low_storage_reserve_storage(op);
   }
 
   loom_low_schedule_table_t Schedule(
-      const loom_low_descriptor_set_t* descriptor_set) const {
+      const loom_low_descriptor_set_t* descriptor_set) {
     loom_low_schedule_table_t schedule = {};
     schedule.module = module_;
     schedule.function_op = function_op_;
     schedule.target = ResolvedTarget(descriptor_set);
+    loom_low_storage_layout_builder_finish(&storage_layout_builder_,
+                                           &schedule.storage_layout);
     return schedule;
   }
 
@@ -158,6 +165,8 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
   }
 
   iree_arena_block_pool_t block_pool_;
+  iree_arena_allocator_t table_arena_;
+  loom_low_storage_layout_builder_t storage_layout_builder_;
   loom_context_t context_;
   loom_module_t* module_ = nullptr;
   loom_op_t* function_op_ = nullptr;

@@ -24,6 +24,7 @@
 #include "loom/codegen/low/memory_access.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/schedule/dependencies.h"
+#include "loom/codegen/low/storage_layout.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
@@ -614,6 +615,8 @@ typedef struct loom_low_schedule_table_t {
   loom_low_resolved_target_t target;
   // Borrowed source-derived memory summaries attached to scheduled nodes.
   loom_low_memory_access_table_t memory_access_table;
+  // Function-local storage reservations packed during source node collection.
+  loom_low_storage_layout_t storage_layout;
   // Function-local value IDs indexed by local value ordinal.
   const loom_value_id_t* value_ids;
   // Number of entries in |value_ids|.

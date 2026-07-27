@@ -172,7 +172,6 @@ loom_cc_library(
     srcs = ["storage_layout.c"],
     hdrs = ["storage_layout.h"],
     deps = [
-        ":function",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
