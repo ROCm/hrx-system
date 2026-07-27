@@ -35,7 +35,7 @@ typedef enum loom_amdgpu_matrix_feature_flag_bits_e {
   LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_BF16_1K = UINT64_C(1) << 2,
   // Processor supports gfx90a F64 MFMA variants.
   LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_F64 = UINT64_C(1) << 3,
-  // Processor supports gfx940 FP8/BF8 and XF32 MFMA variants.
+  // Processor supports gfx940 FP8/BF8 MFMA variants.
   LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8 = UINT64_C(1) << 4,
   // Processor supports gfx950 F16/BF16/I8 MFMA shape variants.
   LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950 = UINT64_C(1) << 5,
@@ -57,6 +57,8 @@ typedef enum loom_amdgpu_matrix_feature_flag_bits_e {
   LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250_SCALE_F8F6F4 = UINT64_C(1) << 13,
   // Processor supports gfx1250 SWMMAC modifier/reuse variants.
   LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250 = UINT64_C(1) << 14,
+  // Processor supports gfx940 XF32 MFMA variants.
+  LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_XF32 = UINT64_C(1) << 15,
 } loom_amdgpu_matrix_feature_flag_bits_t;
 
 // Bitset of loom_amdgpu_matrix_feature_flag_bits_t values.

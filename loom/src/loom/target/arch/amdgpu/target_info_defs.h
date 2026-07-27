@@ -89,6 +89,9 @@ typedef enum loom_amdgpu_kernel_descriptor_profile_e {
   LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125 = 4,
 } loom_amdgpu_kernel_descriptor_profile_t;
 
+// Exact matrix instruction-shape inventories. Profiles are not cumulative ISA
+// generations: a later processor may replace an earlier operand or fragment
+// layout while retaining the same semantic operation.
 typedef enum loom_amdgpu_matrix_feature_profile_e {
   // No matrix instruction feature profile is defined.
   LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE = 0,
@@ -106,6 +109,8 @@ typedef enum loom_amdgpu_matrix_feature_profile_e {
   LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12 = 6,
   // GFX1250 WMMA/SWMMAC feature baseline.
   LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250 = 7,
+  // Number of matrix feature profiles.
+  LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_COUNT = 8,
 } loom_amdgpu_matrix_feature_profile_t;
 
 typedef enum loom_amdgpu_processor_info_flag_bits_e {

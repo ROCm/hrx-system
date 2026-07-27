@@ -260,7 +260,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
     AmdgpuMatrixContract(
         name="mfma.f32.16x16x8.xf32",
         family="mfma",
-        features=("mfma_gfx940_fp8",),
+        features=("mfma_gfx940_xf32",),
         flags=(),
         tile_shape=(16, 16, 8),
         lhs=payload("xf32", 2, 2),
@@ -455,7 +455,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
     AmdgpuMatrixContract(
         name="mfma.f32.32x32x4.xf32",
         family="mfma",
-        features=("mfma_gfx940_fp8",),
+        features=("mfma_gfx940_xf32",),
         flags=(),
         tile_shape=(32, 32, 4),
         lhs=payload("xf32", 2, 2),

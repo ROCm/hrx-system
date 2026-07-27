@@ -278,8 +278,8 @@ processor Loom currently supports:
 | --- | --- |
 | `amdgpu.cdna3.core` | `gfx940`, `gfx941`, `gfx942` |
 | `amdgpu.cdna4.core` | `gfx950` |
-| `amdgpu.rdna3.core` | `gfx1100`, `gfx1101`, `gfx1102`, `gfx1103`, `gfx1150`, `gfx1151`, `gfx1152`, `gfx1153` |
-| `amdgpu.rdna3_5.core` | `gfx1170`, `gfx1171`, `gfx1172` |
+| `amdgpu.rdna3.core` | `gfx1100`, `gfx1101`, `gfx1102`, `gfx1103` |
+| `amdgpu.rdna3_5.core` | `gfx1150`, `gfx1151`, `gfx1152`, `gfx1153`, `gfx1170`, `gfx1171`, `gfx1172` |
 | `amdgpu.rdna4.core` | `gfx1200`, `gfx1201` |
 | `amdgpu.rdna4.gfx125x.core` | `gfx1250`, `gfx1251` |
 

@@ -91,7 +91,7 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx1150Processor) {
   ExpectKernelDescriptor(processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11,
                          8, 4, kRdna3DescriptorFlags);
   EXPECT_EQ(processor->features.matrix,
-            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12);
+            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11);
   ExpectSchedulingBits(
       processor,
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
@@ -399,7 +399,7 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx1170Processor) {
   ExpectKernelDescriptor(processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11,
                          8, 4, kRdna3DescriptorFlags);
   EXPECT_EQ(processor->features.matrix,
-            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12);
+            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11);
   ExpectSchedulingBits(
       processor,
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |

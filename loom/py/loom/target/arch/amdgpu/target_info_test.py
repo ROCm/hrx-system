@@ -12,9 +12,15 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950,
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
+    AMDGPU_MATRIX_FEATURES_BY_PROFILE,
     amdgpu_descriptor_set_info_by_generator_target,
     amdgpu_descriptor_set_storage_info_by_generator_target,
     amdgpu_descriptor_set_view_infos_by_storage_generator_target,
+    amdgpu_processor_info_by_name,
     validate_amdgpu_descriptor_set_isa_xml,
 )
 
@@ -93,3 +99,31 @@ def test_descriptor_set_storage_target_lookup_classifies_storage_targets() -> No
         == ()
     )
     assert amdgpu_descriptor_set_view_infos_by_storage_generator_target("cdna3") == ()
+
+
+def test_matrix_feature_profiles_model_replacement_instruction_shapes() -> None:
+    assert (
+        "mfma_gfx940_xf32"
+        in AMDGPU_MATRIX_FEATURES_BY_PROFILE[AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940]
+    )
+    assert (
+        "mfma_gfx940_xf32"
+        not in AMDGPU_MATRIX_FEATURES_BY_PROFILE[
+            AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950
+        ]
+    )
+    assert (
+        "wmma_gfx11"
+        not in AMDGPU_MATRIX_FEATURES_BY_PROFILE[
+            AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12
+        ]
+    )
+
+
+def test_rdna3_5_processors_use_gfx11_matrix_shapes() -> None:
+    for processor_name in ("gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1170"):
+        processor_info = amdgpu_processor_info_by_name(processor_name)
+        assert processor_info is not None
+        assert (
+            processor_info.features.matrix == AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11
+        )

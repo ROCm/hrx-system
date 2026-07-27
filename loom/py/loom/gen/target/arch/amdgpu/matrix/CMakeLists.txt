@@ -23,6 +23,7 @@ iree_py_library(
     loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::matrix_contracts
     loom::py::loom::target::arch::amdgpu::matrix_fragment_layouts
+    loom::py::loom::target::arch::amdgpu::target_info
 )
 
 iree_py_test(

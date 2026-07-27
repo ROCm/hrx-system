@@ -1015,6 +1015,7 @@ def _with_instruction_classes(descriptor_set: DescriptorSet) -> DescriptorSet:
 @dataclass(frozen=True, slots=True)
 class _AmdgpuCoreDescriptorSetBuilder:
     base: DescriptorSet
+    overlay_rows: Callable[[], tuple[AmdgpuDescriptorOverlay, ...]]
     overlay_descriptors: Callable[[AmdgpuIsaFactSource], tuple[Descriptor, ...]]
     extra_descriptors: tuple[Descriptor, ...] = ()
 
@@ -1022,29 +1023,35 @@ class _AmdgpuCoreDescriptorSetBuilder:
 _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
     "cdna3": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
+        overlay_rows=_gfx940_core_overlays,
         overlay_descriptors=_gfx940_core_overlay_descriptors,
     ),
     "cdna4": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
+        overlay_rows=_gfx950_core_overlays,
         overlay_descriptors=_gfx950_core_overlay_descriptors,
     ),
     "rdna3": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
+        overlay_rows=_gfx11_core_overlays,
         overlay_descriptors=_gfx11_core_overlay_descriptors,
         extra_descriptors=(_s_delay_alu_descriptor(),),
     ),
     "rdna3_5": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE,
+        overlay_rows=_gfx117x_core_overlays,
         overlay_descriptors=_gfx117x_core_overlay_descriptors,
         extra_descriptors=(_s_delay_alu_descriptor(),),
     ),
     "rdna4": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE,
+        overlay_rows=_gfx12_core_overlays,
         overlay_descriptors=_gfx12_core_overlay_descriptors,
         extra_descriptors=(_s_delay_alu_descriptor(),),
     ),
     "rdna4_gfx125x": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,
+        overlay_rows=_gfx1250_core_overlays,
         overlay_descriptors=_gfx1250_core_overlay_descriptors,
         extra_descriptors=(
             _s_delay_alu_descriptor(),

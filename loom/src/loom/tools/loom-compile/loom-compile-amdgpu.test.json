@@ -1504,6 +1504,46 @@
       ]
     },
     {
+      "name": "reports RDNA3.5 gfx1151 narrow matrix target capabilities",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/selected_root_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--root=@unselected_targetless_store_i32",
+              "--target=gfx1151",
+              "--output={tmp}/targetless_native_matrix_gfx1151.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1151\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_feature_profile\",\"value_kind\":\"string\",\"value_string\":\"wmma-gfx11\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/targetless_native_matrix_gfx1151.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "reports RDNA4 gfx1200 narrow matrix target capabilities",
       "steps": [
         {

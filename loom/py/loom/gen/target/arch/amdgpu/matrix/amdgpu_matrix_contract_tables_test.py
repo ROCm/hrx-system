@@ -19,6 +19,9 @@ from loom.target.arch.amdgpu.matrix_contracts import (
 from loom.target.arch.amdgpu.matrix_fragment_layouts import (
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
 )
+from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
+)
 from loom.target.low_descriptors import Immediate, ImmediateKind
 
 
@@ -101,6 +104,42 @@ def _contract_initializer(contract: AmdgpuMatrixContract) -> str:
         descriptor_shapes_by_key=(amdgpu_matrix_contract_tables._matrix_descriptor_shapes_by_key()),
         descriptor_immediates_by_key=(amdgpu_matrix_contract_tables._matrix_descriptor_immediates_by_key()),
     )
+
+
+def _global_descriptor_keys() -> tuple[str | None, ...]:
+    catalog = amdgpu_matrix_contract_tables._global_matrix_descriptor_catalog()
+    return amdgpu_matrix_contract_tables._contract_descriptor_keys(
+        keys_by_semantic_tag=catalog.keys_by_semantic_tag,
+        descriptor_shapes_by_key=catalog.shapes_by_key,
+        descriptor_immediates_by_key=catalog.immediates_by_key,
+    )
+
+
+def test_generation_validates_profile_descriptor_inventories() -> None:
+    source = amdgpu_matrix_contract_tables._emit_source(public_header="loom/target/arch/amdgpu/matrix/contract_tables.h")
+
+    gfx12_profile = source[source.index("[LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12]") : source.index("[LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250]")]
+    assert "LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12" in gfx12_profile
+    assert "LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX12" in gfx12_profile
+    assert "LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11" not in gfx12_profile
+
+
+def test_generation_rejects_gfx12_profile_for_rdna3_5_inventory() -> None:
+    catalog = amdgpu_matrix_contract_tables._matrix_descriptor_catalog_for_builder("rdna3_5")
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"descriptor set 'amdgpu\.rdna3_5\.core'.*profile 'wmma_gfx12'.*"
+            r"contract 'swmmac\.f32\.16x16x32\.f16'.*no matching low descriptor"
+        ),
+    ):
+        amdgpu_matrix_contract_tables._validate_matrix_profile_descriptor_catalog(
+            descriptor_set_key="amdgpu.rdna3_5.core",
+            profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
+            catalog=catalog,
+            global_descriptor_keys=_global_descriptor_keys(),
+        )
 
 
 def test_generation_derives_semantic_tag_descriptor_ref() -> None:

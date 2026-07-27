@@ -47,46 +47,6 @@ static const iree_string_view_t kAmdgpuMatrixScaleKindNames[] = {
     [LOOM_AMDGPU_MATRIX_SCALE_16] = IREE_SVL("scale16"),
 };
 
-static const loom_amdgpu_matrix_feature_bits_t
-    kAmdgpuMatrixFeatureBitsByProfile[] = {
-        [LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE] = 0,
-        [LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908] =
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX908 |
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX908_GFX90A,
-        [LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A] =
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX908 |
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX908_GFX90A |
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_BF16_1K |
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_F64,
-        [LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940] =
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX908 |
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_BF16_1K |
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_F64 |
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8 |
-            LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940,
-        [LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950] =
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX908 |
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_BF16_1K |
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_F64 |
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8 |
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950 |
-            LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4 |
-            LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940 |
-            LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX950,
-        [LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11] =
-            LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11,
-        [LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12] =
-            LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11 |
-            LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12 |
-            LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX12,
-        // GFX1250 replaces the legacy WMMA and SWMMAC instruction shapes;
-        // these feature sets are not backwards-compatible ISA generations.
-        [LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250] =
-            LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250 |
-            LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250_SCALE_F8F6F4 |
-            LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250,
-};
-
 static const loom_amdgpu_matrix_feature_info_t kAmdgpuMatrixFeatureInfos[] = {
     {
         .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX908,
@@ -107,6 +67,10 @@ static const loom_amdgpu_matrix_feature_info_t kAmdgpuMatrixFeatureInfos[] = {
     {
         .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8,
         .name = IREE_SVL("mfma-gfx940-fp8"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_XF32,
+        .name = IREE_SVL("mfma-gfx940-xf32"),
     },
     {
         .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950,
@@ -220,8 +184,8 @@ bool loom_amdgpu_matrix_feature_bits_from_profile(
     loom_amdgpu_matrix_feature_bits_t* out_feature_bits) {
   loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
   if ((iree_host_size_t)profile <
-      IREE_ARRAYSIZE(kAmdgpuMatrixFeatureBitsByProfile)) {
-    feature_bits = kAmdgpuMatrixFeatureBitsByProfile[profile];
+      IREE_ARRAYSIZE(kLoomAmdgpuMatrixFeatureBitsByProfile)) {
+    feature_bits = kLoomAmdgpuMatrixFeatureBitsByProfile[profile];
   }
   *out_feature_bits = feature_bits;
   return feature_bits != 0;

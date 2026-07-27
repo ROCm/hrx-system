@@ -223,6 +223,7 @@ TEST(MatrixContractTest, FeatureInfoCoversKnownFeatureBits) {
       LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_BF16_1K |
       LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_F64 |
       LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8 |
+      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_XF32 |
       LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950 |
       LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4 |
       LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940 |
@@ -2800,12 +2801,15 @@ TEST(MatrixContractTest, ProcessorFeatureBitsRejectMissingMatrixProfile) {
 }
 
 TEST(MatrixContractTest, ProcessorFeatureBitsUseTargetInfoAliases) {
+  loom_amdgpu_matrix_feature_bits_t gfx1151_features = 0;
+  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
+      IREE_SV("gfx1151"), &gfx1151_features));
+  EXPECT_EQ(gfx1151_features, LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11);
+
   loom_amdgpu_matrix_feature_bits_t gfx1170_features = 0;
   IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
       IREE_SV("gfx1170"), &gfx1170_features));
-  EXPECT_EQ(gfx1170_features, LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11 |
-                                  LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12 |
-                                  LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX12);
+  EXPECT_EQ(gfx1170_features, LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11);
 
   loom_amdgpu_matrix_feature_bits_t gfx1251_features = 0;
   IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
@@ -2814,6 +2818,29 @@ TEST(MatrixContractTest, ProcessorFeatureBitsUseTargetInfoAliases) {
             LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250 |
                 LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250_SCALE_F8F6F4 |
                 LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250);
+}
+
+TEST(MatrixContractTest, ReplacementProfilesDoNotLeakMatrixShapes) {
+  loom_amdgpu_matrix_feature_bits_t gfx942_features = 0;
+  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
+      IREE_SV("gfx942"), &gfx942_features));
+  EXPECT_TRUE(iree_any_bit_set(gfx942_features,
+                               LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_XF32));
+
+  loom_amdgpu_matrix_feature_bits_t gfx950_features = 0;
+  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
+      IREE_SV("gfx950"), &gfx950_features));
+  EXPECT_FALSE(iree_any_bit_set(gfx950_features,
+                                LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_XF32));
+
+  loom_amdgpu_matrix_feature_bits_t gfx1200_features = 0;
+  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
+      IREE_SV("gfx1200"), &gfx1200_features));
+  EXPECT_FALSE(iree_any_bit_set(gfx1200_features,
+                                LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11));
+  EXPECT_TRUE(iree_all_bits_set(gfx1200_features,
+                                LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12 |
+                                    LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX12));
 }
 
 TEST(MatrixContractTest, Gfx1250RejectsLegacyWmmaDescriptors) {

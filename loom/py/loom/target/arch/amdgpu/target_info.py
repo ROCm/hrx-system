@@ -35,6 +35,60 @@ AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950 = "mfma_gfx950"
 AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11 = "wmma_gfx11"
 AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12 = "wmma_gfx12"
 AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250 = "wmma_gfx1250"
+# Exact source-contract feature inventories in C enum order. These are not
+# cumulative ISA generations because later processors can replace operand and
+# fragment layouts while retaining the same semantic operation.
+AMDGPU_MATRIX_FEATURE_PROFILES = (
+    AMDGPU_MATRIX_FEATURE_PROFILE_NONE,
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908,
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A,
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950,
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
+)
+AMDGPU_MATRIX_FEATURES_BY_PROFILE = {
+    AMDGPU_MATRIX_FEATURE_PROFILE_NONE: (),
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908: (
+        "mfma_gfx908",
+        "mfma_gfx908_gfx90a",
+    ),
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A: (
+        "mfma_gfx908",
+        "mfma_gfx908_gfx90a",
+        "mfma_gfx90a_bf16_1k",
+        "mfma_gfx90a_f64",
+    ),
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940: (
+        "mfma_gfx908",
+        "mfma_gfx90a_bf16_1k",
+        "mfma_gfx90a_f64",
+        "mfma_gfx940_fp8",
+        "mfma_gfx940_xf32",
+        "smfmac_gfx940",
+    ),
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950: (
+        "mfma_gfx908",
+        "mfma_gfx90a_bf16_1k",
+        "mfma_gfx90a_f64",
+        "mfma_gfx940_fp8",
+        "mfma_gfx950",
+        "mfma_gfx950_scale_f8f6f4",
+        "smfmac_gfx940",
+        "smfmac_gfx950",
+    ),
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11: ("wmma_gfx11",),
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12: (
+        "wmma_gfx12",
+        "swmmac_gfx12",
+    ),
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250: (
+        "wmma_gfx1250",
+        "wmma_gfx1250_scale_f8f6f4",
+        "swmmac_gfx1250",
+    ),
+}
 
 AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION = 1 << 0
 AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE = 1 << 1
@@ -491,7 +545,7 @@ def gfx117x_processor_info(
         elf_machine_flags=elf_machine_flags,
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA3_GFX11,
-        matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
+        matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
         scheduling_bits=(
             AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR
             | AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU
