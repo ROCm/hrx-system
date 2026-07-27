@@ -217,6 +217,9 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   iree_host_size_t sample_constant_argument_count;
 } loom_run_hal_testbench_actual_provider_t;
 
+typedef struct loom_run_hal_testbench_actual_sequence_execution_t
+    loom_run_hal_testbench_actual_sequence_execution_t;
+
 typedef struct loom_run_hal_testbench_actual_sequence_options_t {
   // Shared HAL context used to prepare and dispatch all actual candidates.
   loom_run_hal_testbench_context_t* context;
@@ -259,6 +262,8 @@ typedef struct loom_run_hal_testbench_actual_sequence_t {
   loom_run_hal_testbench_actual_provider_t* providers;
   // Number of entries in |providers|.
   iree_host_size_t provider_count;
+  // Prepared ordered execution over |providers|.
+  loom_run_hal_testbench_actual_sequence_execution_t* execution;
 } loom_run_hal_testbench_actual_sequence_t;
 
 // Initializes a compile-on-first-use HAL actual provider.
@@ -273,6 +278,28 @@ void loom_run_hal_testbench_actual_provider_deinitialize(
 // Compiles and prepares the selected actual candidate if needed.
 iree_status_t loom_run_hal_testbench_actual_provider_compile(
     loom_run_hal_testbench_actual_provider_t* provider);
+
+// Creates ordered execution over actual providers in source order.
+//
+// Provider objects referenced by |providers| are borrowed until the returned
+// execution is destroyed; the pointer array itself is needed only during this
+// call. One execution may be reused across case executors but is submitted
+// serially; concurrent invocation requires a distinct execution object.
+iree_status_t loom_run_hal_testbench_actual_sequence_execution_create(
+    const loom_testbench_case_plan_t* case_plan,
+    iree_host_size_t provider_count,
+    loom_run_hal_testbench_actual_provider_t* const* providers,
+    iree_allocator_t host_allocator,
+    loom_run_hal_testbench_actual_sequence_execution_t** out_execution);
+
+// Releases storage and reusable command sequences owned by |execution|.
+void loom_run_hal_testbench_actual_sequence_execution_destroy(
+    loom_run_hal_testbench_actual_sequence_execution_t* execution);
+
+// Returns a testbench provider backed by |execution|.
+loom_testbench_invocation_provider_t
+loom_run_hal_testbench_actual_sequence_execution_provider(
+    loom_run_hal_testbench_actual_sequence_execution_t* execution);
 
 // Testbench invocation callback for HAL actual invocations.
 iree_status_t loom_run_hal_testbench_actual_invoke(
@@ -290,17 +317,10 @@ iree_status_t loom_run_hal_testbench_actual_sequence_initialize(
 void loom_run_hal_testbench_actual_sequence_deinitialize(
     loom_run_hal_testbench_actual_sequence_t* sequence);
 
-// Testbench invocation callback for HAL actual invocation sequences.
-iree_status_t loom_run_hal_testbench_actual_sequence_invoke(
-    void* user_data, const loom_testbench_invocation_plan_t* invocation,
-    iree_host_size_t input_count, const loom_testbench_value_t* inputs,
-    iree_host_size_t result_count, loom_testbench_value_t* out_results);
-
-// Reports a compile rejection recorded by the provider for |invocation|, if
-// any.
-iree_status_t loom_run_hal_testbench_actual_sequence_query_issue(
-    void* user_data, const loom_testbench_invocation_plan_t* invocation,
-    loom_testbench_sample_issue_t* out_issue);
+// Returns a testbench provider backed by |sequence|.
+loom_testbench_invocation_provider_t
+loom_run_hal_testbench_actual_sequence_provider(
+    loom_run_hal_testbench_actual_sequence_t* sequence);
 
 // Appends borrowed testbench input values to HAL bindings/constants.
 //

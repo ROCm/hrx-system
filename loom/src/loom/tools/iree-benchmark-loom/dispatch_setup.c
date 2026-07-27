@@ -56,10 +56,8 @@ static iree_status_t iree_benchmark_loom_initialize_sequence_compile_context(
   if (iree_status_is_ok(status)) {
     context->hal_sequence_initialized = true;
     context->execution_options.invocation.actual =
-        (loom_testbench_invocation_provider_t){
-            .invoke = iree_benchmark_loom_hal_actual_sequence_invoke,
-            .user_data = &context->hal_sequence,
-        };
+        loom_run_hal_testbench_actual_sequence_execution_provider(
+            context->hal_sequence.execution);
     iree_benchmark_loom_configure_reference_oracles(
         &options->hal_context->execution,
         context->execution_options.materializer.host_allocator,

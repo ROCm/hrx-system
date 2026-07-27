@@ -114,7 +114,7 @@ iree_status_t loom_testbench_run_case_sample(
       &executor->materializer_options, case_plan, sample_ordinal,
       &executor->value_table));
   IREE_RETURN_IF_ERROR(loom_testbench_run_case_invocations(
-      &executor->invocation_executor, &executor->value_table));
+      &executor->invocation_executor, sample_ordinal, &executor->value_table));
   const bool has_sample_issues = executor->invocation_executor.issue_count != 0;
   if (!has_sample_issues) {
     loom_testbench_case_sample_observations_t observations =
