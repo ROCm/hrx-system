@@ -1102,7 +1102,7 @@ static hipError_t iree_hip_ensure_initialized(void) {
   if (!device_registry) {
     // Initialize the runtime.
     iree_status_t status = iree_hal_streaming_init_global(
-        IREE_HAL_STREAMING_INIT_FLAG_NONE, iree_allocator_system());
+        /*device_extensions=*/NULL, iree_allocator_system());
     if (!iree_status_is_ok(status)) {
       const iree_status_code_t status_code = iree_status_code(status);
       iree_status_free(status);
