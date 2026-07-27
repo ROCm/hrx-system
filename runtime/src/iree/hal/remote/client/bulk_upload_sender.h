@@ -35,6 +35,12 @@ iree_hal_remote_client_bulk_upload_sender_chunk_storage_alignment(void);
 void iree_hal_remote_client_bulk_upload_sender_deinitialize_transfer(
     iree_hal_remote_client_file_read_transfer_t* transfer);
 
+// Marks |transfer| terminal while the transfer mutex is held. Releases any
+// locally pending chunk with no async or transport owner. Returns true when no
+// admitted callback still requires the transfer descriptor.
+bool iree_hal_remote_client_bulk_upload_sender_mark_terminal_locked(
+    iree_hal_remote_client_file_read_transfer_t* transfer);
+
 // Begins a client-local queue_read bulk transfer.
 iree_status_t iree_hal_remote_client_bulk_begin_file_read(
     iree_hal_remote_client_device_t* device, iree_hal_file_t* source_file,

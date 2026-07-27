@@ -44,6 +44,7 @@ enum iree_hal_remote_client_file_read_transfer_flag_bits_e {
   IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_CHUNK_IN_FLIGHT = 1u << 0,
   IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_START_SENT = 1u << 1,
   IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_COMPLETE_SENT = 1u << 2,
+  IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_TERMINAL = 1u << 3,
 };
 
 typedef struct iree_hal_remote_client_file_read_transfer_t {
@@ -79,6 +80,7 @@ typedef uint8_t iree_hal_remote_client_file_write_transfer_flags_t;
 enum iree_hal_remote_client_file_write_transfer_flag_bits_e {
   IREE_HAL_REMOTE_CLIENT_FILE_WRITE_TRANSFER_FLAG_SERVER_COMPLETE = 1u << 0,
   IREE_HAL_REMOTE_CLIENT_FILE_WRITE_TRANSFER_FLAG_WRITE_FAILED = 1u << 1,
+  IREE_HAL_REMOTE_CLIENT_FILE_WRITE_TRANSFER_FLAG_TERMINAL = 1u << 2,
 };
 
 typedef void (*iree_hal_remote_client_bulk_completion_fn_t)(

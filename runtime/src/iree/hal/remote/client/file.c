@@ -328,7 +328,9 @@ typedef struct iree_hal_remote_client_file_open_request_header_t {
 static void iree_hal_remote_client_file_close_control(
     iree_hal_remote_client_device_t* device,
     iree_hal_remote_resource_id_t remote_file_id) {
-  if (device && device->session) {
+  if (device && device->session &&
+      iree_hal_remote_client_device_load_state(device) ==
+          IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
     iree_hal_remote_control_envelope_t envelope;
     memset(&envelope, 0, sizeof(envelope));
     envelope.message_type = IREE_HAL_REMOTE_CONTROL_FILE_CLOSE;
@@ -342,8 +344,11 @@ static void iree_hal_remote_client_file_close_control(
     spans[0] = iree_async_span_from_ptr(&envelope, sizeof(envelope));
     spans[1] = iree_async_span_from_ptr(&body, sizeof(body));
     iree_async_span_list_t payload = iree_async_span_list_make(spans, 2);
-    iree_status_ignore(iree_net_session_send_control_data_copy(
-        device->session, /*flags=*/0, payload, /*operation_user_data=*/0));
+    iree_status_t status = iree_net_session_send_control_data_copy(
+        device->session, /*flags=*/0, payload, /*operation_user_data=*/0);
+    if (!iree_status_is_ok(status)) {
+      iree_hal_remote_client_device_fail(device, status);
+    }
   }
 }
 
@@ -358,15 +363,7 @@ iree_status_t iree_hal_remote_client_file_open(
 
   iree_host_size_t request_size = 0;
   iree_host_size_t logical_name_offset = 0;
-  iree_status_t status = iree_ok_status();
-  if (iree_hal_remote_client_device_load_state(device) !=
-      IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "device is not connected");
-  } else if (!device->session) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "session is not available");
-  }
+  iree_status_t status = iree_hal_remote_client_device_check_connected(device);
   if (iree_status_is_ok(status) && logical_name.size > UINT16_MAX) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "remote file logical name too long: %" PRIhsz,

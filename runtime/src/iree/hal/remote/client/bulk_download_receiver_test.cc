@@ -322,6 +322,33 @@ TEST_F(ClientBulkDownloadReceiverTest, ServerAbortFailsAndReleasesTransfer) {
 }
 
 TEST_F(ClientBulkDownloadReceiverTest,
+       TerminalFailureWakesMapAndRejectsNewTransfers) {
+  std::vector<uint8_t> target(4, 0);
+  BeginBufferMapRead(iree_make_byte_span(target.data(), target.size()));
+
+  iree_hal_remote_client_bulk_fail_transfers(
+      &device_,
+      iree_make_status(IREE_STATUS_ABORTED, "injected terminal failure"));
+
+  ASSERT_EQ(completion_status_codes_.size(), 1u);
+  EXPECT_EQ(completion_status_codes_[0], IREE_STATUS_ABORTED);
+  EXPECT_EQ(iree_net_bulk_transfer_table_count(device_.bulk_session.transfers),
+            0u);
+
+  uint64_t transfer_id = 0;
+  CompletionRecorder recorder = {&completion_status_codes_};
+  iree_hal_remote_client_bulk_completion_callback_t callback = {
+      RecordCompletion, &recorder};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      iree_hal_remote_client_bulk_begin_buffer_map_read(
+          &device_, iree_make_byte_span(target.data(), target.size()), callback,
+          &transfer_id));
+  EXPECT_EQ(transfer_id, 0u);
+  EXPECT_EQ(completion_status_codes_.size(), 1u);
+}
+
+TEST_F(ClientBulkDownloadReceiverTest,
        AsyncFileWriteCompletesAfterServerComplete) {
   iree_status_t status = CreatePlatformProactor();
   if (iree_status_is_unavailable(status)) {
@@ -391,6 +418,69 @@ TEST_F(ClientBulkDownloadReceiverTest,
             0);
   iree_io_file_contents_free(contents);
 
+  iree_hal_file_release(file);
+}
+
+TEST_F(ClientBulkDownloadReceiverTest,
+       TerminalFailureRetiresAdmittedAsyncWriteWithoutSending) {
+  iree_status_t status = CreatePlatformProactor();
+  if (iree_status_is_unavailable(status)) {
+    iree_status_free(status);
+    GTEST_SKIP() << "Platform proactor unavailable";
+  }
+  IREE_ASSERT_OK(status);
+
+  iree::testing::TempFilePath path("iree_hal_remote_client_bulk_terminal");
+  const uint8_t initial_contents[] = {0, 0, 0, 0};
+  IREE_ASSERT_OK(iree_io_file_contents_write(
+      path.path_view(),
+      iree_make_const_byte_span(initial_contents, sizeof(initial_contents)),
+      iree_allocator_system()));
+
+  iree_hal_file_t* file = NULL;
+  status = ImportAsyncTempFile(path, &file);
+  if (iree_status_is_unavailable(status) ||
+      iree_status_code(status) == IREE_STATUS_UNIMPLEMENTED) {
+    iree_status_free(status);
+    GTEST_SKIP() << "Async platform file handles unavailable";
+  }
+  IREE_ASSERT_OK(status);
+
+  iree_hal_remote_client_file_view_t file_view;
+  IREE_ASSERT_OK(iree_hal_remote_client_file_resolve(file, &file_view));
+  file_view.length = sizeof(initial_contents);
+  uint64_t transfer_id = 0;
+  IREE_ASSERT_OK(iree_hal_remote_client_bulk_begin_file_write(
+      &device_, file, &file_view, /*target_offset=*/0,
+      /*length=*/sizeof(initial_contents), &transfer_id));
+
+  std::vector<uint8_t> payload = {1, 2, 3, 4};
+  int release_count = 0;
+  iree_async_buffer_lease_t lease = MakeTestLease(&payload, &release_count);
+  bool handled = false;
+  IREE_ASSERT_OK(iree_hal_remote_client_bulk_download_receiver_on_data(
+      &device_, bulk_channel_, transfer_id, /*chunk_offset=*/0, /*sequence=*/1,
+      IREE_NET_BULK_FRAME_FLAG_FINAL_CHUNK,
+      iree_make_const_byte_span(payload.data(), payload.size()), &lease,
+      &handled));
+  ASSERT_TRUE(handled);
+
+  iree_hal_remote_client_bulk_fail_transfers(
+      &device_,
+      iree_make_status(IREE_STATUS_ABORTED, "injected terminal failure"));
+  EXPECT_EQ(iree_net_bulk_transfer_table_count(device_.bulk_session.transfers),
+            1u);
+  iree_hal_remote_client_bulk_cancel_transfer(&device_, transfer_id);
+  EXPECT_EQ(iree_net_bulk_transfer_table_count(device_.bulk_session.transfers),
+            1u);
+
+  PollProactorUntil([&]() {
+    return iree_net_bulk_transfer_table_count(device_.bulk_session.transfers) ==
+           0;
+  });
+
+  EXPECT_EQ(release_count, 1);
+  EXPECT_TRUE(endpoint_.sends.empty());
   iree_hal_file_release(file);
 }
 

@@ -87,6 +87,23 @@ void iree_hal_remote_client_bulk_upload_sender_deinitialize_transfer(
   iree_hal_file_release(transfer->source_file);
 }
 
+bool iree_hal_remote_client_bulk_upload_sender_mark_terminal_locked(
+    iree_hal_remote_client_file_read_transfer_t* transfer) {
+  transfer->flags |= IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_TERMINAL;
+  if (transfer->pending_chunk) {
+    iree_hal_remote_client_file_read_chunk_release(
+        iree_hal_remote_client_file_read_chunk_storage(
+            transfer->pending_chunk));
+    transfer->pending_chunk = NULL;
+    transfer->flags &=
+        ~IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_CHUNK_IN_FLIGHT;
+  }
+  return transfer->pending_send_count == 0 &&
+         !iree_any_bit_set(
+             transfer->flags,
+             IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_CHUNK_IN_FLIGHT);
+}
+
 static void iree_hal_remote_client_bulk_upload_sender_release_transfer(
     iree_net_bulk_transfer_table_t* table, iree_net_bulk_transfer_t* transfer) {
   const uint64_t transfer_id = iree_net_bulk_transfer_id(transfer);
@@ -203,10 +220,31 @@ static void iree_hal_remote_client_file_read_chunk_complete(
   iree_net_bulk_transfer_t* table_transfer =
       iree_net_bulk_transfer_table_lookup(device->bulk_session.transfers,
                                           chunk_context->transfer_id);
-  if (iree_status_is_ok(status) && table_transfer && channel) {
+  iree_hal_remote_client_file_read_transfer_t* file_transfer = NULL;
+  if (table_transfer) {
     iree_hal_remote_client_bulk_transfer_t* bulk_transfer =
         iree_hal_remote_client_bulk_transfer_storage(table_transfer);
-    bulk_transfer->file_read.pending_chunk = chunk_context->chunk;
+    if (bulk_transfer->kind ==
+        IREE_HAL_REMOTE_CLIENT_BULK_TRANSFER_KIND_FILE_READ) {
+      file_transfer = &bulk_transfer->file_read;
+    }
+  }
+  if (file_transfer &&
+      iree_any_bit_set(
+          file_transfer->flags,
+          IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_TERMINAL)) {
+    file_transfer->flags &=
+        ~IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_CHUNK_IN_FLIGHT;
+    if (file_transfer->pending_send_count == 0) {
+      iree_hal_remote_client_bulk_upload_sender_release_transfer(
+          device->bulk_session.transfers, table_transfer);
+      table_transfer = NULL;
+    }
+    iree_status_free(status);
+    status = iree_ok_status();
+    release_chunk = true;
+  } else if (iree_status_is_ok(status) && file_transfer && channel) {
+    file_transfer->pending_chunk = chunk_context->chunk;
     chunk_attached_to_transfer = true;
     status = iree_hal_remote_client_bulk_try_send_pending_upload_locked(
         device, channel, table_transfer);
@@ -248,8 +286,7 @@ static void iree_hal_remote_client_file_read_chunk_complete(
         /*operation_user_data=*/0);
   }
   if (!iree_status_is_ok(transport_status)) {
-    iree_hal_remote_client_device_notify_bulk_transport_error(device,
-                                                              transport_status);
+    iree_hal_remote_client_device_fail(device, transport_status);
   }
 }
 
@@ -289,9 +326,14 @@ iree_status_t iree_hal_remote_client_bulk_begin_file_read(
 
   iree_slim_mutex_lock(&device->bulk_session.transfer_mutex);
   iree_net_bulk_transfer_t* transfer = NULL;
-  iree_status_t status = iree_net_bulk_transfer_table_allocate_transfer(
-      device->bulk_session.transfers, (uint64_t)length, /*user_value=*/0,
-      &transfer);
+  iree_status_t status =
+      iree_hal_remote_client_bulk_session_check_active_locked(
+          &device->bulk_session);
+  if (iree_status_is_ok(status)) {
+    status = iree_net_bulk_transfer_table_allocate_transfer(
+        device->bulk_session.transfers, (uint64_t)length, /*user_value=*/0,
+        &transfer);
+  }
   if (iree_status_is_ok(status)) {
     iree_hal_remote_client_bulk_transfer_t* bulk_transfer =
         iree_hal_remote_client_bulk_transfer_storage(transfer);
@@ -317,9 +359,14 @@ iree_status_t iree_hal_remote_client_bulk_begin_buffer_unmap_write(
 
   iree_slim_mutex_lock(&device->bulk_session.transfer_mutex);
   iree_net_bulk_transfer_t* transfer = NULL;
-  iree_status_t status = iree_net_bulk_transfer_table_allocate_transfer(
-      device->bulk_session.transfers, (uint64_t)source_bytes.data_length,
-      /*user_value=*/0, &transfer);
+  iree_status_t status =
+      iree_hal_remote_client_bulk_session_check_active_locked(
+          &device->bulk_session);
+  if (iree_status_is_ok(status)) {
+    status = iree_net_bulk_transfer_table_allocate_transfer(
+        device->bulk_session.transfers, (uint64_t)source_bytes.data_length,
+        /*user_value=*/0, &transfer);
+  }
   if (iree_status_is_ok(status)) {
     iree_hal_remote_client_bulk_transfer_t* bulk_transfer =
         iree_hal_remote_client_bulk_transfer_storage(transfer);
@@ -394,6 +441,18 @@ static iree_status_t iree_hal_remote_client_bulk_try_send_upload_locked(
   }
   iree_hal_remote_client_file_read_transfer_t* transfer =
       &bulk_transfer->file_read;
+  if (iree_any_bit_set(
+          transfer->flags,
+          IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_TERMINAL)) {
+    if (transfer->pending_send_count == 0 &&
+        !iree_any_bit_set(
+            transfer->flags,
+            IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_CHUNK_IN_FLIGHT)) {
+      iree_hal_remote_client_bulk_upload_sender_release_transfer(
+          device->bulk_session.transfers, table_transfer);
+    }
+    return iree_ok_status();
+  }
   if (iree_any_bit_set(
           transfer->flags,
           IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_COMPLETE_SENT)) {
@@ -637,7 +696,17 @@ iree_status_t iree_hal_remote_client_bulk_upload_sender_send_complete(
         }
         transfer->flags &=
             ~IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_CHUNK_IN_FLIGHT;
-        if (!iree_status_is_ok(status)) {
+        if (iree_any_bit_set(
+                transfer->flags,
+                IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_TERMINAL)) {
+          iree_status_free(status);
+          status = iree_ok_status();
+          if (transfer->pending_send_count == 0) {
+            iree_hal_remote_client_bulk_upload_sender_release_transfer(
+                device->bulk_session.transfers, table_transfer);
+            table_transfer = NULL;
+          }
+        } else if (!iree_status_is_ok(status)) {
           transport_status = status;
           status = iree_ok_status();
           iree_hal_remote_client_bulk_upload_sender_release_transfer(
@@ -684,7 +753,19 @@ iree_status_t iree_hal_remote_client_bulk_upload_sender_send_complete(
       if (transfer->pending_send_count > 0) {
         --transfer->pending_send_count;
       }
-      if (iree_status_is_ok(status)) {
+      if (iree_any_bit_set(
+              transfer->flags,
+              IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_TERMINAL)) {
+        iree_status_free(status);
+        status = iree_ok_status();
+        if (transfer->pending_send_count == 0 &&
+            !iree_any_bit_set(
+                transfer->flags,
+                IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_CHUNK_IN_FLIGHT)) {
+          iree_hal_remote_client_bulk_upload_sender_release_transfer(
+              device->bulk_session.transfers, table_transfer);
+        }
+      } else if (iree_status_is_ok(status)) {
         transport_status = iree_hal_remote_client_bulk_try_send_upload_locked(
             device, channel, table_transfer);
       } else {

@@ -83,6 +83,11 @@ typedef struct iree_hal_remote_client_bulk_session_t {
   // Reconstructs in-order profile callback dispatch from completed transfers.
   iree_net_sequence_window_t profile_sequence_window;
 
+  // First terminal device failure. Protected by transfer_mutex and retained
+  // until deinitialization so racing transfer admission observes the same
+  // failure as the rest of the device.
+  iree_status_t terminal_status;
+
   // Lifecycle bits from iree_hal_remote_client_bulk_session_flag_bits_e.
   iree_hal_remote_client_bulk_session_flags_t flags;
 } iree_hal_remote_client_bulk_session_t;
@@ -124,6 +129,11 @@ iree_net_bulk_channel_t* iree_hal_remote_client_bulk_session_load_channel(
 iree_net_bulk_channel_t* iree_hal_remote_client_bulk_session_exchange_channel(
     iree_hal_remote_client_bulk_session_t* session,
     iree_net_bulk_channel_t* new_channel);
+
+// Returns OK when transfer admission is active or clones the terminal status.
+// The caller must hold |transfer_mutex|.
+iree_status_t iree_hal_remote_client_bulk_session_check_active_locked(
+    iree_hal_remote_client_bulk_session_t* session);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -32,6 +32,12 @@ typedef struct iree_net_bulk_channel_t iree_net_bulk_channel_t;
 typedef struct iree_net_queue_channel_t iree_net_queue_channel_t;
 typedef struct iree_hal_remote_pending_rpc_t iree_hal_remote_pending_rpc_t;
 
+typedef uint8_t iree_hal_remote_client_device_lifecycle_flags_t;
+enum iree_hal_remote_client_device_lifecycle_flag_bits_e {
+  IREE_HAL_REMOTE_CLIENT_DEVICE_LIFECYCLE_FLAG_CONNECT_DISPATCHING = 1u << 0,
+  IREE_HAL_REMOTE_CLIENT_DEVICE_LIFECYCLE_FLAG_ERROR_DEFERRED = 1u << 1,
+};
+
 typedef iree_status_t (
     *iree_hal_remote_client_device_control_rpc_after_send_fn_t)(
     void* user_data);
@@ -140,9 +146,18 @@ typedef struct iree_hal_remote_client_device_t {
   // Monotonically increasing request ID for control channel RPCs.
   iree_atomic_int32_t next_request_id;
 
-  // Pending control RPCs (stack-allocated entries linked during blocking
-  // calls). Protected by rpc_mutex.
-  iree_slim_mutex_t rpc_mutex;
+  // Serializes terminal failure publication with control RPC registration and
+  // reclamation. A terminal transition posts stack-owned RPC waiters while
+  // holding this mutex so they cannot return and reclaim their entries until
+  // the transition no longer references them.
+  iree_slim_mutex_t failure_mutex;
+
+  // First terminal device failure. Protected by failure_mutex and retained
+  // until final device destruction so all operation classes observe one cause.
+  iree_status_t terminal_status;
+
+  // Stack-owned control RPCs linked while blocking for a response. Protected
+  // by failure_mutex.
   iree_hal_remote_pending_rpc_t* pending_rpcs;
 
   // Current connection state. Atomic because it's written by the proactor
@@ -153,8 +168,13 @@ typedef struct iree_hal_remote_client_device_t {
   iree_atomic_int32_t state;
 
   // Pending connect callback (valid during CONNECTING state until queue and
-  // bulk endpoints are both ready).
+  // bulk endpoints are both ready). Protected by failure_mutex.
   iree_hal_remote_client_device_connected_callback_t connect_callback;
+
+  // Callback ordering bits from
+  // iree_hal_remote_client_device_lifecycle_flag_bits_e. Protected by
+  // failure_mutex.
+  iree_hal_remote_client_device_lifecycle_flags_t lifecycle_flags;
 
   // Completion callback for terminal device deactivation.
   iree_hal_remote_client_device_deactivated_callback_t deactivate_callback;
@@ -186,32 +206,22 @@ static inline void iree_hal_remote_client_device_store_state(
 iree_hal_remote_client_device_t* iree_hal_remote_client_device_cast(
     iree_hal_device_t* base_value);
 
-// Publishes |queue_channel| for queue submissions and returns the previously
-// published channel, if any. The caller owns and must detach/release the
-// returned channel.
-iree_net_queue_channel_t* iree_hal_remote_client_device_publish_queue_channel(
+// Atomically publishes the production channels and commits CONNECTED state.
+// Returns true and consumes both channel references when the connection commits
+// or false when a terminal transition won the race.
+bool iree_hal_remote_client_device_try_commit_connected(
     iree_hal_remote_client_device_t* device,
-    iree_net_queue_channel_t* queue_channel);
-
-// Publishes |bulk_channel| for bulk transfers and returns the previously
-// published channel, if any. The caller owns and must detach/release the
-// returned channel.
-iree_net_bulk_channel_t* iree_hal_remote_client_device_publish_bulk_channel(
-    iree_hal_remote_client_device_t* device,
+    iree_net_queue_channel_t* queue_channel,
     iree_net_bulk_channel_t* bulk_channel);
 
-// Completes the pending connect callback with |status|. If no connect callback
-// is pending, errors are forwarded to the device error callback when present.
-void iree_hal_remote_client_device_complete_connect(
-    iree_hal_remote_client_device_t* device, iree_status_t status);
+// Returns OK when the device is connected or clones its terminal failure.
+iree_status_t iree_hal_remote_client_device_check_connected(
+    iree_hal_remote_client_device_t* device);
 
-// All queue operations require the device to be connected.
-#define IREE_HAL_REMOTE_REQUIRE_CONNECTED(device)            \
-  if (iree_hal_remote_client_device_load_state(device) !=    \
-      IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {       \
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION, \
-                            "device is not connected");      \
-  }
+// Publishes the first terminal failure and consumes |status|. The transition is
+// idempotent and fails every operation class exactly once.
+void iree_hal_remote_client_device_fail(iree_hal_remote_client_device_t* device,
+                                        iree_status_t status);
 
 // Sends a control channel request and blocks until the response arrives.
 // |request| is [envelope + body] built by the caller. The envelope's
@@ -238,14 +248,6 @@ iree_status_t iree_hal_remote_client_device_control_rpc_with_after_send(
 // Sends a fire-and-forget control message (no response expected).
 iree_status_t iree_hal_remote_client_device_send_fire_and_forget(
     iree_hal_remote_client_device_t* device, iree_const_byte_span_t message);
-
-// Wakes all pending control RPCs with an unavailable status.
-void iree_hal_remote_client_device_fail_pending_rpcs(
-    iree_hal_remote_client_device_t* device);
-
-// Reports a bulk channel transport failure and consumes |status|.
-void iree_hal_remote_client_device_notify_bulk_transport_error(
-    iree_hal_remote_client_device_t* device, iree_status_t status);
 
 // Sends a frontier-ordered release for a remote resource. The release is
 // fire-and-forget and produces no ADVANCE; failures are best-effort cleanup

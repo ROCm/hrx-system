@@ -125,7 +125,9 @@ iree_status_t iree_hal_remote_client_bulk_begin_profile_session(
 
   iree_status_t status = iree_ok_status();
   iree_slim_mutex_lock(&device->bulk_session.transfer_mutex);
-  if (device->bulk_session.profile_sink) {
+  status = iree_hal_remote_client_bulk_session_check_active_locked(
+      &device->bulk_session);
+  if (iree_status_is_ok(status) && device->bulk_session.profile_sink) {
     status = iree_make_status(IREE_STATUS_ALREADY_EXISTS,
                               "remote profiling session already active");
   }

@@ -48,8 +48,8 @@ iree_status_t iree_hal_remote_client_bulk_begin_buffer_map_read(
     iree_hal_remote_client_bulk_completion_callback_t callback,
     uint64_t* out_transfer_id);
 
-// Handles a START size mismatch for a download transfer while locked.
-void iree_hal_remote_client_bulk_download_receiver_fail_start_locked(
+// Completes a download transfer's local waiter with |status| while locked.
+void iree_hal_remote_client_bulk_download_receiver_fail_locked(
     iree_hal_remote_client_file_write_transfer_t* transfer,
     iree_status_t status);
 

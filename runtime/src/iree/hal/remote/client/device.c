@@ -132,6 +132,8 @@ typedef struct iree_hal_remote_pending_rpc_t {
   // notification post/commit_wait also provides ordering, but the sentinel
   // check between prepare_wait and commit_wait requires explicit atomics.
   iree_atomic_int32_t response_status_code;
+  // Terminal device failure cloned while failure_mutex protects this entry.
+  iree_status_t failure_status;
   iree_const_byte_span_t response_payload;  // points into retained lease
   iree_async_buffer_lease_t response_lease;
   struct iree_hal_remote_pending_rpc_t* next;
@@ -208,7 +210,7 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
                       iree_memory_order_relaxed);
     iree_slim_mutex_initialize(&device->provisional_mutex);
     iree_atomic_store(&device->next_request_id, 1, iree_memory_order_relaxed);
-    iree_slim_mutex_initialize(&device->rpc_mutex);
+    iree_slim_mutex_initialize(&device->failure_mutex);
     iree_atomic_store(&device->state,
                       IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DISCONNECTED,
                       iree_memory_order_relaxed);
@@ -285,13 +287,6 @@ static void iree_hal_remote_client_device_release_queue_channel(
   iree_net_queue_channel_release(queue_channel);
 }
 
-iree_net_queue_channel_t* iree_hal_remote_client_device_publish_queue_channel(
-    iree_hal_remote_client_device_t* device,
-    iree_net_queue_channel_t* queue_channel) {
-  return iree_hal_remote_client_device_exchange_queue_channel(device,
-                                                              queue_channel);
-}
-
 static iree_net_bulk_channel_t*
 iree_hal_remote_client_device_exchange_bulk_channel(
     iree_hal_remote_client_device_t* device,
@@ -318,26 +313,73 @@ static void iree_hal_remote_client_device_release_bulk_channel(
   iree_net_bulk_channel_release(bulk_channel);
 }
 
-iree_net_bulk_channel_t* iree_hal_remote_client_device_publish_bulk_channel(
-    iree_hal_remote_client_device_t* device,
-    iree_net_bulk_channel_t* bulk_channel) {
-  return iree_hal_remote_client_device_exchange_bulk_channel(device,
-                                                             bulk_channel);
-}
-
-void iree_hal_remote_client_device_complete_connect(
+static void iree_hal_remote_client_device_dispatch_error(
     iree_hal_remote_client_device_t* device, iree_status_t status) {
-  iree_hal_remote_client_device_connected_callback_t callback =
-      device->connect_callback;
-  memset(&device->connect_callback, 0, sizeof(device->connect_callback));
-  if (callback.fn) {
-    callback.fn(callback.user_data, status);
-  } else if (!iree_status_is_ok(status) && device->options.error_callback.fn) {
+  if (device->options.error_callback.fn) {
     device->options.error_callback.fn(device->options.error_callback.user_data,
                                       status);
   } else {
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
+}
+
+bool iree_hal_remote_client_device_try_commit_connected(
+    iree_hal_remote_client_device_t* device,
+    iree_net_queue_channel_t* queue_channel,
+    iree_net_bulk_channel_t* bulk_channel) {
+  IREE_ASSERT_ARGUMENT(queue_channel);
+  IREE_ASSERT_ARGUMENT(bulk_channel);
+
+  iree_net_queue_channel_t* old_queue_channel = NULL;
+  iree_net_bulk_channel_t* old_bulk_channel = NULL;
+  iree_hal_remote_client_device_connected_callback_t connect_callback = {0};
+  bool committed = false;
+  iree_slim_mutex_lock(&device->failure_mutex);
+  if (iree_status_is_ok(device->terminal_status) &&
+      iree_hal_remote_client_device_load_state(device) ==
+          IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTING) {
+    old_queue_channel = iree_hal_remote_client_device_exchange_queue_channel(
+        device, queue_channel);
+    old_bulk_channel = iree_hal_remote_client_device_exchange_bulk_channel(
+        device, bulk_channel);
+    iree_hal_remote_client_device_store_state(
+        device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED);
+    connect_callback = device->connect_callback;
+    memset(&device->connect_callback, 0, sizeof(device->connect_callback));
+    if (connect_callback.fn) {
+      device->lifecycle_flags |=
+          IREE_HAL_REMOTE_CLIENT_DEVICE_LIFECYCLE_FLAG_CONNECT_DISPATCHING;
+    }
+    committed = true;
+  }
+  iree_slim_mutex_unlock(&device->failure_mutex);
+  if (!committed) return false;
+
+  iree_net_queue_channel_detach(old_queue_channel);
+  iree_net_queue_channel_release(old_queue_channel);
+  iree_net_bulk_channel_detach(old_bulk_channel);
+  iree_net_bulk_channel_release(old_bulk_channel);
+
+  if (connect_callback.fn) {
+    connect_callback.fn(connect_callback.user_data, iree_ok_status());
+  }
+
+  iree_status_t deferred_error = iree_ok_status();
+  iree_slim_mutex_lock(&device->failure_mutex);
+  device->lifecycle_flags &=
+      ~IREE_HAL_REMOTE_CLIENT_DEVICE_LIFECYCLE_FLAG_CONNECT_DISPATCHING;
+  if (iree_all_bits_set(
+          device->lifecycle_flags,
+          IREE_HAL_REMOTE_CLIENT_DEVICE_LIFECYCLE_FLAG_ERROR_DEFERRED)) {
+    device->lifecycle_flags &=
+        ~IREE_HAL_REMOTE_CLIENT_DEVICE_LIFECYCLE_FLAG_ERROR_DEFERRED;
+    deferred_error = iree_status_clone(device->terminal_status);
+  }
+  iree_slim_mutex_unlock(&device->failure_mutex);
+  if (!iree_status_is_ok(deferred_error)) {
+    iree_hal_remote_client_device_dispatch_error(device, deferred_error);
+  }
+  return true;
 }
 
 // Releases the device-owned network graph during final destruction. The
@@ -393,7 +435,8 @@ static void iree_hal_remote_client_device_complete_destroy(
   iree_hal_device_spec_release(device->device_spec);
   iree_arena_block_pool_deinitialize(&device->resource_set_block_pool);
 
-  iree_slim_mutex_deinitialize(&device->rpc_mutex);
+  iree_status_free(device->terminal_status);
+  iree_slim_mutex_deinitialize(&device->failure_mutex);
   iree_allocator_free(host_allocator, device);
 
   IREE_TRACE_ZONE_END(z0);
@@ -447,9 +490,14 @@ static void iree_hal_remote_client_device_on_session_callbacks_detached(
   iree_hal_remote_client_device_t* device =
       (iree_hal_remote_client_device_t*)user_data;
 
-  if (device->connect_callback.fn) {
-    iree_hal_remote_client_device_complete_connect(
-        device,
+  iree_hal_remote_client_device_connected_callback_t connect_callback = {0};
+  iree_slim_mutex_lock(&device->failure_mutex);
+  connect_callback = device->connect_callback;
+  memset(&device->connect_callback, 0, sizeof(device->connect_callback));
+  iree_slim_mutex_unlock(&device->failure_mutex);
+  if (connect_callback.fn) {
+    connect_callback.fn(
+        connect_callback.user_data,
         iree_make_status(IREE_STATUS_CANCELLED, "remote device destroyed"));
   }
 
@@ -649,7 +697,7 @@ static iree_status_t iree_hal_remote_client_device_import_file(
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
-  IREE_HAL_REMOTE_REQUIRE_CONNECTED(device);
+  IREE_RETURN_IF_ERROR(iree_hal_remote_client_device_check_connected(device));
   return iree_hal_remote_client_file_import(device, queue_affinity, access,
                                             handle, flags, device->proactor,
                                             device->host_allocator, out_file);
@@ -950,7 +998,7 @@ static iree_status_t iree_hal_remote_client_device_profiling_begin(
     const iree_hal_device_profiling_options_t* options) {
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
-  IREE_HAL_REMOTE_REQUIRE_CONNECTED(device);
+  IREE_RETURN_IF_ERROR(iree_hal_remote_client_device_check_connected(device));
 
   iree_byte_span_t message = iree_byte_span_empty();
   iree_status_t status =
@@ -1030,9 +1078,6 @@ static iree_status_t iree_hal_remote_client_device_profiling_end(
   return status;
 }
 
-void iree_hal_remote_client_device_fail_pending_rpcs(
-    iree_hal_remote_client_device_t* device);
-
 //===----------------------------------------------------------------------===//
 // Session callbacks
 //===----------------------------------------------------------------------===//
@@ -1069,13 +1114,11 @@ static void iree_hal_remote_client_device_on_session_ready(
       remote_topology->application_data, /*device_ordinal=*/0,
       device->host_allocator, &remote_device_spec);
   if (!iree_status_is_ok(status)) {
-    iree_hal_remote_client_device_store_state(
-        device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
     status = iree_status_join(
         status,
         iree_net_session_shutdown(session, IREE_STATUS_INVALID_ARGUMENT,
                                   IREE_SV("invalid remote device catalog")));
-    iree_hal_remote_client_device_complete_connect(device, status);
+    iree_hal_remote_client_device_fail(device, status);
     IREE_TRACE_ZONE_END(z0);
     return;
   }
@@ -1108,11 +1151,7 @@ static void iree_hal_remote_client_device_on_session_ready(
   };
   status = iree_net_session_open_endpoint(session, endpoint_callback);
   if (!iree_status_is_ok(status)) {
-    iree_hal_remote_client_device_store_state(
-        device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
-    // Fire the connect callback with the error so the application doesn't
-    // hang waiting for a connection that will never complete.
-    iree_hal_remote_client_device_complete_connect(device, status);
+    iree_hal_remote_client_device_fail(device, status);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -1126,57 +1165,11 @@ static void iree_hal_remote_client_device_on_session_goaway(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   (void)session;
-  (void)reason_code;
-  (void)message;
-
-  iree_hal_remote_client_device_state_t previous_state =
-      iree_hal_remote_client_device_load_state(device);
-  if (previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATING ||
-      previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATED) {
-    IREE_TRACE_ZONE_END(z0);
-    return;
-  }
-  iree_hal_remote_client_device_store_state(
-      device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DISCONNECTED);
-
-  // Wake any pending control RPCs so they fail instead of blocking forever.
-  iree_hal_remote_client_device_fail_pending_rpcs(device);
-
-  // Fail the remote queue axis so pending frontier waiters (from queue_execute
-  // signal semaphores) are resolved immediately. Without this, waiters for
-  // epochs whose ADVANCE frames will never arrive would hang forever, leaking
-  // their pending_signal_t allocations and retained semaphores.
-  // This is a no-op if the axis was never registered (device never connected).
-  if (previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
-    iree_async_frontier_tracker_fail_axis(
-        device->frontier_tracker, device->remote_queue_axis,
-        iree_make_status(IREE_STATUS_UNAVAILABLE,
-                         "server sent GOAWAY; remote queue axis failed"));
-  }
-
-  // Close channel admission while retaining the network graph. Callers that
-  // raced the state transition can safely observe the closed channels.
-  iree_hal_remote_client_device_detach_bulk_channel(device);
-  iree_hal_remote_client_device_detach_queue_channel(device);
-
-  // If the connect callback is still pending (bootstrap or endpoint
-  // provisioning has not completed), fire it with error so the application
-  // does not hang waiting for a connection result.
-  iree_hal_remote_client_device_connected_callback_t callback =
-      device->connect_callback;
-  memset(&device->connect_callback, 0, sizeof(device->connect_callback));
-  if (callback.fn) {
-    callback.fn(callback.user_data,
-                iree_make_status(IREE_STATUS_UNAVAILABLE,
-                                 "server sent GOAWAY during connect"));
-  } else if (previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
-    // Fully connected (callback already fired). Notify via error callback.
-    if (device->options.error_callback.fn) {
-      device->options.error_callback.fn(
-          device->options.error_callback.user_data,
-          iree_make_status(IREE_STATUS_UNAVAILABLE, "server sent GOAWAY"));
-    }
-  }
+  iree_hal_remote_client_device_fail(
+      device,
+      iree_make_status(IREE_STATUS_UNAVAILABLE, "server sent GOAWAY (%u): %.*s",
+                       reason_code, (int)message.size,
+                       message.data ? message.data : ""));
 
   IREE_TRACE_ZONE_END(z0);
 }
@@ -1189,49 +1182,7 @@ static void iree_hal_remote_client_device_on_session_error(
 
   (void)session;
 
-  iree_hal_remote_client_device_state_t previous_state =
-      iree_hal_remote_client_device_load_state(device);
-  if (previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATING ||
-      previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATED) {
-    iree_status_free(status);
-    IREE_TRACE_ZONE_END(z0);
-    return;
-  }
-  iree_hal_remote_client_device_store_state(
-      device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
-
-  // Wake any pending control RPCs so they fail instead of blocking forever.
-  iree_hal_remote_client_device_fail_pending_rpcs(device);
-
-  // Fail the remote queue axis (same rationale as goaway handler).
-  if (previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
-    iree_async_frontier_tracker_fail_axis(device->frontier_tracker,
-                                          device->remote_queue_axis,
-                                          iree_status_clone(status));
-  }
-
-  // Close channel admission while retaining the network graph. Callers that
-  // raced the state transition can safely observe the closed channels.
-  iree_hal_remote_client_device_detach_bulk_channel(device);
-  iree_hal_remote_client_device_detach_queue_channel(device);
-
-  // If the connect callback is still pending, fire it with the error so the
-  // application does not hang. This covers errors during bootstrap and endpoint
-  // provisioning.
-  iree_hal_remote_client_device_connected_callback_t callback =
-      device->connect_callback;
-  memset(&device->connect_callback, 0, sizeof(device->connect_callback));
-  if (callback.fn) {
-    callback.fn(callback.user_data, status);
-  } else {
-    // Fully connected (callback already fired). Notify via error callback.
-    if (device->options.error_callback.fn) {
-      device->options.error_callback.fn(
-          device->options.error_callback.user_data, status);
-    } else {
-      iree_status_ignore(status);
-    }
-  }
+  iree_hal_remote_client_device_fail(device, status);
 
   IREE_TRACE_ZONE_END(z0);
 }
@@ -1249,42 +1200,124 @@ static void iree_hal_remote_client_device_on_session_send_complete(
     return;
   }
   if (!iree_status_is_ok(status)) {
-    iree_hal_remote_client_device_on_session_error(user_data, device->session,
-                                                   status);
+    iree_hal_remote_client_device_fail(device, status);
   } else {
     iree_status_free(status);
   }
 }
 
-// Wakes all pending RPCs with an error status. Called when the session
-// disconnects (goaway/error) while RPCs are in-flight.
-void iree_hal_remote_client_device_fail_pending_rpcs(
+iree_status_t iree_hal_remote_client_device_check_connected(
     iree_hal_remote_client_device_t* device) {
-  iree_slim_mutex_lock(&device->rpc_mutex);
-  iree_hal_remote_pending_rpc_t* pending = device->pending_rpcs;
-  device->pending_rpcs = NULL;
-  iree_slim_mutex_unlock(&device->rpc_mutex);
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&device->failure_mutex);
+  if (!iree_status_is_ok(device->terminal_status)) {
+    status = iree_status_clone(device->terminal_status);
+  } else if (iree_hal_remote_client_device_load_state(device) !=
+             IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "device is not connected");
+  }
+  iree_slim_mutex_unlock(&device->failure_mutex);
+  return status;
+}
 
-  while (pending) {
-    iree_hal_remote_pending_rpc_t* next = pending->next;
-    iree_atomic_store(&pending->response_status_code,
-                      (int32_t)IREE_STATUS_UNAVAILABLE,
-                      iree_memory_order_release);
-    iree_notification_post(&pending->notification, IREE_ALL_WAITERS);
-    pending = next;
+typedef struct iree_hal_remote_client_terminal_effects_t {
+  // Status transferred to the bulk transfer subsystem.
+  iree_status_t bulk_status;
+
+  // Status transferred to the remote queue frontier, when registered.
+  iree_status_t frontier_status;
+} iree_hal_remote_client_terminal_effects_t;
+
+// Publishes the preserved terminal status to pending operation state. The
+// caller must hold |failure_mutex| across any associated state transition.
+static void iree_hal_remote_client_device_prepare_terminal_effects_locked(
+    iree_hal_remote_client_device_t* device,
+    iree_hal_remote_client_device_state_t previous_state, iree_status_t status,
+    iree_hal_remote_client_terminal_effects_t* out_effects) {
+  IREE_ASSERT(!iree_status_is_ok(status));
+  memset(out_effects, 0, sizeof(*out_effects));
+
+  if (iree_status_is_ok(device->terminal_status)) {
+    device->terminal_status = status;
+  } else {
+    iree_status_free(status);
+  }
+  for (iree_hal_remote_pending_rpc_t* pending = device->pending_rpcs; pending;
+       pending = pending->next) {
+    if (iree_status_is_ok(pending->failure_status)) {
+      pending->failure_status = iree_status_clone(device->terminal_status);
+      iree_atomic_store(&pending->response_status_code,
+                        (int32_t)iree_status_code(device->terminal_status),
+                        iree_memory_order_release);
+      iree_notification_post(&pending->notification, IREE_ALL_WAITERS);
+    }
+  }
+  out_effects->bulk_status = iree_status_clone(device->terminal_status);
+  if (previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
+    out_effects->frontier_status = iree_status_clone(device->terminal_status);
   }
 }
 
-void iree_hal_remote_client_device_notify_bulk_transport_error(
-    iree_hal_remote_client_device_t* device, iree_status_t status) {
+// Applies terminal effects that may acquire subsystem locks or close channel
+// admission. The caller must not hold |failure_mutex|.
+static void iree_hal_remote_client_device_apply_terminal_effects(
+    iree_hal_remote_client_device_t* device,
+    iree_hal_remote_client_terminal_effects_t effects) {
+  iree_hal_remote_client_bulk_fail_transfers(device, effects.bulk_status);
+  if (!iree_status_is_ok(effects.frontier_status)) {
+    iree_async_frontier_tracker_fail_axis(device->frontier_tracker,
+                                          device->remote_queue_axis,
+                                          effects.frontier_status);
+  }
+  iree_hal_remote_client_device_detach_bulk_channel(device);
+  iree_hal_remote_client_device_detach_queue_channel(device);
+}
+
+void iree_hal_remote_client_device_fail(iree_hal_remote_client_device_t* device,
+                                        iree_status_t status) {
+  IREE_ASSERT(!iree_status_is_ok(status));
+
+  iree_hal_remote_client_device_state_t previous_state;
+  iree_hal_remote_client_terminal_effects_t effects;
+  iree_hal_remote_client_device_connected_callback_t connect_callback = {0};
+  iree_status_t callback_status = iree_ok_status();
+  bool dispatch_error = false;
+  iree_slim_mutex_lock(&device->failure_mutex);
+  previous_state = iree_hal_remote_client_device_load_state(device);
+  if (!iree_status_is_ok(device->terminal_status) ||
+      previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATING ||
+      previous_state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATED) {
+    iree_slim_mutex_unlock(&device->failure_mutex);
+    iree_status_free(status);
+    return;
+  }
+
   iree_hal_remote_client_device_store_state(
       device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
-  iree_hal_remote_client_device_fail_pending_rpcs(device);
-  if (device->options.error_callback.fn) {
-    device->options.error_callback.fn(device->options.error_callback.user_data,
-                                      status);
+  iree_hal_remote_client_device_prepare_terminal_effects_locked(
+      device, previous_state, status, &effects);
+  callback_status = iree_status_clone(device->terminal_status);
+  connect_callback = device->connect_callback;
+  memset(&device->connect_callback, 0, sizeof(device->connect_callback));
+  bool connect_callback_dispatching = iree_all_bits_set(
+      device->lifecycle_flags,
+      IREE_HAL_REMOTE_CLIENT_DEVICE_LIFECYCLE_FLAG_CONNECT_DISPATCHING);
+  if (!connect_callback.fn && connect_callback_dispatching) {
+    device->lifecycle_flags |=
+        IREE_HAL_REMOTE_CLIENT_DEVICE_LIFECYCLE_FLAG_ERROR_DEFERRED;
+  }
+  dispatch_error = !connect_callback.fn && !connect_callback_dispatching;
+  iree_slim_mutex_unlock(&device->failure_mutex);
+
+  iree_hal_remote_client_device_apply_terminal_effects(device, effects);
+
+  if (connect_callback.fn) {
+    connect_callback.fn(connect_callback.user_data, callback_status);
+  } else if (dispatch_error) {
+    iree_hal_remote_client_device_dispatch_error(device, callback_status);
   } else {
-    iree_status_ignore(status);
+    iree_status_free(callback_status);
   }
 }
 
@@ -1299,17 +1332,7 @@ iree_status_t iree_hal_remote_client_device_control_rpc_with_after_send(
   memset(out_response_lease, 0, sizeof(*out_response_lease));
 
   iree_status_t status = iree_ok_status();
-  if (iree_hal_remote_client_device_load_state(device) !=
-      IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "device is not connected");
-  }
-  if (iree_status_is_ok(status) && !device->session) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "session is not available");
-  }
-  if (iree_status_is_ok(status) &&
-      request.data_length < sizeof(iree_hal_remote_control_envelope_t)) {
+  if (request.data_length < sizeof(iree_hal_remote_control_envelope_t)) {
     status = iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "control RPC request too small for envelope: %" PRIhsz " bytes",
@@ -1339,14 +1362,28 @@ iree_status_t iree_hal_remote_client_device_control_rpc_with_after_send(
     // IREE_STATUS_INTERNAL is the sentinel: "no response yet."
     iree_atomic_store(&pending.response_status_code, IREE_STATUS_INTERNAL,
                       iree_memory_order_relaxed);
+    pending.failure_status = iree_ok_status();
   }
 
-  // Link into the pending list.
+  // Link into the pending list while serialized with terminal failure. The
+  // state check must happen under this mutex so an RPC cannot register after a
+  // terminal transition has already walked the list.
   if (iree_status_is_ok(status)) {
-    iree_slim_mutex_lock(&device->rpc_mutex);
-    pending.next = device->pending_rpcs;
-    device->pending_rpcs = &pending;
-    iree_slim_mutex_unlock(&device->rpc_mutex);
+    iree_slim_mutex_lock(&device->failure_mutex);
+    if (!iree_status_is_ok(device->terminal_status)) {
+      status = iree_status_clone(device->terminal_status);
+    } else if (iree_hal_remote_client_device_load_state(device) !=
+               IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "device is not connected");
+    } else if (!device->session) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "session is not available");
+    } else {
+      pending.next = device->pending_rpcs;
+      device->pending_rpcs = &pending;
+    }
+    iree_slim_mutex_unlock(&device->failure_mutex);
   }
 
   // Send the request.
@@ -1355,18 +1392,13 @@ iree_status_t iree_hal_remote_client_device_control_rpc_with_after_send(
     iree_async_span_t span =
         iree_async_span_from_ptr((void*)request.data, request.data_length);
     iree_async_span_list_t payload = {&span, 1};
-    status = iree_net_session_send_control_data(
+    status = iree_net_session_send_control_data_copy(
         device->session, /*flags=*/0, payload, /*operation_user_data=*/0);
     request_submitted = iree_status_is_ok(status);
   }
 
-  iree_status_t after_send_status = iree_ok_status();
   if (iree_status_is_ok(status) && after_send.fn) {
-    after_send_status = after_send.fn(after_send.user_data);
-    if (!iree_status_is_ok(after_send_status)) {
-      status = after_send_status;
-      after_send_status = iree_ok_status();
-    }
+    status = after_send.fn(after_send.user_data);
   }
 
   if (request_submitted) {
@@ -1388,11 +1420,11 @@ iree_status_t iree_hal_remote_client_device_control_rpc_with_after_send(
 
   // Unlink from the pending list.
   if (pending_initialized) {
-    iree_slim_mutex_lock(&device->rpc_mutex);
+    iree_slim_mutex_lock(&device->failure_mutex);
     iree_hal_remote_pending_rpc_t** prev = &device->pending_rpcs;
     while (*prev && *prev != &pending) prev = &(*prev)->next;
     if (*prev == &pending) *prev = pending.next;
-    iree_slim_mutex_unlock(&device->rpc_mutex);
+    iree_slim_mutex_unlock(&device->failure_mutex);
 
     iree_notification_deinitialize(&pending.notification);
   }
@@ -1400,9 +1432,17 @@ iree_status_t iree_hal_remote_client_device_control_rpc_with_after_send(
   if (!iree_status_is_ok(status)) {
     // Send failed — clean up any lease that might have been set.
     iree_async_buffer_lease_release(&pending.response_lease);
-    iree_status_ignore(after_send_status);
+    iree_status_free(pending.failure_status);
     IREE_TRACE_ZONE_END(z0);
     return status;
+  }
+
+  if (!iree_status_is_ok(pending.failure_status)) {
+    iree_async_buffer_lease_release(&pending.response_lease);
+    iree_status_t failure_status = pending.failure_status;
+    pending.failure_status = iree_ok_status();
+    IREE_TRACE_ZONE_END(z0);
+    return failure_status;
   }
 
   // Check the response status. The acquire load is redundant after
@@ -1434,14 +1474,12 @@ iree_status_t iree_hal_remote_client_device_control_rpc_with_after_send(
           iree_make_status(response_code, "remote control RPC failed");
     }
     iree_async_buffer_lease_release(&pending.response_lease);
-    iree_status_ignore(after_send_status);
     IREE_TRACE_ZONE_END(z0);
     return error_status;
   }
 
   *out_response_payload = pending.response_payload;
   *out_response_lease = pending.response_lease;
-  iree_status_ignore(after_send_status);
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -1463,6 +1501,7 @@ iree_status_t iree_hal_remote_client_device_control_rpc(
 // Sends a fire-and-forget control message (no response expected).
 iree_status_t iree_hal_remote_client_device_send_fire_and_forget(
     iree_hal_remote_client_device_t* device, iree_const_byte_span_t message) {
+  IREE_RETURN_IF_ERROR(iree_hal_remote_client_device_check_connected(device));
   if (!device->session) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "session is not available");
@@ -1633,14 +1672,14 @@ static iree_status_t iree_hal_remote_client_device_on_control_data(
     // mutex. The waiter unlinks stack-owned pending entries after waking; the
     // lock keeps fail/disconnect paths from racing a response writer that has
     // found an entry but not yet posted its notification.
-    iree_slim_mutex_lock(&device->rpc_mutex);
+    iree_slim_mutex_lock(&device->failure_mutex);
     iree_hal_remote_pending_rpc_t* pending = device->pending_rpcs;
     while (pending && pending->request_id != envelope->request_id) {
       pending = pending->next;
     }
 
     if (!pending) {
-      iree_slim_mutex_unlock(&device->rpc_mutex);
+      iree_slim_mutex_unlock(&device->failure_mutex);
       return iree_make_status(IREE_STATUS_NOT_FOUND,
                               "no pending RPC with request_id=%u",
                               envelope->request_id);
@@ -1664,7 +1703,7 @@ static iree_status_t iree_hal_remote_client_device_on_control_data(
 
     // Wake the blocked caller.
     iree_notification_post(&pending->notification, IREE_ALL_WAITERS);
-    iree_slim_mutex_unlock(&device->rpc_mutex);
+    iree_slim_mutex_unlock(&device->failure_mutex);
     return iree_ok_status();
   }
 
@@ -1676,29 +1715,36 @@ static iree_status_t iree_hal_remote_client_device_on_control_data(
 IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_connect(
     iree_hal_device_t* base_device,
     iree_hal_remote_client_device_connected_callback_t callback) {
+  IREE_ASSERT_ARGUMENT(base_device);
+  IREE_ASSERT_ARGUMENT(callback.fn);
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (iree_hal_remote_client_device_load_state(device) ==
-      IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
-                            "device is already connected");
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&device->failure_mutex);
+  iree_hal_remote_client_device_state_t state =
+      iree_hal_remote_client_device_load_state(device);
+  if (!iree_status_is_ok(device->terminal_status)) {
+    status = iree_status_clone(device->terminal_status);
+  } else if (state == IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
+    status = iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                              "device is already connected");
+  } else if (state != IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DISCONNECTED) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "device must be in DISCONNECTED state to connect "
+                              "(current state: %d)",
+                              (int)state);
+  } else {
+    iree_hal_remote_client_device_store_state(
+        device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTING);
+    device->connect_callback = callback;
   }
-  if (iree_hal_remote_client_device_load_state(device) !=
-      IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DISCONNECTED) {
+  iree_slim_mutex_unlock(&device->failure_mutex);
+  if (!iree_status_is_ok(status)) {
     IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "device must be in DISCONNECTED state to connect "
-        "(current state: %d)",
-        (int)iree_hal_remote_client_device_load_state(device));
+    return status;
   }
-
-  iree_hal_remote_client_device_store_state(
-      device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTING);
-  device->connect_callback = callback;
 
   // Configure session options. The client provides no local topology (no
   // device queues to advertise) — the server will advertise its topology in
@@ -1729,7 +1775,7 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_connect(
   };
 
   // Initiate async connection + session bootstrap.
-  iree_status_t status = iree_net_session_connect(
+  status = iree_net_session_connect(
       device->options.transport_factory, device->options.server_address,
       device->proactor,
       iree_hal_remote_recv_pool_buffer_pool(device->recv_pool),
@@ -1737,9 +1783,19 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_connect(
       device->host_allocator, &device->session);
 
   if (!iree_status_is_ok(status)) {
-    iree_hal_remote_client_device_store_state(
-        device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
-    memset(&device->connect_callback, 0, sizeof(device->connect_callback));
+    iree_status_t bulk_status = iree_ok_status();
+    iree_slim_mutex_lock(&device->failure_mutex);
+    if (iree_status_is_ok(device->terminal_status)) {
+      device->terminal_status = iree_status_clone(status);
+      bulk_status = iree_status_clone(status);
+      iree_hal_remote_client_device_store_state(
+          device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
+      memset(&device->connect_callback, 0, sizeof(device->connect_callback));
+    }
+    iree_slim_mutex_unlock(&device->failure_mutex);
+    if (!iree_status_is_ok(bulk_status)) {
+      iree_hal_remote_client_bulk_fail_transfers(device, bulk_status);
+    }
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -1755,12 +1811,15 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_deactivate(
       iree_hal_remote_client_device_cast(base_device);
   iree_hal_device_retain(base_device);
 
+  iree_hal_remote_client_terminal_effects_t effects;
+  iree_slim_mutex_lock(&device->failure_mutex);
   int32_t expected = (int32_t)iree_hal_remote_client_device_load_state(device);
   for (;;) {
     if (expected == (int32_t)IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTING) {
       iree_status_t status = iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
           "device connection must complete before deactivation");
+      iree_slim_mutex_unlock(&device->failure_mutex);
       iree_hal_device_release(base_device);
       return status;
     }
@@ -1769,6 +1828,7 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_deactivate(
       iree_status_t status =
           iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                            "device deactivation already started");
+      iree_slim_mutex_unlock(&device->failure_mutex);
       iree_hal_device_release(base_device);
       return status;
     }
@@ -1780,6 +1840,13 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_deactivate(
     }
   }
 
+  iree_hal_remote_client_device_prepare_terminal_effects_locked(
+      device, (iree_hal_remote_client_device_state_t)expected,
+      iree_make_status(IREE_STATUS_CANCELLED, "remote device deactivated"),
+      &effects);
+  iree_slim_mutex_unlock(&device->failure_mutex);
+  iree_hal_remote_client_device_apply_terminal_effects(device, effects);
+
   if (!device->session) {
     iree_hal_remote_client_device_store_state(
         device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DEACTIVATED);
@@ -1787,13 +1854,6 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_deactivate(
     iree_hal_device_release(base_device);
     return iree_ok_status();
   }
-
-  if (expected == (int32_t)IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
-    iree_async_frontier_tracker_fail_axis(
-        device->frontier_tracker, device->remote_queue_axis,
-        iree_make_status(IREE_STATUS_CANCELLED, "remote device deactivated"));
-  }
-  iree_hal_remote_client_device_fail_pending_rpcs(device);
 
   device->deactivate_callback = callback;
   iree_net_session_callbacks_detached_callback_t detached_callback = {

@@ -736,7 +736,7 @@ static iree_status_t iree_hal_remote_client_device_submit_queue_op_writer(
     const iree_async_frontier_t* required_wait_frontier,
     iree_hal_remote_queue_payload_writer_t payload_writer,
     iree_hal_remote_queue_resource_list_t resource_list, uint64_t* out_epoch) {
-  IREE_HAL_REMOTE_REQUIRE_CONNECTED(device);
+  IREE_RETURN_IF_ERROR(iree_hal_remote_client_device_check_connected(device));
   IREE_TRACE_ZONE_BEGIN(z0);
   if (out_epoch) *out_epoch = 0;
 
@@ -1158,7 +1158,7 @@ iree_status_t iree_hal_remote_client_device_queue_execute(
     iree_hal_execute_flags_t flags) {
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
-  IREE_HAL_REMOTE_REQUIRE_CONNECTED(device);
+  IREE_RETURN_IF_ERROR(iree_hal_remote_client_device_check_connected(device));
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_status_t status = iree_ok_status();
@@ -2209,7 +2209,7 @@ iree_status_t iree_hal_remote_client_device_queue_read(
     iree_device_size_t length, iree_hal_read_flags_t flags) {
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
-  IREE_HAL_REMOTE_REQUIRE_CONNECTED(device);
+  IREE_RETURN_IF_ERROR(iree_hal_remote_client_device_check_connected(device));
 
   iree_status_t status =
       iree_hal_file_validate_access(source_file, IREE_HAL_MEMORY_ACCESS_READ);
@@ -2298,7 +2298,7 @@ iree_status_t iree_hal_remote_client_device_queue_write(
     iree_device_size_t length, iree_hal_write_flags_t flags) {
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
-  IREE_HAL_REMOTE_REQUIRE_CONNECTED(device);
+  IREE_RETURN_IF_ERROR(iree_hal_remote_client_device_check_connected(device));
 
   iree_status_t status =
       iree_hal_file_validate_access(target_file, IREE_HAL_MEMORY_ACCESS_WRITE);
@@ -2659,7 +2659,7 @@ iree_status_t iree_hal_remote_client_device_queue_host_call(
     iree_hal_host_call_flags_t flags) {
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
-  IREE_HAL_REMOTE_REQUIRE_CONNECTED(device);
+  IREE_RETURN_IF_ERROR(iree_hal_remote_client_device_check_connected(device));
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_status_t status = iree_hal_remote_validate_host_call(call, args, flags);
@@ -2857,14 +2857,7 @@ static void iree_hal_remote_client_device_on_queue_transport_error(
       (iree_hal_remote_client_device_t*)user_data;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_remote_client_device_store_state(
-      device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
-  if (device->options.error_callback.fn) {
-    device->options.error_callback.fn(device->options.error_callback.user_data,
-                                      status);
-  } else {
-    iree_status_ignore(status);
-  }
+  iree_hal_remote_client_device_fail(device, status);
 
   IREE_TRACE_ZONE_END(z0);
 }
@@ -2880,16 +2873,13 @@ void iree_hal_remote_client_device_on_queue_endpoint_ready(
 
   if (iree_hal_remote_client_device_load_state(device) !=
       IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTING) {
-    iree_status_ignore(status);
+    iree_status_free(status);
     IREE_TRACE_ZONE_END(z0);
     return;
   }
 
   if (!iree_status_is_ok(status)) {
-    iree_hal_remote_client_device_store_state(
-        device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
-    // Fire the connect callback with error so the application doesn't hang.
-    iree_hal_remote_client_device_complete_connect(device, status);
+    iree_hal_remote_client_device_fail(device, status);
     IREE_TRACE_ZONE_END(z0);
     return;
   }
@@ -2943,10 +2933,7 @@ void iree_hal_remote_client_device_on_queue_endpoint_ready(
       iree_async_buffer_pool_release(header_pool);
     }
 
-    iree_hal_remote_client_device_store_state(
-        device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
-    // Fire connect callback with error so the application doesn't hang.
-    iree_hal_remote_client_device_complete_connect(device, status);
+    iree_hal_remote_client_device_fail(device, status);
   }
 
   IREE_TRACE_ZONE_END(z0);

@@ -125,6 +125,35 @@ iree_cc_library(
 
 iree_cc_test(
   NAME
+    device_failure_test
+  SRCS
+    "bulk_session.h"
+    "device.h"
+    "device_failure_test.cc"
+  DEPS
+    ::client
+    iree::async
+    iree::async::platform
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::internal::arena
+    iree::base::threading
+    iree::hal
+    iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::control
+    iree::hal::remote::server
+    iree::hal::remote::util::recv_pool
+    iree::hal::testing::mock_device
+    iree::net::carrier::loopback::factory
+    iree::net::channel::bulk::transfer_table
+    iree::net::channel::util::sequence_window
+    iree::net::session
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     bulk_download_receiver_test
   SRCS
     "bulk.h"

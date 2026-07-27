@@ -39,6 +39,7 @@ void iree_hal_remote_client_bulk_session_deinitialize(
   }
   IREE_ASSERT(!session->transfers && !session->send_chunks &&
               !session->receive_chunks);
+  iree_status_free(session->terminal_status);
   iree_net_sequence_window_deinitialize(&session->profile_sequence_window);
   iree_hal_profile_sink_release(session->profile_sink);
   session->profile_sink = NULL;
@@ -141,4 +142,12 @@ iree_net_bulk_channel_t* iree_hal_remote_client_bulk_session_exchange_channel(
   IREE_ASSERT_ARGUMENT(session);
   return (iree_net_bulk_channel_t*)iree_atomic_exchange(
       &session->channel, (intptr_t)new_channel, iree_memory_order_acq_rel);
+}
+
+iree_status_t iree_hal_remote_client_bulk_session_check_active_locked(
+    iree_hal_remote_client_bulk_session_t* session) {
+  IREE_ASSERT_ARGUMENT(session);
+  return iree_status_is_ok(session->terminal_status)
+             ? iree_ok_status()
+             : iree_status_clone(session->terminal_status);
 }

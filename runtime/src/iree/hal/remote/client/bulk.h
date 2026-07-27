@@ -32,6 +32,11 @@ iree_status_t iree_hal_remote_client_device_initialize_bulk_transfers(
 void iree_hal_remote_client_device_deinitialize_bulk_transfers(
     iree_hal_remote_client_device_t* device);
 
+// Terminalizes active bulk transfers with |status| without releasing storage
+// still retained by admitted sends or async file operations.
+void iree_hal_remote_client_bulk_fail_transfers(
+    iree_hal_remote_client_device_t* device, iree_status_t status);
+
 // Begins a client-local queue_write bulk transfer.
 iree_status_t iree_hal_remote_client_bulk_begin_file_write(
     iree_hal_remote_client_device_t* device, iree_hal_file_t* target_file,
