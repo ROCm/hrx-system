@@ -635,6 +635,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:storage_lease",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/ir",
+        "//loom/src/loom/util:cfg_graph",
         "//runtime/src/iree/base",
     ],
 )

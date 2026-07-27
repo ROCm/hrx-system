@@ -56,14 +56,14 @@ bool loom_low_allocation_spill_plan_use_full_slice_reload(
 
 // Computes the predicted memory traffic for spilling |value_id|.
 iree_status_t loom_low_allocation_spill_plan_traffic(
-    const loom_module_t* module, loom_region_t* body,
+    const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
     const loom_low_allocation_assignment_t* assignment,
     uint16_t alloc_unit_bits,
     loom_low_allocation_spill_plan_traffic_t* out_traffic);
 
 // Appends the spill materialization plan for |assignment|.
 iree_status_t loom_low_allocation_spill_plan_record(
-    const loom_module_t* module, loom_region_t* body,
+    const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
     const loom_low_allocation_assignment_t* assignment,
     uint32_t assignment_index, uint16_t alloc_unit_bits,
     loom_low_spill_slot_space_t spill_slot_space,

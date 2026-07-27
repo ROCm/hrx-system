@@ -78,7 +78,7 @@ loom_low_allocation_interval_assignment_search_context(
     loom_low_allocation_interval_assignment_state_t* state) {
   return (loom_low_allocation_search_context_t){
       .module = state->context->module,
-      .body = state->context->body,
+      .cfg_graph = state->context->function_cfg_graph,
       .descriptor_set = state->context->target->descriptor_set,
       .liveness = state->context->liveness,
       .unit_liveness = state->context->unit_liveness,
@@ -388,7 +388,7 @@ loom_low_allocation_interval_assignment_spill_active_assignment(
   state->next_spill_slot += assignment->unit_count;
   ++state->result.spill_count;
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_record(
-      state->context->module, state->context->body, assignment,
+      state->context->module, state->context->function_cfg_graph, assignment,
       assignment_index, capacity->alloc_unit_bits, capacity->spill_slot_space,
       state->result.spill_plans, &state->result.spill_plan_count));
   loom_low_allocation_spill_remark_record(
@@ -1034,7 +1034,7 @@ iree_status_t loom_low_allocation_interval_assignment_build(
       state.next_spill_slot += interval->unit_count;
       ++state.result.spill_count;
       IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_record(
-          context->module, context->body,
+          context->module, context->function_cfg_graph,
           &state.result.assignments[assignment_index], assignment_index,
           capacity.alloc_unit_bits, capacity.spill_slot_space,
           state.result.spill_plans, &state.result.spill_plan_count));
