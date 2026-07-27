@@ -179,16 +179,26 @@ iree_status_t iree_file_path_join(iree_string_view_t lhs,
 void iree_file_path_split(iree_string_view_t path,
                           iree_string_view_t* out_dirname,
                           iree_string_view_t* out_basename) {
-  iree_host_size_t pos = iree_string_view_find_last_of(
-      path, iree_make_cstring_view("/"), IREE_STRING_VIEW_NPOS);
+#if defined(IREE_PLATFORM_WINDOWS)
+  const iree_string_view_t separators = IREE_SV("/\\");
+#else
+  const iree_string_view_t separators = IREE_SV("/");
+#endif  // IREE_PLATFORM_WINDOWS
+  iree_host_size_t pos =
+      iree_string_view_find_last_of(path, separators, IREE_STRING_VIEW_NPOS);
+  bool is_root_separator = pos == 0;
+#if defined(IREE_PLATFORM_WINDOWS)
+  is_root_separator |= pos == 2 && path.size >= 3 && path.data[1] == ':';
+#endif  // IREE_PLATFORM_WINDOWS
   if (pos == IREE_STRING_VIEW_NPOS) {
-    // No '/' in path.
+    // No platform path separator in |path|.
     *out_dirname = iree_string_view_empty();
     *out_basename = path;
-  } else if (pos == 0) {
-    // Single leading '/' in path.
-    *out_dirname = iree_string_view_substr(path, 0, 1);
-    *out_basename = iree_string_view_substr(path, 1, IREE_STRING_VIEW_NPOS);
+  } else if (is_root_separator) {
+    // Preserve a leading POSIX separator or Windows drive root.
+    *out_dirname = iree_string_view_substr(path, 0, pos + 1);
+    *out_basename =
+        iree_string_view_substr(path, pos + 1, IREE_STRING_VIEW_NPOS);
   } else {
     *out_dirname = iree_string_view_substr(path, 0, pos);
     *out_basename =
