@@ -355,6 +355,44 @@ TEST(ApplyPatchTableTest, DropsLowTwoBitsOfDescriptorAddress) {
   EXPECT_EQ(ctrl[2], static_cast<uint32_t>(base >> 32));
 }
 
+TEST(ApplyPatchTableTest, AddsAieApertureOffsetForAllArgIndices) {
+  // The HRX host patch table carries raw buffer-relative byte offsets. The
+  // runtime patcher owns conversion to AIE-visible addresses, so every patched
+  // BD gets the DDR aperture offset regardless of arg index.
+  std::vector<uint32_t> ctrl(8, 0);  // bd A at byte 0, bd B at byte 16.
+  std::vector<uint32_t> patches = {/*offset=*/0u, /*arg_idx=*/4u,
+                                   /*arg_plus=*/0u,
+                                   /*offset=*/16u, /*arg_idx=*/5u,
+                                   /*arg_plus=*/0u};
+  uint64_t args[] = {0u, 0u, 0u, 0u, 0x1000u, 0x2000u};
+  EXPECT_TRUE(iree_hal_amdxdna_apply_patch_table(
+      ctrl.data(), ctrl.size(), patches.data(), patches.size(), args, 6));
+  const uint64_t base4 = 0x1000u + 0u + kDdrAieAddrOffset;
+  EXPECT_EQ(ctrl[1], static_cast<uint32_t>(base4 & 0xFFFFFFFC));
+  EXPECT_EQ(ctrl[2], static_cast<uint32_t>(base4 >> 32));
+  const uint64_t base5 = 0x2000u + kDdrAieAddrOffset;
+  EXPECT_EQ(ctrl[5], static_cast<uint32_t>(base5 & 0xFFFFFFFC));
+  EXPECT_EQ(ctrl[6], static_cast<uint32_t>(base5 >> 32));
+}
+
+TEST(ApplyPatchTableTest, DoesNotDoubleCountBakedSubBufferOffset) {
+  // Regression for the multi-worker (e.g. transform_parallel) shim-DMA bug: for
+  // a BD addressing a sub-range of a host buffer, the producer may bake the
+  // intra-buffer byte offset into the BD address word while also emitting the
+  // same offset as the DDR_PATCH addend (arg_plus). The patcher must apply the
+  // offset once (buffer_base + arg_plus), overwriting the baked value.
+  std::vector<uint32_t> ctrl(8, 0);
+  ctrl[1] = 0x200u;  // baked intra-buffer offset (128 int32 elements).
+  std::vector<uint32_t> patches = {/*offset=*/0u, /*arg_idx=*/0u,
+                                   /*arg_plus=*/0x200u};
+  uint64_t args[] = {0x1000u};
+  EXPECT_TRUE(iree_hal_amdxdna_apply_patch_table(
+      ctrl.data(), ctrl.size(), patches.data(), patches.size(), args, 1));
+  const uint64_t base = 0x1000u + 0x200u + kDdrAieAddrOffset;  // one offset.
+  EXPECT_EQ(ctrl[1], static_cast<uint32_t>(base & 0xFFFFFFFC));
+  EXPECT_EQ(ctrl[2], static_cast<uint32_t>(base >> 32));
+}
+
 // --- iree_hal_amdxdna_patch_dynamic_fields_from_template ---------------------
 
 TEST(PatchDynamicFieldsFromTemplateTest, RewritesConstantsAndPatchTable) {
@@ -415,11 +453,13 @@ TEST(PatchDynamicFieldsFromTemplateTest,
       iree_allocator_system(), &patch_list);
 }
 
-TEST(PatchDynamicFieldsFromTemplateTest, RepeatedRewriteUsesTemplateBase) {
+TEST(PatchDynamicFieldsFromTemplateTest, RepeatedRewriteOverwritesBakedAddress) {
   std::vector<uint32_t> templ(8, 0);
-  // Original BD address base is 0x40; the cached destination will be rewritten
-  // twice. The second rewrite must not add the new address onto the first
-  // patched value.
+  // The template's BD address word carries a stale/baked offset (0x40). The
+  // patcher must OVERWRITE it with buffer_base + arg_plus, not accumulate onto
+  // it: firmware/XRT ignore the baked value, and the MLIR-AIE compiler already
+  // supplies the intra-buffer offset via arg_plus. This also guards idempotency
+  // across repeated rewrites of the same cached destination.
   templ[1] = 0x40u;
   std::vector<uint32_t> ctrl = templ;
   std::vector<uint32_t> patches = {0u, 0u, 0u};
@@ -435,9 +475,58 @@ TEST(PatchDynamicFieldsFromTemplateTest, RepeatedRewriteUsesTemplateBase) {
       iree_make_const_byte_span(nullptr, 0), patches.data(), patches.size(),
       second_args, 1));
 
-  const uint64_t expected = 0x40u + 0x2000u + kDdrAieAddrOffset;
+  // Baked 0x40 is discarded, not added.
+  const uint64_t expected = 0x2000u + kDdrAieAddrOffset;
   EXPECT_EQ(ctrl[1], static_cast<uint32_t>(expected & 0xFFFFFFFC));
   EXPECT_EQ(ctrl[2], static_cast<uint32_t>(expected >> 32));
+}
+
+TEST(PatchDynamicFieldsFromTemplateTest,
+     AddsAieApertureOffsetForAllArgIndices) {
+  // Same raw host-patch-table ABI as the apply_patch_table test, via the
+  // template path: arg_plus is always buffer-relative and the patcher always
+  // adds the AIE DDR aperture offset.
+  std::vector<uint32_t> templ(8, 0);
+  std::vector<uint32_t> ctrl = templ;
+  std::vector<uint32_t> patches = {/*offset=*/0u, /*arg_idx=*/4u,
+                                   /*arg_plus=*/0u,
+                                   /*offset=*/16u, /*arg_idx=*/5u,
+                                   /*arg_plus=*/0u};
+  uint64_t args[] = {0u, 0u, 0u, 0u, 0x1000u, 0x2000u};
+
+  IREE_ASSERT_OK(iree_hal_amdxdna_patch_dynamic_fields_from_template(
+      ctrl.data(), templ.data(), ctrl.size(), /*constant_patches=*/nullptr,
+      iree_make_const_byte_span(nullptr, 0), patches.data(), patches.size(),
+      args, 6));
+
+  const uint64_t base4 = 0x1000u + kDdrAieAddrOffset;
+  EXPECT_EQ(ctrl[1], static_cast<uint32_t>(base4 & 0xFFFFFFFC));
+  EXPECT_EQ(ctrl[2], static_cast<uint32_t>(base4 >> 32));
+  const uint64_t base5 = 0x2000u + kDdrAieAddrOffset;
+  EXPECT_EQ(ctrl[5], static_cast<uint32_t>(base5 & 0xFFFFFFFC));
+  EXPECT_EQ(ctrl[6], static_cast<uint32_t>(base5 >> 32));
+}
+
+TEST(PatchDynamicFieldsFromTemplateTest, DoesNotDoubleCountBakedSubBufferOffset) {
+  // Template-path counterpart of the apply_patch_table regression: the baked
+  // sub-buffer offset in the template BD address must be overwritten, not added
+  // to the DDR_PATCH addend that carries the same offset.
+  std::vector<uint32_t> templ(8, 0);
+  templ[1] = 0x200u;         // baked intra-buffer offset.
+  templ[2] = 0xABCD0000u;    // bd[2] high 16 bits: BD control state, preserved.
+  std::vector<uint32_t> ctrl = templ;
+  std::vector<uint32_t> patches = {/*offset=*/0u, /*arg_idx=*/0u,
+                                   /*arg_plus=*/0x200u};
+  uint64_t args[] = {0x1000u};
+
+  IREE_ASSERT_OK(iree_hal_amdxdna_patch_dynamic_fields_from_template(
+      ctrl.data(), templ.data(), ctrl.size(), /*constant_patches=*/nullptr,
+      iree_make_const_byte_span(nullptr, 0), patches.data(), patches.size(),
+      args, 1));
+
+  const uint64_t base = 0x1000u + 0x200u + kDdrAieAddrOffset;  // one offset.
+  EXPECT_EQ(ctrl[1], static_cast<uint32_t>(base & 0xFFFFFFFC));
+  EXPECT_EQ(ctrl[2], 0xABCD0000u | static_cast<uint32_t>(base >> 32));
 }
 
 TEST(PatchDynamicFieldsFromTemplateTest, RejectsMalformedPatchTable) {

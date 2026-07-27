@@ -93,8 +93,9 @@ bool iree_hal_amdxdna_apply_patch_table(uint32_t* ctrl_code, size_t ctrl_words,
 // BOs: constants and buffer-descriptor addresses may change per dispatch, but
 // the rest of the XAie transaction stream remains fixed. Unlike
 // iree_hal_amdxdna_apply_patch_table, this is safe to call repeatedly on an
-// already patched control-code buffer because all base BD words are read from
-// `template_code`, not from `ctrl_code`.
+// already patched control-code buffer because constants and BD control bits are
+// restored from `template_code`, while BD addresses are recomputed from
+// `args[arg_idx] + arg_plus + AIE_DDR_offset`.
 iree_status_t iree_hal_amdxdna_patch_dynamic_fields_from_template(
     uint32_t* ctrl_code, const uint32_t* template_code, size_t ctrl_words,
     const iree_hal_amdxdna_write32_constant_patch_list_t* constant_patches,
