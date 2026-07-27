@@ -1876,7 +1876,11 @@ def _gfx12_generic_core_overlay_descriptors(
 
 def _gfx1250_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
-        *_rdna4_core_overlays(),
+        *(
+            overlay
+            for overlay in _rdna4_core_overlays()
+            if not (overlay.semantic_tag or "").startswith("matrix.wmma.")
+        ),
         _s_getreg_b32_cluster_workgroup_flat_id_overlay(),
         *_v_cvt_pk_f16_packed8_overlays("ocp"),
         *_v_cvt_scale_pk8_overlays(),
@@ -2197,13 +2201,18 @@ def _gfx1250_core_overlay_descriptors(
 ) -> tuple[Descriptor, ...]:
     spec = _gfx1250_spec_with_supplemental_encoding_facts(spec)
     spec = _gfx1250_spec_with_supplemental_instruction_facts(spec)
+    descriptors = materialize_amdgpu_descriptor_overlays(spec, _gfx1250_core_overlays())
     return _with_execution_mask_state_reads(
-        materialize_amdgpu_descriptor_overlays(spec, _gfx1250_core_overlays())
+        _with_gfx125x_inherited_matrix_schedules(descriptors)
     )
 
 
 def _gfx12_5_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
-    return _amdgpu_descriptor_overlay_intersection(_gfx1250_core_overlays())
+    return tuple(
+        overlay
+        for overlay in _amdgpu_descriptor_overlay_intersection(_gfx1250_core_overlays())
+        if not (overlay.semantic_tag or "").startswith("matrix.swmmac.")
+    )
 
 
 def _gfx12_5_generic_core_overlay_descriptors(
@@ -2211,8 +2220,11 @@ def _gfx12_5_generic_core_overlay_descriptors(
 ) -> tuple[Descriptor, ...]:
     spec = _gfx1250_spec_with_supplemental_encoding_facts(spec)
     spec = _gfx1250_spec_with_supplemental_instruction_facts(spec)
+    descriptors = materialize_amdgpu_descriptor_overlays(
+        spec, _gfx12_5_generic_core_overlays()
+    )
     return _with_execution_mask_state_reads(
-        materialize_amdgpu_descriptor_overlays(spec, _gfx12_5_generic_core_overlays())
+        _with_gfx125x_inherited_matrix_schedules(descriptors)
     )
 
 

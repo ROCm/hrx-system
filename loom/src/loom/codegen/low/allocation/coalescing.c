@@ -721,6 +721,7 @@ static iree_status_t loom_low_allocation_coalescing_assign_relation_interval(
 static iree_status_t
 loom_low_allocation_coalescing_copy_ignored_aliases_for_tied_consume(
     loom_low_allocation_coalescing_context_t* context,
+    const loom_liveness_interval_t* copy_interval,
     const loom_low_placement_relation_t* copy_relation,
     loom_value_id_t* ignored_value_ids, uint16_t ignored_value_capacity,
     uint16_t* ignored_value_count, bool* out_requires_materialized_storage) {
@@ -734,6 +735,7 @@ loom_low_allocation_coalescing_copy_ignored_aliases_for_tied_consume(
   const loom_low_placement_relation_range_t tied_range =
       loom_low_placement_relation_range_for_source_value_ordinal(
           context->placement, copy_relation->result_ordinal);
+  bool has_tied_consume = false;
   for (uint32_t i = 0; i < tied_range.count; ++i) {
     const uint32_t relation_index =
         context->placement
@@ -749,18 +751,20 @@ loom_low_allocation_coalescing_copy_ignored_aliases_for_tied_consume(
     if (tied_operand_copy_relation != copy_relation) {
       continue;
     }
+    has_tied_consume = true;
     loom_value_id_t copy_source_id = LOOM_VALUE_ID_INVALID;
     if (loom_low_allocation_coalescing_copy_source_live_at_tied_definition(
             context, tied_relation, copy_relation, &copy_source_id)) {
       *out_requires_materialized_storage = true;
       return iree_ok_status();
     }
-    const loom_liveness_interval_t* tied_result_interval =
-        loom_liveness_interval_for_value_ordinal(context->liveness,
-                                                 tied_relation->result_ordinal);
-    IREE_ASSERT_ARGUMENT(tied_result_interval);
+  }
+  if (has_tied_consume) {
+    // Ignoring an alias permits the copy to share its location for the copy's
+    // entire lifetime. Qualify aliases at the copy definition, before any
+    // tied consume can clobber storage needed by another live copy.
     loom_low_allocation_coalescing_collect_dead_exact_storage_aliases(
-        context, tied_result_interval->start_point, ignored_value_ids,
+        context, copy_interval->start_point, ignored_value_ids,
         ignored_value_capacity, ignored_value_count);
   }
   return iree_ok_status();
@@ -776,7 +780,7 @@ static iree_status_t loom_low_allocation_coalescing_assign_copy_interval(
   bool requires_materialized_storage = false;
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_coalescing_copy_ignored_aliases_for_tied_consume(
-          context, relation, ignored_value_ids,
+          context, interval, relation, ignored_value_ids,
           (uint16_t)IREE_ARRAYSIZE(ignored_value_ids), &ignored_value_count,
           &requires_materialized_storage));
   if (requires_materialized_storage) {

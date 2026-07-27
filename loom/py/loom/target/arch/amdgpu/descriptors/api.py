@@ -975,6 +975,7 @@ _AMDGPU_SCHEDULE_INSTRUCTION_CLASSES = {
     _SCHEDULE_MFMA: (InstructionClass.MFMA,),
     _SCHEDULE_WMMA: (InstructionClass.WMMA,),
     _SCHEDULE_WMMA_SCALE: (InstructionClass.WMMA,),
+    _SCHEDULE_SWMMAC: (InstructionClass.SWMMAC,),
 }
 
 _AMDGPU_KEY_INSTRUCTION_CLASSES = (
@@ -996,6 +997,12 @@ def _with_instruction_classes(descriptor_set: DescriptorSet) -> DescriptorSet:
         )
         if descriptor.schedule_class.startswith(_SCHEDULE_MFMA_QUALIFIED_PREFIX):
             schedule_instruction_classes = (InstructionClass.MFMA,)
+        elif descriptor.schedule_class.startswith(f"{_SCHEDULE_MATRIX}."):
+            semantic_tag = descriptor.semantic_tag or ""
+            if semantic_tag.startswith("matrix.wmma."):
+                schedule_instruction_classes = (InstructionClass.WMMA,)
+            elif semantic_tag.startswith("matrix.swmmac."):
+                schedule_instruction_classes = (InstructionClass.SWMMAC,)
         instruction_classes.update(schedule_instruction_classes)
         semantic_tag = descriptor.semantic_tag or ""
         if semantic_tag.startswith(("memory.stack.", "memory.private.")):

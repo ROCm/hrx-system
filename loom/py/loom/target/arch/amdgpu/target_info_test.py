@@ -22,6 +22,8 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC,
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
     AMDGPU_MATRIX_FEATURES_BY_PROFILE,
     AMDGPU_PROCESSOR_INFOS,
     amdgpu_descriptor_set_info_by_generator_target,
@@ -220,6 +222,19 @@ def test_matrix_feature_profiles_model_replacement_instruction_shapes() -> None:
     assert generic_features == (
         member_intersection
         - set(AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS["gfx9-4-generic"])
+    )
+    gfx12_5_generic_features = set(
+        AMDGPU_MATRIX_FEATURES_BY_PROFILE[
+            AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC
+        ]
+    )
+    assert gfx12_5_generic_features == (
+        set(
+            AMDGPU_MATRIX_FEATURES_BY_PROFILE[
+                AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250
+            ]
+        )
+        - set(AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS["gfx12-5-generic"])
     )
 
 

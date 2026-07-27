@@ -123,6 +123,11 @@ def test_generation_validates_profile_descriptor_inventories() -> None:
     assert "LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX12" in gfx12_profile
     assert "LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11" not in gfx12_profile
 
+    gfx12_5_generic_profile = source[source.index("[LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC]") : source.index("[LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC]")]
+    assert "LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250" in gfx12_5_generic_profile
+    assert "LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250_SCALE_F8F6F4" in gfx12_5_generic_profile
+    assert "LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250" not in gfx12_5_generic_profile
+
 
 def test_generation_rejects_gfx12_profile_for_rdna3_5_inventory() -> None:
     catalog = amdgpu_matrix_contract_tables._matrix_descriptor_catalog_for_builder("rdna3_5")

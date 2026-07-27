@@ -51,12 +51,14 @@ from loom.target.arch.amdgpu.descriptors import (
     _RESOURCE_MFMA,
     _RESOURCE_SALU,
     _RESOURCE_VALU,
+    _SCHEDULE_MATRIX,
     _SCHEDULE_MFMA_QUALIFIED_PREFIX,
     _SCHEDULE_MODE_CONTROL,
     _SCHEDULE_PACKED_DOT,
     _SCHEDULE_SALU,
     _SCHEDULE_SALU_COMPARE,
     _SCHEDULE_SMEM_STORE,
+    _SCHEDULE_SWMMAC,
     _SCHEDULE_VALU,
     _SCHEDULE_VMEM_LOAD,
     _SCHEDULE_VMEM_LOAD_LDS,
@@ -197,10 +199,20 @@ def test_generic_descriptor_contracts_are_member_intersections() -> None:
         ),
     )
     for generic, members in base_cases:
-        assert generic == _amdgpu_core_descriptor_set_intersection(
+        expected = _amdgpu_core_descriptor_set_intersection(
             key=generic.key,
             members=members,
         )
+        if generic.key == "amdgpu.gfx12_5.generic.core":
+            expected = replace(
+                expected,
+                descriptors=tuple(
+                    descriptor
+                    for descriptor in expected.descriptors
+                    if not (descriptor.semantic_tag or "").startswith("matrix.swmmac.")
+                ),
+            )
+        assert generic == expected
 
     gfx9_4_base_intersection = _amdgpu_core_descriptor_set_intersection(
         key=_AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE.key,
@@ -249,7 +261,16 @@ def test_generic_descriptor_contracts_are_member_intersections() -> None:
         if gfx117x_overlays.get(overlay.descriptor_key) == overlay
     )
     assert _gfx12_generic_core_overlays() == _gfx12_core_overlays()
-    assert _gfx12_5_generic_core_overlays() == _gfx1250_core_overlays()
+    gfx1250_overlays = _gfx1250_core_overlays()
+    assert all(
+        not (overlay.semantic_tag or "").startswith("matrix.wmma.")
+        for overlay in gfx1250_overlays
+    )
+    assert _gfx12_5_generic_core_overlays() == tuple(
+        overlay
+        for overlay in gfx1250_overlays
+        if not (overlay.semantic_tag or "").startswith("matrix.swmmac.")
+    )
 
 
 def _descriptor_set(*descriptors: Descriptor) -> DescriptorSet:
@@ -312,8 +333,36 @@ def test_instruction_classes_project_target_packet_families() -> None:
             Effect(EffectKind.WRITE, memory_space=MemorySpace.WORKGROUP),
         ),
     )
+    swmmac = Descriptor(
+        key="amdgpu.v_swmmac_f32_16x16x64_f16",
+        mnemonic="v_swmmac_f32_16x16x64_f16",
+        semantic_tag="matrix.swmmac.f32.16x16x64.f16",
+        operands=(),
+        schedule_class=_SCHEDULE_SWMMAC,
+    )
+    gfx125x_wmma = Descriptor(
+        key="amdgpu.v_wmma_f32_16x16x32_f16",
+        mnemonic="v_wmma_f32_16x16x32_f16",
+        semantic_tag="matrix.wmma.f32.16x16x32.f16",
+        operands=(),
+        schedule_class=f"{_SCHEDULE_MATRIX}.gfx125x.xdl",
+    )
+    gfx125x_swmmac = Descriptor(
+        key="amdgpu.v_swmmac_f32_16x16x64_f16",
+        mnemonic="v_swmmac_f32_16x16x64_f16",
+        semantic_tag="matrix.swmmac.f32.16x16x64.f16",
+        operands=(),
+        schedule_class=f"{_SCHEDULE_MATRIX}.gfx125x.xdl",
+    )
     descriptor_set = _with_instruction_classes(
-        _descriptor_set(global_load, private_load, staged_load)
+        _descriptor_set(
+            global_load,
+            private_load,
+            staged_load,
+            swmmac,
+            gfx125x_wmma,
+            gfx125x_swmmac,
+        )
     )
 
     assert descriptor_set.descriptors[0].instruction_classes == (
@@ -325,6 +374,13 @@ def test_instruction_classes_project_target_packet_families() -> None:
         InstructionClass.GLOBAL_MEMORY,
         InstructionClass.GLOBAL_LOAD,
         InstructionClass.LOCAL_MEMORY,
+    )
+    assert descriptor_set.descriptors[3].instruction_classes == (
+        InstructionClass.SWMMAC,
+    )
+    assert descriptor_set.descriptors[4].instruction_classes == (InstructionClass.WMMA,)
+    assert descriptor_set.descriptors[5].instruction_classes == (
+        InstructionClass.SWMMAC,
     )
 
 

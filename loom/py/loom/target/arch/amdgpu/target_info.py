@@ -42,6 +42,7 @@ AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC = "mfma_gfx9_4_generic"
 AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11 = "wmma_gfx11"
 AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12 = "wmma_gfx12"
 AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250 = "wmma_gfx1250"
+AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC = "wmma_gfx12_5_generic"
 # Exact source-contract feature inventories in C enum order. These are not
 # cumulative ISA generations because later processors can replace operand and
 # fragment layouts while retaining the same semantic operation.
@@ -54,6 +55,7 @@ AMDGPU_MATRIX_FEATURE_PROFILES = (
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
 )
 AMDGPU_MATRIX_FEATURES_BY_PROFILE = {
@@ -100,6 +102,10 @@ AMDGPU_MATRIX_FEATURES_BY_PROFILE = {
         "wmma_gfx1250_scale_f8f6f4",
         "swmmac_gfx1250",
     ),
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC: (
+        "wmma_gfx1250",
+        "wmma_gfx1250_scale_f8f6f4",
+    ),
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC: (
         "mfma_gfx908",
         "mfma_gfx90a_bf16_1k",
@@ -116,6 +122,7 @@ AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS = {
         "mfma_gfx940_fp8",
         "smfmac_gfx940_fp8",
     ),
+    "gfx12-5-generic": ("swmmac_gfx1250",),
 }
 
 AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION = 1 << 0
@@ -822,6 +829,7 @@ def gfx125x_processor_info(
     elf_feature_flags: int = 0,
     elf_generic_version: int = 0,
     processor_flags: int = 0,
+    matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor=processor,
@@ -832,7 +840,7 @@ def gfx125x_processor_info(
         elf_generic_version=elf_generic_version,
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA4_GFX125,
-        matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
+        matrix_feature_profile=matrix_feature_profile,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
         max_workgroup_storage_bytes=AMDGPU_GFX125X_MAX_WORKGROUP_STORAGE_BYTES,
         occupancy=AMDGPU_OCCUPANCY_GFX125X,
@@ -1127,6 +1135,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         descriptor_set_key="amdgpu.gfx12_5.generic.core",
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
         elf_generic_version=generic_code_object_current_version("gfx12-5-generic"),
+        matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC,
     ),
 )
 

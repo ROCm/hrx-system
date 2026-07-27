@@ -189,6 +189,7 @@ _SCHEDULE_LDS_CROSSLANE = "amdgpu.lds.crosslane"
 _SCHEDULE_BARRIER = "amdgpu.barrier"
 _SCHEDULE_MFMA = "amdgpu.mfma"
 _SCHEDULE_MFMA_QUALIFIED_PREFIX = f"{_SCHEDULE_MFMA}."
+_SCHEDULE_MATRIX = "amdgpu.matrix"
 _SCHEDULE_WMMA = "amdgpu.wmma"
 _SCHEDULE_WMMA_SCALE = "amdgpu.wmma.scale"
 _SCHEDULE_SWMMAC = "amdgpu.swmmac"
@@ -279,6 +280,7 @@ _EXECUTION_MASKED_SCHEDULE_CLASSES = frozenset(
         _SCHEDULE_TENSOR_LOAD_LDS,
         _SCHEDULE_CLUSTER_LOAD_LDS,
         _SCHEDULE_MFMA,
+        _SCHEDULE_MATRIX,
         _SCHEDULE_WMMA,
         _SCHEDULE_WMMA_SCALE,
         _SCHEDULE_SWMMAC,
@@ -296,7 +298,11 @@ def _amdgpu_schedule_class_reads_exec_state(schedule_class: str) -> bool:
     return (
         schedule_class in _EXECUTION_MASKED_SCHEDULE_CLASSES
         or schedule_class.startswith(
-            (f"{_SCHEDULE_TRANS}.", _SCHEDULE_MFMA_QUALIFIED_PREFIX)
+            (
+                f"{_SCHEDULE_TRANS}.",
+                _SCHEDULE_MFMA_QUALIFIED_PREFIX,
+                f"{_SCHEDULE_MATRIX}.",
+            )
         )
     )
 
@@ -3244,6 +3250,7 @@ __all__ = (
     "_SCHEDULE_LDS_CROSSLANE",
     "_SCHEDULE_LDS_LOAD",
     "_SCHEDULE_LDS_STORE",
+    "_SCHEDULE_MATRIX",
     "_SCHEDULE_MFMA",
     "_SCHEDULE_MFMA_QUALIFIED_PREFIX",
     "_SCHEDULE_MODE_CONTROL",

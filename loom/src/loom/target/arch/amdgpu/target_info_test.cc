@@ -153,7 +153,7 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx12_5GenericProcessor) {
                          LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125, 16, 8,
                          kRdna4DescriptorFlags);
   EXPECT_EQ(processor->features.matrix,
-            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250);
+            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC);
   ExpectSchedulingBits(processor, LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU);
 }
 

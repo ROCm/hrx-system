@@ -193,6 +193,8 @@ static const loom_amdgpu_matrix_wait_profile_t
             LOOM_AMDGPU_MATRIX_WAIT_PROFILE_UNKNOWN,
         [LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250] =
             LOOM_AMDGPU_MATRIX_WAIT_PROFILE_UNKNOWN,
+        [LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC] =
+            LOOM_AMDGPU_MATRIX_WAIT_PROFILE_UNKNOWN,
 };
 
 iree_string_view_t loom_amdgpu_matrix_wait_profile_name(
