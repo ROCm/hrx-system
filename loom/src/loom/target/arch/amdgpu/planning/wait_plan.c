@@ -514,7 +514,7 @@ static iree_status_t loom_amdgpu_wait_plan_classify_structural_node(
   }
   loom_amdgpu_structural_packet_info_t info = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_structural_packet_analyze(
-      builder->allocation, node->op,
+      builder->allocation, node->op, node->source_ordinal,
       LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION, &info));
   *out_flags = info.flags;
   return iree_ok_status();
@@ -740,23 +740,10 @@ static bool loom_amdgpu_wait_plan_edge_copy_materializes(
     const loom_amdgpu_wait_plan_builder_t* builder,
     const loom_low_allocation_edge_copy_t* edge_copy) {
   const loom_low_allocation_table_t* allocation = builder->allocation;
-  IREE_ASSERT_NE(allocation, NULL);
-  IREE_ASSERT_LT(edge_copy->source_assignment_index,
-                 allocation->assignment_count);
-  IREE_ASSERT_LT(edge_copy->destination_assignment_index,
-                 allocation->assignment_count);
   const loom_low_allocation_assignment_t* source_assignment =
       &allocation->assignments[edge_copy->source_assignment_index];
   const loom_low_allocation_assignment_t* destination_assignment =
       &allocation->assignments[edge_copy->destination_assignment_index];
-  IREE_ASSERT_LE(edge_copy->source_unit_offset,
-                 source_assignment->location_count);
-  IREE_ASSERT_LE(edge_copy->unit_count, source_assignment->location_count -
-                                            edge_copy->source_unit_offset);
-  IREE_ASSERT_LE(edge_copy->destination_unit_offset,
-                 destination_assignment->location_count);
-  IREE_ASSERT_LE(edge_copy->unit_count, destination_assignment->location_count -
-                                            edge_copy->destination_unit_offset);
   return !loom_low_allocation_storage_assignment_subranges_equal(
       builder->schedule->target.descriptor_set, source_assignment,
       edge_copy->source_unit_offset, destination_assignment,
@@ -1058,7 +1045,7 @@ static iree_status_t loom_amdgpu_wait_plan_build_edge_copy_dependency_links(
   IREE_ASSERT_LE(group->copy_start, allocation->edge_copy_count);
   IREE_ASSERT_LE(group->copy_count,
                  allocation->edge_copy_count - group->copy_start);
-  for (uint32_t i = 0; i < group->copy_count; ++i) {
+  for (iree_host_size_t i = 0; i < group->copy_count; ++i) {
     const loom_low_allocation_edge_copy_t* edge_copy =
         &allocation->edge_copies[group->copy_start + i];
     if (!loom_amdgpu_wait_plan_edge_copy_materializes(builder, edge_copy)) {
@@ -2422,7 +2409,7 @@ static iree_status_t loom_amdgpu_wait_plan_handle_physical_write_range(
     uint16_t descriptor_reg_class_id, uint32_t location_base,
     uint32_t location_count) {
   const loom_low_allocation_table_t* allocation = builder->allocation;
-  if (allocation == NULL || location_count == 0 ||
+  if (location_count == 0 ||
       !loom_low_allocation_location_kind_is_register_like(location_kind)) {
     return iree_ok_status();
   }
@@ -2500,9 +2487,31 @@ static iree_status_t loom_amdgpu_wait_plan_handle_physical_write_range(
   return iree_ok_status();
 }
 
+static iree_status_t loom_amdgpu_wait_plan_handle_cycle_scratch_writes(
+    loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index,
+    const loom_low_move_group_t* move_group) {
+  const loom_low_allocation_table_t* allocation = builder->allocation;
+  if (move_group->scratch_move_index_count == 0) {
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = 0; i < move_group->scratch_move_index_count; ++i) {
+    const iree_host_size_t move_index =
+        allocation
+            ->scratch_move_indices[move_group->scratch_move_index_start + i];
+    const loom_low_move_location_t* destination =
+        &allocation->moves[move_index].destination;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_handle_physical_write_range(
+        builder, node_index, destination->location_kind,
+        destination->descriptor_reg_class_id, destination->location,
+        /*location_count=*/1));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_wait_plan_handle_materialized_result_writes(
     loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
   if (builder->allocation == NULL ||
+      builder->allocation->storage_lease_instance_count == 0 ||
       !iree_any_bit_set(builder->node_states[node_index].flags,
                         LOOM_AMDGPU_WAIT_NODE_STATE_MATERIALIZES_RESULTS)) {
     return iree_ok_status();
@@ -2522,6 +2531,17 @@ static iree_status_t loom_amdgpu_wait_plan_handle_materialized_result_writes(
         assignment->descriptor_reg_class_id, assignment->location_base,
         assignment->location_count));
   }
+  if (node->op != NULL &&
+      (loom_low_copy_isa(node->op) || loom_low_slice_isa(node->op) ||
+       loom_low_concat_isa(node->op))) {
+    const loom_low_allocation_packet_move_group_t* group =
+        loom_low_allocation_find_packet_move_group_by_source_ordinal(
+            builder->allocation, node->source_ordinal);
+    if (group != NULL) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_handle_cycle_scratch_writes(
+          builder, node_index, &group->move_group));
+    }
+  }
   return iree_ok_status();
 }
 
@@ -2533,21 +2553,17 @@ static iree_status_t loom_amdgpu_wait_plan_handle_edge_copy_writes(
     return iree_ok_status();
   }
   const loom_low_allocation_table_t* allocation = builder->allocation;
-  IREE_ASSERT_LE(group->copy_start, allocation->edge_copy_count);
-  IREE_ASSERT_LE(group->copy_count,
-                 allocation->edge_copy_count - group->copy_start);
-  for (uint32_t i = 0; i < group->copy_count; ++i) {
+  if (allocation->storage_lease_instance_count == 0) {
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = 0; i < group->copy_count; ++i) {
     const loom_low_allocation_edge_copy_t* edge_copy =
         &allocation->edge_copies[group->copy_start + i];
     if (!loom_amdgpu_wait_plan_edge_copy_materializes(builder, edge_copy)) {
       continue;
     }
-    IREE_ASSERT_LT(edge_copy->destination_assignment_index,
-                   allocation->assignment_count);
     const loom_low_allocation_assignment_t* destination =
         &allocation->assignments[edge_copy->destination_assignment_index];
-    IREE_ASSERT_LE(edge_copy->destination_unit_offset,
-                   UINT32_MAX - destination->location_base);
     const uint32_t location_base =
         destination->location_base + edge_copy->destination_unit_offset;
     IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_handle_physical_write_range(
@@ -2555,18 +2571,8 @@ static iree_status_t loom_amdgpu_wait_plan_handle_edge_copy_writes(
         destination->descriptor_reg_class_id, location_base,
         edge_copy->unit_count));
   }
-  IREE_ASSERT_LE(group->temporary_start, allocation->edge_copy_temporary_count);
-  IREE_ASSERT_LE(group->temporary_count, allocation->edge_copy_temporary_count -
-                                             group->temporary_start);
-  for (uint32_t i = 0; i < group->temporary_count; ++i) {
-    const loom_low_allocation_edge_copy_temporary_t* temporary =
-        &allocation->edge_copy_temporaries[group->temporary_start + i];
-    IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_handle_physical_write_range(
-        builder, node_index, temporary->location_kind,
-        temporary->descriptor_reg_class_id, temporary->location,
-        /*location_count=*/1));
-  }
-  return iree_ok_status();
+  return loom_amdgpu_wait_plan_handle_cycle_scratch_writes(builder, node_index,
+                                                           &group->move_group);
 }
 
 static uint32_t loom_amdgpu_wait_plan_outstanding_counter_mask(

@@ -19,7 +19,6 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::arena
-    loom::codegen::low::move_sequence
     loom::codegen::low::packet
     loom::ir
     loom::ops::low

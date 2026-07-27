@@ -4,19 +4,16 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Branch edge-copy planning and scratch selection.
+// Branch edge-copy planning and final move sequencing.
 
 #ifndef LOOM_CODEGEN_LOW_ALLOCATION_EDGE_COPY_H_
 #define LOOM_CODEGEN_LOW_ALLOCATION_EDGE_COPY_H_
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "loom/analysis/liveness.h"
-#include "loom/codegen/low/allocation/assignment_map.h"
+#include "loom/codegen/low/allocation/move_plan.h"
 #include "loom/codegen/low/allocation/table.h"
-#include "loom/codegen/low/allocation/target_constraints.h"
-#include "loom/codegen/low/allocation/unit_liveness.h"
-#include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/placement.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -25,20 +22,10 @@ extern "C" {
 
 // Immutable allocation facts needed to plan branch edge copies.
 typedef struct loom_low_allocation_edge_copy_context_t {
-  // Body region of the low function.
-  loom_region_t* body;
-  // Descriptor set selected by the low function target.
-  const loom_low_descriptor_set_t* descriptor_set;
-  // Liveness ordering used by allocation.
-  loom_liveness_order_t liveness_order;
-  // Mutable target storage constraints and diagnostic state.
-  loom_low_allocation_target_constraints_t* target_constraints;
-  // Per-allocation-unit live end points.
-  const loom_low_allocation_unit_liveness_t* unit_liveness;
-  // Function-local placement relations over |assignment_map.liveness|.
+  // Function-local placement relations over the move plan's liveness.
   const loom_low_placement_table_t* placement;
-  // Completed assignment lookup map.
-  loom_low_allocation_assignment_map_t assignment_map;
+  // Allocation-wide finalized move rows and sequencing scratch.
+  loom_low_allocation_move_plan_t* move_plan;
 } loom_low_allocation_edge_copy_context_t;
 
 // Branch edge-copy table rows.
@@ -51,13 +38,9 @@ typedef struct loom_low_allocation_edge_copy_plan_t {
   loom_low_allocation_edge_copy_group_t* groups;
   // Number of records in |groups|.
   iree_host_size_t group_count;
-  // Scratch units reserved for cyclic edge-copy groups.
-  loom_low_allocation_edge_copy_temporary_t* temporaries;
-  // Number of records in |temporaries|.
-  iree_host_size_t temporary_count;
 } loom_low_allocation_edge_copy_plan_t;
 
-// Builds branch edge-copy groups and scratch temporaries for low.br payloads.
+// Builds branch edge-copy groups and final physical rows for low.br payloads.
 iree_status_t loom_low_allocation_edge_copy_plan_build(
     const loom_low_allocation_edge_copy_context_t* context,
     iree_arena_allocator_t* arena,

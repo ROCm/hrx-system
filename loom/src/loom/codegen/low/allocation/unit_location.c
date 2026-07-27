@@ -9,27 +9,14 @@
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/storage.h"
 
-iree_status_t loom_low_allocation_assignment_unit_location(
-    const loom_low_allocation_assignment_t* assignment, uint32_t unit_index,
-    loom_low_move_location_t* out_location) {
-  IREE_ASSERT_ARGUMENT(assignment);
-  IREE_ASSERT_ARGUMENT(out_location);
-  *out_location = (loom_low_move_location_t){0};
-  if (unit_index >= assignment->location_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "allocation unit index exceeds assignment range");
-  }
-  if (assignment->location_base > UINT32_MAX - unit_index) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "allocation unit location exceeds uint32_t");
-  }
-  *out_location = (loom_low_move_location_t){
+loom_low_move_location_t loom_low_allocation_assignment_unit_location(
+    const loom_low_allocation_assignment_t* assignment, uint32_t unit_index) {
+  return (loom_low_move_location_t){
       .location_kind = assignment->location_kind,
       .value_class = assignment->value_class,
       .descriptor_reg_class_id = assignment->descriptor_reg_class_id,
       .location = assignment->location_base + unit_index,
   };
-  return iree_ok_status();
 }
 
 bool loom_low_allocation_unit_locations_equal(

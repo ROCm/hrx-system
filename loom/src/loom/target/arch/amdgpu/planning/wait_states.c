@@ -1780,7 +1780,8 @@ static iree_status_t loom_amdgpu_wait_state_packet_analyze(
   *out_info = (loom_amdgpu_wait_state_packet_info_t){0};
   if (packet->descriptor == NULL) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_structural_packet_analyze(
-        builder->allocation, packet->node->op, 0, &out_info->structural));
+        builder->allocation, packet->node->op, packet->node->source_ordinal, 0,
+        &out_info->structural));
     out_info->instruction_count = out_info->structural.instruction_count;
     if (iree_any_bit_set(out_info->structural.flags,
                          LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_WRITES_VALU)) {

@@ -18,10 +18,9 @@
 extern "C" {
 #endif
 
-// Returns the concrete storage location for one unit of |assignment|.
-iree_status_t loom_low_allocation_assignment_unit_location(
-    const loom_low_allocation_assignment_t* assignment, uint32_t unit_index,
-    loom_low_move_location_t* out_location);
+// Returns the concrete storage location for one in-range unit of |assignment|.
+loom_low_move_location_t loom_low_allocation_assignment_unit_location(
+    const loom_low_allocation_assignment_t* assignment, uint32_t unit_index);
 
 // Returns true when two unit locations name the same concrete unit.
 bool loom_low_allocation_unit_locations_equal(

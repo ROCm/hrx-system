@@ -115,7 +115,6 @@ loom_cc_library(
     iree::base
     loom::codegen::low::allocation
     loom::codegen::low::allocation::move_topology
-    loom::codegen::low::move_sequence
     loom::ir
     loom::ops::low
   PUBLIC

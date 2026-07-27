@@ -7,12 +7,8 @@
 #include "loom/codegen/low/allocation/unit_location.h"
 
 #include "iree/testing/gtest.h"
-#include "iree/testing/status_matchers.h"
-
 namespace loom {
 namespace {
-
-using ::iree::StatusCode;
 
 loom_liveness_value_class_t ValueClass(uint16_t reg_class_id) {
   loom_liveness_value_class_t value_class = {};
@@ -66,9 +62,9 @@ TEST(LowAllocationUnitLocationTest, MapsAssignmentUnitLocations) {
   const loom_low_allocation_assignment_t assignment =
       Assignment(/*reg_class_id=*/3);
 
-  loom_low_move_location_t unit_location = {};
-  IREE_ASSERT_OK(loom_low_allocation_assignment_unit_location(
-      &assignment, /*unit_index=*/1, &unit_location));
+  const loom_low_move_location_t unit_location =
+      loom_low_allocation_assignment_unit_location(&assignment,
+                                                   /*unit_index=*/1);
 
   EXPECT_EQ(unit_location.location_kind,
             LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
@@ -76,16 +72,6 @@ TEST(LowAllocationUnitLocationTest, MapsAssignmentUnitLocations) {
                                               assignment.value_class));
   EXPECT_EQ(unit_location.descriptor_reg_class_id, 3);
   EXPECT_EQ(unit_location.location, 8u);
-}
-
-TEST(LowAllocationUnitLocationTest, RejectsOutOfRangeAssignmentUnit) {
-  const loom_low_allocation_assignment_t assignment =
-      Assignment(/*reg_class_id=*/3);
-
-  loom_low_move_location_t unit_location = {};
-  IREE_EXPECT_STATUS_IS(StatusCode::kOutOfRange,
-                        loom_low_allocation_assignment_unit_location(
-                            &assignment, /*unit_index=*/3, &unit_location));
 }
 
 TEST(LowAllocationUnitLocationTest, ComparesLocationsAndStorageClasses) {

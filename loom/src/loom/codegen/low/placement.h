@@ -241,6 +241,14 @@ typedef struct loom_low_placement_table_t {
   iree_host_size_t relation_count;
   // Number of relations constraining concrete location choice.
   iree_host_size_t location_relation_count;
+  // Number of low.copy/slice/concat operations that may require packet moves.
+  uint32_t packet_move_group_count;
+  // Total units covered by low.copy/slice/concat relations.
+  iree_host_size_t packet_move_unit_count;
+  // Number of low.br operations that may require edge copies.
+  uint32_t edge_copy_group_count;
+  // Total units covered by low.br relations.
+  iree_host_size_t branch_unit_count;
   // Relation ranges into |relations| indexed by result value ordinal.
   const loom_low_placement_relation_range_t* ranges_by_result_ordinal;
   // Relation indices grouped by source value ordinal. Each entry indexes
