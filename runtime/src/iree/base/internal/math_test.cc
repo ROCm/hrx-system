@@ -181,6 +181,140 @@ TEST(IntegerNumberTheoryTest, IsPowerOfTwoSigned) {
 // Rounding and alignment
 //==============================================================================
 
+static void ExpectMulU64ToU128(uint64_t lhs, uint64_t rhs,
+                               uint64_t expected_high, uint64_t expected_low) {
+  SCOPED_TRACE(::testing::Message() << "lhs=" << lhs << ", rhs=" << rhs
+                                    << ", expected_high=" << expected_high
+                                    << ", expected_low=" << expected_low);
+
+  uint64_t high = UINT64_MAX;
+  uint64_t low = UINT64_MAX;
+  iree_math_mul_u64_to_u128(lhs, rhs, &high, &low);
+  EXPECT_EQ(expected_high, high);
+  EXPECT_EQ(expected_low, low);
+
+  high = UINT64_MAX;
+  low = UINT64_MAX;
+  iree_math_mul_u64_to_u128(rhs, lhs, &high, &low);
+  EXPECT_EQ(expected_high, high);
+  EXPECT_EQ(expected_low, low);
+}
+
+TEST(RoundingTest, MulU64ToU128) {
+  ExpectMulU64ToU128(0, UINT64_MAX, 0, 0);
+  ExpectMulU64ToU128(1, UINT64_MAX, 0, UINT64_MAX);
+  ExpectMulU64ToU128(UINT32_MAX, UINT32_MAX, 0, UINT64_C(0xFFFFFFFE00000001));
+  ExpectMulU64ToU128(UINT64_C(1) << 32, UINT64_C(1) << 32, 1, 0);
+  ExpectMulU64ToU128(UINT64_MAX, 2, 1, UINT64_MAX - 1ull);
+  ExpectMulU64ToU128(UINT64_MAX, UINT64_MAX, UINT64_MAX - 1ull, 1);
+}
+
+static void ExpectDivU128ByU64ToU64(uint64_t high, uint64_t low,
+                                    uint64_t denominator, bool expected_ok,
+                                    uint64_t expected_quotient = 0) {
+  SCOPED_TRACE(::testing::Message() << "high=" << high << ", low=" << low
+                                    << ", denominator=" << denominator);
+
+  uint64_t quotient = 1;
+  EXPECT_EQ(expected_ok, iree_math_div_u128_by_u64_to_u64(
+                             high, low, denominator, &quotient));
+  EXPECT_EQ(expected_ok ? expected_quotient : 0ull, quotient);
+}
+
+TEST(RoundingTest, DivU128ByU64ToU64) {
+  ExpectDivU128ByU64ToU64(0, 100, 4, true, 25);
+  ExpectDivU128ByU64ToU64(1, 0, 2, true, UINT64_C(1) << 63);
+  ExpectDivU128ByU64ToU64(16, UINT64_MAX, 17, true, UINT64_MAX);
+  ExpectDivU128ByU64ToU64(UINT64_MAX - 1ull, UINT64_MAX, UINT64_MAX, true,
+                          UINT64_MAX);
+
+  // Exercises the 65-bit shifted remainder case in the restoring division loop.
+  ExpectDivU128ByU64ToU64(UINT64_C(1) << 63, 0, UINT64_MAX, true,
+                          UINT64_C(1) << 63);
+
+  ExpectDivU128ByU64ToU64(0, 1, 0, false);
+  ExpectDivU128ByU64ToU64(5, 0, 5, false);
+  ExpectDivU128ByU64ToU64(6, 0, 5, false);
+}
+
+static void ExpectRoundMulDivU64(uint64_t value, uint64_t numerator,
+                                 uint64_t denominator, bool expected_ok,
+                                 uint64_t expected_result = 0) {
+  SCOPED_TRACE(::testing::Message()
+               << "value=" << value << ", numerator=" << numerator
+               << ", denominator=" << denominator);
+
+  uint64_t result = 1;
+  EXPECT_EQ(expected_ok, iree_math_round_mul_div_u64(value, numerator,
+                                                     denominator, &result));
+  EXPECT_EQ(expected_ok ? expected_result : 0ull, result);
+
+  result = 1;
+  EXPECT_EQ(expected_ok, iree_math_round_mul_div_u64_portable(
+                             value, numerator, denominator, &result));
+  EXPECT_EQ(expected_ok ? expected_result : 0ull, result);
+}
+
+TEST(RoundingTest, RoundMulDivU64) {
+  ExpectRoundMulDivU64(1, 1, 0, false);
+  ExpectRoundMulDivU64(0, 123, 456, true, 0);
+  ExpectRoundMulDivU64(123, 0, 456, true, 0);
+
+  ExpectRoundMulDivU64(10, 10, 4, true, 25);
+  ExpectRoundMulDivU64(1, 1, 2, true, 1);
+  ExpectRoundMulDivU64(1, 1, 3, true, 0);
+  ExpectRoundMulDivU64(2, 1, 3, true, 1);
+
+  ExpectRoundMulDivU64(UINT64_MAX, 1, UINT64_MAX, true, 1);
+  ExpectRoundMulDivU64(UINT64_MAX, 2, UINT64_MAX, true, 2);
+  ExpectRoundMulDivU64(UINT64_MAX, 2, 2, true, UINT64_MAX);
+  ExpectRoundMulDivU64(UINT64_MAX, 3, UINT64_MAX, true, 3);
+  ExpectRoundMulDivU64(UINT64_MAX, UINT64_MAX, UINT64_MAX, true, UINT64_MAX);
+  ExpectRoundMulDivU64(UINT64_MAX, UINT64_C(1) << 63, UINT64_C(1) << 63, true,
+                       UINT64_MAX);
+
+  ExpectRoundMulDivU64(UINT64_MAX, UINT64_MAX, 1, false);
+  ExpectRoundMulDivU64(UINT64_MAX, UINT64_MAX, UINT64_MAX - 1ull, false);
+}
+
+#if defined(__SIZEOF_INT128__) && !defined(IREE_COMPILER_MSVC_COMPAT)
+TEST(RoundingTest, RoundMulDivU64PortableMatchesUInt128) {
+  const uint64_t values[] = {
+      0,
+      1,
+      2,
+      3,
+      17,
+      UINT32_MAX,
+      UINT64_C(1) << 32,
+      UINT64_C(1) << 63,
+      UINT64_MAX - 1,
+      UINT64_MAX,
+  };
+  for (uint64_t value : values) {
+    for (uint64_t numerator : values) {
+      for (uint64_t denominator : values) {
+        if (denominator == 0) continue;
+        SCOPED_TRACE(::testing::Message()
+                     << "value=" << value << ", numerator=" << numerator
+                     << ", denominator=" << denominator);
+
+        const __uint128_t rounded_product =
+            (__uint128_t)value * (__uint128_t)numerator + denominator / 2;
+        const __uint128_t quotient = rounded_product / denominator;
+        const bool expected_ok = quotient <= UINT64_MAX;
+        const uint64_t expected_result = expected_ok ? (uint64_t)quotient : 0;
+
+        uint64_t result = 1;
+        EXPECT_EQ(expected_ok, iree_math_round_mul_div_u64_portable(
+                                   value, numerator, denominator, &result));
+        EXPECT_EQ(expected_result, result);
+      }
+    }
+  }
+}
+#endif  // defined(__SIZEOF_INT128__) && !defined(IREE_COMPILER_MSVC_COMPAT)
+
 TEST(RoundingTest, UpToNextPow232) {
   constexpr uint32_t kUint16Max = UINT16_MAX;
   constexpr uint32_t kUint32Max = UINT32_MAX;

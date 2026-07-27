@@ -32,8 +32,19 @@ iree_cc_library(
 py_test(
     name = "ci_core_linux_test",
     srcs = [
+        "ci_core_common.py",
         "ci_core_linux.py",
         "ci_core_linux_test.py",
     ],
     main = "ci_core_linux_test.py",
+)
+
+py_test(
+    name = "ci_core_windows_test",
+    srcs = [
+        "ci_core_common.py",
+        "ci_core_windows.py",
+        "ci_core_windows_test.py",
+    ],
+    main = "ci_core_windows_test.py",
 )

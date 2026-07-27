@@ -46,6 +46,7 @@ iree_runtime_cc_library(
     deps = [
         ":common",
         ":reader",
+        "//runtime/src/iree/base/internal",
     ],
 )
 

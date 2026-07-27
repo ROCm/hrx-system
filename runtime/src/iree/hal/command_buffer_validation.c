@@ -206,19 +206,6 @@ static iree_status_t iree_hal_command_buffer_validate_buffer_requirements(
   return iree_ok_status();
 }
 
-// Returns success iff the currently bound descriptor sets are valid for the
-// given executable entry point.
-static iree_status_t iree_hal_command_buffer_validate_dispatch_bindings(
-    iree_hal_command_buffer_t* command_buffer,
-    const iree_hal_command_buffer_validation_state_t* validation_state,
-    iree_hal_executable_t* executable,
-    iree_hal_executable_function_t function) {
-  // TODO(benvanik): validate buffers referenced have compatible memory types
-  // and access rights.
-  // TODO(benvanik): validate no aliasing between inputs/outputs.
-  return iree_ok_status();
-}
-
 void iree_hal_command_buffer_initialize_validation(
     iree_hal_allocator_t* device_allocator,
     iree_hal_command_buffer_t* command_buffer,

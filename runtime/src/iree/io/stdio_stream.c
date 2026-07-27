@@ -213,7 +213,7 @@ IREE_API_EXPORT iree_status_t iree_io_stdio_stream_open_fd(
   // NOTE: after this point the file handle is associated with dup_fd and
   // anything we do to it (like closing) will apply to the dup_fd.
   iree_status_t status = iree_ok_status();
-  FILE* handle = fdopen(dup_fd, fopen_mode);
+  FILE* handle = iree_fdopen(dup_fd, fopen_mode);
   if (handle == NULL) {
     status = iree_make_stdio_statusf(
         "unable to open file descriptor with mode %d", mode);

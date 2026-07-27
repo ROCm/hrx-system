@@ -246,6 +246,7 @@ iree_runtime_cc_library(
     hdrs = ["statistics_sink.h"],
     deps = [
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
     ],
 )

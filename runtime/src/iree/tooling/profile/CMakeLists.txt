@@ -45,6 +45,7 @@ iree_cc_library(
   DEPS
     ::common
     ::reader
+    iree::base::internal
   PUBLIC
 )
 

@@ -10,6 +10,8 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "iree/base/internal/math.h"
+
 typedef struct iree_hal_profile_statistics_index_entry_t {
   // Mixed key hash used to select and compare occupied slots.
   uint64_t hash;
@@ -460,38 +462,6 @@ static bool iree_hal_profile_statistics_clock_sample_host_cpu_timestamp(
   return true;
 }
 
-static bool iree_hal_profile_statistics_round_mul_div_u64(
-    uint64_t value, uint64_t numerator, uint64_t denominator,
-    uint64_t* out_result) {
-  *out_result = 0;
-  if (denominator == 0) return false;
-  if (value == 0 || numerator == 0) return true;
-
-#if defined(__SIZEOF_INT128__)
-  __uint128_t product = (__uint128_t)value * (__uint128_t)numerator;
-  product += denominator / 2;
-  __uint128_t quotient = product / denominator;
-  if (quotient > UINT64_MAX) return false;
-  *out_result = (uint64_t)quotient;
-  return true;
-#else
-  const uint64_t whole = value / denominator;
-  const uint64_t remainder = value % denominator;
-  if (whole > UINT64_MAX / numerator) return false;
-  uint64_t scaled = whole * numerator;
-  if (remainder != 0) {
-    if (remainder > UINT64_MAX / numerator) return false;
-    uint64_t fractional_product = remainder * numerator;
-    if (fractional_product > UINT64_MAX - denominator / 2) return false;
-    uint64_t fractional = (fractional_product + denominator / 2) / denominator;
-    if (scaled > UINT64_MAX - fractional) return false;
-    scaled += fractional;
-  }
-  *out_result = scaled;
-  return true;
-#endif  // defined(__SIZEOF_INT128__)
-}
-
 static bool iree_hal_profile_statistics_scale_device_ticks_to_ns(
     const iree_hal_profile_statistics_device_t* device, uint64_t duration_ticks,
     uint64_t* out_duration_ns) {
@@ -529,7 +499,7 @@ static bool iree_hal_profile_statistics_scale_device_ticks_to_ns(
   }
   if (last_time_ns <= first_time_ns) return false;
 
-  return iree_hal_profile_statistics_round_mul_div_u64(
+  return iree_math_round_mul_div_u64(
       duration_ticks, (uint64_t)(last_time_ns - first_time_ns),
       last->device_tick - first->device_tick, out_duration_ns);
 }

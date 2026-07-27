@@ -161,7 +161,7 @@ static iree_status_t iree_io_file_handle_fdopen(iree_io_file_handle_t* handle,
   // NOTE: after this point the file handle is associated with dup_fd and
   // anything we do to it (like closing) will apply to the dup_fd.
   iree_status_t status = iree_ok_status();
-  FILE* file = fdopen(dup_fd, mode);
+  FILE* file = iree_fdopen(dup_fd, mode);
   if (file == NULL) {
     status = iree_make_stdio_statusf(
         "unable to open file descriptor with mode %s", mode);

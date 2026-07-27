@@ -286,6 +286,15 @@ iree_select_compiler_opts(IREE_DEFAULT_COPTS
     "/wd4244"  # possible loss of data
     "/wd4267"  # initializing: possible loss of data
     "/wd5105"  # allow: macro expansion producing 'defined' has undefined behavior
+
+  CLANG_CL
+    # clang-cl reports Clang unused diagnostics for generated code and macro
+    # wrappers even when using the MSVC-style warning level above. Keep these in
+    # line with the existing Clang/GCC suppressions.
+    $<$<COMPILE_LANGUAGE:CXX>:-Wno-invalid-offsetof>
+    "-Wno-unused-function"
+    "-Wno-unused-lambda-capture"
+    "-Wno-unused-variable"
 )
 
 # Set some things back to warnings that are really annoying as build errors
