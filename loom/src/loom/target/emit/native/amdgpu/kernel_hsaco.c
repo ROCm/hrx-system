@@ -38,6 +38,8 @@ iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
   const loom_amdgpu_encode_instruction_stream_options_t encode_options = {
       .packet_plan = options ? options->packet_plan : NULL,
       .storage_layout = &record.storage_layout,
+      .flags = options ? options->encoding_flags
+                       : LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_NONE,
   };
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_encode_instruction_stream_result_with_options(
