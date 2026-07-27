@@ -64,6 +64,26 @@ iree_cc_library(
 )
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
+    blocking_printf_protocol
+  HDRS
+    "blocking_printf_protocol.h"
+  SRCS
+    "blocking_printf_protocol.c"
+  DEPS
+    ::hostcall_message
+    ::printf_format
+    iree::base
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+  PUBLIC
+)
+endif()
+
 iree_cc_library(
   NAME
     launch_params
@@ -181,6 +201,20 @@ iree_cc_test(
     "hostcall_message_test.cc"
   DEPS
     ::hostcall_message
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    blocking_printf_protocol_test
+  SRCS
+    "blocking_printf_protocol_test.cc"
+  DEPS
+    ::blocking_printf_protocol
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx_defs

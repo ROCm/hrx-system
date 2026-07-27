@@ -57,6 +57,19 @@ hrx_cc_library(
 )
 
 hrx_cc_library(
+    name = "blocking_printf_protocol",
+    srcs = ["blocking_printf_protocol.c"],
+    hdrs = ["blocking_printf_protocol.h"],
+    includes = ["../.."],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":hostcall_message",
+        ":printf_format",
+        "//runtime/src/iree/base",
+    ],
+)
+
+hrx_cc_library(
     name = "launch_params",
     srcs = ["launch_params.c"],
     hdrs = [
@@ -173,6 +186,17 @@ hrx_cc_test(
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
         ":hostcall_message",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "blocking_printf_protocol_test",
+    srcs = ["blocking_printf_protocol_test.cc"],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":blocking_printf_protocol",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
