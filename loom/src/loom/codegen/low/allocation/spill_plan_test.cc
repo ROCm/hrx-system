@@ -17,8 +17,6 @@
 namespace loom {
 namespace {
 
-using ::iree::StatusCode;
-
 class LowAllocationSpillPlanTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -78,18 +76,6 @@ TEST_F(LowAllocationSpillPlanTest, ComputesByteLayout) {
       &wide_assignment, /*alloc_unit_bits=*/32, &byte_size, &byte_alignment));
   EXPECT_EQ(byte_size, 16u);
   EXPECT_EQ(byte_alignment, 16u);
-}
-
-TEST_F(LowAllocationSpillPlanTest, RejectsZeroBitAllocationUnits) {
-  const loom_low_allocation_assignment_t assignment =
-      Assignment(LOOM_VALUE_ID_INVALID, /*unit_count=*/1);
-
-  uint32_t byte_size = 0;
-  uint32_t byte_alignment = 0;
-  IREE_EXPECT_STATUS_IS(
-      StatusCode::kFailedPrecondition,
-      loom_low_allocation_spill_plan_layout(&assignment, /*alloc_unit_bits=*/0,
-                                            &byte_size, &byte_alignment));
 }
 
 TEST_F(LowAllocationSpillPlanTest, PredictsSliceReloadBytes) {

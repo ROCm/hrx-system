@@ -6,24 +6,11 @@
 
 #include "loom/codegen/low/allocation/spill_plan.h"
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 
 #define LOOM_LOW_ALLOCATION_SPILL_PLAN_MAX_NATURAL_ALIGNMENT 16u
-
-static uint32_t loom_low_allocation_spill_plan_round_up_to_power_of_two_u32(
-    uint32_t value) {
-  if (value <= 1) {
-    return 1;
-  }
-  --value;
-  value |= value >> 1;
-  value |= value >> 2;
-  value |= value >> 4;
-  value |= value >> 8;
-  value |= value >> 16;
-  return value == UINT32_MAX ? 0 : value + 1u;
-}
 
 static uint32_t loom_low_allocation_spill_plan_natural_chunk_units(
     uint32_t unit_count) {
@@ -40,14 +27,6 @@ iree_status_t loom_low_allocation_spill_plan_layout(
     const loom_low_allocation_assignment_t* assignment,
     uint16_t alloc_unit_bits, uint32_t* out_byte_size,
     uint32_t* out_byte_alignment) {
-  IREE_ASSERT_ARGUMENT(assignment);
-  IREE_ASSERT_ARGUMENT(out_byte_size);
-  IREE_ASSERT_ARGUMENT(out_byte_alignment);
-  if (alloc_unit_bits == 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "cannot plan spill for register class with zero allocation unit bits");
-  }
   uint64_t bit_size = (uint64_t)assignment->unit_count * alloc_unit_bits;
   uint64_t byte_size = (bit_size + 7u) / 8u;
   if (byte_size > UINT32_MAX) {
@@ -63,13 +42,8 @@ iree_status_t loom_low_allocation_spill_plan_layout(
       LOOM_LOW_ALLOCATION_SPILL_PLAN_MAX_NATURAL_ALIGNMENT) {
     natural_alignment = LOOM_LOW_ALLOCATION_SPILL_PLAN_MAX_NATURAL_ALIGNMENT;
   }
-  uint32_t byte_alignment =
-      loom_low_allocation_spill_plan_round_up_to_power_of_two_u32(
-          (uint32_t)natural_alignment);
-  if (byte_alignment == 0) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "spill slot byte alignment exceeds uint32_t");
-  }
+  const uint32_t byte_alignment =
+      iree_math_round_up_to_pow2_u32((uint32_t)natural_alignment);
   *out_byte_size = (uint32_t)byte_size;
   *out_byte_alignment = byte_alignment;
   return iree_ok_status();
@@ -242,26 +216,12 @@ static iree_status_t loom_low_allocation_spill_plan_value_store_count(
   return iree_ok_status();
 }
 
-iree_status_t loom_low_allocation_spill_plan_traffic(
+static iree_status_t loom_low_allocation_spill_plan_traffic_for_layout(
     const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
-    const loom_low_allocation_assignment_t* assignment,
-    uint16_t alloc_unit_bits,
+    const loom_low_allocation_assignment_t* assignment, uint32_t byte_size,
     loom_low_allocation_spill_plan_traffic_t* out_traffic) {
-  IREE_ASSERT_ARGUMENT(module);
-  IREE_ASSERT_ARGUMENT(cfg_graph);
-  IREE_ASSERT_ARGUMENT(assignment);
-  IREE_ASSERT_ARGUMENT(out_traffic);
   *out_traffic = (loom_low_allocation_spill_plan_traffic_t){0};
   const loom_value_id_t value_id = assignment->value_id;
-  if (value_id >= module->values.count) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "cannot plan spill for out-of-range value %u",
-                            (unsigned)value_id);
-  }
-  uint32_t byte_size = 0;
-  uint32_t byte_alignment = 0;
-  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_layout(
-      assignment, alloc_unit_bits, &byte_size, &byte_alignment));
   const loom_value_t* value = loom_module_value(module, value_id);
   uint32_t reload_count = 0;
   uint64_t reload_bytes = 0;
@@ -280,6 +240,19 @@ iree_status_t loom_low_allocation_spill_plan_traffic(
   return iree_ok_status();
 }
 
+iree_status_t loom_low_allocation_spill_plan_traffic(
+    const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
+    const loom_low_allocation_assignment_t* assignment,
+    uint16_t alloc_unit_bits,
+    loom_low_allocation_spill_plan_traffic_t* out_traffic) {
+  uint32_t byte_size = 0;
+  uint32_t byte_alignment = 0;
+  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_layout(
+      assignment, alloc_unit_bits, &byte_size, &byte_alignment));
+  return loom_low_allocation_spill_plan_traffic_for_layout(
+      module, cfg_graph, assignment, byte_size, out_traffic);
+}
+
 iree_status_t loom_low_allocation_spill_plan_record(
     const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
     const loom_low_allocation_assignment_t* assignment,
@@ -287,24 +260,14 @@ iree_status_t loom_low_allocation_spill_plan_record(
     loom_low_spill_slot_space_t spill_slot_space,
     loom_low_allocation_spill_plan_t* spill_plans,
     iree_host_size_t* inout_spill_plan_count) {
-  IREE_ASSERT_ARGUMENT(module);
-  IREE_ASSERT_ARGUMENT(cfg_graph);
-  IREE_ASSERT_ARGUMENT(assignment);
-  IREE_ASSERT_ARGUMENT(spill_plans);
-  IREE_ASSERT_ARGUMENT(inout_spill_plan_count);
   uint32_t byte_size = 0;
   uint32_t byte_alignment = 0;
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_layout(
       assignment, alloc_unit_bits, &byte_size, &byte_alignment));
 
-  if (assignment->value_id >= module->values.count) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "cannot plan spill for out-of-range value %u",
-                            (unsigned)assignment->value_id);
-  }
   loom_low_allocation_spill_plan_traffic_t traffic = {0};
-  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_traffic(
-      module, cfg_graph, assignment, alloc_unit_bits, &traffic));
+  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_traffic_for_layout(
+      module, cfg_graph, assignment, byte_size, &traffic));
   spill_plans[(*inout_spill_plan_count)++] = (loom_low_allocation_spill_plan_t){
       .value_id = assignment->value_id,
       .assignment_index = assignment_index,
@@ -321,8 +284,6 @@ iree_status_t loom_low_allocation_spill_plan_record(
 void loom_low_allocation_spill_remark_record(
     loom_low_allocation_remark_t* remarks, iree_host_size_t* inout_remark_count,
     uint32_t assignment_index, uint32_t budget_units, uint32_t required_units) {
-  IREE_ASSERT_ARGUMENT(remarks);
-  IREE_ASSERT_ARGUMENT(inout_remark_count);
   remarks[(*inout_remark_count)++] = (loom_low_allocation_remark_t){
       .kind = LOOM_LOW_ALLOCATION_REMARK_SPILL,
       .assignment_index = assignment_index,
