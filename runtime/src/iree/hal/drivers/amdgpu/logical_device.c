@@ -2643,6 +2643,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_aql_command_buffer(
                 .config.shadow_slot_count
           : 0,
       physical_device->prepublished_kernarg_storage,
+      iree_hal_amdgpu_physical_device_hostcall_buffer(physical_device),
       &logical_device->profile_metadata,
       &logical_device->host_block_pools.command_buffer,
       &logical_device->host_block_pools.small, logical_device->host_allocator,
@@ -2754,6 +2755,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_pm4_command_buffer(
       physical_device->vendor_packet_capabilities,
       physical_device->pm4_timestamp_strategy,
       physical_device->pm4_command_buffer_resident_pool,
+      iree_hal_amdgpu_physical_device_hostcall_buffer(physical_device),
       &logical_device->profile_metadata,
       &logical_device->host_block_pools.small, logical_device->host_allocator,
       out_command_buffer);

@@ -389,6 +389,12 @@ TEST_F(HostcallProviderTest, EagerPhysicalLifecycleAndFailurePublication) {
     EXPECT_EQ(hostcall_state->device_address, provider_context->device_address);
     EXPECT_EQ(hostcall_state->notification_signal.handle,
               provider_context->notification_token);
+    iree_hal_amdgpu_physical_device_t* physical_device =
+        logical_device->physical_devices[i];
+    for (iree_host_size_t j = 0; j < physical_device->host_queue_count; ++j) {
+      EXPECT_EQ(physical_device->host_queues[j].hostcall_buffer,
+                reinterpret_cast<void*>(hostcall_state->device_address));
+    }
     iree_atomic_store(&provider_context->expected_service_count, 1,
                       iree_memory_order_release);
     iree_hsa_signal_add_screlease(IREE_LIBHSA(&libhsa_),

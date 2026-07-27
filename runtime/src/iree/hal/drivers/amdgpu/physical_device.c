@@ -1258,7 +1258,9 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
     iree_thread_affinity_set_group_any(physical_device->host_numa_node,
                                        &completion_thread_affinity);
     status = iree_hal_amdgpu_host_queue_initialize(
-        libhsa, logical_device, proactor, physical_device->device_agent,
+        libhsa, logical_device,
+        iree_hal_amdgpu_physical_device_hostcall_buffer(physical_device),
+        proactor, physical_device->device_agent,
         &kernarg_ring_memory.descriptor, host_memory_pools->fine_pool,
         frontier_tracker, queue_axis, resolved.queue_affinity,
         logical_queue_ordinal, queue_ordinal, completion_thread_affinity,
@@ -1344,6 +1346,14 @@ iree_status_t iree_hal_amdgpu_physical_device_set_hsa_profiling_enabled(
 
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+void* iree_hal_amdgpu_physical_device_hostcall_buffer(
+    const iree_hal_amdgpu_physical_device_t* physical_device) {
+  return physical_device->hostcall_provider_state
+             ? (void*)(uintptr_t)
+                   physical_device->hostcall_provider_state->device_address
+             : NULL;
 }
 
 void iree_hal_amdgpu_physical_device_deinitialize(

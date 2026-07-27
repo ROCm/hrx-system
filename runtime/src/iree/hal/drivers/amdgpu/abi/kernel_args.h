@@ -151,8 +151,8 @@ typedef struct IREE_AMDGPU_ALIGNAS(8) iree_amdgpu_kernel_implicit_args_t {
   //   hidden_grid_dims
   uint16_t grid_dims;  // + 64
 
-  // Fixed-size buffer for `-mprintf-kind=buffered` support.
-  // By default LLVM uses `hostcall` but that's a mess and we avoid it.
+  // Fixed-size buffer for `-mprintf-kind=buffered` support. LLVM's default
+  // blocking mode uses the separate hostcall buffer below.
   // `__printf_alloc` in the device library is used to grab this pointer, the
   // header DWORDs are manipulated, and the contents are written to the buffer.
   //

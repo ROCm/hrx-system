@@ -62,8 +62,8 @@ class AqlCommandBufferTest : public ::testing::Test {
         /*queue_count_per_physical_device=*/1,
         /*tsan_shadow_slot_count=*/16,
         iree_hal_amdgpu_aql_prepublished_kernarg_storage_disabled(),
-        profile_metadata, &block_pool_, &block_pool_, iree_allocator_system(),
-        &command_buffer));
+        /*hostcall_buffer=*/nullptr, profile_metadata, &block_pool_,
+        &block_pool_, iree_allocator_system(), &command_buffer));
     return CommandBufferPtr(command_buffer);
   }
 

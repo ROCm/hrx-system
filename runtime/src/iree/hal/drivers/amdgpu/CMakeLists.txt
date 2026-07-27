@@ -768,6 +768,9 @@ iree_cc_test(
     "runtime-resource=amd-gpu"
   RESOURCE_GROUP
     iree-hal-drivers-amdgpu-tests
+  SANITIZER_SUPPRESSIONS
+    lsan
+    hsa
 )
 endif()
 

@@ -369,6 +369,11 @@ void iree_hal_amdgpu_physical_device_deassign_frontier(
 iree_status_t iree_hal_amdgpu_physical_device_set_hsa_profiling_enabled(
     iree_hal_amdgpu_physical_device_t* physical_device, bool enabled);
 
+// Returns the stable opaque hostcall device address provisioned for this
+// physical device, or NULL when the hosting layer did not opt into a provider.
+void* iree_hal_amdgpu_physical_device_hostcall_buffer(
+    const iree_hal_amdgpu_physical_device_t* physical_device);
+
 // Deinitializes a physical device and deallocates all device-specific
 // resources.
 void iree_hal_amdgpu_physical_device_deinitialize(

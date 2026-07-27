@@ -172,6 +172,10 @@ void iree_hal_amdgpu_pm4_command_buffer_resident_pool_trim(
 // a queue_execute binding-table fixup dispatch before the PM4 IB runs. The
 // command buffer borrows |resident_pool| and |resource_set_block_pool|; callers
 // must keep them live until all created command buffers are destroyed.
+//
+// |hostcall_buffer| is an optional opaque device address copied into every
+// implicit-argument template. The allocation it references must remain valid
+// for the command buffer lifetime.
 iree_status_t iree_hal_amdgpu_pm4_command_buffer_create(
     iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
@@ -181,6 +185,7 @@ iree_status_t iree_hal_amdgpu_pm4_command_buffer_create(
     iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities,
     iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy,
     iree_hal_amdgpu_pm4_command_buffer_resident_pool_t* resident_pool,
+    void* hostcall_buffer,
     iree_hal_amdgpu_profile_metadata_registry_t* profile_metadata,
     iree_arena_block_pool_t* resource_set_block_pool,
     iree_allocator_t host_allocator,

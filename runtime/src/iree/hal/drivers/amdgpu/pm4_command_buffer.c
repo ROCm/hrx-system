@@ -633,6 +633,8 @@ typedef struct iree_hal_amdgpu_pm4_command_buffer_t {
   iree_hal_executable_t* last_retained_executable;
   // Pool that owns resident PM4 storage allocations.
   iree_hal_amdgpu_pm4_command_buffer_resident_pool_t* resident_pool;
+  // Stable opaque hostcall device address written into implicit templates.
+  void* hostcall_buffer;
   // Borrowed resident storage allocation returned to |resident_pool|.
   iree_hal_amdgpu_pm4_command_buffer_resident_allocation_t* resident_allocation;
   // Borrowed host staging allocation returned to |resident_pool|.
@@ -2193,7 +2195,8 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_write_template(
     const iree_hal_amdgpu_kernarg_layout_t* layout, uint32_t template_offset,
     const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     const iree_hal_amdgpu_pm4_binding_record_t* binding_records,
-    uint32_t binding_record_count, uint8_t* template_bytes) {
+    uint32_t binding_record_count, void* hostcall_buffer,
+    uint8_t* template_bytes) {
   uint64_t* binding_ptrs = binding_record_count
                                ? (uint64_t*)iree_alloca(binding_record_count *
                                                         sizeof(binding_ptrs[0]))
@@ -2239,7 +2242,7 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_write_template(
                                                   ->implicit_args_byte_offset);
     iree_hal_amdgpu_device_dispatch_initialize_implicit_args(
         kernel_args, config.workgroup_count,
-        config.dynamic_workgroup_local_memory, implicit_args);
+        config.dynamic_workgroup_local_memory, hostcall_buffer, implicit_args);
   }
   return iree_ok_status();
 }
@@ -2731,7 +2734,7 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_materialize_dispatch(
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_command_buffer_write_template(
       command_buffer, kernel_args, layout, record->template_offset, config,
       constants, binding_records, record->binding_record_count,
-      template_bytes));
+      command_buffer->hostcall_buffer, template_bytes));
 
   if (iree_any_bit_set(
           record->flags,
@@ -3443,6 +3446,7 @@ iree_status_t iree_hal_amdgpu_pm4_command_buffer_create(
     iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities,
     iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy,
     iree_hal_amdgpu_pm4_command_buffer_resident_pool_t* resident_pool,
+    void* hostcall_buffer,
     iree_hal_amdgpu_profile_metadata_registry_t* profile_metadata,
     iree_arena_block_pool_t* resource_set_block_pool,
     iree_allocator_t host_allocator,
@@ -3482,6 +3486,7 @@ iree_status_t iree_hal_amdgpu_pm4_command_buffer_create(
   command_buffer->host_allocator = host_allocator;
   command_buffer->resource_set_block_pool = resource_set_block_pool;
   command_buffer->resident_pool = resident_pool;
+  command_buffer->hostcall_buffer = hostcall_buffer;
   command_buffer->profile.metadata = profile_metadata;
   command_buffer->libhsa = resident_pool->libhsa;
   command_buffer->vendor_packet_capabilities = vendor_packet_capabilities;
