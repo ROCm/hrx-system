@@ -94,10 +94,19 @@ function(iree_cc_test)
   endif()
 
   set_target_properties(${_NAME} PROPERTIES OUTPUT_NAME "${_RULE_NAME}")
-  target_sources(${_NAME}
-    PRIVATE
-      ${_RULE_SRCS}
-  )
+  if(_RULE_SRCS)
+    target_sources(${_NAME}
+      PRIVATE
+        ${_RULE_SRCS}
+    )
+  else()
+    set(_DUMMY_SRC "${CMAKE_CURRENT_BINARY_DIR}/${_NAME}_dummy.cc")
+    iree_make_empty_file("${_DUMMY_SRC}")
+    target_sources(${_NAME}
+      PRIVATE
+        ${_DUMMY_SRC}
+    )
+  endif()
   target_include_directories(${_NAME} SYSTEM
     PUBLIC
       "$<BUILD_INTERFACE:${IREE_SOURCE_DIR}>"

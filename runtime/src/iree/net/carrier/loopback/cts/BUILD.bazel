@@ -48,12 +48,12 @@ iree_runtime_cc_library(
 # CTS tests with loopback backend.
 iree_runtime_cc_test(
     name = "loopback_tests",
-    srcs = ["//runtime/src/iree/net/carrier/cts/util:test_main.cc"],
     target_compatible_with = _POSIX_ONLY,
     deps = [
         ":backends",
         "//runtime/src/iree/net/carrier/cts:all_tests",
         "//runtime/src/iree/net/carrier/cts/util:registry",
+        "//runtime/src/iree/net/carrier/cts/util:test_main",
         "//runtime/src/iree/testing:gtest",
     ],
 )
@@ -65,11 +65,11 @@ iree_runtime_cc_test(
 # CTS benchmarks with loopback backend.
 iree_runtime_cc_benchmark(
     name = "loopback_benchmarks",
-    srcs = ["//runtime/src/iree/net/carrier/cts/util:benchmark_main.cc"],
     target_compatible_with = _POSIX_ONLY,
     deps = [
         ":backends",
         "//runtime/src/iree/net/carrier/cts:all_benchmarks",
+        "//runtime/src/iree/net/carrier/cts/util:benchmark_main",
         "//runtime/src/iree/net/carrier/cts/util:registry",
     ],
 )

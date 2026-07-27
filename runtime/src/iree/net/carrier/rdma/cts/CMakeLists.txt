@@ -37,7 +37,6 @@ iree_cc_test(
   NAME
     rdma_tests
   SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/net/carrier/cts/util/test_main.cc"
     "direct_test.cc"
     "error_test.cc"
   DEPS
@@ -46,6 +45,7 @@ iree_cc_test(
     iree::net::carrier::cts::all_tests
     iree::net::carrier::cts::util::registry
     iree::net::carrier::cts::util::test_base
+    iree::net::carrier::cts::util::test_main
     iree::testing::gtest
   LABELS
     "nodocker"
@@ -56,11 +56,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_binary_benchmark(
   NAME
     rdma_benchmarks
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/net/carrier/cts/util/benchmark_main.cc"
   DEPS
     ::backends
     iree::net::carrier::cts::all_benchmarks
+    iree::net::carrier::cts::util::benchmark_main
     iree::net::carrier::cts::util::registry
     iree::third_party::google_benchmark
   TESTONLY

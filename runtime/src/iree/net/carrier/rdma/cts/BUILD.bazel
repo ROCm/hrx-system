@@ -52,7 +52,6 @@ iree_runtime_cc_test(
     srcs = [
         "direct_test.cc",
         "error_test.cc",
-        "//runtime/src/iree/net/carrier/cts/util:test_main.cc",
     ],
     tags = [
         "nodocker",
@@ -64,13 +63,13 @@ iree_runtime_cc_test(
         "//runtime/src/iree/net/carrier/cts:all_tests",
         "//runtime/src/iree/net/carrier/cts/util:registry",
         "//runtime/src/iree/net/carrier/cts/util:test_base",
+        "//runtime/src/iree/net/carrier/cts/util:test_main",
         "//runtime/src/iree/testing:gtest",
     ],
 )
 
 iree_runtime_cc_benchmark(
     name = "rdma_benchmarks",
-    srcs = ["//runtime/src/iree/net/carrier/cts/util:benchmark_main.cc"],
     tags = [
         "nodocker",
     ],
@@ -78,6 +77,7 @@ iree_runtime_cc_benchmark(
     deps = [
         ":backends",
         "//runtime/src/iree/net/carrier/cts:all_benchmarks",
+        "//runtime/src/iree/net/carrier/cts/util:benchmark_main",
         "//runtime/src/iree/net/carrier/cts/util:registry",
     ],
 )

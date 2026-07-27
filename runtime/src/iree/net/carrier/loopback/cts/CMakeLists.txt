@@ -32,12 +32,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
 iree_cc_test(
   NAME
     loopback_tests
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/net/carrier/cts/util/test_main.cc"
   DEPS
     ::backends
     iree::net::carrier::cts::all_tests
     iree::net::carrier::cts::util::registry
+    iree::net::carrier::cts::util::test_main
     iree::testing::gtest
 )
 endif()
@@ -46,11 +45,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
 iree_cc_binary_benchmark(
   NAME
     loopback_benchmarks
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/net/carrier/cts/util/benchmark_main.cc"
   DEPS
     ::backends
     iree::net::carrier::cts::all_benchmarks
+    iree::net::carrier::cts::util::benchmark_main
     iree::net::carrier::cts::util::registry
     iree::third_party::google_benchmark
   TESTONLY

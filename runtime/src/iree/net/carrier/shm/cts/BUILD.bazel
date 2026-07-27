@@ -39,11 +39,11 @@ iree_runtime_cc_library(
 # CTS tests with SHM backend.
 iree_runtime_cc_test(
     name = "shm_tests",
-    srcs = ["//runtime/src/iree/net/carrier/cts/util:test_main.cc"],
     deps = [
         ":backends",
         "//runtime/src/iree/net/carrier/cts:all_tests",
         "//runtime/src/iree/net/carrier/cts/util:registry",
+        "//runtime/src/iree/net/carrier/cts/util:test_main",
         "//runtime/src/iree/testing:gtest",
     ],
 )
@@ -55,10 +55,10 @@ iree_runtime_cc_test(
 # CTS benchmarks with SHM backend.
 iree_runtime_cc_benchmark(
     name = "shm_benchmarks",
-    srcs = ["//runtime/src/iree/net/carrier/cts/util:benchmark_main.cc"],
     deps = [
         ":backends",
         "//runtime/src/iree/net/carrier/cts:all_benchmarks",
+        "//runtime/src/iree/net/carrier/cts/util:benchmark_main",
         "//runtime/src/iree/net/carrier/cts/util:registry",
     ],
 )

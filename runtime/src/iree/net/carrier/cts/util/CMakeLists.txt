@@ -27,6 +27,30 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    test_main
+  SRCS
+    "test_main.cc"
+  DEPS
+    ::registry
+    iree::testing::gtest
+  TESTONLY
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    benchmark_main
+  SRCS
+    "benchmark_main.cc"
+  DEPS
+    ::registry
+    iree::third_party::google_benchmark
+  TESTONLY
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     test_base
   HDRS
     "test_base.h"

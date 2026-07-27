@@ -28,23 +28,21 @@ iree_cc_library(
 iree_cc_test(
   NAME
     shm_tests
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/net/carrier/cts/util/test_main.cc"
   DEPS
     ::backends
     iree::net::carrier::cts::all_tests
     iree::net::carrier::cts::util::registry
+    iree::net::carrier::cts::util::test_main
     iree::testing::gtest
 )
 
 iree_cc_binary_benchmark(
   NAME
     shm_benchmarks
-  SRCS
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/net/carrier/cts/util/benchmark_main.cc"
   DEPS
     ::backends
     iree::net::carrier::cts::all_benchmarks
+    iree::net::carrier::cts::util::benchmark_main
     iree::net::carrier::cts::util::registry
     iree::third_party::google_benchmark
   TESTONLY
