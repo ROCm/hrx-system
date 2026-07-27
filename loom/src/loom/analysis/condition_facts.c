@@ -790,6 +790,19 @@ bool loom_condition_integer_relation_implies(
   return false;
 }
 
+bool loom_condition_fact_set_proves_integer_relation(
+    const loom_condition_fact_set_t* facts,
+    const loom_condition_integer_relation_t* queried, bool* out_result) {
+  if (!facts) return false;
+  for (iree_host_size_t i = 0; i < facts->integer_relation_count; ++i) {
+    if (loom_condition_integer_relation_implies(&facts->integer_relations[i],
+                                                queried, out_result)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool loom_condition_integer_relations_equivalent(
     const loom_condition_integer_relation_t* left,
     const loom_condition_integer_relation_t* right) {

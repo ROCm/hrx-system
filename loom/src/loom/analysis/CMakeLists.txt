@@ -330,9 +330,11 @@ loom_cc_library(
   HDRS
     "memory_root_bounds.h"
     "vector_memory_footprint.h"
+    "vector_memory_mask_bounds.h"
   SRCS
     "memory_root_bounds.c"
     "vector_memory_footprint.c"
+    "vector_memory_mask_bounds.c"
   DEPS
     ::cfg_condition_facts
     ::condition_facts
