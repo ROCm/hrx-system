@@ -46,17 +46,25 @@
 #include "loom/target/arch/amdgpu/records/target_records_tables.inl"
 #undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET
 
-static const loom_target_export_plan_t kAmdgpuHalExportPlan = {
-  .name = IREE_SVL("amdgpu-hal"),
-  .abi_kind = LOOM_TARGET_ABI_HAL_KERNEL,
-  .linkage = LOOM_TARGET_LINKAGE_DEFAULT,
-  .hal_kernel = {
-    .required_workgroup_size = {.x = 0, .y = 0, .z = 0},
-    .flat_workgroup_size_min = 0,
-    .flat_workgroup_size_max = 0,
-    .buffer_resource_flags = LOOM_AMDGPU_HAL_BUFFER_RESOURCE_FLAGS,
-  },
-};
+#define LOOM_AMDGPU_HAL_EXPORT_PLAN(symbol, buffer_resource_flags_value) \
+  static const loom_target_export_plan_t symbol = {                      \
+    .name = IREE_SVL("amdgpu-hal"),                                      \
+    .abi_kind = LOOM_TARGET_ABI_HAL_KERNEL,                              \
+    .linkage = LOOM_TARGET_LINKAGE_DEFAULT,                              \
+    .hal_kernel = {                                                      \
+      .required_workgroup_size = {.x = 0, .y = 0, .z = 0},               \
+      .flat_workgroup_size_min = 0,                                      \
+      .flat_workgroup_size_max = 0,                                      \
+      .buffer_resource_flags = buffer_resource_flags_value,              \
+    },                                                                   \
+  }
+
+#define LOOM_AMDGPU_TARGET_BUFFER_RESOURCE(symbol_suffix, intrinsic_flags) \
+  LOOM_AMDGPU_HAL_EXPORT_PLAN(kAmdgpu##symbol_suffix##HalExportPlan,        \
+                              intrinsic_flags);
+#include "loom/target/arch/amdgpu/records/target_records_tables.inl"
+#undef LOOM_AMDGPU_TARGET_BUFFER_RESOURCE
+#undef LOOM_AMDGPU_HAL_EXPORT_PLAN
 
 #define LOOM_AMDGPU_LOW_CONFIG(symbol, key) \
   static const loom_target_config_t symbol = { \
@@ -77,7 +85,7 @@ static const loom_target_export_plan_t kAmdgpuHalExportPlan = {
   static const loom_target_bundle_t kAmdgpuLowTargetBundle##symbol_suffix##Core = { \
     .name = IREE_SVL(bundle_name), \
     .snapshot = &kAmdgpu##symbol_suffix##Snapshot, \
-    .export_plan = &kAmdgpuHalExportPlan, \
+    .export_plan = &kAmdgpu##symbol_suffix##HalExportPlan, \
     .config = &kAmdgpu##symbol_suffix##Config, \
   };
 #include "loom/target/arch/amdgpu/records/target_records_tables.inl"

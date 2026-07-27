@@ -30,14 +30,6 @@ extern "C" {
 // Sentinel for processors or descriptor sets without target-low support.
 #define LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE UINT16_MAX
 
-// Default raw buffer-resource descriptor control word for global HAL bindings.
-//
-// This is the final descriptor word consumed by MUBUF/MTBUF packets. It matches
-// the word emitted by LLVM/IREE for amdgcn-amd-amdhsa raw buffers with 32-bit
-// element format, resource-level OOB behavior, and the standard memory
-// properties used for HAL binding resources.
-#define LOOM_AMDGPU_HAL_BUFFER_RESOURCE_FLAGS UINT32_C(0x31027000)
-
 // gfx1250 silicon revision selected for compilation and native emission.
 typedef enum loom_amdgpu_gfx1250_revision_e {
   // No gfx1250 revision applies to the selected processor.
@@ -227,6 +219,15 @@ typedef enum loom_amdgpu_kernel_descriptor_abi_flag_bits_e {
 // Bitset of loom_amdgpu_kernel_descriptor_abi_flag_bits_t values.
 typedef uint64_t loom_amdgpu_kernel_descriptor_abi_flags_t;
 
+typedef enum loom_amdgpu_buffer_resource_layout_e {
+  // Descriptor words hold a 48-bit base, 16-bit stride, 32-bit num_records,
+  // and a 32-bit control word.
+  LOOM_AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32 = 0,
+  // Descriptor words hold a 57-bit base, 45-bit num_records, 16-bit stride,
+  // and a 4-bit control field.
+  LOOM_AMDGPU_BUFFER_RESOURCE_LAYOUT_PACKED_45 = 1,
+} loom_amdgpu_buffer_resource_layout_t;
+
 typedef enum loom_amdgpu_buffer_resource_cache_swizzle_e {
   // Buffer resource descriptors do not support cache swizzle.
   LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE = 0,
@@ -261,8 +262,12 @@ typedef struct loom_amdgpu_descriptor_set_sopp_opcodes_t {
 } loom_amdgpu_descriptor_set_sopp_opcodes_t;
 
 typedef struct loom_amdgpu_descriptor_set_buffer_resource_info_t {
+  // Buffer resource descriptor field layout.
+  loom_amdgpu_buffer_resource_layout_t layout;
   // Buffer resource descriptor cache-swizzle encoding shape.
   loom_amdgpu_buffer_resource_cache_swizzle_t cache_swizzle;
+  // Logical flag operand accepted by llvm.amdgcn.make.buffer.rsrc.
+  uint32_t intrinsic_flags;
 } loom_amdgpu_descriptor_set_buffer_resource_info_t;
 
 typedef struct loom_amdgpu_descriptor_set_vector_memory_info_t {

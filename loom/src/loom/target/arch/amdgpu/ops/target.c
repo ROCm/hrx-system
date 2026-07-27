@@ -65,6 +65,21 @@ static iree_status_t loom_amdgpu_target_record_emit_descriptor_set_mismatch(
                                         params, IREE_ARRAYSIZE(params));
 }
 
+static iree_status_t
+loom_amdgpu_target_record_emit_buffer_resource_flags_overflow(
+    const loom_module_t* module, iree_diagnostic_emitter_t emitter,
+    const loom_op_t* op, uint32_t intrinsic_flags,
+    iree_string_view_t descriptor_set_name, uint32_t field_bits) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_amdgpu_target_record_symbol_name(module, op)),
+      loom_param_u32(intrinsic_flags),
+      loom_param_string(descriptor_set_name),
+      loom_param_u32(field_bits),
+  };
+  return loom_amdgpu_target_record_emit(emitter, op, LOOM_ERR_AMDGPU_050,
+                                        params, IREE_ARRAYSIZE(params));
+}
+
 static iree_status_t loom_amdgpu_target_record_emit_no_descriptor_set(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
     const loom_amdgpu_processor_info_t* processor) {
@@ -329,6 +344,23 @@ iree_status_t loom_amdgpu_target_record_verify(
                               default_processor->descriptor_set.key)) {
     return loom_amdgpu_target_record_emit_descriptor_set_mismatch(
         module, emitter, op, processor, default_processor->descriptor_set.key);
+  }
+
+  const loom_attribute_t buffer_resource_flags_attr = loom_op_const_attrs(
+      op)[loom_amdgpu_target_hal_buffer_resource_flags_ATTR_INDEX];
+  if (!loom_attr_is_absent(buffer_resource_flags_attr)) {
+    const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
+        loom_amdgpu_target_info_descriptor_set_at(
+            processor->descriptor_set.ordinal);
+    const uint32_t intrinsic_flags =
+        (uint32_t)loom_attr_as_i64(buffer_resource_flags_attr);
+    if (descriptor_set_info->buffer_resource.layout ==
+            LOOM_AMDGPU_BUFFER_RESOURCE_LAYOUT_PACKED_45 &&
+        intrinsic_flags > UINT32_C(0xF)) {
+      return loom_amdgpu_target_record_emit_buffer_resource_flags_overflow(
+          module, emitter, op, intrinsic_flags, processor->descriptor_set.key,
+          4);
+    }
   }
 
   const loom_amdgpu_gfx1250_revision_t explicit_revision =

@@ -12,8 +12,13 @@ from contextlib import contextmanager
 
 from loom.gen.target.arch.amdgpu.records import amdgpu_target_records
 from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_BUFFER_RESOURCE_FLAGS_GFX9,
+    AMDGPU_BUFFER_RESOURCE_FLAGS_GFX10_12,
+    AMDGPU_BUFFER_RESOURCE_FLAGS_GFX125X,
+    AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32,
     AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+    AmdgpuDescriptorSetBufferResourceInfo,
     AmdgpuDescriptorSetInfo,
     AmdgpuTargetRecordInfo,
     processor_info,
@@ -42,6 +47,10 @@ def _descriptor_set_info() -> AmdgpuDescriptorSetInfo:
         isa_architecture_name="AMDGPU Test",
         isa_architecture_id=1,
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+        buffer_resource=AmdgpuDescriptorSetBufferResourceInfo(
+            layout=AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32,
+            intrinsic_flags=AMDGPU_BUFFER_RESOURCE_FLAGS_GFX9,
+        ),
     )
 
 
@@ -87,6 +96,9 @@ def test_target_records_materialize_current_rows() -> None:
     assert "static " not in source
     assert "LOOM_AMDGPU_TARGET_RECORD_INFO(Gfx1250" in source
     assert "LOOM_AMDGPU_TARGET_RECORD_DEFAULT(" in source
+    assert (f"LOOM_AMDGPU_TARGET_BUFFER_RESOURCE(Cdna3, UINT32_C({AMDGPU_BUFFER_RESOURCE_FLAGS_GFX9}))") in source
+    assert (f"LOOM_AMDGPU_TARGET_BUFFER_RESOURCE(Rdna3, UINT32_C({AMDGPU_BUFFER_RESOURCE_FLAGS_GFX10_12}))") in source
+    assert (f"LOOM_AMDGPU_TARGET_BUFFER_RESOURCE(Rdna4Gfx125x, UINT32_C({AMDGPU_BUFFER_RESOURCE_FLAGS_GFX125X}))") in source
     assert "Gfx1250)" in source
     assert f"UINT64_C({AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES})" in source
 

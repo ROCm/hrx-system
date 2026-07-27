@@ -49,6 +49,11 @@ AMDGPU_GFX125X_MAX_WORKGROUP_STORAGE_BYTES = 320 * 1024
 
 AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE = "none"
 AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT = "stride14_enable_bit"
+AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32 = "legacy_32"
+AMDGPU_BUFFER_RESOURCE_LAYOUT_PACKED_45 = "packed_45"
+AMDGPU_BUFFER_RESOURCE_FLAGS_GFX9 = 0x00027000
+AMDGPU_BUFFER_RESOURCE_FLAGS_GFX10_12 = 0x31027000
+AMDGPU_BUFFER_RESOURCE_FLAGS_GFX125X = 0x0
 
 AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE = "none"
 AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC = "gfx9_11_glc_slc_dlc"
@@ -169,6 +174,8 @@ def kernel_descriptor_profile_supports_wavefront_size(
 
 @dataclass(frozen=True, slots=True)
 class AmdgpuDescriptorSetBufferResourceInfo:
+    layout: str
+    intrinsic_flags: int
     cache_swizzle: str = AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE
 
 
@@ -194,10 +201,8 @@ class AmdgpuDescriptorSetInfo:
     isa_architecture_name: str
     isa_architecture_id: int
     flags: int
+    buffer_resource: AmdgpuDescriptorSetBufferResourceInfo
     storage_generator_target: str | None = None
-    buffer_resource: AmdgpuDescriptorSetBufferResourceInfo = (
-        AmdgpuDescriptorSetBufferResourceInfo()
-    )
     vector_memory: AmdgpuDescriptorSetVectorMemoryInfo = (
         AmdgpuDescriptorSetVectorMemoryInfo()
     )
@@ -557,6 +562,10 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         isa_architecture_name="AMD CDNA 3",
         isa_architecture_id=2,
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+        buffer_resource=AmdgpuDescriptorSetBufferResourceInfo(
+            layout=AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32,
+            intrinsic_flags=AMDGPU_BUFFER_RESOURCE_FLAGS_GFX9,
+        ),
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1,
         ),
@@ -568,6 +577,10 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         isa_architecture_name="AMD RDNA 4",
         isa_architecture_id=10,
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        buffer_resource=AmdgpuDescriptorSetBufferResourceInfo(
+            layout=AMDGPU_BUFFER_RESOURCE_LAYOUT_PACKED_45,
+            intrinsic_flags=AMDGPU_BUFFER_RESOURCE_FLAGS_GFX125X,
+        ),
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
         ),
@@ -579,6 +592,10 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         isa_architecture_name="AMD RDNA 3",
         isa_architecture_id=8,
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        buffer_resource=AmdgpuDescriptorSetBufferResourceInfo(
+            layout=AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32,
+            intrinsic_flags=AMDGPU_BUFFER_RESOURCE_FLAGS_GFX10_12,
+        ),
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC,
         ),
@@ -590,6 +607,10 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         isa_architecture_name="AMD RDNA 3.5",
         isa_architecture_id=9,
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+        buffer_resource=AmdgpuDescriptorSetBufferResourceInfo(
+            layout=AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32,
+            intrinsic_flags=AMDGPU_BUFFER_RESOURCE_FLAGS_GFX10_12,
+        ),
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC,
         ),
@@ -601,6 +622,10 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         isa_architecture_name="AMD RDNA 4",
         isa_architecture_id=10,
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        buffer_resource=AmdgpuDescriptorSetBufferResourceInfo(
+            layout=AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32,
+            intrinsic_flags=AMDGPU_BUFFER_RESOURCE_FLAGS_GFX10_12,
+        ),
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
         ),
@@ -613,6 +638,8 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         isa_architecture_id=3,
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
         buffer_resource=AmdgpuDescriptorSetBufferResourceInfo(
+            layout=AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32,
+            intrinsic_flags=AMDGPU_BUFFER_RESOURCE_FLAGS_GFX9,
             cache_swizzle=AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT,
         ),
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(

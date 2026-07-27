@@ -39,6 +39,11 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_AMDHSA_TARGET_TRIPLE,
     AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE,
     AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT,
+    AMDGPU_BUFFER_RESOURCE_FLAGS_GFX9,
+    AMDGPU_BUFFER_RESOURCE_FLAGS_GFX10_12,
+    AMDGPU_BUFFER_RESOURCE_FLAGS_GFX125X,
+    AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32,
+    AMDGPU_BUFFER_RESOURCE_LAYOUT_PACKED_45,
     AMDGPU_CACHE_SCOPE_KEYWORDS,
     AMDGPU_CACHE_TEMPORAL_KEYWORDS,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
@@ -150,6 +155,11 @@ _MATRIX_FEATURE_PROFILE_EXPRS = {
 _BUFFER_RESOURCE_CACHE_SWIZZLE_EXPRS = {
     AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE: "LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE",
     AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT: "LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT",
+}
+
+_BUFFER_RESOURCE_LAYOUT_EXPRS = {
+    AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32: "LOOM_AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32",
+    AMDGPU_BUFFER_RESOURCE_LAYOUT_PACKED_45: "LOOM_AMDGPU_BUFFER_RESOURCE_LAYOUT_PACKED_45",
 }
 
 _VECTOR_MEMORY_CACHE_POLICY_ENCODING_EXPRS = {encoding: f"LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_{_c_ident(encoding)}" for encoding in AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODINGS}
@@ -266,6 +276,14 @@ def _buffer_resource_cache_swizzle_expr(kind: str) -> str:
         kind,
         _BUFFER_RESOURCE_CACHE_SWIZZLE_EXPRS,
         "buffer-resource cache swizzle kind",
+    )
+
+
+def _buffer_resource_layout_expr(kind: str) -> str:
+    return _enum_expr(
+        kind,
+        _BUFFER_RESOURCE_LAYOUT_EXPRS,
+        "buffer-resource layout",
     )
 
 
@@ -625,6 +643,21 @@ def _validate_descriptor_sets(descriptor_sets: Sequence[AmdgpuDescriptorSetInfo]
                 raise ValueError(f"AMDGPU descriptor set {info.key} uses view-only target '{storage_info.generator_target}' as storage")
             if storage_info.isa_xml_key != info.isa_xml_key:
                 raise ValueError(f"AMDGPU descriptor set {info.key} storage target '{storage_info.generator_target}' uses ISA XML key '{storage_info.isa_xml_key}', expected '{info.isa_xml_key}'")
+        buffer_resource = info.buffer_resource
+        _buffer_resource_layout_expr(buffer_resource.layout)
+        if buffer_resource.intrinsic_flags < 0 or buffer_resource.intrinsic_flags > 0xFFFFFFFF:
+            raise ValueError(f"AMDGPU buffer-resource intrinsic flags for {info.key} must fit u32")
+        if buffer_resource.layout == AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32:
+            if buffer_resource.intrinsic_flags not in (
+                AMDGPU_BUFFER_RESOURCE_FLAGS_GFX9,
+                AMDGPU_BUFFER_RESOURCE_FLAGS_GFX10_12,
+            ):
+                raise ValueError(f"AMDGPU legacy buffer-resource flags for {info.key} must name a supported raw-buffer policy")
+        elif buffer_resource.layout == AMDGPU_BUFFER_RESOURCE_LAYOUT_PACKED_45:
+            if buffer_resource.intrinsic_flags != AMDGPU_BUFFER_RESOURCE_FLAGS_GFX125X:
+                raise ValueError(f"AMDGPU packed-45 buffer-resource flags for {info.key} must preserve reserved type bits")
+            if buffer_resource.cache_swizzle != AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE:
+                raise ValueError(f"AMDGPU packed-45 buffer resources for {info.key} do not support cache swizzle")
         _buffer_resource_cache_swizzle_expr(info.buffer_resource.cache_swizzle)
         _vector_memory_cache_policy_encoding_expr(info.vector_memory.cache_policy_encoding)
         if info.vector_memory.cache_policy_encoding == AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE:
@@ -793,7 +826,9 @@ def _emit_descriptor_set_rows(rows: Sequence[_AmdgpuDescriptorSetRow]) -> list[s
                 "    },",
                 f"    .flags = {_descriptor_set_info_flags_expr(info.flags)},",
                 "    .buffer_resource = {",
+                f"      .layout = {_buffer_resource_layout_expr(info.buffer_resource.layout)},",
                 f"      .cache_swizzle = {_buffer_resource_cache_swizzle_expr(info.buffer_resource.cache_swizzle)},",
+                f"      .intrinsic_flags = UINT32_C(0x{info.buffer_resource.intrinsic_flags:08x}),",
                 "    },",
                 "    .vector_memory = {",
                 f"      .cache_policy_encoding = {_vector_memory_cache_policy_encoding_expr(info.vector_memory.cache_policy_encoding)},",

@@ -9,10 +9,15 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 
 from loom.gen.target.arch.amdgpu import amdgpu_target_info
 from loom.target.arch.amdgpu import target_info as amdgpu_target_info_data
 from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT,
+    AMDGPU_BUFFER_RESOURCE_FLAGS_GFX9,
+    AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32,
+    AMDGPU_BUFFER_RESOURCE_LAYOUT_PACKED_45,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH,
@@ -24,6 +29,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
     AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER,
     AMDGPU_WAVEFRONT_SIZE_FLAG_32,
+    AmdgpuDescriptorSetBufferResourceInfo,
     AmdgpuDescriptorSetInfo,
     AmdgpuDescriptorSetVectorMemoryInfo,
     AmdgpuKernelDescriptorVgprGranules,
@@ -51,6 +57,10 @@ def _descriptor_set_info() -> AmdgpuDescriptorSetInfo:
         isa_architecture_name="AMDGPU Test",
         isa_architecture_id=1,
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+        buffer_resource=AmdgpuDescriptorSetBufferResourceInfo(
+            layout=AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32,
+            intrinsic_flags=AMDGPU_BUFFER_RESOURCE_FLAGS_GFX9,
+        ),
     )
 
 
@@ -120,6 +130,10 @@ def test_memory_cache_policy_rejects_unknown_descriptor_encoding() -> None:
         isa_architecture_name="AMDGPU Test",
         isa_architecture_id=1,
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+        buffer_resource=AmdgpuDescriptorSetBufferResourceInfo(
+            layout=AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32,
+            intrinsic_flags=AMDGPU_BUFFER_RESOURCE_FLAGS_GFX9,
+        ),
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(cache_policy_encoding="future_encoding"),
     )
 
@@ -130,6 +144,59 @@ def test_memory_cache_policy_rejects_unknown_descriptor_encoding() -> None:
 def test_descriptor_sets_reject_none_memory_cache_policy() -> None:
     with _raises_value_error("non-none vector-memory cache-policy encoding"):
         amdgpu_target_info._validate_descriptor_sets((_descriptor_set_info(),))
+
+
+def test_descriptor_sets_reject_unknown_buffer_resource_layout() -> None:
+    descriptor_set = _descriptor_set_info()
+    descriptor_set = replace(
+        descriptor_set,
+        buffer_resource=replace(
+            descriptor_set.buffer_resource,
+            layout="future_layout",
+        ),
+    )
+
+    with _raises_value_error("unknown AMDGPU buffer-resource layout"):
+        amdgpu_target_info._validate_descriptor_sets((descriptor_set,))
+
+
+def test_descriptor_sets_reject_out_of_range_buffer_resource_flags() -> None:
+    descriptor_set = _descriptor_set_info()
+    descriptor_set = replace(
+        descriptor_set,
+        buffer_resource=replace(
+            descriptor_set.buffer_resource,
+            intrinsic_flags=1 << 32,
+        ),
+    )
+
+    with _raises_value_error("intrinsic flags.*must fit u32"):
+        amdgpu_target_info._validate_descriptor_sets((descriptor_set,))
+
+
+def test_descriptor_sets_reject_invalid_packed_buffer_resource_policy() -> None:
+    descriptor_set = _descriptor_set_info()
+    descriptor_set = replace(
+        descriptor_set,
+        buffer_resource=AmdgpuDescriptorSetBufferResourceInfo(
+            layout=AMDGPU_BUFFER_RESOURCE_LAYOUT_PACKED_45,
+            intrinsic_flags=1,
+            cache_swizzle=AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT,
+        ),
+    )
+
+    with _raises_value_error("must preserve reserved type bits"):
+        amdgpu_target_info._validate_descriptor_sets((descriptor_set,))
+
+    descriptor_set = replace(
+        descriptor_set,
+        buffer_resource=replace(
+            descriptor_set.buffer_resource,
+            intrinsic_flags=0,
+        ),
+    )
+    with _raises_value_error("do not support cache swizzle"):
+        amdgpu_target_info._validate_descriptor_sets((descriptor_set,))
 
 
 def test_memory_cache_policy_rejects_incomplete_temporal_th_table() -> None:

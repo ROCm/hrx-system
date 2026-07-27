@@ -13,7 +13,10 @@ from unittest import mock
 
 from loom.gen.target.arch.amdgpu.descriptors import amdgpu_descriptors
 from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_BUFFER_RESOURCE_FLAGS_GFX9,
+    AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+    AmdgpuDescriptorSetBufferResourceInfo,
     AmdgpuDescriptorSetInfo,
 )
 from loom.target.low_descriptors import Descriptor, DescriptorSet
@@ -61,6 +64,10 @@ def _descriptor_set_info(
         isa_architecture_name="AMDGPU Test",
         isa_architecture_id=0,
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+        buffer_resource=AmdgpuDescriptorSetBufferResourceInfo(
+            layout=AMDGPU_BUFFER_RESOURCE_LAYOUT_LEGACY_32,
+            intrinsic_flags=AMDGPU_BUFFER_RESOURCE_FLAGS_GFX9,
+        ),
         storage_generator_target=storage_target,
     )
 

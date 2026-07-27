@@ -1135,6 +1135,26 @@ ERR_AMDGPU_049 = ErrorDef(
     fix_hint="Materialize AMDGPU storage addresses as one VGPR",
 )
 
+# ERR_AMDGPU_050: AMDGPU buffer-resource flags exceed the target field.
+ERR_AMDGPU_050 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=50,
+    severity=Severity.ERROR,
+    summary="AMDGPU buffer-resource flags exceed the target field.",
+    message=(
+        "AMDGPU target '@{target_name}' selects buffer-resource flags "
+        "{intrinsic_flags} for descriptor set '{descriptor_set_name}', whose "
+        "buffer-resource flag field is {field_bits} bits"
+    ),
+    params=(
+        ErrorParam("target_name", ParamKind.STRING),
+        ErrorParam("intrinsic_flags", ParamKind.U32),
+        ErrorParam("descriptor_set_name", ParamKind.STRING),
+        ErrorParam("field_bits", ParamKind.U32),
+    ),
+    fix_hint="Use a flag value representable by the selected descriptor layout",
+)
+
 
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
@@ -1185,4 +1205,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_047,
     ERR_AMDGPU_048,
     ERR_AMDGPU_049,
+    ERR_AMDGPU_050,
 )

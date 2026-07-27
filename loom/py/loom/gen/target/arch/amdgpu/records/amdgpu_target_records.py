@@ -186,6 +186,7 @@ def _emit_tables(rows: Sequence[_AmdgpuTargetRecordRow]) -> str:
         "//   LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(symbol_suffix, bundle_name,",
         "//       snapshot_name, descriptor_set_key, wavefront_size,",
         "//       max_workgroup_storage_bytes)",
+        "//   LOOM_AMDGPU_TARGET_BUFFER_RESOURCE(symbol_suffix, intrinsic_flags)",
         "//   LOOM_AMDGPU_TARGET_RECORD_INFO(record_suffix, target_kind, processor,",
         "//       descriptor_set_ordinal, bundle_suffix)",
         "//   LOOM_AMDGPU_TARGET_RECORD_DEFAULT(descriptor_set_ordinal, record_suffix)",
@@ -206,6 +207,12 @@ def _emit_tables(rows: Sequence[_AmdgpuTargetRecordRow]) -> str:
             f"{_u64_expr(default_row.processor.limits.max_workgroup_storage_bytes)})"
         )
     lines.extend(["#endif  // LOOM_AMDGPU_TARGET_DESCRIPTOR_SET", ""])
+
+    lines.append("#ifdef LOOM_AMDGPU_TARGET_BUFFER_RESOURCE")
+    lines.extend(
+        f"LOOM_AMDGPU_TARGET_BUFFER_RESOURCE({_c_symbol_suffix(descriptor_set.generator_target)}, {_u32_expr(descriptor_set.buffer_resource.intrinsic_flags)})" for descriptor_set in descriptor_sets
+    )
+    lines.extend(["#endif  // LOOM_AMDGPU_TARGET_BUFFER_RESOURCE", ""])
 
     lines.append("#ifdef LOOM_AMDGPU_TARGET_RECORD_INFO")
     lines.extend(
