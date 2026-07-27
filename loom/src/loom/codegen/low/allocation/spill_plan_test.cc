@@ -126,6 +126,40 @@ TEST_F(LowAllocationSpillPlanTest, PredictsSliceReloadBytes) {
   loom_module_free(module);
 }
 
+TEST_F(LowAllocationSpillPlanTest, PredictsDenseSliceReloadTraffic) {
+  loom_module_t* module = AllocateModule();
+  loom_type_t wide_type =
+      loom_low_register_type(/*descriptor_set_stable_id=*/23,
+                             /*register_class_id=*/0, /*unit_count=*/8);
+  IREE_ASSERT_OK(loom_module_intern_type(module, wide_type, &wide_type));
+  loom_type_t lane_type =
+      loom_low_register_type_with_unit_count(wide_type, /*unit_count=*/1);
+  IREE_ASSERT_OK(loom_module_intern_type(module, lane_type, &lane_type));
+
+  loom_value_id_t source_value = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_define_value(module, wide_type, &source_value));
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                          &builder);
+  for (int64_t i = 0; i < 8; ++i) {
+    loom_op_t* slice = nullptr;
+    IREE_ASSERT_OK(loom_low_slice_build(&builder, source_value, i, lane_type,
+                                        LOOM_LOCATION_UNKNOWN, &slice));
+  }
+
+  const loom_low_allocation_assignment_t assignment =
+      Assignment(source_value, /*unit_count=*/8);
+  loom_low_allocation_spill_plan_traffic_t traffic = {};
+  IREE_ASSERT_OK(loom_low_allocation_spill_plan_traffic(
+      module, module->body, &assignment, /*alloc_unit_bits=*/32, &traffic));
+  EXPECT_EQ(traffic.store_count, 1u);
+  EXPECT_EQ(traffic.store_bytes, 32u);
+  EXPECT_EQ(traffic.reload_count, 1u);
+  EXPECT_EQ(traffic.reload_bytes, 32u);
+
+  loom_module_free(module);
+}
+
 TEST_F(LowAllocationSpillPlanTest, RecordsSpillRemarks) {
   loom_low_allocation_remark_t remarks[1] = {};
   iree_host_size_t remark_count = 0;
