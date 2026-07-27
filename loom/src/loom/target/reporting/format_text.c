@@ -51,6 +51,19 @@ loom_target_compile_report_append_target_insertion_summary_fields(
                                            summary->dynamic_packet_count);
 }
 
+static iree_status_t
+loom_target_compile_report_append_emission_breakdown_fields(
+    iree_string_builder_t* builder,
+    const loom_target_compile_report_emission_breakdown_t* breakdown) {
+  return iree_string_builder_append_format(
+      builder,
+      " body_instructions=%" PRIu64 " entry_instructions=%" PRIu64
+      " coissued_instructions=%" PRIu64 " coissued_components=%" PRIu64,
+      breakdown->body_instruction_count, breakdown->entry_instruction_count,
+      breakdown->coissued_instruction_count,
+      breakdown->coissued_component_count);
+}
+
 static iree_status_t loom_target_compile_report_format_target_insertion_rows(
     const loom_target_compile_report_t* report,
     iree_string_builder_t* builder) {
@@ -528,9 +541,17 @@ static iree_status_t loom_target_compile_report_format_summary(
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         "COMPILE-REPORT: emission instructions=%" PRIu64 " code_bytes=%" PRIu64
-        " storage_bytes=%" PRIu64 "\n",
+        " storage_bytes=%" PRIu64,
         report->emitted_instruction_count, report->emitted_code_byte_count,
         report->emitted_code_storage_byte_count));
+    if (iree_any_bit_set(
+            report->detail_flags,
+            LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION_BREAKDOWN)) {
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_append_emission_breakdown_fields(
+              builder, &report->emission_breakdown));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
   }
 
   if (iree_any_bit_set(
@@ -763,6 +784,13 @@ static iree_status_t loom_target_compile_report_format_entry_rows(
           row->emitted_instruction_count, row->emitted_code_byte_count,
           row->emitted_code_storage_byte_count, row->private_memory_bytes,
           row->local_memory_bytes));
+      if (iree_any_bit_set(
+              row->detail_flags,
+              LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION_BREAKDOWN)) {
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_append_emission_breakdown_fields(
+                builder, &row->emission_breakdown));
+      }
       if (iree_any_bit_set(
               row->detail_flags,
               LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_RESOURCES)) {

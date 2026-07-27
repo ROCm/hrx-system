@@ -472,6 +472,13 @@ void loom_target_compile_report_record_emission(
   report->emitted_code_storage_byte_count = code_storage_byte_count;
 }
 
+void loom_target_compile_report_record_emission_breakdown(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_emission_breakdown_t* breakdown) {
+  report->detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION_BREAKDOWN;
+  report->emission_breakdown = *breakdown;
+}
+
 void loom_target_compile_report_record_memory(
     loom_target_compile_report_t* report, uint64_t private_memory_bytes,
     uint64_t local_memory_bytes) {
@@ -968,6 +975,9 @@ static void loom_target_compile_report_merge_entry_summary(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_t* entry_report) {
   const bool first_entry = report->entry_rows.count == 0;
+  const bool report_had_emission_breakdown =
+      iree_any_bit_set(report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION_BREAKDOWN);
   const bool report_had_target_resources = iree_any_bit_set(
       report->detail_flags, LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_RESOURCES);
   const bool report_had_dynamic_instruction_mix = iree_any_bit_set(
@@ -978,6 +988,9 @@ static void loom_target_compile_report_merge_entry_summary(
   const bool entry_has_dynamic_instruction_mix = iree_any_bit_set(
       entry_report->detail_flags,
       LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX);
+  const bool entry_has_emission_breakdown =
+      iree_any_bit_set(entry_report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION_BREAKDOWN);
   const bool entry_has_low_planning =
       iree_any_bit_set(entry_report->detail_flags,
                        LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING);
@@ -1038,6 +1051,7 @@ static void loom_target_compile_report_merge_entry_summary(
     report->emitted_code_byte_count = entry_report->emitted_code_byte_count;
     report->emitted_code_storage_byte_count =
         entry_report->emitted_code_storage_byte_count;
+    report->emission_breakdown = entry_report->emission_breakdown;
     report->private_memory_bytes = entry_report->private_memory_bytes;
     report->local_memory_bytes = entry_report->local_memory_bytes;
     report->static_instruction_mix = entry_report->static_instruction_mix;
@@ -1128,6 +1142,21 @@ static void loom_target_compile_report_merge_entry_summary(
   report->emitted_code_byte_count += entry_report->emitted_code_byte_count;
   report->emitted_code_storage_byte_count +=
       entry_report->emitted_code_storage_byte_count;
+  if (report_had_emission_breakdown && entry_has_emission_breakdown) {
+    report->emission_breakdown.body_instruction_count +=
+        entry_report->emission_breakdown.body_instruction_count;
+    report->emission_breakdown.entry_instruction_count +=
+        entry_report->emission_breakdown.entry_instruction_count;
+    report->emission_breakdown.coissued_instruction_count +=
+        entry_report->emission_breakdown.coissued_instruction_count;
+    report->emission_breakdown.coissued_component_count +=
+        entry_report->emission_breakdown.coissued_component_count;
+  } else {
+    report->detail_flags &=
+        ~LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION_BREAKDOWN;
+    report->emission_breakdown =
+        (loom_target_compile_report_emission_breakdown_t){0};
+  }
   report->private_memory_bytes = iree_max(report->private_memory_bytes,
                                           entry_report->private_memory_bytes);
   report->local_memory_bytes =
@@ -1241,6 +1270,7 @@ loom_target_compile_report_entry_from_report(
       .emitted_code_byte_count = entry_report->emitted_code_byte_count,
       .emitted_code_storage_byte_count =
           entry_report->emitted_code_storage_byte_count,
+      .emission_breakdown = entry_report->emission_breakdown,
       .private_memory_bytes = entry_report->private_memory_bytes,
       .local_memory_bytes = entry_report->local_memory_bytes,
       .static_instruction_mix = entry_report->static_instruction_mix,

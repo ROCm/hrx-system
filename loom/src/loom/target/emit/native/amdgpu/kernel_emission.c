@@ -318,6 +318,49 @@ static iree_status_t loom_amdgpu_kernel_emission_record_native_insertions(
   return status;
 }
 
+static loom_target_compile_report_target_resources_t
+loom_amdgpu_kernel_emission_target_resources(
+    const loom_amdgpu_kernel_hsaco_summary_t* summary) {
+  const loom_amdgpu_kernel_hsaco_target_resources_t* target_resources =
+      &summary->target_resources;
+  return (loom_target_compile_report_target_resources_t){
+      .scalar_register_class = target_resources->scalar_register_class,
+      .scalar_register_count = target_resources->scalar_register_count,
+      .vector_register_class = target_resources->vector_register_class,
+      .vector_register_count = target_resources->vector_register_count,
+      .subgroup_size = target_resources->wave_size,
+      .max_subgroups_per_simd = target_resources->max_waves_per_simd,
+      .resident_subgroups_per_simd = target_resources->resident_waves_per_simd,
+      .occupancy_percent = target_resources->occupancy_percent,
+      .limiting_resource = target_resources->limiting_resource,
+      .residency_summary = target_resources->residency_summary,
+  };
+}
+
+static void loom_amdgpu_kernel_emission_record_summary(
+    loom_target_compile_report_t* report,
+    const loom_amdgpu_kernel_hsaco_summary_t* summary) {
+  if (report == NULL) return;
+
+  loom_target_compile_report_record_emission(report, summary->instruction_count,
+                                             summary->text_byte_count,
+                                             summary->text_storage_byte_count);
+  const loom_target_compile_report_emission_breakdown_t emission_breakdown = {
+      .body_instruction_count = summary->body_instruction_count,
+      .entry_instruction_count = summary->entry_instruction_count,
+      .coissued_instruction_count = summary->coissued_instruction_count,
+      .coissued_component_count = summary->coissued_component_count,
+  };
+  loom_target_compile_report_record_emission_breakdown(report,
+                                                       &emission_breakdown);
+  loom_target_compile_report_record_memory(report,
+                                           summary->private_segment_fixed_size,
+                                           summary->group_segment_fixed_size);
+  const loom_target_compile_report_target_resources_t target_resources =
+      loom_amdgpu_kernel_emission_target_resources(summary);
+  loom_target_compile_report_record_target_resources(report, &target_resources);
+}
+
 iree_status_t loom_amdgpu_kernel_emission_build(
     const loom_low_emission_frame_t* frame,
     const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout,
@@ -357,6 +400,9 @@ iree_status_t loom_amdgpu_kernel_emission_build(
   IREE_RETURN_IF_ERROR(loom_amdgpu_build_kernel_hsaco_contribution(
       &frame->schedule, &frame->allocation, &hsaco_options, out_contribution,
       table_arena));
-  return loom_amdgpu_kernel_emission_record_native_insertions(report, frame,
-                                                              out_contribution);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_emission_record_native_insertions(
+      report, frame, out_contribution));
+  loom_amdgpu_kernel_emission_record_summary(report,
+                                             &out_contribution->summary);
+  return iree_ok_status();
 }

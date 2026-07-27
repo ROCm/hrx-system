@@ -59,6 +59,10 @@ iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AMDGPU kernel entry instruction count overflowed");
   }
+  const uint64_t coissued_instruction_count =
+      options != NULL && options->packet_plan != NULL
+          ? (uint64_t)options->packet_plan->vopd_plan.pair_count
+          : 0;
 
   const loom_amdgpu_hsaco_kernel_t kernel = {
       .metadata = record.metadata,
@@ -102,6 +106,10 @@ iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
       .summary =
           {
               .instruction_count = kernel_instruction_count,
+              .body_instruction_count = stream.instruction_count,
+              .entry_instruction_count = entry_envelope->instruction_count,
+              .coissued_instruction_count = coissued_instruction_count,
+              .coissued_component_count = coissued_instruction_count * 2u,
               .text_byte_count = kernel_text.data_length,
               .text_storage_byte_count = kernel_text.data_length,
               .private_segment_fixed_size =

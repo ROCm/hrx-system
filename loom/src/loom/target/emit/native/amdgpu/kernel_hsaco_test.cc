@@ -192,6 +192,10 @@ loom_amdgpu_kernel_hsaco_contribution_t Contribution(
       /*.summary=*/
       {
           /*.instruction_count=*/1,
+          /*.body_instruction_count=*/1,
+          /*.entry_instruction_count=*/0,
+          /*.coissued_instruction_count=*/0,
+          /*.coissued_component_count=*/0,
           /*.text_byte_count=*/text.data_length,
           /*.text_storage_byte_count=*/text.data_length,
       },

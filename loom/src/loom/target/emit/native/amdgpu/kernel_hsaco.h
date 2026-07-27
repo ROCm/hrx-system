@@ -55,6 +55,14 @@ typedef struct loom_amdgpu_kernel_hsaco_target_resources_t {
 typedef struct loom_amdgpu_kernel_hsaco_summary_t {
   // Number of native instructions emitted into the kernel text stream.
   uint64_t instruction_count;
+  // Number of native instructions in the final scheduled kernel body.
+  uint64_t body_instruction_count;
+  // Number of target-owned native instructions in the kernel entry envelope.
+  uint64_t entry_instruction_count;
+  // Number of final native instructions containing coissued components.
+  uint64_t coissued_instruction_count;
+  // Number of semantic components carried by coissued instructions.
+  uint64_t coissued_component_count;
   // Number of bytes in the semantic kernel text stream.
   uint64_t text_byte_count;
   // Number of bytes in the stored kernel text stream including local padding.
