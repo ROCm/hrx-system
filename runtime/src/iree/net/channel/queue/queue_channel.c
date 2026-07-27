@@ -124,24 +124,31 @@ static void iree_net_queue_channel_on_endpoint_send_ready(void* user_data) {
 
 // Returns the wire size of a frontier: 8-byte header + 16 bytes per entry.
 static iree_host_size_t iree_net_queue_channel_frontier_wire_size(
-    const iree_async_frontier_t* frontier) {
-  if (!frontier || frontier->entry_count == 0) return 0;
+    uint8_t entry_count) {
+  if (entry_count == 0) return 0;
   return sizeof(iree_async_frontier_t) +
-         (iree_host_size_t)frontier->entry_count *
-             sizeof(iree_async_frontier_entry_t);
+         (iree_host_size_t)entry_count * sizeof(iree_async_frontier_entry_t);
 }
 
 static iree_status_t iree_net_queue_channel_calculate_send_layout(
-    const iree_async_frontier_t* wait_frontier,
-    const iree_async_frontier_t* signal_frontier,
+    uint8_t wait_frontier_entry_count, uint8_t signal_frontier_entry_count,
     iree_host_size_t command_payload_size,
     iree_net_queue_frame_flags_t* out_flags, iree_host_size_t* out_wait_size,
     iree_host_size_t* out_signal_size, uint32_t* out_payload_length,
     iree_host_size_t* out_frame_size) {
+  if (wait_frontier_entry_count > IREE_NET_QUEUE_CHANNEL_MAX_FRONTIER_ENTRIES ||
+      signal_frontier_entry_count >
+          IREE_NET_QUEUE_CHANNEL_MAX_FRONTIER_ENTRIES) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "queue frontier entry count exceeds maximum %u (wait=%u, signal=%u)",
+        IREE_NET_QUEUE_CHANNEL_MAX_FRONTIER_ENTRIES, wait_frontier_entry_count,
+        signal_frontier_entry_count);
+  }
   iree_host_size_t wait_size =
-      iree_net_queue_channel_frontier_wire_size(wait_frontier);
+      iree_net_queue_channel_frontier_wire_size(wait_frontier_entry_count);
   iree_host_size_t signal_size =
-      iree_net_queue_channel_frontier_wire_size(signal_frontier);
+      iree_net_queue_channel_frontier_wire_size(signal_frontier_entry_count);
 
   iree_host_size_t total_payload_size = 0;
   if (!iree_host_size_checked_add(wait_size, signal_size,
@@ -576,8 +583,9 @@ iree_status_t iree_net_queue_channel_send_command(
   uint32_t payload_length = 0;
   iree_host_size_t frame_size = 0;
   iree_status_t status = iree_net_queue_channel_calculate_send_layout(
-      wait_frontier, signal_frontier, command_payload_size, &flags, &wait_size,
-      &signal_size, &payload_length, &frame_size);
+      wait_frontier ? wait_frontier->entry_count : 0,
+      signal_frontier ? signal_frontier->entry_count : 0, command_payload_size,
+      &flags, &wait_size, &signal_size, &payload_length, &frame_size);
   if (!iree_status_is_ok(status)) {
     IREE_TRACE_ZONE_END(z0);
     return status;
@@ -626,15 +634,12 @@ iree_status_t iree_net_queue_channel_send_command(
 
 iree_status_t iree_net_queue_channel_begin_command(
     iree_net_queue_channel_t* channel, uint32_t stream_id,
-    const iree_async_frontier_t* wait_frontier,
-    const iree_async_frontier_t* signal_frontier,
-    iree_host_size_t command_payload_length, uint8_t** out_command_payload,
-    iree_net_queue_channel_send_handle_t* out_handle) {
+    uint8_t wait_frontier_entry_count, uint8_t signal_frontier_entry_count,
+    iree_host_size_t command_payload_length,
+    iree_net_queue_channel_command_reservation_t* out_reservation) {
   IREE_ASSERT_ARGUMENT(channel);
-  IREE_ASSERT_ARGUMENT(out_command_payload);
-  IREE_ASSERT_ARGUMENT(out_handle);
-  *out_command_payload = NULL;
-  *out_handle = 0;
+  IREE_ASSERT_ARGUMENT(out_reservation);
+  memset(out_reservation, 0, sizeof(*out_reservation));
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_net_queue_channel_state_t state =
@@ -652,8 +657,9 @@ iree_status_t iree_net_queue_channel_begin_command(
   uint32_t payload_length = 0;
   iree_host_size_t frame_size = 0;
   iree_status_t status = iree_net_queue_channel_calculate_send_layout(
-      wait_frontier, signal_frontier, command_payload_length, &flags,
-      &wait_size, &signal_size, &payload_length, &frame_size);
+      wait_frontier_entry_count, signal_frontier_entry_count,
+      command_payload_length, &flags, &wait_size, &signal_size, &payload_length,
+      &frame_size);
 
   bool send_admitted = false;
   if (iree_status_is_ok(status)) {
@@ -666,8 +672,9 @@ iree_status_t iree_net_queue_channel_begin_command(
 
   void* frame_data = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_net_message_endpoint_begin_send(channel->endpoint, frame_size,
-                                                  &frame_data, out_handle);
+    status = iree_net_message_endpoint_begin_send(
+        channel->endpoint, frame_size, &frame_data,
+        &out_reservation->send_handle);
   }
 
   if (iree_status_is_ok(status)) {
@@ -679,11 +686,23 @@ iree_status_t iree_net_queue_channel_begin_command(
     uint8_t* frame_bytes = (uint8_t*)frame_data;
     memcpy(frame_bytes + offset, &frame_header, sizeof(frame_header));
     offset += sizeof(frame_header);
-    offset += iree_net_queue_channel_serialize_frontier(frame_bytes + offset,
-                                                        wait_frontier);
-    offset += iree_net_queue_channel_serialize_frontier(frame_bytes + offset,
-                                                        signal_frontier);
-    *out_command_payload = frame_bytes + offset;
+    if (wait_frontier_entry_count > 0) {
+      iree_async_frontier_t* wait_frontier =
+          (iree_async_frontier_t*)(frame_bytes + offset);
+      iree_async_frontier_initialize(wait_frontier, wait_frontier_entry_count);
+      out_reservation->wait_entries = wait_frontier->entries;
+      offset += wait_size;
+    }
+    if (signal_frontier_entry_count > 0) {
+      iree_async_frontier_t* signal_frontier =
+          (iree_async_frontier_t*)(frame_bytes + offset);
+      iree_async_frontier_initialize(signal_frontier,
+                                     signal_frontier_entry_count);
+      out_reservation->signal_entries = signal_frontier->entries;
+      offset += signal_size;
+    }
+    out_reservation->command_payload =
+        iree_make_byte_span(frame_bytes + offset, command_payload_length);
   } else if (send_admitted) {
     iree_net_channel_send_gate_leave(&channel->send_gate);
   }
@@ -692,24 +711,29 @@ iree_status_t iree_net_queue_channel_begin_command(
   return status;
 }
 
-iree_status_t iree_net_queue_channel_commit_send(
+iree_status_t iree_net_queue_channel_commit_command(
     iree_net_queue_channel_t* channel,
-    iree_net_queue_channel_send_handle_t handle) {
+    iree_net_queue_channel_command_reservation_t* reservation) {
   IREE_ASSERT_ARGUMENT(channel);
+  IREE_ASSERT_ARGUMENT(reservation);
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status =
-      iree_net_message_endpoint_commit_send(channel->endpoint, handle);
+  iree_status_t status = iree_net_message_endpoint_commit_send(
+      channel->endpoint, reservation->send_handle);
   iree_net_channel_send_gate_leave(&channel->send_gate);
+  memset(reservation, 0, sizeof(*reservation));
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
-void iree_net_queue_channel_abort_send(
+void iree_net_queue_channel_abort_command(
     iree_net_queue_channel_t* channel,
-    iree_net_queue_channel_send_handle_t handle) {
+    iree_net_queue_channel_command_reservation_t* reservation) {
   if (!channel) return;
-  iree_net_message_endpoint_abort_send(channel->endpoint, handle);
+  IREE_ASSERT_ARGUMENT(reservation);
+  iree_net_message_endpoint_abort_send(channel->endpoint,
+                                       reservation->send_handle);
   iree_net_channel_send_gate_leave(&channel->send_gate);
+  memset(reservation, 0, sizeof(*reservation));
 }
 
 iree_status_t iree_net_queue_channel_send_advance(
@@ -731,7 +755,7 @@ iree_status_t iree_net_queue_channel_send_advance(
 
   // ADVANCE always carries a signal frontier.
   iree_host_size_t signal_size =
-      iree_net_queue_channel_frontier_wire_size(signal_frontier);
+      iree_net_queue_channel_frontier_wire_size(signal_frontier->entry_count);
   if (signal_size == 0) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(

@@ -267,36 +267,50 @@ iree_status_t iree_net_queue_channel_send_command(
     const iree_async_frontier_t* signal_frontier,
     iree_async_span_list_t command_payload, uint64_t operation_user_data);
 
-// Opaque handle for a direct-write COMMAND reservation.
-typedef iree_net_carrier_send_handle_t iree_net_queue_channel_send_handle_t;
+// Writable regions in one transport-owned COMMAND frame reservation.
+typedef struct iree_net_queue_channel_command_reservation_t {
+  // Wait frontier entries, or NULL when no wait entries were requested.
+  iree_async_frontier_entry_t* wait_entries;
 
-// Reserves a transport-owned COMMAND frame buffer and returns the writable
-// command payload region.
+  // Signal frontier entries, or NULL when no signal entries were requested.
+  iree_async_frontier_entry_t* signal_entries;
+
+  // Command payload storage with the requested length.
+  iree_byte_span_t command_payload;
+
+  // Transport reservation consumed by commit_command() or abort_command().
+  iree_net_carrier_send_handle_t send_handle;
+} iree_net_queue_channel_command_reservation_t;
+
+// Reserves a transport-owned COMMAND frame and returns its writable regions.
 //
 // This path is for payloads assembled on the submit path that should not be
 // kept alive after the submit function returns. The queue frame header and
-// frontier metadata are written by the channel before returning; the caller
-// writes exactly |command_payload_length| bytes to |*out_command_payload| and
-// then commits or aborts the handle promptly.
+// frontier headers are written by the channel before returning. The caller
+// fills every returned frontier entry and command payload byte before promptly
+// committing or aborting the reservation.
 //
 // No on_send_complete callback is produced for direct-write sends: ownership
 // transfers to the transport at commit time.
 iree_status_t iree_net_queue_channel_begin_command(
     iree_net_queue_channel_t* channel, uint32_t stream_id,
-    const iree_async_frontier_t* wait_frontier,
-    const iree_async_frontier_t* signal_frontier,
-    iree_host_size_t command_payload_length, uint8_t** out_command_payload,
-    iree_net_queue_channel_send_handle_t* out_handle);
+    uint8_t wait_frontier_entry_count, uint8_t signal_frontier_entry_count,
+    iree_host_size_t command_payload_length,
+    iree_net_queue_channel_command_reservation_t* out_reservation);
 
 // Commits a direct-write COMMAND reservation returned by begin_command().
-iree_status_t iree_net_queue_channel_commit_send(
+//
+// Consumes and zeroes |reservation| regardless of whether publication succeeds.
+iree_status_t iree_net_queue_channel_commit_command(
     iree_net_queue_channel_t* channel,
-    iree_net_queue_channel_send_handle_t handle);
+    iree_net_queue_channel_command_reservation_t* reservation);
 
 // Aborts a direct-write COMMAND reservation returned by begin_command().
-void iree_net_queue_channel_abort_send(
+//
+// Consumes and zeroes |reservation|.
+void iree_net_queue_channel_abort_command(
     iree_net_queue_channel_t* channel,
-    iree_net_queue_channel_send_handle_t handle);
+    iree_net_queue_channel_command_reservation_t* reservation);
 
 // Sends an ADVANCE frame with a signal frontier and optional advance payload.
 //

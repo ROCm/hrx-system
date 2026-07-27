@@ -706,19 +706,30 @@ static iree_status_t iree_hal_remote_client_device_send_queue_op(
     status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "queue channel not available");
   } else {
-    uint8_t* payload_data = NULL;
-    iree_net_queue_channel_send_handle_t send_handle = 0;
+    iree_net_queue_channel_command_reservation_t reservation;
     status = iree_net_queue_channel_begin_command(
-        queue_channel, /*stream_id=*/0, wait_frontier, signal_frontier,
-        payload_writer.payload_length, &payload_data, &send_handle);
+        queue_channel, /*stream_id=*/0,
+        wait_frontier ? wait_frontier->entry_count : 0,
+        signal_frontier ? signal_frontier->entry_count : 0,
+        payload_writer.payload_length, &reservation);
     if (iree_status_is_ok(status)) {
-      status = payload_writer.write(
-          payload_writer.user_data,
-          iree_make_byte_span(payload_data, payload_writer.payload_length));
+      if (wait_frontier) {
+        memcpy(
+            reservation.wait_entries, wait_frontier->entries,
+            wait_frontier->entry_count * sizeof(iree_async_frontier_entry_t));
+      }
+      if (signal_frontier) {
+        memcpy(
+            reservation.signal_entries, signal_frontier->entries,
+            signal_frontier->entry_count * sizeof(iree_async_frontier_entry_t));
+      }
+      status = payload_writer.write(payload_writer.user_data,
+                                    reservation.command_payload);
       if (iree_status_is_ok(status)) {
-        status = iree_net_queue_channel_commit_send(queue_channel, send_handle);
+        status =
+            iree_net_queue_channel_commit_command(queue_channel, &reservation);
       } else {
-        iree_net_queue_channel_abort_send(queue_channel, send_handle);
+        iree_net_queue_channel_abort_command(queue_channel, &reservation);
       }
     }
   }

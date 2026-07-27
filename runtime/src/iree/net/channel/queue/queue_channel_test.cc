@@ -219,6 +219,21 @@ struct MockEndpoint {
   // Number of endpoint deactivation requests.
   iree_host_size_t deactivate_count = 0;
 
+  // Bytes held by the current begin_send reservation.
+  std::vector<uint8_t> reservation;
+
+  // Messages published by commit_send.
+  std::vector<std::vector<uint8_t>> committed_sends;
+
+  // Number of reservations discarded by abort_send.
+  iree_host_size_t abort_count = 0;
+
+  // Error returned by the next begin_send call.
+  iree_status_code_t next_begin_error = IREE_STATUS_OK;
+
+  // Error returned by the next commit_send call.
+  iree_status_code_t next_commit_error = IREE_STATUS_OK;
+
   static void SetCallbacks(void* self,
                            iree_net_message_endpoint_callbacks_t callbacks) {
     static_cast<MockEndpoint*>(self)->callbacks = callbacks;
@@ -252,15 +267,43 @@ struct MockEndpoint {
   static iree_status_t BeginSend(void* self, iree_host_size_t size,
                                  void** out_ptr,
                                  iree_net_carrier_send_handle_t* out_handle) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "mock");
+    MockEndpoint* mock = static_cast<MockEndpoint*>(self);
+    if (mock->next_begin_error != IREE_STATUS_OK) {
+      iree_status_code_t error = mock->next_begin_error;
+      mock->next_begin_error = IREE_STATUS_OK;
+      return iree_status_from_code(error);
+    }
+    if (!mock->reservation.empty()) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "reservation already active");
+    }
+    mock->reservation.resize(size);
+    *out_ptr = mock->reservation.data();
+    *out_handle = 1;
+    return iree_ok_status();
   }
 
   static iree_status_t CommitSend(void* self,
                                   iree_net_carrier_send_handle_t handle) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "mock");
+    MockEndpoint* mock = static_cast<MockEndpoint*>(self);
+    IREE_ASSERT(handle == 1);
+    if (mock->next_commit_error != IREE_STATUS_OK) {
+      iree_status_code_t error = mock->next_commit_error;
+      mock->next_commit_error = IREE_STATUS_OK;
+      mock->reservation.clear();
+      return iree_status_from_code(error);
+    }
+    mock->committed_sends.push_back(std::move(mock->reservation));
+    mock->reservation.clear();
+    return iree_ok_status();
   }
 
-  static void AbortSend(void* self, iree_net_carrier_send_handle_t handle) {}
+  static void AbortSend(void* self, iree_net_carrier_send_handle_t handle) {
+    MockEndpoint* mock = static_cast<MockEndpoint*>(self);
+    IREE_ASSERT(handle == 1);
+    mock->reservation.clear();
+    ++mock->abort_count;
+  }
 
   static const iree_net_message_endpoint_vtable_t vtable;
 
@@ -879,6 +922,106 @@ TEST_F(QueueChannelTest, SendCommandWithFrontiers) {
   // Verify command data.
   EXPECT_EQ(memcmp(sent.data() + offset, command_data, sizeof(command_data)),
             0);
+}
+
+TEST_F(QueueChannelTest, CommandReservationPublishesWritableRegions) {
+  CreateAndActivate();
+
+  iree_net_queue_channel_command_reservation_t reservation;
+  IREE_ASSERT_OK(iree_net_queue_channel_begin_command(
+      channel_, /*stream_id=*/3, /*wait_frontier_entry_count=*/1,
+      /*signal_frontier_entry_count=*/1, /*command_payload_length=*/2,
+      &reservation));
+  ASSERT_NE(reservation.wait_entries, nullptr);
+  ASSERT_NE(reservation.signal_entries, nullptr);
+  ASSERT_NE(reservation.command_payload.data, nullptr);
+  ASSERT_EQ(reservation.command_payload.data_length, 2u);
+
+  iree_async_axis_t wait_axis = iree_async_axis_make_queue(1, 0, 0, 0);
+  iree_async_axis_t signal_axis = iree_async_axis_make_queue(1, 0, 1, 0);
+  reservation.wait_entries[0] = {wait_axis, 5};
+  reservation.signal_entries[0] = {signal_axis, 10};
+  reservation.command_payload.data[0] = 0xAA;
+  reservation.command_payload.data[1] = 0xBB;
+
+  IREE_ASSERT_OK(iree_net_queue_channel_commit_command(channel_, &reservation));
+  EXPECT_EQ(reservation.wait_entries, nullptr);
+  EXPECT_EQ(reservation.signal_entries, nullptr);
+  EXPECT_EQ(reservation.command_payload.data, nullptr);
+  EXPECT_EQ(reservation.command_payload.data_length, 0u);
+  EXPECT_EQ(reservation.send_handle, 0u);
+
+  ASSERT_EQ(endpoint_.committed_sends.size(), 1u);
+  IREE_ASSERT_OK(endpoint_.InjectMessage(endpoint_.committed_sends[0]));
+  ASSERT_EQ(context_.commands.size(), 1u);
+  EXPECT_EQ(context_.commands[0].stream_id, 3u);
+  ASSERT_EQ(context_.commands[0].wait_entries.size(), 1u);
+  EXPECT_EQ(context_.commands[0].wait_entries[0].axis, wait_axis);
+  EXPECT_EQ(context_.commands[0].wait_entries[0].epoch, 5u);
+  ASSERT_EQ(context_.commands[0].signal_entries.size(), 1u);
+  EXPECT_EQ(context_.commands[0].signal_entries[0].axis, signal_axis);
+  EXPECT_EQ(context_.commands[0].signal_entries[0].epoch, 10u);
+  EXPECT_EQ(context_.commands[0].command_data,
+            std::vector<uint8_t>({0xAA, 0xBB}));
+}
+
+TEST_F(QueueChannelTest, CommandReservationAdmissionFailureReturnsNoOwnership) {
+  CreateAndActivate();
+  endpoint_.next_begin_error = IREE_STATUS_RESOURCE_EXHAUSTED;
+
+  iree_net_queue_channel_command_reservation_t reservation;
+  memset(&reservation, 0xCD, sizeof(reservation));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_net_queue_channel_begin_command(
+          channel_, /*stream_id=*/0, /*wait_frontier_entry_count=*/0,
+          /*signal_frontier_entry_count=*/1, /*command_payload_length=*/4,
+          &reservation));
+
+  EXPECT_EQ(reservation.wait_entries, nullptr);
+  EXPECT_EQ(reservation.signal_entries, nullptr);
+  EXPECT_EQ(reservation.command_payload.data, nullptr);
+  EXPECT_EQ(reservation.command_payload.data_length, 0u);
+  EXPECT_EQ(reservation.send_handle, 0u);
+  EXPECT_FALSE(iree_net_queue_channel_has_pending_sends(channel_));
+}
+
+TEST_F(QueueChannelTest, CommandReservationAbortDiscardsOwnership) {
+  CreateAndActivate();
+
+  iree_net_queue_channel_command_reservation_t reservation;
+  IREE_ASSERT_OK(iree_net_queue_channel_begin_command(
+      channel_, /*stream_id=*/0, /*wait_frontier_entry_count=*/0,
+      /*signal_frontier_entry_count=*/1, /*command_payload_length=*/4,
+      &reservation));
+  iree_net_queue_channel_abort_command(channel_, &reservation);
+
+  EXPECT_EQ(endpoint_.abort_count, 1u);
+  EXPECT_TRUE(endpoint_.committed_sends.empty());
+  EXPECT_EQ(reservation.signal_entries, nullptr);
+  EXPECT_EQ(reservation.command_payload.data, nullptr);
+  EXPECT_EQ(reservation.send_handle, 0u);
+  EXPECT_FALSE(iree_net_queue_channel_has_pending_sends(channel_));
+}
+
+TEST_F(QueueChannelTest, CommandReservationCommitFailureConsumesOwnership) {
+  CreateAndActivate();
+
+  iree_net_queue_channel_command_reservation_t reservation;
+  IREE_ASSERT_OK(iree_net_queue_channel_begin_command(
+      channel_, /*stream_id=*/0, /*wait_frontier_entry_count=*/0,
+      /*signal_frontier_entry_count=*/1, /*command_payload_length=*/4,
+      &reservation));
+  endpoint_.next_commit_error = IREE_STATUS_UNAVAILABLE;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      iree_net_queue_channel_commit_command(channel_, &reservation));
+
+  EXPECT_TRUE(endpoint_.committed_sends.empty());
+  EXPECT_EQ(reservation.signal_entries, nullptr);
+  EXPECT_EQ(reservation.command_payload.data, nullptr);
+  EXPECT_EQ(reservation.send_handle, 0u);
+  EXPECT_FALSE(iree_net_queue_channel_has_pending_sends(channel_));
 }
 
 TEST_F(QueueChannelTest, SendBeforeActivateFails) {

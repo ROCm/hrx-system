@@ -1535,22 +1535,23 @@ iree_status_t iree_hal_remote_client_device_release_resource(
   uint64_t required_observed_epoch =
       next_submission_epoch > 1 ? next_submission_epoch - 1 : 0;
 
-  uint8_t* payload_data = NULL;
-  iree_net_queue_channel_send_handle_t send_handle = 0;
+  iree_net_queue_channel_command_reservation_t reservation;
   iree_status_t status = iree_net_queue_channel_begin_command(
-      queue_channel, /*stream_id=*/0, /*wait_frontier=*/NULL,
-      /*signal_frontier=*/NULL, payload_length, &payload_data, &send_handle);
+      queue_channel, /*stream_id=*/0, /*wait_frontier_entry_count=*/0,
+      /*signal_frontier_entry_count=*/0, payload_length, &reservation);
   if (iree_status_is_ok(status)) {
     iree_hal_remote_resource_release_op_t* op =
-        (iree_hal_remote_resource_release_op_t*)payload_data;
+        (iree_hal_remote_resource_release_op_t*)
+            reservation.command_payload.data;
     memset(op, 0, sizeof(*op));
     op->header.type = IREE_HAL_REMOTE_QUEUE_OP_RESOURCE_RELEASE_BATCH;
     op->required_observed_epoch = required_observed_epoch;
     op->resource_count = 1;
     iree_hal_remote_resource_id_t* resource_ids =
-        (iree_hal_remote_resource_id_t*)(payload_data + sizeof(*op));
+        (iree_hal_remote_resource_id_t*)(reservation.command_payload.data +
+                                         sizeof(*op));
     resource_ids[0] = resource_id;
-    status = iree_net_queue_channel_commit_send(queue_channel, send_handle);
+    status = iree_net_queue_channel_commit_command(queue_channel, &reservation);
   }
   return status;
 }
