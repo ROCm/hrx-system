@@ -21,6 +21,32 @@ static uint64_t loom_low_schedule_project_live_units(
   return current_live_units + added_units;
 }
 
+static void loom_low_schedule_record_crossed_pressure_cliff(
+    loom_low_schedule_candidate_score_t* score,
+    loom_low_schedule_pressure_source_kind_t source_kind, uint16_t source_id,
+    uint32_t cliff_units) {
+  if (score->pressure_cliff_units != LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE) {
+    return;
+  }
+  score->pressure_cliff_source_kind = source_kind;
+  score->pressure_cliff_source_id = source_id;
+  score->pressure_cliff_units = cliff_units;
+  score->units_until_pressure_cliff = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE;
+}
+
+static void loom_low_schedule_record_upcoming_pressure_cliff(
+    loom_low_schedule_candidate_score_t* score,
+    loom_low_schedule_pressure_source_kind_t source_kind, uint16_t source_id,
+    uint32_t units_until_cliff) {
+  if (score->pressure_cliff_units != LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE ||
+      units_until_cliff >= score->units_until_pressure_cliff) {
+    return;
+  }
+  score->pressure_cliff_source_kind = source_kind;
+  score->pressure_cliff_source_id = source_id;
+  score->units_until_pressure_cliff = units_until_cliff;
+}
+
 static void loom_low_schedule_project_candidate_resource_pressure(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state) {
@@ -94,23 +120,17 @@ static void loom_low_schedule_score_candidate_resource_pressure(
                                           projected_peak_units, &evaluation);
     const uint32_t penalty = cliffs[0].tier_before - evaluation.tier;
     resource_penalty = iree_math_saturating_add_u32(resource_penalty, penalty);
-    if (penalty != 0 &&
-        score->pressure_cliff_units == LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE) {
-      score->pressure_cliff_source_kind =
-          LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_RESOURCE;
-      score->pressure_cliff_source_id = resource_id;
-      score->pressure_cliff_units = cliffs[0].cliff_units;
+    if (penalty != 0) {
+      loom_low_schedule_record_crossed_pressure_cliff(
+          score, LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_RESOURCE, resource_id,
+          cliffs[0].cliff_units);
     }
     if (iree_any_bit_set(
             evaluation.flags,
-            LOOM_TARGET_RESIDENCY_CLIFF_EVALUATION_FLAG_HAS_WORSE_TIER) &&
-        evaluation.additional_units_to_worse_tier <
-            score->units_until_pressure_cliff) {
-      score->pressure_cliff_source_kind =
-          LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_RESOURCE;
-      score->pressure_cliff_source_id = resource_id;
-      score->units_until_pressure_cliff =
-          (uint32_t)evaluation.additional_units_to_worse_tier;
+            LOOM_TARGET_RESIDENCY_CLIFF_EVALUATION_FLAG_HAS_WORSE_TIER)) {
+      loom_low_schedule_record_upcoming_pressure_cliff(
+          score, LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_RESOURCE, resource_id,
+          (uint32_t)evaluation.additional_units_to_worse_tier);
     }
   }
   score->pressure_cliff_penalty = iree_math_saturating_add_u32(
@@ -152,23 +172,17 @@ static void loom_low_schedule_score_candidate_pressure_cliffs_for_class(
   const uint32_t penalty = cliffs[0].tier_before - evaluation.tier;
   score->pressure_cliff_penalty =
       iree_math_saturating_add_u32(score->pressure_cliff_penalty, penalty);
-  if (penalty != 0 &&
-      score->pressure_cliff_units == LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE) {
-    score->pressure_cliff_source_kind =
-        LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS;
-    score->pressure_cliff_source_id = reg_class_id;
-    score->pressure_cliff_units = cliffs[0].cliff_units;
+  if (penalty != 0) {
+    loom_low_schedule_record_crossed_pressure_cliff(
+        score, LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS, reg_class_id,
+        cliffs[0].cliff_units);
   }
   if (iree_any_bit_set(
           evaluation.flags,
-          LOOM_TARGET_RESIDENCY_CLIFF_EVALUATION_FLAG_HAS_WORSE_TIER) &&
-      evaluation.additional_units_to_worse_tier <
-          score->units_until_pressure_cliff) {
-    score->pressure_cliff_source_kind =
-        LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS;
-    score->pressure_cliff_source_id = reg_class_id;
-    score->units_until_pressure_cliff =
-        (uint32_t)evaluation.additional_units_to_worse_tier;
+          LOOM_TARGET_RESIDENCY_CLIFF_EVALUATION_FLAG_HAS_WORSE_TIER)) {
+    loom_low_schedule_record_upcoming_pressure_cliff(
+        score, LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS, reg_class_id,
+        (uint32_t)evaluation.additional_units_to_worse_tier);
   }
 }
 
@@ -236,21 +250,15 @@ static void loom_low_schedule_score_candidate_pressure_limit(
                                  : (uint32_t)required_limit_debt;
     score->pressure_cliff_penalty =
         iree_math_saturating_add_u32(score->pressure_cliff_penalty, penalty);
-    if (score->pressure_cliff_units == LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE) {
-      score->pressure_cliff_source_kind =
-          LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS;
-      score->pressure_cliff_source_id = reg_class_id;
-      score->pressure_cliff_units = limit_units;
-    }
+    loom_low_schedule_record_crossed_pressure_cliff(
+        score, LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS, reg_class_id,
+        limit_units);
     return;
   }
   const uint64_t units_until_limit = limit_units - required_live_units;
-  if (units_until_limit < score->units_until_pressure_cliff) {
-    score->pressure_cliff_source_kind =
-        LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS;
-    score->pressure_cliff_source_id = reg_class_id;
-    score->units_until_pressure_cliff = (uint32_t)units_until_limit;
-  }
+  loom_low_schedule_record_upcoming_pressure_cliff(
+      score, LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS, reg_class_id,
+      (uint32_t)units_until_limit);
 }
 
 static void loom_low_schedule_score_candidate_pressure_limit_for_class(

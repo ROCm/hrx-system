@@ -171,8 +171,10 @@ typedef struct loom_low_schedule_candidate_score_t {
   // Pressure-cliff penalty from persistent state after the candidate.
   uint32_t persistent_pressure_cliff_penalty;
   // Crossed pressure cliff, or LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE.
+  // Presence excludes |units_until_pressure_cliff|.
   uint32_t pressure_cliff_units;
-  // Required physical units before the next cliff, or PRESSURE_CLIFF_NONE.
+  // Required physical units before the next cliff when no cliff was crossed,
+  // or LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE.
   uint32_t units_until_pressure_cliff;
   // Source-order tie breaker.
   uint32_t source_ordinal;
@@ -188,7 +190,8 @@ typedef struct loom_low_schedule_candidate_score_t {
   uint16_t pair_placement_option_count;
   // Number of storage-relation rows owned by the candidate.
   uint16_t storage_relation_count;
-  // Register-class or resource ID for the closest pressure cliff.
+  // Register-class or resource ID for the crossed cliff when present,
+  // otherwise for the closest upcoming cliff.
   uint16_t pressure_cliff_source_id;
   // Interpretation of pressure_cliff_source_id.
   loom_low_schedule_pressure_source_kind_t pressure_cliff_source_kind;

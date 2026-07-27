@@ -251,6 +251,41 @@ class AmdgpuProcessorLimitInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class AmdgpuOccupancyRegisterClassInfo:
+    register_class: str
+    pool_units: int
+    allocation_granularity: int
+    limits_occupancy: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuOccupancyResourceMemberInfo:
+    register_class: str
+    contribution_granularity: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuOccupancyResourceInfo:
+    resource: str
+    pool_units: int
+    allocation_granularity: int
+    members: tuple[AmdgpuOccupancyResourceMemberInfo, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuOccupancyModelInfo:
+    max_waves_per_simd: int
+    register_classes: tuple[AmdgpuOccupancyRegisterClassInfo, ...]
+    resources: tuple[AmdgpuOccupancyResourceInfo, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuProcessorOccupancyInfo:
+    wave32: AmdgpuOccupancyModelInfo | None = None
+    wave64: AmdgpuOccupancyModelInfo | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AmdgpuProcessorInfo:
     processor: str
     flags: int
@@ -260,6 +295,10 @@ class AmdgpuProcessorInfo:
     kernel_descriptor: AmdgpuProcessorKernelDescriptorInfo
     features: AmdgpuProcessorFeatureInfo = AmdgpuProcessorFeatureInfo()
     limits: AmdgpuProcessorLimitInfo = AmdgpuProcessorLimitInfo()
+    occupancy: AmdgpuProcessorOccupancyInfo = AmdgpuProcessorOccupancyInfo()
+
+
+AMDGPU_OCCUPANCY_NONE = AmdgpuProcessorOccupancyInfo()
 
 
 AMDGPU_KERNEL_DESCRIPTOR_INFO_NONE = AmdgpuProcessorKernelDescriptorInfo()
@@ -287,6 +326,79 @@ AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA4_GFX125 = AmdgpuProcessorKernelDescriptorInfo
     vgpr_granules=AmdgpuKernelDescriptorVgprGranules(wave32=16, wave64=8),
 )
 
+AMDGPU_OCCUPANCY_REGISTER_CLASS_SGPR_CDNA = AmdgpuOccupancyRegisterClassInfo(
+    "amdgpu.sgpr", 800, 16
+)
+AMDGPU_OCCUPANCY_REGISTER_CLASS_SGPR_RDNA = AmdgpuOccupancyRegisterClassInfo(
+    "amdgpu.sgpr", 800, 106, limits_occupancy=False
+)
+AMDGPU_OCCUPANCY_REGISTER_CLASS_AGPR_CDNA = AmdgpuOccupancyRegisterClassInfo(
+    "amdgpu.agpr", 256, 4, limits_occupancy=False
+)
+
+AMDGPU_OCCUPANCY_CDNA = AmdgpuProcessorOccupancyInfo(
+    wave64=AmdgpuOccupancyModelInfo(
+        max_waves_per_simd=8,
+        register_classes=(
+            AMDGPU_OCCUPANCY_REGISTER_CLASS_SGPR_CDNA,
+            AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 512, 8),
+            AMDGPU_OCCUPANCY_REGISTER_CLASS_AGPR_CDNA,
+        ),
+        resources=(
+            AmdgpuOccupancyResourceInfo(
+                "amdgpu.vgpr_agpr",
+                512,
+                8,
+                (
+                    AmdgpuOccupancyResourceMemberInfo("amdgpu.vgpr", 4),
+                    AmdgpuOccupancyResourceMemberInfo("amdgpu.agpr"),
+                ),
+            ),
+        ),
+    ),
+)
+AMDGPU_OCCUPANCY_RDNA_1024 = AmdgpuProcessorOccupancyInfo(
+    wave32=AmdgpuOccupancyModelInfo(
+        max_waves_per_simd=16,
+        register_classes=(
+            AMDGPU_OCCUPANCY_REGISTER_CLASS_SGPR_RDNA,
+            AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 1024, 16),
+        ),
+    ),
+    wave64=AmdgpuOccupancyModelInfo(
+        max_waves_per_simd=16,
+        register_classes=(
+            AMDGPU_OCCUPANCY_REGISTER_CLASS_SGPR_RDNA,
+            AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 512, 8),
+        ),
+    ),
+)
+AMDGPU_OCCUPANCY_RDNA_1536 = AmdgpuProcessorOccupancyInfo(
+    wave32=AmdgpuOccupancyModelInfo(
+        max_waves_per_simd=16,
+        register_classes=(
+            AMDGPU_OCCUPANCY_REGISTER_CLASS_SGPR_RDNA,
+            AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 1536, 24),
+        ),
+    ),
+    wave64=AmdgpuOccupancyModelInfo(
+        max_waves_per_simd=16,
+        register_classes=(
+            AMDGPU_OCCUPANCY_REGISTER_CLASS_SGPR_RDNA,
+            AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 768, 12),
+        ),
+    ),
+)
+AMDGPU_OCCUPANCY_GFX125X = AmdgpuProcessorOccupancyInfo(
+    wave32=AmdgpuOccupancyModelInfo(
+        max_waves_per_simd=16,
+        register_classes=(
+            AMDGPU_OCCUPANCY_REGISTER_CLASS_SGPR_RDNA,
+            AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 1024, 16),
+        ),
+    ),
+)
+
 
 @dataclass(frozen=True, slots=True)
 class AmdgpuTargetRecordInfo:
@@ -294,36 +406,6 @@ class AmdgpuTargetRecordInfo:
     enum_value: int
     doc: str
     default_for_descriptor_set: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class AmdgpuOccupancyRegisterClassInfo:
-    register_class: str
-    pool_units: int
-    allocation_granularity: int
-
-
-@dataclass(frozen=True, slots=True)
-class AmdgpuOccupancyResourceMemberInfo:
-    register_class: str
-    contribution_granularity: int = 1
-
-
-@dataclass(frozen=True, slots=True)
-class AmdgpuOccupancyResourceInfo:
-    resource: str
-    pool_units: int
-    allocation_granularity: int
-    members: tuple[AmdgpuOccupancyResourceMemberInfo, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class AmdgpuOccupancyModelInfo:
-    descriptor_set_key: str
-    wave_size: int
-    max_waves_per_simd: int
-    register_classes: tuple[AmdgpuOccupancyRegisterClassInfo, ...]
-    resources: tuple[AmdgpuOccupancyResourceInfo, ...] = ()
 
 
 class AmdgpuIsaArchitectureInfo(Protocol):
@@ -396,6 +478,7 @@ def processor_info(
     scheduling_bits: int = 0,
     max_workgroup_storage_bytes: int = 0,
     flags: int = 0,
+    occupancy: AmdgpuProcessorOccupancyInfo = AMDGPU_OCCUPANCY_NONE,
 ) -> AmdgpuProcessorInfo:
     if flags & AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION:
         max_workgroup_storage_bytes = (
@@ -420,6 +503,7 @@ def processor_info(
         limits=AmdgpuProcessorLimitInfo(
             max_workgroup_storage_bytes=max_workgroup_storage_bytes,
         ),
+        occupancy=occupancy,
     )
 
 
@@ -451,6 +535,7 @@ def rdna3_processor_info(
     *,
     elf_feature_flags: int = 0,
     scheduling_bits: int = 0,
+    occupancy: AmdgpuProcessorOccupancyInfo = AMDGPU_OCCUPANCY_RDNA_1024,
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor=processor,
@@ -466,6 +551,7 @@ def rdna3_processor_info(
             | AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU
             | AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER
         ),
+        occupancy=occupancy,
     )
 
 
@@ -485,11 +571,15 @@ def cdna3_processor_info(
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_CDNA_GFX9,
         matrix_feature_profile=matrix_feature_profile,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES,
+        occupancy=AMDGPU_OCCUPANCY_CDNA,
     )
 
 
 def gfx117x_processor_info(
-    processor: str, elf_machine_flags: int
+    processor: str,
+    elf_machine_flags: int,
+    *,
+    occupancy: AmdgpuProcessorOccupancyInfo = AMDGPU_OCCUPANCY_RDNA_1024,
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor=processor,
@@ -504,6 +594,7 @@ def gfx117x_processor_info(
             | AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU
             | AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER
         ),
+        occupancy=occupancy,
     )
 
 
@@ -526,6 +617,7 @@ def rdna4_processor_info(
             AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR
             | AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU
         ),
+        occupancy=AMDGPU_OCCUPANCY_RDNA_1536,
     )
 
 
@@ -551,6 +643,7 @@ def gfx125x_processor_info(
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
         max_workgroup_storage_bytes=AMDGPU_GFX125X_MAX_WORKGROUP_STORAGE_BYTES,
+        occupancy=AMDGPU_OCCUPANCY_GFX125X,
     )
 
 
@@ -698,6 +791,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_CDNA_GFX9,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES,
+        occupancy=AMDGPU_OCCUPANCY_CDNA,
     ),
     gfx9_10_processor_info(
         "gfx1010",
@@ -734,11 +828,13 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         processor="gfx1100",
         elf_machine_flags=0x041,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR,
+        occupancy=AMDGPU_OCCUPANCY_RDNA_1536,
     ),
     rdna3_processor_info(
         processor="gfx1101",
         elf_machine_flags=0x046,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR,
+        occupancy=AMDGPU_OCCUPANCY_RDNA_1536,
     ),
     rdna3_processor_info(
         processor="gfx1102",
@@ -751,7 +847,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR,
     ),
     gfx117x_processor_info("gfx1150", 0x043),
-    gfx117x_processor_info("gfx1151", 0x04A),
+    gfx117x_processor_info("gfx1151", 0x04A, occupancy=AMDGPU_OCCUPANCY_RDNA_1536),
     gfx117x_processor_info("gfx1152", 0x055),
     gfx117x_processor_info("gfx1153", 0x058),
     gfx117x_processor_info("gfx1170", 0x05D),
@@ -876,88 +972,6 @@ AMDGPU_TARGET_RECORD_INFOS: tuple[AmdgpuTargetRecordInfo, ...] = (
 )
 
 
-AMDGPU_OCCUPANCY_MODEL_INFOS: tuple[AmdgpuOccupancyModelInfo, ...] = (
-    AmdgpuOccupancyModelInfo(
-        descriptor_set_key="amdgpu.cdna3.core",
-        wave_size=64,
-        max_waves_per_simd=16,
-        register_classes=(
-            AmdgpuOccupancyRegisterClassInfo("amdgpu.sgpr", 800, 16),
-            AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 512, 8),
-            AmdgpuOccupancyRegisterClassInfo("amdgpu.agpr", 256, 4),
-        ),
-        resources=(
-            AmdgpuOccupancyResourceInfo(
-                "amdgpu.vgpr_agpr",
-                512,
-                8,
-                (
-                    AmdgpuOccupancyResourceMemberInfo("amdgpu.vgpr", 4),
-                    AmdgpuOccupancyResourceMemberInfo("amdgpu.agpr"),
-                ),
-            ),
-        ),
-    ),
-    AmdgpuOccupancyModelInfo(
-        descriptor_set_key="amdgpu.cdna4.core",
-        wave_size=64,
-        max_waves_per_simd=16,
-        register_classes=(
-            AmdgpuOccupancyRegisterClassInfo("amdgpu.sgpr", 800, 16),
-            AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 1024, 4),
-            AmdgpuOccupancyRegisterClassInfo("amdgpu.agpr", 256, 4),
-        ),
-        resources=(
-            AmdgpuOccupancyResourceInfo(
-                "amdgpu.vgpr_agpr",
-                512,
-                8,
-                (
-                    AmdgpuOccupancyResourceMemberInfo("amdgpu.vgpr", 4),
-                    AmdgpuOccupancyResourceMemberInfo("amdgpu.agpr"),
-                ),
-            ),
-        ),
-    ),
-    AmdgpuOccupancyModelInfo(
-        descriptor_set_key="amdgpu.rdna3.core",
-        wave_size=64,
-        max_waves_per_simd=16,
-        register_classes=(
-            AmdgpuOccupancyRegisterClassInfo("amdgpu.sgpr", 800, 16),
-            AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 1024, 4),
-        ),
-    ),
-    AmdgpuOccupancyModelInfo(
-        descriptor_set_key="amdgpu.rdna3_5.core",
-        wave_size=64,
-        max_waves_per_simd=16,
-        register_classes=(
-            AmdgpuOccupancyRegisterClassInfo("amdgpu.sgpr", 800, 16),
-            AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 1024, 4),
-        ),
-    ),
-    AmdgpuOccupancyModelInfo(
-        descriptor_set_key="amdgpu.rdna4.core",
-        wave_size=64,
-        max_waves_per_simd=16,
-        register_classes=(
-            AmdgpuOccupancyRegisterClassInfo("amdgpu.sgpr", 800, 16),
-            AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 1024, 4),
-        ),
-    ),
-    AmdgpuOccupancyModelInfo(
-        descriptor_set_key="amdgpu.rdna4.gfx125x.core",
-        wave_size=64,
-        max_waves_per_simd=16,
-        register_classes=(
-            AmdgpuOccupancyRegisterClassInfo("amdgpu.sgpr", 800, 16),
-            AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 1024, 4),
-        ),
-    ),
-)
-
-
 def sorted_descriptor_set_infos() -> tuple[AmdgpuDescriptorSetInfo, ...]:
     return tuple(sorted(AMDGPU_DESCRIPTOR_SET_INFOS, key=lambda info: info.key))
 
@@ -971,6 +985,23 @@ def amdgpu_descriptor_set_ordinal(key: str) -> int:
 
 def sorted_processor_infos() -> tuple[AmdgpuProcessorInfo, ...]:
     return tuple(sorted(AMDGPU_PROCESSOR_INFOS, key=lambda info: info.processor))
+
+
+def amdgpu_processor_ordinal(processor: str) -> int:
+    for ordinal, info in enumerate(sorted_processor_infos()):
+        if info.processor == processor:
+            return ordinal
+    raise ValueError(f"unknown AMDGPU processor '{processor}'")
+
+
+def amdgpu_processor_occupancy_model(
+    info: AmdgpuProcessorInfo, wave_size: int
+) -> AmdgpuOccupancyModelInfo | None:
+    if wave_size == 32:
+        return info.occupancy.wave32
+    if wave_size == 64:
+        return info.occupancy.wave64
+    raise ValueError(f"unsupported AMDGPU wave size {wave_size}")
 
 
 def sorted_target_record_infos() -> tuple[AmdgpuTargetRecordInfo, ...]:
@@ -1005,15 +1036,6 @@ def amdgpu_default_target_record_info_for_descriptor_set(
         ):
             return info
     return None
-
-
-def sorted_occupancy_model_infos() -> tuple[AmdgpuOccupancyModelInfo, ...]:
-    return tuple(
-        sorted(
-            AMDGPU_OCCUPANCY_MODEL_INFOS,
-            key=lambda info: amdgpu_descriptor_set_ordinal(info.descriptor_set_key),
-        )
-    )
 
 
 def amdgpu_descriptor_set_info_by_generator_target(
