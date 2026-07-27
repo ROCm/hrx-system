@@ -12,6 +12,24 @@ iree_add_all_subdirs()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
+    printf_format
+  HDRS
+    "printf_format.h"
+  SRCS
+    "printf_format.c"
+  DEPS
+    iree::base
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
     hostcall_packet
   HDRS
     "hostcall_packet.h"
@@ -180,6 +198,20 @@ iree_cc_test(
     iree::testing::gtest_main
     libhrx_defs
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    printf_format_test
+  SRCS
+    "printf_format_test.cc"
+  DEPS
+    ::printf_format
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 

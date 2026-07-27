@@ -24,6 +24,15 @@ package(
 _LINUX_COMPATIBILITY = ["@platforms//os:linux"]
 
 hrx_cc_library(
+    name = "printf_format",
+    srcs = ["printf_format.c"],
+    hdrs = ["printf_format.h"],
+    includes = ["../.."],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = ["//runtime/src/iree/base"],
+)
+
+hrx_cc_library(
     name = "hostcall_packet",
     hdrs = ["hostcall_packet.h"],
     includes = ["../.."],
@@ -174,6 +183,17 @@ hrx_cc_test(
     srcs = ["launch_params_test.cc"],
     deps = [
         ":launch_params",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "printf_format_test",
+    srcs = ["printf_format_test.cc"],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":printf_format",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
