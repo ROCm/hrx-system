@@ -64,12 +64,6 @@ void iree_benchmark_loom_hal_actual_sequence_deinitialize(
 iree_status_t iree_benchmark_loom_hal_actual_provider_compile(
     iree_benchmark_loom_hal_actual_provider_t* provider);
 
-// Testbench invocation callback for benchmark-owned HAL actual sequences.
-iree_status_t iree_benchmark_loom_hal_actual_sequence_invoke(
-    void* user_data, const loom_testbench_invocation_plan_t* invocation,
-    iree_host_size_t input_count, const loom_testbench_value_t* inputs,
-    iree_host_size_t result_count, loom_testbench_value_t* out_results);
-
 // Projects a single-provider compile rejection into a benchmark result.
 void iree_benchmark_loom_benchmark_result_set_compile_rejection(
     const iree_benchmark_loom_hal_actual_provider_t* provider,

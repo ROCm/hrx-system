@@ -304,11 +304,8 @@ static iree_status_t iree_test_loom_configure_hal_actual_sequence(
   };
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_actual_sequence_initialize(
       &sequence_options, out_sequence));
-  execution_options->invocation.actual = (loom_testbench_invocation_provider_t){
-      .invoke = loom_run_hal_testbench_actual_sequence_invoke,
-      .query_issue = loom_run_hal_testbench_actual_sequence_query_issue,
-      .user_data = out_sequence,
-  };
+  execution_options->invocation.actual =
+      loom_run_hal_testbench_actual_sequence_provider(out_sequence);
   return iree_ok_status();
 }
 

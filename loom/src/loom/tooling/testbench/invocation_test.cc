@@ -187,7 +187,8 @@ check.case @invoke {
   loom_testbench_invocation_executor_t executor = {};
   IREE_ASSERT_OK(loom_testbench_invocation_executor_initialize(
       &schedule, iree_allocator_system(), &executor));
-  IREE_ASSERT_OK(loom_testbench_run_case_invocations(&executor, &table));
+  IREE_ASSERT_OK(loom_testbench_run_case_invocations(
+      &executor, /*sample_ordinal=*/0, &table));
   loom_testbench_invocation_executor_deinitialize(&executor);
 
   EXPECT_EQ(actual_state.issue_query_count, 1u);

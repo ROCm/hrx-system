@@ -34,6 +34,37 @@
       ]
     },
     {
+      "name": "runs ordered spirv vulkan A/B/A dispatch benchmark",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/../iree-test-loom/testdata/spirv_vulkan_hal_actual.loom",
+          "--benchmark=@ordered_dispatch_aba",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false",
+          "--measure=dispatch_complete",
+          "--iterations=1",
+          "--warmup-iterations=0",
+          "--batch-size=1",
+          "--min-time-ms=0",
+          "--max-batches=1",
+          "--input-ring-count=1",
+          "--output-format=jsonl"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"row\":\"sample\"",
+          "\"case\":\"ordered_dispatch_aba_case\"",
+          "\"passed\":true",
+          "\"row\":\"benchmark\"",
+          "\"benchmark\":\"ordered_dispatch_aba\"",
+          "\"physical_dispatches_per_logical_operation\":3",
+          "\"failures\":{\"row_count\":0,\"failed_benchmark_count\":0}"
+        ]
+      }
+    },
+    {
       "name": "runs spirv vulkan cooperative f16 benchmark",
       "run": {
         "tool": "iree-benchmark-loom",

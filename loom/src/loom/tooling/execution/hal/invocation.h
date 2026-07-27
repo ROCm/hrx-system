@@ -114,6 +114,28 @@ typedef struct loom_run_hal_dispatch_batch_t {
   iree_hal_execute_flags_t execute_flags;
 } loom_run_hal_dispatch_batch_t;
 
+typedef struct loom_run_hal_dispatch_sequence_t {
+  // Reusable command buffer containing one ordered dispatch sequence.
+  iree_hal_command_buffer_t* command_buffer;
+  // Timeline semaphore signaled after each sequence submission.
+  iree_hal_semaphore_t* semaphore;
+  // Payload value to signal on the next sequence submission.
+  uint64_t next_signal_value;
+  // Number of indirect buffer slots required at submission.
+  iree_host_size_t binding_count;
+} loom_run_hal_dispatch_sequence_t;
+
+typedef struct loom_run_hal_dispatch_sequence_step_t {
+  // Prepared executable dispatched by this step.
+  const loom_run_hal_prepared_candidate_t* candidate;
+  // Function, launch geometry, and direct constants captured by this step.
+  loom_run_hal_invocation_options_t options;
+  // Borrowed binding byte lengths in HAL ABI order.
+  const iree_device_size_t* binding_lengths;
+  // Number of entries in |binding_lengths|.
+  iree_host_size_t binding_count;
+} loom_run_hal_dispatch_sequence_step_t;
+
 typedef struct loom_run_hal_invocation_request_t {
   // Initialized HAL runtime that owns the device used for dispatch.
   const loom_run_hal_runtime_t* runtime;
@@ -179,6 +201,14 @@ void loom_run_hal_dispatch_batch_initialize(
 // Releases storage owned by |batch|.
 void loom_run_hal_dispatch_batch_deinitialize(
     loom_run_hal_dispatch_batch_t* batch);
+
+// Initializes an empty ordered HAL dispatch sequence.
+void loom_run_hal_dispatch_sequence_initialize(
+    loom_run_hal_dispatch_sequence_t* out_sequence);
+
+// Releases storage owned by |sequence|.
+void loom_run_hal_dispatch_sequence_deinitialize(
+    loom_run_hal_dispatch_sequence_t* sequence);
 
 // Initializes an invocation result. Must be paired with
 // loom_run_hal_invocation_result_deinitialize().
@@ -264,7 +294,9 @@ iree_status_t loom_run_hal_dispatch_batch_prepare_from_binding_ring(
 // is a flattened row-major array with |plan_ring_count * sequence_count|
 // entries, indexed as ring slot first and sequence step second. Each logical
 // batch slot i records every sequence step using ring slot
-// |(plan_ring_offset + i) % plan_ring_count|.
+// |(plan_ring_offset + i) % plan_ring_count|. Adjacent steps carry dispatch
+// execution and write-visibility edges. No barrier follows the terminal step
+// of a logical sequence.
 iree_status_t loom_run_hal_dispatch_sequence_batch_prepare_from_plan_ring(
     const loom_run_hal_runtime_t* runtime, iree_host_size_t sequence_count,
     const loom_run_hal_prepared_candidate_t* const* candidates,
@@ -273,6 +305,26 @@ iree_status_t loom_run_hal_dispatch_sequence_batch_prepare_from_plan_ring(
     iree_host_size_t plan_ring_offset,
     const loom_run_hal_dispatch_batch_options_t* batch_options,
     iree_allocator_t allocator, loom_run_hal_dispatch_batch_t* out_batch);
+
+// Records one reusable ordered sequence with indirect buffer bindings.
+//
+// |steps| contains |step_count| entries in source order. Dispatch constants,
+// geometry, and binding ranges are captured while buffer identities are
+// supplied through a binding table at execution. An execution and
+// dispatch-write visibility edge is recorded between each adjacent dispatch.
+// No barrier follows the terminal dispatch.
+iree_status_t loom_run_hal_dispatch_sequence_prepare(
+    const loom_run_hal_runtime_t* runtime, iree_host_size_t step_count,
+    const loom_run_hal_dispatch_sequence_step_t* steps,
+    loom_run_hal_dispatch_sequence_t* out_sequence);
+
+// Submits |sequence| with |binding_table| and waits for completion.
+//
+// The binding table must remain valid until this call returns.
+iree_status_t loom_run_hal_dispatch_sequence_execute(
+    const loom_run_hal_runtime_t* runtime,
+    loom_run_hal_dispatch_sequence_t* sequence,
+    iree_hal_buffer_binding_table_t binding_table);
 
 // Submits |batch| once and waits for completion.
 iree_status_t loom_run_hal_dispatch_batch_execute(

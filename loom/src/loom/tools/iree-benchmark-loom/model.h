@@ -250,6 +250,8 @@ typedef struct iree_benchmark_loom_hal_actual_sequence_t {
   iree_benchmark_loom_hal_actual_provider_t* providers;
   // Number of entries in |providers|.
   iree_host_size_t provider_count;
+  // Prepared ordered execution over the embedded execution providers.
+  loom_run_hal_testbench_actual_sequence_execution_t* execution;
 } iree_benchmark_loom_hal_actual_sequence_t;
 
 typedef struct iree_benchmark_loom_dispatch_comparison_candidate_t {

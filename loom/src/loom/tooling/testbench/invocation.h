@@ -27,6 +27,17 @@ typedef iree_status_t(IREE_API_PTR* loom_testbench_invocation_fn_t)(
     iree_host_size_t input_count, const loom_testbench_value_t* inputs,
     iree_host_size_t result_count, loom_testbench_value_t* out_results);
 
+typedef struct loom_testbench_prepared_invocation_t
+    loom_testbench_prepared_invocation_t;
+
+// Executes a contiguous source-order sequence against one materialized sample.
+// The callback owns input lookup and result assignment for the sequence.
+typedef iree_status_t(IREE_API_PTR* loom_testbench_invocation_sequence_fn_t)(
+    void* user_data, iree_host_size_t sample_ordinal,
+    iree_host_size_t invocation_count,
+    const loom_testbench_prepared_invocation_t* invocations,
+    loom_testbench_value_table_t* table);
+
 typedef enum loom_testbench_sample_issue_category_e {
   LOOM_TESTBENCH_SAMPLE_ISSUE_NONE = 0,
   LOOM_TESTBENCH_SAMPLE_ISSUE_COMPILE_REJECTED = 1,
@@ -50,8 +61,10 @@ typedef iree_status_t(IREE_API_PTR* loom_testbench_invocation_issue_query_fn_t)(
     loom_testbench_sample_issue_t* out_issue);
 
 typedef struct loom_testbench_invocation_provider_t {
-  // Callback used to execute an invocation.
+  // Callback used to execute one invocation.
   loom_testbench_invocation_fn_t invoke;
+  // Optional callback used for contiguous runs longer than one invocation.
+  loom_testbench_invocation_sequence_fn_t invoke_sequence;
   // Optional callback used to query an issue after an invocation.
   loom_testbench_invocation_issue_query_fn_t query_issue;
   // Caller-owned payload passed to the provider callbacks.
@@ -106,18 +119,29 @@ typedef struct loom_testbench_invocation_options_t {
 void loom_testbench_invocation_options_initialize(
     loom_testbench_invocation_options_t* out_options);
 
-typedef struct loom_testbench_prepared_invocation_t {
+struct loom_testbench_prepared_invocation_t {
   // Static case invocation plan.
   const loom_testbench_invocation_plan_t* plan;
   // Resolved provider for |plan|.
   loom_testbench_invocation_provider_t provider;
-} loom_testbench_prepared_invocation_t;
+};
+
+typedef struct loom_testbench_prepared_invocation_span_t {
+  // First prepared invocation in this contiguous provider span.
+  const loom_testbench_prepared_invocation_t* invocations;
+  // Number of source-order invocations in |invocations|.
+  iree_host_size_t invocation_count;
+} loom_testbench_prepared_invocation_span_t;
 
 typedef struct loom_testbench_invocation_schedule_t {
   // Prepared invocations in source order.
   const loom_testbench_prepared_invocation_t* invocations;
   // Number of entries in |invocations|.
   iree_host_size_t invocation_count;
+  // Prepared provider spans in source order.
+  const loom_testbench_prepared_invocation_span_t* spans;
+  // Number of entries in |spans|.
+  iree_host_size_t span_count;
   // Maximum input arity across prepared invocations.
   iree_host_size_t max_input_count;
   // Maximum result arity across prepared invocations.
@@ -163,10 +187,10 @@ iree_status_t loom_testbench_invocation_executor_initialize(
 void loom_testbench_invocation_executor_deinitialize(
     loom_testbench_invocation_executor_t* executor);
 
-// Executes all prepared invocations in source order against |table|.
+// Executes all prepared invocations in source order against one sample.
 iree_status_t loom_testbench_run_case_invocations(
     loom_testbench_invocation_executor_t* executor,
-    loom_testbench_value_table_t* table);
+    iree_host_size_t sample_ordinal, loom_testbench_value_table_t* table);
 
 #ifdef __cplusplus
 }  // extern "C"
