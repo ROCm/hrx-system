@@ -12,7 +12,6 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/proactor.h"
-#include "iree/async/region.h"
 #include "iree/async/semaphore.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/base/threading/mutex.h"
@@ -20,67 +19,6 @@
 #include "iree/net/channel/control/control_channel.h"
 #include "iree/net/channel/util/frame_sender.h"
 #include "iree/net/transport_factory.h"
-
-//===----------------------------------------------------------------------===//
-// Header pool for control channel frame_sender
-//===----------------------------------------------------------------------===//
-
-// Buffer count and size for the control channel's frame_sender header pool.
-// 32 buffers at 256 bytes each is generous for control frame headers and batch
-// buffers (typical control frames are 8-64 bytes).
-#define IREE_NET_SESSION_HEADER_POOL_BUFFER_COUNT 32
-#define IREE_NET_SESSION_HEADER_POOL_BUFFER_SIZE 256
-
-// Region that bundles the allocator for self-contained cleanup.
-typedef struct iree_net_session_pool_region_t {
-  iree_async_region_t base;
-  iree_allocator_t host_allocator;
-} iree_net_session_pool_region_t;
-
-static void iree_net_session_pool_region_destroy(iree_async_region_t* region) {
-  iree_net_session_pool_region_t* pool_region =
-      (iree_net_session_pool_region_t*)region;
-  iree_allocator_t host_allocator = pool_region->host_allocator;
-  iree_allocator_free(host_allocator, pool_region->base.base_ptr);
-  iree_allocator_free(host_allocator, pool_region);
-}
-
-// Creates a buffer pool for the control channel's frame_sender.
-static iree_status_t iree_net_session_create_header_pool(
-    iree_allocator_t host_allocator, iree_async_buffer_pool_t** out_pool) {
-  *out_pool = NULL;
-
-  iree_host_size_t memory_size = IREE_NET_SESSION_HEADER_POOL_BUFFER_COUNT *
-                                 IREE_NET_SESSION_HEADER_POOL_BUFFER_SIZE;
-
-  iree_net_session_pool_region_t* pool_region = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator, sizeof(*pool_region), (void**)&pool_region));
-
-  uint8_t* memory = NULL;
-  iree_status_t status =
-      iree_allocator_malloc(host_allocator, memory_size, (void**)&memory);
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(host_allocator, pool_region);
-    return status;
-  }
-
-  memset(pool_region, 0, sizeof(*pool_region));
-  iree_atomic_ref_count_init(&pool_region->base.ref_count);
-  pool_region->base.destroy_fn = iree_net_session_pool_region_destroy;
-  pool_region->base.base_ptr = memory;
-  pool_region->base.length = memory_size;
-  pool_region->base.buffer_size = IREE_NET_SESSION_HEADER_POOL_BUFFER_SIZE;
-  pool_region->base.buffer_count = IREE_NET_SESSION_HEADER_POOL_BUFFER_COUNT;
-  pool_region->host_allocator = host_allocator;
-
-  status = iree_async_buffer_pool_create(&pool_region->base, host_allocator,
-                                         out_pool);
-  // Release our ref — pool retains the region. On failure, both refs are
-  // released and the region self-destructs.
-  iree_async_region_release(&pool_region->base);
-  return status;
-}
 
 //===----------------------------------------------------------------------===//
 // Internal types
@@ -200,9 +138,6 @@ struct iree_net_session_t {
 
   // Control channel (owned by session).
   iree_net_control_channel_t* control_channel;
-
-  // Header pool for the control channel's frame_sender (owned by session).
-  iree_async_buffer_pool_t* control_header_pool;
 
   // Frontier tracker retained for remote axis registration and cleanup.
   iree_async_frontier_tracker_t* frontier_tracker;
@@ -1258,17 +1193,6 @@ static void iree_net_session_on_control_endpoint_ready(
     return;
   }
 
-  // Create header pool for the control channel's frame_sender.
-  status = iree_net_session_create_header_pool(session->host_allocator,
-                                               &session->control_header_pool);
-  if (!iree_status_is_ok(status)) {
-    iree_net_session_fail(
-        session, iree_status_annotate(
-                     status, IREE_SV("failed to create control header pool")));
-    iree_net_session_release(session);
-    return;
-  }
-
   // Create control channel with session as the callback target.
   // The control channel routes sends through the endpoint (not directly to the
   // carrier), so transport-specific framing (e.g., TCP mux stream headers) is
@@ -1288,7 +1212,7 @@ static void iree_net_session_on_control_endpoint_ready(
   };
 
   status = iree_net_control_channel_create(
-      endpoint, IREE_NET_FRAME_SENDER_MAX_SPANS, session->control_header_pool,
+      endpoint, IREE_NET_FRAME_SENDER_MAX_SPANS,
       iree_net_control_channel_options_default(), channel_callbacks,
       session->host_allocator, &session->control_channel);
   if (!iree_status_is_ok(status)) {
@@ -1520,8 +1444,7 @@ static void iree_net_session_complete_teardown(iree_net_session_t* session) {
 
   // Release control channel. All carrier completions have drained, so the
   // frame_sender's sends_in_flight is 0 and deinitialize is safe. Must happen
-  // before connection release (carrier memory is still valid) and before header
-  // pool release (batch lease may be returned to the pool during deinitialize).
+  // before connection release because carrier memory is still valid.
   iree_net_control_channel_release(session->control_channel);
 
   // Release connection. Safe now — all carriers are deactivated, so releasing
@@ -1532,11 +1455,6 @@ static void iree_net_session_complete_teardown(iree_net_session_t* session) {
   // this pool for recv operations and may still hold leases until connection
   // deactivation completes.
   iree_async_buffer_pool_release(session->recv_pool);
-
-  // Release header pool (releases the backing region). Safe after control
-  // channel release — all carrier completions have released their leases and
-  // the frame_sender has returned any batch lease.
-  iree_async_buffer_pool_release(session->control_header_pool);
 
   // Release transport factory (client path only).
   iree_net_transport_factory_release(session->transport_factory);

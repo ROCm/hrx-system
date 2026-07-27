@@ -7,8 +7,8 @@
 // Frame sender: scatter-gather send utility for channels.
 //
 // iree_net_frame_sender_t is a formatting utility that assembles scatter-gather
-// lists from headers and payloads, manages buffer pool allocations, and tracks
-// in-flight sends. It sits below the channel layer and above the carrier layer.
+// lists from headers and payloads, retains copied storage, and tracks in-flight
+// sends. It sits below the channel layer and above the carrier layer.
 //
 // Channels embed a frame_sender and use it for all send operations. The channel
 // handles protocol semantics (frame types, stream IDs, etc.) while the
@@ -16,9 +16,9 @@
 //
 // ## Ownership model
 //
-// The frame_sender does NOT own the buffer pool or submit_fn resources - they
-// must outlive the sender. The sender owns in-flight send contexts until
-// completion.
+// The frame_sender does NOT own the optional storage pool or submit_fn
+// resources; they must outlive the sender. The sender owns in-flight send
+// contexts until completion.
 //
 // ## Callback contract
 //
@@ -33,23 +33,26 @@
 //
 // 1. **send()**: Scatter-gather send with retained header, payload zero-copy.
 //    Typical headers are copied to send-context storage; unusually large
-//    headers fall back to the header pool. Payload spans are passed directly.
-//    Used for all sends with application payloads (queue command payloads
-//    are typically 64KB-512KB; control DATA payloads can be many megabytes).
+//    headers use the optional storage pool or heap storage. Payload spans are
+//    passed directly. Used for all sends with application payloads (queue
+//    command payloads are typically 64KB-512KB; control DATA payloads can be
+//    many megabytes).
 //
 // 2. **send_copy()**: Single-buffer send with header and payload copied to
 //    retained sender storage before submission. Used for small messages whose
 //    source storage cannot outlive the asynchronous send.
 //
-// 3. **queue() + flush()**: Batched send for small frames.
-//    Frames are copied to a batch buffer, then sent together on flush().
-//    Reduces syscall overhead for many small control messages.
+// 3. **queue() + flush()**: Batched send for self-delimiting frames.
+//    Encoded frame bytes are copied to a batch buffer and concatenated into
+//    one endpoint message on flush(). The receiving protocol must be able to
+//    recover every frame boundary within that message. This is not valid for
+//    protocols where the endpoint message length defines the frame length.
 //
 // ## Backpressure
 //
-// Frame sender propagates RESOURCE_EXHAUSTED from the carrier (or pool). It
-// does NOT manage backpressure policy - the embedding channel interprets
-// RESOURCE_EXHAUSTED and handles drain callbacks.
+// Frame sender propagates RESOURCE_EXHAUSTED from the carrier or configured
+// storage pool. It does NOT manage backpressure policy; the embedding channel
+// interprets RESOURCE_EXHAUSTED and handles drain callbacks.
 //
 // ## Thread safety
 //
@@ -60,8 +63,8 @@
 // internally - this is not the channel's or frame_sender's concern.
 //
 // **queue() and flush()** are NOT thread-safe and must only be called from
-// a single thread (the proactor thread). These are optimizations for batching
-// small control messages where the proactor is assembling multiple frames.
+// a single thread (the proactor thread). These optimize protocols where the
+// proactor assembles multiple self-delimiting frames.
 //
 // **Mixing send() with queue()/flush()**: If the proactor thread uses both
 // APIs and needs ordering between them, it must call flush() explicitly
@@ -73,7 +76,7 @@
 //
 // **handle_completion()** may be called from the carrier's completion thread,
 // which may differ from the submission thread. It uses atomic operations for
-// the in-flight count and releases the buffer lease (pool is thread-safe).
+// the in-flight count and releases retained pool or heap storage.
 
 #ifndef IREE_NET_CHANNEL_UTIL_FRAME_SENDER_H_
 #define IREE_NET_CHANNEL_UTIL_FRAME_SENDER_H_
@@ -164,7 +167,7 @@ struct iree_net_frame_send_context_t {
   // Sender that owns this context and receives completion recycling.
   iree_net_frame_sender_t* sender;
 
-  // Header, copied-frame, or batch buffer lease held until send completion.
+  // Header or copied-frame buffer lease held until send completion.
   iree_async_buffer_lease_t buffer_lease;
 
   // Heap-backed copied frame storage held until send completion.
@@ -201,14 +204,15 @@ struct iree_net_frame_sender_t {
   // one span for its stream header, so max_send_spans = carrier->max_iov - 1).
   iree_host_size_t max_send_spans;
 
-  // Pool used for unusually large frame headers, copied frames, and batches.
-  // Not owned.
-  iree_async_buffer_pool_t* header_pool;
+  // Optional pool used for unusually large frame headers, copied frames, and
+  // batches. When NULL, retained sends use heap storage and batching is
+  // unavailable. Not owned.
+  iree_async_buffer_pool_t* storage_pool;
 
   // Completion callback (provided by channel).
   iree_net_frame_send_complete_callback_t callback;
 
-  // Batch buffer for small frames (queue/flush mode).
+  // Batch buffer for self-delimiting frames (queue/flush mode).
   iree_async_buffer_lease_t batch_lease;
 
   // True when |batch_lease| is live and holds queued bytes.
@@ -232,7 +236,7 @@ struct iree_net_frame_sender_t {
   // Allocator used when growing the internal block pool.
   iree_allocator_t context_allocator;
 
-  // General host allocator retained for future sender-owned allocations.
+  // Host allocator used for heap-backed retained storage.
   iree_allocator_t host_allocator;
 };
 
@@ -246,14 +250,15 @@ struct iree_net_frame_sender_t {
 // sends, this is carrier->max_iov. For endpoint-routed sends that add
 // transport headers (e.g., TCP mux), subtract the header span count.
 //
-// |header_pool| must outlive the sender.
+// |storage_pool| optionally provides retained send storage and must outlive the
+// sender. When NULL, large sends use heap storage and queue() is unavailable.
 // |callback| is fired for each completed send operation.
 // |context_allocator| is used to grow the internal send context pool.
 // |host_allocator| is used for other dynamic allocations.
 iree_status_t iree_net_frame_sender_initialize(
     iree_net_frame_sender_t* sender, iree_net_frame_send_submit_fn_t submit_fn,
     void* submit_fn_user_data, iree_host_size_t max_send_spans,
-    iree_async_buffer_pool_t* header_pool,
+    iree_async_buffer_pool_t* storage_pool,
     iree_net_frame_send_complete_callback_t callback,
     iree_allocator_t context_allocator, iree_allocator_t host_allocator);
 
@@ -263,22 +268,25 @@ iree_status_t iree_net_frame_sender_initialize(
 // a caller-owned pool and recycle it on release. It may return
 // RESOURCE_EXHAUSTED to express intentional backpressure, but must not call
 // general-purpose malloc/free per send in the steady state.
+//
+// |storage_pool| has the same optional retained-storage contract as
+// iree_net_frame_sender_initialize().
 iree_status_t iree_net_frame_sender_initialize_with_context_pool(
     iree_net_frame_sender_t* sender, iree_net_frame_send_submit_fn_t submit_fn,
     void* submit_fn_user_data, iree_host_size_t max_send_spans,
-    iree_async_buffer_pool_t* header_pool,
+    iree_async_buffer_pool_t* storage_pool,
     iree_net_frame_send_complete_callback_t callback,
     iree_net_frame_sender_context_pool_t context_pool,
     iree_allocator_t host_allocator);
 
-// Deinitializes a frame sender.
+// Deinitializes a frame sender and discards any queued batch.
 // Asserts that no sends are in flight. Caller must drain completions first.
 void iree_net_frame_sender_deinitialize(iree_net_frame_sender_t* sender);
 
 // Sends a frame with scatter-gather. THREAD-SAFE.
 //
 // This is the primary send API and may be called from any thread. The
-// underlying carrier and buffer pool are assumed to be thread-safe.
+// underlying carrier and configured storage pool are assumed to be thread-safe.
 //
 // |header| is copied into sender-owned storage (typically inline in the send
 // context).
@@ -307,8 +315,8 @@ iree_status_t iree_net_frame_sender_send(iree_net_frame_sender_t* sender,
 // and keep their backing storage alive until completion.
 //
 // Returns OK if the operation was submitted (callback will fire). The sender
-// may allocate heap storage when the combined header+payload is larger than the
-// frame sender's fallback pool buffer.
+// may allocate heap storage when the combined header+payload exceeds inline
+// storage and the configured storage pool's buffer capacity.
 // Returns FAILED_PRECONDITION if any payload span is not CPU-accessible.
 //
 // On non-OK return, the callback is NOT called.
@@ -317,15 +325,20 @@ iree_status_t iree_net_frame_sender_send_copy(iree_net_frame_sender_t* sender,
                                               iree_async_span_list_t payload,
                                               uint64_t operation_user_data);
 
-// Queues a small frame for batched send. NOT THREAD-SAFE.
+// Queues one self-delimiting frame for batched send. NOT THREAD-SAFE.
 //
 // Must only be called from the proactor thread. This is an optimization for
-// batching small control messages to reduce syscall overhead.
+// protocols that can decode multiple concatenated frames from one endpoint
+// message.
 //
-// |frame| (header + payload combined) is copied into the batch buffer.
-// Call flush() to actually send the batched data.
+// |frame| (header + payload combined) is copied into the batch buffer. The
+// frame encoding must include enough information for the receiver to determine
+// its length without consulting the enclosing endpoint message length. Call
+// flush() to send all queued bytes as one endpoint message.
 //
 // Returns OK if the frame was queued successfully.
+// Returns INVALID_ARGUMENT if |frame| is empty.
+// Returns FAILED_PRECONDITION if no storage pool was configured.
 // Returns RESOURCE_EXHAUSTED if the batch buffer is full (call flush first).
 iree_status_t iree_net_frame_sender_queue(iree_net_frame_sender_t* sender,
                                           iree_const_byte_span_t frame);
@@ -339,12 +352,19 @@ iree_status_t iree_net_frame_sender_queue(iree_net_frame_sender_t* sender,
 // Returns OK if the operation was submitted or if nothing was queued.
 // Returns RESOURCE_EXHAUSTED if carrier is backpressured.
 //
-// On RESOURCE_EXHAUSTED, the batch data is preserved and flush() can be
-// retried later.
+// On RESOURCE_EXHAUSTED, the batch data is preserved. The caller owns its
+// disposition and must either retry flush() without queuing the frames again
+// or explicitly discard the batch.
 //
 // If nothing is queued, returns OK immediately without firing a callback.
 iree_status_t iree_net_frame_sender_flush(iree_net_frame_sender_t* sender,
                                           uint64_t operation_user_data);
+
+// Discards all queued frame bytes without sending them. NOT THREAD-SAFE.
+//
+// Releases the batch buffer and returns the sender to its empty state. This is
+// a no-op when no frames are queued.
+void iree_net_frame_sender_discard_batch(iree_net_frame_sender_t* sender);
 
 // Returns the number of bytes currently queued for batching.
 iree_host_size_t iree_net_frame_sender_queued_bytes(

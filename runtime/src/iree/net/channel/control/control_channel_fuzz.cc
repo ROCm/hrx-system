@@ -256,20 +256,6 @@ static iree_status_t fuzz_endpoint_send(
 }
 
 //===----------------------------------------------------------------------===//
-// Fuzz buffer pool
-//===----------------------------------------------------------------------===//
-
-// Statically-sized buffer pool for fuzz test. 16 buffers x 256 bytes is
-// generous for control frame headers and batch buffers.
-#define FUZZ_POOL_BUFFER_COUNT 16
-#define FUZZ_POOL_BUFFER_SIZE 256
-static uint8_t fuzz_pool_memory[FUZZ_POOL_BUFFER_COUNT * FUZZ_POOL_BUFFER_SIZE];
-
-static void fuzz_region_destroy(iree_async_region_t* region) {
-  // Statically allocated — nothing to free.
-}
-
-//===----------------------------------------------------------------------===//
 // Mock lease
 //===----------------------------------------------------------------------===//
 
@@ -411,27 +397,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       &fuzz_carrier_vtable, IREE_NET_CARRIER_CAPABILITY_RELIABLE, 0, 8,
       carrier_callback, iree_allocator_system(), &mock_carrier.base);
 
-  // Set up buffer pool for frame headers.
-  // Uses a static region backed by fuzz_pool_memory.
-  iree_async_region_t fuzz_region;
-  memset(&fuzz_region, 0, sizeof(fuzz_region));
-  iree_atomic_ref_count_init(&fuzz_region.ref_count);
-  fuzz_region.destroy_fn = fuzz_region_destroy;
-  fuzz_region.base_ptr = fuzz_pool_memory;
-  fuzz_region.length = sizeof(fuzz_pool_memory);
-  fuzz_region.buffer_size = FUZZ_POOL_BUFFER_SIZE;
-  fuzz_region.buffer_count = FUZZ_POOL_BUFFER_COUNT;
-
-  iree_async_buffer_pool_t* header_pool = NULL;
-  iree_status_t status = iree_async_buffer_pool_create(
-      &fuzz_region, iree_allocator_system(), &header_pool);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-    return 0;
-  }
-  // Pool takes a ref; release ours so pool owns the region lifecycle.
-  // (For the static region with no-op destroy, this is just bookkeeping.)
-
   // Configure channel.
   iree_net_control_channel_options_t options =
       iree_net_control_channel_options_default();
@@ -449,12 +414,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
   // Create and activate channel.
   iree_net_control_channel_t* channel = NULL;
-  status = iree_net_control_channel_create(
-      endpoint, IREE_NET_FRAME_SENDER_MAX_SPANS, header_pool, options,
-      callbacks, iree_allocator_system(), &channel);
+  iree_status_t status = iree_net_control_channel_create(
+      endpoint, IREE_NET_FRAME_SENDER_MAX_SPANS, options, callbacks,
+      iree_allocator_system(), &channel);
   if (!iree_status_is_ok(status)) {
     iree_status_ignore(status);
-    iree_async_buffer_pool_release(header_pool);
     return 0;
   }
 
@@ -462,7 +426,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (!iree_status_is_ok(status)) {
     iree_status_ignore(status);
     iree_net_control_channel_release(channel);
-    iree_async_buffer_pool_release(header_pool);
     return 0;
   }
 
@@ -477,7 +440,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     fuzz_inject_message(&mock_endpoint, stream, remaining);
     fuzz_endpoint_deactivate_and_wait(endpoint);
     iree_net_control_channel_release(channel);
-    iree_async_buffer_pool_release(header_pool);
     return 0;
   }
 
@@ -616,6 +578,5 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
   fuzz_endpoint_deactivate_and_wait(endpoint);
   iree_net_control_channel_release(channel);
-  iree_async_buffer_pool_release(header_pool);
   return 0;
 }

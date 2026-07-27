@@ -120,16 +120,22 @@ static iree_status_t iree_net_control_channel_submit_send(
   return iree_net_message_endpoint_send(channel->endpoint, &params);
 }
 
-// Frame sender completion callback. Routes to the channel's on_send_complete
-// callback for send_data operations.
+// Frame sender completion callback. Internal protocol sends use a zero token;
+// application sends carry an owned completion context.
 static void iree_net_control_channel_on_sender_complete(
     void* callback_user_data, uint64_t operation_user_data,
     iree_status_t status) {
   iree_net_control_channel_t* channel =
       (iree_net_control_channel_t*)callback_user_data;
+  if (operation_user_data == 0) {
+    if (!iree_status_is_ok(status)) {
+      iree_net_control_channel_fail(channel, status);
+    }
+    return;
+  }
+
   iree_net_control_send_context_t* context =
       (iree_net_control_send_context_t*)(uintptr_t)operation_user_data;
-  IREE_ASSERT(context, "control send completed without a context");
   uint64_t user_operation_user_data = context->operation_user_data;
   iree_net_control_channel_send_completion_t completion = context->completion;
   iree_net_control_send_context_free(channel, context);
@@ -155,55 +161,35 @@ static void iree_net_control_channel_on_endpoint_send_ready(void* user_data) {
   }
 }
 
-// Serializes a complete control frame (header + sub-header + optional trailing
-// data) into a contiguous buffer for queue/flush sends. Returns the total
-// number of bytes written to |buffer|.
+// Copies and submits one complete protocol frame.
 //
-// |sub_header| and |trailing| may be NULL/zero-length.
-static iree_host_size_t iree_net_control_channel_serialize_frame(
-    uint8_t* buffer, iree_net_control_frame_type_t type,
-    iree_net_control_frame_flags_t flags, const void* sub_header,
-    iree_host_size_t sub_header_size, const void* trailing,
-    iree_host_size_t trailing_size) {
-  iree_host_size_t offset = 0;
-
-  // Frame header.
+// Protocol frame payloads are transient control data. Copying them into the
+// sender keeps each endpoint message independently retryable without requiring
+// callers to retain stack or receive-buffer storage through completion.
+static iree_status_t iree_net_control_channel_send_protocol_frame(
+    iree_net_control_channel_t* channel, iree_net_control_frame_type_t type,
+    iree_net_control_frame_flags_t flags, iree_async_span_list_t payload) {
   iree_net_control_frame_header_t header;
   iree_net_control_frame_header_initialize(type, flags, &header);
-  memcpy(buffer + offset, &header, sizeof(header));
-  offset += sizeof(header);
-
-  // Sub-header (e.g., goaway_payload, error_payload).
-  if (sub_header_size > 0) {
-    memcpy(buffer + offset, sub_header, sub_header_size);
-    offset += sub_header_size;
-  }
-
-  // Trailing data (e.g., message string, echoed payload).
-  if (trailing_size > 0) {
-    memcpy(buffer + offset, trailing, trailing_size);
-    offset += trailing_size;
-  }
-
-  return offset;
+  return iree_net_frame_sender_send_copy(
+      &channel->sender,
+      iree_make_const_byte_span((const uint8_t*)&header, sizeof(header)),
+      payload, /*operation_user_data=*/0);
 }
 
 //===----------------------------------------------------------------------===//
 // Receive path
 //===----------------------------------------------------------------------===//
 
-// Maximum PING echo payload size for PONG responses. PONG frames are
-// serialized contiguously into a batch buffer, so this limits the maximum
-// PING payload that can be echoed. 64 bytes is generous — typical PING
-// payloads are 8 bytes (a timestamp).
+// Maximum PING payload echoed in a PONG response. This bounds automatic
+// response amplification and retained send storage. Typical PING payloads are
+// 8-byte timestamps.
 #define IREE_NET_CONTROL_MAX_PING_ECHO_SIZE 64
 
 // Handles a received PING frame by auto-responding with PONG.
 //
-// The entire PONG response (header + echoed payload + optional timestamp) is
-// serialized into a contiguous stack buffer and queued via the frame_sender's
-// batch path. This avoids the recv buffer lifetime issue: the echoed payload
-// is copied out of the recv buffer before the recv callback returns.
+// The response is copied into sender-owned storage before returning so the
+// receive lease can be released immediately after this callback.
 static iree_status_t iree_net_control_channel_handle_ping(
     iree_net_control_channel_t* channel, iree_const_byte_span_t payload) {
   iree_net_control_frame_flags_t pong_flags = IREE_NET_CONTROL_PONG_FLAG_NONE;
@@ -214,55 +200,27 @@ static iree_status_t iree_net_control_channel_handle_ping(
     echo_size = IREE_NET_CONTROL_MAX_PING_ECHO_SIZE;
   }
 
-  // Build PONG frame contiguously on the stack.
-  uint8_t pong_buffer[IREE_NET_CONTROL_FRAME_HEADER_SIZE +
-                      IREE_NET_CONTROL_MAX_PING_ECHO_SIZE + sizeof(uint64_t)];
-  iree_host_size_t offset = 0;
-
-  // Header.
   if (channel->options.append_responder_timestamp) {
     pong_flags |= IREE_NET_CONTROL_PONG_FLAG_HAS_RESPONDER_TIMESTAMP;
   }
-  iree_net_control_frame_header_t pong_header;
-  iree_net_control_frame_header_initialize(IREE_NET_CONTROL_FRAME_TYPE_PONG,
-                                           pong_flags, &pong_header);
-  memcpy(pong_buffer + offset, &pong_header, sizeof(pong_header));
-  offset += sizeof(pong_header);
 
-  // Echoed PING payload (copied from recv buffer).
+  iree_async_span_t payload_spans[2];
+  iree_host_size_t payload_span_count = 0;
   if (echo_size > 0) {
-    memcpy(pong_buffer + offset, payload.data, echo_size);
-    offset += echo_size;
+    payload_spans[payload_span_count++] =
+        iree_async_span_from_ptr((void*)payload.data, echo_size);
   }
 
-  // Optional responder timestamp.
+  uint64_t timestamp_le = 0;
   if (channel->options.append_responder_timestamp) {
-    uint64_t timestamp_le = (uint64_t)iree_time_now();
-    memcpy(pong_buffer + offset, &timestamp_le, sizeof(timestamp_le));
-    offset += sizeof(timestamp_le);
+    timestamp_le = (uint64_t)iree_time_now();
+    payload_spans[payload_span_count++] =
+        iree_async_span_from_ptr(&timestamp_le, sizeof(timestamp_le));
   }
 
-  // Queue and flush. The batch buffer copy protects against the recv buffer
-  // dying when this callback returns.
-  iree_net_control_send_context_t* context = NULL;
-  iree_net_control_channel_send_completion_t completion = {
-      .fn = iree_net_control_channel_on_internal_send_complete,
-      .user_data = channel,
-  };
-  iree_status_t status = iree_net_control_send_context_allocate(
-      channel, /*operation_user_data=*/0, completion,
-      /*owned_buffer=*/NULL, &context);
-  if (iree_status_is_ok(status)) {
-    status = iree_net_frame_sender_queue(
-        &channel->sender, iree_make_const_byte_span(pong_buffer, offset));
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_net_frame_sender_flush(&channel->sender,
-                                         (uint64_t)(uintptr_t)context);
-  }
-  if (!iree_status_is_ok(status)) {
-    iree_net_control_send_context_free(channel, context);
-  }
+  iree_status_t status = iree_net_control_channel_send_protocol_frame(
+      channel, IREE_NET_CONTROL_FRAME_TYPE_PONG, pong_flags,
+      iree_async_span_list_make(payload_spans, payload_span_count));
   if (iree_status_code(status) == IREE_STATUS_RESOURCE_EXHAUSTED) {
     // Auto-PONG is an opportunistic liveness response. Backpressure means this
     // response is omitted; the peer can retry without poisoning the channel.
@@ -430,12 +388,10 @@ static void iree_net_control_channel_destroy(
 
 iree_status_t iree_net_control_channel_create(
     iree_net_message_endpoint_t endpoint, iree_host_size_t max_send_spans,
-    iree_async_buffer_pool_t* header_pool,
     iree_net_control_channel_options_t options,
     iree_net_control_channel_callbacks_t callbacks,
     iree_allocator_t host_allocator, iree_net_control_channel_t** out_channel) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_ASSERT_ARGUMENT(header_pool);
   IREE_ASSERT_ARGUMENT(out_channel);
   *out_channel = NULL;
 
@@ -469,7 +425,7 @@ iree_status_t iree_net_control_channel_create(
   };
   iree_status_t status = iree_net_frame_sender_initialize(
       &channel->sender, iree_net_control_channel_submit_send, channel,
-      max_send_spans, header_pool, send_complete, host_allocator,
+      max_send_spans, /*storage_pool=*/NULL, send_complete, host_allocator,
       host_allocator);
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(host_allocator, channel);
@@ -683,33 +639,12 @@ iree_status_t iree_net_control_channel_send_ping(
                             (int)state);
   }
 
-  // Serialize complete PING frame contiguously. queue() copies data into a
-  // batch buffer, so stack-local and caller-provided data are safe to free
-  // immediately after this function returns.
-  uint8_t frame_buffer[IREE_NET_CONTROL_FRAME_HEADER_SIZE + 256];
-  iree_host_size_t frame_size = iree_net_control_channel_serialize_frame(
-      frame_buffer, IREE_NET_CONTROL_FRAME_TYPE_PING, 0, NULL, 0, payload.data,
-      payload.data_length);
-
-  iree_net_control_send_context_t* context = NULL;
-  iree_net_control_channel_send_completion_t completion = {
-      .fn = iree_net_control_channel_on_internal_send_complete,
-      .user_data = channel,
-  };
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_net_control_send_context_allocate(
-              channel, /*operation_user_data=*/0, completion,
-              /*owned_buffer=*/NULL, &context));
-
-  iree_status_t status = iree_net_frame_sender_queue(
-      &channel->sender, iree_make_const_byte_span(frame_buffer, frame_size));
-  if (iree_status_is_ok(status)) {
-    status = iree_net_frame_sender_flush(&channel->sender,
-                                         (uint64_t)(uintptr_t)context);
-  }
-  if (!iree_status_is_ok(status)) {
-    iree_net_control_send_context_free(channel, context);
-  }
+  iree_async_span_t payload_span =
+      iree_async_span_from_ptr((void*)payload.data, payload.data_length);
+  iree_status_t status = iree_net_control_channel_send_protocol_frame(
+      channel, IREE_NET_CONTROL_FRAME_TYPE_PING, 0,
+      payload.data_length > 0 ? iree_async_span_list_make(&payload_span, 1)
+                              : iree_async_span_list_empty());
 
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -730,37 +665,25 @@ iree_status_t iree_net_control_channel_send_goaway(
                             (int)state);
   }
 
-  // Serialize complete GOAWAY frame contiguously.
   iree_net_control_goaway_payload_t goaway_payload;
   memset(&goaway_payload, 0, sizeof(goaway_payload));
   goaway_payload.reason_code = reason_code;
 
-  uint8_t frame_buffer[IREE_NET_CONTROL_FRAME_HEADER_SIZE +
-                       sizeof(iree_net_control_goaway_payload_t) + 256];
-  iree_host_size_t frame_size = iree_net_control_channel_serialize_frame(
-      frame_buffer, IREE_NET_CONTROL_FRAME_TYPE_GOAWAY, 0, &goaway_payload,
-      sizeof(goaway_payload), message.data, message.size);
-
-  iree_net_control_send_context_t* context = NULL;
-  iree_net_control_channel_send_completion_t completion = {
-      .fn = iree_net_control_channel_on_internal_send_complete,
-      .user_data = channel,
-  };
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_net_control_send_context_allocate(
-              channel, /*operation_user_data=*/0, completion,
-              /*owned_buffer=*/NULL, &context));
-
-  iree_status_t status = iree_net_frame_sender_queue(
-      &channel->sender, iree_make_const_byte_span(frame_buffer, frame_size));
-  if (iree_status_is_ok(status)) {
-    status = iree_net_frame_sender_flush(&channel->sender,
-                                         (uint64_t)(uintptr_t)context);
+  iree_async_span_t payload_spans[2];
+  iree_host_size_t payload_span_count = 1;
+  payload_spans[0] =
+      iree_async_span_from_ptr(&goaway_payload, sizeof(goaway_payload));
+  if (message.size > 0) {
+    payload_spans[payload_span_count++] =
+        iree_async_span_from_ptr((void*)message.data, message.size);
   }
-  if (!iree_status_is_ok(status)) {
-    iree_net_control_send_context_free(channel, context);
-  }
-  if (iree_status_is_ok(status)) {
+
+  iree_status_t status = iree_net_control_channel_send_protocol_frame(
+      channel, IREE_NET_CONTROL_FRAME_TYPE_GOAWAY, 0,
+      iree_async_span_list_make(payload_spans, payload_span_count));
+  if (iree_status_is_ok(status) &&
+      iree_net_control_channel_load_state(channel) ==
+          IREE_NET_CONTROL_CHANNEL_STATE_OPERATIONAL) {
     iree_net_control_channel_set_state(channel,
                                        IREE_NET_CONTROL_CHANNEL_STATE_DRAINING);
   }

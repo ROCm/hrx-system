@@ -367,7 +367,7 @@ class FrameSenderTest : public ::testing::Test {
 TEST_F(FrameSenderTest, InitializeSetsFields) {
   EXPECT_EQ(sender_.submit_fn, iree_net_frame_sender_carrier_submit);
   EXPECT_EQ(sender_.submit_fn_user_data, &mock_carrier_->base);
-  EXPECT_EQ(sender_.header_pool, test_pool_->get());
+  EXPECT_EQ(sender_.storage_pool, test_pool_->get());
   EXPECT_FALSE(sender_.has_batch_lease);
   EXPECT_EQ(sender_.batch_used, 0u);
   EXPECT_FALSE(iree_net_frame_sender_has_pending(&sender_));
@@ -377,7 +377,7 @@ TEST_F(FrameSenderTest, DeinitializeClearsFields) {
   iree_net_frame_sender_deinitialize(&sender_);
 
   EXPECT_EQ(sender_.submit_fn, nullptr);
-  EXPECT_EQ(sender_.header_pool, nullptr);
+  EXPECT_EQ(sender_.storage_pool, nullptr);
   EXPECT_FALSE(sender_.has_batch_lease);
 
   // Re-initialize for TearDown to work.
@@ -611,7 +611,7 @@ TEST_F(FrameSenderTest, SendRespectsCarrierMaxIov) {
 TEST_F(FrameSenderTest, SendLargeHeaderPoolExhausted) {
   // Headers larger than the inline capacity fall back to the buffer pool.
   mock_carrier_->auto_complete = false;
-  TestBufferPool large_header_pool(
+  TestBufferPool large_header_storage_pool(
       4, IREE_NET_FRAME_SENDER_INLINE_FRAME_CAPACITY * 2);
 
   iree_net_frame_sender_t large_header_sender;
@@ -621,8 +621,8 @@ TEST_F(FrameSenderTest, SendLargeHeaderPoolExhausted) {
   IREE_ASSERT_OK(iree_net_frame_sender_initialize(
       &large_header_sender, iree_net_frame_sender_carrier_submit,
       &mock_carrier_->base, mock_carrier_->base.max_iov,
-      large_header_pool.get(), complete_callback, iree_allocator_system(),
-      iree_allocator_system()));
+      large_header_storage_pool.get(), complete_callback,
+      iree_allocator_system(), iree_allocator_system()));
 
   std::vector<uint8_t> header_data(
       IREE_NET_FRAME_SENDER_INLINE_FRAME_CAPACITY + 1, 0x01);
@@ -666,7 +666,7 @@ TEST_F(FrameSenderTest, SendCarrierBackpressure) {
   EXPECT_EQ(ctx_.completions.size(), 0u);
 }
 
-TEST_F(FrameSenderTest, SendHeaderExceedsPoolBuffer) {
+TEST_F(FrameSenderTest, SendHeaderExceedsStoragePoolUsesHeap) {
   iree_host_size_t available_before = test_pool_->AvailableCount();
 
   // Create a header larger than both inline storage and the pool buffer.
@@ -676,17 +676,46 @@ TEST_F(FrameSenderTest, SendHeaderExceedsPoolBuffer) {
       iree_make_const_byte_span(large_header.data(), large_header.size());
   iree_async_span_list_t payload = iree_async_span_list_empty();
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_OUT_OF_RANGE,
-      iree_net_frame_sender_send(&sender_, header, payload, 0));
+  IREE_ASSERT_OK(iree_net_frame_sender_send(&sender_, header, payload, 0));
 
-  // Buffer should be released on error.
+  ASSERT_EQ(mock_carrier_->sends.size(), 1u);
+  ASSERT_EQ(mock_carrier_->sends[0].span_data.size(), 1u);
+  EXPECT_EQ(mock_carrier_->sends[0].span_data[0], large_header);
   EXPECT_EQ(test_pool_->AvailableCount(), available_before);
 }
 
 //===----------------------------------------------------------------------===//
 // queue() / flush() tests
 //===----------------------------------------------------------------------===//
+
+TEST_F(FrameSenderTest, QueueRejectsEmptyFrame) {
+  iree_host_size_t available_before = test_pool_->AvailableCount();
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_frame_sender_queue(&sender_, iree_const_byte_span_empty()));
+  EXPECT_EQ(test_pool_->AvailableCount(), available_before);
+  EXPECT_EQ(iree_net_frame_sender_queued_bytes(&sender_), 0u);
+}
+
+TEST_F(FrameSenderTest, QueueRequiresStoragePool) {
+  iree_net_frame_sender_t unpooled_sender;
+  iree_net_frame_send_complete_callback_t complete_callback;
+  complete_callback.fn = TestContext::OnComplete;
+  complete_callback.user_data = &ctx_;
+  IREE_ASSERT_OK(iree_net_frame_sender_initialize(
+      &unpooled_sender, iree_net_frame_sender_carrier_submit,
+      &mock_carrier_->base, mock_carrier_->base.max_iov,
+      /*storage_pool=*/nullptr, complete_callback, iree_allocator_system(),
+      iree_allocator_system()));
+
+  const uint8_t frame[] = {0x01};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_net_frame_sender_queue(
+          &unpooled_sender, iree_make_const_byte_span(frame, sizeof(frame))));
+
+  iree_net_frame_sender_deinitialize(&unpooled_sender);
+}
 
 TEST_F(FrameSenderTest, QueueAccumulatesFrames) {
   const uint8_t frame1[] = {0x01, 0x02, 0x03};
@@ -770,6 +799,26 @@ TEST_F(FrameSenderTest, FlushFailurePreservesBatchData) {
   // Retry should work.
   IREE_ASSERT_OK(iree_net_frame_sender_flush(&sender_, 0));
   EXPECT_EQ(mock_carrier_->sends.size(), 1u);
+}
+
+TEST_F(FrameSenderTest, DiscardBatchReleasesQueuedStorage) {
+  iree_host_size_t available_before = test_pool_->AvailableCount();
+  const uint8_t frame[] = {0x01, 0x02, 0x03};
+  IREE_ASSERT_OK(iree_net_frame_sender_queue(
+      &sender_, iree_make_const_byte_span(frame, sizeof(frame))));
+  EXPECT_EQ(test_pool_->AvailableCount(), available_before - 1);
+
+  iree_net_frame_sender_discard_batch(&sender_);
+
+  EXPECT_EQ(test_pool_->AvailableCount(), available_before);
+  EXPECT_FALSE(sender_.has_batch_lease);
+  EXPECT_EQ(iree_net_frame_sender_queued_bytes(&sender_), 0u);
+
+  iree_net_frame_sender_discard_batch(&sender_);
+
+  EXPECT_EQ(test_pool_->AvailableCount(), available_before);
+  IREE_ASSERT_OK(iree_net_frame_sender_flush(&sender_, 0));
+  EXPECT_TRUE(mock_carrier_->sends.empty());
 }
 
 //===----------------------------------------------------------------------===//

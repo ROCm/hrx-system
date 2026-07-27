@@ -239,10 +239,6 @@ typedef struct iree_net_control_channel_t iree_net_control_channel_t;
 // endpoint at creation; call iree_net_control_channel_activate() when ready to
 // begin receiving.
 //
-// The |header_pool| provides buffers for copying frame headers and batching
-// small control messages. Pool buffers must be at least 256 bytes. The pool
-// is borrowed — caller must keep it alive for the channel's lifetime.
-//
 // |max_send_spans| is the maximum number of scatter-gather spans per send
 // operation, accounting for overhead added by the endpoint's send path. For
 // endpoints that are passthroughs to the carrier, use carrier->max_iov. For
@@ -259,7 +255,6 @@ typedef struct iree_net_control_channel_t iree_net_control_channel_t;
 // The channel starts in CREATED state with ref_count = 1.
 iree_status_t iree_net_control_channel_create(
     iree_net_message_endpoint_t endpoint, iree_host_size_t max_send_spans,
-    iree_async_buffer_pool_t* header_pool,
     iree_net_control_channel_options_t options,
     iree_net_control_channel_callbacks_t callbacks,
     iree_allocator_t host_allocator, iree_net_control_channel_t** out_channel);
