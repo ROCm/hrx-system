@@ -11,6 +11,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/notification.h"
 #include "iree/hal/drivers/amdgpu/abi/signal.h"
+#include "iree/hal/drivers/amdgpu/hostcall_provider.h"
 #include "iree/hal/drivers/amdgpu/pm4_command_buffer.h"
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/slab_provider.h"
@@ -959,6 +960,7 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
     iree_async_proactor_t* proactor, iree_host_size_t host_ordinal,
     const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
     iree_host_size_t device_ordinal, iree_hal_amdgpu_asan_state_t* asan_state,
+    const iree_hal_amdgpu_hostcall_provider_t* hostcall_provider,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_physical_device_t* out_physical_device) {
   IREE_ASSERT_ARGUMENT(logical_device);
@@ -1074,6 +1076,20 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
         iree_hal_amdgpu_select_prepublished_kernarg_storage(
             fine_block_memory_pool,
             out_physical_device->memory_system.svm.direct_host_access);
+  }
+  if (iree_status_is_ok(status) && hostcall_provider) {
+    const iree_hal_amdgpu_hostcall_provider_device_info_t device_info = {
+        .physical_device_ordinal = device_ordinal,
+        .compute_unit_count = out_physical_device->compute_unit_count,
+        .maximum_waves_per_compute_unit =
+            out_physical_device->maximum_waves_per_compute_unit,
+        .wavefront_size = out_physical_device->wavefront_size,
+    };
+    status = iree_hal_amdgpu_hostcall_provider_state_create(
+        hostcall_provider, logical_device, libhsa, device_agent,
+        host_memory_pools->fine_pool, out_physical_device->host_numa_node,
+        &device_info, host_allocator,
+        &out_physical_device->hostcall_provider_state);
   }
 
   if (!iree_status_is_ok(status)) {
@@ -1336,6 +1352,10 @@ void iree_hal_amdgpu_physical_device_deinitialize(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_amdgpu_physical_device_deassign_frontier(physical_device);
+
+  iree_hal_amdgpu_hostcall_provider_state_destroy(
+      physical_device->hostcall_provider_state);
+  physical_device->hostcall_provider_state = NULL;
 
   iree_hal_amdgpu_host_signal_pool_deinitialize(
       &physical_device->host_signal_pool);
