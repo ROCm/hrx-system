@@ -356,13 +356,11 @@ static void loom_low_allocation_set_spill_insertion_point(
 
 static bool loom_low_allocation_defines_entry_preamble_value(
     const loom_op_t* function_op, const loom_op_t* op) {
-  if (!op || !loom_low_allocation_entry_preamble_op(op)) {
+  if (!loom_low_allocation_entry_preamble_op(op)) {
     return false;
   }
   const loom_region_t* body = loom_low_function_const_body(function_op);
-  const loom_block_t* entry_block =
-      body ? loom_region_const_entry_block(body) : NULL;
-  return op->parent_block == entry_block;
+  return op->parent_block == loom_region_const_entry_block(body);
 }
 
 static iree_status_t loom_low_allocation_insert_storage_reserves(
@@ -438,21 +436,6 @@ static bool loom_low_allocation_use_is_removed_block_arg_edge(
 static iree_status_t loom_low_allocation_rebuild_br_without_arg(
     loom_module_t* module, loom_op_t* branch_op, uint16_t arg_index,
     iree_arena_allocator_t* arena) {
-  if (!loom_low_br_isa(branch_op)) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "expected low.br while removing block argument");
-  }
-  if (arg_index >= branch_op->operand_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "low.br payload index %u out of range for %u operand(s)",
-        (unsigned)arg_index, (unsigned)branch_op->operand_count);
-  }
-  if (!branch_op->parent_block) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "low.br is detached while removing payload");
-  }
-
   const uint16_t old_count = branch_op->operand_count;
   const uint16_t new_count = (uint16_t)(old_count - 1);
   loom_value_id_t* new_args = NULL;
@@ -491,25 +474,13 @@ static iree_status_t loom_low_allocation_insert_spill_store(
   bool extends_entry_prefix = false;
   loom_location_id_t location = function_op->location;
   if (loom_value_is_block_arg(value)) {
-    loom_block_t* block = loom_def_block(value->def);
-    if (!block) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "spilled block argument has no defining block");
-    }
+    loom_block_t* block = loom_value_def_block(value);
     loom_builder_initialize(module, &module->arena, block, &builder);
     loom_low_allocation_set_spill_insertion_point(&builder, storage_prefix,
                                                   block);
     extends_entry_prefix = block == storage_prefix->entry_block;
   } else {
-    loom_op_t* defining_op = loom_def_op(value->def);
-    if (!defining_op) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "spilled op result has no defining op");
-    }
-    if (!defining_op->parent_block) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "spilled op result defining op is detached");
-    }
+    loom_op_t* defining_op = loom_value_def_op(value);
     loom_builder_initialize(module, &module->arena, defining_op->parent_block,
                             &builder);
     if (loom_low_allocation_defines_entry_preamble_value(function_op,
@@ -805,24 +776,9 @@ static iree_status_t loom_low_allocation_materialize_block_arg_edges(
         (loom_block_t*)table->cfg_graph.blocks[predecessors.values[i]].block;
     loom_op_t* branch_op =
         (loom_op_t*)loom_block_const_last_op(predecessor_block);
-    if (!branch_op || !loom_low_br_isa(branch_op) ||
-        loom_low_br_dest(branch_op) != block) {
-      continue;
-    }
-    if (arg_index >= branch_op->operand_count) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "low.br predecessor payload count is stale for spilled block "
-          "argument");
-    }
 
     const loom_value_id_t payload =
         loom_op_const_operands(branch_op)[arg_index];
-    if (payload == LOOM_VALUE_ID_INVALID || payload >= module->values.count) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "low.br predecessor payload is invalid for spilled block argument");
-    }
     if (reload_count != 0 && payload != plan->value_id) {
       loom_builder_t builder;
       loom_builder_initialize(module, &module->arena, branch_op->parent_block,
@@ -832,14 +788,6 @@ static iree_status_t loom_low_allocation_materialize_block_arg_edges(
       IREE_RETURN_IF_ERROR(
           loom_low_spill_build(&builder, payload, storage_value_id, 0,
                                branch_op->location, &spill_op));
-      if (store_traffic.count == UINT32_MAX) {
-        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "materialized spill count overflow");
-      }
-      if (plan->byte_size > UINT64_MAX - store_traffic.bytes) {
-        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "materialized spill byte count overflow");
-      }
       ++store_traffic.count;
       store_traffic.bytes += plan->byte_size;
     }

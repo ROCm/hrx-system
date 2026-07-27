@@ -198,8 +198,8 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
 }
 
 static iree_status_t loom_low_allocation_spill_plan_value_store_count(
-    const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
-    loom_value_id_t value_id, const loom_value_t* value, uint32_t reload_count,
+    const loom_cfg_graph_t* cfg_graph, loom_value_id_t value_id,
+    const loom_value_t* value, uint32_t reload_count,
     uint32_t* out_store_count) {
   *out_store_count = 0;
   if (reload_count == 0) {
@@ -225,29 +225,10 @@ static iree_status_t loom_low_allocation_spill_plan_value_store_count(
     const loom_cfg_edge_info_t* edge =
         loom_cfg_graph_edge(cfg_graph, predecessor_edges.values[i]);
     const loom_op_t* terminator = edge->terminator;
-    if (!terminator || !loom_low_br_isa(terminator) ||
-        loom_low_br_dest(terminator) != block) {
-      continue;
-    }
-    if (arg_index >= terminator->operand_count) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "low.br predecessor payload count is stale for spilled block "
-          "argument");
-    }
     const loom_value_id_t payload =
         loom_op_const_operands(terminator)[arg_index];
-    if (payload == LOOM_VALUE_ID_INVALID || payload >= module->values.count) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "low.br predecessor payload is invalid for spilled block argument");
-    }
     if (payload == value_id) {
       continue;
-    }
-    if (store_count == UINT32_MAX) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "spill store count overflow");
     }
     ++store_count;
   }
@@ -289,7 +270,7 @@ iree_status_t loom_low_allocation_spill_plan_traffic(
       &reload_bytes);
   uint32_t store_count = 0;
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_value_store_count(
-      module, cfg_graph, value_id, value, reload_count, &store_count));
+      cfg_graph, value_id, value, reload_count, &store_count));
   *out_traffic = (loom_low_allocation_spill_plan_traffic_t){
       .store_count = store_count,
       .store_bytes = (uint64_t)store_count * byte_size,
