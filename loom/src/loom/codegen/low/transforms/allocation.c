@@ -544,7 +544,7 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
         .emitter = pass->diagnostic_emitter,
     };
     IREE_RETURN_IF_ERROR(loom_low_allocation_materialize_spills(
-        module, &table, &materialization_options, pass->arena, &result));
+        &table, &materialization_options, pass->arena, &result));
     if (result.error_count != 0) {
       return iree_ok_status();
     }

@@ -892,8 +892,7 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
       materialization_options.emitter = frame_options->emitter;
     }
     IREE_RETURN_IF_ERROR(loom_low_allocation_materialize_spills(
-        module, &frame.allocation, &materialization_options, scratch_arena,
-        &result));
+        &frame.allocation, &materialization_options, scratch_arena, &result));
     if (result.error_count != 0) {
       return iree_ok_status();
     }

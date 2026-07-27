@@ -70,6 +70,14 @@ typedef struct loom_low_allocation_storage_prefix_t {
   bool generated_storage_extends_entry_prefix;
 } loom_low_allocation_storage_prefix_t;
 
+static const loom_low_allocation_assignment_t*
+loom_low_allocation_spill_plan_assignment(
+    const loom_low_allocation_table_t* table,
+    const loom_low_allocation_spill_plan_t* plan) {
+  IREE_ASSERT_LT(plan->assignment_index, table->assignment_count);
+  return &table->assignments[plan->assignment_index];
+}
+
 static void loom_low_allocation_record_materialized_spill(
     const loom_low_allocation_table_t* table,
     const loom_low_allocation_spill_plan_t* plan,
@@ -77,9 +85,8 @@ static void loom_low_allocation_record_materialized_spill(
     loom_low_materialized_traffic_t reload_traffic,
     loom_low_allocation_materialized_spill_flags_t flags,
     loom_low_allocation_materialized_spill_t* record) {
-  IREE_ASSERT_LT(plan->assignment_index, table->assignment_count);
   const loom_low_allocation_assignment_t* assignment =
-      &table->assignments[plan->assignment_index];
+      loom_low_allocation_spill_plan_assignment(table, plan);
   *record = (loom_low_allocation_materialized_spill_t){
       .value_id = plan->value_id,
       .value_class = assignment->value_class,
@@ -103,13 +110,8 @@ static iree_status_t loom_low_allocation_emit_materialized_spill(
     loom_low_materialized_traffic_t store_traffic,
     loom_low_materialized_traffic_t reload_traffic,
     iree_diagnostic_emitter_t emitter) {
-  if (plan->assignment_index >= table->assignment_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "allocation spill plan references an out-of-range assignment");
-  }
   const loom_low_allocation_assignment_t* assignment =
-      &table->assignments[plan->assignment_index];
+      loom_low_allocation_spill_plan_assignment(table, plan);
   const loom_op_t* origin_op = loom_low_diagnostic_value_origin_op(
       table->module, plan->value_id, table->function_op);
   loom_diagnostic_param_t params[] = {
@@ -141,25 +143,20 @@ static iree_status_t loom_low_allocation_emit_materialized_spill(
   return iree_diagnostic_emit(emitter, &emission);
 }
 
-static iree_status_t loom_low_allocation_map_slot_space(
-    loom_low_spill_slot_space_t slot_space, loom_storage_space_t* out_space) {
+static loom_storage_space_t loom_low_allocation_map_slot_space(
+    loom_low_spill_slot_space_t slot_space) {
   switch (slot_space) {
     case LOOM_LOW_SPILL_SLOT_SPACE_STACK:
-      *out_space = LOOM_STORAGE_SPACE_STACK;
-      return iree_ok_status();
+      return LOOM_STORAGE_SPACE_STACK;
     case LOOM_LOW_SPILL_SLOT_SPACE_SCRATCH:
-      *out_space = LOOM_STORAGE_SPACE_SCRATCH;
-      return iree_ok_status();
+      return LOOM_STORAGE_SPACE_SCRATCH;
     case LOOM_LOW_SPILL_SLOT_SPACE_PRIVATE:
-      *out_space = LOOM_STORAGE_SPACE_PRIVATE;
-      return iree_ok_status();
+      return LOOM_STORAGE_SPACE_PRIVATE;
     case LOOM_LOW_SPILL_SLOT_SPACE_LDS:
-      *out_space = LOOM_STORAGE_SPACE_WORKGROUP;
-      return iree_ok_status();
+      return LOOM_STORAGE_SPACE_WORKGROUP;
     default:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unknown allocation spill slot space %u",
-                              (unsigned)slot_space);
+      IREE_CHECK_UNREACHABLE("unknown generated spill slot space");
+      return LOOM_STORAGE_SPACE_COUNT_;
   }
 }
 
@@ -169,13 +166,8 @@ static iree_status_t loom_low_allocation_emit_unsupported_spill_storage_space(
     loom_storage_space_t storage_space,
     loom_low_storage_space_set_t supported_storage_spaces,
     iree_diagnostic_emitter_t emitter) {
-  if (plan->assignment_index >= table->assignment_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "allocation spill plan references an out-of-range assignment");
-  }
   const loom_low_allocation_assignment_t* assignment =
-      &table->assignments[plan->assignment_index];
+      loom_low_allocation_spill_plan_assignment(table, plan);
   iree_string_view_t supported_storage_space_names[LOOM_STORAGE_SPACE_COUNT_];
   const iree_host_size_t supported_storage_space_count =
       loom_low_storage_space_set_names(
@@ -218,9 +210,8 @@ loom_low_allocation_validate_supported_spill_storage_spaces(
   }
   for (iree_host_size_t i = 0; i < spill_plan_count; ++i) {
     const loom_low_allocation_spill_plan_t* plan = &table->spill_plans[i];
-    loom_storage_space_t storage_space = LOOM_STORAGE_SPACE_COUNT_;
-    IREE_RETURN_IF_ERROR(
-        loom_low_allocation_map_slot_space(plan->slot_space, &storage_space));
+    const loom_storage_space_t storage_space =
+        loom_low_allocation_map_slot_space(plan->slot_space);
     if (loom_low_storage_space_set_contains(options->supported_storage_spaces,
                                             storage_space)) {
       continue;
@@ -235,36 +226,14 @@ loom_low_allocation_validate_supported_spill_storage_spaces(
 }
 
 static iree_status_t loom_low_allocation_set_storage_value_name(
-    loom_module_t* module, loom_symbol_ref_t function_ref,
+    loom_module_t* module, iree_string_view_t function_name,
     iree_host_size_t storage_index, loom_value_id_t storage_value_id,
     iree_arena_allocator_t* arena) {
-  if (function_ref.module_id != 0 ||
-      function_ref.symbol_id >= module->symbols.count) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "spill storage function symbol is not defined");
-  }
-  loom_string_id_t function_name_id =
-      module->symbols.entries[function_ref.symbol_id].name_id;
-  if (function_name_id >= module->strings.count) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "spill storage function symbol has no name");
-  }
-  iree_string_view_t function_name = module->strings.entries[function_name_id];
-
   char suffix[64] = {0};
-  int suffix_length =
+  const int suffix_length =
       snprintf(suffix, sizeof(suffix), "_spill_storage_%zu", storage_index);
-  if (suffix_length < 0 || (iree_host_size_t)suffix_length >= sizeof(suffix)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "spill storage value name overflow");
-  }
-
-  iree_host_size_t name_length = 0;
-  if (!iree_host_size_checked_add(
-          function_name.size, (iree_host_size_t)suffix_length, &name_length)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "spill storage value name overflow");
-  }
+  const iree_host_size_t name_length =
+      function_name.size + (iree_host_size_t)suffix_length;
 
   char* name_storage = NULL;
   if (name_length > 0) {
@@ -370,7 +339,8 @@ static iree_status_t loom_low_allocation_insert_storage_reserves(
     loom_low_allocation_storage_prefix_t* storage_prefix,
     iree_host_size_t spill_plan_count, iree_arena_allocator_t* arena,
     loom_low_materialized_spill_slot_t* slots) {
-  loom_symbol_ref_t function_ref = loom_low_function_callee(table->function_op);
+  const iree_string_view_t function_name =
+      loom_low_diagnostic_function_name(module, table->function_op);
   const iree_host_size_t storage_name_start =
       storage_prefix->storage_reserve_count;
   loom_builder_t builder;
@@ -379,9 +349,8 @@ static iree_status_t loom_low_allocation_insert_storage_reserves(
       &builder, (loom_op_t*)table->function_op, storage_prefix);
   for (iree_host_size_t i = 0; i < spill_plan_count; ++i) {
     const loom_low_allocation_spill_plan_t* plan = &table->spill_plans[i];
-    loom_storage_space_t storage_space = LOOM_STORAGE_SPACE_COUNT_;
-    IREE_RETURN_IF_ERROR(
-        loom_low_allocation_map_slot_space(plan->slot_space, &storage_space));
+    const loom_storage_space_t storage_space =
+        loom_low_allocation_map_slot_space(plan->slot_space);
 
     loom_op_t* reserve_op = NULL;
     IREE_RETURN_IF_ERROR(loom_low_storage_reserve_build(
@@ -393,14 +362,9 @@ static iree_status_t loom_low_allocation_insert_storage_reserves(
     if (storage_prefix->generated_storage_extends_entry_prefix) {
       storage_prefix->entry_traffic_insertion_anchor = reserve_op;
     }
-    iree_host_size_t storage_name_index = 0;
-    if (!iree_host_size_checked_add(storage_name_start, i,
-                                    &storage_name_index)) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "spill storage name index overflows host size");
-    }
+    const iree_host_size_t storage_name_index = storage_name_start + i;
     IREE_RETURN_IF_ERROR(loom_low_allocation_set_storage_value_name(
-        module, function_ref, storage_name_index, storage_value_id, arena));
+        module, function_name, storage_name_index, storage_value_id, arena));
     loom_builder_set_after(&builder, reserve_op);
     slots[i] = (loom_low_materialized_spill_slot_t){
         .storage_value_id = storage_value_id,
@@ -687,9 +651,8 @@ static iree_status_t loom_low_allocation_insert_reloads_for_uses(
   *out_reload_traffic = (loom_low_materialized_traffic_t){0};
   loom_low_materialized_traffic_t reload_traffic = {0};
   loom_low_slice_reload_plan_t slice_reload_plan = {0};
-  IREE_ASSERT_LT(plan->assignment_index, table->assignment_count);
   const loom_low_allocation_assignment_t* assignment =
-      &table->assignments[plan->assignment_index];
+      loom_low_allocation_spill_plan_assignment(table, plan);
   const loom_region_t* body = loom_low_function_const_body(table->function_op);
   if (use_count != 0) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_prepare_slice_reloads(
@@ -854,17 +817,14 @@ static iree_status_t loom_low_allocation_materialize_one_spill_plan(
 }
 
 iree_status_t loom_low_allocation_materialize_spills(
-    loom_module_t* module, const loom_low_allocation_table_t* table,
+    const loom_low_allocation_table_t* table,
     const loom_low_allocation_materialization_options_t* options,
     iree_arena_allocator_t* arena,
     loom_low_allocation_materialization_result_t* out_result) {
+  loom_module_t* module = table->module;
   loom_low_allocation_materialization_result_t result = {0};
   if (out_result) *out_result = result;
 
-  if (table->module != module) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "allocation table belongs to a different module");
-  }
   if (table->spill_plan_count == 0) return iree_ok_status();
 
   const bool emit_spill_diagnostics =
@@ -898,7 +858,6 @@ iree_status_t loom_low_allocation_materialize_spills(
   loom_low_materialized_spill_slot_t* slots = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, spill_plan_count, sizeof(*slots), (void**)&slots));
-  memset(slots, 0, spill_plan_count * sizeof(*slots));
   loom_low_allocation_materialized_spill_t* materialized_spills = NULL;
   if (record_materialized_spills) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
