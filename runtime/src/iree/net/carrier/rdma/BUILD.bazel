@@ -91,6 +91,7 @@ iree_runtime_cc_library(
         ":queue_pair",
         ":receive_queue",
         ":region",
+        ":send_payload",
         ":send_reservation_table",
         ":send_window",
         ":sge",
@@ -400,6 +401,33 @@ iree_runtime_cc_test(
     target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":send_reservation_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "send_payload",
+    srcs = ["send_payload.c"],
+    hdrs = ["send_payload.h"],
+    target_compatible_with = _RDMA_COMPATIBLE,
+    deps = [
+        ":connection_data",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/net:carrier",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "send_payload_test",
+    srcs = ["send_payload_test.cc"],
+    target_compatible_with = _RDMA_COMPATIBLE,
+    deps = [
+        ":send_payload",
+        ":sge",
+        "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

@@ -20,6 +20,7 @@
 #include "iree/net/carrier/rdma/queue_pair.h"
 #include "iree/net/carrier/rdma/receive_queue.h"
 #include "iree/net/carrier/rdma/region.h"
+#include "iree/net/carrier/rdma/send_payload.h"
 #include "iree/net/carrier/rdma/send_reservation_table.h"
 #include "iree/net/carrier/rdma/send_window.h"
 #include "iree/net/carrier/rdma/sge.h"
@@ -82,7 +83,7 @@ struct iree_net_rdma_carrier_t {
   // Active memory-window exports returned from register_buffer.
   iree_net_rdma_carrier_memory_export_t* memory_exports;
 
-  // Reservations and pending-post FIFO for staged SEND leases.
+  // Reservations and pending-post FIFO for accepted SEND payloads.
   iree_net_rdma_send_reservation_table_t send_reservation_table;
 
   // rdma_cm ID owned after successful carrier creation.
@@ -1925,149 +1926,10 @@ iree_net_rdma_carrier_query_direct_write_budget(
   return budget;
 }
 
-static iree_status_t iree_net_rdma_carrier_total_span_length(
-    iree_async_span_list_t spans, iree_host_size_t* out_total_length) {
-  *out_total_length = 0;
-  iree_status_t status = iree_ok_status();
-  if (spans.count > 0 && !spans.values) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "span list values must not be NULL");
-  }
-  for (iree_host_size_t i = 0; i < spans.count && iree_status_is_ok(status);
-       ++i) {
-    iree_host_size_t new_total = 0;
-    if (iree_host_size_checked_add(*out_total_length, spans.values[i].length,
-                                   &new_total)) {
-      *out_total_length = new_total;
-    } else {
-      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "send span length total overflows host size");
-    }
-  }
-  return status;
-}
-
-static bool iree_net_rdma_carrier_span_uses_rdma_region(
-    iree_async_span_t span) {
-  return span.region && span.region->type == IREE_ASYNC_REGION_TYPE_RDMA;
-}
-
-static iree_status_t iree_net_rdma_carrier_span_list_requires_staging(
-    iree_async_span_list_t spans, bool* out_requires_staging) {
-  *out_requires_staging = false;
-  iree_status_t status = iree_ok_status();
-  if (spans.count > 0 && !spans.values) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "span list values must not be NULL");
-  }
-  for (iree_host_size_t i = 0; i < spans.count && iree_status_is_ok(status);
-       ++i) {
-    if (!iree_net_rdma_carrier_span_uses_rdma_region(spans.values[i])) {
-      *out_requires_staging = true;
-      break;
-    }
-  }
-  return status;
-}
-
-static iree_status_t iree_net_rdma_carrier_validate_staging_source_span(
-    iree_async_span_t span, iree_host_size_t span_index) {
-  if (!iree_async_span_is_cpu_accessible(span)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "send staging requires CPU-accessible span %" PRIhsz, span_index);
-  }
-  if (span.region) {
-    bool in_range = span.offset <= span.region->length &&
-                    span.length <= span.region->length - span.offset;
-    if (!in_range) {
-      iree_host_size_t span_end = span.length > SIZE_MAX - span.offset
-                                      ? SIZE_MAX
-                                      : span.offset + span.length;
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "send span %" PRIhsz " [%" PRIhsz ", %" PRIhsz
-                              ") exceeds region length %" PRIhsz,
-                              span_index, span.offset, span_end,
-                              span.region->length);
-    }
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t iree_net_rdma_carrier_acquire_send_staging_buffer_locked(
     iree_net_rdma_carrier_t* carrier, iree_async_buffer_lease_t* out_lease) {
   memset(out_lease, 0, sizeof(*out_lease));
   return iree_async_buffer_pool_acquire(carrier->send_staging_pool, out_lease);
-}
-
-static iree_status_t iree_net_rdma_carrier_acquire_send_staging_buffer(
-    iree_net_rdma_carrier_t* carrier, iree_async_buffer_lease_t* out_lease) {
-  iree_slim_mutex_lock(&carrier->queue_mutex);
-  iree_status_t status =
-      iree_net_rdma_carrier_acquire_send_staging_buffer_locked(carrier,
-                                                               out_lease);
-  iree_slim_mutex_unlock(&carrier->queue_mutex);
-  return status;
-}
-
-static iree_status_t iree_net_rdma_carrier_stage_send_data(
-    iree_net_rdma_carrier_t* carrier, iree_async_span_list_t spans,
-    iree_host_size_t total_length, iree_async_buffer_lease_t* out_lease,
-    struct ibv_sge* out_scatter_gather_entry) {
-  memset(out_lease, 0, sizeof(*out_lease));
-  memset(out_scatter_gather_entry, 0, sizeof(*out_scatter_gather_entry));
-
-  iree_status_t status = iree_ok_status();
-  if (!carrier->send_staging_pool) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "RDMA send staging pool is not available");
-  }
-
-  iree_host_size_t buffer_size = 0;
-  if (iree_status_is_ok(status)) {
-    buffer_size =
-        iree_async_buffer_pool_buffer_size(carrier->send_staging_pool);
-    if (total_length > buffer_size) {
-      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "send payload size %" PRIhsz
-                                " exceeds RDMA staging buffer size %" PRIhsz,
-                                total_length, buffer_size);
-    }
-  }
-
-  for (iree_host_size_t i = 0; i < spans.count && iree_status_is_ok(status);
-       ++i) {
-    status =
-        iree_net_rdma_carrier_validate_staging_source_span(spans.values[i], i);
-  }
-
-  iree_async_buffer_lease_t lease;
-  memset(&lease, 0, sizeof(lease));
-  if (iree_status_is_ok(status)) {
-    status = iree_net_rdma_carrier_acquire_send_staging_buffer(carrier, &lease);
-  }
-
-  if (iree_status_is_ok(status)) {
-    uint8_t* target_ptr = iree_async_span_ptr(lease.span);
-    for (iree_host_size_t i = 0; i < spans.count; ++i) {
-      iree_async_span_t span = spans.values[i];
-      if (span.length > 0) {
-        memcpy(target_ptr, iree_async_span_ptr(span), span.length);
-        target_ptr += span.length;
-      }
-    }
-
-    iree_async_span_t staged_span = iree_async_span_make(
-        lease.span.region, lease.span.offset, total_length);
-    status = iree_net_rdma_sge_from_span(staged_span, out_scatter_gather_entry);
-  }
-
-  if (iree_status_is_ok(status)) {
-    *out_lease = lease;
-  } else {
-    iree_async_buffer_lease_release(&lease);
-  }
-  return status;
 }
 
 // Posts one send-queue work request with queue_mutex held.
@@ -2193,49 +2055,17 @@ static bool iree_net_rdma_carrier_can_post_send_work_request_locked(
                                              acquire_flags) > 0;
 }
 
-static iree_status_t iree_net_rdma_carrier_sge_list_from_reservation(
-    iree_net_rdma_send_reservation_t* reservation,
-    iree_host_size_t scatter_gather_entry_capacity,
-    struct ibv_sge* scatter_gather_entries,
-    int* out_scatter_gather_entry_count) {
-  *out_scatter_gather_entry_count = 0;
-  switch (reservation->payload) {
-    case IREE_NET_RDMA_SEND_RESERVATION_PAYLOAD_STAGED_BUFFER: {
-      iree_async_span_t staged_span = iree_async_span_make(
-          reservation->buffer_lease.span.region,
-          reservation->buffer_lease.span.offset, reservation->byte_length);
-      IREE_RETURN_IF_ERROR(
-          iree_net_rdma_sge_from_span(staged_span, &scatter_gather_entries[0]));
-      *out_scatter_gather_entry_count = 1;
-      return iree_ok_status();
-    }
-    case IREE_NET_RDMA_SEND_RESERVATION_PAYLOAD_SPAN_LIST: {
-      iree_async_span_list_t spans = iree_async_span_list_make(
-          reservation->spans, reservation->span_count);
-      return iree_net_rdma_sge_list_from_span_list(
-          spans, scatter_gather_entry_capacity, scatter_gather_entries,
-          out_scatter_gather_entry_count);
-    }
-    default:
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "reservation payload kind %u is not valid",
-                              (uint32_t)reservation->payload);
-  }
-}
-
-static iree_status_t iree_net_rdma_carrier_accept_staged_send(
-    iree_net_rdma_carrier_t* carrier,
+static iree_status_t iree_net_rdma_carrier_accept_send(
+    iree_net_rdma_carrier_t* carrier, iree_async_span_list_t spans,
     iree_net_rdma_send_reservation_completion_t completion, uint64_t user_data,
     iree_host_size_t byte_length,
     iree_async_buffer_lease_t* retained_buffer_lease,
-    struct ibv_sge* scatter_gather_entry) {
-  iree_status_t status = iree_ok_status();
+    struct ibv_sge* scatter_gather_entries, int scatter_gather_entry_count) {
   iree_net_rdma_work_request_operation_t operation =
       IREE_NET_RDMA_WORK_REQUEST_OPERATION_NONE;
-  if (iree_status_is_ok(status)) {
-    status = iree_net_rdma_carrier_operation_from_send_reservation_completion(
-        completion, &operation);
-  }
+  iree_status_t status =
+      iree_net_rdma_carrier_operation_from_send_reservation_completion(
+          completion, &operation);
 
   iree_status_t async_error_status = iree_ok_status();
   if (iree_status_is_ok(status)) {
@@ -2270,8 +2100,8 @@ static iree_status_t iree_net_rdma_carrier_accept_staged_send(
     if (can_post) {
       struct ibv_send_wr work_request;
       memset(&work_request, 0, sizeof(work_request));
-      work_request.sg_list = scatter_gather_entry;
-      work_request.num_sge = 1;
+      work_request.sg_list = scatter_gather_entries;
+      work_request.num_sge = scatter_gather_entry_count;
       work_request.opcode = IBV_WR_SEND;
       work_request.send_flags = IBV_SEND_SIGNALED;
 
@@ -2281,7 +2111,7 @@ static iree_status_t iree_net_rdma_carrier_accept_staged_send(
     } else if (iree_status_is_ok(status)) {
       iree_net_carrier_send_handle_t handle = 0;
       status = iree_net_rdma_send_reservation_table_acquire(
-          &carrier->send_reservation_table, retained_buffer_lease, byte_length,
+          &carrier->send_reservation_table, spans, retained_buffer_lease,
           completion, user_data, &handle);
       bool reservation_acquired = iree_status_is_ok(status);
       if (iree_status_is_ok(status)) {
@@ -2310,91 +2140,6 @@ static iree_status_t iree_net_rdma_carrier_accept_staged_send(
     }
     iree_slim_mutex_unlock(&carrier->queue_mutex);
   }
-
-  if (!iree_status_is_ok(status)) {
-    iree_async_buffer_lease_release(retained_buffer_lease);
-  }
-  if (!iree_status_is_ok(async_error_status)) {
-    iree_net_rdma_carrier_notify_error(carrier, async_error_status);
-  }
-  return status;
-}
-
-static iree_status_t iree_net_rdma_carrier_accept_span_list_send(
-    iree_net_rdma_carrier_t* carrier, iree_async_span_list_t spans,
-    uint64_t user_data, iree_host_size_t byte_length,
-    struct ibv_sge* scatter_gather_entries, int scatter_gather_entry_count) {
-  iree_status_t async_error_status = iree_ok_status();
-  iree_status_t status = iree_ok_status();
-
-  iree_slim_mutex_lock(&carrier->queue_mutex);
-  if (iree_net_carrier_state(&carrier->base) != IREE_NET_CARRIER_STATE_ACTIVE) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "carrier is not active");
-  }
-  if (iree_status_is_ok(status) &&
-      iree_any_bit_set(carrier->flags,
-                       IREE_NET_RDMA_CARRIER_FLAG_SHUTDOWN_REQUESTED)) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "carrier send direction is shut down");
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_net_rdma_carrier_get_failure_status(carrier);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_net_rdma_carrier_validate_send_length_locked(carrier, byte_length);
-  }
-
-  iree_net_rdma_send_window_acquire_flags_t acquire_flags =
-      IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_REMOTE_RECV_CREDIT;
-  bool pending_fifo_empty = iree_net_rdma_send_reservation_table_pending_count(
-                                &carrier->send_reservation_table) == 0;
-  bool can_post = iree_status_is_ok(status) && pending_fifo_empty &&
-                  iree_net_rdma_carrier_can_post_send_work_request_locked(
-                      carrier, acquire_flags);
-  if (can_post) {
-    struct ibv_send_wr work_request;
-    memset(&work_request, 0, sizeof(work_request));
-    work_request.sg_list = scatter_gather_entries;
-    work_request.num_sge = scatter_gather_entry_count;
-    work_request.opcode = IBV_WR_SEND;
-    work_request.send_flags = IBV_SEND_SIGNALED;
-
-    status = iree_net_rdma_carrier_post_send_work_request_locked(
-        carrier, IREE_NET_RDMA_WORK_REQUEST_OPERATION_SEND, acquire_flags,
-        user_data, byte_length, /*pending_operation_delta=*/1,
-        /*retained_buffer_lease=*/NULL, &work_request);
-  } else if (iree_status_is_ok(status)) {
-    iree_net_carrier_send_handle_t handle = 0;
-    status = iree_net_rdma_send_reservation_table_acquire_span_list(
-        &carrier->send_reservation_table, spans, byte_length,
-        IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND, user_data, &handle);
-    bool reservation_acquired = iree_status_is_ok(status);
-    if (iree_status_is_ok(status)) {
-      status = iree_net_rdma_send_reservation_table_commit(
-          &carrier->send_reservation_table, handle);
-    }
-    if (!iree_status_is_ok(status) && reservation_acquired) {
-      iree_net_rdma_send_reservation_t reservation;
-      memset(&reservation, 0, sizeof(reservation));
-      iree_status_t resolve_status =
-          iree_net_rdma_send_reservation_table_resolve(
-              &carrier->send_reservation_table, handle, &reservation);
-      status = iree_status_join(status, resolve_status);
-      if (iree_status_is_ok(resolve_status)) {
-        iree_async_buffer_lease_release(&reservation.buffer_lease);
-      }
-    }
-    if (iree_status_is_ok(status)) {
-      iree_net_rdma_carrier_add_pending_operations(carrier, 1);
-      if (iree_net_rdma_carrier_remote_recv_credits_exhausted_locked(carrier)) {
-        async_error_status =
-            iree_net_rdma_carrier_arm_credit_wake_locked(carrier);
-      }
-    }
-  }
-  iree_slim_mutex_unlock(&carrier->queue_mutex);
 
   if (!iree_status_is_ok(async_error_status)) {
     iree_net_rdma_carrier_notify_error(carrier, async_error_status);
@@ -2427,9 +2172,11 @@ iree_net_rdma_carrier_try_post_pending_committed_sends_locked(
     struct ibv_sge scatter_gather_entries[IREE_NET_RDMA_CARRIER_MAX_SEND_SGE];
     int scatter_gather_entry_count = 0;
     if (iree_status_is_ok(status)) {
-      status = iree_net_rdma_carrier_sge_list_from_reservation(
-          &reservation_view, IREE_ARRAYSIZE(scatter_gather_entries),
-          scatter_gather_entries, &scatter_gather_entry_count);
+      iree_async_span_list_t spans = iree_async_span_list_make(
+          reservation_view.spans, reservation_view.span_count);
+      status = iree_net_rdma_sge_list_from_span_list(
+          spans, IREE_ARRAYSIZE(scatter_gather_entries), scatter_gather_entries,
+          &scatter_gather_entry_count);
     }
     if (iree_status_is_ok(status)) {
       status = iree_net_rdma_carrier_validate_send_length_locked(
@@ -2623,56 +2370,27 @@ static iree_status_t iree_net_rdma_carrier_send(
                             params->data.count, base_carrier->max_iov);
   }
 
-  bool requires_staging = false;
-  iree_status_t status = iree_net_rdma_carrier_span_list_requires_staging(
-      params->data, &requires_staging);
-
-  iree_host_size_t total_length = 0;
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_net_rdma_carrier_total_span_length(params->data, &total_length);
-  }
-  if (iree_status_is_ok(status) && total_length == 0) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "send payload must not be empty");
-  }
-  if (iree_status_is_ok(status) && requires_staging &&
-      iree_any_bit_set(params->flags, IREE_NET_SEND_FLAG_ZERO_COPY)) {
-    status =
-        iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                         "RDMA ZERO_COPY send requires RDMA-registered spans");
-  }
-
+  iree_net_rdma_send_payload_t payload;
+  iree_status_t status = iree_net_rdma_send_payload_prepare(
+      params->data, params->flags, carrier->send_staging_pool, &payload);
   struct ibv_sge scatter_gather_entries[IREE_NET_RDMA_CARRIER_MAX_SEND_SGE];
   int scatter_gather_entry_count = 0;
-  iree_async_buffer_lease_t retained_buffer_lease;
-  memset(&retained_buffer_lease, 0, sizeof(retained_buffer_lease));
-  if (iree_status_is_ok(status) && requires_staging) {
-    status = iree_net_rdma_carrier_stage_send_data(
-        carrier, params->data, total_length, &retained_buffer_lease,
-        &scatter_gather_entries[0]);
-    if (iree_status_is_ok(status)) {
-      scatter_gather_entry_count = 1;
-    }
-  } else if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status)) {
+    iree_async_span_list_t prepared_spans =
+        iree_async_span_list_make(payload.spans, payload.span_count);
     status = iree_net_rdma_sge_list_from_span_list(
-        params->data, IREE_ARRAYSIZE(scatter_gather_entries),
+        prepared_spans, IREE_ARRAYSIZE(scatter_gather_entries),
         scatter_gather_entries, &scatter_gather_entry_count);
   }
-
-  if (iree_status_is_ok(status) && requires_staging) {
-    status = iree_net_rdma_carrier_accept_staged_send(
-        carrier, IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND,
-        params->user_data, total_length, &retained_buffer_lease,
-        &scatter_gather_entries[0]);
-  } else if (iree_status_is_ok(status)) {
-    status = iree_net_rdma_carrier_accept_span_list_send(
-        carrier, params->data, params->user_data, total_length,
+  if (iree_status_is_ok(status)) {
+    iree_async_span_list_t prepared_spans =
+        iree_async_span_list_make(payload.spans, payload.span_count);
+    status = iree_net_rdma_carrier_accept_send(
+        carrier, prepared_spans, IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND,
+        params->user_data, payload.byte_length, &payload.staging_buffer_lease,
         scatter_gather_entries, scatter_gather_entry_count);
   }
-  if (!iree_status_is_ok(status)) {
-    iree_async_buffer_lease_release(&retained_buffer_lease);
-  }
+  iree_net_rdma_send_payload_deinitialize(&payload);
   return status;
 }
 
@@ -2735,9 +2453,11 @@ static iree_status_t iree_net_rdma_carrier_begin_send(
   }
   if (iree_status_is_ok(status)) {
     buffer_ptr = iree_async_span_ptr(lease.span);
+    iree_async_span_t span =
+        iree_async_span_make(lease.span.region, lease.span.offset, size);
     status = iree_net_rdma_send_reservation_table_acquire(
-        &carrier->send_reservation_table, &lease, size,
-        IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_INTERNAL,
+        &carrier->send_reservation_table, iree_async_span_list_make(&span, 1),
+        &lease, IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_INTERNAL,
         /*user_data=*/0, out_handle);
   }
   if (iree_status_is_ok(status)) {
@@ -2767,7 +2487,8 @@ static iree_status_t iree_net_rdma_carrier_commit_send(
       &carrier->send_reservation_table, handle, &reservation_view);
   bool handle_valid = iree_status_is_ok(status);
   bool reservation_consumed = false;
-  struct ibv_sge scatter_gather_entry;
+  struct ibv_sge scatter_gather_entries[IREE_NET_RDMA_CARRIER_MAX_SEND_SGE];
+  int scatter_gather_entry_count = 0;
   if (iree_status_is_ok(status) &&
       iree_net_carrier_state(base_carrier) != IREE_NET_CARRIER_STATE_ACTIVE) {
     status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -2777,11 +2498,11 @@ static iree_status_t iree_net_rdma_carrier_commit_send(
     status = iree_net_rdma_carrier_get_failure_status(carrier);
   }
   if (iree_status_is_ok(status)) {
-    iree_async_span_t staged_span =
-        iree_async_span_make(reservation_view.buffer_lease.span.region,
-                             reservation_view.buffer_lease.span.offset,
-                             reservation_view.byte_length);
-    status = iree_net_rdma_sge_from_span(staged_span, &scatter_gather_entry);
+    iree_async_span_list_t spans = iree_async_span_list_make(
+        reservation_view.spans, reservation_view.span_count);
+    status = iree_net_rdma_sge_list_from_span_list(
+        spans, IREE_ARRAYSIZE(scatter_gather_entries), scatter_gather_entries,
+        &scatter_gather_entry_count);
   }
   if (iree_status_is_ok(status)) {
     status = iree_net_rdma_carrier_validate_send_length_locked(
@@ -2806,8 +2527,8 @@ static iree_status_t iree_net_rdma_carrier_commit_send(
         reservation_consumed = true;
         struct ibv_send_wr work_request;
         memset(&work_request, 0, sizeof(work_request));
-        work_request.sg_list = &scatter_gather_entry;
-        work_request.num_sge = 1;
+        work_request.sg_list = scatter_gather_entries;
+        work_request.num_sge = scatter_gather_entry_count;
         work_request.opcode = IBV_WR_SEND;
         work_request.send_flags = IBV_SEND_SIGNALED;
 
@@ -3708,32 +3429,34 @@ iree_net_rdma_carrier_send_bootstrap_connection_data(
 
   iree_async_span_t span = iree_async_span_from_ptr(storage, data_length);
   iree_async_span_list_t span_list = iree_async_span_list_make(&span, 1);
-  iree_async_buffer_lease_t retained_buffer_lease;
-  memset(&retained_buffer_lease, 0, sizeof(retained_buffer_lease));
-  struct ibv_sge scatter_gather_entry;
-  iree_status_t status = iree_net_rdma_carrier_stage_send_data(
-      carrier, span_list, data_length, &retained_buffer_lease,
-      &scatter_gather_entry);
+  iree_net_rdma_send_payload_t payload;
+  iree_status_t status = iree_net_rdma_send_payload_prepare(
+      span_list, IREE_NET_SEND_FLAG_NONE, carrier->send_staging_pool, &payload);
 
-  bool retained_buffer_lease_submitted = false;
+  struct ibv_sge scatter_gather_entries[IREE_NET_RDMA_CARRIER_MAX_SEND_SGE];
+  int scatter_gather_entry_count = 0;
+  if (iree_status_is_ok(status)) {
+    iree_async_span_list_t prepared_spans =
+        iree_async_span_list_make(payload.spans, payload.span_count);
+    status = iree_net_rdma_sge_list_from_span_list(
+        prepared_spans, IREE_ARRAYSIZE(scatter_gather_entries),
+        scatter_gather_entries, &scatter_gather_entry_count);
+  }
   if (iree_status_is_ok(status)) {
     struct ibv_send_wr work_request;
     memset(&work_request, 0, sizeof(work_request));
-    work_request.sg_list = &scatter_gather_entry;
-    work_request.num_sge = 1;
+    work_request.sg_list = scatter_gather_entries;
+    work_request.num_sge = scatter_gather_entry_count;
     work_request.opcode = IBV_WR_SEND;
     work_request.send_flags = IBV_SEND_SIGNALED;
 
-    retained_buffer_lease_submitted = true;
     status = iree_net_rdma_carrier_post_send_work_request(
         carrier, IREE_NET_RDMA_WORK_REQUEST_OPERATION_BOOTSTRAP_SEND,
         IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_NONE, /*user_data=*/0,
-        data_length, /*pending_operation_delta=*/1, &retained_buffer_lease,
-        &work_request);
+        data_length, /*pending_operation_delta=*/1,
+        &payload.staging_buffer_lease, &work_request);
   }
-  if (!iree_status_is_ok(status) && !retained_buffer_lease_submitted) {
-    iree_async_buffer_lease_release(&retained_buffer_lease);
-  }
+  iree_net_rdma_send_payload_deinitialize(&payload);
   return status;
 }
 

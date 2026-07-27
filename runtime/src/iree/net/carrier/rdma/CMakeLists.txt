@@ -67,6 +67,7 @@ iree_cc_library(
     ::queue_pair
     ::receive_queue
     ::region
+    ::send_payload
     ::send_reservation_table
     ::send_window
     ::sge
@@ -439,6 +440,39 @@ iree_cc_test(
     "send_reservation_table_test.cc"
   DEPS
     ::send_reservation_table
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
+iree_cc_library(
+  NAME
+    send_payload
+  HDRS
+    "send_payload.h"
+  SRCS
+    "send_payload.c"
+  DEPS
+    ::connection_data
+    iree::async
+    iree::base
+    iree::net::carrier
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
+iree_cc_test(
+  NAME
+    send_payload_test
+  SRCS
+    "send_payload_test.cc"
+  DEPS
+    ::send_payload
+    ::sge
+    iree::async
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main

@@ -50,6 +50,29 @@ flag require both peers to negotiate `IREE_NET_BOOTSTRAP_CAPABILITY_RDMA`.
 Mismatched peers fail during device/server setup or session bootstrap instead
 of silently using message bulk transfer.
 
+## SEND Data Path
+
+Every native verbs scatter-gather entry must reference RDMA-registered memory.
+The carrier prepares each SEND by preserving caller spans that are already
+registered and packing only unregistered bytes into one registered staging
+buffer. Output spans referencing the staging buffer are interleaved with the
+borrowed registered spans in their original wire order.
+
+This matters for the normal framed channel shape: a small sender-owned frame
+header followed by a large registered payload. The header is copied into
+transport-owned memory, while the payload address and registration remain
+unchanged all the way to `ibv_post_send`. The staging-buffer size constrains the
+sum of unregistered bytes, not the total message size. Fully unregistered sends
+retain the copy path and coalesce adjacent source spans into one verbs entry.
+
+The carrier retains the staging lease through native completion or
+cancellation. Callers retain registered source spans until the ordinary send
+completion. `IREE_NET_SEND_FLAG_ZERO_COPY` remains strict: a send carrying that
+flag fails before admission if any non-empty source span is unregistered.
+`send_payload_test` exercises a framed 1 MiB registered payload, interleaved
+registered and unregistered spans, the fully copied path, and strict zero-copy
+rejection without requiring RDMA hardware.
+
 ## Verification Ladder
 
 The low-friction checks prove the opt-in dependency surface and portable carrier

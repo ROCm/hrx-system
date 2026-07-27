@@ -10,9 +10,9 @@
 // pool. This table owns those leases between begin_send() and commit_send() or
 // abort_send(), returning generation-checked handles that fit in the generic
 // carrier send handle. The carrier also uses the table as the pending-post FIFO
-// once send() payloads are accepted under native SEND backpressure. Staged
-// sends keep a carrier-owned lease, while zero-copy sends copy bounded span
-// descriptors and continue borrowing the caller's referenced memory until
+// once send() payloads are accepted under native SEND backpressure. Each
+// reservation copies bounded span descriptors, optionally retains one staging
+// lease, and continues borrowing caller-owned registered spans until
 // completion. No memory is allocated after initialization.
 
 #ifndef IREE_NET_CARRIER_RDMA_SEND_RESERVATION_TABLE_H_
@@ -39,14 +39,6 @@ enum iree_net_rdma_send_reservation_completion_e {
   IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_INTERNAL = 0,
   // User-visible two-sided SEND completion.
   IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND = 1,
-};
-
-typedef uint8_t iree_net_rdma_send_reservation_payload_t;
-enum iree_net_rdma_send_reservation_payload_e {
-  // Reservation owns one staged buffer lease.
-  IREE_NET_RDMA_SEND_RESERVATION_PAYLOAD_STAGED_BUFFER = 0,
-  // Reservation borrows caller-owned RDMA spans until completion callback.
-  IREE_NET_RDMA_SEND_RESERVATION_PAYLOAD_SPAN_LIST = 1,
 };
 
 typedef struct iree_net_rdma_send_reservation_table_t {
@@ -76,13 +68,10 @@ typedef struct iree_net_rdma_send_reservation_table_t {
 } iree_net_rdma_send_reservation_table_t;
 
 typedef struct iree_net_rdma_send_reservation_t {
-  // Payload representation stored in this reservation.
-  iree_net_rdma_send_reservation_payload_t payload;
-
-  // Buffer lease containing the staged send bytes.
+  // Optional registered staging storage retained by the reservation.
   iree_async_buffer_lease_t buffer_lease;
 
-  // Borrowed caller spans for zero-copy sends.
+  // RDMA spans borrowed until completion or backed by buffer_lease.
   iree_async_span_t spans[IREE_NET_RDMA_CONNECTION_DATA_MAX_SEND_SGE];
 
   // Number of valid entries in spans.
@@ -120,26 +109,18 @@ iree_net_rdma_send_reservation_table_available_capacity(
 IREE_API_EXPORT uint32_t iree_net_rdma_send_reservation_table_pending_count(
     const iree_net_rdma_send_reservation_table_t* table);
 
-// Acquires one staged-buffer reservation and transfers |buffer_lease| into it.
+// Acquires one send reservation and copies |spans| into it.
 //
-// On success |buffer_lease| is cleared, |out_handle| receives a
-// generation-checked carrier send handle, and the table owns the lease until
-// resolve() or abort() is called.
-IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_acquire(
-    iree_net_rdma_send_reservation_table_t* table,
-    iree_async_buffer_lease_t* buffer_lease, iree_host_size_t byte_length,
-    iree_net_rdma_send_reservation_completion_t completion, uint64_t user_data,
-    iree_net_carrier_send_handle_t* out_handle);
-
-// Acquires one span-list reservation and copies |spans| into it.
-//
-// The table stores only the span descriptors. The caller-owned referenced
-// memory must remain valid until the carrier completion fires, matching
+// The table stores only the span descriptors. Caller-owned referenced memory
+// must remain valid until the carrier completion fires, matching
 // iree_net_carrier_send()'s normal async I/O contract.
-IREE_API_EXPORT iree_status_t
-iree_net_rdma_send_reservation_table_acquire_span_list(
+//
+// When |buffer_lease| is non-NULL and live, ownership transfers to the table
+// and the caller's lease is cleared. The lease is returned by resolve() or
+// released by abort().
+IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_acquire(
     iree_net_rdma_send_reservation_table_t* table, iree_async_span_list_t spans,
-    iree_host_size_t byte_length,
+    iree_async_buffer_lease_t* buffer_lease,
     iree_net_rdma_send_reservation_completion_t completion, uint64_t user_data,
     iree_net_carrier_send_handle_t* out_handle);
 

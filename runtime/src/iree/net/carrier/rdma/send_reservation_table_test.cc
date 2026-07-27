@@ -42,8 +42,10 @@ class SendReservationTableTest : public ::testing::Test {
   iree_status_t Acquire(iree_async_buffer_lease_t* lease,
                         iree_host_size_t byte_length,
                         iree_net_carrier_send_handle_t* out_handle) {
+    iree_async_span_t span = iree_async_span_make(
+        lease->span.region, lease->span.offset, byte_length);
     return iree_net_rdma_send_reservation_table_acquire(
-        &table_, lease, byte_length,
+        &table_, iree_async_span_list_make(&span, 1), lease,
         IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_INTERNAL,
         /*user_data=*/0, out_handle);
   }
@@ -68,10 +70,9 @@ TEST_F(SendReservationTableTest, AcquireAndResolveTransfersLease) {
   iree_net_rdma_send_reservation_t reservation;
   IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_resolve(&table_, handle,
                                                               &reservation));
-  EXPECT_EQ(IREE_NET_RDMA_SEND_RESERVATION_PAYLOAD_STAGED_BUFFER,
-            reservation.payload);
   EXPECT_EQ(64u, reservation.byte_length);
-  EXPECT_EQ(0u, reservation.span_count);
+  EXPECT_EQ(1u, reservation.span_count);
+  EXPECT_EQ(64u, reservation.spans[0].length);
   EXPECT_NE(nullptr, reservation.buffer_lease.release.fn);
   EXPECT_EQ(2u,
             iree_net_rdma_send_reservation_table_available_capacity(&table_));
@@ -174,9 +175,11 @@ TEST_F(SendReservationTableTest, PreservesCompletionMetadata) {
   IREE_ASSERT_OK(Initialize(1));
 
   iree_async_buffer_lease_t lease = MakeLease();
+  iree_async_span_t span =
+      iree_async_span_make(lease.span.region, lease.span.offset, 32);
   iree_net_carrier_send_handle_t handle = 0;
   IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_acquire(
-      &table_, &lease, /*byte_length=*/32,
+      &table_, iree_async_span_list_make(&span, 1), &lease,
       IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND, /*user_data=*/0x1234u,
       &handle));
   IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_commit(&table_, handle));
@@ -185,8 +188,6 @@ TEST_F(SendReservationTableTest, PreservesCompletionMetadata) {
   IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_resolve_pending_front(
       &table_, nullptr, &reservation));
   EXPECT_EQ(32u, reservation.byte_length);
-  EXPECT_EQ(IREE_NET_RDMA_SEND_RESERVATION_PAYLOAD_STAGED_BUFFER,
-            reservation.payload);
   EXPECT_EQ(IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND,
             reservation.completion);
   EXPECT_EQ(0x1234u, reservation.user_data);
@@ -195,7 +196,40 @@ TEST_F(SendReservationTableTest, PreservesCompletionMetadata) {
   EXPECT_EQ(1u, release_count_);
 }
 
-TEST_F(SendReservationTableTest, SpanListReservationsCopyMetadata) {
+TEST_F(SendReservationTableTest, MixedReservationsRetainLeaseAndSpanMetadata) {
+  IREE_ASSERT_OK(Initialize(1));
+
+  iree_async_buffer_lease_t lease = MakeLease();
+  iree_async_span_t spans[2] = {
+      iree_async_span_from_ptr(reinterpret_cast<void*>(0x1000), 32),
+      iree_async_span_from_ptr(reinterpret_cast<void*>(0x2000), 64),
+  };
+  iree_net_carrier_send_handle_t handle = 0;
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_acquire(
+      &table_, iree_async_span_list_make(spans, IREE_ARRAYSIZE(spans)), &lease,
+      IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND,
+      /*user_data=*/0x5678u, &handle));
+  EXPECT_EQ(nullptr, lease.release.fn);
+  spans[0] = iree_async_span_empty();
+  spans[1] = iree_async_span_empty();
+
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_commit(&table_, handle));
+  iree_net_rdma_send_reservation_t reservation;
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_resolve_pending_front(
+      &table_, nullptr, &reservation));
+  EXPECT_EQ(2u, reservation.span_count);
+  EXPECT_EQ(32u, reservation.spans[0].length);
+  EXPECT_EQ(64u, reservation.spans[1].length);
+  EXPECT_EQ(96u, reservation.byte_length);
+  EXPECT_EQ(IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND,
+            reservation.completion);
+  EXPECT_EQ(0x5678u, reservation.user_data);
+  EXPECT_NE(nullptr, reservation.buffer_lease.release.fn);
+  iree_async_buffer_lease_release(&reservation.buffer_lease);
+  EXPECT_EQ(1u, release_count_);
+}
+
+TEST_F(SendReservationTableTest, RegisteredReservationNeedsNoLease) {
   IREE_ASSERT_OK(Initialize(1));
 
   iree_async_span_t spans[2] = {
@@ -203,9 +237,9 @@ TEST_F(SendReservationTableTest, SpanListReservationsCopyMetadata) {
       iree_async_span_from_ptr(reinterpret_cast<void*>(0x2000), 64),
   };
   iree_net_carrier_send_handle_t handle = 0;
-  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_acquire_span_list(
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_acquire(
       &table_, iree_async_span_list_make(spans, IREE_ARRAYSIZE(spans)),
-      /*byte_length=*/96, IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND,
+      /*buffer_lease=*/nullptr, IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND,
       /*user_data=*/0x5678u, &handle));
   spans[0] = iree_async_span_empty();
   spans[1] = iree_async_span_empty();
@@ -214,15 +248,32 @@ TEST_F(SendReservationTableTest, SpanListReservationsCopyMetadata) {
   iree_net_rdma_send_reservation_t reservation;
   IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_resolve_pending_front(
       &table_, nullptr, &reservation));
-  EXPECT_EQ(IREE_NET_RDMA_SEND_RESERVATION_PAYLOAD_SPAN_LIST,
-            reservation.payload);
   EXPECT_EQ(2u, reservation.span_count);
   EXPECT_EQ(32u, reservation.spans[0].length);
   EXPECT_EQ(64u, reservation.spans[1].length);
-  EXPECT_EQ(96u, reservation.byte_length);
-  EXPECT_EQ(IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND,
-            reservation.completion);
-  EXPECT_EQ(0x5678u, reservation.user_data);
+  EXPECT_EQ(nullptr, reservation.buffer_lease.release.fn);
+}
+
+TEST_F(SendReservationTableTest, AbortingMixedReservationReleasesLease) {
+  IREE_ASSERT_OK(Initialize(1));
+
+  iree_async_buffer_lease_t lease = MakeLease();
+  iree_async_span_t spans[2] = {
+      iree_async_span_from_ptr(reinterpret_cast<void*>(0x1000), 32),
+      iree_async_span_from_ptr(reinterpret_cast<void*>(0x2000), 64),
+  };
+  iree_net_carrier_send_handle_t handle = 0;
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_acquire(
+      &table_, iree_async_span_list_make(spans, IREE_ARRAYSIZE(spans)), &lease,
+      IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND,
+      /*user_data=*/0x5678u, &handle));
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_commit(&table_, handle));
+
+  uint32_t aborted_count = 0;
+  IREE_ASSERT_OK(
+      iree_net_rdma_send_reservation_table_abort_all(&table_, &aborted_count));
+  EXPECT_EQ(1u, aborted_count);
+  EXPECT_EQ(1u, release_count_);
 }
 
 TEST_F(SendReservationTableTest, AbortAllReleasesAllLeases) {
@@ -263,9 +314,11 @@ TEST_F(SendReservationTableTest, ResolveNextDrainsActiveReservations) {
   iree_net_carrier_send_handle_t first_handle = 0;
   IREE_ASSERT_OK(Acquire(&first_lease, /*byte_length=*/32, &first_handle));
   iree_async_buffer_lease_t second_lease = MakeLease();
+  iree_async_span_t second_span = iree_async_span_make(
+      second_lease.span.region, second_lease.span.offset, 48);
   iree_net_carrier_send_handle_t second_handle = 0;
   IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_acquire(
-      &table_, &second_lease, /*byte_length=*/48,
+      &table_, iree_async_span_list_make(&second_span, 1), &second_lease,
       IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND, /*user_data=*/0xABCDu,
       &second_handle));
   IREE_ASSERT_OK(
@@ -357,67 +410,47 @@ TEST_F(SendReservationTableTest, RejectsInvalidArguments) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Initialize(0));
 
   iree_async_buffer_lease_t lease = MakeLease();
+  iree_async_span_t spans[1] = {
+      iree_async_span_from_ptr(reinterpret_cast<void*>(0x1000), 32),
+  };
+  iree_async_span_list_t span_list =
+      iree_async_span_list_make(spans, IREE_ARRAYSIZE(spans));
   iree_net_carrier_send_handle_t handle = 0;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_net_rdma_send_reservation_table_acquire(
-                            &table_, &lease, /*byte_length=*/32,
+                            &table_, span_list, &lease,
                             IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_INTERNAL,
                             /*user_data=*/0, &handle));
 
   IREE_ASSERT_OK(Initialize(1));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_net_rdma_send_reservation_table_acquire(
-                            &table_, nullptr, /*byte_length=*/32,
+                            &table_, iree_async_span_list_empty(), &lease,
                             IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_INTERNAL,
                             /*user_data=*/0, &handle));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_rdma_send_reservation_table_acquire(
+          &table_, iree_async_span_list_make(nullptr, 1), &lease,
+          IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_INTERNAL,
+          /*user_data=*/0, &handle));
+  iree_async_span_t empty_span = iree_async_span_empty();
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_rdma_send_reservation_table_acquire(
+          &table_, iree_async_span_list_make(&empty_span, 1), &lease,
+          IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_INTERNAL,
+          /*user_data=*/0, &handle));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_net_rdma_send_reservation_table_acquire(
-                            &table_, &lease, /*byte_length=*/0,
-                            IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_INTERNAL,
-                            /*user_data=*/0, &handle));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        iree_net_rdma_send_reservation_table_acquire(
-                            &table_, &lease, /*byte_length=*/129,
-                            IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_INTERNAL,
-                            /*user_data=*/0, &handle));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        iree_net_rdma_send_reservation_table_acquire(
-                            &table_, &lease, /*byte_length=*/32,
+                            &table_, span_list, &lease,
                             IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_INTERNAL,
                             /*user_data=*/0, nullptr));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_net_rdma_send_reservation_table_acquire(
-                            &table_, &lease, /*byte_length=*/32,
+                            &table_, span_list, &lease,
                             (iree_net_rdma_send_reservation_completion_t)0xFFu,
                             /*user_data=*/0, &handle));
-  iree_async_span_t spans[1] = {
-      iree_async_span_from_ptr(reinterpret_cast<void*>(0x1000), 32),
-  };
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_net_rdma_send_reservation_table_acquire_span_list(
-          &table_, iree_async_span_list_empty(), /*byte_length=*/32,
-          IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND, /*user_data=*/0,
-          &handle));
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_net_rdma_send_reservation_table_acquire_span_list(
-          &table_, iree_async_span_list_make(nullptr, 1), /*byte_length=*/32,
-          IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND, /*user_data=*/0,
-          &handle));
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_net_rdma_send_reservation_table_acquire_span_list(
-          &table_, iree_async_span_list_make(spans, IREE_ARRAYSIZE(spans)),
-          /*byte_length=*/64, IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND,
-          /*user_data=*/0, &handle));
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_net_rdma_send_reservation_table_acquire_span_list(
-          &table_, iree_async_span_list_make(spans, IREE_ARRAYSIZE(spans)),
-          /*byte_length=*/32,
-          (iree_net_rdma_send_reservation_completion_t)0xFFu,
-          /*user_data=*/0, &handle));
 
   iree_net_rdma_send_reservation_t reservation;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
