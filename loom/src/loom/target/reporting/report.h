@@ -303,14 +303,15 @@ typedef struct loom_target_compile_report_move_cause_counts_t {
   uint64_t unit_count;
 } loom_target_compile_report_move_cause_counts_t;
 
-// Static feature counters for low packets that survive target emission.
+// Static feature counters for low packets and finalized structural moves that
+// survive target emission.
 //
 // These counters are compile-time proxies derived from generated descriptor
-// instruction classes and structural low terminators. They are intentionally
-// separate from measured HAL profiling counters and may overlap: for example a
-// global atomic packet is both global memory and atomic. Byte counts are static
-// descriptor-effect widths for one issue of the emitted low stream, not
-// evaluated dynamic workload traffic.
+// instruction classes, structural low terminators, and allocation-owned final
+// move groups. They are intentionally separate from measured HAL profiling
+// counters and may overlap: for example a global atomic packet is both global
+// memory and atomic. Byte counts are static descriptor-effect widths for one
+// issue of the emitted low stream, not evaluated dynamic workload traffic.
 typedef struct loom_target_compile_report_static_instruction_mix_t {
   // Descriptor-backed schedule nodes inspected for feature classification.
   uint64_t descriptor_count;
@@ -401,7 +402,7 @@ typedef struct loom_target_compile_report_static_instruction_mix_t {
   // Descriptor-backed nodes identified as cache maintenance or prefetch
   // packets.
   uint64_t cache_count;
-  // Descriptor-backed nodes identified as register moves or copies.
+  // Descriptor-backed register moves and finalized structural physical moves.
   uint64_t register_move_count;
 } loom_target_compile_report_static_instruction_mix_t;
 

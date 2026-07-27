@@ -248,6 +248,7 @@ static void loom_target_compile_report_add_schedule_band_node_results(
 
 static void loom_target_compile_report_accumulate_schedule_band_node(
     const loom_low_schedule_table_t* schedule,
+    const loom_low_allocation_table_t* allocation,
     const loom_liveness_analysis_t* liveness,
     const loom_low_schedule_node_t* node,
     const loom_target_compile_report_low_dynamic_context_t* dynamic_context,
@@ -255,7 +256,7 @@ static void loom_target_compile_report_accumulate_schedule_band_node(
   ++row->node_count;
   loom_target_compile_report_static_instruction_mix_t node_mix = {0};
   loom_target_compile_report_accumulate_low_node_static_mix(
-      schedule, schedule->target.descriptor_set, node, &node_mix);
+      schedule, allocation, schedule->target.descriptor_set, node, &node_mix);
   loom_target_compile_report_accumulate_static_mix(&row->static_instruction_mix,
                                                    &node_mix);
   if (iree_all_bits_set(
@@ -378,6 +379,7 @@ static iree_status_t loom_target_compile_report_record_schedule_band(
 
 static iree_status_t loom_target_compile_report_record_schedule_band_rows(
     loom_target_compile_report_t* report,
+    const loom_low_allocation_table_t* allocation,
     const loom_liveness_analysis_t* liveness,
     const loom_low_schedule_table_t* schedule,
     const loom_target_compile_report_low_dynamic_context_t* dynamic_context) {
@@ -476,7 +478,7 @@ static iree_status_t loom_target_compile_report_record_schedule_band_rows(
         has_band = true;
       }
       loom_target_compile_report_accumulate_schedule_band_node(
-          schedule, liveness, node, dynamic_context, &band);
+          schedule, allocation, liveness, node, dynamic_context, &band);
     }
     if (iree_status_is_ok(status) && has_band) {
       status = loom_target_compile_report_record_schedule_band(
@@ -1420,7 +1422,7 @@ iree_status_t loom_target_compile_report_record_low_allocation_contents(
   }
   if (iree_status_is_ok(status)) {
     status = loom_target_compile_report_record_schedule_band_rows(
-        report, liveness, schedule, dynamic_context);
+        report, allocation, liveness, schedule, dynamic_context);
   }
   if (iree_status_is_ok(status)) {
     status = loom_target_compile_report_record_spill_rows(report, allocation,
