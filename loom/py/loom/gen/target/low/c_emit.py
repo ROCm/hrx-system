@@ -387,6 +387,8 @@ def emit_source_for_views(
                 f".flags = {c_spelling.flag_expr(reg_class.flags)},",
                 f".alloc_unit_bits = {reg_class.alloc_unit_bits},",
                 f".allocatable_count = {reg_class.allocatable_count},",
+                f".fixed_location_base = {reg_class.fixed_location_base},",
+                f".fixed_location_count = {reg_class.fixed_location_count},",
                 f".alias_set_id = {reg_class.alias_set_id},",
                 ".spill_class_id = " + ("LOOM_LOW_REG_CLASS_NONE" if reg_class.spill_class is None else str(compiled.reg_class_ids[reg_class.spill_class])) + ",",
                 f".full_register_part_mask = {c_spelling.hex_u32_literal(reg_class.full_register_part_mask)},",
@@ -431,6 +433,7 @@ def emit_source_for_views(
         [
             [
                 f".field_name_string_offset = {pool.ref(f'field_{operand.field_name}')},",
+                ".source_value_index = " + ("LOOM_LOW_ID_NONE" if compiled.operand_source_value_indices[i] is None else str(compiled.operand_source_value_indices[i])) + ",",
                 f".role = {operand.role.c_name},",
                 f".flags = {_operand_flag_expr(operand, compiled.operand_rematerializable[i])},",
                 f".reg_class_alt_start = {compiled.operand_alt_starts[i]},",

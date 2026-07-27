@@ -76,6 +76,24 @@ TEST(FactsTopologyDomain, LookupAndMarkRoundTrip) {
       {LOOM_VALUE_FACT_TOPOLOGY_SUBGROUP_LANE,
        LOOM_VALUE_FACT_TOPOLOGY_VALUE_SUBGROUP_LANE_ID,
        LOOM_VALUE_FACT_TOPOLOGY_AXIS_LANE},
+      {LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_X,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_X},
+      {LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_Y,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y},
+      {LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_Z,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z},
+      {LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_X,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_WORKGROUP_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_X},
+      {LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_Y,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_WORKGROUP_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y},
+      {LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_Z,
+       LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_WORKGROUP_ID,
+       LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z},
   };
   for (const TestCase& test_case : cases) {
     const loom_value_fact_topology_domain_t* domain =
@@ -784,10 +802,29 @@ TEST(FactsApplyPredicate, ComposedTilePredicate) {
 // Execution distribution
 //===----------------------------------------------------------------------===//
 
-TEST(ExecutionDistribution, ExactValuesAreWorkgroupUniform) {
+TEST(ExecutionDistribution, ExactValuesAreClusterUniform) {
   const loom_value_facts_t facts = loom_value_facts_exact_i64(7);
   EXPECT_TRUE(loom_value_facts_is_subgroup_uniform(facts));
   EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(facts));
+  EXPECT_TRUE(loom_value_facts_is_cluster_uniform(facts));
+}
+
+TEST(ExecutionDistribution, ClusterScopeImpliesWorkgroupAndSubgroupScopes) {
+  loom_value_facts_t facts = loom_value_facts_unknown();
+  loom_value_facts_mark_cluster_uniform(&facts);
+  EXPECT_TRUE(loom_value_facts_is_cluster_uniform(facts));
+  EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(facts));
+  EXPECT_TRUE(loom_value_facts_is_subgroup_uniform(facts));
+}
+
+TEST(ExecutionDistribution, BinaryUsesClusterScopeWhenBothInputsHaveIt) {
+  loom_value_facts_t lhs = loom_value_facts_unknown();
+  loom_value_facts_mark_cluster_uniform(&lhs);
+  loom_value_facts_t rhs = loom_value_facts_unknown();
+  loom_value_facts_mark_cluster_uniform(&rhs);
+  loom_value_facts_t output = loom_value_facts_unknown();
+  loom_value_facts_propagate_binary_distribution(lhs, rhs, &output);
+  EXPECT_TRUE(loom_value_facts_is_cluster_uniform(output));
 }
 
 TEST(ExecutionDistribution, UnaryPreservesSubgroupScope) {

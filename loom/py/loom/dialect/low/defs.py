@@ -28,6 +28,7 @@ from loom.assembly import (
     AttrDict,
     BlockArgs,
     BlockRef,
+    Clause,
     DescriptorRef,
     FormatElement,
     FuncArgs,
@@ -242,6 +243,9 @@ _KERNEL_COMMON_ATTRS = [
     AttrDef("workgroup_count_x", ATTR_TYPE_I64, optional=True),
     AttrDef("workgroup_count_y", ATTR_TYPE_I64, optional=True),
     AttrDef("workgroup_count_z", ATTR_TYPE_I64, optional=True),
+    AttrDef("workgroup_cluster_size_x", ATTR_TYPE_I64, optional=True),
+    AttrDef("workgroup_cluster_size_y", ATTR_TYPE_I64, optional=True),
+    AttrDef("workgroup_cluster_size_z", ATTR_TYPE_I64, optional=True),
     AttrDef("allocation", "enum", enum_def=LowAllocationMode, optional=True),
     AttrDef("schedule", "enum", enum_def=LowScheduleMode, optional=True),
     AttrDef("predicates", "predicate_list", optional=True),
@@ -370,6 +374,24 @@ _KERNEL_WORKGROUP_COUNT_FORMAT: list[FormatElement] = [
             RPAREN,
         ],
         anchor="workgroup_count_x",
+    ),
+]
+
+_KERNEL_WORKGROUP_CLUSTER_SIZE_FORMAT: list[FormatElement] = [
+    OptionalGroup(
+        [
+            kw("cluster_size"),
+            GLUE,
+            LPAREN,
+            Attr("workgroup_cluster_size_x"),
+            COMMA,
+            Attr("workgroup_cluster_size_y"),
+            COMMA,
+            Attr("workgroup_cluster_size_z"),
+            GLUE,
+            RPAREN,
+        ],
+        anchor="workgroup_cluster_size_x",
     ),
 ]
 
@@ -515,6 +537,7 @@ low_kernel_def = Op(
         *_KERNEL_EXPORT_FORMAT,
         *_KERNEL_WORKGROUP_SIZE_FORMAT,
         *_KERNEL_WORKGROUP_COUNT_FORMAT,
+        *_KERNEL_WORKGROUP_CLUSTER_SIZE_FORMAT,
         *_KERNEL_SIGNATURE_FORMAT,
         Region("body", syntax="low.asm.optional"),
     ],
@@ -895,6 +918,12 @@ low_op = Op(
         AttrDef("opcode", "string"),
         AttrDef("descriptor_ordinal", "i64"),
         AttrDef("attrs", "dict", optional=True),
+        AttrDef(
+            "memory_access",
+            "i64_array",
+            optional=True,
+            doc=("Versioned source-derived memory access summary retained for final scheduling."),
+        ),
     ],
     results=[Result("results", REGISTER, variadic=True)],
     traits=[UNKNOWN_EFFECTS],
@@ -906,6 +935,10 @@ low_op = Op(
         Refs("operands"),
         RPAREN,
         AttrDict("attrs"),
+        OptionalGroup(
+            [Clause("memory_access", Attr("memory_access"))],
+            anchor="memory_access",
+        ),
         COLON,
         LPAREN,
         TypesOf("operands"),

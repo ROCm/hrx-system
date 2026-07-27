@@ -19,6 +19,7 @@
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
+#include "loom/target/emit/native/amdgpu/encoding.h"
 #include "loom/target/emit/native/amdgpu/hsaco.h"
 
 #ifdef __cplusplus
@@ -92,6 +93,10 @@ typedef struct loom_amdgpu_kernel_hsaco_contribution_t {
   iree_string_view_t processor;
   // Kernel entry metadata, descriptor flags, and encoded native text.
   loom_amdgpu_hsaco_kernel_t kernel;
+  // Target-owned instructions inserted during native encoding.
+  const loom_amdgpu_native_insertion_t* native_insertions;
+  // Number of entries in |native_insertions|.
+  iree_host_size_t native_insertion_count;
   // Emission summary for this kernel contribution.
   loom_amdgpu_kernel_hsaco_summary_t summary;
 } loom_amdgpu_kernel_hsaco_contribution_t;

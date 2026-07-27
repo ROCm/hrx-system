@@ -14,6 +14,7 @@
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/cache.h"
 #include "loom/ops/combining.h"
+#include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
@@ -97,6 +98,29 @@ static iree_status_t loom_kernel_verify_def_contract(
         IREE_SV("export"), IREE_SV("present when linkage is present"));
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_kernel_launch_config_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  (void)module;
+  const uint32_t cluster_dimension_count =
+      (uint32_t)loom_kernel_launch_config_workgroup_cluster_size_x_is_present(
+          op) +
+      (uint32_t)loom_kernel_launch_config_workgroup_cluster_size_y_is_present(
+          op) +
+      (uint32_t)loom_kernel_launch_config_workgroup_cluster_size_z_is_present(
+          op);
+  if (cluster_dimension_count == 0 || cluster_dimension_count == 3) {
+    return iree_ok_status();
+  }
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(IREE_SV("kernel.launch.config")),
+      loom_param_u32(op->operand_count),
+      loom_param_u32(9),
+  };
+  return loom_kernel_emit(emitter, op, LOOM_ERR_STRUCTURE_001, params,
+                          IREE_ARRAYSIZE(params));
 }
 
 static iree_status_t loom_kernel_emit_operand_constraint(
@@ -679,7 +703,11 @@ static iree_status_t loom_kernel_verify_group_origin_if_local(
   const loom_value_t* group = loom_module_value(module, group_id);
   if (loom_value_is_block_arg(group)) return iree_ok_status();
   const loom_op_t* defining_op = loom_value_def_op(group);
-  if (defining_op && loom_kernel_async_group_isa(defining_op)) {
+  // Template applications are selected and inlined before whole-function async
+  // lifetime verification. Runtime calls remain unsupported ownership
+  // boundaries and are deliberately rejected here.
+  if (defining_op && (loom_kernel_async_group_isa(defining_op) ||
+                      loom_func_apply_isa(defining_op))) {
     return iree_ok_status();
   }
   return loom_kernel_emit_value_user_constraint(

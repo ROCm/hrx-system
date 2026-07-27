@@ -27,6 +27,29 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "residency",
+    srcs = ["residency.c"],
+    hdrs = ["residency.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "residency_test",
+    srcs = ["residency_test.cc"],
+    deps = [
+        ":residency",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "registers",
     hdrs = ["registers.h"],
     deps = [

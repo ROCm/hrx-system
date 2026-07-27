@@ -1,5 +1,88 @@
 // RUN: pass canonicalize
 
+// Extracting exactly the leading axes introduced by a broadcast returns the
+// original trailing vector.
+func.def @extract_broadcast_leading_axes(%value: vector<4xf32>) -> (vector<4xf32>) {
+  %bank = vector.broadcast %value : vector<4xf32> -> vector<2x3x4xf32>
+  %result = vector.extract %bank[1, 2] : vector<2x3x4xf32> -> vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+// ----
+func.def @extract_broadcast_leading_axes(%value: vector<4xf32>) -> (vector<4xf32>) {
+  func.return %value : vector<4xf32>
+}
+
+// ====
+
+// Extracting the slot just inserted returns the inserted payload.
+func.def @extract_insert_same_slot(%dest: vector<2x2x4xf32>, %value: vector<4xf32>) -> (vector<4xf32>) {
+  %updated = vector.insert %value into %dest[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+  %result = vector.extract %updated[1, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+// ----
+func.def @extract_insert_same_slot(%dest: vector<2x2x4xf32>, %value: vector<4xf32>) -> (vector<4xf32>) {
+  func.return %value : vector<4xf32>
+}
+
+// ====
+
+// Equal-rank static prefixes select disjoint slots when any index differs.
+func.def @extract_insert_disjoint_slot(%dest: vector<2x2x4xf32>, %value: vector<4xf32>) -> (vector<4xf32>) {
+  %updated = vector.insert %value into %dest[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+  %result = vector.extract %updated[0, 1] : vector<2x2x4xf32> -> vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+// ----
+func.def @extract_insert_disjoint_slot(%dest: vector<2x2x4xf32>, %value: vector<4xf32>) -> (vector<4xf32>) {
+  %result = vector.extract %dest[0, 1] : vector<2x2x4xf32> -> vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ====
+
+// Reinserting an unchanged slot returns the original aggregate.
+func.def @insert_unchanged_slot(%dest: vector<2x2x4xf32>) -> (vector<2x2x4xf32>) {
+  %value = vector.extract %dest[1, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  %result = vector.insert %value into %dest[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+  func.return %result : vector<2x2x4xf32>
+}
+// ----
+func.def @insert_unchanged_slot(%dest: vector<2x2x4xf32>) -> (vector<2x2x4xf32>) {
+  func.return %dest : vector<2x2x4xf32>
+}
+
+// ====
+
+// A later write to the same slot makes the earlier write irrelevant.
+func.def @insert_overwrites_same_slot(%dest: vector<2x2x4xf32>, %first: vector<4xf32>, %second: vector<4xf32>) -> (vector<2x2x4xf32>) {
+  %updated = vector.insert %first into %dest[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+  %result = vector.insert %second into %updated[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+  func.return %result : vector<2x2x4xf32>
+}
+// ----
+func.def @insert_overwrites_same_slot(%dest: vector<2x2x4xf32>, %first: vector<4xf32>, %second: vector<4xf32>) -> (vector<2x2x4xf32>) {
+  %result = vector.insert %second into %dest[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+  func.return %result : vector<2x2x4xf32>
+}
+
+// ====
+
+// Exact dynamic coordinates become static insert indices.
+func.def @insert_dynamic_exact_indices(%dest: vector<2x2x4xf32>, %value: vector<4xf32>) -> (vector<2x2x4xf32>) {
+  %row = index.constant 1 : index
+  %column = index.constant 0 : index
+  %result = vector.insert %value into %dest[%row, %column] : vector<4xf32>, vector<2x2x4xf32>
+  func.return %result : vector<2x2x4xf32>
+}
+// ----
+func.def @insert_dynamic_exact_indices(%dest: vector<2x2x4xf32>, %value: vector<4xf32>) -> (vector<2x2x4xf32>) {
+  %result = vector.insert %value into %dest[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+  func.return %result : vector<2x2x4xf32>
+}
+
+// ====
+
 // Extension chains collapse to the final width.
 func.def @float_extension_chain(%x: vector<4xf8E4M3>) -> (vector<4xf32>) {
   %bf16 = vector.extf %x : vector<4xf8E4M3> to vector<4xbf16>

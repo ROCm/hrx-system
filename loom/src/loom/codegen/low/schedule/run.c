@@ -72,6 +72,7 @@ static iree_status_t loom_low_schedule_initialize_value_records(
     *value = (loom_low_schedule_value_record_t){
         .value_id = value_id,
         .producer_node = LOOM_LOW_SCHEDULE_NODE_NONE,
+        .state_next_write_node = LOOM_LOW_SCHEDULE_NODE_NONE,
         .register_class_id = LOOM_LOW_REG_CLASS_NONE,
     };
     const loom_type_t type = loom_module_value_type(state->module, value_id);
@@ -468,6 +469,7 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
   iree_host_size_t hazard_use_capacity = 0;
   bool has_state_reg_class = false;
   bool has_resource_uses = false;
+  iree_host_size_t max_descriptor_operand_count = 0;
   const loom_low_descriptor_set_t* descriptor_set =
       state->target.descriptor_set;
   const iree_host_size_t reg_class_count = descriptor_set->reg_class_count;
@@ -481,6 +483,9 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, reg_class_count, sizeof(*state->state_last_write_nodes),
         (void**)&state->state_last_write_nodes));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, reg_class_count, sizeof(*state->state_first_write_nodes),
+        (void**)&state->state_first_write_nodes));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, reg_class_count,
         sizeof(*state->state_ordering_frontier_nodes),
@@ -532,6 +537,10 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
   IREE_RETURN_IF_ERROR(loom_low_schedule_verify_structural_state_reads(state));
   for (iree_host_size_t node_index = 0; node_index < node_count; ++node_index) {
     const loom_low_schedule_node_t* node = &state->nodes[node_index];
+    if (node->descriptor != NULL) {
+      max_descriptor_operand_count =
+          iree_max(max_descriptor_operand_count, node->operand_count);
+    }
     const loom_low_schedule_class_t* schedule_class = node->schedule_class;
     has_resource_uses |=
         schedule_class != NULL && schedule_class->issue_use_count != 0;
@@ -551,6 +560,13 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
                               "low schedule hazard-use capacity exceeds host "
                               "size");
     }
+  }
+  if (max_descriptor_operand_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(state->arena, max_descriptor_operand_count,
+                                  sizeof(*state->descriptor_operands.indices),
+                                  (void**)&state->descriptor_operands.indices));
+    state->descriptor_operands.capacity = max_descriptor_operand_count;
   }
   if (node_count != 0 && descriptor_set->schedule_class_count != 0) {
     const uint32_t schedule_class_count = descriptor_set->schedule_class_count;
@@ -1211,14 +1227,15 @@ iree_status_t loom_low_schedule_function(
   loom_low_schedule_build_state_t state = {
       .module = model->module,
       .options = options,
-      .pressure_cliffs = options->pressure_model != NULL
-                             ? &options->pressure_model->register_class_cliffs
+      .pressure_cliffs = options->residency_model != NULL
+                             ? &options->residency_model->direct_resources
                              : NULL,
-      .pressure_resources = options->pressure_model != NULL &&
-                                    !loom_low_pressure_resource_table_is_empty(
-                                        &options->pressure_model->resources)
-                                ? &options->pressure_model->resources
-                                : NULL,
+      .pressure_resources =
+          options->residency_model != NULL &&
+                  !loom_target_residency_derived_resource_table_is_empty(
+                      &options->residency_model->derived_resources)
+              ? &options->residency_model->derived_resources
+              : NULL,
       .arena = arena,
       .function_op = model->function_op,
       .body = model->body,

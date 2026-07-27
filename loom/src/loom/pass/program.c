@@ -401,6 +401,26 @@ static iree_status_t loom_pass_program_compile_repeat(
   return iree_ok_status();
 }
 
+static iree_status_t loom_pass_program_compile_if_changed(
+    loom_pass_program_compiler_t* compiler,
+    const loom_pass_program_compile_scope_t* scope, const loom_op_t* op,
+    loom_pass_kind_t current_kind) {
+  iree_host_size_t instruction_index = 0;
+  IREE_RETURN_IF_ERROR(loom_pass_program_emit_instruction(
+      compiler, scope, op, LOOM_PASS_PROGRAM_INSTRUCTION_IF_CHANGED,
+      current_kind, &instruction_index));
+  compiler->program->instructions[instruction_index].if_changed =
+      (loom_pass_program_nested_body_t){
+          .body_start = compiler->program->instruction_count,
+          .body_end = compiler->program->instruction_count,
+      };
+  IREE_RETURN_IF_ERROR(loom_pass_program_compile_region(
+      compiler, scope, current_kind, loom_pass_if_changed_body(op)));
+  compiler->program->instructions[instruction_index].if_changed.body_end =
+      compiler->program->instruction_count;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_pass_program_compile_call(
     loom_pass_program_compiler_t* compiler,
     const loom_pass_program_compile_scope_t* scope, const loom_op_t* op,
@@ -418,12 +438,26 @@ static iree_status_t loom_pass_program_compile_call(
         loom_pass_program_anchor_name(current_kind));
   }
 
+  iree_host_size_t instruction_index = 0;
+  IREE_RETURN_IF_ERROR(loom_pass_program_emit_instruction(
+      compiler, scope, op, LOOM_PASS_PROGRAM_INSTRUCTION_CALL, current_kind,
+      &instruction_index));
+  compiler->program->instructions[instruction_index].call =
+      (loom_pass_program_nested_body_t){
+          .body_start = compiler->program->instruction_count,
+          .body_end = compiler->program->instruction_count,
+      };
+
   loom_pass_program_compile_scope_t callee_scope = {0};
   IREE_RETURN_IF_ERROR(
       loom_pass_program_push_call(compiler->program, scope, op, &callee_scope));
   callee_scope.pipeline_op = callee_op;
-  return loom_pass_program_compile_region(compiler, &callee_scope, current_kind,
-                                          loom_pass_pipeline_body(callee_op));
+  IREE_RETURN_IF_ERROR(
+      loom_pass_program_compile_region(compiler, &callee_scope, current_kind,
+                                       loom_pass_pipeline_body(callee_op)));
+  compiler->program->instructions[instruction_index].call.body_end =
+      compiler->program->instruction_count;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_pass_program_compile_message(
@@ -467,6 +501,11 @@ static iree_status_t loom_pass_program_compile_region(
       }
       case LOOM_OP_PASS_REPEAT: {
         IREE_RETURN_IF_ERROR(loom_pass_program_compile_repeat(
+            compiler, scope, op, current_kind));
+        break;
+      }
+      case LOOM_OP_PASS_IF_CHANGED: {
+        IREE_RETURN_IF_ERROR(loom_pass_program_compile_if_changed(
             compiler, scope, op, current_kind));
         break;
       }

@@ -29,6 +29,10 @@ AMDGPU_ASYNC_CONTRACT_FRAGMENT = ContractFragment(
     target_contract_query=False,
     cases=(
         ValueElideRule(
+            source_op=kernel.kernel_tensor_lds_descriptor,
+            values=(ValueRef.result("descriptor"),),
+        ),
+        ValueElideRule(
             source_op=kernel.kernel_async_group,
             values=(ValueRef.result("group"),),
         ),

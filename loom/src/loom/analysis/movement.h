@@ -49,6 +49,8 @@ typedef enum loom_movement_kind_e {
   LOOM_MOVEMENT_KIND_KERNEL_ASYNC_CLUSTER_GATHER_MASK = 16,
   LOOM_MOVEMENT_KIND_KERNEL_ASYNC_TENSOR_LOAD_TO_LDS = 17,
   LOOM_MOVEMENT_KIND_KERNEL_ASYNC_TENSOR_STORE_FROM_LDS = 18,
+  LOOM_MOVEMENT_KIND_VIEW_LOAD = 19,
+  LOOM_MOVEMENT_KIND_VIEW_STORE = 20,
 } loom_movement_kind_t;
 
 // Endpoint storage category.
@@ -69,6 +71,7 @@ typedef enum loom_movement_layout_kind_e {
   LOOM_MOVEMENT_LAYOUT_BYTE_RANGE = 6,
   LOOM_MOVEMENT_LAYOUT_CLUSTER_GATHER = 7,
   LOOM_MOVEMENT_LAYOUT_TENSOR_TILE = 8,
+  LOOM_MOVEMENT_LAYOUT_SCALAR_ELEMENT = 9,
 } loom_movement_layout_kind_t;
 
 // Relationship between byte movement and typed storage interpretation.
@@ -124,6 +127,12 @@ typedef uint32_t loom_movement_rejection_flags_t;
 #define LOOM_MOVEMENT_REJECTION_LANE_COUNT ((uint32_t)1u << 5)
 #define LOOM_MOVEMENT_REJECTION_FOOTPRINT ((uint32_t)1u << 6)
 #define LOOM_MOVEMENT_REJECTION_CACHE_POLICY ((uint32_t)1u << 7)
+#define LOOM_MOVEMENT_REJECTION_CLUSTER_SHAPE ((uint32_t)1u << 8)
+#define LOOM_MOVEMENT_REJECTION_CLUSTER_PARTICIPANTS ((uint32_t)1u << 9)
+#define LOOM_MOVEMENT_REJECTION_CLUSTER_CONTROL ((uint32_t)1u << 10)
+#define LOOM_MOVEMENT_REJECTION_CLUSTER_SOURCE_AGREEMENT ((uint32_t)1u << 11)
+#define LOOM_MOVEMENT_REJECTION_CLUSTER_DEST_AGREEMENT ((uint32_t)1u << 12)
+#define LOOM_MOVEMENT_REJECTION_CLUSTER_PREDICATE ((uint32_t)1u << 13)
 
 // Diagnostic summary for request construction.
 typedef struct loom_movement_diagnostic_t {
@@ -150,6 +159,12 @@ typedef struct loom_movement_endpoint_t {
 
   // Storage root identity for view endpoints.
   loom_value_id_t root_value_id;
+
+  // Comparable alias scope for disjointness proofs, or NONE.
+  loom_value_fact_alias_scope_id_t alias_scope_id;
+
+  // Known nullability of the storage root.
+  loom_value_fact_reference_nullability_t nullability;
 
   // Symbolic begin byte offset relative to root_value_id.
   loom_symbolic_expr_t begin_byte_offset;
@@ -272,6 +287,11 @@ iree_status_t loom_movement_request_describe_op(
 // Non-memory endpoints or unknown alignment facts return 0.
 uint64_t loom_movement_endpoint_minimum_byte_alignment(
     const loom_movement_endpoint_t* endpoint);
+
+// Projects a view endpoint back into the common byte-region representation
+// used by alias and overlap proofs. Returns false for non-view endpoints.
+bool loom_movement_endpoint_as_view_region(
+    const loom_movement_endpoint_t* endpoint, loom_view_region_t* out_region);
 
 // Returns a diagnostic detail string for movement request rejection flags.
 iree_string_view_t loom_movement_rejection_detail(

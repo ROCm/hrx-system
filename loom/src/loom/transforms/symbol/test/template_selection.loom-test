@@ -451,3 +451,66 @@ test.target<low_core> @test_target
 func.def target(@test_target) @target_entry(%value: i32) -> (i32) {
   func.return %value : i32
 }
+
+// ====
+
+// RUN: pass select-templates,inline-callables
+
+func.template<demo.workgroup_reduce> @reduce_provider(%value: f32) -> (f32) {
+  %sum = kernel.workgroup.reduce<addf> %value : f32
+  func.return %sum : f32
+}
+
+kernel.def export("entry") @entry() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%value: f32) {
+  %sum = func.apply<demo.workgroup_reduce>(%value) : (f32) -> (f32)
+  kernel.return
+}
+
+// ----
+kernel.def export("entry") @entry() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%value: f32) {
+  %sum = kernel.workgroup.reduce<addf> %value : f32
+  kernel.return
+}
+
+// ====
+
+// Kernel entries export under their symbol name when export(...) is omitted.
+// RUN: pass select-templates{mode=final}
+
+kernel.def @implicit_export() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  kernel.return
+}
+
+// ----
+kernel.def @implicit_export() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+func.template<demo.workgroup_reduce> @reduce_provider(%value: f32) -> (f32) {
+  %sum = kernel.workgroup.reduce<addf> %value : f32
+  func.return %sum : f32
+}
+
+func.def public @entry(%value: f32) -> (f32) {
+  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.workgroup_reduce", failure_code="all_rejected"}
+  %sum = func.apply<demo.workgroup_reduce>(%value) : (f32) -> (f32)
+  func.return %sum : f32
+}

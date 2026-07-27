@@ -267,10 +267,11 @@ low.func.def target(@target) @branch_arg_repair_consumes_load_before_store(%addr
 
 // A wait in the store block is not path-dominating for the out-of-line repair
 // block, even when the store block is laid out first. The first repair consumer
-// must wait for the VMEM load, and the remaining repair lanes can reuse that
-// block-local wait.
+// must wait for the VMEM load. Its physical destination write is diagnosed as
+// result reuse before SSA consumer handling, and the remaining repair lanes can
+// reuse that block-local wait.
 // ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"branch_arg_repair_consumes_load_before_store","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":2,"progress":[{"index":0,"packet":1,"node":1,"block":1,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":8,"node":8,"block":5,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":0,"consumer_node":8,"insertion_packet":8,"block":5,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":0,"consumer_node":12,"insertion_packet":12,"block":7,"scheduled_ordinal":1,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1}]}
+{"format":"loom.low.packet_hazard_plan.v1","function":"branch_arg_repair_consumes_load_before_store","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":2,"progress":[{"index":0,"packet":1,"node":1,"block":1,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":8,"node":8,"block":5,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":0,"consumer_node":8,"insertion_packet":8,"block":5,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":5,"reason_name":"amdgpu.read_result_reuse","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":0,"consumer_node":12,"insertion_packet":12,"block":7,"scheduled_ordinal":1,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1}]}
 
 // ====
 // RUN: emit amdgpu-assembly @branch_load_join_store_common_wait_assembly strategy=source
@@ -695,6 +696,31 @@ low.func.def target(@target) @exec_state_packets_preserve_scratch_store_wait(%sa
   s_waitcnt vmcnt(0) lgkmcnt(63)
   global_store_b32 v1, v2, s[2:3] offset:0
   s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @cdna_scratch_packets_read_m0_state strategy=source
+
+amdgpu.target<gfx942> @target
+low.func.def target(@target) @cdna_scratch_packets_read_m0_state(%value: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) {
+  %m0 = low.const<amdgpu.s_mov_b32_m0.imm> {imm32 = 0} : reg<amdgpu.m0>
+  low.op<amdgpu.scratch_store_b32_offset_only>(%value, %m0) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.m0>)
+  %loaded = low.op<amdgpu.scratch_load_b32_offset_only>(%m0) {offset = 0} : (reg<amdgpu.m0>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.global_store_b32_saddr>(%addr, %loaded, %output, %m0) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  low.return
+}
+
+// CDNA scratch packets read M0 as implicit architectural state. The state
+// dependency must survive scheduling and allocation even though native scratch
+// syntax does not spell M0 as an operand.
+// ----
+  s_mov_b32 m0, 0
+  scratch_store_b32 off, v0, off offset:0 nt:0 sc0:0 sc1:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  scratch_load_b32 v2, off, off offset:0 nt:0 sc0:0 sc1:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_store_dword v1, v2, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====

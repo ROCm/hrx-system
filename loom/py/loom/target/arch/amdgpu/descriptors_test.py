@@ -22,6 +22,8 @@ from loom.target.arch.amdgpu.descriptors import (
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS,
     _AMDGPU_TRANS_DESCRIPTOR_KEYS,
     _AMDGPU_TRANS_PROXY_LATENCY_CYCLES,
+    _COUNTER_ASYNC,
+    _COUNTER_TENSOR,
     _COUNTER_VMEM_LOAD,
     _D16_PARTIAL_REGISTER_ADDRESSABLE_UNIT_COUNT,
     _GFX12_TH_ATOMIC_RETURN_VALUE,
@@ -46,6 +48,8 @@ from loom.target.arch.amdgpu.descriptors import (
     _SOURCE_INLINE_F32_ENCODING_ID,
     _SOURCE_INLINE_U32_ENCODING_ID,
     _VBUFFER_SOFFSET_NULL,
+    _WAIT_COUNTER_ASYNC_ENCODING_ID,
+    _WAIT_COUNTER_TENSOR_ENCODING_ID,
     AMDGPU_ATOMIC_DESCRIPTOR_CATEGORY,
     AMDGPU_COMPARE_SELECT_DESCRIPTOR_CATEGORY,
     AMDGPU_CONTROL_DESCRIPTOR_CATEGORY,
@@ -58,6 +62,8 @@ from loom.target.arch.amdgpu.descriptors import (
     AMDGPU_ENCODING_FORMAT_VOP3PX2,
     AMDGPU_MEMORY_DESCRIPTOR_CATEGORY,
     AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU,
+    AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL,
+    AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE,
     AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST,
     AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG,
     AMDGPU_VECTOR_DESCRIPTOR_CATEGORY,
@@ -94,19 +100,23 @@ from loom.target.arch.amdgpu.descriptors import (
     amdgpu_encoding_field_id,
 )
 from loom.target.arch.amdgpu.descriptors.api import _with_instruction_classes
+from loom.target.arch.amdgpu.descriptors.cluster import (
+    _cluster_load_async_to_lds_descriptor,
+    _s_wait_asynccnt_descriptor,
+)
 from loom.target.arch.amdgpu.descriptors.control import (
     _s_delay_alu_descriptor,
     _s_set_vgpr_msb_descriptor,
 )
-from loom.target.arch.amdgpu.descriptors.memory import (
-    _s_buffer_load_64_overlay,
-    _s_buffer_load_dword_overlay,
-    _s_load_dword_overlay,
-    _s_load_dwordx2_overlay,
-    _s_load_dwordx4_overlay,
+from loom.target.arch.amdgpu.descriptors.tensor import (
+    _s_wait_tensorcnt_descriptor,
+    _tensor_load_to_lds_descriptor,
 )
 from loom.target.arch.amdgpu.encoding import (
     AMDGPU_ENCODING_FORMAT_IDS,
+    AMDGPU_ENCODING_FORMAT_SOPP,
+    AMDGPU_ENCODING_FORMAT_VGLOBAL,
+    AMDGPU_ENCODING_FORMAT_VIMAGE,
     AMDGPU_ENCODING_FORMAT_VOP1_DPP16,
     AMDGPU_GFX125X_VOP_VGPR_MSB_FORMAT_NAMES,
     AmdgpuVgprMsbSlot,
@@ -1117,6 +1127,179 @@ def test_s_delay_alu_descriptor_is_exposed_on_rdna_families() -> None:
         "rdna4_gfx125x",
     }
     assert "amdgpu.s_delay_alu" in amdgpu_descriptor_ref_keys()
+
+
+def test_gfx1250_cluster_flat_rank_descriptor_matches_compiler_abi() -> None:
+    overlays = {overlay.descriptor_key: overlay for overlay in _gfx1250_core_overlays()}
+    descriptor = overlays["amdgpu.s_getreg_b32.cluster_workgroup_flat_id"]
+
+    assert descriptor.instruction_name == "S_GETREG_B32"
+    assert descriptor.encoding_name == "ENC_SOPK"
+    assert descriptor.schedule_class == _SCHEDULE_SALU
+    assert descriptor.ignored_operands[0].xml_field_name == "SIMM16"
+    assert descriptor.ignored_operands[0].fixed_encoding_value == 0x1D5C
+    assert descriptor.asm_forms[0].native_assembly_values == (
+        NativeAsmValue(NativeAsmValueKind.RESULT, field_name="dst"),
+        NativeAsmValue(
+            NativeAsmValueKind.LITERAL,
+            literal="hwreg(HW_REG_IB_STS2, 21, 4)",
+        ),
+    )
+    assert (
+        "amdgpu.s_getreg_b32.cluster_workgroup_flat_id" in amdgpu_descriptor_ref_keys()
+    )
+
+
+@pytest.mark.parametrize(
+    ("dgroup_count", "expected_units", "expected_fields"),
+    [
+        (2, (4, 8), ("VADDR0", "VADDR1")),
+        (4, (4, 8, 4, 4), ("VADDR0", "VADDR1", "VADDR2", "VADDR3")),
+    ],
+)
+def test_gfx125x_tensor_load_descriptors_encode_dgroup_forms(
+    dgroup_count: int,
+    expected_units: tuple[int, ...],
+    expected_fields: tuple[str, ...],
+) -> None:
+    descriptor = _tensor_load_to_lds_descriptor(dgroup_count)
+
+    assert descriptor.key == f"amdgpu.tensor_load_to_lds.d{dgroup_count}"
+    assert descriptor.mnemonic == f"tensor_load_to_lds_d{dgroup_count}"
+    assert descriptor.semantic_tag == "memory.tensor.load.to_lds"
+    assert descriptor.encoding_format_id == AMDGPU_ENCODING_FORMAT_VIMAGE
+    assert descriptor.encoding_id == 0xC4
+    assert descriptor.schedule_class == "amdgpu.tensor.load.lds"
+    assert tuple(operand.unit_count for operand in descriptor.operands) == (
+        expected_units
+    )
+    assert tuple(operand.encoding_field_id for operand in descriptor.operands) == tuple(
+        amdgpu_encoding_field_id(name) for name in expected_fields
+    )
+    assert tuple(
+        (effect.kind, effect.memory_space, effect.counter_id)
+        for effect in descriptor.effects
+    ) == (
+        (EffectKind.READ, MemorySpace.GLOBAL, _COUNTER_TENSOR),
+        (EffectKind.WRITE, MemorySpace.WORKGROUP, _COUNTER_TENSOR),
+    )
+    assert descriptor.asm_forms[0].native_assembly_mnemonic == ("tensor_load_to_lds")
+
+
+def test_gfx125x_tensor_wait_descriptor_uses_independent_counter() -> None:
+    descriptor = _s_wait_tensorcnt_descriptor()
+
+    assert descriptor.key == "amdgpu.s_wait_tensorcnt"
+    assert descriptor.mnemonic == "s_wait_tensorcnt"
+    assert descriptor.encoding_format_id == AMDGPU_ENCODING_FORMAT_SOPP
+    assert descriptor.encoding_id == 0x4B
+    assert descriptor.schedule_class == "amdgpu.wait.tensor"
+    assert len(descriptor.immediates) == 1
+    tensorcnt = descriptor.immediates[0]
+    assert tensorcnt.field_name == "tensorcnt"
+    assert tensorcnt.encoding_id == _WAIT_COUNTER_TENSOR_ENCODING_ID
+    assert tensorcnt.bit_width == 16
+    assert tensorcnt.unsigned_max == 0xFFFF
+    assert descriptor.effects[0].counter_id == _COUNTER_TENSOR
+
+
+def test_tensor_memory_descriptors_are_gfx125x_scoped() -> None:
+    target_descriptor_keys = {
+        target: {descriptor.key for descriptor in builder.extra_descriptors}
+        for target, builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.items()
+    }
+    tensor_keys = {
+        "amdgpu.tensor_load_to_lds.d2",
+        "amdgpu.tensor_load_to_lds.d4",
+        "amdgpu.s_wait_tensorcnt",
+    }
+
+    assert tensor_keys <= target_descriptor_keys["rdna4_gfx125x"]
+    for target, descriptor_keys in target_descriptor_keys.items():
+        if target != "rdna4_gfx125x":
+            assert tensor_keys.isdisjoint(descriptor_keys)
+
+
+@pytest.mark.parametrize(
+    ("width_bits", "encoding_id"),
+    [(8, 0x6A), (32, 0x6B), (64, 0x6C), (128, 0x6D)],
+)
+def test_gfx125x_cluster_load_descriptors_encode_transfer_widths(
+    width_bits: int, encoding_id: int
+) -> None:
+    descriptor = _cluster_load_async_to_lds_descriptor(width_bits, encoding_id)
+
+    assert descriptor.key == f"amdgpu.cluster_load_async_to_lds_b{width_bits}"
+    assert descriptor.mnemonic == f"cluster_load_async_to_lds_b{width_bits}"
+    assert descriptor.semantic_tag == f"memory.cluster.load.to_lds.u{width_bits}"
+    assert descriptor.encoding_format_id == AMDGPU_ENCODING_FORMAT_VGLOBAL
+    assert descriptor.encoding_id == encoding_id
+    assert descriptor.schedule_class == "amdgpu.cluster.load.lds"
+    assert tuple(operand.unit_count for operand in descriptor.operands) == (1, 1, 2, 1)
+    assert tuple(
+        operand.encoding_field_id for operand in descriptor.operands[:3]
+    ) == tuple(
+        amdgpu_encoding_field_id(field_name)
+        for field_name in ("VDST", "VADDR", "SADDR")
+    )
+    assert descriptor.operands[3].field_name == "m0"
+    assert OperandFlag.IMPLICIT in descriptor.operands[3].flags
+    assert OperandFlag.STATE_READ in descriptor.operands[3].flags
+    assert tuple(
+        (effect.kind, effect.memory_space, effect.counter_id, effect.width_bits)
+        for effect in descriptor.effects
+    ) == (
+        (EffectKind.READ, MemorySpace.GLOBAL, _COUNTER_ASYNC, width_bits),
+        (EffectKind.WRITE, MemorySpace.WORKGROUP, _COUNTER_ASYNC, width_bits),
+    )
+    native_values = descriptor.asm_forms[0].native_assembly_values
+    assert tuple(value.field_name for value in native_values[:3]) == (
+        "lds_addr",
+        "addr",
+        "saddr",
+    )
+    assert native_values[5].target_format_id == (
+        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE
+    )
+    assert native_values[6].target_format_id == (
+        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL
+    )
+
+
+def test_gfx125x_cluster_wait_descriptor_uses_independent_counter() -> None:
+    descriptor = _s_wait_asynccnt_descriptor()
+
+    assert descriptor.key == "amdgpu.s_wait_asynccnt"
+    assert descriptor.mnemonic == "s_wait_asynccnt"
+    assert descriptor.encoding_format_id == AMDGPU_ENCODING_FORMAT_SOPP
+    assert descriptor.encoding_id == 0x4A
+    assert descriptor.schedule_class == "amdgpu.wait.async"
+    assert len(descriptor.immediates) == 1
+    asynccnt = descriptor.immediates[0]
+    assert asynccnt.field_name == "asynccnt"
+    assert asynccnt.encoding_id == _WAIT_COUNTER_ASYNC_ENCODING_ID
+    assert asynccnt.bit_width == 16
+    assert asynccnt.unsigned_max == 0xFFFF
+    assert descriptor.effects[0].counter_id == _COUNTER_ASYNC
+
+
+def test_cluster_memory_descriptors_are_gfx125x_scoped() -> None:
+    target_descriptor_keys = {
+        target: {descriptor.key for descriptor in builder.extra_descriptors}
+        for target, builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.items()
+    }
+    cluster_keys = {
+        "amdgpu.cluster_load_async_to_lds_b8",
+        "amdgpu.cluster_load_async_to_lds_b32",
+        "amdgpu.cluster_load_async_to_lds_b64",
+        "amdgpu.cluster_load_async_to_lds_b128",
+        "amdgpu.s_wait_asynccnt",
+    }
+
+    assert cluster_keys <= target_descriptor_keys["rdna4_gfx125x"]
+    for target, descriptor_keys in target_descriptor_keys.items():
+        if target != "rdna4_gfx125x":
+            assert cluster_keys.isdisjoint(descriptor_keys)
 
 
 def test_gfx125x_vop_operands_use_mode_address_state() -> None:
@@ -2958,22 +3141,6 @@ def test_mad_mix_descriptors_cover_cdna_half_lane_forms() -> None:
             )
 
 
-def test_scalar_memory_loads_early_clobber_results() -> None:
-    for descriptor in (
-        _s_buffer_load_dword_overlay(),
-        _s_buffer_load_64_overlay(),
-        _s_load_dword_overlay(),
-        _s_load_dwordx2_overlay(),
-        _s_load_dwordx4_overlay(),
-    ):
-        assert tuple(constraint.kind for constraint in descriptor.constraints) == (
-            ConstraintKind.EARLY_CLOBBER,
-        )
-        assert tuple(
-            constraint.lhs_operand_index for constraint in descriptor.constraints
-        ) == (0,)
-
-
 def test_dpp_control_domain_covers_only_architectural_encodings() -> None:
     expected_values = {
         *range(0x100),
@@ -4475,19 +4642,36 @@ def test_cdna_smem_dwordx4_store_and_scratch_descriptors_cover_xml() -> None:
             assert descriptors[buffer_store_key].schedule_class == _SCHEDULE_SMEM_STORE
 
 
+def test_cdna_scratch_m0_operands_are_state_reads() -> None:
+    for overlay_builder in (_gfx940_core_overlays, _gfx950_core_overlays):
+        m0_rows = [
+            (descriptor, implicit_operand)
+            for descriptor in overlay_builder()
+            if descriptor.semantic_tag is not None
+            and descriptor.semantic_tag.startswith("memory.stack.")
+            for implicit_operand in descriptor.implicit_operands
+            if implicit_operand.operand_type == "OPR_SDST_M0"
+        ]
+
+        assert m0_rows
+        for _, implicit_operand in m0_rows:
+            assert implicit_operand.is_input
+            assert not implicit_operand.is_output
+            operand = implicit_operand.descriptor_operand
+            assert operand is not None
+            assert operand.field_name == "m0"
+            assert operand.role is OperandRole.RESOURCE
+            assert OperandFlag.IMPLICIT in operand.flags
+            assert OperandFlag.STATE_READ in operand.flags
+            assert OperandFlag.STATE_WRITE not in operand.flags
+
+
 def test_gfx940_scratch_memory_forms_cover_spill_packets() -> None:
     descriptors = {
         descriptor.descriptor_key: descriptor for descriptor in _gfx940_core_overlays()
     }
 
     load_descriptor = descriptors["amdgpu.scratch_load_b32_offset_only"]
-    assert any(
-        operand.operand_type == "OPR_SDST_M0"
-        and operand.descriptor_operand is not None
-        and operand.descriptor_operand.field_name == "m0"
-        and operand.descriptor_operand.role is OperandRole.IMPLICIT
-        for operand in load_descriptor.implicit_operands
-    )
     load_forms = load_descriptor.asm_forms
     assert load_forms is not None
     load_form = load_forms[0]
@@ -4502,13 +4686,6 @@ def test_gfx940_scratch_memory_forms_cover_spill_packets() -> None:
     )
 
     store_descriptor = descriptors["amdgpu.scratch_store_b32_offset_only"]
-    assert any(
-        operand.operand_type == "OPR_SDST_M0"
-        and operand.descriptor_operand is not None
-        and operand.descriptor_operand.field_name == "m0"
-        and operand.descriptor_operand.role is OperandRole.IMPLICIT
-        for operand in store_descriptor.implicit_operands
-    )
     store_forms = store_descriptor.asm_forms
     assert store_forms is not None
     store_form = store_forms[0]

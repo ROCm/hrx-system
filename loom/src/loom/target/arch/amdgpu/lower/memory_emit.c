@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "loom/codegen/low/descriptors.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cache.h"
@@ -363,17 +364,27 @@ static iree_status_t loom_amdgpu_emit_memory_packet(
       context, &descriptor, operands, operand_count, attrs, result_types,
       result_count, /*tied_results=*/NULL, /*tied_result_count=*/0,
       source_op->location, out_op));
+  // Workgroup allocations have compiler-owned identities that remain comparable
+  // after source lowering. Preserve those summaries so final packet scheduling
+  // can distinguish disjoint LDS allocations from real async-memory hazards.
+  const bool preserve_memory_access =
+      packet->access.source.memory_space ==
+          LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP &&
+      packet->access.source.alias_scope_id !=
+          LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
+  const loom_low_lower_memory_access_record_flags_t record_flags =
+      preserve_memory_access ? LOOM_LOW_LOWER_MEMORY_ACCESS_RECORD_PRESERVE : 0;
   IREE_RETURN_IF_ERROR(loom_low_lower_record_source_memory_access(
-      context, *out_op, &packet->access.source));
+      context, *out_op, &packet->access.source, record_flags));
   return loom_amdgpu_record_memory_packet_report(context, source_op, packet);
 }
 
 static bool loom_amdgpu_memory_descriptor_has_implicit_resource_operand(
     loom_low_lower_context_t* context,
     const loom_amdgpu_memory_packet_plan_t* packet) {
-  return loom_amdgpu_descriptor_has_implicit_resource_operand(
-      loom_low_lower_context_descriptor_set(context),
-      packet->access.descriptor);
+  return loom_low_descriptor_implicit_resource_operand(
+             loom_low_lower_context_descriptor_set(context),
+             packet->access.descriptor) != NULL;
 }
 
 static iree_status_t loom_amdgpu_emit_memory_implicit_m0(
@@ -1566,6 +1577,15 @@ static iree_status_t loom_amdgpu_append_memory_cache_attrs(
         attr_capacity, inout_attr_count));
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_make_memory_cache_attrs(
+    loom_low_lower_context_t* context,
+    const loom_amdgpu_memory_access_t* access, loom_named_attr_t* attrs,
+    iree_host_size_t attr_capacity, iree_host_size_t* out_attr_count) {
+  *out_attr_count = 0;
+  return loom_amdgpu_append_memory_cache_attrs(context, access, attrs,
+                                               attr_capacity, out_attr_count);
 }
 
 iree_status_t loom_amdgpu_make_memory_attrs(

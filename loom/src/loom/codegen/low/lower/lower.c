@@ -1901,6 +1901,15 @@ static iree_status_t loom_low_lower_create_kernel_op(
                    LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_COUNT_Z;
     workgroup_count = context->result->static_workgroup_count;
   }
+  loom_target_workgroup_cluster_size_t workgroup_cluster_size = {0};
+  if (iree_any_bit_set(
+          context->result->static_launch_config_flags,
+          LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_CLUSTER_SIZE)) {
+    build_flags |= LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_X |
+                   LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Y |
+                   LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Z;
+    workgroup_cluster_size = context->result->static_workgroup_cluster_size;
+  }
   uint8_t retain = 0;
   if (loom_low_lower_source_is_retained(context->module,
                                         context->source_function)) {
@@ -1920,9 +1929,10 @@ static iree_status_t loom_low_lower_create_kernel_op(
       &context->builder, build_flags, retain, /*allocation=*/0, /*schedule=*/0,
       context->options->target_ref, abi_layout, export_symbol, export_linkage,
       workgroup_size.x, workgroup_size.y, workgroup_size.z, workgroup_count.x,
-      workgroup_count.y, workgroup_count.z, low_func_ref, arg_types, arg_count,
-      predicates, predicate_count, context->source_function.op->location,
-      &context->low_func_op));
+      workgroup_count.y, workgroup_count.z, workgroup_cluster_size.x,
+      workgroup_cluster_size.y, workgroup_cluster_size.z, low_func_ref,
+      arg_types, arg_count, predicates, predicate_count,
+      context->source_function.op->location, &context->low_func_op));
 
   loom_region_t* low_body = loom_low_lower_low_body(context);
   low_body->flags = source_body->flags;
@@ -2796,22 +2806,11 @@ static iree_status_t loom_low_lower_descriptor_matrix_packet_operands(
     loom_low_lower_context_t* context,
     const loom_low_lower_descriptor_matrix_plan_t* plan,
     loom_value_id_t low_lhs, loom_value_id_t low_rhs, loom_value_id_t low_init,
-    loom_value_id_t** out_operands, iree_host_size_t* out_operand_count,
-    const uint16_t** out_descriptor_operand_packet_indices) {
+    loom_value_id_t** out_operands, iree_host_size_t* out_operand_count) {
   *out_operands = NULL;
   *out_operand_count = 0;
-  *out_descriptor_operand_packet_indices = NULL;
   const loom_low_descriptor_set_t* descriptor_set = context->descriptor_set;
   const loom_low_descriptor_t* descriptor = plan->descriptor.descriptor;
-
-  uint16_t* descriptor_operand_packet_indices = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(&context->arena, descriptor->operand_count,
-                                sizeof(*descriptor_operand_packet_indices),
-                                (void**)&descriptor_operand_packet_indices));
-  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    descriptor_operand_packet_indices[i] = UINT16_MAX;
-  }
 
   iree_host_size_t operand_count = 0;
   IREE_ASSERT((uint64_t)descriptor->operand_start +
@@ -2821,8 +2820,8 @@ static iree_status_t loom_low_lower_descriptor_matrix_packet_operands(
        ++i) {
     const uint32_t row = descriptor->operand_start + i;
     const loom_low_operand_t* operand = &descriptor_set->operands[row];
-    if (operand->role != LOOM_LOW_OPERAND_ROLE_IMPLICIT) {
-      descriptor_operand_packet_indices[i] = (uint16_t)operand_count++;
+    if (loom_low_operand_role_is_packet_operand(operand->role)) {
+      ++operand_count;
     }
   }
 
@@ -2834,28 +2833,26 @@ static iree_status_t loom_low_lower_descriptor_matrix_packet_operands(
 
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
-    if (descriptor_operand_packet_indices[i] == UINT16_MAX) {
-      continue;
-    }
     const loom_low_operand_t* operand =
         &descriptor_set->operands[descriptor->operand_start + i];
+    if (!loom_low_operand_role_is_packet_operand(operand->role)) {
+      continue;
+    }
     iree_string_view_t field_name = loom_low_descriptor_set_string(
         descriptor_set, operand->field_name_string_offset);
     IREE_RETURN_IF_ERROR(loom_low_lower_descriptor_matrix_packet_value(
         context, plan, field_name, low_lhs, low_rhs, low_init,
-        &operands[descriptor_operand_packet_indices[i]]));
+        &operands[operand->source_value_index]));
   }
 
   *out_operands = operands;
   *out_operand_count = operand_count;
-  *out_descriptor_operand_packet_indices = descriptor_operand_packet_indices;
   return iree_ok_status();
 }
 
 static iree_status_t loom_low_lower_descriptor_matrix_tied_results(
     loom_low_lower_context_t* context,
     const loom_low_lower_descriptor_matrix_plan_t* plan,
-    const uint16_t* descriptor_operand_packet_indices,
     const loom_tied_result_t** out_tied_results,
     iree_host_size_t* out_tied_result_count) {
   *out_tied_results = NULL;
@@ -2890,17 +2887,18 @@ static iree_status_t loom_low_lower_descriptor_matrix_tied_results(
     }
     if (constraint->lhs_operand_index >= descriptor->result_count ||
         constraint->rhs_operand_index == LOOM_LOW_ID_NONE ||
-        constraint->rhs_operand_index >= descriptor->operand_count ||
-        descriptor_operand_packet_indices[constraint->rhs_operand_index] ==
-            UINT16_MAX) {
+        constraint->rhs_operand_index >= descriptor->operand_count) {
       IREE_ASSERT_UNREACHABLE(
           "descriptor-matrix selected tied result constraint is invalid");
       IREE_BUILTIN_UNREACHABLE();
     }
+    const loom_low_operand_t* tied_operand =
+        &descriptor_set->operands[descriptor->operand_start +
+                                  constraint->rhs_operand_index];
+    IREE_ASSERT_NE(tied_operand->source_value_index, LOOM_LOW_ID_NONE);
     tied_results[tied_result_index++] = (loom_tied_result_t){
         .result_index = constraint->lhs_operand_index,
-        .operand_index =
-            descriptor_operand_packet_indices[constraint->rhs_operand_index],
+        .operand_index = tied_operand->source_value_index,
         .has_type_change = false,
     };
   }
@@ -2912,9 +2910,8 @@ static iree_status_t loom_low_lower_descriptor_matrix_tied_results(
 
 static bool loom_low_lower_descriptor_matrix_destructive_operand_was_copied(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor,
-    const uint16_t* descriptor_operand_packet_indices,
-    uint16_t constraint_index, uint16_t packet_operand_index) {
+    const loom_low_descriptor_t* descriptor, uint16_t constraint_index,
+    uint16_t packet_operand_index) {
   for (uint16_t i = 0; i < constraint_index; ++i) {
     const loom_low_constraint_t* previous =
         &descriptor_set->constraints[descriptor->constraint_start + i];
@@ -2923,8 +2920,10 @@ static bool loom_low_lower_descriptor_matrix_destructive_operand_was_copied(
     }
     IREE_ASSERT(previous->rhs_operand_index != LOOM_LOW_ID_NONE);
     IREE_ASSERT(previous->rhs_operand_index < descriptor->operand_count);
-    if (descriptor_operand_packet_indices[previous->rhs_operand_index] ==
-        packet_operand_index) {
+    const loom_low_operand_t* previous_operand =
+        &descriptor_set->operands[descriptor->operand_start +
+                                  previous->rhs_operand_index];
+    if (previous_operand->source_value_index == packet_operand_index) {
       return true;
     }
   }
@@ -2934,7 +2933,6 @@ static bool loom_low_lower_descriptor_matrix_destructive_operand_was_copied(
 static iree_status_t loom_low_lower_descriptor_matrix_copy_destructive_operands(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_descriptor_matrix_plan_t* plan,
-    const uint16_t* descriptor_operand_packet_indices,
     loom_value_id_t* operands) {
   const loom_low_descriptor_set_t* descriptor_set = context->descriptor_set;
   const loom_low_descriptor_t* descriptor = plan->descriptor.descriptor;
@@ -2950,14 +2948,14 @@ static iree_status_t loom_low_lower_descriptor_matrix_copy_destructive_operands(
     IREE_ASSERT(constraint->lhs_operand_index < descriptor->result_count);
     IREE_ASSERT(constraint->rhs_operand_index != LOOM_LOW_ID_NONE);
     IREE_ASSERT(constraint->rhs_operand_index < descriptor->operand_count);
-    IREE_ASSERT(
-        descriptor_operand_packet_indices[constraint->rhs_operand_index] !=
-        UINT16_MAX);
+    const loom_low_operand_t* destructive_operand =
+        &descriptor_set->operands[descriptor->operand_start +
+                                  constraint->rhs_operand_index];
     const uint16_t packet_operand_index =
-        descriptor_operand_packet_indices[constraint->rhs_operand_index];
+        destructive_operand->source_value_index;
+    IREE_ASSERT_NE(packet_operand_index, LOOM_LOW_ID_NONE);
     if (loom_low_lower_descriptor_matrix_destructive_operand_was_copied(
-            descriptor_set, descriptor, descriptor_operand_packet_indices, i,
-            packet_operand_index)) {
+            descriptor_set, descriptor, i, packet_operand_index)) {
       continue;
     }
     const loom_value_id_t source_value = operands[packet_operand_index];
@@ -3001,19 +2999,15 @@ static iree_status_t loom_low_lower_emit_descriptor_matrix_vector_mma(
 
   loom_value_id_t* operands = NULL;
   iree_host_size_t operand_count = 0;
-  const uint16_t* descriptor_operand_packet_indices = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_descriptor_matrix_packet_operands(
-      context, plan, low_lhs, low_rhs, low_init, &operands, &operand_count,
-      &descriptor_operand_packet_indices));
+      context, plan, low_lhs, low_rhs, low_init, &operands, &operand_count));
   IREE_RETURN_IF_ERROR(
       loom_low_lower_descriptor_matrix_copy_destructive_operands(
-          context, source_op, plan, descriptor_operand_packet_indices,
-          operands));
+          context, source_op, plan, operands));
   const loom_tied_result_t* tied_results = NULL;
   iree_host_size_t tied_result_count = 0;
   IREE_RETURN_IF_ERROR(loom_low_lower_descriptor_matrix_tied_results(
-      context, plan, descriptor_operand_packet_indices, &tied_results,
-      &tied_result_count));
+      context, plan, &tied_results, &tied_result_count));
 
   loom_op_t* low_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
@@ -3173,12 +3167,62 @@ static iree_status_t loom_low_lower_finalize_function(
       context->policy->finalize_function.user_data, context);
 }
 
-static void loom_low_lower_record_static_launch_config(
-    const loom_module_t* module, loom_func_like_t source_function,
-    const loom_value_fact_table_t* fact_table,
-    loom_low_lower_result_t* result) {
+static bool loom_low_lower_cluster_size_product_fits_u32(
+    loom_target_workgroup_cluster_size_t cluster_size) {
+  const uint64_t cluster_size_xy =
+      (uint64_t)cluster_size.x * (uint64_t)cluster_size.y;
+  return cluster_size_xy <= UINT32_MAX &&
+         cluster_size.z <= UINT32_MAX / cluster_size_xy;
+}
+
+static bool loom_low_lower_cluster_size_is_trivial(
+    loom_target_workgroup_cluster_size_t cluster_size) {
+  return cluster_size.x == 1 && cluster_size.y == 1 && cluster_size.z == 1;
+}
+
+static iree_status_t loom_low_lower_verify_static_cluster_divisibility(
+    loom_low_lower_context_t* context, const loom_op_t* launch_config,
+    loom_target_dispatch_workgroup_count_t workgroup_count,
+    loom_target_workgroup_cluster_size_t cluster_size) {
+  const uint32_t workgroup_counts[] = {
+      workgroup_count.x,
+      workgroup_count.y,
+      workgroup_count.z,
+  };
+  const uint32_t cluster_sizes[] = {
+      cluster_size.x,
+      cluster_size.y,
+      cluster_size.z,
+  };
+  const iree_string_view_t axes[] = {
+      IREE_SV("x"),
+      IREE_SV("y"),
+      IREE_SV("z"),
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(workgroup_counts); ++i) {
+    if (workgroup_counts[i] % cluster_sizes[i] == 0) {
+      continue;
+    }
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(axes[i]),
+        loom_param_u32(workgroup_counts[i]),
+        loom_param_u32(cluster_sizes[i]),
+    };
+    return loom_low_lower_emit_target_context_error(context, launch_config,
+                                                    LOOM_ERR_TARGET_064, params,
+                                                    IREE_ARRAYSIZE(params));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_low_lower_record_static_launch_config(
+    loom_low_lower_context_t* context) {
+  const loom_module_t* module = context->module;
+  const loom_func_like_t source_function = context->source_function;
+  const loom_value_fact_table_t* fact_table = context->options->fact_table;
+  loom_low_lower_result_t* result = context->result;
   if (!loom_kernel_def_isa(source_function.op)) {
-    return;
+    return iree_ok_status();
   }
   if (loom_kernel_def_static_workgroup_size_from_facts(
           module, source_function.op, fact_table,
@@ -3192,6 +3236,48 @@ static void loom_low_lower_record_static_launch_config(
     result->static_launch_config_flags |=
         LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_COUNT;
   }
+
+  const loom_op_t* launch_config =
+      loom_kernel_def_launch_config_op(source_function.op);
+  if (!loom_kernel_launch_config_has_workgroup_cluster_size(launch_config)) {
+    return iree_ok_status();
+  }
+  if (!loom_kernel_def_static_workgroup_cluster_size_from_facts(
+          module, source_function.op, fact_table,
+          &result->static_workgroup_cluster_size)) {
+    return loom_low_lower_emit_target_context_error(
+        context, launch_config, LOOM_ERR_TARGET_062, /*extra_params=*/NULL,
+        /*extra_param_count=*/0);
+  }
+  if (!loom_low_lower_cluster_size_product_fits_u32(
+          result->static_workgroup_cluster_size)) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_u32(result->static_workgroup_cluster_size.x),
+        loom_param_u32(result->static_workgroup_cluster_size.y),
+        loom_param_u32(result->static_workgroup_cluster_size.z),
+    };
+    return loom_low_lower_emit_target_context_error(context, launch_config,
+                                                    LOOM_ERR_TARGET_063, params,
+                                                    IREE_ARRAYSIZE(params));
+  }
+  if (iree_any_bit_set(result->static_launch_config_flags,
+                       LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_COUNT)) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_verify_static_cluster_divisibility(
+        context, launch_config, result->static_workgroup_count,
+        result->static_workgroup_cluster_size));
+    if (result->error_count != 0) {
+      return iree_ok_status();
+    }
+  }
+  if (loom_low_lower_cluster_size_is_trivial(
+          result->static_workgroup_cluster_size)) {
+    result->static_workgroup_cluster_size =
+        (loom_target_workgroup_cluster_size_t){0};
+    return iree_ok_status();
+  }
+  result->static_launch_config_flags |=
+      LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_CLUSTER_SIZE;
+  return iree_ok_status();
 }
 
 iree_status_t loom_low_lower_function(loom_module_t* module,
@@ -3207,9 +3293,6 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
     out_result->report_allocator = options->report_allocator;
     out_result->memory_report_row_allocator = module->allocator;
   }
-  loom_low_lower_record_static_launch_config(module, source_function,
-                                             options->fact_table, out_result);
-
   loom_region_t* source_body = loom_func_like_body(source_function);
   IREE_ASSERT(source_body != NULL);
 
@@ -3226,6 +3309,14 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
 
   iree_status_t status =
       loom_low_lowering_frame_initialize_value_ordinals(&context, source_body);
+  if (iree_status_is_ok(status)) {
+    status = loom_low_lower_record_static_launch_config(&context);
+  }
+  if (iree_status_is_ok(status) && out_result->error_count != 0) {
+    loom_low_lowering_frame_deinitialize(&context);
+    iree_arena_deinitialize(&context.arena);
+    return iree_ok_status();
+  }
   if (iree_status_is_ok(status)) {
     status = loom_target_contract_index_compose(
         context.policy->contract_bindings,

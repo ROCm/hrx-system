@@ -128,6 +128,7 @@ __all__ = [
     "ISOLATED_FROM_ABOVE",
     "NON_DETERMINISTIC",
     "UNKNOWN_EFFECTS",
+    "MEMORY_FENCE",
     "CONVERGENT",
     "HINT",
     "SAFE_TO_SPECULATE",
@@ -737,9 +738,10 @@ class RegionDef:
     buffer_arg_memory_space: Optional target-independent memory-space fact to
         seed for buffer entry block arguments in this region. This refines
         region boundary facts without parameterizing the buffer type itself.
-    arg_uniform_scope: Optional execution scope over which scalar entry block
-        arguments are identical. This is a region boundary contract rather
-        than a property inferred from argument types.
+    arg_uniform_scope: Optional execution scope (currently "workgroup" or
+        "cluster") over which scalar entry block arguments are identical.
+        This is a region boundary contract rather than a property inferred
+        from argument types.
     """
 
     name: str
@@ -888,6 +890,11 @@ NON_DETERMINISTIC = Trait("NonDeterministic")
 # Effects depend on runtime state (e.g., func.call depends on the callee).
 # Passes treat this conservatively as both READS_MEMORY and WRITES_MEMORY.
 UNKNOWN_EFFECTS = Trait("UnknownEffects")
+# Op orders memory accesses without directly reading or writing a resource.
+# Fences are observable side effects but do not alias every memory operand;
+# analyses preserve their ordering contract independently from footprint
+# interference.
+MEMORY_FENCE = Trait("MemoryFence")
 # Execution depends on the dynamic set of participating invocations. This is
 # independent of memory effects: a convergent op may still be pure, read/write
 # memory, or have unknown effects, but generic optimizers must not erase,
@@ -3227,6 +3234,11 @@ def _validate_no_effect_conflicts(
             f"Op '{op_name}': declares both PURE and UNKNOWN_EFFECTS. "
             f"A pure op has no effects."
         )
+    if "Pure" in trait_names and "MemoryFence" in trait_names:
+        raise ValueError(
+            f"Op '{op_name}': declares both PURE and MEMORY_FENCE. "
+            f"A memory fence is an observable ordering effect."
+        )
     if "Pure" in trait_names and "UniqueIdentity" in trait_names:
         raise ValueError(
             f"Op '{op_name}': declares both PURE and UNIQUE_IDENTITY. "
@@ -3242,6 +3254,11 @@ def _validate_no_effect_conflicts(
         raise ValueError(
             f"Op '{op_name}': declares both HINT and UNKNOWN_EFFECTS. "
             f"Hints are not semantic effects."
+        )
+    if "Hint" in trait_names and "MemoryFence" in trait_names:
+        raise ValueError(
+            f"Op '{op_name}': declares both HINT and MEMORY_FENCE. "
+            f"A memory fence is semantic, not a compiler hint."
         )
     if "Hint" in trait_names and "NonDeterministic" in trait_names:
         raise ValueError(
@@ -3263,6 +3280,11 @@ def _validate_no_effect_conflicts(
         raise ValueError(
             f"Op '{op_name}': declares both SAFE_TO_SPECULATE and UNKNOWN_EFFECTS. "
             f"Unknown effects cannot be executed on additional control paths."
+        )
+    if "SafeToSpeculate" in trait_names and "MemoryFence" in trait_names:
+        raise ValueError(
+            f"Op '{op_name}': declares both SAFE_TO_SPECULATE and MEMORY_FENCE. "
+            f"Speculation must not add memory-ordering effects."
         )
     if "SafeToSpeculate" in trait_names and "NonDeterministic" in trait_names:
         raise ValueError(
@@ -3417,11 +3439,19 @@ class TargetLikeInterface(NamedTuple):
 class LoopLikeInterface(NamedTuple):
     """Interface for loop-like ops that iterate a body region.
 
-    Each field is the name of a region, an implicit block argument,
-    or an operand on the op (or None where applicable). The generator
-    resolves names to indices and emits a loom_loop_like_vtable_t in
-    .rodata. Used by LICM, loop-invariant sinking, trip count
-    analysis, and loop transformation passes.
+    The variadic iter_args operand is the complete loop-carried state domain.
+    Implementing ops have one matching variadic result field and a required
+    single-block body whose carried block arguments follow any induction
+    variable. IterArgsMatchResults, YieldCountMatchesResults, and
+    YieldTypesMatchResults constraints verify the complete state cycle.
+
+    Each field is the name of a region, an implicit block argument, or an
+    operand on the op (or None where applicable). Exactly one control form is
+    present: either lower_bound, upper_bound, and step with an induction
+    variable, or a separate condition_region without an induction variable.
+    The generator resolves names to indices, validates the contract, and emits
+    a loom_loop_like_vtable_t in .rodata. Used by LICM, loop-invariant sinking,
+    trip count analysis, fact propagation, and loop transformation passes.
     """
 
     # Region name for the primary loop body. For scf.for this is the
@@ -4028,7 +4058,8 @@ class Op:
 
         An op is pure if it explicitly declares traits=[PURE], or if it
         has no effects, no ownership effects, no ALLOCATES results, and no HINT,
-        NON_DETERMINISTIC, UNKNOWN_EFFECTS, or UNIQUE_IDENTITY traits.
+        NON_DETERMINISTIC, UNKNOWN_EFFECTS, MEMORY_FENCE, or UNIQUE_IDENTITY
+        traits.
         """
         if self.has_trait("Pure"):
             return True
@@ -4042,7 +4073,11 @@ class Op:
             return False
         if self.has_trait("Hint"):
             return False
-        if self.has_trait("NonDeterministic") or self.has_trait("UnknownEffects"):
+        if (
+            self.has_trait("NonDeterministic")
+            or self.has_trait("UnknownEffects")
+            or self.has_trait("MemoryFence")
+        ):
             return False
         return True
 

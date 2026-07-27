@@ -22,6 +22,7 @@ loom_cc_library(
     loom::ir
     loom::ops::op_defs
     loom::pass::types
+    loom::pass::value_facts
     loom::rewrite::rewriter
   PUBLIC
 )

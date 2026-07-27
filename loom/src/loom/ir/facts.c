@@ -34,7 +34,7 @@ static int64_t loom_value_facts_exact_i64_divisor(int64_t value) {
 void loom_value_facts_propagate_unary_distribution(loom_value_facts_t input,
                                                    loom_value_facts_t* out) {
   if (loom_value_facts_is_exact(*out)) {
-    loom_value_facts_mark_workgroup_uniform(out);
+    loom_value_facts_mark_cluster_uniform(out);
   } else if (loom_value_facts_is_lane_predicate(input) ||
              loom_value_facts_is_lane_varying(input)) {
     loom_value_facts_mark_lane_varying(out);
@@ -48,7 +48,7 @@ void loom_value_facts_propagate_binary_distribution(loom_value_facts_t lhs,
                                                     loom_value_facts_t rhs,
                                                     loom_value_facts_t* out) {
   if (loom_value_facts_is_exact(*out)) {
-    loom_value_facts_mark_workgroup_uniform(out);
+    loom_value_facts_mark_cluster_uniform(out);
   } else if (loom_value_facts_is_lane_predicate(lhs) ||
              loom_value_facts_is_lane_predicate(rhs) ||
              loom_value_facts_is_lane_varying(lhs) ||
@@ -67,7 +67,7 @@ void loom_value_facts_propagate_ternary_distribution(loom_value_facts_t a,
                                                      loom_value_facts_t c,
                                                      loom_value_facts_t* out) {
   if (loom_value_facts_is_exact(*out)) {
-    loom_value_facts_mark_workgroup_uniform(out);
+    loom_value_facts_mark_cluster_uniform(out);
   } else if (loom_value_facts_is_lane_predicate(a) ||
              loom_value_facts_is_lane_predicate(b) ||
              loom_value_facts_is_lane_predicate(c) ||
@@ -94,7 +94,7 @@ loom_value_facts_t loom_value_facts_exact_i64(int64_t value) {
   facts.range_hi = value;
   facts.known_divisor = loom_value_facts_exact_i64_divisor(value);
   facts.flags = loom_value_facts_compute_flags(value, value);
-  loom_value_facts_mark_workgroup_uniform(&facts);
+  loom_value_facts_mark_cluster_uniform(&facts);
   return facts;
 }
 
@@ -158,6 +158,48 @@ static const loom_value_fact_topology_domain_t kValueFactTopologyDomains[] = {
         .value_kind = LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID,
         .axis = LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z,
         .value_kind_name = IREE_SVL("workgroup.id"),
+        .axis_name = IREE_SVL("z"),
+    },
+    {
+        .fact_flag = LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_X,
+        .value_kind = LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_ID,
+        .axis = LOOM_VALUE_FACT_TOPOLOGY_AXIS_X,
+        .value_kind_name = IREE_SVL("cluster.id"),
+        .axis_name = IREE_SVL("x"),
+    },
+    {
+        .fact_flag = LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_Y,
+        .value_kind = LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_ID,
+        .axis = LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y,
+        .value_kind_name = IREE_SVL("cluster.id"),
+        .axis_name = IREE_SVL("y"),
+    },
+    {
+        .fact_flag = LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_Z,
+        .value_kind = LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_ID,
+        .axis = LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z,
+        .value_kind_name = IREE_SVL("cluster.id"),
+        .axis_name = IREE_SVL("z"),
+    },
+    {
+        .fact_flag = LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_X,
+        .value_kind = LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_WORKGROUP_ID,
+        .axis = LOOM_VALUE_FACT_TOPOLOGY_AXIS_X,
+        .value_kind_name = IREE_SVL("cluster.workgroup.id"),
+        .axis_name = IREE_SVL("x"),
+    },
+    {
+        .fact_flag = LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_Y,
+        .value_kind = LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_WORKGROUP_ID,
+        .axis = LOOM_VALUE_FACT_TOPOLOGY_AXIS_Y,
+        .value_kind_name = IREE_SVL("cluster.workgroup.id"),
+        .axis_name = IREE_SVL("y"),
+    },
+    {
+        .fact_flag = LOOM_VALUE_FACT_TOPOLOGY_CLUSTER_WORKGROUP_Z,
+        .value_kind = LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_WORKGROUP_ID,
+        .axis = LOOM_VALUE_FACT_TOPOLOGY_AXIS_Z,
+        .value_kind_name = IREE_SVL("cluster.workgroup.id"),
         .axis_name = IREE_SVL("z"),
     },
     {

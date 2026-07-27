@@ -137,3 +137,25 @@ func.def public @entry(%lhs: i32) -> (i32) {
   %sum = low.invoke @missing_low(%lhs) : (i32) -> (i32)
   func.return %sum : i32
 }
+
+// ====
+
+// Target-low kernel entries also export under their symbol name.
+// RUN: pass symbol-dce
+
+test.target<low_core> @test_target
+
+low.kernel.def target(@test_target) @implicit_export() {
+  low.return
+}
+
+low.func.def target(@test_target) @dead_helper() {
+  low.return
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.kernel.def target(@test_target) @implicit_export() {
+  low.return
+}

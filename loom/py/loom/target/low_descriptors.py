@@ -14,7 +14,7 @@ from pathlib import Path
 
 from loom.stable_id import stable_id_from_string
 
-LOW_DESCRIPTOR_SET_ABI_VERSION = 27
+LOW_DESCRIPTOR_SET_ABI_VERSION = 29
 LOW_DESCRIPTOR_ENCODING_ID_NONE = (2**16) - 1
 LOW_DESCRIPTOR_SET_ORDINAL_NONE = (2**16) - 1
 
@@ -295,6 +295,8 @@ class RegClass:
     flags: tuple[RegClassFlag, ...] = ()
     target_bank_id: int = 0
     allocatable_count: int = 0
+    fixed_location_base: int = 0
+    fixed_location_count: int = 0
     alias_set_id: int = 0
     spill_class: str | None = None
     full_register_part_mask: int = 1

@@ -63,6 +63,28 @@ func.def @read_decl_config() -> (index) {
 
 // ====
 
+// Unresolved compile-time configuration has a workgroup-uniform value even
+// though specialization has not supplied its exact numerical value.
+config.decl @runtime_sequence_length : index
+
+func.def @decl_config_is_workgroup_uniform() {
+  %value = config.get @runtime_sequence_length : index
+  %uniform = test.fact_workgroup_uniform %value : index -> i1
+  test.use %uniform : i1
+  func.return
+}
+
+// ----
+config.decl @runtime_sequence_length : index
+
+func.def @decl_config_is_workgroup_uniform() {
+  %uniform = scalar.constant true : i1
+  test.use %uniform : i1
+  func.return
+}
+
+// ====
+
 // Declaration predicates apply to config.get results until specialization
 // replaces the declaration with an exact definition.
 config.decl @runtime_chunk_size : %value: index where [range(%value, 0, 131072), mul(%value, 16)]

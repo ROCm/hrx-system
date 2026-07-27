@@ -16,7 +16,6 @@
 // thread using direct syscalls, verify completion, then optionally have the
 // completion callback wake the main thread back for round-trip verification.
 //
-// All tests use iree_notification_t for thread synchronization (no sleeps).
 // Tests requiring kernel 6.7+ check
 // IREE_ASYNC_PROACTOR_CAPABILITY_FUTEX_OPERATIONS and skip gracefully on older
 // kernels.
@@ -79,45 +78,82 @@ class FutexTest : public CtsTestBase<> {
 
 #if defined(IREE_RUNTIME_USE_FUTEX)
 
-// Submit FUTEX_WAIT to the proactor, background thread wakes it, verify
-// completion with OK status.
+static bool atomic_flag_is_set(void* user_data) {
+  return static_cast<std::atomic<bool>*>(user_data)->load(
+      std::memory_order_acquire);
+}
+
+// Owns a thread that performs a futex state transition when triggered.
+//
+// The worker is created and parked before construction returns. This keeps
+// process thread creation outside the lifetime of any subsequently submitted
+// private io_uring futex wait. Linux kernels that migrate an mm to a private
+// futex hash during thread creation have shipped with bugs that can strand an
+// already-armed io_uring waiter during that migration.
+class GatedFutexWaker {
+ public:
+  explicit GatedFutexWaker(std::atomic<uint32_t>* futex_word)
+      : futex_word_(futex_word) {
+    iree_notification_initialize(&gate_);
+    thread_ = std::thread([this]() {
+      worker_ready_.store(true, std::memory_order_release);
+      iree_notification_post(&gate_, IREE_ALL_WAITERS);
+
+      bool was_triggered =
+          iree_notification_await(&gate_, atomic_flag_is_set, &wake_requested_,
+                                  iree_infinite_timeout());
+      IREE_ASSERT(was_triggered);
+      futex_word_->store(1, std::memory_order_release);
+      iree_futex_wake(futex_word_, 1);
+    });
+
+    bool is_ready = iree_notification_await(
+        &gate_, atomic_flag_is_set, &worker_ready_, iree_infinite_timeout());
+    IREE_ASSERT(is_ready);
+  }
+
+  ~GatedFutexWaker() {
+    Trigger();
+    Join();
+    iree_notification_deinitialize(&gate_);
+  }
+
+  void Trigger() {
+    if (!wake_requested_.exchange(true, std::memory_order_acq_rel)) {
+      iree_notification_post(&gate_, IREE_ALL_WAITERS);
+    }
+  }
+
+  void Join() {
+    if (thread_.joinable()) thread_.join();
+  }
+
+ private:
+  std::atomic<uint32_t>* const futex_word_;
+  iree_notification_t gate_;
+  std::atomic<bool> worker_ready_{false};
+  std::atomic<bool> wake_requested_{false};
+  std::thread thread_;
+};
+
+// Submit FUTEX_WAIT to the proactor and complete the state transition from a
+// pre-created background thread.
 TEST_P(FutexTest, BasicFutexWaitWake) {
   std::atomic<uint32_t> futex_word{0};
-  iree_notification_t ready;
-  iree_notification_initialize(&ready);
+  GatedFutexWaker waker(&futex_word);
 
-  CompletionTracker tracker;
+  CompletionTracker wait_tracker;
   iree_async_futex_wait_operation_t wait_op;
   InitFutexWaitOp(&wait_op, &futex_word, 0, CompletionTracker::Callback,
-                  &tracker);
+                  &wait_tracker);
 
-  // Submit the wait operation.
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
+  waker.Trigger();
+  PollUntil(/*min_completions=*/1);
+  waker.Join();
 
-  // Background thread: wait for ready signal, then wake the futex.
-  std::thread waker([&]() {
-    // Wait for main thread to signal that the operation is submitted.
-    iree_notification_await(
-        &ready, [](void*) { return true; }, nullptr, iree_infinite_timeout());
-
-    // Change the futex word and wake.
-    futex_word.store(1, std::memory_order_release);
-    iree_futex_wake(&futex_word, 1);
-  });
-
-  // Signal the background thread that we've submitted.
-  iree_notification_post(&ready, 1);
-
-  // Poll until the wait operation completes.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
-
-  waker.join();
-
-  EXPECT_EQ(tracker.call_count, 1);
-  IREE_EXPECT_OK(tracker.ConsumeStatus());
-
-  iree_notification_deinitialize(&ready);
+  EXPECT_EQ(wait_tracker.call_count, 1);
+  IREE_EXPECT_OK(wait_tracker.ConsumeStatus());
 }
 
 // Submit FUTEX_WAIT with wrong expected value. The operation should complete
@@ -134,8 +170,7 @@ TEST_P(FutexTest, FutexWaitValueMismatch) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
 
   // Should complete immediately since value doesn't match expected.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -153,8 +188,7 @@ TEST_P(FutexTest, FutexWakeWakesWaiter) {
 
     // Wait on the futex (direct syscall, not async).
     while (futex_word.load(std::memory_order_acquire) == 0) {
-      iree_futex_wait(&futex_word, 0,
-                      iree_time_now() + iree_make_duration_ms(100));
+      iree_futex_wait(&futex_word, 0, IREE_TIME_INFINITE_FUTURE);
     }
 
     waiter_woken.store(true, std::memory_order_release);
@@ -177,8 +211,7 @@ TEST_P(FutexTest, FutexWakeWakesWaiter) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wake_op.base));
 
   // Poll for completion.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
   waiter.join();
 
@@ -188,8 +221,8 @@ TEST_P(FutexTest, FutexWakeWakesWaiter) {
   EXPECT_TRUE(waiter_woken.load(std::memory_order_acquire));
 }
 
-// Submit FUTEX_WAKE(2) and verify exactly 2 of 3 waiters wake.
-TEST_P(FutexTest, FutexWakeCount) {
+// Submit FUTEX_WAKE(2) and verify the kernel wake count respects the bound.
+TEST_P(FutexTest, FutexWakeCountIsBounded) {
   std::atomic<uint32_t> futex_word{0};
   std::atomic<int> waiters_ready{0};
   std::atomic<int> waiters_woken{0};
@@ -203,8 +236,7 @@ TEST_P(FutexTest, FutexWakeCount) {
 
       // Wait on the futex (direct syscall).
       while (futex_word.load(std::memory_order_acquire) == 0) {
-        iree_futex_wait(&futex_word, 0,
-                        iree_time_now() + iree_make_duration_ms(100));
+        iree_futex_wait(&futex_word, 0, IREE_TIME_INFINITE_FUTURE);
       }
 
       waiters_woken.fetch_add(1, std::memory_order_acq_rel);
@@ -228,8 +260,7 @@ TEST_P(FutexTest, FutexWakeCount) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wake_op.base));
 
   // Poll for completion of the wake operation.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
   // Wake remaining waiters so we can join.
   iree_futex_wake(&futex_word, IREE_ALL_WAITERS);
@@ -240,6 +271,8 @@ TEST_P(FutexTest, FutexWakeCount) {
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
+  EXPECT_GE(wake_op.woken_count, 0);
+  EXPECT_LE(wake_op.woken_count, kWakeCount);
 }
 
 // Submit FUTEX_WAKE(INT32_MAX) and verify all waiters wake.
@@ -256,8 +289,7 @@ TEST_P(FutexTest, FutexWakeAll) {
 
       // Wait on the futex (direct syscall).
       while (futex_word.load(std::memory_order_acquire) == 0) {
-        iree_futex_wait(&futex_word, 0,
-                        iree_time_now() + iree_make_duration_ms(100));
+        iree_futex_wait(&futex_word, 0, IREE_TIME_INFINITE_FUTURE);
       }
 
       waiters_woken.fetch_add(1, std::memory_order_acq_rel);
@@ -281,8 +313,7 @@ TEST_P(FutexTest, FutexWakeAll) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wake_op.base));
 
   // Poll for completion.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
   for (auto& t : waiters) {
     t.join();
@@ -304,45 +335,29 @@ TEST_P(FutexTest, FutexWakeNoWaiters) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wake_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
   EXPECT_EQ(wake_op.woken_count, 0);
 }
 
-// Full async round-trip: main submits WAIT, background wakes it, completion
-// callback wakes main back.
-//
-// Main thread:                    Background thread:
-//   futex_A = 0, futex_B = 0
-//   notification "ready" = 0
-//   submit FUTEX_WAIT(A, expected=0)
-//     with callback that:
-//       futex_B = 1
-//       syscall futex_wake(B)
-//   post(ready)  ──────────────────►  wait(ready)
-//   syscall futex_wait(B, expected=0)
-//   |                                futex_A = 1
-//   |                                syscall futex_wake(A)
-//   poll() -> FUTEX_WAIT(A) completes
-//   callback fires:
-//     futex_B = 1
-//     syscall futex_wake(B)
-//   main's futex_wait(B) returns
-//   verify round-trip completed
+// Full async round-trip: main submits WAIT, a background thread wakes it, and
+// the completion callback publishes a second futex state change.
 TEST_P(FutexTest, FutexRoundTrip) {
   std::atomic<uint32_t> futex_a{0};
   std::atomic<uint32_t> futex_b{0};
-  iree_notification_t ready;
-  iree_notification_initialize(&ready);
+  GatedFutexWaker waker(&futex_a);
 
   struct RoundTripContext {
+    // Futex state published by the completion callback.
     std::atomic<uint32_t>* futex_b;
+    // Completion status owned until the test consumes it.
+    iree_status_t status = iree_ok_status();
+    // Set after the completion callback publishes |futex_b|.
     bool callback_fired = false;
   };
-  RoundTripContext context = {&futex_b, false};
+  RoundTripContext context = {&futex_b};
 
   iree_async_futex_wait_operation_t wait_op;
   memset(&wait_op, 0, sizeof(wait_op));
@@ -352,10 +367,10 @@ TEST_P(FutexTest, FutexRoundTrip) {
                                   iree_async_completion_flags_t flags) {
     auto* ctx = static_cast<RoundTripContext*>(user_data);
     ctx->callback_fired = true;
+    ctx->status = status;
     // Wake the main thread by setting futex_b.
     ctx->futex_b->store(1, std::memory_order_release);
     iree_futex_wake(ctx->futex_b, 1);
-    iree_status_ignore(status);
   };
   wait_op.base.user_data = &context;
   wait_op.futex_address = &futex_a;
@@ -365,38 +380,16 @@ TEST_P(FutexTest, FutexRoundTrip) {
 
   // Submit the wait operation.
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
+  waker.Trigger();
 
-  // Background thread: wake futex_a after ready signal.
-  std::thread waker([&]() {
-    iree_notification_await(
-        &ready, [](void*) { return true; }, nullptr, iree_infinite_timeout());
+  PollUntilCondition(
+      [&] { return futex_b.load(std::memory_order_acquire) != 0; },
+      "futex round trip");
 
-    // Wake the proactor's wait on futex_a.
-    futex_a.store(1, std::memory_order_release);
-    iree_futex_wake(&futex_a, 1);
-  });
-
-  // Signal background thread.
-  iree_notification_post(&ready, 1);
-
-  // Main thread waits on futex_b (will be woken by callback).
-  while (futex_b.load(std::memory_order_acquire) == 0) {
-    // Poll the proactor while waiting.
-    iree_host_size_t completed = 0;
-    iree_status_t status = iree_async_proactor_poll(
-        proactor_, iree_make_timeout_ms(100), &completed);
-    if (!iree_status_is_deadline_exceeded(status)) {
-      IREE_ASSERT_OK(status);
-    } else {
-      iree_status_ignore(status);
-    }
-  }
-
-  waker.join();
+  waker.Join();
 
   EXPECT_TRUE(context.callback_fired);
-
-  iree_notification_deinitialize(&ready);
+  IREE_EXPECT_OK(context.status);
 }
 
 // Submit FUTEX_WAIT + LINK + NOP, verify NOP only runs after wait completes.
@@ -407,20 +400,30 @@ TEST_P(FutexTest, FutexChainedOperations) {
   }
 
   std::atomic<uint32_t> futex_word{0};
-  iree_notification_t ready;
-  iree_notification_initialize(&ready);
+  GatedFutexWaker waker(&futex_word);
 
   struct OrderTracker {
+    // Callback order observed by the polling thread.
     std::vector<int> order;
+    // Wait operation status owned until the test consumes it.
+    iree_status_t wait_status = iree_ok_status();
+    // NOP operation status owned until the test consumes it.
+    iree_status_t nop_status = iree_ok_status();
+    ~OrderTracker() {
+      iree_status_free(wait_status);
+      iree_status_free(nop_status);
+    }
     static void WaitCallback(void* u, iree_async_operation_t* o,
                              iree_status_t s, iree_async_completion_flags_t f) {
-      static_cast<OrderTracker*>(u)->order.push_back(0);
-      iree_status_ignore(s);
+      auto* tracker = static_cast<OrderTracker*>(u);
+      tracker->order.push_back(0);
+      tracker->wait_status = s;
     }
     static void NopCallback(void* u, iree_async_operation_t* o, iree_status_t s,
                             iree_async_completion_flags_t f) {
-      static_cast<OrderTracker*>(u)->order.push_back(1);
-      iree_status_ignore(s);
+      auto* tracker = static_cast<OrderTracker*>(u);
+      tracker->order.push_back(1);
+      tracker->nop_status = s;
     }
   };
 
@@ -446,32 +449,21 @@ TEST_P(FutexTest, FutexChainedOperations) {
   iree_async_operation_t* ops[] = {&wait_op.base, &nop.base};
   iree_async_operation_list_t list = {ops, 2};
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
-
-  // Background thread: wake the futex after signal.
-  std::thread waker([&]() {
-    iree_notification_await(
-        &ready, [](void*) { return true; }, nullptr, iree_infinite_timeout());
-
-    // The LINKED flag ensures NOP waits for WAIT to complete.
-    futex_word.store(1, std::memory_order_release);
-    iree_futex_wake(&futex_word, 1);
-  });
-
-  // Signal background thread.
-  iree_notification_post(&ready, 1);
+  waker.Trigger();
 
   // Poll until both complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
-  waker.join();
+  waker.Join();
 
   ASSERT_EQ(tracker.order.size(), 2u);
   // Wait must complete before NOP (enforced by LINK).
   EXPECT_EQ(tracker.order[0], 0);
   EXPECT_EQ(tracker.order[1], 1);
-
-  iree_notification_deinitialize(&ready);
+  IREE_EXPECT_OK(tracker.wait_status);
+  tracker.wait_status = iree_ok_status();
+  IREE_EXPECT_OK(tracker.nop_status);
+  tracker.nop_status = iree_ok_status();
 }
 
 // Submit FUTEX_WAIT, cancel it, verify callback fires with CANCELLED status.
@@ -489,8 +481,7 @@ TEST_P(FutexTest, FutexCancellation) {
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &wait_op.base));
 
   // Poll to receive the cancellation callback.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, tracker.ConsumeStatus());
@@ -509,8 +500,7 @@ TEST_P(FutexTest, WakeFromCompletionCallback) {
     waiter_started.store(true, std::memory_order_release);
 
     while (futex_word.load(std::memory_order_acquire) == 0) {
-      iree_futex_wait(&futex_word, 0,
-                      iree_time_now() + iree_make_duration_ms(100));
+      iree_futex_wait(&futex_word, 0, IREE_TIME_INFINITE_FUTURE);
     }
 
     waiter_completed.store(true, std::memory_order_release);
@@ -533,7 +523,7 @@ TEST_P(FutexTest, WakeFromCompletionCallback) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wake_op.base));
 
   // Poll until the wake completes.
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   // Wait for the waiter thread to finish.
   waiter.join();
@@ -556,8 +546,7 @@ TEST_P(FutexTest, WakeAllFromCallback) {
       waiters_started.fetch_add(1, std::memory_order_acq_rel);
 
       while (futex_word.load(std::memory_order_acquire) == 0) {
-        iree_futex_wait(&futex_word, 0,
-                        iree_time_now() + iree_make_duration_ms(100));
+        iree_futex_wait(&futex_word, 0, IREE_TIME_INFINITE_FUTURE);
       }
 
       waiters_completed.fetch_add(1, std::memory_order_acq_rel);
@@ -579,7 +568,7 @@ TEST_P(FutexTest, WakeAllFromCallback) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wake_op.base));
 
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   for (auto& t : waiters) {
     t.join();
@@ -608,11 +597,7 @@ TEST_P(FutexTest, FutexDoubleCancellation) {
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &wait_op.base));
 
   // Poll to receive the cancellation callback.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
-
-  // Drain any remaining CQEs.
-  DrainPending(iree_make_duration_ms(100));
+  PollUntil(/*min_completions=*/1);
 
   // Exactly one callback should have fired.
   EXPECT_EQ(tracker.call_count, 1);
@@ -626,6 +611,7 @@ TEST_P(FutexTest, CancelRacesWithWake) {
 
   for (int iter = 0; iter < kIterations; ++iter) {
     std::atomic<uint32_t> futex_word{0};
+    GatedFutexWaker waker(&futex_word);
 
     CompletionTracker tracker;
     iree_async_futex_wait_operation_t wait_op;
@@ -635,21 +621,12 @@ TEST_P(FutexTest, CancelRacesWithWake) {
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
 
     // Concurrently cancel and wake to create a race.
-    std::thread waker([&]() {
-      futex_word.store(1, std::memory_order_release);
-      iree_futex_wake(&futex_word, 1);
-    });
-
+    waker.Trigger();
     IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &wait_op.base));
-
-    waker.join();
+    waker.Join();
 
     // Poll for the callback.
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
-
-    // Drain any additional CQEs.
-    DrainPending(iree_make_duration_ms(100));
+    PollUntil(/*min_completions=*/1);
 
     // Must have exactly one callback.
     EXPECT_EQ(tracker.call_count, 1) << "Iteration " << iter;
@@ -658,8 +635,11 @@ TEST_P(FutexTest, CancelRacesWithWake) {
     iree_status_t status = tracker.ConsumeStatus();
     if (!iree_status_is_ok(status) && !iree_status_is_cancelled(status)) {
       IREE_EXPECT_OK(status) << "Iteration " << iter;
+    } else if (iree_status_is_cancelled(status)) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, status)
+          << "Iteration " << iter;
     } else {
-      iree_status_ignore(status);
+      IREE_EXPECT_OK(status) << "Iteration " << iter;
     }
   }
 }

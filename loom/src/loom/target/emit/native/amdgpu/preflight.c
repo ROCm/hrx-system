@@ -203,6 +203,14 @@ static iree_status_t loom_amdgpu_native_preflight_collect_register_usage(
       continue;
     }
     if (assignment->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
+      const loom_low_reg_class_t* reg_class =
+          &allocation->target.descriptor_set
+               ->reg_classes[assignment->descriptor_reg_class_id];
+      if (loom_low_reg_class_fixed_location_range_contains(
+              reg_class, assignment->location_base,
+              assignment->location_count)) {
+        continue;
+      }
       IREE_RETURN_IF_ERROR(loom_amdgpu_native_preflight_update_high_water(
           assignment->location_base, assignment->location_count,
           &preflight->next_free_sgpr));

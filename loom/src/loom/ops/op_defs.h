@@ -803,6 +803,9 @@ enum loom_region_flag_bits_e {
   // Scalar entry block arguments are identical across the workgroup. This is
   // a region signature contract and does not apply to nested region arguments.
   LOOM_REGION_WORKGROUP_UNIFORM_ARGS = 1u << 4,
+  // Scalar entry block arguments are identical across every workgroup in a
+  // workgroup cluster. This implies workgroup uniformity.
+  LOOM_REGION_CLUSTER_UNIFORM_ARGS = 1u << 5,
 };
 typedef uint8_t loom_region_flags_t;
 
@@ -1338,6 +1341,11 @@ loom_string_id_t loom_func_like_export_symbol(loom_func_like_t func);
 
 // Returns the export payload attrs, or an empty slice if absent.
 loom_named_attr_slice_t loom_func_like_export_attrs(loom_func_like_t func);
+
+// Returns true when |func| is a source-level or target-low kernel entry.
+// Kernel entries are exported by symbol name even without an explicit export
+// symbol attribute.
+bool loom_func_like_is_kernel_entry(loom_func_like_t func);
 
 // Returns true and assigns the export linkage enum value when present.
 bool loom_func_like_export_linkage(loom_func_like_t func, uint8_t* out_linkage);

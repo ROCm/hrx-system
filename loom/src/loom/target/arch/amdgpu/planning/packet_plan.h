@@ -20,6 +20,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/schedule/types.h"
+#include "loom/target/arch/amdgpu/planning/address_state.h"
 #include "loom/target/arch/amdgpu/planning/vopd_plan.h"
 #include "loom/target/arch/amdgpu/planning/wait_packets.h"
 #include "loom/target/arch/amdgpu/planning/wait_plan.h"
@@ -34,6 +35,8 @@ typedef struct loom_amdgpu_packet_plan_t {
   const loom_low_schedule_table_t* schedule;
   // Allocation table this plan was built from.
   const loom_low_allocation_table_t* allocation;
+  // Concrete address-state packets inserted into the native packet stream.
+  loom_amdgpu_address_state_plan_t address_state;
   // Logical wait-counter actions in scheduled order.
   loom_amdgpu_wait_plan_t wait_plan;
   // Concrete wait packets inserted into the native packet stream.
@@ -56,12 +59,6 @@ iree_status_t loom_amdgpu_packet_plan_build(
 iree_status_t loom_amdgpu_packet_plan_verify(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
-    const loom_amdgpu_packet_plan_t* plan);
-
-// Returns the final native instruction count implied by |schedule| and |plan|.
-// A NULL plan means no target-owned packet insertions or pair replacements.
-uint64_t loom_amdgpu_packet_plan_instruction_count(
-    const loom_low_schedule_table_t* schedule,
     const loom_amdgpu_packet_plan_t* plan);
 
 #ifdef __cplusplus

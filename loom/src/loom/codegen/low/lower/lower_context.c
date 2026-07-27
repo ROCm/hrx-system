@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/lower/lower_internal.h"
+#include "loom/codegen/low/memory_access_ir.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
@@ -851,8 +852,17 @@ iree_status_t loom_low_lower_emit_resolved_descriptor_const(
 }
 
 iree_status_t loom_low_lower_record_memory_access_summary(
-    loom_low_lower_context_t* context, const loom_op_t* low_op,
-    const loom_low_memory_access_summary_t* summary) {
+    loom_low_lower_context_t* context, loom_op_t* low_op,
+    const loom_low_memory_access_summary_t* summary,
+    loom_low_lower_memory_access_record_flags_t flags) {
+  if (iree_any_bit_set(flags, ~LOOM_LOW_LOWER_MEMORY_ACCESS_RECORD_PRESERVE)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported low memory access record flags");
+  }
+  if (iree_any_bit_set(flags, LOOM_LOW_LOWER_MEMORY_ACCESS_RECORD_PRESERVE)) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_memory_access_ir_attach(context->module, low_op, summary));
+  }
   if (context->options->table_arena == NULL) {
     return iree_ok_status();
   }
@@ -886,13 +896,15 @@ iree_status_t loom_low_lower_record_memory_access_summary(
 }
 
 iree_status_t loom_low_lower_record_source_memory_access(
-    loom_low_lower_context_t* context, const loom_op_t* low_op,
-    const loom_low_source_memory_access_plan_t* source_plan) {
+    loom_low_lower_context_t* context, loom_op_t* low_op,
+    const loom_low_source_memory_access_plan_t* source_plan,
+    loom_low_lower_memory_access_record_flags_t flags) {
   loom_low_byte_interval_t byte_interval = {0};
   loom_low_memory_access_summary_t summary = {0};
   loom_low_source_memory_access_plan_make_summary(source_plan, &byte_interval,
                                                   &summary);
-  return loom_low_lower_record_memory_access_summary(context, low_op, &summary);
+  return loom_low_lower_record_memory_access_summary(context, low_op, &summary,
+                                                     flags);
 }
 
 iree_status_t loom_low_lower_map_type(loom_low_lower_context_t* context,

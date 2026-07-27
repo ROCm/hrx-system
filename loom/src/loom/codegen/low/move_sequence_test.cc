@@ -33,6 +33,8 @@ const loom_low_descriptor_set_t* AliasDescriptorSet() {
           /*.flags=*/{},
           /*.alloc_unit_bits=*/{},
           /*.allocatable_count=*/{},
+          /*.fixed_location_base=*/{},
+          /*.fixed_location_count=*/{},
           /*.alias_set_id=*/1,
       },
       {
@@ -41,6 +43,8 @@ const loom_low_descriptor_set_t* AliasDescriptorSet() {
           /*.flags=*/{},
           /*.alloc_unit_bits=*/{},
           /*.allocatable_count=*/{},
+          /*.fixed_location_base=*/{},
+          /*.fixed_location_count=*/{},
           /*.alias_set_id=*/1,
       },
       {
@@ -49,6 +53,8 @@ const loom_low_descriptor_set_t* AliasDescriptorSet() {
           /*.flags=*/{},
           /*.alloc_unit_bits=*/{},
           /*.allocatable_count=*/{},
+          /*.fixed_location_base=*/{},
+          /*.fixed_location_count=*/{},
           /*.alias_set_id=*/0,
       },
   };

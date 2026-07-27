@@ -59,8 +59,6 @@ iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
       .text_fixups = stream.text_fixups,
       .text_fixup_count = stream.text_fixup_count,
   };
-  const uint64_t instruction_count =
-      loom_amdgpu_packet_plan_instruction_count(schedule, packet_plan);
   loom_amdgpu_occupancy_target_resources_t target_resources = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_build_target_resources(
       record.processor, record.metadata.wavefront_size,
@@ -81,9 +79,11 @@ iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
       .target = record.target_id,
       .processor = record.processor->name,
       .kernel = kernel,
+      .native_insertions = stream.native_insertions,
+      .native_insertion_count = stream.native_insertion_count,
       .summary =
           {
-              .instruction_count = instruction_count,
+              .instruction_count = stream.instruction_count,
               .text_byte_count = stream.text.data_length,
               .text_storage_byte_count = stream.text.data_length,
               .private_segment_fixed_size =

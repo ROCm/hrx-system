@@ -876,6 +876,11 @@ iree_hal_amdgpu_physical_device_initialize_device_library_and_blit_context(
   IREE_RETURN_IF_ERROR(
       iree_hsa_agent_get_info(IREE_LIBHSA(libhsa), device_agent,
                               HSA_AGENT_INFO_WAVEFRONT_SIZE, &wavefront_size));
+  uint32_t maximum_waves_per_compute_unit = 0;
+  IREE_RETURN_IF_ERROR(iree_hsa_agent_get_info(
+      IREE_LIBHSA(libhsa), device_agent,
+      (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU,
+      &maximum_waves_per_compute_unit));
   const uint32_t group_segment_max_size =
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_GROUP_SEGMENT_MAX_SIZE_DEFAULT;
 
@@ -895,8 +900,17 @@ iree_hal_amdgpu_physical_device_initialize_device_library_and_blit_context(
         "%" PRIhsz " (expected 32 or 64)",
         wavefront_size, device_ordinal);
   }
+  if (maximum_waves_per_compute_unit == 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "HSA reported 0 maximum waves per compute unit for device agent "
+        "ordinal %" PRIhsz,
+        device_ordinal);
+  }
   out_physical_device->compute_unit_count = compute_unit_count;
   out_physical_device->wavefront_size = wavefront_size;
+  out_physical_device->maximum_waves_per_compute_unit =
+      maximum_waves_per_compute_unit;
   out_physical_device->group_segment_max_size = group_segment_max_size;
   iree_hal_amdgpu_device_buffer_transfer_context_initialize(
       &out_physical_device->device_kernels, compute_unit_count, wavefront_size,
@@ -962,6 +976,10 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
   iree_status_t status = iree_hal_amdgpu_physical_device_initialize_identity(
       system, options, host_ordinal, host_memory_pools, device_ordinal,
       out_physical_device);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_query_workgroup_cluster_capabilities(
+        libhsa, device_agent, &out_physical_device->workgroup_cluster);
+  }
   if (iree_status_is_ok(status)) {
     out_physical_device->hdp_flush =
         iree_hal_amdgpu_physical_device_query_hdp_flush_registers(libhsa,
@@ -1168,8 +1186,6 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_amdgpu_libhsa_t* libhsa = &system->libhsa;
-  const uint8_t session_epoch = iree_async_axis_session(base_axis);
-  const uint8_t machine_index = iree_async_axis_machine(base_axis);
   iree_status_t status = iree_hal_amdgpu_physical_device_create_default_pools(
       physical_device, epoch_signal_table, host_allocator);
   const iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain = {
@@ -1217,12 +1233,11 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
         physical_device->device_ordinal * physical_device->host_queue_capacity +
         queue_ordinal;
     iree_hal_amdgpu_queue_affinity_resolved_t resolved;
-    status = iree_hal_amdgpu_queue_affinity_resolve_ordinal(
-        queue_affinity_domain, logical_queue_ordinal, &resolved);
+    iree_async_axis_t queue_axis = 0;
+    status = iree_hal_amdgpu_queue_affinity_make_axis(
+        queue_affinity_domain, base_axis, logical_queue_ordinal, &resolved,
+        &queue_axis);
     if (!iree_status_is_ok(status)) break;
-    iree_async_axis_t queue_axis = iree_async_axis_make_queue(
-        session_epoch, machine_index, (uint8_t)physical_device->device_ordinal,
-        (uint8_t)queue_ordinal);
     iree_thread_affinity_t completion_thread_affinity;
     iree_thread_affinity_set_group_any(physical_device->host_numa_node,
                                        &completion_thread_affinity);

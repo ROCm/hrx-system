@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "iree/base/api.h"
+#include "loom/codegen/low/descriptors.h"
 #include "loom/ir/context.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
@@ -847,8 +848,8 @@ static bool loom_amdgpu_atomic_select_descriptor(
       IREE_ASSERT(descriptor != NULL);
       selection->address_form = address_form;
       selection->descriptor_ref = candidate->descriptor_ref;
-      if (loom_amdgpu_descriptor_has_implicit_resource_operand(descriptor_set,
-                                                               descriptor)) {
+      if (loom_low_descriptor_implicit_resource_operand(descriptor_set,
+                                                        descriptor) != NULL) {
         selection->flags |= LOOM_AMDGPU_ATOMIC_PLAN_REQUIRES_M0;
       }
       return true;

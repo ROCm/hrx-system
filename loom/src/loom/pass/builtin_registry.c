@@ -39,6 +39,7 @@
 #include "loom/transforms/symbol/refine_boundaries.h"
 #include "loom/transforms/symbol/symbol_dce.h"
 #include "loom/transforms/symbol/template_selection.h"
+#include "loom/transforms/vector/bank_sroa.h"
 #include "loom/transforms/vector/memory_footprint.h"
 #include "loom/transforms/vector/sink_single_use_reads.h"
 #include "loom/transforms/vector/to_scalar.h"
@@ -468,6 +469,11 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .option_schema_count = IREE_ARRAYSIZE(kLowSourceToLowOptionSchema),
         .requirement_defs = kLowSourceToLowRequirements,
         .requirement_count = IREE_ARRAYSIZE(kLowSourceToLowRequirements),
+    },
+    {
+        .key = IREE_SVL("sroa-vector-banks"),
+        .info = loom_vector_bank_sroa_pass_info,
+        .function_run = loom_vector_bank_sroa_run,
     },
     {
         .key = IREE_SVL("stage-loop-carried-fragments"),

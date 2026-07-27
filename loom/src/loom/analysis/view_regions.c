@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
 #include "loom/ops/buffer/ops.h"
@@ -548,6 +549,8 @@ static iree_status_t loom_view_region_build_default(
       .view_value_id = value_id,
       .base_view_value_id = value_id,
       .root_value_id = reference.root_value_id,
+      .alias_scope_id = reference.alias_scope_id,
+      .nullability = reference.nullability,
       .begin_byte_offset = begin,
       .base_begin_byte_offset = begin,
       .projection_byte_offset = zero,
@@ -636,6 +639,8 @@ static iree_status_t loom_view_region_build_subview(
   IREE_RETURN_IF_ERROR(loom_view_region_expr_add(
       table, &source_region->begin_byte_offset, &additional_offset, &begin));
   out_region->root_value_id = source_region->root_value_id;
+  out_region->alias_scope_id = source_region->alias_scope_id;
+  out_region->nullability = source_region->nullability;
   out_region->base_view_value_id = source_region->base_view_value_id;
   out_region->base_begin_byte_offset = source_region->base_begin_byte_offset;
   IREE_RETURN_IF_ERROR(loom_view_region_expr_add(
@@ -668,6 +673,8 @@ static iree_status_t loom_view_region_build_refine(
       table, value_id, view_type, reference, out_region));
   if (!source_region) return iree_ok_status();
   out_region->root_value_id = source_region->root_value_id;
+  out_region->alias_scope_id = source_region->alias_scope_id;
+  out_region->nullability = source_region->nullability;
   out_region->base_view_value_id = source_region->base_view_value_id;
   out_region->base_begin_byte_offset = source_region->base_begin_byte_offset;
   out_region->projection_byte_offset = source_region->projection_byte_offset;
@@ -786,6 +793,70 @@ bool loom_view_region_table_try_lookup(const loom_view_region_table_t* table,
   return true;
 }
 
+iree_status_t loom_view_region_table_derive_element_region(
+    loom_view_region_table_t* table, loom_value_id_t view_value_id,
+    loom_attribute_t static_indices, loom_value_slice_t dynamic_indices,
+    loom_view_region_t* out_region, bool* out_derived) {
+  *out_region = (loom_view_region_t){0};
+  *out_derived = false;
+  if (!table || view_value_id >= table->module->values.count) {
+    return iree_ok_status();
+  }
+
+  const loom_view_region_t* source_region = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_view_region_table_get(table, view_value_id, &source_region));
+  if (!source_region || source_region->static_element_byte_count <= 0) {
+    return iree_ok_status();
+  }
+  const loom_type_t view_type =
+      loom_module_value_type(table->module, view_value_id);
+  if (static_indices.kind != LOOM_ATTR_I64_ARRAY ||
+      static_indices.count != loom_type_rank(view_type)) {
+    return iree_ok_status();
+  }
+  iree_host_size_t expected_dynamic_count = 0;
+  for (uint16_t i = 0; i < static_indices.count; ++i) {
+    expected_dynamic_count += static_indices.i64_array[i] == INT64_MIN;
+  }
+  if (dynamic_indices.count != expected_dynamic_count) {
+    return iree_ok_status();
+  }
+
+  loom_symbolic_expr_t additional_offset = {0};
+  IREE_RETURN_IF_ERROR(loom_view_region_additional_byte_offset_expr(
+      table, view_type, static_indices, dynamic_indices,
+      source_region->static_element_byte_count, &additional_offset));
+  loom_symbolic_expr_t begin = {0};
+  IREE_RETURN_IF_ERROR(loom_view_region_expr_add(
+      table, &source_region->begin_byte_offset, &additional_offset, &begin));
+  loom_symbolic_expr_t byte_length = {0};
+  loom_symbolic_expr_constant(source_region->static_element_byte_count,
+                              &byte_length);
+  loom_symbolic_expr_t end = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_view_region_expr_add(table, &begin, &byte_length, &end));
+  loom_symbolic_expr_t projection = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_view_region_expr_add(table, &source_region->projection_byte_offset,
+                                &additional_offset, &projection));
+
+  *out_region = *source_region;
+  out_region->region_id = LOOM_VIEW_REGION_ID_INVALID;
+  out_region->projection_byte_offset = projection;
+  out_region->begin_value_id = LOOM_VALUE_ID_INVALID;
+  out_region->begin_byte_offset = begin;
+  out_region->byte_length = byte_length;
+  out_region->end_byte_offset = end;
+  out_region->minimum_alignment =
+      iree_math_gcd_i64((int64_t)source_region->minimum_alignment,
+                        additional_offset.facts.known_divisor);
+  out_region->access_flags = 0;
+  loom_view_region_refresh_precision(out_region);
+  *out_derived = true;
+  return iree_ok_status();
+}
+
 //===----------------------------------------------------------------------===//
 // Access derivation
 //===----------------------------------------------------------------------===//
@@ -880,6 +951,20 @@ loom_view_access_flags_t loom_view_region_table_root_access_flags(
   return access_flags;
 }
 
+bool loom_view_memory_spaces_are_disjoint(
+    loom_value_fact_memory_space_t left, loom_value_fact_memory_space_t right) {
+  if (left == right || left == LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN ||
+      right == LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN ||
+      left == LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC ||
+      right == LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC) {
+    return false;
+  }
+  return left == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP ||
+         right == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP ||
+         left == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE ||
+         right == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE;
+}
+
 iree_status_t loom_view_regions_prove_no_overlap(
     loom_view_region_table_t* table, const loom_view_region_t* left_region,
     const loom_view_region_t* right_region, bool* out_no_overlap) {
@@ -890,6 +975,13 @@ iree_status_t loom_view_regions_prove_no_overlap(
     return iree_ok_status();
   }
   if (left_region->root_value_id != right_region->root_value_id) {
+    if (loom_view_memory_spaces_are_disjoint(left_region->memory_space,
+                                             right_region->memory_space) ||
+        (left_region->alias_scope_id != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE &&
+         right_region->alias_scope_id != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE &&
+         left_region->alias_scope_id != right_region->alias_scope_id)) {
+      *out_no_overlap = true;
+    }
     return iree_ok_status();
   }
 

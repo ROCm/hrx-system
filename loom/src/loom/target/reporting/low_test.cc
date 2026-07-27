@@ -169,6 +169,8 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.flags=*/LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
           /*.alloc_unit_bits=*/32,
           /*.allocatable_count=*/{},
+          /*.fixed_location_base=*/{},
+          /*.fixed_location_count=*/{},
           /*.alias_set_id=*/{},
           /*.spill_class_id=*/LOOM_LOW_REG_CLASS_NONE,
           /*.full_register_part_mask=*/1,

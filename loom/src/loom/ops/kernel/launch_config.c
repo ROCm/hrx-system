@@ -107,6 +107,36 @@ loom_value_id_t loom_kernel_launch_config_workgroup_size_operand(
   }
 }
 
+bool loom_kernel_launch_config_has_workgroup_cluster_size(
+    const loom_op_t* launch_config) {
+  if (!launch_config || !loom_kernel_launch_config_isa(launch_config)) {
+    return false;
+  }
+  return loom_kernel_launch_config_workgroup_cluster_size_x_is_present(
+             launch_config) ||
+         loom_kernel_launch_config_workgroup_cluster_size_y_is_present(
+             launch_config) ||
+         loom_kernel_launch_config_workgroup_cluster_size_z_is_present(
+             launch_config);
+}
+
+loom_value_id_t loom_kernel_launch_config_workgroup_cluster_size_operand(
+    const loom_op_t* launch_config, loom_kernel_dimension_t dimension) {
+  if (!launch_config || !loom_kernel_launch_config_isa(launch_config)) {
+    return LOOM_VALUE_ID_INVALID;
+  }
+  switch (dimension) {
+    case LOOM_KERNEL_DIMENSION_X:
+      return loom_kernel_launch_config_workgroup_cluster_size_x(launch_config);
+    case LOOM_KERNEL_DIMENSION_Y:
+      return loom_kernel_launch_config_workgroup_cluster_size_y(launch_config);
+    case LOOM_KERNEL_DIMENSION_Z:
+      return loom_kernel_launch_config_workgroup_cluster_size_z(launch_config);
+    default:
+      return LOOM_VALUE_ID_INVALID;
+  }
+}
+
 bool loom_kernel_def_static_workgroup_size(
     const loom_module_t* module, const loom_op_t* kernel_op,
     loom_target_workgroup_size_t* out_size) {
@@ -165,4 +195,37 @@ bool loom_kernel_def_static_workgroup_count_from_facts(
              module, facts,
              loom_kernel_launch_config_workgroup_count_z(launch_config),
              &out_count->z);
+}
+
+bool loom_kernel_def_static_workgroup_cluster_size(
+    const loom_module_t* module, const loom_op_t* kernel_op,
+    loom_target_workgroup_cluster_size_t* out_size) {
+  return loom_kernel_def_static_workgroup_cluster_size_from_facts(
+      module, kernel_op, NULL, out_size);
+}
+
+bool loom_kernel_def_static_workgroup_cluster_size_from_facts(
+    const loom_module_t* module, const loom_op_t* kernel_op,
+    const loom_value_fact_table_t* facts,
+    loom_target_workgroup_cluster_size_t* out_size) {
+  *out_size = (loom_target_workgroup_cluster_size_t){0};
+  const loom_op_t* launch_config = loom_kernel_def_launch_config_op(kernel_op);
+  if (!launch_config ||
+      !loom_kernel_launch_config_has_workgroup_cluster_size(launch_config)) {
+    return false;
+  }
+  const bool resolved =
+      loom_kernel_launch_config_static_u32_from_facts(
+          module, facts,
+          loom_kernel_launch_config_workgroup_cluster_size_x(launch_config),
+          &out_size->x) &&
+      loom_kernel_launch_config_static_u32_from_facts(
+          module, facts,
+          loom_kernel_launch_config_workgroup_cluster_size_y(launch_config),
+          &out_size->y) &&
+      loom_kernel_launch_config_static_u32_from_facts(
+          module, facts,
+          loom_kernel_launch_config_workgroup_cluster_size_z(launch_config),
+          &out_size->z);
+  return resolved && out_size->x != 0 && out_size->y != 0 && out_size->z != 0;
 }

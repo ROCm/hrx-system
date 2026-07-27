@@ -133,11 +133,6 @@ bool loom_amdgpu_descriptor_set_can_emit_vgpr_compare_immediate(
     loom_amdgpu_descriptor_ref_t src1_inline_descriptor_ref,
     uint32_t immediate);
 
-// Returns true when a descriptor row has an implicit resource operand.
-bool loom_amdgpu_descriptor_has_implicit_resource_operand(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor);
-
 // Resolves one optional explicit packet descriptor and its immediate names.
 iree_status_t loom_amdgpu_resolve_explicit_packet_plan(
     loom_low_lower_context_t* context,
@@ -271,6 +266,13 @@ iree_status_t loom_amdgpu_emit_sgpr_scale_u32(loom_low_lower_context_t* context,
                                               uint32_t scale,
                                               loom_type_t lane_type,
                                               loom_value_id_t* out_value);
+
+// Emits |value * scale + addend| into a one-unit SGPR, using a fused scalar
+// shift-add descriptor when the target provides the exact power-of-two form.
+iree_status_t loom_amdgpu_emit_sgpr_scaled_add_u32(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value, uint32_t scale, loom_value_id_t addend,
+    loom_type_t lane_type, loom_value_id_t* out_value);
 
 // Emits an SGPR x2 value zero-extending the supplied one-unit SGPR.
 iree_status_t loom_amdgpu_emit_sgpr64_from_u32(

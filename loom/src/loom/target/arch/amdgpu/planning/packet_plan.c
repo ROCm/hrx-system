@@ -8,6 +8,29 @@
 
 #include "loom/codegen/low/packet.h"
 
+static iree_status_t loom_amdgpu_packet_plan_verify_address_state_vopd(
+    const loom_amdgpu_packet_plan_t* plan) {
+  for (iree_host_size_t i = 0; i < plan->address_state.transition_count; ++i) {
+    const loom_amdgpu_address_state_transition_t* transition =
+        &plan->address_state.transitions[i];
+    const loom_low_schedule_block_t* block =
+        &plan->schedule->blocks[transition->block_index];
+    const iree_host_size_t packet_index =
+        (iree_host_size_t)block->scheduled_node_start +
+        transition->scheduled_ordinal;
+    const loom_amdgpu_vopd_packet_t* vopd_packet =
+        loom_amdgpu_vopd_plan_packet_at(&plan->vopd_plan, packet_index);
+    if (vopd_packet != NULL &&
+        vopd_packet->role == LOOM_AMDGPU_VOPD_PACKET_ROLE_SECOND) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU address-state transition cannot be inserted between VOPD "
+          "components");
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_amdgpu_packet_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
@@ -24,6 +47,8 @@ iree_status_t loom_amdgpu_packet_plan_build(
       .schedule = schedule,
       .allocation = allocation,
   };
+  IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_plan_build(
+      schedule, allocation, arena, &out_plan->address_state));
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_build(schedule, allocation, arena,
                                                    &out_plan->wait_plan));
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_plan_build(
@@ -31,9 +56,9 @@ iree_status_t loom_amdgpu_packet_plan_build(
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_plan_build(
       schedule, allocation, arena, &out_plan->wait_states));
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_plan_build(
-      schedule, allocation, &out_plan->wait_packets, &out_plan->wait_states,
-      arena, &out_plan->vopd_plan));
-  return iree_ok_status();
+      schedule, allocation, &out_plan->address_state, &out_plan->wait_packets,
+      &out_plan->wait_states, arena, &out_plan->vopd_plan));
+  return loom_amdgpu_packet_plan_verify_address_state_vopd(out_plan);
 }
 
 iree_status_t loom_amdgpu_packet_plan_verify(
@@ -48,6 +73,8 @@ iree_status_t loom_amdgpu_packet_plan_verify(
                             "AMDGPU packet plan must be derived from the "
                             "emitted schedule and allocation");
   }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_plan_verify(
+      schedule, allocation, &plan->address_state));
   if (plan->wait_plan.schedule != schedule ||
       plan->wait_plan.allocation != allocation) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -96,23 +123,7 @@ iree_status_t loom_amdgpu_packet_plan_verify(
   }
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_vopd_plan_verify(schedule, allocation, &plan->vopd_plan));
-  return loom_amdgpu_vopd_plan_verify_wait_insertions(
-      &plan->vopd_plan, &plan->wait_packets, &plan->wait_states);
-}
-
-uint64_t loom_amdgpu_packet_plan_instruction_count(
-    const loom_low_schedule_table_t* schedule,
-    const loom_amdgpu_packet_plan_t* plan) {
-  if (schedule == NULL) {
-    return 0;
-  }
-  if (plan == NULL) {
-    return schedule->scheduled_node_count;
-  }
-  const uint64_t wait_packet_count = plan->wait_packets.packet_count;
-  const uint64_t wait_state_instruction_count =
-      loom_amdgpu_wait_state_plan_instruction_count(&plan->wait_states);
-  const uint64_t vopd_pair_count = plan->vopd_plan.pair_count;
-  return schedule->scheduled_node_count + wait_packet_count +
-         wait_state_instruction_count - vopd_pair_count;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_plan_verify_wait_insertions(
+      &plan->vopd_plan, &plan->wait_packets, &plan->wait_states));
+  return loom_amdgpu_packet_plan_verify_address_state_vopd(plan);
 }

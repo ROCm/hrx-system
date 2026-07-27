@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "loom/codegen/low/builder.h"
 #include "loom/ir/context.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
@@ -73,6 +74,8 @@ static loom_amdgpu_descriptor_ref_t
 loom_amdgpu_sgpr_binary_rhs_inline_descriptor_ref(
     loom_amdgpu_descriptor_ref_t descriptor_ref) {
   switch (descriptor_ref) {
+    case LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B32:
+      return LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B32_RHS_INLINE;
     case LOOM_AMDGPU_DESCRIPTOR_REF_S_ADD_U32:
       return LOOM_AMDGPU_DESCRIPTOR_REF_S_ADD_U32_RHS_INLINE;
     case LOOM_AMDGPU_DESCRIPTOR_REF_S_SUB_U32:
@@ -85,6 +88,17 @@ loom_amdgpu_sgpr_binary_rhs_inline_descriptor_ref(
       return LOOM_AMDGPU_DESCRIPTOR_REF_S_LSHR_B32_RHS_INLINE;
     case LOOM_AMDGPU_DESCRIPTOR_REF_S_ASHR_I32:
       return LOOM_AMDGPU_DESCRIPTOR_REF_S_ASHR_I32_RHS_INLINE;
+    default:
+      return LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+  }
+}
+
+static loom_amdgpu_descriptor_ref_t
+loom_amdgpu_sgpr_binary_rhs_literal_descriptor_ref(
+    loom_amdgpu_descriptor_ref_t descriptor_ref) {
+  switch (descriptor_ref) {
+    case LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B32:
+      return LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B32_LIT;
     default:
       return LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
   }
@@ -113,6 +127,27 @@ iree_status_t loom_amdgpu_emit_sgpr_binary_immediate(
     loom_op_t* low_op = NULL;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
         context, source_op, rhs_inline_descriptor_ref, operands,
+        IREE_ARRAYSIZE(operands), loom_make_named_attr_slice(attrs, attr_count),
+        &lane_type, 1, &low_op));
+    *out_value = loom_value_slice_get(loom_low_op_results(low_op), 0);
+    return iree_ok_status();
+  }
+
+  const loom_amdgpu_descriptor_ref_t rhs_literal_descriptor_ref =
+      loom_amdgpu_sgpr_binary_rhs_literal_descriptor_ref(descriptor_ref);
+  if (rhs_literal_descriptor_ref != LOOM_AMDGPU_DESCRIPTOR_REF_NONE &&
+      loom_amdgpu_descriptor_ref_ordinal(descriptor_set,
+                                         rhs_literal_descriptor_ref) !=
+          LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+    loom_named_attr_t attrs[1] = {0};
+    iree_host_size_t attr_count = 0;
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_append_i64_attr(context, IREE_SV("imm32"), immediate, attrs,
+                                    IREE_ARRAYSIZE(attrs), &attr_count));
+    const loom_value_id_t operands[] = {value};
+    loom_op_t* low_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+        context, source_op, rhs_literal_descriptor_ref, operands,
         IREE_ARRAYSIZE(operands), loom_make_named_attr_slice(attrs, attr_count),
         &lane_type, 1, &low_op));
     *out_value = loom_value_slice_get(loom_low_op_results(low_op), 0);
@@ -158,6 +193,48 @@ iree_status_t loom_amdgpu_emit_sgpr_scale_u32(loom_low_lower_context_t* context,
   return loom_amdgpu_emit_sgpr_binary_immediate(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MUL_I32, value, scale,
       lane_type, out_value);
+}
+
+iree_status_t loom_amdgpu_emit_sgpr_scaled_add_u32(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value, uint32_t scale, loom_value_id_t addend,
+    loom_type_t lane_type, loom_value_id_t* out_value) {
+  *out_value = LOOM_VALUE_ID_INVALID;
+  loom_amdgpu_descriptor_ref_t fused_descriptor_ref =
+      LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+  switch (scale) {
+    case 2:
+      fused_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_LSHL1_ADD_U32;
+      break;
+    case 4:
+      fused_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_LSHL2_ADD_U32;
+      break;
+    case 8:
+      fused_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_LSHL3_ADD_U32;
+      break;
+    case 16:
+      fused_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_LSHL4_ADD_U32;
+      break;
+    default:
+      break;
+  }
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_lower_context_descriptor_set(context);
+  if (fused_descriptor_ref != LOOM_AMDGPU_DESCRIPTOR_REF_NONE &&
+      loom_amdgpu_descriptor_ref_ordinal(descriptor_set,
+                                         fused_descriptor_ref) !=
+          LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+    return loom_amdgpu_emit_sgpr_binary(context, source_op,
+                                        fused_descriptor_ref, value, addend,
+                                        lane_type, out_value);
+  }
+
+  loom_value_id_t scaled_value = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr_scale_u32(
+      context, source_op, value, scale, lane_type, &scaled_value));
+  return loom_amdgpu_emit_sgpr_binary(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_ADD_U32, scaled_value,
+      addend, lane_type, out_value);
 }
 
 iree_status_t loom_amdgpu_emit_sgpr64_from_u32(
@@ -814,26 +891,6 @@ iree_status_t loom_amdgpu_resolve_descriptor_ref(
   return iree_ok_status();
 }
 
-bool loom_amdgpu_descriptor_has_implicit_resource_operand(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor) {
-  IREE_ASSERT(descriptor_set != NULL);
-  IREE_ASSERT(descriptor != NULL);
-  IREE_ASSERT((uint64_t)descriptor->operand_start +
-                  (uint64_t)descriptor->operand_count <=
-              descriptor_set->operand_count);
-  const loom_low_operand_t* operands =
-      &descriptor_set->operands[descriptor->operand_start];
-  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    const loom_low_operand_t* operand = &operands[i];
-    if (operand->role == LOOM_LOW_OPERAND_ROLE_RESOURCE &&
-        iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 static iree_status_t loom_amdgpu_populate_explicit_packet_plan(
     loom_low_lower_context_t* context,
     const loom_low_lower_resolved_descriptor_t* descriptor,
@@ -1081,8 +1138,9 @@ iree_status_t loom_amdgpu_emit_m0_u32(
   IREE_ASSERT(consumer_descriptor->descriptor != NULL);
   *out_value_id = LOOM_VALUE_ID_INVALID;
   loom_type_t m0_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_make_descriptor_row_implicit_resource_type(
-      context, consumer_descriptor->descriptor, &m0_type));
+  IREE_RETURN_IF_ERROR(loom_low_build_descriptor_implicit_resource_type(
+      loom_low_lower_context_descriptor_set(context),
+      consumer_descriptor->descriptor, &m0_type));
   return loom_amdgpu_emit_const_u32(context, source_op,
                                     LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32_M0_IMM,
                                     value, m0_type, out_value_id);

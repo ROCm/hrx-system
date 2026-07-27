@@ -556,7 +556,14 @@ loom_low_allocation_target_constraints_validate_register_location_capacity(
         capacity.location_kind);
   }
   const uint64_t location_end = (uint64_t)location_base + location_count;
-  if (capacity.is_bounded && location_end > capacity.max_units) {
+  const loom_low_reg_class_t* reg_class =
+      loom_low_allocation_target_constraints_reg_class_at(
+          constraints->target->descriptor_set, reg_class_id);
+  const bool fits_fixed_location_window =
+      loom_low_reg_class_fixed_location_range_contains(reg_class, location_base,
+                                                       location_count);
+  if (capacity.is_bounded && location_end > capacity.max_units &&
+      !fits_fixed_location_window) {
     IREE_RETURN_IF_ERROR(
         loom_low_allocation_target_constraints_emit_capacity_failure(
             constraints, diagnostic_op, reg_class_id, subject, location_base,
@@ -1022,6 +1029,10 @@ void loom_low_allocation_target_constraints_record_assignment_location_end(
       loom_low_allocation_storage_reg_class_location_kind(reg_class)) {
     return;
   }
+  if (loom_low_reg_class_fixed_location_range_contains(
+          reg_class, assignment->location_base, assignment->location_count)) {
+    return;
+  }
   const uint32_t location_end =
       loom_low_allocation_target_constraints_assignment_location_end(
           assignment);
@@ -1029,6 +1040,23 @@ void loom_low_allocation_target_constraints_record_assignment_location_end(
       location_end) {
     constraints->max_assigned_location_end_by_reg_class[reg_class_id] =
         location_end;
+  }
+}
+
+void loom_low_allocation_target_constraints_rebuild_assignment_location_ends(
+    loom_low_allocation_target_constraints_t* constraints,
+    const loom_low_allocation_assignment_t* assignments,
+    iree_host_size_t assignment_count) {
+  const iree_host_size_t reg_class_count =
+      constraints->target->descriptor_set->reg_class_count;
+  if (reg_class_count != 0) {
+    memset(constraints->max_assigned_location_end_by_reg_class, 0,
+           reg_class_count *
+               sizeof(*constraints->max_assigned_location_end_by_reg_class));
+  }
+  for (iree_host_size_t i = 0; i < assignment_count; ++i) {
+    loom_low_allocation_target_constraints_record_assignment_location_end(
+        constraints, &assignments[i]);
   }
 }
 

@@ -129,6 +129,8 @@ AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK = 4
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST = 5
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64 = 6
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG = 7
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE = 8
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL = 9
 
 _REG_SGPR = "amdgpu.sgpr"
 _REG_VGPR = "amdgpu.vgpr"
@@ -157,6 +159,7 @@ _RESOURCE_LDS_CROSSLANE = "amdgpu.lds.crosslane"
 _RESOURCE_MFMA = "amdgpu.mfma"
 _RESOURCE_WMMA = "amdgpu.wmma"
 _RESOURCE_SWMMAC = "amdgpu.swmmac"
+_RESOURCE_TENSOR = "amdgpu.tensor"
 _RESOURCE_CONTROL = "amdgpu.control"
 
 _SCHEDULE_SALU = "amdgpu.salu"
@@ -180,6 +183,8 @@ _SCHEDULE_MFMA = "amdgpu.mfma"
 _SCHEDULE_WMMA = "amdgpu.wmma"
 _SCHEDULE_WMMA_SCALE = "amdgpu.wmma.scale"
 _SCHEDULE_SWMMAC = "amdgpu.swmmac"
+_SCHEDULE_TENSOR_LOAD_LDS = "amdgpu.tensor.load.lds"
+_SCHEDULE_CLUSTER_LOAD_LDS = "amdgpu.cluster.load.lds"
 _SCHEDULE_CACHE_CONTROL = "amdgpu.cache.control"
 _SCHEDULE_MODE_CONTROL = "amdgpu.mode.control"
 _SCHEDULE_WAIT_MEMORY = "amdgpu.wait.memory"
@@ -190,6 +195,9 @@ _SCHEDULE_WAIT_LOAD = "amdgpu.wait.load"
 _SCHEDULE_WAIT_STORE = "amdgpu.wait.store"
 _SCHEDULE_WAIT_ALU = "amdgpu.wait.alu"
 _SCHEDULE_WAIT_IDLE = "amdgpu.wait.idle"
+_SCHEDULE_WAIT_TENSOR = "amdgpu.wait.tensor"
+_SCHEDULE_WAIT_ASYNC = "amdgpu.wait.async"
+_SCHEDULE_WAIT_X = "amdgpu.wait.x"
 
 _AMDGPU_TRANS_DESCRIPTOR_KEYS = (
     "amdgpu.v_exp_f32",
@@ -227,6 +235,8 @@ _EXECUTION_MASKED_SCHEDULE_CLASSES = frozenset(
         _SCHEDULE_LDS_STORE,
         _SCHEDULE_LDS_ATOMIC,
         _SCHEDULE_LDS_CROSSLANE,
+        _SCHEDULE_TENSOR_LOAD_LDS,
+        _SCHEDULE_CLUSTER_LOAD_LDS,
         _SCHEDULE_MFMA,
         _SCHEDULE_WMMA,
         _SCHEDULE_WMMA_SCALE,
@@ -410,6 +420,9 @@ _COUNTER_VMEM_STORE = 2
 _COUNTER_LDS = 3
 _COUNTER_SMEM = 4
 _COUNTER_ALU = 5
+_COUNTER_TENSOR = 6
+_COUNTER_ASYNC = 7
+_COUNTER_X = 8
 
 
 def _predefined(
@@ -447,6 +460,9 @@ _VMEM_STORE_COUNTER_HAZARD = Hazard(
 _LDS_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_LDS)
 _SMEM_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_SMEM)
 _ALU_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_ALU)
+_TENSOR_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_TENSOR)
+_ASYNC_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_ASYNC)
+_X_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_X)
 _GFX950_MEMORY_WAIT_HAZARDS = (
     _VMEM_LOAD_COUNTER_HAZARD,
     _VMEM_STORE_COUNTER_HAZARD,
@@ -463,6 +479,9 @@ _VMEM_STORE_WAIT_HAZARDS = (_VMEM_STORE_COUNTER_HAZARD,)
 _LDS_WAIT_HAZARDS = (_LDS_COUNTER_HAZARD,)
 _SMEM_WAIT_HAZARDS = (_SMEM_COUNTER_HAZARD,)
 _ALU_WAIT_HAZARDS = (_ALU_COUNTER_HAZARD,)
+_TENSOR_WAIT_HAZARDS = (_TENSOR_COUNTER_HAZARD,)
+_ASYNC_WAIT_HAZARDS = (_ASYNC_COUNTER_HAZARD,)
+_X_WAIT_HAZARDS = (_X_COUNTER_HAZARD,)
 _IDLE_WAIT_HAZARDS = (
     _VMEM_LOAD_COUNTER_HAZARD,
     _VMEM_STORE_COUNTER_HAZARD,
@@ -495,6 +514,9 @@ _WAIT_COUNTER_VMEM_STORE_ENCODING_ID = 19
 _WAIT_COUNTER_LDS_ENCODING_ID = 20
 _WAIT_COUNTER_SMEM_ENCODING_ID = 21
 _WAIT_COUNTER_ALU_ENCODING_ID = 22
+_WAIT_COUNTER_TENSOR_ENCODING_ID = 23
+_WAIT_COUNTER_ASYNC_ENCODING_ID = 24
+_WAIT_COUNTER_X_ENCODING_ID = 25
 _GFX9_11_VECTOR_CACHE_FIELDS = (("GLC", 1), ("SLC", 1), ("DLC", 1))
 _GFX950_VECTOR_CACHE_FIELDS = (("NT", 1), ("SC0", 1), ("SC1", 1))
 _GFX12_VECTOR_CACHE_FIELDS = (("NV", 1), ("SCOPE", 2), ("TH", 3))
@@ -999,6 +1021,26 @@ def _native_amdgpu_named_flag_immediate(
     )
 
 
+def _native_amdgpu_gfx12_scope_immediate(field_name: str) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal="scope",
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE,
+    )
+
+
+def _native_amdgpu_gfx12_load_temporal_immediate(
+    field_name: str,
+) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal="th",
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL,
+    )
+
+
 def _global_vaddr_asm(
     *,
     mnemonic: str,
@@ -1153,16 +1195,6 @@ def _m0_implicit_resource(field_name: str = "m0") -> Operand:
         OperandRole.RESOURCE,
         _M0_ALT,
         flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_READ),
-        unit_count=1,
-    )
-
-
-def _m0_clobber(field_name: str = "m0") -> Operand:
-    return Operand(
-        field_name,
-        OperandRole.IMPLICIT,
-        _M0_ALT,
-        flags=(OperandFlag.IMPLICIT,),
         unit_count=1,
     )
 
@@ -2160,6 +2192,24 @@ _ALU_WAIT_EFFECT = Effect(
     counter_id=_COUNTER_ALU,
 )
 
+_TENSOR_WAIT_EFFECT = Effect(
+    EffectKind.COUNTER,
+    flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
+    counter_id=_COUNTER_TENSOR,
+)
+
+_ASYNC_WAIT_EFFECT = Effect(
+    EffectKind.COUNTER,
+    flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
+    counter_id=_COUNTER_ASYNC,
+)
+
+_X_WAIT_EFFECT = Effect(
+    EffectKind.COUNTER,
+    flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
+    counter_id=_COUNTER_X,
+)
+
 
 _EARLY_CLOBBER_RESULT_CONSTRAINTS = (Constraint(ConstraintKind.EARLY_CLOBBER, 0),)
 
@@ -2793,17 +2843,6 @@ def _implicit_m0_input(
     )
 
 
-def _implicit_m0_clobber() -> AmdgpuImplicitOperandOverlay:
-    return AmdgpuImplicitOperandOverlay(
-        operand_type="OPR_SDST_M0",
-        descriptor_operand=_m0_clobber(),
-        data_format_name="FMT_NUM_B32",
-        size_bits=32,
-        is_input=True,
-        is_output=False,
-    )
-
-
 __all__ = (
     "AMDGPU_ATOMIC_DESCRIPTOR_CATEGORY",
     "AMDGPU_CACHE_DESCRIPTOR_CATEGORY",
@@ -2845,6 +2884,8 @@ __all__ = (
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64",
@@ -2937,6 +2978,9 @@ __all__ = (
     "_ALU_COUNTER_HAZARD",
     "_ALU_WAIT_EFFECT",
     "_ALU_WAIT_HAZARDS",
+    "_ASYNC_COUNTER_HAZARD",
+    "_ASYNC_WAIT_EFFECT",
+    "_ASYNC_WAIT_HAZARDS",
     "_AMDGPU_DESCRIPTOR_PUBLIC_HEADER_DIR",
     "_AMDGPU_DESCRIPTOR_SOURCE_DIR",
     "_AMDGPU_INLINE_F32_ENUM_DOMAIN_NAME",
@@ -2951,10 +2995,13 @@ __all__ = (
     "_CDNA_SMEM_SGPR_IMM_FIXED_FIELDS",
     "_CONVERGENT_EFFECT",
     "_COUNTER_ALU",
+    "_COUNTER_ASYNC",
     "_COUNTER_LDS",
     "_COUNTER_SMEM",
+    "_COUNTER_TENSOR",
     "_COUNTER_VMEM_LOAD",
     "_COUNTER_VMEM_STORE",
+    "_COUNTER_X",
     "_D16_PARTIAL_REGISTER_ADDRESSABLE_UNIT_COUNT",
     "_D16_PARTIAL_REGISTER_SIZE_REASON",
     "_DEPCTR_IMMEDIATE",
@@ -3064,6 +3111,7 @@ __all__ = (
     "_RESOURCE_SALU",
     "_RESOURCE_SMEM",
     "_RESOURCE_SWMMAC",
+    "_RESOURCE_TENSOR",
     "_RESOURCE_VALU",
     "_RESOURCE_VMEM_LOAD",
     "_RESOURCE_VMEM_STORE",
@@ -3072,6 +3120,7 @@ __all__ = (
     "_SCC_CLOBBER_OUTPUT",
     "_SCHEDULE_BARRIER",
     "_SCHEDULE_CACHE_CONTROL",
+    "_SCHEDULE_CLUSTER_LOAD_LDS",
     "_SCHEDULE_LDS_ATOMIC",
     "_SCHEDULE_LDS_CROSSLANE",
     "_SCHEDULE_LDS_LOAD",
@@ -3084,6 +3133,7 @@ __all__ = (
     "_SCHEDULE_SMEM_LOAD",
     "_SCHEDULE_SMEM_STORE",
     "_SCHEDULE_SWMMAC",
+    "_SCHEDULE_TENSOR_LOAD_LDS",
     "_SCHEDULE_TRANS",
     "_SCHEDULE_VALU",
     "_SCHEDULE_VMEM_ATOMIC_NO_RETURN",
@@ -3092,13 +3142,16 @@ __all__ = (
     "_SCHEDULE_VMEM_LOAD_LDS",
     "_SCHEDULE_VMEM_STORE",
     "_SCHEDULE_WAIT_ALU",
+    "_SCHEDULE_WAIT_ASYNC",
     "_SCHEDULE_WAIT_IDLE",
     "_SCHEDULE_WAIT_LDS",
     "_SCHEDULE_WAIT_LOAD",
     "_SCHEDULE_WAIT_MEMORY",
     "_SCHEDULE_WAIT_SMEM",
     "_SCHEDULE_WAIT_STORE",
+    "_SCHEDULE_WAIT_TENSOR",
     "_SCHEDULE_WAIT_VMEM_STORE",
+    "_SCHEDULE_WAIT_X",
     "_SCHEDULE_WMMA",
     "_SCHEDULE_WMMA_SCALE",
     "_SGPR_ALT",
@@ -3107,6 +3160,9 @@ __all__ = (
     "_SMEM_COUNTER_HAZARD",
     "_SMEM_WAIT_EFFECT",
     "_SMEM_WAIT_HAZARDS",
+    "_TENSOR_COUNTER_HAZARD",
+    "_TENSOR_WAIT_EFFECT",
+    "_TENSOR_WAIT_HAZARDS",
     "_SMFMAC_VDST_ACCUMULATOR_REASON",
     "_SOURCE_INLINE_F32_ENCODING_ID",
     "_SOURCE_INLINE_F32_IMMEDIATE",
@@ -3130,13 +3186,19 @@ __all__ = (
     "_VMEM_STORE_WAIT_HAZARDS",
     "_VSCNT_IMMEDIATE",
     "_WAIT_COUNTER_ALU_ENCODING_ID",
+    "_WAIT_COUNTER_ASYNC_ENCODING_ID",
     "_WAIT_COUNTER_LDS_ENCODING_ID",
     "_WAIT_COUNTER_LGKM_ENCODING_ID",
     "_WAIT_COUNTER_SMEM_ENCODING_ID",
+    "_WAIT_COUNTER_TENSOR_ENCODING_ID",
     "_WAIT_COUNTER_VMEM_ENCODING_ID",
     "_WAIT_COUNTER_VMEM_LOAD_ENCODING_ID",
     "_WAIT_COUNTER_VMEM_STORE_ENCODING_ID",
+    "_WAIT_COUNTER_X_ENCODING_ID",
     "_WAIT_EFFECT",
+    "_X_COUNTER_HAZARD",
+    "_X_WAIT_EFFECT",
+    "_X_WAIT_HAZARDS",
     "_WORKGROUP_BARRIER_EFFECT",
     "_amdgpu_camel_case",
     "_amdgpu_core_descriptor_set",
@@ -3181,13 +3243,11 @@ __all__ = (
     "_ignore_global_write_memory",
     "_ignore_scratch_memory",
     "_ignore_workgroup_memory",
-    "_implicit_m0_clobber",
     "_implicit_m0_input",
     "_instruction_encoding_opcode",
     "_is_exec_state_read",
     "_is_mode_state_read",
     "_literal_operand_form",
-    "_m0_clobber",
     "_m0_implicit_resource",
     "_m0_result",
     "_mode_state_read",
@@ -3198,6 +3258,8 @@ __all__ = (
     "_mubuf_vaddr_operand",
     "_native_amdgpu_dpp_ctrl_immediate",
     "_native_amdgpu_dpp_bank_mask_immediate",
+    "_native_amdgpu_gfx12_load_temporal_immediate",
+    "_native_amdgpu_gfx12_scope_immediate",
     "_native_amdgpu_named_bit_list_immediate",
     "_native_amdgpu_named_flag_immediate",
     "_native_amdgpu_named_i64_immediate",

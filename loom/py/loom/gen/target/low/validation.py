@@ -8,7 +8,10 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
+from dataclasses import dataclass
+from itertools import pairwise, permutations
 
 from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_ENCODING_ID_NONE,
@@ -24,6 +27,7 @@ from loom.target.low_descriptors import (
     Immediate,
     ImmediateFlag,
     ImmediateKind,
+    Operand,
     OperandAddressMapKind,
     OperandFlag,
     OperandRole,
@@ -33,6 +37,388 @@ from loom.target.low_descriptors import (
     StorageLeaseAttachment,
     StorageLeaseFlag,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _PhysicalDescriptorLimits:
+    """Reserved representation and exact-solver admission envelope."""
+
+    # Maximum number of independent physical storage namespaces.
+    canonical_resource_count: int = 15
+    # Maximum allocation-unit capacity of one storage namespace.
+    maximum_resource_capacity: int = 2048
+    # Maximum allocation-unit capacity summed across all namespaces.
+    aggregate_resource_capacity: int = 2304
+    # Maximum number of physical operand rows in one descriptor.
+    maximum_physical_binding_count: int = 15
+    # Maximum number of untied components competing for one namespace.
+    maximum_resource_component_count: int = 8
+    # Maximum pairings of complete pre- and post-phase spatial orders.
+    maximum_phase_order_pair_count: int = 1440
+    # Maximum allocation-unit width of one physical operand.
+    maximum_component_unit_count: int = 64
+    # Maximum target-owned address-window selector identity.
+    maximum_address_state_slot: int = 15
+
+
+_PHYSICAL_DESCRIPTOR_LIMITS = _PhysicalDescriptorLimits()
+
+
+@dataclass(frozen=True, slots=True)
+class _PhysicalComponent:
+    # Descriptor operand rows collapsed into this tied component.
+    operand_indices: tuple[int, ...]
+    # Canonical resources accepted by every row in this tied component.
+    resource_keys: frozenset[str]
+    # Allocation units occupied before the packet executes.
+    pre_width: int
+    # Allocation units occupied after the packet executes.
+    post_width: int
+
+
+def _physical_resource_key(register_class: RegClass) -> str:
+    if register_class.alias_set_id:
+        return f"alias:{register_class.alias_set_id}"
+    return f"class:{register_class.name}"
+
+
+def _operand_physical_register_classes(
+    operand: Operand,
+    register_classes: dict[str, RegClass],
+) -> tuple[RegClass, ...]:
+    physical_register_classes = []
+    for alternative in operand.reg_alts:
+        if alternative.reg_class is None:
+            continue
+        register_class = register_classes[alternative.reg_class]
+        if RegClassFlag.PHYSICAL in register_class.flags:
+            physical_register_classes.append(register_class)
+    return tuple(physical_register_classes)
+
+
+def _operand_phase_accesses(
+    operand: Operand,
+    *,
+    is_early_clobber: bool,
+) -> tuple[bool, bool]:
+    is_result = operand.role is OperandRole.RESULT
+    is_implicit_state = operand.role is OperandRole.IMPLICIT
+    has_state_read = OperandFlag.STATE_READ in operand.flags
+    has_state_write = OperandFlag.STATE_WRITE in operand.flags
+    if is_implicit_state and not has_state_read and not has_state_write:
+        return False, False
+    reads_pre = has_state_read or is_early_clobber
+    if not is_result and not is_implicit_state:
+        reads_pre = True
+    writes_post = is_result or has_state_write
+    return reads_pre, writes_post
+
+
+def _descriptor_tied_operand_roots(descriptor: Descriptor) -> tuple[int, ...]:
+    parent = list(range(len(descriptor.operands)))
+
+    def find(operand_index: int) -> int:
+        while parent[operand_index] != operand_index:
+            parent[operand_index] = parent[parent[operand_index]]
+            operand_index = parent[operand_index]
+        return operand_index
+
+    for constraint in descriptor.constraints:
+        if constraint.kind is not ConstraintKind.TIED:
+            continue
+        assert constraint.rhs_operand_index is not None
+        lhs_root = find(constraint.lhs_operand_index)
+        rhs_root = find(constraint.rhs_operand_index)
+        parent[rhs_root] = lhs_root
+    return tuple(find(operand_index) for operand_index in range(len(parent)))
+
+
+def _operand_allows_base(operand: Operand, base: int) -> bool:
+    assigned_end = base + operand.unit_count
+    if operand.address_map_kind is OperandAddressMapKind.LOW_SUBSET:
+        return assigned_end <= operand.addressable_unit_count
+    if operand.address_map_kind is OperandAddressMapKind.TARGET_STATE:
+        window_size = operand.addressable_unit_count
+        return base // window_size == (assigned_end - 1) // window_size
+    return True
+
+
+def _component_allowed_bases(
+    descriptor: Descriptor,
+    component: _PhysicalComponent,
+    resource_capacity: int,
+    early_clobber_results: frozenset[int],
+) -> tuple[int, ...]:
+    component_width = max(component.pre_width, component.post_width)
+    if component_width > resource_capacity:
+        return ()
+    allowed_bases = []
+    for base in range(resource_capacity - component_width + 1):
+        is_allowed = True
+        for operand_index in component.operand_indices:
+            operand = descriptor.operands[operand_index]
+            reads_pre, writes_post = _operand_phase_accesses(
+                operand,
+                is_early_clobber=operand_index in early_clobber_results,
+            )
+            if not reads_pre and not writes_post:
+                continue
+            if not _operand_allows_base(operand, base):
+                is_allowed = False
+                break
+        if is_allowed:
+            allowed_bases.append(base)
+    return tuple(allowed_bases)
+
+
+def _solve_physical_component_order_pair(
+    components: Sequence[_PhysicalComponent],
+    allowed_bases: Sequence[tuple[int, ...]],
+    pre_order: tuple[int, ...],
+    post_order: tuple[int, ...],
+) -> bool:
+    edge_widths: dict[tuple[int, int], int] = {}
+    for phase, order in (("pre", pre_order), ("post", post_order)):
+        for source_index, destination_index in pairwise(order):
+            width = getattr(components[source_index], f"{phase}_width")
+            edge = (source_index, destination_index)
+            edge_widths[edge] = max(edge_widths.get(edge, 0), width)
+
+    successors: list[list[tuple[int, int]]] = [[] for _ in components]
+    predecessor_counts = [0] * len(components)
+    for (source_index, destination_index), width in edge_widths.items():
+        successors[source_index].append((destination_index, width))
+        predecessor_counts[destination_index] += 1
+
+    ready = [component_index for component_index, predecessor_count in enumerate(predecessor_counts) if predecessor_count == 0]
+    lower_bounds = [0] * len(components)
+    visited_count = 0
+    while ready:
+        component_index = ready.pop()
+        visited_count += 1
+        base = next(
+            (candidate for candidate in allowed_bases[component_index] if candidate >= lower_bounds[component_index]),
+            None,
+        )
+        if base is None:
+            return False
+        for successor_index, width in successors[component_index]:
+            lower_bounds[successor_index] = max(lower_bounds[successor_index], base + width)
+            predecessor_counts[successor_index] -= 1
+            if predecessor_counts[successor_index] == 0:
+                ready.append(successor_index)
+    return visited_count == len(components)
+
+
+def _physical_components_admit_placement(
+    components: Sequence[_PhysicalComponent],
+    allowed_bases: Sequence[tuple[int, ...]],
+) -> bool:
+    pre_components = tuple(index for index, component in enumerate(components) if component.pre_width)
+    post_components = tuple(index for index, component in enumerate(components) if component.post_width)
+    for pre_order in permutations(pre_components):
+        for post_order in permutations(post_components):
+            if _solve_physical_component_order_pair(
+                components,
+                allowed_bases,
+                pre_order,
+                post_order,
+            ):
+                return True
+    return False
+
+
+def _validate_physical_metric(
+    descriptor_set_key: str,
+    metric_name: str,
+    value: int,
+    limit: int,
+    *,
+    descriptor_key: str | None = None,
+) -> None:
+    if value <= limit:
+        return
+    description = f"descriptor set '{descriptor_set_key}'"
+    if descriptor_key is not None:
+        description += f" descriptor '{descriptor_key}'"
+    raise ValueError(f"{description} physical {metric_name} {value} exceeds generation bound {limit}")
+
+
+def validate_physical_descriptor_set(
+    descriptor_set: DescriptorSet,
+) -> None:
+    """Proves bounded packet-local physical storage for a descriptor set.
+
+    Register classes and descriptor operands and constraints must already have
+    passed their general validators.
+    """
+
+    register_classes = {register_class.name: register_class for register_class in descriptor_set.reg_classes}
+    physical_register_classes = tuple(register_class for register_class in descriptor_set.reg_classes if RegClassFlag.PHYSICAL in register_class.flags)
+    resources: dict[str, int] = {}
+    for register_class in physical_register_classes:
+        if register_class.allocatable_count == 0:
+            raise ValueError(f"descriptor set '{descriptor_set.key}' physical register class '{register_class.name}' has zero allocation capacity")
+        resource_key = _physical_resource_key(register_class)
+        resources.setdefault(resource_key, register_class.allocatable_count)
+
+    limits = _PHYSICAL_DESCRIPTOR_LIMITS
+    maximum_resource_capacity = max(resources.values(), default=0)
+    aggregate_resource_capacity = sum(resources.values())
+    _validate_physical_metric(
+        descriptor_set.key,
+        "canonical resource count",
+        len(resources),
+        limits.canonical_resource_count,
+    )
+    _validate_physical_metric(
+        descriptor_set.key,
+        "maximum resource capacity",
+        maximum_resource_capacity,
+        limits.maximum_resource_capacity,
+    )
+    _validate_physical_metric(
+        descriptor_set.key,
+        "aggregate resource capacity",
+        aggregate_resource_capacity,
+        limits.aggregate_resource_capacity,
+    )
+
+    maximum_address_state_slot = 0
+    address_state_slot_windows: dict[int, int] = {}
+
+    for descriptor in descriptor_set.descriptors:
+        for operand in descriptor.operands:
+            for alternative in operand.reg_alts:
+                if alternative.reg_class is not None and alternative.reg_class not in register_classes:
+                    raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' references unknown register class '{alternative.reg_class}'")
+        early_clobber_results = frozenset(constraint.lhs_operand_index for constraint in descriptor.constraints if constraint.kind is ConstraintKind.EARLY_CLOBBER)
+        tied_operand_roots = _descriptor_tied_operand_roots(descriptor)
+
+        physical_rows: list[tuple[int, Operand, tuple[RegClass, ...]]] = []
+        for operand_index, operand in enumerate(descriptor.operands):
+            physical_classes = _operand_physical_register_classes(operand, register_classes)
+            if not physical_classes:
+                continue
+            if operand.role is OperandRole.IMPLICIT and OperandFlag.STATE_READ not in operand.flags and OperandFlag.STATE_WRITE not in operand.flags:
+                raise ValueError(f"descriptor set '{descriptor_set.key}' descriptor '{descriptor.key}' physical implicit operand '{operand.field_name}' has no state read or write phase")
+            _validate_physical_metric(
+                descriptor_set.key,
+                f"operand '{operand.field_name}' unit count",
+                operand.unit_count,
+                limits.maximum_component_unit_count,
+                descriptor_key=descriptor.key,
+            )
+            if operand.address_map_kind is OperandAddressMapKind.TARGET_STATE:
+                previous_window = address_state_slot_windows.setdefault(
+                    operand.address_state_slot,
+                    operand.addressable_unit_count,
+                )
+                if previous_window != operand.addressable_unit_count:
+                    raise ValueError(f"descriptor set '{descriptor_set.key}' address-state slot {operand.address_state_slot} has inconsistent window width")
+                maximum_address_state_slot = max(
+                    maximum_address_state_slot,
+                    operand.address_state_slot,
+                )
+            physical_rows.append((operand_index, operand, physical_classes))
+
+        rows_by_component: dict[int, list[tuple[int, Operand, tuple[RegClass, ...]]]] = {}
+        for operand_index, operand, physical_classes in physical_rows:
+            rows_by_component.setdefault(tied_operand_roots[operand_index], []).append((operand_index, operand, physical_classes))
+
+        address_state_slot_components: dict[int, int] = {}
+        for component_root, component_rows in rows_by_component.items():
+            for _, operand, _ in component_rows:
+                if operand.address_map_kind is not OperandAddressMapKind.TARGET_STATE:
+                    continue
+                previous_root = address_state_slot_components.setdefault(operand.address_state_slot, component_root)
+                if previous_root != component_root:
+                    raise ValueError(
+                        f"descriptor set '{descriptor_set.key}' descriptor '{descriptor.key}' assigns target-state slot {operand.address_state_slot} to multiple untied physical components"
+                    )
+
+        components: list[_PhysicalComponent] = []
+        for component_rows in rows_by_component.values():
+            legal_resource_keys: set[str] | None = None
+            pre_width = 0
+            post_width = 0
+            for operand_index, operand, physical_classes in component_rows:
+                operand_resource_keys = {_physical_resource_key(register_class) for register_class in physical_classes}
+                if legal_resource_keys is None:
+                    legal_resource_keys = operand_resource_keys
+                else:
+                    legal_resource_keys.intersection_update(operand_resource_keys)
+                reads_pre, writes_post = _operand_phase_accesses(
+                    operand,
+                    is_early_clobber=operand_index in early_clobber_results,
+                )
+                if reads_pre:
+                    pre_width = max(pre_width, operand.unit_count)
+                if writes_post:
+                    post_width = max(post_width, operand.unit_count)
+            if not legal_resource_keys:
+                operand_names = ", ".join(operand.field_name for _, operand, _ in component_rows)
+                raise ValueError(f"descriptor set '{descriptor_set.key}' descriptor '{descriptor.key}' tied physical component [{operand_names}] has no common storage resource")
+            components.append(
+                _PhysicalComponent(
+                    operand_indices=tuple(operand_index for operand_index, _, _ in component_rows),
+                    resource_keys=frozenset(legal_resource_keys),
+                    pre_width=pre_width,
+                    post_width=post_width,
+                )
+            )
+
+        _validate_physical_metric(
+            descriptor_set.key,
+            "binding count",
+            len(physical_rows),
+            limits.maximum_physical_binding_count,
+            descriptor_key=descriptor.key,
+        )
+        # Register-class alternatives are selected by the types in low IR, not
+        # by this proof. Every independent component that accepts a resource can
+        # therefore select it in the same packet and must fit simultaneously.
+        for resource_key, resource_capacity in resources.items():
+            resource_components = [component for component in components if resource_key in component.resource_keys]
+            if not resource_components:
+                continue
+            _validate_physical_metric(
+                descriptor_set.key,
+                f"resource '{resource_key}' component count",
+                len(resource_components),
+                limits.maximum_resource_component_count,
+                descriptor_key=descriptor.key,
+            )
+            pre_component_count = sum(component.pre_width != 0 for component in resource_components)
+            post_component_count = sum(component.post_width != 0 for component in resource_components)
+            phase_order_pair_count = math.factorial(pre_component_count) * math.factorial(post_component_count)
+            _validate_physical_metric(
+                descriptor_set.key,
+                f"resource '{resource_key}' phase-order pair count",
+                phase_order_pair_count,
+                limits.maximum_phase_order_pair_count,
+                descriptor_key=descriptor.key,
+            )
+            allowed_bases = tuple(
+                _component_allowed_bases(
+                    descriptor,
+                    component,
+                    resource_capacity,
+                    early_clobber_results,
+                )
+                for component in resource_components
+            )
+            if any(not bases for bases in allowed_bases) or not (_physical_components_admit_placement(resource_components, allowed_bases)):
+                raise ValueError(
+                    f"descriptor set '{descriptor_set.key}' descriptor '{descriptor.key}' physical resource '{resource_key}' does not admit a legal pre/post placement within {resource_capacity} units"
+                )
+
+    _validate_physical_metric(
+        descriptor_set.key,
+        "maximum address-state slot",
+        maximum_address_state_slot,
+        limits.maximum_address_state_slot,
+    )
 
 
 def validate_u16(value: int, description: str) -> None:
@@ -83,6 +469,14 @@ def validate_register_classes(
             f"{description} allocatable count",
         )
         validate_u16(
+            register_class.fixed_location_base,
+            f"{description} fixed-location base",
+        )
+        validate_u16(
+            register_class.fixed_location_count,
+            f"{description} fixed-location count",
+        )
+        validate_u16(
             register_class.alias_set_id,
             f"{description} alias-set ID",
         )
@@ -90,6 +484,15 @@ def validate_register_classes(
             raise ValueError(f"{description} cannot be both physical and virtual-only")
         if register_class.allocatable_count != 0 and RegClassFlag.VIRTUAL_ONLY in register_class.flags:
             raise ValueError(f"{description} has a physical allocation capacity but is virtual-only")
+        if (register_class.fixed_location_base != 0 or register_class.fixed_location_count != 0) and RegClassFlag.VIRTUAL_ONLY in register_class.flags:
+            raise ValueError(f"{description} has fixed physical locations but is virtual-only")
+        if register_class.fixed_location_count == 0 and register_class.fixed_location_base != 0:
+            raise ValueError(f"{description} has a fixed-location base without a count")
+        fixed_location_end = register_class.fixed_location_base + register_class.fixed_location_count
+        if fixed_location_end > 0x10000:
+            raise ValueError(f"{description} fixed-location range exceeds the u16 location namespace")
+        if register_class.fixed_location_count != 0 and register_class.fixed_location_base < register_class.allocatable_count:
+            raise ValueError(f"{description} fixed-location range overlaps its allocatable locations")
         if register_class.alias_set_id != 0:
             alias_sets.setdefault(register_class.alias_set_id, []).append(register_class)
 
@@ -109,6 +512,8 @@ def validate_register_classes(
                 raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} classes '{reference.name}' and '{member.name}' use different target banks")
             if member.allocatable_count != reference.allocatable_count:
                 raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} classes '{reference.name}' and '{member.name}' have different allocatable counts")
+            if (member.fixed_location_base, member.fixed_location_count) != (reference.fixed_location_base, reference.fixed_location_count):
+                raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} classes '{reference.name}' and '{member.name}' have different fixed-location ranges")
 
 
 def _descriptor_asm_surface_description(
@@ -191,6 +596,10 @@ def hazard_reference_count(hazard: Hazard) -> int:
 
 
 def validate_descriptor_operands(descriptor: Descriptor) -> int:
+    validate_u16(
+        len(descriptor.operands),
+        f"descriptor '{descriptor.key}' operand count",
+    )
     result_count = 0
     seen_non_result = False
     for operand in descriptor.operands:
@@ -215,8 +624,8 @@ def validate_descriptor_operands(descriptor: Descriptor) -> int:
             operand.address_state_slot,
             f"descriptor '{descriptor.key}' operand '{operand.field_name}' address state slot",
         )
-        is_explicit_packet_value = operand_role_is_packet_input(operand.role) and OperandFlag.IMPLICIT not in operand.flags
-        has_addressable_assignment = is_result or is_explicit_packet_value
+        is_packet_value = operand_role_is_packet_input(operand.role)
+        has_addressable_assignment = is_result or is_packet_value
         if operand.address_map_kind is OperandAddressMapKind.DIRECT:
             if operand.addressable_unit_count != 0:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' direct address map must not set an addressable unit count")
@@ -224,7 +633,7 @@ def validate_descriptor_operands(descriptor: Descriptor) -> int:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' direct address map must not set an address state slot")
         elif operand.address_map_kind in (OperandAddressMapKind.LOW_SUBSET, OperandAddressMapKind.TARGET_STATE):
             if not has_addressable_assignment:
-                raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' bounded address map must apply to an explicit value operand")
+                raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' bounded address map must apply to an SSA value operand")
             if operand.addressable_unit_count == 0:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' bounded address map must set an addressable unit count")
             if operand.addressable_unit_count < operand.unit_count:
@@ -286,6 +695,34 @@ def operand_role_is_packet_input(role: OperandRole) -> bool:
         OperandRole.PREDICATE,
         OperandRole.RESOURCE,
     )
+
+
+def descriptor_operand_source_value_indices(
+    descriptor: Descriptor,
+    result_count: int,
+) -> tuple[int | None, ...]:
+    """Derives and validates the source value coordinate for every operand row."""
+    result_index = 0
+    packet_operand_index = 0
+    source_value_indices: list[int | None] = []
+    for operand in descriptor.operands:
+        if operand.role is OperandRole.RESULT:
+            source_value_index = result_index
+            result_index += 1
+        elif operand_role_is_packet_input(operand.role):
+            source_value_index = packet_operand_index
+            packet_operand_index += 1
+        elif operand.role is OperandRole.IMPLICIT:
+            source_value_indices.append(None)
+            continue
+        else:
+            raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' role {operand.role.name} has no source value coordinate")
+        if source_value_index >= 0xFFFF:
+            raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' source value index {source_value_index} collides with the absent-index sentinel")
+        source_value_indices.append(source_value_index)
+    if result_index != result_count:
+        raise ValueError(f"descriptor '{descriptor.key}' derived {result_index} source result indices for {result_count} results")
+    return tuple(source_value_indices)
 
 
 def _validate_binary_constraint(
@@ -461,7 +898,7 @@ def asm_form_mnemonic(descriptor: Descriptor, asm_form: AsmForm) -> str:
 
 
 def descriptor_packet_operand_indices(descriptor: Descriptor) -> tuple[int, ...]:
-    return tuple(i for i, operand in enumerate(descriptor.operands) if operand_role_is_packet_input(operand.role) and OperandFlag.IMPLICIT not in operand.flags)
+    return tuple(i for i, operand in enumerate(descriptor.operands) if operand_role_is_packet_input(operand.role))
 
 
 def validate_storage_lease_name(value: str, description: str) -> None:

@@ -18,8 +18,9 @@ loom_cc_library(
     "main.c"
   DEPS
     iree::base
+    iree::base::internal::path
     iree::base::tooling::flags
-    iree::io::file_handle
+    iree::io::stream
     loom::sanitizer::options
     loom::target::provider
     loom::tooling::cli::help
@@ -103,6 +104,7 @@ iree_execution_test_suite(
   DATA
     "testdata/amdgpu_compile_rejection.loom"
     "testdata/amdgpu_hal_actual.loom"
+    "testdata/amdgpu_unused_kernargs.loom"
     "testdata/generated_tensor_cases.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"

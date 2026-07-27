@@ -87,6 +87,36 @@ typedef struct loom_liveness_segment_range_t {
   uint32_t count;
 } loom_liveness_segment_range_t;
 
+// One operation in the accepted liveness program order.
+//
+// Top-level rows follow the caller-provided block order when present. Nested
+// regions retain source order. Semantic-use values are grouped with the row and
+// split into direct and nested-capture ranges without storing value IDs or use
+// pointers. Each range is a distinct-value set; a value may appear in both
+// ranges when the operation and one of its nested regions read it.
+typedef struct loom_liveness_operation_point_t {
+  // Operation represented by this row.
+  const loom_op_t* op;
+  // Immediate parent operation row, or UINT32_MAX for a top-level operation.
+  uint32_t parent_operation_index;
+  // Program point where the operation reads its operands.
+  uint32_t start_point;
+  // Program point where the operation defines its results.
+  uint32_t end_point;
+  // First semantic-use value ordinal in the analysis operation-use table.
+  uint32_t use_start;
+  // Number of distinct direct semantic-use values before nested captures.
+  uint32_t direct_use_count;
+  // Combined entry count of the independently distinct use ranges.
+  uint32_t use_count;
+} loom_liveness_operation_point_t;
+
+static_assert(sizeof(loom_liveness_operation_point_t) <= 32,
+              "liveness operation rows must remain compact");
+
+typedef struct loom_liveness_operation_use_table_t
+    loom_liveness_operation_use_table_t;
+
 // Liveness for one block in the analyzed region.
 typedef struct loom_liveness_block_info_t {
   // Region block represented by this record.
@@ -103,6 +133,10 @@ typedef struct loom_liveness_block_info_t {
   const loom_value_id_t* live_out_values;
   // Number of values in |live_out_values|.
   iree_host_size_t live_out_count;
+  // First accepted operation row owned by this block.
+  uint32_t operation_start;
+  // Number of operation rows owned by this block, including nested regions.
+  uint32_t operation_count;
 } loom_liveness_block_info_t;
 
 // Peak boundary pressure for one value class.
@@ -231,6 +265,14 @@ typedef struct loom_liveness_analysis_t {
   // Segment ranges indexed by local value ordinal. The table has
   // |value_count| entries.
   const loom_liveness_segment_range_t* value_segment_ranges;
+  // Operations in accepted program-point order.
+  const loom_liveness_operation_point_t* operation_points;
+  // Number of records in |operation_points|.
+  iree_host_size_t operation_count;
+  // Segmented local value ordinals read by |operation_points|.
+  const loom_liveness_operation_use_table_t* operation_uses;
+  // Number of local value ordinals in |operation_uses|.
+  iree_host_size_t operation_use_count;
 } loom_liveness_analysis_t;
 
 // Returns true when |analysis| models recursively nested structured regions.
@@ -281,26 +323,9 @@ iree_status_t loom_liveness_analyze_region_with_order(
     loom_liveness_order_t order, iree_arena_allocator_t* arena,
     loom_liveness_analysis_t* out_analysis);
 
-// Resolves |op|'s program point in |analysis|.
-//
-// For region-tree analyses, nested operations are located relative to the
-// structured parent op that owns them. |order| applies only to direct
-// operations in |analysis->region|; nested regions keep source order.
-iree_status_t loom_liveness_op_program_point(
-    const loom_liveness_analysis_t* analysis, loom_liveness_order_t order,
-    const loom_op_t* op, uint32_t* out_program_point);
-
-// Returns the number of program points occupied by |op| under |analysis|'s
-// point model.
-iree_status_t loom_liveness_analysis_op_point_span(
-    const loom_liveness_analysis_t* analysis, const loom_op_t* op,
-    uint32_t* out_span);
-
-// Returns the number of program points occupied by |region| under |analysis|'s
-// point model.
-iree_status_t loom_liveness_analysis_region_point_span(
-    const loom_liveness_analysis_t* analysis, const loom_region_t* region,
-    uint32_t* out_span);
+// Returns the local value ordinal for one retained semantic operation use.
+loom_value_ordinal_t loom_liveness_operation_use_ordinal(
+    const loom_liveness_analysis_t* analysis, uint32_t use_index);
 
 // Returns the interval for |value_id|, or NULL when the value is not touched by
 // the analyzed region. This convenience helper scans the compact local value

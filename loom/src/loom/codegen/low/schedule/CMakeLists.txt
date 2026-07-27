@@ -98,7 +98,6 @@ loom_cc_library(
     loom::codegen::low::function_model
     loom::codegen::low::memory_access
     loom::codegen::low::placement
-    loom::codegen::low::pressure
     loom::codegen::low::storage_relation
     loom::codegen::low::target_binding
     loom::codegen::low::text_asm
@@ -108,6 +107,7 @@ loom_cc_library(
     loom::ops::low
     loom::ops::op_defs
     loom::target::registers
+    loom::target::residency
     loom::util::cfg_graph
     loom::util::json
     loom::util::segmented_storage

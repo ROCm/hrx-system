@@ -32,7 +32,6 @@ loom_generated_cc_library(
   DEPS
     iree::base::internal
     loom::analysis::availability
-    loom::analysis::motion
     loom::error::emitter
     loom::error::error_defs
     loom::ir

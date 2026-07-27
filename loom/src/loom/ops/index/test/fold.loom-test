@@ -776,6 +776,84 @@ func.def @rem_power_of_two_nonnegative(%x: index) -> (index) {
 
 // ====
 
+// A non-negative coordinate already inside the divisor range is its own
+// remainder.
+func.def @rem_bounded_below_divisor(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %offset = index.add %x2, %c32 : index
+  %r = index.rem %offset, %c64 : index
+  func.return %r : index
+}
+// ----
+func.def @rem_bounded_below_divisor(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  %c32 = index.constant 32 : index
+  %offset = index.add %x2, %c32 : index
+  func.return %offset : index
+}
+
+// ====
+
+// Exact radix multiples do not affect a bounded coordinate's remainder.
+func.def @rem_strips_radix_aligned_offset(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  %c960 = index.constant 960 : index
+  %c64 = index.constant 64 : index
+  %offset = index.add %x2, %c960 : index
+  %r = index.rem %offset, %c64 : index
+  func.return %r : index
+}
+// ----
+func.def @rem_strips_radix_aligned_offset(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  func.return %x2 : index
+}
+
+// ====
+
+// A large exact offset reduces to its in-radix residue when the dynamic range
+// proves that the reduced expression cannot wrap.
+func.def @rem_reduces_offset_residue(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  %c992 = index.constant 992 : index
+  %c64 = index.constant 64 : index
+  %offset = index.add %x2, %c992 : index
+  %r = index.rem %offset, %c64 : index
+  func.return %r : index
+}
+// ----
+func.def @rem_reduces_offset_residue(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  %7 = index.constant 32 : index
+  %r = index.add %x2, %7 : index
+  func.return %r : index
+}
+
+// ====
+
+// Reduction is conservative when the dynamic range can cross the radix.
+func.def @rem_offset_residue_wrap_is_preserved(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 32)] : index
+  %c992 = index.constant 992 : index
+  %c64 = index.constant 64 : index
+  %offset = index.add %x2, %c992 : index
+  %r = index.rem %offset, %c64 : index
+  func.return %r : index
+}
+// ----
+func.def @rem_offset_residue_wrap_is_preserved(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 32)] : index
+  %c992 = index.constant 992 : index
+  %offset = index.add %x2, %c992 : index
+  %7 = index.constant 63 : index
+  %r = index.andi %offset, %7 : index
+  func.return %r : index
+}
+
+// ====
+
 // Without non-negative dividend facts, remainder by a positive literal stays
 // conservative.
 func.def @rem_maybe_negative_is_preserved(%x: index) -> (index) {

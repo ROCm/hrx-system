@@ -6,6 +6,7 @@
 
 #include "loom/target/emit/native/amdgpu/hal_kernel_library.h"
 
+#include <inttypes.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -30,13 +31,14 @@
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/ops/target.h"
-#include "loom/target/arch/amdgpu/planning/address_state.h"
 #include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
 #include "loom/target/arch/amdgpu/planning/occupancy.h"
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
 #include "loom/target/arch/amdgpu/planning/storage_lease.h"
 #include "loom/target/arch/amdgpu/planning/vopd_plan.h"
+#include "loom/target/arch/amdgpu/planning/wait_counters.h"
 #include "loom/target/arch/amdgpu/provider.h"
+#include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/kernel_assembly.h"
 #include "loom/target/emit/native/amdgpu/kernel_hsaco.h"
@@ -47,6 +49,8 @@
 #include "loom/target/function_contract.h"
 #include "loom/target/provider.h"
 #include "loom/target/reporting/low.h"
+#include "loom/target/reporting/low_mix.h"
+#include "loom/target/reporting/low_names.h"
 
 #define LOOM_AMDGPU_HAL_KERNEL_LIBRARY_DEFAULT_MAX_ERRORS 20u
 
@@ -445,7 +449,8 @@ loom_amdgpu_hal_kernel_library_record_matrix_feature_capabilities(
       0;
   if (iree_any_bit_set(feature_bits,
                        LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8 |
-                           LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12)) {
+                           LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12 |
+                           LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250)) {
     fp8_bf8_support |=
         LOOM_AMDGPU_HAL_KERNEL_LIBRARY_NARROW_MATRIX_SUPPORT_UNSCALED;
   }
@@ -615,15 +620,14 @@ static iree_status_t loom_amdgpu_hal_kernel_library_record_wait_plan(
                       [LOOM_AMDGPU_WAIT_PLAN_REASON_COUNT] = {0};
   for (iree_host_size_t i = 0; i < wait_plan->action_count; ++i) {
     const loom_amdgpu_wait_plan_action_t* action = &wait_plan->actions[i];
-    IREE_ASSERT(action->counter_id > LOOM_AMDGPU_WAIT_COUNTER_NONE &&
-                    action->counter_id <= LOOM_AMDGPU_WAIT_COUNTER_ALU,
+    IREE_ASSERT(loom_amdgpu_wait_counter_id_is_valid(action->counter_id),
                 "wait plan action must name a concrete counter");
     IREE_ASSERT(action->reason < LOOM_AMDGPU_WAIT_PLAN_REASON_COUNT,
                 "wait plan action must name a concrete reason");
     loom_amdgpu_hal_kernel_library_accumulate_wait_action(&summary, action);
-    if (action->counter_id > LOOM_AMDGPU_WAIT_COUNTER_NONE &&
-        action->counter_id <= LOOM_AMDGPU_WAIT_COUNTER_ALU) {
-      const uint32_t counter_index = action->counter_id - 1;
+    if (loom_amdgpu_wait_counter_id_is_valid(action->counter_id)) {
+      const uint32_t counter_index =
+          loom_amdgpu_wait_counter_slot_from_id(action->counter_id);
       loom_amdgpu_hal_kernel_library_accumulate_wait_action(
           &counter_summaries[counter_index], action);
       if (action->reason < LOOM_AMDGPU_WAIT_PLAN_REASON_COUNT) {
@@ -720,6 +724,100 @@ static iree_status_t loom_amdgpu_hal_kernel_library_record_wait_plan(
   return iree_ok_status();
 }
 
+static iree_status_t loom_amdgpu_hal_kernel_library_record_target_insertions(
+    loom_target_compile_report_t* report,
+    const loom_low_emission_frame_t* frame,
+    const loom_amdgpu_kernel_hsaco_contribution_t* contribution) {
+  if (report == NULL || contribution->native_insertion_count == 0) {
+    return iree_ok_status();
+  }
+
+  const loom_low_descriptor_set_t* descriptor_set =
+      frame->schedule.target.descriptor_set;
+  const loom_low_descriptor_t* packet_descriptor =
+      loom_amdgpu_descriptor_ref_descriptor(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_S_SET_VGPR_MSB);
+  if (packet_descriptor == NULL) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU address-state insertions require the s_set_vgpr_msb "
+        "descriptor");
+  }
+  const iree_string_view_t packet_key = loom_low_descriptor_set_string(
+      descriptor_set, packet_descriptor->key_string_offset);
+
+  loom_target_compile_report_low_dynamic_context_t dynamic_context = {0};
+  iree_status_t status =
+      loom_target_compile_report_low_dynamic_context_initialize(
+          frame, &dynamic_context);
+  for (iree_host_size_t i = 0;
+       i < contribution->native_insertion_count && iree_status_is_ok(status);
+       ++i) {
+    const loom_amdgpu_native_insertion_t* insertion =
+        &contribution->native_insertions[i];
+    if (insertion->kind != LOOM_AMDGPU_NATIVE_INSERTION_ADDRESS_STATE) {
+      status =
+          iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                           "AMDGPU native insertion has unsupported kind %u",
+                           (unsigned)insertion->kind);
+      break;
+    }
+    if (insertion->reserved != 0 ||
+        insertion->block_index >= frame->schedule.block_count ||
+        insertion->node_index >= frame->schedule.node_count) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU native insertion %" PRIhsz " has invalid provenance", i);
+      break;
+    }
+    const loom_low_schedule_node_t* node =
+        &frame->schedule.nodes[insertion->node_index];
+    const loom_low_schedule_block_t* block =
+        &frame->schedule.blocks[insertion->block_index];
+    if (node->block_index != insertion->block_index ||
+        node->scheduled_ordinal != insertion->scheduled_ordinal) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "AMDGPU native insertion %" PRIhsz
+                                " does not match its owning scheduled node",
+                                i);
+      break;
+    }
+    iree_string_view_t boundary_descriptor_key = iree_string_view_empty();
+    if (node->descriptor != NULL) {
+      boundary_descriptor_key = loom_low_descriptor_set_string(
+          descriptor_set, node->descriptor->key_string_offset);
+    }
+    loom_target_compile_report_target_insertion_row_t row = {
+        .function_name = report->function_name,
+        .insertion_kind = LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_STATE,
+        .packet_key = packet_key,
+        .block_name =
+            loom_target_compile_report_block_name(frame->module, block->block),
+        .block_index = insertion->block_index,
+        .node_index = insertion->node_index,
+        .scheduled_ordinal = insertion->scheduled_ordinal,
+        .boundary_operation_name = node->op != NULL
+                                       ? loom_op_name(frame->module, node->op)
+                                       : iree_string_view_empty(),
+        .boundary_descriptor_key = boundary_descriptor_key,
+        .static_packet_count = 1,
+    };
+    uint64_t execution_multiplier = 0;
+    if (dynamic_context.exact &&
+        loom_target_compile_report_low_node_execution_multiplier(
+            frame->module, &dynamic_context.fact_table,
+            dynamic_context.block_multipliers, node, &execution_multiplier)) {
+      row.flags =
+          LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_DYNAMIC_PACKET_COUNT;
+      row.dynamic_packet_count = execution_multiplier;
+    }
+    status =
+        loom_target_compile_report_record_target_insertion_row(report, &row);
+  }
+  loom_target_compile_report_low_dynamic_context_deinitialize(&dynamic_context);
+  return status;
+}
+
 static iree_status_t loom_amdgpu_hal_kernel_library_build_hsaco_contribution(
     const loom_low_emission_frame_t* frame,
     const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout,
@@ -752,9 +850,11 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_hsaco_contribution(
       .preflight = preflight,
       .packet_plan = &packet_plan,
   };
-  return loom_amdgpu_build_kernel_hsaco_contribution(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_build_kernel_hsaco_contribution(
       &frame->schedule, &frame->allocation, &hsaco_options, out_contribution,
-      table_arena);
+      table_arena));
+  return loom_amdgpu_hal_kernel_library_record_target_insertions(
+      report, frame, out_contribution);
 }
 
 static loom_target_compile_report_target_resources_t
@@ -965,15 +1065,6 @@ static iree_status_t loom_amdgpu_hal_kernel_library_lower_spill_traffic(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_hal_kernel_library_materialize_address_state(
-    void* user_data, loom_module_t* module, loom_op_t* low_function_op,
-    const loom_low_emission_frame_t* frame, iree_arena_allocator_t* table_arena,
-    loom_low_emission_frame_materialize_address_state_result_t* out_result) {
-  (void)user_data;
-  return loom_amdgpu_materialize_address_state(module, low_function_op, frame,
-                                               table_arena, out_result);
-}
-
 static iree_status_t
 loom_amdgpu_hal_kernel_library_validate_final_workgroup_storage(
     void* user_data, const loom_low_emission_frame_t* frame,
@@ -1025,8 +1116,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
   IREE_RETURN_IF_ERROR(loom_target_low_descriptor_set_select_for_bundle(
       &low_registry->registry, &plan->entry->bundle_storage.bundle,
       &descriptor_set));
-  const loom_low_pressure_model_t* pressure_model =
-      loom_amdgpu_occupancy_pressure_model(descriptor_set);
+  const loom_target_residency_model_t* residency_model =
+      loom_amdgpu_occupancy_residency_model(descriptor_set);
   loom_low_schedule_pair_affinity_list_t schedule_pair_affinities =
       loom_low_schedule_pair_affinity_list_empty();
   loom_low_resolved_target_t resolved_target = {
@@ -1052,7 +1143,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
               .bundle = &plan->entry->bundle_storage.bundle,
               .data = target_selection.data,
           },
-      .pressure_model = pressure_model,
+      .residency_model = residency_model,
       .schedule_pair_affinities = schedule_pair_affinities,
       .schedule_structural_state_reads = schedule_state_reads,
       .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
@@ -1087,9 +1178,6 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
           },
       .lower_spill_traffic = loom_amdgpu_hal_kernel_library_lower_spill_traffic,
       .lower_spill_traffic_user_data = &spill_lowering_context,
-      .materialize_address_state =
-          loom_amdgpu_hal_kernel_library_materialize_address_state,
-      .materialize_address_state_user_data = NULL,
       .validate_frame =
           loom_amdgpu_hal_kernel_library_validate_final_workgroup_storage,
       .validate_frame_user_data = (void*)&final_validation_emitter,

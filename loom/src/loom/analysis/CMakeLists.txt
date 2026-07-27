@@ -144,6 +144,7 @@ loom_cc_library(
     loom::ops::func_symbol_facts
     loom::ops::op_defs
     loom::util::adaptive_sort
+    loom::util::walk
   PUBLIC
 )
 
@@ -161,6 +162,7 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::func
+    loom::ops::kernel
     loom::ops::op_defs
     loom::ops::test
     loom::testing::module_ptr
@@ -270,6 +272,7 @@ loom_cc_library(
   SRCS
     "kernel_async_legality.c"
   DEPS
+    ::control_uniformity
     ::movement
     iree::base
     iree::base::internal::arena
@@ -502,6 +505,7 @@ loom_cc_library(
     loom::target::registers
     loom::util::adaptive_sort
     loom::util::cfg_graph
+    loom::util::segmented_storage
   PUBLIC
 )
 
@@ -626,6 +630,7 @@ loom_cc_test(
     loom::ops::kernel
     loom::ops::test
     loom::ops::vector
+    loom::ops::view
     loom::util::fact_table
 )
 
@@ -638,6 +643,8 @@ loom_cc_library(
     "motion.c"
   DEPS
     ::availability
+    ::loop_domain
+    ::movement
     iree::base
     iree::base::internal::arena
     loom::ir

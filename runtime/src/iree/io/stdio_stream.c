@@ -438,7 +438,7 @@ static iree_status_t iree_io_stdio_stream_fill(
   // we just bash fwrite. We could buffer up a reasonable size (4096 etc) of the
   // pattern repeating but this shouldn't be performance critical.
   for (iree_io_stream_pos_t i = 0; i < count; ++i) {
-    if (fwrite(pattern, pattern_length, 1, stream->handle) != pattern_length) {
+    if (fwrite(pattern, pattern_length, 1, stream->handle) != 1) {
       status = iree_make_stdio_status(
           "write failed, possibly out of disk space or device lost");
       break;

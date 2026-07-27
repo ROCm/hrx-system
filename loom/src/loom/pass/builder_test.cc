@@ -86,9 +86,12 @@ static iree_status_t BuildForBody(loom_builder_t* builder, void* user_data) {
       nullptr, &where_op));
 
   loom_op_t* repeat_op = nullptr;
-  return loom_pass_ir_build_repeat(
+  IREE_RETURN_IF_ERROR(loom_pass_ir_build_repeat(
       builder, LOOM_PASS_REPEAT_BUILD_FLAG_HAS_COUNT,
-      LOOM_PASS_REPEAT_MODE_FIXED, 2, 0, BuildRepeatBody, nullptr, &repeat_op);
+      LOOM_PASS_REPEAT_MODE_FIXED, 2, 0, BuildRepeatBody, nullptr, &repeat_op));
+  loom_op_t* if_changed_op = nullptr;
+  return loom_pass_ir_build_if_changed(builder, BuildOneRun, nullptr,
+                                       &if_changed_op);
 }
 
 typedef struct MainPipelineBuildData {
@@ -157,9 +160,10 @@ TEST_F(PassBuilderTest, BuildsNestedPassControls) {
   loom_op_t* for_op = main_body->first_op;
   loom_block_t* for_body = loom_region_entry_block(loom_pass_for_body(for_op));
   ASSERT_NE(for_body, nullptr);
-  ASSERT_EQ(for_body->op_count, 3u);
+  ASSERT_EQ(for_body->op_count, 4u);
   ASSERT_TRUE(loom_pass_where_isa(for_body->first_op));
   ASSERT_TRUE(loom_pass_repeat_isa(for_body->first_op->next_op));
+  ASSERT_TRUE(loom_pass_if_changed_isa(for_body->first_op->next_op->next_op));
   EXPECT_TRUE(loom_pass_yield_isa(for_body->last_op));
 
   loom_op_t* where_op = for_body->first_op;
@@ -180,6 +184,14 @@ TEST_F(PassBuilderTest, BuildsNestedPassControls) {
   ASSERT_EQ(repeat_body->op_count, 2u);
   EXPECT_TRUE(loom_pass_run_isa(repeat_body->first_op));
   EXPECT_TRUE(loom_pass_yield_isa(repeat_body->last_op));
+
+  loom_op_t* if_changed_op = repeat_op->next_op;
+  loom_block_t* if_changed_body =
+      loom_region_entry_block(loom_pass_if_changed_body(if_changed_op));
+  ASSERT_NE(if_changed_body, nullptr);
+  ASSERT_EQ(if_changed_body->op_count, 2u);
+  EXPECT_TRUE(loom_pass_run_isa(if_changed_body->first_op));
+  EXPECT_TRUE(loom_pass_yield_isa(if_changed_body->last_op));
 }
 
 TEST(PassBuilderStandaloneTest, RequiresPassDialect) {

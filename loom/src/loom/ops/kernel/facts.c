@@ -137,6 +137,21 @@ static uint32_t loom_kernel_workgroup_size_dim(
   }
 }
 
+static uint32_t loom_kernel_workgroup_cluster_size_dim(
+    const loom_target_workgroup_cluster_size_t* size,
+    loom_kernel_dimension_t dimension) {
+  switch (dimension) {
+    case LOOM_KERNEL_DIMENSION_X:
+      return size->x;
+    case LOOM_KERNEL_DIMENSION_Y:
+      return size->y;
+    case LOOM_KERNEL_DIMENSION_Z:
+      return size->z;
+    default:
+      return 0;
+  }
+}
+
 static uint32_t loom_kernel_grid_size_dim(const loom_target_grid_size_t* size,
                                           loom_kernel_dimension_t dimension) {
   switch (dimension) {
@@ -168,6 +183,19 @@ static uint32_t loom_kernel_workgroup_count_dim(
 
 static bool loom_kernel_workgroup_size_flat_product(
     const loom_target_workgroup_size_t* size, uint32_t* out_flat_size) {
+  if (size->x == 0 || size->y == 0 || size->z == 0) {
+    return false;
+  }
+  const uint64_t flat_size = (uint64_t)size->x * size->y * size->z;
+  if (flat_size > UINT32_MAX) {
+    return false;
+  }
+  *out_flat_size = (uint32_t)flat_size;
+  return true;
+}
+
+static bool loom_kernel_workgroup_cluster_size_flat_product(
+    const loom_target_workgroup_cluster_size_t* size, uint32_t* out_flat_size) {
   if (size->x == 0 || size->y == 0 || size->z == 0) {
     return false;
   }
@@ -217,6 +245,20 @@ static void loom_kernel_mark_workgroup_topology_domain(
     loom_kernel_dimension_t dimension, loom_value_facts_t* facts) {
   loom_value_facts_mark_topology_domain(
       facts, LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKGROUP_ID,
+      loom_kernel_dimension_topology_axis(dimension));
+}
+
+static void loom_kernel_mark_cluster_topology_domain(
+    loom_kernel_dimension_t dimension, loom_value_facts_t* facts) {
+  loom_value_facts_mark_topology_domain(
+      facts, LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_ID,
+      loom_kernel_dimension_topology_axis(dimension));
+}
+
+static void loom_kernel_mark_cluster_workgroup_topology_domain(
+    loom_kernel_dimension_t dimension, loom_value_facts_t* facts) {
+  loom_value_facts_mark_topology_domain(
+      facts, LOOM_VALUE_FACT_TOPOLOGY_VALUE_CLUSTER_WORKGROUP_ID,
       loom_kernel_dimension_topology_axis(dimension));
 }
 
@@ -287,6 +329,30 @@ static bool loom_kernel_context_required_workgroup_size(
   }
   *out_size = bundle->export_plan->hal_kernel.required_workgroup_size;
   return out_size->x != 0 || out_size->y != 0 || out_size->z != 0;
+}
+
+static bool loom_kernel_context_workgroup_cluster_size(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_target_workgroup_cluster_size_t* out_size) {
+  *out_size = (loom_target_workgroup_cluster_size_t){0};
+  if (!context || !loom_kernel_def_isa(context->function.op)) {
+    return false;
+  }
+
+  const loom_op_t* launch_config =
+      loom_kernel_def_launch_config_op(context->function.op);
+  if (!launch_config) {
+    return false;
+  }
+  if (!loom_kernel_launch_config_has_workgroup_cluster_size(launch_config)) {
+    *out_size = (loom_target_workgroup_cluster_size_t){1, 1, 1};
+    return true;
+  }
+  if (!module) {
+    return false;
+  }
+  return loom_kernel_def_static_workgroup_cluster_size_from_facts(
+      module, context->function.op, context->table, out_size);
 }
 
 static bool loom_kernel_context_fixed_flat_workgroup_size(
@@ -410,6 +476,53 @@ static loom_value_facts_t loom_kernel_launch_workgroup_count_facts(
   launch_facts =
       loom_kernel_positive_u32_extent_facts(launch_facts, maximum_extent);
   return loom_kernel_intersect_integer_facts(launch_facts, target_facts);
+}
+
+static loom_value_facts_t loom_kernel_launch_workgroup_cluster_size_facts(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_kernel_dimension_t dimension) {
+  loom_target_workgroup_cluster_size_t cluster_size = {0};
+  if (!loom_kernel_context_workgroup_cluster_size(context, module,
+                                                  &cluster_size)) {
+    return loom_kernel_hal_positive_u32_facts();
+  }
+  const uint32_t extent =
+      loom_kernel_workgroup_cluster_size_dim(&cluster_size, dimension);
+  return extent == 0 ? loom_kernel_hal_positive_u32_facts()
+                     : loom_value_facts_exact_i64((int64_t)extent);
+}
+
+static loom_value_facts_t loom_kernel_positive_extent_quotient_facts(
+    loom_value_facts_t numerator_facts, uint32_t denominator) {
+  if (denominator == 0 || loom_value_facts_is_float(numerator_facts) ||
+      numerator_facts.range_lo < 1 || numerator_facts.range_hi > UINT32_MAX) {
+    return loom_kernel_hal_positive_u32_facts();
+  }
+  const int64_t divisor = (int64_t)denominator;
+  const int64_t lower_bound = numerator_facts.range_lo / divisor +
+                              (numerator_facts.range_lo % divisor != 0);
+  const int64_t upper_bound = numerator_facts.range_hi / divisor;
+  if (lower_bound < 1 || lower_bound > upper_bound) {
+    return loom_kernel_hal_positive_u32_facts();
+  }
+  return loom_value_facts_make(lower_bound, upper_bound, 1);
+}
+
+static loom_value_facts_t loom_kernel_launch_workgroup_cluster_count_facts(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_kernel_dimension_t dimension) {
+  const loom_value_facts_t workgroup_count_facts =
+      loom_kernel_launch_workgroup_count_facts(context, module, dimension);
+  const loom_value_facts_t cluster_size_facts =
+      loom_kernel_launch_workgroup_cluster_size_facts(context, module,
+                                                      dimension);
+  if (!loom_value_facts_is_exact(cluster_size_facts) ||
+      cluster_size_facts.range_lo < 1 ||
+      cluster_size_facts.range_lo > UINT32_MAX) {
+    return loom_kernel_hal_positive_u32_facts();
+  }
+  return loom_kernel_positive_extent_quotient_facts(
+      workgroup_count_facts, (uint32_t)cluster_size_facts.range_lo);
 }
 
 static loom_value_facts_t loom_kernel_workitem_dispatch_id_target_facts(
@@ -572,6 +685,87 @@ iree_status_t loom_kernel_workgroup_id_facts(
   return iree_ok_status();
 }
 
+iree_status_t loom_kernel_cluster_id_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  (void)operand_facts;
+  const loom_kernel_dimension_t dimension =
+      loom_kernel_cluster_id_dimension(op);
+  result_facts[0] = loom_kernel_coordinate_from_extent_facts(
+      loom_kernel_launch_workgroup_cluster_count_facts(context, module,
+                                                       dimension));
+  loom_value_facts_mark_cluster_uniform(&result_facts[0]);
+  loom_kernel_mark_cluster_topology_domain(dimension, &result_facts[0]);
+  return iree_ok_status();
+}
+
+iree_status_t loom_kernel_cluster_workgroup_id_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  (void)operand_facts;
+  const loom_kernel_dimension_t dimension =
+      loom_kernel_cluster_workgroup_id_dimension(op);
+  result_facts[0] = loom_kernel_coordinate_from_extent_facts(
+      loom_kernel_launch_workgroup_cluster_size_facts(context, module,
+                                                      dimension));
+  if (loom_value_facts_is_zero(result_facts[0])) {
+    loom_value_facts_mark_cluster_uniform(&result_facts[0]);
+  } else {
+    loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
+  }
+  loom_kernel_mark_cluster_workgroup_topology_domain(dimension,
+                                                     &result_facts[0]);
+  return iree_ok_status();
+}
+
+iree_status_t loom_kernel_cluster_workgroup_flat_id_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  (void)op;
+  (void)operand_facts;
+  loom_target_workgroup_cluster_size_t cluster_size = {0};
+  uint32_t flat_size = 0;
+  if (loom_kernel_context_workgroup_cluster_size(context, module,
+                                                 &cluster_size) &&
+      loom_kernel_workgroup_cluster_size_flat_product(&cluster_size,
+                                                      &flat_size)) {
+    result_facts[0] = loom_value_facts_make(0, (int64_t)flat_size - 1, 1);
+  } else {
+    result_facts[0] = loom_kernel_hal_coordinate_facts();
+  }
+  if (loom_value_facts_is_zero(result_facts[0])) {
+    loom_value_facts_mark_cluster_uniform(&result_facts[0]);
+  } else {
+    loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_kernel_cluster_size_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  (void)operand_facts;
+  result_facts[0] = loom_kernel_launch_workgroup_cluster_size_facts(
+      context, module, loom_kernel_cluster_size_dimension(op));
+  loom_value_facts_mark_cluster_uniform(&result_facts[0]);
+  return iree_ok_status();
+}
+
+iree_status_t loom_kernel_cluster_count_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  (void)operand_facts;
+  result_facts[0] = loom_kernel_launch_workgroup_cluster_count_facts(
+      context, module, loom_kernel_cluster_count_dimension(op));
+  loom_value_facts_mark_cluster_uniform(&result_facts[0]);
+  return iree_ok_status();
+}
+
 iree_status_t loom_kernel_workgroup_size_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
@@ -579,7 +773,7 @@ iree_status_t loom_kernel_workgroup_size_facts(
   (void)operand_facts;
   result_facts[0] = loom_kernel_launch_workgroup_size_facts(
       context, module, loom_kernel_workgroup_size_dimension(op));
-  loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
+  loom_value_facts_mark_cluster_uniform(&result_facts[0]);
   return iree_ok_status();
 }
 
@@ -590,7 +784,7 @@ iree_status_t loom_kernel_workgroup_count_facts(
   (void)operand_facts;
   result_facts[0] = loom_kernel_launch_workgroup_count_facts(
       context, module, loom_kernel_workgroup_count_dimension(op));
-  loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
+  loom_value_facts_mark_cluster_uniform(&result_facts[0]);
   return iree_ok_status();
 }
 

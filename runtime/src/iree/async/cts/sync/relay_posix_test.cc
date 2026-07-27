@@ -20,17 +20,12 @@
 //   - Flag behavior (OWN_SOURCE_PRIMITIVE, ERROR_SENSITIVE)
 //   - Lifecycle (unregister while pending, multiple active relays)
 //
-// Synchronization model: relay CQEs are processed synchronously during
-// DrainPending (immediate-timeout polls with GETEVENTS flush). After
-// DrainPending returns, all relay side effects (sink fd writes, notification
-// epoch increments) are complete. No timing-based waits are needed.
+// Synchronization model: expected sink effects are explicit wait conditions.
+// Terminal unregistration is joined through its completion callback.
 
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
-
-#include <atomic>
-#include <thread>
 
 #include "iree/async/relay.h"
 
@@ -48,9 +43,12 @@ namespace iree::async::cts {
 // On Linux, this is an eventfd (single bidirectional fd).
 // On macOS/BSD, this is a pipe (read end + write end).
 struct TestPrimitive {
-  int source_fd;   // Read end: for relay source monitoring and test drain
-  int signal_fd;   // Write end: for test triggering and relay sink writes
-  bool owns_pair;  // True for pipe (two fds), false for eventfd (one fd)
+  // Read end used for relay source monitoring and test reads.
+  int source_fd;
+  // Write end used for test triggers and relay sink writes.
+  int signal_fd;
+  // True for a pipe with two fds; false for an eventfd with one fd.
+  bool owns_pair;
 };
 
 class RelayPosixTest : public CtsTestBase<> {
@@ -99,6 +97,14 @@ class RelayPosixTest : public CtsTestBase<> {
     return false;
   }
 
+  // Polls until |primitive| receives a signal and returns its value.
+  uint64_t WaitForPrimitiveSignal(const TestPrimitive& primitive) {
+    uint64_t value = 0;
+    PollUntilCondition([&] { return DrainPrimitive(primitive, &value); },
+                       "relay sink primitive signal");
+    return value;
+  }
+
   // Closes a primitive pair, handling eventfd (one fd) vs pipe (two fds).
   void ClosePrimitive(TestPrimitive& primitive) {
     if (primitive.source_fd >= 0) {
@@ -129,9 +135,7 @@ TEST_P(RelayPosixTest, PrimitiveToPrimitive) {
   ASSERT_NE(relay, nullptr);
 
   SignalPrimitive(source);
-  DrainPending();
-
-  EXPECT_TRUE(DrainPrimitive(sink));
+  EXPECT_EQ(WaitForPrimitiveSignal(sink), 1u);
 
   ClosePrimitive(source);
   ClosePrimitive(sink);
@@ -155,32 +159,17 @@ TEST_P(RelayPosixTest, PrimitiveToNotification) {
       &relay));
   ASSERT_NE(relay, nullptr);
 
-  // Use epoch-based gate pattern: capture baseline before starting the waiter,
-  // then use iree_notification_await with a predicate that checks the epoch.
-  // This avoids the three-actor race where notification_wait captures the epoch
-  // after the relay has already fired.
-  iree_notification_t gate;
-  iree_notification_initialize(&gate);
-  EpochWaitContext wait_context = {
-      sink_notification,
-      iree_async_notification_query_epoch(sink_notification)};
-
-  std::atomic<bool> waiter_woken{false};
-  std::thread waiter([&]() {
-    bool result = iree_notification_await(&gate, epoch_advanced, &wait_context,
-                                          iree_make_timeout_ms(5000));
-    waiter_woken.store(result, std::memory_order_release);
-  });
+  uint32_t epoch_before =
+      iree_async_notification_query_epoch(sink_notification);
 
   SignalPrimitive(source);
-  DrainPending();
+  PollUntilCondition(
+      [&] {
+        return iree_async_notification_query_epoch(sink_notification) !=
+               epoch_before;
+      },
+      "relay sink notification epoch advance");
 
-  iree_notification_post(&gate, IREE_ALL_WAITERS);
-
-  waiter.join();
-  EXPECT_TRUE(waiter_woken.load(std::memory_order_acquire));
-
-  iree_notification_deinitialize(&gate);
   ClosePrimitive(source);
   iree_async_notification_release(sink_notification);
 }
@@ -203,11 +192,7 @@ TEST_P(RelayPosixTest, NotificationToPrimitive) {
   ASSERT_NE(relay, nullptr);
 
   iree_async_notification_signal(source_notification, 1);
-  DrainPending();
-
-  uint64_t value = 0;
-  EXPECT_TRUE(DrainPrimitive(sink, &value));
-  EXPECT_EQ(value, 42u);
+  EXPECT_EQ(WaitForPrimitiveSignal(sink), 42u);
 
   ClosePrimitive(sink);
   iree_async_notification_release(source_notification);
@@ -230,18 +215,56 @@ TEST_P(RelayPosixTest, PersistentMultipleTransfers) {
   ASSERT_NE(relay, nullptr);
 
   for (int i = 0; i < 3; ++i) {
-    DrainPrimitive(sink);
     SignalPrimitive(source);
-    DrainPending();
-    EXPECT_TRUE(DrainPrimitive(sink))
+    EXPECT_EQ(WaitForPrimitiveSignal(sink), 1u)
         << "Relay failed to fire on iteration " << i;
   }
 
-  iree_async_proactor_unregister_relay(proactor_, relay);
-  DrainPending();
+  WaitForRelayUnregistration(relay);
 
   ClosePrimitive(source);
   ClosePrimitive(sink);
+}
+
+// A persistent relay retains its handle after a terminal sink fault so the
+// caller can join backend cleanup before releasing source resources.
+TEST_P(RelayPosixTest, PersistentSinkFaultHasTerminalUnregistration) {
+  TestPrimitive source = CreateTestPrimitive();
+  TestPrimitive sink = CreateTestPrimitive();
+
+  struct FaultState {
+    // Set when the relay reports the sink failure.
+    bool called = false;
+    // Status code reported for the sink failure.
+    iree_status_code_t status_code = IREE_STATUS_OK;
+  } fault_state;
+  iree_async_relay_error_callback_t error_callback = {
+      +[](void* user_data, iree_async_relay_t* relay, iree_status_t status) {
+        auto* state = static_cast<FaultState*>(user_data);
+        (void)relay;
+        state->status_code = iree_status_code(status);
+        state->called = true;
+        iree_status_free(status);
+      },
+      &fault_state,
+  };
+
+  iree_async_relay_t* relay = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_register_relay(
+      proactor_,
+      iree_async_relay_source_from_primitive(
+          iree_async_primitive_from_fd(source.source_fd)),
+      iree_async_relay_sink_signal_primitive(
+          iree_async_primitive_from_fd(sink.signal_fd), 1),
+      IREE_ASYNC_RELAY_FLAG_PERSISTENT, error_callback, &relay));
+
+  ClosePrimitive(sink);
+  SignalPrimitive(source);
+  PollUntilCondition([&] { return fault_state.called; }, "relay sink fault");
+  EXPECT_NE(fault_state.status_code, IREE_STATUS_OK);
+
+  WaitForRelayUnregistration(relay);
+  ClosePrimitive(source);
 }
 
 // One-shot relay auto-cleans up after single fire.
@@ -261,12 +284,10 @@ TEST_P(RelayPosixTest, OneShotAutoCleanup) {
   ASSERT_NE(relay, nullptr);
 
   SignalPrimitive(source);
-  DrainPending();
-  EXPECT_TRUE(DrainPrimitive(sink));
+  EXPECT_EQ(WaitForPrimitiveSignal(sink), 1u);
 
   // Signal source again — relay should not fire (auto-cleaned up).
   SignalPrimitive(source);
-  DrainPending();
 
   EXPECT_FALSE(DrainPrimitive(sink))
       << "One-shot relay should not fire after cleanup";
@@ -292,8 +313,7 @@ TEST_P(RelayPosixTest, OwnSourcePrimitive) {
   ASSERT_NE(relay, nullptr);
 
   SignalPrimitive(source);
-  DrainPending();
-  DrainPrimitive(sink);
+  EXPECT_EQ(WaitForPrimitiveSignal(sink), 1u);
 
   // The source_fd should now be closed by the relay cleanup.
   // Verify by trying to write — should fail with EBADF.
@@ -334,10 +354,10 @@ TEST_P(RelayPosixTest, MultipleActiveRelays) {
   for (int i = 0; i < kNumRelays; ++i) {
     SignalPrimitive(sources[i]);
   }
-  DrainPending();
 
   for (int i = 0; i < kNumRelays; ++i) {
-    EXPECT_TRUE(DrainPrimitive(sinks[i])) << "Relay " << i << " failed to fire";
+    EXPECT_EQ(WaitForPrimitiveSignal(sinks[i]), 1u)
+        << "Relay " << i << " failed to fire";
   }
 
   for (int i = 0; i < kNumRelays; ++i) {
@@ -365,20 +385,26 @@ TEST_P(RelayPosixTest, ErrorSensitiveSuppressesSinkOnPollHup) {
           iree_async_primitive_from_fd(read_fd)),
       iree_async_relay_sink_signal_primitive(
           iree_async_primitive_from_fd(sink.signal_fd), 1),
-      IREE_ASYNC_RELAY_FLAG_ERROR_SENSITIVE,
+      IREE_ASYNC_RELAY_FLAG_ERROR_SENSITIVE |
+          IREE_ASYNC_RELAY_FLAG_OWN_SOURCE_PRIMITIVE,
       iree_async_relay_error_callback_none(), &relay));
   ASSERT_NE(relay, nullptr);
 
-  // Close the write end to cause POLLHUP on the read end. The POLL_ADD CQE
-  // is produced synchronously by the kernel and flushed on the next poll.
+  // Close the write end to cause POLLHUP on the read end. Source ownership
+  // makes closure of the read end an exact indication that the one-shot relay
+  // consumed the event and completed cleanup without firing the sink.
   close(write_fd);
-  DrainPending();
+  PollUntilCondition(
+      [&] {
+        errno = 0;
+        return fcntl(read_fd, F_GETFD) == -1 && errno == EBADF;
+      },
+      "error-sensitive relay cleanup");
 
   uint64_t value;
   bool got_signal = DrainPrimitive(sink, &value);
   EXPECT_FALSE(got_signal) << "ERROR_SENSITIVE should suppress sink on POLLHUP";
 
-  close(read_fd);
   ClosePrimitive(sink);
 }
 
@@ -399,9 +425,7 @@ TEST_P(RelayPosixTest, ErrorSensitiveFiresOnNormalPollin) {
   ASSERT_NE(relay, nullptr);
 
   SignalPrimitive(source);
-  DrainPending();
-
-  EXPECT_TRUE(DrainPrimitive(sink))
+  EXPECT_EQ(WaitForPrimitiveSignal(sink), 1u)
       << "ERROR_SENSITIVE should fire on normal POLLIN";
 
   ClosePrimitive(source);
@@ -427,11 +451,9 @@ TEST_P(RelayPosixTest, OwnSourcePrimitiveOnUnregister) {
   ASSERT_NE(relay, nullptr);
 
   SignalPrimitive(source);
-  DrainPending();
-  DrainPrimitive(sink);
+  EXPECT_EQ(WaitForPrimitiveSignal(sink), 1u);
 
-  iree_async_proactor_unregister_relay(proactor_, relay);
-  DrainPending();
+  WaitForRelayUnregistration(relay);
 
   // The source_fd should now be closed by the relay cleanup.
   uint64_t value = 1;
@@ -462,11 +484,10 @@ TEST_P(RelayPosixTest, UnregisterWhilePending) {
       &relay));
   ASSERT_NE(relay, nullptr);
 
-  iree_async_proactor_unregister_relay(proactor_, relay);
+  WaitForRelayUnregistration(relay);
 
   // Signal after unregister — sink should NOT fire.
   SignalPrimitive(source);
-  DrainPending();
 
   uint64_t value;
   bool got_signal = DrainPrimitive(sink, &value);

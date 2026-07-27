@@ -23,6 +23,7 @@
 #include "iree/async/util/completion_pool.h"
 #include "iree/async/util/message_pool.h"
 #include "iree/async/util/ready_pool.h"
+#include "iree/async/util/semaphore_wait.h"
 #include "iree/async/util/sequence_emulation.h"
 #include "iree/async/util/signal.h"
 #include "iree/base/internal/atomic_slist.h"
@@ -99,6 +100,8 @@ typedef struct iree_async_proactor_posix_t {
   iree_atomic_slist_t completion_queue;  // workers → poll thread.
   // Timepoint callbacks funneled to poll thread.
   iree_atomic_slist_t pending_semaphore_waits;
+  // Serializes wait operation association with cancellation and completion.
+  iree_async_semaphore_wait_context_t semaphore_wait_context;
   // Fence imports deferred from arbitrary threads to poll thread.
   iree_atomic_slist_t pending_fence_imports;
 

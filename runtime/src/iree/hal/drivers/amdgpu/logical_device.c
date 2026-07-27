@@ -172,6 +172,12 @@ IREE_API_EXPORT void iree_hal_amdgpu_logical_device_options_initialize(
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_KERNARG_CAPACITY;
   out_options->host_queues.upload_capacity =
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_UPLOAD_CAPACITY;
+  iree_hal_amdgpu_staging_pool_options_t file_staging_options;
+  iree_hal_amdgpu_staging_pool_options_initialize(&file_staging_options);
+  out_options->file_staging.slot_size = file_staging_options.slot_size;
+  out_options->file_staging.slot_count = file_staging_options.slot_count;
+  out_options->file_staging.force_fine_host_memory =
+      file_staging_options.force_fine_host_memory;
 
   out_options->asan.shadow_scale_shift =
       IREE_HAL_AMDGPU_SHADOW_MAP_DEFAULT_SCALE_SHIFT;
@@ -1554,21 +1560,31 @@ bool iree_hal_amdgpu_logical_device_lookup_host_queue_epoch_wait(
   memset(out_wait_state, 0, sizeof(*out_wait_state));
 
   if (!logical_device->host_queue_epoch_table) return false;
+  const iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain = {
+      .supported_affinity = logical_device->queue_affinity_mask,
+      .physical_device_count = logical_device->physical_device_count,
+      .queue_count_per_physical_device =
+          logical_device->system->topology.gpu_agent_queue_count,
+  };
+  iree_hal_amdgpu_queue_affinity_resolved_t resolved;
+  if (!iree_hal_amdgpu_queue_affinity_try_resolve_axis(
+          queue_affinity_domain, logical_device->axis, axis, &resolved)) {
+    return false;
+  }
   hsa_signal_t epoch_signal = {0};
   if (!iree_hal_amdgpu_epoch_signal_table_lookup(
           logical_device->host_queue_epoch_table, axis, &epoch_signal)) {
     return false;
   }
 
-  const uint8_t device_index = iree_async_axis_device_index(axis);
-  if (device_index >= logical_device->physical_device_count) return false;
   iree_hal_amdgpu_physical_device_t* physical_device =
-      logical_device->physical_devices[device_index];
+      logical_device->physical_devices[resolved.physical_device_ordinal];
 
-  const uint8_t queue_index = iree_async_axis_queue_index(axis);
-  if (queue_index >= physical_device->host_queue_count) return false;
+  if (resolved.physical_queue_ordinal >= physical_device->host_queue_count) {
+    return false;
+  }
   iree_hal_amdgpu_host_queue_t* queue =
-      &physical_device->host_queues[queue_index];
+      &physical_device->host_queues[resolved.physical_queue_ordinal];
 
   uint64_t wait_timeout_hint =
       logical_device->system->info.timestamp_frequency / 1000;
@@ -1678,6 +1694,10 @@ static void iree_hal_amdgpu_logical_device_translate_physical_options(
       options->host_queues.kernarg_capacity;
   out_options->host_queue_upload_capacity =
       options->host_queues.upload_capacity;
+  out_options->file_staging.slot_size = options->file_staging.slot_size;
+  out_options->file_staging.slot_count = options->file_staging.slot_count;
+  out_options->file_staging.force_fine_host_memory =
+      options->file_staging.force_fine_host_memory;
   out_options->force_wait_barrier_defer = options->force_wait_barrier_defer;
   out_options->enable_experimental_pm4_command_buffers =
       options->enable_experimental_pm4_command_buffers;
@@ -1887,6 +1907,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_device_spec(
     physical_params->queue_count = (uint32_t)physical_device->host_queue_count;
     physical_params->compute_unit_count = physical_device->compute_unit_count;
     physical_params->wavefront_size = physical_device->wavefront_size;
+    physical_params->maximum_waves_per_compute_unit =
+        physical_device->maximum_waves_per_compute_unit;
     physical_params->maximum_workgroup_local_memory_size =
         physical_device->group_segment_max_size;
   }
@@ -2494,19 +2516,32 @@ static iree_status_t iree_hal_amdgpu_logical_device_assign_topology_info(
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_hal_amdgpu_system_t* system = logical_device->system;
 
-  const uint8_t device_count = (uint8_t)system->topology.gpu_agent_count;
-  const uint8_t queue_stride = (uint8_t)system->topology.gpu_agent_queue_count;
-  const iree_host_size_t table_size =
-      iree_hal_amdgpu_epoch_signal_table_size(device_count, queue_stride);
-  iree_status_t status =
-      iree_allocator_malloc(logical_device->host_allocator, table_size,
-                            (void**)&logical_device->host_queue_epoch_table);
+  iree_host_size_t logical_queue_count = 0;
+  iree_status_t status = iree_ok_status();
+  if (!iree_host_size_checked_mul(system->topology.gpu_agent_count,
+                                  system->topology.gpu_agent_queue_count,
+                                  &logical_queue_count) ||
+      logical_queue_count > IREE_HAL_MAX_QUEUES) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "AMDGPU logical queue count %" PRIhsz
+                              " exceeds queue affinity capacity %" PRIhsz,
+                              logical_queue_count,
+                              (iree_host_size_t)IREE_HAL_MAX_QUEUES);
+  }
+  if (iree_status_is_ok(status)) {
+    const iree_host_size_t table_size =
+        iree_hal_amdgpu_epoch_signal_table_size((uint16_t)logical_queue_count);
+    status =
+        iree_allocator_malloc(logical_device->host_allocator, table_size,
+                              (void**)&logical_device->host_queue_epoch_table);
+  }
   if (iree_status_is_ok(status)) {
     iree_hal_amdgpu_epoch_signal_table_initialize(
         logical_device->host_queue_epoch_table,
         iree_async_axis_session(topology_info->frontier.base_axis),
         iree_async_axis_machine(topology_info->frontier.base_axis),
-        device_count, queue_stride);
+        iree_async_axis_device_index(topology_info->frontier.base_axis),
+        (uint16_t)logical_queue_count);
   }
 
   for (iree_host_size_t device_ordinal = 0;
@@ -2770,7 +2805,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_load_executable(
       base_device, &logical_device->system->libhsa,
       &logical_device->system->topology, queue_affinity, target, load_params,
       executable_id, &logical_device->feedback, &logical_device->asan,
-      &logical_device->tsan, queue_scope_count, queue_scopes,
+      &logical_device->tsan, logical_device->physical_device_count,
+      logical_device->physical_devices, queue_scope_count, queue_scopes,
       &logical_device->profile_metadata,
       iree_hal_device_host_allocator(base_device), out_executable);
 }

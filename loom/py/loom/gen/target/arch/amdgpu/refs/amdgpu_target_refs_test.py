@@ -193,6 +193,23 @@ def test_descriptor_trait_names_include_memory_and_ref_facts() -> None:
     )
 
 
+def test_descriptor_trait_names_include_xcnt_implicit_drain_families() -> None:
+    descriptor_set = _descriptor_set(
+        _descriptor("amdgpu.s_trap"),
+        _descriptor("amdgpu.s_getreg_b32_cluster_workgroup_flat_id"),
+        _descriptor("amdgpu.s_setreg_b32"),
+        _descriptor("amdgpu.s_sendmsg_rtn_b32"),
+        _descriptor("amdgpu.s_barrier_wait_all"),
+        _descriptor("amdgpu.s_barrier_signal_all"),
+        _descriptor("amdgpu.v_mov_b32"),
+    )
+    trait_context = amdgpu_target_refs._descriptor_trait_context(descriptor_set)
+
+    for descriptor in descriptor_set.descriptors[:-1]:
+        assert "LOOM_AMDGPU_DESCRIPTOR_TRAIT_XCNT_IMPLICIT_DRAIN" in amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor)
+    assert "LOOM_AMDGPU_DESCRIPTOR_TRAIT_XCNT_IMPLICIT_DRAIN" not in amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[-1])
+
+
 def test_vmem_result_order_classes_distinguish_memory_families() -> None:
     result = Operand("dst", OperandRole.RESULT, ())
     non_memory = _descriptor("amdgpu.v_mov_b32", operands=(result,))

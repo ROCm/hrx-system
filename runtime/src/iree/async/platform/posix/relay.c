@@ -65,20 +65,6 @@ static void iree_async_posix_relay_drain_source(iree_async_relay_t* relay) {
   }
 }
 
-// Invokes the error callback (if registered) and cleans up the relay.
-// Takes ownership of |status|.
-static void iree_async_posix_relay_fault(iree_async_proactor_posix_t* proactor,
-                                         iree_async_relay_t* relay,
-                                         iree_status_t status) {
-  if (relay->error_callback.fn) {
-    relay->error_callback.fn(relay->error_callback.user_data, relay, status);
-  } else {
-    iree_status_ignore(status);
-  }
-  // Clean up the relay immediately (POSIX lifecycle is synchronous).
-  iree_async_proactor_posix_unregister_relay(proactor, relay);
-}
-
 // Unlinks a relay from the proactor's doubly-linked list.
 static void iree_async_posix_relay_unlink(iree_async_proactor_posix_t* proactor,
                                           iree_async_relay_t* relay) {
@@ -166,6 +152,45 @@ static void iree_async_posix_notification_deactivate(
       iree_async_posix_event_set_remove(proactor->event_set, fd));
 }
 
+// Stops monitoring a relay source without destroying the caller-visible relay
+// handle. May only be called once for an active relay.
+static void iree_async_posix_relay_deactivate_source(
+    iree_async_proactor_posix_t* proactor, iree_async_relay_t* relay) {
+  if (relay->source.type == IREE_ASYNC_RELAY_SOURCE_TYPE_PRIMITIVE) {
+    int fd = relay->source.primitive.value.fd;
+    iree_async_posix_fd_map_remove(&proactor->fd_map, fd);
+    iree_status_ignore(
+        iree_async_posix_event_set_remove(proactor->event_set, fd));
+  } else {
+    iree_async_notification_t* notification = relay->source.notification;
+    iree_async_posix_relay_remove_from_notification_list(relay);
+    if (!iree_async_posix_notification_has_consumers(notification)) {
+      iree_async_posix_notification_deactivate(proactor, notification);
+    }
+  }
+}
+
+// Stops source monitoring, invokes the error callback, and retains persistent
+// relay handles for explicit terminal unregistration. Takes ownership of
+// |status|.
+static void iree_async_posix_relay_fault(iree_async_proactor_posix_t* proactor,
+                                         iree_async_relay_t* relay,
+                                         iree_status_t status) {
+  bool is_persistent =
+      iree_any_bit_set(relay->flags, IREE_ASYNC_RELAY_FLAG_PERSISTENT);
+  iree_async_posix_relay_deactivate_source(proactor, relay);
+  relay->platform.posix.is_terminal = true;
+  if (relay->error_callback.fn) {
+    relay->error_callback.fn(relay->error_callback.user_data, relay, status);
+  } else {
+    iree_status_free(status);
+  }
+  if (!is_persistent) {
+    iree_async_proactor_posix_unregister_relay(
+        proactor, relay, iree_async_relay_unregistered_callback_none());
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // Register relay
 //===----------------------------------------------------------------------===//
@@ -242,6 +267,7 @@ iree_status_t iree_async_proactor_posix_register_relay(
   relay->sink = sink;
   relay->flags = flags;
   relay->error_callback = error_callback;
+  relay->unregistered_callback = iree_async_relay_unregistered_callback_none();
   relay->wait_epoch = 0;
   relay->allocator = proactor->base.allocator;
   memset(&relay->platform, 0, sizeof(relay->platform));
@@ -322,26 +348,15 @@ iree_status_t iree_async_proactor_posix_register_relay(
 //===----------------------------------------------------------------------===//
 
 void iree_async_proactor_posix_unregister_relay(
-    iree_async_proactor_posix_t* proactor, iree_async_relay_t* relay) {
+    iree_async_proactor_posix_t* proactor, iree_async_relay_t* relay,
+    iree_async_relay_unregistered_callback_t callback) {
   if (!relay) return;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (relay->source.type == IREE_ASYNC_RELAY_SOURCE_TYPE_PRIMITIVE) {
-    // Remove from fd_map and event_set BEFORE closing the fd.
-    // kqueue returns EBADF if the fd is already closed, and epoll has
-    // fd-reuse races if close happens first.
-    int fd = relay->source.primitive.value.fd;
-    iree_async_posix_fd_map_remove(&proactor->fd_map, fd);
-    iree_status_ignore(
-        iree_async_posix_event_set_remove(proactor->event_set, fd));
-  } else if (relay->source.type == IREE_ASYNC_RELAY_SOURCE_TYPE_NOTIFICATION) {
-    // Remove from the source notification's relay list.
-    iree_async_posix_relay_remove_from_notification_list(relay);
-    // Deactivate the notification fd if this was the last consumer.
-    iree_async_notification_t* notification = relay->source.notification;
-    if (!iree_async_posix_notification_has_consumers(notification)) {
-      iree_async_posix_notification_deactivate(proactor, notification);
-    }
+  if (!relay->platform.posix.is_terminal) {
+    // Remove monitoring before closing an owned source. kqueue returns EBADF
+    // if the fd is closed first, and epoll has fd-reuse races.
+    iree_async_posix_relay_deactivate_source(proactor, relay);
   }
 
   // Close source fd if we own it.
@@ -355,6 +370,8 @@ void iree_async_proactor_posix_unregister_relay(
 
   // Release retained notifications and free.
   iree_async_posix_relay_release_resources(relay);
+
+  if (callback.fn) callback.fn(callback.user_data);
 
   IREE_TRACE_ZONE_END(z0);
 }
@@ -386,7 +403,7 @@ void iree_async_proactor_posix_dispatch_relay(
           proactor, relay,
           iree_make_status(iree_status_code_from_errno(saved_errno),
                            "relay sink write failed"));
-      return;  // Relay has been cleaned up by fault handler.
+      return;  // Persistent handles remain terminal until unregistered.
     }
   }
 
@@ -437,18 +454,11 @@ void iree_async_proactor_posix_dispatch_notification_relays(
     // Epoch advanced — fire the sink.
     if (!iree_async_posix_relay_fire_sink(relay)) {
       int saved_errno = errno;
-      // Remove from the notification relay list before fault handler
-      // calls unregister (which would also try to remove from list).
-      *previous = next;
-      relay->platform.posix.notification_relay_next = NULL;
-      // Check if notification should deactivate after list removal.
-      if (!iree_async_posix_notification_has_consumers(notification)) {
-        iree_async_posix_notification_deactivate(proactor, notification);
-      }
       iree_async_posix_relay_fault(
           proactor, relay,
           iree_make_status(iree_status_code_from_errno(saved_errno),
                            "relay sink write failed"));
+      // The fault handler removed |relay| from this notification's list.
       relay = next;
       continue;
     }
@@ -485,17 +495,18 @@ void iree_async_proactor_posix_destroy_all_relays(
   while (relay) {
     iree_async_relay_t* next = relay->next;
 
-    if (relay->source.type == IREE_ASYNC_RELAY_SOURCE_TYPE_PRIMITIVE) {
-      // Remove from fd_map and event_set before close (kqueue safety).
-      int fd = relay->source.primitive.value.fd;
-      iree_async_posix_fd_map_remove(&proactor->fd_map, fd);
-      iree_status_ignore(
-          iree_async_posix_event_set_remove(proactor->event_set, fd));
-    } else if (relay->source.type ==
-               IREE_ASYNC_RELAY_SOURCE_TYPE_NOTIFICATION) {
-      // Remove from notification's relay list (no need to deactivate —
-      // we're destroying everything).
-      iree_async_posix_relay_remove_from_notification_list(relay);
+    if (!relay->platform.posix.is_terminal) {
+      if (relay->source.type == IREE_ASYNC_RELAY_SOURCE_TYPE_PRIMITIVE) {
+        // Remove from fd_map and event_set before close (kqueue safety).
+        int fd = relay->source.primitive.value.fd;
+        iree_async_posix_fd_map_remove(&proactor->fd_map, fd);
+        iree_status_ignore(
+            iree_async_posix_event_set_remove(proactor->event_set, fd));
+      } else {
+        // Remove from the notification's relay list. No deactivation is
+        // needed because the entire proactor is being destroyed.
+        iree_async_posix_relay_remove_from_notification_list(relay);
+      }
     }
 
     // Close owned fds.

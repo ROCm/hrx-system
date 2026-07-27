@@ -376,14 +376,22 @@ TEST(LowPacketTest, MapsBlocksAndHazardGapsToPacketIndices) {
       12u);
 }
 
-TEST(LowDescriptorTest, DistinguishesPacketAndExplicitPacketOperands) {
-  loom_low_operand_t operands[5] = {};
+TEST(LowDescriptorTest, IndexesPacketOperandRoles) {
+  loom_low_operand_t operands[6] = {};
   operands[0].role = LOOM_LOW_OPERAND_ROLE_RESULT;
+  operands[0].source_value_index = 0;
   operands[1].role = LOOM_LOW_OPERAND_ROLE_OPERAND;
+  operands[1].source_value_index = 0;
   operands[2].role = LOOM_LOW_OPERAND_ROLE_RESOURCE;
+  operands[2].source_value_index = 1;
   operands[2].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT;
-  operands[3].role = LOOM_LOW_OPERAND_ROLE_PREDICATE;
-  operands[4].role = LOOM_LOW_OPERAND_ROLE_RESOURCE;
+  operands[3].role = LOOM_LOW_OPERAND_ROLE_IMPLICIT;
+  operands[3].source_value_index = LOOM_LOW_ID_NONE;
+  operands[3].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT;
+  operands[4].role = LOOM_LOW_OPERAND_ROLE_PREDICATE;
+  operands[4].source_value_index = 2;
+  operands[5].role = LOOM_LOW_OPERAND_ROLE_RESOURCE;
+  operands[5].source_value_index = 3;
 
   loom_low_constraint_t constraints[2] = {};
   constraints[0].kind = LOOM_LOW_CONSTRAINT_KIND_TIED;
@@ -391,7 +399,7 @@ TEST(LowDescriptorTest, DistinguishesPacketAndExplicitPacketOperands) {
   constraints[0].rhs_operand_index = 2;
   constraints[1].kind = LOOM_LOW_CONSTRAINT_KIND_TIED;
   constraints[1].lhs_operand_index = 0;
-  constraints[1].rhs_operand_index = 3;
+  constraints[1].rhs_operand_index = 4;
 
   loom_low_descriptor_t descriptor = {};
   descriptor.operand_start = 0;
@@ -412,21 +420,12 @@ TEST(LowDescriptorTest, DistinguishesPacketAndExplicitPacketOperands) {
       &descriptor_set, &descriptor, 1));
   EXPECT_TRUE(loom_low_descriptor_operand_maps_to_packet_operand(
       &descriptor_set, &descriptor, 2));
-  EXPECT_TRUE(loom_low_descriptor_operand_maps_to_packet_operand(
+  EXPECT_FALSE(loom_low_descriptor_operand_maps_to_packet_operand(
       &descriptor_set, &descriptor, 3));
   EXPECT_TRUE(loom_low_descriptor_operand_maps_to_packet_operand(
       &descriptor_set, &descriptor, 4));
-
-  EXPECT_FALSE(loom_low_descriptor_operand_maps_to_explicit_packet_operand(
-      &descriptor_set, &descriptor, 0));
-  EXPECT_TRUE(loom_low_descriptor_operand_maps_to_explicit_packet_operand(
-      &descriptor_set, &descriptor, 1));
-  EXPECT_FALSE(loom_low_descriptor_operand_maps_to_explicit_packet_operand(
-      &descriptor_set, &descriptor, 2));
-  EXPECT_TRUE(loom_low_descriptor_operand_maps_to_explicit_packet_operand(
-      &descriptor_set, &descriptor, 3));
-  EXPECT_TRUE(loom_low_descriptor_operand_maps_to_explicit_packet_operand(
-      &descriptor_set, &descriptor, 4));
+  EXPECT_TRUE(loom_low_descriptor_operand_maps_to_packet_operand(
+      &descriptor_set, &descriptor, 5));
 
   EXPECT_EQ(
       loom_low_descriptor_operand_packet_index(&descriptor_set, &descriptor, 1),
@@ -435,27 +434,18 @@ TEST(LowDescriptorTest, DistinguishesPacketAndExplicitPacketOperands) {
       loom_low_descriptor_operand_packet_index(&descriptor_set, &descriptor, 2),
       1u);
   EXPECT_EQ(
-      loom_low_descriptor_operand_packet_index(&descriptor_set, &descriptor, 3),
+      loom_low_descriptor_operand_packet_index(&descriptor_set, &descriptor, 4),
       2u);
-  EXPECT_EQ(loom_low_descriptor_packet_operand_descriptor_index(&descriptor_set,
-                                                                &descriptor, 0),
-            1u);
-  EXPECT_EQ(loom_low_descriptor_packet_operand_descriptor_index(&descriptor_set,
-                                                                &descriptor, 1),
-            2u);
-  EXPECT_EQ(loom_low_descriptor_packet_operand_descriptor_index(&descriptor_set,
-                                                                &descriptor, 2),
-            3u);
-  EXPECT_EQ(loom_low_descriptor_packet_operand_descriptor_index(&descriptor_set,
-                                                                &descriptor, 3),
-            4u);
+  EXPECT_EQ(
+      loom_low_descriptor_operand_packet_index(&descriptor_set, &descriptor, 5),
+      3u);
 
   EXPECT_TRUE(loom_low_descriptor_operands_are_tied(&descriptor_set,
                                                     &descriptor, 0, 2));
   EXPECT_TRUE(loom_low_descriptor_operands_are_tied(&descriptor_set,
-                                                    &descriptor, 0, 3));
+                                                    &descriptor, 0, 4));
   EXPECT_TRUE(loom_low_descriptor_operands_are_tied(&descriptor_set,
-                                                    &descriptor, 3, 0));
+                                                    &descriptor, 4, 0));
 }
 
 }  // namespace

@@ -76,6 +76,280 @@ static bool iree_hal_amdgpu_gfxip_version_range_contains(
                                                version.stepping);
 }
 
+// Public HSA AMD agent attributes introduced with clustered dispatch support.
+// These local names keep this driver buildable against older HSA SDK headers;
+// hsa_agent_get_info accepts the numeric ABI values at runtime.
+enum iree_hal_amdgpu_workgroup_cluster_agent_info_e {
+  IREE_HAL_AMDGPU_AGENT_INFO_KERNEL_CLUSTER_MAX_DIM = 0xA11E,
+  IREE_HAL_AMDGPU_AGENT_INFO_KERNEL_CLUSTER_MAX_SIZE = 0xA11F,
+  IREE_HAL_AMDGPU_AGENT_INFO_CLUSTER_MAX_DIM = 0xA120,
+  IREE_HAL_AMDGPU_AGENT_INFO_CLUSTER_MAX_SIZE = 0xA121,
+};
+
+// Raw ABI layout returned by the HSA per-dimension cluster attributes.
+typedef struct iree_hal_amdgpu_hsa_dimension_limits_t {
+  uint64_t x;
+  uint64_t y;
+  uint64_t z;
+} iree_hal_amdgpu_hsa_dimension_limits_t;
+
+static iree_status_t iree_hal_amdgpu_validate_dispatch_dimension_limits(
+    iree_string_view_t name,
+    const iree_hal_amdgpu_dispatch_dimension_limits_t* limits) {
+  if (IREE_UNLIKELY(limits->x == 0 || limits->y == 0 || limits->z == 0 ||
+                    limits->total == 0)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "%.*s limits contain zero: dimensions=%" PRIu64
+                            "x%" PRIu64 "x%" PRIu64 ", total=%" PRIu64,
+                            (int)name.size, name.data, limits->x, limits->y,
+                            limits->z, limits->total);
+  }
+  const uint64_t maximum_axis =
+      iree_max(limits->x, iree_max(limits->y, limits->z));
+  if (IREE_UNLIKELY(limits->total < maximum_axis)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "%.*s flat limit %" PRIu64 " is smaller than per-axis maximum %" PRIu64,
+        (int)name.size, name.data, limits->total, maximum_axis);
+  }
+  uint64_t xy = 0;
+  uint64_t xyz = 0;
+  if (iree_checked_mul_u64(limits->x, limits->y, &xy) &&
+      iree_checked_mul_u64(xy, limits->z, &xyz) &&
+      IREE_UNLIKELY(limits->total > xyz)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "%.*s flat limit %" PRIu64
+                            " exceeds per-axis product %" PRIu64,
+                            (int)name.size, name.data, limits->total, xyz);
+  }
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amdgpu_query_workgroup_cluster_capabilities(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
+    iree_hal_amdgpu_workgroup_cluster_capabilities_t* out_capabilities) {
+  IREE_ASSERT_ARGUMENT(libhsa);
+  IREE_ASSERT_ARGUMENT(out_capabilities);
+  memset(out_capabilities, 0, sizeof(*out_capabilities));
+
+  iree_hal_amdgpu_hsa_dimension_limits_t cluster_count_dimensions = {0};
+  uint64_t cluster_count_total = 0;
+  iree_hal_amdgpu_hsa_dimension_limits_t workgroups_per_cluster_dimensions = {
+      0};
+  uint64_t workgroups_per_cluster_total = 0;
+  const hsa_status_t query_statuses[] = {
+      iree_hsa_agent_get_info_raw(
+          libhsa, device_agent,
+          (hsa_agent_info_t)IREE_HAL_AMDGPU_AGENT_INFO_KERNEL_CLUSTER_MAX_DIM,
+          &cluster_count_dimensions),
+      iree_hsa_agent_get_info_raw(
+          libhsa, device_agent,
+          (hsa_agent_info_t)IREE_HAL_AMDGPU_AGENT_INFO_KERNEL_CLUSTER_MAX_SIZE,
+          &cluster_count_total),
+      iree_hsa_agent_get_info_raw(
+          libhsa, device_agent,
+          (hsa_agent_info_t)IREE_HAL_AMDGPU_AGENT_INFO_CLUSTER_MAX_DIM,
+          &workgroups_per_cluster_dimensions),
+      iree_hsa_agent_get_info_raw(
+          libhsa, device_agent,
+          (hsa_agent_info_t)IREE_HAL_AMDGPU_AGENT_INFO_CLUSTER_MAX_SIZE,
+          &workgroups_per_cluster_total),
+  };
+
+  iree_host_size_t success_count = 0;
+  iree_host_size_t unsupported_count = 0;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(query_statuses); ++i) {
+    success_count += query_statuses[i] == HSA_STATUS_SUCCESS ? 1 : 0;
+    unsupported_count +=
+        query_statuses[i] == HSA_STATUS_ERROR_INVALID_ARGUMENT ? 1 : 0;
+  }
+  if (unsupported_count == IREE_ARRAYSIZE(query_statuses)) {
+    return iree_ok_status();
+  }
+  if (success_count != IREE_ARRAYSIZE(query_statuses)) {
+    if (success_count + unsupported_count == IREE_ARRAYSIZE(query_statuses)) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "HSA runtime exposes only %zu of 4 workgroup-cluster attributes",
+          success_count);
+    }
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(query_statuses); ++i) {
+      if (query_statuses[i] != HSA_STATUS_SUCCESS &&
+          query_statuses[i] != HSA_STATUS_ERROR_INVALID_ARGUMENT) {
+        return iree_status_from_hsa_status(
+            __FILE__, __LINE__, query_statuses[i], "hsa_agent_get_info",
+            "querying workgroup-cluster limits");
+      }
+    }
+  }
+
+  const iree_hal_amdgpu_workgroup_cluster_capabilities_t capabilities = {
+      .supported = 1,
+      .cluster_count =
+          {
+              .x = cluster_count_dimensions.x,
+              .y = cluster_count_dimensions.y,
+              .z = cluster_count_dimensions.z,
+              .total = cluster_count_total,
+          },
+      .workgroups_per_cluster =
+          {
+              .x = workgroups_per_cluster_dimensions.x,
+              .y = workgroups_per_cluster_dimensions.y,
+              .z = workgroups_per_cluster_dimensions.z,
+              .total = workgroups_per_cluster_total,
+          },
+  };
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_validate_dispatch_dimension_limits(
+      iree_make_cstring_view("kernel cluster-count"),
+      &capabilities.cluster_count));
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_validate_dispatch_dimension_limits(
+      iree_make_cstring_view("workgroups-per-cluster"),
+      &capabilities.workgroups_per_cluster));
+
+  if (capabilities.workgroups_per_cluster.x == 1 &&
+      capabilities.workgroups_per_cluster.y == 1 &&
+      capabilities.workgroups_per_cluster.z == 1 &&
+      capabilities.workgroups_per_cluster.total == 1) {
+    return iree_ok_status();
+  }
+  *out_capabilities = capabilities;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amdgpu_validate_workgroup_cluster_size(
+    iree_string_view_t kernel_name, const uint8_t cluster_size[3],
+    iree_host_size_t physical_device_ordinal,
+    const iree_hal_amdgpu_workgroup_cluster_capabilities_t* capabilities) {
+  IREE_ASSERT_ARGUMENT(cluster_size);
+  IREE_ASSERT_ARGUMENT(capabilities);
+
+  if (cluster_size[0] == 0 && cluster_size[1] == 0 && cluster_size[2] == 0) {
+    return iree_ok_status();
+  }
+  if (IREE_UNLIKELY(cluster_size[0] == 0 || cluster_size[1] == 0 ||
+                    cluster_size[2] == 0)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU kernel '%.*s' has partial workgroup cluster size %ux%ux%u",
+        (int)kernel_name.size, kernel_name.data, cluster_size[0],
+        cluster_size[1], cluster_size[2]);
+  }
+  if (IREE_UNLIKELY(cluster_size[0] == 1 && cluster_size[1] == 1 &&
+                    cluster_size[2] == 1)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU kernel '%.*s' must omit trivial workgroup cluster size 1x1x1",
+        (int)kernel_name.size, kernel_name.data);
+  }
+  if (IREE_UNLIKELY(!capabilities->supported)) {
+    return iree_make_status(
+        IREE_STATUS_INCOMPATIBLE,
+        "AMDGPU kernel '%.*s' requires workgroup cluster size %ux%ux%u but "
+        "physical device[%" PRIhsz "] does not support clustered dispatch",
+        (int)kernel_name.size, kernel_name.data, cluster_size[0],
+        cluster_size[1], cluster_size[2], physical_device_ordinal);
+  }
+
+  const iree_hal_amdgpu_dispatch_dimension_limits_t* limits =
+      &capabilities->workgroups_per_cluster;
+  if (IREE_UNLIKELY(cluster_size[0] > limits->x ||
+                    cluster_size[1] > limits->y ||
+                    cluster_size[2] > limits->z)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU kernel '%.*s' workgroup cluster size %ux%ux%u exceeds "
+        "physical device[%" PRIhsz "] maximum %" PRIu64 "x%" PRIu64 "x%" PRIu64,
+        (int)kernel_name.size, kernel_name.data, cluster_size[0],
+        cluster_size[1], cluster_size[2], physical_device_ordinal, limits->x,
+        limits->y, limits->z);
+  }
+  const uint64_t total =
+      (uint64_t)cluster_size[0] * cluster_size[1] * cluster_size[2];
+  if (IREE_UNLIKELY(total > limits->total)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU kernel '%.*s' workgroup cluster size %ux%ux%u has total "
+        "%" PRIu64 " exceeding physical device[%" PRIhsz "] maximum %" PRIu64,
+        (int)kernel_name.size, kernel_name.data, cluster_size[0],
+        cluster_size[1], cluster_size[2], total, physical_device_ordinal,
+        limits->total);
+  }
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amdgpu_validate_workgroup_cluster_dispatch(
+    const uint8_t cluster_size[3], const uint32_t workgroup_count[3],
+    iree_host_size_t physical_device_ordinal,
+    const iree_hal_amdgpu_dispatch_dimension_limits_t* cluster_count_limits) {
+  IREE_ASSERT_ARGUMENT(cluster_size);
+  IREE_ASSERT_ARGUMENT(workgroup_count);
+  IREE_ASSERT_ARGUMENT(cluster_count_limits);
+
+  if (cluster_size[0] == 0 && cluster_size[1] == 0 && cluster_size[2] == 0) {
+    return iree_ok_status();
+  }
+
+  uint64_t cluster_count[3] = {0};
+  const uint64_t axis_limits[3] = {
+      iree_min(cluster_count_limits->x, (uint64_t)UINT32_MAX),
+      iree_min(cluster_count_limits->y, (uint64_t)UINT16_MAX),
+      iree_min(cluster_count_limits->z, (uint64_t)UINT16_MAX),
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(cluster_count); ++i) {
+    if (IREE_UNLIKELY(cluster_size[i] == 0)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "clustered dispatch has partial cluster size %ux%ux%u",
+          cluster_size[0], cluster_size[1], cluster_size[2]);
+    }
+    if (IREE_UNLIKELY(workgroup_count[i] == 0 ||
+                      workgroup_count[i] % cluster_size[i] != 0)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "clustered dispatch workgroup count %ux%ux%u is not a positive "
+          "multiple of cluster size %ux%ux%u",
+          workgroup_count[0], workgroup_count[1], workgroup_count[2],
+          cluster_size[0], cluster_size[1], cluster_size[2]);
+    }
+    cluster_count[i] = workgroup_count[i] / cluster_size[i];
+  }
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(cluster_count); ++i) {
+    if (IREE_UNLIKELY(cluster_count[i] > axis_limits[i])) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "clustered dispatch requests cluster count %" PRIu64 "x%" PRIu64
+          "x%" PRIu64 " on physical device[%" PRIhsz "] with maximum %" PRIu64
+          "x%" PRIu64 "x%" PRIu64,
+          cluster_count[0], cluster_count[1], cluster_count[2],
+          physical_device_ordinal, axis_limits[0], axis_limits[1],
+          axis_limits[2]);
+    }
+  }
+
+  uint64_t total = cluster_count[0];
+  if (IREE_UNLIKELY(cluster_count[1] != 0 &&
+                    total > UINT64_MAX / cluster_count[1])) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "clustered dispatch cluster count overflows u64");
+  }
+  total *= cluster_count[1];
+  if (IREE_UNLIKELY(cluster_count[2] != 0 &&
+                    total > UINT64_MAX / cluster_count[2])) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "clustered dispatch cluster count overflows u64");
+  }
+  total *= cluster_count[2];
+  if (IREE_UNLIKELY(total > cluster_count_limits->total)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "clustered dispatch requests %" PRIu64
+        " total clusters on physical device[%" PRIhsz "] with maximum %" PRIu64,
+        total, physical_device_ordinal, cluster_count_limits->total);
+  }
+  return iree_ok_status();
+}
+
 bool iree_hal_amdgpu_cpu_visible_device_coarse_memory_is_available(
     const iree_hal_amdgpu_cpu_visible_device_coarse_memory_t* memory) {
   return iree_any_bit_set(
@@ -345,24 +619,23 @@ iree_status_t iree_hal_amdgpu_select_physical_topology_edge(
   return iree_ok_status();
 }
 
-static bool iree_hal_amdgpu_gfxip_is_pre_gfx908(
+static bool iree_hal_amdgpu_gfxip_is_gfx94x(
     iree_hal_amdgpu_gfxip_version_t version) {
-  return version.major < 9 ||
-         (version.major == 9 && version.minor == 0 && version.stepping < 8);
+  return version.major == 9 && version.minor >= 4 && version.stepping <= 2;
 }
 
-static bool iree_hal_amdgpu_gfxip_is_gfx101x(
+static bool iree_hal_amdgpu_gfxip_is_gfx125x(
     iree_hal_amdgpu_gfxip_version_t version) {
-  return version.major == 10 && (version.minor == 0 || version.minor == 1);
+  return version.major == 12 && version.minor >= 5;
 }
 
 bool iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(
     iree_hal_amdgpu_gfxip_version_t version) {
-  // Matches the HDP workaround eligibility in CLR's setKernelArgImpl. Devices
-  // outside this set stay on host kernarg memory unless we add a first-class
-  // readback publication mode.
-  return !iree_hal_amdgpu_gfxip_is_pre_gfx908(version) &&
-         !iree_hal_amdgpu_gfxip_is_gfx101x(version);
+  // Matches the device-kernarg family gate in CLR's setKernelArgImpl. Other
+  // families stay on host kernarg memory until they have a validated device-
+  // local publication path.
+  return iree_hal_amdgpu_gfxip_is_gfx94x(version) ||
+         iree_hal_amdgpu_gfxip_is_gfx125x(version);
 }
 
 iree_status_t iree_hal_amdgpu_select_cpu_visible_device_coarse_memory(

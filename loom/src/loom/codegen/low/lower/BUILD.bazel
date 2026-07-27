@@ -52,6 +52,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:memory_access",
+        "//loom/src/loom/codegen/low:memory_access_ir",
         "//loom/src/loom/codegen/low:source_memory_plan",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",

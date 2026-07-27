@@ -423,6 +423,60 @@ def _validate_call_like_interface(op: Op, iface: CallLikeInterface, interface_na
         raise ValueError(f"{interface_name} on {op.name!r}: result {iface.results!r} must be the trailing result field")
 
 
+def _validate_loop_like_interface(op: Op, iface: LoopLikeInterface, interface_name: str) -> None:
+    """Validates LoopLikeInterface's carried-state boundary contract."""
+    iter_args_index = c_queries.resolve_operand_index(op, iface.iter_args, interface_name)
+    if not op.operands[iter_args_index].variadic:
+        raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.iter_args!r} must be variadic")
+
+    body_index = c_queries.resolve_region_index(op, iface.body, interface_name)
+    body = op.regions[body_index]
+    if body.variadic or body.optional or not body.single_block or body.terminator is None:
+        raise ValueError(f"{interface_name} on {op.name!r}: body {iface.body!r} must be a required single-block region with a terminator")
+    if body.arg_source != iface.iter_args:
+        raise ValueError(f"{interface_name} on {op.name!r}: body {iface.body!r} must source carried arguments from {iface.iter_args!r}")
+
+    result_constraints = [constraint for constraint in op.constraints if constraint.name == "IterArgsMatchResults" and constraint.args[:1] == (iface.iter_args,)]
+    if len(result_constraints) != 1 or len(result_constraints[0].args) != 2:
+        raise ValueError(f"{interface_name} on {op.name!r}: requires one IterArgsMatchResults constraint for {iface.iter_args!r}")
+    results_name = result_constraints[0].args[1]
+    results_index = c_queries.resolve_result_index(op, results_name, interface_name)
+    if len(op.results) != 1 or results_index != 0 or not op.results[results_index].variadic:
+        raise ValueError(f"{interface_name} on {op.name!r}: carried results {results_name!r} must be the only variadic result field")
+
+    required_constraints = (
+        ("YieldCountMatchesResults", (iface.body, results_name)),
+        ("YieldTypesMatchResults", (iface.body, results_name)),
+    )
+    for constraint_name, constraint_args in required_constraints:
+        if not any(constraint.name == constraint_name and constraint.args == constraint_args for constraint in op.constraints):
+            raise ValueError(f"{interface_name} on {op.name!r}: requires {constraint_name}{constraint_args!r}")
+
+    bound_names = (iface.lower_bound, iface.upper_bound, iface.step)
+    present_bound_count = sum(name is not None for name in bound_names)
+    if present_bound_count not in (0, len(bound_names)):
+        raise ValueError(f"{interface_name} on {op.name!r}: lower_bound, upper_bound, and step must be declared together")
+    has_counted_range = present_bound_count == len(bound_names)
+    has_condition_region = iface.condition_region is not None
+    if has_counted_range == has_condition_region:
+        raise ValueError(f"{interface_name} on {op.name!r}: requires exactly one of a counted range or condition region")
+
+    if has_counted_range:
+        if iface.iv is None:
+            raise ValueError(f"{interface_name} on {op.name!r}: counted loops require an induction variable")
+        for bound_name in bound_names:
+            c_queries.resolve_operand_index(op, bound_name, interface_name)
+        iv_index = c_queries.resolve_block_arg_index(op, iface.body, iface.iv, interface_name)
+        if iv_index + 1 != len(body.implicit_args):
+            raise ValueError(f"{interface_name} on {op.name!r}: carried body arguments must immediately follow the induction variable")
+    else:
+        if iface.iv is not None:
+            raise ValueError(f"{interface_name} on {op.name!r}: condition loops cannot declare an induction variable")
+        c_queries.resolve_region_index(op, iface.condition_region, interface_name)
+        if body.implicit_args:
+            raise ValueError(f"{interface_name} on {op.name!r}: condition-loop carried body arguments must begin at block argument zero")
+
+
 def _validate_memory_access_interface(op: Op, iface: MemoryAccessInterface, interface_name: str) -> None:
     """Validates MemoryAccessInterface's optional role coherence."""
     if iface.view is None:
@@ -491,6 +545,8 @@ def emit_interface_vtable(op: Op, spec: InterfaceSpec, lines: list[str]) -> None
         return
     if isinstance(iface, CallLikeInterface):
         _validate_call_like_interface(op, iface, spec.name)
+    if isinstance(iface, LoopLikeInterface):
+        _validate_loop_like_interface(op, iface, spec.name)
     if isinstance(iface, MemoryAccessInterface):
         _validate_memory_access_interface(op, iface, spec.name)
     prefix = c_prefix(op)

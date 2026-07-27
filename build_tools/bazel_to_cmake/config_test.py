@@ -222,6 +222,58 @@ loom_check_test_suite(
         self.assertNotIn('"test/source_low/a.loom-test"', cmake)
         self.assertNotIn("iree_native_test(", cmake)
 
+    def test_loom_link_module_registers_generated_location(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        loom = bazel_to_cmake_config.include_project(
+            str(repo_root / ".bazel_to_cmake.cfg.py"),
+            "loom/.bazel_to_cmake.cfg.py",
+        )
+        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@iree": ""})
+
+        cmake = bazel_to_cmake_converter.convert_build_file(
+            """
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
+
+loom_link_module(
+    name = "linked_checks",
+    srcs = ["testdata/checks.loom"],
+    libraries = ["kernels.loom"],
+    roots = ["@case"],
+    configs = ["model.width=16"],
+    mode = "selective",
+    output = "linked.loombc",
+    output_format = "bc",
+    include_exported_roots = True,
+    strip_check = True,
+    require_resolved_config = True,
+)
+
+iree_executable_test(
+    name = "linked_checks_test",
+    src = "//loom/src/loom/tools/loom-format",
+    args = ["$(location :linked_checks)"],
+    data = [":linked_checks"],
+)
+""",
+            repo_cfg,
+            str(repo_root / "loom/src/loom/target/arch/amdgpu"),
+            repo_root=str(repo_root),
+        )
+
+        self.assertIn("loom_link_module(", cmake)
+        self.assertIn('    "testdata/checks.loom"', cmake)
+        self.assertIn('    "kernels.loom"', cmake)
+        self.assertIn('    "@case"', cmake)
+        self.assertIn('    "model.width=16"', cmake)
+        self.assertIn('    "selective"', cmake)
+        self.assertIn('    "linked.loombc"', cmake)
+        self.assertIn('    "bc"', cmake)
+        self.assertIn("  INCLUDE_EXPORTED_ROOTS", cmake)
+        self.assertIn("  STRIP_CHECK", cmake)
+        self.assertIn("  REQUIRE_RESOLVED_CONFIG", cmake)
+        self.assertIn('"{{${CMAKE_CURRENT_BINARY_DIR}/linked.loombc}}"', cmake)
+
     def test_rejects_compiler_monorepo_external_targets(self):
         converter = bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""})
 

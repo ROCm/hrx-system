@@ -748,6 +748,9 @@ enum {
   LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_SIZE = 1u << 0,
   // |static_workgroup_count| was proven from the source launch config.
   LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_COUNT = 1u << 1,
+  // |static_workgroup_cluster_size| was proven from a nontrivial source
+  // workgroup-cluster launch config.
+  LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_CLUSTER_SIZE = 1u << 2,
 };
 
 typedef struct loom_low_lower_result_t {
@@ -772,6 +775,8 @@ typedef struct loom_low_lower_result_t {
   loom_target_workgroup_size_t static_workgroup_size;
   // Proven dispatch workgroup count from the source kernel launch config.
   loom_target_dispatch_workgroup_count_t static_workgroup_count;
+  // Proven nontrivial workgroup-cluster size from the source launch config.
+  loom_target_workgroup_cluster_size_t static_workgroup_cluster_size;
   // Allocator used for owned source-low report rows.
   iree_allocator_t report_allocator;
   // Allocator used for owned source-memory packet report row storage.
@@ -1200,19 +1205,26 @@ iree_status_t loom_low_lower_emit_resolved_descriptor_const(
     loom_named_attr_slice_t attrs, loom_type_t result_type,
     loom_location_id_t location, loom_op_t** out_op);
 
+typedef enum loom_low_lower_memory_access_record_bits_e {
+  // Attaches serializable precision to the low op so it remains available
+  // across pass and serialization boundaries.
+  LOOM_LOW_LOWER_MEMORY_ACCESS_RECORD_PRESERVE = 1u << 0,
+} loom_low_lower_memory_access_record_bits_t;
+typedef uint32_t loom_low_lower_memory_access_record_flags_t;
+
 // Records a source-derived memory summary for an emitted low memory packet.
-//
-// The row is copied into options.table_arena when provided. Calls are ignored
-// when the current lowering run has no table arena, preserving conservative
-// descriptor-only scheduling for callers that do not need source precision.
+// The row is copied into options.table_arena when provided. PRESERVE also
+// attaches the summary to the low op for later scheduling.
 iree_status_t loom_low_lower_record_memory_access_summary(
-    loom_low_lower_context_t* context, const loom_op_t* low_op,
-    const loom_low_memory_access_summary_t* summary);
+    loom_low_lower_context_t* context, loom_op_t* low_op,
+    const loom_low_memory_access_summary_t* summary,
+    loom_low_lower_memory_access_record_flags_t flags);
 
 // Records a source memory access plan for an emitted low memory packet.
 iree_status_t loom_low_lower_record_source_memory_access(
-    loom_low_lower_context_t* context, const loom_op_t* low_op,
-    const loom_low_source_memory_access_plan_t* source_plan);
+    loom_low_lower_context_t* context, loom_op_t* low_op,
+    const loom_low_source_memory_access_plan_t* source_plan,
+    loom_low_lower_memory_access_record_flags_t flags);
 
 // Populates row source interval evidence from |source_plan| and interns exact
 // symbolic interval endpoints when report-only accounting can prove them.

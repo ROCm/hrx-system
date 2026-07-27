@@ -35,6 +35,7 @@
 #include "iree/async/semaphore.h"
 #include "iree/async/span.h"
 #include "iree/async/util/operation_pool.h"
+#include "iree/async/util/semaphore_wait.h"
 #include "iree/base/internal/math.h"
 
 #if defined(IREE_PLATFORM_LINUX)
@@ -70,6 +71,7 @@ static inline void iree_async_proactor_complete_operation(
     iree_async_completion_flags_t flags) {
   bool is_final = !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE);
   iree_async_operation_pool_t* pool = is_final ? operation->pool : NULL;
+  status = iree_async_operation_resolve_completion(operation, status, &flags);
   if (operation->completion_fn) {
     operation->completion_fn(operation->user_data, operation, status, flags);
   } else {
@@ -201,6 +203,8 @@ iree_status_t iree_async_proactor_create_posix_with_backend(
   iree_notification_initialize(&proactor->ready_notification);
   iree_atomic_slist_initialize(&proactor->completion_queue);
   iree_atomic_slist_initialize(&proactor->pending_semaphore_waits);
+  iree_async_semaphore_wait_context_initialize(
+      &proactor->semaphore_wait_context);
   iree_atomic_slist_initialize(&proactor->pending_fence_imports);
 
   // Initialize pools with external storage.
@@ -340,6 +344,8 @@ static void iree_async_proactor_posix_destroy(
   // Deinitialize notifications and queues.
   iree_notification_deinitialize(&proactor->ready_notification);
   iree_atomic_slist_deinitialize(&proactor->pending_semaphore_waits);
+  iree_async_semaphore_wait_context_deinitialize(
+      &proactor->semaphore_wait_context);
   iree_atomic_slist_deinitialize(&proactor->pending_fence_imports);
   iree_async_message_pool_deinitialize(&proactor->message_pool);
   iree_atomic_slist_deinitialize(&proactor->completion_queue);
@@ -361,50 +367,6 @@ void iree_async_proactor_posix_wake_poll_thread(
 //===----------------------------------------------------------------------===//
 // Submit infrastructure
 //===----------------------------------------------------------------------===//
-
-// Tracks a pending SEMAPHORE_WAIT operation.
-// Heap-allocated per wait operation, freed when the operation completes.
-// Contains embedded timepoints for each semaphore being waited on.
-typedef struct iree_async_posix_semaphore_wait_tracker_t {
-  // Intrusive MPSC list link for pending completion queue.
-  iree_atomic_slist_entry_t slist_entry;
-
-  // Back-pointer to the wait operation being tracked.
-  iree_async_semaphore_wait_operation_t* operation;
-
-  // Proactor to wake when a semaphore fires.
-  iree_async_proactor_posix_t* proactor;
-
-  // Allocator used for this tracker.
-  iree_allocator_t allocator;
-
-  // Number of semaphores being waited on.
-  iree_host_size_t count;
-
-  // Number of successfully registered timepoints. Used during cleanup to
-  // cancel only the timepoints that were actually registered.
-  iree_host_size_t registered_count;
-
-  // For ALL mode: remaining semaphores to satisfy (count down to 0).
-  // For ANY mode: first satisfied index (starts at -1, CAS to winning index).
-  iree_atomic_int32_t remaining_or_satisfied;
-
-  // Completion status. Written by timepoint callback if failure occurs.
-  // CAS: first non-OK status wins.
-  iree_atomic_intptr_t completion_status;
-
-  // Guard against double-enqueue: success callbacks (remaining_or_satisfied),
-  // error callbacks, and cancel all independently decide to enqueue. Only the
-  // first to CAS this from 0→1 actually pushes to the MPSC slist.
-  iree_atomic_int32_t enqueued;
-
-  // LINKED chain continuation head. When the wait has LINKED flag, the
-  // chain is transferred here during submit and dispatched on completion.
-  iree_async_operation_t* continuation_head;
-
-  // Flexible array of timepoints (one per semaphore).
-  iree_async_semaphore_timepoint_t timepoints[];
-} iree_async_posix_semaphore_wait_tracker_t;
 
 // Pushes a completion for delivery in poll(). Does not retain operation
 // resources — callers in the drain/execute paths (where push_pending already
@@ -1059,68 +1021,13 @@ static iree_status_t iree_async_proactor_posix_submit_semaphore_signal(
       proactor, &signal_op->base, op_status, IREE_ASYNC_COMPLETION_FLAG_NONE);
 }
 
-// Enqueues a completed semaphore wait tracker for the poll thread to drain.
-// Called from timepoint callbacks running on arbitrary threads.
-static void iree_async_proactor_posix_semaphore_wait_enqueue_completion(
-    iree_async_posix_semaphore_wait_tracker_t* tracker) {
-  // Guard against double-enqueue: success callbacks (remaining_or_satisfied),
-  // error callbacks, and cancel all independently decide to enqueue. Only the
-  // first to set the flag actually pushes.
-  int32_t expected = 0;
-  if (!iree_atomic_compare_exchange_strong(&tracker->enqueued, &expected, 1,
-                                           iree_memory_order_acq_rel,
-                                           iree_memory_order_relaxed)) {
-    return;
-  }
-  iree_atomic_slist_push(&tracker->proactor->pending_semaphore_waits,
-                         &tracker->slist_entry);
-  iree_async_proactor_posix_wake_poll_thread(tracker->proactor);
-}
-
-// Timepoint callback for SEMAPHORE_WAIT operations.
-// Called under the semaphore's internal lock — must be fast and non-blocking.
-// Decodes the tracker and index from user_data, then tracks ALL/ANY
-// satisfaction. When the wait is complete, pushes the tracker to the
-// pending_semaphore_waits MPSC slist for the poll thread to drain.
-static void iree_async_proactor_posix_semaphore_wait_timepoint_callback(
-    void* user_data, iree_async_semaphore_timepoint_t* timepoint,
-    iree_status_t status) {
-  uintptr_t encoded = (uintptr_t)user_data;
-  iree_async_posix_semaphore_wait_tracker_t* tracker =
-      (iree_async_posix_semaphore_wait_tracker_t*)(encoded &
-                                                   0x00FFFFFFFFFFFFFFull);
-  iree_host_size_t index = (iree_host_size_t)(encoded >> 56);
-
-  if (!iree_status_is_ok(status)) {
-    // Failure or cancellation. Store the error status (first one wins).
-    intptr_t expected = (intptr_t)iree_ok_status();
-    if (!iree_atomic_compare_exchange_strong(
-            &tracker->completion_status, &expected, (intptr_t)status,
-            iree_memory_order_acq_rel, iree_memory_order_acquire)) {
-      iree_status_ignore(status);
-    }
-    // Enqueue for completion regardless of whether we won the status race.
-    iree_async_proactor_posix_semaphore_wait_enqueue_completion(tracker);
-    return;
-  }
-
-  if (tracker->operation->mode == IREE_ASYNC_WAIT_MODE_ANY) {
-    // ANY mode: first satisfied index wins via CAS.
-    int32_t expected = -1;
-    if (iree_atomic_compare_exchange_strong(
-            &tracker->remaining_or_satisfied, &expected, (int32_t)index,
-            iree_memory_order_acq_rel, iree_memory_order_acquire)) {
-      iree_async_proactor_posix_semaphore_wait_enqueue_completion(tracker);
-    }
-  } else {
-    // ALL mode: decrement remaining count.
-    int32_t remaining = iree_atomic_fetch_sub(&tracker->remaining_or_satisfied,
-                                              1, iree_memory_order_acq_rel) -
-                        1;
-    if (remaining == 0) {
-      iree_async_proactor_posix_semaphore_wait_enqueue_completion(tracker);
-    }
-  }
+// Enqueues a terminal semaphore wait tracker and wakes the poll thread.
+static void iree_async_proactor_posix_enqueue_semaphore_wait(
+    void* user_data, iree_atomic_slist_entry_t* entry) {
+  iree_async_proactor_posix_t* proactor =
+      (iree_async_proactor_posix_t*)user_data;
+  iree_atomic_slist_push(&proactor->pending_semaphore_waits, entry);
+  iree_async_proactor_posix_wake_poll_thread(proactor);
 }
 
 // Submits a SEMAPHORE_WAIT by checking for immediate satisfaction, then
@@ -1132,18 +1039,6 @@ static iree_status_t iree_async_proactor_posix_submit_semaphore_wait(
     iree_async_proactor_posix_t* proactor,
     iree_async_semaphore_wait_operation_t* wait_op) {
   IREE_TRACE_ZONE_BEGIN(z0);
-
-  // The timepoint callback encodes {tracker_pointer, semaphore_index} in a
-  // single pointer using a 56-bit/8-bit split. The 8-bit index field limits
-  // the maximum number of semaphores per wait to 255.
-  if (IREE_UNLIKELY(wait_op->count > 255)) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "semaphore wait count %" PRIhsz
-        " exceeds the maximum of 255 (limited by timepoint user_data encoding)",
-        wait_op->count);
-  }
 
   // Check for immediate satisfaction before allocating a tracker.
   bool immediately_satisfied = false;
@@ -1170,77 +1065,19 @@ static iree_status_t iree_async_proactor_posix_submit_semaphore_wait(
         IREE_ASYNC_COMPLETION_FLAG_NONE);
   }
 
-  // Calculate allocation size with overflow checking.
-  iree_host_size_t total_size = 0;
+  iree_async_semaphore_wait_enqueue_callback_t enqueue_callback = {
+      .fn = iree_async_proactor_posix_enqueue_semaphore_wait,
+      .user_data = proactor,
+  };
+  iree_async_semaphore_wait_tracker_t* tracker = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, IREE_STRUCT_LAYOUT(
-              sizeof(iree_async_posix_semaphore_wait_tracker_t), &total_size,
-              IREE_STRUCT_FIELD_FAM(wait_op->count,
-                                    iree_async_semaphore_timepoint_t)));
-
-  // Allocate tracker with embedded timepoints.
-  iree_async_posix_semaphore_wait_tracker_t* tracker = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(proactor->base.allocator, total_size,
-                                (void**)&tracker));
-  memset(tracker, 0, total_size);
-
-  tracker->operation = wait_op;
-  tracker->proactor = proactor;
-  tracker->allocator = proactor->base.allocator;
-  tracker->count = wait_op->count;
-  tracker->registered_count = 0;
-  iree_atomic_store(&tracker->completion_status, (intptr_t)iree_ok_status(),
-                    iree_memory_order_release);
-
-  // Transfer LINKED continuation chain from operation to tracker.
-  tracker->continuation_head = wait_op->base.linked_next;
-  wait_op->base.linked_next = NULL;
-
-  if (wait_op->mode == IREE_ASYNC_WAIT_MODE_ALL) {
-    iree_atomic_store(&tracker->remaining_or_satisfied, (int32_t)wait_op->count,
-                      iree_memory_order_release);
-  } else {
-    // ANY mode: -1 indicates not yet satisfied.
-    iree_atomic_store(&tracker->remaining_or_satisfied, -1,
-                      iree_memory_order_release);
-  }
-
-  // Store tracker in operation for cancel to find it.
-  wait_op->base.next = (iree_async_operation_t*)tracker;
-
-  // Register timepoints for each semaphore. Use status chaining so that
-  // on failure we cancel only the successfully registered timepoints.
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < wait_op->count && iree_status_is_ok(status);
-       ++i) {
-    iree_async_semaphore_timepoint_t* timepoint = &tracker->timepoints[i];
-    timepoint->callback =
-        iree_async_proactor_posix_semaphore_wait_timepoint_callback;
-    // Encode tracker pointer + index in user_data using a 56-bit/8-bit split
-    // for LA57 (5-level paging) safety: userspace pointers use at most 56 bits
-    // on x86-64, leaving 8 bits for the index (max 255).
-    // The count <= 255 check above guarantees this shift is safe.
-    timepoint->user_data = (void*)((uintptr_t)tracker | ((uintptr_t)i << 56));
-    status = iree_async_semaphore_acquire_timepoint(
-        wait_op->semaphores[i], wait_op->values[i], timepoint);
-    if (iree_status_is_ok(status)) {
-      tracker->registered_count = i + 1;
-    }
-  }
-
-  // Single exit point: on failure, cancel registered timepoints and free.
-  if (!iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < tracker->registered_count; ++i) {
-      iree_async_semaphore_cancel_timepoint(wait_op->semaphores[i],
-                                            &tracker->timepoints[i]);
-    }
-    wait_op->base.next = NULL;
-    iree_allocator_free(tracker->allocator, tracker);
-  }
+      z0, iree_async_semaphore_wait_tracker_create(
+              &proactor->semaphore_wait_context, wait_op, enqueue_callback,
+              proactor->base.allocator, &tracker));
+  iree_async_semaphore_wait_tracker_register_timepoints(tracker);
 
   IREE_TRACE_ZONE_END(z0);
-  return status;
+  return iree_ok_status();
 }
 
 // Submits a MESSAGE operation: delivers payload to the target proactor's
@@ -1626,33 +1463,23 @@ static int iree_async_proactor_posix_calculate_timeout_ms(
   } else if (iree_timeout_is_infinite(user_timeout)) {
     timeout_ms = -1;
   } else {
-    iree_duration_t remaining = iree_timeout_as_duration_ns(user_timeout);
-    // Clamp to INT_MAX (24 days) to avoid overflow.
-    int64_t remaining_ms = remaining / 1000000;
-    if (remaining_ms > INT_MAX) remaining_ms = INT_MAX;
-    timeout_ms = (int)remaining_ms;
-    if (timeout_ms == 0 && remaining > 0) timeout_ms = 1;
+    uint32_t remaining_ms = iree_absolute_deadline_to_timeout_ms(
+        iree_timeout_as_deadline_ns(user_timeout));
+    timeout_ms = remaining_ms > INT_MAX ? INT_MAX : (int)remaining_ms;
   }
 
   // If we have pending timers, reduce timeout to fire them on time.
   iree_time_t earliest_deadline =
       iree_async_posix_timer_list_next_deadline_ns(&proactor->timers);
   if (earliest_deadline != IREE_TIME_INFINITE_FUTURE) {
-    iree_time_t now = iree_time_now();
-    if (earliest_deadline <= now) {
-      // Timer already expired - immediate poll.
-      timeout_ms = 0;
-    } else {
-      // Calculate time until next timer.
-      int64_t delta_ns = earliest_deadline - now;
-      int64_t delta_ms = delta_ns / 1000000;
-      if (delta_ms > INT_MAX) delta_ms = INT_MAX;
-      if (delta_ms < 0) delta_ms = 0;
+    uint32_t timer_timeout_ms =
+        iree_absolute_deadline_to_timeout_ms(earliest_deadline);
+    int clamped_timer_timeout_ms =
+        timer_timeout_ms > INT_MAX ? INT_MAX : (int)timer_timeout_ms;
 
-      // Use the smaller of user timeout and timer timeout.
-      if (timeout_ms < 0 || (int)delta_ms < timeout_ms) {
-        timeout_ms = (int)delta_ms;
-      }
+    // Use the smaller of user timeout and timer timeout.
+    if (timeout_ms < 0 || clamped_timer_timeout_ms < timeout_ms) {
+      timeout_ms = clamped_timer_timeout_ms;
     }
   }
 
@@ -1838,31 +1665,19 @@ static iree_host_size_t iree_async_proactor_posix_drain_pending_semaphore_waits(
   iree_host_size_t drained_count = 0;
   iree_atomic_slist_entry_t* entry = head;
   while (entry != NULL) {
-    iree_async_posix_semaphore_wait_tracker_t* tracker =
-        (iree_async_posix_semaphore_wait_tracker_t*)entry;
+    iree_async_semaphore_wait_tracker_t* tracker =
+        (iree_async_semaphore_wait_tracker_t*)entry;
     iree_atomic_slist_entry_t* next = entry->next;
 
-    iree_status_t status = (iree_status_t)iree_atomic_load(
-        &tracker->completion_status, iree_memory_order_acquire);
-
-    // For ANY mode: record the satisfied index in the operation.
-    iree_async_semaphore_wait_operation_t* wait_op = tracker->operation;
-    if (wait_op->mode == IREE_ASYNC_WAIT_MODE_ANY &&
-        iree_status_is_ok(status)) {
-      int32_t satisfied = iree_atomic_load(&tracker->remaining_or_satisfied,
-                                           iree_memory_order_acquire);
-      if (satisfied >= 0) {
-        wait_op->satisfied_index = (iree_host_size_t)satisfied;
-      }
+    if (!iree_async_semaphore_wait_tracker_try_prepare_completion(tracker)) {
+      entry = next;
+      continue;
     }
 
-    // Cancel remaining timepoints. In ANY mode only one was satisfied; on
-    // failure some may still be registered. cancel_timepoint is a no-op for
-    // timepoints that already fired.
-    for (iree_host_size_t i = 0; i < tracker->count; ++i) {
-      iree_async_semaphore_cancel_timepoint(wait_op->semaphores[i],
-                                            &tracker->timepoints[i]);
-    }
+    iree_async_semaphore_wait_completion_t completion;
+    iree_async_semaphore_wait_tracker_finalize(tracker, &completion);
+    iree_async_semaphore_wait_operation_t* wait_op = completion.operation;
+    iree_status_t status = completion.status;
 
     // Dispatch LINKED continuation chain (if any) before invoking callback.
     // On success: submits the chain for execution (completions counted via
@@ -1871,9 +1686,8 @@ static iree_host_size_t iree_async_proactor_posix_drain_pending_semaphore_waits(
     // CANCELLED).
     //   Cancelled continuations bypass the completion queue, so their count is
     //   added directly here.
-    if (tracker->continuation_head) {
-      iree_async_operation_t* continuation = tracker->continuation_head;
-      tracker->continuation_head = NULL;
+    if (completion.continuation_head) {
+      iree_async_operation_t* continuation = completion.continuation_head;
       if (iree_status_is_ok(status)) {
         iree_async_proactor_posix_submit_continuation_chain(proactor,
                                                             continuation);
@@ -1887,10 +1701,6 @@ static iree_host_size_t iree_async_proactor_posix_drain_pending_semaphore_waits(
     iree_async_proactor_complete_operation(&wait_op->base, status,
                                            IREE_ASYNC_COMPLETION_FLAG_NONE);
     ++drained_count;
-
-    // Clear tracker reference and free.
-    wait_op->base.next = NULL;
-    iree_allocator_free(tracker->allocator, tracker);
 
     entry = next;
   }
@@ -2850,7 +2660,7 @@ static iree_status_t iree_async_proactor_posix_poll(
   // Calculate timeout considering both user request and pending timers.
   int timeout_ms =
       iree_async_proactor_posix_calculate_timeout_ms(proactor, timeout);
-  if (progress_count > 0 || base_proactor->progress_list) timeout_ms = 0;
+  if (completed_count > 0 || base_proactor->progress_list) timeout_ms = 0;
 
   // Poll for ready fds.
   iree_host_size_t ready_count = 0;
@@ -2987,7 +2797,7 @@ static iree_status_t iree_async_proactor_posix_poll(
   iree_async_proactor_posix_drain_incoming_messages(proactor);
 
   if (out_completed_count) *out_completed_count = completed_count;
-  return completed_count > 0
+  return completed_count > 0 || ready_count > 0
              ? iree_ok_status()
              : iree_status_from_code(IREE_STATUS_DEADLINE_EXCEEDED);
 }
@@ -3061,32 +2871,8 @@ static iree_status_t iree_async_proactor_posix_cancel(
     case IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT: {
       iree_async_semaphore_wait_operation_t* wait_op =
           (iree_async_semaphore_wait_operation_t*)operation;
-      iree_async_posix_semaphore_wait_tracker_t* tracker =
-          (iree_async_posix_semaphore_wait_tracker_t*)wait_op->base.next;
-      if (!tracker) {
-        // No tracker: operation was never submitted or already completed.
-        return iree_ok_status();
-      }
-      // Try to set CANCELLED status (first status wins via CAS).
-      intptr_t expected = (intptr_t)iree_ok_status();
-      iree_status_t cancelled_status =
-          iree_make_status(IREE_STATUS_CANCELLED, "operation cancelled");
-      if (!iree_atomic_compare_exchange_strong(
-              &tracker->completion_status, &expected,
-              (intptr_t)cancelled_status, iree_memory_order_acq_rel,
-              iree_memory_order_acquire)) {
-        // Another callback already set a status. The tracker will be (or
-        // has been) enqueued for completion by that callback.
-        iree_status_ignore(cancelled_status);
-        return iree_ok_status();
-      }
-      // Cancel all registered timepoints.
-      for (iree_host_size_t i = 0; i < tracker->count; ++i) {
-        iree_async_semaphore_cancel_timepoint(wait_op->semaphores[i],
-                                              &tracker->timepoints[i]);
-      }
-      // Enqueue for completion on the poll thread.
-      iree_async_proactor_posix_semaphore_wait_enqueue_completion(tracker);
+      iree_async_semaphore_wait_context_request_cancellation(
+          &proactor->semaphore_wait_context, wait_op);
       return iree_ok_status();
     }
 
@@ -3751,10 +3537,11 @@ static iree_status_t iree_async_proactor_posix_vtable_register_relay(
 }
 
 static void iree_async_proactor_posix_vtable_unregister_relay(
-    iree_async_proactor_t* base_proactor, iree_async_relay_t* relay) {
+    iree_async_proactor_t* base_proactor, iree_async_relay_t* relay,
+    iree_async_relay_unregistered_callback_t callback) {
   iree_async_proactor_posix_t* proactor =
       iree_async_proactor_posix_cast(base_proactor);
-  iree_async_proactor_posix_unregister_relay(proactor, relay);
+  iree_async_proactor_posix_unregister_relay(proactor, relay, callback);
 }
 
 static void iree_async_proactor_posix_set_message_callback(

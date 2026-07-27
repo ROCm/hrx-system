@@ -1,5 +1,23 @@
 // RUN: pass-report source-to-low,low-dce
 
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @report_static_cluster_size() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%c4, %c4, %c1) workgroup_size(%c32, %c1, %c1) cluster_size(%c1, %c2, %c1) : index
+} launch() {
+  kernel.return
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: workload workgroup_size=32x1x1 flat_workgroup_size=32 workgroup_count=4x4x1 dispatch_workgroup_count=16 cluster_size=1x2x1 flat_cluster_size=2 dispatch_workitem_count=512
+
+// ====
+
 amdgpu.target<gfx1100> @target
 
 kernel.def target(@target) @report_static_lds_bank_pattern_unknown() {

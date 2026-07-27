@@ -59,7 +59,7 @@ static loom_value_facts_t loom_value_facts_exact_rounded_float(double value) {
       facts.flags |= LOOM_VALUE_FACT_NOT_INF | LOOM_VALUE_FACT_FINITE;
     }
   }
-  loom_value_facts_mark_workgroup_uniform(&facts);
+  loom_value_facts_mark_cluster_uniform(&facts);
   return facts;
 }
 

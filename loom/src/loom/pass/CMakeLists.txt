@@ -309,6 +309,7 @@ loom_cc_library(
     loom::transforms::symbol::refine_boundaries
     loom::transforms::symbol::symbol_dce
     loom::transforms::symbol::template_selection
+    loom::transforms::vector::bank_sroa
     loom::transforms::vector::memory_footprint
     loom::transforms::vector::sink_single_use_reads
     loom::transforms::vector::to_scalar

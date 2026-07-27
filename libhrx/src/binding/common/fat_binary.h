@@ -55,7 +55,8 @@ typedef struct iree_hal_streaming_fat_binary_extract_t {
   // Host allocator used for owned storage.
   iree_allocator_t host_allocator;
 
-  // Decompressed buffer backing store (non-NULL only for CCOB inputs).
+  // Decompressed/resolved buffer backing store (non-NULL for CCOB inputs and
+  // for HIPK out-of-band kpack inputs; the matched ELF spans point into it).
   void* owned_buffer;
   // Size of |owned_buffer| in bytes.
   iree_host_size_t owned_buffer_size;

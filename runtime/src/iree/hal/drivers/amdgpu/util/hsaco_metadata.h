@@ -86,6 +86,11 @@ typedef struct iree_hal_amdgpu_hsaco_metadata_kernel_t {
   uint32_t required_workgroup_size[3];
   // True when |required_workgroup_size| was present.
   bool has_required_workgroup_size;
+  // Required nontrivial workgroup-cluster size from `.cluster_dims`, if
+  // present.
+  uint8_t workgroup_cluster_size[3];
+  // True when |workgroup_cluster_size| was present.
+  bool has_workgroup_cluster_size;
   // Number of argument records in |args|.
   iree_host_size_t arg_count;
   // Argument records borrowed from the owning metadata object.

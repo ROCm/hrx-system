@@ -120,18 +120,21 @@ void InitializeTestTables(TestTables* tables) {
   tables->reg_class_alts[0].flags = LOOM_LOW_REG_CLASS_ALT_FLAG_PREFERRED;
 
   tables->operands[0].field_name_string_offset = TEST_STRING_OFFSET(field_dst);
+  tables->operands[0].source_value_index = 0;
   tables->operands[0].role = LOOM_LOW_OPERAND_ROLE_RESULT;
   tables->operands[0].reg_class_alt_start = 0;
   tables->operands[0].reg_class_alt_count = 1;
   tables->operands[0].unit_count = 1;
 
   tables->operands[1].field_name_string_offset = TEST_STRING_OFFSET(field_dst);
+  tables->operands[1].source_value_index = 0;
   tables->operands[1].role = LOOM_LOW_OPERAND_ROLE_RESULT;
   tables->operands[1].reg_class_alt_start = 0;
   tables->operands[1].reg_class_alt_count = 1;
   tables->operands[1].unit_count = 1;
 
   tables->operands[2].field_name_string_offset = TEST_STRING_OFFSET(field_lhs);
+  tables->operands[2].source_value_index = 0;
   tables->operands[2].role = LOOM_LOW_OPERAND_ROLE_OPERAND;
   tables->operands[2].reg_class_alt_start = 0;
   tables->operands[2].reg_class_alt_count = 1;
@@ -139,6 +142,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->operands[2].read_stage = 0;
 
   tables->operands[3].field_name_string_offset = TEST_STRING_OFFSET(field_rhs);
+  tables->operands[3].source_value_index = 1;
   tables->operands[3].role = LOOM_LOW_OPERAND_ROLE_OPERAND;
   tables->operands[3].reg_class_alt_start = 0;
   tables->operands[3].reg_class_alt_count = 1;
@@ -696,6 +700,24 @@ TEST(LowDescriptorsTest, RejectsResultRoleAfterResultPrefix) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, RejectsInvalidResultSourceValueIndex) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[1].source_value_index = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsInvalidPacketOperandSourceValueIndex) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[3].source_value_index = 0;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsOperandResultRows) {
   TestTables tables;
   InitializeTestTables(&tables);
@@ -705,10 +727,31 @@ TEST(LowDescriptorsTest, RejectsOperandResultRows) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, AcceptsAssemblyImplicitPacketOperand) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsImplicitRowsWithoutImplicitFlag) {
   TestTables tables;
   InitializeTestTables(&tables);
   tables.operands[2].role = LOOM_LOW_OPERAND_ROLE_IMPLICIT;
+  tables.operands[2].source_value_index = LOOM_LOW_ID_NONE;
+  tables.operands[3].source_value_index = 0;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsImplicitSourceValueIndex) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[2].role = LOOM_LOW_OPERAND_ROLE_IMPLICIT;
+  tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT;
+  tables.operands[3].source_value_index = 0;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
@@ -718,7 +761,9 @@ TEST(LowDescriptorsTest, AcceptsImplicitRowsWithImplicitFlag) {
   TestTables tables;
   InitializeTestTables(&tables);
   tables.operands[2].role = LOOM_LOW_OPERAND_ROLE_IMPLICIT;
+  tables.operands[2].source_value_index = LOOM_LOW_ID_NONE;
   tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT;
+  tables.operands[3].source_value_index = 0;
 
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
 }
@@ -773,7 +818,9 @@ TEST(LowDescriptorsTest, RejectsBoundedOperandAddressMapOnImplicitOperand) {
   TestTables tables;
   InitializeTestTables(&tables);
   tables.operands[2].role = LOOM_LOW_OPERAND_ROLE_IMPLICIT;
+  tables.operands[2].source_value_index = LOOM_LOW_ID_NONE;
   tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT;
+  tables.operands[3].source_value_index = 0;
   tables.operands[2].address_map_kind = LOOM_LOW_OPERAND_ADDRESS_MAP_LOW_SUBSET;
   tables.operands[2].addressable_unit_count = 1;
 
@@ -1558,6 +1605,38 @@ TEST(LowDescriptorsTest, AcceptsPhysicalRegisterClassWithPhysicalCount) {
   InitializeTestTables(&tables);
   tables.reg_classes[0].flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
   tables.reg_classes[0].allocatable_count = 32;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsVirtualRegisterClassWithFixedLocations) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.reg_classes[0].fixed_location_count = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsPhysicalRegisterClassFixedLocationOverlap) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.reg_classes[0].flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
+  tables.reg_classes[0].allocatable_count = 32;
+  tables.reg_classes[0].fixed_location_base = 31;
+  tables.reg_classes[0].fixed_location_count = 2;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, AcceptsPhysicalRegisterClassFixedLocationWindow) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.reg_classes[0].flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
+  tables.reg_classes[0].allocatable_count = 32;
+  tables.reg_classes[0].fixed_location_base = 36;
+  tables.reg_classes[0].fixed_location_count = 4;
 
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
 }

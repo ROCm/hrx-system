@@ -50,6 +50,8 @@ void loom_target_compile_report_deinitialize(
   loom_target_compile_report_row_list_deinitialize(allocator,
                                                    &report->wait_action_rows);
   loom_target_compile_report_row_list_deinitialize(
+      allocator, &report->target_insertion_rows);
+  loom_target_compile_report_row_list_deinitialize(
       allocator, &report->config_binding_rows);
   loom_target_compile_report_row_list_deinitialize(allocator,
                                                    &report->source_low_rows);
@@ -90,6 +92,7 @@ static bool loom_target_compile_report_has_rows(
          report->wait_counter_rows.count != 0 ||
          report->wait_reason_summary_rows.count != 0 ||
          report->wait_action_rows.count != 0 ||
+         report->target_insertion_rows.count != 0 ||
          report->config_binding_rows.count != 0 ||
          report->entry_rows.count != 0 || report->source_low_rows.count != 0 ||
          report->source_low_target_rows.count != 0 ||
@@ -138,6 +141,7 @@ iree_status_t loom_target_compile_report_clone(
   target.wait_counter_rows = (loom_target_compile_report_row_list_t){0};
   target.wait_reason_summary_rows = (loom_target_compile_report_row_list_t){0};
   target.wait_action_rows = (loom_target_compile_report_row_list_t){0};
+  target.target_insertion_rows = (loom_target_compile_report_row_list_t){0};
   target.config_binding_rows = (loom_target_compile_report_row_list_t){0};
   target.source_low_rows = (loom_target_compile_report_row_list_t){0};
   target.source_low_target_rows = (loom_target_compile_report_row_list_t){0};
@@ -166,6 +170,7 @@ iree_status_t loom_target_compile_report_clone(
       source->wait_counter_rows.count == 0 &&
       source->wait_reason_summary_rows.count == 0 &&
       source->wait_action_rows.count == 0 &&
+      source->target_insertion_rows.count == 0 &&
       source->config_binding_rows.count == 0 &&
       source->source_low_rows.count == 0 &&
       source->source_low_target_rows.count == 0 &&
@@ -253,6 +258,12 @@ iree_status_t loom_target_compile_report_clone(
         &source->wait_action_rows,
         sizeof(loom_target_compile_report_wait_action_row_t), allocator,
         &target.wait_action_rows);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_target_compile_report_row_list_clone(
+        &source->target_insertion_rows,
+        sizeof(loom_target_compile_report_target_insertion_row_t), allocator,
+        &target.target_insertion_rows);
   }
   if (iree_status_is_ok(status)) {
     status = loom_target_compile_report_row_list_clone(
@@ -607,6 +618,12 @@ static bool loom_target_compile_report_workgroup_counts_equal(
   return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
 }
 
+static bool loom_target_compile_report_workgroup_cluster_sizes_equal(
+    loom_target_workgroup_cluster_size_t lhs,
+    loom_target_workgroup_cluster_size_t rhs) {
+  return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
+}
+
 static bool loom_target_compile_report_checked_mul3_u32(uint32_t x, uint32_t y,
                                                         uint32_t z,
                                                         uint64_t* out_result) {
@@ -677,6 +694,37 @@ void loom_target_compile_report_record_workload(
               merged.workgroup_count.z, &merged.dispatch_workgroup_count)) {
         merged.flags |=
             LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT;
+      }
+    }
+
+    bool has_workgroup_cluster_size = iree_any_bit_set(
+        report->workload.flags,
+        LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE);
+    if (iree_any_bit_set(
+            workload->flags,
+            LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE)) {
+      if (!has_workgroup_cluster_size) {
+        merged.workgroup_cluster_size = workload->workgroup_cluster_size;
+        has_workgroup_cluster_size = true;
+      } else if (loom_target_compile_report_workgroup_cluster_sizes_equal(
+                     report->workload.workgroup_cluster_size,
+                     workload->workgroup_cluster_size)) {
+        merged.workgroup_cluster_size = report->workload.workgroup_cluster_size;
+      } else {
+        has_workgroup_cluster_size = false;
+      }
+    } else if (has_workgroup_cluster_size) {
+      merged.workgroup_cluster_size = report->workload.workgroup_cluster_size;
+    }
+    if (has_workgroup_cluster_size) {
+      merged.flags |=
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE;
+      if (loom_target_compile_report_checked_mul3_u32(
+              merged.workgroup_cluster_size.x, merged.workgroup_cluster_size.y,
+              merged.workgroup_cluster_size.z,
+              &merged.flat_workgroup_cluster_size)) {
+        merged.flags |=
+            LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_CLUSTER_SIZE;
       }
     }
 
@@ -798,6 +846,12 @@ static void loom_target_compile_report_merge_workload(
     flags &= ~LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT;
   }
   if (iree_any_bit_set(
+          flags, LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE) &&
+      !loom_target_compile_report_workgroup_cluster_sizes_equal(
+          target->workgroup_cluster_size, source->workgroup_cluster_size)) {
+    flags &= ~LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE;
+  }
+  if (iree_any_bit_set(
           flags, LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE) &&
       target->flat_workgroup_size != source->flat_workgroup_size) {
     flags &= ~LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE;
@@ -813,6 +867,13 @@ static void loom_target_compile_report_merge_workload(
       target->dispatch_workitem_count != source->dispatch_workitem_count) {
     flags &= ~LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT;
   }
+  if (iree_any_bit_set(
+          flags,
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_CLUSTER_SIZE) &&
+      target->flat_workgroup_cluster_size !=
+          source->flat_workgroup_cluster_size) {
+    flags &= ~LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_CLUSTER_SIZE;
+  }
   target->flags = flags;
   if (!iree_any_bit_set(flags,
                         LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE)) {
@@ -821,6 +882,10 @@ static void loom_target_compile_report_merge_workload(
   if (!iree_any_bit_set(flags,
                         LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT)) {
     target->workgroup_count = (loom_target_dispatch_workgroup_count_t){0};
+  }
+  if (!iree_any_bit_set(
+          flags, LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE)) {
+    target->workgroup_cluster_size = (loom_target_workgroup_cluster_size_t){0};
   }
   if (!iree_any_bit_set(
           flags, LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE)) {
@@ -834,6 +899,11 @@ static void loom_target_compile_report_merge_workload(
   if (!iree_any_bit_set(
           flags, LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT)) {
     target->dispatch_workitem_count = 0;
+  }
+  if (!iree_any_bit_set(
+          flags,
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_CLUSTER_SIZE)) {
+    target->flat_workgroup_cluster_size = 0;
   }
 }
 
@@ -975,6 +1045,7 @@ static void loom_target_compile_report_merge_entry_summary(
     report->target_resources = entry_report->target_resources;
     report->wait_plan = entry_report->wait_plan;
     report->workload = entry_report->workload;
+    report->target_insertion_summary = entry_report->target_insertion_summary;
     if (entry_has_low_planning) {
       report->low_planning = entry_report->low_planning;
     }
@@ -1063,6 +1134,9 @@ static void loom_target_compile_report_merge_entry_summary(
       iree_max(report->local_memory_bytes, entry_report->local_memory_bytes);
   loom_target_compile_report_accumulate_wait_plan(&report->wait_plan,
                                                   &entry_report->wait_plan);
+  loom_target_compile_report_accumulate_target_insertion_summary(
+      &report->target_insertion_summary,
+      &entry_report->target_insertion_summary);
   loom_target_compile_report_accumulate_instruction_mix(
       &report->static_instruction_mix, &entry_report->static_instruction_mix);
   if (report_had_dynamic_instruction_mix && entry_has_dynamic_instruction_mix) {
@@ -1175,6 +1249,7 @@ loom_target_compile_report_entry_from_report(
       .wait_plan = entry_report->wait_plan,
       .workload = entry_report->workload,
       .low_planning = entry_report->low_planning,
+      .target_insertion_summary = entry_report->target_insertion_summary,
       .pressure_row_count = entry_report->pressure_rows.count,
       .pressure_origin_row_count = entry_report->pressure_origin_rows.count,
       .schedule_band_row_count = entry_report->schedule_band_rows.count,
@@ -1188,6 +1263,7 @@ loom_target_compile_report_entry_from_report(
           entry_report->wait_reason_summary_rows.count,
       .wait_action_row_count = entry_report->wait_action_rows.count,
       .target_capability_row_count = entry_report->target_capability_rows.count,
+      .target_insertion_row_count = entry_report->target_insertion_rows.count,
   };
 }
 
@@ -1364,6 +1440,14 @@ iree_status_t loom_target_compile_report_record_entry_report(
     IREE_RETURN_IF_ERROR(loom_target_compile_report_row_list_append_all(
         &report->wait_action_rows, &entry_report->wait_action_rows,
         sizeof(loom_target_compile_report_wait_action_row_t),
+        report->allocator));
+  }
+  if (iree_any_bit_set(
+          entry_report->detail_flags,
+          LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS)) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_row_list_append_all(
+        &report->target_insertion_rows, &entry_report->target_insertion_rows,
+        sizeof(loom_target_compile_report_target_insertion_row_t),
         report->allocator));
   }
   if (iree_any_bit_set(entry_report->detail_flags,

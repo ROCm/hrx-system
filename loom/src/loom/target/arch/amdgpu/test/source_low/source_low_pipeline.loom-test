@@ -34,6 +34,11 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
       unroll-scf-for
       canonicalize
       cse
+      sroa-vector-banks
+      if changed {
+        canonicalize
+        cse
+      }
       sink-single-use-reads
       promote-private-fragments
       canonicalize
@@ -94,6 +99,11 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
       unroll-scf-for
       canonicalize
       cse
+      sroa-vector-banks
+      if changed {
+        canonicalize
+        cse
+      }
       sink-single-use-reads
       promote-private-fragments
       canonicalize
@@ -200,6 +210,11 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
       unroll-scf-for
       canonicalize
       cse
+      sroa-vector-banks
+      if changed {
+        canonicalize
+        cse
+      }
       sink-single-use-reads
       promote-private-fragments
       canonicalize

@@ -30,9 +30,6 @@ hrx_cc_library(
         "api.h",
         "launch_params.h",
     ],
-    copts = [
-        "-Wno-attributes",
-    ],
     includes = [
         "../..",
         "../../../include",
@@ -58,7 +55,6 @@ hrx_cc_shared_library(
     additional_linker_inputs = ["amdhip64.map"],
     copts = [
         "-DIREE_HAL_STREAMING_HIP_EXPORTS",
-        "-Wno-attributes",
         "-Wno-unused-variable",
     ],
     includes = [
@@ -121,9 +117,6 @@ hrx_cc_test(
 hrx_cc_test(
     name = "hip_launch_validation_api_test",
     srcs = ["hip_launch_validation_api_test.cc"],
-    copts = [
-        "-Wno-attributes",
-    ],
     # The test loads the built runtime through its public ABI and supplies a
     # tagged function handle that reaches argument validation before dispatch.
     data = [":amdhip64"],
@@ -144,9 +137,6 @@ hrx_cc_test(
 hrx_cc_test(
     name = "launch_params_test",
     srcs = ["launch_params_test.cc"],
-    copts = [
-        "-Wno-attributes",
-    ],
     deps = [
         ":launch_params",
         "//runtime/src/iree/testing:gtest",

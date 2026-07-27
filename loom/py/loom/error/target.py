@@ -1104,6 +1104,70 @@ ERR_TARGET_061 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_062: Workgroup-cluster size is not statically resolved.
+ERR_TARGET_062 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=62,
+    severity=Severity.ERROR,
+    summary="Workgroup-cluster size is not statically resolved.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': every cluster_size "
+        "dimension must resolve to an exact positive u32 after configuration "
+        "specialization"
+    ),
+    params=_TARGET_CONTEXT_PARAMS,
+    fix_hint=(
+        "Select each cluster_size dimension from target-specific exact values; "
+        "use 1x1x1 for an ordinary non-clustered launch"
+    ),
+)
+
+# ERR_TARGET_063: Workgroup-cluster size product exceeds the launch contract.
+ERR_TARGET_063 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=63,
+    severity=Severity.ERROR,
+    summary="Workgroup-cluster size product exceeds the launch contract.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': cluster_size "
+        "{cluster_size_x}x{cluster_size_y}x{cluster_size_z} has a flat size "
+        "that does not fit u32"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("cluster_size_x", ParamKind.U32),
+        ErrorParam("cluster_size_y", ParamKind.U32),
+        ErrorParam("cluster_size_z", ParamKind.U32),
+    ),
+    fix_hint="Reduce the cluster dimensions so their product fits u32",
+)
+
+# ERR_TARGET_064: Static workgroup grid is not divisible by its cluster shape.
+ERR_TARGET_064 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=64,
+    severity=Severity.ERROR,
+    summary="Static workgroup grid is not divisible by its cluster shape.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': workgroup_count "
+        "{workgroup_count} along {axis} is not divisible by cluster_size "
+        "{cluster_size}"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("axis", ParamKind.STRING),
+        ErrorParam("workgroup_count", ParamKind.U32),
+        ErrorParam("cluster_size", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Choose a cluster dimension that exactly divides the corresponding "
+        "static workgroup count"
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1158,4 +1222,7 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_059,
     ERR_TARGET_060,
     ERR_TARGET_061,
+    ERR_TARGET_062,
+    ERR_TARGET_063,
+    ERR_TARGET_064,
 )

@@ -42,7 +42,7 @@ TEST_P(EventTest, SameThreadSignal) {
   IREE_ASSERT_OK(iree_async_event_set(event));
 
   // Poll should pick up the signaled event.
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(100));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -69,13 +69,18 @@ TEST_P(EventTest, CrossThreadSignal) {
 
   // Signal the event from another thread. The submit is synchronous, so the
   // wait is already registered by the time the signaler starts.
-  std::thread signaler(
-      [event]() { iree_status_ignore(iree_async_event_set(event)); });
+  iree_status_code_t signal_status_code = IREE_STATUS_UNKNOWN;
+  std::thread signaler([event, &signal_status_code]() {
+    iree_status_t status = iree_async_event_set(event);
+    signal_status_code = iree_status_code(status);
+    iree_status_free(status);
+  });
 
   // Poll should pick up the signaled event.
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(200));
+  PollUntil(/*min_completions=*/1);
 
   signaler.join();
+  EXPECT_EQ(signal_status_code, IREE_STATUS_OK);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -111,7 +116,7 @@ TEST_P(EventTest, MultipleEventsPartialSignal) {
   IREE_ASSERT_OK(iree_async_event_set(events[2]));
 
   // Poll should pick up exactly 2 completions.
-  PollUntil(/*min_completions=*/2, /*total_budget=*/iree_make_duration_ms(100));
+  PollUntil(/*min_completions=*/2);
 
   EXPECT_EQ(trackers[0].call_count, 1);
   IREE_EXPECT_OK(trackers[0].ConsumeStatus());
@@ -121,7 +126,7 @@ TEST_P(EventTest, MultipleEventsPartialSignal) {
 
   // Now signal event 1.
   IREE_ASSERT_OK(iree_async_event_set(events[1]));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(100));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(trackers[1].call_count, 1);
   IREE_EXPECT_OK(trackers[1].ConsumeStatus());
@@ -149,8 +154,7 @@ TEST_P(EventTest, ResetAndReWait) {
 
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
     IREE_ASSERT_OK(iree_async_event_set(event));
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(100));
+    PollUntil(/*min_completions=*/1);
 
     EXPECT_EQ(tracker.call_count, 1);
     IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -172,8 +176,7 @@ TEST_P(EventTest, ResetAndReWait) {
 
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
     IREE_ASSERT_OK(iree_async_event_set(event));
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(100));
+    PollUntil(/*min_completions=*/1);
 
     EXPECT_EQ(tracker.call_count, 1);
     IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -202,7 +205,7 @@ TEST_P(EventTest, PreSignaledEvent) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
 
   // Should complete immediately since the event was already signaled.
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(100));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());

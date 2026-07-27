@@ -55,6 +55,7 @@ _REG_I64 = "test.i64"
 _REG_PTR = "test.ptr"
 _REG_PHYS = "test.phys"
 _REG_SPECIAL = "test.special"
+_REG_SCHEDULE_STATE = "test.schedule_state"
 _REG_ALIAS32 = "test.alias32"
 _REG_ALIAS64 = "test.alias64"
 _REG_PRESSURE_ALIAS32 = "test.pressure.alias32"
@@ -86,6 +87,7 @@ _I32_I64_ALT = (RegClassAlt(_REG_I32), RegClassAlt(_REG_I64))
 _PTR_ALT = (RegClassAlt(_REG_PTR),)
 _PHYS_ALT = (RegClassAlt(_REG_PHYS),)
 _SPECIAL_ALT = (RegClassAlt(_REG_SPECIAL),)
+_SCHEDULE_STATE_ALT = (RegClassAlt(_REG_SCHEDULE_STATE),)
 _PRESSURE_ALIAS32_ALT = (RegClassAlt(_REG_PRESSURE_ALIAS32),)
 
 
@@ -181,12 +183,12 @@ def _phys_operand(field_name: str) -> Operand:
     return Operand(field_name, OperandRole.OPERAND, _PHYS_ALT)
 
 
-def _special_result(field_name: str = "dst") -> Operand:
-    return Operand(field_name, OperandRole.RESULT, _SPECIAL_ALT)
+def _schedule_state_result(field_name: str = "dst") -> Operand:
+    return Operand(field_name, OperandRole.RESULT, _SCHEDULE_STATE_ALT)
 
 
-def _special_operand(field_name: str) -> Operand:
-    return Operand(field_name, OperandRole.OPERAND, _SPECIAL_ALT)
+def _schedule_state_operand(field_name: str) -> Operand:
+    return Operand(field_name, OperandRole.OPERAND, _SCHEDULE_STATE_ALT)
 
 
 def _pressure_alias32_result(
@@ -206,6 +208,33 @@ def _pressure_alias32_operand(field_name: str, *, unit_count: int = 1) -> Operan
         OperandRole.OPERAND,
         _PRESSURE_ALIAS32_ALT,
         unit_count=unit_count,
+    )
+
+
+def _schedule_state_operand_read(field_name: str) -> Operand:
+    return Operand(
+        field_name,
+        OperandRole.OPERAND,
+        _SCHEDULE_STATE_ALT,
+        flags=(OperandFlag.STATE_READ,),
+    )
+
+
+def _schedule_state_read(field_name: str = "state_in") -> Operand:
+    return Operand(
+        field_name,
+        OperandRole.IMPLICIT,
+        _SCHEDULE_STATE_ALT,
+        flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_READ),
+    )
+
+
+def _schedule_state_write(field_name: str = "state_out") -> Operand:
+    return Operand(
+        field_name,
+        OperandRole.IMPLICIT,
+        _SCHEDULE_STATE_ALT,
+        flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_WRITE),
     )
 
 
@@ -481,6 +510,43 @@ TEST_LOW_EARLY_CLOBBER_V4I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_MIXED_EARLY_CLOBBER_V4I32_DESCRIPTOR = Descriptor(
+    key="test.mixed_early_clobber.v4i32",
+    mnemonic="test.mixed_early_clobber.v4i32",
+    semantic_tag="test.mixed_early_clobber.v4i32",
+    operands=(
+        _v4i32_result("early_dst"),
+        _v4i32_result("normal_dst"),
+        _v4i32_operand("early_src"),
+        _v4i32_operand("normal_src"),
+    ),
+    constraints=(Constraint(ConstraintKind.EARLY_CLOBBER, 0),),
+    asm_forms=_asm(
+        results=("early_dst", "normal_dst"),
+        operands=("early_src", "normal_src"),
+    ),
+    schedule_class=_SCHEDULE_VECTOR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_EARLY_TIED_V4I32_DESCRIPTOR = Descriptor(
+    key="test.early_tied.v4i32",
+    mnemonic="test.early_tied.v4i32",
+    semantic_tag="test.early_tied.v4i32",
+    operands=(
+        _v4i32_result(),
+        _v4i32_operand("src"),
+    ),
+    constraints=(
+        Constraint(ConstraintKind.TIED, 0, 1),
+        Constraint(ConstraintKind.DESTRUCTIVE, 0, 1),
+        Constraint(ConstraintKind.EARLY_CLOBBER, 0),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("src",)),
+    schedule_class=_SCHEDULE_VECTOR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
 TEST_LOW_DOT4I_S8S8_DESCRIPTOR = Descriptor(
     key="test.dot4i.s8s8",
     mnemonic="test.dot4i.s8s8",
@@ -730,44 +796,44 @@ TEST_LOW_MOVE_FROM_PRESSURE_ALIAS32_X5_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
-TEST_LOW_ADD_SPECIAL_DESCRIPTOR = Descriptor(
-    key="test.add.special",
-    mnemonic="test.add.special",
-    semantic_tag="test.special.add",
+TEST_LOW_ADD_SCHEDULE_STATE_DESCRIPTOR = Descriptor(
+    key="test.add.schedule_state",
+    mnemonic="test.add.schedule_state",
+    semantic_tag="test.schedule_state.add",
     operands=(
-        _special_result(),
-        _special_operand("lhs"),
-        _special_operand("rhs"),
+        _schedule_state_result(),
+        _schedule_state_operand("lhs"),
+        _schedule_state_operand("rhs"),
     ),
     asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
     schedule_class=_SCHEDULE_SCALAR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
-TEST_LOW_STATE_ADD_SPECIAL_DESCRIPTOR = Descriptor(
-    key="test.state.add.special",
-    mnemonic="test.state.add.special",
-    semantic_tag="test.state.add.special",
+TEST_LOW_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR = Descriptor(
+    key="test.state.add.schedule_state",
+    mnemonic="test.state.add.schedule_state",
+    semantic_tag="test.state.add.schedule_state",
     operands=(
-        _special_result(),
-        _special_operand("lhs"),
-        _special_operand("rhs"),
-        _special_state_write(),
-        _special_state_read(),
+        _schedule_state_result(),
+        _schedule_state_operand("lhs"),
+        _schedule_state_operand("rhs"),
+        _schedule_state_write(),
+        _schedule_state_read(),
     ),
     asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
     schedule_class=_SCHEDULE_SCALAR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
-TEST_LOW_EXPLICIT_STATE_ADD_SPECIAL_DESCRIPTOR = Descriptor(
-    key="test.explicit.state.add.special",
-    mnemonic="test.explicit.state.add.special",
-    semantic_tag="test.explicit.state.add.special",
+TEST_LOW_EXPLICIT_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR = Descriptor(
+    key="test.explicit.state.add.schedule_state",
+    mnemonic="test.explicit.state.add.schedule_state",
+    semantic_tag="test.explicit.state.add.schedule_state",
     operands=(
-        _special_result(),
-        _special_operand("lhs"),
-        _special_state_operand("rhs"),
+        _schedule_state_result(),
+        _schedule_state_operand("lhs"),
+        _schedule_state_operand_read("rhs"),
     ),
     asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
     schedule_class=_SCHEDULE_SCALAR_ALU,
@@ -781,7 +847,7 @@ TEST_LOW_CONVERGENT_EXPLICIT_STATE_READ_I32_DESCRIPTOR = Descriptor(
     operands=(
         _i32_result(),
         _i32_operand("value"),
-        _special_state_operand("state"),
+        _schedule_state_operand_read("state"),
     ),
     effects=(_CONVERGENT_EFFECT,),
     asm_forms=_asm(results=("dst",), operands=("value", "state")),
@@ -1080,6 +1146,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             SpillSlotSpace.STACK,
             flags=(RegClassFlag.PHYSICAL,),
             allocatable_count=32,
+            fixed_location_base=32,
+            fixed_location_count=8,
         ),
         RegClass(
             _REG_SPECIAL,
@@ -1119,6 +1187,12 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             flags=(RegClassFlag.PHYSICAL,),
             allocatable_count=8,
             alias_set_id=2,
+        ),
+        RegClass(
+            _REG_SCHEDULE_STATE,
+            32,
+            SpillSlotSpace.PRIVATE,
+            flags=(RegClassFlag.VIRTUAL_ONLY,),
         ),
     ),
     register_parts=(
@@ -1224,6 +1298,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_SELECT_I32_DESCRIPTOR,
         TEST_LOW_ADD_V4I32_DESCRIPTOR,
         TEST_LOW_EARLY_CLOBBER_V4I32_DESCRIPTOR,
+        TEST_LOW_MIXED_EARLY_CLOBBER_V4I32_DESCRIPTOR,
+        TEST_LOW_EARLY_TIED_V4I32_DESCRIPTOR,
         TEST_LOW_DOT4I_S8S8_DESCRIPTOR,
         TEST_LOW_MMA_I32_2X2X2_DESCRIPTOR,
         TEST_LOW_SHUFFLE_V4I32_DESCRIPTOR,
@@ -1234,9 +1310,9 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_ADD_PHYS_DESCRIPTOR,
         TEST_LOW_MOVE_TO_PRESSURE_ALIAS32_DESCRIPTOR,
         TEST_LOW_MOVE_FROM_PRESSURE_ALIAS32_X5_DESCRIPTOR,
-        TEST_LOW_ADD_SPECIAL_DESCRIPTOR,
-        TEST_LOW_STATE_ADD_SPECIAL_DESCRIPTOR,
-        TEST_LOW_EXPLICIT_STATE_ADD_SPECIAL_DESCRIPTOR,
+        TEST_LOW_ADD_SCHEDULE_STATE_DESCRIPTOR,
+        TEST_LOW_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,
+        TEST_LOW_EXPLICIT_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,
         TEST_LOW_CONVERGENT_EXPLICIT_STATE_READ_I32_DESCRIPTOR,
         TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
         TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,

@@ -332,6 +332,7 @@ scf_for = Op(
             single_block=True,
             terminator="scf.yield",
             implicit_args=(("iv", "index"),),
+            arg_source="iter_args",
         ),
     ],
     interfaces=[

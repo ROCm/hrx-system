@@ -36,6 +36,7 @@ loom_cc_library(
     loom::codegen::low::builder
     loom::codegen::low::descriptors
     loom::codegen::low::memory_access
+    loom::codegen::low::memory_access_ir
     loom::codegen::low::source_memory_plan
     loom::error::emitter
     loom::error::error_defs

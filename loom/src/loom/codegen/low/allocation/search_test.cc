@@ -195,8 +195,8 @@ uint32_t FindFreeLocationWithPlacement(
   unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
   unit_liveness.end_points = unit_end_points;
   unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
-  unit_liveness.values_with_edge_handoff_units = {liveness.value_count,
-                                                  edge_handoff_words};
+  unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
+                                                           edge_handoff_words};
 
   const loom_low_reg_class_t reg_class =
       RegClass(max_units, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
@@ -393,8 +393,8 @@ TEST_F(LowAllocationSearchTest, FindsFreeLocationAfterActiveAndReservedRanges) {
   unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
   unit_liveness.end_points = unit_end_points;
   unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
-  unit_liveness.values_with_edge_handoff_units = {liveness.value_count,
-                                                  edge_handoff_words};
+  unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
+                                                           edge_handoff_words};
 
   const loom_low_reg_class_t reg_class =
       RegClass(/*allocatable_count=*/8, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
@@ -502,8 +502,8 @@ TEST_F(LowAllocationSearchTest,
   unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
   unit_liveness.end_points = unit_end_points;
   unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
-  unit_liveness.values_with_edge_handoff_units = {liveness.value_count,
-                                                  edge_handoff_words};
+  unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
+                                                           edge_handoff_words};
 
   const loom_low_reg_class_t reg_class =
       RegClass(/*allocatable_count=*/2, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
@@ -662,8 +662,8 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
   unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
   unit_liveness.end_points = unit_end_points;
   unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
-  unit_liveness.values_with_edge_handoff_units = {liveness.value_count,
-                                                  edge_handoff_words};
+  unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
+                                                           edge_handoff_words};
 
   const loom_low_reg_class_t reg_class =
       RegClass(/*allocatable_count=*/4, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
@@ -797,8 +797,8 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
   unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
   unit_liveness.end_points = unit_end_points;
   unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
-  unit_liveness.values_with_edge_handoff_units = {liveness.value_count,
-                                                  edge_handoff_words};
+  unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
+                                                           edge_handoff_words};
 
   const loom_low_reg_class_t reg_class =
       RegClass(/*allocatable_count=*/4, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);

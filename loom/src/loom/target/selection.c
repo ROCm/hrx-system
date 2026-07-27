@@ -76,6 +76,26 @@ loom_symbol_ref_t loom_target_effective_target_ref(
   return loom_target_pass_capability_target_ref(capability);
 }
 
+bool loom_target_pass_capability_can_refine_target_bundle(
+    const loom_target_pass_capability_t* capability,
+    loom_symbol_ref_t effective_target_ref,
+    const loom_target_bundle_t* authored_target_bundle) {
+  if (!capability || !authored_target_bundle) return false;
+  const loom_symbol_ref_t invocation_target_ref =
+      loom_target_pass_capability_target_ref(capability);
+  if (!loom_symbol_ref_is_valid(effective_target_ref) ||
+      !loom_symbol_ref_is_valid(invocation_target_ref) ||
+      effective_target_ref.module_id != invocation_target_ref.module_id ||
+      effective_target_ref.symbol_id != invocation_target_ref.symbol_id) {
+    return false;
+  }
+  const loom_target_selection_t target_selection =
+      loom_target_pass_capability_target_selection(capability);
+  return target_selection.bundle != NULL &&
+         loom_target_function_contract_bundles_compatible(
+             authored_target_bundle, target_selection.bundle);
+}
+
 static bool loom_target_function_symbol_id(const loom_module_t* module,
                                            loom_func_like_t function,
                                            loom_symbol_id_t* out_symbol_id) {

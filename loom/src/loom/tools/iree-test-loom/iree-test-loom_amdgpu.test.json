@@ -83,6 +83,28 @@
           ]
         }
       }
+    },
+    {
+      "name": "runs kernel whose kernargs are unused",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/amdgpu_unused_kernargs.loom",
+          "--case=@unused_kernargs_case",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            {
+              "regex": "\"case\":\"unused_kernargs_case\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
     }
   ]
 }

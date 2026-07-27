@@ -75,6 +75,13 @@ typedef struct loom_view_region_t {
   // SSA value representing the storage root identity.
   loom_value_id_t root_value_id;
 
+  // Comparable alias scope for disjointness proofs, or NONE when distinct
+  // root identities are only addressing provenance.
+  loom_value_fact_alias_scope_id_t alias_scope_id;
+
+  // Known nullability of the underlying storage root.
+  loom_value_fact_reference_nullability_t nullability;
+
   // Symbolic byte offset of the view base relative to root_value_id.
   loom_symbolic_expr_t begin_byte_offset;
 
@@ -171,6 +178,17 @@ bool loom_view_region_table_try_lookup(const loom_view_region_table_t* table,
                                        loom_value_id_t value_id,
                                        const loom_view_region_t** out_region);
 
+// Derives the exact one-element byte region addressed by |static_indices| and
+// |dynamic_indices| within |view_value_id|. The returned region preserves the
+// storage root, alias scope, nullability, and memory space of the source view.
+// Unsupported element widths or malformed index lists return OK with
+// |out_derived| false. Nonlinear but well-formed addresses remain derived with
+// conservative symbolic begin/end expressions.
+iree_status_t loom_view_region_table_derive_element_region(
+    loom_view_region_table_t* table, loom_value_id_t view_value_id,
+    loom_attribute_t static_indices, loom_value_slice_t dynamic_indices,
+    loom_view_region_t* out_region, bool* out_derived);
+
 // Walks the table's local value domain region, constructs summaries for view
 // values, and derives per-view access flags from memory-operand descriptors.
 iree_status_t loom_view_region_table_analyze(loom_view_region_table_t* table);
@@ -180,9 +198,16 @@ iree_status_t loom_view_region_table_analyze(loom_view_region_table_t* table);
 loom_view_access_flags_t loom_view_region_table_root_access_flags(
     const loom_view_region_table_t* table, loom_value_id_t root_value_id);
 
-// Attempts to prove that two same-root view regions cannot overlap. Different
-// root SSA values are conservative unknown until a separate root-disjoint fact
-// system exists.
+// Returns true when two concrete memory spaces cannot name the same storage.
+// Unknown and generic spaces remain conservative, as do distinct global-like
+// spaces whose target representations may overlap.
+bool loom_view_memory_spaces_are_disjoint(loom_value_fact_memory_space_t left,
+                                          loom_value_fact_memory_space_t right);
+
+// Attempts to prove that two view regions cannot overlap. Same-root regions
+// use symbolic byte intervals. Distinct roots are disjoint when their concrete
+// memory spaces cannot alias or both carry comparable and different alias
+// scopes.
 iree_status_t loom_view_regions_prove_no_overlap(
     loom_view_region_table_t* table, const loom_view_region_t* left_region,
     const loom_view_region_t* right_region, bool* out_no_overlap);

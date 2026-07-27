@@ -115,11 +115,15 @@ TEST(ArtifactManifestTest, FormatsSummaryFacts) {
   functions[0].interface.parameter_detail_count = IREE_ARRAYSIZE(parameters);
   functions[0].execution.flags =
       LOOM_TARGET_ARTIFACT_MANIFEST_EXECUTION_FLAG_WORKGROUP_SIZE |
-      LOOM_TARGET_ARTIFACT_MANIFEST_EXECUTION_FLAG_SUBGROUP_SIZE;
+      LOOM_TARGET_ARTIFACT_MANIFEST_EXECUTION_FLAG_SUBGROUP_SIZE |
+      LOOM_TARGET_ARTIFACT_MANIFEST_EXECUTION_FLAG_CLUSTER_SIZE;
   functions[0].execution.workgroup_size[0] = 256;
   functions[0].execution.workgroup_size[1] = 1;
   functions[0].execution.workgroup_size[2] = 1;
   functions[0].execution.subgroup_size = 32;
+  functions[0].execution.cluster_size[0] = 1;
+  functions[0].execution.cluster_size[1] = 2;
+  functions[0].execution.cluster_size[2] = 1;
   functions[0].used_global_names = used_global_names;
   functions[0].used_global_name_count = IREE_ARRAYSIZE(used_global_names);
 
@@ -170,7 +174,8 @@ TEST(ArtifactManifestTest, FormatsSummaryFacts) {
                       "\"binding_count\":2,"
                       "\"constant_byte_length\":16},"
                       "\"execution\":{\"workgroup_size\":[256,1,1],"
-                      "\"subgroup_size\":32}}],"
+                      "\"subgroup_size\":32,"
+                      "\"cluster_size\":[1,2,1]}}],"
                       "\"globals\":[{\"name\":\"q4_table\","
                       "\"source\":\"q4_decode_table\","
                       "\"type\":\"u8[32]\","

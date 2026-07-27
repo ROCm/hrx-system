@@ -79,6 +79,8 @@ typedef struct loom_amdgpu_spill_lowering_context_t {
   uint32_t vgpr_unit_bytes;
   // Attribute name used by scratch packet descriptors.
   loom_string_id_t offset_attr_id;
+  // Immediate attribute name used by M0 constant descriptors.
+  loom_string_id_t imm32_attr_id;
   // Optional structured diagnostic emitter for user-authored spill traffic.
   iree_diagnostic_emitter_t emitter;
   // Mutable result receiving emitted diagnostic counts.
@@ -553,6 +555,31 @@ static iree_status_t loom_amdgpu_spill_lowering_build_register_convert(
   return iree_ok_status();
 }
 
+static iree_status_t loom_amdgpu_spill_lowering_build_m0_zero(
+    const loom_amdgpu_spill_lowering_context_t* context,
+    loom_rewriter_t* rewriter, const loom_low_descriptor_t* consumer_descriptor,
+    loom_location_id_t location, loom_value_id_t* out_value) {
+  *out_value = LOOM_VALUE_ID_INVALID;
+  loom_type_t m0_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_low_build_descriptor_implicit_resource_type(
+      context->descriptor_set, consumer_descriptor, &m0_type));
+  loom_amdgpu_spill_opcode_descriptor_t opcode_descriptor = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_resolve_descriptor_ref(
+      rewriter, context->descriptor_set,
+      LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32_M0_IMM, &opcode_descriptor));
+  const loom_named_attr_t imm32_attr = {
+      .name_id = context->imm32_attr_id,
+      .value = loom_attr_i64(0),
+  };
+  loom_op_t* const_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_const(
+      &rewriter->builder, context->descriptor_set, opcode_descriptor.descriptor,
+      opcode_descriptor.opcode_id, loom_make_named_attr_slice(&imm32_attr, 1),
+      m0_type, location, &const_op));
+  *out_value = loom_low_const_result(const_op);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_spill_lowering_materialize_store_value(
     const loom_amdgpu_spill_lowering_context_t* context,
     loom_rewriter_t* rewriter,
@@ -738,7 +765,8 @@ static iree_status_t loom_amdgpu_spill_lowering_store_chunk(
           rewriter, context->descriptor_set,
           loom_amdgpu_spill_lowering_store_descriptor_ref(chunk_units),
           &spill_descriptor));
-  loom_value_id_t operands[2] = {value, LOOM_VALUE_ID_INVALID};
+  loom_value_id_t operands[3] = {value, LOOM_VALUE_ID_INVALID,
+                                 LOOM_VALUE_ID_INVALID};
   iree_host_size_t operand_count = 1;
   int64_t offset = access->segment_offset;
   if (!loom_amdgpu_spill_lowering_offset_fits_immediate(
@@ -757,6 +785,12 @@ static iree_status_t loom_amdgpu_spill_lowering_store_chunk(
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_validate_offset_immediate(
       &spill_descriptor, offset));
+  if (loom_low_descriptor_implicit_resource_operand(
+          context->descriptor_set, spill_descriptor.descriptor) != NULL) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_build_m0_zero(
+        context, rewriter, spill_descriptor.descriptor, location,
+        &operands[operand_count++]));
+  }
   loom_named_attr_t attr = {0};
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_spill_lowering_make_offset_attr(context, offset, &attr));
@@ -781,7 +815,7 @@ static iree_status_t loom_amdgpu_spill_lowering_load_chunk(
           rewriter, context->descriptor_set,
           loom_amdgpu_spill_lowering_load_descriptor_ref(chunk_units),
           &spill_descriptor));
-  loom_value_id_t operands[1] = {LOOM_VALUE_ID_INVALID};
+  loom_value_id_t operands[2] = {LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID};
   iree_host_size_t operand_count = 0;
   int64_t offset = access->segment_offset;
   if (!loom_amdgpu_spill_lowering_offset_fits_immediate(
@@ -799,6 +833,12 @@ static iree_status_t loom_amdgpu_spill_lowering_load_chunk(
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_validate_offset_immediate(
       &spill_descriptor, offset));
+  if (loom_low_descriptor_implicit_resource_operand(
+          context->descriptor_set, spill_descriptor.descriptor) != NULL) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_build_m0_zero(
+        context, rewriter, spill_descriptor.descriptor, location,
+        &operands[operand_count++]));
+  }
   loom_named_attr_t attr = {0};
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_spill_lowering_make_offset_attr(context, offset, &attr));
@@ -1035,6 +1075,8 @@ static iree_status_t loom_amdgpu_spill_lowering_initialize_context(
           descriptor_set, out_context->vgpr_class_id);
   IREE_RETURN_IF_ERROR(loom_module_intern_string(module, IREE_SV("offset"),
                                                  &out_context->offset_attr_id));
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(module, IREE_SV("imm32"),
+                                                 &out_context->imm32_attr_id));
   return loom_amdgpu_storage_layout_build(module, function_op, scratch_arena,
                                           &out_context->storage_layout);
 }

@@ -25,6 +25,8 @@ typedef struct loom_low_allocation_op_point_entry_t
 
 // Hash index mapping low operations to allocation liveness program points.
 typedef struct loom_low_allocation_op_point_index_t {
+  // Liveness analysis owning the indexed operation rows.
+  const loom_liveness_analysis_t* liveness;
   // Bucket heads into |entries|. Empty buckets contain UINT32_MAX.
   uint32_t* bucket_heads;
   // Power-of-two number of entries in |bucket_heads|.
@@ -32,7 +34,7 @@ typedef struct loom_low_allocation_op_point_index_t {
   // Operation point entries stored in insertion order.
   loom_low_allocation_op_point_entry_t* entries;
   // Number of initialized entries in |entries|.
-  iree_host_size_t entry_count;
+  uint32_t entry_count;
 } loom_low_allocation_op_point_index_t;
 
 // Returns true when |assignment|'s storage lifetime overlaps |interval|'s
@@ -84,25 +86,10 @@ bool loom_low_allocation_live_range_values_overlap(
     loom_value_id_t rhs_value_id, uint32_t rhs_start_point,
     uint32_t rhs_end_point);
 
-// Returns |op|'s liveness program point by walking its parent block from the
-// block start point. This is only valid for source-order liveness.
-iree_status_t loom_low_allocation_live_range_op_program_point(
-    const loom_liveness_analysis_t* liveness, const loom_op_t* op,
-    uint32_t* out_program_point);
-
-// Returns |op|'s liveness program point under an optional explicit operation
-// order. Empty orders fall back to source order.
-iree_status_t loom_low_allocation_live_range_ordered_op_program_point(
-    const loom_liveness_analysis_t* liveness, const loom_region_t* body,
-    loom_liveness_order_t liveness_order, const loom_op_t* op,
-    uint32_t* out_program_point);
-
-// Builds an operation-to-program-point index using the same point model as
-// |liveness|. Empty operation orders use source order; non-empty orders use the
-// caller-provided root block order while nested regions remain in source order.
+// Builds an operation-to-program-point index over the accepted operation rows
+// already retained by |liveness|.
 iree_status_t loom_low_allocation_op_point_index_initialize(
-    const loom_liveness_analysis_t* liveness,
-    loom_liveness_order_t liveness_order, iree_arena_allocator_t* arena,
+    const loom_liveness_analysis_t* liveness, iree_arena_allocator_t* arena,
     loom_low_allocation_op_point_index_t* out_index);
 
 // Returns true and populates |out_program_point| when |op| is indexed.

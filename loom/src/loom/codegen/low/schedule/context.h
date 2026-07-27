@@ -135,6 +135,8 @@ typedef struct loom_low_schedule_value_record_t {
   loom_value_id_t value_id;
   // Same-block producer node index, or NONE for block arguments/external defs.
   uint32_t producer_node;
+  // First same-class state writer after the producer, or NONE.
+  uint32_t state_next_write_node;
   // Register units contributed to the pressure model.
   uint32_t unit_count;
   // Live units currently charged to this value in the pressure model.
@@ -160,9 +162,9 @@ typedef struct loom_low_schedule_build_state_t {
   // Scheduler options provided by the caller.
   const loom_low_schedule_options_t* options;
   // Direct register-class pressure cliffs from |options|, or NULL.
-  const loom_low_pressure_cliff_table_t* pressure_cliffs;
+  const loom_target_residency_direct_resource_table_t* pressure_cliffs;
   // Derived target pressure resources from |options|, or NULL.
-  const loom_low_pressure_resource_table_t* pressure_resources;
+  const loom_target_residency_derived_resource_table_t* pressure_resources;
   // Arena owning all table storage produced by this schedule.
   iree_arena_allocator_t* arena;
   // Low function definition operation being scheduled.
@@ -233,6 +235,9 @@ typedef struct loom_low_schedule_build_state_t {
   } pressure_limits;
   // Most recent architectural-state writer node, dense by register class.
   uint32_t* state_last_write_nodes;
+  // First architectural-state writer in the current block, dense by register
+  // class.
+  uint32_t* state_first_write_nodes;
   // Most recent non-writing state-ordering node, dense by register class.
   uint32_t* state_ordering_frontier_nodes;
   // Most recent state-edge consumer indexed by producer schedule node.
@@ -256,6 +261,13 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_schedule_preferred_pair_node_t* preferred_pair_nodes;
   // Concrete placement-sensitive pair opportunities in scheduled order.
   loom_low_placement_pair_use_t* placement_pair_uses;
+  // Reusable descriptor-row projection for one packet's operands.
+  struct {
+    // Descriptor-local row indices keyed by packet operand index.
+    uint16_t* indices;
+    // Allocated entries in |indices|.
+    iree_host_size_t capacity;
+  } descriptor_operands;
   // Per-block readers of values whose storage may be consumed by tied ops.
   struct {
     // Outstanding read lists, dense by local value ordinal.

@@ -26,6 +26,12 @@ iree_status_t loom_low_build_register_type(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id,
     uint32_t unit_count, loom_type_t* out_type);
 
+// Builds the register type for a descriptor's first implicit resource operand.
+// The descriptor must provide at least one non-immediate register-class form.
+iree_status_t loom_low_build_descriptor_implicit_resource_type(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor, loom_type_t* out_type);
+
 // Emits a descriptor-backed low.op from a descriptor row resolved earlier in
 // the pipeline.
 //

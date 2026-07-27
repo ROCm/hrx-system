@@ -34,8 +34,6 @@ void loom_low_planning_statistics_accumulate(
   LOOM_LOW_PLANNING_ACCUMULATE(repair.pair_replication_edit_count);
   LOOM_LOW_PLANNING_ACCUMULATE(repair.pair_replication_rejection_count);
   LOOM_LOW_PLANNING_ACCUMULATE(repair.spill_materialization_batch_count);
-  LOOM_LOW_PLANNING_ACCUMULATE(repair.address_state_materialization_count);
-  LOOM_LOW_PLANNING_ACCUMULATE(repair.address_state_change_count);
   loom_low_planning_arena_statistics_merge(&target->memory.frame_arena,
                                            &source->memory.frame_arena);
   loom_low_planning_arena_statistics_merge(&target->memory.repair_arena,

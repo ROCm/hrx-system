@@ -62,11 +62,6 @@ typedef struct iree_coordinated_test_config_t {
   // its ready signal before spawning the next role.
   const iree_test_role_t* roles;
   iree_host_size_t role_count;
-
-  // Overall timeout in milliseconds for all children to complete. If any
-  // child exceeds the timeout, all remaining children are killed.
-  // 0 = default (30000ms).
-  int64_t timeout_ms;
 } iree_coordinated_test_config_t;
 
 // Checks if --iree_test_role is present in argv, indicating this process is

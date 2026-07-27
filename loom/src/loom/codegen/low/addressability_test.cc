@@ -112,6 +112,7 @@ void InitializeAddressabilityTestState(
   state->operands[0] = (loom_low_operand_t){
       /*.field_name_string_offset=*/ADDRESSABILITY_STRING_OFFSET(field_dst),
       /*.encoding_field_id=*/{},
+      /*.source_value_index=*/0,
       /*.role=*/LOOM_LOW_OPERAND_ROLE_RESULT,
       /*.flags=*/{},
       /*.reg_class_alt_start=*/0,
@@ -126,6 +127,7 @@ void InitializeAddressabilityTestState(
   state->operands[1] = (loom_low_operand_t){
       /*.field_name_string_offset=*/ADDRESSABILITY_STRING_OFFSET(field_src),
       /*.encoding_field_id=*/{},
+      /*.source_value_index=*/0,
       /*.role=*/LOOM_LOW_OPERAND_ROLE_OPERAND,
       /*.flags=*/{},
       /*.reg_class_alt_start=*/0,

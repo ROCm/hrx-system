@@ -87,6 +87,25 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_test(
+  NAME
+    parameter_index_provider_test
+  SRCS
+    "parameter_index_provider_test.cc"
+  DEPS
+    ::file_handle
+    ::parameter_index
+    ::parameter_index_provider
+    ::parameter_provider
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::hal
+    iree::hal::drivers::local_sync::sync_driver
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 iree_cc_library(
   NAME
     parameter_provider

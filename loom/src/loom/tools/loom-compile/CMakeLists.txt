@@ -102,6 +102,11 @@ iree_execution_test_suite(
   TOOLS
     "loom-compile=::loom-compile"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/amdgpu_unused_kernargs.loom"
+    "gfx1250_configured_fragment_bank.loom"
+    "gfx1250_extended_vgpr.loom"
+    "gfx1250_tied_accumulators.loom"
+    "gfx12_wmma_bf16_f32.loom"
     "report_carried_loop_memory_economics_amdgpu.loom"
     "report_complex_loop_memory_economics_amdgpu.loom"
     "report_dispatch_memory_economics_amdgpu.loom"
@@ -109,7 +114,9 @@ iree_execution_test_suite(
     "report_loop_memory_economics_amdgpu.loom"
     "report_materialized_fragment_spills_amdgpu.loom"
     "report_private_memory_mix_amdgpu.loom"
+    "report_target_insertions_uncountable_amdgpu.loom"
     "selected_root_amdgpu.loom"
+    "target_family_template_provider_amdgpu.loom"
   LABELS
     "hostonly"
 )

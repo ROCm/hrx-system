@@ -1,0 +1,15 @@
+kernel.def export("unused_kernargs") @unused_kernargs() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%unused_buffer: buffer, %unused_scalar: i32) {
+  kernel.return
+}
+
+check.case @unused_kernargs_case {
+  %actual = check.generate.fill value(17) : tensor<4xi32>
+  %unused_scalar = check.literal value(42) : i32
+  func.call @unused_kernargs(%actual, %unused_scalar) : (tensor<4xi32>, i32)
+  %expected = check.generate.fill value(17) : tensor<4xi32>
+  check.expect.equal actual(%actual) expected(%expected) : tensor<4xi32>
+  check.return
+}

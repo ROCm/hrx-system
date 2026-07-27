@@ -7,7 +7,9 @@
 # bazel-to-cmake: skip
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
+load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
 load(":loom_check_rules_test.bzl", "loom_check_rules_test_suite")
 
 package(default_visibility = ["//visibility:public"])
@@ -20,6 +22,19 @@ loom_check_test(
 )
 
 loom_check_rules_test_suite(name = "loom_check_rules_tests")
+
+loom_link_module(
+    name = "linked_module",
+    srcs = ["link_checks.loom"],
+    libraries = ["link_kernels.loom"],
+)
+
+iree_executable_test(
+    name = "loom_link_module_direct_test",
+    src = "//loom/src/loom/tools/loom-format",
+    args = ["$(rootpath :linked_module)"],
+    data = [":linked_module"],
+)
 
 sh_test(
     name = "loom_check_wrapper_direct_test",
@@ -37,5 +52,6 @@ test_suite(
     tests = [
         ":loom_check_rules_tests",
         ":loom_check_wrapper_direct_test",
+        ":loom_link_module_direct_test",
     ],
 )

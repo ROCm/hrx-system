@@ -111,9 +111,13 @@ typedef enum loom_amdgpu_matrix_feature_profile_e {
 typedef enum loom_amdgpu_processor_info_flag_bits_e {
   // Processor has enough target-owned facts for native HSACO emission.
   LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION = 1u << 0,
+  // Clustered dispatches provide workgroup and cluster identity in the GFX1250
+  // launch-state TTMP and IB_STS2 ABI.
+  LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE = 1u << 1,
   // Processor info flags known by the AMDGPU target package.
   LOOM_AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS =
-      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION |
+      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
 } loom_amdgpu_processor_info_flag_bits_t;
 
 // Bitset of loom_amdgpu_processor_info_flag_bits_t values.

@@ -90,8 +90,9 @@ class MotionTest : public ::testing::Test {
 
   void PrepareMotionAnalysis() {
     IREE_ASSERT_OK(loom_module_compute_uses(module_));
-    IREE_ASSERT_OK(
-        loom_motion_analysis_initialize(module_, &motion_arena_, &motion_));
+    IREE_ASSERT_OK(loom_motion_analysis_initialize(
+        module_, /*fact_table=*/nullptr, /*value_domain=*/nullptr,
+        &motion_arena_, &motion_));
   }
 
   iree_status_t QueryRelocateBefore(loom_op_t* candidate_op,

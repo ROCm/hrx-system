@@ -590,6 +590,45 @@ class CiTest(unittest.TestCase):
         self.assertIn(xfail_target, gfx120x_test.argv)
         self.assertNotIn(xfail_target, gfx110x_test.argv)
 
+    def test_amdgpu_gfx1151_quarantines_manual_asan_execution(self):
+        xfail_target = (
+            "-//runtime/src/iree/hal/drivers/amdgpu/cts:manual_asan_executable_tests"
+        )
+        gfx1151_args = ci.parse_arguments(
+            [
+                "iree-bazel-amdgpu",
+                "--target",
+                "//runtime/...",
+                "--amdgpu-target",
+                "gfx1151",
+            ]
+        )
+        gfx110x_args = ci.parse_arguments(
+            [
+                "iree-bazel-amdgpu",
+                "--target",
+                "//runtime/...",
+                "--amdgpu-target",
+                "gfx110X-all",
+            ]
+        )
+
+        gfx1151_steps = ci.steps_from_args(gfx1151_args)
+        gfx110x_steps = ci.steps_from_args(gfx110x_args)
+        gfx1151_test = next(
+            step
+            for step in gfx1151_steps
+            if step.name == "Test IREE AMDGPU runtime resources"
+        )
+        gfx110x_test = next(
+            step
+            for step in gfx110x_steps
+            if step.name == "Test IREE AMDGPU runtime resources"
+        )
+
+        self.assertIn(xfail_target, gfx1151_test.argv)
+        self.assertNotIn(xfail_target, gfx110x_test.argv)
+
     def test_bazel_amdgpu_single_sanitizer_command_runs_one_configuration(self):
         args = ci.parse_arguments(
             [
@@ -847,27 +886,34 @@ class CiTest(unittest.TestCase):
                     r"command: iree-bazel-(amdgpu|vulkan)-sanitizers",
                 )
 
-    def test_core_gpu_workflow_routes_gpu_labels_to_linux_runners(self):
+    def test_core_gpu_workflow_routes_exact_gpu_labels(self):
         block = self.workflow_job_block(
             ".github/workflows/ci_core_linux.yml", "gpu_linux"
         )
-        self.assertIn("runner_label: linux-gfx942-1gpu-core42-ossci-rocm", block)
-        self.assertIn("runner_label: gpu_navi4x", block)
+        self.assertIn(
+            "runner_labels: '[\"linux-gfx942-1gpu-ccs-csp-ossci-rocm\"]'",
+            block,
+        )
+        self.assertIn(
+            'runner_labels: \'["self-hosted", "Linux", "X64", "gpu_navi4x"]\'',
+            block,
+        )
 
         reusable_workflow = Path(
             ".github/workflows/test_core_linux_gpu.yml"
         ).read_text()
         self.assertRegex(
             reusable_workflow,
-            r"runner_label:\n\s+type: string\n\s+required: true",
+            r"runner_labels:\n\s+type: string\n\s+description: "
+            r'"JSON array of labels that must all match the GPU runner\."\n'
+            r"\s+required: true",
         )
         reusable_block = self.workflow_job_block(
             ".github/workflows/test_core_linux_gpu.yml", "test_core_linux_gpu"
         )
         self.assertRegex(
             reusable_block,
-            r"runs-on:\n\s+- self-hosted\n\s+- Linux\n\s+- X64\n"
-            r"\s+- \"\$\{\{ inputs\.runner_label \}\}\"",
+            r"(?m)^\s+runs-on: \$\{\{ fromJSON\(inputs\.runner_labels\) \}\}$",
         )
 
     def test_core_windows_workflow_uses_generic_windows_runner(self):

@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "common/kpack.h"
 #include "iree/base/api.h"
 
 #if defined(HRX_ENABLE_ZSTD)
@@ -24,6 +25,11 @@
 // 0xBA55FACE that ships via `__hipRegisterFatBinary` in more recent ROCm.
 #define HRX_HIP_FAT_MAGIC_HIPF 0x48495046u
 #define HRX_HIP_FAT_MAGIC_BA55FACE 0xBA55FACEu
+// "HIPK" (0x4b504948): out-of-band wrapper emitted by kpack-packaged ROCm
+// builds. Same 24-byte layout as HIPF, but |binary| points at msgpack metadata
+// describing a sibling .kpack archive instead of an inline code object, and
+// |reserved| carries the multi-TU code-object index. Resolved via kpack.h.
+#define HRX_HIP_FAT_MAGIC_HIPK 0x4b504948u
 #define HRX_HIP_FAT_VERSION 1
 
 // __CLANG_OFFLOAD_BUNDLE__ (uncompressed bundle).
@@ -202,7 +208,8 @@ static bool hrx_fat_is_wrapper(iree_const_byte_span_t data) {
   }
   uint32_t magic;
   memcpy(&magic, data.data, sizeof(magic));
-  return magic == HRX_HIP_FAT_MAGIC_HIPF || magic == HRX_HIP_FAT_MAGIC_BA55FACE;
+  return magic == HRX_HIP_FAT_MAGIC_HIPF ||
+         magic == HRX_HIP_FAT_MAGIC_BA55FACE || magic == HRX_HIP_FAT_MAGIC_HIPK;
 }
 
 bool iree_hal_streaming_fat_binary_is_supported(iree_const_byte_span_t data) {
@@ -995,6 +1002,66 @@ static iree_status_t hrx_fat_extract_from_ccob(
 #endif  // HRX_ENABLE_ZSTD
 }
 
+// Resolves an out-of-band "HIPK" wrapper. Unlike HIPF/BA55FACE, its |binary|
+// pointer is msgpack metadata for a sibling .kpack archive rather than an
+// inline code object. The kpack module (kpack.h) reads that metadata, locates
+// the archive, selects the code object matching the best-ranked target
+// (honoring ISA feature-flag subsetting), and decompresses it into an
+// extract-owned buffer. The resolved code object is a raw AMDGPU ELF (or a
+// concatenation of ELFs / a Clang offload bundle), which is unpacked exactly
+// like an inline one.
+static iree_status_t hrx_fat_extract_from_hipk(
+    const hrx_hip_fat_binary_header_t* header, iree_host_size_t target_count,
+    const iree_hal_streaming_fat_binary_target_t* targets,
+    iree_hal_streaming_fat_binary_extract_t* extract) {
+  // Project the ranked targets to their AMDGPU target keys; the kpack resolver
+  // does its own ISA feature-subset matching over the device's actual feature
+  // flags. hrx_fat_validate_targets already proved every candidate is a
+  // concrete AMDGPU target with a non-empty key before any wrapper was opened,
+  // so the keys are read directly here.
+  iree_string_view_t target_archs[32];
+  iree_host_size_t target_arch_count = 0;
+  for (iree_host_size_t i = 0;
+       i < target_count && target_arch_count < IREE_ARRAYSIZE(target_archs);
+       ++i) {
+    target_archs[target_arch_count++] =
+        targets[i].executable_target->target_key;
+  }
+
+  // |reserved| holds the multi-TU code-object index (0 for single-TU binaries).
+  uint32_t co_index = (uint32_t)(uintptr_t)header->reserved;
+  void* code_object = NULL;
+  iree_host_size_t code_object_size = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_kpack_resolve_code_object(
+      header->binary, co_index, target_arch_count, target_archs,
+      extract->host_allocator, &code_object, &code_object_size));
+
+  // The resolved buffer backs the returned ELF spans; hand it to the extract so
+  // a single reset frees everything (including on the error paths below).
+  extract->owned_buffer = code_object;
+  extract->owned_buffer_size = code_object_size;
+
+  // A zero-length object would make the format sniffers below treat it as
+  // "size unknown" and read past the (empty) buffer; reject it explicitly.
+  if (code_object_size == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kpack resolved an empty code object");
+  }
+
+  iree_const_byte_span_t inner =
+      iree_make_const_byte_span(code_object, code_object_size);
+  if (hrx_fat_is_elf(inner)) {
+    return hrx_fat_extract_concatenated_elves(inner, target_count, targets,
+                                              extract);
+  }
+  if (hrx_fat_is_uncompressed_bundle(inner)) {
+    return hrx_fat_extract_from_bundle(inner, target_count, targets, extract);
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "kpack code object is neither an AMDGPU ELF nor a Clang offload bundle");
+}
+
 //===----------------------------------------------------------------------===//
 // Public API
 //===----------------------------------------------------------------------===//
@@ -1028,8 +1095,9 @@ iree_status_t iree_hal_streaming_fat_binary_extract_for_targets(
 
   // Peel the HIP fat-binary wrapper if present.
   iree_const_byte_span_t inner = data;
+  hrx_hip_fat_binary_header_t header = {0};
+  bool is_hipk = false;
   if (hrx_fat_is_wrapper(data)) {
-    hrx_hip_fat_binary_header_t header;
     memcpy(&header, data.data, sizeof(header));
     if (header.version != HRX_HIP_FAT_VERSION) {
       return iree_make_status(IREE_STATUS_INCOMPATIBLE,
@@ -1040,14 +1108,23 @@ iree_status_t iree_hal_streaming_fat_binary_extract_for_targets(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "HIP fat-binary wrapper has NULL binary pointer");
     }
-    // The wrapper points at an absolute address — it does NOT have to lie
-    // inside |data|. HIP embeds a pointer to the bundle in a separate
-    // section of the host object at link-time.
-    inner = iree_make_const_byte_span(header.binary, 0);
+    if (header.magic == HRX_HIP_FAT_MAGIC_HIPK) {
+      // Out-of-band kpack wrapper: |binary| is msgpack metadata, not a code
+      // object. Resolved below into an extract-owned buffer.
+      is_hipk = true;
+    } else {
+      // The wrapper points at an absolute address — it does NOT have to lie
+      // inside |data|. HIP embeds a pointer to the bundle in a separate
+      // section of the host object at link-time.
+      inner = iree_make_const_byte_span(header.binary, 0);
+    }
   }
 
   iree_status_t status = iree_ok_status();
-  if (hrx_fat_is_ccob(inner)) {
+  if (is_hipk) {
+    status =
+        hrx_fat_extract_from_hipk(&header, target_count, targets, out_extract);
+  } else if (hrx_fat_is_ccob(inner)) {
     status =
         hrx_fat_extract_from_ccob(inner, target_count, targets, out_extract);
   } else if (hrx_fat_is_uncompressed_bundle(inner)) {

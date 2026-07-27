@@ -70,7 +70,6 @@ loom_cc_library(
     loom::codegen::low::target_binding
     loom::ir
     loom::ops::low
-    loom::target::arch::amdgpu::planning::address_state
     loom::target::arch::amdgpu::planning::descriptor_semantics
     loom::target::arch::amdgpu::planning::occupancy
     loom::target::arch::amdgpu::planning::packet_plan
@@ -89,6 +88,7 @@ loom_check_test_suite(
   SRCS
     "test/allocation_json.loom-test"
     "test/assembly.loom-test"
+    "test/assembly_cluster.loom-test"
     "test/assembly_q8.loom-test"
     "test/assembly_wmma.loom-test"
     "test/packet.loom-test"
@@ -357,6 +357,7 @@ loom_cc_test(
     loom::ops::low
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::error_defs
+    loom::target::arch::amdgpu::refs::target_refs
     loom::testing::diagnostic_matchers
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -494,13 +495,14 @@ loom_cc_library(
     loom::target::arch::amdgpu::hal::kernel_abi
     loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::ops
-    loom::target::arch::amdgpu::planning::address_state
     loom::target::arch::amdgpu::planning::descriptor_semantics
     loom::target::arch::amdgpu::planning::occupancy
     loom::target::arch::amdgpu::planning::packet_plan
     loom::target::arch::amdgpu::planning::storage_lease
     loom::target::arch::amdgpu::planning::vopd_plan
+    loom::target::arch::amdgpu::planning::wait_counters
     loom::target::arch::amdgpu::provider
+    loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_info
     loom::target::entry_selection
     loom::target::function_contract
@@ -537,6 +539,7 @@ loom_cc_test(
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::error_defs
     loom::target::arch::amdgpu::matrix::contract
+    loom::target::arch::amdgpu::planning::wait_counters
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info

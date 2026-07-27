@@ -18,7 +18,7 @@
 #include "iree/hal/drivers/amdgpu/util/block_pool.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/signal_pool.h"
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 #include "iree/hal/memory/slab_provider.h"
 #include "iree/hal/memory/tlsf_pool.h"
 #include "iree/hal/pool.h"
@@ -220,6 +220,8 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   uint32_t compute_unit_count;
   // Native wavefront size reported by HSA for this GPU agent.
   uint32_t wavefront_size;
+  // Maximum resident wave count per compute unit reported by HSA.
+  uint32_t maximum_waves_per_compute_unit;
   // Maximum group segment byte length used for dispatch and sanitizer sizing.
   uint32_t group_segment_max_size;
   // HDP flush register descriptor reported by HSA for this GPU agent.
@@ -228,6 +230,8 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   iree_hal_amdgpu_host_memory_pools_t host_memory_pools;
   // Cold memory-system facts used to derive conservative topology flags.
   iree_hal_amdgpu_memory_system_capabilities_t memory_system;
+  // Clustered-dispatch limits reported for this GPU agent.
+  iree_hal_amdgpu_workgroup_cluster_capabilities_t workgroup_cluster;
   // CPU-visible coarse-grained device-memory capability for this GPU.
   iree_hal_amdgpu_cpu_visible_device_coarse_memory_t
       cpu_visible_device_coarse_memory;

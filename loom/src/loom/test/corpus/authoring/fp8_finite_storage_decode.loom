@@ -472,9 +472,6 @@ kernel.def @fp8_finite_storage_compact_rhs_tile_zero_scale_bf16(
   %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
 
   %weight_noalias, %scale_noalias, %target_noalias = buffer.assume.noalias %weight, %scale, %target : buffer, buffer, buffer
-  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
-  %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
-  %target_global = buffer.assume.memory_space<global> %target_noalias : buffer
 
   %dense = encoding.layout.dense : encoding<layout>
   %weight_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, rounding=finite_only> : encoding<schema>
@@ -483,9 +480,9 @@ kernel.def @fp8_finite_storage_compact_rhs_tile_zero_scale_bf16(
   %bounded_output_size = index.assume %output_size [range(%output_size, 16, 16384), mul(%output_size, 16)] : index
   %input_tile_count = index.div %bounded_input_size, %sixteen : index
   %output_tile_count = index.div %bounded_output_size, %sixteen : index
-  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%bounded_output_size]x[%input_tile_count]x16xf8E4M3, %weight_storage>
-  %scale_view = buffer.view %scale_global[%base] : buffer -> view<[%bounded_output_size]xf32, #dense>
-  %target_view = buffer.view %target_global[%base] : buffer -> view<[%output_tile_count]x[%input_tile_count]x16x16xbf16, #dense>
+  %weight_view = buffer.view %weight_noalias[%base] : buffer -> view<[%bounded_output_size]x[%input_tile_count]x16xf8E4M3, %weight_storage>
+  %scale_view = buffer.view %scale_noalias[%base] : buffer -> view<[%bounded_output_size]xf32, #dense>
+  %target_view = buffer.view %target_noalias[%base] : buffer -> view<[%output_tile_count]x[%input_tile_count]x16x16xbf16, #dense>
 
   %segment = index.rem %lane, %two : index
   %output_lane0 = index.div %lane, %two : index

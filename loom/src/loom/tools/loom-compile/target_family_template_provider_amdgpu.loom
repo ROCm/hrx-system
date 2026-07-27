@@ -1,0 +1,24 @@
+amdgpu.target<gfx1100> @gfx1100
+amdgpu.target<gfx1250> @gfx125x
+
+func.template<demo.target_family> target(@gfx1100) @gfx1100_provider(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<demo.target_family> target(@gfx125x) @gfx125x_provider(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+kernel.def export("target_family_template_provider") @target_family_template_provider() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %value = scalar.constant 42 : i32
+  %selected = func.apply<demo.target_family>(%value) : (i32) -> (i32)
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %view = buffer.view %global[%base] : buffer -> view<1xi32, #dense>
+  view.store %selected, %view[%zero] : i32, view<1xi32, #dense>
+  kernel.return
+}

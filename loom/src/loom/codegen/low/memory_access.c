@@ -76,6 +76,33 @@ static bool loom_low_byte_interval_envelopes_are_disjoint(
          right->end_facts.range_hi <= left->begin_facts.range_lo;
 }
 
+static bool loom_low_strided_byte_intervals_are_disjoint(
+    const loom_low_memory_access_summary_t* left,
+    const loom_low_memory_access_summary_t* right) {
+  const loom_low_memory_access_precision_flags_t required_precision =
+      LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT |
+      LOOM_LOW_MEMORY_ACCESS_PRECISION_STRIDED_INTERVAL;
+  if (!iree_all_bits_set(left->precision_flags, required_precision) ||
+      !iree_all_bits_set(right->precision_flags, required_precision) ||
+      left->alias_root_id != right->alias_root_id) {
+    return false;
+  }
+  const loom_low_strided_byte_interval_t* left_interval =
+      &left->strided_interval;
+  const loom_low_strided_byte_interval_t* right_interval =
+      &right->strided_interval;
+  if (left_interval->stride_bytes == 0 ||
+      left_interval->stride_bytes != right_interval->stride_bytes ||
+      left_interval->begin_bytes >= left_interval->end_bytes ||
+      left_interval->end_bytes > left_interval->stride_bytes ||
+      right_interval->begin_bytes >= right_interval->end_bytes ||
+      right_interval->end_bytes > right_interval->stride_bytes) {
+    return false;
+  }
+  return left_interval->end_bytes <= right_interval->begin_bytes ||
+         right_interval->end_bytes <= left_interval->begin_bytes;
+}
+
 bool loom_low_memory_access_summaries_may_alias(
     const loom_low_memory_access_summary_t* left,
     const loom_low_memory_access_summary_t* right) {
@@ -97,11 +124,16 @@ bool loom_low_memory_access_summaries_may_alias(
       left->alias_group_id != right->alias_group_id) {
     return false;
   }
-  if (iree_all_bits_set(left->precision_flags,
-                        LOOM_LOW_MEMORY_ACCESS_PRECISION_INTERVAL) &&
-      iree_all_bits_set(right->precision_flags,
-                        LOOM_LOW_MEMORY_ACCESS_PRECISION_INTERVAL) &&
-      left->byte_interval && right->byte_interval &&
+  if (loom_low_strided_byte_intervals_are_disjoint(left, right)) {
+    return false;
+  }
+  const loom_low_memory_access_precision_flags_t interval_precision =
+      LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT |
+      LOOM_LOW_MEMORY_ACCESS_PRECISION_INTERVAL;
+  if (iree_all_bits_set(left->precision_flags, interval_precision) &&
+      iree_all_bits_set(right->precision_flags, interval_precision) &&
+      left->alias_root_id == right->alias_root_id && left->byte_interval &&
+      right->byte_interval &&
       loom_low_byte_interval_envelopes_are_disjoint(left->byte_interval,
                                                     right->byte_interval)) {
     return false;

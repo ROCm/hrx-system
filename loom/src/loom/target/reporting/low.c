@@ -401,7 +401,8 @@ static bool loom_target_compile_report_mul3_u32(uint32_t x, uint32_t y,
 static void loom_target_compile_report_record_static_workload(
     loom_target_compile_report_t* report,
     const loom_target_workgroup_size_t* workgroup_size,
-    const loom_target_dispatch_workgroup_count_t* workgroup_count) {
+    const loom_target_dispatch_workgroup_count_t* workgroup_count,
+    const loom_target_workgroup_cluster_size_t* workgroup_cluster_size) {
   loom_target_compile_report_workload_t workload = {0};
   if (workgroup_size != NULL) {
     workload.flags |= LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE;
@@ -420,6 +421,19 @@ static void loom_target_compile_report_record_static_workload(
             workload.workgroup_count.z, &workload.dispatch_workgroup_count)) {
       workload.flags |=
           LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT;
+    }
+  }
+  if (workgroup_cluster_size != NULL) {
+    workload.flags |=
+        LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE;
+    workload.workgroup_cluster_size = *workgroup_cluster_size;
+    if (loom_target_compile_report_mul3_u32(
+            workload.workgroup_cluster_size.x,
+            workload.workgroup_cluster_size.y,
+            workload.workgroup_cluster_size.z,
+            &workload.flat_workgroup_cluster_size)) {
+      workload.flags |=
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_CLUSTER_SIZE;
     }
   }
   if (iree_all_bits_set(
@@ -448,8 +462,14 @@ static void loom_target_compile_report_record_low_workload(
                        LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_COUNT)) {
     workgroup_count = &lower_result->static_workgroup_count;
   }
-  loom_target_compile_report_record_static_workload(report, workgroup_size,
-                                                    workgroup_count);
+  const loom_target_workgroup_cluster_size_t* workgroup_cluster_size = NULL;
+  if (iree_any_bit_set(
+          lower_result->static_launch_config_flags,
+          LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_CLUSTER_SIZE)) {
+    workgroup_cluster_size = &lower_result->static_workgroup_cluster_size;
+  }
+  loom_target_compile_report_record_static_workload(
+      report, workgroup_size, workgroup_count, workgroup_cluster_size);
 }
 
 void loom_target_compile_report_record_low_kernel_workload(
@@ -460,9 +480,14 @@ void loom_target_compile_report_record_low_kernel_workload(
   loom_target_dispatch_workgroup_count_t workgroup_count = {0};
   const bool has_workgroup_count = loom_low_kernel_def_static_workgroup_count(
       low_function_op, &workgroup_count);
+  loom_target_workgroup_cluster_size_t workgroup_cluster_size = {0};
+  const bool has_workgroup_cluster_size =
+      loom_low_kernel_def_static_workgroup_cluster_size(
+          low_function_op, &workgroup_cluster_size);
   loom_target_compile_report_record_static_workload(
       report, has_workgroup_size ? &workgroup_size : NULL,
-      has_workgroup_count ? &workgroup_count : NULL);
+      has_workgroup_count ? &workgroup_count : NULL,
+      has_workgroup_cluster_size ? &workgroup_cluster_size : NULL);
 }
 
 iree_status_t loom_target_compile_report_record_low_lowering(

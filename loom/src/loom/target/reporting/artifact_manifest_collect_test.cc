@@ -419,7 +419,7 @@ low.kernel.def target(@gpu) abi_layout({
   direct_arg_sizes = [],
   resource_count = 0,
   uses_kernarg_segment_ptr = false
-}) workgroup_size(64, 1, 1) @entry() {
+}) workgroup_size(64, 1, 1) cluster_size(1, 2, 1) @entry() {
   low.return
 }
 )");
@@ -444,7 +444,8 @@ low.kernel.def target(@gpu) abi_layout({
                       "\"binding_count\":0,"
                       "\"constant_byte_length\":0},"
                       "\"execution\":{\"workgroup_size\":[64,1,1],"
-                      "\"subgroup_size\":64}}]}")))
+                      "\"subgroup_size\":64,"
+                      "\"cluster_size\":[1,2,1]}}]}")))
       << std::string(output.data, output.size);
   iree_string_builder_deinitialize(&builder);
 }

@@ -188,6 +188,33 @@ iree_status_t loom_pass_ir_build_repeat(
   return status;
 }
 
+iree_status_t loom_pass_ir_begin_if_changed(loom_builder_t* builder,
+                                            loom_pass_ir_scope_t* out_scope) {
+  *out_scope = (loom_pass_ir_scope_t){0};
+  loom_op_t* if_changed_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_if_changed_build(
+      builder, LOOM_LOCATION_UNKNOWN, &if_changed_op));
+  return loom_pass_ir_enter_scope(builder, if_changed_op,
+                                  loom_pass_if_changed_body(if_changed_op),
+                                  out_scope);
+}
+
+iree_status_t loom_pass_ir_build_if_changed(
+    loom_builder_t* builder, loom_pass_ir_body_build_fn_t build_body,
+    void* user_data, loom_op_t** out_if_changed_op) {
+  *out_if_changed_op = NULL;
+  loom_op_t* if_changed_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_if_changed_build(
+      builder, LOOM_LOCATION_UNKNOWN, &if_changed_op));
+  iree_status_t status = loom_pass_ir_build_scope(
+      builder, if_changed_op, loom_pass_if_changed_body(if_changed_op),
+      build_body, user_data);
+  if (iree_status_is_ok(status)) {
+    *out_if_changed_op = if_changed_op;
+  }
+  return status;
+}
+
 iree_status_t loom_pass_ir_build_call(loom_builder_t* builder,
                                       loom_symbol_ref_t callee,
                                       loom_op_t** out_call_op) {

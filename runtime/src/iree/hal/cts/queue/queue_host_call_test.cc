@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <future>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -111,15 +112,22 @@ TEST_P(QueueHostCallTest, NonBlockingFlag) {
   IREE_TRACE_SCOPE();
 
   struct state_t {
-    std::atomic<int> did_call;
-    std::atomic<bool> received_semaphores;
+    // Guards all callback-produced state through sideband signaling.
+    std::mutex mutex;
+    // Number of times the callback was invoked.
+    int did_call = 0;
+    // Whether the callback received signal semaphores in its context.
+    bool received_semaphores = false;
+    // Signals that the detached callback has started executing.
     SemaphoreList sideband_semaphore_list;
-  } state = {0, false, {device_, {0}, {1}}};
+  } state;
+  state.sideband_semaphore_list = SemaphoreList(device_, {0}, {1});
   auto call = iree_hal_make_host_call(
       +[](void* user_data, const uint64_t args[4],
           iree_hal_host_call_context_t* context) {
         IREE_TRACE_SCOPE_NAMED("callback");
         auto* state = (state_t*)user_data;
+        std::lock_guard<std::mutex> lock(state->mutex);
         ++state->did_call;
         state->received_semaphores =
             !iree_hal_semaphore_list_is_empty(context->signal_semaphore_list);
@@ -148,6 +156,10 @@ TEST_P(QueueHostCallTest, NonBlockingFlag) {
                                               iree_infinite_timeout(),
                                               IREE_ASYNC_WAIT_FLAG_NONE));
 
+  // Observing the sideband payload does not imply that its signal operation
+  // has finished dispatching timepoints. Wait until the callback releases the
+  // state mutex before inspecting or destroying its semaphore list.
+  std::lock_guard<std::mutex> lock(state.mutex);
   EXPECT_EQ(state.did_call, 1);
   EXPECT_FALSE(state.received_semaphores)
       << "Callback should not receive semaphores with NON_BLOCKING flag";

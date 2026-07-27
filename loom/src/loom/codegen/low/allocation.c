@@ -9,6 +9,7 @@
 #include "loom/codegen/low/allocation/copy_decision.h"
 #include "loom/codegen/low/allocation/edge_copy.h"
 #include "loom/codegen/low/allocation/interval_assignment.h"
+#include "loom/codegen/low/allocation/loop_edge_relocation.h"
 #include "loom/codegen/low/allocation/packet_move.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
@@ -131,9 +132,8 @@ iree_status_t loom_low_allocate_function(
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_unit_liveness_initialize(
-        model->module, state.body, &state.target, options->liveness_order,
-        &state.placement, value_domain, &state.liveness, arena,
-        &state.unit_liveness);
+        model->module, &state.target, &state.placement, value_domain,
+        &state.liveness, arena, &state.unit_liveness);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_unit_liveness_extend_for_tied_results(
@@ -167,6 +167,36 @@ iree_status_t loom_low_allocate_function(
     status = loom_low_allocation_interval_assignment_build(
         &interval_assignment_context, &state.interval_assignment);
   }
+  // Backedge placement belongs to the final physical assignment. Spill repair
+  // rewrites the IR and rebuilds the frame, so relocating a provisional spill
+  // assignment would be discarded.
+  const bool assignment_is_final =
+      state.interval_assignment.spill_plan_count == 0 &&
+      state.interval_assignment.spill_count == 0;
+  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0 &&
+      assignment_is_final) {
+    const loom_low_allocation_loop_edge_relocation_context_t
+        loop_edge_relocation_context = {
+            .module = state.module,
+            .body = state.body,
+            .cfg_graph = &model->cfg_graph,
+            .descriptor_set = state.target.descriptor_set,
+            .liveness = &state.liveness,
+            .placement = &state.placement,
+            .target_constraints = &state.target_constraints,
+            .unit_liveness = &state.unit_liveness,
+            .storage_leases = &state.storage_leases,
+            .assignments = state.interval_assignment.assignments,
+            .assignment_count = state.interval_assignment.assignment_count,
+            .assignment_indices_by_value_ordinal =
+                state.interval_assignment.assignment_indices_by_value_ordinal,
+            .arena = arena,
+        };
+    loom_low_allocation_loop_edge_relocation_result_t
+        loop_edge_relocation_result = {0};
+    status = loom_low_allocation_loop_edge_relocate(
+        &loop_edge_relocation_context, &loop_edge_relocation_result);
+  }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status =
         loom_low_allocation_storage_lease_state_finalize(&state.storage_leases);
@@ -180,13 +210,9 @@ iree_status_t loom_low_allocate_function(
     status = loom_low_allocation_copy_decision_plan_build(
         &copy_decision_context, arena, &state.copy_decision_plan);
   }
-  // Parallel-move scratch belongs to the final physical assignment. Spill
-  // repair rewrites the IR and rebuilds the frame, so any move plan built from
-  // a provisional spill assignment would be discarded and may report false
-  // scratch conflicts against registers that repair will release.
-  const bool assignment_is_final =
-      state.interval_assignment.spill_plan_count == 0 &&
-      state.interval_assignment.spill_count == 0;
+  // Parallel-move scratch also belongs to the final physical assignment. A
+  // provisional spill assignment may report false scratch conflicts against
+  // registers that repair will release.
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0 &&
       assignment_is_final) {
     const loom_low_allocation_edge_copy_context_t edge_copy_context = {

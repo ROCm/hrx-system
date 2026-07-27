@@ -20,8 +20,8 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/string_builder.h"
 #include "loom/codegen/low/allocation.h"
-#include "loom/codegen/low/pressure.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
+#include "loom/target/residency.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -194,8 +194,8 @@ iree_status_t loom_amdgpu_occupancy_build_target_resources(
     iree_arena_allocator_t* arena,
     loom_amdgpu_occupancy_target_resources_t* out_resources);
 
-// Returns the generated target pressure model for |descriptor_set|.
-const loom_low_pressure_model_t* loom_amdgpu_occupancy_pressure_model(
+// Returns the generated target residency model for |descriptor_set|.
+const loom_target_residency_model_t* loom_amdgpu_occupancy_residency_model(
     const loom_low_descriptor_set_t* descriptor_set);
 
 // Appends a compact JSON representation of |table| to |builder|.
