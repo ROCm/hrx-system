@@ -162,6 +162,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::codegen::low::storage_layout
     loom::ir
     loom::ops::low
   LABELS
@@ -306,6 +307,7 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
+    loom::codegen::low::storage_layout
     loom::ir
     loom::ops::low
     loom::target::arch::amdgpu::descriptors::low_registry

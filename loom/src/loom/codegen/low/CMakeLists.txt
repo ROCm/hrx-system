@@ -159,7 +159,6 @@ loom_cc_library(
   SRCS
     "storage_layout.c"
   DEPS
-    ::function
     iree::base
     iree::base::internal::arena
     loom::ir

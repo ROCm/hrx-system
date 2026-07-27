@@ -158,6 +158,7 @@ loom_cc_test(
     srcs = ["storage_layout_test.cc"],
     deps = [
         ":storage_layout",
+        "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base/internal:arena",
@@ -270,6 +271,7 @@ loom_cc_test(
         ":preflight",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amdgpu:error_defs",

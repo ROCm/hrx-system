@@ -1243,6 +1243,10 @@ iree_status_t loom_low_schedule_fill_nodes(
       if (op->kind == LOOM_OP_LOW_COPY && loom_low_copy_detached(op)) {
         ++state->detached_copy_node_count;
       }
+      if (loom_low_storage_reserve_isa(op)) {
+        IREE_RETURN_IF_ERROR(loom_low_storage_layout_builder_append(
+            state->module, op, state->arena, &state->storage_layout_builder));
+      }
 
       const loom_low_descriptor_t* descriptor = NULL;
       IREE_RETURN_IF_ERROR(

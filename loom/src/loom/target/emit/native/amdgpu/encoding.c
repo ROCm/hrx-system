@@ -1708,9 +1708,9 @@ static iree_status_t loom_amdgpu_encode_storage_address_packet(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
   const loom_op_t* op = packet->node->op;
   loom_amdgpu_storage_layout_reference_t reference;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_lookup_reference(
+  loom_amdgpu_storage_layout_lookup_reference(
       state->storage_layout, state->schedule->module,
-      loom_low_storage_address_storage(op), &reference));
+      loom_low_storage_address_storage(op), &reference);
   const uint64_t offset = (uint64_t)loom_low_storage_address_offset(op);
   uint64_t byte_offset = reference.reservation.byte_offset;
   if (byte_offset > UINT32_MAX ||
@@ -2063,8 +2063,7 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
       options ? options->storage_layout : NULL;
   if (storage_layout == NULL) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_build(
-        schedule->module, schedule->function_op, arena,
-        &derived_storage_layout));
+        &schedule->storage_layout, arena, &derived_storage_layout));
     storage_layout = &derived_storage_layout;
   }
   const loom_amdgpu_native_descriptor_refs_t descriptors = {

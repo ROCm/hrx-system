@@ -1253,6 +1253,7 @@ iree_status_t loom_low_schedule_function(
   };
   loom_target_bundle_storage_rebind(&state.target.bundle_storage);
   loom_low_schedule_dependency_graph_initialize(&state.dependencies);
+  loom_low_storage_layout_builder_initialize(&state.storage_layout_builder);
   IREE_ASSERT(state.body != NULL);
   IREE_RETURN_IF_ERROR(loom_low_schedule_verify_memory_access_table(
       options->memory_access_table, model->function_op, state.body));
@@ -1333,11 +1334,15 @@ iree_status_t loom_low_schedule_function(
   }
 
   if (iree_status_is_ok(status)) {
+    loom_low_storage_layout_t storage_layout;
+    loom_low_storage_layout_builder_finish(&state.storage_layout_builder,
+                                           &storage_layout);
     *out_table = (loom_low_schedule_table_t){
         .module = model->module,
         .function_op = model->function_op,
         .target = state.target,
         .memory_access_table = options->memory_access_table,
+        .storage_layout = storage_layout,
         .value_ids = model->value_domain.value_ids,
         .value_count = model->value_domain.value_count,
         .liveness = liveness,

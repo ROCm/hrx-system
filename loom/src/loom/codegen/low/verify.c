@@ -42,6 +42,8 @@ typedef struct loom_low_function_verify_state_t {
   iree_string_view_t function_name;
   const loom_op_t* function_op;
   loom_region_t* body;
+  // Packed storage sizes accumulated during the existing verifier walk.
+  loom_low_storage_layout_space_sizes_t storage_space_sizes;
   void** provider_states;
 } loom_low_function_verify_state_t;
 
@@ -1257,16 +1259,13 @@ static iree_status_t loom_low_verify_workgroup_storage_limit(
       loom_low_verify_should_stop(function_state->state)) {
     return iree_ok_status();
   }
-  loom_low_storage_layout_space_sizes_t sizes = {0};
-  IREE_RETURN_IF_ERROR(loom_low_storage_layout_collect_space_sizes(
-      function_state->state->module, function_state->function_op, &sizes));
-  if (sizes.workgroup_bytes <= limit) {
+  if (function_state->storage_space_sizes.workgroup_bytes <= limit) {
     return iree_ok_status();
   }
   const loom_diagnostic_param_t params[] = {
       loom_param_string(function_state->function_name),
       loom_param_string(bundle->name),
-      loom_param_u64(sizes.workgroup_bytes),
+      loom_param_u64(function_state->storage_space_sizes.workgroup_bytes),
       loom_param_u64(limit),
   };
   return loom_low_verify_emit(function_state->state,
@@ -1861,6 +1860,12 @@ static iree_status_t loom_low_verify_walk_op(void* user_data, loom_op_t* op,
     *out_result = LOOM_WALK_ABORT;
     return iree_ok_status();
   }
+  if (loom_low_storage_reserve_isa(op) && op->parent_block != NULL &&
+      op->parent_block->parent_region == function_state->body) {
+    IREE_RETURN_IF_ERROR(loom_low_storage_layout_accumulate_reservation(
+        function_state->state->module, op,
+        &function_state->storage_space_sizes));
+  }
 
   loom_low_resolved_descriptor_packet_t packet = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_descriptor_packet(
@@ -1970,11 +1975,6 @@ static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
   if (loom_low_verify_should_stop(state)) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(
-      loom_low_verify_workgroup_storage_limit(&function_state));
-  if (loom_low_verify_should_stop(state)) {
-    return iree_ok_status();
-  }
   if (body == NULL) {
     return iree_ok_status();
   }
@@ -1990,6 +1990,9 @@ static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
         state->module, body, LOOM_WALK_PRE_ORDER,
         (loom_walk_callback_t){loom_low_verify_walk_op, &function_state},
         &state->walk_arena, &walk_result);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_low_verify_workgroup_storage_limit(&function_state);
   }
   if (iree_status_is_ok(status)) {
     status = loom_low_verify_end_function_providers(&function_state);

@@ -47,15 +47,6 @@ static iree_status_t loom_amdgpu_native_preflight_update_high_water(
   return iree_ok_status();
 }
 
-typedef struct loom_amdgpu_native_preflight_storage_context_t {
-  // Schedule whose function body is being scanned.
-  const loom_low_schedule_table_t* schedule;
-  // Optional structured diagnostic controls.
-  const loom_amdgpu_native_preflight_options_t* options;
-  // Mutable preflight result receiving diagnostic counts.
-  loom_amdgpu_native_preflight_t* preflight;
-} loom_amdgpu_native_preflight_storage_context_t;
-
 static iree_status_t
 loom_amdgpu_native_preflight_emit_unsupported_storage_space(
     const loom_low_schedule_table_t* schedule, loom_value_id_t storage_value_id,
@@ -101,32 +92,23 @@ loom_amdgpu_native_preflight_emit_unsupported_storage_space(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_native_preflight_storage_callback(
-    void* user_data, loom_value_id_t storage_value_id,
-    const loom_low_storage_layout_reservation_t* reservation) {
-  loom_amdgpu_native_preflight_storage_context_t* context =
-      (loom_amdgpu_native_preflight_storage_context_t*)user_data;
-  if (loom_low_storage_space_set_contains(kLoomAmdgpuNativeStorageSpaces,
-                                          reservation->space)) {
-    return iree_ok_status();
-  }
-  return loom_amdgpu_native_preflight_emit_unsupported_storage_space(
-      context->schedule, storage_value_id, reservation, context->options,
-      context->preflight);
-}
-
 static iree_status_t loom_amdgpu_native_preflight_collect_storage_usage(
     const loom_low_schedule_table_t* schedule,
     const loom_amdgpu_native_preflight_options_t* options,
     loom_amdgpu_native_preflight_t* preflight) {
-  loom_amdgpu_native_preflight_storage_context_t context = {
-      .schedule = schedule,
-      .options = options,
-      .preflight = preflight,
-  };
-  return loom_low_storage_layout_visit_reservations(
-      schedule->module, schedule->function_op,
-      loom_amdgpu_native_preflight_storage_callback, &context);
+  const loom_low_storage_layout_t* layout = &schedule->storage_layout;
+  for (iree_host_size_t i = 0; i < layout->record_count; ++i) {
+    const loom_low_storage_layout_record_t* record = &layout->records[i];
+    if (loom_low_storage_space_set_contains(kLoomAmdgpuNativeStorageSpaces,
+                                            record->reservation.space)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_native_preflight_emit_unsupported_storage_space(
+            schedule, record->storage_value_id, &record->reservation, options,
+            preflight));
+  }
+  return iree_ok_status();
 }
 
 static iree_string_view_t
