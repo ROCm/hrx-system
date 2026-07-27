@@ -115,6 +115,35 @@ void iree_hal_amdgpu_device_dispatch_emplace_packet(
     iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr);
 
+// Initializes the fixed HIP/OpenCL implicit-argument suffix.
+//
+// Only IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE bytes are reserved by executable
+// metadata and initialized here. The backing struct also declares deprecated
+// pre-GFX9 fields beyond that suffix and must not be cleared with sizeof.
+//
+// Preconditions:
+//   - |kernel_args|, |workgroup_count|, and |implicit_args| are non-NULL.
+//   - |implicit_args| points to at least
+//     IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE bytes of writable storage.
+static inline IREE_AMDGPU_ATTRIBUTE_ALWAYS_INLINE void
+iree_hal_amdgpu_device_dispatch_initialize_implicit_args(
+    const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
+        kernel_args,
+    const uint32_t workgroup_count[3], uint32_t dynamic_workgroup_local_memory,
+    iree_amdgpu_kernel_implicit_args_t* IREE_AMDGPU_RESTRICT implicit_args) {
+  iree_amdgpu_memset(implicit_args, 0, IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE);
+  implicit_args->block_count[0] = workgroup_count[0];
+  implicit_args->block_count[1] = workgroup_count[1];
+  implicit_args->block_count[2] = workgroup_count[2];
+  implicit_args->group_size[0] = kernel_args->workgroup_size[0];
+  implicit_args->group_size[1] = kernel_args->workgroup_size[1];
+  implicit_args->group_size[2] = kernel_args->workgroup_size[2];
+  implicit_args->grid_dims = 3;
+  implicit_args->printf_buffer = NULL;
+  implicit_args->hostcall_buffer = NULL;
+  implicit_args->dynamic_lds_size = dynamic_workgroup_local_memory;
+}
+
 // Populates the HIP/OpenCL implicit args suffix in already-reserved storage.
 //
 // This must be called after explicit HAL/custom kernargs have been populated

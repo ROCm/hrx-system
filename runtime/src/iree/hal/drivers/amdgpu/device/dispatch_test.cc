@@ -107,6 +107,10 @@ TEST(DispatchTest, EmplaceImplicitArgsWritesSuffix) {
   EXPECT_EQ(implicit_args->unused_default_queue, 0u);
   EXPECT_EQ(implicit_args->unused_completion_action, 0u);
   EXPECT_EQ(implicit_args->dynamic_lds_size, 13u);
+  for (size_t i = layout.total_kernarg_size; i < kernargs.size(); ++i) {
+    EXPECT_EQ(kernargs[i], 0xFDu)
+        << "implicit args writer exceeded its fixed suffix at byte " << i;
+  }
 }
 
 TEST(DispatchTest, EmplaceCustomKernargsCopiesRawBlob) {

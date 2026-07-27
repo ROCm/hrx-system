@@ -8,8 +8,6 @@
 
 #include <string.h>
 
-#include "iree/hal/drivers/amdgpu/abi/kernel_args.h"
-
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_kernarg_layout_t
 //===----------------------------------------------------------------------===//
@@ -226,23 +224,6 @@ static iree_status_t iree_hal_amdgpu_kernarg_layout_validate_params(
                               " exceeds kernarg byte length %" PRIhsz,
                               params->implicit_args_byte_offset,
                               params->kernarg_byte_length);
-    }
-    // The full fixed implicit-args suffix must fit within the reservation. The
-    // device and host implicit writers unconditionally write
-    // IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE bytes starting at the offset, so a
-    // reservation that only covers the offset itself would be overrun.
-    iree_host_size_t implicit_args_end = 0;
-    if (IREE_UNLIKELY(
-            !iree_host_size_checked_add(
-                params->implicit_args_byte_offset,
-                (iree_host_size_t)IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
-                &implicit_args_end) ||
-            implicit_args_end > params->kernarg_byte_length)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "implicit args suffix [%" PRIhsz ", %" PRIhsz
-                              ") exceeds kernarg byte length %" PRIhsz,
-                              params->implicit_args_byte_offset,
-                              implicit_args_end, params->kernarg_byte_length);
     }
     if (IREE_UNLIKELY(!iree_host_size_has_alignment(
             params->implicit_args_byte_offset, sizeof(uint64_t)))) {

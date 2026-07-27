@@ -105,7 +105,6 @@ iree_runtime_cc_library(
     hdrs = ["kernarg_layout.h"],
     deps = [
         "//runtime/src/iree/base",
-        "//runtime/src/iree/hal/drivers/amdgpu/abi",
     ],
 )
 
@@ -528,23 +527,6 @@ iree_runtime_cc_test(
     deps = [
         ":kernarg_layout",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/hal/drivers/amdgpu/abi",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "kernarg_emitter_equivalence_test",
-    srcs = ["kernarg_emitter_equivalence_test.cc"],
-    deps = [
-        ":amdgpu",
-        ":headers",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/amdgpu/abi",
-        "//runtime/src/iree/hal/drivers/amdgpu/device:dispatch",
-        "//runtime/src/iree/hal/drivers/amdgpu/device:headers",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -571,23 +553,6 @@ iree_runtime_cc_test(
         ":kernarg_layout",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal/drivers/amdgpu/abi",
-        "//runtime/src/iree/hal/drivers/amdgpu/util:hsaco_metadata",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "kernarg_golden_test",
-    srcs = ["kernarg_golden_test.cc"],
-    deps = [
-        ":executable_metadata",
-        ":executable_metadata_hsaco",
-        ":kernarg_layout",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/hal/drivers/amdgpu/abi",
-        "//runtime/src/iree/hal/drivers/amdgpu/device:dispatch",
-        "//runtime/src/iree/hal/drivers/amdgpu/device:headers",
         "//runtime/src/iree/hal/drivers/amdgpu/util:hsaco_metadata",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

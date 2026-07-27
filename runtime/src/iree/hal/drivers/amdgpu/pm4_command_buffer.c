@@ -10,7 +10,6 @@
 #include <string.h>
 
 #include "iree/base/threading/mutex.h"
-#include "iree/hal/drivers/amdgpu/abi/kernel_args.h"
 #include "iree/hal/drivers/amdgpu/abi/kernel_descriptor.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/device/dispatch.h"
@@ -2151,35 +2150,6 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_resolve_buffer_ref(
   return iree_ok_status();
 }
 
-static void iree_hal_amdgpu_pm4_command_buffer_write_implicit_args(
-    const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
-    const iree_hal_dispatch_config_t config,
-    iree_amdgpu_kernel_implicit_args_t* implicit_args) {
-  // Zero the reserved implicit-args window, not sizeof(the struct): the struct
-  // carries deprecated GFX8/pre-GFX9 trailer fields past the reservation, so
-  // sizeof would overrun the kernarg template. This matches the device, AQL,
-  // and host-queue implicit writers.
-  memset(implicit_args, 0, IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE);
-  implicit_args->block_count[0] = config.workgroup_count[0];
-  implicit_args->block_count[1] = config.workgroup_count[1];
-  implicit_args->block_count[2] = config.workgroup_count[2];
-  implicit_args->group_size[0] = kernel_args->workgroup_size[0];
-  implicit_args->group_size[1] = kernel_args->workgroup_size[1];
-  implicit_args->group_size[2] = kernel_args->workgroup_size[2];
-  implicit_args->grid_dims = 3;
-  implicit_args->printf_buffer = NULL;
-  implicit_args->hostcall_buffer = NULL;
-  implicit_args->dynamic_lds_size = config.dynamic_workgroup_local_memory;
-}
-
-void iree_hal_amdgpu_pm4_command_buffer_emplace_implicit_args(
-    const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
-    iree_hal_dispatch_config_t config,
-    iree_amdgpu_kernel_implicit_args_t* implicit_args) {
-  iree_hal_amdgpu_pm4_command_buffer_write_implicit_args(kernel_args, config,
-                                                         implicit_args);
-}
-
 static iree_status_t
 iree_hal_amdgpu_pm4_command_buffer_kernarg_range_preload_offset(
     const iree_hal_amdgpu_pm4_dispatch_launch_state_t* launch_state,
@@ -2267,8 +2237,9 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_write_template(
         (iree_amdgpu_kernel_implicit_args_t*)(template_bytes +
                                               layout
                                                   ->implicit_args_byte_offset);
-    iree_hal_amdgpu_pm4_command_buffer_write_implicit_args(kernel_args, config,
-                                                           implicit_args);
+    iree_hal_amdgpu_device_dispatch_initialize_implicit_args(
+        kernel_args, config.workgroup_count,
+        config.dynamic_workgroup_local_memory, implicit_args);
   }
   return iree_ok_status();
 }
