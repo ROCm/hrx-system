@@ -416,6 +416,58 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.kind=*/LOOM_LOW_ALLOCATION_COPY_MATERIALIZED,
       },
   };
+  const loom_low_move_t moves[] = {
+      {
+          /*.destination=*/
+          {
+              /*.location_kind=*/
+              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+              /*.value_class=*/pressure_summaries[0].value_class,
+              /*.descriptor_reg_class_id=*/0,
+              /*.location=*/1,
+          },
+          /*.source=*/
+          {
+              /*.location_kind=*/
+              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+              /*.value_class=*/pressure_summaries[0].value_class,
+              /*.descriptor_reg_class_id=*/0,
+              /*.location=*/0,
+          },
+      },
+      {
+          /*.destination=*/
+          {
+              /*.location_kind=*/
+              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+              /*.value_class=*/pressure_summaries[0].value_class,
+              /*.descriptor_reg_class_id=*/0,
+              /*.location=*/2,
+          },
+          /*.source=*/
+          {
+              /*.location_kind=*/
+              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+              /*.value_class=*/pressure_summaries[0].value_class,
+              /*.descriptor_reg_class_id=*/0,
+              /*.location=*/1,
+          },
+      },
+  };
+  const loom_low_allocation_packet_move_group_t packet_move_groups[] = {
+      {
+          /*.source_ordinal=*/0,
+          /*.cause=*/LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY,
+          /*.move_group=*/
+          {
+              /*.moves=*/
+              {
+                  /*.start=*/0,
+                  /*.count=*/1,
+              },
+          },
+      },
+  };
   const loom_low_allocation_edge_copy_t edge_copies[kEdgeCopyCount] = {
       {
           /*.payload_index=*/0,
@@ -432,9 +484,16 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       {
           /*.terminator_op=*/{},
           /*.source_ordinal=*/{},
-          /*.program_point=*/{},
           /*.copy_start=*/0,
           /*.copy_count=*/kEdgeCopyCount,
+          /*.move_group=*/
+          {
+              /*.moves=*/
+              {
+                  /*.start=*/1,
+                  /*.count=*/1,
+              },
+          },
       },
   };
   const loom_low_allocation_spill_plan_t spill_plans[] = {
@@ -624,13 +683,11 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.edge_copy_count=*/IREE_ARRAYSIZE(edge_copies),
           /*.edge_copy_groups=*/edge_copy_groups,
           /*.edge_copy_group_count=*/IREE_ARRAYSIZE(edge_copy_groups),
-          /*.edge_copy_temporaries=*/{},
-          /*.edge_copy_temporary_count=*/{},
-          /*.packet_move_temporary_groups=*/{},
-          /*.packet_move_temporary_group_count=*/{},
-          /*.packet_move_temporaries=*/{},
-          /*.packet_move_temporary_count=*/{},
-          /*.packet_move_count=*/{},
+          /*.packet_move_groups=*/packet_move_groups,
+          /*.packet_move_group_count=*/IREE_ARRAYSIZE(packet_move_groups),
+          /*.moves=*/moves,
+          /*.scratch_move_indices=*/{},
+          /*.packet_move_count=*/1,
           /*.storage_leases=*/{},
           /*.storage_lease_instances=*/{},
           /*.storage_lease_instance_count=*/{},

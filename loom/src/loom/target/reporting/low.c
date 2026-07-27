@@ -142,109 +142,6 @@ static uint64_t loom_target_compile_report_result_register_unit_count(
   return unit_count;
 }
 
-static const loom_low_allocation_assignment_t*
-loom_target_compile_report_map_assignment(
-    const loom_low_allocation_table_t* allocation, loom_value_id_t value_id) {
-  return loom_low_allocation_map_active_value_assignment(allocation, value_id,
-                                                         NULL);
-}
-
-static uint64_t loom_target_compile_report_slice_move_unit_count(
-    const loom_low_allocation_table_t* allocation, const loom_op_t* op) {
-  uint64_t unit_count = 0;
-  const int64_t offset = loom_low_slice_offset(op);
-  IREE_ASSERT(offset >= 0 && offset <= UINT32_MAX,
-              "verified low.slice offset must fit in uint32_t");
-  const loom_low_allocation_assignment_t* source_assignment =
-      loom_target_compile_report_map_assignment(allocation,
-                                                loom_low_slice_source(op));
-  const loom_low_allocation_assignment_t* result_assignment =
-      loom_target_compile_report_map_assignment(allocation,
-                                                loom_low_slice_result(op));
-  const uint32_t source_offset = (uint32_t)offset;
-  IREE_ASSERT(source_offset <= source_assignment->location_count &&
-                  result_assignment->location_count <=
-                      source_assignment->location_count - source_offset,
-              "verified low.slice range must fit source assignment");
-  IREE_ASSERT(loom_low_allocation_storage_assignment_classes_share(
-                  allocation->target.descriptor_set, source_assignment,
-                  result_assignment),
-              "allocated low.slice values must share one target storage class");
-  for (uint32_t unit_index = 0; unit_index < result_assignment->location_count;
-       ++unit_index) {
-    if (!loom_low_allocation_storage_assignment_subranges_equal(
-            allocation->target.descriptor_set, result_assignment, unit_index,
-            source_assignment, source_offset + unit_index, /*unit_count=*/1)) {
-      ++unit_count;
-    }
-  }
-  return unit_count;
-}
-
-static uint64_t loom_target_compile_report_concat_move_unit_count(
-    const loom_low_allocation_table_t* allocation, const loom_op_t* op) {
-  if (!loom_low_allocation_move_topology_concat_requires_packet_materialization(
-          allocation, op)) {
-    return 0;
-  }
-  uint64_t unit_count = 0;
-  const loom_low_allocation_assignment_t* result_assignment =
-      loom_target_compile_report_map_assignment(allocation,
-                                                loom_low_concat_result(op));
-  uint32_t result_offset = 0;
-  loom_value_slice_t sources = loom_low_concat_sources(op);
-  for (uint16_t i = 0; i < sources.count; ++i) {
-    const loom_low_allocation_assignment_t* source_assignment =
-        loom_target_compile_report_map_assignment(allocation,
-                                                  sources.values[i]);
-    IREE_ASSERT(loom_low_allocation_storage_assignment_classes_share(
-                    allocation->target.descriptor_set, result_assignment,
-                    source_assignment),
-                "allocated low.concat values must share one target storage "
-                "class");
-    IREE_ASSERT(result_offset <= result_assignment->location_count &&
-                    source_assignment->location_count <=
-                        result_assignment->location_count - result_offset,
-                "verified low.concat range must fit result");
-    for (uint32_t source_unit = 0;
-         source_unit < source_assignment->location_count; ++source_unit) {
-      if (!loom_low_allocation_storage_assignment_subranges_equal(
-              allocation->target.descriptor_set, result_assignment,
-              result_offset + source_unit, source_assignment, source_unit,
-              /*unit_count=*/1)) {
-        ++unit_count;
-      }
-    }
-    result_offset += source_assignment->location_count;
-  }
-  IREE_ASSERT_EQ(result_offset, result_assignment->location_count);
-  return unit_count;
-}
-
-static void loom_target_compile_report_record_low_copy_moves(
-    loom_target_compile_report_t* report,
-    const loom_low_allocation_table_t* allocation) {
-  uint64_t packet_count = 0;
-  uint64_t unit_count = 0;
-  for (iree_host_size_t i = 0; i < allocation->copy_decision_count; ++i) {
-    const loom_low_allocation_copy_decision_t* decision =
-        &allocation->copy_decisions[i];
-    if (decision->kind != LOOM_LOW_ALLOCATION_COPY_MATERIALIZED) {
-      continue;
-    }
-    ++packet_count;
-    IREE_ASSERT(
-        decision->result_assignment_index < allocation->assignment_count,
-        "verified copy decision result assignment must fit allocation "
-        "table");
-    unit_count += allocation->assignments[decision->result_assignment_index]
-                      .location_count;
-  }
-  loom_target_compile_report_record_move_cause_if_nonzero(
-      report, LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_COPY, packet_count,
-      unit_count);
-}
-
 static void loom_target_compile_report_record_edge_copy_moves(
     loom_target_compile_report_t* report,
     const loom_low_allocation_table_t* allocation) {
@@ -253,42 +150,55 @@ static void loom_target_compile_report_record_edge_copy_moves(
   for (iree_host_size_t i = 0; i < allocation->edge_copy_group_count; ++i) {
     const loom_low_allocation_edge_copy_group_t* group =
         &allocation->edge_copy_groups[i];
-    IREE_ASSERT(group->copy_start <= allocation->edge_copy_count &&
-                    group->copy_count <=
-                        allocation->edge_copy_count - group->copy_start,
-                "verified edge-copy group range must fit allocation table");
-    uint64_t group_unit_count = 0;
-    for (uint32_t j = 0; j < group->copy_count; ++j) {
-      const loom_low_allocation_edge_copy_t* edge_copy =
-          &allocation->edge_copies[group->copy_start + j];
-      IREE_ASSERT(
-          edge_copy->source_assignment_index < allocation->assignment_count &&
-              edge_copy->destination_assignment_index <
-                  allocation->assignment_count,
-          "verified edge-copy assignments must fit allocation table");
-      const loom_low_allocation_assignment_t* source_assignment =
-          &allocation->assignments[edge_copy->source_assignment_index];
-      const loom_low_allocation_assignment_t* destination_assignment =
-          &allocation->assignments[edge_copy->destination_assignment_index];
-      for (uint32_t unit_index = 0; unit_index < edge_copy->unit_count;
-           ++unit_index) {
-        if (!loom_low_allocation_storage_assignment_subranges_equal(
-                allocation->target.descriptor_set, destination_assignment,
-                edge_copy->destination_unit_offset + unit_index,
-                source_assignment, edge_copy->source_unit_offset + unit_index,
-                /*unit_count=*/1)) {
-          ++group_unit_count;
-        }
-      }
-    }
-    if (group_unit_count != 0) {
-      ++packet_count;
-      unit_count += group_unit_count;
-    }
+    if (group->move_group.moves.count == 0) continue;
+    ++packet_count;
+    unit_count += group->move_group.moves.count;
   }
   loom_target_compile_report_record_move_cause_if_nonzero(
       report, LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_BRANCH_EDGE, packet_count,
       unit_count);
+}
+
+static void loom_target_compile_report_record_packet_moves(
+    loom_target_compile_report_t* report,
+    const loom_low_allocation_table_t* allocation) {
+  uint64_t copy_packet_count = 0;
+  uint64_t copy_unit_count = 0;
+  uint64_t slice_packet_count = 0;
+  uint64_t slice_unit_count = 0;
+  uint64_t concat_packet_count = 0;
+  uint64_t concat_unit_count = 0;
+  for (iree_host_size_t i = 0; i < allocation->packet_move_group_count; ++i) {
+    const loom_low_allocation_packet_move_group_t* group =
+        &allocation->packet_move_groups[i];
+    switch (group->cause) {
+      case LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY:
+        ++copy_packet_count;
+        copy_unit_count += group->move_group.moves.count;
+        break;
+      case LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE:
+        ++slice_packet_count;
+        slice_unit_count += group->move_group.moves.count;
+        break;
+      case LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT:
+        ++concat_packet_count;
+        concat_unit_count += group->move_group.moves.count;
+        break;
+      default:
+        IREE_ASSERT_UNREACHABLE(
+            "packet move group must have a packet-local placement cause");
+        break;
+    }
+  }
+  loom_target_compile_report_record_move_cause_if_nonzero(
+      report, LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_COPY, copy_packet_count,
+      copy_unit_count);
+  loom_target_compile_report_record_move_cause_if_nonzero(
+      report, LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_SLICE,
+      slice_packet_count, slice_unit_count);
+  loom_target_compile_report_record_move_cause_if_nonzero(
+      report, LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_CONCAT,
+      concat_packet_count, concat_unit_count);
 }
 
 static void
@@ -323,12 +233,7 @@ static void loom_target_compile_report_record_structural_packet_moves(
     const loom_low_emission_frame_t* frame) {
   uint64_t constant_packet_count = 0;
   uint64_t constant_unit_count = 0;
-  uint64_t slice_packet_count = 0;
-  uint64_t slice_unit_count = 0;
-  uint64_t concat_packet_count = 0;
-  uint64_t concat_unit_count = 0;
   const loom_module_t* module = frame->schedule.module;
-  const loom_low_allocation_table_t* allocation = &frame->allocation;
   for (iree_host_size_t i = 0; i < frame->schedule.node_count; ++i) {
     const loom_op_t* op = frame->schedule.nodes[i].op;
     if (op == NULL) {
@@ -339,38 +244,18 @@ static void loom_target_compile_report_record_structural_packet_moves(
       constant_unit_count +=
           loom_target_compile_report_value_register_unit_count(
               module, loom_low_const_result(op));
-    } else if (loom_low_slice_isa(op)) {
-      const uint64_t move_count =
-          loom_target_compile_report_slice_move_unit_count(allocation, op);
-      if (move_count != 0) {
-        ++slice_packet_count;
-        slice_unit_count += move_count;
-      }
-    } else if (loom_low_concat_isa(op)) {
-      const uint64_t move_count =
-          loom_target_compile_report_concat_move_unit_count(allocation, op);
-      if (move_count != 0) {
-        ++concat_packet_count;
-        concat_unit_count += move_count;
-      }
     }
   }
   loom_target_compile_report_record_move_cause_if_nonzero(
       report, LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_CONSTANT_MATERIALIZATION,
       constant_packet_count, constant_unit_count);
-  loom_target_compile_report_record_move_cause_if_nonzero(
-      report, LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_SLICE,
-      slice_packet_count, slice_unit_count);
-  loom_target_compile_report_record_move_cause_if_nonzero(
-      report, LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_CONCAT,
-      concat_packet_count, concat_unit_count);
 }
 
 static void loom_target_compile_report_record_move_causes(
     loom_target_compile_report_t* report,
     const loom_low_emission_frame_t* frame) {
-  loom_target_compile_report_record_low_copy_moves(report, &frame->allocation);
   loom_target_compile_report_record_edge_copy_moves(report, &frame->allocation);
+  loom_target_compile_report_record_packet_moves(report, &frame->allocation);
   loom_target_compile_report_record_operand_bank_materialization_moves(report,
                                                                        frame);
   loom_target_compile_report_record_structural_packet_moves(report, frame);

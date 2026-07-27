@@ -91,16 +91,12 @@ loom_cc_library(
     srcs = ["edge_copy.c"],
     hdrs = ["edge_copy.h"],
     deps = [
-        ":assignment",
         ":assignment_map",
-        ":live_range",
-        ":move",
+        ":move_plan",
         ":table",
-        ":target_constraints",
-        ":unit_liveness",
         ":unit_location",
         "//loom/src/loom/analysis:liveness",
-        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
@@ -581,11 +577,55 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "move_sequence",
+    srcs = ["move_sequence.c"],
+    hdrs = ["move_sequence.h"],
+    deps = [
+        ":move",
+        ":storage",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "move_sequence_test",
+    srcs = ["move_sequence_test.cc"],
+    deps = [
+        ":move_sequence",
+        ":storage",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "move_plan",
+    srcs = ["move_plan.c"],
+    hdrs = ["move_plan.h"],
+    deps = [
+        ":assignment_map",
+        ":move",
+        ":move_sequence",
+        ":storage",
+        ":target_constraints",
+        ":unit_liveness",
+        ":unit_location",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "move_topology",
     srcs = ["move_topology.c"],
     hdrs = ["move_topology.h"],
     deps = [
-        ":table",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
@@ -617,17 +657,13 @@ loom_cc_library(
     srcs = ["packet_move.c"],
     hdrs = ["packet_move.h"],
     deps = [
-        ":assignment",
         ":assignment_map",
-        ":live_range",
-        ":move",
+        ":move_plan",
         ":move_topology",
         ":table",
-        ":target_constraints",
-        ":unit_liveness",
         ":unit_location",
         "//loom/src/loom/analysis:liveness",
-        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
@@ -641,6 +677,7 @@ loom_cc_library(
     hdrs = ["table.h"],
     deps = [
         ":assignment",
+        ":move",
         ":target_constraints",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",

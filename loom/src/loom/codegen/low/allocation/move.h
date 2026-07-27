@@ -36,6 +36,24 @@ typedef struct loom_low_move_t {
   loom_low_move_location_t source;
 } loom_low_move_t;
 
+// Contiguous range in an allocation-owned move row table.
+typedef struct loom_low_move_range_t {
+  // First move row in the table.
+  iree_host_size_t start;
+  // Number of move rows in the range.
+  iree_host_size_t count;
+} loom_low_move_range_t;
+
+// Final move rows and cycle-scratch metadata for one parallel move group.
+typedef struct loom_low_move_group_t {
+  // Sequential physical moves emitted for the group.
+  loom_low_move_range_t moves;
+  // First entry in the allocation scratch-move index table.
+  iree_host_size_t scratch_move_index_start;
+  // Number of distinct cycle-scratch locations used by the group.
+  iree_host_size_t scratch_move_index_count;
+} loom_low_move_group_t;
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

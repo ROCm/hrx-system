@@ -30,7 +30,6 @@ loom_cc_library(
     hdrs = ["assembly.h"],
     visibility = _NATIVE_AMDGPU_VISIBILITY + _NATIVE_X86_VISIBILITY,
     deps = [
-        "//loom/src/loom/codegen/low:move_sequence",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",

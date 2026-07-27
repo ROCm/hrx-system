@@ -41,11 +41,25 @@ typedef struct loom_low_placement_build_state_t {
   uint32_t relation_count;
   // Number of collected concrete-location relations.
   iree_host_size_t location_relation_count;
+  // Number of low.copy/slice/concat operations that may require packet moves.
+  uint32_t packet_move_group_count;
+  // Total units covered by low.copy/slice/concat relations.
+  iree_host_size_t packet_move_unit_count;
+  // Number of low.br operations that may require edge copies.
+  uint32_t edge_copy_group_count;
+  // Total units covered by low.br relations.
+  iree_host_size_t branch_unit_count;
   // Number of relation records appended after range prefixing.
   iree_host_size_t appended_relation_count;
   // Number of source relation indices appended after range prefixing.
   iree_host_size_t appended_source_relation_count;
 } loom_low_placement_build_state_t;
+
+enum loom_low_placement_move_group_flag_bits_e {
+  LOOM_LOW_PLACEMENT_MOVE_GROUP_FLAG_PACKET = 1u << 0,
+  LOOM_LOW_PLACEMENT_MOVE_GROUP_FLAG_EDGE = 1u << 1,
+};
+typedef uint8_t loom_low_placement_move_group_flags_t;
 
 static bool loom_low_placement_cause_can_alias(
     loom_low_placement_cause_t cause) {
@@ -199,18 +213,43 @@ loom_low_placement_kind_from_storage_relation(
 }
 
 static loom_low_placement_cause_t
-loom_low_placement_cause_from_storage_relation(
-    loom_low_storage_relation_cause_t cause) {
+loom_low_placement_collect_storage_relation_cause(
+    loom_low_placement_build_state_t* state,
+    loom_low_placement_move_group_flags_t* move_group_flags,
+    loom_low_storage_relation_cause_t cause, uint32_t unit_count) {
   switch (cause) {
     case LOOM_LOW_STORAGE_RELATION_CAUSE_TIED_RESULT:
       return LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT;
     case LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_COPY:
+      if ((*move_group_flags & LOOM_LOW_PLACEMENT_MOVE_GROUP_FLAG_PACKET) ==
+          0) {
+        *move_group_flags |= LOOM_LOW_PLACEMENT_MOVE_GROUP_FLAG_PACKET;
+        ++state->packet_move_group_count;
+      }
+      state->packet_move_unit_count += unit_count;
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY;
     case LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SLICE:
+      if ((*move_group_flags & LOOM_LOW_PLACEMENT_MOVE_GROUP_FLAG_PACKET) ==
+          0) {
+        *move_group_flags |= LOOM_LOW_PLACEMENT_MOVE_GROUP_FLAG_PACKET;
+        ++state->packet_move_group_count;
+      }
+      state->packet_move_unit_count += unit_count;
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE;
     case LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_CONCAT:
+      if ((*move_group_flags & LOOM_LOW_PLACEMENT_MOVE_GROUP_FLAG_PACKET) ==
+          0) {
+        *move_group_flags |= LOOM_LOW_PLACEMENT_MOVE_GROUP_FLAG_PACKET;
+        ++state->packet_move_group_count;
+      }
+      state->packet_move_unit_count += unit_count;
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT;
     case LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_BRANCH:
+      if ((*move_group_flags & LOOM_LOW_PLACEMENT_MOVE_GROUP_FLAG_EDGE) == 0) {
+        *move_group_flags |= LOOM_LOW_PLACEMENT_MOVE_GROUP_FLAG_EDGE;
+        ++state->edge_copy_group_count;
+      }
+      state->branch_unit_count += unit_count;
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH;
     case LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_FOR:
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR;
@@ -257,6 +296,7 @@ static void loom_low_placement_assert_storage_relation_units(
 
 static iree_status_t loom_low_placement_collect_op_relations(
     loom_low_placement_build_state_t* state, const loom_op_t* op) {
+  loom_low_placement_move_group_flags_t move_group_flags = 0;
   loom_low_storage_relation_iterator_t iterator;
   loom_low_storage_relation_iterator_initialize(state->module, op, &iterator);
   loom_low_storage_relation_t storage_relation;
@@ -279,8 +319,9 @@ static iree_status_t loom_low_placement_collect_op_relations(
         .unit_count = storage_relation.unit_count,
         .kind = loom_low_placement_kind_from_storage_relation(
             storage_relation.kind),
-        .cause = loom_low_placement_cause_from_storage_relation(
-            storage_relation.cause),
+        .cause = loom_low_placement_collect_storage_relation_cause(
+            state, &move_group_flags, storage_relation.cause,
+            storage_relation.unit_count),
         .flags = loom_low_placement_flags_from_storage_relation(
             storage_relation.flags),
         .priority = 1,
@@ -566,6 +607,10 @@ static iree_status_t loom_low_placement_build(
       .relations = state->relations,
       .relation_count = relation_count,
       .location_relation_count = state->location_relation_count,
+      .packet_move_group_count = state->packet_move_group_count,
+      .packet_move_unit_count = state->packet_move_unit_count,
+      .edge_copy_group_count = state->edge_copy_group_count,
+      .branch_unit_count = state->branch_unit_count,
       .ranges_by_result_ordinal = state->ranges_by_result_ordinal,
       .relation_indices_by_source_ordinal =
           state->relation_indices_by_source_ordinal,

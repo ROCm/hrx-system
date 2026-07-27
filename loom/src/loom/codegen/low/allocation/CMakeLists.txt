@@ -98,18 +98,14 @@ loom_cc_library(
   SRCS
     "edge_copy.c"
   DEPS
-    ::assignment
     ::assignment_map
-    ::live_range
-    ::move
+    ::move_plan
     ::table
-    ::target_constraints
-    ::unit_liveness
     ::unit_location
     iree::base
     iree::base::internal::arena
     loom::analysis::liveness
-    loom::codegen::low::descriptors
+    loom::codegen::low::placement
     loom::ir
     loom::ops::low
   PUBLIC
@@ -653,13 +649,64 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    move_sequence
+  HDRS
+    "move_sequence.h"
+  SRCS
+    "move_sequence.c"
+  DEPS
+    ::move
+    ::storage
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::descriptors
+    loom::target::registers
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    move_sequence_test
+  SRCS
+    "move_sequence_test.cc"
+  DEPS
+    ::move_sequence
+    ::storage
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
+    move_plan
+  HDRS
+    "move_plan.h"
+  SRCS
+    "move_plan.c"
+  DEPS
+    ::assignment_map
+    ::move
+    ::move_sequence
+    ::storage
+    ::target_constraints
+    ::unit_liveness
+    ::unit_location
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::descriptors
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     move_topology
   HDRS
     "move_topology.h"
   SRCS
     "move_topology.c"
   DEPS
-    ::table
     iree::base
     loom::ir
     loom::ops::low
@@ -695,19 +742,15 @@ loom_cc_library(
   SRCS
     "packet_move.c"
   DEPS
-    ::assignment
     ::assignment_map
-    ::live_range
-    ::move
+    ::move_plan
     ::move_topology
     ::table
-    ::target_constraints
-    ::unit_liveness
     ::unit_location
     iree::base
     iree::base::internal::arena
     loom::analysis::liveness
-    loom::codegen::low::descriptors
+    loom::codegen::low::placement
     loom::ir
     loom::ops::low
   PUBLIC
@@ -722,6 +765,7 @@ loom_cc_library(
     "table.c"
   DEPS
     ::assignment
+    ::move
     ::target_constraints
     iree::base
     loom::analysis::liveness

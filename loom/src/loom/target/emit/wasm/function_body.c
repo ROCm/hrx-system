@@ -1337,19 +1337,16 @@ static iree_status_t loom_wasm_validate_allocation(
         "Wasm emission requires unspilled allocation tables");
   }
   if (allocation->edge_copy_count != 0 ||
-      allocation->edge_copy_group_count != 0 ||
-      allocation->edge_copy_temporary_count != 0) {
+      allocation->edge_copy_group_count != 0) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "Wasm emission requires structured allocation tables without CFG edge "
         "copies");
   }
-  if (allocation->packet_move_temporary_count != 0 ||
-      allocation->packet_move_temporary_group_count != 0) {
+  if (allocation->packet_move_group_count != 0) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "Wasm emission requires allocation tables without packet-local move "
-        "temporaries");
+        "Wasm emission requires allocation tables without packet-local moves");
   }
   return iree_ok_status();
 }

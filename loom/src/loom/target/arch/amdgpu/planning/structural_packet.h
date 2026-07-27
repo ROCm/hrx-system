@@ -47,6 +47,7 @@ typedef struct loom_amdgpu_structural_packet_info_t {
 // Analyzes AMDGPU scheduling semantics for a structural low packet.
 iree_status_t loom_amdgpu_structural_packet_analyze(
     const loom_low_allocation_table_t* allocation, const loom_op_t* op,
+    uint32_t source_ordinal,
     loom_amdgpu_structural_packet_analysis_flags_t analysis_flags,
     loom_amdgpu_structural_packet_info_t* out_info);
 

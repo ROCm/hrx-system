@@ -17,7 +17,6 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/string_builder.h"
-#include "loom/codegen/low/move_sequence.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/ops/op_defs.h"
 
@@ -34,8 +33,6 @@ typedef struct loom_native_assembly_packet_context_t {
   const loom_low_packet_view_t* packet;
   // Text destination for the fragment.
   iree_string_builder_t* builder;
-  // Reusable scratch for structural parallel-copy sequencing.
-  loom_low_move_sequence_scratch_t* move_scratch;
 } loom_native_assembly_packet_context_t;
 
 typedef iree_status_t (*loom_native_assembly_append_packet_fn_t)(

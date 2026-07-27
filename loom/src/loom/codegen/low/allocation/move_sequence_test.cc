@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/codegen/low/move_sequence.h"
+#include "loom/codegen/low/allocation/move_sequence.h"
 
 #include <string>
 #include <vector>
@@ -12,6 +12,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/allocation/storage.h"
 
 namespace loom {
 namespace {
@@ -25,39 +26,8 @@ loom_liveness_value_class_t ValueClass(uint16_t register_class_id) {
   };
 }
 
-const loom_low_descriptor_set_t* AliasDescriptorSet() {
-  static const loom_low_reg_class_t kRegClasses[] = {
-      {
-          /*.name_string_offset=*/{},
-          /*.target_bank_id=*/{},
-          /*.flags=*/{},
-          /*.alloc_unit_bits=*/{},
-          /*.allocatable_count=*/{},
-          /*.fixed_location_base=*/{},
-          /*.fixed_location_count=*/{},
-          /*.alias_set_id=*/1,
-      },
-      {
-          /*.name_string_offset=*/{},
-          /*.target_bank_id=*/{},
-          /*.flags=*/{},
-          /*.alloc_unit_bits=*/{},
-          /*.allocatable_count=*/{},
-          /*.fixed_location_base=*/{},
-          /*.fixed_location_count=*/{},
-          /*.alias_set_id=*/1,
-      },
-      {
-          /*.name_string_offset=*/{},
-          /*.target_bank_id=*/{},
-          /*.flags=*/{},
-          /*.alloc_unit_bits=*/{},
-          /*.allocatable_count=*/{},
-          /*.fixed_location_base=*/{},
-          /*.fixed_location_count=*/{},
-          /*.alias_set_id=*/0,
-      },
-  };
+const loom_low_descriptor_set_t* IndependentDescriptorSet() {
+  static const loom_low_reg_class_t kRegClasses[3] = {};
   static const loom_low_descriptor_set_t kDescriptorSet = {
       /*.abi_version=*/{},
       /*.generator_version=*/{},
@@ -108,6 +78,38 @@ const loom_low_descriptor_set_t* AliasDescriptorSet() {
   return &kDescriptorSet;
 }
 
+const loom_low_descriptor_set_t* AliasDescriptorSet() {
+  static const loom_low_reg_class_t kRegClasses[] = {
+      {
+          /*.name_string_offset=*/{},
+          /*.target_bank_id=*/{},
+          /*.flags=*/{},
+          /*.alloc_unit_bits=*/{},
+          /*.allocatable_count=*/{},
+          /*.fixed_location_base=*/{},
+          /*.fixed_location_count=*/{},
+          /*.alias_set_id=*/1,
+      },
+      {
+          /*.name_string_offset=*/{},
+          /*.target_bank_id=*/{},
+          /*.flags=*/{},
+          /*.alloc_unit_bits=*/{},
+          /*.allocatable_count=*/{},
+          /*.fixed_location_base=*/{},
+          /*.fixed_location_count=*/{},
+          /*.alias_set_id=*/1,
+      },
+      {},
+  };
+  static const loom_low_descriptor_set_t kDescriptorSet = [] {
+    loom_low_descriptor_set_t descriptor_set = *IndependentDescriptorSet();
+    descriptor_set.reg_classes = kRegClasses;
+    return descriptor_set;
+  }();
+  return &kDescriptorSet;
+}
+
 loom_low_move_location_t Location(uint32_t ordinal,
                                   uint16_t register_class_id = 0) {
   return loom_low_move_location_t{
@@ -136,19 +138,10 @@ loom_low_move_t MoveBetween(uint32_t destination,
   };
 }
 
-std::string MoveString(const loom_low_move_location_t* destination,
-                       const loom_low_move_location_t* source) {
-  return std::to_string(destination->descriptor_reg_class_id) + ":" +
-         std::to_string(destination->location) + "<-" +
-         std::to_string(source->location);
-}
-
-iree_status_t RecordMove(void* user_data,
-                         const loom_low_move_location_t* destination,
-                         const loom_low_move_location_t* source) {
-  auto* moves = static_cast<std::vector<std::string>*>(user_data);
-  moves->push_back(MoveString(destination, source));
-  return iree_ok_status();
+std::string MoveString(const loom_low_move_t& move) {
+  return std::to_string(move.destination.descriptor_reg_class_id) + ":" +
+         std::to_string(move.destination.location) + "<-" +
+         std::to_string(move.source.location);
 }
 
 class TestArena {
@@ -167,120 +160,154 @@ class TestArena {
   iree_arena_allocator_t* arena() { return &arena_; }
 
  private:
-  // Block pool backing |arena_|.
   iree_arena_block_pool_t block_pool_ = {};
-  // Arena used for one test's move-sequencing scratch.
   iree_arena_allocator_t arena_ = {};
 };
 
-std::vector<std::string> EmitMoves(
+struct TemporaryResolver {
+  const loom_low_descriptor_set_t* descriptor_set = nullptr;
+  const loom_low_move_location_t* locations = nullptr;
+  iree_host_size_t count = 0;
+};
+
+iree_status_t ResolveTemporary(void* user_data,
+                               const loom_low_move_location_t* storage_class,
+                               const loom_low_move_t* moves,
+                               iree_host_size_t move_count,
+                               loom_low_move_location_t* out_temporary,
+                               bool* out_resolved) {
+  (void)moves;
+  (void)move_count;
+  auto* resolver = static_cast<TemporaryResolver*>(user_data);
+  *out_resolved = false;
+  for (iree_host_size_t i = 0; i < resolver->count; ++i) {
+    const loom_low_move_location_t* location = &resolver->locations[i];
+    if (location->location_kind == storage_class->location_kind &&
+        loom_low_allocation_storage_reg_classes_share(
+            resolver->descriptor_set, location->descriptor_reg_class_id,
+            storage_class->descriptor_reg_class_id) &&
+        loom_liveness_value_class_equal(location->value_class,
+                                        storage_class->value_class)) {
+      *out_temporary = *location;
+      *out_resolved = true;
+      break;
+    }
+  }
+  return iree_ok_status();
+}
+
+std::vector<std::string> ResolveMoves(
     const loom_low_move_t* input_moves, iree_host_size_t move_count,
     const loom_low_move_location_t* temporaries,
     iree_host_size_t temporary_count,
-    const loom_low_descriptor_set_t* descriptor_set = nullptr) {
+    const loom_low_descriptor_set_t* descriptor_set =
+        IndependentDescriptorSet()) {
   TestArena arena;
   loom_low_move_sequence_scratch_t scratch;
-  loom_low_move_sequence_scratch_initialize(arena.arena(), &scratch);
-  loom_low_move_t* moves = nullptr;
-  IREE_EXPECT_OK(loom_low_move_sequence_scratch_reserve_moves(
-      &scratch, move_count, &moves));
+  IREE_EXPECT_OK(loom_low_move_sequence_scratch_initialize(
+      arena.arena(), move_count, &scratch));
   for (iree_host_size_t i = 0; i < move_count; ++i) {
-    moves[i] = input_moves[i];
+    scratch.moves[i] = input_moves[i];
   }
-  loom_low_move_location_t* temporary_storage = nullptr;
-  IREE_EXPECT_OK(loom_low_move_sequence_scratch_reserve_temporaries(
-      &scratch, temporary_count, &temporary_storage));
-  for (iree_host_size_t i = 0; i < temporary_count; ++i) {
-    temporary_storage[i] = temporaries[i];
-  }
-  std::vector<std::string> emitted_moves;
-  loom_low_move_sequence_options_t options = {
-      /*.descriptor_set=*/descriptor_set,
-      /*.temporary_locations=*/temporary_storage,
-      /*.temporary_location_count=*/temporary_count,
-      /*.emit_move=*/
+  TemporaryResolver resolver = {
+      descriptor_set,
+      temporaries,
+      temporary_count,
+  };
+  const loom_low_move_sequence_options_t options = {
+      descriptor_set,
       {
-          /*.fn=*/RecordMove,
-          /*.user_data=*/&emitted_moves,
+          ResolveTemporary,
+          &resolver,
       },
   };
-  IREE_EXPECT_OK(loom_low_move_sequence_emit(&scratch, move_count, &options));
-  return emitted_moves;
+  std::vector<loom_low_move_t> resolved_moves(move_count * 2);
+  iree_host_size_t resolved_move_count = 0;
+  bool complete = false;
+  IREE_EXPECT_OK(loom_low_move_sequence_resolve(
+      &scratch, move_count, &options, resolved_moves.size(),
+      resolved_moves.data(), &resolved_move_count, &complete));
+  EXPECT_TRUE(complete);
+  std::vector<std::string> result;
+  for (iree_host_size_t i = 0; i < resolved_move_count; ++i) {
+    result.push_back(MoveString(resolved_moves[i]));
+  }
+  return result;
 }
 
 TEST(LowMoveSequenceTest, SkipsIdentityMoves) {
-  loom_low_move_t moves[] = {
+  const loom_low_move_t moves[] = {
       Move(0, 0),
       Move(1, 1),
   };
 
-  EXPECT_TRUE(EmitMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0).empty());
+  EXPECT_TRUE(ResolveMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0).empty());
 }
 
 TEST(LowMoveSequenceTest, SkipsAliasIdentityMoves) {
-  loom_low_move_t moves[] = {
+  const loom_low_move_t moves[] = {
       MoveBetween(0, 1, 0, 0),
   };
 
-  EXPECT_TRUE(
-      EmitMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0, AliasDescriptorSet())
-          .empty());
+  EXPECT_TRUE(ResolveMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0,
+                           AliasDescriptorSet())
+                  .empty());
 }
 
 TEST(LowMoveSequenceTest, EmitsIndependentMovesInInputOrder) {
-  loom_low_move_t moves[] = {
+  const loom_low_move_t moves[] = {
       Move(4, 0),
       Move(5, 1),
   };
 
-  EXPECT_THAT(EmitMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0),
+  EXPECT_THAT(ResolveMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0),
               ::testing::ElementsAre("0:4<-0", "0:5<-1"));
 }
 
 TEST(LowMoveSequenceTest, ReordersForwardClobberingShift) {
-  loom_low_move_t moves[] = {
+  const loom_low_move_t moves[] = {
       Move(1, 0),
       Move(2, 1),
   };
 
-  EXPECT_THAT(EmitMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0),
+  EXPECT_THAT(ResolveMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0),
               ::testing::ElementsAre("0:2<-1", "0:1<-0"));
 }
 
 TEST(LowMoveSequenceTest, ReordersAliasClobberingShift) {
-  loom_low_move_t moves[] = {
+  const loom_low_move_t moves[] = {
       MoveBetween(1, 1, 0, 1),
       MoveBetween(2, 0, 1, 0),
   };
 
-  EXPECT_THAT(
-      EmitMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0, AliasDescriptorSet()),
-      ::testing::ElementsAre("0:2<-1", "1:1<-0"));
+  EXPECT_THAT(ResolveMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0,
+                           AliasDescriptorSet()),
+              ::testing::ElementsAre("0:2<-1", "1:1<-0"));
 }
 
 TEST(LowMoveSequenceTest, KeepsBackwardShiftInInputOrder) {
-  loom_low_move_t moves[] = {
+  const loom_low_move_t moves[] = {
       Move(0, 1),
       Move(1, 2),
   };
 
-  EXPECT_THAT(EmitMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0),
+  EXPECT_THAT(ResolveMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0),
               ::testing::ElementsAre("0:0<-1", "0:1<-2"));
 }
 
 TEST(LowMoveSequenceTest, UsesTemporaryForCycle) {
-  loom_low_move_t moves[] = {
+  const loom_low_move_t moves[] = {
       Move(0, 1),
       Move(1, 0),
   };
   const loom_low_move_location_t temporary = Location(9);
 
-  EXPECT_THAT(EmitMoves(moves, IREE_ARRAYSIZE(moves), &temporary, 1),
+  EXPECT_THAT(ResolveMoves(moves, IREE_ARRAYSIZE(moves), &temporary, 1),
               ::testing::ElementsAre("0:9<-0", "0:0<-1", "0:1<-9"));
 }
 
 TEST(LowMoveSequenceTest, UsesMatchingTemporaryForMixedClassCycles) {
-  loom_low_move_t moves[] = {
+  const loom_low_move_t moves[] = {
       Move(0, 1, 0),
       Move(1, 0, 0),
       Move(4, 5, 1),
@@ -291,8 +318,8 @@ TEST(LowMoveSequenceTest, UsesMatchingTemporaryForMixedClassCycles) {
       Location(11, 1),
   };
 
-  EXPECT_THAT(EmitMoves(moves, IREE_ARRAYSIZE(moves), temporaries,
-                        IREE_ARRAYSIZE(temporaries)),
+  EXPECT_THAT(ResolveMoves(moves, IREE_ARRAYSIZE(moves), temporaries,
+                           IREE_ARRAYSIZE(temporaries)),
               ::testing::ElementsAre("0:9<-0", "0:0<-1", "0:1<-9", "1:11<-4",
                                      "1:4<-5", "1:5<-11"));
 }
