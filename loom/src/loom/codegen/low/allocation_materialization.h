@@ -80,10 +80,6 @@ typedef struct loom_low_allocation_materialized_spill_list_t {
 } loom_low_allocation_materialized_spill_list_t;
 
 typedef struct loom_low_allocation_materialization_options_t {
-  // Allows a function body that already contains low.spill or low.reload ops.
-  // The default false value rejects existing traffic so repeated or partial
-  // materialization fails loud instead of stacking generated reloads.
-  bool allow_existing_storage_traffic;
   // True when |supported_storage_spaces| names the complete target lowering
   // capability for newly generated spill storage.
   bool has_supported_storage_spaces;
