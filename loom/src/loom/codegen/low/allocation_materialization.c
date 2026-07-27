@@ -426,68 +426,13 @@ static iree_status_t loom_low_allocation_snapshot_value_uses(
   return iree_ok_status();
 }
 
-static bool loom_low_allocation_operand_is_removed_block_arg_edge(
-    const loom_op_t* user_op, uint16_t operand_index, const loom_block_t* block,
-    uint16_t arg_index) {
-  return block && user_op && loom_low_br_isa(user_op) &&
-         loom_low_br_dest(user_op) == block && operand_index == arg_index;
-}
-
 static bool loom_low_allocation_use_is_removed_block_arg_edge(
     loom_use_t use, const loom_block_t* block, uint16_t arg_index) {
+  if (!block) return false;
   const loom_op_t* user_op = loom_use_user_op(use);
   const uint16_t operand_index = loom_use_operand_index(use);
-  return loom_low_allocation_operand_is_removed_block_arg_edge(
-      user_op, operand_index, block, arg_index);
-}
-
-static uint32_t loom_low_allocation_count_materialized_reloads(
-    const loom_use_t* uses, uint32_t use_count, const loom_block_t* block,
-    uint16_t arg_index) {
-  uint32_t reload_count = 0;
-  for (uint32_t i = 0; i < use_count; ++i) {
-    if (!loom_low_allocation_use_is_removed_block_arg_edge(uses[i], block,
-                                                           arg_index)) {
-      ++reload_count;
-    }
-  }
-  return reload_count;
-}
-
-static bool loom_low_allocation_block_arg_plan(
-    loom_module_t* module, const loom_op_t* function_op,
-    const loom_low_allocation_spill_plan_t* plan, loom_block_t** out_block,
-    uint16_t* out_arg_index, bool* out_is_entry_arg) {
-  *out_block = NULL;
-  *out_arg_index = 0;
-  *out_is_entry_arg = false;
-
-  if (plan->value_id >= module->values.count) {
-    return false;
-  }
-  const loom_value_t* value = loom_module_value(module, plan->value_id);
-  if (!loom_value_is_block_arg(value)) {
-    return false;
-  }
-
-  loom_block_t* block = loom_value_def_block(value);
-  if (!block) {
-    return false;
-  }
-  for (uint16_t i = 0; i < block->arg_count; ++i) {
-    if (loom_block_arg_id(block, i) == plan->value_id) {
-      *out_block = block;
-      *out_arg_index = i;
-      break;
-    }
-  }
-  if (!*out_block) {
-    return false;
-  }
-
-  const loom_region_t* body = loom_low_function_const_body(function_op);
-  *out_is_entry_arg = body && block == loom_region_const_entry_block(body);
-  return true;
+  return loom_low_br_isa(user_op) && loom_low_br_dest(user_op) == block &&
+         operand_index == arg_index;
 }
 
 static iree_status_t loom_low_allocation_rebuild_br_without_arg(
@@ -585,26 +530,6 @@ static iree_status_t loom_low_allocation_insert_spill_store(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_allocation_validate_spill_use(
-    const loom_op_t* user_op, uint16_t operand_index,
-    const loom_low_allocation_spill_plan_t* plan) {
-  if (!user_op) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "spilled value use has no user op");
-  }
-  if (!user_op->parent_block) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "spilled value user op is detached");
-  }
-  if (operand_index >= user_op->operand_count ||
-      loom_op_const_operands(user_op)[operand_index] != plan->value_id) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "allocation spill plan is stale for value %u",
-                            (unsigned)plan->value_id);
-  }
-  return iree_ok_status();
-}
-
 static bool loom_low_allocation_slice_reload_use(
     const loom_low_allocation_assignment_t* assignment,
     const loom_low_allocation_spill_plan_t* plan, const loom_region_t* body,
@@ -614,12 +539,6 @@ static bool loom_low_allocation_slice_reload_use(
   *out_block_index = 0;
   *out_unit_byte_size = 0;
   loom_op_t* user_op = loom_use_user_op(use);
-  if (user_op == NULL || user_op->parent_block == NULL ||
-      loom_use_operand_index(use) >= user_op->operand_count ||
-      loom_op_const_operands(user_op)[loom_use_operand_index(use)] !=
-          plan->value_id) {
-    return false;
-  }
   int64_t reload_offset = 0;
   if (!loom_low_allocation_spill_plan_slice_reload_byte_offset(
           assignment, plan->byte_size, user_op, loom_use_operand_index(use),
@@ -637,7 +556,7 @@ static bool loom_low_allocation_slice_reload_use(
 }
 
 static iree_status_t loom_low_allocation_try_insert_reload_for_slice_use(
-    loom_module_t* module, const loom_low_allocation_table_t* table,
+    loom_module_t* module, const loom_low_allocation_assignment_t* assignment,
     const loom_low_allocation_spill_plan_t* plan,
     loom_value_id_t storage_value_id, loom_op_t* slice_op,
     uint16_t operand_index,
@@ -646,13 +565,6 @@ static iree_status_t loom_low_allocation_try_insert_reload_for_slice_use(
   if (!loom_low_slice_isa(slice_op) || operand_index != 0) {
     return iree_ok_status();
   }
-  if (plan->assignment_index >= table->assignment_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "allocation spill plan references an out-of-range assignment");
-  }
-  const loom_low_allocation_assignment_t* assignment =
-      &table->assignments[plan->assignment_index];
   int64_t reload_offset = 0;
   uint32_t unit_byte_size = 0;
   if (!loom_low_allocation_spill_plan_slice_reload_byte_offset(
@@ -697,8 +609,8 @@ static iree_status_t loom_low_allocation_insert_full_slice_reload(
 }
 
 static iree_status_t loom_low_allocation_insert_dense_slice_reloads(
-    loom_module_t* module, const loom_low_allocation_table_t* table,
-    const loom_low_allocation_spill_plan_t* plan,
+    loom_module_t* module, const loom_low_allocation_assignment_t* assignment,
+    const loom_low_allocation_spill_plan_t* plan, const loom_region_t* body,
     loom_value_id_t storage_value_id, const loom_use_t* uses,
     uint32_t use_count, const loom_block_t* removed_block_arg_block,
     uint16_t removed_arg_index, iree_arena_allocator_t* arena,
@@ -707,55 +619,16 @@ static iree_status_t loom_low_allocation_insert_dense_slice_reloads(
   *out_reload_plan = (loom_low_slice_reload_plan_t){0};
   *out_reload_traffic = (loom_low_materialized_traffic_t){0};
   if (use_count == 0) return iree_ok_status();
-  IREE_ASSERT_LT(plan->assignment_index, table->assignment_count);
-  const loom_low_allocation_assignment_t* assignment =
-      &table->assignments[plan->assignment_index];
   if (assignment->unit_count <= 1 ||
       plan->byte_size % assignment->unit_count != 0) {
     return iree_ok_status();
   }
 
-  const loom_region_t* body = loom_low_function_const_body(table->function_op);
-
-  uint32_t first_slice_use_index = use_count;
-  for (uint32_t i = 0; i < use_count; ++i) {
-    if (loom_low_allocation_use_is_removed_block_arg_edge(
-            uses[i], removed_block_arg_block, removed_arg_index)) {
-      continue;
-    }
-    loom_op_t* slice_op = NULL;
-    uint16_t block_index = 0;
-    uint32_t unit_byte_size = 0;
-    if (loom_low_allocation_slice_reload_use(assignment, plan, body, uses[i],
-                                             &slice_op, &block_index,
-                                             &unit_byte_size)) {
-      first_slice_use_index = i;
-      break;
-    }
-    (void)slice_op;
-    (void)block_index;
-    (void)unit_byte_size;
-  }
-  if (first_slice_use_index == use_count) return iree_ok_status();
-
   uint32_t* group_indices_by_block = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, body->block_count, sizeof(*group_indices_by_block),
-      (void**)&group_indices_by_block));
-  memset(group_indices_by_block, 0xFF,
-         body->block_count * sizeof(*group_indices_by_block));
-
   loom_low_slice_reload_group_t* groups = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, body->block_count, sizeof(*groups), (void**)&groups));
   uint32_t* group_indices_by_use = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(arena, use_count, sizeof(*group_indices_by_use),
-                                (void**)&group_indices_by_use));
-  memset(group_indices_by_use, 0xFF, use_count * sizeof(*group_indices_by_use));
-
   uint32_t group_count = 0;
-  for (uint32_t i = first_slice_use_index; i < use_count; ++i) {
+  for (uint32_t i = 0; i < use_count; ++i) {
     if (loom_low_allocation_use_is_removed_block_arg_edge(
             uses[i], removed_block_arg_block, removed_arg_index)) {
       continue;
@@ -768,7 +641,20 @@ static iree_status_t loom_low_allocation_insert_dense_slice_reloads(
                                               &unit_byte_size)) {
       continue;
     }
-    (void)slice_op;
+    if (!groups) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          arena, body->block_count, sizeof(*group_indices_by_block),
+          (void**)&group_indices_by_block));
+      memset(group_indices_by_block, 0xFF,
+             body->block_count * sizeof(*group_indices_by_block));
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          arena, body->block_count, sizeof(*groups), (void**)&groups));
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          arena, use_count, sizeof(*group_indices_by_use),
+          (void**)&group_indices_by_use));
+      memset(group_indices_by_use, 0xFF,
+             use_count * sizeof(*group_indices_by_use));
+    }
     uint32_t group_index = group_indices_by_block[block_index];
     if (group_index == UINT32_MAX) {
       group_index = group_count++;
@@ -783,19 +669,23 @@ static iree_status_t loom_low_allocation_insert_dense_slice_reloads(
     ++groups[group_index].slice_count;
     groups[group_index].narrow_reload_bytes += unit_byte_size;
   }
+  if (!groups) return iree_ok_status();
 
   loom_low_materialized_traffic_t reload_traffic = {0};
+  uint32_t full_reload_group_count = 0;
   for (uint32_t i = 0; i < group_count; ++i) {
     loom_low_slice_reload_group_t* group = &groups[i];
     group->use_full_reload =
         loom_low_allocation_spill_plan_use_full_slice_reload(
             group->slice_count, group->narrow_reload_bytes, plan->byte_size);
     if (!group->use_full_reload) continue;
+    ++full_reload_group_count;
     IREE_RETURN_IF_ERROR(loom_low_allocation_insert_full_slice_reload(
         module, plan, storage_value_id, group));
     ++reload_traffic.count;
     reload_traffic.bytes += plan->byte_size;
   }
+  if (full_reload_group_count == 0) return iree_ok_status();
 
   *out_reload_plan = (loom_low_slice_reload_plan_t){
       .groups = groups,
@@ -807,18 +697,16 @@ static iree_status_t loom_low_allocation_insert_dense_slice_reloads(
 }
 
 static iree_status_t loom_low_allocation_insert_reload_for_use(
-    loom_module_t* module, const loom_low_allocation_table_t* table,
+    loom_module_t* module, const loom_low_allocation_assignment_t* assignment,
     const loom_low_allocation_spill_plan_t* plan,
     loom_value_id_t storage_value_id, loom_use_t use,
     loom_low_materialized_traffic_t* out_reload_traffic) {
   *out_reload_traffic = (loom_low_materialized_traffic_t){0};
   loom_op_t* user_op = loom_use_user_op(use);
   const uint16_t operand_index = loom_use_operand_index(use);
-  IREE_RETURN_IF_ERROR(
-      loom_low_allocation_validate_spill_use(user_op, operand_index, plan));
 
   IREE_RETURN_IF_ERROR(loom_low_allocation_try_insert_reload_for_slice_use(
-      module, table, plan, storage_value_id, user_op, operand_index,
+      module, assignment, plan, storage_value_id, user_op, operand_index,
       out_reload_traffic));
   if (out_reload_traffic->count != 0) {
     return iree_ok_status();
@@ -852,9 +740,13 @@ static iree_status_t loom_low_allocation_insert_reloads_for_uses(
   *out_reload_traffic = (loom_low_materialized_traffic_t){0};
   loom_low_materialized_traffic_t reload_traffic = {0};
   loom_low_slice_reload_plan_t slice_reload_plan = {0};
+  IREE_ASSERT_LT(plan->assignment_index, table->assignment_count);
+  const loom_low_allocation_assignment_t* assignment =
+      &table->assignments[plan->assignment_index];
+  const loom_region_t* body = loom_low_function_const_body(table->function_op);
   if (use_count != 0) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_insert_dense_slice_reloads(
-        module, table, plan, storage_value_id, uses, use_count,
+        module, assignment, plan, body, storage_value_id, uses, use_count,
         removed_block_arg_block, removed_arg_index, arena, &slice_reload_plan,
         &reload_traffic));
   }
@@ -872,8 +764,6 @@ static iree_status_t loom_low_allocation_insert_reloads_for_uses(
     if (group_index != UINT32_MAX &&
         slice_reload_plan.groups[group_index].use_full_reload) {
       loom_op_t* slice_op = loom_use_user_op(uses[i]);
-      IREE_RETURN_IF_ERROR(loom_low_allocation_validate_spill_use(
-          slice_op, loom_use_operand_index(uses[i]), plan));
       IREE_RETURN_IF_ERROR(loom_op_set_operand(
           module, slice_op, /*operand_index=*/0,
           slice_reload_plan.groups[group_index].full_reload_value_id));
@@ -882,7 +772,7 @@ static iree_status_t loom_low_allocation_insert_reloads_for_uses(
 
     loom_low_materialized_traffic_t inserted_reload_traffic = {0};
     IREE_RETURN_IF_ERROR(loom_low_allocation_insert_reload_for_use(
-        module, table, plan, storage_value_id, uses[i],
+        module, assignment, plan, storage_value_id, uses[i],
         &inserted_reload_traffic));
     if (inserted_reload_traffic.count > UINT32_MAX - reload_traffic.count) {
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -986,21 +876,18 @@ static iree_status_t loom_low_allocation_materialize_one_spill_plan(
 
   loom_block_t* block_arg_block = NULL;
   uint16_t block_arg_index = 0;
-  bool block_arg_is_entry = false;
-  const bool is_block_arg = loom_low_allocation_block_arg_plan(
-      module, table->function_op, plan, &block_arg_block, &block_arg_index,
-      &block_arg_is_entry);
+  const loom_value_t* spill_value = loom_module_value(module, plan->value_id);
+  const bool is_block_arg = loom_value_is_block_arg(spill_value);
   if (is_block_arg) {
+    block_arg_block = loom_value_def_block(spill_value);
+    block_arg_index = loom_value_def_index(spill_value);
     *out_record_flags |=
         LOOM_LOW_ALLOCATION_MATERIALIZED_SPILL_FLAG_VALUE_WAS_BLOCK_ARGUMENT;
   }
-  uint32_t reload_count = use_count;
-  if (is_block_arg && !block_arg_is_entry) {
-    reload_count = loom_low_allocation_count_materialized_reloads(
-        uses, use_count, block_arg_block, block_arg_index);
-  }
+  const bool block_arg_is_entry =
+      block_arg_block == storage_prefix->entry_block;
   const bool needs_definition_store =
-      reload_count > 0 && (!is_block_arg || block_arg_is_entry);
+      use_count > 0 && (!is_block_arg || block_arg_is_entry);
 
   if (needs_definition_store) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_insert_spill_store(
@@ -1041,7 +928,8 @@ static iree_status_t loom_low_allocation_materialize_one_spill_plan(
     loom_low_materialized_traffic_t inserted_store_traffic = {0};
     IREE_RETURN_IF_ERROR(loom_low_allocation_materialize_block_arg_edges(
         module, table->function_op, plan, storage_value_id, block_arg_block,
-        block_arg_index, reload_count, arena, &inserted_store_traffic));
+        block_arg_index, inserted_reload_traffic.count, arena,
+        &inserted_store_traffic));
     if (inserted_store_traffic.count > UINT32_MAX - result->spill_count) {
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "materialized spill count overflow");
