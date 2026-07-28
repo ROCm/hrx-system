@@ -691,6 +691,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.storage_leases=*/{},
           /*.storage_lease_instances=*/{},
           /*.storage_lease_instance_count=*/{},
+          /*.storage_lease_unit_index=*/{},
           /*.storage_release_actions=*/{},
           /*.storage_release_action_count=*/{},
           /*.spill_count=*/IREE_ARRAYSIZE(spill_plans),

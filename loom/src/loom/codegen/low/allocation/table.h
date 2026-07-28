@@ -25,6 +25,9 @@
 extern "C" {
 #endif
 
+typedef struct loom_low_allocation_storage_lease_unit_index_t
+    loom_low_allocation_storage_lease_unit_index_t;
+
 typedef enum loom_low_allocation_remark_kind_e {
   // Unknown or uninitialized remark kind.
   LOOM_LOW_ALLOCATION_REMARK_UNKNOWN = 0,
@@ -319,6 +322,10 @@ typedef struct loom_low_allocation_table_t {
   const loom_low_allocation_storage_lease_t* storage_lease_instances;
   // Number of records in |storage_lease_instances|.
   iree_host_size_t storage_lease_instance_count;
+  // Physical-unit index over |storage_lease_instances| retained from
+  // allocation, or NULL when no register-like leases were materialized.
+  const loom_low_allocation_storage_lease_unit_index_t*
+      storage_lease_unit_index;
   // Allocator-requested storage release actions in allocation order.
   const loom_low_storage_release_action_t* storage_release_actions;
   // Number of records in |storage_release_actions|.

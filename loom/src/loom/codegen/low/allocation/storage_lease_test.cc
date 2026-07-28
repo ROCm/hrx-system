@@ -8,6 +8,8 @@
 
 #include <stdint.h>
 
+#include <vector>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -83,6 +85,25 @@ loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_classes,
   descriptor_set.reg_classes = reg_classes;
   descriptor_set.reg_class_count = reg_class_count;
   return descriptor_set;
+}
+
+std::vector<uint32_t> QueryLeaseUnits(
+    const loom_low_allocation_storage_lease_unit_index_t* index,
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t descriptor_reg_class_id,
+    loom_low_allocation_location_kind_t location_kind, uint32_t location_base,
+    uint32_t location_count) {
+  loom_low_allocation_storage_lease_unit_query_t query;
+  loom_low_allocation_storage_lease_unit_query_initialize(
+      index, descriptor_set, descriptor_reg_class_id, location_kind,
+      location_base, location_count, &query);
+  std::vector<uint32_t> indices;
+  uint32_t storage_lease_index = 0;
+  while (loom_low_allocation_storage_lease_unit_query_next(
+      &query, &storage_lease_index)) {
+    indices.push_back(storage_lease_index);
+  }
+  return indices;
 }
 
 loom_liveness_block_info_t LivenessBlock(uint32_t start_point,
@@ -193,6 +214,62 @@ loom_low_allocation_assignment_t Assignment(loom_value_id_t value_id,
   assignment.location_base = location_base;
   assignment.location_count = location_count;
   return assignment;
+}
+
+TEST_F(LowAllocationStorageLeaseTest, QueriesAliasingPhysicalLeaseUnits) {
+  const loom_low_reg_class_t reg_classes[] = {
+      RegClass(/*alias_set_id=*/7),
+      RegClass(/*alias_set_id=*/7),
+      RegClass(/*alias_set_id=*/0),
+  };
+  const loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
+
+  loom_low_allocation_storage_lease_unit_index_t index = {};
+  IREE_ASSERT_OK(loom_low_allocation_storage_lease_unit_index_initialize(
+      &index, /*lease_unit_capacity=*/7, &arena_));
+  IREE_ASSERT_OK(loom_low_allocation_storage_lease_unit_index_insert(
+      &index, &descriptor_set, /*descriptor_reg_class_id=*/0,
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, /*location_base=*/10,
+      /*location_count=*/3, /*storage_lease_index=*/0));
+  IREE_ASSERT_OK(loom_low_allocation_storage_lease_unit_index_insert(
+      &index, &descriptor_set, /*descriptor_reg_class_id=*/1,
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, /*location_base=*/11,
+      /*location_count=*/2, /*storage_lease_index=*/1));
+  IREE_ASSERT_OK(loom_low_allocation_storage_lease_unit_index_insert(
+      &index, &descriptor_set, /*descriptor_reg_class_id=*/2,
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, /*location_base=*/11,
+      /*location_count=*/1, /*storage_lease_index=*/2));
+  IREE_ASSERT_OK(loom_low_allocation_storage_lease_unit_index_insert(
+      &index, &descriptor_set, /*descriptor_reg_class_id=*/1,
+      LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID, /*location_base=*/11,
+      /*location_count=*/1, /*storage_lease_index=*/3));
+
+  EXPECT_EQ(
+      (std::vector<uint32_t>{1, 0}),
+      QueryLeaseUnits(&index, &descriptor_set, /*descriptor_reg_class_id=*/1,
+                      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                      /*location_base=*/11, /*location_count=*/1));
+  EXPECT_EQ(
+      (std::vector<uint32_t>{0, 1, 0, 1, 0}),
+      QueryLeaseUnits(&index, &descriptor_set, /*descriptor_reg_class_id=*/1,
+                      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                      /*location_base=*/10, /*location_count=*/3));
+  EXPECT_EQ(
+      (std::vector<uint32_t>{2}),
+      QueryLeaseUnits(&index, &descriptor_set, /*descriptor_reg_class_id=*/2,
+                      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                      /*location_base=*/11, /*location_count=*/1));
+  EXPECT_EQ((std::vector<uint32_t>{3}),
+            QueryLeaseUnits(&index, &descriptor_set,
+                            /*descriptor_reg_class_id=*/1,
+                            LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID,
+                            /*location_base=*/11, /*location_count=*/1));
+  EXPECT_TRUE(QueryLeaseUnits(&index, &descriptor_set,
+                              /*descriptor_reg_class_id=*/1,
+                              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                              /*location_base=*/20, /*location_count=*/4)
+                  .empty());
 }
 
 TEST_F(LowAllocationStorageLeaseTest, MaterializesAndReleasesConflictingLease) {
