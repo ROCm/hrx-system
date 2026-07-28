@@ -60,6 +60,34 @@ iree_cc_test(
 
 iree_cc_library(
   NAME
+    resource_table
+  HDRS
+    "resource_table.h"
+  SRCS
+    "resource_table.c"
+  DEPS
+    iree::base
+    iree::hal
+    iree::hal::remote::protocol::common
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    resource_table_test
+  SRCS
+    "resource_table_test.cc"
+  DEPS
+    ::resource_table
+    iree::base
+    iree::hal
+    iree::hal::remote::protocol::common
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     server
   HDRS
     "api.h"
@@ -80,14 +108,13 @@ iree_cc_library(
     "profile.c"
     "profile.h"
     "profile_relay.c"
-    "resource_table.c"
-    "resource_table.h"
     "server.c"
     "server.h"
     "session.c"
     "session.h"
   DEPS
     ::bulk_staging_pool
+    ::resource_table
     iree::async
     iree::base
     iree::base::internal
@@ -128,10 +155,10 @@ iree_cc_test(
   SRCS
     "bulk_session_test.cc"
     "bulk_test_util.h"
-    "resource_table.h"
     "server.h"
     "session.h"
   DEPS
+    ::resource_table
     ::server
     iree::async
     iree::base
@@ -157,10 +184,10 @@ iree_cc_test(
     bulk_download_sender_test
   SRCS
     "bulk_download_sender_test.cc"
-    "resource_table.h"
     "server.h"
     "session.h"
   DEPS
+    ::resource_table
     ::server
     iree::async
     iree::async::util::proactor_pool
@@ -189,10 +216,10 @@ iree_cc_binary_benchmark(
   SRCS
     "bulk_download_sender_benchmark.cc"
     "bulk_test_util.h"
-    "resource_table.h"
     "server.h"
     "session.h"
   DEPS
+    ::resource_table
     ::server
     iree::async
     iree::async::util::proactor_pool
@@ -225,10 +252,10 @@ iree_cc_binary_benchmark(
     "bulk.h"
     "bulk_profile_sender_benchmark.cc"
     "bulk_test_util.h"
-    "resource_table.h"
     "server.h"
     "session.h"
   DEPS
+    ::resource_table
     ::server
     iree::async
     iree::async::util::proactor_pool
@@ -261,10 +288,10 @@ iree_cc_test(
     "bulk.h"
     "bulk_profile_sender_test.cc"
     "bulk_test_util.h"
-    "resource_table.h"
     "server.h"
     "session.h"
   DEPS
+    ::resource_table
     ::server
     iree::async
     iree::base
@@ -293,10 +320,10 @@ iree_cc_binary_benchmark(
   SRCS
     "bulk_test_util.h"
     "bulk_upload_receiver_benchmark.cc"
-    "resource_table.h"
     "server.h"
     "session.h"
   DEPS
+    ::resource_table
     ::server
     iree::async
     iree::async::util::proactor_pool
@@ -327,10 +354,10 @@ iree_cc_test(
   SRCS
     "bulk_test_util.h"
     "bulk_upload_receiver_test.cc"
-    "resource_table.h"
     "server.h"
     "session.h"
   DEPS
+    ::resource_table
     ::server
     iree::async
     iree::async::util::proactor_pool
@@ -375,10 +402,10 @@ iree_cc_test(
     profile_relay_test
   SRCS
     "profile_relay_test.cc"
-    "resource_table.h"
     "server.h"
     "session.h"
   DEPS
+    ::resource_table
     ::server
     iree::async
     iree::base
@@ -398,11 +425,11 @@ iree_cc_test(
   NAME
     session_test
   SRCS
-    "resource_table.h"
     "server.h"
     "session.h"
     "session_test.cc"
   DEPS
+    ::resource_table
     ::server
     iree::async
     iree::base
@@ -427,11 +454,11 @@ iree_cc_test(
     server_lifecycle_test
   SRCS
     "bulk_test_util.h"
-    "resource_table.h"
     "server.h"
     "server_lifecycle_test.cc"
     "session.h"
   DEPS
+    ::resource_table
     ::server
     iree::async
     iree::async::platform

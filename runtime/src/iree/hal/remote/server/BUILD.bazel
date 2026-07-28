@@ -57,6 +57,30 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "resource_table",
+    srcs = ["resource_table.c"],
+    hdrs = ["resource_table.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/remote/protocol:common",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "resource_table_test",
+    srcs = ["resource_table_test.cc"],
+    deps = [
+        ":resource_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/remote/protocol:common",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "server",
     srcs = [
         "bulk.c",
@@ -69,8 +93,6 @@ iree_runtime_cc_library(
         "profile.c",
         "profile.h",
         "profile_relay.c",
-        "resource_table.c",
-        "resource_table.h",
         "server.c",
         "server.h",
         "session.c",
@@ -87,6 +109,7 @@ iree_runtime_cc_library(
     ],
     deps = [
         ":bulk_staging_pool",
+        ":resource_table",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
@@ -126,11 +149,11 @@ iree_runtime_cc_test(
     srcs = [
         "bulk_session_test.cc",
         "bulk_test_util.h",
-        "resource_table.h",
         "server.h",
         "session.h",
     ],
     deps = [
+        ":resource_table",
         ":server",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
@@ -156,11 +179,11 @@ iree_runtime_cc_test(
     name = "bulk_download_sender_test",
     srcs = [
         "bulk_download_sender_test.cc",
-        "resource_table.h",
         "server.h",
         "session.h",
     ],
     deps = [
+        ":resource_table",
         ":server",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -189,11 +212,11 @@ iree_runtime_cc_benchmark(
     srcs = [
         "bulk_download_sender_benchmark.cc",
         "bulk_test_util.h",
-        "resource_table.h",
         "server.h",
         "session.h",
     ],
     deps = [
+        ":resource_table",
         ":server",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -224,11 +247,11 @@ iree_runtime_cc_benchmark(
         "bulk.h",
         "bulk_profile_sender_benchmark.cc",
         "bulk_test_util.h",
-        "resource_table.h",
         "server.h",
         "session.h",
     ],
     deps = [
+        ":resource_table",
         ":server",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -259,11 +282,11 @@ iree_runtime_cc_test(
         "bulk.h",
         "bulk_profile_sender_test.cc",
         "bulk_test_util.h",
-        "resource_table.h",
         "server.h",
         "session.h",
     ],
     deps = [
+        ":resource_table",
         ":server",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
@@ -292,11 +315,11 @@ iree_runtime_cc_benchmark(
     srcs = [
         "bulk_test_util.h",
         "bulk_upload_receiver_benchmark.cc",
-        "resource_table.h",
         "server.h",
         "session.h",
     ],
     deps = [
+        ":resource_table",
         ":server",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -325,11 +348,11 @@ iree_runtime_cc_test(
     srcs = [
         "bulk_test_util.h",
         "bulk_upload_receiver_test.cc",
-        "resource_table.h",
         "server.h",
         "session.h",
     ],
     deps = [
+        ":resource_table",
         ":server",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -372,11 +395,11 @@ iree_runtime_cc_test(
     name = "profile_relay_test",
     srcs = [
         "profile_relay_test.cc",
-        "resource_table.h",
         "server.h",
         "session.h",
     ],
     deps = [
+        ":resource_table",
         ":server",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
@@ -396,12 +419,12 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "session_test",
     srcs = [
-        "resource_table.h",
         "server.h",
         "session.h",
         "session_test.cc",
     ],
     deps = [
+        ":resource_table",
         ":server",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
@@ -426,12 +449,12 @@ iree_runtime_cc_test(
     name = "server_lifecycle_test",
     srcs = [
         "bulk_test_util.h",
-        "resource_table.h",
         "server.h",
         "server_lifecycle_test.cc",
         "session.h",
     ],
     deps = [
+        ":resource_table",
         ":server",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async:platform",

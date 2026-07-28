@@ -728,6 +728,42 @@ TEST(RemoteServerSessionTest, ResourceReleaseWaitsForObservedSubmissionEpoch) {
 }
 
 TEST(RemoteServerSessionTest,
+     CrossTypeReleaseCannotBypassVirtualBufferOwnership) {
+  RemoteServerSessionHarness harness;
+  IREE_ASSERT_OK(harness.Initialize());
+  int destroy_count = 0;
+  TestResource resource;
+  InitializeTestResource(&resource, &destroy_count);
+
+  iree_hal_remote_resource_id_t resource_id = 0;
+  IREE_ASSERT_OK(AssignTestBufferResource(&harness, &resource, &resource_id));
+  iree_hal_resource_release(&resource.resource);
+  harness.session.virtual_buffer_map.resource_ids = &resource_id;
+  harness.session.virtual_buffer_map.count = 1;
+  harness.session.virtual_buffer_map.capacity = 1;
+
+  const iree_hal_remote_resource_id_t forged_file_id =
+      (resource_id & UINT64_C(0x00FFFFFFFFFFFFFF)) |
+      ((uint64_t)IREE_HAL_REMOTE_RESOURCE_TYPE_FILE << 56);
+  SubmitResourceRelease(&harness, /*required_observed_epoch=*/0,
+                        forged_file_id);
+
+  EXPECT_EQ(destroy_count, 0);
+  EXPECT_EQ(harness.session.virtual_buffer_map.count, 1u);
+  EXPECT_EQ(iree_hal_remote_resource_table_lookup(
+                &harness.session.resource_table,
+                IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, resource_id),
+            &resource);
+
+  harness.session.virtual_buffer_map.resource_ids = nullptr;
+  harness.session.virtual_buffer_map.count = 0;
+  harness.session.virtual_buffer_map.capacity = 0;
+  iree_hal_remote_resource_table_release(&harness.session.resource_table,
+                                         resource_id);
+  EXPECT_EQ(destroy_count, 1);
+}
+
+TEST(RemoteServerSessionTest,
      ResourceReleaseWaitsForContiguousObservedSubmissionPrefix) {
   RemoteServerSessionHarness harness;
   IREE_ASSERT_OK(harness.Initialize());

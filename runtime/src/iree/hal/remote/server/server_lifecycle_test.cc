@@ -276,7 +276,7 @@ TEST_F(ServerLifecycleTest, AcceptFailureClearsReservedSlot) {
   EXPECT_EQ(session.queue_channel, nullptr);
   EXPECT_TRUE(
       iree_hal_remote_server_bulk_session_is_empty(session.bulk_session));
-  EXPECT_EQ(session.resource_table.entries, nullptr);
+  EXPECT_EQ(session.resource_table.slots, nullptr);
   EXPECT_EQ(session.observed_submission_window.storage, nullptr);
   EXPECT_EQ(session.completed_signal_window.storage, nullptr);
 }

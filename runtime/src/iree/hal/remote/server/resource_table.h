@@ -14,23 +14,28 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Slot-based resource table with generation counters for ABA prevention.
+// Slot-based resource table with typed generation counters for ABA prevention.
 //
 // Stores retained HAL resources (buffers, semaphores, executables, etc.)
-// indexed by the Slot[23:0] field of a resource_id. Each slot carries a
-// generation counter that is bumped on assign and validated on lookup/release,
-// preventing stale references from accidentally hitting a recycled slot.
+// indexed by the Slot[23:0] field of a resource_id. Each occupied slot records
+// the assigned resource type and generation independently of the untrusted ID.
+// Lookup, detach, and release require all three values to match.
 //
 // Resource IDs encode: Type[63:56] | Flags[55:48] | Generation[47:32] |
 //                      Proactor[31:24] | Slot[23:0]
 //
-// The table does not interpret the Type or Flags fields — callers validate
-// the type before calling lookup.
+// A slot is permanently retired when its 16-bit generation is exhausted so
+// that a stale ID can never become valid again after counter wraparound.
+typedef struct iree_hal_remote_resource_table_slot_t
+    iree_hal_remote_resource_table_slot_t;
+
 typedef struct iree_hal_remote_resource_table_t {
-  void** entries;         // retained resources, NULL when free
-  uint16_t* generations;  // generation counter per slot (ABA prevention)
+  // Typed resource slots owned by the table.
+  iree_hal_remote_resource_table_slot_t* slots;
+  // Total number of slots in |slots|.
   uint32_t capacity;
-  uint32_t next_slot;  // hint for next free slot scan
+  // Slot at which the next free-slot scan begins.
+  uint32_t next_slot;
 } iree_hal_remote_resource_table_t;
 
 // Initializes a resource table with the given capacity.
@@ -52,24 +57,25 @@ iree_status_t iree_hal_remote_resource_table_assign(
     iree_hal_remote_resource_type_t resource_type, void* resource,
     iree_hal_remote_resource_id_t* out_resource_id);
 
-// Looks up a resource by resource_id. Validates the type field matches
-// |expected_type| and the generation matches the slot's current generation.
-// Returns NULL on any mismatch (wrong type, stale generation, out-of-bounds).
+// Looks up a resource by resource_id. The encoded type, |expected_type|, stored
+// type, generation, and slot occupancy must all match. Returns NULL on any
+// mismatch.
 void* iree_hal_remote_resource_table_lookup(
-    iree_hal_remote_resource_table_t* table,
+    const iree_hal_remote_resource_table_t* table,
     iree_hal_remote_resource_type_t expected_type,
     iree_hal_remote_resource_id_t resource_id);
 
-// Releases a resource slot by resource_id. Validates the type and generation
-// before releasing. Silently ignores mismatches (stale releases are benign).
+// Releases a resource slot by resource_id. The encoded type, stored type,
+// generation, and slot occupancy must all match. Silently ignores mismatches
+// because stale releases are benign.
 void iree_hal_remote_resource_table_release(
     iree_hal_remote_resource_table_t* table,
     iree_hal_remote_resource_id_t resource_id);
 
 // Detaches a resource slot by resource_id and transfers the table's retained
-// reference to the caller. Validates the type and generation before detaching.
-// Returns NULL on mismatch or stale release. The caller must release the
-// returned HAL resource.
+// reference to the caller. The encoded type, stored type, generation, and slot
+// occupancy must all match. Returns NULL on mismatch. The caller must release
+// the returned HAL resource.
 void* iree_hal_remote_resource_table_detach(
     iree_hal_remote_resource_table_t* table,
     iree_hal_remote_resource_id_t resource_id);
