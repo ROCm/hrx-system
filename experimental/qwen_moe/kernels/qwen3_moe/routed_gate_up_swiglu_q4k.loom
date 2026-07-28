@@ -277,7 +277,7 @@ kernel.def @qwen3_moe_build_expert_table(%token_count: index, %route_count: inde
   %bounded_route_count = index.assume %route_count [range(%route_count, 1, 8)] : index
   %bounded_route_stride = index.assume %route_stride [range(%route_stride, 1, 512)] : index
   %bounded_expert_count = index.assume %expert_count [range(%expert_count, 1, 512)] : index
-  %expert = kernel.workgroup.id<x> : index
+  %expert0 = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
   %zero = index.constant 0 : index
   %workgroup_size = index.constant 256 : index
@@ -286,21 +286,22 @@ kernel.def @qwen3_moe_build_expert_table(%token_count: index, %route_count: inde
   %zero_offset = index.constant 0 : offset
   %four_bytes = index.constant 4 : offset
   %assignment_count = index.mul %bounded_token_count, %bounded_route_count : index
-  %route_storage_count = index.mul %bounded_token_count, %bounded_route_stride : index
-  %expert_assignment_count = index.mul %bounded_expert_count, %bounded_token_count : index
-  %assignment_table_byte_base = index.scale %bounded_expert_count, %four_bytes : index, offset -> offset
-  %route_view = buffer.view %route_ids[%zero_offset] : buffer -> view<[%route_storage_count]xi32, #dense>
-  %count_view = buffer.view %expert_table[%zero_offset] : buffer -> view<[%bounded_expert_count]xi32, #dense>
-  %assignment_view = buffer.view %expert_table[%assignment_table_byte_base] : buffer -> view<[%expert_assignment_count]xi32, #dense>
+  %expert, %table_expert_count = index.assume %expert0, %bounded_expert_count [lt(%expert0, %bounded_expert_count)] : index, index
+  %assignment_table_byte_base = index.scale %table_expert_count, %four_bytes : index, offset -> offset
+  %route_view = buffer.view %route_ids[%zero_offset] : buffer -> view<[%bounded_token_count]x[%bounded_route_stride]xi32, #dense>
+  %count_view = buffer.view %expert_table[%zero_offset] : buffer -> view<[%table_expert_count]xi32, #dense>
+  %assignment_view = buffer.view %expert_table[%assignment_table_byte_base] : buffer -> view<[%table_expert_count]x[%bounded_token_count]xi32, #dense>
   %expert_route_count = scf.for %block_base = [%zero to %assignment_count step %workgroup_size](%matched_base = %zero_i32 : i32) -> (i32) {
     %assignment = index.add %block_base, %lane : index
     %in_range = index.cmp ult, %assignment, %assignment_count : index
     %route_expert_i32 = scf.if %in_range -> (i32) {
-      %token = index.div %assignment, %bounded_route_count : index
-      %route = index.rem %assignment, %bounded_route_count : index
-      %token_base = index.mul %token, %bounded_route_stride : index
-      %route_index = index.add %token_base, %route : index
-      %loaded = view.load %route_view[%route_index] : view<[%route_storage_count]xi32, #dense> -> i32
+      %token0 = index.div %assignment, %bounded_route_count : index
+      %route0 = index.rem %assignment, %bounded_route_count : index
+      %token, %route_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
+      // The route stride is the physical row width and must contain every
+      // logical top-k route.
+      %route, %route_row_stride = index.assume %route0, %bounded_route_stride [lt(%route0, %bounded_route_stride)] : index, index
+      %loaded = view.load %route_view[%token, %route] : view<[%bounded_token_count]x[%bounded_route_stride]xi32, #dense> -> i32
       scf.yield %loaded : i32
     } else {
       %minus_one_i32 = scalar.constant -1 : i32
@@ -324,17 +325,15 @@ kernel.def @qwen3_moe_build_expert_table(%token_count: index, %route_count: inde
       // Top-k route IDs are unique within a token, so one expert can own at
       // most token_count assignments.
       %bounded_match_ordinal, %table_token_count = index.assume %match_ordinal, %bounded_token_count [lt(%match_ordinal, %bounded_token_count)] : index, index
-      %expert_assignment_base = index.mul %expert, %table_token_count : index
-      %expert_assignment_index = index.add %expert_assignment_base, %bounded_match_ordinal : index
       %assignment_i32 = index.cast %assignment : index to i32
-      view.store %assignment_i32, %assignment_view[%expert_assignment_index] : i32, view<[%expert_assignment_count]xi32, #dense>
+      view.store %assignment_i32, %assignment_view[%expert, %bounded_match_ordinal] : i32, view<[%table_expert_count]x[%bounded_token_count]xi32, #dense>
     }
     %next_matched_base = scalar.addi %matched_base, %block_match_count : i32
     scf.yield %next_matched_base : i32
   }
   %is_lane_zero = index.cmp eq, %lane, %zero : index
   scf.if %is_lane_zero {
-    view.store %expert_route_count, %count_view[%expert] : i32, view<[%bounded_expert_count]xi32, #dense>
+    view.store %expert_route_count, %count_view[%expert] : i32, view<[%table_expert_count]xi32, #dense>
   }
   kernel.return
 }
@@ -479,7 +478,7 @@ kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped(%token_count: index, 
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 4096)] : index
   %channel_tile = kernel.workgroup.id<x> : index
   %route_tile = kernel.workgroup.id<y> : index
-  %expert = kernel.workgroup.id<z> : index
+  %expert0 = kernel.workgroup.id<z> : index
   %lane = kernel.workitem.id<x> : index
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -502,8 +501,8 @@ kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped(%token_count: index, 
   %weight_stage_bytes = index.constant 4608 : offset
   %q8_stage_bytes = index.constant 9216 : offset
   %assignment_count = index.mul %bounded_token_count, %bounded_route_count : index
-  %expert_assignment_count = index.mul %bounded_expert_count, %bounded_token_count : index
-  %assignment_table_byte_base = index.scale %bounded_expert_count, %four_bytes : index, offset -> offset
+  %expert, %table_expert_count = index.assume %expert0, %bounded_expert_count [lt(%expert0, %bounded_expert_count)] : index, index
+  %assignment_table_byte_base = index.scale %table_expert_count, %four_bytes : index, offset -> offset
   %q4_block_count = index.div %input_size, %twofiftysix : index
   %weight_row_word_count = index.mul %q4_block_count, %thirtysix : index
   %weight_expert_word_count = index.mul %bounded_output_size, %weight_row_word_count : index
@@ -515,8 +514,8 @@ kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped(%token_count: index, 
   %output_element_count = index.mul %output_route_count, %bounded_output_size : index
   %q8_noalias, %expert_table_noalias, %gate_noalias, %up_noalias, %output_noalias = buffer.assume.noalias %q8_input, %expert_table, %gate_weight, %up_weight, %output : buffer, buffer, buffer, buffer, buffer
   %q8_words = buffer.view %q8_noalias[%zero_offset] : buffer -> view<[%q8_word_count]xi32, #dense>
-  %count_view = buffer.view %expert_table_noalias[%zero_offset] : buffer -> view<[%bounded_expert_count]xi32, #dense>
-  %assignment_view = buffer.view %expert_table_noalias[%assignment_table_byte_base] : buffer -> view<[%expert_assignment_count]xi32, #dense>
+  %count_view = buffer.view %expert_table_noalias[%zero_offset] : buffer -> view<[%table_expert_count]xi32, #dense>
+  %assignment_view = buffer.view %expert_table_noalias[%assignment_table_byte_base] : buffer -> view<[%table_expert_count]x[%bounded_token_count]xi32, #dense>
   %gate_words = buffer.view %gate_noalias[%zero_offset] : buffer -> view<[%weight_word_count]xi32, #dense>
   %up_words = buffer.view %up_noalias[%zero_offset] : buffer -> view<[%weight_word_count]xi32, #dense>
   %output_view = buffer.view %output_noalias[%zero_offset] : buffer -> view<[%output_element_count]xf32, #dense>
@@ -540,7 +539,7 @@ kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped(%token_count: index, 
   %route_partition_step = index.constant 128 : index
   %is_lane_zero = index.cmp eq, %lane, %zero : index
   %lane_expert_route_count = scf.if %is_lane_zero -> (i32) {
-    %loaded = view.load %count_view[%expert] : view<[%bounded_expert_count]xi32, #dense> -> i32
+    %loaded = view.load %count_view[%expert] : view<[%table_expert_count]xi32, #dense> -> i32
     scf.yield %loaded : i32
   } else {
     scf.yield %zero_i32 : i32
@@ -565,9 +564,7 @@ kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped(%token_count: index, 
       %local_row = index.assume %lane [range(%lane, 0, 31)] : index
       %expert_assignment_ordinal0 = index.add %tile_base, %local_row : index
       %expert_assignment_ordinal, %table_token_count = index.assume %expert_assignment_ordinal0, %bounded_token_count [lt(%expert_assignment_ordinal0, %bounded_token_count)] : index, index
-      %table_expert_assignment_base = index.mul %expert, %table_token_count : index
-      %expert_assignment_index = index.add %table_expert_assignment_base, %expert_assignment_ordinal : index
-      %assignment_i32 = view.load %assignment_view[%expert_assignment_index] : view<[%expert_assignment_count]xi32, #dense> -> i32
+      %assignment_i32 = view.load %assignment_view[%expert, %expert_assignment_ordinal] : view<[%table_expert_count]x[%bounded_token_count]xi32, #dense> -> i32
       view.store %assignment_i32, %row_ids_view[%local_row] : i32, view<32xi32, #dense>
     }
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}

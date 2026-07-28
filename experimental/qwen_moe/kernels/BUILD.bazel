@@ -16,6 +16,7 @@ package(
 exports_files([
     "ggml/quantize_q8_1_x4.loom",
     "qwen3_moe/routed_gate_up_swiglu_q4k.loom",
+    "qwen3_moe/routed_linear_q4k_f16_wmma.loom",
 ])
 
 iree_executable_test(
@@ -69,6 +70,56 @@ loom_link_module(
     libraries = ["ggml/quantize_q8_1_x4.loom"],
 )
 
+loom_link_module(
+    name = "routed_gate_up_swiglu_q4k_f16_wmma_linked",
+    srcs = ["qwen3_moe/routed_linear_q4k_f16_wmma.loom"],
+    libraries = [
+        "ggml/quantize_q8_1_x4.loom",
+        "qwen3_moe/routed_gate_up_swiglu_q4k.loom",
+    ],
+)
+
+iree_executable_test(
+    name = "routed_gate_up_swiglu_q4k_f16_wmma_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :routed_gate_up_swiglu_q4k_f16_wmma_linked)",
+        "--config=qwen3_moe.routed_gate_up.expert_count=128",
+        "--config=qwen3_moe.routed_gate_up.input_size=2048",
+        "--config=qwen3_moe.routed_gate_up.output_size=768",
+        "--config=qwen3_moe.routed_gate_up.route_count=8",
+        "--dry-run",
+        "--output-format=jsonl",
+    ],
+    data = [":routed_gate_up_swiglu_q4k_f16_wmma_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "routed_gate_up_swiglu_q4k_gfx1151_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :routed_gate_up_swiglu_q4k_f16_wmma_linked)",
+        "--case=@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_differential_case",
+        "--config=qwen3_moe.routed_gate_up.expert_count=4",
+        "--config=qwen3_moe.routed_gate_up.input_size=512",
+        "--config=qwen3_moe.routed_gate_up.output_size=33",
+        "--config=qwen3_moe.routed_gate_up.route_count=2",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":routed_gate_up_swiglu_q4k_f16_wmma_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
 iree_executable_test(
     name = "routed_gate_up_swiglu_q4k_hal_test",
     src = "//loom/src/loom/tools/iree-test-loom",
@@ -96,6 +147,8 @@ test_suite(
     tests = [
         ":quantize_q8_1_x4_hal_test",
         ":quantize_q8_1_x4_plan_test",
+        ":routed_gate_up_swiglu_q4k_f16_wmma_plan_test",
+        ":routed_gate_up_swiglu_q4k_gfx1151_hal_test",
         ":routed_gate_up_swiglu_q4k_hal_test",
         ":routed_gate_up_swiglu_q4k_plan_test",
     ],
