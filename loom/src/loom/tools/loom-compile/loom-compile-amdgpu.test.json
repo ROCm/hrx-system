@@ -697,50 +697,96 @@
       ]
     },
     {
-      "name": "compiles kernels whose kernargs are unused",
+      "name": "compiles unused kernargs for every generic AMDGPU family",
       "steps": [
         {
-          "name": "compile-gfx1100",
+          "name": "compile-gfx9-4-generic",
           "run": {
             "tool": "loom-compile",
             "args": [
               "{srcdir}/../iree-test-loom/testdata/amdgpu_unused_kernargs.loom",
               "--backend=amdgpu-hal",
-              "--target=gfx1100",
-              "--output={tmp}/amdgpu_unused_kernargs_gfx1100.hal",
-              "--emit-target-artifact={tmp}/amdgpu_unused_kernargs_gfx1100.hsaco"
+              "--target=gfx9-4-generic",
+              "--output={tmp}/amdgpu_unused_kernargs_gfx9-4-generic.hal",
+              "--emit-target-artifact={tmp}/amdgpu_unused_kernargs_gfx9-4-generic.hsaco"
             ]
           },
           "files": [
             {
-              "path": "{tmp}/amdgpu_unused_kernargs_gfx1100.hal",
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx9-4-generic.hal",
               "non_empty": true
             },
             {
-              "path": "{tmp}/amdgpu_unused_kernargs_gfx1100.hsaco",
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx9-4-generic.hsaco",
               "non_empty": true
             }
           ]
         },
         {
-          "name": "compile-gfx1250",
+          "name": "compile-gfx11-generic",
           "run": {
             "tool": "loom-compile",
             "args": [
               "{srcdir}/../iree-test-loom/testdata/amdgpu_unused_kernargs.loom",
               "--backend=amdgpu-hal",
-              "--target=gfx1250",
-              "--output={tmp}/amdgpu_unused_kernargs_gfx1250.hal",
-              "--emit-target-artifact={tmp}/amdgpu_unused_kernargs_gfx1250.hsaco"
+              "--target=gfx11-generic",
+              "--output={tmp}/amdgpu_unused_kernargs_gfx11-generic.hal",
+              "--emit-target-artifact={tmp}/amdgpu_unused_kernargs_gfx11-generic.hsaco"
             ]
           },
           "files": [
             {
-              "path": "{tmp}/amdgpu_unused_kernargs_gfx1250.hal",
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx11-generic.hal",
               "non_empty": true
             },
             {
-              "path": "{tmp}/amdgpu_unused_kernargs_gfx1250.hsaco",
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx11-generic.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx12-generic",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/../iree-test-loom/testdata/amdgpu_unused_kernargs.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx12-generic",
+              "--output={tmp}/amdgpu_unused_kernargs_gfx12-generic.hal",
+              "--emit-target-artifact={tmp}/amdgpu_unused_kernargs_gfx12-generic.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx12-generic.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx12-generic.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx12-5-generic",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/../iree-test-loom/testdata/amdgpu_unused_kernargs.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx12-5-generic",
+              "--output={tmp}/amdgpu_unused_kernargs_gfx12-5-generic.hal",
+              "--emit-target-artifact={tmp}/amdgpu_unused_kernargs_gfx12-5-generic.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx12-5-generic.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/amdgpu_unused_kernargs_gfx12-5-generic.hsaco",
               "non_empty": true
             }
           ]
@@ -1590,7 +1636,7 @@
           "stderr": {
             "contains": {
               "unordered": [
-                "\"target_bundle\":\"gfx1100_target\"",
+                "\"target_bundle\":\"gfx11_generic_target\"",
                 "\"artifact_format\":\"elf\"",
                 "\"function\":\"selected_store_i32\"",
                 "\"status\":{\"code\":0,\"name\":\"OK\"}"
