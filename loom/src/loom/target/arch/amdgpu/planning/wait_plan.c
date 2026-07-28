@@ -25,8 +25,6 @@
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/util/segmented_storage.h"
 
-#define LOOM_AMDGPU_WAIT_PLAN_ACTION_INDEX_NONE UINT32_MAX
-
 // Target payload size for lazily appended wait-action segments. Segments stay
 // small enough to share normal compiler workspace blocks with other planning
 // state while avoiding repeated copies as the final action count becomes known.
@@ -207,10 +205,6 @@ typedef struct loom_amdgpu_wait_plan_builder_t {
   loom_amdgpu_wait_block_arg_source_t* block_arg_sources;
   // Storage-release actions grouped by insertion node.
   loom_low_storage_release_action_index_t storage_release_action_index;
-  // First residual hazard action per insertion node.
-  uint32_t* first_hazard_action_by_node;
-  // Next residual hazard action for the same insertion node.
-  uint32_t* next_hazard_action;
   // DFS visit epoch per value while forwarding SSA wait dependencies.
   uint32_t* dependency_visit_epochs;
   // Explicit worklist used with |dependency_visit_epochs|.
@@ -242,6 +236,10 @@ typedef struct loom_amdgpu_wait_plan_builder_t {
   loom_amdgpu_wait_plan_action_t* actions;
   // Number of populated action rows.
   iree_host_size_t action_count;
+  // Cursor into packet-ordered actions while projecting residual hazards.
+  iree_host_size_t hazard_action_cursor;
+  // Packet index of the next residual hazard, or IREE_HOST_SIZE_MAX.
+  iree_host_size_t next_hazard_packet_index;
   // Exact number of canonical packet-progress rows.
   iree_host_size_t progress_event_count;
   // Exact number of target-owned canonical packet-hazard rows.
@@ -614,6 +612,13 @@ static iree_status_t loom_amdgpu_wait_plan_allocate_physical_state(
   return iree_ok_status();
 }
 
+static bool loom_amdgpu_wait_plan_action_is_residual_hazard(
+    const loom_amdgpu_wait_plan_action_t* action) {
+  return action->kind == LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED &&
+         !iree_any_bit_set(action->flags,
+                           LOOM_AMDGPU_WAIT_PLAN_ACTION_FLAG_STORAGE_RELEASE);
+}
+
 static iree_status_t loom_amdgpu_wait_plan_append_action(
     loom_amdgpu_wait_plan_builder_t* builder,
     loom_amdgpu_wait_plan_action_t action) {
@@ -632,6 +637,9 @@ static iree_status_t loom_amdgpu_wait_plan_append_action(
   builder->action_stream.tail->actions[builder->action_stream.tail_count++] =
       action;
   ++builder->action_count;
+  if (loom_amdgpu_wait_plan_action_is_residual_hazard(&action)) {
+    ++builder->hazard_event_count;
+  }
   return iree_ok_status();
 }
 
@@ -661,13 +669,6 @@ static iree_status_t loom_amdgpu_wait_plan_finalize_actions(
   }
   IREE_ASSERT_EQ(output_count, builder->action_count);
   return iree_ok_status();
-}
-
-static bool loom_amdgpu_wait_plan_action_is_residual_hazard(
-    const loom_amdgpu_wait_plan_action_t* action) {
-  return action->kind == LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED &&
-         !iree_any_bit_set(action->flags,
-                           LOOM_AMDGPU_WAIT_PLAN_ACTION_FLAG_STORAGE_RELEASE);
 }
 
 static iree_status_t loom_amdgpu_wait_plan_ensure_dependency_link_capacity(
@@ -3148,50 +3149,6 @@ static iree_status_t loom_amdgpu_wait_plan_build_actions(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_wait_plan_build_hazard_action_index(
-    loom_amdgpu_wait_plan_builder_t* builder) {
-  if (builder->action_count == 0) {
-    return iree_ok_status();
-  }
-  IREE_ASSERT_LE(builder->action_count, UINT32_MAX);
-  const loom_low_schedule_table_t* schedule = builder->schedule;
-  if (schedule->node_count == 0) {
-    return iree_ok_status();
-  }
-
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(builder->arena, schedule->node_count,
-                                sizeof(*builder->first_hazard_action_by_node),
-                                (void**)&builder->first_hazard_action_by_node));
-  for (iree_host_size_t i = 0; i < schedule->node_count; ++i) {
-    builder->first_hazard_action_by_node[i] =
-        LOOM_AMDGPU_WAIT_PLAN_ACTION_INDEX_NONE;
-  }
-
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(builder->arena, builder->action_count,
-                                sizeof(*builder->next_hazard_action),
-                                (void**)&builder->next_hazard_action));
-  for (iree_host_size_t i = 0; i < builder->action_count; ++i) {
-    builder->next_hazard_action[i] = LOOM_AMDGPU_WAIT_PLAN_ACTION_INDEX_NONE;
-  }
-
-  for (iree_host_size_t i = builder->action_count; i > 0; --i) {
-    const uint32_t action_index = (uint32_t)(i - 1);
-    const loom_amdgpu_wait_plan_action_t* action =
-        &builder->actions[action_index];
-    if (!loom_amdgpu_wait_plan_action_is_residual_hazard(action)) {
-      continue;
-    }
-    ++builder->hazard_event_count;
-    IREE_ASSERT_LT(action->node_index, schedule->node_count);
-    builder->next_hazard_action[action_index] =
-        builder->first_hazard_action_by_node[action->node_index];
-    builder->first_hazard_action_by_node[action->node_index] = action_index;
-  }
-  return iree_ok_status();
-}
-
 static void loom_amdgpu_wait_plan_emit_counter_progress(
     loom_low_packet_progress_emit_fn_t emit, void* emit_user_data,
     uint16_t counter_id, loom_low_packet_progress_action_t action,
@@ -3276,6 +3233,24 @@ static void loom_amdgpu_wait_plan_emit_hazard_action(
   emit(emit_user_data, &event);
 }
 
+static void loom_amdgpu_wait_plan_advance_hazard_action(
+    loom_amdgpu_wait_plan_builder_t* builder) {
+  while (builder->hazard_action_cursor < builder->action_count) {
+    const loom_amdgpu_wait_plan_action_t* action =
+        &builder->actions[builder->hazard_action_cursor];
+    if (loom_amdgpu_wait_plan_action_is_residual_hazard(action)) {
+      const loom_low_schedule_block_t* block =
+          &builder->schedule->blocks[action->block_index];
+      builder->next_hazard_packet_index =
+          (iree_host_size_t)block->scheduled_node_start +
+          action->scheduled_ordinal;
+      return;
+    }
+    ++builder->hazard_action_cursor;
+  }
+  builder->next_hazard_packet_index = IREE_HOST_SIZE_MAX;
+}
+
 static void loom_amdgpu_wait_plan_hazard_query(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
@@ -3285,19 +3260,18 @@ static void loom_amdgpu_wait_plan_hazard_query(
   (void)schedule;
   (void)allocation;
   (void)progress;
-  const loom_amdgpu_wait_plan_builder_t* builder =
-      (const loom_amdgpu_wait_plan_builder_t*)user_data;
-  if (builder->first_hazard_action_by_node == NULL) {
+  loom_amdgpu_wait_plan_builder_t* builder =
+      (loom_amdgpu_wait_plan_builder_t*)user_data;
+  if (builder->next_hazard_packet_index != packet->packet_index) {
     return;
   }
-  for (uint32_t action_index =
-           builder->first_hazard_action_by_node[packet->node_index];
-       action_index != LOOM_AMDGPU_WAIT_PLAN_ACTION_INDEX_NONE;
-       action_index = builder->next_hazard_action[action_index]) {
+  do {
     const loom_amdgpu_wait_plan_action_t* action =
-        &builder->actions[action_index];
+        &builder->actions[builder->hazard_action_cursor];
     loom_amdgpu_wait_plan_emit_hazard_action(action, emit, emit_user_data);
-  }
+    ++builder->hazard_action_cursor;
+    loom_amdgpu_wait_plan_advance_hazard_action(builder);
+  } while (builder->next_hazard_packet_index == packet->packet_index);
 }
 
 static iree_status_t loom_amdgpu_wait_plan_build_common_tables(
@@ -3315,6 +3289,8 @@ static iree_status_t loom_amdgpu_wait_plan_build_common_tables(
     progress = &builder->progress;
   }
 
+  builder->hazard_action_cursor = 0;
+  loom_amdgpu_wait_plan_advance_hazard_action(builder);
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       .user_data = builder,
       .event_count = builder->hazard_event_count,
@@ -3368,9 +3344,6 @@ iree_status_t loom_amdgpu_wait_plan_build(
   }
   if (iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_plan_finalize_actions(&builder);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_amdgpu_wait_plan_build_hazard_action_index(&builder);
   }
   if (iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_plan_build_common_tables(&builder);
