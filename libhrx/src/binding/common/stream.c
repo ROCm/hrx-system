@@ -315,9 +315,6 @@ iree_status_t iree_hal_streaming_stream_create(
   stream->submitted_value = 0;
   stream->completed_value = 0;
   stream->queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
-  stream->recorded_events = NULL;
-  stream->event_count = 0;
-  stream->event_capacity = 0;
   stream->memory_reuse_dependencies = NULL;
   stream->memory_reuse_dependency_count = 0;
   stream->memory_reuse_dependency_capacity = 0;
@@ -371,13 +368,6 @@ static void iree_hal_streaming_stream_destroy(
     iree_hal_streaming_context_unregister_stream(context, stream);
   }
 
-  // Clean up recorded events.
-  if (stream->recorded_events) {
-    for (iree_host_size_t i = 0; i < stream->event_count; ++i) {
-      iree_hal_streaming_event_release(stream->recorded_events[i]);
-    }
-    iree_allocator_free(stream->host_allocator, stream->recorded_events);
-  }
   iree_allocator_free(stream->host_allocator,
                       stream->memory_reuse_dependencies);
 
