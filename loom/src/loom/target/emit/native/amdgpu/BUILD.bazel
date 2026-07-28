@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load(
     "//loom/build_tools/amdgpu:descriptor_sets.bzl",
     "loom_amdgpu_descriptor_set_compatible_with",
@@ -220,23 +221,35 @@ loom_cc_library(
     ],
 )
 
+iree_c_embed_data(
+    name = "packet_plan_attention_bf16",
+    testonly = True,
+    srcs = ["packet_plan_attention_bf16.loom"],
+    c_file_output = "packet_plan_attention_bf16.c",
+    flatten = True,
+    h_file_output = "packet_plan_attention_bf16.h",
+    identifier = "packet_plan_attention_bf16",
+)
+
 loom_cc_benchmark(
     name = "packet_plan_benchmark",
     srcs = ["packet_plan_benchmark.cc"],
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_GFX125X),
     deps = [
+        ":packet_plan_attention_bf16",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:function",
-        "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:low_descriptor_registry",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/amdgpu:provider",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
         "//loom/src/loom/target/arch/amdgpu/ops",
         "//loom/src/loom/target/arch/amdgpu/planning:descriptor_semantics",
@@ -244,6 +257,7 @@ loom_cc_benchmark(
         "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
         "//loom/src/loom/target/arch/amdgpu/planning:storage_lease",
         "//loom/src/loom/target/arch/amdgpu/planning:vopd_plan",
+        "//loom/src/loom/tooling/compile:pipeline",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:benchmark_main",

@@ -6,9 +6,9 @@
 
 // Benchmarks AMDGPU packet planning over immutable production emission frames.
 //
-// Fixture parsing, verification, scheduling, and allocation happen before the
-// timed loop. Each iteration resets only the transient plan arena and rebuilds
-// either the wait plan or the complete target-owned packet plan.
+// Fixture parsing, lowering, verification, scheduling, and allocation happen
+// before the timed loop. Each iteration resets only the transient plan arena
+// and rebuilds either the wait plan or the complete target-owned packet plan.
 
 #include <inttypes.h>
 
@@ -23,7 +23,6 @@
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/function.h"
-#include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/codegen/low/verify.h"
@@ -32,7 +31,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
-#include "loom/target/arch/amdgpu/descriptors/low_registry.h"
+#include "loom/ops/op_registry.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
 #include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
@@ -40,7 +39,11 @@
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
 #include "loom/target/arch/amdgpu/planning/storage_lease.h"
 #include "loom/target/arch/amdgpu/planning/vopd_plan.h"
+#include "loom/target/arch/amdgpu/provider.h"
+#include "loom/target/emit/native/amdgpu/packet_plan_attention_bf16.h"
 #include "loom/target/low_descriptor_registry.h"
+#include "loom/target/provider.h"
+#include "loom/tooling/compile/pipeline.h"
 
 namespace {
 
@@ -48,35 +51,88 @@ constexpr iree_host_size_t kArenaBlockSize = 128 * 1024;
 constexpr uint64_t kFnvOffsetBasis = UINT64_C(1469598103934665603);
 constexpr uint64_t kFnvPrime = UINT64_C(1099511628211);
 
-using DialectVtablesFn = const loom_op_vtable_t* const* (*)(iree_host_size_t*);
-
 enum class PlanComponent {
   kWait,
   kComplete,
 };
 
-struct FixtureSpec {
-  const char* name;
-  uint32_t matrix_phase_count;
+enum class FixtureInputStage {
+  kGeneratedLow,
+  kAuthoredSource,
+};
+
+struct GeneratedMatrixShape {
+  // Number of matrix phases separated by CFG edges.
+  uint32_t phase_count;
+  // Total synthesized VALU packets in each matrix phase.
   uint32_t valu_packets_per_phase;
+  // VALU packets retained in the dependent prefix of each phase.
   uint32_t dependent_valu_packets_per_phase;
-  uint32_t minimum_packet_count;
+};
+
+struct FrameShape {
+  // Number of scheduled CFG blocks.
+  iree_host_size_t block_count;
+  // Number of scheduled packets.
+  iree_host_size_t packet_count;
+  // Number of physical allocation assignments.
+  iree_host_size_t assignment_count;
+  // Number of matrix-class packets.
+  iree_host_size_t matrix_packet_count;
+  // Number of storage lease records.
+  iree_host_size_t storage_lease_count;
+  // Number of physical register units covered by storage leases.
+  iree_host_size_t storage_lease_unit_count;
+  // Number of scheduled storage release actions.
+  iree_host_size_t storage_release_count;
+};
+
+struct FixtureSpec {
+  // Stable benchmark row name.
+  const char* name;
+  // Compilation stage represented by the fixture input.
+  FixtureInputStage input_stage;
+  // Generated target-low topology; empty for authored source fixtures.
+  GeneratedMatrixShape generated_matrix;
+  // Exact immutable frame shape required for comparable measurements.
+  FrameShape expected_frame;
 };
 
 constexpr FixtureSpec kMemoryControl = {
     /*.name=*/"memory_control",
-    /*.matrix_phase_count=*/0,
-    /*.valu_packets_per_phase=*/0,
-    /*.dependent_valu_packets_per_phase=*/0,
-    /*.minimum_packet_count=*/5,
+    /*.input_stage=*/FixtureInputStage::kGeneratedLow,
+    /*.generated_matrix=*/{},
+    /*.expected_frame=*/
+    {
+        /*.block_count=*/1,
+        /*.packet_count=*/10,
+        /*.assignment_count=*/8,
+        /*.matrix_packet_count=*/0,
+        /*.storage_lease_count=*/14,
+        /*.storage_lease_unit_count=*/20,
+        /*.storage_release_count=*/1,
+    },
 };
 
 constexpr FixtureSpec kMatrixDependencyCanary = {
     /*.name=*/"matrix_dependency_canary",
-    /*.matrix_phase_count=*/2,
-    /*.valu_packets_per_phase=*/4,
-    /*.dependent_valu_packets_per_phase=*/4,
-    /*.minimum_packet_count=*/25,
+    /*.input_stage=*/FixtureInputStage::kGeneratedLow,
+    /*.generated_matrix=*/
+    {
+        /*.phase_count=*/2,
+        /*.valu_packets_per_phase=*/4,
+        /*.dependent_valu_packets_per_phase=*/4,
+    },
+    /*.expected_frame=*/
+    {
+        /*.block_count=*/2,
+        /*.packet_count=*/49,
+        /*.assignment_count=*/44,
+        /*.matrix_packet_count=*/2,
+        /*.storage_lease_count=*/56,
+        /*.storage_lease_unit_count=*/128,
+        /*.storage_release_count=*/5,
+    },
 };
 
 // Legal adversarial topology for storage-lease overlap planning. Every address
@@ -87,24 +143,49 @@ constexpr FixtureSpec kMatrixDependencyCanary = {
 // performance proxy.
 constexpr FixtureSpec kMatrixLeaseOverlapStress = {
     /*.name=*/"matrix_lease_overlap_stress",
-    /*.matrix_phase_count=*/17,
-    /*.valu_packets_per_phase=*/208,
-    /*.dependent_valu_packets_per_phase=*/64,
-    /*.minimum_packet_count=*/3700,
+    /*.input_stage=*/FixtureInputStage::kGeneratedLow,
+    /*.generated_matrix=*/
+    {
+        /*.phase_count=*/17,
+        /*.valu_packets_per_phase=*/208,
+        /*.dependent_valu_packets_per_phase=*/64,
+    },
+    /*.expected_frame=*/
+    {
+        /*.block_count=*/17,
+        /*.packet_count=*/3772,
+        /*.assignment_count=*/3737,
+        /*.matrix_packet_count=*/17,
+        /*.storage_lease_count=*/476,
+        /*.storage_lease_unit_count=*/1088,
+        /*.storage_release_count=*/68,
+    },
+};
+
+// Fixed-shape 4096-token, 18-head, 256-wide online attention workload. The
+// authored source runs through the shared prepared-low pipeline before the
+// immutable planner frame is built, keeping the benchmark coupled to the
+// shipping compilation boundary rather than a retained low-IR snapshot.
+constexpr FixtureSpec kAttentionBf16 = {
+    /*.name=*/"attention_bf16",
+    /*.input_stage=*/FixtureInputStage::kAuthoredSource,
+    /*.generated_matrix=*/{},
+    /*.expected_frame=*/
+    {
+        /*.block_count=*/21,
+        /*.packet_count=*/2570,
+        /*.assignment_count=*/2599,
+        /*.matrix_packet_count=*/17,
+        /*.storage_lease_count=*/916,
+        /*.storage_lease_unit_count=*/1366,
+        /*.storage_release_count=*/154,
+    },
 };
 
 static void AbortOnError(iree_status_t status) {
   if (!iree_status_is_ok(status)) {
     iree_status_abort(status);
   }
-}
-
-static void RegisterDialect(loom_context_t* context, uint8_t dialect_id,
-                            DialectVtablesFn dialect_vtables) {
-  iree_host_size_t vtable_count = 0;
-  const loom_op_vtable_t* const* vtables = dialect_vtables(&vtable_count);
-  AbortOnError(loom_context_register_dialect(
-      context, dialect_id, vtables, static_cast<uint16_t>(vtable_count)));
 }
 
 static loom_op_t* FindFirstLowFunction(loom_module_t* module) {
@@ -125,30 +206,107 @@ static uint64_t HashValue(uint64_t hash, uint64_t value) {
   return hash;
 }
 
-static uint64_t FrameSignature(const loom_low_emission_frame_t& frame) {
-  uint64_t hash = HashValue(kFnvOffsetBasis, frame.schedule.block_count);
-  hash = HashValue(hash, frame.schedule.scheduled_node_count);
+struct FrameAnalysis {
+  // Comparable cardinalities extracted during signature construction.
+  FrameShape shape;
+  // Hash over schedule descriptors and physical allocation assignments.
+  uint64_t signature;
+};
+
+static FrameAnalysis AnalyzeFrame(const loom_low_emission_frame_t& frame) {
+  FrameAnalysis analysis = {
+      /*.shape=*/
+      {
+          /*.block_count=*/frame.schedule.block_count,
+          /*.packet_count=*/frame.schedule.scheduled_node_count,
+          /*.assignment_count=*/frame.allocation.assignment_count,
+          /*.matrix_packet_count=*/0,
+          /*.storage_lease_count=*/
+          frame.allocation.storage_leases.record_count,
+          /*.storage_lease_unit_count=*/0,
+          /*.storage_release_count=*/
+          frame.allocation.storage_release_action_count,
+      },
+      /*.signature=*/HashValue(kFnvOffsetBasis, frame.schedule.block_count),
+  };
+  analysis.signature =
+      HashValue(analysis.signature, frame.schedule.scheduled_node_count);
   for (iree_host_size_t i = 0; i < frame.schedule.scheduled_node_count; ++i) {
     const uint32_t node_index = frame.schedule.scheduled_node_indices[i];
     const loom_low_schedule_node_t& node = frame.schedule.nodes[node_index];
-    hash = HashValue(hash, node_index);
-    hash = HashValue(
-        hash, node.descriptor == nullptr ? 0 : node.descriptor->stable_id);
+    analysis.signature = HashValue(analysis.signature, node_index);
+    analysis.signature =
+        HashValue(analysis.signature,
+                  node.descriptor == nullptr ? 0 : node.descriptor->stable_id);
+    if (node.descriptor != nullptr &&
+        iree_any_bit_set(node.descriptor->instruction_class_flags,
+                         LOOM_LOW_INSTRUCTION_CLASS_FLAG_MATRIX)) {
+      ++analysis.shape.matrix_packet_count;
+    }
   }
-  hash = HashValue(hash, frame.allocation.assignment_count);
+  analysis.signature =
+      HashValue(analysis.signature, frame.allocation.assignment_count);
   for (iree_host_size_t i = 0; i < frame.allocation.assignment_count; ++i) {
     const loom_low_allocation_assignment_t& assignment =
         frame.allocation.assignments[i];
-    hash = HashValue(hash, assignment.value_id);
-    hash = HashValue(hash, assignment.descriptor_reg_class_id);
-    hash = HashValue(hash, assignment.start_point);
-    hash = HashValue(hash, assignment.end_point);
-    hash = HashValue(hash, assignment.unit_count);
-    hash = HashValue(hash, assignment.location_kind);
-    hash = HashValue(hash, assignment.location_base);
-    hash = HashValue(hash, assignment.location_count);
+    analysis.signature = HashValue(analysis.signature, assignment.value_id);
+    analysis.signature =
+        HashValue(analysis.signature, assignment.descriptor_reg_class_id);
+    analysis.signature = HashValue(analysis.signature, assignment.start_point);
+    analysis.signature = HashValue(analysis.signature, assignment.end_point);
+    analysis.signature = HashValue(analysis.signature, assignment.unit_count);
+    analysis.signature =
+        HashValue(analysis.signature, assignment.location_kind);
+    analysis.signature =
+        HashValue(analysis.signature, assignment.location_base);
+    analysis.signature =
+        HashValue(analysis.signature, assignment.location_count);
   }
-  return hash;
+  for (iree_host_size_t i = 0;
+       i < frame.allocation.storage_lease_instance_count; ++i) {
+    analysis.shape.storage_lease_unit_count +=
+        frame.allocation.storage_lease_instances[i].location_count;
+  }
+  return analysis;
+}
+
+static bool FrameShapeMatches(const FrameShape& lhs, const FrameShape& rhs) {
+  return lhs.block_count == rhs.block_count &&
+         lhs.packet_count == rhs.packet_count &&
+         lhs.assignment_count == rhs.assignment_count &&
+         lhs.matrix_packet_count == rhs.matrix_packet_count &&
+         lhs.storage_lease_count == rhs.storage_lease_count &&
+         lhs.storage_lease_unit_count == rhs.storage_lease_unit_count &&
+         lhs.storage_release_count == rhs.storage_release_count;
+}
+
+static void AbortOnUnexpectedFrame(const FixtureSpec& spec,
+                                   const FrameShape& actual) {
+  if (FrameShapeMatches(actual, spec.expected_frame)) {
+    return;
+  }
+  const FrameShape& expected = spec.expected_frame;
+  std::fprintf(stderr,
+               "%s frame shape changed\n"
+               "  expected: blocks=%zu packets=%zu assignments=%zu matrix=%zu "
+               "leases=%zu lease_units=%zu releases=%zu\n"
+               "  actual:   blocks=%zu packets=%zu assignments=%zu matrix=%zu "
+               "leases=%zu lease_units=%zu releases=%zu\n",
+               spec.name, static_cast<size_t>(expected.block_count),
+               static_cast<size_t>(expected.packet_count),
+               static_cast<size_t>(expected.assignment_count),
+               static_cast<size_t>(expected.matrix_packet_count),
+               static_cast<size_t>(expected.storage_lease_count),
+               static_cast<size_t>(expected.storage_lease_unit_count),
+               static_cast<size_t>(expected.storage_release_count),
+               static_cast<size_t>(actual.block_count),
+               static_cast<size_t>(actual.packet_count),
+               static_cast<size_t>(actual.assignment_count),
+               static_cast<size_t>(actual.matrix_packet_count),
+               static_cast<size_t>(actual.storage_lease_count),
+               static_cast<size_t>(actual.storage_lease_unit_count),
+               static_cast<size_t>(actual.storage_release_count));
+  std::abort();
 }
 
 static std::string BuildMemoryControlSource() {
@@ -197,7 +355,7 @@ low.kernel.def target(@target) abi_layout({constant_count = 0, direct_arg_count 
 )";
 
   std::string accumulator = "%initial_accumulator";
-  for (uint32_t phase = 0; phase < spec.matrix_phase_count; ++phase) {
+  for (uint32_t phase = 0; phase < spec.generated_matrix.phase_count; ++phase) {
     if (phase != 0) {
       source << "  low.br ^_bb" << phase << "(" << accumulator
              << ": reg<amdgpu.vgpr x8>)\n"
@@ -247,7 +405,8 @@ low.kernel.def target(@target) abi_layout({constant_count = 0, direct_arg_count 
     accumulator = "%accumulator" + std::to_string(phase);
 
     std::string address = "%row_address";
-    for (uint32_t i = 0; i < spec.dependent_valu_packets_per_phase; ++i) {
+    for (uint32_t i = 0;
+         i < spec.generated_matrix.dependent_valu_packets_per_phase; ++i) {
       const std::string next_address =
           "%address" + std::to_string(phase) + "_chain" + std::to_string(i);
       source << "  " << next_address << " = low.op<amdgpu.v_add_u32>("
@@ -261,7 +420,8 @@ low.kernel.def target(@target) abi_layout({constant_count = 0, direct_arg_count 
     // width while the balanced reduction bounds dependency depth; the final
     // address feeds both stores.
     const uint32_t independent_leaf_count =
-        (spec.valu_packets_per_phase - spec.dependent_valu_packets_per_phase) /
+        (spec.generated_matrix.valu_packets_per_phase -
+         spec.generated_matrix.dependent_valu_packets_per_phase) /
         2;
     std::vector<std::string> address_values = {address};
     for (uint32_t i = 0; i < independent_leaf_count; ++i) {
@@ -314,19 +474,33 @@ low.kernel.def target(@target) abi_layout({constant_count = 0, direct_arg_count 
   return source.str();
 }
 
-static std::string BuildFixtureSource(const FixtureSpec& spec) {
-  return spec.matrix_phase_count == 0 ? BuildMemoryControlSource()
-                                      : BuildMatrixSource(spec);
+static std::string BuildGeneratedLowSource(const FixtureSpec& spec) {
+  return spec.generated_matrix.phase_count == 0 ? BuildMemoryControlSource()
+                                                : BuildMatrixSource(spec);
+}
+
+static iree_string_view_t AttentionBf16Source() {
+  const iree_file_toc_t* files = packet_plan_attention_bf16_create();
+  return iree_make_string_view(reinterpret_cast<const char*>(files[0].data),
+                               files[0].size);
 }
 
 struct PlanMetrics {
+  // Arena bytes occupied by plan allocations.
   iree_host_size_t plan_used_bytes = 0;
+  // Arena bytes retained from the block pool.
   iree_host_size_t plan_owned_bytes = 0;
+  // Wait actions produced by the selected plan component.
   iree_host_size_t wait_action_count = 0;
+  // Hazard records retained across all selected plan components.
   iree_host_size_t hazard_record_count = 0;
+  // Progress records retained across all selected plan components.
   iree_host_size_t progress_record_count = 0;
+  // Materialized wait packets in a complete packet plan.
   iree_host_size_t wait_packet_count = 0;
+  // Wait-counter states in a complete packet plan.
   iree_host_size_t wait_state_count = 0;
+  // VOPD pairs selected in a complete packet plan.
   iree_host_size_t vopd_pair_count = 0;
 };
 
@@ -342,26 +516,54 @@ class PacketPlanFixture {
     iree_arena_initialize(&frame_block_pool_, &frame_arena_);
     iree_arena_initialize(&plan_block_pool_, &plan_arena_);
 
+    AbortOnError(loom_target_environment_initialize(
+        &loom_amdgpu_target_provider_set, &target_environment_));
     loom_context_initialize(iree_allocator_system(), &context_);
-    RegisterDialect(&context_, LOOM_DIALECT_AMDGPU,
-                    loom_amdgpu_dialect_vtables);
-    RegisterDialect(&context_, LOOM_DIALECT_LOW, loom_low_dialect_vtables);
+    AbortOnError(loom_op_registry_register_all_dialects(&context_));
+    AbortOnError(loom_target_environment_register_context(&target_environment_,
+                                                          &context_));
     AbortOnError(loom_context_finalize(&context_));
-    loom_amdgpu_low_descriptor_registry_initialize(&target_registry_);
+    AbortOnError(loom_target_environment_initialize_low_descriptor_registry(
+        &target_environment_, &target_registry_));
 
-    const std::string source = BuildFixtureSource(spec);
+    std::string generated_source;
+    iree_string_view_t source = iree_string_view_empty();
+    if (spec.input_stage == FixtureInputStage::kAuthoredSource) {
+      source = AttentionBf16Source();
+    } else {
+      generated_source = BuildGeneratedLowSource(spec);
+      source = iree_make_string_view(generated_source.data(),
+                                     generated_source.size());
+    }
     loom_text_parse_options_t parse_options = {
         /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
         /*.max_errors=*/20,
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &target_registry_.registry, &parse_options.low_asm_environment);
-    AbortOnError(
-        loom_text_parse(iree_make_string_view(source.data(), source.size()),
-                        iree_make_cstring_view(spec.name), &context_,
-                        &module_block_pool_, &parse_options, &module_));
+    AbortOnError(loom_text_parse(source, iree_make_cstring_view(spec.name),
+                                 &context_, &module_block_pool_, &parse_options,
+                                 &module_));
     if (module_ == nullptr) {
       std::abort();
+    }
+
+    if (spec.input_stage == FixtureInputStage::kAuthoredSource) {
+      loom_compile_pipeline_options_t pipeline_options = {};
+      loom_compile_pipeline_options_initialize(&pipeline_options);
+      pipeline_options.target_environment = &target_environment_;
+      pipeline_options.low_descriptor_registry = &target_registry_;
+      pipeline_options.diagnostic_sink = {
+          /*.fn=*/loom_diagnostic_stderr_sink,
+          /*.user_data=*/nullptr,
+      };
+      pipeline_options.max_errors = 20;
+      loom_pass_run_result_t pipeline_result = {};
+      AbortOnError(loom_compile_run_pipeline(
+          module_, &pipeline_options, &module_block_pool_, &pipeline_result));
+      if (pipeline_result.error_count != 0) {
+        std::abort();
+      }
     }
 
     loom_op_t* low_function = FindFirstLowFunction(module_);
@@ -433,25 +635,12 @@ class PacketPlanFixture {
         module_, low_function, &frame_options, &frame_arena_, &frame_));
     if (frame_.schedule.error_count != 0 ||
         frame_.allocation.error_count != 0 ||
-        frame_.allocation.spill_plan_count != 0 ||
-        frame_.schedule.scheduled_node_count < spec.minimum_packet_count) {
+        frame_.allocation.spill_plan_count != 0) {
       std::abort();
     }
 
-    for (iree_host_size_t i = 0; i < frame_.schedule.scheduled_node_count;
-         ++i) {
-      const loom_low_packet_view_t packet =
-          loom_low_packet_at(&frame_.schedule, i);
-      if (packet.descriptor != nullptr &&
-          iree_any_bit_set(packet.descriptor->instruction_class_flags,
-                           LOOM_LOW_INSTRUCTION_CLASS_FLAG_MATRIX)) {
-        ++matrix_packet_count_;
-      }
-    }
-    if (matrix_packet_count_ != spec.matrix_phase_count) {
-      std::abort();
-    }
-    frame_signature_ = FrameSignature(frame_);
+    analysis_ = AnalyzeFrame(frame_);
+    AbortOnUnexpectedFrame(spec, analysis_.shape);
   }
 
   ~PacketPlanFixture() {
@@ -461,6 +650,7 @@ class PacketPlanFixture {
       loom_module_free(module_);
     }
     loom_context_deinitialize(&context_);
+    loom_target_environment_deinitialize(&target_environment_);
     iree_arena_block_pool_deinitialize(&plan_block_pool_);
     iree_arena_block_pool_deinitialize(&frame_block_pool_);
     iree_arena_block_pool_deinitialize(&module_block_pool_);
@@ -474,8 +664,7 @@ class PacketPlanFixture {
   iree_host_size_t frame_arena_used_bytes() const {
     return frame_arena_.used_allocation_size;
   }
-  uint64_t frame_signature() const { return frame_signature_; }
-  iree_host_size_t matrix_packet_count() const { return matrix_packet_count_; }
+  const FrameAnalysis& analysis() const { return analysis_; }
 
  private:
   iree_arena_block_pool_t module_block_pool_ = {};
@@ -483,12 +672,12 @@ class PacketPlanFixture {
   iree_arena_block_pool_t plan_block_pool_ = {};
   iree_arena_allocator_t frame_arena_ = {};
   iree_arena_allocator_t plan_arena_ = {};
+  loom_target_environment_t target_environment_ = {};
   loom_context_t context_ = {};
   loom_target_low_descriptor_registry_t target_registry_ = {};
   loom_module_t* module_ = nullptr;
   loom_low_emission_frame_t frame_ = {};
-  uint64_t frame_signature_ = 0;
-  iree_host_size_t matrix_packet_count_ = 0;
+  FrameAnalysis analysis_ = {};
 };
 
 static PlanMetrics BuildReferencePlan(PacketPlanFixture& fixture,
@@ -525,18 +714,17 @@ static PlanMetrics BuildReferencePlan(PacketPlanFixture& fixture,
 static void RecordMetrics(benchmark::State& state,
                           const PacketPlanFixture& fixture,
                           const PlanMetrics& metrics) {
-  const loom_low_emission_frame_t& frame = fixture.frame();
+  const FrameAnalysis& analysis = fixture.analysis();
   state.counters["assignments"] =
-      static_cast<double>(frame.allocation.assignment_count);
-  state.counters["blocks"] = static_cast<double>(frame.schedule.block_count);
+      static_cast<double>(analysis.shape.assignment_count);
+  state.counters["blocks"] = static_cast<double>(analysis.shape.block_count);
   state.counters["frame_arena_bytes"] =
       static_cast<double>(fixture.frame_arena_used_bytes());
   state.counters["planned_hazards"] =
       static_cast<double>(metrics.hazard_record_count);
   state.counters["matrix_packets"] =
-      static_cast<double>(fixture.matrix_packet_count());
-  state.counters["packets"] =
-      static_cast<double>(frame.schedule.scheduled_node_count);
+      static_cast<double>(analysis.shape.matrix_packet_count);
+  state.counters["packets"] = static_cast<double>(analysis.shape.packet_count);
   state.counters["plan_arena_owned_bytes"] =
       static_cast<double>(metrics.plan_owned_bytes);
   state.counters["plan_arena_used_bytes"] =
@@ -544,33 +732,26 @@ static void RecordMetrics(benchmark::State& state,
   state.counters["progress_events"] =
       static_cast<double>(metrics.progress_record_count);
   state.counters["storage_leases"] =
-      static_cast<double>(frame.allocation.storage_leases.record_count);
-  iree_host_size_t storage_lease_unit_count = 0;
-  for (iree_host_size_t i = 0;
-       i < frame.allocation.storage_lease_instance_count; ++i) {
-    storage_lease_unit_count +=
-        frame.allocation.storage_lease_instances[i].location_count;
-  }
+      static_cast<double>(analysis.shape.storage_lease_count);
   state.counters["storage_lease_units"] =
-      static_cast<double>(storage_lease_unit_count);
+      static_cast<double>(analysis.shape.storage_lease_unit_count);
   state.counters["storage_releases"] =
-      static_cast<double>(frame.allocation.storage_release_action_count);
+      static_cast<double>(analysis.shape.storage_release_count);
   state.counters["vopd_pairs"] = static_cast<double>(metrics.vopd_pair_count);
   state.counters["wait_actions"] =
       static_cast<double>(metrics.wait_action_count);
   state.counters["wait_packets"] =
       static_cast<double>(metrics.wait_packet_count);
   state.counters["wait_states"] = static_cast<double>(metrics.wait_state_count);
-  state.counters["packets_per_second"] =
-      benchmark::Counter(static_cast<double>(state.iterations()) *
-                             frame.schedule.scheduled_node_count,
-                         benchmark::Counter::kIsRate);
+  state.counters["packets_per_second"] = benchmark::Counter(
+      static_cast<double>(state.iterations()) * analysis.shape.packet_count,
+      benchmark::Counter::kIsRate);
   state.counters["plans_per_second"] = benchmark::Counter(
       static_cast<double>(state.iterations()), benchmark::Counter::kIsRate);
 
   char label[64] = {};
   std::snprintf(label, sizeof(label), "frame_signature=%016" PRIx64,
-                fixture.frame_signature());
+                analysis.signature);
   state.SetLabel(label);
 }
 
@@ -636,6 +817,20 @@ static void BM_PacketPlan_MatrixLeaseOverlapStress(benchmark::State& state) {
   BenchmarkPlan(state, kMatrixLeaseOverlapStress, PlanComponent::kComplete);
 }
 BENCHMARK(BM_PacketPlan_MatrixLeaseOverlapStress)
+    ->Iterations(10)
+    ->Unit(benchmark::kNanosecond);
+
+static void BM_WaitPlan_AttentionBf16(benchmark::State& state) {
+  BenchmarkPlan(state, kAttentionBf16, PlanComponent::kWait);
+}
+BENCHMARK(BM_WaitPlan_AttentionBf16)
+    ->Iterations(10)
+    ->Unit(benchmark::kNanosecond);
+
+static void BM_PacketPlan_AttentionBf16(benchmark::State& state) {
+  BenchmarkPlan(state, kAttentionBf16, PlanComponent::kComplete);
+}
+BENCHMARK(BM_PacketPlan_AttentionBf16)
     ->Iterations(10)
     ->Unit(benchmark::kNanosecond);
 
