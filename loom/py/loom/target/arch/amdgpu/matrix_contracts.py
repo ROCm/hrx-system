@@ -694,7 +694,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
     AmdgpuMatrixContract(
         name="smfmac.f32.16x16x64.bf8.bf8",
         family="smfmac",
-        features=("smfmac_gfx940",),
+        features=("smfmac_gfx940_fp8",),
         flags=("sparse",),
         tile_shape=(16, 16, 64),
         lhs=payload("bf8", 2, 8),
@@ -706,7 +706,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
     AmdgpuMatrixContract(
         name="smfmac.f32.16x16x64.bf8.fp8",
         family="smfmac",
-        features=("smfmac_gfx940",),
+        features=("smfmac_gfx940_fp8",),
         flags=("sparse",),
         tile_shape=(16, 16, 64),
         lhs=payload("bf8", 2, 8),
@@ -766,7 +766,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
     AmdgpuMatrixContract(
         name="smfmac.f32.16x16x64.fp8.bf8",
         family="smfmac",
-        features=("smfmac_gfx940",),
+        features=("smfmac_gfx940_fp8",),
         flags=("sparse",),
         tile_shape=(16, 16, 64),
         lhs=payload("fp8", 2, 8),
@@ -778,7 +778,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
     AmdgpuMatrixContract(
         name="smfmac.f32.16x16x64.fp8.fp8",
         family="smfmac",
-        features=("smfmac_gfx940",),
+        features=("smfmac_gfx940_fp8",),
         flags=("sparse",),
         tile_shape=(16, 16, 64),
         lhs=payload("fp8", 2, 8),
@@ -862,7 +862,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
     AmdgpuMatrixContract(
         name="smfmac.f32.32x32x32.bf8.bf8",
         family="smfmac",
-        features=("smfmac_gfx940",),
+        features=("smfmac_gfx940_fp8",),
         flags=("sparse",),
         tile_shape=(32, 32, 32),
         lhs=payload("bf8", 2, 8),
@@ -874,7 +874,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
     AmdgpuMatrixContract(
         name="smfmac.f32.32x32x32.bf8.fp8",
         family="smfmac",
-        features=("smfmac_gfx940",),
+        features=("smfmac_gfx940_fp8",),
         flags=("sparse",),
         tile_shape=(32, 32, 32),
         lhs=payload("bf8", 2, 8),
@@ -934,7 +934,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
     AmdgpuMatrixContract(
         name="smfmac.f32.32x32x32.fp8.bf8",
         family="smfmac",
-        features=("smfmac_gfx940",),
+        features=("smfmac_gfx940_fp8",),
         flags=("sparse",),
         tile_shape=(32, 32, 32),
         lhs=payload("fp8", 2, 8),
@@ -970,7 +970,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
     AmdgpuMatrixContract(
         name="smfmac.f32.32x32x32.fp8.fp8",
         family="smfmac",
-        features=("smfmac_gfx940",),
+        features=("smfmac_gfx940_fp8",),
         flags=("sparse",),
         tile_shape=(32, 32, 32),
         lhs=payload("fp8", 2, 8),

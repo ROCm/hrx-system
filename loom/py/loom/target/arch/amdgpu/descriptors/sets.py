@@ -877,9 +877,21 @@ def _gfx950_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
 
 
 def _gfx9_4_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
-    return _amdgpu_descriptor_overlay_intersection(
-        _gfx940_core_overlays(),
-        _gfx950_core_overlays(),
+    common_overlays = _amdgpu_descriptor_overlay_intersection(
+        _gfx940_core_overlays(), _gfx950_core_overlays()
+    )
+    # ROCm's generic processor omits packed FP8/BF8 matrix operations because
+    # gfx942 uses FNUZ operands while gfx950 uses OCP operands. Their packets
+    # compare equal here, but the shared encodings do not have shared numeric
+    # semantics.
+    return tuple(
+        overlay
+        for overlay in common_overlays
+        if not (
+            overlay.semantic_tag is not None
+            and overlay.semantic_tag.startswith("matrix.")
+            and (".fp8" in overlay.semantic_tag or ".bf8" in overlay.semantic_tag)
+        )
     )
 
 

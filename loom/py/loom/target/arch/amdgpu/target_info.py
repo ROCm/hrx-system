@@ -75,6 +75,7 @@ AMDGPU_MATRIX_FEATURES_BY_PROFILE = {
         "mfma_gfx940_fp8",
         "mfma_gfx940_xf32",
         "smfmac_gfx940",
+        "smfmac_gfx940_fp8",
     ),
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950: (
         "mfma_gfx908",
@@ -84,6 +85,7 @@ AMDGPU_MATRIX_FEATURES_BY_PROFILE = {
         "mfma_gfx950",
         "mfma_gfx950_scale_f8f6f4",
         "smfmac_gfx940",
+        "smfmac_gfx940_fp8",
         "smfmac_gfx950",
     ),
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11: ("wmma_gfx11",),
@@ -100,8 +102,16 @@ AMDGPU_MATRIX_FEATURES_BY_PROFILE = {
         "mfma_gfx908",
         "mfma_gfx90a_bf16_1k",
         "mfma_gfx90a_f64",
-        "mfma_gfx940_fp8",
         "smfmac_gfx940",
+    ),
+}
+
+# Features present on every exact member but intentionally absent from the
+# corresponding ROCm generic processor contract.
+AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS = {
+    "gfx9-4-generic": (
+        "mfma_gfx940_fp8",
+        "smfmac_gfx940_fp8",
     ),
 }
 
@@ -1576,13 +1586,24 @@ def validate_amdgpu_generic_contracts(
             portable_matrix_features.intersection_update(
                 AMDGPU_MATRIX_FEATURES_BY_PROFILE[member.features.matrix]
             )
+        excluded_matrix_features = set(
+            AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS.get(
+                generic_processor.processor, ()
+            )
+        )
+        if not excluded_matrix_features.issubset(portable_matrix_features):
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} "
+                "excludes matrix features absent from its members"
+            )
+        expected_matrix_features = portable_matrix_features - excluded_matrix_features
         if (
             set(AMDGPU_MATRIX_FEATURES_BY_PROFILE[generic_processor.features.matrix])
-            != portable_matrix_features
+            != expected_matrix_features
         ):
             raise ValueError(
                 f"AMDGPU generic processor {generic_processor.processor} "
-                "matrix features do not match the member intersection"
+                "matrix features do not match its portable contract"
             )
         if generic_processor.limits.max_workgroup_storage_bytes != min(
             member.limits.max_workgroup_storage_bytes for member in exact_members

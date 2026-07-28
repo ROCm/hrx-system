@@ -16,6 +16,7 @@ from build_tools.amdgpu.target_map_data import AMDGPU_GENERIC_CODE_OBJECT_INFOS
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION,
     AMDGPU_DESCRIPTOR_SET_INFOS,
+    AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950,
@@ -203,17 +204,19 @@ def test_matrix_feature_profiles_model_replacement_instruction_shapes() -> None:
             AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12
         ]
     )
-    assert set(
+    generic_features = set(
         AMDGPU_MATRIX_FEATURES_BY_PROFILE[
             AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC
         ]
-    ) == (
-        set(
-            AMDGPU_MATRIX_FEATURES_BY_PROFILE[AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940]
-        )
-        & set(
-            AMDGPU_MATRIX_FEATURES_BY_PROFILE[AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950]
-        )
+    )
+    member_intersection = set(
+        AMDGPU_MATRIX_FEATURES_BY_PROFILE[AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940]
+    ) & set(
+        AMDGPU_MATRIX_FEATURES_BY_PROFILE[AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950]
+    )
+    assert generic_features == (
+        member_intersection
+        - set(AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS["gfx9-4-generic"])
     )
 
 

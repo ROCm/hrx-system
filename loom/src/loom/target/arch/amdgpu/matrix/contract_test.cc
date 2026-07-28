@@ -2672,6 +2672,9 @@ TEST(MatrixContractTest, ProcessorFeatureBitsGateAvailability) {
   loom_amdgpu_matrix_feature_bits_t gfx950_features = 0;
   IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
       IREE_SV("gfx950"), &gfx950_features));
+  loom_amdgpu_matrix_feature_bits_t gfx9_4_generic_features = 0;
+  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
+      IREE_SV("gfx9-4-generic"), &gfx9_4_generic_features));
   loom_amdgpu_matrix_feature_bits_t gfx1250_features = 0;
   IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
       IREE_SV("gfx1250"), &gfx1250_features));
@@ -2681,6 +2684,24 @@ TEST(MatrixContractTest, ProcessorFeatureBitsGateAvailability) {
   ASSERT_NE(fp8_mfma, nullptr);
   EXPECT_TRUE(
       loom_amdgpu_matrix_contract_is_available(fp8_mfma, gfx942_features, 64));
+  EXPECT_FALSE(loom_amdgpu_matrix_contract_is_available(
+      fp8_mfma, gfx9_4_generic_features, 64));
+
+  const loom_amdgpu_matrix_contract_descriptor_t* fp8_smfmac =
+      FindDescriptor("smfmac.f32.16x16x64.fp8.fp8");
+  ASSERT_NE(fp8_smfmac, nullptr);
+  EXPECT_TRUE(loom_amdgpu_matrix_contract_is_available(fp8_smfmac,
+                                                       gfx942_features, 64));
+  EXPECT_TRUE(loom_amdgpu_matrix_contract_is_available(fp8_smfmac,
+                                                       gfx950_features, 64));
+  EXPECT_FALSE(loom_amdgpu_matrix_contract_is_available(
+      fp8_smfmac, gfx9_4_generic_features, 64));
+
+  const loom_amdgpu_matrix_contract_descriptor_t* bf16_smfmac =
+      FindDescriptor("smfmac.f32.16x16x32.bf16");
+  ASSERT_NE(bf16_smfmac, nullptr);
+  EXPECT_TRUE(loom_amdgpu_matrix_contract_is_available(
+      bf16_smfmac, gfx9_4_generic_features, 64));
 
   const loom_amdgpu_matrix_contract_descriptor_t* double_mfma =
       FindDescriptor("mfma.f64.16x16x4.f64");
@@ -2809,7 +2830,12 @@ TEST(MatrixContractTest, ProcessorFeatureBitsUseTargetInfoAliases) {
   loom_amdgpu_matrix_feature_bits_t gfx9_4_generic_features = 0;
   IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
       IREE_SV("gfx9-4-generic"), &gfx9_4_generic_features));
-  EXPECT_EQ(gfx9_4_generic_features, gfx940_features & gfx950_features);
+  const loom_amdgpu_matrix_feature_bits_t packed8_features =
+      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8 |
+      LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940_FP8;
+  EXPECT_EQ(gfx9_4_generic_features,
+            (gfx940_features & gfx950_features) & ~packed8_features);
+  EXPECT_EQ(gfx9_4_generic_features & packed8_features, 0u);
 
   loom_amdgpu_matrix_feature_bits_t gfx1151_features = 0;
   IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(

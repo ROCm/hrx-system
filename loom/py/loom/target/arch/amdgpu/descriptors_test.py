@@ -208,10 +208,25 @@ def test_generic_descriptor_contracts_are_member_intersections() -> None:
     gfx950_overlays = {
         overlay.descriptor_key: overlay for overlay in _gfx950_core_overlays()
     }
-    assert _gfx9_4_generic_core_overlays() == tuple(
+    gfx9_4_common_overlays = tuple(
         overlay
         for overlay in _gfx940_core_overlays()
         if gfx950_overlays.get(overlay.descriptor_key) == overlay
+    )
+    gfx9_4_packed8_matrix_keys = {
+        overlay.descriptor_key
+        for overlay in gfx9_4_common_overlays
+        if (
+            overlay.semantic_tag is not None
+            and overlay.semantic_tag.startswith("matrix.")
+            and (".fp8" in overlay.semantic_tag or ".bf8" in overlay.semantic_tag)
+        )
+    }
+    assert len(gfx9_4_packed8_matrix_keys) == 16
+    assert _gfx9_4_generic_core_overlays() == tuple(
+        overlay
+        for overlay in gfx9_4_common_overlays
+        if overlay.descriptor_key not in gfx9_4_packed8_matrix_keys
     )
     assert _gfx11_generic_core_overlays() == tuple(
         overlay
