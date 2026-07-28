@@ -12,6 +12,12 @@ package(
 )
 
 iree_py_library(
+    name = "target_map_data",
+    srcs = ["//build_tools/amdgpu:target_map_data.py"],
+    imports = ["../../../../../.."],
+)
+
+iree_py_library(
     name = "target_info",
     srcs = [
         "__init__.py",
@@ -19,6 +25,7 @@ iree_py_library(
         "target_info.py",
     ],
     deps = [
+        ":target_map_data",
         "//loom/py/loom/dialect:shared",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch:package_init",
@@ -128,6 +135,7 @@ iree_py_test(
     deps = [
         ":isa_xml",
         ":target_info",
+        ":target_map_data",
     ],
 )
 

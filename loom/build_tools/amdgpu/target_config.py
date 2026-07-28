@@ -54,6 +54,17 @@ def configure_name_helpers(repo_root: Path) -> None:
     )
 
 
+def configure_python_paths(repo_root: Path) -> None:
+    for path in (
+        repo_root,
+        repo_root / "loom/py",
+        repo_root / "build_tools/amdgpu",
+    ):
+        path_string = str(path)
+        if path_string not in sys.path:
+            sys.path.insert(0, path_string)
+
+
 def name_helpers():
     if _AMDGPU_NAMES is None:
         raise RuntimeError("AMDGPU name helpers were not configured")
@@ -568,6 +579,7 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = find_repo_root()
+    configure_python_paths(repo_root)
     configure_name_helpers(repo_root)
     target_info = load_module(
         "loom_amdgpu_target_info",

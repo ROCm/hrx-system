@@ -16,6 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from build_tools.amdgpu.target_map_data import generic_code_object_current_version
+
 from loom.dialect.cache import CacheScope, CacheTemporal
 
 AMDGPU_AMDHSA_TARGET_TRIPLE = "amdgcn-amd-amdhsa"
@@ -201,7 +203,14 @@ AMDGPU_ELF_FEATURE_SRAMECC_ANY_V4 = 0x400
 AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4 = (
     AMDGPU_ELF_FEATURE_XNACK_ANY_V4 | AMDGPU_ELF_FEATURE_SRAMECC_ANY_V4
 )
-AMDGPU_ELF_FEATURE_GENERIC_VERSION_1_V6 = 0x01000000
+AMDGPU_ELF_FEATURE_GENERIC_VERSION_OFFSET_V6 = 24
+
+
+def amdgpu_generic_code_object_elf_flags(processor: str) -> int:
+    return (
+        generic_code_object_current_version(processor)
+        << AMDGPU_ELF_FEATURE_GENERIC_VERSION_OFFSET_V6
+    )
 
 
 def kernel_descriptor_profile_supports_wavefront_size(
@@ -967,43 +976,43 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         "gfx9-generic",
         0x051,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4
-        | AMDGPU_ELF_FEATURE_GENERIC_VERSION_1_V6,
+        | amdgpu_generic_code_object_elf_flags("gfx9-generic"),
     ),
     gfx9_10_processor_info(
         "gfx10-1-generic",
         0x052,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4
-        | AMDGPU_ELF_FEATURE_GENERIC_VERSION_1_V6,
+        | amdgpu_generic_code_object_elf_flags("gfx10-1-generic"),
         default_wavefront_size=32,
     ),
     gfx9_10_processor_info(
         "gfx10-3-generic",
         0x053,
-        elf_feature_flags=AMDGPU_ELF_FEATURE_GENERIC_VERSION_1_V6,
+        elf_feature_flags=amdgpu_generic_code_object_elf_flags("gfx10-3-generic"),
         default_wavefront_size=32,
     ),
     rdna3_processor_info(
         "gfx11-generic",
         0x054,
-        elf_feature_flags=AMDGPU_ELF_FEATURE_GENERIC_VERSION_1_V6,
+        elf_feature_flags=amdgpu_generic_code_object_elf_flags("gfx11-generic"),
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR,
     ),
     rdna4_processor_info(
         "gfx12-generic",
         0x059,
-        elf_feature_flags=AMDGPU_ELF_FEATURE_GENERIC_VERSION_1_V6,
+        elf_feature_flags=amdgpu_generic_code_object_elf_flags("gfx12-generic"),
     ),
     processor_info(
         "gfx9-4-generic",
         0x05F,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4
-        | AMDGPU_ELF_FEATURE_GENERIC_VERSION_1_V6,
+        | amdgpu_generic_code_object_elf_flags("gfx9-4-generic"),
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES,
     ),
     gfx125x_processor_info(
         "gfx12-5-generic",
         0x05B,
-        elf_feature_flags=AMDGPU_ELF_FEATURE_GENERIC_VERSION_1_V6,
+        elf_feature_flags=amdgpu_generic_code_object_elf_flags("gfx12-5-generic"),
     ),
 )
 

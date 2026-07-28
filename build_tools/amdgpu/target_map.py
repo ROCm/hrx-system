@@ -4,13 +4,14 @@
 # Licensed under the Apache License v2.0 with LLVM Exceptions.
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-"""Generates shared AMDGPU device binary target map fragments.
+"""Generates shared AMDGPU target and code-object map fragments.
 
 The map in this file is the source of truth for the small generated tables used
-by Bazel, CMake, and the runtime device-library loader. Runtime target rows also
-carry processor facts imported from loom.target.arch.amdgpu.target_info so those
-facts stay tied to Loom's target table. Keep build logic in Starlark/CMake; keep
-target facts in Python tables.
+by Bazel, CMake, Loom, and the runtime. Code-object membership and version facts
+live in target_map_data.py so Python consumers can share them without importing
+this generator. Runtime target rows also carry processor facts imported from
+loom.target.arch.amdgpu.target_info so those facts stay tied to Loom's target
+table. Keep build logic in Starlark/CMake; keep target facts in Python tables.
 """
 
 import argparse
@@ -18,6 +19,17 @@ import difflib
 import re
 import sys
 from pathlib import Path
+
+if __package__:
+    from .target_map_data import (
+        AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS,
+        validate_code_object_compatibility,
+    )
+else:
+    from target_map_data import (
+        AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS,
+        validate_code_object_compatibility,
+    )
 
 DEFAULT_TARGET_SELECTIONS = (
     "gfx9-generic",
@@ -27,51 +39,6 @@ DEFAULT_TARGET_SELECTIONS = (
     "gfx10-3-generic",
     "gfx11-generic",
     "gfx12-generic",
-)
-
-# Each exact target must match an HSA ISA architecture suffix. Each code object
-# target must be accepted by LLVM clang/lld as an AMDGPU -march value. Generic
-# code object coverage follows LLVM generic processor documentation; TheRock
-# family membership follows ROCm/TheRock's cmake/therock_amdgpu_targets.cmake.
-EXACT_TARGET_CODE_OBJECTS = (
-    ("gfx900", "gfx9-generic"),
-    ("gfx902", "gfx9-generic"),
-    ("gfx904", "gfx9-generic"),
-    ("gfx90c", "gfx9-generic"),
-    ("gfx906", "gfx9-generic"),
-    ("gfx908", "gfx908"),
-    ("gfx909", "gfx9-generic"),
-    ("gfx90a", "gfx90a"),
-    ("gfx940", "gfx9-4-generic"),
-    ("gfx941", "gfx9-4-generic"),
-    ("gfx942", "gfx9-4-generic"),
-    ("gfx950", "gfx9-4-generic"),
-    ("gfx1010", "gfx10-1-generic"),
-    ("gfx1011", "gfx10-1-generic"),
-    ("gfx1012", "gfx10-1-generic"),
-    ("gfx1013", "gfx10-1-generic"),
-    ("gfx1030", "gfx10-3-generic"),
-    ("gfx1031", "gfx10-3-generic"),
-    ("gfx1032", "gfx10-3-generic"),
-    ("gfx1033", "gfx10-3-generic"),
-    ("gfx1034", "gfx10-3-generic"),
-    ("gfx1035", "gfx10-3-generic"),
-    ("gfx1036", "gfx10-3-generic"),
-    ("gfx1100", "gfx11-generic"),
-    ("gfx1101", "gfx11-generic"),
-    ("gfx1102", "gfx11-generic"),
-    ("gfx1103", "gfx11-generic"),
-    ("gfx1150", "gfx11-generic"),
-    ("gfx1151", "gfx11-generic"),
-    ("gfx1152", "gfx11-generic"),
-    ("gfx1153", "gfx11-generic"),
-    ("gfx1170", "gfx1170"),
-    ("gfx1171", "gfx1171"),
-    ("gfx1172", "gfx1172"),
-    ("gfx1200", "gfx12-generic"),
-    ("gfx1201", "gfx12-generic"),
-    ("gfx1250", "gfx12-5-generic"),
-    ("gfx1251", "gfx12-5-generic"),
 )
 
 FEATURE_SRAMECC = "sramecc"
@@ -272,13 +239,13 @@ def append_unique(values, new_values):
 
 
 def exact_targets():
-    return [exact_target for exact_target, _ in EXACT_TARGET_CODE_OBJECTS]
+    return [info.exact_processor for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS]
 
 
 def code_object_targets():
     values = []
-    for _, code_object_target in EXACT_TARGET_CODE_OBJECTS:
-        append_unique(values, [code_object_target])
+    for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
+        append_unique(values, [info.code_object_processor])
     return values
 
 
@@ -303,6 +270,7 @@ def elf_machine_targets():
 
 
 def validate_target_map():
+    validate_code_object_compatibility()
     exact = exact_targets()
     if len(set(exact)) != len(exact):
         raise ValueError("duplicate exact AMDGPU targets in target map")
@@ -387,6 +355,9 @@ def validate_target_map():
 
 
 def import_loom_target_info(repo_root):
+    repo_root_path = str(repo_root)
+    if repo_root_path not in sys.path:
+        sys.path.insert(0, repo_root_path)
     loom_python_path = str(repo_root / "loom/py")
     if loom_python_path not in sys.path:
         sys.path.insert(0, loom_python_path)
@@ -492,7 +463,10 @@ def render_bzl():
                 bzl_list("IREE_AMDGPU_CODE_OBJECT_TARGETS", code_object_targets()),
                 bzl_string_dict(
                     "IREE_AMDGPU_EXACT_TARGET_CODE_OBJECTS",
-                    EXACT_TARGET_CODE_OBJECTS,
+                    (
+                        (info.exact_processor, info.code_object_processor)
+                        for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
+                    ),
                 ),
                 bzl_list("IREE_AMDGPU_TARGET_FAMILY_NAMES", target_family_names()),
                 bzl_family_dict("IREE_AMDGPU_TARGET_FAMILIES"),
@@ -523,10 +497,10 @@ def render_cmake():
         cmake_list("_IREE_AMDGPU_CODE_OBJECT_TARGETS", code_object_targets()),
         "",
     ]
-    for exact_target, code_object_target in EXACT_TARGET_CODE_OBJECTS:
+    for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
         lines.append(
             'set(_IREE_AMDGPU_TARGET_CODE_OBJECT_{} "{}")'.format(
-                exact_target, code_object_target
+                info.exact_processor, info.code_object_processor
             )
         )
     lines.extend(
@@ -563,16 +537,17 @@ def render_target_id_inl(repo_root):
     }
     processor_info_rows, supports_wavefront_size = import_loom_target_info(repo_root)
     processor_infos = {info.processor: info for info in processor_info_rows}
-    for exact_target, code_object_target in EXACT_TARGET_CODE_OBJECTS:
-        processor_info = processor_infos[exact_target]
-        features = TARGET_FEATURE_SUPPORT.get(exact_target, ())
+    for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
+        processor_info = processor_infos[info.exact_processor]
+        features = TARGET_FEATURE_SUPPORT.get(info.exact_processor, ())
         feature_flags = " | ".join(feature_flag_names[feature] for feature in features)
         if not feature_flags:
             feature_flags = "IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_NONE"
         lines.append(
-            '{{IREE_SVL("{}"), IREE_SVL("{}"), {}, {{{}, {}}}}},'.format(
-                exact_target,
-                code_object_target,
+            '{{IREE_SVL("{}"), IREE_SVL("{}"), {}, {}, {{{}, {}}}}},'.format(
+                info.exact_processor,
+                info.code_object_processor,
+                info.generic_introduction_version,
                 feature_flags,
                 processor_info.wavefront.default_size,
                 wavefront_size_flags_expr(supports_wavefront_size, processor_info),
@@ -626,10 +601,10 @@ def render_header():
         "    const char* exact_target) {",
         "  if (!exact_target) return NULL;",
     ]
-    for exact_target, code_object_target in EXACT_TARGET_CODE_OBJECTS:
+    for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
         lines.append(
             '  if (strcmp(exact_target, "{}") == 0) return "{}";'.format(
-                exact_target, code_object_target
+                info.exact_processor, info.code_object_processor
             )
         )
     lines.extend(

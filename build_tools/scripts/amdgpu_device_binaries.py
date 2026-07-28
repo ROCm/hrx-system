@@ -406,7 +406,10 @@ def expand_target_selections(selections: Sequence[str]) -> list[str]:
     code_object_targets = []
     all_exact_targets = set(amdgpu_target_map.exact_targets())
     all_code_object_targets = set(amdgpu_target_map.code_object_targets())
-    exact_to_code_object = dict(amdgpu_target_map.EXACT_TARGET_CODE_OBJECTS)
+    exact_to_code_object = {
+        info.exact_processor: info.code_object_processor
+        for info in amdgpu_target_map.AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
+    }
     family_map = {
         family: amdgpu_target_map.family_targets(targets)
         for family, targets in amdgpu_target_map.TARGET_FAMILIES

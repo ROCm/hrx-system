@@ -11,12 +11,16 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 
+from build_tools.amdgpu.target_map_data import AMDGPU_GENERIC_CODE_OBJECT_INFOS
+
 from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_ELF_FEATURE_GENERIC_VERSION_OFFSET_V6,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
     AMDGPU_MATRIX_FEATURES_BY_PROFILE,
+    AMDGPU_PROCESSOR_INFOS,
     amdgpu_descriptor_set_info_by_generator_target,
     amdgpu_descriptor_set_storage_info_by_generator_target,
     amdgpu_descriptor_set_view_infos_by_storage_generator_target,
@@ -126,4 +130,18 @@ def test_rdna3_5_processors_use_gfx11_matrix_shapes() -> None:
         assert processor_info is not None
         assert (
             processor_info.features.matrix == AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11
+        )
+
+
+def test_generic_processor_elf_flags_use_canonical_code_object_versions() -> None:
+    processor_infos = {info.processor: info for info in AMDGPU_PROCESSOR_INFOS}
+    generic_processors = {info.processor for info in AMDGPU_GENERIC_CODE_OBJECT_INFOS}
+    assert {
+        processor for processor in processor_infos if processor.endswith("-generic")
+    } == generic_processors
+    for generic_info in AMDGPU_GENERIC_CODE_OBJECT_INFOS:
+        assert (
+            processor_infos[generic_info.processor].elf.feature_flags
+            >> AMDGPU_ELF_FEATURE_GENERIC_VERSION_OFFSET_V6
+            == generic_info.current_version
         )
