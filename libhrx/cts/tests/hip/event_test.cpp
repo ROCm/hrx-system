@@ -167,74 +167,76 @@ class HipEventTest : public ::testing::Test {
     ASSERT_NE(nullptr, library_)
         << "cannot dlopen " << CandidateLibPath() << ": " << dlerror();
 
-    init_ = ResolveHipSymbol<HipInitFn>(library_, "hipInit");
-    stream_create_ =
+    hip_.init = ResolveHipSymbol<HipInitFn>(library_, "hipInit");
+    hip_.stream_create =
         ResolveHipSymbol<HipStreamCreateFn>(library_, "hipStreamCreate");
-    stream_destroy_ =
+    hip_.stream_destroy =
         ResolveHipSymbol<HipStreamDestroyFn>(library_, "hipStreamDestroy");
-    stream_synchronize_ = ResolveHipSymbol<HipStreamSynchronizeFn>(
+    hip_.stream_synchronize = ResolveHipSymbol<HipStreamSynchronizeFn>(
         library_, "hipStreamSynchronize");
-    stream_wait_event_ =
+    hip_.stream_wait_event =
         ResolveHipSymbol<HipStreamWaitEventFn>(library_, "hipStreamWaitEvent");
-    stream_begin_capture_ = ResolveHipSymbol<HipStreamBeginCaptureFn>(
+    hip_.stream_begin_capture = ResolveHipSymbol<HipStreamBeginCaptureFn>(
         library_, "hipStreamBeginCapture");
-    stream_end_capture_ = ResolveHipSymbol<HipStreamEndCaptureFn>(
+    hip_.stream_end_capture = ResolveHipSymbol<HipStreamEndCaptureFn>(
         library_, "hipStreamEndCapture");
-    event_create_ =
+    hip_.event_create =
         ResolveHipSymbol<HipEventCreateFn>(library_, "hipEventCreate");
-    event_destroy_ =
+    hip_.event_destroy =
         ResolveHipSymbol<HipEventDestroyFn>(library_, "hipEventDestroy");
-    event_record_ =
+    hip_.event_record =
         ResolveHipSymbol<HipEventRecordFn>(library_, "hipEventRecord");
-    event_query_ = ResolveHipSymbol<HipEventQueryFn>(library_, "hipEventQuery");
-    event_synchronize_ = ResolveHipSymbol<HipEventSynchronizeFn>(
+    hip_.event_query =
+        ResolveHipSymbol<HipEventQueryFn>(library_, "hipEventQuery");
+    hip_.event_synchronize = ResolveHipSymbol<HipEventSynchronizeFn>(
         library_, "hipEventSynchronize");
-    event_elapsed_time_ = ResolveHipSymbol<HipEventElapsedTimeFn>(
+    hip_.event_elapsed_time = ResolveHipSymbol<HipEventElapsedTimeFn>(
         library_, "hipEventElapsedTime");
-    launch_host_func_ =
+    hip_.launch_host_func =
         ResolveHipSymbol<HipLaunchHostFuncFn>(library_, "hipLaunchHostFunc");
-    graph_create_ =
+    hip_.graph_create =
         ResolveHipSymbol<HipGraphCreateFn>(library_, "hipGraphCreate");
-    graph_destroy_ =
+    hip_.graph_destroy =
         ResolveHipSymbol<HipGraphDestroyFn>(library_, "hipGraphDestroy");
-    graph_add_event_record_node_ =
+    hip_.graph_add_event_record_node =
         ResolveHipSymbol<HipGraphAddEventRecordNodeFn>(
             library_, "hipGraphAddEventRecordNode");
-    graph_add_event_wait_node_ = ResolveHipSymbol<HipGraphAddEventWaitNodeFn>(
-        library_, "hipGraphAddEventWaitNode");
-    graph_add_host_node_ = ResolveHipSymbol<HipGraphAddHostNodeFn>(
+    hip_.graph_add_event_wait_node =
+        ResolveHipSymbol<HipGraphAddEventWaitNodeFn>(
+            library_, "hipGraphAddEventWaitNode");
+    hip_.graph_add_host_node = ResolveHipSymbol<HipGraphAddHostNodeFn>(
         library_, "hipGraphAddHostNode");
-    graph_instantiate_ = ResolveHipSymbol<HipGraphInstantiateFn>(
+    hip_.graph_instantiate = ResolveHipSymbol<HipGraphInstantiateFn>(
         library_, "hipGraphInstantiate");
-    graph_launch_ =
+    hip_.graph_launch =
         ResolveHipSymbol<HipGraphLaunchFn>(library_, "hipGraphLaunch");
-    graph_exec_destroy_ = ResolveHipSymbol<HipGraphExecDestroyFn>(
+    hip_.graph_exec_destroy = ResolveHipSymbol<HipGraphExecDestroyFn>(
         library_, "hipGraphExecDestroy");
 
-    ASSERT_NE(nullptr, init_);
-    ASSERT_NE(nullptr, stream_create_);
-    ASSERT_NE(nullptr, stream_destroy_);
-    ASSERT_NE(nullptr, stream_synchronize_);
-    ASSERT_NE(nullptr, stream_wait_event_);
-    ASSERT_NE(nullptr, stream_begin_capture_);
-    ASSERT_NE(nullptr, stream_end_capture_);
-    ASSERT_NE(nullptr, event_create_);
-    ASSERT_NE(nullptr, event_destroy_);
-    ASSERT_NE(nullptr, event_record_);
-    ASSERT_NE(nullptr, event_query_);
-    ASSERT_NE(nullptr, event_synchronize_);
-    ASSERT_NE(nullptr, event_elapsed_time_);
-    ASSERT_NE(nullptr, launch_host_func_);
-    ASSERT_NE(nullptr, graph_create_);
-    ASSERT_NE(nullptr, graph_destroy_);
-    ASSERT_NE(nullptr, graph_add_event_record_node_);
-    ASSERT_NE(nullptr, graph_add_event_wait_node_);
-    ASSERT_NE(nullptr, graph_add_host_node_);
-    ASSERT_NE(nullptr, graph_instantiate_);
-    ASSERT_NE(nullptr, graph_launch_);
-    ASSERT_NE(nullptr, graph_exec_destroy_);
+    ASSERT_NE(nullptr, hip_.init);
+    ASSERT_NE(nullptr, hip_.stream_create);
+    ASSERT_NE(nullptr, hip_.stream_destroy);
+    ASSERT_NE(nullptr, hip_.stream_synchronize);
+    ASSERT_NE(nullptr, hip_.stream_wait_event);
+    ASSERT_NE(nullptr, hip_.stream_begin_capture);
+    ASSERT_NE(nullptr, hip_.stream_end_capture);
+    ASSERT_NE(nullptr, hip_.event_create);
+    ASSERT_NE(nullptr, hip_.event_destroy);
+    ASSERT_NE(nullptr, hip_.event_record);
+    ASSERT_NE(nullptr, hip_.event_query);
+    ASSERT_NE(nullptr, hip_.event_synchronize);
+    ASSERT_NE(nullptr, hip_.event_elapsed_time);
+    ASSERT_NE(nullptr, hip_.launch_host_func);
+    ASSERT_NE(nullptr, hip_.graph_create);
+    ASSERT_NE(nullptr, hip_.graph_destroy);
+    ASSERT_NE(nullptr, hip_.graph_add_event_record_node);
+    ASSERT_NE(nullptr, hip_.graph_add_event_wait_node);
+    ASSERT_NE(nullptr, hip_.graph_add_host_node);
+    ASSERT_NE(nullptr, hip_.graph_instantiate);
+    ASSERT_NE(nullptr, hip_.graph_launch);
+    ASSERT_NE(nullptr, hip_.graph_exec_destroy);
 
-    const hipError_t init_result = init_(/*flags=*/0);
+    const hipError_t init_result = hip_.init(/*flags=*/0);
     if (init_result == hipErrorNoDevice) {
       GTEST_SKIP() << "no HIP device available";
     }
@@ -246,23 +248,23 @@ class HipEventTest : public ::testing::Test {
   // not also report leaks.
   void TearDown() override {
     for (auto it = graph_execs_.rbegin(); it != graph_execs_.rend(); ++it) {
-      EXPECT_EQ(hipSuccess, graph_exec_destroy_(*it));
+      EXPECT_EQ(hipSuccess, hip_.graph_exec_destroy(*it));
     }
     for (auto it = graphs_.rbegin(); it != graphs_.rend(); ++it) {
-      EXPECT_EQ(hipSuccess, graph_destroy_(*it));
+      EXPECT_EQ(hipSuccess, hip_.graph_destroy(*it));
     }
     for (auto it = events_.rbegin(); it != events_.rend(); ++it) {
-      EXPECT_EQ(hipSuccess, event_destroy_(*it));
+      EXPECT_EQ(hipSuccess, hip_.event_destroy(*it));
     }
     for (auto it = streams_.rbegin(); it != streams_.rend(); ++it) {
-      EXPECT_EQ(hipSuccess, stream_destroy_(*it));
+      EXPECT_EQ(hipSuccess, hip_.stream_destroy(*it));
     }
   }
 
   // Creates a stream owned by the fixture.
   hipStream_t CreateStream() {
     hipStream_t stream = nullptr;
-    EXPECT_EQ(hipSuccess, stream_create_(&stream));
+    EXPECT_EQ(hipSuccess, hip_.stream_create(&stream));
     if (stream) streams_.push_back(stream);
     return stream;
   }
@@ -271,13 +273,13 @@ class HipEventTest : public ::testing::Test {
   void DestroyStream(hipStream_t stream) {
     streams_.erase(std::remove(streams_.begin(), streams_.end(), stream),
                    streams_.end());
-    EXPECT_EQ(hipSuccess, stream_destroy_(stream));
+    EXPECT_EQ(hipSuccess, hip_.stream_destroy(stream));
   }
 
   // Creates an event owned by the fixture.
   hipEvent_t CreateEvent() {
     hipEvent_t event = nullptr;
-    EXPECT_EQ(hipSuccess, event_create_(&event));
+    EXPECT_EQ(hipSuccess, hip_.event_create(&event));
     if (event) events_.push_back(event);
     return event;
   }
@@ -285,7 +287,7 @@ class HipEventTest : public ::testing::Test {
   // Creates an empty graph owned by the fixture.
   hipGraph_t CreateGraph() {
     hipGraph_t graph = nullptr;
-    EXPECT_EQ(hipSuccess, graph_create_(&graph, /*flags=*/0));
+    EXPECT_EQ(hipSuccess, hip_.graph_create(&graph, /*flags=*/0));
     TrackGraph(graph);
     return graph;
   }
@@ -300,15 +302,15 @@ class HipEventTest : public ::testing::Test {
   void DestroyGraph(hipGraph_t graph) {
     graphs_.erase(std::remove(graphs_.begin(), graphs_.end(), graph),
                   graphs_.end());
-    EXPECT_EQ(hipSuccess, graph_destroy_(graph));
+    EXPECT_EQ(hipSuccess, hip_.graph_destroy(graph));
   }
 
   // Instantiates |graph| into an executable owned by the fixture.
   hipGraphExec_t InstantiateGraph(hipGraph_t graph) {
     hipGraphExec_t graph_exec = nullptr;
-    EXPECT_EQ(hipSuccess,
-              graph_instantiate_(&graph_exec, graph, /*error_node=*/nullptr,
-                                 /*log_buffer=*/nullptr, /*buffer_size=*/0));
+    EXPECT_EQ(hipSuccess, hip_.graph_instantiate(
+                              &graph_exec, graph, /*error_node=*/nullptr,
+                              /*log_buffer=*/nullptr, /*buffer_size=*/0));
     if (graph_exec) graph_execs_.push_back(graph_exec);
     return graph_exec;
   }
@@ -318,24 +320,25 @@ class HipEventTest : public ::testing::Test {
     graph_execs_.erase(
         std::remove(graph_execs_.begin(), graph_execs_.end(), graph_exec),
         graph_execs_.end());
-    EXPECT_EQ(hipSuccess, graph_exec_destroy_(graph_exec));
+    EXPECT_EQ(hipSuccess, hip_.graph_exec_destroy(graph_exec));
   }
 
   // Records |event| on |stream| and waits for it |count| times, leaving both
   // the stream and the event drained.
   void AdvanceEventOnStream(hipEvent_t event, hipStream_t stream, int count) {
     for (int i = 0; i < count; ++i) {
-      ASSERT_EQ(hipSuccess, event_record_(event, stream));
-      ASSERT_EQ(hipSuccess, event_synchronize_(event));
+      ASSERT_EQ(hipSuccess, hip_.event_record(event, stream));
+      ASSERT_EQ(hipSuccess, hip_.event_synchronize(event));
     }
-    ASSERT_EQ(hipSuccess, stream_synchronize_(stream));
+    ASSERT_EQ(hipSuccess, hip_.stream_synchronize(stream));
   }
 
   // Enqueues |gate| on |stream|, registers it with |callbacks|, and returns
   // once the callback is running and the stream provably holds unfinished work.
   void EnqueueGateAndWaitUntilEntered(hipStream_t stream, StreamGate* gate,
                                       ScopedHostCallbacks* callbacks) {
-    ASSERT_EQ(hipSuccess, launch_host_func_(stream, &GateHostFunction, gate));
+    ASSERT_EQ(hipSuccess,
+              hip_.launch_host_func(stream, &GateHostFunction, gate));
     ASSERT_NO_FATAL_FAILURE(callbacks->AddGate(gate));
     while (!gate->entered.load(std::memory_order_acquire)) {
       sched_yield();
@@ -345,50 +348,33 @@ class HipEventTest : public ::testing::Test {
   // HIP shim under test. Intentionally never dlclose()d: the shim owns
   // process-global device state shared by every test in this file.
   void* library_ = nullptr;
-  // Resolved hipInit.
-  HipInitFn init_ = nullptr;
-  // Resolved hipStreamCreate.
-  HipStreamCreateFn stream_create_ = nullptr;
-  // Resolved hipStreamDestroy.
-  HipStreamDestroyFn stream_destroy_ = nullptr;
-  // Resolved hipStreamSynchronize.
-  HipStreamSynchronizeFn stream_synchronize_ = nullptr;
-  // Resolved hipStreamWaitEvent.
-  HipStreamWaitEventFn stream_wait_event_ = nullptr;
-  // Resolved hipStreamBeginCapture.
-  HipStreamBeginCaptureFn stream_begin_capture_ = nullptr;
-  // Resolved hipStreamEndCapture.
-  HipStreamEndCaptureFn stream_end_capture_ = nullptr;
-  // Resolved hipEventCreate.
-  HipEventCreateFn event_create_ = nullptr;
-  // Resolved hipEventDestroy.
-  HipEventDestroyFn event_destroy_ = nullptr;
-  // Resolved hipEventRecord.
-  HipEventRecordFn event_record_ = nullptr;
-  // Resolved hipEventQuery.
-  HipEventQueryFn event_query_ = nullptr;
-  // Resolved hipEventSynchronize.
-  HipEventSynchronizeFn event_synchronize_ = nullptr;
-  // Resolved hipEventElapsedTime.
-  HipEventElapsedTimeFn event_elapsed_time_ = nullptr;
-  // Resolved hipLaunchHostFunc.
-  HipLaunchHostFuncFn launch_host_func_ = nullptr;
-  // Resolved hipGraphCreate.
-  HipGraphCreateFn graph_create_ = nullptr;
-  // Resolved hipGraphDestroy.
-  HipGraphDestroyFn graph_destroy_ = nullptr;
-  // Resolved hipGraphAddEventRecordNode.
-  HipGraphAddEventRecordNodeFn graph_add_event_record_node_ = nullptr;
-  // Resolved hipGraphAddEventWaitNode.
-  HipGraphAddEventWaitNodeFn graph_add_event_wait_node_ = nullptr;
-  // Resolved hipGraphAddHostNode.
-  HipGraphAddHostNodeFn graph_add_host_node_ = nullptr;
-  // Resolved hipGraphInstantiate.
-  HipGraphInstantiateFn graph_instantiate_ = nullptr;
-  // Resolved hipGraphLaunch.
-  HipGraphLaunchFn graph_launch_ = nullptr;
-  // Resolved hipGraphExecDestroy.
-  HipGraphExecDestroyFn graph_exec_destroy_ = nullptr;
+  // Entry points resolved from |library_| by SetUp, each named for the hip*
+  // symbol it was resolved from. SetUp fails if any is unresolved, so every
+  // one is non-null for the duration of a test body.
+  struct {
+    HipInitFn init;
+    HipStreamCreateFn stream_create;
+    HipStreamDestroyFn stream_destroy;
+    HipStreamSynchronizeFn stream_synchronize;
+    HipStreamWaitEventFn stream_wait_event;
+    HipStreamBeginCaptureFn stream_begin_capture;
+    HipStreamEndCaptureFn stream_end_capture;
+    HipEventCreateFn event_create;
+    HipEventDestroyFn event_destroy;
+    HipEventRecordFn event_record;
+    HipEventQueryFn event_query;
+    HipEventSynchronizeFn event_synchronize;
+    HipEventElapsedTimeFn event_elapsed_time;
+    HipLaunchHostFuncFn launch_host_func;
+    HipGraphCreateFn graph_create;
+    HipGraphDestroyFn graph_destroy;
+    HipGraphAddEventRecordNodeFn graph_add_event_record_node;
+    HipGraphAddEventWaitNodeFn graph_add_event_wait_node;
+    HipGraphAddHostNodeFn graph_add_host_node;
+    HipGraphInstantiateFn graph_instantiate;
+    HipGraphLaunchFn graph_launch;
+    HipGraphExecDestroyFn graph_exec_destroy;
+  } hip_ = {};
 
  private:
   // Streams created through CreateStream, destroyed by TearDown.
@@ -421,15 +407,15 @@ TEST_F(HipEventTest, CrossStreamRerecordDoesNotReportStaleCompletion) {
   ASSERT_NO_FATAL_FAILURE(
       EnqueueGateAndWaitUntilEntered(stream_b, &gate, &callbacks));
 
-  ASSERT_EQ(hipSuccess, event_record_(event, stream_b));
-  EXPECT_EQ(hipErrorNotReady, event_query_(event))
+  ASSERT_EQ(hipSuccess, hip_.event_record(event, stream_b));
+  EXPECT_EQ(hipErrorNotReady, hip_.event_query(event))
       << "event completed while the gate callback holding its recording stream "
          "is still running";
 
   callbacks.ReleaseGate();
-  EXPECT_EQ(hipSuccess, event_synchronize_(event));
-  EXPECT_EQ(hipSuccess, event_query_(event));
-  EXPECT_EQ(hipSuccess, stream_synchronize_(stream_b));
+  EXPECT_EQ(hipSuccess, hip_.event_synchronize(event));
+  EXPECT_EQ(hipSuccess, hip_.event_query(event));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream_b));
 }
 
 // Recording a shared event on a second stream must not make that stream wait
@@ -449,19 +435,19 @@ TEST_F(HipEventTest, CrossStreamRerecordDoesNotChainTheNewStreamToTheOldOne) {
   ASSERT_NO_FATAL_FAILURE(
       EnqueueGateAndWaitUntilEntered(stream_a, &gate, &callbacks));
 
-  ASSERT_EQ(hipSuccess, event_record_(event, stream_a));
-  ASSERT_EQ(hipSuccess, event_record_(event, stream_b));
+  ASSERT_EQ(hipSuccess, hip_.event_record(event, stream_a));
+  ASSERT_EQ(hipSuccess, hip_.event_record(event, stream_b));
 
-  EXPECT_EQ(hipSuccess, stream_synchronize_(stream_b));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream_b));
   // The event names the last record, on the stream that just drained, so
   // waiting on it must not reach back to the parked stream either.
-  EXPECT_EQ(hipSuccess, event_query_(event));
-  EXPECT_EQ(hipSuccess, event_synchronize_(event));
+  EXPECT_EQ(hipSuccess, hip_.event_query(event));
+  EXPECT_EQ(hipSuccess, hip_.event_synchronize(event));
   EXPECT_FALSE(gate.finished.load(std::memory_order_acquire))
       << "the gate was released before the independent stream was observed";
 
   callbacks.ReleaseGate();
-  EXPECT_EQ(hipSuccess, stream_synchronize_(stream_a));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream_a));
 }
 
 // Destroying the stream an event was recorded on has to leave the event
@@ -476,13 +462,13 @@ TEST_F(HipEventTest, EventStaysUsableAfterItsRecordingStreamHandleIsDestroyed) {
   ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(event, stream_a, /*count=*/2));
 
   ASSERT_NO_FATAL_FAILURE(DestroyStream(stream_a));
-  EXPECT_EQ(hipSuccess, event_query_(event));
-  EXPECT_EQ(hipSuccess, event_synchronize_(event));
+  EXPECT_EQ(hipSuccess, hip_.event_query(event));
+  EXPECT_EQ(hipSuccess, hip_.event_synchronize(event));
 
   hipStream_t stream_b = CreateStream();
   ASSERT_NE(nullptr, stream_b);
   ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(event, stream_b, /*count=*/1));
-  EXPECT_EQ(hipSuccess, event_query_(event));
+  EXPECT_EQ(hipSuccess, hip_.event_query(event));
 }
 
 // A record node in the middle of a graph marks a point on a timeline the graph
@@ -501,7 +487,7 @@ TEST_F(HipEventTest, EventStaysUsableAfterTheRecordingGraphExecutableIsGone) {
   hipGraph_t graph = CreateGraph();
   ASSERT_NE(nullptr, graph);
   hipGraphNode_t record_node = nullptr;
-  ASSERT_EQ(hipSuccess, graph_add_event_record_node_(
+  ASSERT_EQ(hipSuccess, hip_.graph_add_event_record_node(
                             &record_node, graph, /*dependencies=*/nullptr,
                             /*dependency_count=*/0, event));
   std::atomic<bool> host_node_ran{false};
@@ -510,26 +496,26 @@ TEST_F(HipEventTest, EventStaysUsableAfterTheRecordingGraphExecutableIsGone) {
   host_params.userData = &host_node_ran;
   hipGraphNode_t host_node = nullptr;
   ASSERT_EQ(hipSuccess,
-            graph_add_host_node_(&host_node, graph, &record_node,
-                                 /*dependency_count=*/1, &host_params));
+            hip_.graph_add_host_node(&host_node, graph, &record_node,
+                                     /*dependency_count=*/1, &host_params));
   hipGraphExec_t graph_exec = InstantiateGraph(graph);
   ASSERT_NE(nullptr, graph_exec);
 
   ScopedHostCallbacks callbacks;
-  ASSERT_EQ(hipSuccess, graph_launch_(graph_exec, stream));
+  ASSERT_EQ(hipSuccess, hip_.graph_launch(graph_exec, stream));
   callbacks.Add(host_node_ran);
-  ASSERT_EQ(hipSuccess, stream_synchronize_(stream));
+  ASSERT_EQ(hipSuccess, hip_.stream_synchronize(stream));
 
   ASSERT_NO_FATAL_FAILURE(DestroyGraphExec(graph_exec));
   ASSERT_NO_FATAL_FAILURE(DestroyGraph(graph));
 
-  EXPECT_EQ(hipSuccess, event_query_(event));
-  EXPECT_EQ(hipSuccess, event_synchronize_(event));
+  EXPECT_EQ(hipSuccess, hip_.event_query(event));
+  EXPECT_EQ(hipSuccess, hip_.event_synchronize(event));
 
   hipStream_t stream_b = CreateStream();
   ASSERT_NE(nullptr, stream_b);
   ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(event, stream_b, /*count=*/1));
-  EXPECT_EQ(hipSuccess, event_query_(event));
+  EXPECT_EQ(hipSuccess, hip_.event_query(event));
 }
 
 // A cross-stream re-record must leave the event usable as a dependency for
@@ -555,15 +541,15 @@ TEST_F(HipEventTest, CrossStreamRerecordStaysUsableAsStreamWaitDependency) {
   ASSERT_NO_FATAL_FAILURE(
       EnqueueGateAndWaitUntilEntered(stream_b, &gate, &callbacks));
 
-  ASSERT_EQ(hipSuccess, event_record_(event, stream_b));
-  ASSERT_EQ(hipSuccess, stream_wait_event_(stream_c, event, /*flags=*/0));
+  ASSERT_EQ(hipSuccess, hip_.event_record(event, stream_b));
+  ASSERT_EQ(hipSuccess, hip_.stream_wait_event(stream_c, event, /*flags=*/0));
   ASSERT_EQ(hipSuccess,
-            launch_host_func_(stream_c, &MarkerHostFunction, &marker));
+            hip_.launch_host_func(stream_c, &MarkerHostFunction, &marker));
   callbacks.Add(marker.finished);
 
   callbacks.ReleaseGate();
-  EXPECT_EQ(hipSuccess, stream_synchronize_(stream_c));
-  EXPECT_EQ(hipSuccess, stream_synchronize_(stream_b));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream_c));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream_b));
 
   EXPECT_TRUE(marker.finished.load(std::memory_order_acquire))
       << "work gated on the re-recorded event never ran";
@@ -593,10 +579,10 @@ TEST_F(HipEventTest, StreamWaitEventStaysOrderedBehindPriorStreamWork) {
   ASSERT_NO_FATAL_FAILURE(
       EnqueueGateAndWaitUntilEntered(stream_b, &gate, &callbacks));
 
-  ASSERT_EQ(hipSuccess, stream_wait_event_(stream_b, event, /*flags=*/0));
+  ASSERT_EQ(hipSuccess, hip_.stream_wait_event(stream_b, event, /*flags=*/0));
 
   callbacks.ReleaseGate();
-  EXPECT_EQ(hipSuccess, stream_synchronize_(stream_b));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream_b));
   EXPECT_TRUE(gate.finished.load(std::memory_order_acquire))
       << "the stream reported itself drained while work submitted before the "
          "event wait was still running";
@@ -612,18 +598,18 @@ TEST_F(HipEventTest, StreamWaitOnANeverRecordedEventDropsBothWaits) {
   hipEvent_t event = CreateEvent();
   ASSERT_NE(nullptr, event);
 
-  ASSERT_EQ(hipSuccess, stream_wait_event_(stream, event, /*flags=*/0));
-  EXPECT_EQ(hipSuccess, stream_synchronize_(stream));
+  ASSERT_EQ(hipSuccess, hip_.stream_wait_event(stream, event, /*flags=*/0));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream));
 
   // The stream has now submitted, so the same wait keeps the stream half and
   // drops only the event half.
-  ASSERT_EQ(hipSuccess, stream_wait_event_(stream, event, /*flags=*/0));
-  EXPECT_EQ(hipSuccess, stream_synchronize_(stream));
+  ASSERT_EQ(hipSuccess, hip_.stream_wait_event(stream, event, /*flags=*/0));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream));
 
   // And once the event has a record the wait carries both halves again.
   ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(event, stream, /*count=*/1));
-  ASSERT_EQ(hipSuccess, stream_wait_event_(stream, event, /*flags=*/0));
-  EXPECT_EQ(hipSuccess, stream_synchronize_(stream));
+  ASSERT_EQ(hipSuccess, hip_.stream_wait_event(stream, event, /*flags=*/0));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream));
 }
 
 // A graph event wait node on an event with no submitted record has nothing to
@@ -639,24 +625,24 @@ TEST_F(HipEventTest, GraphEventWaitNodeOnANeverRecordedEventDropsTheWait) {
   ASSERT_NE(nullptr, graph);
   hipGraphNode_t wait_node = nullptr;
   ASSERT_EQ(hipSuccess,
-            graph_add_event_wait_node_(&wait_node, graph,
-                                       /*dependencies=*/nullptr,
-                                       /*dependency_count=*/0, event));
+            hip_.graph_add_event_wait_node(&wait_node, graph,
+                                           /*dependencies=*/nullptr,
+                                           /*dependency_count=*/0, event));
   std::atomic<bool> host_node_ran{false};
   hipHostNodeParams host_params = {};
   host_params.fn = &RanHostFunction;
   host_params.userData = &host_node_ran;
   hipGraphNode_t host_node = nullptr;
   ASSERT_EQ(hipSuccess,
-            graph_add_host_node_(&host_node, graph, &wait_node,
-                                 /*dependency_count=*/1, &host_params));
+            hip_.graph_add_host_node(&host_node, graph, &wait_node,
+                                     /*dependency_count=*/1, &host_params));
   hipGraphExec_t graph_exec = InstantiateGraph(graph);
   ASSERT_NE(nullptr, graph_exec);
 
   ScopedHostCallbacks callbacks;
-  ASSERT_EQ(hipSuccess, graph_launch_(graph_exec, stream));
+  ASSERT_EQ(hipSuccess, hip_.graph_launch(graph_exec, stream));
   callbacks.Add(host_node_ran);
-  EXPECT_EQ(hipSuccess, stream_synchronize_(stream));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream));
   EXPECT_TRUE(host_node_ran.load(std::memory_order_acquire))
       << "the node behind a dropped event wait never ran";
 }
@@ -676,9 +662,9 @@ TEST_F(HipEventTest, GraphRecordNodeAtTheEndOfAGraphMarksTheLaunchPoint) {
   hipGraph_t graph = CreateGraph();
   ASSERT_NE(nullptr, graph);
   hipGraphNode_t node = nullptr;
-  ASSERT_EQ(hipSuccess,
-            graph_add_event_record_node_(&node, graph, /*dependencies=*/nullptr,
-                                         /*dependency_count=*/0, event));
+  ASSERT_EQ(hipSuccess, hip_.graph_add_event_record_node(
+                            &node, graph, /*dependencies=*/nullptr,
+                            /*dependency_count=*/0, event));
   hipGraphExec_t graph_exec = InstantiateGraph(graph);
   ASSERT_NE(nullptr, graph_exec);
 
@@ -687,23 +673,23 @@ TEST_F(HipEventTest, GraphRecordNodeAtTheEndOfAGraphMarksTheLaunchPoint) {
   ASSERT_NO_FATAL_FAILURE(
       EnqueueGateAndWaitUntilEntered(stream, &gate, &callbacks));
 
-  ASSERT_EQ(hipSuccess, graph_launch_(graph_exec, stream));
-  EXPECT_EQ(hipErrorNotReady, event_query_(event))
+  ASSERT_EQ(hipSuccess, hip_.graph_launch(graph_exec, stream));
+  EXPECT_EQ(hipErrorNotReady, hip_.event_query(event))
       << "event completed while the gate callback holding the stream the graph "
          "launched onto is still running";
 
   callbacks.ReleaseGate();
-  EXPECT_EQ(hipSuccess, event_synchronize_(event));
-  EXPECT_EQ(hipSuccess, event_query_(event));
+  EXPECT_EQ(hipSuccess, hip_.event_synchronize(event));
+  EXPECT_EQ(hipSuccess, hip_.event_query(event));
 
   // Repeated launches keep naming a fresh point, and stream records keep
   // working on an event a graph has been recording.
   for (int i = 0; i < 3; ++i) {
-    ASSERT_EQ(hipSuccess, graph_launch_(graph_exec, stream));
-    EXPECT_EQ(hipSuccess, event_synchronize_(event));
-    EXPECT_EQ(hipSuccess, event_query_(event));
+    ASSERT_EQ(hipSuccess, hip_.graph_launch(graph_exec, stream));
+    EXPECT_EQ(hipSuccess, hip_.event_synchronize(event));
+    EXPECT_EQ(hipSuccess, hip_.event_query(event));
   }
-  EXPECT_EQ(hipSuccess, stream_synchronize_(stream));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream));
   ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(event, stream, /*count=*/1));
 }
 
@@ -720,7 +706,7 @@ TEST_F(HipEventTest, GraphRecordNodeInsideAGraphMarksTheNodePoint) {
   hipGraph_t graph = CreateGraph();
   ASSERT_NE(nullptr, graph);
   hipGraphNode_t record_node = nullptr;
-  ASSERT_EQ(hipSuccess, graph_add_event_record_node_(
+  ASSERT_EQ(hipSuccess, hip_.graph_add_event_record_node(
                             &record_node, graph, /*dependencies=*/nullptr,
                             /*dependency_count=*/0, event));
 
@@ -732,8 +718,8 @@ TEST_F(HipEventTest, GraphRecordNodeInsideAGraphMarksTheNodePoint) {
   host_params.userData = &marker;
   hipGraphNode_t host_node = nullptr;
   ASSERT_EQ(hipSuccess,
-            graph_add_host_node_(&host_node, graph, &record_node,
-                                 /*dependency_count=*/1, &host_params));
+            hip_.graph_add_host_node(&host_node, graph, &record_node,
+                                     /*dependency_count=*/1, &host_params));
 
   hipGraphExec_t graph_exec = InstantiateGraph(graph);
   ASSERT_NE(nullptr, graph_exec);
@@ -742,16 +728,16 @@ TEST_F(HipEventTest, GraphRecordNodeInsideAGraphMarksTheNodePoint) {
   ASSERT_NO_FATAL_FAILURE(
       EnqueueGateAndWaitUntilEntered(stream, &gate, &callbacks));
 
-  ASSERT_EQ(hipSuccess, graph_launch_(graph_exec, stream));
+  ASSERT_EQ(hipSuccess, hip_.graph_launch(graph_exec, stream));
   callbacks.Add(marker.finished);
-  EXPECT_EQ(hipErrorNotReady, event_query_(event))
+  EXPECT_EQ(hipErrorNotReady, hip_.event_query(event))
       << "event completed while the gate callback holding the stream the graph "
          "launched onto is still running";
 
   callbacks.ReleaseGate();
-  EXPECT_EQ(hipSuccess, event_synchronize_(event));
-  EXPECT_EQ(hipSuccess, event_query_(event));
-  EXPECT_EQ(hipSuccess, stream_synchronize_(stream));
+  EXPECT_EQ(hipSuccess, hip_.event_synchronize(event));
+  EXPECT_EQ(hipSuccess, hip_.event_query(event));
+  EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream));
   EXPECT_TRUE(marker.saw_gate_finished.load(std::memory_order_acquire))
       << "the node after the record node ran before the work in front of the "
          "launch drained";
@@ -769,15 +755,15 @@ TEST_F(HipEventTest, ElapsedTimeNeedsBothEventsRecorded) {
   ASSERT_NE(nullptr, stop);
 
   float ms = -1.0f;
-  EXPECT_EQ(hipErrorInvalidHandle, event_elapsed_time_(&ms, start, stop));
+  EXPECT_EQ(hipErrorInvalidHandle, hip_.event_elapsed_time(&ms, start, stop));
 
   ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(start, stream, /*count=*/1));
-  EXPECT_EQ(hipErrorInvalidHandle, event_elapsed_time_(&ms, start, stop))
+  EXPECT_EQ(hipErrorInvalidHandle, hip_.event_elapsed_time(&ms, start, stop))
       << "an interval was reported for an event that was never recorded";
 
   ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(stop, stream, /*count=*/1));
   ms = -1.0f;
-  EXPECT_EQ(hipSuccess, event_elapsed_time_(&ms, start, stop));
+  EXPECT_EQ(hipSuccess, hip_.event_elapsed_time(&ms, start, stop));
   EXPECT_GE(ms, 0.0f);
 }
 
@@ -799,15 +785,15 @@ TEST_F(HipEventTest, ElapsedTimeIsNotReadyWhileAnEventIsOutstanding) {
   ScopedHostCallbacks callbacks;
   ASSERT_NO_FATAL_FAILURE(
       EnqueueGateAndWaitUntilEntered(stream_b, &gate, &callbacks));
-  ASSERT_EQ(hipSuccess, event_record_(stop, stream_b));
+  ASSERT_EQ(hipSuccess, hip_.event_record(stop, stream_b));
 
   float ms = -1.0f;
-  EXPECT_EQ(hipErrorNotReady, event_elapsed_time_(&ms, start, stop));
+  EXPECT_EQ(hipErrorNotReady, hip_.event_elapsed_time(&ms, start, stop));
 
   callbacks.ReleaseGate();
-  ASSERT_EQ(hipSuccess, event_synchronize_(stop));
+  ASSERT_EQ(hipSuccess, hip_.event_synchronize(stop));
   ms = -1.0f;
-  EXPECT_EQ(hipSuccess, event_elapsed_time_(&ms, start, stop));
+  EXPECT_EQ(hipSuccess, hip_.event_elapsed_time(&ms, start, stop));
   EXPECT_GE(ms, 0.0f);
 }
 
@@ -823,16 +809,16 @@ TEST_F(HipEventTest, ElapsedTimeRejectsEventsRecordedOnlyDuringCapture) {
   ASSERT_NE(nullptr, stop);
 
   ASSERT_EQ(hipSuccess,
-            stream_begin_capture_(stream, hipStreamCaptureModeGlobal));
-  ASSERT_EQ(hipSuccess, event_record_(start, stream));
-  ASSERT_EQ(hipSuccess, event_record_(stop, stream));
+            hip_.stream_begin_capture(stream, hipStreamCaptureModeGlobal));
+  ASSERT_EQ(hipSuccess, hip_.event_record(start, stream));
+  ASSERT_EQ(hipSuccess, hip_.event_record(stop, stream));
   hipGraph_t graph = nullptr;
-  ASSERT_EQ(hipSuccess, stream_end_capture_(stream, &graph));
+  ASSERT_EQ(hipSuccess, hip_.stream_end_capture(stream, &graph));
   TrackGraph(graph);
   ASSERT_NE(nullptr, graph);
 
   float ms = -1.0f;
-  EXPECT_EQ(hipErrorInvalidHandle, event_elapsed_time_(&ms, start, stop))
+  EXPECT_EQ(hipErrorInvalidHandle, hip_.event_elapsed_time(&ms, start, stop))
       << "an interval was reported for records that were never submitted";
 }
 
