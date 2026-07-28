@@ -323,6 +323,8 @@ typedef struct loom_amdgpu_processor_feature_info_t {
 typedef struct loom_amdgpu_processor_info_t {
   // Processor name used in AMDHSA target IDs, such as `gfx1100`.
   iree_string_view_t name;
+  // Dense generated processor ordinal used by target fact tables.
+  uint16_t ordinal;
   // Processor-wide target-info capability flags.
   loom_amdgpu_processor_info_flags_t flags;
   // Target-low descriptor-set identity selected for this processor.

@@ -104,10 +104,13 @@ TEST(AmdgpuTargetInfoTest, IteratesProcessors) {
   ASSERT_GT(count, 0u);
   EXPECT_EQ(loom_amdgpu_target_info_processor_at(count), nullptr);
 
-  const loom_amdgpu_processor_info_t* first =
-      loom_amdgpu_target_info_processor_at(0);
-  ASSERT_NE(first, nullptr);
-  EXPECT_FALSE(iree_string_view_is_empty(first->name));
+  for (iree_host_size_t index = 0; index < count; ++index) {
+    const loom_amdgpu_processor_info_t* processor =
+        loom_amdgpu_target_info_processor_at(index);
+    ASSERT_NE(processor, nullptr);
+    EXPECT_FALSE(iree_string_view_is_empty(processor->name));
+    EXPECT_EQ(processor->ordinal, index);
+  }
 }
 
 TEST(AmdgpuTargetInfoTest, LooksUpDescriptorSetEncodingProfile) {

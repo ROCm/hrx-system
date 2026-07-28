@@ -164,9 +164,7 @@ loom_cc_test(
     deps = [
         ":target_info",
         "//loom/src/loom/codegen/low:descriptors",
-        "//loom/src/loom/target:residency",
         "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
-        "//loom/src/loom/target/arch/amdgpu/planning:occupancy_model",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",

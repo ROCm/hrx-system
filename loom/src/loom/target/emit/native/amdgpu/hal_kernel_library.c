@@ -1116,15 +1116,17 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
   IREE_RETURN_IF_ERROR(loom_target_low_descriptor_set_select_for_bundle(
       &low_registry->registry, &plan->entry->bundle_storage.bundle,
       &descriptor_set));
-  const loom_target_residency_model_t* residency_model =
-      loom_amdgpu_occupancy_residency_model(descriptor_set);
   loom_low_schedule_pair_affinity_list_t schedule_pair_affinities =
       loom_low_schedule_pair_affinity_list_empty();
   loom_low_resolved_target_t resolved_target = {
+      .target_symbol = plan->entry->target_symbol,
+      .target_op = plan->entry->target_op,
       .bundle_storage = plan->entry->bundle_storage,
       .descriptor_set = descriptor_set,
   };
   loom_target_bundle_storage_rebind(&resolved_target.bundle_storage);
+  const loom_target_residency_model_t* residency_model =
+      loom_amdgpu_occupancy_residency_model(module, &resolved_target);
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_build_schedule_pair_affinities(
       &resolved_target, table_arena, &schedule_pair_affinities));
   loom_low_schedule_structural_state_read_list_t schedule_state_reads =

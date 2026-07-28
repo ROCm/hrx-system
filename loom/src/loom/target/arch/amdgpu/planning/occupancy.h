@@ -72,6 +72,8 @@ typedef struct loom_amdgpu_occupancy_register_class_t {
   uint32_t pool_units;
   // Allocation granularity applied before estimating occupancy.
   uint32_t allocation_granularity;
+  // Whether this class directly limits resident waves.
+  bool limits_occupancy;
   // Maximum resident waves allowed by this register class.
   uint32_t wave_limit;
   // Smallest allocated unit count that would reduce |wave_limit|, or 0 when
@@ -194,9 +196,9 @@ iree_status_t loom_amdgpu_occupancy_build_target_resources(
     iree_arena_allocator_t* arena,
     loom_amdgpu_occupancy_target_resources_t* out_resources);
 
-// Returns the generated target residency model for |descriptor_set|.
+// Returns the generated target residency model for |target|.
 const loom_target_residency_model_t* loom_amdgpu_occupancy_residency_model(
-    const loom_low_descriptor_set_t* descriptor_set);
+    const loom_module_t* module, const loom_low_resolved_target_t* target);
 
 // Appends a compact JSON representation of |table| to |builder|.
 iree_status_t loom_amdgpu_occupancy_format_json(

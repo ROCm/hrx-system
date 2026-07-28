@@ -649,6 +649,8 @@ def _validate_processors(
         raise ValueError("AMDGPU processor target-info keys must be sorted")
     if len(processor_names) != len(set(processor_names)):
         raise ValueError("AMDGPU processor target-info keys must be unique")
+    if len(processors) > 0x10000:
+        raise ValueError("AMDGPU processor target-info rows must fit u16 ordinals")
     descriptor_set_keys = {info.key for info in descriptor_sets}
     for info in processors:
         kernel_descriptor = info.kernel_descriptor
@@ -810,12 +812,13 @@ def _emit_processor_rows(processors: Sequence[AmdgpuProcessorInfo]) -> list[str]
     lines = [
         "const loom_amdgpu_processor_info_t loom_amdgpu_target_info_processor_infos[] = {",
     ]
-    for info in processors:
+    for processor_ordinal, info in enumerate(processors):
         kernel_descriptor = info.kernel_descriptor
         lines.extend(
             [
                 "  {",
                 f"    .name = IREE_SVL({_c_string_arg(info.processor)}),",
+                f"    .ordinal = {_u16_expr(processor_ordinal)},",
                 f"    .flags = {_processor_info_flags_expr(info.flags)},",
                 "    .descriptor_set = {",
                 f"      .key = IREE_SVL({_c_string_arg(info.descriptor_set.key)}),",

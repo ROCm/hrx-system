@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -30,9 +31,13 @@ from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE,
     AmdgpuOccupancyModelInfo,
+    AmdgpuProcessorInfo,
     amdgpu_descriptor_set_ordinal,
+    amdgpu_processor_occupancy_model,
+    amdgpu_processor_ordinal,
+    kernel_descriptor_profile_supports_wavefront_size,
     sorted_descriptor_set_infos,
-    sorted_occupancy_model_infos,
+    sorted_processor_infos,
 )
 from loom.target.low_descriptors import RegClass, RegClassFlag  # noqa: E402
 
@@ -51,16 +56,26 @@ def _c_identifier(value: str) -> str:
     return "".join(chars).strip("_")
 
 
-def _model_symbol_suffix(descriptor_set_key: str) -> str:
+@dataclass(frozen=True, slots=True)
+class _AmdgpuOccupancyModelRow:
+    descriptor_set_key: str
+    wave_size: int
+    model: AmdgpuOccupancyModelInfo
+    processors: tuple[AmdgpuProcessorInfo, ...]
+
+
+def _model_symbol_suffix(row: _AmdgpuOccupancyModelRow) -> str:
+    descriptor_set_key = row.descriptor_set_key
     prefix = "amdgpu."
     suffix = ".core"
     if not descriptor_set_key.startswith(prefix) or not descriptor_set_key.endswith(suffix):
         raise ValueError(f"AMDGPU occupancy descriptor-set key '{descriptor_set_key}' must be a core key")
-    return _c_identifier(descriptor_set_key.removeprefix(prefix).removesuffix(suffix))
+    descriptor_suffix = descriptor_set_key.removeprefix(prefix).removesuffix(suffix)
+    return _c_identifier(f"{descriptor_suffix}_{row.processors[0].processor}_wave{row.wave_size}")
 
 
-def _model_c_suffix(descriptor_set_key: str) -> str:
-    return _camel_c_suffix(_model_symbol_suffix(descriptor_set_key))
+def _model_c_suffix(row: _AmdgpuOccupancyModelRow) -> str:
+    return _camel_c_suffix(_model_symbol_suffix(row))
 
 
 def _camel_c_suffix(value: str) -> str:
@@ -146,44 +161,98 @@ def _validate_u32(value: int, description: str) -> None:
         raise ValueError(f"{description} does not fit uint32")
 
 
-def _validate_models(models: Sequence[AmdgpuOccupancyModelInfo]) -> None:
+def _materialize_models(
+    processors: Sequence[AmdgpuProcessorInfo],
+) -> tuple[_AmdgpuOccupancyModelRow, ...]:
+    grouped_processors: dict[tuple[str, int, AmdgpuOccupancyModelInfo], list[AmdgpuProcessorInfo]] = {}
+    for processor in processors:
+        for wave_size in (32, 64):
+            model = amdgpu_processor_occupancy_model(processor, wave_size)
+            if model is None:
+                continue
+            key = (processor.descriptor_set.key, wave_size, model)
+            grouped_processors.setdefault(key, []).append(processor)
+    return tuple(
+        _AmdgpuOccupancyModelRow(
+            descriptor_set_key=descriptor_set_key,
+            wave_size=wave_size,
+            model=model,
+            processors=tuple(model_processors),
+        )
+        for (
+            descriptor_set_key,
+            wave_size,
+            model,
+        ), model_processors in grouped_processors.items()
+    )
+
+
+def _validate_models(
+    models: Sequence[_AmdgpuOccupancyModelRow],
+    processors: Sequence[AmdgpuProcessorInfo],
+) -> None:
     descriptor_set_keys = {info.key for info in sorted_descriptor_set_infos()}
-    model_keys = [info.descriptor_set_key for info in models]
-    if len(model_keys) != len(set(model_keys)):
-        raise ValueError("AMDGPU occupancy descriptor-set keys must be unique")
-    missing_model_keys = sorted(descriptor_set_keys - set(model_keys))
-    if missing_model_keys:
-        raise ValueError(f"AMDGPU occupancy models missing descriptor sets: {', '.join(missing_model_keys)}")
-    for model in models:
-        if model.descriptor_set_key not in descriptor_set_keys:
-            raise ValueError(f"AMDGPU occupancy model references unknown descriptor set '{model.descriptor_set_key}'")
-        if amdgpu_descriptor_set_ordinal(model.descriptor_set_key) >= (AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE):
+    expected_processor_waves: set[tuple[str, int]] = set()
+    for processor in processors:
+        for wave_size in (32, 64):
+            supports_wave = kernel_descriptor_profile_supports_wavefront_size(processor.kernel_descriptor.profile, wave_size)
+            model = amdgpu_processor_occupancy_model(processor, wave_size)
+            if not processor.descriptor_set.key:
+                if model is not None:
+                    raise ValueError(f"AMDGPU processor {processor.processor} has an occupancy model without a descriptor set")
+                continue
+            if supports_wave:
+                expected_processor_waves.add((processor.processor, wave_size))
+                if model is None:
+                    raise ValueError(f"AMDGPU processor {processor.processor} is missing its wave{wave_size} occupancy model")
+            elif model is not None:
+                raise ValueError(f"AMDGPU processor {processor.processor} defines an unsupported wave{wave_size} occupancy model")
+
+    covered_processor_waves: set[tuple[str, int]] = set()
+    for model_row in models:
+        model = model_row.model
+        descriptor_set_key = model_row.descriptor_set_key
+        wave_size = model_row.wave_size
+        if descriptor_set_key not in descriptor_set_keys:
+            raise ValueError(f"AMDGPU occupancy model references unknown descriptor set '{descriptor_set_key}'")
+        if amdgpu_descriptor_set_ordinal(descriptor_set_key) >= (AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE):
             raise ValueError("AMDGPU occupancy descriptor-set ordinal overflows")
-        if model.wave_size not in (32, 64):
-            raise ValueError(f"AMDGPU occupancy wave size for {model.descriptor_set_key} must be 32 or 64")
+        if wave_size not in (32, 64):
+            raise ValueError(f"AMDGPU occupancy wave size for {descriptor_set_key} must be 32 or 64")
+        if not model_row.processors:
+            raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} wave{wave_size} has no processors")
+        for processor in model_row.processors:
+            processor_wave = (processor.processor, wave_size)
+            if processor_wave in covered_processor_waves:
+                raise ValueError(f"AMDGPU occupancy model duplicates {processor.processor} wave{wave_size}")
+            if processor.descriptor_set.key != descriptor_set_key:
+                raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} references processor {processor.processor} from {processor.descriptor_set.key}")
+            if amdgpu_processor_occupancy_model(processor, wave_size) != model:
+                raise ValueError(f"AMDGPU occupancy model for {processor.processor} wave{wave_size} disagrees with processor facts")
+            covered_processor_waves.add(processor_wave)
         if model.max_waves_per_simd <= 0:
-            raise ValueError(f"AMDGPU occupancy max waves for {model.descriptor_set_key} must be positive")
+            raise ValueError(f"AMDGPU occupancy max waves for {descriptor_set_key} must be positive")
         _validate_u32(
             model.max_waves_per_simd,
-            f"AMDGPU occupancy max waves for {model.descriptor_set_key}",
+            f"AMDGPU occupancy max waves for {descriptor_set_key}",
         )
         register_classes = [row.register_class for row in model.register_classes]
         if len(register_classes) > 0xFFFF:
-            raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} has too many register classes")
+            raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} has too many register classes")
         if len(register_classes) != len(set(register_classes)):
-            raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} has duplicate register classes")
+            raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} has duplicate register classes")
         missing_base_classes = sorted({"amdgpu.sgpr", "amdgpu.vgpr"} - set(register_classes))
         if missing_base_classes:
             missing = ", ".join(missing_base_classes)
-            raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} is missing base register classes: {missing}")
-        descriptor_reg_classes = _descriptor_reg_class_ids(model.descriptor_set_key)
-        descriptor_reg_class_rows = {row.name: row for row in _descriptor_reg_classes(model.descriptor_set_key)}
+            raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} is missing base register classes: {missing}")
+        descriptor_reg_classes = _descriptor_reg_class_ids(descriptor_set_key)
+        descriptor_reg_class_rows = {row.name: row for row in _descriptor_reg_classes(descriptor_set_key)}
         if len(descriptor_reg_class_rows) > 0xFFFF:
-            raise ValueError(f"AMDGPU descriptor set {model.descriptor_set_key} has too many register classes for pressure-resource indexes")
+            raise ValueError(f"AMDGPU descriptor set {descriptor_set_key} has too many register classes for pressure-resource indexes")
         pressure_cliff_count = 0
         for row in model.register_classes:
             if row.register_class not in descriptor_reg_classes:
-                raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} references unknown register class {row.register_class}")
+                raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} references unknown register class {row.register_class}")
             if row.pool_units <= 0:
                 raise ValueError(f"AMDGPU occupancy pool for {row.register_class} must be positive")
             if row.allocation_granularity <= 0:
@@ -203,34 +272,35 @@ def _validate_models(models: Sequence[AmdgpuOccupancyModelInfo]) -> None:
                 maximum_allocated_units,
                 f"AMDGPU occupancy register class {row.register_class} maximum rounded allocation",
             )
-            if maximum_allocated_units > row.pool_units:
+            if row.limits_occupancy and maximum_allocated_units > row.pool_units:
                 raise ValueError(f"AMDGPU occupancy register class {row.register_class} permits a legal allocation with zero residency")
-            pressure_cliff_count += len(
-                _pressure_cliffs(
-                    row.pool_units,
-                    row.allocation_granularity,
-                    model.max_waves_per_simd,
+            if row.limits_occupancy:
+                pressure_cliff_count += len(
+                    _pressure_cliffs(
+                        row.pool_units,
+                        row.allocation_granularity,
+                        model.max_waves_per_simd,
+                    )
                 )
-            )
             if pressure_cliff_count > 0xFFFFFFFF:
-                raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} has too many register-class pressure cliffs")
+                raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} has too many register-class pressure cliffs")
         modeled_register_classes = set(register_classes)
         missing_spillable_classes = sorted(
-            reg_class.name for reg_class in _descriptor_reg_classes(model.descriptor_set_key) if RegClassFlag.UNSPILLABLE not in reg_class.flags and reg_class.name not in modeled_register_classes
+            reg_class.name for reg_class in _descriptor_reg_classes(descriptor_set_key) if RegClassFlag.UNSPILLABLE not in reg_class.flags and reg_class.name not in modeled_register_classes
         )
         if missing_spillable_classes:
             missing = ", ".join(missing_spillable_classes)
-            raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} is missing spillable descriptor register classes: {missing}")
+            raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} is missing spillable descriptor register classes: {missing}")
         resources = [row.resource for row in model.resources]
         if len(resources) > 0xFFFF:
-            raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} has too many pressure resources")
+            raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} has too many pressure resources")
         if len(resources) != len(set(resources)):
-            raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} has duplicate resources")
+            raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} has duplicate resources")
         resource_member_count = 0
         resource_cliff_count = 0
         for resource in model.resources:
             if not resource.resource:
-                raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} has an empty resource name")
+                raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} has an empty resource name")
             if resource.pool_units <= 0:
                 raise ValueError(f"AMDGPU occupancy resource pool for {resource.resource} must be positive")
             if resource.allocation_granularity <= 0:
@@ -271,12 +341,22 @@ def _validate_models(models: Sequence[AmdgpuOccupancyModelInfo]) -> None:
                 )
             )
         if resource_member_count > 0xFFFF:
-            raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} has too many pressure-resource members")
+            raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} has too many pressure-resource members")
         if resource_cliff_count > 0xFFFF:
-            raise ValueError(f"AMDGPU occupancy model for {model.descriptor_set_key} has too many pressure-resource cliffs")
+            raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} has too many pressure-resource cliffs")
+
+    missing_processor_waves = sorted(expected_processor_waves - covered_processor_waves)
+    extra_processor_waves = sorted(covered_processor_waves - expected_processor_waves)
+    if missing_processor_waves or extra_processor_waves:
+        details: list[str] = []
+        if missing_processor_waves:
+            details.append("missing " + ", ".join(f"{processor}/wave{wave_size}" for processor, wave_size in missing_processor_waves))
+        if extra_processor_waves:
+            details.append("unexpected " + ", ".join(f"{processor}/wave{wave_size}" for processor, wave_size in extra_processor_waves))
+        raise ValueError("AMDGPU occupancy models do not cover processor wave modes: " + "; ".join(details))
 
 
-def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
+def _emit_source(models: Sequence[_AmdgpuOccupancyModelRow]) -> str:
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -290,16 +370,21 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
         "",
         "// clang-format off",
     ]
-    for model in models:
-        suffix = _model_c_suffix(model.descriptor_set_key)
-        descriptor_reg_classes = _descriptor_reg_class_ids(model.descriptor_set_key)
-        descriptor_reg_class_rows = _descriptor_reg_classes(model.descriptor_set_key)
+    for model_row in models:
+        model = model_row.model
+        suffix = _model_c_suffix(model_row)
+        descriptor_reg_classes = _descriptor_reg_class_ids(model_row.descriptor_set_key)
+        descriptor_reg_class_rows = _descriptor_reg_classes(model_row.descriptor_set_key)
         register_class_indices = {row.register_class: index for index, row in enumerate(model.register_classes)}
         pressure_cliffs_by_register_class = {
-            row.register_class: _pressure_cliffs(
-                row.pool_units,
-                row.allocation_granularity,
-                model.max_waves_per_simd,
+            row.register_class: (
+                _pressure_cliffs(
+                    row.pool_units,
+                    row.allocation_granularity,
+                    model.max_waves_per_simd,
+                )
+                if row.limits_occupancy
+                else ()
             )
             for row in model.register_classes
         }
@@ -368,6 +453,7 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
                     f"    .descriptor_reg_class_id = {_u16_expr(descriptor_reg_classes[row.register_class])},",
                     f"    .pool_units = {_u32_expr(row.pool_units)},",
                     f"    .allocation_granularity = {_u32_expr(row.allocation_granularity)},",
+                    f"    .limits_occupancy = {'true' if row.limits_occupancy else 'false'},",
                     "  },",
                 ]
             )
@@ -526,8 +612,8 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
             [
                 "",
                 f"static const loom_amdgpu_occupancy_model_t kAmdgpu{suffix}OccupancyModel = {{",
-                f"  .descriptor_set_ordinal = {_u16_expr(amdgpu_descriptor_set_ordinal(model.descriptor_set_key))},",
-                f"  .wave_size = {_u32_expr(model.wave_size)},",
+                f"  .descriptor_set_ordinal = {_u16_expr(amdgpu_descriptor_set_ordinal(model_row.descriptor_set_key))},",
+                f"  .wave_size = {_u32_expr(model_row.wave_size)},",
                 f"  .max_waves_per_simd = {_u32_expr(model.max_waves_per_simd)},",
                 "  .residency_model = {",
                 f"    .best_tier = {_u32_expr(model.max_waves_per_simd)},",
@@ -556,19 +642,26 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
                 "};",
             ]
         )
+    model_by_processor_wave: dict[tuple[str, int], _AmdgpuOccupancyModelRow] = {}
+    for model_row in models:
+        for processor in model_row.processors:
+            model_by_processor_wave[(processor.processor, model_row.wave_size)] = model_row
     lines.extend(
         [
             "",
-            "const loom_amdgpu_occupancy_model_t* const kLoomAmdgpuOccupancyModels[LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_COUNT] = {",
+            "const loom_amdgpu_occupancy_model_t* const",
+            "    kLoomAmdgpuOccupancyModelsByProcessor[][LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_COUNT] = {",
         ]
     )
-    for model in models:
-        suffix = _model_c_suffix(model.descriptor_set_key)
-        lines.extend(
-            [
-                f"  [{_u16_expr(amdgpu_descriptor_set_ordinal(model.descriptor_set_key))}] = &kAmdgpu{suffix}OccupancyModel,",
-            ]
-        )
+    for processor in sorted_processor_infos():
+        wave_rows = {wave_size: model_by_processor_wave[(processor.processor, wave_size)] for wave_size in (32, 64) if (processor.processor, wave_size) in model_by_processor_wave}
+        if not wave_rows:
+            continue
+        lines.append(f"  [{_u16_expr(amdgpu_processor_ordinal(processor.processor))}] = {{")
+        for wave_size, model_row in wave_rows.items():
+            wave_slot = "LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_32" if wave_size == 32 else "LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_64"
+            lines.append(f"    [{wave_slot}] = &kAmdgpu{_model_c_suffix(model_row)}OccupancyModel,")
+        lines.append("  },")
     lines.extend(
         [
             "};",
@@ -580,8 +673,9 @@ def _emit_source(models: Sequence[AmdgpuOccupancyModelInfo]) -> str:
 
 
 def write_occupancy_tables_to_path(source_path: Path) -> None:
-    models = sorted_occupancy_model_infos()
-    _validate_models(models)
+    processors = sorted_processor_infos()
+    models = _materialize_models(processors)
+    _validate_models(models, processors)
     source_path.parent.mkdir(parents=True, exist_ok=True)
     source_path.write_text(_emit_source(models), encoding="utf-8")
 
