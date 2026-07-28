@@ -3206,13 +3206,13 @@ static void loom_amdgpu_wait_plan_emit_counter_progress_mask(
     loom_low_packet_progress_emit_fn_t emit, void* emit_user_data,
     uint32_t counter_mask, loom_low_packet_progress_action_t action,
     uint32_t units) {
-  for (uint32_t slot = 0; slot < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT; ++slot) {
-    if ((counter_mask & loom_amdgpu_wait_counter_mask_from_slot(slot)) == 0) {
-      continue;
-    }
+  while (counter_mask != 0) {
+    const uint32_t slot =
+        (uint32_t)iree_math_count_trailing_zeros_u32(counter_mask);
     const uint16_t counter_id = loom_amdgpu_wait_counter_id_from_slot(slot);
     loom_amdgpu_wait_plan_emit_counter_progress(emit, emit_user_data,
                                                 counter_id, action, units);
+    counter_mask &= counter_mask - 1;
   }
 }
 
