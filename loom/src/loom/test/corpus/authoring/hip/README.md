@@ -316,7 +316,7 @@ Useful queries:
 jq '{status, target_key, local:.entries.rows[0].local_memory_bytes, lds_ops:.static_instruction_mix.local_memory_count, barriers:.static_instruction_mix.barrier_count}' \
   /tmp/shared-memory-tile.compile-report.json
 
-llvm-objdump -d --mcpu=gfx1100 /tmp/shared-memory-tile.hsaco | rg 'ds_(read|write)|s_barrier'
+llvm-objdump -d --mcpu=gfx11-generic /tmp/shared-memory-tile.hsaco | rg 'ds_(read|write)|s_barrier'
 ```
 
 Expected signal: the dry run lists `case_shared_memory_tile_reverse` and
@@ -391,7 +391,7 @@ Useful queries:
 jq '{status, target_key, local:.entries.rows[0].local_memory_bytes, lds_ops:.static_instruction_mix.local_memory_count, barriers:.static_instruction_mix.barrier_count}' \
   /tmp/shared-memory-transpose.compile-report.json
 
-llvm-objdump -d --mcpu=gfx1100 /tmp/shared-memory-transpose.hsaco | rg 'ds_(read|store)|s_barrier'
+llvm-objdump -d --mcpu=gfx11-generic /tmp/shared-memory-transpose.hsaco | rg 'ds_(read|store)|s_barrier'
 ```
 
 Expected signal: the dry run lists
@@ -461,7 +461,7 @@ Useful queries:
 jq '{status, target_key, local:.entries.rows[0].local_memory_bytes, lds_ops:.static_instruction_mix.local_memory_count, barriers:.static_instruction_mix.barrier_count}' \
   /tmp/shared-memory-vector-tile.compile-report.json
 
-llvm-objdump -d --mcpu=gfx1100 /tmp/shared-memory-vector-tile.hsaco | rg 'global_(load|store)_b128|ds_(store|load)_b128|s_barrier'
+llvm-objdump -d --mcpu=gfx11-generic /tmp/shared-memory-vector-tile.hsaco | rg 'global_(load|store)_b128|ds_(store|load)_b128|s_barrier'
 ```
 
 Expected signal: the dry run lists `case_shared_memory_vector_tile_roundtrip`

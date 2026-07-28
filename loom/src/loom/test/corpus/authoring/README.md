@@ -98,7 +98,7 @@ sidecar when validating target lowering and packaging:
 python dev.py bazel run //loom/src/loom/tools/loom-compile:loom-compile -- \
   loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom \
   --backend=amdgpu-hal \
-  --target=gfx1100 \
+  --target=gfx11-generic \
   --output=/tmp/loom-q6q8.vmfb \
   --emit-target-artifact=/tmp/loom-q6q8.hsaco \
   --artifact-manifest=summary \
@@ -107,12 +107,12 @@ python dev.py bazel run //loom/src/loom/tools/loom-compile:loom-compile -- \
   --compile-report-output=/tmp/loom-q6q8.compile-report.json
 ```
 
-`--target=gfx1100` is invocation target selection. The source kernel stays
-targetless, template providers are resolved against the effective target, and
-target-sensitive passes see that same selected target. A successful summary
-manifest for this kernel reports one `ffn_gate_up_swiglu_q6q8` function, four
-parameters/bindings, zero constant bytes, workgroup size `[512,1,1]`, and
-subgroup size `32`.
+`--target=gfx11-generic` is invocation target selection. The source kernel
+stays targetless, template providers are resolved against the effective target,
+and target-sensitive passes see that same selected target. A successful
+summary manifest for this kernel reports one `ffn_gate_up_swiglu_q6q8`
+function, four parameters/bindings, zero constant bytes, workgroup size
+`[512,1,1]`, and subgroup size `32`.
 
 The artifact manifest describes the emitted artifact contract. The compile
 report describes compiler evidence for the invocation: status, selected backend
@@ -171,7 +171,7 @@ snapshots around those boundaries:
 python dev.py bazel run //loom/src/loom/tools/loom-compile:loom-compile -- \
   loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom \
   --backend=amdgpu-hal \
-  --target=gfx1100 \
+  --target=gfx11-generic \
   --output=/tmp/loom-q6q8.vmfb \
   --emit-target-artifact=/tmp/loom-q6q8.hsaco \
   --dump-ir-after=select-templates \
@@ -303,7 +303,7 @@ For quick object-level disassembly of a standalone HSACO, use the LLVM object
 tools on the emitted sidecar:
 
 ```bash
-llvm-objdump -d --mcpu=gfx1100 /tmp/loom-q6q8.hsaco
+llvm-objdump -d --mcpu=gfx11-generic /tmp/loom-q6q8.hsaco
 ```
 
 Treat the evidence channels separately. Planner output answers "what would run?"
@@ -387,7 +387,7 @@ padding, swizzling, vectorization, or imported kernel staging choices:
 ```bash
 loom-compile loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom \
   --backend=amdgpu-hal \
-  --target=gfx1100 \
+  --target=gfx11-generic \
   --output=/tmp/shared-memory-vector-tile.vmfb \
   --compile-report=json-details \
   --compile-report-output=/tmp/shared-memory-vector-tile.compile-report.json
@@ -410,7 +410,7 @@ greppable report is more convenient:
 ```bash
 loom-compile loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom \
   --backend=amdgpu-hal \
-  --target=gfx1100 \
+  --target=gfx11-generic \
   --output=/tmp/shared-memory-vector-tile.vmfb \
   --compile-report=text-details \
   --compile-report-output=/tmp/shared-memory-vector-tile.compile-report.txt

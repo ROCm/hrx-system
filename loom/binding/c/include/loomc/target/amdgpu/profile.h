@@ -13,12 +13,12 @@
 /// AMDGPU target profile facts.
 ///
 /// The current AMDGPU public profile is intentionally compact: it selects one
-/// concrete AMDGPU processor row such as `gfx1100` or `gfx942`. The processor
-/// row determines the descriptor-family target bundle, native HSACO support,
-/// default wavefront size, HSA target id, and target-record family used by
-/// compilation and emission. Live HSA/HIP/HRX adapters should derive this
-/// processor string from their runtime agent query and then create a normal
-/// `loomc_target_profile_t`.
+/// exact or generic AMDGPU processor row such as `gfx1151`, `gfx942`, or
+/// `gfx11-generic`. The processor row determines the descriptor-family target
+/// bundle, native HSACO support, default wavefront size, HSA target id, and
+/// target-record family used by compilation and emission. Live HSA/HIP/HRX
+/// adapters should derive an exact processor string from their runtime agent
+/// query and then create a normal `loomc_target_profile_t`.
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,11 +41,12 @@ typedef struct loomc_amdgpu_profile_options_t {
   /// Empty uses `processor`.
   loomc_string_view_t identifier;
 
-  /// AMDGPU processor name, such as `gfx1100`, `gfx1150`, or `gfx942`.
+  /// Exact or generic AMDGPU processor name, such as `gfx1151`, `gfx942`, or
+  /// `gfx11-generic`.
   loomc_string_view_t processor;
 } loomc_amdgpu_profile_options_t;
 
-/// Creates an AMDGPU target profile from a concrete processor name.
+/// Creates an AMDGPU target profile from an exact or generic processor name.
 ///
 /// @param target_environment AMDGPU-capable target environment.
 /// @param options Profile options. Required.
