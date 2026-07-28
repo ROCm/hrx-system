@@ -124,7 +124,7 @@ class AmdgpuSanitizerSiteTableTest : public ::testing::Test {
 
 TEST_F(AmdgpuSanitizerSiteTableTest, SourceToLowAggregatesMultiKernelSites) {
   static constexpr char kSource[] = R"(
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @read_kernel() {
   %one = index.constant 1 : index

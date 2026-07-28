@@ -84,7 +84,7 @@ iree_status_t loom_llvm_tool_verify_bitcode_file(
 // Runs `llc <input_path> -filetype=obj -o <output_path>`.
 //
 // |extra_arguments| are appended after the standard arguments and may include
-// target-specific flags such as `-mcpu=gfx1100`.
+// target-specific flags such as `-mcpu=gfx11-generic`.
 iree_status_t loom_llvm_tool_compile_object_file(
     const loom_llvm_toolchain_t* toolchain, iree_string_view_t input_path,
     iree_string_view_t output_path, const iree_string_view_t* extra_arguments,
@@ -103,7 +103,7 @@ iree_status_t loom_llvm_tool_compile_assembly_file(
 // returns the produced object bytes.
 //
 // |extra_arguments| are appended after the standard arguments and may include
-// target-specific flags such as `-mcpu=gfx1100`.
+// target-specific flags such as `-mcpu=gfx11-generic`.
 iree_status_t loom_llvm_tool_compile_object(
     const loom_llvm_toolchain_t* toolchain, iree_const_byte_span_t bitcode,
     const iree_string_view_t* extra_arguments,
@@ -125,7 +125,7 @@ iree_status_t loom_llvm_tool_compile_assembly(
 //
 // |extra_arguments| are appended after the standard arguments and must provide
 // the target selection required by the native assembly, such as
-// `--triple=amdgcn-amd-amdhsa` and `--mcpu=gfx1100`.
+// `--triple=amdgcn-amd-amdhsa` and `--mcpu=gfx11-generic`.
 iree_status_t loom_llvm_tool_assemble_native_object_file(
     const loom_llvm_toolchain_t* toolchain, iree_string_view_t input_path,
     iree_string_view_t output_path, const iree_string_view_t* extra_arguments,
@@ -143,7 +143,7 @@ iree_status_t loom_llvm_tool_assemble_native_object(
 //
 // |extra_arguments| are inserted before the input path and may include
 // disassembly flags such as `--disassemble` and target-specific flags such as
-// `--mcpu=gfx1100`.
+// `--mcpu=gfx11-generic`.
 iree_status_t loom_llvm_tool_disassemble_object_file(
     const loom_llvm_toolchain_t* toolchain, iree_string_view_t input_path,
     const iree_string_view_t* extra_arguments,

@@ -64,6 +64,13 @@ typedef enum loom_amdgpu_elf_feature_flag_bits_e {
 // Bitset of AMDGPU ELF EF_AMDGPU_FEATURE_* values.
 typedef uint32_t loom_amdgpu_elf_feature_flags_t;
 
+enum {
+  // Bit offset of the generic code-object version in AMDHSA v6 e_flags.
+  LOOM_AMDGPU_ELF_GENERIC_VERSION_OFFSET_V6 = 24u,
+  // Mask selecting the generic code-object version in AMDHSA v6 e_flags.
+  LOOM_AMDGPU_ELF_GENERIC_VERSION_MASK_V6 = UINT32_C(0xff000000),
+};
+
 // Target feature selector parsed from an AMDHSA target-id suffix.
 typedef uint8_t loom_amdgpu_target_feature_selection_t;
 
@@ -89,6 +96,9 @@ typedef enum loom_amdgpu_kernel_descriptor_profile_e {
   LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125 = 4,
 } loom_amdgpu_kernel_descriptor_profile_t;
 
+// Exact matrix instruction-shape inventories. Profiles are not cumulative ISA
+// generations: a later processor may replace an earlier operand or fragment
+// layout while retaining the same semantic operation.
 typedef enum loom_amdgpu_matrix_feature_profile_e {
   // No matrix instruction feature profile is defined.
   LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE = 0,
@@ -106,6 +116,12 @@ typedef enum loom_amdgpu_matrix_feature_profile_e {
   LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12 = 6,
   // GFX1250 WMMA/SWMMAC feature baseline.
   LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250 = 7,
+  // Portable GFX12.5 WMMA feature baseline.
+  LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC = 8,
+  // Portable intersection of GFX940- and GFX950-family MFMA features.
+  LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC = 9,
+  // Number of matrix feature profiles.
+  LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_COUNT = 10,
 } loom_amdgpu_matrix_feature_profile_t;
 
 typedef enum loom_amdgpu_processor_info_flag_bits_e {
@@ -283,6 +299,8 @@ typedef struct loom_amdgpu_processor_elf_info_t {
   uint32_t machine_flags;
   // ELF EF_AMDGPU_FEATURE_* bits implied by the selected target-id policy.
   uint32_t feature_flags;
+  // Generic code-object version, or 0 for an exact processor.
+  uint32_t generic_version;
 } loom_amdgpu_processor_elf_info_t;
 
 typedef struct loom_amdgpu_processor_wavefront_info_t {
@@ -316,8 +334,11 @@ typedef struct loom_amdgpu_processor_feature_info_t {
 } loom_amdgpu_processor_feature_info_t;
 
 typedef struct loom_amdgpu_processor_info_t {
-  // Processor name used in AMDHSA target IDs, such as `gfx1100`.
+  // Exact or generic processor name used in AMDHSA target IDs, such as
+  // `gfx1151` or `gfx11-generic`.
   iree_string_view_t name;
+  // Dense generated processor ordinal used by target fact tables.
+  uint16_t ordinal;
   // Processor-wide target-info capability flags.
   loom_amdgpu_processor_info_flags_t flags;
   // Target-low descriptor-set identity selected for this processor.
@@ -457,7 +478,8 @@ iree_status_t loom_amdgpu_target_info_lookup_descriptor_set_by_ordinal(
     uint16_t descriptor_set_ordinal,
     const loom_amdgpu_descriptor_set_info_t** out_descriptor_set);
 
-// Parses an AMDHSA target ID such as `amdgcn-amd-amdhsa--gfx1100`.
+// Parses an AMDHSA target ID such as
+// `amdgcn-amd-amdhsa--gfx11-generic`.
 iree_status_t loom_amdgpu_target_info_parse_amdhsa_target_id(
     iree_string_view_t target_id,
     loom_amdgpu_amdhsa_target_id_t* out_target_id);

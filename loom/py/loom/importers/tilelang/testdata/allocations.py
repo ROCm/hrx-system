@@ -58,15 +58,15 @@ def shared_block_alloc(tir: Any) -> TileLangImportInput:
         buffer_map={dst: dst_buffer},
     )
     return TileLangImportInput(
-        source=prim_func, target="hip -mcpu=gfx1100", name="shared_block_alloc"
+        source=prim_func, target="hip -mcpu=gfx11-generic", name="shared_block_alloc"
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("shared_block_alloc") @shared_block_alloc() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("shared_block_alloc") @shared_block_alloc() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%dst: buffer) {
@@ -122,15 +122,15 @@ def private_block_alloc(tir: Any) -> TileLangImportInput:
         buffer_map={dst: dst_buffer},
     )
     return TileLangImportInput(
-        source=prim_func, target="hip -mcpu=gfx1100", name="private_block_alloc"
+        source=prim_func, target="hip -mcpu=gfx11-generic", name="private_block_alloc"
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("private_block_alloc") @private_block_alloc() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("private_block_alloc") @private_block_alloc() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%dst: buffer) {

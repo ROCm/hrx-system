@@ -23,6 +23,32 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "code_object_target",
+    srcs = ["code_object_target.c"],
+    hdrs = ["code_object_target.h"],
+    textual_hdrs = ["//build_tools/amdgpu:elf_machine_map.inl"],
+    deps = [
+        ":target_id",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/hal/utils:elf_format",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "code_object_target_test",
+    srcs = ["code_object_target_test.cc"],
+    deps = [
+        ":code_object_target",
+        ":target_id",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "target_id_test",
     srcs = ["target_id_test.cc"],

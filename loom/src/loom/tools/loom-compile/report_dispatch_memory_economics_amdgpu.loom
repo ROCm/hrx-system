@@ -1,8 +1,8 @@
-amdgpu.target<gfx1100> @gfx1100_target
+amdgpu.target<gfx11-generic> @gfx11_generic_target
 
 config.def @compile_report.dispatch_token_count = 8 : index
 
-kernel.def target(@gfx1100_target) export("compile_report_dispatch_memory_economics") @compile_report_dispatch_memory_economics() {
+kernel.def target(@gfx11_generic_target) export("compile_report_dispatch_memory_economics") @compile_report_dispatch_memory_economics() {
   %unit = index.constant 1 : index
   %tile_size = index.constant 8 : index
   %dispatch_token_count = config.get @compile_report.dispatch_token_count : index

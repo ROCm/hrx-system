@@ -267,6 +267,21 @@ TEST(AmdgpuEncodingTest, ReportsGeneratedTableFormatSupport) {
       nullptr, LOOM_AMDGPU_ENCODING_FORMAT_VOP1));
 }
 
+TEST(AmdgpuEncodingTest, SelectedTablesMatchDescriptorSetFacts) {
+  for (uint16_t ordinal = 0;
+       ordinal < loom_amdgpu_target_info_descriptor_set_count(); ++ordinal) {
+    const loom_amdgpu_encoding_table_t* table =
+        loom_amdgpu_encoding_table_for_descriptor_set_ordinal(ordinal);
+    if (table == nullptr) continue;
+    const loom_amdgpu_descriptor_set_info_t* descriptor_set =
+        loom_amdgpu_target_info_descriptor_set_at(ordinal);
+    ASSERT_NE(descriptor_set, nullptr);
+    EXPECT_EQ(table->descriptor_set_ordinal, descriptor_set->ordinal);
+    EXPECT_TRUE(
+        iree_string_view_equal(table->descriptor_set_key, descriptor_set->key));
+  }
+}
+
 TEST(AmdgpuEncodingTest, NamesVopdFormats) {
   EXPECT_TRUE(iree_string_view_equal(
       loom_amdgpu_encoding_format_name(LOOM_AMDGPU_ENCODING_FORMAT_VOPDXY),
@@ -578,6 +593,30 @@ TEST(AmdgpuEncodingTest, PacksGfx1250TensorWaitCounts) {
   EXPECT_EQ(packet.words[0], UINT32_C(0xbfcbffff));
 }
 
+TEST(AmdgpuEncodingTest, PacksGfx1250ClusterAsyncLoadToLds) {
+  LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
+      table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X,
+      "amdgpu.rdna4.gfx125x.core");
+  const loom_amdgpu_encoding_field_value_t field_values[] = {
+      {LOOM_AMDGPU_ENCODING_FIELD_VDST, {}, 0},
+      {LOOM_AMDGPU_ENCODING_FIELD_VADDR, {}, 1},
+      {LOOM_AMDGPU_ENCODING_FIELD_SADDR, {}, 4},
+      {LOOM_AMDGPU_ENCODING_FIELD_IOFFSET, {}, 0},
+      {LOOM_AMDGPU_ENCODING_FIELD_NV, {}, 1},
+      {LOOM_AMDGPU_ENCODING_FIELD_SCOPE, {}, 2},
+      {LOOM_AMDGPU_ENCODING_FIELD_TH, {}, 2},
+  };
+  loom_amdgpu_encoding_packet_t packet = {};
+  IREE_ASSERT_OK(loom_amdgpu_encoding_pack(
+      table, LOOM_AMDGPU_ENCODING_FORMAT_VGLOBAL, /*opcode=*/0x6C, field_values,
+      IREE_ARRAYSIZE(field_values), &packet));
+  EXPECT_EQ(packet.word_count, 3u);
+  EXPECT_EQ(packet.bit_count, 96u);
+  EXPECT_EQ(packet.words[0], UINT32_C(0xee1b0084));
+  EXPECT_EQ(packet.words[1], UINT32_C(0x00280000));
+  EXPECT_EQ(packet.words[2], UINT32_C(0x00000001));
+}
+
 TEST(AmdgpuEncodingTest, PacksGfx1250SupplementalScaledWmma) {
   LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
       table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X,
@@ -666,7 +705,7 @@ TEST(AmdgpuEncodingTest, PacksGfx1250SupplementalScaledWmma) {
   EXPECT_EQ(packet.word_count, 4u);
   EXPECT_EQ(packet.bit_count, 128u);
   EXPECT_EQ(packet.words[0], UINT32_C(0xcc350800));
-  EXPECT_EQ(packet.words[1], UINT32_C(0x0c020501));
+  EXPECT_EQ(packet.words[1], UINT32_C(0x0a020501));
   EXPECT_EQ(packet.words[2], UINT32_C(0xcc330800));
   EXPECT_EQ(packet.words[3], UINT32_C(0x14a23108));
 }

@@ -1,6 +1,6 @@
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @subgroup_broadcast_i32_wave32() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -20,7 +20,7 @@ kernel.def target(@target) @subgroup_broadcast_i32_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_broadcast_i32_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_broadcast_i32_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -35,7 +35,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_broadcast_dynamic_i32_wave32() {
   %c1 = index.constant 1 : index
@@ -57,7 +57,7 @@ kernel.def target(@target) @subgroup_broadcast_dynamic_i32_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_broadcast_dynamic_i32_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_broadcast_dynamic_i32_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -73,7 +73,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_broadcast_first_i32_wave32() {
   %c1 = index.constant 1 : index
@@ -93,7 +93,7 @@ kernel.def target(@target) @subgroup_broadcast_first_i32_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_broadcast_first_i32_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_broadcast_first_i32_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -108,7 +108,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_shuffle_index_i32_wave32() {
   %c1 = index.constant 1 : index
@@ -130,7 +130,7 @@ kernel.def target(@target) @subgroup_shuffle_index_i32_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_index_i32_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_index_i32_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -145,7 +145,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_shuffle_up_i32_wave32() {
   %c1 = index.constant 1 : index
@@ -167,7 +167,7 @@ kernel.def target(@target) @subgroup_shuffle_up_i32_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_up_i32_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_up_i32_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -185,7 +185,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_broadcast_f32_vector_wave32() {
   %c1 = index.constant 1 : index
@@ -204,7 +204,7 @@ kernel.def target(@target) @subgroup_broadcast_f32_vector_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_broadcast_f32_vector_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_broadcast_f32_vector_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -227,7 +227,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_shuffle_down_f32_vector_wave32() {
   %c1 = index.constant 1 : index
@@ -247,7 +247,7 @@ kernel.def target(@target) @subgroup_shuffle_down_f32_vector_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_down_f32_vector_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_down_f32_vector_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -273,7 +273,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_reduce_addi_i32_wave32() {
   %c1 = index.constant 1 : index
@@ -293,7 +293,7 @@ kernel.def target(@target) @subgroup_reduce_addi_i32_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_addi_i32_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_addi_i32_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -316,7 +316,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_reduce_addi_i32_sub_wave_power2() {
   %one = index.constant 1 : index
@@ -336,7 +336,7 @@ kernel.def target(@target) @subgroup_reduce_addi_i32_sub_wave_power2() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_addi_i32_sub_wave_power2() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(8, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_addi_i32_sub_wave_power2() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
@@ -355,7 +355,7 @@ low.kernel.def target(@target) workgroup_size(8, 1, 1) workgroup_count(1, 1, 1) 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_reduce_minsi_i32_wave32() {
   %one = index.constant 1 : index
@@ -375,7 +375,7 @@ kernel.def target(@target) @subgroup_reduce_minsi_i32_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_minsi_i32_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_minsi_i32_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
@@ -398,7 +398,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_reduce_minsi_single_wave() {
   %one = index.constant 1 : index
@@ -418,7 +418,7 @@ kernel.def target(@target) @workgroup_reduce_minsi_single_wave() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_minsi_single_wave() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_minsi_single_wave() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
@@ -441,7 +441,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_reduce_addf_sub_wave_power2() {
   %one = index.constant 1 : index
@@ -461,7 +461,7 @@ kernel.def target(@target) @workgroup_reduce_addf_sub_wave_power2() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_sub_wave_power2() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(8, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_sub_wave_power2() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
@@ -477,7 +477,7 @@ low.kernel.def target(@target) workgroup_size(8, 1, 1) workgroup_count(1, 1, 1) 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_reduce_addf_sub_wave_non_power2() {
   %one = index.constant 1 : index
@@ -497,7 +497,7 @@ kernel.def target(@target) @workgroup_reduce_addf_sub_wave_non_power2() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(24, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_sub_wave_non_power2() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(24, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_sub_wave_non_power2() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 96} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 96} : reg<amdgpu.sgpr x2>
@@ -543,7 +543,7 @@ low.kernel.def target(@target) workgroup_size(24, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_reduce_addf_f32_multi_wave() {
   %one = index.constant 1 : index
@@ -563,7 +563,7 @@ kernel.def target(@target) @workgroup_reduce_addf_f32_multi_wave() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_multi_wave() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_multi_wave() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -607,7 +607,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @workgroup_reduce_addf_f32_wave64_sub_wave() {
   %one = index.constant 1 : index
@@ -627,7 +627,7 @@ kernel.def target(@target) @workgroup_reduce_addf_f32_wave64_sub_wave() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave64_sub_wave() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave64_sub_wave() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
@@ -646,7 +646,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @workgroup_reduce_addf_f32_wave64_full_wave() {
   %one = index.constant 1 : index
@@ -666,7 +666,7 @@ kernel.def target(@target) @workgroup_reduce_addf_f32_wave64_full_wave() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave64_full_wave() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave64_full_wave() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -712,7 +712,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @workgroup_reduce_addf_f32_wave64_two_rows() {
   %one = index.constant 1 : index
@@ -770,7 +770,7 @@ kernel.def target(@target) @workgroup_reduce_addf_f32_wave64_two_rows() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave64_two_rows(%row_count: reg<amdgpu.sgpr>, %fusion_flags: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave64_two_rows(%row_count: reg<amdgpu.sgpr>, %fusion_flags: reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input0_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %input1_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -900,7 +900,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @workgroup_reduce_addf_f32_wave64_multi_wave() {
   %one = index.constant 1 : index
@@ -920,7 +920,7 @@ kernel.def target(@target) @workgroup_reduce_addf_f32_wave64_multi_wave() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave64_multi_wave() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave64_multi_wave() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -972,7 +972,7 @@ low.kernel.def target(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @workgroup_reduce_addf_f32_wave64_partial_tail() {
   %one = index.constant 1 : index
@@ -992,7 +992,7 @@ kernel.def target(@target) @workgroup_reduce_addf_f32_wave64_partial_tail() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(96, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave64_partial_tail() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(96, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave64_partial_tail() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 384} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 384} : reg<amdgpu.sgpr x2>
@@ -1041,7 +1041,7 @@ low.kernel.def target(@target) workgroup_size(96, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @workgroup_reduce_addf_f32_wave64_leader_only_full_wave() {
   %one = index.constant 1 : index
@@ -1065,7 +1065,7 @@ kernel.def target(@target) @workgroup_reduce_addf_f32_wave64_leader_only_full_wa
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave64_leader_only_full_wave() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave64_leader_only_full_wave() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -1111,7 +1111,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @workgroup_reduce_addf_f32_wave64_leader_only_cross_wave() {
   %one = index.constant 1 : index
@@ -1135,7 +1135,7 @@ kernel.def target(@target) @workgroup_reduce_addf_f32_wave64_leader_only_cross_w
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave64_leader_only_cross_wave() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave64_leader_only_cross_wave() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -1187,7 +1187,7 @@ low.kernel.def target(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 // Only the workitem-zero branch observes the reduction result. The reducer can
 // leave the cross-wave partial in that leader workitem instead of publishing it
@@ -1214,7 +1214,7 @@ kernel.def target(@target) @workgroup_reduce_addf_f32_leader_only_multi_wave() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_leader_only_multi_wave() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_leader_only_multi_wave() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -1263,7 +1263,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 // Every wave leader observes the reduction result. The reducer can redundantly
 // reduce the per-wave partials in each wave without broadcasting the final
@@ -1291,7 +1291,7 @@ kernel.def target(@target) @workgroup_reduce_addf_f32_wave_leader_multi_wave() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave_leader_multi_wave() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_wave_leader_multi_wave() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -1340,7 +1340,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_reduce_addf_f32_fourteen_waves() {
   %one = index.constant 1 : index
@@ -1360,7 +1360,7 @@ kernel.def target(@target) @workgroup_reduce_addf_f32_fourteen_waves() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(448, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_fourteen_waves() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(448, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_fourteen_waves() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1792} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1792} : reg<amdgpu.sgpr x2>
@@ -1427,7 +1427,7 @@ low.kernel.def target(@target) workgroup_size(448, 1, 1) workgroup_count(1, 1, 1
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_reduce_addf_f32_partial_tail() {
   %one = index.constant 1 : index
@@ -1447,7 +1447,7 @@ kernel.def target(@target) @workgroup_reduce_addf_f32_partial_tail() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(48, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_partial_tail() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(48, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_partial_tail() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 192} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 192} : reg<amdgpu.sgpr x2>
@@ -1521,7 +1521,7 @@ low.kernel.def target(@target) workgroup_size(48, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_reduce_minsi_vector_partial_tail() {
   %one = index.constant 1 : index
@@ -1539,7 +1539,7 @@ kernel.def target(@target) @workgroup_reduce_minsi_vector_partial_tail() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(48, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_minsi_vector_partial_tail() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(48, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_minsi_vector_partial_tail() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 384} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 384} : reg<amdgpu.sgpr x2>
@@ -1647,7 +1647,7 @@ low.kernel.def target(@target) workgroup_size(48, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_reduce_addf_f32_vector_multi_wave() {
   %one = index.constant 1 : index
@@ -1665,7 +1665,7 @@ kernel.def target(@target) @workgroup_reduce_addf_f32_vector_multi_wave() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_vector_multi_wave() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_addf_f32_vector_multi_wave() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -1766,7 +1766,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_scan_inclusive_addi_i32_wave32() {
   %c1 = index.constant 1 : index
@@ -1786,7 +1786,7 @@ kernel.def target(@target) @subgroup_scan_inclusive_addi_i32_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_scan_inclusive_addi_i32_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_scan_inclusive_addi_i32_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -1835,7 +1835,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_scan_exclusive_reverse_addi_i32_wave32() {
   %c1 = index.constant 1 : index
@@ -1855,7 +1855,7 @@ kernel.def target(@target) @subgroup_scan_exclusive_reverse_addi_i32_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_scan_exclusive_reverse_addi_i32_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_scan_exclusive_reverse_addi_i32_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -1908,7 +1908,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_scan_inclusive_addi_i32_one_wave() {
   %c1 = index.constant 1 : index
@@ -1928,7 +1928,7 @@ kernel.def target(@target) @workgroup_scan_inclusive_addi_i32_one_wave() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(16, 1, 1) workgroup_count(1, 1, 1) @workgroup_scan_inclusive_addi_i32_one_wave() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(16, 1, 1) workgroup_count(1, 1, 1) @workgroup_scan_inclusive_addi_i32_one_wave() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
@@ -1969,7 +1969,7 @@ low.kernel.def target(@target) workgroup_size(16, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_scan_inclusive_addi_i32_multi_wave() {
   %c1 = index.constant 1 : index
@@ -1989,7 +1989,7 @@ kernel.def target(@target) @workgroup_scan_inclusive_addi_i32_multi_wave() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_scan_inclusive_addi_i32_multi_wave() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_scan_inclusive_addi_i32_multi_wave() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -2056,7 +2056,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_scan_inclusive_addi_i32_partial_tail() {
   %c1 = index.constant 1 : index
@@ -2076,7 +2076,7 @@ kernel.def target(@target) @workgroup_scan_inclusive_addi_i32_partial_tail() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(48, 1, 1) workgroup_count(1, 1, 1) @workgroup_scan_inclusive_addi_i32_partial_tail() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(48, 1, 1) workgroup_count(1, 1, 1) @workgroup_scan_inclusive_addi_i32_partial_tail() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 192} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 192} : reg<amdgpu.sgpr x2>
@@ -2145,7 +2145,7 @@ low.kernel.def target(@target) workgroup_size(48, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_scan_reverse_exclusive_addi_i32_partial_tail() {
   %c1 = index.constant 1 : index
@@ -2165,7 +2165,7 @@ kernel.def target(@target) @workgroup_scan_reverse_exclusive_addi_i32_partial_ta
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(48, 1, 1) workgroup_count(1, 1, 1) @workgroup_scan_reverse_exclusive_addi_i32_partial_tail() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(48, 1, 1) workgroup_count(1, 1, 1) @workgroup_scan_reverse_exclusive_addi_i32_partial_tail() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 192} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 192} : reg<amdgpu.sgpr x2>
@@ -2238,7 +2238,7 @@ low.kernel.def target(@target) workgroup_size(48, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_scan_reverse_exclusive_addi_i32_partial_tail_three_wave() {
   %c1 = index.constant 1 : index
@@ -2258,7 +2258,7 @@ kernel.def target(@target) @workgroup_scan_reverse_exclusive_addi_i32_partial_ta
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(80, 1, 1) workgroup_count(1, 1, 1) @workgroup_scan_reverse_exclusive_addi_i32_partial_tail_three_wave() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(80, 1, 1) workgroup_count(1, 1, 1) @workgroup_scan_reverse_exclusive_addi_i32_partial_tail_three_wave() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 320} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 320} : reg<amdgpu.sgpr x2>
@@ -2357,7 +2357,7 @@ low.kernel.def target(@target) workgroup_size(80, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_scan_reverse_exclusive_addi_i32_multi_wave() {
   %c1 = index.constant 1 : index
@@ -2377,7 +2377,7 @@ kernel.def target(@target) @workgroup_scan_reverse_exclusive_addi_i32_multi_wave
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_scan_reverse_exclusive_addi_i32_multi_wave() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_scan_reverse_exclusive_addi_i32_multi_wave() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -2450,7 +2450,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_active_mask_i32_wave32() {
   %c1 = index.constant 1 : index
@@ -2467,7 +2467,7 @@ kernel.def target(@target) @subgroup_active_mask_i32_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_active_mask_i32_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_active_mask_i32_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %11 = s_mov_b64_exec_read
@@ -2480,7 +2480,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_vote_ballot_i32_wave32() {
   %c1 = index.constant 1 : index
@@ -2502,7 +2502,7 @@ kernel.def target(@target) @subgroup_vote_ballot_i32_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_vote_ballot_i32_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_vote_ballot_i32_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -2517,7 +2517,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_vote_ballot_i64_wave32() {
   %c1 = index.constant 1 : index
@@ -2539,7 +2539,7 @@ kernel.def target(@target) @subgroup_vote_ballot_i64_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_vote_ballot_i64_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_vote_ballot_i64_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -2558,7 +2558,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_vote_any_wave32() {
   %c1 = index.constant 1 : index
@@ -2581,7 +2581,7 @@ kernel.def target(@target) @subgroup_vote_any_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_vote_any_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_vote_any_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %14 = v_lshlrev_b32_src0_inline %tid, 2
@@ -2598,7 +2598,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_vote_all_wave32() {
   %c1 = index.constant 1 : index
@@ -2621,7 +2621,7 @@ kernel.def target(@target) @subgroup_vote_all_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_vote_all_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_vote_all_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %14 = v_lshlrev_b32_src0_inline %tid, 2
@@ -2640,7 +2640,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @subgroup_match_all_i32_wave32() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -2659,7 +2659,7 @@ kernel.def target(@target) @subgroup_match_all_i32_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_match_all_i32_wave32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_match_all_i32_wave32() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -2729,7 +2729,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @subgroup_match_any_i32_wave32_i64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -2749,7 +2749,7 @@ kernel.def target(@target) @subgroup_match_any_i32_wave32_i64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_match_any_i32_wave32_i64() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_match_any_i32_wave32_i64() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %lane_i32 = v_and_b32_src0_inline %tid, 31
@@ -3654,7 +3654,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_reduce_addf_f32_wave64_leader_lane() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3676,7 +3676,7 @@ kernel.def target(@target) @subgroup_reduce_addf_f32_wave64_leader_lane() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_addf_f32_wave64_leader_lane() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_addf_f32_wave64_leader_lane() asm<amdgpu.gfx11.generic.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -3706,7 +3706,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_reduce_addf_f32_wave64_scalar_workitem_guard_nested() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3740,7 +3740,7 @@ kernel.def target(@target) @subgroup_reduce_addf_f32_wave64_scalar_workitem_guar
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_addf_f32_wave64_scalar_workitem_guard_nested() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_addf_f32_wave64_scalar_workitem_guard_nested() asm<amdgpu.gfx11.generic.core> {
   %tid_i32 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -3801,7 +3801,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_reduce_addf_f32_cluster32_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3822,7 +3822,7 @@ kernel.def target(@target) @subgroup_reduce_addf_f32_cluster32_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_addf_f32_cluster32_wave64() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_addf_f32_cluster32_wave64() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -3848,7 +3848,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_shuffle_xor_f32_pair_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3867,7 +3867,7 @@ kernel.def target(@target) @subgroup_shuffle_xor_f32_pair_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_xor_f32_pair_wave64() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_xor_f32_pair_wave64() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -3881,7 +3881,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_shuffle_xor_v2f32_pair_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3900,7 +3900,7 @@ kernel.def target(@target) @subgroup_shuffle_xor_v2f32_pair_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_xor_v2f32_pair_wave64() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_xor_v2f32_pair_wave64() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -3918,7 +3918,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_shuffle_xor_i32_quad_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3937,7 +3937,7 @@ kernel.def target(@target) @subgroup_shuffle_xor_i32_quad_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_xor_i32_quad_wave64() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_xor_i32_quad_wave64() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -3951,7 +3951,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_shuffle_xor_f32_cluster8_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3970,7 +3970,7 @@ kernel.def target(@target) @subgroup_shuffle_xor_f32_cluster8_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_xor_f32_cluster8_wave64() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_xor_f32_cluster8_wave64() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -3984,7 +3984,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_shuffle_xor_f32_cluster16_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4003,7 +4003,7 @@ kernel.def target(@target) @subgroup_shuffle_xor_f32_cluster16_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_xor_f32_cluster16_wave64() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_xor_f32_cluster16_wave64() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -4017,7 +4017,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_shuffle_xor_f32_cluster32_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4036,7 +4036,7 @@ kernel.def target(@target) @subgroup_shuffle_xor_f32_cluster32_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_xor_f32_cluster32_wave64() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_xor_f32_cluster32_wave64() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -4050,7 +4050,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_shuffle_index_i32_cluster8_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4071,7 +4071,7 @@ kernel.def target(@target) @subgroup_shuffle_index_i32_cluster8_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_index_i32_cluster8_wave64() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_index_i32_cluster8_wave64() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -4088,7 +4088,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_shuffle_down_i32_cluster8_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4109,7 +4109,7 @@ kernel.def target(@target) @subgroup_shuffle_down_i32_cluster8_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_down_i32_cluster8_wave64() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_down_i32_cluster8_wave64() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -4126,7 +4126,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_shuffle_down_valid_cluster8_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4149,7 +4149,7 @@ kernel.def target(@target) @subgroup_shuffle_down_valid_cluster8_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_down_valid_cluster8_wave64() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_down_valid_cluster8_wave64() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -4176,7 +4176,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_reduce_addf_f32_cluster8_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4193,7 +4193,7 @@ kernel.def target(@target) @subgroup_reduce_addf_f32_cluster8_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_addf_f32_cluster8_wave64() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_addf_f32_cluster8_wave64() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -4209,7 +4209,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_reduce_maxnumf_f32_cluster8_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4226,7 +4226,7 @@ kernel.def target(@target) @subgroup_reduce_maxnumf_f32_cluster8_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_maxnumf_f32_cluster8_wave64() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_maxnumf_f32_cluster8_wave64() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>

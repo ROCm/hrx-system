@@ -82,7 +82,7 @@
           "--pipeline=source-low"
         ],
         "stdin": {
-          "text": "amdgpu.target<gfx1100> @target\nkernel.def target(@target) @f32_arith() {\n  %c1 = index.constant 1 : index\n  %c64 = index.constant 64 : index\n  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index\n} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {\n  %tid = kernel.workitem.id<x> : index\n  %zero = index.constant 0 : offset\n  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>\n  %lhs = vector.load %lhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %rhs = vector.load %rhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %sum = vector.addf %lhs, %rhs : vector<1xf32>\n  vector.store %sum, %output_view[%tid] : vector<1xf32>, view<64xf32, #dense>\n  kernel.return\n}\n"
+          "text": "amdgpu.target<gfx11-generic> @target\nkernel.def target(@target) @f32_arith() {\n  %c1 = index.constant 1 : index\n  %c64 = index.constant 64 : index\n  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index\n} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {\n  %tid = kernel.workitem.id<x> : index\n  %zero = index.constant 0 : offset\n  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>\n  %lhs = vector.load %lhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %rhs = vector.load %rhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %sum = vector.addf %lhs, %rhs : vector<1xf32>\n  vector.store %sum, %output_view[%tid] : vector<1xf32>, view<64xf32, #dense>\n  kernel.return\n}\n"
         }
       },
       "stdout": {
@@ -108,7 +108,7 @@
           "--output={tmp}/source-low.loom"
         ],
         "stdin": {
-          "text": "amdgpu.target<gfx1100> @target\nkernel.def target(@target) @f32_arith() {\n  %c1 = index.constant 1 : index\n  %c64 = index.constant 64 : index\n  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index\n} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {\n  %tid = kernel.workitem.id<x> : index\n  %zero = index.constant 0 : offset\n  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>\n  %lhs = vector.load %lhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %rhs = vector.load %rhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %sum = vector.addf %lhs, %rhs : vector<1xf32>\n  vector.store %sum, %output_view[%tid] : vector<1xf32>, view<64xf32, #dense>\n  kernel.return\n}\n"
+          "text": "amdgpu.target<gfx11-generic> @target\nkernel.def target(@target) @f32_arith() {\n  %c1 = index.constant 1 : index\n  %c64 = index.constant 64 : index\n  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index\n} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {\n  %tid = kernel.workitem.id<x> : index\n  %zero = index.constant 0 : offset\n  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>\n  %lhs = vector.load %lhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %rhs = vector.load %rhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %sum = vector.addf %lhs, %rhs : vector<1xf32>\n  vector.store %sum, %output_view[%tid] : vector<1xf32>, view<64xf32, #dense>\n  kernel.return\n}\n"
         }
       },
       "stderr": {
@@ -135,7 +135,7 @@
           "--pipeline=default"
         ],
         "stdin": {
-          "text": "amdgpu.target<gfx1100> @target\nkernel.def target(@target) @f32_arith() {\n  %c1 = index.constant 1 : index\n  %c64 = index.constant 64 : index\n  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index\n} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {\n  %tid = kernel.workitem.id<x> : index\n  %zero = index.constant 0 : offset\n  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>\n  %lhs = vector.load %lhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %rhs = vector.load %rhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %sum = vector.addf %lhs, %rhs : vector<1xf32>\n  vector.store %sum, %output_view[%tid] : vector<1xf32>, view<64xf32, #dense>\n  kernel.return\n}\n"
+          "text": "amdgpu.target<gfx11-generic> @target\nkernel.def target(@target) @f32_arith() {\n  %c1 = index.constant 1 : index\n  %c64 = index.constant 64 : index\n  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index\n} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {\n  %tid = kernel.workitem.id<x> : index\n  %zero = index.constant 0 : offset\n  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>\n  %lhs = vector.load %lhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %rhs = vector.load %rhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %sum = vector.addf %lhs, %rhs : vector<1xf32>\n  vector.store %sum, %output_view[%tid] : vector<1xf32>, view<64xf32, #dense>\n  kernel.return\n}\n"
         }
       },
       "stdout": {
@@ -565,7 +565,7 @@
           "--output={tmp}/unused.loom"
         ],
         "stdin": {
-          "text": "amdgpu.target<gfx1100> @target\n\nlow.func.def target(@target) @bad_return(%predicate: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) {\n  low.return %predicate : reg<amdgpu.sgpr x2>\n}\n"
+          "text": "amdgpu.target<gfx11-generic> @target\n\nlow.func.def target(@target) @bad_return(%predicate: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) {\n  low.return %predicate : reg<amdgpu.sgpr x2>\n}\n"
         }
       },
       "exit": {
@@ -590,7 +590,7 @@
           "--output={tmp}/unused.loom"
         ],
         "stdin": {
-          "text": "amdgpu.target<gfx1100> @target\n\nlow.func.def target(@target) @bad_return_json(%predicate: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) {\n  low.return %predicate : reg<amdgpu.sgpr x2>\n}\n"
+          "text": "amdgpu.target<gfx11-generic> @target\n\nlow.func.def target(@target) @bad_return_json(%predicate: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) {\n  low.return %predicate : reg<amdgpu.sgpr x2>\n}\n"
         }
       },
       "exit": {

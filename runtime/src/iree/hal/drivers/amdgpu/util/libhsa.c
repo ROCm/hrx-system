@@ -620,13 +620,8 @@ IREE_API_EXPORT iree_status_t iree_status_from_hsa_status(
 //
 // If we wanted to statically link HSA we could use this mechanism to re-route
 // all the iree_hsa_* methods directly to the HSA functions.
-#define IREE_HAL_AMDGPU_LIBHSA_PFN_hsa_status_t(trace_category, result_type,  \
-                                                symbol, decl, args)           \
-  hsa_status_t iree_##symbol##_raw(                                           \
-      const iree_hal_amdgpu_libhsa_t* IREE_RESTRICT libhsa _COMMA_DECL(       \
-          decl)) {                                                            \
-    return IREE_HAL_AMDGPU_LIBHSA_LIBPTR(libhsa) symbol(args);                \
-  }                                                                           \
+#define IREE_HAL_AMDGPU_LIBHSA_STATUS_WRAPPER(trace_category, symbol, decl,   \
+                                              args)                           \
   iree_status_t iree_##symbol(                                                \
       const iree_hal_amdgpu_libhsa_t* IREE_RESTRICT libhsa, const char* file, \
       const uint32_t line _COMMA_DECL(decl)) {                                \
@@ -646,6 +641,30 @@ IREE_API_EXPORT iree_status_t iree_status_from_hsa_status(
     IREE_HAL_AMDGPU_LIBHSA_TRACE_ZONE_END_##trace_category(z0);               \
     return iree_status;                                                       \
   }
+
+#define IREE_HAL_AMDGPU_LIBHSA_PFN_hsa_status_t(trace_category, result_type, \
+                                                symbol, decl, args)          \
+  hsa_status_t iree_##symbol##_raw(                                          \
+      const iree_hal_amdgpu_libhsa_t* IREE_RESTRICT libhsa _COMMA_DECL(      \
+          decl)) {                                                           \
+    return IREE_HAL_AMDGPU_LIBHSA_LIBPTR(libhsa) symbol(args);               \
+  }                                                                          \
+  IREE_HAL_AMDGPU_LIBHSA_STATUS_WRAPPER(trace_category, symbol, DECL(decl),  \
+                                        ARGS(args))
+
+#define IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN_hsa_status_t(        \
+    trace_category, result_type, symbol, decl, args)                        \
+  hsa_status_t iree_##symbol##_raw(                                         \
+      const iree_hal_amdgpu_libhsa_t* IREE_RESTRICT libhsa _COMMA_DECL(     \
+          decl)) {                                                          \
+    IREE_LEAK_CHECK_DISABLE_PUSH();                                         \
+    hsa_status_t hsa_status =                                               \
+        IREE_HAL_AMDGPU_LIBHSA_LIBPTR(libhsa) symbol(args);                 \
+    IREE_LEAK_CHECK_DISABLE_POP();                                          \
+    return hsa_status;                                                      \
+  }                                                                         \
+  IREE_HAL_AMDGPU_LIBHSA_STATUS_WRAPPER(trace_category, symbol, DECL(decl), \
+                                        ARGS(args))
 
 // A thunk into the HSA library for a particular symbol that does not return a
 // value. These are usually high-frequency operations like signals.
@@ -684,6 +703,10 @@ IREE_API_EXPORT iree_status_t iree_status_from_hsa_status(
                                    args)                                      \
   IREE_HAL_AMDGPU_LIBHSA_PFN_##result_type(trace_category, result_type,       \
                                            symbol, DECL(decl), ARGS(args))
+#define IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN(         \
+    trace_category, result_type, symbol, decl, args)            \
+  IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN_##result_type( \
+      trace_category, result_type, symbol, DECL(decl), ARGS(args))
 
 #define DECL(...) __VA_ARGS__
 #define ARGS(...) __VA_ARGS__
@@ -692,3 +715,5 @@ IREE_API_EXPORT iree_status_t iree_status_from_hsa_status(
 #include "iree/hal/drivers/amdgpu/util/libhsa_tables.h"  // IWYU pragma: export
 #undef _COMMA_ARGS
 #undef _COMMA_DECL
+#undef IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN_hsa_status_t
+#undef IREE_HAL_AMDGPU_LIBHSA_STATUS_WRAPPER

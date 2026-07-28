@@ -12,14 +12,14 @@ from loom.importers.tilelang.analysis import (
 )
 
 
-def test_marks_gfx1100_dense_gemm_rhs_shared_layout() -> None:
+def test_marks_wmma_gfx11_profile_dense_gemm_rhs_shared_layout() -> None:
     harness = TileLangHarness()
     T: Any = harness.T
     gemm_kernel = _build_gemm_kernel(T)
 
     preferences = collect_address_layout_preferences(
         gemm_kernel,
-        target_preset="hip -mcpu=gfx1100",
+        target_preset="hip -mcpu=gfx11-generic",
     )
 
     unique_preferences = {
@@ -44,7 +44,7 @@ def test_ignores_gemm_variants_outside_current_bridge() -> None:
     assert (
         collect_address_layout_preferences(
             transposed_kernel,
-            target_preset="hip -mcpu=gfx1100",
+            target_preset="hip -mcpu=gfx11-generic",
         )
         == {}
     )

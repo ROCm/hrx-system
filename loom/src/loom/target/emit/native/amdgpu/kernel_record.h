@@ -32,7 +32,8 @@ typedef struct loom_amdgpu_kernel_record_t {
   iree_string_view_t symbol;
   // Loader-visible kernel descriptor symbol.
   iree_string_view_t descriptor_symbol;
-  // Full AMDHSA target id such as `amdgcn-amd-amdhsa--gfx1100`.
+  // Full AMDHSA target id such as
+  // `amdgcn-amd-amdhsa--gfx11-generic`.
   iree_string_view_t target_id;
   // Processor facts selected by the AMDGPU target record.
   const loom_amdgpu_processor_info_t* processor;

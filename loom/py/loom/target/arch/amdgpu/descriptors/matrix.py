@@ -408,6 +408,12 @@ def _v_wmma_i32_16x16x32_iu4_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
+def _matrix_schedule_class(descriptor_key: str) -> str:
+    if _amdgpu_mfma_has_qualified_timing(descriptor_key):
+        return _amdgpu_mfma_schedule_class_name(descriptor_key)
+    return _SCHEDULE_MFMA
+
+
 def _v_mfma_overlay(
     *,
     instruction_name: str,
@@ -418,13 +424,14 @@ def _v_mfma_overlay(
     encoding_name: str = "VOP3P_MFMA",
 ) -> AmdgpuDescriptorOverlay:
     mnemonic = instruction_name.lower()
+    descriptor_key = f"amdgpu.{mnemonic}"
     return AmdgpuDescriptorOverlay(
-        descriptor_key=f"amdgpu.{mnemonic}",
+        descriptor_key=descriptor_key,
         instruction_name=instruction_name,
         mnemonic=mnemonic,
         encoding_name=encoding_name,
         semantic_tag=semantic_tag,
-        schedule_class=_SCHEDULE_MFMA,
+        schedule_class=_matrix_schedule_class(descriptor_key),
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_agpr_result(units=accumulator_units)),
             AmdgpuOperandOverlay("SRC0", _vgpr_agpr_operand("a", units=lhs_units)),
@@ -447,13 +454,14 @@ def _v_mfma_scale_overlay(
     rhs_units: int,
 ) -> AmdgpuDescriptorOverlay:
     mnemonic = instruction_name.lower()
+    descriptor_key = f"amdgpu.{mnemonic}"
     return AmdgpuDescriptorOverlay(
-        descriptor_key=f"amdgpu.{mnemonic}",
+        descriptor_key=descriptor_key,
         instruction_name=instruction_name,
         mnemonic=mnemonic,
         encoding_name="ENC_VOP3PX2",
         semantic_tag=semantic_tag,
-        schedule_class=_SCHEDULE_MFMA,
+        schedule_class=_matrix_schedule_class(descriptor_key),
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_agpr_result(units=accumulator_units)),
             AmdgpuOperandOverlay("SRC0", _vgpr_agpr_operand("a", units=lhs_units)),
@@ -463,6 +471,11 @@ def _v_mfma_scale_overlay(
             ),
             AmdgpuOperandOverlay("SCALE_SRC0", _sgpr_vgpr_operand("scale_src0")),
             AmdgpuOperandOverlay("SCALE_SRC1", _sgpr_vgpr_operand("scale_src1")),
+        ),
+        fixed_encoding_fields=(
+            ("ABID", 1),
+            ("ENCODING", 0x1A7),
+            ("X2ENCODING", 0xD3AC),
         ),
         constraints=_destructive_accumulator_constraints(3),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -858,7 +871,7 @@ def _v_smfmac_f32_overlay(
         mnemonic=mnemonic,
         encoding_name="VOP3P_MFMA",
         semantic_tag=semantic_tag,
-        schedule_class=_SCHEDULE_MFMA,
+        schedule_class=_matrix_schedule_class(descriptor_key),
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_agpr_result(units=accumulator_units)),
             AmdgpuOperandOverlay(

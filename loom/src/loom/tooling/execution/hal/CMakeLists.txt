@@ -155,6 +155,8 @@ loom_cc_library(
     ::runtime
     iree::base
     iree::base::core_headers
+    iree::base::internal::arena
+    loom::target::entry_selection
     loom::tooling::execution::compile_report_capture
     loom::tooling::execution::execution_backend
     loom::tooling::execution::one_shot

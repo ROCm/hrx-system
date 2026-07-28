@@ -64,7 +64,15 @@ if(LOOM_IMPORT_MLIR)
 iree_py_test(
   NAME
     mlir_test
+  MAIN
+    "../../tools/pytest_style_runner.py"
   SRCS
+    "attrs_test.py"
+    "importer_test.py"
+    "locations_test.py"
+    "model_test.py"
+    "names_test.py"
+    "types_test.py"
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.importers.mlir.attrs_test"
@@ -78,6 +86,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 endif()
 
@@ -99,6 +108,8 @@ if(LOOM_IMPORT_MLIR)
 iree_py_test(
   NAME
     mlir_import_test
+  MAIN
+    "../check/import_test.py"
   SRCS
     "../check/import_test.py"
   ARGS
@@ -114,6 +125,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 endif()
 

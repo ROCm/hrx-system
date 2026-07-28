@@ -1,4 +1,4 @@
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) export("report_materialized_fragment_spills") @report_materialized_fragment_spills() {
   %unit = index.constant 1 : index

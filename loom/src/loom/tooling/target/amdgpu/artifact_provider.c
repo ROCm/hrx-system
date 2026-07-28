@@ -8,8 +8,11 @@
 
 #include <inttypes.h>
 
+#include "iree/hal/executable/amdgpu/executable_target.h"
+#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/runtime_requirements.h"
+#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/hal_kernel_library.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
@@ -125,6 +128,65 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_select_device_target(
   return status;
 }
 
+static iree_status_t
+loom_amdgpu_hal_artifact_provider_select_function_device_target(
+    const loom_run_hal_artifact_provider_t* provider,
+    const loom_run_hal_runtime_t* runtime, const loom_module_t* module,
+    loom_func_like_t function, iree_allocator_t allocator,
+    loom_run_hal_device_target_t* out_target) {
+  IREE_ASSERT_ARGUMENT(provider);
+  IREE_ASSERT_ARGUMENT(runtime);
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(out_target);
+  (void)allocator;
+
+  *out_target = (loom_run_hal_device_target_t){0};
+
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_processor_from_ref(module,
+                                            loom_func_like_target(function));
+  if (processor == NULL) {
+    return loom_amdgpu_hal_artifact_provider_select_device_target(
+        provider, runtime, allocator, out_target);
+  }
+
+  const iree_hal_device_spec_t* device_spec =
+      iree_hal_device_spec(runtime->device);
+  if (device_spec == NULL) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "selected AMDGPU HAL device does not expose immutable device facts");
+  }
+  iree_hal_executable_target_selection_result_t result = {0};
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_device_spec_select_executable_target(
+      device_spec, processor->name, /*physical_device_affinity=*/0, &result));
+  if (result.outcome == IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "selected AMDGPU HAL device does not support authored target '%.*s'",
+        (int)processor->name.size, processor->name.data);
+  }
+  if (result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "selected AMDGPU HAL device reports ambiguous matches for authored "
+        "target '%.*s'",
+        (int)processor->name.size, processor->name.data);
+  }
+
+  bool selected = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_hal_artifact_provider_try_select_processor(
+      processor, result.target, &selected, out_target));
+  if (!selected) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "authored AMDGPU target '%.*s' cannot be emitted as HSACO by Loom",
+        (int)processor->name.size, processor->name.data);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_hal_artifact_provider_select_target_key(
     const loom_run_hal_artifact_provider_t* provider,
     iree_string_view_t target_key, iree_allocator_t allocator,
@@ -206,16 +268,12 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_emit_artifact(
   *out_emitted = false;
   *out_artifact = (loom_run_hal_artifact_t){0};
 
-  const loom_amdgpu_processor_info_t* processor =
-      (const loom_amdgpu_processor_info_t*)target->data;
-
   loom_amdgpu_hal_artifact_storage_t* storage = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(allocator, sizeof(*storage), (void**)&storage));
   *storage = (loom_amdgpu_hal_artifact_storage_t){0};
 
   const loom_amdgpu_hal_kernel_library_options_t library_options = {
-      .processor = processor ? processor->name : iree_string_view_empty(),
       .target_selection =
           {
               .bundle = target->target_bundle,
@@ -299,6 +357,8 @@ const loom_run_hal_artifact_provider_t loom_amdgpu_hal_artifact_provider = {
     .target_family_name = IREE_SVL("AMDGPU"),
     .select_device_target =
         loom_amdgpu_hal_artifact_provider_select_device_target,
+    .select_function_device_target =
+        loom_amdgpu_hal_artifact_provider_select_function_device_target,
     .select_target_key = loom_amdgpu_hal_artifact_provider_select_target_key,
     .emit_artifact = loom_amdgpu_hal_artifact_provider_emit_artifact,
     .deinitialize_artifact =

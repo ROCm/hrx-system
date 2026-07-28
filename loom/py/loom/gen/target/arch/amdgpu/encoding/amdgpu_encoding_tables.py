@@ -12,7 +12,7 @@ import argparse
 import re
 import struct
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -27,11 +27,16 @@ def _ensure_runtime_py_on_path() -> None:
 _ensure_runtime_py_on_path()
 
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
+from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
+    build_amdgpu_core_descriptor_set_from_specs,
+)
 from loom.target.arch.amdgpu.encoding import (  # noqa: E402
     AMDGPU_ENCODING_FIELD_IDS,
     AMDGPU_ENCODING_FORMAT_IDS,
+    AMDGPU_ENCODING_FORMAT_XML_NAMES_BY_ID,
     AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_COUNT,
     AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_OFFSET,
+    amdgpu_encoding_field_name,
     amdgpu_supplemental_encoding_format_names,
 )
 from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
@@ -50,8 +55,8 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     amdgpu_descriptor_set_ordinal,
     amdgpu_descriptor_set_storage_info_by_generator_target,
     amdgpu_descriptor_set_view_infos_by_storage_generator_target,
-    validate_amdgpu_descriptor_set_isa_xml,
 )
+from loom.target.low_descriptors import Descriptor, DescriptorSet  # noqa: E402
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +93,8 @@ def _rdna4_vop3p_supplemental_fields() -> tuple[AmdgpuIsaEncodingField, ...]:
         _field("INDEX_KEY_16BIT", _bit_range(11, 1)),
         _field("MATRIX_A_REUSE", _bit_range(13, 1)),
         _field("MATRIX_B_REUSE", _bit_range(14, 1)),
+        _field("MATRIX_A_FMT", _bit_range(11, 3)),
+        _field("MATRIX_B_FMT", _bit_range(59, 2), _bit_range(14, 1)),
     )
 
 
@@ -109,7 +116,7 @@ def _rdna4_vop3px2_supplemental_encoding() -> AmdgpuIsaEncoding:
         order=0,
         bit_count=128,
         identifier_mask=(0xFF << 24) | (0x1FF << 50) | (0xFF << 88),
-        identifier_values=((0xCC << 24) | (0x100 << 50) | (0xCC << 88),),
+        identifier_values=((0xCC << 24) | (0x080 << 50) | (0xCC << 88),),
         fields=(
             _field("MATRIX_B_SCALE_FMT", _bit_range(8, 2)),
             _field("MATRIX_A_SCALE", _bit_range(11, 1)),
@@ -123,6 +130,7 @@ def _rdna4_vop3px2_supplemental_encoding() -> AmdgpuIsaEncoding:
             _field("VDST", _bit_range(64, 8)),
             _field("MATRIX_A_FMT", _bit_range(75, 3)),
             _field("MATRIX_B_FMT", _bit_range(123, 2), _bit_range(78, 1)),
+            _field("OPSEL_HI", _bit_range(123, 2), _bit_range(78, 1)),
             _field("CLAMP", _bit_range(79, 1)),
             _field("OP", _bit_range(80, 8)),
             _field("SRC0", _bit_range(96, 9)),
@@ -141,6 +149,16 @@ def _supplemental_fields_by_encoding(
     if target == "rdna4_gfx125x":
         fields_by_encoding["ENC_VOP3"] = _gfx1250_vop3_supplemental_fields()
     return fields_by_encoding
+
+
+def _replacement_fields_by_encoding(
+    target: str,
+) -> dict[str, tuple[AmdgpuIsaEncodingField, ...]]:
+    if target == "rdna4_gfx125x":
+        return {
+            "ENC_VOP3P": (_field("OP", _bit_range(16, 8)),),
+        }
+    return {}
 
 
 _SUPPLEMENTAL_ENCODING_BUILDERS = {
@@ -166,14 +184,34 @@ def _supplement_encoding_fields(
     return replace(encoding, fields=(*encoding.fields, *supplemental_fields))
 
 
+def _replace_encoding_fields(
+    encoding: AmdgpuIsaEncoding,
+    replacement_fields: tuple[AmdgpuIsaEncodingField, ...],
+) -> AmdgpuIsaEncoding:
+    if not replacement_fields:
+        return encoding
+    replacements_by_name = {field.name: field for field in replacement_fields}
+    existing_names = {field.name for field in encoding.fields}
+    missing_names = sorted(replacements_by_name.keys() - existing_names)
+    if missing_names:
+        missing_text = ", ".join(missing_names)
+        raise ValueError(f"AMDGPU encoding '{encoding.name}' cannot replace missing fields: {missing_text}")
+    return replace(
+        encoding,
+        fields=tuple(replacements_by_name.get(field.name, field) for field in encoding.fields),
+    )
+
+
 def _with_supplemental_encodings(target: str, encodings: tuple[AmdgpuIsaEncoding, ...]) -> tuple[AmdgpuIsaEncoding, ...]:
     fields_by_encoding = _supplemental_fields_by_encoding(target)
+    replacement_fields_by_encoding = _replacement_fields_by_encoding(target)
     supplemental_encodings = _supplemental_encodings(target)
     supplemental_names = {encoding.name for encoding in supplemental_encodings}
     output = []
     for encoding in encodings:
         if encoding.name in supplemental_names:
             raise ValueError(f"AMDGPU encoding target '{target}' XML now defines supplemental encoding '{encoding.name}'")
+        encoding = _replace_encoding_fields(encoding, replacement_fields_by_encoding.get(encoding.name, ()))
         output.append(_supplement_encoding_fields(encoding, fields_by_encoding.get(encoding.name, ())))
     output.extend(supplemental_encodings)
     return tuple(output)
@@ -190,6 +228,49 @@ class _EncodingTableView:
 class _InlineF32Source:
     bit_pattern: int
     source: int
+
+
+@dataclass(frozen=True, slots=True)
+class _EncodingFieldContract:
+    field: AmdgpuIsaEncodingField
+    value_bit_count: int
+    ranges: tuple[tuple[AmdgpuIsaBitRange, int], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _DescriptorEncodingContract:
+    descriptor_key: str
+    format_id: int
+    bit_count: int
+    word_count: int
+    identifier_seed: int
+    fields: tuple[_EncodingFieldContract, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _EncodingContract:
+    descriptors: tuple[_DescriptorEncodingContract, ...]
+    source_literal: int
+    scalar_source_literal: int
+    scalar_inline_u32: tuple[int, int]
+    inline_f32_sources: tuple[_InlineF32Source, ...]
+    vector_source_vgprs: tuple[int, int]
+    s_mov_b32_opcode: int
+    v_mov_b32_opcode: int
+
+
+def _parse_isa_xml_arguments(
+    values: Sequence[str],
+) -> dict[str, AmdgpuIsaFactSource]:
+    specs: dict[str, AmdgpuIsaFactSource] = {}
+    for value in values:
+        key, separator, path = value.partition(":")
+        if not separator or not key or not path:
+            raise ValueError("AMDGPU encoding --isa-xml entries must be key:path pairs")
+        if key in specs:
+            raise ValueError(f"AMDGPU encoding ISA XML key '{key}' is duplicate")
+        specs[key] = parse_amdgpu_isa_xml_path(Path(path))
+    return specs
 
 
 def _parse_view_headers(values: Sequence[str]) -> dict[str, Path]:
@@ -425,6 +506,144 @@ def _compile_formats(
         )
     compiled_formats.sort(key=lambda entry: entry.format_id)
     return compiled_formats, compiled_fields, compiled_ranges
+
+
+def _descriptor_encoding_field_names(descriptor: Descriptor) -> set[str]:
+    field_names = {"OP"}
+    field_names.update(amdgpu_encoding_field_name(operand.encoding_field_id) for operand in descriptor.operands if operand.encoding_field_id != 0)
+    for immediate in descriptor.immediates:
+        if immediate.encoding_field_id != 0:
+            field_names.add(amdgpu_encoding_field_name(immediate.encoding_field_id))
+        field_names.update(amdgpu_encoding_field_name(encoding_slice.encoding_field_id) for encoding_slice in immediate.encoding_slices if encoding_slice.encoding_field_id != 0)
+    field_names.update(amdgpu_encoding_field_name(field_value.encoding_field_id) for field_value in descriptor.encoding_field_values if field_value.encoding_field_id != 0)
+    return field_names
+
+
+def _identifier_seed_without_fields(
+    identifier_value: int,
+    fields: Sequence[AmdgpuIsaEncodingField],
+) -> int:
+    identifier_seed = identifier_value
+    for field in fields:
+        for bit_range in field.ranges:
+            field_mask = ((1 << bit_range.bit_count) - 1) << bit_range.bit_offset
+            identifier_seed &= ~field_mask
+    return identifier_seed
+
+
+def _compile_encoding_contract(
+    target: str,
+    spec: AmdgpuIsaFactSource,
+    descriptor_set: DescriptorSet,
+) -> _EncodingContract:
+    encodings = _with_supplemental_encodings(target, spec.encodings)
+    compiled_formats, compiled_fields, compiled_ranges = _compile_formats(
+        encodings,
+        _partitioned_fields_by_encoding(
+            encodings,
+            spec.instructions,
+            spec.operand_types,
+        ),
+    )
+    compiled_formats_by_id = {compiled_format.format_id: compiled_format for compiled_format in compiled_formats}
+    descriptor_contracts = []
+    for descriptor in descriptor_set.descriptors:
+        if descriptor.encoding_format_id == 0:
+            continue
+        compiled_format = compiled_formats_by_id.get(descriptor.encoding_format_id)
+        if compiled_format is None:
+            raise ValueError(f"{spec.source_name}: AMDGPU encoding table is missing descriptor '{descriptor.key}' format id {descriptor.encoding_format_id}")
+        field_names = _descriptor_encoding_field_names(descriptor)
+        compiled_format_fields = compiled_fields[compiled_format.field_start : compiled_format.field_start + compiled_format.field_count]
+        fields_by_name = {compiled_field.field.name: compiled_field for compiled_field in compiled_format_fields}
+        missing_fields = sorted(field_names - fields_by_name.keys())
+        if missing_fields:
+            encoding_name = AMDGPU_ENCODING_FORMAT_XML_NAMES_BY_ID[compiled_format.format_id]
+            raise ValueError(f"{spec.source_name}: AMDGPU encoding format '{encoding_name}' for descriptor '{descriptor.key}' is missing fields: {', '.join(missing_fields)}")
+        field_contracts: list[_EncodingFieldContract] = []
+        for field_name in sorted(field_names):
+            compiled_field = fields_by_name[field_name]
+            ranges = compiled_ranges[compiled_field.range_start : compiled_field.range_start + compiled_field.range_count]
+            field_contracts.append(
+                _EncodingFieldContract(
+                    field=compiled_field.field,
+                    value_bit_count=compiled_field.value_bit_count,
+                    ranges=tuple(ranges),
+                )
+            )
+        descriptor_contracts.append(
+            _DescriptorEncodingContract(
+                descriptor_key=descriptor.key,
+                format_id=compiled_format.format_id,
+                bit_count=compiled_format.encoding.bit_count,
+                word_count=compiled_format.word_count,
+                identifier_seed=_identifier_seed_without_fields(
+                    compiled_format.encoding.identifier_values[0],
+                    tuple(contract.field for contract in field_contracts),
+                ),
+                fields=tuple(field_contracts),
+            )
+        )
+    return _EncodingContract(
+        descriptors=tuple(descriptor_contracts),
+        source_literal=spec.operand_predefined_value("OPR_SRC", "SRC_LITERAL"),
+        scalar_source_literal=spec.operand_predefined_value("OPR_SSRC", "SRC_LITERAL"),
+        scalar_inline_u32=_derive_predefined_linear_range(
+            spec,
+            operand_type_name="OPR_SSRC",
+            base_name="0",
+            name_pattern=re.compile(r"([0-9]+)"),
+            description="OPR_SSRC inline integer",
+        ),
+        inline_f32_sources=_derive_predefined_f32_sources(
+            spec,
+            operand_type_name="OPR_SRC",
+        ),
+        vector_source_vgprs=_derive_predefined_linear_range(
+            spec,
+            operand_type_name="OPR_SRC",
+            base_name="v0",
+            name_pattern=re.compile(r"v([0-9]+)"),
+            description="OPR_SRC VGPR",
+        ),
+        s_mov_b32_opcode=_instruction_opcode(
+            spec.instructions,
+            instruction_name="S_MOV_B32",
+            encoding_name="ENC_SOP1",
+            condition_name=None,
+        ),
+        v_mov_b32_opcode=_instruction_opcode(
+            spec.instructions,
+            instruction_name="V_MOV_B32",
+            encoding_name="ENC_VOP1",
+            condition_name="default",
+        ),
+    )
+
+
+def _validate_view_encoding_contract(
+    storage_target: str,
+    storage_spec: AmdgpuIsaFactSource,
+    view_info: AmdgpuDescriptorSetInfo,
+    view_descriptor_set: DescriptorSet,
+    isa_specs: Mapping[str, AmdgpuIsaFactSource],
+) -> None:
+    storage_contract = _compile_encoding_contract(
+        storage_target,
+        storage_spec,
+        view_descriptor_set,
+    )
+    for isa_info in view_info.isa_infos:
+        member_spec = isa_specs[isa_info.isa_xml_key]
+        member_contract = _compile_encoding_contract(
+            storage_target,
+            member_spec,
+            view_descriptor_set,
+        )
+        if member_contract != storage_contract:
+            raise ValueError(
+                f"AMDGPU encoding view '{view_info.key}' does not have a common encoding contract across storage ISA '{storage_spec.source_name}' and member ISA '{member_spec.source_name}'"
+            )
 
 
 def _instruction_opcode(
@@ -699,7 +918,12 @@ def _parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", required=True)
     parser.add_argument("--descriptor-set-key", required=True)
-    parser.add_argument("--xml", type=Path, required=True)
+    parser.add_argument(
+        "--isa-xml",
+        action="append",
+        default=[],
+        help="ISA XML fact source as <key>:<path>.",
+    )
     parser.add_argument("--public-header", required=True)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--header", type=Path, required=True)
@@ -722,8 +946,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     if storage_info != descriptor_set_info:
         raise ValueError(f"AMDGPU encoding target {args.target} is a view of storage target {storage_info.generator_target}; generate the storage target with --view-header instead")
     view_infos = _view_infos_for_storage_target(descriptor_set_info, view_headers)
-    spec = parse_amdgpu_isa_xml_path(args.xml)
-    validate_amdgpu_descriptor_set_isa_xml(descriptor_set_info, spec)
+    isa_specs = _parse_isa_xml_arguments(args.isa_xml)
+    if len(descriptor_set_info.isa_infos) != 1:
+        raise ValueError(f"AMDGPU encoding storage target '{args.target}' must have one ISA member")
+    storage_isa_info = descriptor_set_info.isa_infos[0]
+    try:
+        spec = isa_specs[storage_isa_info.isa_xml_key]
+    except KeyError as exc:
+        raise ValueError(f"AMDGPU encoding target '{args.target}' is missing ISA XML key '{storage_isa_info.isa_xml_key}'") from exc
+    if spec.architecture_name != storage_isa_info.isa_architecture_name or spec.architecture_id != storage_isa_info.isa_architecture_id:
+        raise ValueError(f"{spec.source_name}: AMDGPU encoding target '{args.target}' expects {storage_isa_info.isa_architecture_name} architecture id {storage_isa_info.isa_architecture_id}")
+    for view_info in view_infos:
+        view_descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
+            view_info.generator_target,
+            isa_specs,
+        )
+        _validate_view_encoding_contract(
+            args.target,
+            spec,
+            view_info,
+            view_descriptor_set,
+            isa_specs,
+        )
     source_literal = spec.operand_predefined_value("OPR_SRC", "SRC_LITERAL")
     scalar_source_literal = spec.operand_predefined_value("OPR_SSRC", "SRC_LITERAL")
     if scalar_source_literal != source_literal:

@@ -1,6 +1,6 @@
 // RUN: pass-report target-legalize{mode=final},dce,canonicalize,source-to-low,low-dce
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_workgroup_reduce_scalar_publication() {
   %one = index.constant 1 : index
@@ -44,7 +44,7 @@ COMPILE-REPORT: target_legalization[0] function=report_workgroup_reduce_scalar_p
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_workgroup_reduce_scalar_leader_publication() {
   %one = index.constant 1 : index
@@ -96,7 +96,7 @@ COMPILE-REPORT: target_legalization[0] function=report_workgroup_reduce_scalar_l
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_workgroup_reduce_scalar_leader_publication_projected_tid() {
   %one = index.constant 1 : index
@@ -150,7 +150,7 @@ COMPILE-REPORT: target_legalization[0] function=report_workgroup_reduce_scalar_l
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_workgroup_reduce_scalar_wave_leader_publication() {
   %one = index.constant 1 : index
@@ -204,7 +204,7 @@ COMPILE-REPORT: target_legalization[0] function=report_workgroup_reduce_scalar_w
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_workgroup_reduce_vector_publication() {
   %one = index.constant 1 : index
@@ -260,7 +260,7 @@ COMPILE-REPORT: target_legalization[0] function=report_workgroup_reduce_vector_p
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_subgroup_reduce_addf_f32_wave32_all_lanes() {
   %one = index.constant 1 : index
@@ -300,7 +300,7 @@ COMPILE-REPORT: source_low_memory_argument_packet[1] function=report_subgroup_re
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @report_subgroup_reduce_addf_f32_wave64_leader_lane() {
   %one = index.constant 1 : index
@@ -350,7 +350,7 @@ COMPILE-REPORT: source_low_memory_argument_packet[1] function=report_subgroup_re
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @report_subgroup_reduce_addf_f32_wave64_scalar_workitem_guard_nested() {
   %one = index.constant 1 : index

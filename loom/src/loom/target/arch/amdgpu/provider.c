@@ -88,7 +88,7 @@ static iree_status_t loom_amdgpu_provider_validate_materialized_target_symbol(
   }
 
   const iree_string_view_t existing_processor =
-      loom_amdgpu_target_record_processor_name(module, symbol->defining_op);
+      loom_amdgpu_target_record_processor_name(symbol->defining_op);
   if (!iree_string_view_equal(existing_processor, processor->name)) {
     return iree_make_status(
         IREE_STATUS_ALREADY_EXISTS,

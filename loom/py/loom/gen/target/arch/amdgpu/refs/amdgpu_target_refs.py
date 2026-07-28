@@ -30,7 +30,7 @@ from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     amdgpu_common_reg_class_ids,
     amdgpu_descriptor_ref_keys,
     amdgpu_immediate_encoding_id_items,
-    build_amdgpu_core_descriptor_set_from_spec,
+    build_amdgpu_core_descriptor_set_from_specs,
 )
 from loom.target.arch.amdgpu.encoding import (  # noqa: E402
     AMDGPU_ENCODING_FIELD_IDS,
@@ -55,6 +55,8 @@ from loom.target.low_descriptors import (  # noqa: E402
     Descriptor,
     DescriptorSet,
     Immediate,
+    ImmediateKind,
+    OperandFlag,
     OperandRole,
     Resource,
     ResourceKind,
@@ -68,6 +70,52 @@ _SYSTEM_MEMORY_GLOBAL_LOAD_DESCRIPTOR_KEYS = (
 )
 
 _SANITIZER_ACCESS_FLAT_LOAD_DESCRIPTOR_KEYS = ("amdgpu.flat_load_u8",)
+
+_SPILL_LOWERING_SCRATCH_DESCRIPTOR_KEYS = (
+    "amdgpu.scratch_load_b32_offset_only",
+    "amdgpu.scratch_load_b64_offset_only",
+    "amdgpu.scratch_load_b128_offset_only",
+    "amdgpu.scratch_load_b32_vaddr",
+    "amdgpu.scratch_load_b64_vaddr",
+    "amdgpu.scratch_load_b128_vaddr",
+    "amdgpu.scratch_store_b32_offset_only",
+    "amdgpu.scratch_store_b64_offset_only",
+    "amdgpu.scratch_store_b128_offset_only",
+    "amdgpu.scratch_store_b32_vaddr",
+    "amdgpu.scratch_store_b64_vaddr",
+    "amdgpu.scratch_store_b128_vaddr",
+)
+
+_SPILL_LOWERING_HELPER_DESCRIPTOR_KEYS = (
+    "amdgpu.v_mov_b32_copy",
+    "amdgpu.v_readfirstlane_b32",
+    "amdgpu.s_mov_b64_exec_read",
+    "amdgpu.s_mov_b64_exec.full",
+    "amdgpu.s_mov_b64_exec",
+)
+
+_SPILL_LOWERING_M0_DESCRIPTOR_KEY = "amdgpu.s_mov_b32_m0.imm"
+
+_SPILL_LOWERING_DESCRIPTOR_SHAPES = {
+    "amdgpu.scratch_load_b32_offset_only": (0, 1),
+    "amdgpu.scratch_load_b64_offset_only": (0, 1),
+    "amdgpu.scratch_load_b128_offset_only": (0, 1),
+    "amdgpu.scratch_load_b32_vaddr": (1, 1),
+    "amdgpu.scratch_load_b64_vaddr": (1, 1),
+    "amdgpu.scratch_load_b128_vaddr": (1, 1),
+    "amdgpu.scratch_store_b32_offset_only": (1, 0),
+    "amdgpu.scratch_store_b64_offset_only": (1, 0),
+    "amdgpu.scratch_store_b128_offset_only": (1, 0),
+    "amdgpu.scratch_store_b32_vaddr": (2, 0),
+    "amdgpu.scratch_store_b64_vaddr": (2, 0),
+    "amdgpu.scratch_store_b128_vaddr": (2, 0),
+    "amdgpu.v_mov_b32_copy": (1, 1),
+    "amdgpu.v_readfirstlane_b32": (1, 1),
+    "amdgpu.s_mov_b64_exec_read": (0, 1),
+    "amdgpu.s_mov_b64_exec.full": (0, 0),
+    "amdgpu.s_mov_b64_exec": (1, 0),
+    "amdgpu.s_mov_b32_m0.imm": (0, 1),
+}
 
 _VECTOR_MEMORY_ENCODING_FORMAT_IDS = frozenset(
     (
@@ -145,6 +193,7 @@ class _DescriptorSetRefTable:
     vmem_result_order_classes: list[str]
     sdwa_dst_sel_immediate_slots: list[int | None]
     literal_immediate_slots: list[int | None]
+    address_offset_immediate_slots: list[int | None]
     reg_class_traits: list[tuple[str, ...]]
 
 
@@ -263,6 +312,68 @@ def _validate_lowering_descriptor_contracts(descriptor_set: DescriptorSet) -> No
         _validate_canonical_asm_operand_count(descriptor_set, descriptor_key, (2, 3))
     for descriptor_key in _SANITIZER_ACCESS_FLAT_LOAD_DESCRIPTOR_KEYS:
         _validate_canonical_asm_operand_count(descriptor_set, descriptor_key, (1, 2))
+    _validate_spill_lowering_descriptor_contracts(descriptor_set)
+
+
+def _validate_spill_lowering_descriptor_contracts(
+    descriptor_set: DescriptorSet,
+) -> None:
+    requires_m0_materialization = False
+    for descriptor_key in _SPILL_LOWERING_SCRATCH_DESCRIPTOR_KEYS:
+        descriptor = _descriptor_by_key(descriptor_set, descriptor_key)
+        _validate_spill_lowering_descriptor_shape(descriptor_set, descriptor)
+        offset_slot = _descriptor_address_offset_immediate_slot(descriptor_set, descriptor)
+        if offset_slot is None:
+            raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' spill descriptor '{descriptor_key}' has no address offset immediate")
+        offset = descriptor.immediates[offset_slot]
+        if offset.kind not in (
+            ImmediateKind.SIGNED,
+            ImmediateKind.UNSIGNED,
+            ImmediateKind.ORDINAL,
+        ):
+            raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' spill descriptor '{descriptor_key}' address offset immediate has unsupported kind {offset.kind.name.lower()}")
+        if offset.kind is ImmediateKind.SIGNED and not (offset.signed_min <= 0 <= offset.unsigned_max):
+            raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' spill descriptor '{descriptor_key}' address offset immediate does not encode zero")
+        requires_m0_materialization |= any(operand.role is OperandRole.RESOURCE and OperandFlag.IMPLICIT in operand.flags for operand in descriptor.operands)
+    for descriptor_key in _SPILL_LOWERING_HELPER_DESCRIPTOR_KEYS:
+        descriptor = _descriptor_by_key(descriptor_set, descriptor_key)
+        _validate_spill_lowering_descriptor_shape(descriptor_set, descriptor)
+    if requires_m0_materialization:
+        descriptor = _descriptor_by_key(descriptor_set, _SPILL_LOWERING_M0_DESCRIPTOR_KEY)
+        _validate_spill_lowering_descriptor_shape(descriptor_set, descriptor)
+        immediate_slot = _descriptor_immediate_slot(
+            descriptor_set,
+            descriptor,
+            "imm32",
+            lambda immediate: immediate.field_name == "imm32",
+        )
+        if immediate_slot is None:
+            raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' spill helper '{_SPILL_LOWERING_M0_DESCRIPTOR_KEY}' has no imm32 immediate")
+
+
+def _validate_spill_lowering_descriptor_shape(
+    descriptor_set: DescriptorSet,
+    descriptor: Descriptor,
+) -> None:
+    expected_operand_count, expected_result_count = _SPILL_LOWERING_DESCRIPTOR_SHAPES[descriptor.key]
+    explicit_operand_count = sum(
+        operand.role
+        in (
+            OperandRole.OPERAND,
+            OperandRole.PREDICATE,
+            OperandRole.RESOURCE,
+        )
+        and OperandFlag.IMPLICIT not in operand.flags
+        for operand in descriptor.operands
+    )
+    result_count = sum(operand.role in (OperandRole.RESULT, OperandRole.OPERAND_RESULT) for operand in descriptor.operands)
+    if explicit_operand_count != expected_operand_count or result_count != expected_result_count:
+        raise ValueError(
+            f"AMDGPU descriptor set '{descriptor_set.key}' spill descriptor "
+            f"'{descriptor.key}' has {explicit_operand_count} explicit operand(s) "
+            f"and {result_count} result(s); expected {expected_operand_count} "
+            f"operand(s) and {expected_result_count} result(s)"
+        )
 
 
 def _descriptor_uses_resource_kind(
@@ -301,6 +412,8 @@ def _descriptor_trait_names(
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU")
     if _descriptor_uses_resource_kind(context, descriptor, ResourceKind.SCALAR_ALU):
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_SCALAR_ALU")
+    if _descriptor_uses_resource_kind(context, descriptor, ResourceKind.MATRIX):
+        trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX")
     if descriptor.encoding_format_id in _VECTOR_MEMORY_ENCODING_FORMAT_IDS:
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_MEMORY")
     if descriptor.key in _TRANSCENDENTAL_DESCRIPTOR_KEYS:
@@ -371,6 +484,18 @@ def _descriptor_literal_immediate_slot(
     )
 
 
+def _descriptor_address_offset_immediate_slot(
+    descriptor_set: DescriptorSet,
+    descriptor: Descriptor,
+) -> int | None:
+    return _descriptor_immediate_slot(
+        descriptor_set,
+        descriptor,
+        "address offset",
+        lambda immediate: immediate.field_name == "offset",
+    )
+
+
 def _validate_descriptor_trait_keys() -> None:
     descriptor_ref_keys = frozenset(amdgpu_descriptor_ref_keys())
     trait_descriptor_keys = _TRANSCENDENTAL_DESCRIPTOR_KEYS | _DPP_DESCRIPTOR_KEYS | _READFIRSTLANE_DESCRIPTOR_KEYS
@@ -406,13 +531,9 @@ def _materialize_descriptor_ref_tables(
             descriptor_set_info = descriptor_set_infos_by_key[descriptor_set_key]
         except KeyError as exc:
             raise ValueError(f"AMDGPU target-ref generator got unknown descriptor set '{descriptor_set_key}'") from exc
-        try:
-            spec = isa_specs[descriptor_set_info.isa_xml_key]
-        except KeyError as exc:
-            raise ValueError(f"AMDGPU target-ref generator is missing ISA XML key '{descriptor_set_info.isa_xml_key}' for descriptor set '{descriptor_set_info.key}'") from exc
-        descriptor_set = build_amdgpu_core_descriptor_set_from_spec(
+        descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
             descriptor_set_info.generator_target,
-            spec,
+            isa_specs,
         )
         if descriptor_set.key != descriptor_set_info.key:
             raise ValueError(f"AMDGPU descriptor-set builder '{descriptor_set_info.generator_target}' produced '{descriptor_set.key}', expected '{descriptor_set_info.key}'")
@@ -435,6 +556,7 @@ def _materialize_descriptor_ref_tables(
             )
         ]
         literal_immediate_slots = [_descriptor_literal_immediate_slot(descriptor_set, descriptor) for descriptor in descriptor_set.descriptors]
+        address_offset_immediate_slots = [_descriptor_address_offset_immediate_slot(descriptor_set, descriptor) for descriptor in descriptor_set.descriptors]
         descriptor_set_tables.append(
             _DescriptorSetRefTable(
                 descriptor_set_ordinal=amdgpu_descriptor_set_ordinal(descriptor_set_info.key),
@@ -445,6 +567,7 @@ def _materialize_descriptor_ref_tables(
                 vmem_result_order_classes=vmem_result_order_classes,
                 sdwa_dst_sel_immediate_slots=sdwa_dst_sel_immediate_slots,
                 literal_immediate_slots=literal_immediate_slots,
+                address_offset_immediate_slots=address_offset_immediate_slots,
                 reg_class_traits=[_reg_class_trait_names(reg_class.name) for reg_class in descriptor_set.reg_classes],
             )
         )
@@ -541,14 +664,16 @@ def _emit_source(
         lines.append("")
         immediate_slot_table_name = _descriptor_set_immediate_slot_table_name(descriptor_set_table.descriptor_set_key)
         lines.append(f"static const loom_amdgpu_descriptor_immediate_slots_t {immediate_slot_table_name}[] = {{")
-        for sdwa_dst_sel_slot, literal_slot in zip(
+        for sdwa_dst_sel_slot, literal_slot, address_offset_slot in zip(
             descriptor_set_table.sdwa_dst_sel_immediate_slots,
             descriptor_set_table.literal_immediate_slots,
+            descriptor_set_table.address_offset_immediate_slots,
             strict=True,
         ):
             sdwa_dst_sel_expr = "LOOM_LOW_ID_NONE" if sdwa_dst_sel_slot is None else f"UINT16_C({sdwa_dst_sel_slot})"
             literal_expr = "LOOM_LOW_ID_NONE" if literal_slot is None else f"UINT16_C({literal_slot})"
-            lines.append(f"    {{.sdwa_dst_sel = {sdwa_dst_sel_expr}, .literal = {literal_expr}}},")
+            address_offset_expr = "LOOM_LOW_ID_NONE" if address_offset_slot is None else f"UINT16_C({address_offset_slot})"
+            lines.append(f"    {{.sdwa_dst_sel = {sdwa_dst_sel_expr}, .literal = {literal_expr}, .address_offset = {address_offset_expr}}},")
         lines.append("};")
         lines.append("")
         reg_class_trait_table_name = _reg_class_trait_table_name(descriptor_set_table.descriptor_set_key)

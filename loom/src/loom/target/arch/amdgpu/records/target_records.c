@@ -84,12 +84,13 @@ static const loom_target_export_plan_t kAmdgpuHalExportPlan = {
 #undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET
 
 #define LOOM_AMDGPU_TARGET_RECORD_INFO(record_suffix, target_kind_value, \
-                                       processor_name, descriptor_set_ordinal_value, \
+                                       processor_name_literal, \
+                                       descriptor_set_ordinal_value, \
                                        bundle_suffix) \
   static const loom_amdgpu_target_record_info_t \
       kAmdgpuTargetRecordInfo##record_suffix = { \
           .target_kind = target_kind_value, \
-          .default_processor_name = IREE_SVL(processor_name), \
+          .processor_name = IREE_SVL(processor_name_literal), \
           .descriptor_set_ordinal = descriptor_set_ordinal_value, \
           .bundle = &kAmdgpuLowTargetBundle##bundle_suffix##Core, \
       };
@@ -99,7 +100,8 @@ static const loom_target_export_plan_t kAmdgpuHalExportPlan = {
 static const loom_target_bundle_t* const kAmdgpuTargetBundleValues[] = {
   NULL,
 #define LOOM_AMDGPU_TARGET_RECORD_INFO(record_suffix, target_kind_value, \
-                                       processor_name, descriptor_set_ordinal_value, \
+                                       processor_name_literal, \
+                                       descriptor_set_ordinal_value, \
                                        bundle_suffix) \
   &kAmdgpuLowTargetBundle##bundle_suffix##Core,
 #include "loom/target/arch/amdgpu/records/target_records_tables.inl"
@@ -114,7 +116,8 @@ const loom_target_bundle_table_t loom_amdgpu_target_bundles = {
 static const loom_amdgpu_target_record_info_t* const kAmdgpuTargetRecordInfos[] = {
   NULL,
 #define LOOM_AMDGPU_TARGET_RECORD_INFO(record_suffix, target_kind_value, \
-                                       processor_name, descriptor_set_ordinal_value, \
+                                       processor_name_literal, \
+                                       descriptor_set_ordinal_value, \
                                        bundle_suffix) \
   &kAmdgpuTargetRecordInfo##record_suffix,
 #include "loom/target/arch/amdgpu/records/target_records_tables.inl"
@@ -147,7 +150,7 @@ loom_amdgpu_target_record_info_for_processor(
        ++i) {
     const loom_amdgpu_target_record_info_t* info = kAmdgpuTargetRecordInfos[i];
     if (info != NULL &&
-        iree_string_view_equal(info->default_processor_name, processor_name)) {
+        iree_string_view_equal(info->processor_name, processor_name)) {
       return info;
     }
   }

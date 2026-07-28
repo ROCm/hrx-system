@@ -275,27 +275,27 @@ def _make_sinkhorn_kernel(tilelang: Any, T: Any) -> Any:
 
 # ====
 @tilelang_case(
-    name="tilekernels_mhc_expand_fwd_gfx1100",
+    name="tilekernels_mhc_expand_fwd_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "mhc", "expand", "amdgpu"),
 )
-def tilekernels_mhc_expand_fwd_gfx1100(
+def tilekernels_mhc_expand_fwd_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
     return TileLangImportInput(
         source=_make_expand_kernel(tilelang, T),
         args=(128, 2),
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="expand_to_mhc_fwd_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("expand_to_mhc_fwd_kernel") @expand_to_mhc_fwd_kernel(%num_tokens: i32) {
+kernel.def target(@hip_mcpu_gfx11_generic) export("expand_to_mhc_fwd_kernel") @expand_to_mhc_fwd_kernel(%num_tokens: i32) {
   %num_tokens_idx = index.cast %num_tokens : i32 to index
   %c32 = index.constant 32 : index
   %add = index.add %num_tokens_idx, %c32 : index
@@ -361,27 +361,27 @@ kernel.def target(@hip_mcpu_gfx1100) export("expand_to_mhc_fwd_kernel") @expand_
 
 # ====
 @tilelang_case(
-    name="tilekernels_mhc_head_compute_mix_fwd_gfx1100",
+    name="tilekernels_mhc_head_compute_mix_fwd_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "mhc", "sigmoid", "amdgpu"),
 )
-def tilekernels_mhc_head_compute_mix_fwd_gfx1100(
+def tilekernels_mhc_head_compute_mix_fwd_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
     return TileLangImportInput(
         source=_make_head_compute_mix_kernel(tilelang, T),
         args=(2, 1e-5, 2),
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="mhc_head_compute_mix_fwd_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("mhc_head_compute_mix_fwd_kernel") @mhc_head_compute_mix_fwd_kernel(%num_tokens: i32) {
+kernel.def target(@hip_mcpu_gfx11_generic) export("mhc_head_compute_mix_fwd_kernel") @mhc_head_compute_mix_fwd_kernel(%num_tokens: i32) {
   %num_tokens_idx = index.cast %num_tokens : i32 to index
   %c2 = index.constant 2 : index
   %add = index.add %num_tokens_idx, %c2 : index
@@ -433,27 +433,27 @@ kernel.def target(@hip_mcpu_gfx1100) export("mhc_head_compute_mix_fwd_kernel") @
 
 # ====
 @tilelang_case(
-    name="tilekernels_mhc_pre_split_mixes_fwd_gfx1100",
+    name="tilekernels_mhc_pre_split_mixes_fwd_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "mhc", "split", "amdgpu"),
 )
-def tilekernels_mhc_pre_split_mixes_fwd_gfx1100(
+def tilekernels_mhc_pre_split_mixes_fwd_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
     return TileLangImportInput(
         source=_make_pre_split_mixes_kernel(tilelang, T),
         args=(2, 0.5, 1e-5, 2),
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="mhc_pre_split_mixes_fwd_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("mhc_pre_split_mixes_fwd_kernel") @mhc_pre_split_mixes_fwd_kernel(%num_tokens: i32) {
+kernel.def target(@hip_mcpu_gfx11_generic) export("mhc_pre_split_mixes_fwd_kernel") @mhc_pre_split_mixes_fwd_kernel(%num_tokens: i32) {
   %num_tokens_idx = index.cast %num_tokens : i32 to index
   %c2 = index.constant 2 : index
   %add = index.add %num_tokens_idx, %c2 : index
@@ -578,27 +578,27 @@ kernel.def target(@hip_mcpu_gfx1100) export("mhc_pre_split_mixes_fwd_kernel") @m
 
 # ====
 @tilelang_case(
-    name="tilekernels_mhc_sinkhorn_gfx1100",
+    name="tilekernels_mhc_sinkhorn_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "mhc", "sinkhorn", "amdgpu"),
 )
-def tilekernels_mhc_sinkhorn_gfx1100(
+def tilekernels_mhc_sinkhorn_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
     return TileLangImportInput(
         source=_make_sinkhorn_kernel(tilelang, T),
         args=(2, 1, 2, 1e-6),
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="mhc_sinkhorn_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("mhc_sinkhorn_kernel") @mhc_sinkhorn_kernel(%num_tokens: i32) {
+kernel.def target(@hip_mcpu_gfx11_generic) export("mhc_sinkhorn_kernel") @mhc_sinkhorn_kernel(%num_tokens: i32) {
   %num_tokens_idx = index.cast %num_tokens : i32 to index
   %c1 = index.constant 1 : index
   %add = index.add %num_tokens_idx, %c1 : index

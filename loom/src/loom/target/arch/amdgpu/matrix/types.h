@@ -35,13 +35,13 @@ typedef enum loom_amdgpu_matrix_feature_flag_bits_e {
   LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_BF16_1K = UINT64_C(1) << 2,
   // Processor supports gfx90a F64 MFMA variants.
   LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_F64 = UINT64_C(1) << 3,
-  // Processor supports gfx940 FP8/BF8 and XF32 MFMA variants.
+  // Processor supports gfx940 FP8/BF8 MFMA variants.
   LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8 = UINT64_C(1) << 4,
   // Processor supports gfx950 F16/BF16/I8 MFMA shape variants.
   LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950 = UINT64_C(1) << 5,
   // Processor supports gfx950 scaled F8/F6/F4 MFMA variants.
   LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4 = UINT64_C(1) << 6,
-  // Processor supports gfx940 sparse MFMA accumulate variants.
+  // Processor supports gfx940 F16/BF16/I8 sparse MFMA variants.
   LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940 = UINT64_C(1) << 7,
   // Processor supports gfx950 sparse MFMA accumulate variants.
   LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX950 = UINT64_C(1) << 8,
@@ -57,6 +57,12 @@ typedef enum loom_amdgpu_matrix_feature_flag_bits_e {
   LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250_SCALE_F8F6F4 = UINT64_C(1) << 13,
   // Processor supports gfx1250 SWMMAC modifier/reuse variants.
   LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250 = UINT64_C(1) << 14,
+  // Processor supports gfx940 XF32 MFMA variants.
+  LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_XF32 = UINT64_C(1) << 15,
+  // Processor supports gfx940 FP8/BF8 sparse MFMA variants.
+  LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940_FP8 = UINT64_C(1) << 16,
+  // Processor supports gfx940 I8 MFMA shape variants.
+  LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_I8 = UINT64_C(1) << 17,
 } loom_amdgpu_matrix_feature_flag_bits_t;
 
 // Bitset of loom_amdgpu_matrix_feature_flag_bits_t values.
@@ -128,8 +134,12 @@ typedef enum loom_amdgpu_matrix_numeric_type_e {
   LOOM_AMDGPU_MATRIX_NUMERIC_BF6 = 14,
   // AMD FP4 payload.
   LOOM_AMDGPU_MATRIX_NUMERIC_FP4 = 15,
+  // Selector-driven 8-bit AMD FP8/BF8 payload family.
+  LOOM_AMDGPU_MATRIX_NUMERIC_F8 = 16,
+  // Selector-driven 6-bit AMD FP6/BF6 payload family.
+  LOOM_AMDGPU_MATRIX_NUMERIC_F6 = 17,
   // Selector-driven AMD F8/F6/F4 payload family.
-  LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4 = 16,
+  LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4 = 18,
 } loom_amdgpu_matrix_numeric_type_t;
 
 typedef enum loom_amdgpu_matrix_scale_kind_e {
@@ -322,8 +332,44 @@ typedef enum loom_amdgpu_matrix_fragment_layout_kind_e {
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_I32_32X32X4_I8_2B = 64,
   // CDNA MFMA 4 independent 4x4x4 f64-input/result blocks.
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F64_4X4X4_F64_4B = 65,
+  // RDNA3 WMMAR3 wave32 16x16x16 packed iu8 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_I32_16X16X16_IU8 = 66,
+  // RDNA3 WMMAR3 wave64 16x16x16 packed iu8 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_I32_16X16X16_IU8_W64 = 67,
+  // RDNA3 WMMAR3 wave32 16x16x16 packed iu4 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_I32_16X16X16_IU4 = 68,
+  // RDNA3 WMMAR3 wave64 16x16x16 packed iu4 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_I32_16X16X16_IU4_W64 = 69,
+  // RDNA4 WMMA 16x16x16 packed iu8 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X16_IU8 = 70,
+  // RDNA4 WMMA 16x16x16 packed iu4 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X16_IU4 = 71,
+  // RDNA4 WMMA 16x16x32 packed iu4 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X32_IU4 = 72,
+  // RDNA4 WMMA 16x16x64 packed iu8 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X64_IU8 = 73,
+  // CDNA MFMA 16x16x4 f64 input, f64 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F64_16X16X4_F64 = 74,
+  // GFX12.5 WMMA 16x16x128 f8/f8 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F8_F8 = 75,
+  // GFX12.5 WMMA 16x16x128 f8/f6 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F8_F6 = 76,
+  // GFX12.5 WMMA 16x16x128 f8/f4 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F8_F4 = 77,
+  // GFX12.5 WMMA 16x16x128 f6/f8 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F6_F8 = 78,
+  // GFX12.5 WMMA 16x16x128 f6/f6 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F6_F6 = 79,
+  // GFX12.5 WMMA 16x16x128 f6/f4 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F6_F4 = 80,
+  // GFX12.5 WMMA 16x16x128 f4/f8 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F4_F8 = 81,
+  // GFX12.5 WMMA 16x16x128 f4/f6 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F4_F6 = 82,
+  // GFX12.5 WMMA 16x16x128 f4/f4 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F4_F4 = 83,
   // Total number of fragment layout table slots, including UNKNOWN.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT = 66,
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT = 84,
 } loom_amdgpu_matrix_fragment_layout_kind_t;
 
 typedef enum loom_amdgpu_matrix_contract_flag_bits_e {

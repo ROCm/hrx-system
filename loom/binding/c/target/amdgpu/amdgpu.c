@@ -183,15 +183,12 @@ static iree_status_t loomc_amdgpu_emit_module_artifact(
     loom_target_emit_artifact_t* out_artifact) {
   *out_artifact = (loom_target_emit_artifact_t){0};
 
-  const loom_amdgpu_processor_info_t* processor =
-      (const loom_amdgpu_processor_info_t*)request->target_selection.data;
   loom_amdgpu_runtime_global_flags_t runtime_globals =
       LOOM_AMDGPU_RUNTIME_GLOBAL_NONE;
   IREE_RETURN_IF_ERROR(loomc_amdgpu_emit_resolve_runtime_globals(
       request->option_chain, &runtime_globals));
   iree_diagnostic_emitter_t diagnostic_emitter = request->diagnostic_emitter;
   const loom_amdgpu_hal_kernel_library_options_t library_options = {
-      .processor = processor ? processor->name : iree_string_view_empty(),
       .target_selection = request->target_selection,
       .runtime_globals = runtime_globals,
       .diagnostic_sink =

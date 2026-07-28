@@ -28,6 +28,7 @@ from loom.target.low_descriptors import (
     LatencyKind,
     ModelQuality,
     Operand,
+    OperandFlag,
     OperandRole,
     Resource,
     ResourceKind,
@@ -36,9 +37,11 @@ from loom.target.low_descriptors import (
 
 _RESOURCE_SALU = "salu"
 _RESOURCE_VALU = "valu"
+_RESOURCE_MATRIX = "matrix"
 _SCHEDULE_NONE = "none"
 _SCHEDULE_SALU = "salu"
 _SCHEDULE_VALU = "valu"
+_SCHEDULE_MATRIX = "matrix"
 
 
 @contextmanager
@@ -98,6 +101,11 @@ def _descriptor_set(*descriptors: Descriptor) -> DescriptorSet:
                 capacity_per_cycle=1,
                 kind=ResourceKind.VECTOR_ALU,
             ),
+            Resource(
+                _RESOURCE_MATRIX,
+                capacity_per_cycle=1,
+                kind=ResourceKind.MATRIX,
+            ),
         ),
         schedule_classes=(
             ScheduleClass(
@@ -117,8 +125,65 @@ def _descriptor_set(*descriptors: Descriptor) -> DescriptorSet:
                 model_quality=ModelQuality.EXACT,
                 issue_uses=(IssueUse(_RESOURCE_VALU, cycles=1, units=1),),
             ),
+            ScheduleClass(
+                _SCHEDULE_MATRIX,
+                latency_kind=LatencyKind.EXACT,
+                model_quality=ModelQuality.EXACT,
+                issue_uses=(IssueUse(_RESOURCE_MATRIX, cycles=1, units=1),),
+            ),
         ),
         descriptors=descriptors,
+    )
+
+
+def _spill_lowering_descriptor(
+    descriptor_key: str,
+    *,
+    include_address_offset: bool = True,
+    include_implicit_m0: bool = False,
+) -> Descriptor:
+    operand_count, result_count = amdgpu_target_refs._SPILL_LOWERING_DESCRIPTOR_SHAPES[descriptor_key]
+    operands = (
+        *(Operand(f"result{index}", OperandRole.RESULT, ()) for index in range(result_count)),
+        *(Operand(f"operand{index}", OperandRole.OPERAND, ()) for index in range(operand_count)),
+    )
+    if include_implicit_m0:
+        operands = (
+            *operands,
+            Operand(
+                "m0",
+                OperandRole.RESOURCE,
+                (),
+                flags=(OperandFlag.IMPLICIT,),
+            ),
+        )
+    address_offset_immediates = (
+        (
+            Immediate(
+                "offset",
+                ImmediateKind.UNSIGNED,
+                bit_width=12,
+                unsigned_max=4095,
+            ),
+        )
+        if include_address_offset and descriptor_key in amdgpu_target_refs._SPILL_LOWERING_SCRATCH_DESCRIPTOR_KEYS
+        else ()
+    )
+    m0_immediates = (Immediate("imm32", ImmediateKind.UNSIGNED),) if descriptor_key == amdgpu_target_refs._SPILL_LOWERING_M0_DESCRIPTOR_KEY else ()
+    return _descriptor(
+        descriptor_key,
+        immediates=(*address_offset_immediates, *m0_immediates),
+        operands=operands,
+    )
+
+
+def _valid_spill_lowering_descriptors() -> tuple[Descriptor, ...]:
+    return tuple(
+        _spill_lowering_descriptor(descriptor_key)
+        for descriptor_key in (
+            *amdgpu_target_refs._SPILL_LOWERING_SCRATCH_DESCRIPTOR_KEYS,
+            *amdgpu_target_refs._SPILL_LOWERING_HELPER_DESCRIPTOR_KEYS,
+        )
     )
 
 
@@ -136,6 +201,7 @@ def _valid_contract_descriptors() -> tuple[Descriptor, ...]:
             "amdgpu.flat_load_u8",
             (AsmForm(operands=("addr",)),),
         ),
+        *_valid_spill_lowering_descriptors(),
     )
 
 
@@ -176,6 +242,7 @@ def test_descriptor_trait_names_include_memory_and_ref_facts() -> None:
         ),
         _descriptor("amdgpu.v_exp_f32", schedule_class=_SCHEDULE_VALU),
         _descriptor("amdgpu.v_readfirstlane_b32", schedule_class=_SCHEDULE_SALU),
+        _descriptor("amdgpu.v_wmma", schedule_class=_SCHEDULE_MATRIX),
     )
     trait_context = amdgpu_target_refs._descriptor_trait_context(descriptor_set)
 
@@ -191,6 +258,7 @@ def test_descriptor_trait_names_include_memory_and_ref_facts() -> None:
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_SCALAR_ALU",
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_READFIRSTLANE",
     )
+    assert amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[3]) == ("LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX",)
 
 
 def test_descriptor_trait_names_include_xcnt_implicit_drain_families() -> None:
@@ -377,6 +445,26 @@ def test_descriptor_immediate_slots_publish_literal() -> None:
     )
 
 
+def test_descriptor_immediate_slots_publish_address_offset() -> None:
+    descriptor_set = _descriptor_set(
+        _descriptor(
+            "amdgpu.scratch_load_b32_offset_only",
+            immediates=(
+                Immediate("cache_policy", ImmediateKind.UNSIGNED),
+                Immediate("offset", ImmediateKind.UNSIGNED),
+            ),
+        )
+    )
+
+    assert (
+        amdgpu_target_refs._descriptor_address_offset_immediate_slot(
+            descriptor_set,
+            descriptor_set.descriptors[0],
+        )
+        == 1
+    )
+
+
 def test_descriptor_immediate_slots_reject_duplicate_literal() -> None:
     descriptor_set = _descriptor_set(
         _descriptor(
@@ -430,6 +518,126 @@ def test_lowering_descriptor_contracts_reject_bad_operand_count() -> None:
                 _descriptor(
                     "amdgpu.flat_load_u8",
                     (AsmForm(operands=("addr", "m0", "extra")),),
+                ),
+                *_valid_spill_lowering_descriptors(),
+            )
+        )
+
+
+def test_spill_lowering_contracts_require_every_packet() -> None:
+    descriptors = _valid_spill_lowering_descriptors()
+
+    with _raises_value_error("missing descriptor 'amdgpu.scratch_load_b128_vaddr' required by target lowering"):
+        amdgpu_target_refs._validate_spill_lowering_descriptor_contracts(_descriptor_set(*(descriptor for descriptor in descriptors if descriptor.key != "amdgpu.scratch_load_b128_vaddr")))
+
+
+def test_spill_lowering_contracts_require_address_offset() -> None:
+    descriptors = _valid_spill_lowering_descriptors()
+
+    with _raises_value_error("spill descriptor 'amdgpu.scratch_load_b32_offset_only' has no address offset immediate"):
+        amdgpu_target_refs._validate_spill_lowering_descriptor_contracts(
+            _descriptor_set(
+                _spill_lowering_descriptor(
+                    "amdgpu.scratch_load_b32_offset_only",
+                    include_address_offset=False,
+                ),
+                *descriptors[1:],
+            )
+        )
+
+
+def test_spill_lowering_contracts_require_packet_shape() -> None:
+    descriptors = _valid_spill_lowering_descriptors()
+
+    with _raises_value_error(
+        "spill descriptor 'amdgpu.scratch_load_b32_offset_only' has 0 explicit "
+        r"operand\(s\) and 0 result\(s\); expected 0 operand\(s\) and 1 "
+        r"result\(s\)"
+    ):
+        amdgpu_target_refs._validate_spill_lowering_descriptor_contracts(
+            _descriptor_set(
+                _descriptor(
+                    "amdgpu.scratch_load_b32_offset_only",
+                    immediates=descriptors[0].immediates,
+                ),
+                *descriptors[1:],
+            )
+        )
+
+
+def test_spill_lowering_contracts_require_encodable_zero_offset() -> None:
+    descriptors = _valid_spill_lowering_descriptors()
+
+    with _raises_value_error("spill descriptor 'amdgpu.scratch_load_b32_offset_only' address offset immediate does not encode zero"):
+        amdgpu_target_refs._validate_spill_lowering_descriptor_contracts(
+            _descriptor_set(
+                _descriptor(
+                    "amdgpu.scratch_load_b32_offset_only",
+                    immediates=(
+                        Immediate(
+                            "offset",
+                            ImmediateKind.SIGNED,
+                            signed_min=1,
+                            unsigned_max=4095,
+                        ),
+                    ),
+                    operands=descriptors[0].operands,
+                ),
+                *descriptors[1:],
+            )
+        )
+
+
+def test_spill_lowering_contracts_require_numeric_address_offset() -> None:
+    descriptors = _valid_spill_lowering_descriptors()
+
+    with _raises_value_error("spill descriptor 'amdgpu.scratch_load_b32_offset_only' address offset immediate has unsupported kind enum"):
+        amdgpu_target_refs._validate_spill_lowering_descriptor_contracts(
+            _descriptor_set(
+                _descriptor(
+                    "amdgpu.scratch_load_b32_offset_only",
+                    immediates=(Immediate("offset", ImmediateKind.ENUM),),
+                    operands=descriptors[0].operands,
+                ),
+                *descriptors[1:],
+            )
+        )
+
+
+def test_spill_lowering_contracts_require_m0_materialization_when_consumed() -> None:
+    descriptors = _valid_spill_lowering_descriptors()
+    scratch_with_m0 = _spill_lowering_descriptor(
+        "amdgpu.scratch_load_b32_offset_only",
+        include_implicit_m0=True,
+    )
+    descriptor_set = _descriptor_set(scratch_with_m0, *descriptors[1:])
+
+    with _raises_value_error("missing descriptor 'amdgpu.s_mov_b32_m0.imm' required by target lowering"):
+        amdgpu_target_refs._validate_spill_lowering_descriptor_contracts(descriptor_set)
+
+    amdgpu_target_refs._validate_spill_lowering_descriptor_contracts(
+        _descriptor_set(
+            *descriptor_set.descriptors,
+            _spill_lowering_descriptor(amdgpu_target_refs._SPILL_LOWERING_M0_DESCRIPTOR_KEY),
+        )
+    )
+
+
+def test_spill_lowering_contracts_require_m0_materialization_immediate() -> None:
+    descriptors = _valid_spill_lowering_descriptors()
+    scratch_with_m0 = _spill_lowering_descriptor(
+        "amdgpu.scratch_load_b32_offset_only",
+        include_implicit_m0=True,
+    )
+
+    with _raises_value_error("spill helper 'amdgpu.s_mov_b32_m0.imm' has no imm32 immediate"):
+        amdgpu_target_refs._validate_spill_lowering_descriptor_contracts(
+            _descriptor_set(
+                scratch_with_m0,
+                *descriptors[1:],
+                _descriptor(
+                    amdgpu_target_refs._SPILL_LOWERING_M0_DESCRIPTOR_KEY,
+                    operands=_spill_lowering_descriptor(amdgpu_target_refs._SPILL_LOWERING_M0_DESCRIPTOR_KEY).operands,
                 ),
             )
         )

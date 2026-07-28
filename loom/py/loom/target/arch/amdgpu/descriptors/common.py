@@ -122,6 +122,14 @@ from loom.target.low_descriptors import (
     StorageLeaseReleaseScope,
 )
 
+from .matrix_schedule import (
+    _AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS,
+    _AMDGPU_GFX942_MATRIX_TIMINGS,
+    _AMDGPU_GFX950_MATRIX_TIMINGS,
+    _amdgpu_mfma_has_qualified_timing,
+    _AmdgpuMatrixTiming,
+)
+
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU = 1
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL = 2
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL = 3
@@ -131,6 +139,7 @@ AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64 = 6
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG = 7
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE = 8
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL = 9
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64 = 10
 
 _REG_SGPR = "amdgpu.sgpr"
 _REG_VGPR = "amdgpu.vgpr"
@@ -180,6 +189,8 @@ _SCHEDULE_LDS_ATOMIC = "amdgpu.lds.atomic"
 _SCHEDULE_LDS_CROSSLANE = "amdgpu.lds.crosslane"
 _SCHEDULE_BARRIER = "amdgpu.barrier"
 _SCHEDULE_MFMA = "amdgpu.mfma"
+_SCHEDULE_MFMA_QUALIFIED_PREFIX = f"{_SCHEDULE_MFMA}."
+_SCHEDULE_MATRIX = "amdgpu.matrix"
 _SCHEDULE_WMMA = "amdgpu.wmma"
 _SCHEDULE_WMMA_SCALE = "amdgpu.wmma.scale"
 _SCHEDULE_SWMMAC = "amdgpu.swmmac"
@@ -198,6 +209,38 @@ _SCHEDULE_WAIT_IDLE = "amdgpu.wait.idle"
 _SCHEDULE_WAIT_TENSOR = "amdgpu.wait.tensor"
 _SCHEDULE_WAIT_ASYNC = "amdgpu.wait.async"
 _SCHEDULE_WAIT_X = "amdgpu.wait.x"
+
+
+def _amdgpu_mfma_schedule_class_name(descriptor_key: str) -> str:
+    if not _amdgpu_mfma_has_qualified_timing(descriptor_key):
+        raise ValueError(
+            f"AMDGPU descriptor '{descriptor_key}' has no qualified GFX9.4 "
+            "matrix timing"
+        )
+    return f"{_SCHEDULE_MFMA_QUALIFIED_PREFIX}{descriptor_key.removeprefix('amdgpu.')}"
+
+
+def _amdgpu_mfma_schedule_classes(
+    timings: Mapping[str, _AmdgpuMatrixTiming],
+) -> tuple[ScheduleClass, ...]:
+    return tuple(
+        ScheduleClass(
+            _amdgpu_mfma_schedule_class_name(descriptor_key),
+            latency_kind=LatencyKind.ESTIMATE,
+            latency_cycles=timing.latency_cycles,
+            issue_uses=(
+                IssueUse(
+                    _RESOURCE_MFMA,
+                    cycles=timing.reciprocal_throughput_cycles,
+                    units=1,
+                ),
+            ),
+            hazards=_matrix_hazards(_RESOURCE_MFMA),
+            model_quality=ModelQuality.ESTIMATED,
+        )
+        for descriptor_key, timing in timings.items()
+    )
+
 
 _AMDGPU_TRANS_DESCRIPTOR_KEYS = (
     "amdgpu.v_exp_f32",
@@ -238,6 +281,7 @@ _EXECUTION_MASKED_SCHEDULE_CLASSES = frozenset(
         _SCHEDULE_TENSOR_LOAD_LDS,
         _SCHEDULE_CLUSTER_LOAD_LDS,
         _SCHEDULE_MFMA,
+        _SCHEDULE_MATRIX,
         _SCHEDULE_WMMA,
         _SCHEDULE_WMMA_SCALE,
         _SCHEDULE_SWMMAC,
@@ -254,7 +298,13 @@ def _amdgpu_trans_schedule_class_name(descriptor_key: str) -> str:
 def _amdgpu_schedule_class_reads_exec_state(schedule_class: str) -> bool:
     return (
         schedule_class in _EXECUTION_MASKED_SCHEDULE_CLASSES
-        or schedule_class.startswith(f"{_SCHEDULE_TRANS}.")
+        or schedule_class.startswith(
+            (
+                f"{_SCHEDULE_TRANS}.",
+                _SCHEDULE_MFMA_QUALIFIED_PREFIX,
+                f"{_SCHEDULE_MATRIX}.",
+            )
+        )
     )
 
 
@@ -412,6 +462,78 @@ def _amdgpu_core_descriptor_set(
         descriptor_set_ordinal=amdgpu_descriptor_set_ordinal(key),
         categories=categories,
         requires_explicit_asm_surface=True,
+    )
+
+
+def _amdgpu_core_descriptor_set_intersection(
+    *,
+    key: str,
+    members: Sequence[DescriptorSet],
+) -> DescriptorSet:
+    if not members:
+        raise ValueError(f"AMDGPU generic descriptor set '{key}' has no members")
+
+    def named_intersection(
+        attribute: str,
+        *,
+        key_attribute: str,
+    ) -> tuple[object, ...]:
+        member_values = tuple(getattr(member, attribute) for member in members)
+        member_maps = []
+        for member, values in zip(members, member_values, strict=True):
+            values_by_key = {getattr(value, key_attribute): value for value in values}
+            if len(values_by_key) != len(values):
+                raise ValueError(
+                    f"AMDGPU descriptor set '{member.key}' has duplicate "
+                    f"{attribute} keys"
+                )
+            member_maps.append(values_by_key)
+        return tuple(
+            value
+            for value in member_values[0]
+            if all(
+                member_map.get(getattr(value, key_attribute)) == value
+                for member_map in member_maps[1:]
+            )
+        )
+
+    member_reg_classes = tuple(
+        {reg_class.name: reg_class for reg_class in member.reg_classes}
+        for member in members
+    )
+    reg_classes = []
+    for reg_class in members[0].reg_classes:
+        member_rows = tuple(
+            member_map.get(reg_class.name) for member_map in member_reg_classes
+        )
+        if any(member_row is None for member_row in member_rows):
+            continue
+        allocatable_count = min(
+            member_row.allocatable_count
+            for member_row in member_rows
+            if member_row is not None
+        )
+        portable_row = replace(reg_class, allocatable_count=allocatable_count)
+        if any(
+            replace(member_row, allocatable_count=allocatable_count) != portable_row
+            for member_row in member_rows
+            if member_row is not None
+        ):
+            raise ValueError(
+                f"AMDGPU generic descriptor set '{key}' register class "
+                f"'{reg_class.name}' differs beyond allocatable count"
+            )
+        reg_classes.append(portable_row)
+
+    return _amdgpu_core_descriptor_set(
+        key=key,
+        reg_classes=tuple(reg_classes),
+        register_parts=named_intersection("register_parts", key_attribute="name"),
+        enum_domains=named_intersection("enum_domains", key_attribute="name"),
+        resources=named_intersection("resources", key_attribute="name"),
+        schedule_classes=named_intersection("schedule_classes", key_attribute="name"),
+        descriptors=named_intersection("descriptors", key_attribute="key"),
+        categories=named_intersection("categories", key_attribute="key"),
     )
 
 
@@ -1007,6 +1129,17 @@ def _native_amdgpu_named_i64_immediate(
         field_name=field_name,
         literal=name or field_name,
         target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64,
+    )
+
+
+def _native_amdgpu_required_named_i64_immediate(
+    field_name: str, *, name: str | None = None
+) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal=name or field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64,
     )
 
 
@@ -2844,6 +2977,7 @@ def _implicit_m0_input(
 
 
 __all__ = (
+    "_AmdgpuMatrixTiming",
     "AMDGPU_ATOMIC_DESCRIPTOR_CATEGORY",
     "AMDGPU_CACHE_DESCRIPTOR_CATEGORY",
     "AMDGPU_COMPARE_SELECT_DESCRIPTOR_CATEGORY",
@@ -2889,6 +3023,7 @@ __all__ = (
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL",
     "AMDGPU_SCALAR_DESCRIPTOR_CATEGORY",
     "AMDGPU_VECTOR_DESCRIPTOR_CATEGORY",
@@ -3017,6 +3152,9 @@ __all__ = (
     "_GFX950_MEMORY_WAIT_HAZARDS",
     "_GFX950_VECTOR_CACHE_FIELDS",
     "_GFX9_11_VECTOR_CACHE_FIELDS",
+    "_AMDGPU_GFX942_MATRIX_TIMINGS",
+    "_AMDGPU_GFX950_MATRIX_TIMINGS",
+    "_AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS",
     "_GLOBAL_GFX950_SADDR_OFF",
     "_GLOBAL_LOAD_B16_EFFECT",
     "_GLOBAL_LOAD_B128_EFFECT",
@@ -3125,7 +3263,9 @@ __all__ = (
     "_SCHEDULE_LDS_CROSSLANE",
     "_SCHEDULE_LDS_LOAD",
     "_SCHEDULE_LDS_STORE",
+    "_SCHEDULE_MATRIX",
     "_SCHEDULE_MFMA",
+    "_SCHEDULE_MFMA_QUALIFIED_PREFIX",
     "_SCHEDULE_MODE_CONTROL",
     "_SCHEDULE_PACKED_DOT",
     "_SCHEDULE_SALU",
@@ -3202,7 +3342,11 @@ __all__ = (
     "_WORKGROUP_BARRIER_EFFECT",
     "_amdgpu_camel_case",
     "_amdgpu_core_descriptor_set",
+    "_amdgpu_core_descriptor_set_intersection",
     "_amdgpu_descriptor_set_file_stem",
+    "_amdgpu_mfma_has_qualified_timing",
+    "_amdgpu_mfma_schedule_class_name",
+    "_amdgpu_mfma_schedule_classes",
     "_amdgpu_schedule_class_reads_exec_state",
     "_amdgpu_trans_schedule_class_name",
     "_amdgpu_trans_schedule_classes",
@@ -3263,6 +3407,7 @@ __all__ = (
     "_native_amdgpu_named_bit_list_immediate",
     "_native_amdgpu_named_flag_immediate",
     "_native_amdgpu_named_i64_immediate",
+    "_native_amdgpu_required_named_i64_immediate",
     "_native_i64_immediate",
     "_native_amdgpu_delay_alu_immediate",
     "_native_amdgpu_scale_sel_immediate",

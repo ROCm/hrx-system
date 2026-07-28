@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "iree/base/internal/arena.h"
+#include "iree/hal/executable/amdgpu/code_object_target.h"
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -809,9 +810,28 @@ TEST(AmdgpuHsacoTest, WritesSupportedProcessorCodeObjectFlags) {
     const std::string bytes = StreamBytes(stream.get());
 
     ASSERT_GE(bytes.size(), 64u) << StringViewToString(processor->name);
-    EXPECT_EQ(LoadLeU32(bytes, 48),
-              processor->elf.machine_flags | processor->elf.feature_flags)
+    EXPECT_EQ((uint8_t)bytes[8], LOOM_NATIVE_ELF_ABI_VERSION_AMDGPU_HSA_V6)
         << StringViewToString(processor->name);
+    EXPECT_EQ(LoadLeU32(bytes, 48),
+              processor->elf.machine_flags | processor->elf.feature_flags |
+                  (processor->elf.generic_version
+                   << LOOM_AMDGPU_ELF_GENERIC_VERSION_OFFSET_V6))
+        << StringViewToString(processor->name);
+
+    iree_hal_amdgpu_target_id_t decoded_target_id = {};
+    IREE_ASSERT_OK(iree_hal_amdgpu_code_object_target_id_from_elf(
+        iree_make_const_byte_span(bytes.data(), bytes.size()),
+        &decoded_target_id));
+    EXPECT_TRUE(
+        iree_string_view_equal(decoded_target_id.processor, processor->name))
+        << StringViewToString(processor->name);
+    EXPECT_EQ(decoded_target_id.kind, processor->elf.generic_version
+                                          ? IREE_HAL_AMDGPU_TARGET_KIND_GENERIC
+                                          : IREE_HAL_AMDGPU_TARGET_KIND_EXACT)
+        << StringViewToString(processor->name);
+    EXPECT_EQ(decoded_target_id.generic_version, processor->elf.generic_version)
+        << StringViewToString(processor->name);
+
     const std::vector<Section> sections = ReadSections(bytes);
     const Section& note = FindSection(sections, ".note");
     const std::string note_contents =

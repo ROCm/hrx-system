@@ -21,6 +21,8 @@ load(
     "LOOM_AMDGPU_DEFAULT_TARGET_SELECTORS",
     "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES",
     "LOOM_AMDGPU_DESCRIPTOR_SET_EXACT_PROCESSORS",
+    "LOOM_AMDGPU_DESCRIPTOR_SET_GENERIC_PROCESSORS",
+    "LOOM_AMDGPU_SUPPORTED_CODE_OBJECT_PROCESSORS",
     "LOOM_AMDGPU_SUPPORTED_EXACT_PROCESSORS",
     "LOOM_AMDGPU_TARGET_SOURCE_IREE_HAL",
     "LOOM_AMDGPU_TARGET_SOURCE_LOOM_DEFAULTS",
@@ -144,7 +146,26 @@ def _exact_target_selector_config_settings(
         )
         requested[exact_target] = ":" + requested_name
 
-    return requested
+    return struct(
+        requested = requested,
+        selected = selected,
+    )
+
+def _direct_selector_config_settings(name, flag, selectors):
+    selected = {}
+    for selector in selectors:
+        setting_name = "{}_{}_selected".format(
+            name,
+            iree_amdgpu_target_label_fragment(selector),
+        )
+        native.config_setting(
+            name = setting_name,
+            flag_values = {
+                flag: selector,
+            },
+        )
+        selected[selector] = ":" + setting_name
+    return selected
 
 def loom_amdgpu_target_config_settings(
         name,
@@ -187,21 +208,42 @@ def loom_amdgpu_target_config_settings(
     explicit_loom_selectors = [
         selector
         for selector in loom_amdgpu_valid_target_selectors()
-        if selector not in LOOM_AMDGPU_TARGET_SOURCE_SELECTORS
+        if (
+            selector not in LOOM_AMDGPU_TARGET_SOURCE_SELECTORS and
+            selector not in LOOM_AMDGPU_SUPPORTED_CODE_OBJECT_PROCESSORS
+        )
     ]
-    loom_processors = _exact_target_selector_config_settings(
+    loom_selector_settings = _exact_target_selector_config_settings(
         name = "selected_processor",
         flag = flag,
         exact_targets = LOOM_AMDGPU_SUPPORTED_EXACT_PROCESSORS,
         valid_selectors = explicit_loom_selectors,
     )
+    loom_processors = loom_selector_settings.requested
+    loom_generic_selectors = _direct_selector_config_settings(
+        name = "selected_generic_processor",
+        flag = flag,
+        selectors = LOOM_AMDGPU_SUPPORTED_CODE_OBJECT_PROCESSORS,
+    )
     iree_hal_processors = {}
+    iree_hal_generic_selectors = {}
     if iree_hal_flag:
-        iree_hal_processors = _exact_target_selector_config_settings(
+        explicit_iree_hal_selectors = [
+            selector
+            for selector in iree_amdgpu_valid_selectors()
+            if selector not in LOOM_AMDGPU_SUPPORTED_CODE_OBJECT_PROCESSORS
+        ]
+        iree_hal_selector_settings = _exact_target_selector_config_settings(
             name = "iree_hal_selected_processor",
             flag = iree_hal_flag,
             exact_targets = LOOM_AMDGPU_SUPPORTED_EXACT_PROCESSORS,
-            valid_selectors = iree_amdgpu_valid_selectors(),
+            valid_selectors = explicit_iree_hal_selectors,
+        )
+        iree_hal_processors = iree_hal_selector_settings.requested
+        iree_hal_generic_selectors = _direct_selector_config_settings(
+            name = "iree_hal_selected_generic_processor",
+            flag = iree_hal_flag,
+            selectors = LOOM_AMDGPU_SUPPORTED_CODE_OBJECT_PROCESSORS,
         )
 
     for processor in LOOM_AMDGPU_SUPPORTED_EXACT_PROCESSORS:
@@ -240,6 +282,9 @@ def loom_amdgpu_target_config_settings(
         ] + [
             loom_processors[processor]
             for processor in LOOM_AMDGPU_DESCRIPTOR_SET_EXACT_PROCESSORS[capability]
+        ] + [
+            loom_generic_selectors[processor]
+            for processor in LOOM_AMDGPU_DESCRIPTOR_SET_GENERIC_PROCESSORS[capability]
         ]
         if iree_hal_flag:
             iree_hal_capability = _descriptor_set_label(capability, prefix = "iree_hal")
@@ -252,6 +297,9 @@ def loom_amdgpu_target_config_settings(
                 match_any = [
                     iree_hal_processors[processor]
                     for processor in LOOM_AMDGPU_DESCRIPTOR_SET_EXACT_PROCESSORS[capability]
+                ] + [
+                    iree_hal_generic_selectors[processor]
+                    for processor in LOOM_AMDGPU_DESCRIPTOR_SET_GENERIC_PROCESSORS[capability]
                 ],
             )
             selects.config_setting_group(

@@ -12,6 +12,12 @@ package(
 )
 
 iree_py_library(
+    name = "target_map_data",
+    srcs = ["//build_tools/amdgpu:target_map_data.py"],
+    imports = ["../../../../../.."],
+)
+
+iree_py_library(
     name = "target_info",
     srcs = [
         "__init__.py",
@@ -19,6 +25,7 @@ iree_py_library(
         "target_info.py",
     ],
     deps = [
+        ":target_map_data",
         "//loom/py/loom/dialect:shared",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch:package_init",
@@ -57,15 +64,24 @@ iree_py_library(
     name = "matrix_contracts",
     srcs = ["matrix_contracts.py"],
     deps = [
+        ":matrix_formats",
         ":matrix_fragment_layouts",
         "//loom/py/loom/target/arch:package",
     ],
 )
 
 iree_py_library(
+    name = "matrix_formats",
+    srcs = ["matrix_formats.py"],
+)
+
+iree_py_library(
     name = "matrix_fragment_layouts",
     srcs = ["matrix_fragment_layouts.py"],
-    deps = ["//loom/py/loom/target/arch:package"],
+    deps = [
+        ":matrix_formats",
+        "//loom/py/loom/target/arch:package",
+    ],
 )
 
 iree_py_test(
@@ -96,6 +112,7 @@ iree_py_library(
         "descriptors/contracts.py",
         "descriptors/control.py",
         "descriptors/matrix.py",
+        "descriptors/matrix_schedule.py",
         "descriptors/memory.py",
         "descriptors/rdna3.py",
         "descriptors/rdna4.py",
@@ -107,6 +124,7 @@ iree_py_library(
     deps = [
         ":encoding_info",
         ":isa_xml",
+        ":matrix_formats",
         ":target_info",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch:package",
@@ -128,6 +146,7 @@ iree_py_test(
     deps = [
         ":isa_xml",
         ":target_info",
+        ":target_map_data",
     ],
 )
 
@@ -135,6 +154,7 @@ iree_py_test(
     name = "descriptors_test",
     srcs = [
         "descriptor_overlay_test.py",
+        "descriptors/rdna4_test.py",
         "descriptors_test.py",
         "isa_xml_test.py",
         "low_aliases_test.py",
@@ -142,6 +162,7 @@ iree_py_test(
     ],
     args = [
         "loom.target.arch.amdgpu.descriptor_overlay_test",
+        "loom.target.arch.amdgpu.descriptors.rdna4_test",
         "loom.target.arch.amdgpu.descriptors_test",
         "loom.target.arch.amdgpu.low_aliases_test",
     ],

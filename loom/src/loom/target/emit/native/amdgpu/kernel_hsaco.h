@@ -87,9 +87,10 @@ typedef struct loom_amdgpu_kernel_hsaco_write_options_t {
 } loom_amdgpu_kernel_hsaco_write_options_t;
 
 typedef struct loom_amdgpu_kernel_hsaco_contribution_t {
-  // Full AMDHSA target id such as `amdgcn-amd-amdhsa--gfx1100`.
+  // Full AMDHSA target id such as
+  // `amdgcn-amd-amdhsa--gfx11-generic`.
   iree_string_view_t target;
-  // Processor such as `gfx1100`, used for ELF flags and descriptor packing.
+  // Exact or generic processor used for ELF flags and descriptor packing.
   iree_string_view_t processor;
   // Kernel entry metadata, descriptor flags, and encoded native text.
   loom_amdgpu_hsaco_kernel_t kernel;

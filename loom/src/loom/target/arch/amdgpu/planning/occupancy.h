@@ -40,6 +40,10 @@ typedef enum loom_amdgpu_occupancy_limiting_resource_kind_e {
   LOOM_AMDGPU_OCCUPANCY_LIMITING_RESOURCE_REGISTER_CLASS = 1,
   // Occupancy is limited by a derived target pressure resource.
   LOOM_AMDGPU_OCCUPANCY_LIMITING_RESOURCE_PRESSURE_RESOURCE = 2,
+  // Occupancy is limited by wave or barrier slots for fixed workgroups.
+  LOOM_AMDGPU_OCCUPANCY_LIMITING_RESOURCE_WORKGROUP_SLOTS = 3,
+  // Occupancy is limited by local memory reserved for fixed workgroups.
+  LOOM_AMDGPU_OCCUPANCY_LIMITING_RESOURCE_LOCAL_MEMORY = 4,
 } loom_amdgpu_occupancy_limiting_resource_kind_t;
 
 typedef enum loom_amdgpu_occupancy_diagnostic_bits_e {
@@ -72,6 +76,8 @@ typedef struct loom_amdgpu_occupancy_register_class_t {
   uint32_t pool_units;
   // Allocation granularity applied before estimating occupancy.
   uint32_t allocation_granularity;
+  // Whether this class directly limits resident waves.
+  bool limits_occupancy;
   // Maximum resident waves allowed by this register class.
   uint32_t wave_limit;
   // Smallest allocated unit count that would reduce |wave_limit|, or 0 when
@@ -128,7 +134,7 @@ typedef struct loom_amdgpu_occupancy_table_t {
   // Number of waves required by one workgroup, or 0 when the workgroup size is
   // unavailable.
   uint32_t waves_per_workgroup;
-  // Estimated resident waves per SIMD after register limits.
+  // Estimated resident waves per SIMD after register and fixed launch limits.
   uint32_t resident_waves_per_simd;
   // Estimated resident wave occupancy as a percentage of |max_waves_per_simd|.
   uint32_t occupancy_percent;
@@ -186,17 +192,20 @@ iree_status_t loom_amdgpu_occupancy_build(
     const loom_amdgpu_occupancy_options_t* options,
     iree_arena_allocator_t* arena, loom_amdgpu_occupancy_table_t* out_table);
 
-// Builds an AMDGPU occupancy estimate from final target metadata. |arena| is
-// used only as scratch during construction.
+// Builds an AMDGPU occupancy estimate from final target metadata.
+// |flat_workgroup_size| is the exact fixed size or zero when it is unknown.
+// Local-memory occupancy is only applied when the fixed size is available.
+// |arena| is used only as scratch during construction.
 iree_status_t loom_amdgpu_occupancy_build_target_resources(
     const loom_amdgpu_processor_info_t* processor, uint32_t wave_size,
     uint32_t scalar_register_count, uint32_t vector_register_count,
+    uint32_t flat_workgroup_size, uint32_t local_memory_bytes,
     iree_arena_allocator_t* arena,
     loom_amdgpu_occupancy_target_resources_t* out_resources);
 
-// Returns the generated target residency model for |descriptor_set|.
+// Returns the generated target residency model for |target|.
 const loom_target_residency_model_t* loom_amdgpu_occupancy_residency_model(
-    const loom_low_descriptor_set_t* descriptor_set);
+    const loom_low_resolved_target_t* target);
 
 // Appends a compact JSON representation of |table| to |builder|.
 iree_status_t loom_amdgpu_occupancy_format_json(

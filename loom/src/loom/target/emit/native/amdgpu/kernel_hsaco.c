@@ -60,10 +60,15 @@ iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
       .text_fixup_count = stream.text_fixup_count,
   };
   loom_amdgpu_occupancy_target_resources_t target_resources = {0};
+  const uint32_t flat_workgroup_size =
+      record.metadata.has_required_workgroup_size
+          ? record.metadata.max_flat_workgroup_size
+          : 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_build_target_resources(
       record.processor, record.metadata.wavefront_size,
-      record.metadata.sgpr_count, record.metadata.vgpr_count, scratch_arena,
-      &target_resources));
+      record.metadata.sgpr_count, record.metadata.vgpr_count,
+      flat_workgroup_size, record.metadata.group_segment_fixed_size,
+      scratch_arena, &target_resources));
   const loom_amdgpu_kernel_hsaco_target_resources_t hsaco_target_resources = {
       .scalar_register_class = target_resources.scalar_register_class,
       .scalar_register_count = target_resources.scalar_register_count,

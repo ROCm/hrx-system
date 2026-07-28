@@ -15,6 +15,7 @@ from loom.gen.target.arch.amdgpu.descriptors import amdgpu_descriptors
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
     AmdgpuDescriptorSetInfo,
+    AmdgpuDescriptorSetIsaInfo,
 )
 from loom.target.low_descriptors import Descriptor, DescriptorSet
 
@@ -57,9 +58,13 @@ def _descriptor_set_info(
     return AmdgpuDescriptorSetInfo(
         generator_target=target,
         key=f"amdgpu.{target}.core",
-        isa_xml_key="test",
-        isa_architecture_name="AMDGPU Test",
-        isa_architecture_id=0,
+        isa_infos=(
+            AmdgpuDescriptorSetIsaInfo(
+                isa_xml_key="test",
+                isa_architecture_name="AMDGPU Test",
+                isa_architecture_id=1,
+            ),
+        ),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
         storage_generator_target=storage_target,
     )
@@ -78,8 +83,8 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
         parse_calls.append(path)
         return parsed_spec
 
-    def build_descriptor_set(target: str, spec: object) -> DescriptorSet:
-        build_calls.append((target, spec))
+    def build_descriptor_set(target: str, specs: dict[str, object]) -> DescriptorSet:
+        build_calls.append((target, specs))
         descriptor_count = 2 if target == view_target else 1
         return _descriptor_set(target, descriptor_count)
 
@@ -136,7 +141,7 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
         mock.patch.object(amdgpu_descriptors, "parse_amdgpu_isa_xml_path", parse_xml),
         mock.patch.object(
             amdgpu_descriptors,
-            "build_amdgpu_core_descriptor_set_from_spec",
+            "build_amdgpu_core_descriptor_set_from_specs",
             build_descriptor_set,
         ),
         mock.patch.object(
@@ -157,7 +162,7 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
             amdgpu_descriptors.main(
                 [
                     f"--target={storage_target}",
-                    f"--xml={xml_path}",
+                    f"--isa-xml=test:{xml_path}",
                     f"--header={tmp_path / 'test_storage_descriptors.h'}",
                     f"--source={tmp_path / 'test_storage_descriptors.c'}",
                     f"--view-header={view_target}={view_header_path}",
@@ -168,6 +173,6 @@ def test_storage_generation_reuses_parsed_isa_for_declared_views() -> None:
 
     assert parse_calls == [xml_path]
     assert build_calls == [
-        (storage_target, parsed_spec),
-        (view_target, parsed_spec),
+        (storage_target, {"test": parsed_spec}),
+        (view_target, {"test": parsed_spec}),
     ]

@@ -200,20 +200,16 @@ TEST_F(AmdgpuProviderTest, MaterializesSelectedProcessors) {
   ModulePtr module;
   IREE_ASSERT_OK(AllocateModule(IREE_SV("materialize"), &module));
 
-  struct Case {
-    iree_string_view_t processor_name;
-    loom_amdgpu_target_kind_t expected_kind;
-  };
-  static const Case cases[] = {
-      {IREE_SV("gfx942"), LOOM_AMDGPU_TARGET_KIND_GFX942},
-      {IREE_SV("gfx1150"), LOOM_AMDGPU_TARGET_KIND_GFX1150},
-      {IREE_SV("gfx1201"), LOOM_AMDGPU_TARGET_KIND_GFX1200},
-      {IREE_SV("gfx1250"), LOOM_AMDGPU_TARGET_KIND_GFX1250},
-  };
-  for (const Case& c : cases) {
+  for (uint32_t target_kind = 1; target_kind < LOOM_AMDGPU_TARGET_KIND_COUNT_;
+       ++target_kind) {
+    const loom_amdgpu_target_record_info_t* target_record =
+        loom_amdgpu_target_record_info_for_kind(target_kind);
+    ASSERT_NE(target_record, nullptr) << "target kind " << target_kind;
+    EXPECT_EQ(target_record->target_kind, target_kind);
+
     const loom_amdgpu_processor_info_t* processor = nullptr;
-    IREE_ASSERT_OK(
-        loom_amdgpu_target_info_lookup_processor(c.processor_name, &processor));
+    IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_processor(
+        target_record->processor_name, &processor));
     ASSERT_NE(processor, nullptr);
     const loom_target_selection_t selection = {
         /*.bundle=*/loom_amdgpu_target_bundle_for_descriptor_set(
@@ -226,10 +222,9 @@ TEST_F(AmdgpuProviderTest, MaterializesSelectedProcessors) {
         &target_environment_, module.get(), selection, &target_ref));
     const loom_op_t* target_op = TargetOpFromRef(module.get(), target_ref);
     ASSERT_TRUE(loom_amdgpu_target_isa(target_op));
-    EXPECT_EQ(loom_amdgpu_target_kind(target_op), c.expected_kind);
+    EXPECT_EQ(loom_amdgpu_target_kind(target_op), target_kind);
     EXPECT_TRUE(iree_string_view_equal(
-        loom_amdgpu_target_record_processor_name(module.get(), target_op),
-        processor->name));
+        loom_amdgpu_target_record_processor_name(target_op), processor->name));
 
     loom_symbol_ref_t reused_ref = loom_symbol_ref_null();
     IREE_ASSERT_OK(loom_target_environment_materialize_selection(

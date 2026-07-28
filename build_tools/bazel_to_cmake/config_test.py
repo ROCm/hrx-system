@@ -556,6 +556,50 @@ iree_executable_test(
 
         self.assertIn("iree_py_test(", converter.body)
 
+    def test_py_test_preserves_all_sources_and_main(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        converter = SimpleNamespace(body="")
+        functions = _PythonBuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="build_tools/bazel_to_cmake",
+            repo_root=str(repo_root),
+        )
+
+        functions.iree_py_test(
+            name="multi_source_test",
+            srcs=["config_test.py", "bazel_to_cmake_targets_test.py"],
+            main="config_test.py",
+            deps=[],
+        )
+
+        self.assertIn('MAIN\n    "config_test.py"', converter.body)
+        self.assertIn(
+            'SRCS\n    "config_test.py"\n    "bazel_to_cmake_targets_test.py"',
+            converter.body,
+        )
+
+    def test_py_library_resolves_cross_package_sources(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        converter = SimpleNamespace(body="")
+        functions = _PythonBuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="loom/py/loom/example",
+            repo_root=str(repo_root),
+        )
+
+        functions.iree_py_library(
+            name="shared_source",
+            srcs=["//build_tools/bazel_to_cmake:config_test.py"],
+            deps=[],
+        )
+
+        self.assertIn(
+            '"${PROJECT_SOURCE_DIR}/build_tools/bazel_to_cmake/config_test.py"',
+            converter.body,
+        )
+
     def test_py_test_rejects_unlocated_generated_data(self):
         repo_root = Path(__file__).resolve().parents[2]
         converter = SimpleNamespace(body="")
@@ -917,6 +961,25 @@ iree_executable_test(
         self.assertIn("SANITIZER_SUPPRESSIONS", converter.body)
         self.assertIn("    lsan", converter.body)
         self.assertIn("    vulkan", converter.body)
+
+    def test_execution_test_suite_emits_resource_group(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="/repo/pkg",
+            repo_root="/repo",
+        )
+
+        functions.iree_execution_test_suite(
+            name="execution_test",
+            manifests=["test.json"],
+            tools={"runner": "//tools:runner"},
+            resource_group="gpu",
+        )
+
+        self.assertIn("RESOURCE_GROUP", converter.body)
+        self.assertIn("    gpu", converter.body)
 
 
 if __name__ == "__main__":

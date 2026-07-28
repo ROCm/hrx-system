@@ -96,22 +96,24 @@ static iree_status_t loom_run_hal_candidate_emit_selected_target(
 iree_status_t loom_run_hal_candidate_compile(
     const loom_run_hal_artifact_provider_t* provider,
     const loom_run_hal_runtime_t* runtime, loom_run_module_t* run_module,
+    loom_func_like_t function,
     const loom_run_candidate_compile_options_t* options,
     iree_allocator_t allocator, loom_run_hal_candidate_t* out_candidate) {
   iree_status_t status = loom_run_hal_candidate_initialize(
       provider, options, allocator, out_candidate);
-  if (provider->select_device_target == NULL) {
+  if (provider->select_function_device_target == NULL) {
     status = iree_status_join(
         status,
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                          "HAL artifact provider '%.*s' is missing required "
-                         "device target selection hook",
+                         "function device target selection hook",
                          (int)provider->name.size, provider->name.data));
   }
 
   if (iree_status_is_ok(status)) {
-    status = provider->select_device_target(provider, runtime, allocator,
-                                            &out_candidate->device_target);
+    status = provider->select_function_device_target(
+        provider, runtime, run_module->module, function, allocator,
+        &out_candidate->device_target);
     if (iree_status_is_ok(status)) {
       out_candidate->owns_device_target = true;
     }

@@ -45,6 +45,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION,
     AMDGPU_DESCRIPTOR_SET_INFO_KNOWN_FLAGS,
     AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE,
+    AMDGPU_ELF_GENERIC_VERSION_MASK_V6,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ACCUM_OFFSET,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_DX10_CLAMP_AND_IEEE_MODE,
@@ -57,6 +58,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX12,
     AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125,
     AMDGPU_KERNEL_DESCRIPTOR_PROFILE_NONE,
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
@@ -64,6 +66,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_MATRIX_FEATURE_PROFILE_NONE,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
     AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
     AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
@@ -92,6 +95,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     sorted_descriptor_set_infos,
     sorted_processor_infos,
     validate_amdgpu_descriptor_set_isa_xml,
+    validate_amdgpu_generic_contracts,
 )
 
 
@@ -141,9 +145,11 @@ _MATRIX_FEATURE_PROFILE_EXPRS = {
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A",
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940",
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950",
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC",
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11",
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12",
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250",
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC",
 }
 
 _BUFFER_RESOURCE_CACHE_SWIZZLE_EXPRS = {
@@ -562,21 +568,41 @@ def _materialize_descriptor_set_rows(
 ) -> tuple[_AmdgpuDescriptorSetRow, ...]:
     rows: list[_AmdgpuDescriptorSetRow] = []
     for info in descriptor_sets:
-        spec = isa_specs.get(info.isa_xml_key)
-        if spec is None:
-            raise ValueError(f"AMDGPU descriptor set {info.key} references missing ISA XML key '{info.isa_xml_key}'")
-        validate_amdgpu_descriptor_set_isa_xml(info, spec)
-        rows.append(
-            _AmdgpuDescriptorSetRow(
-                info=info,
-                sopp=_AmdgpuSoppOpcodeRow(
+        sopp_rows: list[_AmdgpuSoppOpcodeRow] = []
+        for isa_info in info.isa_infos:
+            spec = isa_specs.get(isa_info.isa_xml_key)
+            if spec is None:
+                raise ValueError(f"AMDGPU descriptor set {info.key} references missing ISA XML key '{isa_info.isa_xml_key}'")
+            if spec.architecture_name != isa_info.isa_architecture_name or spec.architecture_id != isa_info.isa_architecture_id:
+                validate_amdgpu_descriptor_set_isa_xml(info, spec)
+                raise ValueError(
+                    f"{spec.source_name}: AMDGPU descriptor set {info.key} ISA "
+                    f"XML key '{isa_info.isa_xml_key}' does not identify "
+                    f"{isa_info.isa_architecture_name} architecture id "
+                    f"{isa_info.isa_architecture_id}"
+                )
+            sopp_rows.append(
+                _AmdgpuSoppOpcodeRow(
                     nop=_sopp_opcode(spec, "S_NOP"),
                     delay_alu=_sopp_opcode_or_zero(spec, "S_DELAY_ALU"),
                     endpgm=_sopp_opcode(spec, "S_ENDPGM"),
                     branch=_sopp_opcode(spec, "S_BRANCH"),
                     conditional_branch_scc0=_sopp_opcode(spec, "S_CBRANCH_SCC0"),
                     conditional_branch_scc1=_sopp_opcode(spec, "S_CBRANCH_SCC1"),
-                ),
+                )
+            )
+        sopp = sopp_rows[0]
+        for isa_info, member_sopp in zip(
+            info.isa_infos[1:],
+            sopp_rows[1:],
+            strict=True,
+        ):
+            if member_sopp != sopp:
+                raise ValueError(f"AMDGPU descriptor set {info.key} has incompatible S_OPP opcodes across ISA XML keys '{info.isa_infos[0].isa_xml_key}' and '{isa_info.isa_xml_key}'")
+        rows.append(
+            _AmdgpuDescriptorSetRow(
+                info=info,
+                sopp=sopp,
             )
         )
     return tuple(rows)
@@ -599,12 +625,18 @@ def _validate_descriptor_sets(descriptor_sets: Sequence[AmdgpuDescriptorSetInfo]
             raise ValueError("AMDGPU descriptor generator target is required")
         if not info.key:
             raise ValueError("AMDGPU descriptor-set key is required")
-        if not info.isa_xml_key:
-            raise ValueError(f"AMDGPU ISA XML key is required for {info.key}")
-        if not info.isa_architecture_name:
-            raise ValueError(f"AMDGPU ISA XML architecture name is required for {info.key}")
-        if info.isa_architecture_id <= 0:
-            raise ValueError(f"AMDGPU ISA XML architecture id is required for {info.key}")
+        if not info.isa_infos:
+            raise ValueError(f"AMDGPU ISA membership is required for {info.key}")
+        isa_xml_keys = [isa_info.isa_xml_key for isa_info in info.isa_infos]
+        if len(isa_xml_keys) != len(set(isa_xml_keys)):
+            raise ValueError(f"AMDGPU ISA XML keys must be unique for {info.key}")
+        for isa_info in info.isa_infos:
+            if not isa_info.isa_xml_key:
+                raise ValueError(f"AMDGPU ISA XML key is required for {info.key}")
+            if not isa_info.isa_architecture_name:
+                raise ValueError(f"AMDGPU ISA XML architecture name is required for {info.key}")
+            if isa_info.isa_architecture_id <= 0:
+                raise ValueError(f"AMDGPU ISA XML architecture id is required for {info.key}")
         if info.flags < 0 or info.flags > 0xFFFFFFFFFFFFFFFF:
             raise ValueError(f"AMDGPU descriptor-set info flags for {info.key} must fit u64")
         _descriptor_set_info_flags_expr(info.flags)
@@ -618,8 +650,23 @@ def _validate_descriptor_sets(descriptor_sets: Sequence[AmdgpuDescriptorSetInfo]
                 raise ValueError(f"AMDGPU descriptor set {info.key} references unknown storage generator target '{info.storage_generator_target}'")
             if storage_info.storage_generator_target is not None:
                 raise ValueError(f"AMDGPU descriptor set {info.key} uses view-only target '{storage_info.generator_target}' as storage")
-            if storage_info.isa_xml_key != info.isa_xml_key:
-                raise ValueError(f"AMDGPU descriptor set {info.key} storage target '{storage_info.generator_target}' uses ISA XML key '{storage_info.isa_xml_key}', expected '{info.isa_xml_key}'")
+            if not set(storage_info.isa_infos).issubset(info.isa_infos):
+                raise ValueError(f"AMDGPU descriptor set {info.key} storage target '{storage_info.generator_target}' has ISA membership outside the view contract")
+        if info.member_generator_targets:
+            if tuple(sorted(info.member_generator_targets)) != (info.member_generator_targets):
+                raise ValueError(f"AMDGPU descriptor set {info.key} member generator targets must be sorted")
+            if len(info.member_generator_targets) != len(set(info.member_generator_targets)):
+                raise ValueError(f"AMDGPU descriptor set {info.key} member generator targets must be unique")
+            member_isa_infos = []
+            for member_generator_target in info.member_generator_targets:
+                member_info = infos_by_generator_target.get(member_generator_target)
+                if member_info is None:
+                    raise ValueError(f"AMDGPU descriptor set {info.key} references unknown member generator target '{member_generator_target}'")
+                if member_info.member_generator_targets:
+                    raise ValueError(f"AMDGPU descriptor set {info.key} uses generic member target '{member_generator_target}'")
+                member_isa_infos.extend(member_info.isa_infos)
+            if tuple(member_isa_infos) != info.isa_infos:
+                raise ValueError(f"AMDGPU descriptor set {info.key} ISA membership does not match its member generator targets")
         _buffer_resource_cache_swizzle_expr(info.buffer_resource.cache_swizzle)
         _vector_memory_cache_policy_encoding_expr(info.vector_memory.cache_policy_encoding)
         if info.vector_memory.cache_policy_encoding == AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE:
@@ -649,6 +696,8 @@ def _validate_processors(
         raise ValueError("AMDGPU processor target-info keys must be sorted")
     if len(processor_names) != len(set(processor_names)):
         raise ValueError("AMDGPU processor target-info keys must be unique")
+    if len(processors) > 0x10000:
+        raise ValueError("AMDGPU processor target-info rows must fit u16 ordinals")
     descriptor_set_keys = {info.key for info in descriptor_sets}
     for info in processors:
         kernel_descriptor = info.kernel_descriptor
@@ -664,6 +713,13 @@ def _validate_processors(
             raise ValueError(f"AMDGPU ELF feature flags for {info.processor} must fit u32")
         if info.elf.feature_flags & 0x0FF:
             raise ValueError(f"AMDGPU ELF feature flags for {info.processor} must not overlap EF_AMDGPU_MACH")
+        if info.elf.feature_flags & AMDGPU_ELF_GENERIC_VERSION_MASK_V6:
+            raise ValueError(f"AMDGPU ELF feature flags for {info.processor} must not overlap the generic version")
+        if info.elf.generic_version < 0 or info.elf.generic_version > 0xFF:
+            raise ValueError(f"AMDGPU ELF generic version for {info.processor} must fit u8")
+        is_generic_processor = info.processor.endswith("-generic")
+        if is_generic_processor != (info.elf.generic_version != 0):
+            raise ValueError(f"AMDGPU processor {info.processor} generic identity and ELF generic version disagree")
         if info.flags < 0 or info.flags > 0xFFFFFFFF:
             raise ValueError(f"AMDGPU processor info flags for {info.processor} must fit u32")
         _processor_info_flags_expr(info.flags)
@@ -698,6 +754,7 @@ def _validate_processors(
         if info.features.scheduling < 0 or info.features.scheduling > 0xFFFFFFFF:
             raise ValueError(f"AMDGPU scheduling bits for {info.processor} must fit u32")
         _processor_scheduling_bits_expr(info.features.scheduling)
+    validate_amdgpu_generic_contracts(processors, descriptor_sets)
 
 
 def _emit_header(descriptor_sets: Sequence[AmdgpuDescriptorSetInfo]) -> str:
@@ -810,12 +867,13 @@ def _emit_processor_rows(processors: Sequence[AmdgpuProcessorInfo]) -> list[str]
     lines = [
         "const loom_amdgpu_processor_info_t loom_amdgpu_target_info_processor_infos[] = {",
     ]
-    for info in processors:
+    for processor_ordinal, info in enumerate(processors):
         kernel_descriptor = info.kernel_descriptor
         lines.extend(
             [
                 "  {",
                 f"    .name = IREE_SVL({_c_string_arg(info.processor)}),",
+                f"    .ordinal = {_u16_expr(processor_ordinal)},",
                 f"    .flags = {_processor_info_flags_expr(info.flags)},",
                 "    .descriptor_set = {",
                 f"      .key = IREE_SVL({_c_string_arg(info.descriptor_set.key)}),",
@@ -824,6 +882,7 @@ def _emit_processor_rows(processors: Sequence[AmdgpuProcessorInfo]) -> list[str]
                 "    .elf = {",
                 f"      .machine_flags = UINT32_C(0x{info.elf.machine_flags:03x}),",
                 f"      .feature_flags = UINT32_C(0x{info.elf.feature_flags:x}),",
+                f"      .generic_version = UINT32_C({info.elf.generic_version}),",
                 "    },",
                 "    .wavefront = {",
                 f"      .default_size = {info.wavefront.default_size},",

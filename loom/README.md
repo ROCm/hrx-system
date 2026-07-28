@@ -156,9 +156,12 @@ Offline synthetic AMDGPU processor profile:
 
 ```bash
 python dev.py bazel run //loom/binding/c/example:emit_amdgpu_offline -- \
-  gfx1100 \
+  gfx11-generic \
   /tmp/targetless_store_i32.hsaco
 ```
+
+The generic target emits a portable GFX11 code object. Pass `gfx1151` instead
+when the artifact should be specialized for that exact processor.
 
 Raw HSA probing, HSACO emission, code-object loading, and one kernel dispatch
 without the IREE HAL:

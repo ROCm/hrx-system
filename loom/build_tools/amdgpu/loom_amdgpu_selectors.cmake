@@ -63,6 +63,10 @@ function(_loom_amdgpu_expand_iree_hal_target_selectors out_targets)
       "IREE_HAL_AMDGPU_TARGETS is not defined.")
   endif()
   foreach(_iree_hal_selector ${IREE_HAL_AMDGPU_TARGETS})
+    if("${_iree_hal_selector}" IN_LIST
+        _LOOM_AMDGPU_SUPPORTED_CODE_OBJECT_PROCESSORS)
+      continue()
+    endif()
     _loom_amdgpu_append_supported_exact_selector(
       _expanded_targets
       "${_iree_hal_selector}"
@@ -82,6 +86,8 @@ function(loom_amdgpu_expand_target_selectors out_targets)
         _iree_hal_exact_targets
       )
       list(APPEND _expanded_targets ${_iree_hal_exact_targets})
+    elseif("${_selector}" IN_LIST _LOOM_AMDGPU_SUPPORTED_CODE_OBJECT_PROCESSORS)
+      # Generic selectors select their compiler contract directly.
     else()
       _loom_amdgpu_append_explicit_exact_selector(
         _expanded_targets
@@ -101,10 +107,16 @@ function(_loom_amdgpu_exact_target_selected out_var targets_var processor)
   set(${out_var} "${_selected}" PARENT_SCOPE)
 endfunction()
 
-function(_loom_amdgpu_descriptor_set_selected out_var targets_var capability)
+function(_loom_amdgpu_descriptor_set_selected
+    out_var exact_targets_var generic_targets_var capability)
   set(_selected OFF)
   foreach(_processor ${_LOOM_AMDGPU_DESCRIPTOR_SET_EXACT_PROCESSORS_${capability}})
-    if("${_processor}" IN_LIST ${targets_var})
+    if("${_processor}" IN_LIST ${exact_targets_var})
+      set(_selected ON)
+    endif()
+  endforeach()
+  foreach(_processor ${_LOOM_AMDGPU_DESCRIPTOR_SET_GENERIC_PROCESSORS_${capability}})
+    if("${_processor}" IN_LIST ${generic_targets_var})
       set(_selected ON)
     endif()
   endforeach()
@@ -120,6 +132,23 @@ function(loom_amdgpu_configure_target_selectors)
     _loom_amdgpu_exact_targets
     ${LOOM_TARGET_AMDGPU_TARGETS}
   )
+  set(_loom_amdgpu_generic_targets)
+  foreach(_selector ${LOOM_TARGET_AMDGPU_TARGETS})
+    if("${_selector}" STREQUAL "${LOOM_AMDGPU_TARGET_SOURCE_LOOM_DEFAULTS}")
+      list(APPEND _loom_amdgpu_generic_targets
+        ${_LOOM_AMDGPU_SUPPORTED_CODE_OBJECT_PROCESSORS})
+    elseif("${_selector}" STREQUAL "${LOOM_AMDGPU_TARGET_SOURCE_IREE_HAL}")
+      foreach(_iree_hal_selector ${IREE_HAL_AMDGPU_TARGETS})
+        if("${_iree_hal_selector}" IN_LIST
+            _LOOM_AMDGPU_SUPPORTED_CODE_OBJECT_PROCESSORS)
+          list(APPEND _loom_amdgpu_generic_targets "${_iree_hal_selector}")
+        endif()
+      endforeach()
+    elseif("${_selector}" IN_LIST _LOOM_AMDGPU_SUPPORTED_CODE_OBJECT_PROCESSORS)
+      list(APPEND _loom_amdgpu_generic_targets "${_selector}")
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES _loom_amdgpu_generic_targets)
 
   if(DEFINED IREE_HAL_AMDGPU_TARGETS)
     _loom_amdgpu_expand_iree_hal_target_selectors(
@@ -128,6 +157,12 @@ function(loom_amdgpu_configure_target_selectors)
   else()
     set(_loom_amdgpu_iree_hal_exact_targets)
   endif()
+  set(_loom_amdgpu_iree_hal_generic_targets)
+  foreach(_selector ${IREE_HAL_AMDGPU_TARGETS})
+    if("${_selector}" IN_LIST _LOOM_AMDGPU_SUPPORTED_CODE_OBJECT_PROCESSORS)
+      list(APPEND _loom_amdgpu_iree_hal_generic_targets "${_selector}")
+    endif()
+  endforeach()
 
   foreach(_processor ${_LOOM_AMDGPU_SUPPORTED_EXACT_PROCESSORS})
     string(TOUPPER "${_processor}" _processor_upper)
@@ -152,12 +187,14 @@ function(loom_amdgpu_configure_target_selectors)
     _loom_amdgpu_descriptor_set_selected(
       _selected
       _loom_amdgpu_exact_targets
+      _loom_amdgpu_generic_targets
       "${_capability}"
     )
     set("LOOM_TARGET_AMDGPU_${_capability_upper}" "${_selected}" PARENT_SCOPE)
     _loom_amdgpu_descriptor_set_selected(
       _iree_hal_selected
       _loom_amdgpu_iree_hal_exact_targets
+      _loom_amdgpu_iree_hal_generic_targets
       "${_capability}"
     )
     set("LOOM_TARGET_AMDGPU_IREE_HAL_${_capability_upper}"

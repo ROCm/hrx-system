@@ -80,22 +80,22 @@ def _topk_gate_input(tilelang: Any, T: Any, *, target: str) -> TileLangImportInp
 
 # ====
 @tilelang_case(
-    name="tilekernels_topk_gate_gfx1100",
+    name="tilekernels_topk_gate_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "moe", "topk", "amdgpu"),
 )
-def tilekernels_topk_gate_gfx1100(
+def tilekernels_topk_gate_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
-    return _topk_gate_input(tilelang, T, target="hip -mcpu=gfx1100")
+    return _topk_gate_input(tilelang, T, target="hip -mcpu=gfx11-generic")
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("topk_gate_kernel") @topk_gate_kernel(%num_tokens: i32) {
+kernel.def target(@hip_mcpu_gfx11_generic) export("topk_gate_kernel") @topk_gate_kernel(%num_tokens: i32) {
   %num_tokens_idx = index.cast %num_tokens : i32 to index
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index

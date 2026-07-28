@@ -101,7 +101,8 @@ typedef struct loom_target_artifact_manifest_target_t {
   iree_string_view_t name;
   // Optional target family, such as "amdgpu", "spirv", "wasm", or "x86".
   iree_string_view_t family;
-  // Optional processor or architecture spelling, such as "gfx1100".
+  // Optional exact or generic processor spelling, such as "gfx1151" or
+  // "gfx11-generic".
   iree_string_view_t processor;
   // Optional target triple spelling.
   iree_string_view_t triple;

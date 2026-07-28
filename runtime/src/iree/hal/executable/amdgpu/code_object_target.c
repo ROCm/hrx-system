@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/drivers/amdgpu/util/code_object_target.h"
+#include "iree/hal/executable/amdgpu/code_object_target.h"
 
 #include <string.h>
 

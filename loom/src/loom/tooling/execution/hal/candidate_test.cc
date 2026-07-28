@@ -85,6 +85,16 @@ iree_status_t FakeHalSelectDeviceTarget(
   return iree_ok_status();
 }
 
+iree_status_t FakeHalSelectFunctionDeviceTarget(
+    const loom_run_hal_artifact_provider_t* provider,
+    const loom_run_hal_runtime_t* runtime, const loom_module_t* module,
+    loom_func_like_t function, iree_allocator_t allocator,
+    loom_run_hal_device_target_t* out_target) {
+  (void)module;
+  (void)function;
+  return FakeHalSelectDeviceTarget(provider, runtime, allocator, out_target);
+}
+
 iree_status_t FakeHalEmitArtifact(
     const loom_run_hal_artifact_provider_t* provider, loom_module_t* module,
     const loom_run_hal_device_target_t* target,
@@ -150,6 +160,7 @@ const loom_run_hal_artifact_provider_t kFakeHalArtifactProvider = {
     /*.target_family_name=*/IREE_SVL("fake"),
     /*.default_pipeline_options=*/{},
     /*.select_device_target=*/FakeHalSelectDeviceTarget,
+    /*.select_function_device_target=*/FakeHalSelectFunctionDeviceTarget,
     /*.select_target_key=*/{},
     /*.deinitialize_device_target=*/{},
     /*.emit_artifact=*/FakeHalEmitArtifact,
@@ -193,6 +204,24 @@ class HalCandidateTest : public ::testing::Test {
     out_options->source_resolver = loom_run_module_source_resolver(run_module);
   }
 
+  loom_func_like_t FindFunction(const loom_run_module_t* run_module,
+                                iree_string_view_t name) {
+    const loom_string_id_t name_id =
+        loom_module_lookup_string(run_module->module, name);
+    if (name_id == LOOM_STRING_ID_INVALID) {
+      return {};
+    }
+    const loom_symbol_id_t symbol_id =
+        loom_module_find_symbol(run_module->module, name_id);
+    if (symbol_id == LOOM_SYMBOL_ID_INVALID ||
+        symbol_id >= run_module->module->symbols.count) {
+      return {};
+    }
+    return loom_func_like_cast(
+        run_module->module,
+        run_module->module->symbols.entries[symbol_id].defining_op);
+  }
+
   loom_run_session_t session_ = {};
 };
 
@@ -210,7 +239,8 @@ TEST_F(HalCandidateTest, CompileHalExecutableCandidate) {
   g_fake_hal_expect_module_target = false;
   g_fake_hal_emit_report = nullptr;
   IREE_ASSERT_OK(loom_run_hal_candidate_compile(
-      &kFakeHalArtifactProvider, FakeHalRuntime(), &run_module, &options,
+      &kFakeHalArtifactProvider, FakeHalRuntime(), &run_module,
+      FindFunction(&run_module, IREE_SV("empty")), &options,
       iree_allocator_system(), &candidate));
   EXPECT_TRUE(g_fake_hal_emit_was_called);
   EXPECT_EQ(g_fake_hal_emit_report, &candidate.compile_report);
@@ -261,7 +291,8 @@ TEST_F(HalCandidateTest, CompileHalExecutableCandidateWithoutReport) {
   g_fake_hal_expect_module_target = false;
   g_fake_hal_emit_report = nullptr;
   IREE_ASSERT_OK(loom_run_hal_candidate_compile(
-      &kFakeHalArtifactProvider, FakeHalRuntime(), &run_module, &options,
+      &kFakeHalArtifactProvider, FakeHalRuntime(), &run_module,
+      FindFunction(&run_module, IREE_SV("empty")), &options,
       iree_allocator_system(), &candidate));
   EXPECT_TRUE(g_fake_hal_emit_was_called);
   EXPECT_EQ(g_fake_hal_emit_report, nullptr);
@@ -322,8 +353,9 @@ TEST_F(HalCandidateTest, CompileHalRequiresHooks) {
   loom_run_hal_candidate_t candidate = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_run_hal_candidate_compile(
-                            &provider, FakeHalRuntime(), &run_module, &options,
-                            iree_allocator_system(), &candidate));
+                            &provider, FakeHalRuntime(), &run_module,
+                            FindFunction(&run_module, IREE_SV("empty")),
+                            &options, iree_allocator_system(), &candidate));
   EXPECT_EQ(candidate.provider, nullptr);
   EXPECT_EQ(report.artifact_kind,
             LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_EXECUTABLE);

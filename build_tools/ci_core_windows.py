@@ -89,7 +89,7 @@ ARTIFACT_SETS = {
     "core-with-upstream-hip": {
         "sysdeps": ["lib", "dev"],
         "base": ["lib", "run", "dev"],
-        "amd-llvm": ["lib", "run"],
+        "amd-llvm": ["lib", "run", "dev"],
         "core-hip": ["lib", "run", "dev"],
         "core-hipinfo": ["run"],
         "core-kpack": ["lib", "dev"],

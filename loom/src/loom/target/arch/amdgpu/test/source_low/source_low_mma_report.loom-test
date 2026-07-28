@@ -1,6 +1,6 @@
 // RUN: pass-report scf-to-cfg,cfg-simplify,source-to-low,low-dce
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_fixed_trip_matrix_loop(%lhs_data: vector<16xbf16>, %rhs_data: vector<16xbf16>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %zero = index.constant 0 : index

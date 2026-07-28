@@ -93,6 +93,7 @@ loom_check_test_suite(
     "test/assembly_wmma.loom-test"
     "test/packet.loom-test"
     "test/packet_json.loom-test"
+    "test/spill_lowering.loom-test"
     "test/vopd_plan.loom-test"
     "test/wait_plan.loom-test"
     "test/wait_states.loom-test"
@@ -192,30 +193,6 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_cc_test(
-  NAME
-    spill_lowering_test
-  SRCS
-    "spill_lowering_test.cc"
-  DEPS
-    ::spill_lowering
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::codegen::low::builder
-    loom::ir
-    loom::ops::low
-    loom::target::arch::amdgpu::descriptors::low_registry
-    loom::target::arch::amdgpu::error_defs
-    loom::target::arch::amdgpu::refs::target_refs
-    loom::testing::diagnostic_matchers
-  LABELS
-    "iree-build-requirement=loom.target.arch.amdgpu"
-    "iree-build-requirement=loom.emit.amdgpu"
-)
-endif()
-
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_cc_library(
   NAME
@@ -255,35 +232,6 @@ loom_cc_library(
     loom::target::arch::amdgpu::target_info
     loom::target::emit::native::fragment
   PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_cc_test(
-  NAME
-    encoding_test
-  SRCS
-    "encoding_test.cc"
-  DEPS
-    ::encoding
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::codegen::low::frame
-    loom::codegen::low::function
-    loom::codegen::low::text_asm
-    loom::codegen::low::verify
-    loom::error::diagnostic
-    loom::format::text::parser
-    loom::ir
-    loom::ops::low
-    loom::target::arch::amdgpu::descriptors::low_registry
-    loom::target::arch::amdgpu::ops
-    loom::target::arch::amdgpu::planning::packet_plan
-    loom::target::low_descriptor_registry
-  LABELS
-    "iree-build-requirement=loom.target.arch.amdgpu"
-    "iree-build-requirement=loom.emit.amdgpu"
 )
 endif()
 
@@ -491,7 +439,6 @@ loom_cc_library(
     loom::ops::global
     loom::ops::low
     loom::ops::target
-    loom::target::arch::amdgpu::error_defs
     loom::target::arch::amdgpu::hal::kernel_abi
     loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::ops
@@ -537,7 +484,6 @@ loom_cc_test(
     loom::ops::sanitizer
     loom::sanitizer::site_table
     loom::target::arch::amdgpu::descriptors::low_registry
-    loom::target::arch::amdgpu::error_defs
     loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::planning::wait_counters
     loom::target::arch::amdgpu::provider
@@ -603,6 +549,7 @@ loom_cc_test(
     ::metadata
     iree::base
     iree::base::internal::arena
+    iree::hal::executable::amdgpu::code_object_target
     iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main

@@ -3329,8 +3329,8 @@ iree_status_t loom_amdgpu_wait_plan_build(
       .schedule = schedule,
       .allocation = allocation,
       .arena = arena,
-      .processor = loom_amdgpu_target_processor_from_resolved_target(
-          schedule->module, &schedule->target),
+      .processor =
+          loom_amdgpu_target_processor_from_resolved_target(&schedule->target),
   };
   loom_amdgpu_wait_packet_analyze_target(schedule->target.descriptor_set,
                                          &builder.wait_packet_target);

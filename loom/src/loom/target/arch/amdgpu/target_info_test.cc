@@ -6,129 +6,55 @@
 
 #include "loom/target/arch/amdgpu/target_info.h"
 
-#include <string>
-
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
-
-using SchedulingBits = loom_amdgpu_processor_scheduling_bits_t;
-using KernelDescriptorFlags = loom_amdgpu_kernel_descriptor_abi_flags_t;
-using WavefrontSizeFlags = loom_amdgpu_wavefront_size_flags_t;
-
-static constexpr KernelDescriptorFlags kCdnaGfx9DescriptorFlags =
-    LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH |
-    LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ACCUM_OFFSET |
-    LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_DX10_CLAMP_AND_IEEE_MODE |
-    LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID;
-
-static constexpr KernelDescriptorFlags kRdna3DescriptorFlags =
-    LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH |
-    LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_GFX10_SGPR_ENCODING |
-    LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_DX10_CLAMP_AND_IEEE_MODE |
-    LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID;
-
-static constexpr KernelDescriptorFlags kRdna4DescriptorFlags =
-    LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH |
-    LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_GFX10_SGPR_ENCODING |
-    LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID;
-
-static void ExpectDescriptorSet(const loom_amdgpu_processor_info_t* processor,
-                                iree_string_view_t expected_key,
-                                uint16_t expected_ordinal) {
-  EXPECT_TRUE(
-      iree_string_view_equal(processor->descriptor_set.key, expected_key));
-  EXPECT_EQ(processor->descriptor_set.ordinal, expected_ordinal);
-}
-
-static void ExpectKernelDescriptor(
-    const loom_amdgpu_processor_info_t* processor,
-    loom_amdgpu_kernel_descriptor_profile_t expected_profile,
-    uint32_t expected_wave32_vgpr_granule,
-    uint32_t expected_wave64_vgpr_granule,
-    KernelDescriptorFlags expected_flags) {
-  EXPECT_EQ(processor->kernel_descriptor.profile, expected_profile);
-  EXPECT_EQ(processor->kernel_descriptor.vgpr_granules.wave32,
-            expected_wave32_vgpr_granule);
-  EXPECT_EQ(processor->kernel_descriptor.vgpr_granules.wave64,
-            expected_wave64_vgpr_granule);
-  EXPECT_EQ(processor->kernel_descriptor.flags, expected_flags);
-}
-
-static void ExpectSchedulingBits(const loom_amdgpu_processor_info_t* processor,
-                                 SchedulingBits expected_scheduling_bits) {
-  EXPECT_EQ(processor->features.scheduling, expected_scheduling_bits);
-}
-
-TEST(AmdgpuTargetInfoTest, LooksUpGfx11Processor) {
-  const loom_amdgpu_processor_info_t* processor = nullptr;
-  IREE_ASSERT_OK(
-      loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx1100"), &processor));
-  ASSERT_NE(processor, nullptr);
-  ExpectDescriptorSet(processor, IREE_SV("amdgpu.rdna3.core"),
-                      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3);
-  EXPECT_NE(processor->elf.machine_flags, 0u);
-  EXPECT_EQ(processor->wavefront.default_size, 32u);
-  ExpectKernelDescriptor(processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11,
-                         8, 4, kRdna3DescriptorFlags);
-  ExpectSchedulingBits(
-      processor,
-      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
-}
-
-TEST(AmdgpuTargetInfoTest, LooksUpGfx1150Processor) {
-  const loom_amdgpu_processor_info_t* processor = nullptr;
-  IREE_ASSERT_OK(
-      loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx1150"), &processor));
-  ASSERT_NE(processor, nullptr);
-  ExpectDescriptorSet(processor, IREE_SV("amdgpu.rdna3_5.core"),
-                      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3_5);
-  EXPECT_EQ(processor->elf.machine_flags, 0x043u);
-  EXPECT_EQ(processor->wavefront.default_size, 32u);
-  ExpectKernelDescriptor(processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11,
-                         8, 4, kRdna3DescriptorFlags);
-  EXPECT_EQ(processor->features.matrix,
-            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12);
-  ExpectSchedulingBits(
-      processor,
-      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
-}
 
 TEST(AmdgpuTargetInfoTest, IteratesProcessors) {
   const iree_host_size_t count = loom_amdgpu_target_info_processor_count();
   ASSERT_GT(count, 0u);
   EXPECT_EQ(loom_amdgpu_target_info_processor_at(count), nullptr);
 
-  const loom_amdgpu_processor_info_t* first =
-      loom_amdgpu_target_info_processor_at(0);
-  ASSERT_NE(first, nullptr);
-  EXPECT_FALSE(iree_string_view_is_empty(first->name));
+  for (iree_host_size_t index = 0; index < count; ++index) {
+    const loom_amdgpu_processor_info_t* processor =
+        loom_amdgpu_target_info_processor_at(index);
+    ASSERT_NE(processor, nullptr);
+    EXPECT_FALSE(iree_string_view_is_empty(processor->name));
+    EXPECT_EQ(processor->ordinal, index);
+
+    const loom_amdgpu_processor_info_t* found_processor = nullptr;
+    IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_processor(processor->name,
+                                                            &found_processor));
+    EXPECT_EQ(found_processor, processor);
+    EXPECT_EQ(processor->elf.generic_version != 0,
+              iree_string_view_ends_with(processor->name, IREE_SV("-generic")));
+  }
 }
 
-TEST(AmdgpuTargetInfoTest, LooksUpDescriptorSetEncodingProfile) {
-  const loom_amdgpu_descriptor_set_info_t* descriptor_set = nullptr;
-  IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_descriptor_set(
-      IREE_SV("amdgpu.cdna3.core"), &descriptor_set));
-  ASSERT_NE(descriptor_set, nullptr);
-  ASSERT_EQ(descriptor_set->ordinal, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3);
-  const loom_amdgpu_descriptor_set_info_t* descriptor_set_by_ordinal = nullptr;
-  IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_descriptor_set_by_ordinal(
-      descriptor_set->ordinal, &descriptor_set_by_ordinal));
-  EXPECT_EQ(descriptor_set_by_ordinal, descriptor_set);
-  EXPECT_NE(descriptor_set->sopp.endpgm, 0u);
-  EXPECT_TRUE(loom_amdgpu_descriptor_set_info_has_flags(
-      descriptor_set,
-      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING));
-  EXPECT_EQ(descriptor_set->buffer_resource.cache_swizzle,
-            LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE);
-  EXPECT_EQ(descriptor_set->vector_memory.cache_policy_encoding,
-            LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1);
-  EXPECT_EQ(descriptor_set->sopp.delay_alu, 0u);
+TEST(AmdgpuTargetInfoTest, IteratesDescriptorSets) {
+  const iree_host_size_t count = loom_amdgpu_target_info_descriptor_set_count();
+  ASSERT_GT(count, 0u);
+  EXPECT_EQ(loom_amdgpu_target_info_descriptor_set_at((uint16_t)count),
+            nullptr);
+
+  for (uint16_t ordinal = 0; ordinal < count; ++ordinal) {
+    const loom_amdgpu_descriptor_set_info_t* descriptor_set =
+        loom_amdgpu_target_info_descriptor_set_at(ordinal);
+    ASSERT_NE(descriptor_set, nullptr);
+    EXPECT_EQ(descriptor_set->ordinal, ordinal);
+    EXPECT_FALSE(iree_string_view_is_empty(descriptor_set->key));
+
+    const loom_amdgpu_descriptor_set_info_t* found_by_key = nullptr;
+    IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_descriptor_set(
+        descriptor_set->key, &found_by_key));
+    EXPECT_EQ(found_by_key, descriptor_set);
+
+    const loom_amdgpu_descriptor_set_info_t* found_by_ordinal = nullptr;
+    IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_descriptor_set_by_ordinal(
+        ordinal, &found_by_ordinal));
+    EXPECT_EQ(found_by_ordinal, descriptor_set);
+  }
 }
 
 TEST(AmdgpuTargetInfoTest, DescriptorSetAtReturnsNullForUnknownOrdinal) {
@@ -154,174 +80,6 @@ TEST(AmdgpuTargetInfoTest, RejectsUnsupportedDescriptorSetOrdinal) {
       loom_amdgpu_target_info_lookup_descriptor_set_by_ordinal(
           UINT16_MAX - 1, &descriptor_set));
   EXPECT_EQ(descriptor_set, nullptr);
-}
-
-TEST(AmdgpuTargetInfoTest, DescriptorSetDelayAluOpcodesMatchRdnaFamilies) {
-  const struct {
-    uint16_t descriptor_set_ordinal;
-    uint16_t expected_delay_alu_opcode;
-  } cases[] = {
-      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3, 0x000u},
-      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3, 0x007u},
-      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3_5, 0x007u},
-      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4, 0x007u},
-      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X, 0x007u},
-  };
-  for (const auto& c : cases) {
-    const loom_amdgpu_descriptor_set_info_t* descriptor_set =
-        loom_amdgpu_target_info_descriptor_set_at(c.descriptor_set_ordinal);
-    ASSERT_NE(descriptor_set, nullptr);
-    EXPECT_EQ(descriptor_set->sopp.delay_alu, c.expected_delay_alu_opcode);
-  }
-}
-
-TEST(AmdgpuTargetInfoTest, DescriptorSetVopdSupportMatchesPacketFamilies) {
-  const struct {
-    uint16_t descriptor_set_ordinal;
-    bool supports_vopd;
-  } cases[] = {
-      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3, false},
-      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3, true},
-      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3_5, false},
-      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4, true},
-      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X, true},
-      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA4, false},
-  };
-  for (const auto& c : cases) {
-    const loom_amdgpu_descriptor_set_info_t* descriptor_set =
-        loom_amdgpu_target_info_descriptor_set_at(c.descriptor_set_ordinal);
-    ASSERT_NE(descriptor_set, nullptr);
-    EXPECT_EQ(loom_amdgpu_descriptor_set_info_supports_vopd(descriptor_set),
-              c.supports_vopd);
-  }
-}
-
-TEST(AmdgpuTargetInfoTest, LooksUpGfx942Processor) {
-  const loom_amdgpu_processor_info_t* processor = nullptr;
-  IREE_ASSERT_OK(
-      loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx942"), &processor));
-  ASSERT_NE(processor, nullptr);
-  ExpectDescriptorSet(processor, IREE_SV("amdgpu.cdna3.core"),
-                      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3);
-  EXPECT_EQ(processor->elf.machine_flags, 0x04Cu);
-  EXPECT_EQ(processor->elf.feature_flags, 0x500u);
-  EXPECT_EQ(processor->wavefront.default_size, 64u);
-  ExpectKernelDescriptor(processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX9,
-                         8, 8, kCdnaGfx9DescriptorFlags);
-  EXPECT_EQ(processor->features.matrix,
-            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940);
-  ExpectSchedulingBits(
-      processor,
-      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
-}
-
-TEST(AmdgpuTargetInfoTest, LooksUpGfx950Processor) {
-  const loom_amdgpu_processor_info_t* processor = nullptr;
-  IREE_ASSERT_OK(
-      loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx950"), &processor));
-  ASSERT_NE(processor, nullptr);
-  ExpectDescriptorSet(processor, IREE_SV("amdgpu.cdna4.core"),
-                      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA4);
-  ExpectKernelDescriptor(processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX9,
-                         8, 8, kCdnaGfx9DescriptorFlags);
-  EXPECT_EQ(processor->features.matrix,
-            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950);
-  ExpectSchedulingBits(
-      processor,
-      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
-}
-
-TEST(AmdgpuTargetInfoTest, Gfx94xMatrixProfileMatchesProcessorSupport) {
-  struct Case {
-    iree_string_view_t processor_name;
-    loom_amdgpu_matrix_feature_profile_t expected_matrix_profile;
-    bool supports_hsaco;
-  };
-  static const Case cases[] = {
-      {IREE_SV("gfx940"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE, false},
-      {IREE_SV("gfx941"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE, false},
-      {IREE_SV("gfx942"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940, true},
-  };
-  for (const Case& c : cases) {
-    const loom_amdgpu_processor_info_t* processor = nullptr;
-    IREE_ASSERT_OK(
-        loom_amdgpu_target_info_lookup_processor(c.processor_name, &processor));
-    ASSERT_NE(processor, nullptr);
-    EXPECT_EQ(processor->features.matrix, c.expected_matrix_profile)
-        << std::string(c.processor_name.data, c.processor_name.size);
-    EXPECT_EQ(loom_amdgpu_processor_supports_hsaco(processor), c.supports_hsaco)
-        << std::string(c.processor_name.data, c.processor_name.size);
-  }
-}
-
-TEST(AmdgpuTargetInfoTest, WavefrontSizeSupportMatchesGfxFamilies) {
-  struct Case {
-    iree_string_view_t processor_name;
-    bool supports_wave32;
-    bool supports_wave64;
-  };
-  static const Case cases[] = {
-      {IREE_SV("gfx90a"), false, false}, {IREE_SV("gfx942"), false, true},
-      {IREE_SV("gfx950"), false, true},  {IREE_SV("gfx1100"), true, true},
-      {IREE_SV("gfx1200"), true, true},  {IREE_SV("gfx1250"), true, false},
-  };
-  for (const Case& c : cases) {
-    const loom_amdgpu_processor_info_t* processor = nullptr;
-    IREE_ASSERT_OK(
-        loom_amdgpu_target_info_lookup_processor(c.processor_name, &processor));
-    ASSERT_NE(processor, nullptr);
-    const WavefrontSizeFlags expected_supported_sizes =
-        (c.supports_wave32 ? LOOM_AMDGPU_WAVEFRONT_SIZE_FLAG_32 : 0) |
-        (c.supports_wave64 ? LOOM_AMDGPU_WAVEFRONT_SIZE_FLAG_64 : 0);
-    EXPECT_EQ(processor->wavefront.supported_sizes, expected_supported_sizes)
-        << std::string(c.processor_name.data, c.processor_name.size);
-    EXPECT_EQ(loom_amdgpu_processor_supports_wavefront_size(processor, 32),
-              c.supports_wave32)
-        << std::string(c.processor_name.data, c.processor_name.size);
-    EXPECT_EQ(loom_amdgpu_processor_supports_wavefront_size(processor, 64),
-              c.supports_wave64)
-        << std::string(c.processor_name.data, c.processor_name.size);
-    EXPECT_FALSE(loom_amdgpu_processor_supports_wavefront_size(processor, 0));
-  }
-}
-
-TEST(AmdgpuTargetInfoTest, LooksUpGfx1200Processor) {
-  const loom_amdgpu_processor_info_t* processor = nullptr;
-  IREE_ASSERT_OK(
-      loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx1200"), &processor));
-  ASSERT_NE(processor, nullptr);
-  ExpectDescriptorSet(processor, IREE_SV("amdgpu.rdna4.core"),
-                      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4);
-  ExpectKernelDescriptor(processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX12,
-                         8, 4, kRdna4DescriptorFlags);
-  EXPECT_EQ(processor->features.matrix,
-            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12);
-  ExpectSchedulingBits(processor,
-                       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR |
-                           LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU);
-}
-
-TEST(AmdgpuTargetInfoTest, LooksUpGfx1250Processor) {
-  const loom_amdgpu_processor_info_t* processor = nullptr;
-  IREE_ASSERT_OK(
-      loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx1250"), &processor));
-  ASSERT_NE(processor, nullptr);
-  ExpectDescriptorSet(processor, IREE_SV("amdgpu.rdna4.gfx125x.core"),
-                      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X);
-  ExpectKernelDescriptor(processor,
-                         LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125, 16, 8,
-                         kRdna4DescriptorFlags);
-  EXPECT_EQ(processor->features.matrix,
-            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250);
-  EXPECT_TRUE(iree_any_bit_set(
-      processor->flags, LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE));
-  ExpectSchedulingBits(processor, LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU);
 }
 
 TEST(AmdgpuTargetInfoTest, MatchesAmdhsaGfx9PlusProcessorElfFlags) {
@@ -374,55 +132,23 @@ TEST(AmdgpuTargetInfoTest, MatchesAmdhsaGfx9PlusProcessorElfFlags) {
       {IREE_SV("gfx11-generic"), 0x01000054u},
       {IREE_SV("gfx12-generic"), 0x01000059u},
       {IREE_SV("gfx9-4-generic"), 0x0100055Fu},
-      {IREE_SV("gfx12-5-generic"), 0x0100005Bu},
+      {IREE_SV("gfx12-5-generic"), 0x0100055Bu},
   };
+  ASSERT_EQ(IREE_ARRAYSIZE(cases), loom_amdgpu_target_info_processor_count());
   for (const auto& c : cases) {
     const loom_amdgpu_processor_info_t* processor = nullptr;
     IREE_ASSERT_OK(
         loom_amdgpu_target_info_lookup_processor(c.processor, &processor));
     ASSERT_NE(processor, nullptr);
     EXPECT_TRUE(iree_string_view_equal(processor->name, c.processor));
-    EXPECT_EQ(processor->elf.machine_flags | processor->elf.feature_flags,
+    EXPECT_EQ(
+        processor->elf.feature_flags & LOOM_AMDGPU_ELF_GENERIC_VERSION_MASK_V6,
+        0u);
+    EXPECT_EQ(processor->elf.machine_flags | processor->elf.feature_flags |
+                  (processor->elf.generic_version
+                   << LOOM_AMDGPU_ELF_GENERIC_VERSION_OFFSET_V6),
               c.elf_flags);
   }
-}
-
-TEST(AmdgpuTargetInfoTest, LooksUpGfx1170Processor) {
-  const loom_amdgpu_processor_info_t* processor = nullptr;
-  IREE_ASSERT_OK(
-      loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx1170"), &processor));
-  ASSERT_NE(processor, nullptr);
-  ExpectDescriptorSet(processor, IREE_SV("amdgpu.rdna3_5.core"),
-                      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3_5);
-  EXPECT_EQ(processor->elf.machine_flags, 0x05Du);
-  EXPECT_EQ(processor->wavefront.default_size, 32u);
-  ExpectKernelDescriptor(processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11,
-                         8, 4, kRdna3DescriptorFlags);
-  EXPECT_EQ(processor->features.matrix,
-            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12);
-  ExpectSchedulingBits(
-      processor,
-      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
-}
-
-TEST(AmdgpuTargetInfoTest, LooksUpGfx94GenericSchedulingFacts) {
-  const loom_amdgpu_processor_info_t* processor = nullptr;
-  IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_processor(
-      IREE_SV("gfx9-4-generic"), &processor));
-  ASSERT_NE(processor, nullptr);
-  EXPECT_TRUE(iree_string_view_is_empty(processor->descriptor_set.key));
-  EXPECT_EQ(processor->descriptor_set.ordinal,
-            LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE);
-  EXPECT_EQ(processor->features.matrix,
-            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE);
-  ExpectSchedulingBits(
-      processor,
-      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES |
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
 }
 
 TEST(AmdgpuTargetInfoTest, ParsesAmdhsaTargetIdWithFeatureSuffix) {

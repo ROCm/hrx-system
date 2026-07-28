@@ -12,6 +12,7 @@ from dataclasses import replace
 
 import pytest
 
+from loom.target.arch.amdgpu.matrix_formats import GFX125X_MATRIX_PHYSICAL_FORMATS
 from loom.target.arch.amdgpu.matrix_fragment_layouts import (
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
@@ -29,6 +30,92 @@ def test_lane_xor1_column_property_accounts_for_payload_padding() -> None:
 
     assert role_has_contiguous_lane_xor1_columns(f32_layout, f32_layout.result)
     assert not role_has_contiguous_lane_xor1_columns(f16_layout, f16_layout.result)
+
+
+@pytest.mark.parametrize(
+    "layout_key",
+    [
+        "rdna3_wmmar3_i32_16x16x16_iu8",
+        "rdna3_wmmar3_i32_16x16x16_iu8_w64",
+        "rdna3_wmmar3_i32_16x16x16_iu4",
+        "rdna3_wmmar3_i32_16x16x16_iu4_w64",
+    ],
+)
+def test_rdna3_integer_wmma_layout_matches_instruction_coordinates(
+    layout_key: str,
+) -> None:
+    layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY[layout_key]
+
+    for lane in range(layout.wave_size):
+        for element in range(layout.lhs.payload_element_count):
+            assert role_coordinate(layout, layout.lhs, lane, element) == (
+                None,
+                lane % 16,
+                None,
+                element,
+            )
+            assert role_coordinate(layout, layout.rhs, lane, element) == (
+                None,
+                None,
+                lane % 16,
+                element,
+            )
+        for role in (layout.accumulator, layout.result):
+            for element in range(role.payload_element_count):
+                assert role_coordinate(layout, role, lane, element) == (
+                    None,
+                    (layout.wave_size // 16) * element + lane // 16,
+                    lane % 16,
+                    None,
+                )
+
+
+def test_gfx125x_selector_layouts_cover_every_physical_operand_abi() -> None:
+    for lhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
+        for rhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
+            layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY[
+                f"gfx125x_wmma_f32_16x16x128_{lhs_format.token}_{rhs_format.token}"
+            ]
+            assert layout.tile_shape == (1, 16, 16, 128)
+            assert (
+                layout.lhs.payload_element_count,
+                layout.lhs.register_count,
+                layout.lhs.element_bit_count,
+            ) == (
+                64,
+                lhs_format.register_count_for(64),
+                lhs_format.element_bit_count,
+            )
+            assert (
+                layout.rhs.payload_element_count,
+                layout.rhs.register_count,
+                layout.rhs.element_bit_count,
+            ) == (
+                64,
+                rhs_format.register_count_for(64),
+                rhs_format.element_bit_count,
+            )
+            assert (
+                layout.result.payload_element_count,
+                layout.result.register_count,
+                layout.result.element_bit_count,
+            ) == (8, 8, 32)
+
+            for lane in (0, 15, 16, 31):
+                for element in (0, 5, 63):
+                    reduction = 64 * (lane // 16) + element
+                    assert role_coordinate(layout, layout.lhs, lane, element) == (
+                        None,
+                        lane % 16,
+                        None,
+                        reduction,
+                    )
+                    assert role_coordinate(layout, layout.rhs, lane, element) == (
+                        None,
+                        None,
+                        lane % 16,
+                        reduction,
+                    )
 
 
 def test_validation_rejects_missing_and_extraneous_role_axes() -> None:
@@ -130,15 +217,15 @@ def test_validation_rejects_non_power_of_two_lane_factor() -> None:
         validate_matrix_fragment_layout(malformed)
 
 
-def test_validation_rejects_fractional_payload_register_elements() -> None:
+def test_validation_accepts_elements_that_straddle_payload_registers() -> None:
     layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["cdna_mfma_f32_16x16x16_f16"]
-    malformed = replace(
+    bitstream = replace(
         layout,
         result=replace(layout.result, element_bit_count=24),
     )
 
-    with pytest.raises(ValueError, match="cannot be split into 32-bit"):
-        validate_matrix_fragment_layout(malformed)
+    validate_matrix_fragment_layout(bitstream)
+    assert bitstream.result.register_count == 3
 
 
 def test_validation_rejects_unaddressable_coordinate_element_mapping() -> None:
@@ -257,6 +344,32 @@ def test_blocked_f64_mfma_source_layout_matches_instruction_coordinates() -> Non
             matrix_lane,
             reduction,
         )
+
+
+def test_f64_mfma_16x16_layout_matches_instruction_coordinates() -> None:
+    layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["cdna_mfma_f64_16x16x4_f64"]
+
+    for lane in range(layout.wave_size):
+        assert role_coordinate(layout, layout.lhs, lane, 0) == (
+            None,
+            lane % 16,
+            None,
+            lane // 16,
+        )
+        assert role_coordinate(layout, layout.rhs, lane, 0) == (
+            None,
+            None,
+            lane % 16,
+            lane // 16,
+        )
+        for role in (layout.accumulator, layout.result):
+            for element in range(role.payload_element_count):
+                assert role_coordinate(layout, role, lane, element) == (
+                    None,
+                    4 * (lane // 16) + element,
+                    lane % 16,
+                    None,
+                )
 
 
 def test_result_to_lhs_partial_transpose_preserves_coordinates() -> None:

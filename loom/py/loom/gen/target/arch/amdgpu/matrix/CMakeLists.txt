@@ -23,22 +23,28 @@ iree_py_library(
     loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::matrix_contracts
     loom::py::loom::target::arch::amdgpu::matrix_fragment_layouts
+    loom::py::loom::target::arch::amdgpu::target_info
 )
 
 iree_py_test(
   NAME
     contract_tables_test
+  MAIN
+    "../../../../../tools/pytest_style_runner.py"
   SRCS
+    "amdgpu_matrix_contract_tables_test.py"
     "../../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.amdgpu.matrix.amdgpu_matrix_contract_tables_test"
   DEPS
     loom::py::loom::gen::target::arch::amdgpu::matrix::contract_tables
     loom::py::loom::target::arch::amdgpu::matrix_contracts
+    loom::py::loom::target::arch::amdgpu::matrix_formats
     loom::py::loom::target::arch::amdgpu::matrix_fragment_layouts
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

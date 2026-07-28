@@ -90,7 +90,8 @@ typedef struct loom_matrix_fragment_role_layout_t {
   loom_contract_operand_role_t role;
   // Number of 32-bit payload registers held by each participating lane.
   uint16_t register_count;
-  // Bit width of each logical scalar element.
+  // Bit width of each logical scalar element. Elements are densely packed
+  // across the role's register bitstream and may straddle register boundaries.
   uint16_t element_bit_count;
   // Number of scalar elements in the role's source-level payload vector.
   uint16_t payload_element_count;

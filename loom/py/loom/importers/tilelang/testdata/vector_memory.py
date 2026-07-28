@@ -53,16 +53,16 @@ def broadcast_vector_store(tir: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="broadcast_vector_store",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("broadcast_vector_store") @broadcast_vector_store() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("broadcast_vector_store") @broadcast_vector_store() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%dst: buffer) {
@@ -96,15 +96,15 @@ def ramp_vector_load(tir: Any) -> TileLangImportInput:
         buffer_map={src: src_buffer, dst: dst_buffer},
     )
     return TileLangImportInput(
-        source=prim_func, target="hip -mcpu=gfx1100", name="ramp_vector_load"
+        source=prim_func, target="hip -mcpu=gfx11-generic", name="ramp_vector_load"
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("ramp_vector_load") @ramp_vector_load() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("ramp_vector_load") @ramp_vector_load() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src: buffer, %dst: buffer) {

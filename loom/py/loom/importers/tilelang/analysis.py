@@ -11,12 +11,18 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from loom.importers.core import sanitize_identifier, target_preset_amdgpu_kind
+from loom.importers.core import (
+    sanitize_identifier,
+    target_preset_amdgpu_matrix_profile,
+)
 from loom.importers.tilelang.context import (
     TileLangAddressLayoutPreference,
     address_layout_keys,
 )
 from loom.importers.tilelang.nodes import mapping_items, node_kind, source_name
+from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
+)
 
 
 def collect_address_layout_preferences(
@@ -26,22 +32,25 @@ def collect_address_layout_preferences(
 ) -> dict[object, TileLangAddressLayoutPreference]:
     """Collect physical address-layout choices implied by target tile ops."""
 
-    if target_preset_amdgpu_kind(target_preset) != "gfx1100":
+    if (
+        target_preset_amdgpu_matrix_profile(target_preset)
+        != AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11
+    ):
         return {}
     preferences: dict[object, TileLangAddressLayoutPreference] = {}
     for call in _walk_calls(getattr(prim_func, "body", None)):
         if _call_op_name(call) != "tl.tileop.gemm":
             continue
-        _record_gfx1100_dense_gemm_preferences(call, preferences)
+        _record_gfx11_wmma_dense_gemm_preferences(call, preferences)
     return preferences
 
 
-def _record_gfx1100_dense_gemm_preferences(
+def _record_gfx11_wmma_dense_gemm_preferences(
     call: object,
     preferences: dict[object, TileLangAddressLayoutPreference],
 ) -> None:
     args = _args(call)
-    if not _is_supported_gfx1100_dense_gemm(call, args):
+    if not _is_supported_gfx11_wmma_dense_gemm(call, args):
         return
     rhs_buffer = _region_source_buffer(args[1])
     if rhs_buffer is None or _buffer_scope(rhs_buffer) not in ("shared", "shared.dyn"):
@@ -54,7 +63,7 @@ def _record_gfx1100_dense_gemm_preferences(
         preferences[key] = preference
 
 
-def _is_supported_gfx1100_dense_gemm(call: object, args: tuple[object, ...]) -> bool:
+def _is_supported_gfx11_wmma_dense_gemm(call: object, args: tuple[object, ...]) -> bool:
     if len(args) < 19 or _call_annotations(call):
         return False
     transpose_lhs = _static_bool(args[3])

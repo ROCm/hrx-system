@@ -50,8 +50,13 @@ iree_py_library(
 iree_py_test(
   NAME
     tools_test
-  SRCS
+  MAIN
     "pytest_style_runner.py"
+  SRCS
+    "amdgpu_asm_test.py"
+    "loom_opt_test.py"
+    "pytest_style_runner.py"
+    "source_surface_test.py"
   ARGS
     "loom.tools.amdgpu_asm_test"
     "loom.tools.loom_opt_test"
@@ -63,6 +68,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

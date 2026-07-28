@@ -23,7 +23,10 @@ iree_py_library(
 iree_py_test(
   NAME
     target_info_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
   SRCS
+    "target_info_test.py"
     "../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.target.emit.llvmir.x86.target_info_test"
@@ -32,6 +35,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

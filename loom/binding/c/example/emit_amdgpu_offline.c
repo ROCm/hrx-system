@@ -28,7 +28,7 @@ static const char kSourceText[] =
     "}\n";
 
 typedef struct emit_amdgpu_offline_state_t {
-  // AMDGPU processor key, such as `gfx11-generic`, `gfx1100`, or `gfx942`.
+  // AMDGPU processor key, such as `gfx11-generic`, `gfx1151`, or `gfx942`.
   const char* processor;
 
   // Optional output path supplied by the caller.
@@ -95,7 +95,7 @@ static void print_usage(FILE* file) {
           "[manifest.json]]]\n");
   fprintf(
       file,
-      "  processor    AMDGPU processor key, such as gfx11-generic, gfx1100, "
+      "  processor    AMDGPU processor key, such as gfx11-generic, gfx1151, "
       "or gfx942.\n");
   fprintf(file,
           "  output.hsaco Optional path for the emitted AMDGPU HSACO ELF "

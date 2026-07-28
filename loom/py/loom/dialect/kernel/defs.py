@@ -332,7 +332,7 @@ kernel_def = Op(
     ],
     examples=[
         "kernel.def @entry() {\n  %one = index.constant 1 : index\n  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index\n} launch(%buffer: buffer) {\n  kernel.return\n}",
-        'kernel.def target(@gfx1100) export("matmul") @matmul(%m: index, %n: index) {\n  %one = index.constant 1 : index\n  %threads = index.constant 256 : index\n  kernel.launch.config workgroups(%m, %n, %one) workgroup_size(%threads, %one, %one) : index\n} launch(%lhs: buffer, %rhs: buffer, %out: buffer) {\n  kernel.return\n}',
+        'kernel.def target(@gfx11_generic) export("matmul") @matmul(%m: index, %n: index) {\n  %one = index.constant 1 : index\n  %threads = index.constant 256 : index\n  kernel.launch.config workgroups(%m, %n, %one) workgroup_size(%threads, %one, %one) : index\n} launch(%lhs: buffer, %rhs: buffer, %out: buffer) {\n  kernel.return\n}',
     ],
 )
 

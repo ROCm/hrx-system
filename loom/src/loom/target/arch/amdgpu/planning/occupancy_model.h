@@ -28,7 +28,33 @@ typedef struct loom_amdgpu_occupancy_register_class_model_t {
   uint32_t pool_units;
   // Allocation granularity used by occupancy calculations.
   uint32_t allocation_granularity;
+  // Whether this register class directly limits resident waves.
+  bool limits_occupancy;
 } loom_amdgpu_occupancy_register_class_model_t;
+
+typedef enum loom_amdgpu_occupancy_wave_slot_e {
+  // Generated occupancy model slot for wave32 execution.
+  LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_32 = 0,
+  // Generated occupancy model slot for wave64 execution.
+  LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_64 = 1,
+  // Number of generated wave-mode slots per processor.
+  LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_COUNT = 2,
+} loom_amdgpu_occupancy_wave_slot_t;
+
+// Hardware resources shared by waves in one occupancy calculation domain.
+//
+// On current AMDGPU processors the domain is either a CU or a WGP. Naming it
+// by its scheduling role keeps the units stable across both hardware modes.
+typedef struct loom_amdgpu_occupancy_domain_model_t {
+  // Number of SIMD execution units in the occupancy domain.
+  uint32_t simd_count;
+  // Local-memory bytes shared by workgroups in the occupancy domain.
+  uint32_t local_memory_bytes;
+  // Local-memory allocation granularity in bytes per workgroup.
+  uint32_t local_memory_allocation_granularity;
+  // Barrier-using workgroups available in the occupancy domain.
+  uint32_t max_barrier_workgroup_count;
+} loom_amdgpu_occupancy_domain_model_t;
 
 typedef struct loom_amdgpu_occupancy_model_t {
   // Dense generated AMDGPU descriptor-set ordinal.
@@ -37,6 +63,8 @@ typedef struct loom_amdgpu_occupancy_model_t {
   uint32_t wave_size;
   // Maximum resident waves per SIMD.
   uint32_t max_waves_per_simd;
+  // Workgroup and local-memory resources in one occupancy domain.
+  loom_amdgpu_occupancy_domain_model_t domain;
   // Target residency policy shared by scheduling and final occupancy.
   loom_target_residency_model_t residency_model;
   // Register-class occupancy models in diagnostic order.
@@ -50,11 +78,11 @@ typedef struct loom_amdgpu_occupancy_model_t {
   iree_host_size_t descriptor_reg_class_count;
 } loom_amdgpu_occupancy_model_t;
 
-// Returns the occupancy model for |descriptor_set_ordinal|, or NULL when the
-// descriptor set does not define one.
-const loom_amdgpu_occupancy_model_t*
-loom_amdgpu_occupancy_model_for_descriptor_set_ordinal(
-    uint16_t descriptor_set_ordinal);
+// Returns the generated occupancy model for |processor| and |wave_size|.
+//
+// The processor and wave mode must have passed target verification.
+const loom_amdgpu_occupancy_model_t* loom_amdgpu_occupancy_model_for_processor(
+    const loom_amdgpu_processor_info_t* processor, uint32_t wave_size);
 
 #ifdef __cplusplus
 }  // extern "C"

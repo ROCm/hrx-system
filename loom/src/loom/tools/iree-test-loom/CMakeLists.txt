@@ -110,6 +110,8 @@ iree_execution_test_suite(
     "iree-run-requirement=runtime.resource.amd_gpu"
     "requires-gpu-amd"
     "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    loom-amdgpu-tests
 )
 endif()
 
@@ -128,6 +130,8 @@ iree_execution_test_suite(
     "requires-gpu-amd"
     "runtime-resource=amd-gpu"
     "notsan"
+  RESOURCE_GROUP
+    loom-amdgpu-tests
 )
 endif()
 
@@ -145,6 +149,8 @@ iree_execution_test_suite(
     "iree-run-requirement=runtime.resource.amd_gpu"
     "requires-gpu-amd"
     "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    loom-amdgpu-tests
 )
 endif()
 
@@ -168,6 +174,8 @@ iree_execution_test_suite(
     "iree-run-requirement=runtime.resource.vulkan_device"
     "requires-gpu-vulkan"
     "runtime-resource=vulkan-device"
+  RESOURCE_GROUP
+    loom-vulkan-tests
 )
 endif()
 

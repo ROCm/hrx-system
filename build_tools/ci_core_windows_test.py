@@ -281,6 +281,7 @@ class CiCoreWindowsTest(unittest.TestCase):
                 "base_dev_generic",
                 "amd-llvm_lib_generic",
                 "amd-llvm_run_generic",
+                "amd-llvm_dev_generic",
                 "core-hip_lib_generic",
                 "core-hip_run_generic",
                 "core-hip_dev_generic",

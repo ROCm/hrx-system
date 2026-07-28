@@ -6,7 +6,6 @@
 
 #include "iree/hal/drivers/amdgpu/util/device_library.h"
 
-#include "iree/base/internal/debugging.h"
 #include "iree/hal/drivers/amdgpu/device/binaries/toc.h"
 #include "iree/hal/drivers/amdgpu/device/kernels.h"
 #include "iree/hal/drivers/amdgpu/util/device_library_target.h"
@@ -279,16 +278,10 @@ iree_status_t iree_hal_amdgpu_device_library_initialize(
   // lacking. These may have only been used for HSAIL anyway.
   const char* options = NULL;
 
-  // ROCR's executable loader retains some process-lifetime bookkeeping while
-  // building executable/code-object state. Keep LeakSanitizer focused on
-  // IREE-owned allocations by bracketing those HSA setup calls.
-
   // Bind a code object reader to the memory sourced from our rodata.
-  IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_status_t status = iree_hsa_code_object_reader_create_from_memory(
       IREE_LIBHSA(libhsa), file_toc->data, file_toc->size,
       &out_library->code_object_reader);
-  IREE_LEAK_CHECK_DISABLE_POP();
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
   // Create the executable that will hold all of the loaded code objects.
@@ -297,13 +290,11 @@ iree_status_t iree_hal_amdgpu_device_library_initialize(
       HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT;
   status = iree_hal_amdgpu_device_library_select_agent_profile(
       libhsa, topology, &executable_profile, &executable_rounding_mode);
-  IREE_LEAK_CHECK_DISABLE_PUSH();
   if (iree_status_is_ok(status)) {
     status = iree_hsa_executable_create_alt(
         IREE_LIBHSA(libhsa), executable_profile, executable_rounding_mode,
         options, &out_library->executable);
   }
-  IREE_LEAK_CHECK_DISABLE_POP();
 
   // Load the code object for each agent.
   // Note that we could save off the loaded_code_object per-agent here but then
@@ -313,11 +304,9 @@ iree_status_t iree_hal_amdgpu_device_library_initialize(
   // loaded_code_objects caches the results.
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < topology->gpu_agent_count; ++i) {
-      IREE_LEAK_CHECK_DISABLE_PUSH();
       status = iree_hsa_executable_load_agent_code_object(
           IREE_LIBHSA(libhsa), out_library->executable, topology->gpu_agents[i],
           out_library->code_object_reader, options, NULL);
-      IREE_LEAK_CHECK_DISABLE_POP();
       if (!iree_status_is_ok(status)) break;
     }
   }
@@ -325,10 +314,8 @@ iree_status_t iree_hal_amdgpu_device_library_initialize(
   // Freeze the executable now that loading has completed. Most queries require
   // that the executable be frozen.
   if (iree_status_is_ok(status)) {
-    IREE_LEAK_CHECK_DISABLE_PUSH();
     status = iree_hsa_executable_freeze(IREE_LIBHSA(libhsa),
                                         out_library->executable, options);
-    IREE_LEAK_CHECK_DISABLE_POP();
   }
 
   if (!iree_status_is_ok(status)) {

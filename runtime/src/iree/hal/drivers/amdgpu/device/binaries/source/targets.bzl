@@ -27,6 +27,7 @@ _GENERATOR_SCRIPT = "//build_tools/scripts:amdgpu_device_binaries.py"
 _GENERATOR_SCRIPT_DEPS = [
     _GENERATOR_SCRIPT,
     "//build_tools/amdgpu:target_map.py",
+    "//build_tools/amdgpu:target_map_data.py",
 ]
 
 _GENERATOR_INPUTS = [

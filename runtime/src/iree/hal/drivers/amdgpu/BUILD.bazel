@@ -7,7 +7,6 @@
 load("//build_tools/amdgpu:cts.bzl", "iree_amdgpu_hal_cts_testdata")
 load("//build_tools/amdgpu:selectors.bzl", "iree_amdgpu_target_selectors_flag")
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
-load("//build_tools/sanitizer:suppressions.bzl", "hsa_suppressions")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
@@ -281,7 +280,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amdgpu/device:tsan",
         "//runtime/src/iree/hal/drivers/amdgpu/device/binaries:toc",
         "//runtime/src/iree/hal/drivers/amdgpu/util:block_pool",
-        "//runtime/src/iree/hal/drivers/amdgpu/util:code_object_target",
         "//runtime/src/iree/hal/drivers/amdgpu/util:device_clock",
         "//runtime/src/iree/hal/drivers/amdgpu/util:device_library",
         "//runtime/src/iree/hal/drivers/amdgpu/util:feedback_channel",
@@ -299,6 +297,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amdgpu/util:shadow_map",
         "//runtime/src/iree/hal/drivers/amdgpu/util:topology",
         "//runtime/src/iree/hal/drivers/amdgpu/util:vmem",
+        "//runtime/src/iree/hal/executable/amdgpu:code_object_target",
         "//runtime/src/iree/hal/executable/amdgpu:target_id",
         "//runtime/src/iree/hal/memory:passthrough_pool",
         "//runtime/src/iree/hal/memory:slab_provider",
@@ -596,7 +595,6 @@ iree_runtime_cc_test(
         "host_queue_command_buffer_test.cc",
         "host_queue_command_buffer_test_util.h",
     ],
-    sanitizer_suppressions = hsa_suppressions,
     deps = [
         ":amdgpu",
         ":headers",

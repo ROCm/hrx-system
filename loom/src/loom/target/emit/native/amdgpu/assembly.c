@@ -39,6 +39,8 @@ typedef enum loom_amdgpu_native_asm_immediate_format_e {
   LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE = 8,
   // Target-format ID for a GFX12 load TH symbolic modifier.
   LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL = 9,
+  // Target-format ID for a required named integer modifier.
+  LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64 = 10,
 } loom_amdgpu_native_asm_immediate_format_t;
 
 typedef struct loom_amdgpu_assembly_emit_state_t {
@@ -662,6 +664,7 @@ static bool loom_amdgpu_native_asm_format_is_named_modifier(
   switch (target_format_id) {
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST:
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64:
+    case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64:
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG:
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE:
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL:
@@ -688,7 +691,9 @@ static iree_status_t loom_amdgpu_append_packet_immediate_named_modifier(
   int64_t value = 0;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_read_packet_immediate_i64(context, immediate, &value));
-  if (value == immediate->default_value) {
+  if (native_value->target_format_id !=
+          LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64 &&
+      value == immediate->default_value) {
     return iree_ok_status();
   }
 
@@ -713,6 +718,7 @@ static iree_status_t loom_amdgpu_append_packet_immediate_named_modifier(
       return iree_string_builder_append_cstring(context->builder, "]");
     }
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64:
+    case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64:
       return iree_string_builder_append_format(
           context->builder, " %.*s:%" PRId64, (int)name.size, name.data, value);
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG:
@@ -924,37 +930,6 @@ static bool loom_amdgpu_descriptor_is_global_to_lds(
       descriptor_set, descriptor, LOOM_LOW_EFFECT_KIND_WRITE,
       LOOM_LOW_MEMORY_SPACE_WORKGROUP);
   return has_global_read && has_workgroup_write;
-}
-
-static bool loom_amdgpu_descriptor_uses_resource_kind(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, loom_low_resource_kind_t kind) {
-  IREE_ASSERT_LT(descriptor->schedule_class_id,
-                 descriptor_set->schedule_class_count);
-  IREE_ASSERT(descriptor_set->schedule_classes != NULL);
-  const loom_low_schedule_class_t* schedule_class =
-      &descriptor_set->schedule_classes[descriptor->schedule_class_id];
-  if (schedule_class->issue_use_count == 0) {
-    return false;
-  }
-  IREE_ASSERT(descriptor_set->issue_uses != NULL);
-  IREE_ASSERT(descriptor_set->resources != NULL);
-  IREE_ASSERT_LE(schedule_class->issue_use_start,
-                 descriptor_set->issue_use_count);
-  IREE_ASSERT_LE(
-      schedule_class->issue_use_count,
-      descriptor_set->issue_use_count - schedule_class->issue_use_start);
-  for (uint16_t i = 0; i < schedule_class->issue_use_count; ++i) {
-    const loom_low_issue_use_t* issue_use =
-        &descriptor_set->issue_uses[schedule_class->issue_use_start + i];
-    IREE_ASSERT_LT(issue_use->resource_id, descriptor_set->resource_count);
-    const loom_low_resource_t* resource =
-        &descriptor_set->resources[issue_use->resource_id];
-    if (resource->kind == kind) {
-      return true;
-    }
-  }
-  return false;
 }
 
 static iree_status_t loom_amdgpu_append_comma(
@@ -1272,6 +1247,7 @@ static iree_status_t loom_amdgpu_append_native_asm_form_value(
               context, value->index);
         case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST:
         case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64:
+        case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64:
         case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG:
           return loom_amdgpu_append_packet_immediate_named_modifier(context,
                                                                     value);
@@ -3648,9 +3624,10 @@ static iree_status_t loom_amdgpu_try_append_effect_route_dispatch_packet(
 static iree_status_t loom_amdgpu_try_append_matrix_dispatch_packet(
     const loom_native_assembly_packet_context_t* context, bool* out_matched) {
   *out_matched = false;
-  if (!loom_amdgpu_descriptor_uses_resource_kind(
-          context->schedule->target.descriptor_set, context->packet->descriptor,
-          LOOM_LOW_RESOURCE_KIND_MATRIX)) {
+  if (!iree_any_bit_set(loom_amdgpu_descriptor_traits(
+                            context->schedule->target.descriptor_set,
+                            context->packet->descriptor),
+                        LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX)) {
     return iree_ok_status();
   }
   *out_matched = true;

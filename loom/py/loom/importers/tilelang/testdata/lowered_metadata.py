@@ -64,16 +64,16 @@ def lazy_if_then_else(tir: Any, T: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="lazy_if_then_else",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("lazy_if_then_else") @lazy_if_then_else() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("lazy_if_then_else") @lazy_if_then_else() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%n: i32, %i: i32, %src: buffer, %dst: buffer) {
@@ -129,16 +129,16 @@ def tvm_access_ptr_atomic(tir: Any, T: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tvm_access_ptr_atomic",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tvm_access_ptr_atomic") @tvm_access_ptr_atomic() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tvm_access_ptr_atomic") @tvm_access_ptr_atomic() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%dst: buffer) {
@@ -172,16 +172,16 @@ def tl_infinity_constant(tir: Any, T: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tl_infinity_constant",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tl_infinity_constant") @tl_infinity_constant() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tl_infinity_constant") @tl_infinity_constant() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%dst: buffer) {
@@ -219,6 +219,6 @@ def call_extern_diagnostic(tir: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="call_extern_diagnostic",
     )

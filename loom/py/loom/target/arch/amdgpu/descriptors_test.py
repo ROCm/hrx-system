@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -19,12 +20,27 @@ from loom.target.arch.amdgpu.descriptors import (
     _ADDRESS_OFFSET_DS16_ENCODING_ID,
     _ADDRESS_OFFSET_DWORD_ENCODING_ID,
     _ADDRESS_OFFSET_DWORD_STRIDE64_ENCODING_ID,
+    _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS,
+    _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS,
+    _AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_GFX942_MATRIX_TIMINGS,
+    _AMDGPU_GFX950_MATRIX_TIMINGS,
+    _AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_TRANS_DESCRIPTOR_KEYS,
     _AMDGPU_TRANS_PROXY_LATENCY_CYCLES,
     _COUNTER_ASYNC,
+    _COUNTER_LDS,
     _COUNTER_TENSOR,
     _COUNTER_VMEM_LOAD,
+    _COUNTER_VMEM_STORE,
     _D16_PARTIAL_REGISTER_ADDRESSABLE_UNIT_COUNT,
     _GFX12_TH_ATOMIC_RETURN_VALUE,
     _MUBUF_SOFFSET_INLINE_ZERO,
@@ -33,18 +49,28 @@ from loom.target.arch.amdgpu.descriptors import (
     _REG_PART_SGPR_LOW16,
     _REG_PART_VGPR_HIGH16,
     _REG_PART_VGPR_LOW16,
+    _REG_SGPR,
     _REG_VCC,
+    _REG_VGPR,
+    _RESOURCE_MFMA,
     _RESOURCE_SALU,
+    _RESOURCE_SWMMAC,
     _RESOURCE_VALU,
+    _RESOURCE_WMMA,
+    _SCHEDULE_LDS_STORE,
+    _SCHEDULE_MATRIX,
+    _SCHEDULE_MFMA_QUALIFIED_PREFIX,
     _SCHEDULE_MODE_CONTROL,
     _SCHEDULE_PACKED_DOT,
     _SCHEDULE_SALU,
     _SCHEDULE_SALU_COMPARE,
     _SCHEDULE_SMEM_STORE,
+    _SCHEDULE_SWMMAC,
     _SCHEDULE_VALU,
     _SCHEDULE_VMEM_LOAD,
     _SCHEDULE_VMEM_LOAD_LDS,
     _SCHEDULE_WAIT_ALU,
+    _SCHEDULE_WMMA,
     _SOURCE_INLINE_F32_ENCODING_ID,
     _SOURCE_INLINE_U32_ENCODING_ID,
     _VBUFFER_SOFFSET_NULL,
@@ -75,11 +101,17 @@ from loom.target.arch.amdgpu.descriptors import (
     AmdgpuMemoryAddressForm,
     _amdgpu_core_descriptor_set,
     _amdgpu_core_descriptor_set_bases,
+    _amdgpu_core_descriptor_set_intersection,
+    _amdgpu_mfma_schedule_class_name,
     _amdgpu_trans_schedule_class_name,
     _amdgpu_trans_schedule_classes,
     _categorize_amdgpu_descriptors,
+    _gfx9_4_generic_core_overlays,
     _gfx11_core_overlays,
+    _gfx11_generic_core_overlays,
+    _gfx12_5_generic_core_overlays,
     _gfx12_core_overlays,
+    _gfx12_generic_core_overlays,
     _gfx117x_core_overlays,
     _gfx125x_reg_classes,
     _gfx940_core_overlays,
@@ -99,7 +131,10 @@ from loom.target.arch.amdgpu.descriptors import (
     amdgpu_descriptor_ref_keys,
     amdgpu_encoding_field_id,
 )
-from loom.target.arch.amdgpu.descriptors.api import _with_instruction_classes
+from loom.target.arch.amdgpu.descriptors.api import (
+    _with_instruction_classes,
+    _with_storage_lease_rows,
+)
 from loom.target.arch.amdgpu.descriptors.cluster import (
     _cluster_load_async_to_lds_descriptor,
     _s_wait_asynccnt_descriptor,
@@ -134,6 +169,8 @@ from loom.target.low_descriptors import (
     EffectFlag,
     EffectKind,
     EncodingFieldValue,
+    Hazard,
+    HazardKind,
     Immediate,
     ImmediateFlag,
     ImmediateKind,
@@ -141,6 +178,7 @@ from loom.target.low_descriptors import (
     IssueUse,
     LatencyKind,
     MemorySpace,
+    ModelQuality,
     NativeAsmValue,
     NativeAsmValueKind,
     Operand,
@@ -151,9 +189,106 @@ from loom.target.low_descriptors import (
     RegClassAlt,
     RegClassAltFlag,
     RegClassFlag,
+    ScheduleClass,
     ScheduleClassFlag,
     SpillSlotSpace,
+    StorageLeaseAttachment,
+    StorageLeaseFlag,
+    StorageLeaseKind,
 )
+
+
+def test_generic_descriptor_contracts_are_member_intersections() -> None:
+    base_cases = (
+        (
+            _AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+            (
+                _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
+                _AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE,
+            ),
+        ),
+        (
+            _AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+            (_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE,),
+        ),
+        (
+            _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+            (_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,),
+        ),
+    )
+    for generic, members in base_cases:
+        expected = _amdgpu_core_descriptor_set_intersection(
+            key=generic.key,
+            members=members,
+        )
+        if generic.key == "amdgpu.gfx12_5.generic.core":
+            expected = replace(
+                expected,
+                descriptors=tuple(
+                    descriptor
+                    for descriptor in expected.descriptors
+                    if not (descriptor.semantic_tag or "").startswith("matrix.swmmac.")
+                ),
+            )
+        assert generic == expected
+
+    gfx9_4_base_intersection = _amdgpu_core_descriptor_set_intersection(
+        key=_AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE.key,
+        members=(
+            _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
+            _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
+        ),
+    )
+    assert (
+        replace(
+            _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+            schedule_classes=gfx9_4_base_intersection.schedule_classes,
+        )
+        == gfx9_4_base_intersection
+    )
+
+    gfx117x_overlays = {
+        overlay.descriptor_key: overlay for overlay in _gfx117x_core_overlays()
+    }
+    gfx950_overlays = {
+        overlay.descriptor_key: overlay for overlay in _gfx950_core_overlays()
+    }
+    gfx9_4_common_overlays = tuple(
+        overlay
+        for overlay in _gfx940_core_overlays()
+        if gfx950_overlays.get(overlay.descriptor_key) == overlay
+    )
+    gfx9_4_packed8_matrix_keys = {
+        overlay.descriptor_key
+        for overlay in gfx9_4_common_overlays
+        if (
+            overlay.semantic_tag is not None
+            and overlay.semantic_tag.startswith("matrix.")
+            and (".fp8" in overlay.semantic_tag or ".bf8" in overlay.semantic_tag)
+        )
+    }
+    assert len(gfx9_4_packed8_matrix_keys) == 16
+    assert _gfx9_4_generic_core_overlays() == tuple(
+        overlay
+        for overlay in gfx9_4_common_overlays
+        if overlay.descriptor_key not in gfx9_4_packed8_matrix_keys
+    )
+    assert _gfx11_generic_core_overlays() == tuple(
+        overlay
+        for overlay in _gfx11_core_overlays()
+        if gfx117x_overlays.get(overlay.descriptor_key) == overlay
+    )
+    assert _gfx12_generic_core_overlays() == _gfx12_core_overlays()
+    gfx1250_overlays = _gfx1250_core_overlays()
+    assert all(
+        not (overlay.semantic_tag or "").startswith("matrix.wmma.")
+        for overlay in gfx1250_overlays
+    )
+    assert _gfx12_5_generic_core_overlays() == tuple(
+        overlay
+        for overlay in gfx1250_overlays
+        if not (overlay.semantic_tag or "").startswith("matrix.swmmac.")
+    )
 
 
 def _descriptor_set(*descriptors: Descriptor) -> DescriptorSet:
@@ -188,6 +323,215 @@ def _memory_descriptor(*, immediates: tuple[Immediate, ...]) -> Descriptor:
     )
 
 
+def _storage_lease_signature(
+    descriptor: Descriptor,
+) -> tuple[
+    tuple[
+        StorageLeaseKind,
+        StorageLeaseAttachment,
+        int,
+        int,
+        int,
+        str,
+        tuple[StorageLeaseFlag, ...],
+    ],
+    ...,
+]:
+    return tuple(
+        (
+            lease.kind,
+            lease.attachment,
+            lease.attachment_index,
+            lease.unit_count,
+            lease.release_class_id,
+            lease.release_reason_name,
+            lease.flags,
+        )
+        for lease in descriptor.storage_leases
+    )
+
+
+def test_storage_lease_rows_project_memory_dependencies() -> None:
+    schedule_class = ScheduleClass(
+        name="amdgpu.test.memory",
+        latency_kind=LatencyKind.VARIABLE,
+        model_quality=ModelQuality.EXACT,
+        hazards=(
+            Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_VMEM_LOAD),
+            Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_VMEM_STORE),
+        ),
+    )
+    descriptor = Descriptor(
+        key="amdgpu.test.memory",
+        mnemonic="test_memory",
+        semantic_tag="memory.global.atomic.u32",
+        operands=(
+            Operand("dst", OperandRole.RESULT, (RegClassAlt(_REG_VGPR),), unit_count=2),
+            Operand("vaddr", OperandRole.OPERAND, (RegClassAlt(_REG_VGPR),)),
+            Operand(
+                "saddr",
+                OperandRole.RESOURCE,
+                (RegClassAlt(_REG_SGPR),),
+                unit_count=4,
+            ),
+            Operand(
+                "exec",
+                OperandRole.IMPLICIT,
+                (RegClassAlt(_REG_SGPR),),
+                unit_count=2,
+            ),
+        ),
+        schedule_class=schedule_class.name,
+        effects=(
+            Effect(
+                EffectKind.READ,
+                memory_space=MemorySpace.GLOBAL,
+                flags=(EffectFlag.DEPENDENCY,),
+            ),
+            Effect(
+                EffectKind.WRITE,
+                memory_space=MemorySpace.GLOBAL,
+                flags=(EffectFlag.DEPENDENCY,),
+            ),
+        ),
+    )
+    descriptor_set = replace(
+        _descriptor_set(descriptor), schedule_classes=(schedule_class,)
+    )
+
+    descriptor = _with_storage_lease_rows(descriptor_set).descriptors[0]
+
+    pressure_flags = (
+        StorageLeaseFlag.STARTS_AT_ISSUE,
+        StorageLeaseFlag.RELEASE_BEFORE_BOUNDARY,
+        StorageLeaseFlag.RELEASE_FOR_PRESSURE,
+    )
+    source_flags = (
+        StorageLeaseFlag.STARTS_AT_ISSUE,
+        StorageLeaseFlag.MAY_CARRY_ACROSS_BOUNDARY,
+    )
+    assert _storage_lease_signature(descriptor) == (
+        (
+            StorageLeaseKind.RESULT_WRITE,
+            StorageLeaseAttachment.RESULT,
+            0,
+            2,
+            _COUNTER_VMEM_LOAD,
+            "amdgpu.read_result_reuse",
+            pressure_flags,
+        ),
+        (
+            StorageLeaseKind.SOURCE_READ,
+            StorageLeaseAttachment.OPERAND,
+            0,
+            1,
+            _COUNTER_VMEM_STORE,
+            "amdgpu.store_source_reuse",
+            source_flags,
+        ),
+        (
+            StorageLeaseKind.SOURCE_READ,
+            StorageLeaseAttachment.OPERAND,
+            1,
+            4,
+            _COUNTER_VMEM_LOAD,
+            "amdgpu.memory_source_reuse",
+            source_flags,
+        ),
+        (
+            StorageLeaseKind.SOURCE_READ,
+            StorageLeaseAttachment.OPERAND,
+            1,
+            4,
+            _COUNTER_VMEM_STORE,
+            "amdgpu.memory_source_reuse",
+            source_flags,
+        ),
+    )
+
+
+def test_storage_lease_rows_project_xcnt_over_packet_inputs() -> None:
+    schedule_class = ScheduleClass(
+        name=_SCHEDULE_VMEM_LOAD,
+        latency_kind=LatencyKind.VARIABLE,
+        model_quality=ModelQuality.EXACT,
+    )
+    descriptor = Descriptor(
+        key="amdgpu.test.xcnt",
+        mnemonic="test_xcnt",
+        semantic_tag="memory.global.load.u32",
+        operands=(
+            Operand("vaddr", OperandRole.OPERAND, (RegClassAlt(_REG_VGPR),)),
+            Operand(
+                "saddr",
+                OperandRole.RESOURCE,
+                (RegClassAlt(_REG_SGPR),),
+                unit_count=2,
+            ),
+            Operand(
+                "exec",
+                OperandRole.IMPLICIT,
+                (RegClassAlt(_REG_SGPR),),
+                unit_count=2,
+            ),
+        ),
+        schedule_class=schedule_class.name,
+    )
+    descriptor_set = replace(
+        _descriptor_set(descriptor), schedule_classes=(schedule_class,)
+    )
+
+    descriptor = _with_storage_lease_rows(
+        descriptor_set, enable_gfx125x_xcnt=True
+    ).descriptors[0]
+
+    assert tuple(
+        (
+            lease.attachment_index,
+            lease.unit_count,
+            lease.release_class_name,
+            lease.release_reason_name,
+        )
+        for lease in descriptor.storage_leases
+    ) == (
+        (0, 1, "amdgpu.x", "amdgpu.memory_source_reuse"),
+        (1, 2, "amdgpu.x", "amdgpu.memory_source_reuse"),
+    )
+
+
+def test_storage_lease_rows_ignore_synchronous_lds_sources() -> None:
+    schedule_class = ScheduleClass(
+        name=_SCHEDULE_LDS_STORE,
+        latency_kind=LatencyKind.VARIABLE,
+        model_quality=ModelQuality.EXACT,
+        hazards=(Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_LDS),),
+    )
+    descriptor = Descriptor(
+        key="amdgpu.test.lds",
+        mnemonic="test_lds",
+        semantic_tag="memory.workgroup.store.u32",
+        operands=(
+            Operand("addr", OperandRole.OPERAND, (RegClassAlt(_REG_VGPR),)),
+            Operand("value", OperandRole.OPERAND, (RegClassAlt(_REG_VGPR),)),
+        ),
+        schedule_class=schedule_class.name,
+        effects=(
+            Effect(
+                EffectKind.WRITE,
+                memory_space=MemorySpace.WORKGROUP,
+                flags=(EffectFlag.DEPENDENCY,),
+            ),
+        ),
+    )
+    descriptor_set = replace(
+        _descriptor_set(descriptor), schedule_classes=(schedule_class,)
+    )
+
+    descriptor = _with_storage_lease_rows(descriptor_set).descriptors[0]
+
+    assert descriptor.storage_leases == ()
+
+
 def test_instruction_classes_project_target_packet_families() -> None:
     global_load = Descriptor(
         key="amdgpu.global_load_b32",
@@ -216,8 +560,36 @@ def test_instruction_classes_project_target_packet_families() -> None:
             Effect(EffectKind.WRITE, memory_space=MemorySpace.WORKGROUP),
         ),
     )
+    swmmac = Descriptor(
+        key="amdgpu.v_swmmac_f32_16x16x64_f16",
+        mnemonic="v_swmmac_f32_16x16x64_f16",
+        semantic_tag="matrix.swmmac.f32.16x16x64.f16",
+        operands=(),
+        schedule_class=_SCHEDULE_SWMMAC,
+    )
+    gfx125x_wmma = Descriptor(
+        key="amdgpu.v_wmma_f32_16x16x32_f16",
+        mnemonic="v_wmma_f32_16x16x32_f16",
+        semantic_tag="matrix.wmma.f32.16x16x32.f16",
+        operands=(),
+        schedule_class=f"{_SCHEDULE_MATRIX}.gfx125x.xdl",
+    )
+    gfx125x_swmmac = Descriptor(
+        key="amdgpu.v_swmmac_f32_16x16x64_f16",
+        mnemonic="v_swmmac_f32_16x16x64_f16",
+        semantic_tag="matrix.swmmac.f32.16x16x64.f16",
+        operands=(),
+        schedule_class=f"{_SCHEDULE_MATRIX}.gfx125x.xdl",
+    )
     descriptor_set = _with_instruction_classes(
-        _descriptor_set(global_load, private_load, staged_load)
+        _descriptor_set(
+            global_load,
+            private_load,
+            staged_load,
+            swmmac,
+            gfx125x_wmma,
+            gfx125x_swmmac,
+        )
     )
 
     assert descriptor_set.descriptors[0].instruction_classes == (
@@ -229,6 +601,13 @@ def test_instruction_classes_project_target_packet_families() -> None:
         InstructionClass.GLOBAL_MEMORY,
         InstructionClass.GLOBAL_LOAD,
         InstructionClass.LOCAL_MEMORY,
+    )
+    assert descriptor_set.descriptors[3].instruction_classes == (
+        InstructionClass.SWMMAC,
+    )
+    assert descriptor_set.descriptors[4].instruction_classes == (InstructionClass.WMMA,)
+    assert descriptor_set.descriptors[5].instruction_classes == (
+        InstructionClass.SWMMAC,
     )
 
 
@@ -398,6 +777,121 @@ def test_trans_descriptors_use_descriptor_specific_schedule_classes() -> None:
             ]
             assert schedule_class.latency_kind is LatencyKind.ESTIMATE
             assert schedule_class.latency_cycles == _AMDGPU_TRANS_PROXY_LATENCY_CYCLES
+
+
+def test_gfx9_4_matrix_schedule_classes_match_member_timings() -> None:
+    schedule_cases = (
+        (
+            _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
+            _AMDGPU_GFX942_MATRIX_TIMINGS,
+            _gfx940_core_overlays(),
+        ),
+        (
+            _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
+            _AMDGPU_GFX950_MATRIX_TIMINGS,
+            _gfx950_core_overlays(),
+        ),
+        (
+            _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+            _AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS,
+            _gfx9_4_generic_core_overlays(),
+        ),
+    )
+    for descriptor_set, timings, overlays in schedule_cases:
+        schedule_classes = {
+            schedule_class.name: schedule_class
+            for schedule_class in descriptor_set.schedule_classes
+        }
+        matrix_overlays = {
+            overlay.descriptor_key: overlay
+            for overlay in overlays
+            if overlay.semantic_tag is not None
+            and overlay.semantic_tag.startswith("matrix.")
+        }
+        assert set(matrix_overlays) == set(timings)
+        for descriptor_key, timing in timings.items():
+            schedule_class = schedule_classes[
+                _amdgpu_mfma_schedule_class_name(descriptor_key)
+            ]
+            assert schedule_class.latency_kind is LatencyKind.ESTIMATE
+            assert schedule_class.latency_cycles == timing.latency_cycles
+            assert schedule_class.issue_uses == (
+                IssueUse(
+                    _RESOURCE_MFMA,
+                    cycles=timing.reciprocal_throughput_cycles,
+                    units=1,
+                ),
+            )
+            overlay = matrix_overlays[descriptor_key]
+            assert overlay.schedule_class == _amdgpu_mfma_schedule_class_name(
+                descriptor_key
+            )
+            assert overlay.schedule_class.startswith(_SCHEDULE_MFMA_QUALIFIED_PREFIX)
+
+    differing_member_timings = {
+        descriptor_key
+        for descriptor_key in (
+            _AMDGPU_GFX942_MATRIX_TIMINGS.keys() & _AMDGPU_GFX950_MATRIX_TIMINGS.keys()
+        )
+        if _AMDGPU_GFX942_MATRIX_TIMINGS[descriptor_key]
+        != _AMDGPU_GFX950_MATRIX_TIMINGS[descriptor_key]
+    }
+    assert differing_member_timings == {"amdgpu.v_mfma_f64_16x16x4_f64"}
+    for descriptor_key, generic_timing in _AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS.items():
+        gfx942_timing = _AMDGPU_GFX942_MATRIX_TIMINGS[descriptor_key]
+        gfx950_timing = _AMDGPU_GFX950_MATRIX_TIMINGS[descriptor_key]
+        assert generic_timing.latency_cycles == max(
+            gfx942_timing.latency_cycles,
+            gfx950_timing.latency_cycles,
+        )
+        assert generic_timing.reciprocal_throughput_cycles == max(
+            gfx942_timing.reciprocal_throughput_cycles,
+            gfx950_timing.reciprocal_throughput_cycles,
+        )
+
+    gfx950_overlays = {
+        overlay.descriptor_key: overlay for overlay in _gfx950_core_overlays()
+    }
+    for descriptor_key in (
+        "amdgpu.v_mfma_scale_f32_16x16x128_f8f6f4",
+        "amdgpu.v_mfma_scale_f32_32x32x64_f8f6f4",
+    ):
+        assert gfx950_overlays[descriptor_key].fixed_encoding_fields == (
+            ("ABID", 1),
+            ("ENCODING", 0x1A7),
+            ("X2ENCODING", 0xD3AC),
+        )
+
+
+def test_gfx12_matrix_schedule_classes_match_processor_model() -> None:
+    schedule_classes = {
+        schedule_class.name: schedule_class
+        for schedule_class in _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE.schedule_classes
+    }
+    for schedule_class_name, resource_name in (
+        (_SCHEDULE_WMMA, _RESOURCE_WMMA),
+        (_SCHEDULE_SWMMAC, _RESOURCE_SWMMAC),
+    ):
+        schedule_class = schedule_classes[schedule_class_name]
+        assert schedule_class.latency_kind is LatencyKind.EXACT
+        assert schedule_class.latency_cycles == 5
+        assert schedule_class.issue_uses == (
+            IssueUse(resource_name, cycles=1, units=1),
+        )
+        assert schedule_class.model_quality is ModelQuality.EXACT
+
+    matrix_overlays = tuple(
+        overlay
+        for overlay in _gfx12_core_overlays()
+        if (overlay.semantic_tag or "").startswith("matrix.")
+    )
+    # Each of the 11 WMMA instructions has both tied-accumulator and
+    # zero-accumulator packet forms. SWMMAC contributes another 11 forms.
+    assert len(matrix_overlays) == 33
+    assert {overlay.schedule_class for overlay in matrix_overlays} == {
+        _SCHEDULE_WMMA,
+        _SCHEDULE_SWMMAC,
+    }
 
 
 def test_trans_schedule_classes_accept_descriptor_latency_overrides() -> None:
@@ -1121,6 +1615,9 @@ def test_s_delay_alu_descriptor_is_exposed_on_rdna_families() -> None:
     }
 
     assert targets_with_delay_alu == {
+        "gfx11_generic",
+        "gfx12_generic",
+        "gfx12_5_generic",
         "rdna3",
         "rdna3_5",
         "rdna4",
@@ -1214,9 +1711,11 @@ def test_tensor_memory_descriptors_are_gfx125x_scoped() -> None:
         "amdgpu.s_wait_tensorcnt",
     }
 
-    assert tensor_keys <= target_descriptor_keys["rdna4_gfx125x"]
+    gfx125x_targets = {"gfx12_5_generic", "rdna4_gfx125x"}
+    for target in gfx125x_targets:
+        assert tensor_keys <= target_descriptor_keys[target]
     for target, descriptor_keys in target_descriptor_keys.items():
-        if target != "rdna4_gfx125x":
+        if target not in gfx125x_targets:
             assert tensor_keys.isdisjoint(descriptor_keys)
 
 
@@ -1296,9 +1795,11 @@ def test_cluster_memory_descriptors_are_gfx125x_scoped() -> None:
         "amdgpu.s_wait_asynccnt",
     }
 
-    assert cluster_keys <= target_descriptor_keys["rdna4_gfx125x"]
+    gfx125x_targets = {"gfx12_5_generic", "rdna4_gfx125x"}
+    for target in gfx125x_targets:
+        assert cluster_keys <= target_descriptor_keys[target]
     for target, descriptor_keys in target_descriptor_keys.items():
-        if target != "rdna4_gfx125x":
+        if target not in gfx125x_targets:
             assert cluster_keys.isdisjoint(descriptor_keys)
 
 

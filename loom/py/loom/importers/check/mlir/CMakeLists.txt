@@ -27,7 +27,10 @@ if(LOOM_IMPORT_MLIR)
 iree_py_test(
   NAME
     mlir_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
   SRCS
+    "runner_test.py"
     "../../../tools/pytest_style_runner.py"
   ARGS
     "loom.importers.check.mlir.runner_test"
@@ -36,6 +39,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 endif()
 

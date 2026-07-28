@@ -160,7 +160,7 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
   report->artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_VM_ARCHIVE;
   report->backend_name = IREE_SV("amdgpu-hal");
   report->target_family_name = IREE_SV("amdgpu");
-  report->target_key = IREE_SV("gfx1100");
+  report->target_key = IREE_SV("gfx11-generic");
   report->function_name = IREE_SV("candidate_kernel");
   const loom_target_compile_report_target_capability_row_t capability_row = {
       /*.function_name=*/report->function_name,
@@ -259,7 +259,7 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
   ExpectObjectValueEquals(compile_report, IREE_SV("target_family"),
                           IREE_SV("amdgpu"));
   ExpectObjectValueEquals(compile_report, IREE_SV("target_key"),
-                          IREE_SV("gfx1100"));
+                          IREE_SV("gfx11-generic"));
   ExpectObjectValueEquals(compile_report, IREE_SV("function"),
                           IREE_SV("candidate_kernel"));
 

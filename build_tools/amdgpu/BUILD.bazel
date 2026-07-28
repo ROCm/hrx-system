@@ -3,8 +3,11 @@
 # Licensed under the Apache License v2.0 with LLVM Exceptions.
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# bazel-to-cmake: skip
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -17,7 +20,19 @@ exports_files([
     "selectors.cmake",
     "target_map.cmake",
     "target_map.py",
+    "target_map_data.py",
 ])
+
+iree_py_library(
+    name = "target_map_data",
+    srcs = ["target_map_data.py"],
+)
+
+iree_py_test(
+    name = "target_map_data_test",
+    srcs = ["target_map_data_test.py"],
+    deps = [":target_map_data"],
+)
 
 cc_library(
     name = "target_map_h",

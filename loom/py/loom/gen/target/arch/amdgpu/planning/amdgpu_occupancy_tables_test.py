@@ -13,14 +13,36 @@ import pytest
 from loom.gen.target.arch.amdgpu.planning import amdgpu_occupancy_tables
 from loom.target.arch.amdgpu.target_info import (
     AmdgpuOccupancyModelInfo,
-    sorted_occupancy_model_infos,
+    sorted_processor_infos,
 )
 
 _OCCUPANCY_HEADER = "loom/target/arch/amdgpu/planning/occupancy_model.h"
 
 
+def _current_models() -> tuple[amdgpu_occupancy_tables._AmdgpuOccupancyModelRow, ...]:
+    return amdgpu_occupancy_tables._materialize_models(sorted_processor_infos())
+
+
+def _replace_row_model(
+    row: amdgpu_occupancy_tables._AmdgpuOccupancyModelRow,
+    model: AmdgpuOccupancyModelInfo,
+) -> amdgpu_occupancy_tables._AmdgpuOccupancyModelRow:
+    processors = tuple(
+        dataclasses.replace(
+            processor,
+            occupancy=dataclasses.replace(
+                processor.occupancy,
+                wave32=model if row.wave_size == 32 else processor.occupancy.wave32,
+                wave64=model if row.wave_size == 64 else processor.occupancy.wave64,
+            ),
+        )
+        for processor in row.processors
+    )
+    return dataclasses.replace(row, model=model, processors=processors)
+
+
 def test_occupancy_generator_emits_data_source_only() -> None:
-    source = amdgpu_occupancy_tables._emit_source(sorted_occupancy_model_infos())
+    source = amdgpu_occupancy_tables._emit_source(_current_models())
 
     assert f'#include "{_OCCUPANCY_HEADER}"' in source
     assert "typedef " not in source
@@ -46,94 +68,117 @@ def test_occupancy_generator_emits_data_source_only() -> None:
     assert "RegisterClassIndexByDescriptorRegClassId" in source
     assert ".register_class_indices_by_descriptor_reg_class_id =" in source
     assert ".descriptor_reg_class_count =" in source
-    assert "kLoomAmdgpuOccupancyModels[LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_COUNT]" in source
+    assert "kLoomAmdgpuOccupancyModelsByProcessor" in source
+    assert "LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_32" in source
+    assert "LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_64" in source
 
 
-def test_occupancy_models_cover_all_descriptor_sets() -> None:
-    amdgpu_occupancy_tables._validate_models(sorted_occupancy_model_infos())
+def test_occupancy_models_cover_all_processor_wave_modes() -> None:
+    processors = sorted_processor_infos()
+    amdgpu_occupancy_tables._validate_models(amdgpu_occupancy_tables._materialize_models(processors), processors)
 
 
-def test_occupancy_models_reject_missing_descriptor_set() -> None:
-    models = sorted_occupancy_model_infos()[:-1]
-    with pytest.raises(ValueError, match="missing descriptor sets"):
-        amdgpu_occupancy_tables._validate_models(models)
+def test_occupancy_models_reject_missing_processor_wave_mode() -> None:
+    processors = sorted_processor_infos()
+    models = _current_models()[:-1]
+    with pytest.raises(ValueError, match="do not cover processor wave modes"):
+        amdgpu_occupancy_tables._validate_models(models, processors)
 
 
 def test_occupancy_models_reject_missing_base_register_class() -> None:
-    models = list(sorted_occupancy_model_infos())
-    model = models[0]
-    models[0] = dataclasses.replace(
-        model,
-        register_classes=tuple(row for row in model.register_classes if row.register_class != "amdgpu.vgpr"),
+    processors = sorted_processor_infos()
+    models = list(_current_models())
+    model = models[0].model
+    models[0] = _replace_row_model(
+        models[0],
+        dataclasses.replace(
+            model,
+            register_classes=tuple(row for row in model.register_classes if row.register_class != "amdgpu.vgpr"),
+        ),
     )
     with pytest.raises(ValueError, match="missing base register classes"):
-        amdgpu_occupancy_tables._validate_models(models)
+        amdgpu_occupancy_tables._validate_models(models, processors)
 
 
 def test_occupancy_models_reject_missing_spillable_register_class() -> None:
-    models = list(sorted_occupancy_model_infos())
-    model = next(info for info in models if info.descriptor_set_key == "amdgpu.cdna3.core")
-    model_index = models.index(model)
-    models[model_index] = AmdgpuOccupancyModelInfo(
-        descriptor_set_key=model.descriptor_set_key,
-        wave_size=model.wave_size,
+    processors = sorted_processor_infos()
+    models = list(_current_models())
+    model_row = next(row for row in models if row.descriptor_set_key == "amdgpu.cdna3.core")
+    model_index = models.index(model_row)
+    model = model_row.model
+    replacement = AmdgpuOccupancyModelInfo(
         max_waves_per_simd=model.max_waves_per_simd,
+        domain=model.domain,
         register_classes=tuple(row for row in model.register_classes if row.register_class != "amdgpu.agpr"),
         resources=(),
     )
+    models[model_index] = _replace_row_model(model_row, replacement)
     with pytest.raises(
         ValueError,
         match=r"missing spillable descriptor register classes: amdgpu\.agpr",
     ):
-        amdgpu_occupancy_tables._validate_models(models)
+        amdgpu_occupancy_tables._validate_models(models, processors)
 
 
 def test_occupancy_models_reject_zero_residency_resource_capacity() -> None:
-    models = list(sorted_occupancy_model_infos())
-    model = next(info for info in models if info.descriptor_set_key == "amdgpu.cdna3.core")
-    model_index = models.index(model)
+    processors = sorted_processor_infos()
+    models = list(_current_models())
+    model_row = next(row for row in models if row.descriptor_set_key == "amdgpu.cdna3.core")
+    model_index = models.index(model_row)
+    model = model_row.model
     resource = model.resources[0]
-    models[model_index] = dataclasses.replace(
-        model,
-        resources=(dataclasses.replace(resource, pool_units=511),),
+    models[model_index] = _replace_row_model(
+        model_row,
+        dataclasses.replace(
+            model,
+            resources=(dataclasses.replace(resource, pool_units=511),),
+        ),
     )
 
     with pytest.raises(ValueError, match="zero residency"):
-        amdgpu_occupancy_tables._validate_models(models)
+        amdgpu_occupancy_tables._validate_models(models, processors)
 
 
 def test_occupancy_models_reject_zero_residency_register_capacity() -> None:
-    models = list(sorted_occupancy_model_infos())
-    model = next(info for info in models if info.descriptor_set_key == "amdgpu.cdna3.core")
-    model_index = models.index(model)
+    processors = sorted_processor_infos()
+    models = list(_current_models())
+    model_row = next(row for row in models if row.descriptor_set_key == "amdgpu.cdna3.core")
+    model_index = models.index(model_row)
+    model = model_row.model
     register_classes = tuple(dataclasses.replace(row, pool_units=255) if row.register_class == "amdgpu.vgpr" else row for row in model.register_classes)
-    models[model_index] = dataclasses.replace(
-        model,
-        register_classes=register_classes,
+    models[model_index] = _replace_row_model(
+        model_row,
+        dataclasses.replace(model, register_classes=register_classes),
     )
 
     with pytest.raises(ValueError, match="zero residency"):
-        amdgpu_occupancy_tables._validate_models(models)
+        amdgpu_occupancy_tables._validate_models(models, processors)
 
 
 def test_occupancy_models_reject_unrepresentable_terminal_cliff() -> None:
-    models = list(sorted_occupancy_model_infos())
-    model = models[0]
+    processors = sorted_processor_infos()
+    models = list(_current_models())
+    model_row = models[0]
+    model = model_row.model
     register_class = model.register_classes[0]
-    models[0] = dataclasses.replace(
-        model,
-        register_classes=(
-            dataclasses.replace(
-                register_class,
-                pool_units=0xFFFFFFFF,
-                allocation_granularity=1,
+    models[0] = _replace_row_model(
+        model_row,
+        dataclasses.replace(
+            model,
+            register_classes=(
+                dataclasses.replace(
+                    register_class,
+                    pool_units=0xFFFFFFFF,
+                    allocation_granularity=1,
+                    limits_occupancy=True,
+                ),
+                *model.register_classes[1:],
             ),
-            *model.register_classes[1:],
         ),
     )
 
     with pytest.raises(ValueError, match="pressure cliff does not fit uint32"):
-        amdgpu_occupancy_tables._validate_models(models)
+        amdgpu_occupancy_tables._validate_models(models, processors)
 
 
 def test_pressure_cliffs_jump_directly_between_reachable_tiers() -> None:
@@ -149,8 +194,13 @@ def test_pressure_cliffs_jump_directly_between_reachable_tiers() -> None:
 
 
 def test_pressure_cliffs_match_exhaustive_current_models() -> None:
-    for model in sorted_occupancy_model_infos():
-        for source in (*model.register_classes, *model.resources):
+    for model_row in _current_models():
+        model = model_row.model
+        sources = (
+            *(row for row in model.register_classes if row.limits_occupancy),
+            *model.resources,
+        )
+        for source in sources:
             expected: list[tuple[int, int, int]] = []
             previous_wave_limit = model.max_waves_per_simd
             stop_candidate = source.pool_units + source.allocation_granularity

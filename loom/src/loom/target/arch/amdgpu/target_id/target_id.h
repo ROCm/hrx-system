@@ -26,7 +26,7 @@ extern const iree_string_view_t loom_amdgpu_amdhsa_target_id_prefix;
 // Returns the AMDGPU processor selected by |target_op|, or NULL when the op is
 // not an AMDGPU target record or verification has not proven the processor.
 const loom_amdgpu_processor_info_t* loom_amdgpu_target_processor_from_op(
-    const loom_module_t* module, const loom_op_t* target_op);
+    const loom_op_t* target_op);
 
 // Returns the AMDGPU processor selected by |target_ref|, or NULL.
 const loom_amdgpu_processor_info_t* loom_amdgpu_target_processor_from_ref(
@@ -35,7 +35,7 @@ const loom_amdgpu_processor_info_t* loom_amdgpu_target_processor_from_ref(
 // Returns the AMDGPU processor selected by a resolved low target, or NULL.
 const loom_amdgpu_processor_info_t*
 loom_amdgpu_target_processor_from_resolved_target(
-    const loom_module_t* module, const loom_low_resolved_target_t* target);
+    const loom_low_resolved_target_t* target);
 
 // Appends a full AMDHSA target id for |processor| and optional
 // |feature_suffix| to |builder|.

@@ -17,6 +17,8 @@ exports_files([
     "ffn_gate_up_swiglu_q6q8.loom",
     "fragment_repack_bf16.loom",
     "fp8_finite_storage_decode.loom",
+    "gfx11_wmma_families.loom",
+    "gfx9_4_mfma_families.loom",
     "indexed_row_gather_f32.loom",
     "loop_carried_lane_liveness.loom",
     "memset_i8.loom",
@@ -68,6 +70,34 @@ iree_executable_test(
     ],
     data = [
         "fp8_finite_storage_decode.loom",
+    ],
+    tags = ["hostonly"],
+    target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
+)
+
+iree_executable_test(
+    name = "gfx11_wmma_families_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location gfx11_wmma_families.loom)",
+        "--dry-run",
+    ],
+    data = [
+        "gfx11_wmma_families.loom",
+    ],
+    tags = ["hostonly"],
+    target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
+)
+
+iree_executable_test(
+    name = "gfx9_4_mfma_families_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location gfx9_4_mfma_families.loom)",
+        "--dry-run",
+    ],
+    data = [
+        "gfx9_4_mfma_families.loom",
     ],
     tags = ["hostonly"],
     target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
@@ -199,6 +229,60 @@ iree_executable_test(
     ],
     data = [
         "fp8_finite_storage_decode.loom",
+    ],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+)
+
+iree_executable_test(
+    name = "gfx11_wmma_families_amdgpu_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location gfx11_wmma_families.loom)",
+        "--device=amdgpu",
+        "--measure=dispatch_complete",
+        "--sample-compilation=per_sample",
+        "--iterations=1",
+        "--warmup-iterations=0",
+        "--batch-size=1",
+        "--min-time-ms=0",
+        "--max-batches=1",
+        "--input-ring-count=1",
+    ],
+    data = [
+        "gfx11_wmma_families.loom",
+    ],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+)
+
+iree_executable_test(
+    name = "gfx9_4_mfma_families_amdgpu_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location gfx9_4_mfma_families.loom)",
+        "--device=amdgpu",
+        "--measure=dispatch_complete",
+        "--sample-compilation=per_sample",
+        "--iterations=1",
+        "--warmup-iterations=0",
+        "--batch-size=1",
+        "--min-time-ms=0",
+        "--max-batches=1",
+        "--input-ring-count=1",
+    ],
+    data = [
+        "gfx9_4_mfma_families.loom",
     ],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",

@@ -677,8 +677,7 @@ iree_status_t loom_amdgpu_kernel_record_build(
   const loom_target_hal_kernel_abi_t* hal_kernel =
       &schedule->target.bundle_storage.export_plan.hal_kernel;
   const loom_amdgpu_processor_info_t* processor =
-      loom_amdgpu_target_processor_from_resolved_target(schedule->module,
-                                                        &schedule->target);
+      loom_amdgpu_target_processor_from_resolved_target(&schedule->target);
   if (processor == NULL) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "AMDGPU kernel emission requires an AMDGPU "

@@ -1,8 +1,8 @@
 // RUN: emit source-low output=low sanitizer=access sanitizer-reporting=trap
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @sanitizer_explicit_rdna3_access_read(%input: buffer) {
+func.def target(@target) @sanitizer_explicit_gfx11_access_read(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32, #dense>
@@ -11,7 +11,7 @@ func.def target(@target) @sanitizer_explicit_rdna3_access_read(%input: buffer) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_rdna3_access_read() asm<amdgpu.rdna3.core> {
+low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_gfx11_access_read() asm<amdgpu.gfx11.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %5 = s_getpc_b64
   %6 = slice %5[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -93,9 +93,9 @@ low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_rdna3_access_re
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @sanitizer_explicit_rdna3_access_write(%output: buffer) {
+func.def target(@target) @sanitizer_explicit_gfx11_access_write(%output: buffer) {
   %base = index.constant 0 : offset
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_view = buffer.view %output_global[%base] : buffer -> view<1xf32, #dense>
@@ -104,7 +104,7 @@ func.def target(@target) @sanitizer_explicit_rdna3_access_write(%output: buffer)
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_rdna3_access_write() asm<amdgpu.rdna3.core> {
+low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_gfx11_access_write() asm<amdgpu.gfx11.generic.core> {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %5 = s_getpc_b64
   %6 = slice %5[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -186,9 +186,9 @@ low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_rdna3_access_wr
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @sanitizer_explicit_rdna3_strided_access_write(%output: buffer) {
+func.def target(@target) @sanitizer_explicit_gfx11_strided_access_write(%output: buffer) {
   %base = index.constant 0 : offset
   %sixty_four = index.constant 64 : index
   %layout = encoding.layout.strided [1, %sixty_four] : encoding<layout>
@@ -199,7 +199,7 @@ func.def target(@target) @sanitizer_explicit_rdna3_strided_access_write(%output:
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_rdna3_strided_access_write() asm<amdgpu.rdna3.core> {
+low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_gfx11_strided_access_write() asm<amdgpu.gfx11.generic.core> {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16384} : reg<amdgpu.sgpr x2>
   %7 = s_getpc_b64
   %8 = slice %7[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -281,9 +281,9 @@ low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_rdna3_strided_a
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @sanitizer_explicit_rdna3_vector_access_read(%input: buffer) {
+func.def target(@target) @sanitizer_explicit_gfx11_vector_access_read(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %input_view = buffer.view %input_global[%base] : buffer -> view<4xi32, #dense>
@@ -292,7 +292,7 @@ func.def target(@target) @sanitizer_explicit_rdna3_vector_access_read(%input: bu
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_rdna3_vector_access_read() asm<amdgpu.rdna3.core> {
+low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_gfx11_vector_access_read() asm<amdgpu.gfx11.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %5 = s_getpc_b64
   %6 = slice %5[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -412,9 +412,9 @@ low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_rdna3_vector_ac
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @sanitizer_explicit_rdna3_access_reads_share_trap(%input: buffer) {
+func.def target(@target) @sanitizer_explicit_gfx11_access_reads_share_trap(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %input_view = buffer.view %input_global[%base] : buffer -> view<2xi32, #dense>
@@ -424,7 +424,7 @@ func.def target(@target) @sanitizer_explicit_rdna3_access_reads_share_trap(%inpu
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_rdna3_access_reads_share_trap() asm<amdgpu.rdna3.core> {
+low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_gfx11_access_reads_share_trap() asm<amdgpu.gfx11.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
   %5 = s_getpc_b64
   %6 = slice %5[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -571,7 +571,7 @@ low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_rdna3_access_re
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @sanitizer_trap_terminates_returning_func(%input: buffer, %value: i32) -> (i32) {
   %base = index.constant 0 : offset
@@ -582,7 +582,7 @@ func.def target(@target) @sanitizer_trap_terminates_returning_func(%input: buffe
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @sanitizer_trap_terminates_returning_func(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@target) abi(hal_kernel) @sanitizer_trap_terminates_returning_func(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %9 = s_getpc_b64
   %10 = slice %9[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -843,7 +843,7 @@ low.func.def target(@target) abi(hal_kernel) @sanitizer_explicit_rdna4_access_re
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @sanitizer_dynamic_byte_stride_read() {
   %one = index.constant 1 : index
@@ -860,7 +860,7 @@ kernel.def target(@target) @sanitizer_dynamic_byte_stride_read() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(256, 1, 1) workgroup_count(1, 1, 1) @sanitizer_dynamic_byte_stride_read() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(256, 1, 1) workgroup_count(1, 1, 1) @sanitizer_dynamic_byte_stride_read() asm<amdgpu.gfx11.generic.core> {
   %row = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 53760} : reg<amdgpu.sgpr x2>
   %10 = s_getpc_b64

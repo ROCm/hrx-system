@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from itertools import product
 from math import prod
 
+from loom.target.arch.amdgpu.matrix_formats import GFX125X_MATRIX_PHYSICAL_FORMATS
+
 _AXIS_NAMES = ("block", "row", "column", "reduction")
 _MAX_FRAGMENT_REGISTER_COUNT = 32
 _ROLE_AXIS_NAMES = {
@@ -141,7 +143,8 @@ def _single_tile_layout(
     reduction_count: int,
     lhs_payload_element_count: int,
     rhs_payload_element_count: int,
-    source_element_bit_count: int,
+    lhs_element_bit_count: int,
+    rhs_element_bit_count: int,
     result_payload_element_count: int,
     result_element_bit_count: int = 32,
     lhs_reduction_group: MatrixFragmentReductionGroup | None = None,
@@ -151,7 +154,7 @@ def _single_tile_layout(
     lhs = _role(
         "lhs",
         lhs_payload_element_count,
-        source_element_bit_count,
+        lhs_element_bit_count,
         _axes(
             row=_axis(thread=row_count),
             reduction=_axis(
@@ -165,7 +168,7 @@ def _single_tile_layout(
     rhs = _role(
         "rhs",
         rhs_payload_element_count,
-        source_element_bit_count,
+        rhs_element_bit_count,
         _axes(
             column=_axis(thread=column_count),
             reduction=_axis(
@@ -326,12 +329,20 @@ def _rdna3_layout(
     key: str,
     *,
     wave_size: int,
+    source_payload_element_count: int,
+    source_element_bit_count: int,
     result_element_bit_count: int,
     result_payload_element_count: int,
     result_coordinate_stride: int,
 ) -> AmdgpuMatrixFragmentLayout:
-    source_axes_lhs = _axes(row=_axis(thread=16), reduction=_axis(element=16))
-    source_axes_rhs = _axes(column=_axis(thread=16), reduction=_axis(element=16))
+    source_axes_lhs = _axes(
+        row=_axis(thread=16),
+        reduction=_axis(element=source_payload_element_count),
+    )
+    source_axes_rhs = _axes(
+        column=_axis(thread=16),
+        reduction=_axis(element=source_payload_element_count),
+    )
     result_coordinate_count = result_payload_element_count // result_coordinate_stride
     result_axes = _axes(
         row=_axis(
@@ -345,8 +356,18 @@ def _rdna3_layout(
         key=key,
         wave_size=wave_size,
         tile_shape=(1, 16, 16, 16),
-        lhs=_role("lhs", 16, 16, source_axes_lhs),
-        rhs=_role("rhs", 16, 16, source_axes_rhs),
+        lhs=_role(
+            "lhs",
+            source_payload_element_count,
+            source_element_bit_count,
+            source_axes_lhs,
+        ),
+        rhs=_role(
+            "rhs",
+            source_payload_element_count,
+            source_element_bit_count,
+            source_axes_rhs,
+        ),
         accumulator=_role(
             "accumulator",
             result_payload_element_count,
@@ -402,14 +423,6 @@ def _validate_role(
             f"{role.register_count} payload registers, exceeding the "
             f"{_MAX_FRAGMENT_REGISTER_COUNT}-register architectural limit"
         )
-    if (role.element_bit_count <= 32 and 32 % role.element_bit_count != 0) or (
-        role.element_bit_count > 32 and role.element_bit_count % 32 != 0
-    ):
-        raise ValueError(
-            f"matrix fragment layout '{layout.key}' role '{role.role}' "
-            f"{role.element_bit_count}-bit elements cannot be split into "
-            "32-bit payload registers"
-        )
     if (
         role.coordinate_element_offset < 0
         or role.coordinate_element_offset > 0xFFFF
@@ -421,11 +434,13 @@ def _validate_role(
             "an invalid coordinate element mapping"
         )
     payload_elements_per_register = (
-        32 // role.element_bit_count if role.element_bit_count <= 32 else 1
+        32 // role.element_bit_count
+        if role.element_bit_count <= 32 and 32 % role.element_bit_count == 0
+        else 0
     )
-    if (
-        role.coordinate_element_offset != 0
-        or payload_elements_per_register % role.coordinate_element_stride != 0
+    if role.coordinate_element_offset != 0 or (
+        payload_elements_per_register != 0
+        and payload_elements_per_register % role.coordinate_element_stride != 0
     ):
         raise ValueError(
             f"matrix fragment layout '{layout.key}' role '{role.role}' has "
@@ -673,6 +688,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_f32_16x16x16_f16",
         wave_size=32,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=32,
         result_payload_element_count=8,
         result_coordinate_stride=1,
@@ -680,6 +697,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_f32_16x16x16_bf16",
         wave_size=32,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=32,
         result_payload_element_count=8,
         result_coordinate_stride=1,
@@ -692,7 +711,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
         reduction_count=16,
         lhs_payload_element_count=4,
         rhs_payload_element_count=4,
-        source_element_bit_count=16,
+        lhs_element_bit_count=16,
+        rhs_element_bit_count=16,
         result_payload_element_count=4,
     ),
     _single_tile_layout(
@@ -703,7 +723,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
         reduction_count=16,
         lhs_payload_element_count=4,
         rhs_payload_element_count=4,
-        source_element_bit_count=16,
+        lhs_element_bit_count=16,
+        rhs_element_bit_count=16,
         result_payload_element_count=4,
     ),
     _single_tile_layout(
@@ -714,8 +735,22 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
         reduction_count=4,
         lhs_payload_element_count=1,
         rhs_payload_element_count=1,
-        source_element_bit_count=32,
+        lhs_element_bit_count=32,
+        rhs_element_bit_count=32,
         result_payload_element_count=4,
+    ),
+    _single_tile_layout(
+        "cdna_mfma_f64_16x16x4_f64",
+        wave_size=64,
+        row_count=16,
+        column_count=16,
+        reduction_count=4,
+        lhs_payload_element_count=1,
+        rhs_payload_element_count=1,
+        lhs_element_bit_count=64,
+        rhs_element_bit_count=64,
+        result_payload_element_count=4,
+        result_element_bit_count=64,
     ),
     *(
         _blocked_mfma_layout(
@@ -756,6 +791,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_f16_16x16x16_f16",
         wave_size=32,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=16,
         result_payload_element_count=16,
         result_coordinate_stride=2,
@@ -763,6 +800,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_bf16_16x16x16_bf16",
         wave_size=32,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=16,
         result_payload_element_count=16,
         result_coordinate_stride=2,
@@ -770,6 +809,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_f32_16x16x16_f16_w64",
         wave_size=64,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=32,
         result_payload_element_count=4,
         result_coordinate_stride=1,
@@ -777,6 +818,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_f32_16x16x16_bf16_w64",
         wave_size=64,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=32,
         result_payload_element_count=4,
         result_coordinate_stride=1,
@@ -784,6 +827,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_f16_16x16x16_f16_w64",
         wave_size=64,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=16,
         result_payload_element_count=8,
         result_coordinate_stride=2,
@@ -791,9 +836,33 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_bf16_16x16x16_bf16_w64",
         wave_size=64,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=16,
         result_payload_element_count=8,
         result_coordinate_stride=2,
+    ),
+    *(
+        _rdna3_layout(
+            key,
+            wave_size=wave_size,
+            source_payload_element_count=16,
+            source_element_bit_count=source_element_bit_count,
+            result_element_bit_count=32,
+            result_payload_element_count=result_payload_element_count,
+            result_coordinate_stride=1,
+        )
+        for (
+            key,
+            wave_size,
+            source_element_bit_count,
+            result_payload_element_count,
+        ) in (
+            ("rdna3_wmmar3_i32_16x16x16_iu8", 32, 8, 8),
+            ("rdna3_wmmar3_i32_16x16x16_iu8_w64", 64, 8, 4),
+            ("rdna3_wmmar3_i32_16x16x16_iu4", 32, 4, 8),
+            ("rdna3_wmmar3_i32_16x16x16_iu4_w64", 64, 4, 4),
+        )
     ),
     _single_tile_layout(
         "rdna4_wmma_f16_16x16x16_f16",
@@ -803,7 +872,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
         reduction_count=16,
         lhs_payload_element_count=8,
         rhs_payload_element_count=8,
-        source_element_bit_count=16,
+        lhs_element_bit_count=16,
+        rhs_element_bit_count=16,
         result_payload_element_count=8,
         result_element_bit_count=16,
     ),
@@ -815,7 +885,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
         reduction_count=16,
         lhs_payload_element_count=8,
         rhs_payload_element_count=8,
-        source_element_bit_count=16,
+        lhs_element_bit_count=16,
+        rhs_element_bit_count=16,
         result_payload_element_count=8,
         result_element_bit_count=16,
     ),
@@ -827,7 +898,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
         reduction_count=32,
         lhs_payload_element_count=16,
         rhs_payload_element_count=16,
-        source_element_bit_count=16,
+        lhs_element_bit_count=16,
+        rhs_element_bit_count=16,
         result_payload_element_count=8,
         result_element_bit_count=16,
     ),
@@ -839,7 +911,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
         reduction_count=32,
         lhs_payload_element_count=16,
         rhs_payload_element_count=16,
-        source_element_bit_count=16,
+        lhs_element_bit_count=16,
+        rhs_element_bit_count=16,
         result_payload_element_count=8,
         result_element_bit_count=16,
     ),
@@ -852,7 +925,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
             reduction_count=reduction_count,
             lhs_payload_element_count=source_payload_element_count,
             rhs_payload_element_count=source_payload_element_count,
-            source_element_bit_count=source_element_bit_count,
+            lhs_element_bit_count=source_element_bit_count,
+            rhs_element_bit_count=source_element_bit_count,
             result_payload_element_count=8,
         )
         for (
@@ -869,7 +943,27 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
             ("rdna4_wmma_f32_16x16x16_packed8", 16, 8, 8),
             ("rdna4_wmma_f32_16x16x64_packed8", 64, 32, 8),
             ("rdna4_wmma_f32_16x16x128_packed8", 128, 64, 8),
+            ("rdna4_wmma_i32_16x16x16_iu8", 16, 8, 8),
+            ("rdna4_wmma_i32_16x16x16_iu4", 16, 8, 4),
+            ("rdna4_wmma_i32_16x16x32_iu4", 32, 16, 4),
+            ("rdna4_wmma_i32_16x16x64_iu8", 64, 32, 8),
         )
+    ),
+    *(
+        _single_tile_layout(
+            (f"gfx125x_wmma_f32_16x16x128_{lhs_format.token}_{rhs_format.token}"),
+            wave_size=32,
+            row_count=16,
+            column_count=16,
+            reduction_count=128,
+            lhs_payload_element_count=64,
+            rhs_payload_element_count=64,
+            lhs_element_bit_count=lhs_format.element_bit_count,
+            rhs_element_bit_count=rhs_format.element_bit_count,
+            result_payload_element_count=8,
+        )
+        for lhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS
+        for rhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS
     ),
     *(
         _single_tile_layout(
@@ -880,7 +974,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
             reduction_count=reduction_count,
             lhs_payload_element_count=source_payload_element_count,
             rhs_payload_element_count=source_payload_element_count,
-            source_element_bit_count=source_element_bit_count,
+            lhs_element_bit_count=source_element_bit_count,
+            rhs_element_bit_count=source_element_bit_count,
             result_payload_element_count=result_payload_element_count,
         )
         for (
@@ -915,7 +1010,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
             reduction_count=reduction_count,
             lhs_payload_element_count=lhs_payload_element_count,
             rhs_payload_element_count=rhs_payload_element_count,
-            source_element_bit_count=source_element_bit_count,
+            lhs_element_bit_count=source_element_bit_count,
+            rhs_element_bit_count=source_element_bit_count,
             result_payload_element_count=result_payload_element_count,
             result_element_bit_count=result_element_bit_count,
             lhs_reduction_group=_STRUCTURED_2_TO_4_REDUCTION_GROUP,

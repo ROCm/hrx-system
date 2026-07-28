@@ -19,6 +19,9 @@ TEST(AmdgpuMatrixWaitStatesTest, MapsFeatureProfiles) {
   EXPECT_TRUE(loom_amdgpu_matrix_wait_profile_from_feature_profile(
       LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950, &wait_profile));
   EXPECT_EQ(wait_profile, LOOM_AMDGPU_MATRIX_WAIT_PROFILE_MFMA_GFX950);
+  EXPECT_TRUE(loom_amdgpu_matrix_wait_profile_from_feature_profile(
+      LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC, &wait_profile));
+  EXPECT_EQ(wait_profile, LOOM_AMDGPU_MATRIX_WAIT_PROFILE_MFMA_GFX950);
   EXPECT_FALSE(loom_amdgpu_matrix_wait_profile_from_feature_profile(
       LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12, &wait_profile));
   EXPECT_EQ(wait_profile, LOOM_AMDGPU_MATRIX_WAIT_PROFILE_UNKNOWN);

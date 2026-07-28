@@ -25,7 +25,10 @@ iree_py_library(
 iree_py_test(
   NAME
     features_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
   SRCS
+    "spirv_features_test.py"
     "../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.spirv.spirv_features_test"
@@ -35,6 +38,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 iree_py_library(
@@ -59,7 +63,10 @@ iree_py_library(
 iree_py_test(
   NAME
     packet_rows_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
   SRCS
+    "spirv_packet_rows_test.py"
     "../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.spirv.spirv_packet_rows_test"
@@ -68,6 +75,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 iree_py_library(
@@ -89,7 +97,10 @@ iree_py_library(
 iree_py_test(
   NAME
     cooperative_properties_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
   SRCS
+    "spirv_cooperative_properties_test.py"
     "../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.spirv.spirv_cooperative_properties_test"
@@ -98,6 +109,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

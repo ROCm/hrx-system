@@ -9,6 +9,8 @@
 #include <string.h>
 
 #include "iree/base/alignment.h"
+#include "iree/base/internal/arena.h"
+#include "loom/target/entry_selection.h"
 #include "loom/tooling/execution/compile_report_capture.h"
 #include "loom/tooling/execution/hal/candidate.h"
 #include "loom/tooling/execution/hal/invocation.h"
@@ -28,6 +30,42 @@ loom_run_hal_execution_backend_artifact_provider(
   const loom_run_hal_execution_backend_t* hal_execution_backend =
       loom_run_hal_execution_backend_from_base(backend);
   return hal_execution_backend->artifact_provider;
+}
+
+static bool loom_run_hal_execution_backend_accept_entry(
+    void* user_data, const loom_target_entry_t* entry) {
+  (void)user_data;
+  (void)entry;
+  return true;
+}
+
+static iree_status_t loom_run_hal_execution_backend_select_entry(
+    const loom_run_one_shot_request_t* request, iree_arena_allocator_t* arena,
+    bool* out_selected, loom_func_like_t* out_function) {
+  *out_selected = false;
+  *out_function = (loom_func_like_t){0};
+
+  const loom_target_entry_options_t options = {
+      .entry_symbol = request->options->hal_function_name,
+      .diagnostic_sink = request->compile_options->diagnostic_sink,
+      .source_resolver = request->compile_options->source_resolver,
+      .max_errors = request->compile_options->max_errors,
+  };
+  loom_target_entry_diagnostic_emitter_t diagnostic_emitter = {0};
+  loom_target_entry_diagnostic_emitter_initialize(
+      request->run_module->module, &options, LOOM_EMITTER_VERIFIER,
+      &diagnostic_emitter);
+  const loom_target_entry_predicate_t predicate = {
+      .fn = loom_run_hal_execution_backend_accept_entry,
+  };
+  loom_target_entry_t entry = {0};
+  IREE_RETURN_IF_ERROR(loom_target_entry_select_entry(
+      request->run_module->module, &options, predicate, &diagnostic_emitter,
+      IREE_SV("HAL execution"), arena, out_selected, &entry));
+  if (*out_selected) {
+    *out_function = entry.func;
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_run_hal_write_artifact(
@@ -121,17 +159,32 @@ iree_status_t loom_run_hal_execution_backend_run_one_shot(
   loom_run_hal_invocation_result_initialize(request->host_allocator,
                                             &invocation_result);
 
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(32 * 1024, request->host_allocator,
+                                   &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+  bool entry_selected = false;
+  loom_func_like_t entry_function = {0};
+  iree_status_t status = loom_run_hal_execution_backend_select_entry(
+      request, &arena, &entry_selected, &entry_function);
+  if (iree_status_is_ok(status) && !entry_selected) {
+    request->result->exit_code = 1;
+  }
+
   loom_run_hal_runtime_options_t runtime_options;
   loom_run_hal_runtime_options_initialize(artifact_provider->hal_driver_name,
                                           &runtime_options);
   runtime_options.runtime_features |=
       loom_run_hal_runtime_features_from_sanitizer_options(
           &request->compile_options->target_pipeline_options.sanitizer);
-  iree_status_t status = loom_run_hal_runtime_initialize(
-      &runtime_options, request->host_allocator, &runtime);
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && entry_selected) {
+    status = loom_run_hal_runtime_initialize(&runtime_options,
+                                             request->host_allocator, &runtime);
+  }
+  if (iree_status_is_ok(status) && entry_selected) {
     status = loom_run_hal_candidate_compile(
-        artifact_provider, &runtime, request->run_module,
+        artifact_provider, &runtime, request->run_module, entry_function,
         request->compile_options, request->host_allocator, &candidate);
   }
   if (iree_status_is_ok(status) && !candidate.compiled) {
@@ -198,5 +251,7 @@ iree_status_t loom_run_hal_execution_backend_run_one_shot(
   loom_run_hal_invocation_result_deinitialize(&invocation_result);
   loom_run_hal_candidate_deinitialize(&candidate);
   loom_run_hal_runtime_deinitialize(&runtime);
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
   return status;
 }

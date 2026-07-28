@@ -26,7 +26,7 @@ endif()
 
 iree_add_all_subdirs()
 
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA3_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_low_descriptor_cc_library(
   NAME
     cdna3
@@ -36,19 +36,77 @@ loom_low_descriptor_cc_library(
     "cdna3_descriptors.c"
   HEADER
     "cdna3_descriptors.h"
+  GENERATED_HDR_FLAGS
+    "--view-header=gfx9_4_generic"
+  GENERATED_HDRS
+    "gfx9_4_generic_descriptors.h"
   ARGS
     "--target=cdna3"
-    "--xml=${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
   INPUTS
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
     "loom_amdgpu_isa_xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
   DEPS
     loom::codegen::low::descriptors
   EXCLUDE_FROM_ALL
 )
 endif()
 
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+loom_low_descriptor_cc_library(
+  NAME
+    gfx9_4_generic
+  HEADER
+    "gfx9_4_generic_descriptors.h"
+  DEPS
+    ::cdna3
+    loom::codegen::low::descriptors
+  HEADER_ONLY
+)
+endif()
+
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+loom_low_descriptor_cc_library(
+  NAME
+    gfx11_generic
+  HEADER
+    "gfx11_generic_descriptors.h"
+  DEPS
+    ::rdna3
+    loom::codegen::low::descriptors
+  HEADER_ONLY
+)
+endif()
+
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+loom_low_descriptor_cc_library(
+  NAME
+    gfx12_generic
+  HEADER
+    "gfx12_generic_descriptors.h"
+  DEPS
+    ::rdna4
+    loom::codegen::low::descriptors
+  HEADER_ONLY
+)
+endif()
+
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+loom_low_descriptor_cc_library(
+  NAME
+    gfx12_5_generic
+  HEADER
+    "gfx12_5_generic_descriptors.h"
+  DEPS
+    ::rdna4_gfx125x
+    loom::codegen::low::descriptors
+  HEADER_ONLY
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_low_descriptor_cc_library(
   NAME
     rdna3
@@ -58,12 +116,18 @@ loom_low_descriptor_cc_library(
     "rdna3_descriptors.c"
   HEADER
     "rdna3_descriptors.h"
+  GENERATED_HDR_FLAGS
+    "--view-header=gfx11_generic"
+  GENERATED_HDRS
+    "gfx11_generic_descriptors.h"
   ARGS
     "--target=rdna3"
-    "--xml=${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
+    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
   INPUTS
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
     "loom_amdgpu_isa_xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
   DEPS
     loom::codegen::low::descriptors
   EXCLUDE_FROM_ALL
@@ -82,7 +146,7 @@ loom_low_descriptor_cc_library(
     "rdna3_5_descriptors.h"
   ARGS
     "--target=rdna3_5"
-    "--xml=${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
+    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
   INPUTS
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
     "loom_amdgpu_isa_xml"
@@ -92,7 +156,7 @@ loom_low_descriptor_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_low_descriptor_cc_library(
   NAME
     rdna4
@@ -102,9 +166,13 @@ loom_low_descriptor_cc_library(
     "rdna4_descriptors.c"
   HEADER
     "rdna4_descriptors.h"
+  GENERATED_HDR_FLAGS
+    "--view-header=gfx12_generic"
+  GENERATED_HDRS
+    "gfx12_generic_descriptors.h"
   ARGS
     "--target=rdna4"
-    "--xml=${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
   INPUTS
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
     "loom_amdgpu_isa_xml"
@@ -114,7 +182,7 @@ loom_low_descriptor_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX125X_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_low_descriptor_cc_library(
   NAME
     rdna4_gfx125x
@@ -124,9 +192,13 @@ loom_low_descriptor_cc_library(
     "rdna4_gfx125x_descriptors.c"
   HEADER
     "rdna4_gfx125x_descriptors.h"
+  GENERATED_HDR_FLAGS
+    "--view-header=gfx12_5_generic"
+  GENERATED_HDRS
+    "gfx12_5_generic_descriptors.h"
   ARGS
     "--target=rdna4_gfx125x"
-    "--xml=${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
   INPUTS
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
     "loom_amdgpu_isa_xml"
@@ -148,7 +220,7 @@ loom_low_descriptor_cc_library(
     "cdna4_descriptors.h"
   ARGS
     "--target=cdna4"
-    "--xml=${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
+    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
   INPUTS
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
     "loom_amdgpu_isa_xml"
@@ -191,6 +263,18 @@ endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE)
   list(APPEND _low_registry_platform_defines "LOOM_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE")
 endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE)
+  list(APPEND _low_registry_platform_defines "LOOM_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE")
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE)
+  list(APPEND _low_registry_platform_defines "LOOM_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE")
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE)
+  list(APPEND _low_registry_platform_defines "LOOM_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE")
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+  list(APPEND _low_registry_platform_defines "LOOM_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE")
+endif()
 set(_low_registry_platform_deps "")
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA3_CORE)
   list(APPEND _low_registry_platform_deps ::cdna3)
@@ -209,6 +293,18 @@ if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX125X_CORE)
 endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE)
   list(APPEND _low_registry_platform_deps ::rdna3_5)
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE)
+  list(APPEND _low_registry_platform_deps ::gfx9_4_generic)
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE)
+  list(APPEND _low_registry_platform_deps ::gfx11_generic)
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE)
+  list(APPEND _low_registry_platform_deps ::gfx12_generic)
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+  list(APPEND _low_registry_platform_deps ::gfx12_5_generic)
 endif()
 loom_cc_library(
   NAME

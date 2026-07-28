@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from build_tools.devtools import aliases, cli
+from build_tools.devtools import aliases, cli, importers
 from build_tools.devtools import bazel as bazel_dev
 from build_tools.devtools.command_plan import CommandStep, WriteFileStep
 
@@ -61,6 +62,42 @@ class CliTest(unittest.TestCase):
         self.assertIn(".tmp/importers/tilelang/venv", description)
         self.assertIn("pip install --require-hashes --only-binary=:all:", description)
         self.assertIn("requirements-importers-tilelang.lock.txt", description)
+
+    def test_importers_setup_uses_locked_python_abi(self):
+        with (
+            mock.patch(
+                "build_tools.devtools.importers._interpreter_version",
+                side_effect=("3.13", "3.13", "3.12"),
+            ),
+            mock.patch(
+                "build_tools.devtools.importers.shutil.which",
+                return_value="/tools/python3.12",
+            ),
+        ):
+            args = cli.parse_arguments(["importers", "setup", "tilelang"])
+            plan = args.handler(args)
+
+        description = normalized_plan_description(plan)
+        self.assertIn("/tools/python3.12 -m venv", description)
+        self.assertIn(".tmp/importers/tilelang/venv-3.12", description)
+
+    def test_importers_reject_manifest_from_wrong_python_abi(self):
+        importer_spec = importers.spec("tilelang")
+        manifest = {
+            "lock_sha256": importers.lock_hash(importer_spec),
+            "ok": True,
+            "python_version": "3.13.7",
+            "site_packages": str(importer_spec.state_dir),
+        }
+        with (
+            mock.patch.object(
+                importers.Path,
+                "read_text",
+                return_value=json.dumps(manifest),
+            ),
+            self.assertRaisesRegex(ValueError, "requires Python 3.12"),
+        ):
+            importers.load_manifest(importer_spec)
 
     def test_importers_env_prints_manifest(self):
         args = cli.parse_arguments(["importers", "env", "tilelang", "--format=shell"])

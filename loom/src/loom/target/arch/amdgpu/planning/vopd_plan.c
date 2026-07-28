@@ -2385,8 +2385,8 @@ iree_status_t loom_amdgpu_vopd_plan_build(
   loom_amdgpu_vopd_plan_builder_t builder = {
       .schedule = schedule,
       .allocation = allocation,
-      .processor = loom_amdgpu_target_processor_from_resolved_target(
-          schedule->module, &schedule->target),
+      .processor =
+          loom_amdgpu_target_processor_from_resolved_target(&schedule->target),
       .address_state = address_state,
       .wait_packets = wait_packets,
       .wait_states = wait_states,

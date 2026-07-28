@@ -13,7 +13,11 @@ from dataclasses import dataclass
 from typing import cast
 
 from loom.builder import ValueRef
-from loom.importers.core import sanitize_identifier, target_preset_amdgpu_kind
+from loom.importers.core import (
+    sanitize_identifier,
+    target_preset_amdgpu_kind,
+    target_preset_amdgpu_matrix_profile,
+)
 from loom.importers.tilelang.buffers import (
     TileLangBufferAccess,
     TileLangBufferRegion,
@@ -51,6 +55,9 @@ from loom.ir import (
     StaticDim,
     Type,
     TypeKind,
+)
+from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
 )
 
 
@@ -1492,10 +1499,16 @@ def _decode_dense_gemm_spec(
             ),
         )
         return None
-    if target_preset_amdgpu_kind(context.target_preset) != "gfx1100":
+    if (
+        target_preset_amdgpu_matrix_profile(context.target_preset)
+        != AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11
+    ):
         context.record_blocked(
             node_text(expr),
-            "tl.tileop.gemm vector.fragment bridge requires AMDGPU gfx1100",
+            (
+                "tl.tileop.gemm vector.fragment bridge requires an AMDGPU "
+                "GFX11 WMMA target"
+            ),
         )
         return None
     transpose_lhs = _static_bool(args[3])

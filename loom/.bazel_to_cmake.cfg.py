@@ -317,6 +317,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         return [
             "${PROJECT_SOURCE_DIR}/loom/py",
             "${PROJECT_BINARY_DIR}/loom/py",
+            "${PROJECT_SOURCE_DIR}",
         ]
 
     def _emit_rewritten_cmake_rule(self, old_rule_name, new_rule_name, emit):

@@ -58,15 +58,15 @@ def scalar_calls(tir: Any) -> TileLangImportInput:
         buffer_map={src: src_buffer, dst: dst_buffer},
     )
     return TileLangImportInput(
-        source=prim_func, target="hip -mcpu=gfx1100", name="scalar_calls"
+        source=prim_func, target="hip -mcpu=gfx11-generic", name="scalar_calls"
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("scalar_calls") @scalar_calls() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("scalar_calls") @scalar_calls() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src: buffer, %dst: buffer) {
@@ -125,16 +125,16 @@ def scalar_rounding_calls(tir: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="scalar_rounding_calls",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("scalar_rounding_calls") @scalar_rounding_calls() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("scalar_rounding_calls") @scalar_rounding_calls() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src: buffer, %dst: buffer) {
@@ -178,16 +178,16 @@ def scalar_fastmath_quantizer_math(tir: Any) -> TileLangImportInput:
     ).with_attr("tilelang_pass_configs", {"tl.enable_fast_math": True})
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="scalar_fastmath_quantizer_math",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("scalar_fastmath_quantizer_math") @scalar_fastmath_quantizer_math() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("scalar_fastmath_quantizer_math") @scalar_fastmath_quantizer_math() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src: buffer, %dst: buffer) {
@@ -226,15 +226,15 @@ def bitwise_not(tir: Any) -> TileLangImportInput:
         buffer_map={src: src_buffer, dst: dst_buffer},
     )
     return TileLangImportInput(
-        source=prim_func, target="hip -mcpu=gfx1100", name="bitwise_not"
+        source=prim_func, target="hip -mcpu=gfx11-generic", name="bitwise_not"
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("bitwise_not") @bitwise_not() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("bitwise_not") @bitwise_not() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src: buffer, %dst: buffer) {
@@ -277,16 +277,16 @@ def signed_floormod_power_of_two(tir: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="signed_floormod_power_of_two",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("signed_floormod_power_of_two") @signed_floormod_power_of_two() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("signed_floormod_power_of_two") @signed_floormod_power_of_two() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src: buffer, %dst: buffer) {
@@ -328,16 +328,16 @@ def dynamic_loop_bound(tir: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="dynamic_loop_bound",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("dynamic_loop_bound") @dynamic_loop_bound() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("dynamic_loop_bound") @dynamic_loop_bound() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%n: i32, %src: buffer, %dst: buffer) {
@@ -379,15 +379,15 @@ def ceildiv_loop(tir: Any) -> TileLangImportInput:
         buffer_map={src: src_buffer, dst: dst_buffer},
     )
     return TileLangImportInput(
-        source=prim_func, target="hip -mcpu=gfx1100", name="ceildiv_loop"
+        source=prim_func, target="hip -mcpu=gfx11-generic", name="ceildiv_loop"
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("ceildiv_loop") @ceildiv_loop() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("ceildiv_loop") @ceildiv_loop() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src: buffer, %dst: buffer) {

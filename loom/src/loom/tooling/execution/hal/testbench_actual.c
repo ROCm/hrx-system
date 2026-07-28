@@ -686,21 +686,6 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
   }
   IREE_RETURN_IF_ERROR(
       loom_run_hal_testbench_context_ensure_runtime(provider->context));
-  if (!provider->compile_device_target_initialized) {
-    const loom_run_hal_artifact_provider_t* artifact_provider =
-        provider->context->artifact_provider;
-    if (artifact_provider->select_device_target == NULL) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "HAL artifact provider '%.*s' is missing required device target "
-          "selection hook",
-          (int)artifact_provider->name.size, artifact_provider->name.data);
-    }
-    IREE_RETURN_IF_ERROR(artifact_provider->select_device_target(
-        artifact_provider, &provider->context->runtime,
-        provider->context->host_allocator, &provider->compile_device_target));
-    provider->compile_device_target_initialized = true;
-  }
 
   iree_string_view_t entry_symbol = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_module_symbol_name_from_ref(
@@ -752,6 +737,23 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "HAL actual invocations require a target environment");
+  }
+
+  if (!provider->compile_device_target_initialized) {
+    const loom_run_hal_artifact_provider_t* artifact_provider =
+        provider->context->artifact_provider;
+    if (artifact_provider->select_function_device_target == NULL) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "HAL artifact provider '%.*s' is missing required function device "
+          "target selection hook",
+          (int)artifact_provider->name.size, artifact_provider->name.data);
+    }
+    IREE_RETURN_IF_ERROR(artifact_provider->select_function_device_target(
+        artifact_provider, &provider->context->runtime,
+        provider->compile_module.module, entry_func,
+        provider->context->host_allocator, &provider->compile_device_target));
+    provider->compile_device_target_initialized = true;
   }
 
   const loom_diagnostic_sink_t diagnostic_sink =
@@ -811,8 +813,8 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
 
   provider->candidate_initialized = true;
   const iree_host_size_t emit_error_count = provider->diagnostic_error_count;
-  status = loom_run_hal_candidate_compile(
-      provider->context->artifact_provider, &provider->context->runtime,
+  status = loom_run_hal_candidate_emit_target(
+      provider->context->artifact_provider, &provider->compile_device_target,
       &provider->compile_module, &compile_options,
       provider->context->host_allocator, &provider->candidate);
   provider->compile_report_available = true;

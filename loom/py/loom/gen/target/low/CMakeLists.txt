@@ -107,7 +107,12 @@ iree_py_library(
 iree_py_test(
   NAME
     low_descriptors_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
   SRCS
+    "low_descriptor_shard_test.py"
+    "low_descriptors_test.py"
+    "physical_validation_test.py"
     "../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.low.low_descriptor_shard_test"
@@ -122,6 +127,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

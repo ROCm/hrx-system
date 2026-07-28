@@ -127,24 +127,16 @@ iree_status_t FormatTargetRecordForProcessor(
   IREE_ASSERT_ARGUMENT(out_target_record);
   *out_target_record = {};
   const loom_amdgpu_target_record_info_t* record_info =
-      loom_amdgpu_target_record_default_info_for_descriptor_set(
-          processor->descriptor_set.ordinal);
+      loom_amdgpu_target_record_info_for_processor(processor->name);
   if (record_info == nullptr) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU HSA processor has no target record for "
-                            "descriptor set ordinal %" PRIu16,
-                            processor->descriptor_set.ordinal);
+                            "AMDGPU HSA processor '%.*s' has no target record",
+                            (int)processor->name.size, processor->name.data);
   }
   std::string target_record = "amdgpu.target<";
-  target_record.append(record_info->default_processor_name.data,
-                       record_info->default_processor_name.size);
+  target_record.append(record_info->processor_name.data,
+                       record_info->processor_name.size);
   target_record += "> @gfx_target";
-  if (!iree_string_view_equal(processor->name,
-                              record_info->default_processor_name)) {
-    target_record += " {processor = \"";
-    target_record.append(processor->name.data, processor->name.size);
-    target_record += "\"}";
-  }
   target_record += "\n";
   *out_target_record = std::move(target_record);
   return iree_ok_status();

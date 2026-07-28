@@ -312,15 +312,16 @@ TEST_P(SharedBufferPoolTest, OpenValidatesBufferSizeMismatch) {
   iree_shm_handle_close(&dup_handle);
 
   // Wrap with a different buffer_size to create a mismatched region.
-  // Register with WRITE access to avoid the singleton fixed-buffer-table
-  // constraint (READ uses fixed buffers, WRITE uses provided buffers).
+  // No I/O is issued through this deliberately mismatched region. Register it
+  // without access requirements so the validation test does not allocate an
+  // incidental fixed-buffer table or provided-buffer ring.
   iree_async_slab_t* slab = nullptr;
   IREE_ASSERT_OK(iree_async_slab_wrap((uint8_t*)opener_shm.base + pool_storage,
                                       /*buffer_size=*/512, kBufferCount,
                                       iree_allocator_system(), &slab));
   iree_async_region_t* region = nullptr;
   IREE_ASSERT_OK(iree_async_proactor_register_slab(
-      proactor_, slab, IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &region));
+      proactor_, slab, IREE_ASYNC_BUFFER_ACCESS_FLAG_NONE, &region));
 
   // open_shared should detect the buffer_size mismatch (header says 4096,
   // region says 512).

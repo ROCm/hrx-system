@@ -110,11 +110,13 @@ iree_execution_test_suite(
     "report_carried_loop_memory_economics_amdgpu.loom"
     "report_complex_loop_memory_economics_amdgpu.loom"
     "report_dispatch_memory_economics_amdgpu.loom"
+    "report_lds_occupancy_amdgpu.loom"
     "report_loop_matrix_mix_amdgpu.loom"
     "report_loop_memory_economics_amdgpu.loom"
     "report_materialized_fragment_spills_amdgpu.loom"
     "report_private_memory_mix_amdgpu.loom"
     "report_target_insertions_uncountable_amdgpu.loom"
+    "report_workgroup_occupancy_amdgpu.loom"
     "selected_root_amdgpu.loom"
     "target_family_template_provider_amdgpu.loom"
   LABELS

@@ -158,6 +158,7 @@ iree_execution_test_suite(
         "testdata/generated_tensor_cases.loom",
     ],
     manifests = ["iree-test-loom_amdgpu.test.json"],
+    resource_group = "loom-amdgpu-tests",
     tags = _AMDGPU_EXECUTION_TEST_TAGS,
     target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
     tools = {
@@ -172,6 +173,7 @@ iree_execution_test_suite(
         "//loom/src/loom/test/corpus/sanitizer:amdgpu_asan_actual.loom",
     ],
     manifests = ["iree-test-loom_amdgpu_asan.test.json"],
+    resource_group = "loom-amdgpu-tests",
     tags = _AMDGPU_EXECUTION_TEST_TAGS + ["notsan"],
     target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
     tools = {
@@ -185,6 +187,7 @@ iree_execution_test_suite(
         "//loom/src/loom/test/corpus/sanitizer:amdgpu_tsan_actual.loom",
     ],
     manifests = ["iree-test-loom_amdgpu_tsan.test.json"],
+    resource_group = "loom-amdgpu-tests",
     tags = _AMDGPU_EXECUTION_TEST_TAGS,
     target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
     tools = {
@@ -201,6 +204,7 @@ iree_execution_test_suite(
         "testdata/spirv_vulkan_quantized_hal_actual.loom",
     ],
     manifests = ["iree-test-loom_spirv_vulkan.test.json"],
+    resource_group = "loom-vulkan-tests",
     sanitizer_suppressions = vulkan_suppressions,
     tags = [
         "iree-run-requirement=runtime.resource.vulkan_device",

@@ -229,32 +229,6 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
-    name = "code_object_target",
-    srcs = ["code_object_target.c"],
-    hdrs = ["code_object_target.h"],
-    textual_hdrs = ["//build_tools/amdgpu:elf_machine_map.inl"],
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base:core_headers",
-        "//runtime/src/iree/hal/executable/amdgpu:target_id",
-        "//runtime/src/iree/hal/utils:elf_format",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "code_object_target_test",
-    srcs = ["code_object_target_test.cc"],
-    deps = [
-        ":code_object_target",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base:core_headers",
-        "//runtime/src/iree/hal/executable/amdgpu:target_id",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-iree_runtime_cc_library(
     name = "device_clock",
     srcs = ["device_clock.c"],
     hdrs = ["device_clock.h"],

@@ -378,12 +378,13 @@ typedef struct loom_low_schedule_candidate_decision_t {
   uint16_t chosen_bottleneck_resource_id;
   // Chosen target pressure-cliff penalty.
   uint32_t chosen_pressure_cliff_penalty;
-  // Chosen register class or derived resource closest to a pressure cliff.
+  // Chosen crossed-cliff source, or closest upcoming source when no cliff was
+  // crossed.
   iree_string_view_t chosen_pressure_cliff_source;
   // Chosen crossed pressure cliff, or LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE.
   uint32_t chosen_pressure_cliff_units;
-  // Chosen live units remaining before the next pressure cliff, or
-  // LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE.
+  // Chosen live units remaining before the next pressure cliff when no cliff
+  // was crossed, or LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE.
   uint32_t chosen_units_until_pressure_cliff;
   // Best rejected cycles until all SSA inputs are ready.
   uint32_t rejected_data_ready_stall_cycles;
@@ -398,14 +399,14 @@ typedef struct loom_low_schedule_candidate_decision_t {
   uint16_t rejected_bottleneck_resource_id;
   // Best rejected target pressure-cliff penalty.
   uint32_t rejected_pressure_cliff_penalty;
-  // Best rejected register class or derived resource closest to a pressure
-  // cliff.
+  // Best rejected crossed-cliff source, or closest upcoming source when no
+  // cliff was crossed.
   iree_string_view_t rejected_pressure_cliff_source;
   // Best rejected crossed pressure cliff, or
   // LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE.
   uint32_t rejected_pressure_cliff_units;
-  // Best rejected live units remaining before the next pressure cliff, or
-  // LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE.
+  // Best rejected live units remaining before the next pressure cliff when no
+  // cliff was crossed, or LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE.
   uint32_t rejected_units_until_pressure_cliff;
 } loom_low_schedule_candidate_decision_t;
 

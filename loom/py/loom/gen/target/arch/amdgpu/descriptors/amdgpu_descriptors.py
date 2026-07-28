@@ -31,9 +31,12 @@ from loom.gen.target.low.low_descriptors import (  # noqa: E402
 )
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS,
-    build_amdgpu_core_descriptor_set_from_spec,
+    build_amdgpu_core_descriptor_set_from_specs,
 )
-from loom.target.arch.amdgpu.isa_xml import parse_amdgpu_isa_xml_path  # noqa: E402
+from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
+    AmdgpuIsaFactSource,
+    parse_amdgpu_isa_xml_path,
+)
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AmdgpuDescriptorSetInfo,
     amdgpu_descriptor_set_info_by_generator_target,
@@ -53,6 +56,20 @@ def _parse_view_headers(values: Sequence[str]) -> dict[str, Path]:
             raise ValueError(f"duplicate AMDGPU descriptor view header for {target}")
         view_headers[target] = Path(path)
     return view_headers
+
+
+def _parse_isa_xml_arguments(
+    values: Sequence[str],
+) -> dict[str, AmdgpuIsaFactSource]:
+    specs: dict[str, AmdgpuIsaFactSource] = {}
+    for value in values:
+        key, separator, path = value.partition(":")
+        if not separator or not key or not path:
+            raise ValueError("AMDGPU descriptor --isa-xml entries must be key:path pairs")
+        if key in specs:
+            raise ValueError(f"AMDGPU descriptor ISA XML key '{key}' is duplicate")
+        specs[key] = parse_amdgpu_isa_xml_path(Path(path))
+    return specs
 
 
 def _view_infos_for_storage_target(
@@ -97,10 +114,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="AMDGPU descriptor target shard to generate.",
     )
     parser.add_argument(
-        "--xml",
-        required=True,
-        type=Path,
-        help="Path to the AMD machine-readable ISA XML file for the target family.",
+        "--isa-xml",
+        action="append",
+        default=[],
+        help="ISA XML fact source as <key>:<path>.",
     )
     parser.add_argument(
         "--header",
@@ -128,10 +145,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if storage_info != descriptor_set_info:
         raise ValueError(f"AMDGPU descriptor target {args.target} is a view of storage target {storage_info.generator_target}; generate the storage target with --view-header instead")
     view_infos = _view_infos_for_storage_target(descriptor_set_info, view_headers)
-    spec = parse_amdgpu_isa_xml_path(args.xml)
-    descriptor_set = build_amdgpu_core_descriptor_set_from_spec(args.target, spec)
+    isa_specs = _parse_isa_xml_arguments(args.isa_xml)
+    descriptor_set = build_amdgpu_core_descriptor_set_from_specs(args.target, isa_specs)
     if view_infos:
-        view_descriptor_sets = tuple(build_amdgpu_core_descriptor_set_from_spec(info.generator_target, spec) for info in view_infos)
+        view_descriptor_sets = tuple(build_amdgpu_core_descriptor_set_from_specs(info.generator_target, isa_specs) for info in view_infos)
         storage_descriptor_set = _shared_storage_descriptor_set(
             descriptor_set,
             view_descriptor_sets,

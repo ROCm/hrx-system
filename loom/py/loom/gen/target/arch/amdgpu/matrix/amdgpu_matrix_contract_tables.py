@@ -26,13 +26,12 @@ def _ensure_runtime_py_on_path() -> None:
 _ensure_runtime_py_on_path()
 
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
+from loom.target.arch.amdgpu.descriptor_overlay import (  # noqa: E402
+    AmdgpuDescriptorOverlay,
+)
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
+    _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS,
     _amdgpu_core_descriptor_set_bases,
-    _gfx11_core_overlays,
-    _gfx12_core_overlays,
-    _gfx940_core_overlays,
-    _gfx950_core_overlays,
-    _gfx1250_core_overlays,
     amdgpu_descriptor_ref_keys,
 )
 from loom.target.arch.amdgpu.matrix_contracts import (  # noqa: E402
@@ -49,7 +48,24 @@ from loom.target.arch.amdgpu.matrix_fragment_layouts import (  # noqa: E402
     layout_roles,
     role_has_contiguous_lane_xor1_columns,
 )
+from loom.target.arch.amdgpu.target_info import (  # noqa: E402
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A,
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908,
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950,
+    AMDGPU_MATRIX_FEATURE_PROFILE_NONE,
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC,
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
+    AMDGPU_MATRIX_FEATURE_PROFILES,
+    AMDGPU_MATRIX_FEATURES_BY_PROFILE,
+    sorted_processor_infos,
+)
 from loom.target.low_descriptors import (  # noqa: E402
+    Descriptor,
+    DescriptorSet,
     Immediate,
     ImmediateFlag,
     Operand,
@@ -69,9 +85,12 @@ _FEATURE_C_NAMES = {
     "mfma_gfx90a_bf16_1k": "LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_BF16_1K",
     "mfma_gfx90a_f64": "LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_F64",
     "mfma_gfx940_fp8": "LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8",
+    "mfma_gfx940_i8": "LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_I8",
+    "mfma_gfx940_xf32": "LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_XF32",
     "mfma_gfx950": "LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950",
     "mfma_gfx950_scale_f8f6f4": ("LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4"),
     "smfmac_gfx940": "LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940",
+    "smfmac_gfx940_fp8": "LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940_FP8",
     "smfmac_gfx950": "LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX950",
     "wmma_gfx11": "LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11",
     "wmma_gfx12": "LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12",
@@ -79,6 +98,19 @@ _FEATURE_C_NAMES = {
     "wmma_gfx1250": "LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250",
     "wmma_gfx1250_scale_f8f6f4": ("LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250_SCALE_F8F6F4"),
     "swmmac_gfx1250": "LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250",
+}
+
+_MATRIX_FEATURE_PROFILE_C_NAMES = {
+    AMDGPU_MATRIX_FEATURE_PROFILE_NONE: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE",
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908: ("LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908"),
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A: ("LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A"),
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940: ("LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940"),
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950: ("LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950"),
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11: ("LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11"),
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12: ("LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12"),
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250: ("LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250"),
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC: ("LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC"),
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC: ("LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC"),
 }
 
 _WAVE_SIZE_C_NAMES = {
@@ -103,6 +135,8 @@ _NUMERIC_TYPE_C_NAMES = {
     "fp6": "LOOM_AMDGPU_MATRIX_NUMERIC_FP6",
     "bf6": "LOOM_AMDGPU_MATRIX_NUMERIC_BF6",
     "fp4": "LOOM_AMDGPU_MATRIX_NUMERIC_FP4",
+    "f8": "LOOM_AMDGPU_MATRIX_NUMERIC_F8",
+    "f6": "LOOM_AMDGPU_MATRIX_NUMERIC_F6",
     "f8f6f4": "LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4",
 }
 
@@ -175,6 +209,26 @@ class _MatrixDescriptorShape:
     has_scale_operands: bool
 
 
+@dataclass(frozen=True, slots=True)
+class _MatrixDescriptorCatalog:
+    keys_by_semantic_tag: Mapping[str, tuple[str, ...]]
+    shapes_by_key: Mapping[str, tuple[_MatrixDescriptorShape, ...]]
+    immediates_by_key: Mapping[str, tuple[Immediate, ...]]
+
+
+@dataclass(frozen=True, slots=True)
+class _MatrixSourceContractSignature:
+    block_count: int
+    tile_shape: tuple[int, int, int]
+    lhs: AmdgpuMatrixPayload
+    rhs: AmdgpuMatrixPayload
+    accumulator: AmdgpuMatrixPayload
+    result: AmdgpuMatrixPayload
+    scale_kind: str
+    flags: frozenset[str]
+    implicit_scale_formats: frozenset[str]
+
+
 def _c_identifier(value: str) -> str:
     identifier = re.sub(r"[^0-9A-Za-z_]", "_", value).strip("_")
     if not identifier:
@@ -234,30 +288,85 @@ def _contract_intrinsic_name(contract: AmdgpuMatrixContract) -> str:
     return contract.intrinsic_name or f"llvm.amdgcn.{contract.name}"
 
 
-def _matrix_descriptor_keys_by_semantic_tag() -> dict[str, tuple[str, ...]]:
+def _matrix_descriptor_catalog(
+    *,
+    descriptor_sets: Iterable[DescriptorSet],
+    overlay_sets: Iterable[Iterable[AmdgpuDescriptorOverlay]],
+    extra_descriptors: Iterable[Descriptor] = (),
+) -> _MatrixDescriptorCatalog:
     descriptor_ref_key_set = set(amdgpu_descriptor_ref_keys())
     keys_by_semantic_tag: dict[str, set[str]] = {}
+    shapes_by_key: dict[str, set[_MatrixDescriptorShape]] = {}
+    immediates_by_key: dict[str, list[Immediate]] = {}
 
-    def add_descriptor_key(descriptor_key: str, semantic_tag: str | None) -> None:
+    def add_descriptor(
+        descriptor_key: str,
+        semantic_tag: str | None,
+        operands: Iterable[Operand],
+        immediates: Iterable[Immediate],
+    ) -> None:
         if semantic_tag is None or not semantic_tag.startswith("matrix.") or descriptor_key not in descriptor_ref_key_set:
             return
         keys_by_semantic_tag.setdefault(semantic_tag, set()).add(descriptor_key)
+        shape = _matrix_descriptor_shape_from_operands(operands)
+        if shape is not None:
+            shapes_by_key.setdefault(descriptor_key, set()).add(shape)
+        immediates_by_key.setdefault(descriptor_key, []).extend(immediates)
 
-    for descriptor_set in _amdgpu_core_descriptor_set_bases():
+    for descriptor_set in descriptor_sets:
         for descriptor in descriptor_set.descriptors:
-            add_descriptor_key(descriptor.key, descriptor.semantic_tag)
+            add_descriptor(
+                descriptor.key,
+                descriptor.semantic_tag,
+                descriptor.operands,
+                descriptor.immediates,
+            )
 
-    for overlays in (
-        _gfx940_core_overlays(),
-        _gfx950_core_overlays(),
-        _gfx11_core_overlays(),
-        _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
-    ):
+    for overlays in overlay_sets:
         for overlay in overlays:
-            add_descriptor_key(overlay.descriptor_key, overlay.semantic_tag)
+            add_descriptor(
+                overlay.descriptor_key,
+                overlay.semantic_tag,
+                (operand_overlay.descriptor_operand for operand_overlay in overlay.operands),
+                overlay.immediates,
+            )
 
-    return {semantic_tag: tuple(sorted(descriptor_keys)) for semantic_tag, descriptor_keys in keys_by_semantic_tag.items()}
+    for descriptor in extra_descriptors:
+        add_descriptor(
+            descriptor.key,
+            descriptor.semantic_tag,
+            descriptor.operands,
+            descriptor.immediates,
+        )
+
+    return _MatrixDescriptorCatalog(
+        keys_by_semantic_tag={semantic_tag: tuple(sorted(descriptor_keys)) for semantic_tag, descriptor_keys in keys_by_semantic_tag.items()},
+        shapes_by_key={descriptor_key: tuple(sorted(shapes, key=_matrix_descriptor_shape_sort_key)) for descriptor_key, shapes in shapes_by_key.items()},
+        immediates_by_key={descriptor_key: tuple(immediates) for descriptor_key, immediates in immediates_by_key.items()},
+    )
+
+
+def _global_matrix_descriptor_catalog() -> _MatrixDescriptorCatalog:
+    return _matrix_descriptor_catalog(
+        descriptor_sets=_amdgpu_core_descriptor_set_bases(),
+        overlay_sets=(builder.overlay_rows() for builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.values()),
+        extra_descriptors=(descriptor for builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.values() for descriptor in builder.extra_descriptors),
+    )
+
+
+def _matrix_descriptor_catalog_for_builder(
+    generator_target: str,
+) -> _MatrixDescriptorCatalog:
+    builder = _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[generator_target]
+    return _matrix_descriptor_catalog(
+        descriptor_sets=(builder.base,),
+        overlay_sets=(builder.overlay_rows(),),
+        extra_descriptors=builder.extra_descriptors,
+    )
+
+
+def _matrix_descriptor_keys_by_semantic_tag() -> dict[str, tuple[str, ...]]:
+    return dict(_global_matrix_descriptor_catalog().keys_by_semantic_tag)
 
 
 def _matrix_descriptor_shape_from_operands(
@@ -283,65 +392,11 @@ def _matrix_descriptor_shape_from_operands(
 
 
 def _matrix_descriptor_shapes_by_key() -> dict[str, tuple[_MatrixDescriptorShape, ...]]:
-    shapes_by_key: dict[str, set[_MatrixDescriptorShape]] = {}
-
-    def add_descriptor_shape(
-        descriptor_key: str,
-        operands: Iterable[Operand],
-    ) -> None:
-        shape = _matrix_descriptor_shape_from_operands(operands)
-        if shape is None:
-            return
-        shapes_by_key.setdefault(descriptor_key, set()).add(shape)
-
-    for descriptor_set in _amdgpu_core_descriptor_set_bases():
-        for descriptor in descriptor_set.descriptors:
-            add_descriptor_shape(descriptor.key, descriptor.operands)
-
-    for overlays in (
-        _gfx940_core_overlays(),
-        _gfx950_core_overlays(),
-        _gfx11_core_overlays(),
-        _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
-    ):
-        for overlay in overlays:
-            add_descriptor_shape(
-                overlay.descriptor_key,
-                (operand_overlay.descriptor_operand for operand_overlay in overlay.operands),
-            )
-
-    return {descriptor_key: tuple(sorted(shapes, key=_matrix_descriptor_shape_sort_key)) for descriptor_key, shapes in shapes_by_key.items()}
+    return dict(_global_matrix_descriptor_catalog().shapes_by_key)
 
 
 def _matrix_descriptor_immediates_by_key() -> dict[str, tuple[Immediate, ...]]:
-    descriptor_ref_key_set = set(amdgpu_descriptor_ref_keys())
-    immediates_by_key: dict[str, list[Immediate]] = {}
-
-    def add_descriptor_immediates(
-        descriptor_key: str,
-        semantic_tag: str | None,
-        immediates: Iterable[Immediate],
-    ) -> None:
-        if semantic_tag is None or not semantic_tag.startswith("matrix.") or descriptor_key not in descriptor_ref_key_set:
-            return
-        immediates_by_key.setdefault(descriptor_key, []).extend(immediates)
-
-    for descriptor_set in _amdgpu_core_descriptor_set_bases():
-        for descriptor in descriptor_set.descriptors:
-            add_descriptor_immediates(descriptor.key, descriptor.semantic_tag, descriptor.immediates)
-
-    for overlays in (
-        _gfx940_core_overlays(),
-        _gfx950_core_overlays(),
-        _gfx11_core_overlays(),
-        _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
-    ):
-        for overlay in overlays:
-            add_descriptor_immediates(overlay.descriptor_key, overlay.semantic_tag, overlay.immediates)
-
-    return {descriptor_key: tuple(immediates) for descriptor_key, immediates in immediates_by_key.items()}
+    return dict(_global_matrix_descriptor_catalog().immediates_by_key)
 
 
 def _matrix_descriptor_shape_sort_key(
@@ -397,6 +452,12 @@ def _contract_matrix_descriptor_shape(
         has_sparse_index="sparse" in contract.flags,
         has_scale_operands=has_scale_operands,
     )
+
+
+def _contract_has_abstract_matrix_format_payload(
+    contract: AmdgpuMatrixContract,
+) -> bool:
+    return "matrix_formats" in contract.flags and contract.lhs.register_count == 0 and contract.lhs.element_count == 0 and contract.rhs.register_count == 0 and contract.rhs.element_count == 0
 
 
 def _format_matrix_descriptor_shape(shape: _MatrixDescriptorShape) -> str:
@@ -518,6 +579,143 @@ def _contract_descriptor_keys(
     return tuple(descriptor_keys)
 
 
+def _validate_matrix_feature_profiles() -> None:
+    if tuple(AMDGPU_MATRIX_FEATURES_BY_PROFILE) != AMDGPU_MATRIX_FEATURE_PROFILES:
+        raise ValueError("AMDGPU matrix feature profile rows must exactly match the ordered profile inventory")
+    if tuple(_MATRIX_FEATURE_PROFILE_C_NAMES) != AMDGPU_MATRIX_FEATURE_PROFILES:
+        raise ValueError("AMDGPU matrix feature profile C names must exactly match the ordered profile inventory")
+
+    assigned_features: set[str] = set()
+    for profile in AMDGPU_MATRIX_FEATURE_PROFILES:
+        features = AMDGPU_MATRIX_FEATURES_BY_PROFILE[profile]
+        if len(features) != len(set(features)):
+            raise ValueError(f"AMDGPU matrix feature profile '{profile}' contains duplicate feature bits")
+        if profile == AMDGPU_MATRIX_FEATURE_PROFILE_NONE:
+            if features:
+                raise ValueError("AMDGPU matrix feature profile 'none' must not enable feature bits")
+        elif not features:
+            raise ValueError(f"AMDGPU matrix feature profile '{profile}' has no feature bits")
+        unknown_features = set(features) - set(_FEATURE_C_NAMES)
+        if unknown_features:
+            unknown_text = ", ".join(sorted(unknown_features))
+            raise ValueError(f"AMDGPU matrix feature profile '{profile}' has unknown feature bit(s): {unknown_text}")
+        assigned_features.update(features)
+
+    unassigned_features = set(_FEATURE_C_NAMES) - assigned_features
+    if unassigned_features:
+        unassigned_text = ", ".join(sorted(unassigned_features))
+        raise ValueError(f"AMDGPU matrix feature bit(s) have no profile: {unassigned_text}")
+
+
+def _matrix_source_contract_signature(
+    contract: AmdgpuMatrixContract,
+) -> _MatrixSourceContractSignature:
+    return _MatrixSourceContractSignature(
+        block_count=contract.block_count,
+        tile_shape=contract.tile_shape,
+        lhs=contract.lhs,
+        rhs=contract.rhs,
+        accumulator=contract.accumulator,
+        result=contract.result,
+        scale_kind=contract.scale_kind,
+        flags=frozenset(contract.flags),
+        implicit_scale_formats=frozenset(contract.implicit_scale_formats),
+    )
+
+
+def _matrix_contract_wave_sizes(contract: AmdgpuMatrixContract) -> frozenset[int]:
+    if contract.wave_size == "any":
+        return frozenset((32, 64))
+    if contract.wave_size in ("32", "64"):
+        return frozenset((int(contract.wave_size),))
+    raise ValueError(f"AMDGPU matrix contract '{contract.name}' has unknown wave size '{contract.wave_size}'")
+
+
+def _validate_matrix_source_contracts(
+    contracts: Sequence[AmdgpuMatrixContract] = AMDGPU_MATRIX_CONTRACTS,
+) -> None:
+    for profile, profile_features in AMDGPU_MATRIX_FEATURES_BY_PROFILE.items():
+        feature_set = frozenset(profile_features)
+        contracts_by_signature: dict[_MatrixSourceContractSignature, list[AmdgpuMatrixContract]] = {}
+        for contract in contracts:
+            if not feature_set.issuperset(contract.features):
+                continue
+            signature = _matrix_source_contract_signature(contract)
+            contracts_by_signature.setdefault(signature, []).append(contract)
+        for signature_contracts in contracts_by_signature.values():
+            for index, contract in enumerate(signature_contracts):
+                contract_wave_sizes = _matrix_contract_wave_sizes(contract)
+                for other_contract in signature_contracts[index + 1 :]:
+                    overlapping_wave_sizes = contract_wave_sizes.intersection(_matrix_contract_wave_sizes(other_contract))
+                    if not overlapping_wave_sizes:
+                        continue
+                    wave_sizes = ", ".join(f"wave{wave_size}" for wave_size in sorted(overlapping_wave_sizes))
+                    raise ValueError(f"AMDGPU matrix feature profile '{profile}' exposes source-indistinguishable contracts '{contract.name}' and '{other_contract.name}' for {wave_sizes}")
+
+
+def _validate_matrix_profile_descriptor_catalog(
+    *,
+    descriptor_set_key: str,
+    profile: str,
+    catalog: _MatrixDescriptorCatalog,
+    global_descriptor_keys: Sequence[str | None],
+) -> None:
+    feature_set = frozenset(AMDGPU_MATRIX_FEATURES_BY_PROFILE[profile])
+    for contract, global_descriptor_key in zip(AMDGPU_MATRIX_CONTRACTS, global_descriptor_keys, strict=True):
+        if not feature_set.issuperset(contract.features):
+            continue
+        if global_descriptor_key is None:
+            if _contract_has_abstract_matrix_format_payload(contract):
+                continue
+            raise ValueError(f"AMDGPU descriptor set '{descriptor_set_key}' matrix profile '{profile}' exposes concrete contract '{contract.name}' without a global low descriptor")
+        try:
+            descriptor_key = _contract_descriptor_key(
+                contract,
+                keys_by_semantic_tag=catalog.keys_by_semantic_tag,
+                descriptor_shapes_by_key=catalog.shapes_by_key,
+                descriptor_immediates_by_key=catalog.immediates_by_key,
+            )
+        except ValueError as exc:
+            raise ValueError(f"AMDGPU descriptor set '{descriptor_set_key}' matrix profile '{profile}' exposes contract '{contract.name}' with an incompatible descriptor ABI: {exc}") from exc
+        if descriptor_key is None:
+            raise ValueError(f"AMDGPU descriptor set '{descriptor_set_key}' matrix profile '{profile}' exposes contract '{contract.name}' but has no matching low descriptor")
+        if descriptor_key != global_descriptor_key:
+            raise ValueError(
+                f"AMDGPU descriptor set '{descriptor_set_key}' matrix profile "
+                f"'{profile}' resolves contract '{contract.name}' to "
+                f"'{descriptor_key}', expected stable descriptor "
+                f"'{global_descriptor_key}'"
+            )
+
+
+def _validate_matrix_profile_descriptor_sets(*, global_descriptor_keys: Sequence[str | None]) -> None:
+    _validate_matrix_feature_profiles()
+    _validate_matrix_source_contracts()
+    builders_by_descriptor_set_key = {builder.base.key: generator_target for generator_target, builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.items()}
+    profiles_by_descriptor_set_key: dict[str, set[str]] = {}
+    for processor_info in sorted_processor_infos():
+        profile = processor_info.features.matrix
+        if profile not in AMDGPU_MATRIX_FEATURES_BY_PROFILE:
+            raise ValueError(f"AMDGPU processor '{processor_info.processor}' has unknown matrix feature profile '{profile}'")
+        descriptor_set_key = processor_info.descriptor_set.key
+        if not descriptor_set_key:
+            continue
+        if descriptor_set_key not in builders_by_descriptor_set_key:
+            raise ValueError(f"AMDGPU processor '{processor_info.processor}' references descriptor set '{descriptor_set_key}' without a builder")
+        profiles_by_descriptor_set_key.setdefault(descriptor_set_key, set()).add(profile)
+
+    for descriptor_set_key in sorted(profiles_by_descriptor_set_key):
+        generator_target = builders_by_descriptor_set_key[descriptor_set_key]
+        catalog = _matrix_descriptor_catalog_for_builder(generator_target)
+        for profile in sorted(profiles_by_descriptor_set_key[descriptor_set_key]):
+            _validate_matrix_profile_descriptor_catalog(
+                descriptor_set_key=descriptor_set_key,
+                profile=profile,
+                catalog=catalog,
+                global_descriptor_keys=global_descriptor_keys,
+            )
+
+
 def _contract_wait_state_signature(
     contract: AmdgpuMatrixContract,
 ) -> tuple[str, int] | None:
@@ -537,6 +735,27 @@ def _contract_wait_state_ordinals_by_descriptor_ref(
             continue
         contract_ordinals_by_descriptor_key.setdefault(descriptor_key, ordinal)
     return [contract_ordinals_by_descriptor_key.get(descriptor_key) for descriptor_key in amdgpu_descriptor_ref_keys()]
+
+
+def _matrix_feature_profile_table_lines() -> list[str]:
+    _validate_matrix_feature_profiles()
+    lines = [
+        "const loom_amdgpu_matrix_feature_bits_t",
+        "    kLoomAmdgpuMatrixFeatureBitsByProfile[",
+        "        LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_COUNT] = {",
+    ]
+    for profile in AMDGPU_MATRIX_FEATURE_PROFILES:
+        profile_c_name = _MATRIX_FEATURE_PROFILE_C_NAMES[profile]
+        feature_c_names = tuple(_FEATURE_C_NAMES[feature] for feature in AMDGPU_MATRIX_FEATURES_BY_PROFILE[profile])
+        if not feature_c_names:
+            lines.append(f"    [{profile_c_name}] = 0,")
+            continue
+        lines.append(f"    [{profile_c_name}] =")
+        for index, feature_c_name in enumerate(feature_c_names):
+            suffix = "," if index == len(feature_c_names) - 1 else " |"
+            lines.append(f"        {feature_c_name}{suffix}")
+    lines.extend(("};", ""))
+    return lines
 
 
 def _payload_initializer(payload: AmdgpuMatrixPayload) -> str:
@@ -721,6 +940,9 @@ def _emit_header() -> str:
         "extern const loom_amdgpu_matrix_contract_descriptor_t",
         "    kLoomAmdgpuMatrixContractDescriptors[];",
         "extern const iree_host_size_t kLoomAmdgpuMatrixContractDescriptorCount;",
+        "extern const loom_amdgpu_matrix_feature_bits_t",
+        "    kLoomAmdgpuMatrixFeatureBitsByProfile[",
+        "        LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_COUNT];",
         "extern const uint16_t",
         "    kLoomAmdgpuMatrixWaitStateContractOrdinalsByDescriptorRef[];",
         "",
@@ -830,14 +1052,16 @@ def _fragment_layout_initializer(
 
 
 def _emit_source(*, public_header: str) -> str:
-    keys_by_semantic_tag = _matrix_descriptor_keys_by_semantic_tag()
-    descriptor_shapes_by_key = _matrix_descriptor_shapes_by_key()
-    descriptor_immediates_by_key = _matrix_descriptor_immediates_by_key()
+    catalog = _global_matrix_descriptor_catalog()
+    keys_by_semantic_tag = catalog.keys_by_semantic_tag
+    descriptor_shapes_by_key = catalog.shapes_by_key
+    descriptor_immediates_by_key = catalog.immediates_by_key
     descriptor_keys = _contract_descriptor_keys(
         keys_by_semantic_tag=keys_by_semantic_tag,
         descriptor_shapes_by_key=descriptor_shapes_by_key,
         descriptor_immediates_by_key=descriptor_immediates_by_key,
     )
+    _validate_matrix_profile_descriptor_sets(global_descriptor_keys=descriptor_keys)
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -849,6 +1073,7 @@ def _emit_source(*, public_header: str) -> str:
         "",
         f'#include "{public_header}"',
         "",
+        *_matrix_feature_profile_table_lines(),
         "const loom_amdgpu_matrix_fragment_layout_t",
         "    kLoomAmdgpuMatrixFragmentLayouts[",
         "        LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT] = {",

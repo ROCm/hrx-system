@@ -28,11 +28,6 @@ extern "C" {
 #endif
 
 typedef struct loom_amdgpu_hal_kernel_library_options_t {
-  // Optional AMDHSA processor name such as `gfx1100` overriding the selected
-  // target record's processor. This preserves the target record's
-  // descriptor-set family while letting JIT runners specialize to the concrete
-  // HAL device ISA.
-  iree_string_view_t processor;
   // Optional runtime/device target selection applied to compatible module
   // target records before entry selection, verification, scheduling, and
   // allocation.

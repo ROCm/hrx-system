@@ -72,16 +72,16 @@ def call_extern_match_any_sync(tir: Any, tvm: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="call_extern_match_any_sync",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("call_extern_match_any_sync") @call_extern_match_any_sync() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("call_extern_match_any_sync") @call_extern_match_any_sync() {
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
@@ -132,16 +132,16 @@ def tilelang_match_any_sync(tir: Any, tvm: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tilelang_match_any_sync",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tilelang_match_any_sync") @tilelang_match_any_sync() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tilelang_match_any_sync") @tilelang_match_any_sync() {
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
@@ -189,15 +189,15 @@ def launch_thread_attrs(tir: Any, tvm: Any) -> TileLangImportInput:
         buffer_map={src: src_buffer, dst: dst_buffer},
     )
     return TileLangImportInput(
-        source=prim_func, target="hip -mcpu=gfx1100", name="launch_thread_attrs"
+        source=prim_func, target="hip -mcpu=gfx11-generic", name="launch_thread_attrs"
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("launch_thread_attrs") @launch_thread_attrs() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("launch_thread_attrs") @launch_thread_attrs() {
   %c8 = index.constant 8 : index
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -246,15 +246,15 @@ def shared_storage_sync(tir: Any) -> TileLangImportInput:
         buffer_map={src: src_buffer, dst: dst_buffer},
     )
     return TileLangImportInput(
-        source=prim_func, target="hip -mcpu=gfx1100", name="shared_storage_sync"
+        source=prim_func, target="hip -mcpu=gfx11-generic", name="shared_storage_sync"
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("shared_storage_sync") @shared_storage_sync() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("shared_storage_sync") @shared_storage_sync() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src: buffer, %dst: buffer) {
@@ -292,16 +292,16 @@ def warp_sync(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=warp_sync_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="warp_sync_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("warp_sync_kernel") @warp_sync_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("warp_sync_kernel") @warp_sync_kernel() {
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
@@ -345,15 +345,15 @@ def thread_binding_loop(tir: Any, tvm: Any) -> TileLangImportInput:
         buffer_map={src: src_buffer, dst: dst_buffer},
     )
     return TileLangImportInput(
-        source=prim_func, target="hip -mcpu=gfx1100", name="thread_binding_loop"
+        source=prim_func, target="hip -mcpu=gfx11-generic", name="thread_binding_loop"
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("thread_binding_loop") @thread_binding_loop() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("thread_binding_loop") @thread_binding_loop() {
   %c1 = index.constant 1 : index
   %c128 = index.constant 128 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c128, %c1, %c1) : index
@@ -383,16 +383,16 @@ def thread_index_to_i64(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=thread_index_to_i64_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="thread_index_to_i64_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("thread_index_to_i64_kernel") @thread_index_to_i64_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("thread_index_to_i64_kernel") @thread_index_to_i64_kernel() {
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
@@ -434,16 +434,16 @@ def warp_shuffle(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=warp_shuffle_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="warp_shuffle_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("warp_shuffle_kernel") @warp_shuffle_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("warp_shuffle_kernel") @warp_shuffle_kernel() {
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
@@ -502,16 +502,16 @@ def warp_shuffle_loop_offsets(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=warp_shuffle_loop_offsets_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="warp_shuffle_loop_offsets_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("warp_shuffle_loop_offsets_kernel") @warp_shuffle_loop_offsets_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("warp_shuffle_loop_offsets_kernel") @warp_shuffle_loop_offsets_kernel() {
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
@@ -574,16 +574,16 @@ def warp_reduce_float(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=warp_reduce_float_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="warp_reduce_float_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("warp_reduce_float_kernel") @warp_reduce_float_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("warp_reduce_float_kernel") @warp_reduce_float_kernel() {
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
@@ -642,16 +642,16 @@ def warp_reduce_integer(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=warp_reduce_integer_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="warp_reduce_integer_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("warp_reduce_integer_kernel") @warp_reduce_integer_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("warp_reduce_integer_kernel") @warp_reduce_integer_kernel() {
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index

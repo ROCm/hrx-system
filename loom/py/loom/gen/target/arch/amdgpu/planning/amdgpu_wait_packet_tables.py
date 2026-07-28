@@ -46,7 +46,7 @@ from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     _WAIT_COUNTER_VMEM_STORE_ENCODING_ID,
     _WAIT_COUNTER_X_ENCODING_ID,
     amdgpu_descriptor_ref_keys,
-    build_amdgpu_core_descriptor_set_from_spec,
+    build_amdgpu_core_descriptor_set_from_specs,
 )
 from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
     AmdgpuIsaFactSource,
@@ -537,13 +537,9 @@ def _materialize_wait_packet_tables(
     descriptor_lookup_rows: list[int] = []
     selection_rows: list[_WaitPacketSelectionRow] = []
     for info in descriptor_sets:
-        try:
-            spec = isa_specs[info.isa_xml_key]
-        except KeyError as exc:
-            raise ValueError(f"AMDGPU wait-packet generator is missing ISA XML key '{info.isa_xml_key}' for descriptor set '{info.key}'") from exc
-        descriptor_set = build_amdgpu_core_descriptor_set_from_spec(
+        descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
             info.generator_target,
-            spec,
+            isa_specs,
         )
         if descriptor_set.key != info.key:
             raise ValueError(f"AMDGPU descriptor-set builder '{info.generator_target}' produced '{descriptor_set.key}', expected '{info.key}'")

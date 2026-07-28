@@ -1,6 +1,6 @@
 // RUN: pass-report target-legalize{mode=final},dce,canonicalize,source-to-low,low-dce
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_f32_table_lookup_i32_ladder(%codes: vector<2xi32>) -> (vector<2xf32>) {
   %g0 = scalar.constant 2.0 : f32
@@ -22,7 +22,7 @@ COMPILE-REPORT: source_low[4] function=report_f32_table_lookup_i32_ladder source
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_i8_table_lookup_permute(%grid: vector<4xi8>) -> (vector<4xi8>) {
   %c0 = scalar.constant 0 : i8
@@ -46,7 +46,7 @@ COMPILE-REPORT: source_low[5] function=report_i8_table_lookup_permute source_op=
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_i8_table_lookup_u4_permute(%grid: vector<16xi8>, %packed: vector<2xi8>) -> (vector<4xi8>) {
   %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>

@@ -1169,7 +1169,7 @@ class BuildFileFunctions(object):
             source_list.append(main)
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
         main_block = self._convert_string_arg_block("MAIN", main)
-        source_block = self._convert_string_list_block("SRCS", source_list, sort=False)
+        source_block = self._convert_srcs_block(source_list)
         imports_block = self._convert_string_list_block("IMPORTS", imports, sort=False)
         deps_block, deps_var_block = self._convert_python_target_list_blocks(
             name, "DEPS", deps
@@ -1209,7 +1209,7 @@ class BuildFileFunctions(object):
         if data and not self._has_only_external_targets(data):
             raise NotImplementedError(f"iree_py_library data: {name}")
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        source_block = self._convert_string_list_block("SRCS", srcs, sort=False)
+        source_block = self._convert_srcs_block(srcs)
         imports_block = self._convert_string_list_block("IMPORTS", imports, sort=False)
         deps_block, deps_var_block = self._convert_python_target_list_blocks(
             name, "DEPS", deps
@@ -1284,8 +1284,13 @@ class BuildFileFunctions(object):
             raise ValueError(f"iree_py_test {name} requires a main source")
 
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        source_block = self._convert_string_arg_block(
-            "SRCS", self._python_file_cmake_path(main_source)
+        main_block = self._convert_string_arg_block(
+            "MAIN", self._python_file_cmake_path(main_source)
+        )
+        source_block = self._convert_string_list_block(
+            "SRCS",
+            [self._python_file_cmake_path(source) for source in source_list],
+            sort=False,
         )
         args_block = self._convert_string_list_block(
             "ARGS", self._convert_location_args(args), sort=False
@@ -1307,6 +1312,7 @@ class BuildFileFunctions(object):
         self._converter.body += (
             "iree_py_test(\n"
             f"{name_block}"
+            f"{main_block}"
             f"{source_block}"
             f"{args_block}"
             f"{deps_block}"
@@ -2588,6 +2594,7 @@ class BuildFileFunctions(object):
         tools,
         data=None,
         args=None,
+        resource_group=None,
         sanitizer_suppressions=None,
         tags=None,
         timeout=None,
@@ -2608,6 +2615,9 @@ class BuildFileFunctions(object):
             sanitizer_suppressions
         )
         labels_block = self._convert_string_list_block("LABELS", tags)
+        resource_group_block = self._convert_string_arg_block(
+            "RESOURCE_GROUP", resource_group, quote=False
+        )
         timeout_block = self._convert_timeout_arg_block("TIMEOUT", timeout)
 
         tool_entries = []
@@ -2627,6 +2637,7 @@ class BuildFileFunctions(object):
             f"{args_block}"
             f"{sanitizer_suppressions_block}"
             f"{labels_block}"
+            f"{resource_group_block}"
             f"{timeout_block}"
             f")\n\n"
         )

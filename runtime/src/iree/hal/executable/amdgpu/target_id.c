@@ -18,6 +18,8 @@ typedef struct iree_hal_amdgpu_target_id_mapping_t {
   iree_string_view_t exact_processor;
   // Code-object processor selected for the exact processor.
   iree_string_view_t code_object_processor;
+  // First generic code-object version that supports the exact processor.
+  uint32_t generic_introduction_version;
   // Feature support flags from
   // iree_hal_amdgpu_target_feature_support_bits_t.
   iree_hal_amdgpu_target_feature_support_flags_t feature_support;
@@ -458,15 +460,6 @@ IREE_API_EXPORT bool iree_hal_amdgpu_target_id_lookup_wavefront_size_support(
   return true;
 }
 
-static bool iree_hal_amdgpu_generic_version_compatible(
-    iree_hal_amdgpu_gfxip_version_t code_object_version,
-    iree_hal_amdgpu_gfxip_version_t agent_version) {
-  if (code_object_version.major != agent_version.major) return false;
-  if (code_object_version.minor != agent_version.minor) return false;
-  if (code_object_version.stepping > agent_version.stepping) return false;
-  return true;
-}
-
 static bool iree_hal_amdgpu_target_feature_compatible(
     iree_hal_amdgpu_target_feature_state_t code_object_feature,
     iree_hal_amdgpu_target_feature_state_t agent_feature) {
@@ -475,11 +468,6 @@ static bool iree_hal_amdgpu_target_feature_compatible(
     return code_object_feature == agent_feature;
   }
   return true;
-}
-
-static uint32_t iree_hal_amdgpu_generic_code_object_minimum_version(
-    const iree_hal_amdgpu_target_id_t* generic_target_id) {
-  return generic_target_id->kind == IREE_HAL_AMDGPU_TARGET_KIND_GENERIC ? 1 : 0;
 }
 
 IREE_API_EXPORT iree_hal_amdgpu_target_compatibility_t
@@ -498,28 +486,23 @@ iree_hal_amdgpu_target_id_check_compatible(
       compatibility |= IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_PROCESSOR;
     }
   } else {
-    iree_string_view_t agent_code_object_processor = iree_string_view_empty();
+    uint32_t minimum_generic_version = 1;
     if (agent_target_id->kind == IREE_HAL_AMDGPU_TARGET_KIND_EXACT) {
-      if (!iree_hal_amdgpu_target_id_lookup_code_object_processor(
-              agent_target_id->processor, &agent_code_object_processor)) {
-        if (!iree_hal_amdgpu_generic_version_compatible(
-                code_object_target_id->version, agent_target_id->version)) {
-          compatibility |=
-              IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GENERIC_FAMILY;
-        }
-      } else if (!iree_string_view_equal(code_object_target_id->processor,
-                                         agent_code_object_processor)) {
+      const iree_hal_amdgpu_target_id_mapping_t* mapping =
+          iree_hal_amdgpu_target_id_lookup_mapping(agent_target_id->processor);
+      if (mapping == NULL ||
+          !iree_string_view_equal(code_object_target_id->processor,
+                                  mapping->code_object_processor)) {
         compatibility |=
             IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GENERIC_FAMILY;
+      } else {
+        minimum_generic_version = mapping->generic_introduction_version;
       }
     } else if (!iree_string_view_equal(code_object_target_id->processor,
                                        agent_target_id->processor)) {
       compatibility |=
           IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GENERIC_FAMILY;
     }
-    const uint32_t minimum_generic_version =
-        iree_hal_amdgpu_generic_code_object_minimum_version(
-            code_object_target_id);
     if (code_object_target_id->generic_version != 0 &&
         code_object_target_id->generic_version < minimum_generic_version) {
       compatibility |=

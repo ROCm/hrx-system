@@ -1,7 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/packed_payload_offsets.loom-test
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @packed4_payload_word_offset(%weights: buffer, %block0: index, %word0: index) -> (i32) {
   %block = index.assume %block0 [range(%block0, 0, 63)] : index
   %word = index.assume %word0 [range(%word0, 0, 3)] : index
@@ -19,7 +19,7 @@ func.def target(@target) @packed4_payload_word_offset(%weights: buffer, %block0:
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @packed4_payload_word_offset(%block: reg<amdgpu.sgpr>, %word: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@target) abi(hal_kernel) @packed4_payload_word_offset(%block: reg<amdgpu.sgpr>, %word: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
   %word_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %27 = v_mov_b32 0
   %28 = s_mul_i32_rhs_inline %block, 18
@@ -37,7 +37,7 @@ low.func.def target(@target) abi(hal_kernel) @packed4_payload_word_offset(%block
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @packed5_split_payload_offsets(%weights: buffer, %block0: index, %word0: index) -> (i32, i32) {
   %block = index.assume %block0 [range(%block0, 0, 63)] : index
   %word = index.assume %word0 [range(%word0, 0, 3)] : index
@@ -59,7 +59,7 @@ func.def target(@target) @packed5_split_payload_offsets(%weights: buffer, %block
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @packed5_split_payload_offsets(%block: reg<amdgpu.sgpr>, %word: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@target) abi(hal_kernel) @packed5_split_payload_offsets(%block: reg<amdgpu.sgpr>, %word: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
   %low_bits_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %35 = v_mov_b32 0
   %36 = s_mul_i32_rhs_inline %block, 22
@@ -81,7 +81,7 @@ low.func.def target(@target) abi(hal_kernel) @packed5_split_payload_offsets(%blo
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @packed6_split_payload_offsets(%weights: buffer, %block0: index, %low_word0: index, %high_word0: index, %scale0: index) -> (i32, i32, f16) {
   %block = index.assume %block0 [range(%block0, 0, 63)] : index
   %low_word = index.assume %low_word0 [range(%low_word0, 0, 31)] : index
@@ -114,7 +114,7 @@ func.def target(@target) @packed6_split_payload_offsets(%weights: buffer, %block
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @packed6_split_payload_offsets(%block: reg<amdgpu.sgpr>, %low_word: reg<amdgpu.sgpr>, %high_word: reg<amdgpu.sgpr>, %scale: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@target) abi(hal_kernel) @packed6_split_payload_offsets(%block: reg<amdgpu.sgpr>, %low_word: reg<amdgpu.sgpr>, %high_word: reg<amdgpu.sgpr>, %scale: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
   %scale_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %57 = v_mov_b32 0
   %58 = s_mov_b32 210
