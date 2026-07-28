@@ -1705,25 +1705,40 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
         iree_arena_allocate(&exec->arena_allocator,
                             exec->semaphore_count * sizeof(*exec->semaphores),
                             (void**)&exec->semaphores));
+    memset(exec->semaphores, 0,
+           exec->semaphore_count * sizeof(*exec->semaphores));
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_arena_allocate(
                 &exec->arena_allocator,
                 exec->semaphore_count * sizeof(*exec->semaphore_base_values),
                 (void**)&exec->semaphore_base_values));
+    memset(exec->semaphore_base_values, 0,
+           exec->semaphore_count * sizeof(*exec->semaphore_base_values));
 
-    // Create internal semaphores.
-    for (uint32_t i = 0; i < exec->semaphore_count; i++) {
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_hal_semaphore_create(
-                  exec->context->device, exec->context->queue_affinity, 0ull,
-                  IREE_HAL_SEMAPHORE_FLAG_NONE, &exec->semaphores[i]));
-      exec->semaphore_base_values[i] = 0;
+    // Create the internal semaphores that carry values between partitions. The
+    // resource set is their only owner: every use of exec->semaphores happens
+    // under a launch of this executable, and anything that has to outlive the
+    // executable - an event recorded by a node in the middle of the graph, for
+    // one - takes a reference of its own. Each semaphore is handed to the set
+    // and let go of as it is created, so a failure part way through leaves the
+    // ones already made owned by the set rather than by nobody.
+    iree_status_t status = iree_ok_status();
+    for (uint32_t i = 0; i < exec->semaphore_count && iree_status_is_ok(status);
+         i++) {
+      iree_hal_semaphore_t* semaphore = NULL;
+      status = iree_hal_semaphore_create(
+          exec->context->device, exec->context->queue_affinity, 0ull,
+          IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore);
+      if (iree_status_is_ok(status)) {
+        status =
+            iree_hal_resource_set_insert(exec->resource_set, 1, &semaphore);
+        iree_hal_semaphore_release(semaphore);
+      }
+      if (iree_status_is_ok(status)) {
+        exec->semaphores[i] = semaphore;
+      }
     }
-
-    // Add semaphores to the resource set for automatic cleanup.
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_resource_set_insert(
-                exec->resource_set, exec->semaphore_count, exec->semaphores));
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   }
 
   // Create blocks from partitions.
