@@ -1,6 +1,6 @@
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1250> @target
+amdgpu.target<gfx12-5-generic> @target
 func.def target(@target) @wmma_f8_f6(%lhs_data: vector<16xi32>, %rhs_data: vector<12xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -15,7 +15,7 @@ func.def target(@target) @wmma_f8_f6(%lhs_data: vector<16xi32>, %rhs_data: vecto
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @wmma_f8_f6(%lhs: reg<amdgpu.vgpr x16>, %rhs: reg<amdgpu.vgpr x12>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target(@target) abi(hal_kernel) @wmma_f8_f6(%lhs: reg<amdgpu.vgpr x16>, %rhs: reg<amdgpu.vgpr x12>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.gfx12_5.generic.core> {
   %17 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %result = v_wmma_f32_16x16x128_f8f6f4_f8_f6 %lhs, %rhs, %17 {matrix_a_fmt = 0, matrix_b_fmt = 2}
   return %result
@@ -23,7 +23,7 @@ low.func.def target(@target) abi(hal_kernel) @wmma_f8_f6(%lhs: reg<amdgpu.vgpr x
 
 // ====
 
-amdgpu.target<gfx1250> @target
+amdgpu.target<gfx12-5-generic> @target
 func.def target(@target) @wmma_f8_f4(%lhs_data: vector<16xi32>, %rhs_data: vector<8xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -38,7 +38,7 @@ func.def target(@target) @wmma_f8_f4(%lhs_data: vector<16xi32>, %rhs_data: vecto
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @wmma_f8_f4(%lhs: reg<amdgpu.vgpr x16>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target(@target) abi(hal_kernel) @wmma_f8_f4(%lhs: reg<amdgpu.vgpr x16>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.gfx12_5.generic.core> {
   %17 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %result = v_wmma_f32_16x16x128_f8f6f4_f8_f4 %lhs, %rhs, %17 {matrix_a_fmt = 1, matrix_b_fmt = 4}
   return %result
@@ -46,7 +46,7 @@ low.func.def target(@target) abi(hal_kernel) @wmma_f8_f4(%lhs: reg<amdgpu.vgpr x
 
 // ====
 
-amdgpu.target<gfx1250> @target
+amdgpu.target<gfx12-5-generic> @target
 func.def target(@target) @wmma_f6_f8(%lhs_data: vector<12xi32>, %rhs_data: vector<16xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -61,7 +61,7 @@ func.def target(@target) @wmma_f6_f8(%lhs_data: vector<12xi32>, %rhs_data: vecto
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @wmma_f6_f8(%lhs: reg<amdgpu.vgpr x12>, %rhs: reg<amdgpu.vgpr x16>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target(@target) abi(hal_kernel) @wmma_f6_f8(%lhs: reg<amdgpu.vgpr x12>, %rhs: reg<amdgpu.vgpr x16>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.gfx12_5.generic.core> {
   %17 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %result = v_wmma_f32_16x16x128_f8f6f4_f6_f8 %lhs, %rhs, %17 {matrix_a_fmt = 3, matrix_b_fmt = 1}
   return %result
@@ -69,7 +69,7 @@ low.func.def target(@target) abi(hal_kernel) @wmma_f6_f8(%lhs: reg<amdgpu.vgpr x
 
 // ====
 
-amdgpu.target<gfx1250> @target
+amdgpu.target<gfx12-5-generic> @target
 func.def target(@target) @wmma_f6_f4(%lhs_data: vector<12xi32>, %rhs_data: vector<8xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -84,7 +84,7 @@ func.def target(@target) @wmma_f6_f4(%lhs_data: vector<12xi32>, %rhs_data: vecto
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @wmma_f6_f4(%lhs: reg<amdgpu.vgpr x12>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target(@target) abi(hal_kernel) @wmma_f6_f4(%lhs: reg<amdgpu.vgpr x12>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.gfx12_5.generic.core> {
   %17 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %result = v_wmma_f32_16x16x128_f8f6f4_f6_f4 %lhs, %rhs, %17 {matrix_a_fmt = 2, matrix_b_fmt = 4}
   return %result
@@ -92,7 +92,7 @@ low.func.def target(@target) abi(hal_kernel) @wmma_f6_f4(%lhs: reg<amdgpu.vgpr x
 
 // ====
 
-amdgpu.target<gfx1250> @target
+amdgpu.target<gfx12-5-generic> @target
 func.def target(@target) @wmma_f4_f8(%lhs_data: vector<8xi32>, %rhs_data: vector<16xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -107,7 +107,7 @@ func.def target(@target) @wmma_f4_f8(%lhs_data: vector<8xi32>, %rhs_data: vector
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @wmma_f4_f8(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x16>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target(@target) abi(hal_kernel) @wmma_f4_f8(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x16>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.gfx12_5.generic.core> {
   %17 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %result = v_wmma_f32_16x16x128_f8f6f4_f4_f8 %lhs, %rhs, %17 {matrix_a_fmt = 4, matrix_b_fmt = 0}
   return %result
@@ -115,7 +115,7 @@ low.func.def target(@target) abi(hal_kernel) @wmma_f4_f8(%lhs: reg<amdgpu.vgpr x
 
 // ====
 
-amdgpu.target<gfx1250> @target
+amdgpu.target<gfx12-5-generic> @target
 func.def target(@target) @wmma_f4_f6(%lhs_data: vector<8xi32>, %rhs_data: vector<12xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -130,7 +130,7 @@ func.def target(@target) @wmma_f4_f6(%lhs_data: vector<8xi32>, %rhs_data: vector
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @wmma_f4_f6(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x12>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target(@target) abi(hal_kernel) @wmma_f4_f6(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x12>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.gfx12_5.generic.core> {
   %17 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %result = v_wmma_f32_16x16x128_f8f6f4_f4_f6 %lhs, %rhs, %17 {matrix_a_fmt = 4, matrix_b_fmt = 3}
   return %result
