@@ -212,6 +212,7 @@ loom_cc_library(
     "matrix_fragment_repack.h"
     "matrix_fragment_state.h"
     "memory.h"
+    "memory_bank_service.h"
     "narrow_float/float16.h"
     "narrow_float/fp8.h"
     "narrow_float/fp8_vector_conversion.h"
@@ -285,6 +286,7 @@ loom_cc_library(
     "matrix_fragment_repack.c"
     "matrix_fragment_state.c"
     "memory.c"
+    "memory_bank_service.c"
     "memory_cache.c"
     "memory_diagnostics.c"
     "memory_emit.c"
@@ -329,6 +331,7 @@ loom_cc_library(
     iree::base::internal
     loom::analysis::condition_facts
     loom::analysis::contract_vector
+    loom::analysis::control_uniformity
     loom::analysis::symbolic_expr
     loom::analysis::view_regions
     loom::codegen::low::builder
@@ -360,6 +363,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::abi::feedback
     loom::target::arch::amdgpu::abi::signal
     loom::target::arch::amdgpu::abi::tsan
+    loom::target::arch::amdgpu::analysis::lds_bank_service
     loom::target::arch::amdgpu::contracts
     loom::target::arch::amdgpu::encoding::encoding_defs
     loom::target::arch::amdgpu::error_defs

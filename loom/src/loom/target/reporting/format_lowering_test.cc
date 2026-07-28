@@ -103,6 +103,29 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   memory.storage_scale_topology = IREE_SVL("block_1d");
   memory.storage_affine_policy = IREE_SVL("scale_only");
   memory.storage_rounding_policy = IREE_SVL("finite_only");
+  memory.bank_service.proof = IREE_SVL("exact");
+  memory.bank_service.classification = IREE_SVL("conflicted");
+  memory.bank_service.model_key = IREE_SVL("test.ds_read_b128");
+  memory.bank_service.model_revision = IREE_SVL("test-model@1");
+  memory.bank_service.model_evidence = IREE_SVL("silicon-calibrated");
+  memory.bank_service.request_policy = IREE_SVL("count-each");
+  memory.bank_service.lane_address_proof = IREE_SVL("affine-lane-stride");
+  memory.bank_service.active_lane_proof = IREE_SVL("full-wave");
+  memory.bank_service.base_residue_proof = IREE_SVL("common-translation");
+  memory.bank_service.wave_size = 32;
+  memory.bank_service.bank_count = 32;
+  memory.bank_service.bank_word_byte_count = 4;
+  memory.bank_service.packet_word_count = 4;
+  memory.bank_service.phase_count = 2;
+  memory.bank_service.phase_lane_counts[0] = 4;
+  memory.bank_service.phase_lane_counts[1] = 4;
+  memory.bank_service.base_residue_count = 32;
+  memory.bank_service.phase_required_rounds[0] = 2;
+  memory.bank_service.phase_required_rounds[1] = 2;
+  memory.bank_service.required_rounds = 4;
+  memory.bank_service.uncontended_rounds = 2;
+  memory.bank_service.extra_rounds = 2;
+  memory.bank_service.maximum_request_multiplicity = 2;
   memory.execution_count_plus_one = 2;
   IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
       &report, &memory));
@@ -160,6 +183,29 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
                           IREE_SV("f8e4m3fn"));
   ExpectObjectValueEquals(storage, IREE_SV("rounding_policy"),
                           IREE_SV("finite_only"));
+  const iree_string_view_t bank_service =
+      LookupObject(memory_row, IREE_SV("bank_service"));
+  ExpectObjectValueEquals(bank_service, IREE_SV("proof"), IREE_SV("exact"));
+  ExpectObjectValueEquals(bank_service, IREE_SV("classification"),
+                          IREE_SV("conflicted"));
+  ExpectObjectUint64Equals(bank_service, IREE_SV("required_rounds"), 4);
+  const iree_string_view_t bank_model =
+      LookupObject(bank_service, IREE_SV("model"));
+  ExpectObjectValueEquals(bank_model, IREE_SV("key"),
+                          IREE_SV("test.ds_read_b128"));
+  ExpectObjectValueEquals(bank_model, IREE_SV("revision"),
+                          IREE_SV("test-model@1"));
+  const iree_string_view_t bank_address =
+      LookupObject(bank_service, IREE_SV("address"));
+  ExpectObjectValueEquals(bank_address, IREE_SV("active_lane_proof"),
+                          IREE_SV("full-wave"));
+  uint64_t second_phase_rounds = 0;
+  IREE_ASSERT_OK(iree_json_parse_uint64(
+      LookupArrayElement(
+          LookupObject(bank_service, IREE_SV("phase_required_rounds")),
+          /*index=*/1),
+      &second_phase_rounds));
+  EXPECT_EQ(second_phase_rounds, 2u);
 
   iree_string_builder_deinitialize(&builder);
   loom_target_compile_report_deinitialize(&report);

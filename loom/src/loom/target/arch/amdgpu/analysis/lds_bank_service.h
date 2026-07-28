@@ -94,6 +94,14 @@ const loom_amdgpu_lds_bank_service_model_t*
 loom_amdgpu_lds_bank_service_gfx1250_b128_model(
     loom_amdgpu_lds_bank_service_direction_t direction);
 
+// Returns the stable report key for |evidence_class|.
+iree_string_view_t loom_amdgpu_lds_bank_service_evidence_class_name(
+    loom_amdgpu_lds_bank_service_evidence_class_t evidence_class);
+
+// Returns the stable report key for |request_policy|.
+iree_string_view_t loom_amdgpu_lds_bank_service_request_policy_name(
+    loom_amdgpu_lds_bank_service_request_policy_t request_policy);
+
 // Evaluates explicit lane-relative byte addresses under |model|.
 //
 // The first |model->wave_size| lane addresses must be aligned to the model bank

@@ -391,11 +391,13 @@ visible before object disassembly enters the debugging loop.
 ## AMDGPU Shared-Memory Feedback
 
 The AMDGPU compile report explains selected workgroup-memory packets and the
-source address strides retained at packet selection. It does not classify LDS
-bank conflicts: that requires an instruction- and target-specific service model
-in addition to the source stride. Runtime measurements and profiler counters
-remain necessary when occupancy, cache behavior, scheduling, or data-dependent
-control flow dominates.
+source address facts retained at packet selection. When Loom has a named
+instruction- and target-specific service model, detailed rows also report an
+exact structural LDS bank-service profile or an explicit reason the source
+address and active-lane facts were insufficient. These are bank service rounds,
+not cycle predictions. Runtime measurements and profiler counters remain
+necessary when occupancy, cache behavior, scheduling, or data-dependent control
+flow dominates.
 
 Compile with detailed reports when investigating shared-memory layout,
 padding, swizzling, vectorization, or imported kernel staging choices:
@@ -415,9 +417,24 @@ reported source memory operation:
 ```bash
 jq '.source_low.memory_rows[]?
   | {function, source_op, operation, packet, vector_lanes,
-     dynamic_stride_bytes, vector_lane_stride_bytes}' \
+     dynamic_stride_bytes, vector_lane_stride_bytes,
+     bank_service}' \
   /tmp/shared-memory-vector-tile.compile-report.json
 ```
+
+`bank_service` is absent when no model is registered for the selected target
+and packet. A modeled packet records the immutable model revision and evidence
+class independently from the address proof. `proof: "exact"` carries the
+per-phase service rounds, uncontended baseline, extra rounds, and maximum
+same-bank request multiplicity. `proof: "unknown"` carries a stable
+`unknown_reason` instead of guessing through unsupported address shapes or
+divergent active-lane control.
+
+The current gfx1250 model covers full-wave `ds_read_b128` and
+`ds_write_b128` packets whose lane addresses are an aligned affine function of
+`workitem.id<x>`. Its phase topology and request policy come from the named
+rocRoller software model and are deliberately labeled
+`vendor-software-model-unvalidated` until calibrated against silicon.
 
 The text form carries the same fields as `source_low_memory[...]` rows when a
 greppable report is more convenient:

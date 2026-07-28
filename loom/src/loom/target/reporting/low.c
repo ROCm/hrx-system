@@ -77,6 +77,43 @@ loom_target_compile_report_source_interval(
   return target_interval;
 }
 
+static_assert(
+    LOOM_LOW_LOWER_MEMORY_BANK_SERVICE_PHASE_CAPACITY ==
+        LOOM_TARGET_COMPILE_REPORT_BANK_SERVICE_PHASE_CAPACITY,
+    "source-low and compile-report bank-service phase capacities must match");
+
+static loom_target_compile_report_bank_service_t
+loom_target_compile_report_bank_service(
+    const loom_low_lower_memory_bank_service_report_t* source) {
+  loom_target_compile_report_bank_service_t target = {
+      .proof = source->proof,
+      .classification = source->classification,
+      .model_key = source->model_key,
+      .model_revision = source->model_revision,
+      .model_evidence = source->model_evidence,
+      .request_policy = source->request_policy,
+      .lane_address_proof = source->lane_address_proof,
+      .active_lane_proof = source->active_lane_proof,
+      .base_residue_proof = source->base_residue_proof,
+      .unknown_reason = source->unknown_reason,
+      .wave_size = source->wave_size,
+      .bank_count = source->bank_count,
+      .bank_word_byte_count = source->bank_word_byte_count,
+      .packet_word_count = source->packet_word_count,
+      .phase_count = source->phase_count,
+      .base_residue_count = source->base_residue_count,
+      .required_rounds = source->required_rounds,
+      .uncontended_rounds = source->uncontended_rounds,
+      .extra_rounds = source->extra_rounds,
+      .maximum_request_multiplicity = source->maximum_request_multiplicity,
+  };
+  for (uint8_t i = 0; i < source->phase_count; ++i) {
+    target.phase_lane_counts[i] = source->phase_lane_counts[i];
+    target.phase_required_rounds[i] = source->phase_required_rounds[i];
+  }
+  return target;
+}
+
 static iree_string_view_t
 loom_target_compile_report_low_frame_emitted_function_name(
     const loom_low_emission_frame_t* frame) {
@@ -459,6 +496,8 @@ iree_status_t loom_target_compile_report_record_low_lowering(
         .storage_rounding_policy = source_row->storage_rounding_policy,
         .storage_codebook_policy = source_row->storage_codebook_policy,
         .storage_sparsity_policy = source_row->storage_sparsity_policy,
+        .bank_service =
+            loom_target_compile_report_bank_service(&source_row->bank_service),
         .source_interval = source_interval,
         .execution_count_plus_one = source_row->execution_count_plus_one,
     };

@@ -465,6 +465,118 @@ loom_target_compile_report_format_source_low_memory_argument_packet_storage_json
 }
 
 static iree_status_t
+loom_target_compile_report_format_source_low_memory_bank_service_u8_array_json(
+    iree_string_view_t field_name, const uint8_t* values, uint8_t value_count,
+    loom_json_object_writer_t* object) {
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(object, field_name));
+  loom_json_array_writer_t array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(object->stream, &array));
+  for (uint8_t i = 0; i < value_count; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_array_write_uint32_element(&array, values[i]));
+  }
+  return loom_json_array_end(&array);
+}
+
+static iree_status_t
+loom_target_compile_report_format_source_low_memory_bank_service_u16_array_json(
+    iree_string_view_t field_name, const uint16_t* values, uint8_t value_count,
+    loom_json_object_writer_t* object) {
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(object, field_name));
+  loom_json_array_writer_t array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(object->stream, &array));
+  for (uint8_t i = 0; i < value_count; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_array_write_uint32_element(&array, values[i]));
+  }
+  return loom_json_array_end(&array);
+}
+
+static iree_status_t
+loom_target_compile_report_format_source_low_memory_bank_service_json(
+    const loom_target_compile_report_bank_service_t* bank_service,
+    loom_json_object_writer_t* row_object) {
+  if (iree_string_view_is_empty(bank_service->model_key)) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(row_object, IREE_SV("bank_service")));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(row_object->stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("proof"), bank_service->proof));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("classification"), bank_service->classification));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("unknown_reason"), bank_service->unknown_reason));
+
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("model")));
+  loom_json_object_writer_t model;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(object.stream, &model));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &model, IREE_SV("key"), bank_service->model_key));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &model, IREE_SV("revision"), bank_service->model_revision));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &model, IREE_SV("evidence"), bank_service->model_evidence));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &model, IREE_SV("request_policy"), bank_service->request_policy));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &model, IREE_SV("wave_size"), bank_service->wave_size));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &model, IREE_SV("bank_count"), bank_service->bank_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &model, IREE_SV("bank_word_bytes"), bank_service->bank_word_byte_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &model, IREE_SV("packet_bank_words"), bank_service->packet_word_count));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_source_low_memory_bank_service_u8_array_json(
+          IREE_SV("phase_lane_counts"), bank_service->phase_lane_counts,
+          bank_service->phase_count, &model));
+  IREE_RETURN_IF_ERROR(loom_json_object_end(&model));
+
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&object, IREE_SV("address")));
+  loom_json_object_writer_t address;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(object.stream, &address));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &address, IREE_SV("lane_address_proof"),
+      bank_service->lane_address_proof));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &address, IREE_SV("active_lane_proof"), bank_service->active_lane_proof));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &address, IREE_SV("base_residue_proof"),
+      bank_service->base_residue_proof));
+  if (bank_service->base_residue_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &address, IREE_SV("base_residue_count"),
+        bank_service->base_residue_count));
+  }
+  IREE_RETURN_IF_ERROR(loom_json_object_end(&address));
+
+  if (!iree_string_view_is_empty(bank_service->classification)) {
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_format_source_low_memory_bank_service_u16_array_json(
+            IREE_SV("phase_required_rounds"),
+            bank_service->phase_required_rounds, bank_service->phase_count,
+            &object));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &object, IREE_SV("required_rounds"), bank_service->required_rounds));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &object, IREE_SV("uncontended_rounds"),
+        bank_service->uncontended_rounds));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &object, IREE_SV("extra_rounds"), bank_service->extra_rounds));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &object, IREE_SV("maximum_request_multiplicity"),
+        bank_service->maximum_request_multiplicity));
+  }
+  return loom_json_object_end(&object);
+}
+
+static iree_status_t
 loom_target_compile_report_format_source_low_memory_row_json(
     const loom_target_compile_report_source_low_memory_row_t* row,
     iree_host_size_t row_index, loom_output_stream_t* stream) {
@@ -534,6 +646,9 @@ loom_target_compile_report_format_source_low_memory_row_json(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_format_source_low_memory_storage_json(
           row, &object));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_source_low_memory_bank_service_json(
+          &row->bank_service, &object));
   if (row->execution_count_plus_one !=
           LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_EXECUTION_COUNT_PLUS_ONE_UNKNOWN &&
       row->execution_count_plus_one != 2) {

@@ -396,6 +396,58 @@ typedef struct loom_low_lower_report_row_t {
 #define LOOM_LOW_LOWER_MEMORY_REPORT_EXECUTION_COUNT_PLUS_ONE_UNKNOWN \
   LOOM_LOW_LOWER_REPORT_EXECUTION_COUNT_PLUS_ONE_UNKNOWN
 
+// Maximum target bank-service phases retained in a source-memory report row.
+#define LOOM_LOW_LOWER_MEMORY_BANK_SERVICE_PHASE_CAPACITY 8
+
+// Target-owned bank-service evidence for one emitted source memory packet.
+typedef struct loom_low_lower_memory_bank_service_report_t {
+  // Exactness of the result: "exact", "unknown", or empty when not analyzed.
+  iree_string_view_t proof;
+  // Exact result class: "conflict-free", "conflicted", or empty when unknown.
+  iree_string_view_t classification;
+  // Stable target packet-service model key.
+  iree_string_view_t model_key;
+  // Immutable source revision defining the selected model.
+  iree_string_view_t model_revision;
+  // Provenance strength of the selected model.
+  iree_string_view_t model_evidence;
+  // Treatment of requests to identical bank-word addresses.
+  iree_string_view_t request_policy;
+  // Proof used to derive per-lane packet base addresses.
+  iree_string_view_t lane_address_proof;
+  // Proof used to derive the active lane set.
+  iree_string_view_t active_lane_proof;
+  // Proof covering unknown common LDS base translations.
+  iree_string_view_t base_residue_proof;
+  // Stable reason key when |proof| is "unknown".
+  iree_string_view_t unknown_reason;
+  // Number of lanes represented by the model phases.
+  uint8_t wave_size;
+  // Number of independently serviced LDS banks.
+  uint8_t bank_count;
+  // Byte width of one LDS bank word.
+  uint8_t bank_word_byte_count;
+  // Number of consecutive bank words requested by each active lane.
+  uint8_t packet_word_count;
+  // Number of populated phase entries.
+  uint8_t phase_count;
+  // Number of active model lanes in each service phase.
+  uint8_t phase_lane_counts[LOOM_LOW_LOWER_MEMORY_BANK_SERVICE_PHASE_CAPACITY];
+  // Number of common bank-word base residues covered by the result.
+  uint8_t base_residue_count;
+  // Required bank service rounds for each model phase.
+  uint16_t
+      phase_required_rounds[LOOM_LOW_LOWER_MEMORY_BANK_SERVICE_PHASE_CAPACITY];
+  // Sum of |phase_required_rounds|.
+  uint16_t required_rounds;
+  // One round for each phase containing at least one active lane.
+  uint16_t uncontended_rounds;
+  // Difference between |required_rounds| and |uncontended_rounds|.
+  uint16_t extra_rounds;
+  // Maximum requests assigned to one bank in one phase.
+  uint16_t maximum_request_multiplicity;
+} loom_low_lower_memory_bank_service_report_t;
+
 // One emitted source-memory packet row captured for production diagnostics.
 typedef struct loom_low_lower_memory_report_row_t {
   // Source function symbol containing the lowered source operation.
@@ -458,6 +510,8 @@ typedef struct loom_low_lower_memory_report_row_t {
   iree_string_view_t storage_codebook_policy;
   // Sparse metadata contract recovered from source encoding facts.
   iree_string_view_t storage_sparsity_policy;
+  // Target-owned bank-service evidence for this packet.
+  loom_low_lower_memory_bank_service_report_t bank_service;
   // Conservative source byte interval evidence for this memory packet.
   loom_low_byte_interval_t source_interval;
   // Exact source execution count plus one, or zero when unknown.

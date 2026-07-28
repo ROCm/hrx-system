@@ -71,6 +71,32 @@ loom_amdgpu_lds_bank_service_gfx1250_b128_model(
   }
 }
 
+iree_string_view_t loom_amdgpu_lds_bank_service_evidence_class_name(
+    loom_amdgpu_lds_bank_service_evidence_class_t evidence_class) {
+  switch (evidence_class) {
+    case LOOM_AMDGPU_LDS_BANK_SERVICE_EVIDENCE_PUBLIC_VENDOR_DOCUMENTATION:
+      return IREE_SV("public-vendor-documentation");
+    case LOOM_AMDGPU_LDS_BANK_SERVICE_EVIDENCE_VENDOR_SOFTWARE_MODEL_UNVALIDATED:
+      return IREE_SV("vendor-software-model-unvalidated");
+    case LOOM_AMDGPU_LDS_BANK_SERVICE_EVIDENCE_SILICON_CALIBRATED_VENDOR_MODEL:
+      return IREE_SV("silicon-calibrated-vendor-model");
+    default:
+      return iree_string_view_empty();
+  }
+}
+
+iree_string_view_t loom_amdgpu_lds_bank_service_request_policy_name(
+    loom_amdgpu_lds_bank_service_request_policy_t request_policy) {
+  switch (request_policy) {
+    case LOOM_AMDGPU_LDS_BANK_SERVICE_REQUEST_POLICY_COUNT_EACH:
+      return IREE_SV("count-each");
+    case LOOM_AMDGPU_LDS_BANK_SERVICE_REQUEST_POLICY_COALESCE_IDENTICAL_READS:
+      return IREE_SV("coalesce-identical-reads");
+    default:
+      return iree_string_view_empty();
+  }
+}
+
 static bool loom_amdgpu_lds_bank_service_word_already_requested(
     const uint64_t* requested_words, uint16_t requested_word_count,
     uint64_t address_word) {

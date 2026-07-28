@@ -19,6 +19,7 @@
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
+#include "loom/target/arch/amdgpu/lower/memory_bank_service.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/util/numeric_format.h"
@@ -329,6 +330,9 @@ static iree_status_t loom_amdgpu_record_memory_packet_report(
           source->vector_lane_byte_stride),
   };
   loom_amdgpu_memory_report_row_populate_storage_schema(context, source, &row);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_memory_report_bank_service(
+      context, source_op, packet->access.descriptor, source,
+      &row.bank_service));
   IREE_RETURN_IF_ERROR(
       loom_low_lower_memory_report_row_populate_source_interval(context, source,
                                                                 &row));
