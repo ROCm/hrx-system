@@ -223,6 +223,7 @@ TEST(AmdgpuTargetInfoTest, DescriptorSetDelayAluOpcodesMatchRdnaFamilies) {
     uint16_t expected_delay_alu_opcode;
   } cases[] = {
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3, 0x000u},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX9_4_GENERIC, 0x000u},
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX11_GENERIC, 0x007u},
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX12_GENERIC, 0x007u},
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX12_5_GENERIC, 0x007u},
@@ -245,6 +246,7 @@ TEST(AmdgpuTargetInfoTest, DescriptorSetVopdSupportMatchesPacketFamilies) {
     bool supports_vopd;
   } cases[] = {
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3, false},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX9_4_GENERIC, false},
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX11_GENERIC, false},
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX12_GENERIC, true},
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX12_5_GENERIC, true},
@@ -311,8 +313,8 @@ TEST(AmdgpuTargetInfoTest, Gfx94xMatrixProfileMatchesProcessorSupport) {
     bool supports_hsaco;
   };
   static const Case cases[] = {
-      {IREE_SV("gfx940"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE, false},
-      {IREE_SV("gfx941"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE, false},
+      {IREE_SV("gfx940"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940, true},
+      {IREE_SV("gfx941"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940, true},
       {IREE_SV("gfx942"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940, true},
   };
   for (const Case& c : cases) {
@@ -441,7 +443,7 @@ TEST(AmdgpuTargetInfoTest, MatchesAmdhsaGfx9PlusProcessorElfFlags) {
       {IREE_SV("gfx11-generic"), 0x01000054u},
       {IREE_SV("gfx12-generic"), 0x01000059u},
       {IREE_SV("gfx9-4-generic"), 0x0100055Fu},
-      {IREE_SV("gfx12-5-generic"), 0x0100005Bu},
+      {IREE_SV("gfx12-5-generic"), 0x0100055Bu},
   };
   for (const auto& c : cases) {
     const loom_amdgpu_processor_info_t* processor = nullptr;
@@ -479,16 +481,20 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx1170Processor) {
           LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
 }
 
-TEST(AmdgpuTargetInfoTest, LooksUpGfx94GenericSchedulingFacts) {
+TEST(AmdgpuTargetInfoTest, LooksUpGfx94GenericProcessor) {
   const loom_amdgpu_processor_info_t* processor = nullptr;
   IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_processor(
       IREE_SV("gfx9-4-generic"), &processor));
   ASSERT_NE(processor, nullptr);
-  EXPECT_TRUE(iree_string_view_is_empty(processor->descriptor_set.key));
-  EXPECT_EQ(processor->descriptor_set.ordinal,
-            LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE);
+  ExpectDescriptorSet(processor, IREE_SV("amdgpu.gfx9_4.generic.core"),
+                      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX9_4_GENERIC);
+  EXPECT_EQ(processor->elf.machine_flags, 0x05Fu);
+  EXPECT_EQ(processor->elf.generic_version, 1u);
+  EXPECT_EQ(processor->wavefront.default_size, 64u);
+  ExpectKernelDescriptor(processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX9,
+                         8, 8, kCdnaGfx9DescriptorFlags);
   EXPECT_EQ(processor->features.matrix,
-            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE);
+            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC);
   ExpectSchedulingBits(
       processor,
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES |

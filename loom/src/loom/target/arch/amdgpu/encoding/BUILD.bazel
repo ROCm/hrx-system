@@ -34,9 +34,9 @@ _AMDGPU_ENCODING_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/encodi
 
 _AMDGPU_CONFIG_TABLES_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:config_tables"
 
-_DESCRIPTOR_SET_CDNA3 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.cdna3.core"]
-
 _DESCRIPTOR_SET_CDNA4 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.cdna4.core"]
+
+_DESCRIPTOR_SET_GFX9_4_GENERIC = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.gfx9_4.generic.core"]
 
 _DESCRIPTOR_SET_GFX11_GENERIC = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.gfx11.generic.core"]
 
@@ -90,13 +90,30 @@ loom_target_table_cc_library(
         "--target=cdna3",
         "--descriptor-set-key=amdgpu.cdna3.core",
         "--isa-xml=cdna3:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna3.xml)",
+        "--isa-xml=cdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna4.xml)",
         "--public-header=loom/target/arch/amdgpu/encoding/cdna3_encoding_tables.h",
     ],
     exclude_from_cmake_all = True,
+    generated_hdr_flags = ["--view-header=gfx9_4_generic"],
+    generated_hdrs = ["gfx9_4_generic_encoding_tables.h"],
     generator = _AMDGPU_ENCODING_TABLE_GENERATOR,
-    inputs = ["@amdgpu_isa_xml//:amdgpu_isa_cdna3.xml"],
-    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_CDNA3),
+    inputs = [
+        "@amdgpu_isa_xml//:amdgpu_isa_cdna3.xml",
+        "@amdgpu_isa_xml//:amdgpu_isa_cdna4.xml",
+    ],
     deps = [
+        ":encoding_defs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_target_table_cc_library(
+    name = "gfx9_4_generic_encoding_tables",
+    header = "gfx9_4_generic_encoding_tables.h",
+    header_only = True,
+    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_GFX9_4_GENERIC),
+    deps = [
+        ":cdna3_encoding_tables",
         ":encoding_defs",
         "//runtime/src/iree/base",
     ],

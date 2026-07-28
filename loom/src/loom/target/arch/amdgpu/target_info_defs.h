@@ -116,8 +116,10 @@ typedef enum loom_amdgpu_matrix_feature_profile_e {
   LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12 = 6,
   // GFX1250 WMMA/SWMMAC feature baseline.
   LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250 = 7,
+  // Portable intersection of GFX940- and GFX950-family MFMA features.
+  LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC = 8,
   // Number of matrix feature profiles.
-  LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_COUNT = 8,
+  LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_COUNT = 9,
 } loom_amdgpu_matrix_feature_profile_t;
 
 typedef enum loom_amdgpu_processor_info_flag_bits_e {

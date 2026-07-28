@@ -283,6 +283,22 @@ TEST(AmdgpuEncodingTest, Gfx11GenericUsesIndependentTableIdentity) {
   EXPECT_EQ(packet.words[0], UINT32_C(0xbf870214));
 }
 
+TEST(AmdgpuEncodingTest, Gfx9_4GenericUsesIndependentTableIdentity) {
+  LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
+      table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX9_4_GENERIC,
+      "amdgpu.gfx9_4.generic.core");
+  EXPECT_EQ(table->descriptor_set_ordinal,
+            LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX9_4_GENERIC);
+  EXPECT_TRUE(iree_string_view_equal(table->descriptor_set_key,
+                                     IREE_SV("amdgpu.gfx9_4.generic.core")));
+
+  loom_amdgpu_encoding_packet_t packet = {};
+  IREE_ASSERT_OK(loom_amdgpu_encoding_pack_sopp_simm16(
+      table, /*opcode=*/0x001, /*immediate=*/0x0000, &packet));
+  EXPECT_EQ(packet.word_count, 1u);
+  EXPECT_EQ(packet.words[0], UINT32_C(0xbf810000));
+}
+
 TEST(AmdgpuEncodingTest, Gfx12GenericUsesIndependentTableIdentity) {
   LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
       table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX12_GENERIC,

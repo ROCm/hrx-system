@@ -1037,6 +1037,11 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
         overlay_rows=_gfx950_core_overlays,
         overlay_descriptors=_gfx950_core_overlay_descriptors,
     ),
+    "gfx9_4_generic": _AmdgpuCoreDescriptorSetBuilder(
+        base=_AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+        overlay_rows=_gfx9_4_generic_core_overlays,
+        overlay_descriptors=_gfx9_4_generic_core_overlay_descriptors,
+    ),
     "rdna3": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
         overlay_rows=_gfx11_core_overlays,

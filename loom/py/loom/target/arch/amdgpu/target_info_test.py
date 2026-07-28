@@ -15,6 +15,8 @@ from build_tools.amdgpu.target_map_data import AMDGPU_GENERIC_CODE_OBJECT_INFOS
 
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION,
+    AMDGPU_DESCRIPTOR_SET_INFOS,
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
@@ -26,6 +28,7 @@ from loom.target.arch.amdgpu.target_info import (
     amdgpu_descriptor_set_view_infos_by_storage_generator_target,
     amdgpu_processor_info_by_name,
     validate_amdgpu_descriptor_set_isa_xml,
+    validate_amdgpu_generic_contracts,
 )
 
 
@@ -98,6 +101,7 @@ def test_descriptor_set_storage_target_lookup_classifies_storage_targets() -> No
     )
 
     for storage_target, view_target in (
+        ("cdna3", "gfx9_4_generic"),
         ("rdna3", "gfx11_generic"),
         ("rdna4", "gfx12_generic"),
         ("rdna4_gfx125x", "gfx12_5_generic"),
@@ -112,11 +116,19 @@ def test_descriptor_set_storage_target_lookup_classifies_storage_targets() -> No
         assert amdgpu_descriptor_set_view_infos_by_storage_generator_target(
             storage_target
         ) == (view_info,)
-    assert amdgpu_descriptor_set_view_infos_by_storage_generator_target("cdna3") == ()
 
 
 def test_generic_descriptor_sets_have_independent_contracts() -> None:
     cases = (
+        (
+            "gfx9_4_generic",
+            "amdgpu.gfx9_4.generic.core",
+            ("cdna3", "cdna4"),
+            ("cdna3", "cdna4"),
+            "gfx9-4-generic",
+            ("gfx940", "gfx950"),
+            False,
+        ),
         (
             "gfx11_generic",
             "amdgpu.gfx11.generic.core",
@@ -190,6 +202,24 @@ def test_matrix_feature_profiles_model_replacement_instruction_shapes() -> None:
         not in AMDGPU_MATRIX_FEATURES_BY_PROFILE[
             AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12
         ]
+    )
+    assert set(
+        AMDGPU_MATRIX_FEATURES_BY_PROFILE[
+            AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC
+        ]
+    ) == (
+        set(
+            AMDGPU_MATRIX_FEATURES_BY_PROFILE[AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940]
+        )
+        & set(
+            AMDGPU_MATRIX_FEATURES_BY_PROFILE[AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950]
+        )
+    )
+
+
+def test_generic_contracts_are_portable_member_intersections() -> None:
+    validate_amdgpu_generic_contracts(
+        AMDGPU_PROCESSOR_INFOS, AMDGPU_DESCRIPTOR_SET_INFOS
     )
 
 

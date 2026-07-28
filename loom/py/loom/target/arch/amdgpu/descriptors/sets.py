@@ -876,6 +876,13 @@ def _gfx950_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
+def _gfx9_4_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return _amdgpu_descriptor_overlay_intersection(
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+    )
+
+
 def _gfx940_core_overlay_descriptors(
     spec: AmdgpuIsaFactSource,
 ) -> tuple[Descriptor, ...]:
@@ -889,6 +896,14 @@ def _gfx950_core_overlay_descriptors(
 ) -> tuple[Descriptor, ...]:
     return _with_execution_mask_state_reads(
         materialize_amdgpu_descriptor_overlays(spec, _gfx950_core_overlays())
+    )
+
+
+def _gfx9_4_generic_core_overlay_descriptors(
+    spec: AmdgpuIsaFactSource,
+) -> tuple[Descriptor, ...]:
+    return _with_execution_mask_state_reads(
+        materialize_amdgpu_descriptor_overlays(spec, _gfx9_4_generic_core_overlays())
     )
 
 
@@ -2193,6 +2208,7 @@ def _amdgpu_core_descriptor_set_bases() -> tuple[DescriptorSet, ...]:
     return (
         _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
+        _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
@@ -2224,6 +2240,7 @@ def _amdgpu_descriptor_ref_key_set() -> set[str]:
 __all__ = (
     "_AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE",
+    "_AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE",
@@ -2253,4 +2270,6 @@ __all__ = (
     "_gfx940_core_overlays",
     "_gfx950_core_overlay_descriptors",
     "_gfx950_core_overlays",
+    "_gfx9_4_generic_core_overlay_descriptors",
+    "_gfx9_4_generic_core_overlays",
 )

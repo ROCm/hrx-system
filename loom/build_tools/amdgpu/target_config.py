@@ -346,8 +346,15 @@ class TargetConfig:
     def descriptor_set_keys(self) -> list[str]:
         keys: list[str] = []
         for record in self._target_records:
+            if is_generic_processor(record):
+                continue
             key = processor_descriptor_set_key(self._processor_infos[record.processor])
             if key not in keys:
+                keys.append(key)
+        for processor_name in self._root_target_map.code_object_targets():
+            processor_info = self._processor_infos[processor_name]
+            key = processor_descriptor_set_key(processor_info)
+            if key and key not in keys:
                 keys.append(key)
         return keys
 

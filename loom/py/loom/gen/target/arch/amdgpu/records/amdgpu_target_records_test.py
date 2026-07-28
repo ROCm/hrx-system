@@ -123,6 +123,7 @@ def test_target_record_enum_values_are_stable_and_explicit() -> None:
         "gfx1172": 20,
         "gfx1201": 21,
         "gfx1251": 22,
+        "gfx9-4-generic": 23,
     }
 
 
@@ -133,9 +134,10 @@ def test_target_records_reject_missing_descriptor_backed_processor() -> None:
         processors,
         sorted_descriptor_set_infos(),
     )
+    incomplete_rows = tuple(row for row in rows if row.info.processor != "gfx1251")
 
     with _raises_value_error("missing=\\['gfx1251'\\]"):
-        amdgpu_target_records._validate_target_record_coverage(rows[:-1], processors)
+        amdgpu_target_records._validate_target_record_coverage(incomplete_rows, processors)
 
 
 def test_target_records_reject_unknown_processor() -> None:

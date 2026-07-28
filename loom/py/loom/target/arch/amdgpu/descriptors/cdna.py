@@ -178,8 +178,19 @@ _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     schedule_classes=_AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
 )
 
+_AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE = (
+    _amdgpu_core_descriptor_set_intersection(
+        key="amdgpu.gfx9_4.generic.core",
+        members=(
+            _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
+            _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
+        ),
+    )
+)
+
 
 __all__ = (
     "_AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE",
+    "_AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE",
 )

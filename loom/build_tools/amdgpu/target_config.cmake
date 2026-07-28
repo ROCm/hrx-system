@@ -37,6 +37,7 @@ set(_LOOM_AMDGPU_SUPPORTED_EXACT_PROCESSORS
 )
 
 set(_LOOM_AMDGPU_SUPPORTED_CODE_OBJECT_PROCESSORS
+  "gfx9-4-generic"
   "gfx11-generic"
   "gfx12-generic"
   "gfx12-5-generic"
@@ -62,6 +63,7 @@ set(_LOOM_AMDGPU_SUPPORTED_DESCRIPTOR_BACKED_PROCESSORS
   "gfx1170"
   "gfx1171"
   "gfx1172"
+  "gfx9-4-generic"
   "gfx11-generic"
   "gfx12-generic"
   "gfx12-5-generic"
@@ -74,6 +76,7 @@ set(_LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES
   "descriptor_set_rdna4_core"
   "descriptor_set_rdna4_gfx125x_core"
   "descriptor_set_rdna3_5_core"
+  "descriptor_set_gfx9_4_generic_core"
   "descriptor_set_gfx11_generic_core"
   "descriptor_set_gfx12_generic_core"
   "descriptor_set_gfx12_5_generic_core"
@@ -157,6 +160,17 @@ set(_LOOM_AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGET_descriptor_set_rdna3_5_core "rd
 set(_LOOM_AMDGPU_LOW_DESCRIPTOR_HEADER_descriptor_set_rdna3_5_core "loom/target/arch/amdgpu/descriptors/rdna3_5_descriptors.h")
 set(_LOOM_AMDGPU_LOW_DESCRIPTOR_PROVIDER_SYMBOL_descriptor_set_rdna3_5_core "loom_amdgpu_rdna3_5_core_descriptor_set")
 set(_LOOM_AMDGPU_DESCRIPTOR_SET_DEFINE_descriptor_set_rdna3_5_core "LOOM_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE")
+
+set(_LOOM_AMDGPU_DESCRIPTOR_SET_KEY_descriptor_set_gfx9_4_generic_core "amdgpu.gfx9_4.generic.core")
+set(_LOOM_AMDGPU_DESCRIPTOR_SET_EXACT_PROCESSORS_descriptor_set_gfx9_4_generic_core
+)
+set(_LOOM_AMDGPU_DESCRIPTOR_SET_GENERIC_PROCESSORS_descriptor_set_gfx9_4_generic_core
+  "gfx9-4-generic"
+)
+set(_LOOM_AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGET_descriptor_set_gfx9_4_generic_core "gfx9_4_generic")
+set(_LOOM_AMDGPU_LOW_DESCRIPTOR_HEADER_descriptor_set_gfx9_4_generic_core "loom/target/arch/amdgpu/descriptors/gfx9_4_generic_descriptors.h")
+set(_LOOM_AMDGPU_LOW_DESCRIPTOR_PROVIDER_SYMBOL_descriptor_set_gfx9_4_generic_core "loom_amdgpu_gfx9_4_generic_core_descriptor_set")
+set(_LOOM_AMDGPU_DESCRIPTOR_SET_DEFINE_descriptor_set_gfx9_4_generic_core "LOOM_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE")
 
 set(_LOOM_AMDGPU_DESCRIPTOR_SET_KEY_descriptor_set_gfx11_generic_core "amdgpu.gfx11.generic.core")
 set(_LOOM_AMDGPU_DESCRIPTOR_SET_EXACT_PROCESSORS_descriptor_set_gfx11_generic_core

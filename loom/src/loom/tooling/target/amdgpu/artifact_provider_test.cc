@@ -240,16 +240,20 @@ TEST_F(AmdgpuHalArtifactProviderTest, SelectTargetKeyBuildsOfflineTarget) {
   EXPECT_TRUE(iree_string_view_equal(processor->name, IREE_SV("gfx1100")));
 }
 
-TEST_F(AmdgpuHalArtifactProviderTest,
-       SelectTargetKeyRejectsKnownProcessorsWithoutHsacoEmission) {
-  for (iree_string_view_t processor : {IREE_SV("gfx940"), IREE_SV("gfx941")}) {
+TEST_F(AmdgpuHalArtifactProviderTest, SelectTargetKeyBuildsAllGfx94Targets) {
+  for (iree_string_view_t processor :
+       {IREE_SV("gfx940"), IREE_SV("gfx941"), IREE_SV("gfx942"),
+        IREE_SV("gfx9-4-generic")}) {
     loom_run_hal_device_target_t target = {};
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
-                          loom_amdgpu_hal_artifact_provider.select_target_key(
-                              &loom_amdgpu_hal_artifact_provider, processor,
-                              iree_allocator_system(), &target));
-    EXPECT_EQ(target.data, nullptr);
-    EXPECT_EQ(target.target_bundle, nullptr);
+    IREE_ASSERT_OK(loom_amdgpu_hal_artifact_provider.select_target_key(
+        &loom_amdgpu_hal_artifact_provider, processor, iree_allocator_system(),
+        &target));
+    ASSERT_NE(target.data, nullptr);
+    EXPECT_NE(target.target_bundle, nullptr);
+    EXPECT_TRUE(iree_string_view_equal(target.target_key, processor));
+    const loom_amdgpu_processor_info_t* processor_info =
+        static_cast<const loom_amdgpu_processor_info_t*>(target.data);
+    EXPECT_TRUE(iree_string_view_equal(processor_info->name, processor));
   }
 }
 

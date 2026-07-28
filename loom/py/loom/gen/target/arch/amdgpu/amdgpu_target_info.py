@@ -58,6 +58,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX12,
     AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125,
     AMDGPU_KERNEL_DESCRIPTOR_PROFILE_NONE,
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
@@ -93,6 +94,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     sorted_descriptor_set_infos,
     sorted_processor_infos,
     validate_amdgpu_descriptor_set_isa_xml,
+    validate_amdgpu_generic_contracts,
 )
 
 
@@ -142,6 +144,7 @@ _MATRIX_FEATURE_PROFILE_EXPRS = {
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A",
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940",
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950",
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC",
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11",
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12",
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250",
@@ -749,6 +752,7 @@ def _validate_processors(
         if info.features.scheduling < 0 or info.features.scheduling > 0xFFFFFFFF:
             raise ValueError(f"AMDGPU scheduling bits for {info.processor} must fit u32")
         _processor_scheduling_bits_expr(info.features.scheduling)
+    validate_amdgpu_generic_contracts(processors, descriptor_sets)
 
 
 def _emit_header(descriptor_sets: Sequence[AmdgpuDescriptorSetInfo]) -> str:

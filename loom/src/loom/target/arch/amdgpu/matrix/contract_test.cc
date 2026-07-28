@@ -2786,9 +2786,6 @@ TEST(MatrixContractTest, ProcessorFeatureBitsRejectUnknownProcessor) {
 TEST(MatrixContractTest, ProcessorFeatureBitsRejectMissingMatrixProfile) {
   static const iree_string_view_t cases[] = {
       IREE_SV("gfx900"),
-      IREE_SV("gfx940"),
-      IREE_SV("gfx941"),
-      IREE_SV("gfx9-4-generic"),
   };
   for (iree_string_view_t processor_name : cases) {
     loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
@@ -2801,6 +2798,19 @@ TEST(MatrixContractTest, ProcessorFeatureBitsRejectMissingMatrixProfile) {
 }
 
 TEST(MatrixContractTest, ProcessorFeatureBitsUseTargetInfoAliases) {
+  loom_amdgpu_matrix_feature_bits_t gfx940_features = 0;
+  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
+      IREE_SV("gfx940"), &gfx940_features));
+
+  loom_amdgpu_matrix_feature_bits_t gfx950_features = 0;
+  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
+      IREE_SV("gfx950"), &gfx950_features));
+
+  loom_amdgpu_matrix_feature_bits_t gfx9_4_generic_features = 0;
+  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
+      IREE_SV("gfx9-4-generic"), &gfx9_4_generic_features));
+  EXPECT_EQ(gfx9_4_generic_features, gfx940_features & gfx950_features);
+
   loom_amdgpu_matrix_feature_bits_t gfx1151_features = 0;
   IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
       IREE_SV("gfx1151"), &gfx1151_features));

@@ -13,10 +13,14 @@ Python input rows consumed by the table generator, not emitted C ABI shapes.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from build_tools.amdgpu.target_map_data import generic_code_object_current_version
+from build_tools.amdgpu.target_map_data import (
+    AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS,
+    generic_code_object_current_version,
+)
 
 from loom.dialect.cache import CacheScope, CacheTemporal
 
@@ -34,6 +38,7 @@ AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908 = "mfma_gfx908"
 AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A = "mfma_gfx90a"
 AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940 = "mfma_gfx940"
 AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950 = "mfma_gfx950"
+AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC = "mfma_gfx9_4_generic"
 AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11 = "wmma_gfx11"
 AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12 = "wmma_gfx12"
 AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250 = "wmma_gfx1250"
@@ -49,6 +54,7 @@ AMDGPU_MATRIX_FEATURE_PROFILES = (
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
 )
 AMDGPU_MATRIX_FEATURES_BY_PROFILE = {
     AMDGPU_MATRIX_FEATURE_PROFILE_NONE: (),
@@ -89,6 +95,13 @@ AMDGPU_MATRIX_FEATURES_BY_PROFILE = {
         "wmma_gfx1250",
         "wmma_gfx1250_scale_f8f6f4",
         "swmmac_gfx1250",
+    ),
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC: (
+        "mfma_gfx908",
+        "mfma_gfx90a_bf16_1k",
+        "mfma_gfx90a_f64",
+        "mfma_gfx940_fp8",
+        "smfmac_gfx940",
     ),
 }
 
@@ -507,6 +520,7 @@ AMDGPU_OCCUPANCY_CDNA4 = AmdgpuProcessorOccupancyInfo(
         ),
     ),
 )
+AMDGPU_OCCUPANCY_GFX9_4_GENERIC = AMDGPU_OCCUPANCY_CDNA3
 AMDGPU_OCCUPANCY_RDNA_1024 = AmdgpuProcessorOccupancyInfo(
     wave32=AmdgpuOccupancyModelInfo(
         max_waves_per_simd=16,
@@ -721,8 +735,8 @@ def cdna3_processor_info(
     processor: str,
     elf_machine_flags: int,
     *,
-    flags: int = 0,
-    matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_NONE,
+    flags: int = AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+    matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor,
@@ -871,6 +885,20 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         ),
     ),
     AmdgpuDescriptorSetInfo(
+        generator_target="gfx9_4_generic",
+        key="amdgpu.gfx9_4.generic.core",
+        isa_infos=(
+            AMDGPU_DESCRIPTOR_SET_ISA_CDNA3,
+            AMDGPU_DESCRIPTOR_SET_ISA_CDNA4,
+        ),
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+        storage_generator_target="cdna3",
+        member_generator_targets=("cdna3", "cdna4"),
+        vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
+            cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1,
+        ),
+    ),
+    AmdgpuDescriptorSetInfo(
         generator_target="gfx11_generic",
         key="amdgpu.gfx11.generic.core",
         isa_infos=(
@@ -943,12 +971,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
     ),
     cdna3_processor_info("gfx940", 0x040),
     cdna3_processor_info("gfx941", 0x04B),
-    cdna3_processor_info(
-        "gfx942",
-        0x04C,
-        matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
-        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
-    ),
+    cdna3_processor_info("gfx942", 0x04C),
     processor_info(
         "gfx950",
         0x04F,
@@ -1075,14 +1098,21 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
     processor_info(
         "gfx9-4-generic",
         0x05F,
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+        descriptor_set_key="amdgpu.gfx9_4.generic.core",
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
         elf_generic_version=generic_code_object_current_version("gfx9-4-generic"),
+        kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_CDNA_GFX9,
+        matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES,
+        max_workgroup_storage_bytes=AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES,
+        occupancy=AMDGPU_OCCUPANCY_GFX9_4_GENERIC,
     ),
     gfx125x_processor_info(
         "gfx12-5-generic",
         0x05B,
         descriptor_set_key="amdgpu.gfx12_5.generic.core",
+        elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
         elf_generic_version=generic_code_object_current_version("gfx12-5-generic"),
     ),
 )
@@ -1208,6 +1238,12 @@ AMDGPU_TARGET_RECORD_INFOS: tuple[AmdgpuTargetRecordInfo, ...] = (
         enum_value=22,
         doc="RDNA 4 gfx1251 target row.",
     ),
+    AmdgpuTargetRecordInfo(
+        processor="gfx9-4-generic",
+        enum_value=23,
+        doc="GFX9.4 generic code-object target row.",
+        default_for_descriptor_set=True,
+    ),
 )
 
 
@@ -1252,6 +1288,341 @@ def amdgpu_processor_info_by_name(processor: str) -> AmdgpuProcessorInfo | None:
         if info.processor == processor:
             return info
     return None
+
+
+def _occupancy_rounded_units(units: int, granularity: int) -> int:
+    return ((units + granularity - 1) // granularity) * granularity
+
+
+def _occupancy_capacity(pool_units: int, granularity: int, units: int) -> int:
+    if units == 0:
+        return pool_units
+    return pool_units // _occupancy_rounded_units(units, granularity)
+
+
+def _validate_portable_occupancy_model(
+    generic_processor: str,
+    wave_size: int,
+    generic_model: AmdgpuOccupancyModelInfo,
+    member_models: tuple[AmdgpuOccupancyModelInfo, ...],
+) -> None:
+    if generic_model.max_waves_per_simd > min(
+        model.max_waves_per_simd for model in member_models
+    ):
+        raise ValueError(
+            f"AMDGPU generic processor {generic_processor} wave{wave_size} "
+            "occupancy overstates resident waves"
+        )
+    if generic_model.domain.simd_count != member_models[0].domain.simd_count or any(
+        model.domain.simd_count != generic_model.domain.simd_count
+        for model in member_models[1:]
+    ):
+        raise ValueError(
+            f"AMDGPU generic processor {generic_processor} wave{wave_size} "
+            "occupancy has divergent SIMD topology"
+        )
+    if any(model.resources != generic_model.resources for model in member_models):
+        raise ValueError(
+            f"AMDGPU generic processor {generic_processor} wave{wave_size} "
+            "occupancy has divergent coupled resources"
+        )
+    if generic_model.domain.max_barrier_workgroup_count > min(
+        model.domain.max_barrier_workgroup_count for model in member_models
+    ):
+        raise ValueError(
+            f"AMDGPU generic processor {generic_processor} wave{wave_size} "
+            "occupancy overstates barrier workgroups"
+        )
+
+    maximum_local_memory_bytes = max(
+        model.domain.local_memory_bytes for model in member_models
+    )
+    for local_memory_bytes in range(1, maximum_local_memory_bytes + 1):
+        generic_capacity = _occupancy_capacity(
+            generic_model.domain.local_memory_bytes,
+            generic_model.domain.local_memory_allocation_granularity,
+            local_memory_bytes,
+        )
+        for member_model in member_models:
+            member_capacity = _occupancy_capacity(
+                member_model.domain.local_memory_bytes,
+                member_model.domain.local_memory_allocation_granularity,
+                local_memory_bytes,
+            )
+            if generic_capacity > member_capacity:
+                raise ValueError(
+                    f"AMDGPU generic processor {generic_processor} wave{wave_size} "
+                    f"occupancy overstates local-memory capacity at "
+                    f"{local_memory_bytes} bytes"
+                )
+
+    member_register_classes = tuple(
+        {
+            register_class.register_class: register_class
+            for register_class in model.register_classes
+        }
+        for model in member_models
+    )
+    generic_register_classes = {
+        register_class.register_class: register_class
+        for register_class in generic_model.register_classes
+    }
+    limiting_register_classes = {
+        register_class.register_class
+        for model in member_models
+        for register_class in model.register_classes
+        if register_class.limits_occupancy
+    }
+    for register_class in sorted(limiting_register_classes):
+        generic_register_class = generic_register_classes.get(register_class)
+        if (
+            generic_register_class is None
+            or not generic_register_class.limits_occupancy
+        ):
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor} wave{wave_size} "
+                f"occupancy does not model limiting register class "
+                f"{register_class}"
+            )
+        member_rows = tuple(
+            member_map.get(register_class) for member_map in member_register_classes
+        )
+        if any(member_row is None for member_row in member_rows):
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor} wave{wave_size} "
+                f"occupancy register class {register_class} is not common"
+            )
+        maximum_units = max(
+            member_row.pool_units
+            for member_row in member_rows
+            if member_row is not None
+        )
+        for units in range(1, maximum_units + 1):
+            generic_capacity = min(
+                generic_model.max_waves_per_simd,
+                _occupancy_capacity(
+                    generic_register_class.pool_units,
+                    generic_register_class.allocation_granularity,
+                    units,
+                ),
+            )
+            for member_model, member_row in zip(
+                member_models, member_rows, strict=True
+            ):
+                if member_row is None or not member_row.limits_occupancy:
+                    continue
+                member_capacity = min(
+                    member_model.max_waves_per_simd,
+                    _occupancy_capacity(
+                        member_row.pool_units,
+                        member_row.allocation_granularity,
+                        units,
+                    ),
+                )
+                if generic_capacity > member_capacity:
+                    raise ValueError(
+                        f"AMDGPU generic processor {generic_processor} "
+                        f"wave{wave_size} occupancy overstates "
+                        f"{register_class} capacity at {units} units"
+                    )
+
+
+def validate_amdgpu_generic_contracts(
+    processors: Sequence[AmdgpuProcessorInfo],
+    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
+) -> None:
+    processors_by_name = {info.processor: info for info in processors}
+    descriptor_sets_by_key = {info.key: info for info in descriptor_sets}
+    for descriptor_set in descriptor_sets:
+        if not descriptor_set.member_generator_targets:
+            continue
+        generic_processors = tuple(
+            info
+            for info in processors
+            if info.descriptor_set.key == descriptor_set.key
+            and info.processor.endswith("-generic")
+        )
+        if len(generic_processors) != 1:
+            raise ValueError(
+                f"AMDGPU generic descriptor set {descriptor_set.key} must have "
+                "one processor"
+            )
+        generic_processor = generic_processors[0]
+        exact_members = tuple(
+            processors_by_name[compatibility.exact_processor]
+            for compatibility in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
+            if (
+                compatibility.code_object_processor == generic_processor.processor
+                and compatibility.generic_introduction_version
+                <= generic_processor.elf.generic_version
+            )
+        )
+        if not exact_members:
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} has "
+                "no exact members"
+            )
+
+        exact_member_generator_targets = tuple(
+            sorted(
+                {
+                    descriptor_sets_by_key[member.descriptor_set.key].generator_target
+                    for member in exact_members
+                }
+            )
+        )
+        if exact_member_generator_targets != descriptor_set.member_generator_targets:
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} "
+                "descriptor membership does not match the target map"
+            )
+        if any(
+            member.descriptor_set.key == generic_processor.descriptor_set.key
+            for member in exact_members
+        ):
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} "
+                "aliases an exact descriptor contract"
+            )
+
+        exact_member_descriptor_sets = tuple(
+            descriptor_sets_by_key[member.descriptor_set.key]
+            for member in exact_members
+        )
+        portable_descriptor_flags = exact_member_descriptor_sets[0].flags
+        for member_descriptor_set in exact_member_descriptor_sets[1:]:
+            portable_descriptor_flags &= member_descriptor_set.flags
+        if descriptor_set.flags != portable_descriptor_flags:
+            raise ValueError(
+                f"AMDGPU generic descriptor set {descriptor_set.key} flags do "
+                "not match the member intersection"
+            )
+        vector_memory_encoding = exact_member_descriptor_sets[
+            0
+        ].vector_memory.cache_policy_encoding
+        if any(
+            member_descriptor_set.vector_memory.cache_policy_encoding
+            != vector_memory_encoding
+            for member_descriptor_set in exact_member_descriptor_sets[1:]
+        ):
+            raise ValueError(
+                f"AMDGPU generic descriptor set {descriptor_set.key} members "
+                "have divergent vector-memory cache-policy encodings"
+            )
+        if descriptor_set.vector_memory.cache_policy_encoding != vector_memory_encoding:
+            raise ValueError(
+                f"AMDGPU generic descriptor set {descriptor_set.key} "
+                "vector-memory cache-policy encoding does not match every member"
+            )
+        member_cache_swizzles = {
+            member_descriptor_set.buffer_resource.cache_swizzle
+            for member_descriptor_set in exact_member_descriptor_sets
+        }
+        portable_cache_swizzle = (
+            next(iter(member_cache_swizzles))
+            if len(member_cache_swizzles) == 1
+            else AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE
+        )
+        if descriptor_set.buffer_resource.cache_swizzle != portable_cache_swizzle:
+            raise ValueError(
+                f"AMDGPU generic descriptor set {descriptor_set.key} buffer "
+                "resource cache swizzle is not portable across every member"
+            )
+
+        portable_flags = exact_members[0].flags
+        for member in exact_members[1:]:
+            portable_flags &= member.flags
+        if generic_processor.flags != portable_flags:
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} flags "
+                "do not match the member intersection"
+            )
+        portable_elf_feature_flags = exact_members[0].elf.feature_flags
+        for member in exact_members[1:]:
+            portable_elf_feature_flags &= member.elf.feature_flags
+        if generic_processor.elf.feature_flags != portable_elf_feature_flags:
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} ELF "
+                "feature flags do not match the member intersection"
+            )
+        if any(
+            member.wavefront != generic_processor.wavefront for member in exact_members
+        ):
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} "
+                "wavefront facts do not match every member"
+            )
+        if any(
+            member.kernel_descriptor != generic_processor.kernel_descriptor
+            for member in exact_members
+        ):
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} "
+                "kernel descriptor facts do not match every member"
+            )
+
+        scheduling_bits = 0
+        for member in exact_members:
+            scheduling_bits |= member.features.scheduling
+        if generic_processor.features.scheduling != scheduling_bits:
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} "
+                "scheduling facts do not cover every member"
+            )
+        portable_matrix_features = set(
+            AMDGPU_MATRIX_FEATURES_BY_PROFILE[exact_members[0].features.matrix]
+        )
+        for member in exact_members[1:]:
+            portable_matrix_features.intersection_update(
+                AMDGPU_MATRIX_FEATURES_BY_PROFILE[member.features.matrix]
+            )
+        if (
+            set(AMDGPU_MATRIX_FEATURES_BY_PROFILE[generic_processor.features.matrix])
+            != portable_matrix_features
+        ):
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} "
+                "matrix features do not match the member intersection"
+            )
+        if generic_processor.limits.max_workgroup_storage_bytes != min(
+            member.limits.max_workgroup_storage_bytes for member in exact_members
+        ):
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} "
+                "workgroup storage does not match the portable minimum"
+            )
+
+        for wave_size in (32, 64):
+            generic_model = amdgpu_processor_occupancy_model(
+                generic_processor, wave_size
+            )
+            member_models = tuple(
+                amdgpu_processor_occupancy_model(member, wave_size)
+                for member in exact_members
+            )
+            if generic_model is None:
+                if any(member_model is not None for member_model in member_models):
+                    raise ValueError(
+                        f"AMDGPU generic processor "
+                        f"{generic_processor.processor} lacks wave{wave_size} "
+                        "occupancy shared by its members"
+                    )
+                continue
+            if any(member_model is None for member_model in member_models):
+                raise ValueError(
+                    f"AMDGPU generic processor {generic_processor.processor} "
+                    f"wave{wave_size} occupancy is absent from a member"
+                )
+            _validate_portable_occupancy_model(
+                generic_processor.processor,
+                wave_size,
+                generic_model,
+                tuple(
+                    member_model
+                    for member_model in member_models
+                    if member_model is not None
+                ),
+            )
 
 
 def amdgpu_target_record_info_for_processor(

@@ -278,6 +278,7 @@ processor Loom currently supports:
 | --- | --- |
 | `amdgpu.cdna3.core` | `gfx940`, `gfx941`, `gfx942` |
 | `amdgpu.cdna4.core` | `gfx950` |
+| `amdgpu.gfx9_4.generic.core` | `gfx9-4-generic` |
 | `amdgpu.rdna3.core` | `gfx1100`, `gfx1101`, `gfx1102`, `gfx1103` |
 | `amdgpu.rdna3_5.core` | `gfx1150`, `gfx1151`, `gfx1152`, `gfx1153`, `gfx1170`, `gfx1171`, `gfx1172` |
 | `amdgpu.gfx11.generic.core` | `gfx11-generic` |
@@ -294,23 +295,24 @@ match, but it never selects that exact contract as an implementation alias.
 and RDNA 3.5 ISA descriptions, and its code objects cover `gfx1100`-`gfx1103`
 and `gfx1150`-`gfx1153`. The `gfx1170`-`gfx1172` targets remain exact-only
 because they are outside LLVM's `gfx11-generic` compatibility set.
+`gfx9-4-generic` is the common CDNA 3/CDNA 4 surface for `gfx940`, `gfx941`,
+`gfx942`, and `gfx950`; its instruction, matrix, resource, scheduling, ABI,
+limit, and occupancy facts are portable member intersections.
 
 The accepted Loom AMDGPU selector vocabulary is the intersection of the shared
 AMDGPU target map and Loom's descriptor-backed compiler support. It accepts:
 
 - Source selectors: `loom_defaults`, `iree_hal`.
 - Exact processors listed in the descriptor-set table above.
-- Generic compiler targets: `gfx11-generic`, `gfx12-generic`,
-  `gfx12-5-generic`.
+- Generic compiler targets: `gfx9-4-generic`, `gfx11-generic`,
+  `gfx12-generic`, `gfx12-5-generic`.
 - Fully covered family selectors: `gfx94X-all`, `gfx94X-dcgpu`,
   `gfx950-all`, `gfx950-dcgpu`, `gfx110X-all`, `gfx110X-dgpu`,
   `gfx110X-igpu`, `gfx115X-all`, `gfx115X-igpu`, `gfx117X-all`,
   `gfx120X-all`, `gfx125X-all`.
 
-`gfx9-4-generic` remains accepted as a shared build selector that expands to
-Loom's supported exact CDNA targets; it is not yet a Loom
-`amdgpu.target<gfx9-4-generic>` compiler record. Older shared selectors such as
-`gfx9-generic`, `gfx90a`, `gfx908`, `gfx10-1-generic`, and
+Older shared selectors such as `gfx9-generic`, `gfx90a`, `gfx908`,
+`gfx10-1-generic`, and
 `gfx10-3-generic` are still valid for runtime-side AMDGPU tooling, but they are
 not Loom compiler targets until matching Loom descriptor sets exist. The
 `iree_hal` source selector narrows Loom AMDGPU support to the descriptor-backed

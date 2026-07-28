@@ -48,7 +48,8 @@ typedef enum loom_amdgpu_target_kind_e {
   LOOM_AMDGPU_TARGET_KIND_GFX1172 = 20,
   LOOM_AMDGPU_TARGET_KIND_GFX1201 = 21,
   LOOM_AMDGPU_TARGET_KIND_GFX1251 = 22,
-  LOOM_AMDGPU_TARGET_KIND_COUNT_ = 23,
+  LOOM_AMDGPU_TARGET_KIND_GFX9_4_GENERIC = 23,
+  LOOM_AMDGPU_TARGET_KIND_COUNT_ = 24,
 } loom_amdgpu_target_kind_t;
 
 // LOOM_OP_AMDGPU_TARGET: AMDGPU processor target record. The selector chooses one exact or generic processor row; optional attrs structurally override authored common target fields.

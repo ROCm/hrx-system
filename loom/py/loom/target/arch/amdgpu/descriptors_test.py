@@ -19,7 +19,10 @@ from loom.target.arch.amdgpu.descriptors import (
     _ADDRESS_OFFSET_DS16_ENCODING_ID,
     _ADDRESS_OFFSET_DWORD_ENCODING_ID,
     _ADDRESS_OFFSET_DWORD_STRIDE64_ENCODING_ID,
+    _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS,
+    _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE,
@@ -86,6 +89,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _amdgpu_trans_schedule_class_name,
     _amdgpu_trans_schedule_classes,
     _categorize_amdgpu_descriptors,
+    _gfx9_4_generic_core_overlays,
     _gfx11_core_overlays,
     _gfx11_generic_core_overlays,
     _gfx12_5_generic_core_overlays,
@@ -170,6 +174,13 @@ from loom.target.low_descriptors import (
 def test_generic_descriptor_contracts_are_member_intersections() -> None:
     base_cases = (
         (
+            _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+            (
+                _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
+                _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
+            ),
+        ),
+        (
             _AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE,
             (
                 _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
@@ -194,6 +205,14 @@ def test_generic_descriptor_contracts_are_member_intersections() -> None:
     gfx117x_overlays = {
         overlay.descriptor_key: overlay for overlay in _gfx117x_core_overlays()
     }
+    gfx950_overlays = {
+        overlay.descriptor_key: overlay for overlay in _gfx950_core_overlays()
+    }
+    assert _gfx9_4_generic_core_overlays() == tuple(
+        overlay
+        for overlay in _gfx940_core_overlays()
+        if gfx950_overlays.get(overlay.descriptor_key) == overlay
+    )
     assert _gfx11_generic_core_overlays() == tuple(
         overlay
         for overlay in _gfx11_core_overlays()

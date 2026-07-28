@@ -53,24 +53,44 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA3_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_target_table_cc_library(
   NAME
     cdna3_encoding_tables
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::encoding::encoding_tables
+  GENERATED_HDR_FLAGS
+    "--view-header=gfx9_4_generic"
+  GENERATED_HDRS
+    "gfx9_4_generic_encoding_tables.h"
   ARGS
     "--target=cdna3"
     "--descriptor-set-key=amdgpu.cdna3.core"
     "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
+    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
     "--public-header=loom/target/arch/amdgpu/encoding/cdna3_encoding_tables.h"
   INPUTS
     "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
     "loom_amdgpu_isa_xml"
+    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
   DEPS
     ::encoding_defs
     iree::base
   EXCLUDE_FROM_ALL
+)
+endif()
+
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+loom_target_table_cc_library(
+  NAME
+    gfx9_4_generic_encoding_tables
+  HEADER
+    "gfx9_4_generic_encoding_tables.h"
+  DEPS
+    ::cdna3_encoding_tables
+    ::encoding_defs
+    iree::base
+  HEADER_ONLY
 )
 endif()
 
@@ -268,6 +288,9 @@ endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE)
   list(APPEND _encoding_platform_defines "LOOM_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE")
 endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE)
+  list(APPEND _encoding_platform_defines "LOOM_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE")
+endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE)
   list(APPEND _encoding_platform_defines "LOOM_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE")
 endif()
@@ -295,6 +318,9 @@ if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX125X_CORE)
 endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE)
   list(APPEND _encoding_platform_deps ::rdna3_5_encoding_tables)
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE)
+  list(APPEND _encoding_platform_deps ::gfx9_4_generic_encoding_tables)
 endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE)
   list(APPEND _encoding_platform_deps ::gfx11_generic_encoding_tables)
