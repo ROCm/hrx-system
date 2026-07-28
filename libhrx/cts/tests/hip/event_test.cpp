@@ -387,9 +387,6 @@ class HipEventTest : public ::testing::Test {
   std::vector<hipGraphExec_t> graph_execs_;
 };
 
-// A record marks a point on the recording stream's timeline, so re-recording an
-// event on a stream whose timeline is behind still names a point that stream
-// has not reached.
 TEST_F(HipEventTest, CrossStreamRerecordDoesNotReportStaleCompletion) {
   hipStream_t stream_a = CreateStream();
   ASSERT_NE(nullptr, stream_a);
@@ -418,10 +415,7 @@ TEST_F(HipEventTest, CrossStreamRerecordDoesNotReportStaleCompletion) {
   EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream_b));
 }
 
-// Recording a shared event on a second stream must not make that stream wait
-// for the first one: nothing was submitted between the two records, so the
-// second stream drains while the first is still parked in its gate. A stream
-// chained to the other one hangs in hipStreamSynchronize.
+// A chained stream hangs in hipStreamSynchronize rather than failing here.
 TEST_F(HipEventTest, CrossStreamRerecordDoesNotChainTheNewStreamToTheOldOne) {
   hipStream_t stream_a = CreateStream();
   ASSERT_NE(nullptr, stream_a);
@@ -450,10 +444,8 @@ TEST_F(HipEventTest, CrossStreamRerecordDoesNotChainTheNewStreamToTheOldOne) {
   EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream_a));
 }
 
-// Destroying the stream an event was recorded on has to leave the event
-// queryable, and re-recording it elsewhere has to let go of what it was
-// holding. This pins the handle-level contract; the event's reference to the
-// timeline itself is what the graph executable case below covers.
+// Pins the handle-level contract only - the event keeps the stream object alive
+// for its capture state, so the timeline reference is the case below.
 TEST_F(HipEventTest, EventStaysUsableAfterItsRecordingStreamHandleIsDestroyed) {
   hipStream_t stream_a = CreateStream();
   ASSERT_NE(nullptr, stream_a);
@@ -471,10 +463,8 @@ TEST_F(HipEventTest, EventStaysUsableAfterItsRecordingStreamHandleIsDestroyed) {
   EXPECT_EQ(hipSuccess, hip_.event_query(event));
 }
 
-// A record node in the middle of a graph marks a point on a timeline the graph
-// executable owns, and the event's own reference is all that is left once the
-// executable is destroyed: the event has to stay queryable afterwards, and
-// re-recording it elsewhere has to let the timeline go.
+// The one case where the event's own reference is all that keeps the timeline
+// alive; without it the query below is a use after free.
 TEST_F(HipEventTest, EventStaysUsableAfterTheRecordingGraphExecutableIsGone) {
   hipStream_t stream = CreateStream();
   ASSERT_NE(nullptr, stream);
@@ -518,10 +508,8 @@ TEST_F(HipEventTest, EventStaysUsableAfterTheRecordingGraphExecutableIsGone) {
   EXPECT_EQ(hipSuccess, hip_.event_query(event));
 }
 
-// A cross-stream re-record must leave the event usable as a dependency for
-// another stream: work gated on it through hipStreamWaitEvent has to run only
-// after the recording stream drains. This is a contract check, not a
-// discriminator - the gated callback shares a queue thread with the gate.
+// This is a contract check, not a discriminator - the gated callback shares a
+// queue thread with the gate.
 TEST_F(HipEventTest, CrossStreamRerecordStaysUsableAsStreamWaitDependency) {
   hipStream_t stream_a = CreateStream();
   ASSERT_NE(nullptr, stream_a);
@@ -558,10 +546,8 @@ TEST_F(HipEventTest, CrossStreamRerecordStaysUsableAsStreamWaitDependency) {
          "recorded the event drained";
 }
 
-// Waiting on an event does not release a stream from its own ordering: the wait
-// advances the stream timeline, so it must complete only once the work in front
-// of it has run. This is a contract check, not a discriminator - the queue also
-// serializes signals on one timeline, which covers the same ordering.
+// This is a contract check, not a discriminator - the queue also serializes
+// signals on one timeline, which covers the same ordering.
 TEST_F(HipEventTest, StreamWaitEventStaysOrderedBehindPriorStreamWork) {
   hipStream_t stream_a = CreateStream();
   ASSERT_NE(nullptr, stream_a);
@@ -588,10 +574,6 @@ TEST_F(HipEventTest, StreamWaitEventStaysOrderedBehindPriorStreamWork) {
          "event wait was still running";
 }
 
-// Both halves of a stream event wait can be absent at once: a stream that has
-// never submitted has nothing behind it, and an event with no submitted record
-// has no point to wait for. The barrier goes out with an empty wait list and
-// still has to be accepted and still has to signal the stream.
 TEST_F(HipEventTest, StreamWaitOnANeverRecordedEventDropsBothWaits) {
   hipStream_t stream = CreateStream();
   ASSERT_NE(nullptr, stream);
@@ -612,9 +594,6 @@ TEST_F(HipEventTest, StreamWaitOnANeverRecordedEventDropsBothWaits) {
   EXPECT_EQ(hipSuccess, hip_.stream_synchronize(stream));
 }
 
-// A graph event wait node on an event with no submitted record has nothing to
-// wait for, so the wait is dropped and the block goes out with whatever waits
-// the schedule gave it. The node behind it still has to run.
 TEST_F(HipEventTest, GraphEventWaitNodeOnANeverRecordedEventDropsTheWait) {
   hipStream_t stream = CreateStream();
   ASSERT_NE(nullptr, stream);
@@ -647,9 +626,6 @@ TEST_F(HipEventTest, GraphEventWaitNodeOnANeverRecordedEventDropsTheWait) {
       << "the node behind a dropped event wait never ran";
 }
 
-// A graph whose only node records an event marks the point the launch itself
-// reaches, so launching it onto a parked stream leaves the event not ready
-// until that stream drains.
 TEST_F(HipEventTest, GraphRecordNodeAtTheEndOfAGraphMarksTheLaunchPoint) {
   hipStream_t stream = CreateStream();
   ASSERT_NE(nullptr, stream);
@@ -693,10 +669,6 @@ TEST_F(HipEventTest, GraphRecordNodeAtTheEndOfAGraphMarksTheLaunchPoint) {
   ASSERT_NO_FATAL_FAILURE(AdvanceEventOnStream(event, stream, /*count=*/1));
 }
 
-// A record node with a node after it marks the point that node reaches rather
-// than the point the whole launch reaches: the launch signals the stream, while
-// a node in the middle signals one of the executable's internal semaphores. The
-// event still must not read as complete while the launch is parked.
 TEST_F(HipEventTest, GraphRecordNodeInsideAGraphMarksTheNodePoint) {
   hipStream_t stream = CreateStream();
   ASSERT_NE(nullptr, stream);
@@ -743,9 +715,6 @@ TEST_F(HipEventTest, GraphRecordNodeInsideAGraphMarksTheNodePoint) {
          "launch drained";
 }
 
-// Elapsed time reads the timestamp a record leaves behind, which is adopted
-// only once the submission carrying it has been accepted, so an event with no
-// submitted record has no interval to report.
 TEST_F(HipEventTest, ElapsedTimeNeedsBothEventsRecorded) {
   hipStream_t stream = CreateStream();
   ASSERT_NE(nullptr, stream);
@@ -767,8 +736,6 @@ TEST_F(HipEventTest, ElapsedTimeNeedsBothEventsRecorded) {
   EXPECT_GE(ms, 0.0f);
 }
 
-// Both events have to have completed before an interval means anything, so a
-// stop event whose record is still parked reports as not ready.
 TEST_F(HipEventTest, ElapsedTimeIsNotReadyWhileAnEventIsOutstanding) {
   hipStream_t stream_a = CreateStream();
   ASSERT_NE(nullptr, stream_a);
@@ -797,9 +764,6 @@ TEST_F(HipEventTest, ElapsedTimeIsNotReadyWhileAnEventIsOutstanding) {
   EXPECT_GE(ms, 0.0f);
 }
 
-// A record issued while its stream is capturing produces neither a submission
-// nor a graph node, only a snapshot of the capture frontier, so it leaves the
-// event with no timestamp and no interval to report.
 TEST_F(HipEventTest, ElapsedTimeRejectsEventsRecordedOnlyDuringCapture) {
   hipStream_t stream = CreateStream();
   ASSERT_NE(nullptr, stream);
