@@ -110,6 +110,7 @@ loom_check_test_suite(
         "test/assembly_wmma.loom-test",
         "test/packet.loom-test",
         "test/packet_json.loom-test",
+        "test/spill_lowering.loom-test",
         "test/vopd_plan.loom-test",
         "test/wait_plan.loom-test",
         "test/wait_states.loom-test",
@@ -180,25 +181,6 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
-loom_cc_test(
-    name = "spill_lowering_test",
-    srcs = ["spill_lowering_test.cc"],
-    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA3),
-    deps = [
-        ":spill_lowering",
-        "//loom/src/loom/codegen/low:builder",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/low",
-        "//loom/src/loom/target/arch/amdgpu:error_defs",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
-        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
-        "//loom/src/loom/testing:diagnostic_matchers",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
