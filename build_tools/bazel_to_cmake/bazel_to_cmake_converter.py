@@ -2588,6 +2588,7 @@ class BuildFileFunctions(object):
         tools,
         data=None,
         args=None,
+        resource_group=None,
         sanitizer_suppressions=None,
         tags=None,
         timeout=None,
@@ -2608,6 +2609,9 @@ class BuildFileFunctions(object):
             sanitizer_suppressions
         )
         labels_block = self._convert_string_list_block("LABELS", tags)
+        resource_group_block = self._convert_string_arg_block(
+            "RESOURCE_GROUP", resource_group, quote=False
+        )
         timeout_block = self._convert_timeout_arg_block("TIMEOUT", timeout)
 
         tool_entries = []
@@ -2627,6 +2631,7 @@ class BuildFileFunctions(object):
             f"{args_block}"
             f"{sanitizer_suppressions_block}"
             f"{labels_block}"
+            f"{resource_group_block}"
             f"{timeout_block}"
             f")\n\n"
         )

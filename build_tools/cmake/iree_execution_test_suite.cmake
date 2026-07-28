@@ -16,6 +16,8 @@
 # DATA: additional data files required by the manifests.
 # ARGS: additional arguments passed to the runner.
 # LABELS: additional labels to apply to the test.
+# RESOURCE_GROUP: If set, tests sharing the same RESOURCE_GROUP name will not
+#     run concurrently.
 # SANITIZER_SUPPRESSIONS: Sanitizer/name pairs selecting suppression files.
 #     For example: lsan vulkan.
 # TIMEOUT: test timeout in seconds.
@@ -31,7 +33,7 @@ function(iree_execution_test_suite)
   cmake_parse_arguments(
     _RULE
     ""
-    "NAME;TIMEOUT"
+    "NAME;RESOURCE_GROUP;TIMEOUT"
     "MANIFESTS;TOOLS;DATA;ARGS;LABELS;SANITIZER_SUPPRESSIONS"
     ${ARGN}
   )
@@ -125,6 +127,9 @@ function(iree_execution_test_suite)
   set_property(TEST ${_TEST_NAME} PROPERTY LABELS "${_RULE_LABELS}")
   set_property(TEST ${_TEST_NAME} PROPERTY TIMEOUT "${_RULE_TIMEOUT}")
   set_property(TEST ${_TEST_NAME} PROPERTY REQUIRED_FILES "${_REQUIRED_FILES}")
+  if(_RULE_RESOURCE_GROUP)
+    set_property(TEST ${_TEST_NAME} PROPERTY RESOURCE_LOCK "${_RULE_RESOURCE_GROUP}")
+  endif()
   iree_register_test_resource_build_target(
     TEST_BUILD_TARGET
       "${_TEST_TARGET_NAME}"

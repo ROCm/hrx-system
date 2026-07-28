@@ -939,6 +939,25 @@ iree_executable_test(
         self.assertIn("    lsan", converter.body)
         self.assertIn("    vulkan", converter.body)
 
+    def test_execution_test_suite_emits_resource_group(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="/repo/pkg",
+            repo_root="/repo",
+        )
+
+        functions.iree_execution_test_suite(
+            name="execution_test",
+            manifests=["test.json"],
+            tools={"runner": "//tools:runner"},
+            resource_group="gpu",
+        )
+
+        self.assertIn("RESOURCE_GROUP", converter.body)
+        self.assertIn("    gpu", converter.body)
+
 
 if __name__ == "__main__":
     unittest.main()
