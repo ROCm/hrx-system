@@ -253,16 +253,6 @@ ResultPtr EmitModule(loomc_target_environment_t* target_environment,
   return ResultPtr(result);
 }
 
-TEST(AmdgpuTargetTest, CreatesExactAndGenericProfiles) {
-  TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
-  for (const char* processor : {"gfx11-generic", "gfx1151"}) {
-    TargetProfilePtr profile =
-        CreateTargetProfile(target_environment.get(), processor);
-    EXPECT_EQ(ToString(loomc_amdgpu_target_profile_processor(profile.get())),
-              processor);
-  }
-}
-
 TEST(AmdgpuTargetTest, CompileConfiguredHalKernelEmitsModuleTextArtifact) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   ContextPtr context = CreateAmdgpuContext(target_environment.get());

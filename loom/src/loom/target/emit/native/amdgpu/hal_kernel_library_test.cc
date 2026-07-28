@@ -1524,7 +1524,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
       0x00, 0x01, 0x01, 0x06, 0x01, 0x01, 0x00, 0x00,
   };
   static const char kSource[] =
-      "amdgpu.target<gfx1100> @gfx_target\n"
+      "amdgpu.target<gfx11-generic> @gfx_target\n"
       "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
       "@loom_kernel() {\n"
       "  %pc = low.op<amdgpu.s_getpc_b64>() : () -> "
@@ -1615,7 +1615,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
 
 TEST_F(AmdgpuHalKernelLibraryTest, RejectsRel32AddWithoutPcProvenance) {
   static const char kSource[] =
-      "amdgpu.target<gfx1100> @gfx_target\n"
+      "amdgpu.target<gfx11-generic> @gfx_target\n"
       "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
       "@loom_kernel() {\n"
       "  %zero = low.op<amdgpu.s_mov_b32>() {imm32 = 0} : () -> "

@@ -36,25 +36,29 @@ class TargetMapDataTest(unittest.TestCase):
     def test_rejects_member_newer_than_generic_code_object(self):
         with self.assertRaisesRegex(ValueError, "outside .* supported range"):
             validate_code_object_compatibility(
-                (AmdgpuGenericCodeObjectInfo("gfx11-generic", 1),),
-                (AmdgpuCodeObjectCompatibilityInfo("gfx1151", "gfx11-generic", 2),),
+                (AmdgpuGenericCodeObjectInfo("gfx-test-generic", 1),),
+                (AmdgpuCodeObjectCompatibilityInfo("gfx-test", "gfx-test-generic", 2),),
             )
 
     def test_rejects_undeclared_generic_family(self):
         with self.assertRaisesRegex(ValueError, "unknown generic"):
             validate_code_object_compatibility(
-                (AmdgpuGenericCodeObjectInfo("gfx11-generic", 1),),
-                (AmdgpuCodeObjectCompatibilityInfo("gfx1200", "gfx12-generic", 1),),
+                (AmdgpuGenericCodeObjectInfo("gfx-test-generic", 1),),
+                (
+                    AmdgpuCodeObjectCompatibilityInfo(
+                        "gfx-test", "gfx-undeclared-generic", 1
+                    ),
+                ),
             )
 
     def test_rejects_unreferenced_generic_family(self):
         with self.assertRaisesRegex(ValueError, "have no exact members"):
             validate_code_object_compatibility(
                 (
-                    AmdgpuGenericCodeObjectInfo("gfx11-generic", 1),
-                    AmdgpuGenericCodeObjectInfo("gfx12-generic", 1),
+                    AmdgpuGenericCodeObjectInfo("gfx-test-generic", 1),
+                    AmdgpuGenericCodeObjectInfo("gfx-unused-generic", 1),
                 ),
-                (AmdgpuCodeObjectCompatibilityInfo("gfx1151", "gfx11-generic", 1),),
+                (AmdgpuCodeObjectCompatibilityInfo("gfx-test", "gfx-test-generic", 1),),
             )
 
 

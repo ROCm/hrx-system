@@ -92,11 +92,12 @@ def test_target_records_materialize_current_rows() -> None:
 
     assert "typedef " not in source
     assert "static " not in source
-    assert "LOOM_AMDGPU_TARGET_RECORD_INFO(Gfx1250" in source
-    assert "LOOM_AMDGPU_TARGET_RECORD_INFO(Gfx1151" in source
-    assert "LOOM_AMDGPU_TARGET_RECORD_DEFAULT(" in source
-    assert "Gfx1250)" in source
-    assert f"UINT64_C({AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES})" in source
+    for row in rows:
+        suffix = amdgpu_target_records._c_symbol_suffix(row.info.processor)
+        descriptor_suffix = amdgpu_target_records._c_symbol_suffix(row.descriptor_set.generator_target)
+        assert (f'LOOM_AMDGPU_TARGET_RECORD_INFO({suffix}, UINT32_C({row.info.enum_value}), "{row.info.processor}", UINT16_C({row.descriptor_set_ordinal}), {descriptor_suffix})') in source
+        if row.info.default_for_descriptor_set:
+            assert (f"LOOM_AMDGPU_TARGET_RECORD_DEFAULT(UINT16_C({row.descriptor_set_ordinal}), {suffix})") in source
 
 
 def test_target_record_enum_values_are_stable_and_explicit() -> None:
@@ -134,9 +135,10 @@ def test_target_records_reject_missing_descriptor_backed_processor() -> None:
         processors,
         sorted_descriptor_set_infos(),
     )
-    incomplete_rows = tuple(row for row in rows if row.info.processor != "gfx1251")
+    missing_processor = rows[-1].info.processor
+    incomplete_rows = tuple(row for row in rows if row.info.processor != missing_processor)
 
-    with _raises_value_error("missing=\\['gfx1251'\\]"):
+    with _raises_value_error(rf"missing=\['{re.escape(missing_processor)}'\]"):
         amdgpu_target_records._validate_target_record_coverage(incomplete_rows, processors)
 
 
