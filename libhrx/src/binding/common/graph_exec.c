@@ -1716,12 +1716,8 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
            exec->semaphore_count * sizeof(*exec->semaphore_base_values));
 
     // Create the internal semaphores that carry values between partitions. The
-    // resource set is their only owner: every use of exec->semaphores happens
-    // under a launch of this executable, and anything that has to outlive the
-    // executable - an event recorded by a node in the middle of the graph, for
-    // one - takes a reference of its own. Each semaphore is handed to the set
-    // and let go of as it is created, so a failure part way through leaves the
-    // ones already made owned by the set rather than by nobody.
+    // resource set is their sole owner; exec->semaphores are borrowed pointers
+    // and anything outliving the executable takes its own reference.
     iree_status_t status = iree_ok_status();
     for (uint32_t i = 0; i < exec->semaphore_count && iree_status_is_ok(status);
          i++) {
@@ -2148,9 +2144,8 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
           exec->semaphore_base_values[semaphore_index] + delta;
       ++wait_count;
     }
-    // Point the block waits on when it waits for an event, retained across the
-    // submission so a concurrent record of the same event cannot drop the last
-    // reference to a timeline this block is about to name.
+    // Retained across the submission so a concurrent record of the same event
+    // cannot drop the last reference to the timeline this block names.
     iree_hal_semaphore_t* event_wait_semaphore = NULL;
     if (block_waits_event) {
       uint64_t event_wait_value = 0;
@@ -2183,21 +2178,11 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
       }
     }
 
-    // A record node marks the point its own block reaches, which is the first
-    // value the block signals: a record node always occupies a partition of its
-    // own, so that value is signaled exactly when the node's dependencies have
-    // completed and by nothing else. Reusing the block's existing signal rather
-    // than adding one of its own is what keeps the event off any timeline it
-    // would have to reserve values on, and the timeline it names is advanced
-    // only by launches that reach this block, all of which run under one
-    // executable mutex: a top-level launch holds its own, while a child graph's
-    // blocks are submitted under the parent's, which is the only mutex that can
-    // reach them because each instantiation of a parent owns a private child
-    // executable.
-    //
-    // Every partition but the last signals at least one of the executable's
-    // internal semaphores, and the last partition's block carries the launch's
-    // external signals, so a record block always has a value to name.
+    // A record node marks the point its own block reaches, which is the block's
+    // first signal value: the partitioner gives a record node a partition of
+    // its own, so that value is signaled exactly when the node's dependencies
+    // complete. Every block signals either an internal semaphore or the
+    // launch's external signals, so a record block always has a value to name.
     if (block_records_event && IREE_UNLIKELY(signal_count == 0)) {
       status = iree_make_status(IREE_STATUS_INTERNAL,
                                 "event record block signals no timeline value");
@@ -2220,17 +2205,10 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
           block_records_event ? iree_time_now() : 0;
       status = iree_hal_streaming_graph_submit_block(
           block, &ptrs, stream, wait_semaphores, signal_semaphores);
-      // A rejected block signals nothing, so the event keeps its previous point
-      // rather than naming one that will never be reached. Later blocks in this
-      // launch that wait on the event read the committed point, so the commit
-      // stays inside the iteration that submitted it.
-      //
-      // The event's recording stream is left alone: it carries the capture
-      // state a stream wait picks up from the stream that captured the event,
-      // and a graph launch is not a capture. Exchanging it here would also drop
-      // a reference to another stream while this stream's mutex is held, and
-      // stream teardown re-enters the streaming layer to synchronize that
-      // stream and unregister it from its context.
+      // A rejected block signals nothing, so the event keeps its old point. The
+      // commit stays inside this iteration because later blocks in the same
+      // launch wait on the committed point. The recording stream is left alone:
+      // it carries capture state and a launch is not a capture.
       if (block_records_event && iree_status_is_ok(status)) {
         iree_hal_streaming_event_commit_recorded_point(
             ptrs.attrs->event.event, signal_sems[0], signal_vals[0],
@@ -2246,13 +2224,10 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     }
   }
 
-  // The base values advance even when a block failed to submit. Blocks that did
+  // The base values advance even when a block failed to submit: blocks that did
   // submit have already signaled their new values, and a timeline value may be
-  // signaled only once; a launch that rewound the bases would make the next
-  // launch signal those values a second time and fail the semaphores for good.
-  // Entries for blocks that never submitted are unchanged, and the block that
-  // waits on such an entry is rebased by the same amount as the block that
-  // signals it, so skipping a value is invisible to both.
+  // signaled only once, so rewinding the bases would make the next launch
+  // signal those values again and fail the semaphores for good.
   if (exec->semaphore_count > 0) {
     memcpy(exec->semaphore_base_values, new_base_values,
            exec->semaphore_count * sizeof(uint64_t));

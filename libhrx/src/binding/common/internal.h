@@ -547,21 +547,14 @@ typedef struct iree_hal_streaming_stream_t {
   iree_allocator_t host_allocator;
 } iree_hal_streaming_stream_t;
 
-// Reserves the next value on |stream|'s timeline for one submission and returns
-// the pair of values that submission names. Callers must hold |stream->mutex|,
-// which is what keeps two submissions on the same stream from selecting the
-// same value, and must publish |*out_signal_value| to |stream->pending_value|
-// themselves so a reservation the queue never accepted leaves the timeline
-// where it was.
+// Reserves the next value on |stream|'s timeline for one submission. Callers
+// must hold |stream->mutex| and publish |*out_signal_value| to
+// |stream->pending_value| only once the submission is accepted, so a rejected
+// submission leaves the timeline where it was.
 //
-// |*out_wait_value| is the value already reserved on the timeline that the
-// submission has to wait on to stay behind the work in front of it. It is zero
-// when the stream has never submitted, in which case there is nothing behind
-// the reservation and callers drop the wait rather than waiting on value zero.
-//
-// This is the only place a stream timeline value is reserved. Every submission
-// path on a stream goes through it, so the check that the timeline has values
-// left has exactly one owner.
+// |*out_wait_value| is the value the submission must wait on to stay behind the
+// work in front of it, or 0 when the stream has never submitted, in which case
+// callers drop the wait rather than waiting on value zero.
 static inline iree_status_t iree_hal_streaming_stream_reserve_next_value_locked(
     iree_hal_streaming_stream_t* stream, uint64_t* out_wait_value,
     uint64_t* out_signal_value) {
@@ -745,63 +738,36 @@ typedef struct iree_hal_streaming_event_t {
   // Event properties.
   iree_hal_streaming_event_flags_t flags;
 
-  // Guards the recorded point: |signal_semaphore|, |signal_value| and
-  // |record_time_ns|. An event is shared state that any thread may record,
-  // query, or wait on, and the semaphore and value must be read together or a
-  // reader can pair one record's semaphore with another record's value. Held
-  // after the recording stream's mutex and, on the graph path, after the graph
-  // executable's mutex; no path takes a stream or executable mutex while
-  // holding this one. Readers copy the pair and retain the semaphore under this
-  // mutex rather than waiting under it, so a record never blocks behind an
-  // unbounded wait on the same event.
+  // Guards |signal_semaphore|, |signal_value| and |record_time_ns|, which must
+  // be read together or a reader pairs one record's semaphore with another
+  // record's value. Acquired after the recording stream's mutex and after the
+  // graph executable's mutex; no path takes either while holding this one.
+  // Waits happen outside it: readers copy and retain the point under it.
   iree_slim_mutex_t mutex;
-  // Timeline semaphore the last submitted record signals, retained by the
-  // event, or NULL when no record has been submitted yet. The event never owns
-  // a timeline of its own: a record marks a point on the timeline of whichever
-  // submission carries it, so the value below is always reserved and signaled
-  // by that submission's owner. A stream record marks the recording stream's
-  // timeline; a graph record node marks the timeline its block signals, which
-  // is the graph executable's internal semaphore for the partition holding the
-  // node or, for a node in the final partition, the timeline the launch itself
-  // signals. Being a reference rather than an owned semaphore is what lets a
-  // submitted record stay queryable after the stream or graph executable that
-  // carried it is gone.
-  //
-  // A record issued while the recording stream was capturing to a graph never
-  // becomes a submitted record: it produces no submission and no graph node,
-  // only the capture state below. That state is never cleared once set, so from
-  // then on a query or a synchronize on the event is answered with a
-  // captured-event error instead of reading the point here.
+  // Timeline semaphore the last submitted record signals, retained, or NULL
+  // when no record has been submitted. The event owns no timeline: a record
+  // names a point on the timeline of whichever submission carries it, and the
+  // retained reference is what keeps a submitted record queryable after the
+  // stream or graph executable that carried it is gone.
   iree_hal_semaphore_t* signal_semaphore;
   // Value on |signal_semaphore| that the last submitted record signals, or 0
-  // when |signal_semaphore| is NULL. Both fields are adopted only after that
-  // submission succeeds, so the event never names a point nothing will reach.
-  // Because every timeline is advanced only by its own owner under its own
-  // mutex, no two records can select the same value and no record can select a
-  // value its timeline has already passed. A record issued while the recording
-  // stream is capturing to a graph stores capture state instead and leaves both
-  // fields naming whatever the last submitted record set.
+  // when |signal_semaphore| is NULL. Adopted with |signal_semaphore| only once
+  // the submission that signals it has been accepted, so the event never names
+  // a point nothing will reach.
   uint64_t signal_value;
 
   // Stream that last recorded this event through the stream API, retained, or
-  // NULL before any such record. Its only consumer is stream capture: a wait on
-  // a captured event picks the capture mode, id and owning thread up from here.
-  // A graph launch that runs a record node leaves it alone, as a launch is not
-  // a capture and has no capture state to hand over. Exchanged under |mutex| so
-  // two concurrent records cannot both release the stream they displaced; the
-  // capture paths that consume it read it without the mutex, which is sound
-  // only because a capture sequence is driven by one thread.
+  // NULL before any such record. Consumed only by stream capture, which picks
+  // the capture mode, id and owning thread up from here; a graph launch leaves
+  // it alone. Exchanged under |mutex| but read by the capture paths without it,
+  // which is sound only because a capture sequence is driven by one thread.
   iree_hal_streaming_stream_t* recording_stream;
   // Context that created the event, retained.
   iree_hal_streaming_context_t* context;
 
-  // Host time the last submitted record was issued at, or 0 when no record has
-  // been submitted. Guarded by |mutex| and adopted with the recorded point, so
-  // a record that never reached the queue leaves no timestamp for a point that
-  // will never be reached: a rejected submission and a record issued while the
-  // recording stream is capturing both leave whatever the last submitted record
-  // set. Elapsed time reads this as the test for whether an event has been
-  // recorded, which is why the two must move together.
+  // Host time in nanoseconds the last submitted record was issued at, or 0 when
+  // no record has been submitted. Guarded by |mutex| and adopted with the
+  // recorded point; elapsed time reads 0 here as "never recorded".
   iree_time_t record_time_ns;
 
   // Platform-specific IPC handle, if the event is IPC enabled.
@@ -1779,10 +1745,9 @@ void iree_hal_streaming_event_release(iree_hal_streaming_event_t* event);
 iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
                                              int* status);
 
-// Takes a reference to the timeline point |event| was last recorded at.
-// |*out_semaphore| is left NULL when no record has been submitted, in which
-// case there is nothing to wait for and |*out_value| is 0. Callers release
-// |*out_semaphore|.
+// Takes a reference to the timeline point |event| was last recorded at, or
+// leaves |*out_semaphore| NULL and |*out_value| 0 when no record has been
+// submitted. Callers release |*out_semaphore|.
 // Synchronization: event (event mutex held while copying the point).
 void iree_hal_streaming_event_acquire_recorded_point(
     iree_hal_streaming_event_t* event, iree_hal_semaphore_t** out_semaphore,
@@ -1797,16 +1762,13 @@ void iree_hal_streaming_event_commit_recorded_point(
     uint64_t value, iree_time_t record_time_ns);
 
 // Makes |stream| the stream whose capture state |event| belongs to, taking a
-// reference to it, and returns the stream the event referenced before with its
-// reference transferred to the caller. Returns NULL when |stream| was already
-// the recording stream and no reference changed hands.
+// reference to it, and transfers the previously referenced stream to the
+// caller. Returns NULL when |stream| was already the recording stream.
 //
-// Releasing the returned stream can destroy it, and stream teardown re-enters
-// the streaming layer to synchronize the stream and unregister it from its
-// context, so callers holding a stream mutex drop the returned reference after
-// unlocking rather than under the lock.
-// Synchronization: event (event mutex held while exchanging), so two concurrent
-// records can never both be handed the same reference to release.
+// Releasing the returned stream can run its teardown, which re-enters the
+// streaming layer to synchronize and unregister the stream, so callers holding
+// a stream mutex must drop the reference after unlocking.
+// Synchronization: event (event mutex held while exchanging).
 iree_hal_streaming_stream_t* iree_hal_streaming_event_exchange_recording_stream(
     iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream);
 

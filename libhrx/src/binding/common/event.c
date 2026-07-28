@@ -24,8 +24,7 @@ iree_status_t iree_hal_streaming_event_create(
       z0,
       iree_allocator_malloc(host_allocator, sizeof(*event), (void**)&event));
 
-  // Initialize event. An event holds no timeline of its own; it starts with no
-  // recorded point and takes a reference to one when a record is submitted.
+  // Initialize event.
   iree_atomic_ref_count_init(&event->ref_count);
   event->flags = flags;
   iree_slim_mutex_initialize(&event->mutex);
@@ -51,8 +50,7 @@ static void iree_hal_streaming_event_destroy(
     iree_hal_streaming_event_t* event) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Release the recorded point. The semaphore belongs to the stream or graph
-  // executable that carried the record, both of which may already be gone.
+  // Release the recorded point.
   iree_hal_semaphore_release(event->signal_semaphore);
 
   // Release recording stream reference.
@@ -140,8 +138,7 @@ iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
   iree_hal_streaming_event_acquire_recorded_point(event, &semaphore,
                                                   &signal_value);
   if (!semaphore) {
-    // Nothing has been submitted for this event, so there is nothing to wait
-    // for and the event reads as complete.
+    // An event with no submitted record reads as complete.
     *status = 0;
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
@@ -187,14 +184,9 @@ iree_status_t iree_hal_streaming_event_record(
       event->capture_graph = stream->capture_graph;
       iree_hal_streaming_graph_retain(event->capture_graph);
     }
-    // A captured record produces neither a submission nor a graph node, only
-    // the frontier snapshot above, so there is no point for it to name and no
-    // moment for a timestamp to describe: both the recorded point and the
-    // record time are left naming the last submitted record. An event whose
-    // only record was captured therefore reads as never recorded, and elapsed
-    // time over it is rejected rather than reporting the host-side gap between
-    // two capture calls. The stream is adopted because a later wait on this
-    // event has to pick the capture up from the stream that captured it.
+    // A captured record produces no submission, so it leaves the recorded point
+    // and the record time alone; only the stream is adopted, for the later wait
+    // that picks the capture up from the stream that captured it.
     iree_hal_streaming_stream_release(
         iree_hal_streaming_event_exchange_recording_stream(event, stream));
     IREE_TRACE_ZONE_END(z0);
@@ -202,7 +194,7 @@ iree_status_t iree_hal_streaming_event_record(
   }
 
   // Sampled before the submission so the timestamp reflects when the caller
-  // issued the record, and adopted only once that submission is accepted.
+  // issued the record.
   const iree_time_t record_time_ns = iree_time_now();
 
   // Flush the stream to ensure all prior operations are submitted.
@@ -212,12 +204,8 @@ iree_status_t iree_hal_streaming_event_record(
   iree_slim_mutex_lock(&stream->mutex);
 
   // The record marks a point on the recording stream's timeline: the barrier
-  // takes the stream's next value under the stream mutex and signals it once
-  // everything already on the stream has completed. Every value on a stream
-  // timeline is reserved exactly once and only ever increases, so a record can
-  // never select a value that timeline has already passed no matter which
-  // stream recorded the event before, and two streams recording the same event
-  // at once draw from different timelines under different mutexes.
+  // takes the stream's next value and signals it once everything already on the
+  // stream has completed.
   uint64_t stream_wait_value = 0;
   uint64_t stream_signal_value = 0;
   iree_status_t status = iree_hal_streaming_stream_reserve_next_value_locked(
@@ -228,8 +216,7 @@ iree_status_t iree_hal_streaming_event_record(
     return status;
   }
 
-  // The wait is dropped when the stream has never submitted, matching the other
-  // submission paths on the stream; nothing can be behind value zero.
+  // A stream that has never submitted has nothing behind it to wait on.
   iree_hal_semaphore_list_t wait_semaphores = {
       .count = stream_wait_value > 0 ? 1 : 0,
       .semaphores = &stream->timeline_semaphore,
@@ -252,18 +239,15 @@ iree_status_t iree_hal_streaming_event_record(
   if (iree_status_is_ok(status)) {
     stream->pending_value = stream_signal_value;
     stream->submitted_value = stream_signal_value;
-    // A rejected submission signals nothing, so the event keeps its previous
-    // point instead of naming one that will never be reached.
+    // A rejected submission signals nothing, so the event keeps its old point.
     iree_hal_streaming_event_commit_recorded_point(
         event, stream->timeline_semaphore, stream_signal_value, record_time_ns);
     previous_stream =
         iree_hal_streaming_event_exchange_recording_stream(event, stream);
   }
   iree_slim_mutex_unlock(&stream->mutex);
-  // Dropping the last reference to the previously recording stream runs its
-  // teardown, which re-enters the streaming layer to synchronize the stream and
-  // unregister it from its context, so the reference is dropped only after this
-  // stream's mutex is released.
+  // Stream teardown re-enters the streaming layer, so the displaced reference
+  // is dropped outside this stream's mutex.
   iree_hal_streaming_stream_release(previous_stream);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
@@ -281,15 +265,11 @@ iree_status_t iree_hal_streaming_event_synchronize(
   iree_hal_streaming_event_acquire_recorded_point(event, &semaphore,
                                                   &signal_value);
   if (!semaphore) {
-    // Nothing has been submitted for this event, so there is nothing to wait
-    // for.
+    // An event with no submitted record has nothing to wait for.
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
 
-  // Waiting outside the event mutex leaves the event recordable while a wait on
-  // it is outstanding; the retained reference keeps the timeline alive across a
-  // concurrent re-record onto another one.
   iree_status_t status =
       iree_hal_semaphore_wait(semaphore, signal_value, iree_infinite_timeout(),
                               IREE_ASYNC_WAIT_FLAG_NONE);
@@ -314,9 +294,7 @@ iree_status_t iree_hal_streaming_event_elapsed_time(
                             "cannot measure elapsed time with timing disabled");
   }
 
-  // Ensure both events have been recorded. A record that failed to submit
-  // leaves no timestamp, so this also rejects events whose only record never
-  // reached the device.
+  // Ensure both events have been recorded.
   const iree_time_t start_time_ns =
       iree_hal_streaming_event_record_time_ns(start);
   const iree_time_t stop_time_ns =

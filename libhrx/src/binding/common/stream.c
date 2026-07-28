@@ -544,12 +544,6 @@ iree_status_t iree_hal_streaming_stream_query(
 
   IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_flush(stream));
 
-  // A timeline query fails only when the timeline itself has failed, which is
-  // permanent: there is no transient answer to distinguish from an incomplete
-  // one, since a value below the one being waited for is reported as a value
-  // and not as an error. Reporting that failure as merely incomplete would turn
-  // a dead timeline into a poll loop that never ends, so it propagates, which
-  // is also how an event query classifies it.
   uint64_t current_value = 0;
   IREE_RETURN_IF_ERROR(
       iree_hal_semaphore_query(stream->timeline_semaphore, &current_value));
@@ -600,9 +594,6 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
   uint64_t completed_value = stream->completed_value;
   iree_slim_mutex_unlock(&stream->mutex);
 
-  // A failing query means the timeline has failed for good, which the wait
-  // below would also report; propagating it here keeps the message the failure
-  // was raised with instead of the bare code a wait carries.
   timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
   uint64_t current_value = 0;
   iree_status_t query_status =
@@ -787,15 +778,9 @@ iree_status_t iree_hal_streaming_stream_wait_event(
   }
 
   // The barrier waits on the point the event was recorded at and on everything
-  // already on this stream. Both waits are needed: dropping the stream wait
-  // would let this barrier signal the next stream value before the value below
-  // it, which both breaks the ordering every later operation on the stream
-  // relies on and signals the stream timeline out of order. The stream wait is
-  // dropped when the stream has never submitted, and the event wait when the
-  // event has never had a record submitted, as neither has a point to wait for.
-  // The recorded point is copied out under the event's own mutex; reading the
-  // event's fields in place would read them under this stream's mutex, which is
-  // not the mutex a record of this event takes.
+  // already on this stream, so the value it signals stays behind the value
+  // below it. Either wait is dropped when there is nothing behind it: a stream
+  // that has never submitted, or an event with no submitted record.
   iree_hal_semaphore_t* event_semaphore = NULL;
   uint64_t event_signal_value = 0;
   iree_hal_streaming_event_acquire_recorded_point(event, &event_semaphore,
