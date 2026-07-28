@@ -273,8 +273,6 @@ static void iree_net_session_on_application_endpoint_ready(
 }
 
 static void iree_net_session_cleanup_remote_axes(iree_net_session_t* session);
-static void iree_net_session_fail(iree_net_session_t* session,
-                                  iree_status_t status);
 
 static iree_status_t iree_net_session_validate_endpoint_capacity(
     iree_net_session_t* session, iree_net_connection_t* connection) {
@@ -478,14 +476,8 @@ static void iree_net_session_cancel_bootstrap_timer(
 // Error handling
 //===----------------------------------------------------------------------===//
 
-// Transitions to ERROR state and fires on_error callback.
-// Takes ownership of |status|.
-//
-// Thread-safe: uses CAS to ensure only one caller wins the ERROR transition.
-// This prevents double on_error callback when a synchronous error in
-// connect/accept races with the bootstrap timer firing on the proactor thread.
-static void iree_net_session_fail(iree_net_session_t* session,
-                                  iree_status_t status) {
+IREE_API_EXPORT void iree_net_session_fail(iree_net_session_t* session,
+                                           iree_status_t status) {
   // Atomically transition to ERROR. The CAS loop handles state progression
   // (e.g., BOOTSTRAPPING → OPERATIONAL between our load and the exchange).
   int32_t expected =

@@ -43,9 +43,10 @@
 //
 // ## Threading
 //
-// All session operations happen on the proactor thread. Callbacks fire on
-// the proactor thread. The session state can be queried from any thread
-// (atomic acquire load).
+// Transport-driven session operations and callbacks happen on the proactor
+// thread. iree_net_session_fail() is thread-safe and fires on_error
+// synchronously on the thread that claims the terminal transition. The
+// session state can be queried from any thread (atomic acquire load).
 //
 // ## Ownership
 //
@@ -211,8 +212,10 @@ typedef void (*iree_net_session_on_send_ready_fn_t)(
 // must handle HAL control messages after bootstrap). |on_goaway| and
 // |on_error| are optional but strongly recommended.
 //
-// All callbacks fire on the proactor thread. The shared |user_data| is
-// passed as the first argument to each callback.
+// Transport-driven callbacks fire on the proactor thread. A local
+// iree_net_session_fail() call fires on_error synchronously on the thread that
+// claims the terminal transition. The shared |user_data| is passed as the
+// first argument to each callback.
 typedef struct iree_net_session_callbacks_t {
   // Required callback for session bootstrap completion.
   iree_net_session_on_ready_fn_t on_ready;
@@ -475,6 +478,17 @@ IREE_API_EXPORT iree_status_t iree_net_session_send_control_data(
 IREE_API_EXPORT iree_status_t iree_net_session_send_control_data_copy(
     iree_net_session_t* session, iree_net_control_frame_flags_t flags,
     iree_async_span_list_t payload, uint64_t operation_user_data);
+
+// Fails the session with an unrecoverable local or application endpoint error.
+//
+// Atomically transitions the session to ERROR, fails its remote frontier axes,
+// and fires callbacks.on_error with |status|. Only the first caller to claim
+// the terminal transition publishes its status; later statuses are consumed.
+//
+// Thread-safe. Takes ownership of |status|. The winning caller synchronously
+// fires callbacks.on_error before this function returns.
+IREE_API_EXPORT void iree_net_session_fail(iree_net_session_t* session,
+                                           iree_status_t status);
 
 // Initiates graceful shutdown.
 //
