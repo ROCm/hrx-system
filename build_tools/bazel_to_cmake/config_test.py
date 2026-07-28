@@ -556,6 +556,27 @@ iree_executable_test(
 
         self.assertIn("iree_py_test(", converter.body)
 
+    def test_py_library_resolves_cross_package_sources(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        converter = SimpleNamespace(body="")
+        functions = _PythonBuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="loom/py/loom/example",
+            repo_root=str(repo_root),
+        )
+
+        functions.iree_py_library(
+            name="shared_source",
+            srcs=["//build_tools/bazel_to_cmake:config_test.py"],
+            deps=[],
+        )
+
+        self.assertIn(
+            '"${PROJECT_SOURCE_DIR}/build_tools/bazel_to_cmake/config_test.py"',
+            converter.body,
+        )
+
     def test_py_test_rejects_unlocated_generated_data(self):
         repo_root = Path(__file__).resolve().parents[2]
         converter = SimpleNamespace(body="")

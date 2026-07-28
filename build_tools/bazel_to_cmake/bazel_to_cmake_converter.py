@@ -1169,7 +1169,7 @@ class BuildFileFunctions(object):
             source_list.append(main)
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
         main_block = self._convert_string_arg_block("MAIN", main)
-        source_block = self._convert_string_list_block("SRCS", source_list, sort=False)
+        source_block = self._convert_srcs_block(source_list)
         imports_block = self._convert_string_list_block("IMPORTS", imports, sort=False)
         deps_block, deps_var_block = self._convert_python_target_list_blocks(
             name, "DEPS", deps
@@ -1209,7 +1209,7 @@ class BuildFileFunctions(object):
         if data and not self._has_only_external_targets(data):
             raise NotImplementedError(f"iree_py_library data: {name}")
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        source_block = self._convert_string_list_block("SRCS", srcs, sort=False)
+        source_block = self._convert_srcs_block(srcs)
         imports_block = self._convert_string_list_block("IMPORTS", imports, sort=False)
         deps_block, deps_var_block = self._convert_python_target_list_blocks(
             name, "DEPS", deps
