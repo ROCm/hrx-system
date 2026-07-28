@@ -75,6 +75,8 @@ typedef struct loom_amdgpu_descriptor_immediate_slots_t {
   uint16_t sdwa_dst_sel;
   // Descriptor-local literal payload immediate, or LOOM_LOW_ID_NONE.
   uint16_t literal;
+  // Descriptor-local address offset immediate, or LOOM_LOW_ID_NONE.
+  uint16_t address_offset;
 } loom_amdgpu_descriptor_immediate_slots_t;
 
 uint32_t loom_amdgpu_descriptor_ref_ordinal(

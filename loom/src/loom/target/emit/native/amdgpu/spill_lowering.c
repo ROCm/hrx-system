@@ -94,20 +94,12 @@ static iree_status_t loom_amdgpu_spill_lowering_resolve_descriptor_ref(
   *out_opcode_descriptor = (loom_amdgpu_spill_opcode_descriptor_t){0};
   const loom_low_descriptor_t* descriptor =
       loom_amdgpu_descriptor_ref_descriptor(descriptor_set, descriptor_ref);
-  if (descriptor == NULL) {
-    return iree_make_status(
-        IREE_STATUS_NOT_FOUND,
-        "AMDGPU spill lowering references missing descriptor ref %" PRIu16,
-        descriptor_ref);
-  }
+  IREE_ASSERT(descriptor != NULL,
+              "generated descriptor set must satisfy spill lowering refs");
   iree_string_view_t key = loom_low_descriptor_set_string(
       descriptor_set, descriptor->key_string_offset);
-  if (iree_string_view_is_empty(key)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU spill lowering descriptor ref %" PRIu16
-                            " has no descriptor key",
-                            descriptor_ref);
-  }
+  IREE_ASSERT(!iree_string_view_is_empty(key),
+              "generated spill lowering descriptor must have a key");
   loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_module_intern_string(rewriter->module, key, &opcode_id));
@@ -129,31 +121,18 @@ static iree_status_t loom_amdgpu_spill_lowering_resolve_scratch_descriptor_ref(
       rewriter, descriptor_set, descriptor_ref, &opcode_descriptor));
   const loom_low_descriptor_t* descriptor = opcode_descriptor.descriptor;
 
-  const loom_low_immediate_t* offset_immediate = NULL;
-  for (uint16_t i = 0; i < descriptor->immediate_count; ++i) {
-    const uint32_t immediate_index = descriptor->immediate_start + i;
-    if (immediate_index >= descriptor_set->immediate_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU spill lowering descriptor ref %" PRIu16
-                              " references immediate row %" PRIu32
-                              " outside the descriptor set",
-                              descriptor_ref, immediate_index);
-    }
-    const loom_low_immediate_t* immediate =
-        &descriptor_set->immediates[immediate_index];
-    iree_string_view_t immediate_name = loom_low_descriptor_set_string(
-        descriptor_set, immediate->field_name_string_offset);
-    if (iree_string_view_equal(immediate_name, IREE_SV("offset"))) {
-      offset_immediate = immediate;
-      break;
-    }
-  }
-  if (offset_immediate == NULL) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "AMDGPU spill lowering descriptor ref %" PRIu16
-                            " has no offset immediate",
-                            descriptor_ref);
-  }
+  const loom_amdgpu_descriptor_immediate_slots_t immediate_slots =
+      loom_amdgpu_descriptor_immediate_slots(descriptor_set, descriptor);
+  IREE_ASSERT(immediate_slots.address_offset != LOOM_LOW_ID_NONE,
+              "generated spill descriptor must have an address offset");
+  IREE_ASSERT(immediate_slots.address_offset < descriptor->immediate_count,
+              "generated address offset slot must be descriptor-local");
+  const uint32_t immediate_index =
+      descriptor->immediate_start + immediate_slots.address_offset;
+  IREE_ASSERT(immediate_index < descriptor_set->immediate_count,
+              "generated address offset slot must reference an immediate");
+  const loom_low_immediate_t* offset_immediate =
+      &descriptor_set->immediates[immediate_index];
 
   *out_spill_descriptor = (loom_amdgpu_spill_descriptor_t){
       .descriptor = opcode_descriptor.descriptor,
@@ -177,43 +156,6 @@ static bool loom_amdgpu_spill_lowering_offset_fits_immediate(
       return offset >= 0 && (uint64_t)offset <= immediate->unsigned_max;
     default:
       return false;
-  }
-}
-
-static iree_status_t loom_amdgpu_spill_lowering_validate_offset_immediate(
-    const loom_amdgpu_spill_descriptor_t* spill_descriptor, int64_t offset) {
-  const loom_low_immediate_t* immediate = spill_descriptor->offset_immediate;
-  switch (immediate->kind) {
-    case LOOM_LOW_IMMEDIATE_KIND_SIGNED: {
-      const int64_t maximum = immediate->unsigned_max > INT64_MAX
-                                  ? INT64_MAX
-                                  : (int64_t)immediate->unsigned_max;
-      if (offset >= immediate->signed_min && offset <= maximum) {
-        return iree_ok_status();
-      }
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU scratch spill offset %" PRId64
-          " does not fit the selected offset-only scratch encoding range "
-          "[%" PRId64 ", %" PRId64 "]",
-          offset, immediate->signed_min, maximum);
-    }
-    case LOOM_LOW_IMMEDIATE_KIND_UNSIGNED:
-    case LOOM_LOW_IMMEDIATE_KIND_ORDINAL:
-      if (offset >= 0 && (uint64_t)offset <= immediate->unsigned_max) {
-        return iree_ok_status();
-      }
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU scratch spill offset %" PRId64
-          " does not fit the selected offset-only scratch encoding range "
-          "[0, %" PRIu64 "]",
-          offset, immediate->unsigned_max);
-    default:
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AMDGPU scratch spill offset immediate has unsupported kind %u",
-          (unsigned)immediate->kind);
   }
 }
 
@@ -783,8 +725,10 @@ static iree_status_t loom_amdgpu_spill_lowering_store_chunk(
             loom_amdgpu_spill_lowering_store_vaddr_descriptor_ref(chunk_units),
             &spill_descriptor));
   }
-  IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_validate_offset_immediate(
-      &spill_descriptor, offset));
+  IREE_ASSERT(
+      loom_amdgpu_spill_lowering_offset_fits_immediate(
+          spill_descriptor.offset_immediate, offset),
+      "selected spill descriptor must encode the lowering-created offset");
   if (loom_low_descriptor_implicit_resource_operand(
           context->descriptor_set, spill_descriptor.descriptor) != NULL) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_build_m0_zero(
@@ -831,8 +775,10 @@ static iree_status_t loom_amdgpu_spill_lowering_load_chunk(
             loom_amdgpu_spill_lowering_load_vaddr_descriptor_ref(chunk_units),
             &spill_descriptor));
   }
-  IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_validate_offset_immediate(
-      &spill_descriptor, offset));
+  IREE_ASSERT(
+      loom_amdgpu_spill_lowering_offset_fits_immediate(
+          spill_descriptor.offset_immediate, offset),
+      "selected reload descriptor must encode the lowering-created offset");
   if (loom_low_descriptor_implicit_resource_operand(
           context->descriptor_set, spill_descriptor.descriptor) != NULL) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_build_m0_zero(

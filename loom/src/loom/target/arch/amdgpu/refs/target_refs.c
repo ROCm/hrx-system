@@ -176,6 +176,7 @@ loom_amdgpu_descriptor_immediate_slots_t loom_amdgpu_descriptor_immediate_slots(
     return (loom_amdgpu_descriptor_immediate_slots_t){
         .sdwa_dst_sel = LOOM_LOW_ID_NONE,
         .literal = LOOM_LOW_ID_NONE,
+        .address_offset = LOOM_LOW_ID_NONE,
     };
   }
   const uint32_t descriptor_ordinal =
@@ -184,6 +185,7 @@ loom_amdgpu_descriptor_immediate_slots_t loom_amdgpu_descriptor_immediate_slots(
     return (loom_amdgpu_descriptor_immediate_slots_t){
         .sdwa_dst_sel = LOOM_LOW_ID_NONE,
         .literal = LOOM_LOW_ID_NONE,
+        .address_offset = LOOM_LOW_ID_NONE,
     };
   }
   return slot_table[descriptor_ordinal];
