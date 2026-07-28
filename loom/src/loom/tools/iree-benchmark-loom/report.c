@@ -433,32 +433,24 @@ iree_status_t iree_benchmark_loom_append_device_row(
 static iree_status_t iree_benchmark_loom_write_actual_invocation_plan_json(
     const loom_module_t* module, const loom_testbench_case_plan_t* case_plan,
     loom_json_object_writer_t* object) {
-  const loom_testbench_invocation_plan_t* actual_invocation = NULL;
-  iree_host_size_t actual_invocation_count = 0;
-  for (iree_host_size_t i = 0; i < case_plan->invocation_count; ++i) {
-    const loom_testbench_invocation_plan_t* invocation =
-        &case_plan->invocations[i];
-    if (invocation->kind != LOOM_TESTBENCH_INVOCATION_ACTUAL) {
-      continue;
-    }
-    actual_invocation = invocation;
-    ++actual_invocation_count;
-  }
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
-      object, IREE_SV("actual_invocation_count"), actual_invocation_count));
-  if (actual_invocation_count != 1) {
+      object, IREE_SV("actual_invocation_count"),
+      case_plan->actual_invocation_count));
+  if (case_plan->actual_invocation_count != 1) {
     return iree_ok_status();
   }
 
   iree_string_view_t actual_entry = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_module_symbol_name_from_ref(
-      module, actual_invocation->callee_ref, &actual_entry));
+      module, case_plan->first_actual_invocation->callee_ref, &actual_entry));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       object, IREE_SV("actual_entry"), actual_entry));
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
-      object, IREE_SV("actual_input_count"), actual_invocation->input_count));
+      object, IREE_SV("actual_input_count"),
+      case_plan->first_actual_invocation->input_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
-      object, IREE_SV("actual_result_count"), actual_invocation->result_count));
+      object, IREE_SV("actual_result_count"),
+      case_plan->first_actual_invocation->result_count));
   return iree_ok_status();
 }
 

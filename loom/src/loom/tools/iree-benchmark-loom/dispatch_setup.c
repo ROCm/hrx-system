@@ -199,13 +199,11 @@ iree_status_t iree_benchmark_loom_dispatch_compile_context_initialize(
   const iree_benchmark_loom_selected_benchmark_t* selection =
       &options->work_plan
            ->selected_benchmarks[compile_item->representative_selection_index];
-  iree_host_size_t actual_invocation_count = 0;
-  iree_status_t status = loom_run_hal_testbench_count_actual_invocations(
-      selection->case_plan, &actual_invocation_count);
-  if (iree_status_is_ok(status) && actual_invocation_count > 1) {
+  iree_status_t status = iree_ok_status();
+  if (selection->case_plan->actual_invocation_count > 1) {
     status = iree_benchmark_loom_initialize_sequence_compile_context(
         options, compile_item, selection, context);
-  } else if (iree_status_is_ok(status)) {
+  } else {
     status = iree_benchmark_loom_initialize_single_compile_context(
         options, compile_item, selection, context);
   }

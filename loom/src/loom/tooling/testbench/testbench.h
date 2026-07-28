@@ -367,6 +367,10 @@ typedef struct loom_testbench_case_plan_t {
   const loom_testbench_invocation_plan_t* invocations;
   // Number of entries in |invocations|.
   iree_host_size_t invocation_count;
+  // First actual invocation in |invocations|, or NULL when none are present.
+  const loom_testbench_invocation_plan_t* first_actual_invocation;
+  // Number of actual invocation entries in |invocations|.
+  iree_host_size_t actual_invocation_count;
   // Expectation plans in source order.
   const loom_testbench_expectation_plan_t* expectations;
   // Number of entries in |expectations|.

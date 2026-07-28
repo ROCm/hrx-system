@@ -802,6 +802,8 @@ static void loom_testbench_plan_case_body(
       file_writes ? file_writes + *inout_file_write_count : NULL;
   case_plan->invocations =
       invocations ? invocations + *inout_invocation_count : NULL;
+  case_plan->first_actual_invocation = NULL;
+  case_plan->actual_invocation_count = 0;
   case_plan->expectations =
       expectations ? expectations + *inout_expectation_count : NULL;
   case_plan->issues = issues ? issues + *inout_issue_count : NULL;
@@ -869,6 +871,11 @@ static void loom_testbench_plan_case_body(
               issues, issue_capacity, inout_issue_count,
               LOOM_TESTBENCH_ISSUE_INVALID_INVOCATION, case_index,
               LOOM_TESTBENCH_BENCHMARK_INDEX_INVALID, op, case_plan->ref);
+        } else if (invocation->kind == LOOM_TESTBENCH_INVOCATION_ACTUAL) {
+          if (case_plan->first_actual_invocation == NULL) {
+            case_plan->first_actual_invocation = invocation;
+          }
+          ++case_plan->actual_invocation_count;
         }
         continue;
       }
