@@ -6,7 +6,7 @@
 //
 // Streaming is always built from the same source tree as libhrx and
 // shares internal type representations. Type punning between hrx and
-// IREE types is valid (verified by _Static_assert in hrx_internal.h).
+// IREE types is valid (verified by static_assert in hrx_internal.h).
 
 #ifndef HRX_STREAMING_BRIDGE_H_
 #define HRX_STREAMING_BRIDGE_H_
@@ -61,7 +61,7 @@ static inline hrx_status_t iree_to_hrx_status(iree_status_t s) {
 // Allocator bridging: hrx_host_allocator_t <-> iree_allocator_t
 //
 // Both are two-word structs {self, ctl} with identical layout.
-// Verified by _Static_assert in hrx_internal.h.
+// Verified by static_assert in hrx_internal.h.
 //===----------------------------------------------------------------------===//
 
 static inline iree_allocator_t hrx_to_iree_allocator(hrx_host_allocator_t a) {

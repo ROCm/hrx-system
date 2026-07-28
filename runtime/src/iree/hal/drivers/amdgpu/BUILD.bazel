@@ -7,6 +7,7 @@
 load("//build_tools/amdgpu:cts.bzl", "iree_amdgpu_hal_cts_testdata")
 load("//build_tools/amdgpu:selectors.bzl", "iree_amdgpu_target_selectors_flag")
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//build_tools/sanitizer:suppressions.bzl", "hsa_suppressions")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
@@ -214,6 +215,8 @@ iree_runtime_cc_library(
         "host_queue_timestamp.h",
         "host_queue_waits.c",
         "host_queue_waits.h",
+        "hostcall_provider.c",
+        "hostcall_provider.h",
         "logical_device.c",
         "logical_device.h",
         "physical_device.c",
@@ -344,6 +347,7 @@ iree_runtime_cc_library(
         "host_queue_submission.h",
         "host_queue_timestamp.h",
         "host_queue_waits.h",
+        "hostcall_provider.h",
         "logical_device.h",
         "physical_device.h",
         "physical_device_capabilities.h",
@@ -592,6 +596,7 @@ iree_runtime_cc_test(
         "host_queue_command_buffer_test.cc",
         "host_queue_command_buffer_test_util.h",
     ],
+    sanitizer_suppressions = hsa_suppressions,
     deps = [
         ":amdgpu",
         ":headers",
@@ -723,6 +728,22 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/drivers/amdgpu/util:packet",
         "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "hostcall_provider_test",
+    srcs = ["hostcall_provider_test.cc"],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:topology",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

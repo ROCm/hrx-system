@@ -78,7 +78,8 @@ TEST(DispatchTest, EmplaceImplicitArgsWritesSuffix) {
 
   iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
       &kernel_args, workgroup_count, /*dynamic_workgroup_local_memory=*/13,
-      &layout, kernargs.data());
+      /*hostcall_buffer=*/reinterpret_cast<void*>(0x12345678u), &layout,
+      kernargs.data());
 
   EXPECT_EQ(kernargs[31], 0xFDu);
 
@@ -101,7 +102,8 @@ TEST(DispatchTest, EmplaceImplicitArgsWritesSuffix) {
   EXPECT_EQ(implicit_args->global_offset[2], 0u);
   EXPECT_EQ(implicit_args->grid_dims, 3u);
   EXPECT_EQ(implicit_args->printf_buffer, nullptr);
-  EXPECT_EQ(implicit_args->hostcall_buffer, nullptr);
+  EXPECT_EQ(implicit_args->hostcall_buffer,
+            reinterpret_cast<void*>(0x12345678u));
   EXPECT_EQ(implicit_args->deprecated_multigrid_sync_arg, 0u);
   EXPECT_EQ(implicit_args->unused_heap_v1, 0u);
   EXPECT_EQ(implicit_args->unused_default_queue, 0u);

@@ -256,6 +256,8 @@ iree_cc_library(
     "host_queue_timestamp.h"
     "host_queue_waits.c"
     "host_queue_waits.h"
+    "hostcall_provider.c"
+    "hostcall_provider.h"
     "logical_device.c"
     "logical_device.h"
     "physical_device.c"
@@ -383,6 +385,7 @@ iree_cc_library(
     "host_queue_submission.h"
     "host_queue_timestamp.h"
     "host_queue_waits.h"
+    "hostcall_provider.h"
     "logical_device.h"
     "physical_device.h"
     "physical_device_capabilities.h"
@@ -765,6 +768,9 @@ iree_cc_test(
     "runtime-resource=amd-gpu"
   RESOURCE_GROUP
     iree-hal-drivers-amdgpu-tests
+  SANITIZER_SUPPRESSIONS
+    lsan
+    hsa
 )
 endif()
 
@@ -925,6 +931,31 @@ iree_cc_test(
     iree::hal::cts::util::test_base
     iree::hal::drivers::amdgpu::util::packet
     iree::io::file_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    hostcall_provider_test
+  SRCS
+    "hostcall_provider_test.cc"
+  DEPS
+    ::amdgpu
+    ::headers
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::amdgpu::util::topology
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

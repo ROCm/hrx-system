@@ -2152,6 +2152,7 @@ class BuildFileFunctions(object):
         linkopts=None,
         deps=None,
         internalize=True,
+        source_format=None,
         testonly=None,
         tags=None,
         target_compatible_with=None,
@@ -2174,7 +2175,14 @@ class BuildFileFunctions(object):
         linkopts_block = self._convert_string_list_block(
             "LINKOPTS", linkopts, sort=False
         )
-        internalize_block = self._convert_amdgpu_internalize_block(internalize)
+        internalize_block = (
+            ""
+            if source_format == "hip"
+            else self._convert_amdgpu_internalize_block(internalize)
+        )
+        source_format_block = self._convert_string_arg_block(
+            "SOURCE_FORMAT", source_format, quote=False
+        )
         testonly_block = self._convert_option_block("TESTONLY", testonly)
 
         self._emit_platform_guard_begin(target_compatible_with)
@@ -2190,6 +2198,7 @@ class BuildFileFunctions(object):
             f"{copts_block}"
             f"{linkopts_block}"
             f"{internalize_block}"
+            f"{source_format_block}"
             f"{testonly_block}"
             f")\n\n"
         )
@@ -2211,6 +2220,7 @@ class BuildFileFunctions(object):
         linkopts=None,
         deps=None,
         internalize=True,
+        source_format=None,
         testonly=None,
         tags=None,
         target_compatible_with=None,
@@ -2240,7 +2250,14 @@ class BuildFileFunctions(object):
             "LINKOPTS", linkopts, sort=False
         )
         deps_block = self._convert_amdgpu_bitcode_deps_block(deps)
-        internalize_block = self._convert_amdgpu_internalize_block(internalize)
+        internalize_block = (
+            ""
+            if source_format == "hip"
+            else self._convert_amdgpu_internalize_block(internalize)
+        )
+        source_format_block = self._convert_string_arg_block(
+            "SOURCE_FORMAT", source_format, quote=False
+        )
         testonly_block = self._convert_option_block("TESTONLY", testonly)
         flatten_block = self._convert_option_block("FLATTEN", flatten)
 
@@ -2260,6 +2277,7 @@ class BuildFileFunctions(object):
             f"{linkopts_block}"
             f"{deps_block}"
             f"{internalize_block}"
+            f"{source_format_block}"
             f"{testonly_block}"
             f"{flatten_block}"
             f"  PUBLIC\n)\n\n"

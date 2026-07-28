@@ -390,6 +390,9 @@ typedef struct iree_hal_streaming_device_registry_t {
   // Host allocator for internal allocations.
   iree_allocator_t host_allocator;
 
+  // Immutable HAL device-creation extension chain selected at initialization.
+  const iree_hal_device_create_params_extension_t* device_extensions;
+
   // Global initialization state.
   bool initialized;
 
@@ -1223,14 +1226,11 @@ typedef struct iree_hal_streaming_graph_node_t {
 // Global state
 //===----------------------------------------------------------------------===//
 
-typedef enum iree_hal_streaming_init_flag_bits_e {
-  IREE_HAL_STREAMING_INIT_FLAG_NONE = 0ull,
-} iree_hal_streaming_init_flags_t;
-
 // Initializes global state.
 // Synchronization: none (one-time initialization).
 iree_status_t iree_hal_streaming_init_global(
-    iree_hal_streaming_init_flags_t flags, iree_allocator_t host_allocator);
+    const iree_hal_device_create_params_extension_t* device_extensions,
+    iree_allocator_t host_allocator);
 
 // Cleans up global state and releases all resources.
 // Synchronization: all contexts (synchronizes all active contexts).

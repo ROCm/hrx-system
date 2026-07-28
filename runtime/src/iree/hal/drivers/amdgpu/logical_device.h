@@ -204,6 +204,11 @@ typedef struct iree_hal_amdgpu_logical_device_t {
   // + trailing identifier string storage
 } iree_hal_amdgpu_logical_device_t;
 
+// Records an asynchronous child-subsystem failure on |logical_device|.
+// Consumes |status| and preserves only the first failure.
+void iree_hal_amdgpu_logical_device_error_handler(void* logical_device,
+                                                  iree_status_t status);
+
 // Creates a AMDGPU logical HAL device with the given |options| and |topology|.
 //
 // The provided |identifier| will be used by programs to distinguish the device

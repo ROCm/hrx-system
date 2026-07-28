@@ -155,6 +155,8 @@ typedef struct iree_hal_amdgpu_aql_command_buffer_t {
   uint32_t device_ordinal;
   // Number of physical queues on |device_ordinal|.
   uint32_t queue_count_per_physical_device;
+  // Stable opaque hostcall device address written into implicit templates.
+  void* hostcall_buffer;
   // One-shot lifecycle state enforced even when generic HAL validation is off.
   iree_hal_amdgpu_aql_command_buffer_recording_state_t recording_state;
   // Arena owning recording-lifetime static buffer pages, rodata pages, and
@@ -800,6 +802,7 @@ iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
     uint32_t tsan_shadow_slot_count,
     iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
         prepublished_kernarg_storage,
+    void* hostcall_buffer,
     iree_hal_amdgpu_profile_metadata_registry_t* profile_metadata,
     iree_arena_block_pool_t* program_block_pool,
     iree_arena_block_pool_t* resource_set_block_pool,
@@ -883,6 +886,7 @@ iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
   command_buffer->device_ordinal = (uint32_t)device_ordinal;
   command_buffer->queue_count_per_physical_device =
       (uint32_t)queue_count_per_physical_device;
+  command_buffer->hostcall_buffer = hostcall_buffer;
   command_buffer->tsan_shadow_spans.shadow_slot_count = tsan_shadow_slot_count;
   command_buffer->prepublished_kernargs.storage = prepublished_kernarg_storage;
   command_buffer->prepublished_kernargs.templates.max_alignment = 1;
@@ -1768,7 +1772,7 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_write_dispatch_tail(
     const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* layout,
     const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     iree_hal_amdgpu_command_buffer_kernarg_storage_mode_t kernarg_storage_mode,
-    uint8_t* tail_payload) {
+    void* hostcall_buffer, uint8_t* tail_payload) {
   switch (kernarg_storage_mode) {
     case IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT: {
       const iree_host_size_t copy_bytes =
@@ -1787,7 +1791,8 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_write_dispatch_tail(
                                                   layout->implicit_args_offset);
         iree_hal_amdgpu_device_dispatch_initialize_implicit_args(
             kernel_args, config.workgroup_count,
-            config.dynamic_workgroup_local_memory, implicit_args);
+            config.dynamic_workgroup_local_memory, hostcall_buffer,
+            implicit_args);
       }
       return iree_ok_status();
     }
@@ -1825,7 +1830,7 @@ iree_hal_amdgpu_aql_command_buffer_record_prepublished_dispatch_kernargs(
       IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT) {
     status = iree_hal_amdgpu_aql_command_buffer_write_dispatch_tail(
         kernel_args, custom_layout, config, constants, kernarg_storage_mode,
-        kernarg_data);
+        command_buffer->hostcall_buffer, kernarg_data);
   } else {
     uint64_t* binding_ptrs =
         bindings.count
@@ -1847,7 +1852,8 @@ iree_hal_amdgpu_aql_command_buffer_record_prepublished_dispatch_kernargs(
                                                       ->implicit_args_byte_offset);
         iree_hal_amdgpu_device_dispatch_initialize_implicit_args(
             kernel_args, config.workgroup_count,
-            config.dynamic_workgroup_local_memory, implicit_args);
+            config.dynamic_workgroup_local_memory,
+            command_buffer->hostcall_buffer, implicit_args);
       }
     }
   }
@@ -1873,7 +1879,7 @@ iree_hal_amdgpu_aql_command_buffer_write_inline_dispatch_kernargs(
       IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT) {
     return iree_hal_amdgpu_aql_command_buffer_write_dispatch_tail(
         kernel_args, custom_layout, config, constants, kernarg_storage_mode,
-        kernarg_data);
+        command_buffer->hostcall_buffer, kernarg_data);
   }
 
   iree_status_t status = iree_ok_status();
@@ -1904,7 +1910,8 @@ iree_hal_amdgpu_aql_command_buffer_write_inline_dispatch_kernargs(
                                                     ->implicit_args_byte_offset);
       iree_hal_amdgpu_device_dispatch_initialize_implicit_args(
           kernel_args, config.workgroup_count,
-          config.dynamic_workgroup_local_memory, implicit_args);
+          config.dynamic_workgroup_local_memory,
+          command_buffer->hostcall_buffer, implicit_args);
     }
   }
   return status;

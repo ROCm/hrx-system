@@ -46,6 +46,7 @@ void iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
     const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
         kernel_args,
     const uint32_t workgroup_count[3], uint32_t dynamic_workgroup_local_memory,
+    void* hostcall_buffer,
     const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* IREE_AMDGPU_RESTRICT
         layout,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
@@ -56,7 +57,7 @@ void iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
                                             layout->implicit_args_offset);
   iree_hal_amdgpu_device_dispatch_initialize_implicit_args(
       kernel_args, workgroup_count, dynamic_workgroup_local_memory,
-      implicit_args);
+      hostcall_buffer, implicit_args);
 }
 
 void iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(

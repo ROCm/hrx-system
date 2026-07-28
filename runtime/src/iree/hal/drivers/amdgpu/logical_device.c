@@ -50,6 +50,39 @@ iree_hal_amdgpu_logical_device_queue_affinity_domain(
   };
 }
 
+static iree_status_t iree_hal_amdgpu_logical_device_resolve_hostcall_provider(
+    const void* next,
+    const iree_hal_amdgpu_hostcall_provider_t** out_provider) {
+  *out_provider = NULL;
+  while (next) {
+    const iree_hal_device_create_params_extension_t* extension =
+        (const iree_hal_device_create_params_extension_t*)next;
+    if (extension->type ==
+        IREE_HAL_AMDGPU_DEVICE_CREATE_PARAMS_EXTENSION_TYPE_HOSTCALL_PROVIDER) {
+      if (IREE_UNLIKELY(*out_provider)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "AMDGPU device creation contains duplicate hostcall providers");
+      }
+      const iree_hal_amdgpu_hostcall_provider_extension_t* hostcall_extension =
+          (const iree_hal_amdgpu_hostcall_provider_extension_t*)extension;
+      const iree_hal_amdgpu_hostcall_provider_t* provider =
+          &hostcall_extension->provider;
+      if (IREE_UNLIKELY(!provider->query_requirements ||
+                        !provider->initialize || !provider->service ||
+                        !provider->deinitialize)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "AMDGPU hostcall provider requires query, initialize, service, "
+            "and deinitialize callbacks");
+      }
+      *out_provider = provider;
+    }
+    next = extension->next;
+  }
+  return iree_ok_status();
+}
+
 // Returns the queue for a flattened logical queue ordinal.
 static iree_status_t iree_hal_amdgpu_logical_device_queue_from_ordinal(
     iree_hal_amdgpu_logical_device_t* logical_device,
@@ -1622,8 +1655,8 @@ static void iree_hal_amdgpu_logical_device_deassign_frontier(
   IREE_TRACE_ZONE_END(z0);
 }
 
-static void iree_hal_amdgpu_logical_device_error_handler(void* user_data,
-                                                         iree_status_t status) {
+void iree_hal_amdgpu_logical_device_error_handler(void* user_data,
+                                                  iree_status_t status) {
   iree_hal_amdgpu_logical_device_t* logical_device =
       (iree_hal_amdgpu_logical_device_t*)user_data;
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -1831,6 +1864,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_initialize_physical_devices(
     iree_hal_amdgpu_logical_device_t* logical_device,
     const iree_hal_amdgpu_topology_t* topology,
     const iree_hal_amdgpu_physical_device_options_t* options,
+    const iree_hal_amdgpu_hostcall_provider_t* hostcall_provider,
     iree_allocator_t host_allocator) {
   for (iree_host_size_t device_ordinal = 0;
        device_ordinal < logical_device->physical_device_count;
@@ -1840,8 +1874,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_initialize_physical_devices(
         (iree_hal_device_t*)logical_device, logical_device->system, options,
         logical_device->proactor, host_ordinal,
         &logical_device->system->host_memory_pools[host_ordinal],
-        device_ordinal, &logical_device->asan, host_allocator,
-        logical_device->physical_devices[device_ordinal]));
+        device_ordinal, &logical_device->asan, hostcall_provider,
+        host_allocator, logical_device->physical_devices[device_ordinal]));
   }
   return iree_ok_status();
 }
@@ -1965,6 +1999,13 @@ iree_status_t iree_hal_amdgpu_logical_device_create(
       z0, iree_hal_device_create_params_verify(create_params),
       "verifying device creation parameters");
 
+  const iree_hal_amdgpu_hostcall_provider_t* hostcall_provider = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_amdgpu_logical_device_resolve_hostcall_provider(
+          create_params->next, &hostcall_provider),
+      "resolving AMDGPU device creation extensions");
+
   iree_hal_amdgpu_logical_device_options_t resolved_options = *options;
   iree_hal_amdgpu_logical_device_options_apply_create_params(&resolved_options,
                                                              create_params);
@@ -2018,7 +2059,8 @@ iree_status_t iree_hal_amdgpu_logical_device_create(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_logical_device_initialize_physical_devices(
-        logical_device, topology, &physical_device_options, host_allocator);
+        logical_device, topology, &physical_device_options, hostcall_provider,
+        host_allocator);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_logical_device_create_device_spec(
@@ -2601,6 +2643,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_aql_command_buffer(
                 .config.shadow_slot_count
           : 0,
       physical_device->prepublished_kernarg_storage,
+      iree_hal_amdgpu_physical_device_hostcall_buffer(physical_device),
       &logical_device->profile_metadata,
       &logical_device->host_block_pools.command_buffer,
       &logical_device->host_block_pools.small, logical_device->host_allocator,
@@ -2712,6 +2755,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_pm4_command_buffer(
       physical_device->vendor_packet_capabilities,
       physical_device->pm4_timestamp_strategy,
       physical_device->pm4_command_buffer_resident_pool,
+      iree_hal_amdgpu_physical_device_hostcall_buffer(physical_device),
       &logical_device->profile_metadata,
       &logical_device->host_block_pools.small, logical_device->host_allocator,
       out_command_buffer);

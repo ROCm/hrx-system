@@ -22,6 +22,7 @@
 #include "iree/hal/drivers/amdgpu/host_queue.h"
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer_packet.h"
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer_test_util.h"
+#include "iree/hal/drivers/amdgpu/hostcall_provider.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
 #include "iree/hal/drivers/amdgpu/physical_device.h"
 #include "iree/hal/drivers/amdgpu/pm4_command_buffer.h"
@@ -74,6 +75,127 @@ class HostQueueCommandBufferTest : public ::testing::Test {
 iree_allocator_t HostQueueCommandBufferTest::host_allocator_;
 iree_hal_amdgpu_libhsa_t HostQueueCommandBufferTest::libhsa_;
 iree_hal_amdgpu_topology_t HostQueueCommandBufferTest::topology_;
+
+// Installs only the stable address consumed by dispatch recording. Provider
+// resource ownership and listener lifetime are covered by
+// hostcall_provider_test.
+class ScopedHostcallBufferAddress {
+ public:
+  ScopedHostcallBufferAddress(
+      iree_hal_amdgpu_physical_device_t* physical_device,
+      uint64_t device_address)
+      : physical_device_(physical_device) {
+    EXPECT_EQ(physical_device_->hostcall_provider_state, nullptr);
+    state_.device_address = device_address;
+    physical_device_->hostcall_provider_state = &state_;
+    for (iree_host_size_t i = 0; i < physical_device_->host_queue_count; ++i) {
+      EXPECT_EQ(physical_device_->host_queues[i].hostcall_buffer, nullptr);
+      physical_device_->host_queues[i].hostcall_buffer =
+          reinterpret_cast<void*>(device_address);
+    }
+  }
+
+  ~ScopedHostcallBufferAddress() {
+    for (iree_host_size_t i = 0; i < physical_device_->host_queue_count; ++i) {
+      physical_device_->host_queues[i].hostcall_buffer = nullptr;
+    }
+    physical_device_->hostcall_provider_state = nullptr;
+  }
+
+ private:
+  iree_hal_amdgpu_physical_device_t* physical_device_;
+  iree_hal_amdgpu_hostcall_provider_state_t state_ = {};
+};
+
+static iree_status_t LoadHostcallBufferExecutable(
+    iree_hal_device_t* device, iree_hal_executable_t** out_executable) {
+  return LoadCtsExecutable(device, IREE_SV("hostcall_buffer_test.bin"),
+                           out_executable);
+}
+
+static iree_hal_buffer_ref_list_t MakeHostcallBufferBindingList(
+    iree_hal_buffer_t* output_buffer, iree_hal_buffer_ref_t* out_binding) {
+  *out_binding =
+      iree_hal_make_buffer_ref(output_buffer, /*offset=*/0, sizeof(uint64_t));
+  return {
+      /*.count=*/1,
+      /*.values=*/out_binding,
+  };
+}
+
+static iree_status_t DispatchHostcallBufferDirect(
+    iree_hal_device_t* device, iree_hal_executable_t* executable,
+    iree_hal_buffer_t* output_buffer, uint64_t* out_device_address) {
+  Ref<iree_hal_semaphore_t> signal;
+  IREE_RETURN_IF_ERROR(CreateSemaphore(device, signal.out()));
+  iree_hal_semaphore_t* signal_ptr = signal.get();
+  uint64_t signal_value = 1;
+  const iree_hal_semaphore_list_t signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&signal_ptr,
+      /*.payload_values=*/&signal_value,
+  };
+  iree_hal_buffer_ref_t binding;
+  IREE_RETURN_IF_ERROR(iree_hal_device_queue_dispatch(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+      signal_list, executable, iree_hal_executable_function_from_index(0),
+      iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_const_byte_span_empty(),
+      MakeHostcallBufferBindingList(output_buffer, &binding),
+      IREE_HAL_DISPATCH_FLAG_NONE));
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_wait(signal, signal_value,
+                                               iree_infinite_timeout(),
+                                               IREE_ASYNC_WAIT_FLAG_NONE));
+  return iree_hal_buffer_map_read(output_buffer, /*offset=*/0,
+                                  out_device_address,
+                                  sizeof(*out_device_address));
+}
+
+static iree_status_t RecordHostcallBufferCommandBuffer(
+    iree_hal_device_t* device, iree_hal_executable_t* executable,
+    iree_hal_buffer_t* output_buffer,
+    iree_hal_command_buffer_t** out_command_buffer) {
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
+      device, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*binding_capacity=*/0, command_buffer.out()));
+  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_begin(command_buffer));
+  iree_hal_buffer_ref_t binding;
+  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_dispatch(
+      command_buffer, executable, iree_hal_executable_function_from_index(0),
+      iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_const_byte_span_empty(),
+      MakeHostcallBufferBindingList(output_buffer, &binding),
+      IREE_HAL_DISPATCH_FLAG_NONE));
+  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_end(command_buffer));
+  *out_command_buffer = command_buffer.release();
+  return iree_ok_status();
+}
+
+static iree_status_t ExecuteHostcallBufferCommandBuffer(
+    iree_hal_device_t* device, iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_t* output_buffer, iree_hal_semaphore_t* signal,
+    uint64_t signal_value, uint64_t* out_device_address) {
+  IREE_RETURN_IF_ERROR(
+      iree_hal_buffer_map_zero(output_buffer, /*offset=*/0, sizeof(uint64_t)));
+  iree_hal_semaphore_t* signal_ptr = signal;
+  iree_hal_semaphore_list_t signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&signal_ptr,
+      /*.payload_values=*/&signal_value,
+  };
+  IREE_RETURN_IF_ERROR(iree_hal_device_queue_execute(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+      signal_list, command_buffer, iree_hal_buffer_binding_table_empty(),
+      IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_wait(signal, signal_value,
+                                               iree_infinite_timeout(),
+                                               IREE_ASYNC_WAIT_FLAG_NONE));
+  return iree_hal_buffer_map_read(output_buffer, /*offset=*/0,
+                                  out_device_address,
+                                  sizeof(*out_device_address));
+}
 
 #if IREE_FILE_IO_ENABLE
 struct TempFilePath {
@@ -924,6 +1046,119 @@ TEST_F(HostQueueCommandBufferTest,
   EXPECT_EQ(iree_status_code(one_shot_status), IREE_STATUS_UNIMPLEMENTED);
   iree_status_free(one_shot_status);
   iree_hal_command_buffer_release(one_shot_command_buffer);
+}
+
+TEST_F(HostQueueCommandBufferTest,
+       HostcallAddressIsBakedIntoDirectAndAqlDispatches) {
+  constexpr uint64_t kHostcallBufferAddress = 0x123456789ABC0000ull;
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.command_buffer_mode = IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_AQL;
+  options.preallocate_pools = 0;
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  Ref<iree_hal_executable_t> executable;
+  IREE_ASSERT_OK(LoadHostcallBufferExecutable(test_device.base_device(),
+                                              executable.out()));
+  Ref<iree_hal_buffer_t> output_buffer;
+  IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
+      test_device.allocator(), sizeof(uint64_t), output_buffer.out()));
+
+  uint64_t null_direct_address = UINT64_MAX;
+  IREE_ASSERT_OK(DispatchHostcallBufferDirect(test_device.base_device(),
+                                              executable, output_buffer,
+                                              &null_direct_address));
+  EXPECT_EQ(null_direct_address, 0u);
+
+  Ref<iree_hal_command_buffer_t> null_command_buffer;
+  IREE_ASSERT_OK(RecordHostcallBufferCommandBuffer(test_device.base_device(),
+                                                   executable, output_buffer,
+                                                   null_command_buffer.out()));
+  ASSERT_TRUE(iree_hal_amdgpu_aql_command_buffer_isa(null_command_buffer));
+  Ref<iree_hal_semaphore_t> signal;
+  IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(), signal.out()));
+  uint64_t null_replay_address = UINT64_MAX;
+  IREE_ASSERT_OK(ExecuteHostcallBufferCommandBuffer(
+      test_device.base_device(), null_command_buffer, output_buffer, signal,
+      /*signal_value=*/1, &null_replay_address));
+  EXPECT_EQ(null_replay_address, 0u);
+
+  ScopedHostcallBufferAddress hostcall_buffer(
+      test_device.logical_device()->physical_devices[0],
+      kHostcallBufferAddress);
+  uint64_t direct_address = 0;
+  IREE_ASSERT_OK(DispatchHostcallBufferDirect(
+      test_device.base_device(), executable, output_buffer, &direct_address));
+  EXPECT_EQ(direct_address, kHostcallBufferAddress);
+
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_ASSERT_OK(RecordHostcallBufferCommandBuffer(test_device.base_device(),
+                                                   executable, output_buffer,
+                                                   command_buffer.out()));
+  ASSERT_TRUE(iree_hal_amdgpu_aql_command_buffer_isa(command_buffer));
+  for (uint64_t replay = 1; replay <= 2; ++replay) {
+    uint64_t replay_address = 0;
+    IREE_ASSERT_OK(ExecuteHostcallBufferCommandBuffer(
+        test_device.base_device(), command_buffer, output_buffer, signal,
+        replay + 1, &replay_address));
+    EXPECT_EQ(replay_address, kHostcallBufferAddress);
+  }
+}
+
+TEST_F(HostQueueCommandBufferTest, HostcallAddressIsBakedIntoPm4Dispatches) {
+  constexpr uint64_t kHostcallBufferAddress = 0x123456789ABC0000ull;
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.command_buffer_mode = IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4;
+  options.preallocate_pools = 0;
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  iree_hal_amdgpu_physical_device_t* physical_device =
+      test_device.logical_device()->physical_devices[0];
+  if (!iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
+          physical_device->vendor_packet_capabilities)) {
+    GTEST_SKIP() << "PM4 dispatch command buffers are not supported on this "
+                    "physical device";
+  }
+  Ref<iree_hal_executable_t> executable;
+  IREE_ASSERT_OK(LoadHostcallBufferExecutable(test_device.base_device(),
+                                              executable.out()));
+  Ref<iree_hal_buffer_t> output_buffer;
+  IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
+      test_device.allocator(), sizeof(uint64_t), output_buffer.out()));
+  Ref<iree_hal_semaphore_t> signal;
+  IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(), signal.out()));
+
+  Ref<iree_hal_command_buffer_t> null_command_buffer;
+  IREE_ASSERT_OK(RecordHostcallBufferCommandBuffer(test_device.base_device(),
+                                                   executable, output_buffer,
+                                                   null_command_buffer.out()));
+  ASSERT_TRUE(iree_hal_amdgpu_pm4_command_buffer_isa(null_command_buffer));
+  uint64_t null_replay_address = UINT64_MAX;
+  IREE_ASSERT_OK(ExecuteHostcallBufferCommandBuffer(
+      test_device.base_device(), null_command_buffer, output_buffer, signal,
+      /*signal_value=*/1, &null_replay_address));
+  EXPECT_EQ(null_replay_address, 0u);
+
+  ScopedHostcallBufferAddress hostcall_buffer(physical_device,
+                                              kHostcallBufferAddress);
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_ASSERT_OK(RecordHostcallBufferCommandBuffer(test_device.base_device(),
+                                                   executable, output_buffer,
+                                                   command_buffer.out()));
+  ASSERT_TRUE(iree_hal_amdgpu_pm4_command_buffer_isa(command_buffer));
+
+  for (uint64_t replay = 1; replay <= 2; ++replay) {
+    uint64_t replay_address = 0;
+    IREE_ASSERT_OK(ExecuteHostcallBufferCommandBuffer(
+        test_device.base_device(), command_buffer, output_buffer, signal,
+        replay + 1, &replay_address));
+    EXPECT_EQ(replay_address, kHostcallBufferAddress);
+  }
 }
 
 TEST_F(HostQueueCommandBufferTest,

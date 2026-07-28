@@ -137,6 +137,11 @@ change the driver's sibling lookup behavior.
 When the toolchain repository is inert, selected source-built binaries are
 incompatible instead of referencing missing tool labels.
 
+`iree_amdgpu_binary_variants[_embed_data]` accepts `source_format = "hip"` for
+device-only HIP fixtures that need ROCm device libraries such as `ocml.bc` and
+`ockl.bc`. This changes only the AMDGPU device compilation pipeline: host C and
+C++ compilation continues to use the configured host LLVM toolchain.
+
 ## CMake Integration
 
 Projects add this directory to `CMAKE_MODULE_PATH` and include the small module

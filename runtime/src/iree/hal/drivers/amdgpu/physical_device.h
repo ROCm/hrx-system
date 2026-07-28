@@ -31,6 +31,8 @@ typedef struct iree_hal_amdgpu_pm4_command_buffer_resident_pool_t
 typedef struct iree_hal_amdgpu_asan_state_t iree_hal_amdgpu_asan_state_t;
 typedef struct iree_hal_amdgpu_feedback_state_t
     iree_hal_amdgpu_feedback_state_t;
+typedef struct iree_hal_amdgpu_hostcall_provider_state_t
+    iree_hal_amdgpu_hostcall_provider_state_t;
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_physical_device_options_t
@@ -239,6 +241,9 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
       prepublished_kernarg_storage;
 
+  // Optional opaque hostcall provider and its stable shared device address.
+  iree_hal_amdgpu_hostcall_provider_state_t* hostcall_provider_state;
+
   // Optional fine-grained block pools for host-coherent device memory.
   iree_hal_amdgpu_block_pools_t fine_block_pools;
   // Optional fine-grained block pool-based allocators for small transients.
@@ -335,6 +340,7 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
     iree_async_proactor_t* proactor, iree_host_size_t host_ordinal,
     const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
     iree_host_size_t device_ordinal, iree_hal_amdgpu_asan_state_t* asan_state,
+    const iree_hal_amdgpu_hostcall_provider_t* hostcall_provider,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_physical_device_t* out_physical_device);
 
@@ -362,6 +368,11 @@ void iree_hal_amdgpu_physical_device_deassign_frontier(
 // queues and joins failures.
 iree_status_t iree_hal_amdgpu_physical_device_set_hsa_profiling_enabled(
     iree_hal_amdgpu_physical_device_t* physical_device, bool enabled);
+
+// Returns the stable opaque hostcall device address provisioned for this
+// physical device, or NULL when the hosting layer did not opt into a provider.
+void* iree_hal_amdgpu_physical_device_hostcall_buffer(
+    const iree_hal_amdgpu_physical_device_t* physical_device);
 
 // Deinitializes a physical device and deallocates all device-specific
 // resources.

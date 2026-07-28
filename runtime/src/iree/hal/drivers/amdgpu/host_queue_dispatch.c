@@ -512,28 +512,30 @@ iree_hal_amdgpu_host_queue_native_implicit_args(
 static void iree_hal_amdgpu_host_queue_emplace_native_implicit_args(
     const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
     const uint32_t workgroup_count[3], uint32_t dynamic_workgroup_local_memory,
-    const iree_hal_amdgpu_kernarg_layout_t* layout, void* kernarg_data) {
+    void* hostcall_buffer, const iree_hal_amdgpu_kernarg_layout_t* layout,
+    void* kernarg_data) {
   iree_amdgpu_kernel_implicit_args_t* implicit_args =
       iree_hal_amdgpu_host_queue_native_implicit_args(layout, kernarg_data);
   if (!implicit_args) return;
 
   iree_hal_amdgpu_device_dispatch_initialize_implicit_args(
       kernel_args, workgroup_count, dynamic_workgroup_local_memory,
-      implicit_args);
+      hostcall_buffer, implicit_args);
 }
 
 static void iree_hal_amdgpu_host_queue_emplace_dispatch_kernargs(
     const iree_hal_amdgpu_host_queue_dispatch_plan_t* plan,
     const uint32_t workgroup_count[3], uint32_t dynamic_workgroup_local_memory,
     iree_const_byte_span_t constants, const uint64_t* binding_ptrs,
-    bool uses_custom_direct_arguments, void* kernarg_data) {
+    bool uses_custom_direct_arguments, void* hostcall_buffer,
+    void* kernarg_data) {
   if (uses_custom_direct_arguments) {
     iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
         plan->custom_layout, constants.data, constants.data_length,
         kernarg_data);
     iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
         plan->kernel_args, workgroup_count, dynamic_workgroup_local_memory,
-        plan->custom_layout, kernarg_data);
+        hostcall_buffer, plan->custom_layout, kernarg_data);
     return;
   }
 
@@ -541,7 +543,7 @@ static void iree_hal_amdgpu_host_queue_emplace_dispatch_kernargs(
       plan->kernarg_layout, binding_ptrs, constants, kernarg_data);
   iree_hal_amdgpu_host_queue_emplace_native_implicit_args(
       plan->kernel_args, workgroup_count, dynamic_workgroup_local_memory,
-      plan->kernarg_layout, kernarg_data);
+      hostcall_buffer, plan->kernarg_layout, kernarg_data);
 }
 
 static bool iree_hal_amdgpu_host_queue_should_profile_dispatch(
@@ -758,7 +760,7 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_dispatch_packets(
   iree_hal_amdgpu_host_queue_emplace_dispatch_kernargs(
       plan, target_workgroup_count, config.dynamic_workgroup_local_memory,
       constants, binding_ptrs, uses_custom_direct_arguments,
-      dispatch_kernarg_data);
+      queue->hostcall_buffer, dispatch_kernarg_data);
   iree_hsa_signal_t dispatch_completion_signal =
       profile_queue_device_event
           ? iree_hsa_signal_null()

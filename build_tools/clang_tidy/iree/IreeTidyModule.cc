@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "clang-tidy/ClangTidyModule.h"
+#include "clang-tidy/ClangTidyModuleRegistry.h"
 #include "iree/ExtentChecks.h"
 #include "iree/LifecycleChecks.h"
 #include "iree/RefCountChecks.h"

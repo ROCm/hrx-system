@@ -27,6 +27,7 @@
 #endif
 
 #include "binding/hip/binding_internal.h"
+#include "binding/hip/blocking_printf_provider.h"
 #include "binding/hip/launch_params.h"
 #include "common/graph.h"
 #include "common/internal.h"
@@ -541,6 +542,7 @@ static IREE_THREAD_LOCAL struct {
 
 static iree_slim_mutex_t iree_hip_global_init_mutex;
 static iree_once_flag iree_hip_global_init_mutex_once = IREE_ONCE_FLAG_INIT;
+static iree_hip_blocking_printf_provider_t iree_hip_blocking_printf_provider;
 
 typedef struct iree_hip_per_thread_stream_state_t {
   // Context associated with the cached per-thread stream.
@@ -1097,21 +1099,28 @@ static hipError_t iree_hip_ensure_initialized(void) {
   iree_call_once(&iree_hip_global_init_mutex_once,
                  iree_hip_initialize_global_init_mutex);
   iree_slim_mutex_lock(&iree_hip_global_init_mutex);
+  if (!iree_hal_streaming_device_registry()) {
+    iree_hal_device_event_sink_t event_sink = {0};
+    hrx_runtime_try_get_hal_device_event_sink(&event_sink);
+    iree_hip_blocking_printf_provider_initialize(
+        event_sink, iree_allocator_system(),
+        &iree_hip_blocking_printf_provider);
+  }
+
+  const iree_hal_device_create_params_extension_t* device_extension =
+      iree_hip_blocking_printf_provider_device_extension(
+          &iree_hip_blocking_printf_provider);
+  iree_status_t status =
+      iree_hal_streaming_init_global(device_extension, iree_allocator_system());
+  if (!iree_status_is_ok(status)) {
+    const iree_status_code_t status_code = iree_status_code(status);
+    iree_status_free(status);
+    iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
+    return status_code == IREE_STATUS_NOT_FOUND ? hipErrorNoDevice
+                                                : hipErrorNotInitialized;
+  }
   iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
-  if (!device_registry) {
-    // Initialize the runtime.
-    iree_status_t status = iree_hal_streaming_init_global(
-        IREE_HAL_STREAMING_INIT_FLAG_NONE, iree_allocator_system());
-    if (!iree_status_is_ok(status)) {
-      const iree_status_code_t status_code = iree_status_code(status);
-      iree_status_free(status);
-      iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
-      return status_code == IREE_STATUS_NOT_FOUND ? hipErrorNoDevice
-                                                  : hipErrorNotInitialized;
-    }
-    device_registry = iree_hal_streaming_device_registry();
-  }
   if (!device_registry || device_registry->device_count == 0) {
     iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
     return hipErrorNoDevice;
@@ -1297,11 +1306,27 @@ HIPAPI hipError_t hipInit(unsigned int flags) {
   return result;
 }
 
-// Custom function to deinitialize the HAL backend.
-// This is not a standard HIP API function.
+HIPAPI hipError_t hipHRXSetDeviceEventSink(hrx_device_event_sink_t sink) {
+  iree_call_once(&iree_hip_global_init_mutex_once,
+                 iree_hip_initialize_global_init_mutex);
+  iree_slim_mutex_lock(&iree_hip_global_init_mutex);
+  const hipError_t result =
+      iree_hal_streaming_device_registry()
+          ? hipErrorSetOnActiveProcess
+          : hrx_status_to_hip_result(hrx_runtime_set_device_event_sink(sink));
+  iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
+  return result;
+}
+
+// Deinitializes the embedded HRX runtime.
+// This is an HRX extension, not a standard HIP API function.
 HIPAPI hipError_t hipHALDeinit(void) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  iree_call_once(&iree_hip_global_init_mutex_once,
+                 iree_hip_initialize_global_init_mutex);
+  iree_slim_mutex_lock(&iree_hip_global_init_mutex);
   iree_hal_streaming_cleanup_global();
+  iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -1772,7 +1797,9 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->maxBlocksPerMultiProcessor = device_obj->max_blocks_per_multiprocessor;
   prop->accessPolicyMaxWindowSize = 0;
   prop->reservedSharedMemPerBlock = 0;
-  prop->hostNativeAtomicSupported = is_gfx1100 ? 1 : 0;
+  // HIP-on-AMDGPU supports native host/device atomics on the fine-grained
+  // shared memory required during device initialization.
+  prop->hostNativeAtomicSupported = 1;
   prop->memoryPoolsSupported = is_gfx1100 ? 1 : 0;
   prop->hostRegisterSupported = 1;
   prop->hostRegisterReadOnlySupported = 1;
@@ -1896,6 +1923,10 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = 1;
       break;
     case hipDeviceAttributeCanUseHostPointerForRegisteredMem:
+      *value = 1;
+      break;
+    case hipDeviceAttributeHostNativeAtomicSupported:
+      // HIP-on-AMDGPU requires fine-grained host/device atomic shared memory.
       *value = 1;
       break;
     case hipDeviceAttributeMultiprocessorCount:

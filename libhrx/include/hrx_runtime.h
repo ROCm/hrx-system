@@ -59,7 +59,7 @@ HRX_API void hrx_runtime_version(int* major, int* minor, int* patch);
 //===----------------------------------------------------------------------===//
 // Status
 //
-// Values match iree_status_code_t. Verified by _Static_assert in
+// Values match iree_status_code_t. Verified by static_assert in
 // implementation.
 //===----------------------------------------------------------------------===//
 
@@ -171,7 +171,7 @@ typedef struct hrx_graph_node_s* hrx_graph_node_t;
 //===----------------------------------------------------------------------===//
 // Enums and flags
 //
-// All values match their IREE counterparts. Verified by _Static_assert
+// All values match their IREE counterparts. Verified by static_assert
 // in the implementation. Bitfield types use typedef + #define.
 //===----------------------------------------------------------------------===//
 
@@ -299,6 +299,7 @@ typedef struct hrx_executable_export_info_t {
 
 #define HRX_DEVICE_EVENT_ABI_VERSION_0 0u
 #define HRX_DEVICE_ASAN_REPORT_ABI_VERSION_0 0u
+#define HRX_DEVICE_PRINTF_EVENT_ABI_VERSION_0 0u
 
 typedef uint32_t hrx_device_event_type_t;
 enum hrx_device_event_type_bits_t {
@@ -367,6 +368,37 @@ typedef struct hrx_device_event_t {
   // Optional backend-native payload for advanced tools.
   hrx_const_byte_span_t implementation_payload;
 } hrx_device_event_t;
+
+// Device printf stream classification.
+typedef uint32_t hrx_device_printf_stream_t;
+enum hrx_device_printf_stream_bits_t {
+  HRX_DEVICE_PRINTF_STREAM_DEFAULT = 0u,
+  HRX_DEVICE_PRINTF_STREAM_STDOUT = 1u,
+  HRX_DEVICE_PRINTF_STREAM_STDERR = 2u,
+};
+
+typedef uint32_t hrx_device_printf_flags_t;
+enum hrx_device_printf_flag_bits_t {
+  HRX_DEVICE_PRINTF_FLAG_NONE = 0u,
+};
+
+// Device printf payload.
+typedef struct hrx_device_printf_event_t {
+  // Size of this record in bytes.
+  uint32_t record_length;
+  // ABI version of this printf payload.
+  uint32_t abi_version;
+  // Stream hint for the output.
+  hrx_device_printf_stream_t stream;
+  // Printf event flags.
+  hrx_device_printf_flags_t flags;
+  // Format string identifier, or 0 when |text| is already formatted.
+  uint64_t format_id;
+  // Borrowed already-formatted text when available.
+  hrx_string_view_t text;
+  // Borrowed encoded arguments when available.
+  hrx_const_byte_span_t arguments;
+} hrx_device_printf_event_t;
 
 typedef uint32_t hrx_device_asan_access_kind_t;
 enum hrx_device_asan_access_kind_bits_t {

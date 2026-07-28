@@ -31,6 +31,30 @@ iree_amdgpu_binary_variants_embed_data(
   PUBLIC
 )
 
+iree_amdgpu_binary_variants_embed_data(
+  NAME
+    amdgpu_hip_printf_test_kernels
+  TARGET
+    amdgcn-amd-amdhsa
+  TARGETS
+    ${IREE_HAL_AMDGPU_TARGETS}
+  BINARY_NAME_PREFIX
+    hrx_cts_hip_printf_kernel
+  C_FILE_OUTPUT
+    "amdgpu_hip_printf_test_kernels.c"
+  H_FILE_OUTPUT
+    "amdgpu_hip_printf_test_kernels.h"
+  IDENTIFIER
+    "hrx_cts_amdgpu_hip_printf_test_kernels"
+  SRCS
+    "tests/hip/blocking_printf_kernel.hip"
+  SOURCE_FORMAT
+    hip
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
 iree_cc_library(
   NAME
     core
@@ -217,6 +241,7 @@ hrx_cc_test(
     hrx_cts_executable
   SRCS
     "core/amdgpu_executable_test_data.hpp"
+    "core/amdgpu_test_data.hpp"
     "tests/executable/executable_test.cpp"
   DATA
     libhrx::src::libhrx::hrx
@@ -238,6 +263,8 @@ iree_cc_test(
     hip_module_execution_test
   SRCS
     "core/amdgpu_executable_test_data.hpp"
+    "core/amdgpu_hip_printf_test_data.hpp"
+    "core/amdgpu_test_data.hpp"
     "tests/hip/module_execution_test.cpp"
   COPTS
     "-Wno-attributes"
@@ -246,6 +273,7 @@ iree_cc_test(
   DEPS
     ${CMAKE_DL_LIBS}
     ::amdgpu_executable_test_kernels
+    ::amdgpu_hip_printf_test_kernels
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx::src::binding::hip::launch_params
@@ -254,6 +282,65 @@ iree_cc_test(
     "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
   LABELS
     "runtime-resource=amd-gpu"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    hsa
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    hip_device_event_sink_test
+  SRCS
+    "core/amdgpu_hip_printf_test_data.hpp"
+    "core/amdgpu_test_data.hpp"
+    "tests/hip/device_event_sink_test.cpp"
+  COPTS
+    "-Wno-attributes"
+  DATA
+    libhrx::src::binding::hip::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    ::amdgpu_hip_printf_test_kernels
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx::src::binding::hip::launch_params
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  LABELS
+    "runtime-resource=amd-gpu"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    hsa
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    hip_blocking_printf_stress_test
+  SRCS
+    "core/amdgpu_hip_printf_test_data.hpp"
+    "core/amdgpu_test_data.hpp"
+    "tests/hip/blocking_printf_stress_test.cpp"
+  COPTS
+    "-Wno-attributes"
+  DATA
+    libhrx::src::binding::hip::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    ::amdgpu_hip_printf_test_kernels
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx::src::binding::hip::launch_params
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  LABELS
+    "runtime-resource=amd-gpu"
+    "manual"
   SANITIZER_SUPPRESSIONS
     lsan
     hsa

@@ -574,6 +574,82 @@ function(iree_amdgpu_library_variants)
   endif()
 endfunction()
 
+# Builds one device-library-linked HIP code object.
+function(_iree_amdgpu_hip_binary)
+  cmake_parse_arguments(
+    _RULE
+    ""
+    "NAME;OUT;TARGET;ARCH"
+    "SRCS;COPTS"
+    ${ARGN}
+  )
+
+  if(NOT _RULE_TARGET STREQUAL "amdgcn-amd-amdhsa")
+    message(FATAL_ERROR
+      "HIP device sources require TARGET amdgcn-amd-amdhsa")
+  endif()
+  list(LENGTH _RULE_SRCS _SOURCE_COUNT)
+  if(NOT _SOURCE_COUNT EQUAL 1)
+    message(FATAL_ERROR "HIP device sources require exactly one source")
+  endif()
+  if(NOT IREE_AMDGPU_HIP_DEVICE_LIBRARIES_AVAILABLE)
+    message(FATAL_ERROR
+      "HIP device sources require ROCm device libraries and "
+      "clang-offload-bundler")
+  endif()
+
+  if(DEFINED _RULE_OUT)
+    set(_OUT "${_RULE_OUT}")
+  else()
+    set(_OUT "${_RULE_NAME}.so")
+  endif()
+  get_filename_component(_SOURCE_PATH "${_RULE_SRCS}" REALPATH)
+  set(_OFFLOAD_BUNDLE "${_RULE_NAME}.offload_bundle")
+  file(GLOB _DEVICE_LIBRARIES CONFIGURE_DEPENDS
+    "${IREE_ROCM_DEVICE_LIBRARIES_PATH}/*.bc")
+
+  add_custom_command(
+    OUTPUT
+      "${_OUT}"
+    COMMAND
+      "${IREE_CLANG_BINARY}"
+      "--cuda-device-only"
+      "-x" "hip"
+      "-nogpuinc"
+      "--rocm-device-lib-path=${IREE_ROCM_DEVICE_LIBRARIES_PATH}"
+      "--offload-arch=${_RULE_ARCH}"
+      "-fno-gpu-rdc"
+      "-fno-ident"
+      "-O3"
+      ${_RULE_COPTS}
+      "${_SOURCE_PATH}"
+      "-o" "${_OFFLOAD_BUNDLE}"
+    COMMAND
+      "${IREE_CLANG_OFFLOAD_BUNDLER_BINARY}"
+      "--unbundle"
+      "--type=o"
+      "--targets=hipv4-amdgcn-amd-amdhsa--${_RULE_ARCH}"
+      "--input=${_OFFLOAD_BUNDLE}"
+      "--output=${_OUT}"
+    DEPENDS
+      "${IREE_CLANG_BINARY}"
+      "${IREE_CLANG_OFFLOAD_BUNDLER_BINARY}"
+      "${_SOURCE_PATH}"
+      ${_DEVICE_LIBRARIES}
+    COMMENT
+      "Compiling HIP code object ${_RULE_NAME} for ${_RULE_ARCH}"
+    VERBATIM
+  )
+
+  iree_package_name(_PACKAGE_NAME)
+  set(_TARGET_NAME "${_PACKAGE_NAME}_${_RULE_NAME}")
+  add_custom_target("${_TARGET_NAME}" DEPENDS "${_OUT}")
+  _iree_amdgpu_abs_binary_path(_OUT_PATH "${_OUT}")
+  iree_register_generated_output_producer("${_TARGET_NAME}"
+    OUTPUTS "${_OUT_PATH}"
+  )
+endfunction()
+
 # Builds one AMDGPU binary per selected code-object target.
 #
 # Parameters:
@@ -593,11 +669,13 @@ endfunction()
 # INTERNALIZE: whether to internalize linked dependency symbols after lazy
 #              archive extraction. Defaults ON.
 # MINIMIZE: apply post-link symbol-table minimization.
+# SOURCE_FORMAT: source compilation pipeline. freestanding_c uses the HAL
+#                device build; hip links the ROCm device libraries.
 function(iree_amdgpu_binary_variants)
   cmake_parse_arguments(
     _RULE
     "MINIMIZE"
-    "NAME;TARGET;BINARY_NAME_PREFIX;OUTPUTS_OUT;OUTPUT_PATHS_OUT;TARGETS_OUT;INTERNALIZE"
+    "NAME;TARGET;BINARY_NAME_PREFIX;OUTPUTS_OUT;OUTPUT_PATHS_OUT;TARGETS_OUT;INTERNALIZE;SOURCE_FORMAT"
     "TARGETS;SRCS;DEPS;INTERNAL_HDRS;COPTS;LINKOPTS"
     ${ARGN}
   )
@@ -608,6 +686,20 @@ function(iree_amdgpu_binary_variants)
   if(NOT _RULE_TARGET)
     message(FATAL_ERROR "iree_amdgpu_binary_variants requires TARGET")
   endif()
+  if(NOT DEFINED _RULE_SOURCE_FORMAT)
+    set(_RULE_SOURCE_FORMAT "freestanding_c")
+  elseif(NOT _RULE_SOURCE_FORMAT STREQUAL "freestanding_c" AND
+         NOT _RULE_SOURCE_FORMAT STREQUAL "hip")
+    message(FATAL_ERROR
+      "Unsupported AMDGPU binary SOURCE_FORMAT: ${_RULE_SOURCE_FORMAT}")
+  endif()
+  if(_RULE_SOURCE_FORMAT STREQUAL "hip" AND
+     (_RULE_DEPS OR _RULE_INTERNAL_HDRS OR _RULE_LINKOPTS OR
+      _RULE_MINIMIZE OR DEFINED _RULE_INTERNALIZE))
+    message(FATAL_ERROR
+      "HIP device sources do not support DEPS, INTERNAL_HDRS, LINKOPTS, "
+      "MINIMIZE, or INTERNALIZE")
+  endif()
 
   iree_package_name(_PACKAGE_NAME)
 
@@ -617,11 +709,15 @@ function(iree_amdgpu_binary_variants)
     set(_BINARY_NAME_PREFIX "${_RULE_NAME}")
   endif()
 
-  iree_amdgpu_expand_target_selectors(
-    _CODE_OBJECT_TARGETS
-    "${IREE_AMDGPU_TARGET_EXPANSION_CODE_OBJECT}"
-    ${_RULE_TARGETS}
-  )
+  set(_CODE_OBJECT_TARGETS)
+  if(NOT _RULE_SOURCE_FORMAT STREQUAL "hip" OR
+     IREE_AMDGPU_HIP_DEVICE_LIBRARIES_AVAILABLE)
+    iree_amdgpu_expand_target_selectors(
+      _CODE_OBJECT_TARGETS
+      "${IREE_AMDGPU_TARGET_EXPANSION_CODE_OBJECT}"
+      ${_RULE_TARGETS}
+    )
+  endif()
 
   set(_VARIANT_OUTPUTS)
   set(_VARIANT_OUTPUT_PATHS)
@@ -639,36 +735,53 @@ function(iree_amdgpu_binary_variants)
       ${_RULE_DEPS}
     )
 
-    set(_MINIMIZE)
-    if(_RULE_MINIMIZE)
-      set(_MINIMIZE MINIMIZE)
+    if(_RULE_SOURCE_FORMAT STREQUAL "hip")
+      _iree_amdgpu_hip_binary(
+        NAME
+          "${_VARIANT_NAME}"
+        OUT
+          "${_VARIANT_OUTPUT}"
+        TARGET
+          "${_RULE_TARGET}"
+        ARCH
+          "${_CODE_OBJECT_TARGET}"
+        SRCS
+          ${_RULE_SRCS}
+        COPTS
+          ${_RULE_COPTS}
+      )
+    else()
+      set(_MINIMIZE)
+      if(_RULE_MINIMIZE)
+        set(_MINIMIZE MINIMIZE)
+      endif()
+      set(_INTERNALIZE_ARG)
+      if(DEFINED _RULE_INTERNALIZE)
+        set(_INTERNALIZE_ARG INTERNALIZE "${_RULE_INTERNALIZE}")
+      endif()
+      iree_amdgpu_binary(
+        NAME
+          "${_VARIANT_NAME}"
+        OUT
+          "${_VARIANT_OUTPUT}"
+        TARGET
+          "${_RULE_TARGET}"
+        ARCH
+          "${_CODE_OBJECT_TARGET}"
+        SRCS
+          ${_RULE_SRCS}
+        DEPS
+          ${_VARIANT_DEPS}
+        INTERNAL_HDRS
+          ${_RULE_INTERNAL_HDRS}
+        COPTS
+          ${_RULE_COPTS}
+        LINKOPTS
+          ${_RULE_LINKOPTS}
+        ${_MINIMIZE}
+        ${_INTERNALIZE_ARG}
+      )
     endif()
-    set(_INTERNALIZE_ARG)
-    if(DEFINED _RULE_INTERNALIZE)
-      set(_INTERNALIZE_ARG INTERNALIZE "${_RULE_INTERNALIZE}")
-    endif()
-    iree_amdgpu_binary(
-      NAME
-        "${_VARIANT_NAME}"
-      OUT
-        "${_VARIANT_OUTPUT}"
-      TARGET
-        "${_RULE_TARGET}"
-      ARCH
-        "${_CODE_OBJECT_TARGET}"
-      SRCS
-        ${_RULE_SRCS}
-      DEPS
-        ${_VARIANT_DEPS}
-      INTERNAL_HDRS
-        ${_RULE_INTERNAL_HDRS}
-      COPTS
-        ${_RULE_COPTS}
-      LINKOPTS
-        ${_RULE_LINKOPTS}
-      ${_MINIMIZE}
-      ${_INTERNALIZE_ARG}
-    )
 
     list(APPEND _VARIANT_OUTPUTS "${_VARIANT_OUTPUT}")
     list(APPEND _VARIANT_OUTPUT_PATHS
@@ -714,11 +827,13 @@ endfunction()
 # MINIMIZE: apply post-link symbol-table minimization.
 # INTERNALIZE: whether to internalize linked dependency symbols after lazy
 #              archive extraction. Defaults ON.
+# SOURCE_FORMAT: source compilation pipeline. See
+#                iree_amdgpu_binary_variants.
 function(iree_amdgpu_binary_variants_embed_data)
   cmake_parse_arguments(
     _RULE
     "FLATTEN;PUBLIC;TESTONLY;MINIMIZE"
-    "NAME;TARGET;BINARY_NAME_PREFIX;C_FILE_OUTPUT;H_FILE_OUTPUT;IDENTIFIER;INTERNALIZE"
+    "NAME;TARGET;BINARY_NAME_PREFIX;C_FILE_OUTPUT;H_FILE_OUTPUT;IDENTIFIER;INTERNALIZE;SOURCE_FORMAT"
     "TARGETS;SRCS;INTERNAL_HDRS;COPTS;LINKOPTS;DEPS;INCLUDES"
     ${ARGN}
   )
@@ -755,6 +870,10 @@ function(iree_amdgpu_binary_variants_embed_data)
   if(DEFINED _RULE_INTERNALIZE)
     set(_INTERNALIZE_ARG INTERNALIZE "${_RULE_INTERNALIZE}")
   endif()
+  set(_SOURCE_FORMAT_ARG)
+  if(DEFINED _RULE_SOURCE_FORMAT)
+    set(_SOURCE_FORMAT_ARG SOURCE_FORMAT "${_RULE_SOURCE_FORMAT}")
+  endif()
   iree_amdgpu_binary_variants(
     NAME
       "${_BINARY_VARIANTS_NAME}"
@@ -775,6 +894,7 @@ function(iree_amdgpu_binary_variants_embed_data)
       ${_RULE_LINKOPTS}
     DEPS
       ${_RULE_DEPS}
+    ${_SOURCE_FORMAT_ARG}
     ${_MINIMIZE_ARG}
     ${_INTERNALIZE_ARG}
   )

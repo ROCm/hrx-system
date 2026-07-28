@@ -168,6 +168,8 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   const iree_hal_amdgpu_libhsa_t* libhsa;
   // Logical device owning this queue. Not retained.
   iree_hal_device_t* logical_device;
+  // Stable opaque hostcall device address for this queue, or NULL.
+  void* hostcall_buffer;
   // Proactor used to arm async semaphore/timepoint waits. Borrowed from the
   // logical device.
   iree_async_proactor_t* proactor;
@@ -627,6 +629,9 @@ void iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
 // retirement drains the physical-device feedback channel before releasing
 // queue-owned resources or publishing signal semaphores.
 //
+// |hostcall_buffer| is the optional stable opaque device address copied into
+// every implicit-argument suffix emitted by this queue.
+//
 // |completion_thread_affinity| pins the completion thread near the host CPU
 // agent associated with the GPU. The platform may ignore the request, but on
 // NUMA-aware systems this keeps blocked-wait wakeups and notification-ring
@@ -660,7 +665,8 @@ void iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
 // them on the CPU.
 iree_status_t iree_hal_amdgpu_host_queue_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa, iree_hal_device_t* logical_device,
-    iree_async_proactor_t* proactor, hsa_agent_t gpu_agent,
+    void* hostcall_buffer, iree_async_proactor_t* proactor,
+    hsa_agent_t gpu_agent,
     const iree_hal_amdgpu_kernarg_ring_memory_t* kernarg_memory,
     hsa_amd_memory_pool_t pm4_ib_pool,
     iree_async_frontier_tracker_t* frontier_tracker, iree_async_axis_t axis,

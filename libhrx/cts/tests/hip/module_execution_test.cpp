@@ -7,12 +7,15 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <string>
 #include <vector>
 
 #include "binding/hip/api.h"
 #include "iree/testing/gtest.h"
 #include "libhrx/cts/core/amdgpu_executable_test_data.hpp"
+#include "libhrx/cts/core/amdgpu_hip_printf_test_data.hpp"
 
 namespace {
 
@@ -100,6 +103,31 @@ hipError_t AddKernelGraphNode(HipGraphAddKernelNodeFn add_kernel_node,
   offset = UINT32_MAX;
   std::fill(std::begin(arguments), std::end(arguments), nullptr);
   return result;
+}
+
+hipError_t AddPrintfGraphNode(HipGraphAddKernelNodeFn add_kernel_node,
+                              hipGraph_t graph, hipFunction_t function,
+                              hipDeviceptr_t output, hipGraphNode_t* out_node) {
+  uint32_t value = 42;
+  hipDeviceptr_t result = output;
+  void* arguments[] = {&value, &result};
+  const hipKernelNodeParams params = {
+      /*.blockDim=*/{1, 1, 1},
+      /*.extra=*/nullptr,
+      /*.func=*/function,
+      /*.gridDim=*/{1, 1, 1},
+      /*.kernelParams=*/arguments,
+      /*.sharedMemBytes=*/0,
+  };
+  const hipError_t add_result =
+      add_kernel_node(out_node, graph, /*dependencies=*/nullptr,
+                      /*dependency_count=*/0, &params);
+
+  // The graph must own the copied native argument image.
+  value = UINT32_MAX;
+  result = nullptr;
+  std::fill(std::begin(arguments), std::end(arguments), nullptr);
+  return add_result;
 }
 
 TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
@@ -289,6 +317,206 @@ TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
   EXPECT_EQ(hipSuccess, module_unload(module));
   EXPECT_EQ(hipSuccess, hip_free(output));
   EXPECT_EQ(hipSuccess, hip_free(input));
+}
+
+TEST(HipModuleExecutionTest, BlockingPrintfDirectAndGraphReplay) {
+  if (hrx_cts_amdgpu_hip_printf_test_kernels_size() == 0) {
+    GTEST_SKIP() << "ROCm device libraries are unavailable";
+  }
+
+  void* library = dlopen(CandidateLibPath(), RTLD_NOW | RTLD_LOCAL);
+  if (!library) {
+    GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": " << dlerror();
+  }
+
+  const auto init = ResolveHipSymbol<HipInitFn>(library, "hipInit");
+  const auto get_device =
+      ResolveHipSymbol<HipGetDeviceFn>(library, "hipGetDevice");
+  const auto get_device_properties = ResolveHipSymbol<HipGetDevicePropertiesFn>(
+      library, "hipGetDeviceProperties");
+  const auto module_load_data =
+      ResolveHipSymbol<HipModuleLoadDataFn>(library, "hipModuleLoadData");
+  const auto module_unload =
+      ResolveHipSymbol<HipModuleUnloadFn>(library, "hipModuleUnload");
+  const auto module_get_function =
+      ResolveHipSymbol<HipModuleGetFunctionFn>(library, "hipModuleGetFunction");
+  const auto module_launch_kernel = ResolveHipSymbol<HipModuleLaunchKernelFn>(
+      library, "hipModuleLaunchKernel");
+  const auto device_synchronize =
+      ResolveHipSymbol<HipDeviceSynchronizeFn>(library, "hipDeviceSynchronize");
+  const auto hip_malloc = ResolveHipSymbol<HipMallocFn>(library, "hipMalloc");
+  const auto hip_free = ResolveHipSymbol<HipFreeFn>(library, "hipFree");
+  const auto hip_memcpy = ResolveHipSymbol<HipMemcpyFn>(library, "hipMemcpy");
+  const auto graph_create =
+      ResolveHipSymbol<HipGraphCreateFn>(library, "hipGraphCreate");
+  const auto graph_destroy =
+      ResolveHipSymbol<HipGraphDestroyFn>(library, "hipGraphDestroy");
+  const auto graph_add_kernel_node = ResolveHipSymbol<HipGraphAddKernelNodeFn>(
+      library, "hipGraphAddKernelNode");
+  const auto graph_instantiate =
+      ResolveHipSymbol<HipGraphInstantiateFn>(library, "hipGraphInstantiate");
+  const auto graph_launch =
+      ResolveHipSymbol<HipGraphLaunchFn>(library, "hipGraphLaunch");
+  const auto graph_exec_destroy =
+      ResolveHipSymbol<HipGraphExecDestroyFn>(library, "hipGraphExecDestroy");
+
+  ASSERT_NE(nullptr, init);
+  ASSERT_NE(nullptr, get_device);
+  ASSERT_NE(nullptr, get_device_properties);
+  ASSERT_NE(nullptr, module_load_data);
+  ASSERT_NE(nullptr, module_unload);
+  ASSERT_NE(nullptr, module_get_function);
+  ASSERT_NE(nullptr, module_launch_kernel);
+  ASSERT_NE(nullptr, device_synchronize);
+  ASSERT_NE(nullptr, hip_malloc);
+  ASSERT_NE(nullptr, hip_free);
+  ASSERT_NE(nullptr, hip_memcpy);
+  ASSERT_NE(nullptr, graph_create);
+  ASSERT_NE(nullptr, graph_destroy);
+  ASSERT_NE(nullptr, graph_add_kernel_node);
+  ASSERT_NE(nullptr, graph_instantiate);
+  ASSERT_NE(nullptr, graph_launch);
+  ASSERT_NE(nullptr, graph_exec_destroy);
+
+  const hipError_t init_result = init(/*flags=*/0);
+  if (init_result != hipSuccess) {
+    GTEST_SKIP() << "hipInit failed: " << init_result;
+  }
+  int device = 0;
+  ASSERT_EQ(hipSuccess, get_device(&device));
+  hipDeviceProp_t properties = {};
+  ASSERT_EQ(hipSuccess, get_device_properties(&properties, device));
+
+  const hrx_cts::AmdgpuHipPrintfTestImage test_image =
+      hrx_cts::FindAmdgpuHipPrintfTestImage(properties.gcnArchName);
+  ASSERT_NE(nullptr, test_image.file)
+      << "no embedded HIP printf HSACO for " << properties.gcnArchName;
+
+  std::vector<uint8_t> image(test_image.file->data,
+                             test_image.file->data + test_image.file->size);
+  hipModule_t module = nullptr;
+  ASSERT_EQ(hipSuccess, module_load_data(&module, image.data()));
+  std::fill(image.begin(), image.end(), uint8_t{0xA5});
+  std::vector<uint8_t>().swap(image);
+
+  hipFunction_t function = nullptr;
+  ASSERT_EQ(hipSuccess,
+            module_get_function(&function, module, "hrx_blocking_printf"));
+
+  hipDeviceptr_t output = nullptr;
+  ASSERT_EQ(hipSuccess, hip_malloc(&output, 2 * sizeof(int)));
+  const std::array<int, 2> initial_result = {-1, -1};
+  ASSERT_EQ(hipSuccess,
+            hip_memcpy(output, initial_result.data(), sizeof(initial_result),
+                       hipMemcpyHostToDevice));
+
+  uint32_t value = 42;
+  hipDeviceptr_t result = output;
+  void* arguments[] = {&value, &result};
+  ::testing::internal::CaptureStdout();
+  const hipError_t launch_result =
+      module_launch_kernel(function, 1, 1, 1, 1, 1, 1,
+                           /*shared_memory_bytes=*/0, /*stream=*/nullptr,
+                           arguments, /*extra=*/nullptr);
+  const hipError_t synchronize_result =
+      launch_result == hipSuccess ? device_synchronize() : launch_result;
+  std::fflush(stdout);
+  const std::string direct_output = ::testing::internal::GetCapturedStdout();
+  ASSERT_EQ(hipSuccess, launch_result);
+  ASSERT_EQ(hipSuccess, synchronize_result);
+  EXPECT_EQ("hrx cts printf value=42\n", direct_output);
+
+  constexpr int kExpectedPrintfLength = sizeof("hrx cts printf value=42\n") - 1;
+  constexpr int kPostPrintfMarker = 0xC0FFEE;
+  std::array<int, 2> actual_result = {};
+  ASSERT_EQ(hipSuccess,
+            hip_memcpy(actual_result.data(), output, sizeof(actual_result),
+                       hipMemcpyDeviceToHost));
+  EXPECT_EQ(kExpectedPrintfLength, actual_result[0]);
+  EXPECT_EQ(kPostPrintfMarker, actual_result[1]);
+
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, graph_create(&graph, /*flags=*/0));
+  hipGraphNode_t graph_node = nullptr;
+  ASSERT_EQ(hipSuccess, AddPrintfGraphNode(graph_add_kernel_node, graph,
+                                           function, output, &graph_node));
+  hipGraphExec_t graph_executable = nullptr;
+  ASSERT_EQ(hipSuccess,
+            graph_instantiate(&graph_executable, graph,
+                              /*error_node=*/nullptr, /*log_buffer=*/nullptr,
+                              /*buffer_size=*/0));
+
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_EQ(hipSuccess,
+              hip_memcpy(output, initial_result.data(), sizeof(initial_result),
+                         hipMemcpyHostToDevice));
+    ::testing::internal::CaptureStdout();
+    const hipError_t graph_launch_result =
+        graph_launch(graph_executable, /*stream=*/nullptr);
+    const hipError_t graph_synchronize_result =
+        graph_launch_result == hipSuccess ? device_synchronize()
+                                          : graph_launch_result;
+    std::fflush(stdout);
+    const std::string graph_output = ::testing::internal::GetCapturedStdout();
+    ASSERT_EQ(hipSuccess, graph_launch_result);
+    ASSERT_EQ(hipSuccess, graph_synchronize_result);
+    EXPECT_EQ("hrx cts printf value=42\n", graph_output);
+
+    actual_result = {};
+    ASSERT_EQ(hipSuccess,
+              hip_memcpy(actual_result.data(), output, sizeof(actual_result),
+                         hipMemcpyDeviceToHost));
+    EXPECT_EQ(kExpectedPrintfLength, actual_result[0]);
+    EXPECT_EQ(kPostPrintfMarker, actual_result[1]);
+  }
+
+  EXPECT_EQ(hipSuccess, graph_exec_destroy(graph_executable));
+  EXPECT_EQ(hipSuccess, graph_destroy(graph));
+
+  hipFunction_t many_workitems_function = nullptr;
+  ASSERT_EQ(hipSuccess,
+            module_get_function(&many_workitems_function, module,
+                                "hrx_blocking_printf_many_workitems"));
+  EXPECT_EQ(hipSuccess, hip_free(output));
+  // One workgroup exercises concurrent fragmented calls from multiple
+  // resident waves while keeping routine CTS execution bounded.
+  constexpr uint32_t kBlockSize = 256;
+  constexpr uint32_t kWorkitemCount = kBlockSize;
+  static_assert(kWorkitemCount % kBlockSize == 0);
+  ASSERT_EQ(hipSuccess, hip_malloc(&output, kWorkitemCount * sizeof(int)));
+  uint32_t workgroup_size = kBlockSize;
+  uint32_t workitem_count = kWorkitemCount;
+  result = output;
+  void* many_workitems_arguments[] = {&workgroup_size, &workitem_count,
+                                      &result};
+  ::testing::internal::CaptureStdout();
+  const hipError_t many_workitems_launch_result = module_launch_kernel(
+      many_workitems_function, kWorkitemCount / kBlockSize, 1, 1, kBlockSize, 1,
+      1, /*shared_memory_bytes=*/0, /*stream=*/nullptr,
+      many_workitems_arguments, /*extra=*/nullptr);
+  const hipError_t many_workitems_synchronize_result =
+      many_workitems_launch_result == hipSuccess ? device_synchronize()
+                                                 : many_workitems_launch_result;
+  std::fflush(stdout);
+  const std::string many_workitems_output =
+      ::testing::internal::GetCapturedStdout();
+  ASSERT_EQ(hipSuccess, many_workitems_launch_result);
+  ASSERT_EQ(hipSuccess, many_workitems_synchronize_result);
+  EXPECT_EQ(kWorkitemCount, many_workitems_output.size());
+  EXPECT_TRUE(std::all_of(many_workitems_output.begin(),
+                          many_workitems_output.end(),
+                          [](char value) { return value == '7'; }));
+
+  std::vector<int> many_workitems_results(kWorkitemCount);
+  ASSERT_EQ(hipSuccess, hip_memcpy(many_workitems_results.data(), output,
+                                   many_workitems_results.size() * sizeof(int),
+                                   hipMemcpyDeviceToHost));
+  EXPECT_TRUE(std::all_of(many_workitems_results.begin(),
+                          many_workitems_results.end(),
+                          [](int value) { return value == 1; }));
+
+  EXPECT_EQ(hipSuccess, hip_free(output));
+  EXPECT_EQ(hipSuccess, module_unload(module));
 }
 
 }  // namespace

@@ -106,6 +106,18 @@ typedef struct iree_async_frontier_tracker_t iree_async_frontier_tracker_t;
 typedef struct iree_async_notification_t iree_async_notification_t;
 typedef struct iree_hal_slab_provider_t iree_hal_slab_provider_t;
 
+// Common prefix for driver-specific device creation parameter extensions.
+//
+// Drivers walk the chain by interpreting each extension through this prefix.
+// Extension type values are scoped to the driver consuming the chain.
+typedef struct iree_hal_device_create_params_extension_t {
+  // Driver-specific extension type identifier.
+  uint32_t type;
+
+  // Next driver-specific device creation parameter extension, or NULL.
+  const void* next;
+} iree_hal_device_create_params_extension_t;
+
 // Parameters for device creation that apply across all HAL drivers.
 //
 // Callers stack-allocate and initialize with
@@ -114,9 +126,9 @@ typedef struct iree_hal_slab_provider_t iree_hal_slab_provider_t;
 // valid pointer — callers must always provide one.
 //
 // The |next| pointer enables a Vulkan-style extension chain: drivers may define
-// their own params structs that chain off this base struct. Each extension
-// starts with a type identifier and its own |next| pointer. Unrecognized
-// extensions are silently skipped for forward compatibility.
+// their own params structs that chain off this base struct. Each extension must
+// begin with iree_hal_device_create_params_extension_t. Unrecognized extensions
+// are silently skipped for forward compatibility.
 typedef struct iree_hal_device_create_params_t {
   IREE_API_UNSTABLE
 
