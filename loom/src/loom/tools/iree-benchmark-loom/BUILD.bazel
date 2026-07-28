@@ -308,6 +308,7 @@ iree_execution_test_suite(
         "//loom/src/loom/tools/iree-test-loom:testdata/amdgpu_hal_actual.loom",
     ],
     manifests = ["iree-benchmark-loom_amdgpu.test.json"],
+    resource_group = "loom-amdgpu-tests",
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
         "manual",
@@ -329,6 +330,7 @@ iree_execution_test_suite(
         "//loom/src/loom/tools/iree-test-loom:testdata/spirv_vulkan_quantized_hal_actual.loom",
     ],
     manifests = ["iree-benchmark-loom_spirv_vulkan.test.json"],
+    resource_group = "loom-vulkan-tests",
     sanitizer_suppressions = vulkan_suppressions,
     tags = [
         "manual",

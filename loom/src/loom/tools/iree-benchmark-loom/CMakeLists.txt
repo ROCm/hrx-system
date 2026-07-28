@@ -272,6 +272,8 @@ iree_execution_test_suite(
     "manual"
     "requires-gpu-amd"
     "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    loom-amdgpu-tests
 )
 endif()
 
@@ -294,6 +296,8 @@ iree_execution_test_suite(
   LABELS
     "manual"
     "requires-gpu-vulkan"
+  RESOURCE_GROUP
+    loom-vulkan-tests
 )
 endif()
 
