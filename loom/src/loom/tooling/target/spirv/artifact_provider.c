@@ -112,6 +112,18 @@ static iree_status_t loom_spirv_hal_artifact_provider_select_device_target(
   return iree_ok_status();
 }
 
+static iree_status_t
+loom_spirv_hal_artifact_provider_select_function_device_target(
+    const loom_run_hal_artifact_provider_t* provider,
+    const loom_run_hal_runtime_t* runtime, const loom_module_t* module,
+    loom_func_like_t function, iree_allocator_t allocator,
+    loom_run_hal_device_target_t* out_target) {
+  (void)module;
+  (void)function;
+  return loom_spirv_hal_artifact_provider_select_device_target(
+      provider, runtime, allocator, out_target);
+}
+
 static void loom_spirv_hal_artifact_provider_deinitialize_device_target(
     const loom_run_hal_artifact_provider_t* provider,
     loom_run_hal_device_target_t* target, iree_allocator_t allocator) {
@@ -345,6 +357,8 @@ const loom_run_hal_artifact_provider_t loom_spirv_vulkan_hal_artifact_provider =
             },
         .select_device_target =
             loom_spirv_hal_artifact_provider_select_device_target,
+        .select_function_device_target =
+            loom_spirv_hal_artifact_provider_select_function_device_target,
         .deinitialize_device_target =
             loom_spirv_hal_artifact_provider_deinitialize_device_target,
         .emit_artifact = loom_spirv_hal_artifact_provider_emit_artifact,

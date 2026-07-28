@@ -174,6 +174,21 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
                        out_module);
   }
 
+  loom_func_like_t FindKernel(const loom_module_t* module) {
+    const loom_string_id_t name_id =
+        loom_module_lookup_string(module, IREE_SV("loom_kernel"));
+    if (name_id == LOOM_STRING_ID_INVALID) {
+      return {};
+    }
+    const loom_symbol_id_t symbol_id = loom_module_find_symbol(module, name_id);
+    if (symbol_id == LOOM_SYMBOL_ID_INVALID ||
+        symbol_id >= module->symbols.count) {
+      return {};
+    }
+    return loom_func_like_cast(module,
+                               module->symbols.entries[symbol_id].defining_op);
+  }
+
   void ExpectEmitsModuleTarget(iree_string_view_t processor) {
     ModulePtr module;
     IREE_ASSERT_OK(ParsePreparedArithmeticModule(processor, &module));
@@ -292,6 +307,109 @@ TEST_F(AmdgpuHalArtifactProviderTest,
       static_cast<const loom_amdgpu_processor_info_t*>(target.data);
   EXPECT_TRUE(
       iree_string_view_equal(processor->name, IREE_SV("gfx11-generic")));
+
+  iree_hal_device_spec_release(device_spec);
+}
+
+TEST_F(AmdgpuHalArtifactProviderTest,
+       SelectFunctionDeviceTargetPreservesAuthoredGenericTarget) {
+  ModulePtr module;
+  IREE_ASSERT_OK(
+      ParsePreparedArithmeticModule(IREE_SV("gfx11-generic"), &module));
+  ASSERT_NE(module.get(), nullptr);
+  const loom_func_like_t function = FindKernel(module.get());
+  ASSERT_TRUE(loom_func_like_isa(function));
+
+  iree_hal_device_spec_t* device_spec = nullptr;
+  IREE_ASSERT_OK(CreateAmdgpuExecutableDeviceSpec(
+      /*include_exact_target=*/true, &device_spec));
+  fake_hal_device_t device = {};
+  InitializeFakeHalDevice(device_spec, &device);
+  const loom_run_hal_runtime_t runtime = {
+      /*.device=*/(iree_hal_device_t*)&device,
+      /*.device_group=*/nullptr,
+  };
+
+  loom_run_hal_device_target_t target = {};
+  IREE_ASSERT_OK(
+      loom_amdgpu_hal_artifact_provider.select_function_device_target(
+          &loom_amdgpu_hal_artifact_provider, &runtime, module.get(), function,
+          iree_allocator_system(), &target));
+
+  ASSERT_NE(target.data, nullptr);
+  ASSERT_NE(target.hal_target, nullptr);
+  EXPECT_EQ(target.hal_target->kind, IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC);
+  EXPECT_TRUE(
+      iree_string_view_equal(target.target_key, IREE_SV("gfx11-generic")));
+  const loom_amdgpu_processor_info_t* processor =
+      static_cast<const loom_amdgpu_processor_info_t*>(target.data);
+  EXPECT_TRUE(
+      iree_string_view_equal(processor->name, IREE_SV("gfx11-generic")));
+
+  iree_hal_device_spec_release(device_spec);
+}
+
+TEST_F(AmdgpuHalArtifactProviderTest,
+       SelectFunctionDeviceTargetPreservesAuthoredExactTarget) {
+  ModulePtr module;
+  IREE_ASSERT_OK(ParsePreparedArithmeticModule(IREE_SV("gfx1151"), &module));
+  ASSERT_NE(module.get(), nullptr);
+  const loom_func_like_t function = FindKernel(module.get());
+  ASSERT_TRUE(loom_func_like_isa(function));
+
+  iree_hal_device_spec_t* device_spec = nullptr;
+  IREE_ASSERT_OK(CreateAmdgpuExecutableDeviceSpec(
+      /*include_exact_target=*/true, &device_spec));
+  fake_hal_device_t device = {};
+  InitializeFakeHalDevice(device_spec, &device);
+  const loom_run_hal_runtime_t runtime = {
+      /*.device=*/(iree_hal_device_t*)&device,
+      /*.device_group=*/nullptr,
+  };
+
+  loom_run_hal_device_target_t target = {};
+  IREE_ASSERT_OK(
+      loom_amdgpu_hal_artifact_provider.select_function_device_target(
+          &loom_amdgpu_hal_artifact_provider, &runtime, module.get(), function,
+          iree_allocator_system(), &target));
+
+  ASSERT_NE(target.data, nullptr);
+  ASSERT_NE(target.hal_target, nullptr);
+  EXPECT_EQ(target.hal_target->kind, IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT);
+  EXPECT_TRUE(iree_string_view_equal(target.target_key, IREE_SV("gfx1151")));
+  const loom_amdgpu_processor_info_t* processor =
+      static_cast<const loom_amdgpu_processor_info_t*>(target.data);
+  EXPECT_TRUE(iree_string_view_equal(processor->name, IREE_SV("gfx1151")));
+
+  iree_hal_device_spec_release(device_spec);
+}
+
+TEST_F(AmdgpuHalArtifactProviderTest,
+       SelectFunctionDeviceTargetRejectsIncompatibleAuthoredExactTarget) {
+  ModulePtr module;
+  IREE_ASSERT_OK(ParsePreparedArithmeticModule(IREE_SV("gfx1150"), &module));
+  ASSERT_NE(module.get(), nullptr);
+  const loom_func_like_t function = FindKernel(module.get());
+  ASSERT_TRUE(loom_func_like_isa(function));
+
+  iree_hal_device_spec_t* device_spec = nullptr;
+  IREE_ASSERT_OK(CreateAmdgpuExecutableDeviceSpec(
+      /*include_exact_target=*/true, &device_spec));
+  fake_hal_device_t device = {};
+  InitializeFakeHalDevice(device_spec, &device);
+  const loom_run_hal_runtime_t runtime = {
+      /*.device=*/(iree_hal_device_t*)&device,
+      /*.device_group=*/nullptr,
+  };
+
+  loom_run_hal_device_target_t target = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      loom_amdgpu_hal_artifact_provider.select_function_device_target(
+          &loom_amdgpu_hal_artifact_provider, &runtime, module.get(), function,
+          iree_allocator_system(), &target));
+  EXPECT_EQ(target.data, nullptr);
+  EXPECT_EQ(target.hal_target, nullptr);
 
   iree_hal_device_spec_release(device_spec);
 }
