@@ -14,6 +14,7 @@ load(
 )
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_benchmark",
     "loom_cc_library",
     "loom_cc_test",
 )
@@ -31,6 +32,8 @@ package(
 _AMDGPU_CHECK_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/check:__pkg__"]
 
 _DESCRIPTOR_SET_RDNA3 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna3.core"]
+
+_DESCRIPTOR_SET_GFX125X = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4.gfx125x.core"]
 
 _AMDGPU_TOOLING_VISIBILITY = [
     "//loom/binding/c/target/amdgpu:__pkg__",
@@ -214,6 +217,36 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "packet_plan_benchmark",
+    srcs = ["packet_plan_benchmark.cc"],
+    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_GFX125X),
+    deps = [
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
+        "//loom/src/loom/target/arch/amdgpu/ops",
+        "//loom/src/loom/target/arch/amdgpu/planning:descriptor_semantics",
+        "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
+        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+        "//loom/src/loom/target/arch/amdgpu/planning:storage_lease",
+        "//loom/src/loom/target/arch/amdgpu/planning:vopd_plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )
 

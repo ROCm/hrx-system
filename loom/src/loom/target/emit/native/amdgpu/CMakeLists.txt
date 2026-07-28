@@ -237,6 +237,42 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX125X_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_benchmark(
+  NAME
+    packet_plan_benchmark
+  SRCS
+    "packet_plan_benchmark.cc"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::codegen::low::frame
+    loom::codegen::low::function
+    loom::codegen::low::packet
+    loom::codegen::low::target_binding
+    loom::codegen::low::text_asm
+    loom::codegen::low::verify
+    loom::error::diagnostic
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::target::arch::amdgpu::descriptors::low_registry
+    loom::target::arch::amdgpu::hal::kernel_abi
+    loom::target::arch::amdgpu::ops
+    loom::target::arch::amdgpu::planning::descriptor_semantics
+    loom::target::arch::amdgpu::planning::occupancy
+    loom::target::arch::amdgpu::planning::packet_plan
+    loom::target::arch::amdgpu::planning::storage_lease
+    loom::target::arch::amdgpu::planning::vopd_plan
+    loom::target::low_descriptor_registry
+  TESTONLY
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+)
+endif()
+
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_cc_library(
   NAME
