@@ -1,6 +1,6 @@
 // RUN: pass-report scf-to-cfg,cfg-simplify,source-to-low,low-dce
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 // A uniform tail-tile branch should keep the WMMA work attributable to the
 // source operations that shape the full-tile and tail paths.

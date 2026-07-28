@@ -1,6 +1,6 @@
 // RUN: emit source-low output=pipeline
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @pipeline_probe(%value: i32) -> (i32) {
   func.return %value : i32
@@ -65,7 +65,7 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
 // ====
 // RUN: emit source-low output=pipeline sanitizer=access
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @sanitizer_pipeline_probe(%value: i32) -> (i32) {
   func.return %value : i32
@@ -135,7 +135,7 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
 // ====
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @gfx11
+amdgpu.target<gfx11-generic> @gfx11
 amdgpu.target<gfx1200> @gfx12
 
 func.template<demo.target_prune> target(@gfx12) priority(20) @gfx12_provider(%codes: vector<8xi32>) -> (vector<4xi8>) {
@@ -159,7 +159,7 @@ func.def target(@gfx11) @target_template_prunes_nonmatching_provider(%codes: vec
 }
 
 // ----
-low.func.def target(@gfx11) abi(hal_kernel) @target_template_prunes_nonmatching_provider(%codes: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@gfx11) abi(hal_kernel) @target_template_prunes_nonmatching_provider(%codes: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
   %15 = slice %codes[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %16 = slice %codes[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %17 = slice %codes[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -173,7 +173,7 @@ low.func.def target(@gfx11) abi(hal_kernel) @target_template_prunes_nonmatching_
 // ====
 // RUN: emit source-low output=prepared-pipeline
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @prepared_pipeline_probe() {
   %one = index.constant 1 : index
@@ -253,7 +253,7 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
 // ====
 // RUN: emit source-low output=module
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @module_output_prints_low_asm(%lhs: i32, %rhs: i32) -> (i32) {
   %product = scalar.muli %lhs, %rhs : i32
@@ -261,9 +261,9 @@ func.def target(@target) @module_output_prints_low_asm(%lhs: i32, %rhs: i32) -> 
 }
 
 // ----
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
-low.func.def target(@target) abi(hal_kernel) @module_output_prints_low_asm(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@target) abi(hal_kernel) @module_output_prints_low_asm(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
   %product = s_mul_i32 %lhs, %rhs
   return %product
 }
@@ -271,7 +271,7 @@ low.func.def target(@target) abi(hal_kernel) @module_output_prints_low_asm(%lhs:
 // ====
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.template<pipeline.late_fragment_epilogue> target(@target) @late_fragment_epilogue_provider(%payload0: vector<8xf32>, %payload1: vector<8xf32>, %payload2: vector<8xf32>, %payload3: vector<8xf32>, %output: buffer, %column_count: index) {
   %base = index.constant 0 : offset
@@ -306,7 +306,7 @@ kernel.def target(@target) @target_legalization_precedes_cfg_finalization() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @target_legalization_precedes_cfg_finalization() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @target_legalization_precedes_cfg_finalization() asm<amdgpu.gfx11.generic.core> {
   %615 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 2048} : reg<amdgpu.sgpr x2>
   %617 = v_mov_b32 16256

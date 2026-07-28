@@ -98,7 +98,7 @@ low.kernel.def target(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @multidim_workgroup_memory_workitem_xy_b32() {
   %unit = index.constant 1 : index
   %tile = index.constant 8 : index
@@ -118,7 +118,7 @@ kernel.def target(@target) @multidim_workgroup_memory_workitem_xy_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 8, 1) workgroup_count(1, 1, 1) @multidim_workgroup_memory_workitem_xy_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(8, 8, 1) workgroup_count(1, 1, 1) @multidim_workgroup_memory_workitem_xy_b32() asm<amdgpu.gfx11.generic.core> {
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
   %column = v_and_b32_lit %packed_tid, 1023
   %20 = v_lshrrev_b32_src0_inline %packed_tid, 10

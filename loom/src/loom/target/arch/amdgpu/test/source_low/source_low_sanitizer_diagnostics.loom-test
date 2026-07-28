@@ -1,6 +1,6 @@
 // RUN: emit source-low output=low sanitizer=access
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @access_assert_workgroup_memory_rejected() {
   %zero_offset = index.constant 0 : offset

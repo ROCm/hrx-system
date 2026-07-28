@@ -1,6 +1,6 @@
 // RUN: pass-report target-legalize{mode=final,policy=reference-only},dce,canonicalize,source-to-low,low-dce
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @reference_i8x3_to_u3x8_bitunpack(%packed: vector<3xi8>) -> (vector<8xi32>) {
   %unpacked = vector.bitunpacku<3> %packed : vector<3xi8> -> vector<8xi32>

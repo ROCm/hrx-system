@@ -1,6 +1,6 @@
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @subgroup_broadcast_dynamic_lane_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -19,7 +19,7 @@ kernel.def target(@target) @subgroup_broadcast_dynamic_lane_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_broadcast_lane_out_of_range_rejected() {
   %c1 = index.constant 1 : index
@@ -36,7 +36,7 @@ kernel.def target(@target) @subgroup_broadcast_lane_out_of_range_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_broadcast_payload_rejected() {
   %c1 = index.constant 1 : index
@@ -52,7 +52,7 @@ kernel.def target(@target) @subgroup_broadcast_payload_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_broadcast_first_payload_rejected() {
   %c1 = index.constant 1 : index
@@ -67,7 +67,7 @@ kernel.def target(@target) @subgroup_broadcast_first_payload_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_shuffle_dynamic_offset_rejected() {
   %c1 = index.constant 1 : index
@@ -87,7 +87,7 @@ kernel.def target(@target) @subgroup_shuffle_dynamic_offset_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_shuffle_dynamic_width_rejected() {
   %c1 = index.constant 1 : index
@@ -107,7 +107,7 @@ kernel.def target(@target) @subgroup_shuffle_dynamic_width_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_shuffle_non_power_of_two_width_rejected() {
   %c1 = index.constant 1 : index
@@ -124,7 +124,7 @@ kernel.def target(@target) @subgroup_shuffle_non_power_of_two_width_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_shuffle_offset_out_of_range_rejected() {
   %c1 = index.constant 1 : index
@@ -141,7 +141,7 @@ kernel.def target(@target) @subgroup_shuffle_offset_out_of_range_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_shuffle_payload_rejected() {
   %c1 = index.constant 1 : index
@@ -158,7 +158,7 @@ kernel.def target(@target) @subgroup_shuffle_payload_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_reduce_cluster_stride_rejected() {
   %c1 = index.constant 1 : index
@@ -173,7 +173,7 @@ kernel.def target(@target) @subgroup_reduce_cluster_stride_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_reduce_cluster_size_rejected() {
   %c1 = index.constant 1 : index
@@ -188,7 +188,7 @@ kernel.def target(@target) @subgroup_reduce_cluster_size_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_reduce_cluster_multiple_rejected() {
   %c1 = index.constant 1 : index
@@ -203,7 +203,7 @@ kernel.def target(@target) @subgroup_reduce_cluster_multiple_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_reduce_kind_rejected() {
   %c1 = index.constant 1 : index
@@ -218,7 +218,7 @@ kernel.def target(@target) @subgroup_reduce_kind_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_reduce_partial_wave_rejected() {
   %c1 = index.constant 1 : index
@@ -233,7 +233,7 @@ kernel.def target(@target) @subgroup_reduce_partial_wave_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_reduce_payload_rejected() {
   %c1 = index.constant 1 : index
@@ -248,7 +248,7 @@ kernel.def target(@target) @subgroup_reduce_payload_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_scan_cluster_rejected() {
   %c1 = index.constant 1 : index
@@ -263,7 +263,7 @@ kernel.def target(@target) @subgroup_scan_cluster_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_scan_kind_rejected() {
   %c1 = index.constant 1 : index
@@ -278,7 +278,7 @@ kernel.def target(@target) @subgroup_scan_kind_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_scan_partial_wave_rejected() {
   %c1 = index.constant 1 : index
@@ -293,7 +293,7 @@ kernel.def target(@target) @subgroup_scan_partial_wave_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_scan_payload_rejected() {
   %c1 = index.constant 1 : index
@@ -308,7 +308,7 @@ kernel.def target(@target) @subgroup_scan_payload_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_scan_wave_count_rejected() {
   %c1 = index.constant 1 : index
@@ -323,7 +323,7 @@ kernel.def target(@target) @workgroup_scan_wave_count_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_match_any_f32_requires_legalization() {
   %c1 = index.constant 1 : index
@@ -338,7 +338,7 @@ kernel.def target(@target) @subgroup_match_any_f32_requires_legalization() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_match_all_f32_requires_legalization() {
   %c1 = index.constant 1 : index
@@ -357,7 +357,7 @@ kernel.def target(@target) @subgroup_match_all_f32_requires_legalization() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_vote_ballot_uniform_predicate_rejected() {
   %c1 = index.constant 1 : index
@@ -387,7 +387,7 @@ kernel.def target(@target) @subgroup_active_mask_i32_wave64_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_broadcast_wave64_native_width_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -403,7 +403,7 @@ kernel.def target(@target) @subgroup_broadcast_wave64_native_width_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_broadcast_first_wave64_native_width_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -418,7 +418,7 @@ kernel.def target(@target) @subgroup_broadcast_first_wave64_native_width_rejecte
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_shuffle_wave64_native_width_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -434,7 +434,7 @@ kernel.def target(@target) @subgroup_shuffle_wave64_native_width_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_reduce_wave64_native_width_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -452,7 +452,7 @@ kernel.def target(@target) @subgroup_reduce_wave64_native_width_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_reduce_wave64_leader_publication_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -474,7 +474,7 @@ kernel.def target(@target) @subgroup_reduce_wave64_leader_publication_rejected()
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_scan_wave64_native_width_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -488,7 +488,7 @@ kernel.def target(@target) @subgroup_scan_wave64_native_width_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_active_mask_wave64_native_width_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -501,7 +501,7 @@ kernel.def target(@target) @subgroup_active_mask_wave64_native_width_rejected() 
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_ballot_wave64_native_width_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -518,7 +518,7 @@ kernel.def target(@target) @subgroup_ballot_wave64_native_width_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_vote_any_wave64_native_width_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -539,7 +539,7 @@ kernel.def target(@target) @subgroup_vote_any_wave64_native_width_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_vote_all_wave64_native_width_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index

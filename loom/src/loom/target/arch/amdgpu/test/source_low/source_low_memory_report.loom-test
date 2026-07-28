@@ -18,7 +18,7 @@ COMPILE-REPORT: workload workgroup_size=32x1x1 flat_workgroup_size=32 workgroup_
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_static_lds_bank_pattern_unknown() {
   %c1 = index.constant 1 : index
@@ -49,7 +49,7 @@ COMPILE-REPORT: source_low_memory_root[0] function=report_static_lds_bank_patter
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_lds_f16_subword_bank_fields() {
   %c1 = index.constant 1 : index
@@ -100,7 +100,7 @@ COMPILE-REPORT: source_low_memory_argument_packet[1] function=report_lds_f16_sub
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_lds_read2_write2_bank_fields() {
   %c1 = index.constant 1 : index
@@ -146,7 +146,7 @@ COMPILE-REPORT: source_low_memory_argument_packet[0] function=report_lds_read2_w
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_lds_b128_single_lane_extract() {
   %c1 = index.constant 1 : index
@@ -199,7 +199,7 @@ COMPILE-REPORT: source_low_memory_argument_packet[1] function=report_lds_b128_si
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_global_and_descriptor_load_families() {
   %c1 = index.constant 1 : index
@@ -245,7 +245,7 @@ COMPILE-REPORT: source_low_memory_argument_packet[2] function=report_global_and_
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_bf16_result_fragment_packets() {
   %unit = index.constant 1 : index
@@ -595,7 +595,7 @@ COMPILE-REPORT: source_low_memory_strategy[0] function=report_gfx1250_bf16_resul
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_launch_subgroup_fragment_footprint() {
   %unit = index.constant 1 : index
@@ -655,7 +655,7 @@ COMPILE-REPORT: source_low_memory_strategy[0] function=report_launch_subgroup_fr
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_fp8_fragment_exact_packed_decode() {
   %unit = index.constant 1 : index
@@ -700,7 +700,7 @@ COMPILE-REPORT: source_low_memory_strategy[0] function=report_fp8_fragment_exact
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_fp8_fragment_finite_nan_storage_packed_decode() {
   %unit = index.constant 1 : index
@@ -747,7 +747,7 @@ COMPILE-REPORT: source_low_memory_strategy[0] function=report_fp8_fragment_finit
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_fp8_fragment_finite_only_storage_packed_decode() {
   %unit = index.constant 1 : index
@@ -794,7 +794,7 @@ COMPILE-REPORT: source_low_memory_strategy[0] function=report_fp8_fragment_finit
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_fp8_fragment_compact_finite_only_storage_decode() {
   %unit = index.constant 1 : index
@@ -841,7 +841,7 @@ COMPILE-REPORT: source_low_memory_strategy[0] function=report_fp8_fragment_compa
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_fp8_fragment_finite_packed_decode() {
   %unit = index.constant 1 : index
@@ -888,7 +888,7 @@ COMPILE-REPORT: source_low_memory_strategy[0] function=report_fp8_fragment_finit
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_fp8_fragment_f16_finite_only_storage_decode() {
   %unit = index.constant 1 : index
@@ -935,7 +935,7 @@ COMPILE-REPORT: source_low_memory_strategy[0] function=report_fp8_fragment_f16_f
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_fp8_fragment_f16_finite_packed_decode() {
   %unit = index.constant 1 : index
@@ -982,7 +982,7 @@ COMPILE-REPORT: source_low_memory_strategy[0] function=report_fp8_fragment_f16_f
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_bf8_fragment_exact_packed_decode() {
   %unit = index.constant 1 : index
@@ -1027,7 +1027,7 @@ COMPILE-REPORT: source_low_memory_strategy[0] function=report_bf8_fragment_exact
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_bf8_fragment_finite_only_decode() {
   %unit = index.constant 1 : index
@@ -1074,7 +1074,7 @@ COMPILE-REPORT: source_low_memory_strategy[0] function=report_bf8_fragment_finit
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_bf8_fragment_finite_packed_decode() {
   %unit = index.constant 1 : index

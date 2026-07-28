@@ -1,6 +1,6 @@
 // RUN: emit source-low diagnostics=memory output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @static_lds_bank_pattern_unknown() {
   %c1 = index.constant 1 : index
@@ -17,7 +17,7 @@ kernel.def target(@target) @static_lds_bank_pattern_unknown() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @static_lds_bank_pattern_unknown() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @static_lds_bank_pattern_unknown() asm<amdgpu.gfx11.generic.core> {
   %6 = storage {byte_alignment = 4, byte_length = 4} : low.storage<workgroup>
   %one = v_mov_b32 1
   %9 = v_mov_b32 0
@@ -27,7 +27,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @addtid_byte_stride_selected_reason_fields() {
   %unit = index.constant 1 : index
@@ -50,7 +50,7 @@ kernel.def target(@target) @addtid_byte_stride_selected_reason_fields() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @addtid_byte_stride_selected_reason_fields() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @addtid_byte_stride_selected_reason_fields() asm<amdgpu.gfx11.generic.core> {
   %10 = storage {byte_alignment = 16, byte_length = 64} : low.storage<workgroup>
   %one = v_mov_b32 16843009
   %13 = s_mov_b32_m0_imm 0
@@ -64,7 +64,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @addtid_element_stride_reason_fields() {
   %unit = index.constant 1 : index
@@ -87,7 +87,7 @@ kernel.def target(@target) @addtid_element_stride_reason_fields() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @addtid_element_stride_reason_fields() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @addtid_element_stride_reason_fields() asm<amdgpu.gfx11.generic.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %10 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %one = v_mov_b32 1
@@ -100,7 +100,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @addtid_cross_wave_reason_fields() {
   %unit = index.constant 1 : index
@@ -123,7 +123,7 @@ kernel.def target(@target) @addtid_cross_wave_reason_fields() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @addtid_cross_wave_reason_fields() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @addtid_cross_wave_reason_fields() asm<amdgpu.gfx11.generic.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %10 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %one = v_mov_b32 1
@@ -136,7 +136,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @addtid_dynamic_stride_reason_fields() {
   %unit = index.constant 1 : index
@@ -164,7 +164,7 @@ kernel.def target(@target) @addtid_dynamic_stride_reason_fields() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @addtid_dynamic_stride_reason_fields() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @addtid_dynamic_stride_reason_fields() asm<amdgpu.gfx11.generic.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %13 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %one = v_mov_b32 1
@@ -180,7 +180,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @addtid_payload_width_reason_fields() {
   %unit = index.constant 1 : index
@@ -199,7 +199,7 @@ kernel.def target(@target) @addtid_payload_width_reason_fields() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @addtid_payload_width_reason_fields() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @addtid_payload_width_reason_fields() asm<amdgpu.gfx11.generic.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %9 = storage {byte_alignment = 16, byte_length = 512} : low.storage<workgroup>
   %11 = v_mov_b32 1
@@ -211,7 +211,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @global_memory_diagnostics_stay_silent() {
   %c1 = index.constant 1 : index
@@ -227,7 +227,7 @@ kernel.def target(@target) @global_memory_diagnostics_stay_silent() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @global_memory_diagnostics_stay_silent() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @global_memory_diagnostics_stay_silent() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %one = v_mov_b32 1
@@ -238,7 +238,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @multi_term_lds_bank_pattern_unknown() {
   %c1 = index.constant 1 : index
@@ -259,7 +259,7 @@ kernel.def target(@target) @multi_term_lds_bank_pattern_unknown() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @multi_term_lds_bank_pattern_unknown() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @multi_term_lds_bank_pattern_unknown() asm<amdgpu.gfx11.generic.core> {
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
   %lane_x = v_and_b32_lit %packed_tid, 1023
   %12 = v_lshrrev_b32_src0_inline %packed_tid, 10
@@ -275,7 +275,7 @@ low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @lds_read2_write2_structured_bank_fields() {
   %c1 = index.constant 1 : index
@@ -299,7 +299,7 @@ kernel.def target(@target) @lds_read2_write2_structured_bank_fields() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_read2_write2_structured_bank_fields() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_read2_write2_structured_bank_fields() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %14 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>

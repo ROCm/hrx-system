@@ -1,6 +1,6 @@
 // RUN: pass-report scf-to-cfg,cfg-simplify,source-to-low,low-dce
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_nested_cfg_loop_memory_counts() {
   %c1 = index.constant 1 : index

@@ -1,6 +1,6 @@
 // RUN: pass-report target-legalize{mode=final},dce,canonicalize,source-to-low,low-dce
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_scalar_arcp_reciprocal_div(%rhs: f32) -> (f32) {
   %one = scalar.constant 1.0 : f32
@@ -16,7 +16,7 @@ COMPILE-REPORT: source_low[1] function=report_scalar_arcp_reciprocal_div source_
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_scalar_arcp_div(%lhs: f32, %rhs: f32) -> (f32) {
   %quotient = scalar.divf<nnan|ninf|nsz|arcp> %lhs, %rhs : f32
@@ -30,7 +30,7 @@ COMPILE-REPORT: source_low[0] function=report_scalar_arcp_div source_op=scalar.d
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_scalar_arcp_literal_lhs_div(%rhs: f32) -> (f32) {
   %scale_limit = scalar.constant 127.0 : f32
@@ -46,7 +46,7 @@ COMPILE-REPORT: source_low[1] function=report_scalar_arcp_literal_lhs_div source
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_scalar_exact_div(%lhs: f32, %rhs: f32) -> (f32) {
   %quotient = scalar.divf %lhs, %rhs : f32
@@ -60,7 +60,7 @@ COMPILE-REPORT: source_low[0] function=report_scalar_exact_div source_op=scalar.
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_vector_arcp_reciprocal_div(%rhs: vector<2xf32>) -> (vector<2xf32>) {
   %one = vector.constant 1.0 : vector<2xf32>
@@ -76,7 +76,7 @@ COMPILE-REPORT: source_low[1] function=report_vector_arcp_reciprocal_div source_
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_vector_arcp_div(%lhs: vector<2xf32>, %rhs: vector<2xf32>) -> (vector<2xf32>) {
   %quotient = vector.divf<nnan|ninf|nsz|arcp> %lhs, %rhs : vector<2xf32>
@@ -90,7 +90,7 @@ COMPILE-REPORT: source_low[0] function=report_vector_arcp_div source_op=vector.d
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_vector_exact_div(%lhs: vector<1xf32>, %rhs: vector<1xf32>) -> (vector<1xf32>) {
   %quotient = vector.divf %lhs, %rhs : vector<1xf32>
@@ -104,7 +104,7 @@ COMPILE-REPORT: source_low[0] function=report_vector_exact_div source_op=vector.
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_scalar_roundeven(%input: f32) -> (f32) {
   %rounded = scalar.roundevenf %input : f32
@@ -118,7 +118,7 @@ COMPILE-REPORT: source_low[0] function=report_scalar_roundeven source_op=scalar.
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_scalar_round_afn(%input: f32) -> (f32) {
   %rounded = scalar.roundf<afn> %input : f32
@@ -132,7 +132,7 @@ COMPILE-REPORT: source_low[0] function=report_scalar_round_afn source_op=scalar.
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_vector_roundeven(%input: vector<2xf32>) -> (vector<2xf32>) {
   %rounded = vector.roundevenf %input : vector<2xf32>
@@ -146,7 +146,7 @@ COMPILE-REPORT: source_low[0] function=report_vector_roundeven source_op=vector.
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_vector_round_afn(%input: vector<2xf32>) -> (vector<2xf32>) {
   %rounded = vector.roundf<afn> %input : vector<2xf32>

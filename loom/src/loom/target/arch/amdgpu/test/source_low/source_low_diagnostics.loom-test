@@ -1,6 +1,6 @@
 // RUN: emit source-low diagnostics=memory output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @lds_b32_diagnostics() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -22,7 +22,7 @@ kernel.def target(@target) @lds_b32_diagnostics() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_b32_diagnostics() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_b32_diagnostics() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %13 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
@@ -36,7 +36,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @lds_padded_diagnostics() {
   %c1 = index.constant 1 : index
@@ -60,7 +60,7 @@ kernel.def target(@target) @lds_padded_diagnostics() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_padded_diagnostics() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_padded_diagnostics() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %14 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
@@ -77,7 +77,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @lds_read2_write2_diagnostics() {
   %c1 = index.constant 1 : index
@@ -101,7 +101,7 @@ kernel.def target(@target) @lds_read2_write2_diagnostics() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_read2_write2_diagnostics() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_read2_write2_diagnostics() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %14 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
@@ -116,7 +116,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @lds_conflict_risk_diagnostics() {
   %c1 = index.constant 1 : index
@@ -139,7 +139,7 @@ kernel.def target(@target) @lds_conflict_risk_diagnostics() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_conflict_risk_diagnostics() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_conflict_risk_diagnostics() asm<amdgpu.gfx11.generic.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %13 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
@@ -154,7 +154,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @lds_f16_subword_stride_diagnostics() {
   %unit = index.constant 1 : index
@@ -178,7 +178,7 @@ kernel.def target(@target) @lds_f16_subword_stride_diagnostics() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_f16_subword_stride_diagnostics() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_f16_subword_stride_diagnostics() asm<amdgpu.gfx11.generic.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -193,7 +193,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @buffer_view_i1_rejected(%input: buffer) {
   %zero = index.constant 0 : offset
@@ -204,7 +204,7 @@ func.def target(@target) @buffer_view_i1_rejected(%input: buffer) {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @dynamic_scaled_index_large_extent_flat_load(%input: buffer, %index: index) -> (i32) {
   %zero = index.constant 0 : offset
@@ -215,7 +215,7 @@ func.def target(@target) @dynamic_scaled_index_large_extent_flat_load(%input: bu
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @dynamic_scaled_index_large_extent_flat_load(%bounded_index: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@target) abi(hal_kernel) @dynamic_scaled_index_large_extent_flat_load(%bounded_index: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4294967296} : reg<amdgpu.sgpr x2>
   %10 = v_mov_b32 0
   %11 = s_lshl_b32_rhs_inline %bounded_index, 2
@@ -231,7 +231,7 @@ low.func.def target(@target) abi(hal_kernel) @dynamic_scaled_index_large_extent_
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @dynamic_view_base_b128_alignment_rejected(%input: buffer, %offset: offset) -> (vector<4xi32>) {
   %base = index.assume %offset [range(%offset, 0, 4096)] : offset
@@ -244,7 +244,7 @@ func.def target(@target) @dynamic_view_base_b128_alignment_rejected(%input: buff
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @fragment_store_tail_footprint_rejected(%output: buffer, %value: vector<8xf32>) {
   %zero = index.constant 0 : offset
@@ -259,7 +259,7 @@ func.def target(@target) @fragment_store_tail_footprint_rejected(%output: buffer
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @fragment_store_launch_subgroup_footprint() {
   %unit = index.constant 1 : index
@@ -286,7 +286,7 @@ kernel.def target(@target) @fragment_store_launch_subgroup_footprint() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(64, 1, 1) @fragment_store_launch_subgroup_footprint() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(64, 1, 1) @fragment_store_launch_subgroup_footprint() asm<amdgpu.gfx11.generic.core> {
   %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %19 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 262144} : reg<amdgpu.sgpr x2>
@@ -314,7 +314,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(64, 1, 1
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @oversized_f32x64_store_rejected(%output: buffer, %value: vector<64xf32>) {
   %zero = index.constant 0 : offset
@@ -327,7 +327,7 @@ func.def target(@target) @oversized_f32x64_store_rejected(%output: buffer, %valu
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @oversized_bf16x128_store_rejected(%output: buffer, %value: vector<128xbf16>) {
   %zero = index.constant 0 : offset
@@ -340,7 +340,7 @@ func.def target(@target) @oversized_bf16x128_store_rejected(%output: buffer, %va
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_dynamic_byte_offset_range_rejected() {
   %one = index.constant 1 : index
@@ -362,7 +362,7 @@ kernel.def target(@target) @workgroup_dynamic_byte_offset_range_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_dependent_lds_index_rejected() {
   %unit = index.constant 1 : index
@@ -387,7 +387,7 @@ kernel.def target(@target) @workgroup_dependent_lds_index_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @lds_i8x8_strided_load_rejected() {
   %c1 = index.constant 1 : index
@@ -406,7 +406,7 @@ kernel.def target(@target) @lds_i8x8_strided_load_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @cache_policy_non_temporal_load_rejected() {
   %c1 = index.constant 1 : index
@@ -416,14 +416,14 @@ kernel.def target(@target) @cache_policy_non_temporal_load_rejected() {
   %zero = index.constant 0 : offset
   %input_view = buffer.view %input[%zero] : buffer -> view<64x4xi32, #dense>
   // REMARK@+2: BACKEND/040 "rejected cache policy 'device/non_temporal'" "decision 'memory_cache_policy.descriptor_encoding'" "encoding 'gfx9_11_glc_slc_dlc'"
-  // ERROR@+1: AMDGPU/024 {constraint_key="memory_cache_policy.descriptor_encoding", memory_space="global", cache_scope="device", cache_temporal="non_temporal", descriptor_set_key="amdgpu.rdna3.core"}
+  // ERROR@+1: AMDGPU/024 {constraint_key="memory_cache_policy.descriptor_encoding", memory_space="global", cache_scope="device", cache_temporal="non_temporal", descriptor_set_key="amdgpu.gfx11.generic.core"}
   %loaded = vector.load %input_view[%tid, 0] {cache_scope = device, cache_temporal = non_temporal} : view<64x4xi32, #dense> -> vector<4xi32>
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @cache_policy_workgroup_store_rejected() {
   %c1 = index.constant 1 : index
@@ -436,14 +436,14 @@ kernel.def target(@target) @cache_policy_workgroup_store_rejected() {
   %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64x4xi32, #dense>
   %one = vector.constant 1 : vector<4xi32>
   // REMARK@+2: BACKEND/040 "rejected cache policy 'device/non_temporal'" "decision 'memory_cache_policy.workgroup'" "store in workgroup"
-  // ERROR@+1: AMDGPU/024 {constraint_key="memory_cache_policy.workgroup", memory_space="workgroup", cache_scope="device", cache_temporal="non_temporal", descriptor_set_key="amdgpu.rdna3.core"}
+  // ERROR@+1: AMDGPU/024 {constraint_key="memory_cache_policy.workgroup", memory_space="workgroup", cache_scope="device", cache_temporal="non_temporal", descriptor_set_key="amdgpu.gfx11.generic.core"}
   vector.store %one, %scratch_view[%tid, 0] {cache_scope = device, cache_temporal = non_temporal} : vector<4xi32>, view<64x4xi32, #dense>
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @global_atomic_system_scope_rejected() {
   %c1 = index.constant 1 : index
@@ -461,7 +461,7 @@ kernel.def target(@target) @global_atomic_system_scope_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @global_dynamic_offset_sum_flat() {
   %c1 = index.constant 1 : index
@@ -483,13 +483,13 @@ kernel.def target(@target) @global_dynamic_offset_sum_flat() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 4, 1) workgroup_count(1, 1, 1) @global_dynamic_offset_sum_flat() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 4, 1) workgroup_count(1, 1, 1) @global_dynamic_offset_sum_flat() asm<amdgpu.gfx11.generic.core> {
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_count_dynamic_workgroup_size_rejected(%workgroups: index, %size: index) {
   %c1 = index.constant 1 : index
@@ -502,7 +502,7 @@ kernel.def target(@target) @workgroup_count_dynamic_workgroup_size_rejected(%wor
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_count_non_power_of_two_workgroup_size_rejected(%workgroups: index) {
   %c1 = index.constant 1 : index
@@ -516,7 +516,7 @@ kernel.def target(@target) @workgroup_count_non_power_of_two_workgroup_size_reje
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_id_rejected(%size: index) {
   %c1 = index.constant 1 : index
@@ -528,13 +528,13 @@ kernel.def target(@target) @subgroup_id_rejected(%size: index) {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @subgroup_id_rejected() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @subgroup_id_rejected() asm<amdgpu.gfx11.generic.core> {
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_lane_id_rejected(%size: index) {
   %c1 = index.constant 1 : index
@@ -546,13 +546,13 @@ kernel.def target(@target) @subgroup_lane_id_rejected(%size: index) {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @subgroup_lane_id_rejected() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @subgroup_lane_id_rejected() asm<amdgpu.gfx11.generic.core> {
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_vote_count_rejected() {
   %c1 = index.constant 1 : index
@@ -565,7 +565,7 @@ kernel.def target(@target) @workgroup_vote_count_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @vector_transpose_dynamic_shape_rejected(%n: index) {
   // ERROR@+1: TARGET/031 {type_constraint="vector.static"}
@@ -577,7 +577,7 @@ func.def target(@target) @vector_transpose_dynamic_shape_rejected(%n: index) {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @fragment_rhs_dense_layout_rejected() {
   %c1 = index.constant 1 : index
@@ -595,7 +595,7 @@ kernel.def target(@target) @fragment_rhs_dense_layout_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @fragment_payload_rejected() {
   %c1 = index.constant 1 : index
@@ -613,7 +613,7 @@ kernel.def target(@target) @fragment_payload_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @fragment_wave64_result_wide_f32_payload_rejected() {
   %unit = index.constant 1 : index
@@ -633,7 +633,7 @@ kernel.def target(@target) @fragment_wave64_result_wide_f32_payload_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @fragment_wave64_result_ordinary_f16_storage_rejected() {
   %unit = index.constant 1 : index
@@ -654,7 +654,7 @@ kernel.def target(@target) @fragment_wave64_result_ordinary_f16_storage_rejected
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @fragment_store_conversion_rejected() {
   %unit = index.constant 1 : index
@@ -770,7 +770,7 @@ kernel.def target(@target) @fragment_sparse_density_layout_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @fragment_private_memory_rejected() {
   %c1 = index.constant 1 : index
@@ -790,7 +790,7 @@ kernel.def target(@target) @fragment_private_memory_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @fragment_static_vaddr_offset_range_rejected() {
   %c1 = index.constant 1 : index
@@ -808,7 +808,7 @@ kernel.def target(@target) @fragment_static_vaddr_offset_range_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @fragment_repack_result_to_lhs_rejected(%payload: vector<8xf32>) -> (vector<16xf16>) {
   %m = index.constant 16 : index
@@ -823,7 +823,7 @@ func.def target(@target) @fragment_repack_result_to_lhs_rejected(%payload: vecto
 
 // RUN: emit source-low diagnostics=all output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @fragment_repack_rejection_stops_multiblock_emission(%payload: vector<8xf32>, %value: f32) -> (vector<16xbf16>, f32) {
   %m = index.constant 16 : index
@@ -853,7 +853,7 @@ func.def target(@target) @fragment_repack_result_to_lhs_shape_rejected(%payload:
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @packed_select_requires_uniform_mask(%mask: vector<4xi1>, %true_value: vector<4xbf16>, %false_value: vector<4xbf16>) -> (vector<4xbf16>) {
   // ERROR@+1: AMDGPU/023 {constraint_key="select.packed_mask_uniform"}
