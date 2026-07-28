@@ -2344,8 +2344,10 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   // completion observed by the host; HIP stream ordering requires repeated
   // graph launches on the same stream to execute FIFO even when the caller does
   // not synchronize between launches.
-  uint64_t stream_wait_value = stream->pending_value;
-  uint64_t stream_signal_value = stream_wait_value + 1;
+  uint64_t stream_wait_value = 0;
+  uint64_t stream_signal_value = 0;
+  iree_status_t status = iree_hal_streaming_stream_reserve_next_value_locked(
+      stream, &stream_wait_value, &stream_signal_value);
 
   iree_hal_semaphore_t* wait_semaphore = stream->timeline_semaphore;
   uint64_t wait_payload_value = stream_wait_value;
@@ -2361,8 +2363,10 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
       .semaphores = &signal_semaphore,
       .payload_values = &signal_payload_value,
   };
-  iree_status_t status = iree_hal_streaming_graph_exec_submit_blocks_locked(
-      exec, stream, wait_semaphores, signal_semaphores);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_graph_exec_submit_blocks_locked(
+        exec, stream, wait_semaphores, signal_semaphores);
+  }
 
   if (iree_status_is_ok(status)) {
     stream->pending_value = stream_signal_value;

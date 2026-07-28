@@ -547,6 +547,34 @@ typedef struct iree_hal_streaming_stream_t {
   iree_allocator_t host_allocator;
 } iree_hal_streaming_stream_t;
 
+// Reserves the next value on |stream|'s timeline for one submission and returns
+// the pair of values that submission names. Callers must hold |stream->mutex|,
+// which is what keeps two submissions on the same stream from selecting the
+// same value, and must publish |*out_signal_value| to |stream->pending_value|
+// themselves so a reservation the queue never accepted leaves the timeline
+// where it was.
+//
+// |*out_wait_value| is the value already reserved on the timeline that the
+// submission has to wait on to stay behind the work in front of it. It is zero
+// when the stream has never submitted, in which case there is nothing behind
+// the reservation and callers drop the wait rather than waiting on value zero.
+//
+// This is the only place a stream timeline value is reserved. Every submission
+// path on a stream goes through it, so the check that the timeline has values
+// left has exactly one owner.
+static inline iree_status_t iree_hal_streaming_stream_reserve_next_value_locked(
+    iree_hal_streaming_stream_t* stream, uint64_t* out_wait_value,
+    uint64_t* out_signal_value) {
+  const uint64_t wait_value = stream->pending_value;
+  if (IREE_UNLIKELY(wait_value == UINT64_MAX)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "stream timeline value overflow");
+  }
+  *out_wait_value = wait_value;
+  *out_signal_value = wait_value + 1;
+  return iree_ok_status();
+}
+
 // Updates capture status while keeping the owning context's capture-stream
 // count in sync. Callers serialize access to the stream capture fields.
 static inline void iree_hal_streaming_stream_set_capture_status(

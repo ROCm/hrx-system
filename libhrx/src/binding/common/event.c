@@ -212,20 +212,21 @@ iree_status_t iree_hal_streaming_event_record(
   iree_slim_mutex_lock(&stream->mutex);
 
   // The record marks a point on the recording stream's timeline: the barrier
-  // reserves the stream's next value under the stream mutex and signals it once
+  // takes the stream's next value under the stream mutex and signals it once
   // everything already on the stream has completed. Every value on a stream
   // timeline is reserved exactly once and only ever increases, so a record can
   // never select a value that timeline has already passed no matter which
   // stream recorded the event before, and two streams recording the same event
   // at once draw from different timelines under different mutexes.
-  uint64_t stream_wait_value = stream->pending_value;
-  if (IREE_UNLIKELY(stream_wait_value == UINT64_MAX)) {
+  uint64_t stream_wait_value = 0;
+  uint64_t stream_signal_value = 0;
+  iree_status_t status = iree_hal_streaming_stream_reserve_next_value_locked(
+      stream, &stream_wait_value, &stream_signal_value);
+  if (!iree_status_is_ok(status)) {
     iree_slim_mutex_unlock(&stream->mutex);
     IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "stream timeline value overflow");
+    return status;
   }
-  uint64_t stream_signal_value = stream_wait_value + 1;
 
   // The wait is dropped when the stream has never submitted, matching the other
   // submission paths on the stream; nothing can be behind value zero.
@@ -241,7 +242,7 @@ iree_status_t iree_hal_streaming_event_record(
   };
 
   iree_hal_streaming_stream_t* previous_stream = NULL;
-  iree_status_t status = iree_hal_device_queue_barrier(
+  status = iree_hal_device_queue_barrier(
       stream->context->device, stream->queue_affinity, wait_semaphores,
       signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
   if (iree_status_is_ok(status)) {
