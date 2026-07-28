@@ -16,13 +16,13 @@
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/source_context.h"
 #include "iree/hal/drivers/amdgpu/tsan_state.h"
-#include "iree/hal/drivers/amdgpu/util/code_object_target.h"
 #include "iree/hal/drivers/amdgpu/util/global_table.h"
 #include "iree/hal/drivers/amdgpu/util/hsaco_metadata.h"
 #include "iree/hal/drivers/amdgpu/util/kernarg_ring.h"
 #include "iree/hal/drivers/amdgpu/util/loaded_code_object.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/drivers/amdgpu/util/vmem.h"
+#include "iree/hal/executable/amdgpu/code_object_target.h"
 #include "iree/hal/executable/amdgpu/target_id.h"
 
 //===----------------------------------------------------------------------===//

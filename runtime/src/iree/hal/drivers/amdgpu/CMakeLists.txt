@@ -318,7 +318,6 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::device::timestamp
     iree::hal::drivers::amdgpu::device::tsan
     iree::hal::drivers::amdgpu::util::block_pool
-    iree::hal::drivers::amdgpu::util::code_object_target
     iree::hal::drivers::amdgpu::util::device_clock
     iree::hal::drivers::amdgpu::util::device_library
     iree::hal::drivers::amdgpu::util::feedback_channel
@@ -336,6 +335,7 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::util::shadow_map
     iree::hal::drivers::amdgpu::util::topology
     iree::hal::drivers::amdgpu::util::vmem
+    iree::hal::executable::amdgpu::code_object_target
     iree::hal::executable::amdgpu::target_id
     iree::hal::memory::passthrough_pool
     iree::hal::memory::slab_provider

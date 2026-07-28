@@ -305,47 +305,6 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
-    code_object_target
-  HDRS
-    "code_object_target.h"
-  TEXTUAL_HDRS
-    "${PROJECT_SOURCE_DIR}/build_tools/amdgpu/elf_machine_map.inl"
-  SRCS
-    "code_object_target.c"
-  DEPS
-    iree::base
-    iree::base::core_headers
-    iree::hal::executable::amdgpu::target_id
-    iree::hal::utils::elf_format
-  PUBLIC
-)
-endif()
-
-if(IREE_HAL_DRIVER_AMDGPU)
-iree_cc_test(
-  NAME
-    code_object_target_test
-  SRCS
-    "code_object_target_test.cc"
-  DEPS
-    ::code_object_target
-    iree::base
-    iree::base::core_headers
-    iree::hal::executable::amdgpu::target_id
-    iree::testing::gtest
-    iree::testing::gtest_main
-  LABELS
-    "iree-build-requirement=runtime.hal.amdgpu"
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "runtime-resource=amd-gpu"
-  RESOURCE_GROUP
-    iree-hal-drivers-amdgpu-tests
-)
-endif()
-
-if(IREE_HAL_DRIVER_AMDGPU)
-iree_cc_library(
-  NAME
     device_clock
   HDRS
     "device_clock.h"
