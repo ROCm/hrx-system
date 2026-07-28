@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from loom.target.arch.amdgpu.encoding import (
     AMDGPU_DPP_CONTROL_ENCODING_FORMAT_IDS,
     AMDGPU_ENCODING_FORMAT_NONE,
@@ -1012,12 +1014,16 @@ def _with_instruction_classes(descriptor_set: DescriptorSet) -> DescriptorSet:
     return replace(descriptor_set, descriptors=tuple(descriptors))
 
 
+_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X = 1 << 0
+
+
 @dataclass(frozen=True, slots=True)
 class _AmdgpuCoreDescriptorSetBuilder:
     base: DescriptorSet
     overlay_rows: Callable[[], tuple[AmdgpuDescriptorOverlay, ...]]
     overlay_descriptors: Callable[[AmdgpuIsaFactSource], tuple[Descriptor, ...]]
     extra_descriptors: tuple[Descriptor, ...] = ()
+    flags: int = 0
 
 
 _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
@@ -1036,6 +1042,30 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
         overlay_rows=_gfx11_core_overlays,
         overlay_descriptors=_gfx11_core_overlay_descriptors,
         extra_descriptors=(_s_delay_alu_descriptor(),),
+    ),
+    "gfx11_generic": _AmdgpuCoreDescriptorSetBuilder(
+        base=_AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+        overlay_rows=_gfx11_core_overlays,
+        overlay_descriptors=_gfx11_core_overlay_descriptors,
+        extra_descriptors=(_s_delay_alu_descriptor(),),
+    ),
+    "gfx12_generic": _AmdgpuCoreDescriptorSetBuilder(
+        base=_AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+        overlay_rows=_gfx12_core_overlays,
+        overlay_descriptors=_gfx12_core_overlay_descriptors,
+        extra_descriptors=(_s_delay_alu_descriptor(),),
+    ),
+    "gfx12_5_generic": _AmdgpuCoreDescriptorSetBuilder(
+        base=_AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+        overlay_rows=_gfx1250_core_overlays,
+        overlay_descriptors=_gfx1250_core_overlay_descriptors,
+        extra_descriptors=(
+            _s_delay_alu_descriptor(),
+            _s_wait_xcnt_descriptor(),
+            *_gfx125x_cluster_descriptors(),
+            *_gfx125x_tensor_descriptors(),
+        ),
+        flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     ),
     "rdna3_5": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE,
@@ -1059,6 +1089,7 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
             *_gfx125x_cluster_descriptors(),
             *_gfx125x_tensor_descriptors(),
         ),
+        flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     ),
 }
 
@@ -1067,9 +1098,34 @@ AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS = tuple(
 )
 
 
-def build_amdgpu_core_descriptor_set_from_spec(
+def _build_amdgpu_core_descriptor_set_from_spec(
     target: str,
+    builder: _AmdgpuCoreDescriptorSetBuilder,
     spec: AmdgpuIsaFactSource,
+) -> DescriptorSet:
+    descriptor_set = _with_overlay_descriptors(
+        builder.base,
+        spec,
+        builder.overlay_descriptors(spec),
+        builder.extra_descriptors,
+    )
+    is_gfx125x = bool(builder.flags & _AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X)
+    if is_gfx125x:
+        descriptor_set = _with_gfx125x_vgpr_msb_address_states(descriptor_set)
+    descriptor_set = _with_storage_lease_rows(
+        descriptor_set, enable_gfx125x_xcnt=is_gfx125x
+    )
+    descriptor_set = _with_instruction_classes(descriptor_set)
+    _validate_descriptor_encoding_formats(target, spec, descriptor_set)
+    _validate_dpp_control_fields(descriptor_set)
+    _validate_matrix_high_half_select_fields(descriptor_set)
+    _validate_native_asm_values(descriptor_set)
+    return descriptor_set
+
+
+def build_amdgpu_core_descriptor_set_from_specs(
+    target: str,
+    specs: Mapping[str, AmdgpuIsaFactSource],
 ) -> DescriptorSet:
     try:
         builder = _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target]
@@ -1079,26 +1135,60 @@ def build_amdgpu_core_descriptor_set_from_spec(
             f"unsupported AMDGPU descriptor target '{target}'; "
             f"expected one of: {supported}"
         ) from exc
-    validate_amdgpu_descriptor_set_isa_xml(
-        amdgpu_descriptor_set_info_by_generator_target(target), spec
-    )
-    descriptor_set = _with_overlay_descriptors(
-        builder.base,
-        spec,
-        builder.overlay_descriptors(spec),
-        builder.extra_descriptors,
-    )
-    if target == "rdna4_gfx125x":
-        descriptor_set = _with_gfx125x_vgpr_msb_address_states(descriptor_set)
-    descriptor_set = _with_storage_lease_rows(
-        descriptor_set, enable_gfx125x_xcnt=target == "rdna4_gfx125x"
-    )
-    descriptor_set = _with_instruction_classes(descriptor_set)
-    _validate_descriptor_encoding_formats(target, spec, descriptor_set)
-    _validate_dpp_control_fields(descriptor_set)
-    _validate_matrix_high_half_select_fields(descriptor_set)
-    _validate_native_asm_values(descriptor_set)
+    info = amdgpu_descriptor_set_info_by_generator_target(target)
+    descriptor_sets: list[DescriptorSet] = []
+    for isa_info in info.isa_infos:
+        try:
+            spec = specs[isa_info.isa_xml_key]
+        except KeyError as exc:
+            raise ValueError(
+                f"AMDGPU descriptor target '{target}' is missing ISA XML key "
+                f"'{isa_info.isa_xml_key}'"
+            ) from exc
+        if (
+            spec.architecture_name != isa_info.isa_architecture_name
+            or spec.architecture_id != isa_info.isa_architecture_id
+        ):
+            raise ValueError(
+                f"{spec.source_name}: AMDGPU descriptor set {info.key} ISA XML "
+                f"key '{isa_info.isa_xml_key}' expects "
+                f"{isa_info.isa_architecture_name} architecture id "
+                f"{isa_info.isa_architecture_id}, found "
+                f"{spec.architecture_name} architecture id "
+                f"{spec.architecture_id}"
+            )
+        descriptor_sets.append(
+            _build_amdgpu_core_descriptor_set_from_spec(target, builder, spec)
+        )
+    descriptor_set = descriptor_sets[0]
+    for isa_info, member_descriptor_set in zip(
+        info.isa_infos[1:],
+        descriptor_sets[1:],
+        strict=True,
+    ):
+        if member_descriptor_set != descriptor_set:
+            raise ValueError(
+                f"AMDGPU descriptor target '{target}' does not have a common "
+                f"contract across ISA XML keys '{info.isa_infos[0].isa_xml_key}' "
+                f"and '{isa_info.isa_xml_key}'"
+            )
     return descriptor_set
+
+
+def build_amdgpu_core_descriptor_set_from_spec(
+    target: str,
+    spec: AmdgpuIsaFactSource,
+) -> DescriptorSet:
+    info = amdgpu_descriptor_set_info_by_generator_target(target)
+    if len(info.isa_infos) != 1:
+        keys = ", ".join(isa_info.isa_xml_key for isa_info in info.isa_infos)
+        raise ValueError(
+            f"AMDGPU descriptor target '{target}' requires ISA XML keys: {keys}"
+        )
+    return build_amdgpu_core_descriptor_set_from_specs(
+        target,
+        {info.isa_infos[0].isa_xml_key: spec},
+    )
 
 
 def build_amdgpu_core_descriptor_set(
@@ -1129,4 +1219,5 @@ __all__ = (
     "amdgpu_immediate_encoding_id_items",
     "build_amdgpu_core_descriptor_set",
     "build_amdgpu_core_descriptor_set_from_spec",
+    "build_amdgpu_core_descriptor_set_from_specs",
 )

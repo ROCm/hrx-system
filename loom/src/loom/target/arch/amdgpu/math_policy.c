@@ -258,6 +258,9 @@ static const loom_target_math_policy_t kAmdgpuGfx125xMathPolicy = {
 
 #define LOOM_AMDGPU_MATH_POLICY_Cdna3 (&kAmdgpuMathPolicy)
 #define LOOM_AMDGPU_MATH_POLICY_Cdna4 (&kAmdgpuMathPolicy)
+#define LOOM_AMDGPU_MATH_POLICY_Gfx11Generic (&kAmdgpuMathPolicy)
+#define LOOM_AMDGPU_MATH_POLICY_Gfx12Generic (&kAmdgpuMathPolicy)
+#define LOOM_AMDGPU_MATH_POLICY_Gfx125Generic (&kAmdgpuGfx125xMathPolicy)
 #define LOOM_AMDGPU_MATH_POLICY_Rdna3 (&kAmdgpuMathPolicy)
 #define LOOM_AMDGPU_MATH_POLICY_Rdna35 (&kAmdgpuMathPolicy)
 #define LOOM_AMDGPU_MATH_POLICY_Rdna4 (&kAmdgpuMathPolicy)
@@ -278,6 +281,9 @@ static const loom_target_math_policy_registry_entry_t
 
 #undef LOOM_AMDGPU_MATH_POLICY_Cdna3
 #undef LOOM_AMDGPU_MATH_POLICY_Cdna4
+#undef LOOM_AMDGPU_MATH_POLICY_Gfx11Generic
+#undef LOOM_AMDGPU_MATH_POLICY_Gfx12Generic
+#undef LOOM_AMDGPU_MATH_POLICY_Gfx125Generic
 #undef LOOM_AMDGPU_MATH_POLICY_Rdna3
 #undef LOOM_AMDGPU_MATH_POLICY_Rdna35
 #undef LOOM_AMDGPU_MATH_POLICY_Rdna4

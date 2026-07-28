@@ -563,21 +563,41 @@ def _materialize_descriptor_set_rows(
 ) -> tuple[_AmdgpuDescriptorSetRow, ...]:
     rows: list[_AmdgpuDescriptorSetRow] = []
     for info in descriptor_sets:
-        spec = isa_specs.get(info.isa_xml_key)
-        if spec is None:
-            raise ValueError(f"AMDGPU descriptor set {info.key} references missing ISA XML key '{info.isa_xml_key}'")
-        validate_amdgpu_descriptor_set_isa_xml(info, spec)
-        rows.append(
-            _AmdgpuDescriptorSetRow(
-                info=info,
-                sopp=_AmdgpuSoppOpcodeRow(
+        sopp_rows: list[_AmdgpuSoppOpcodeRow] = []
+        for isa_info in info.isa_infos:
+            spec = isa_specs.get(isa_info.isa_xml_key)
+            if spec is None:
+                raise ValueError(f"AMDGPU descriptor set {info.key} references missing ISA XML key '{isa_info.isa_xml_key}'")
+            if spec.architecture_name != isa_info.isa_architecture_name or spec.architecture_id != isa_info.isa_architecture_id:
+                validate_amdgpu_descriptor_set_isa_xml(info, spec)
+                raise ValueError(
+                    f"{spec.source_name}: AMDGPU descriptor set {info.key} ISA "
+                    f"XML key '{isa_info.isa_xml_key}' does not identify "
+                    f"{isa_info.isa_architecture_name} architecture id "
+                    f"{isa_info.isa_architecture_id}"
+                )
+            sopp_rows.append(
+                _AmdgpuSoppOpcodeRow(
                     nop=_sopp_opcode(spec, "S_NOP"),
                     delay_alu=_sopp_opcode_or_zero(spec, "S_DELAY_ALU"),
                     endpgm=_sopp_opcode(spec, "S_ENDPGM"),
                     branch=_sopp_opcode(spec, "S_BRANCH"),
                     conditional_branch_scc0=_sopp_opcode(spec, "S_CBRANCH_SCC0"),
                     conditional_branch_scc1=_sopp_opcode(spec, "S_CBRANCH_SCC1"),
-                ),
+                )
+            )
+        sopp = sopp_rows[0]
+        for isa_info, member_sopp in zip(
+            info.isa_infos[1:],
+            sopp_rows[1:],
+            strict=True,
+        ):
+            if member_sopp != sopp:
+                raise ValueError(f"AMDGPU descriptor set {info.key} has incompatible S_OPP opcodes across ISA XML keys '{info.isa_infos[0].isa_xml_key}' and '{isa_info.isa_xml_key}'")
+        rows.append(
+            _AmdgpuDescriptorSetRow(
+                info=info,
+                sopp=sopp,
             )
         )
     return tuple(rows)
@@ -600,12 +620,18 @@ def _validate_descriptor_sets(descriptor_sets: Sequence[AmdgpuDescriptorSetInfo]
             raise ValueError("AMDGPU descriptor generator target is required")
         if not info.key:
             raise ValueError("AMDGPU descriptor-set key is required")
-        if not info.isa_xml_key:
-            raise ValueError(f"AMDGPU ISA XML key is required for {info.key}")
-        if not info.isa_architecture_name:
-            raise ValueError(f"AMDGPU ISA XML architecture name is required for {info.key}")
-        if info.isa_architecture_id <= 0:
-            raise ValueError(f"AMDGPU ISA XML architecture id is required for {info.key}")
+        if not info.isa_infos:
+            raise ValueError(f"AMDGPU ISA membership is required for {info.key}")
+        isa_xml_keys = [isa_info.isa_xml_key for isa_info in info.isa_infos]
+        if len(isa_xml_keys) != len(set(isa_xml_keys)):
+            raise ValueError(f"AMDGPU ISA XML keys must be unique for {info.key}")
+        for isa_info in info.isa_infos:
+            if not isa_info.isa_xml_key:
+                raise ValueError(f"AMDGPU ISA XML key is required for {info.key}")
+            if not isa_info.isa_architecture_name:
+                raise ValueError(f"AMDGPU ISA XML architecture name is required for {info.key}")
+            if isa_info.isa_architecture_id <= 0:
+                raise ValueError(f"AMDGPU ISA XML architecture id is required for {info.key}")
         if info.flags < 0 or info.flags > 0xFFFFFFFFFFFFFFFF:
             raise ValueError(f"AMDGPU descriptor-set info flags for {info.key} must fit u64")
         _descriptor_set_info_flags_expr(info.flags)
@@ -619,8 +645,23 @@ def _validate_descriptor_sets(descriptor_sets: Sequence[AmdgpuDescriptorSetInfo]
                 raise ValueError(f"AMDGPU descriptor set {info.key} references unknown storage generator target '{info.storage_generator_target}'")
             if storage_info.storage_generator_target is not None:
                 raise ValueError(f"AMDGPU descriptor set {info.key} uses view-only target '{storage_info.generator_target}' as storage")
-            if storage_info.isa_xml_key != info.isa_xml_key:
-                raise ValueError(f"AMDGPU descriptor set {info.key} storage target '{storage_info.generator_target}' uses ISA XML key '{storage_info.isa_xml_key}', expected '{info.isa_xml_key}'")
+            if not set(storage_info.isa_infos).issubset(info.isa_infos):
+                raise ValueError(f"AMDGPU descriptor set {info.key} storage target '{storage_info.generator_target}' has ISA membership outside the view contract")
+        if info.member_generator_targets:
+            if tuple(sorted(info.member_generator_targets)) != (info.member_generator_targets):
+                raise ValueError(f"AMDGPU descriptor set {info.key} member generator targets must be sorted")
+            if len(info.member_generator_targets) != len(set(info.member_generator_targets)):
+                raise ValueError(f"AMDGPU descriptor set {info.key} member generator targets must be unique")
+            member_isa_infos = []
+            for member_generator_target in info.member_generator_targets:
+                member_info = infos_by_generator_target.get(member_generator_target)
+                if member_info is None:
+                    raise ValueError(f"AMDGPU descriptor set {info.key} references unknown member generator target '{member_generator_target}'")
+                if member_info.member_generator_targets:
+                    raise ValueError(f"AMDGPU descriptor set {info.key} uses generic member target '{member_generator_target}'")
+                member_isa_infos.extend(member_info.isa_infos)
+            if tuple(member_isa_infos) != info.isa_infos:
+                raise ValueError(f"AMDGPU descriptor set {info.key} ISA membership does not match its member generator targets")
         _buffer_resource_cache_swizzle_expr(info.buffer_resource.cache_swizzle)
         _vector_memory_cache_policy_encoding_expr(info.vector_memory.cache_policy_encoding)
         if info.vector_memory.cache_policy_encoding == AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE:

@@ -24,6 +24,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER,
     AMDGPU_WAVEFRONT_SIZE_FLAG_32,
     AmdgpuDescriptorSetInfo,
+    AmdgpuDescriptorSetIsaInfo,
     AmdgpuDescriptorSetVectorMemoryInfo,
     AmdgpuKernelDescriptorVgprGranules,
     AmdgpuProcessorKernelDescriptorInfo,
@@ -46,9 +47,13 @@ def _descriptor_set_info() -> AmdgpuDescriptorSetInfo:
     return AmdgpuDescriptorSetInfo(
         generator_target="test",
         key="amdgpu.test.core",
-        isa_xml_key="test",
-        isa_architecture_name="AMDGPU Test",
-        isa_architecture_id=1,
+        isa_infos=(
+            AmdgpuDescriptorSetIsaInfo(
+                isa_xml_key="test",
+                isa_architecture_name="AMDGPU Test",
+                isa_architecture_id=1,
+            ),
+        ),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
     )
 
@@ -116,9 +121,13 @@ def test_memory_cache_policy_rejects_unknown_descriptor_encoding() -> None:
     descriptor_set_info = AmdgpuDescriptorSetInfo(
         generator_target="test",
         key="amdgpu.test.core",
-        isa_xml_key="test",
-        isa_architecture_name="AMDGPU Test",
-        isa_architecture_id=1,
+        isa_infos=(
+            AmdgpuDescriptorSetIsaInfo(
+                isa_xml_key="test",
+                isa_architecture_name="AMDGPU Test",
+                isa_architecture_id=1,
+            ),
+        ),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(cache_policy_encoding="future_encoding"),
     )

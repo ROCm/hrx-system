@@ -99,6 +99,64 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx1150Processor) {
           LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
 }
 
+TEST(AmdgpuTargetInfoTest, LooksUpGfx11GenericProcessor) {
+  const loom_amdgpu_processor_info_t* processor = nullptr;
+  IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_processor(
+      IREE_SV("gfx11-generic"), &processor));
+  ASSERT_NE(processor, nullptr);
+  ExpectDescriptorSet(processor, IREE_SV("amdgpu.gfx11.generic.core"),
+                      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX11_GENERIC);
+  EXPECT_EQ(processor->elf.machine_flags, 0x054u);
+  EXPECT_EQ(processor->elf.generic_version, 1u);
+  EXPECT_EQ(processor->wavefront.default_size, 32u);
+  ExpectKernelDescriptor(processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11,
+                         8, 4, kRdna3DescriptorFlags);
+  EXPECT_EQ(processor->features.matrix,
+            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11);
+  ExpectSchedulingBits(
+      processor,
+      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
+}
+
+TEST(AmdgpuTargetInfoTest, LooksUpGfx12GenericProcessor) {
+  const loom_amdgpu_processor_info_t* processor = nullptr;
+  IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_processor(
+      IREE_SV("gfx12-generic"), &processor));
+  ASSERT_NE(processor, nullptr);
+  ExpectDescriptorSet(processor, IREE_SV("amdgpu.gfx12.generic.core"),
+                      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX12_GENERIC);
+  EXPECT_EQ(processor->elf.machine_flags, 0x059u);
+  EXPECT_EQ(processor->elf.generic_version, 1u);
+  EXPECT_EQ(processor->wavefront.default_size, 32u);
+  ExpectKernelDescriptor(processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX12,
+                         8, 4, kRdna4DescriptorFlags);
+  EXPECT_EQ(processor->features.matrix,
+            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12);
+  ExpectSchedulingBits(processor,
+                       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR |
+                           LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU);
+}
+
+TEST(AmdgpuTargetInfoTest, LooksUpGfx12_5GenericProcessor) {
+  const loom_amdgpu_processor_info_t* processor = nullptr;
+  IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_processor(
+      IREE_SV("gfx12-5-generic"), &processor));
+  ASSERT_NE(processor, nullptr);
+  ExpectDescriptorSet(processor, IREE_SV("amdgpu.gfx12_5.generic.core"),
+                      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX12_5_GENERIC);
+  EXPECT_EQ(processor->elf.machine_flags, 0x05Bu);
+  EXPECT_EQ(processor->elf.generic_version, 1u);
+  EXPECT_EQ(processor->wavefront.default_size, 32u);
+  ExpectKernelDescriptor(processor,
+                         LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125, 16, 8,
+                         kRdna4DescriptorFlags);
+  EXPECT_EQ(processor->features.matrix,
+            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250);
+  ExpectSchedulingBits(processor, LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU);
+}
+
 TEST(AmdgpuTargetInfoTest, IteratesProcessors) {
   const iree_host_size_t count = loom_amdgpu_target_info_processor_count();
   ASSERT_GT(count, 0u);
@@ -165,6 +223,9 @@ TEST(AmdgpuTargetInfoTest, DescriptorSetDelayAluOpcodesMatchRdnaFamilies) {
     uint16_t expected_delay_alu_opcode;
   } cases[] = {
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3, 0x000u},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX11_GENERIC, 0x007u},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX12_GENERIC, 0x007u},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX12_5_GENERIC, 0x007u},
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3, 0x007u},
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3_5, 0x007u},
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4, 0x007u},
@@ -184,6 +245,9 @@ TEST(AmdgpuTargetInfoTest, DescriptorSetVopdSupportMatchesPacketFamilies) {
     bool supports_vopd;
   } cases[] = {
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3, false},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX11_GENERIC, false},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX12_GENERIC, true},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX12_5_GENERIC, true},
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3, true},
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3_5, false},
       {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4, true},

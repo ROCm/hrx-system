@@ -415,6 +415,23 @@ def _amdgpu_core_descriptor_set(
     )
 
 
+def _amdgpu_core_descriptor_set_view(
+    *,
+    key: str,
+    storage: DescriptorSet,
+) -> DescriptorSet:
+    return _amdgpu_core_descriptor_set(
+        key=key,
+        reg_classes=storage.reg_classes,
+        register_parts=storage.register_parts,
+        enum_domains=storage.enum_domains,
+        resources=storage.resources,
+        schedule_classes=storage.schedule_classes,
+        descriptors=storage.descriptors,
+        categories=storage.categories,
+    )
+
+
 _COUNTER_VMEM_LOAD = 1
 _COUNTER_VMEM_STORE = 2
 _COUNTER_LDS = 3
@@ -3202,6 +3219,7 @@ __all__ = (
     "_WORKGROUP_BARRIER_EFFECT",
     "_amdgpu_camel_case",
     "_amdgpu_core_descriptor_set",
+    "_amdgpu_core_descriptor_set_view",
     "_amdgpu_descriptor_set_file_stem",
     "_amdgpu_schedule_class_reads_exec_state",
     "_amdgpu_trans_schedule_class_name",

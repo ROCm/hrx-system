@@ -28,7 +28,7 @@ from loom.gen.support.c import c_string_arg as _c_string_arg  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.gen.target.low.validation import operand_role_is_packet_input  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
-    build_amdgpu_core_descriptor_set_from_spec,
+    build_amdgpu_core_descriptor_set_from_specs,
 )
 from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
     AmdgpuIsaFactSource,
@@ -195,22 +195,34 @@ def _descriptor_set_supports_vopd(info: AmdgpuDescriptorSetInfo) -> bool:
     return bool(info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION)
 
 
+def _descriptor_set_storage_generator_target(
+    info: AmdgpuDescriptorSetInfo,
+) -> str:
+    return info.storage_generator_target or info.generator_target
+
+
+def _vopd_isa_xml_key(info: AmdgpuDescriptorSetInfo) -> str:
+    if len(info.isa_infos) != 1:
+        raise ValueError(f"AMDGPU VOPD descriptor set '{info.key}' must have one ISA member")
+    return info.isa_infos[0].isa_xml_key
+
+
 def _descriptor_set_keys_for_group(group: str, descriptor_set_infos: Sequence[AmdgpuDescriptorSetInfo]) -> tuple[str, ...]:
-    def select(keys: set[str]) -> tuple[str, ...]:
-        return tuple(info.key for info in descriptor_set_infos if info.key in keys and _descriptor_set_supports_vopd(info))
+    def select(storage_generator_targets: set[str]) -> tuple[str, ...]:
+        return tuple(info.key for info in descriptor_set_infos if (_descriptor_set_storage_generator_target(info) in storage_generator_targets and _descriptor_set_supports_vopd(info)))
 
     if group == _DESCRIPTOR_SET_GROUP_RDNA_VOPD:
         return tuple(info.key for info in descriptor_set_infos if _descriptor_set_supports_vopd(info))
     if group == _DESCRIPTOR_SET_GROUP_GFX11_GFX12:
-        return select({"amdgpu.rdna3.core", "amdgpu.rdna4.core"})
+        return select({"rdna3", "rdna4"})
     if group == _DESCRIPTOR_SET_GROUP_RDNA4_GFX125X:
-        return select({"amdgpu.rdna4.gfx125x.core"})
+        return select({"rdna4_gfx125x"})
     raise ValueError(f"unknown AMDGPU VOPD descriptor-set group '{group}'")
 
 
 def _xml_instruction_name(component: _VopdComponentDefinition, info: AmdgpuDescriptorSetInfo) -> str | None:
     for isa_key, instruction_name in component.xml_instruction_names_by_isa_key:
-        if isa_key == info.isa_xml_key:
+        if isa_key == _vopd_isa_xml_key(info):
             return instruction_name
     return component.xml_instruction_name
 
@@ -462,13 +474,9 @@ def _descriptor_sets_by_key(
 ) -> dict[str, DescriptorSet]:
     descriptor_sets: dict[str, DescriptorSet] = {}
     for info in descriptor_set_infos:
-        try:
-            spec = isa_specs[info.isa_xml_key]
-        except KeyError as exc:
-            raise ValueError(f"AMDGPU VOPD generator is missing ISA XML key '{info.isa_xml_key}' for descriptor set '{info.key}'") from exc
-        descriptor_set = build_amdgpu_core_descriptor_set_from_spec(
+        descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
             info.generator_target,
-            spec,
+            isa_specs,
         )
         if descriptor_set.key != info.key:
             raise ValueError(f"AMDGPU descriptor-set builder '{info.generator_target}' produced '{descriptor_set.key}', expected '{info.key}'")
@@ -497,7 +505,11 @@ def _validate_component_definition(
         descriptors = descriptors_by_set_key[descriptor_set_key]
         if component.descriptor_key not in descriptors:
             raise ValueError(f"{owner} references descriptor set '{descriptor_set_key}' where the scalar component descriptor is absent")
-        _validate_xml_instruction(component, info, isa_specs[info.isa_xml_key])
+        _validate_xml_instruction(
+            component,
+            info,
+            isa_specs[_vopd_isa_xml_key(info)],
+        )
 
 
 def _descriptor_commutes_packet_operands(

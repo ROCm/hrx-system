@@ -15,6 +15,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
     AmdgpuDescriptorSetInfo,
+    AmdgpuDescriptorSetIsaInfo,
     AmdgpuTargetRecordInfo,
     processor_info,
     sorted_descriptor_set_infos,
@@ -38,9 +39,13 @@ def _descriptor_set_info() -> AmdgpuDescriptorSetInfo:
     return AmdgpuDescriptorSetInfo(
         generator_target="test",
         key="amdgpu.test.core",
-        isa_xml_key="test",
-        isa_architecture_name="AMDGPU Test",
-        isa_architecture_id=1,
+        isa_infos=(
+            AmdgpuDescriptorSetIsaInfo(
+                isa_xml_key="test",
+                isa_architecture_name="AMDGPU Test",
+                isa_architecture_id=1,
+            ),
+        ),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
     )
 

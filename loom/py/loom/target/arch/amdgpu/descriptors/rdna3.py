@@ -133,8 +133,14 @@ _AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     schedule_classes=_AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
 )
 
+_AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set_view(
+    key="amdgpu.gfx11.generic.core",
+    storage=_AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
+)
+
 
 __all__ = (
+    "_AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE",
 )

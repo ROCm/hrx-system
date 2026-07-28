@@ -1121,6 +1121,9 @@ def test_s_delay_alu_descriptor_is_exposed_on_rdna_families() -> None:
     }
 
     assert targets_with_delay_alu == {
+        "gfx11_generic",
+        "gfx12_generic",
+        "gfx12_5_generic",
         "rdna3",
         "rdna3_5",
         "rdna4",
@@ -1214,9 +1217,11 @@ def test_tensor_memory_descriptors_are_gfx125x_scoped() -> None:
         "amdgpu.s_wait_tensorcnt",
     }
 
-    assert tensor_keys <= target_descriptor_keys["rdna4_gfx125x"]
+    gfx125x_targets = {"gfx12_5_generic", "rdna4_gfx125x"}
+    for target in gfx125x_targets:
+        assert tensor_keys <= target_descriptor_keys[target]
     for target, descriptor_keys in target_descriptor_keys.items():
-        if target != "rdna4_gfx125x":
+        if target not in gfx125x_targets:
             assert tensor_keys.isdisjoint(descriptor_keys)
 
 
@@ -1296,9 +1301,11 @@ def test_cluster_memory_descriptors_are_gfx125x_scoped() -> None:
         "amdgpu.s_wait_asynccnt",
     }
 
-    assert cluster_keys <= target_descriptor_keys["rdna4_gfx125x"]
+    gfx125x_targets = {"gfx12_5_generic", "rdna4_gfx125x"}
+    for target in gfx125x_targets:
+        assert cluster_keys <= target_descriptor_keys[target]
     for target, descriptor_keys in target_descriptor_keys.items():
-        if target != "rdna4_gfx125x":
+        if target not in gfx125x_targets:
             assert cluster_keys.isdisjoint(descriptor_keys)
 
 

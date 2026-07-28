@@ -6,6 +6,8 @@
 
 #include "loom/tooling/target/amdgpu/artifact_provider.h"
 
+#include <string>
+
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
 #include "iree/testing/gtest.h"
@@ -152,9 +154,12 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
     return iree_ok_status();
   }
 
-  iree_status_t ParsePreparedArithmeticModule(ModulePtr* out_module) {
-    static const char kSource[] =
-        "amdgpu.target<gfx1100> @gfx_target\n"
+  iree_status_t ParsePreparedArithmeticModule(iree_string_view_t processor,
+                                              ModulePtr* out_module) {
+    std::string source = "amdgpu.target<";
+    source.append(processor.data, processor.size);
+    source.append(
+        "> @gfx_target\n"
         "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
         "@loom_kernel() {\n"
         "  %zero = low.const<amdgpu.v_mov_b32> {imm32 = 0} : "
@@ -164,38 +169,41 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
         "  %sum = low.op<amdgpu.v_add_u32>(%zero, %one) : "
         "(reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>\n"
         "  low.return\n"
-        "}\n";
-    loom_text_parse_options_t options = ParseOptions();
-    loom_module_t* module = nullptr;
-    IREE_RETURN_IF_ERROR(
-        loom_text_parse(iree_make_cstring_view(kSource),
-                        IREE_SV("amdgpu_hal_artifact_provider_test.loom"),
-                        &context_, &block_pool_, &options, &module));
-    *out_module = ModulePtr(module);
-    return iree_ok_status();
+        "}\n");
+    return ParseModule(iree_make_string_view(source.data(), source.size()),
+                       out_module);
   }
 
-  iree_status_t ParsePreparedCdnaArithmeticModule(ModulePtr* out_module) {
-    static const char kSource[] =
-        "amdgpu.target<gfx942> @gfx_target\n"
-        "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
-        "@loom_kernel() {\n"
-        "  %zero = low.const<amdgpu.v_mov_b32> {imm32 = 0} : "
-        "reg<amdgpu.vgpr>\n"
-        "  %one = low.const<amdgpu.v_mov_b32> {imm32 = 1} : "
-        "reg<amdgpu.vgpr>\n"
-        "  %sum = low.op<amdgpu.v_add_u32>(%zero, %one) : "
-        "(reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>\n"
-        "  low.return\n"
-        "}\n";
-    loom_text_parse_options_t options = ParseOptions();
-    loom_module_t* module = nullptr;
-    IREE_RETURN_IF_ERROR(
-        loom_text_parse(iree_make_cstring_view(kSource),
-                        IREE_SV("amdgpu_hal_artifact_provider_test.loom"),
-                        &context_, &block_pool_, &options, &module));
-    *out_module = ModulePtr(module);
-    return iree_ok_status();
+  void ExpectEmitsModuleTarget(iree_string_view_t processor) {
+    ModulePtr module;
+    IREE_ASSERT_OK(ParsePreparedArithmeticModule(processor, &module));
+    ASSERT_NE(module.get(), nullptr);
+
+    loom_run_hal_device_target_t target = {};
+    loom_run_hal_artifact_t artifact = {};
+    bool emitted = false;
+    IREE_ASSERT_OK(loom_amdgpu_hal_artifact_provider.emit_artifact(
+        &loom_amdgpu_hal_artifact_provider, module.get(), &target,
+        /*diagnostic_sink=*/(loom_diagnostic_sink_t){0},
+        /*source_resolver=*/(loom_source_resolver_t){0}, /*max_errors=*/20,
+        /*target_pipeline_options=*/nullptr,
+        /*artifact_flags=*/LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_NONE,
+        /*artifact_manifest=*/nullptr, /*report=*/nullptr,
+        iree_allocator_system(), &emitted, &artifact));
+    EXPECT_TRUE(emitted);
+    EXPECT_NE(iree_string_view_find(artifact.target_key, processor, 0),
+              IREE_STRING_VIEW_NPOS);
+    EXPECT_EQ(artifact.target_artifact_format, LOOM_TARGET_ARTIFACT_FORMAT_ELF);
+    EXPECT_EQ(artifact.target_artifact_data.data,
+              artifact.executable_data.data);
+    EXPECT_EQ(artifact.target_artifact_data.data_length,
+              artifact.executable_data.data_length);
+    EXPECT_NE(artifact.target_artifact_data.data, nullptr);
+    EXPECT_GT(artifact.target_artifact_data.data_length, 0u);
+    EXPECT_EQ(artifact.target_bundle, nullptr);
+
+    loom_amdgpu_hal_artifact_provider.deinitialize_artifact(
+        &loom_amdgpu_hal_artifact_provider, &artifact, iree_allocator_system());
   }
 
   iree_arena_block_pool_t block_pool_;
@@ -290,7 +298,7 @@ TEST_F(AmdgpuHalArtifactProviderTest,
 
 TEST_F(AmdgpuHalArtifactProviderTest, RecordsDetailedReportRows) {
   ModulePtr module;
-  IREE_ASSERT_OK(ParsePreparedArithmeticModule(&module));
+  IREE_ASSERT_OK(ParsePreparedArithmeticModule(IREE_SV("gfx1100"), &module));
   ASSERT_NE(module.get(), nullptr);
 
   const loom_amdgpu_processor_info_t* processor = nullptr;
@@ -362,7 +370,7 @@ TEST_F(AmdgpuHalArtifactProviderTest, RecordsDetailedReportRows) {
 TEST_F(AmdgpuHalArtifactProviderTest,
        EmitsRuntimeGlobalsFromPipelineRequirements) {
   ModulePtr module;
-  IREE_ASSERT_OK(ParsePreparedArithmeticModule(&module));
+  IREE_ASSERT_OK(ParsePreparedArithmeticModule(IREE_SV("gfx1100"), &module));
   ASSERT_NE(module.get(), nullptr);
 
   const loom_amdgpu_processor_info_t* processor = nullptr;
@@ -423,7 +431,7 @@ TEST_F(AmdgpuHalArtifactProviderTest,
 TEST_F(AmdgpuHalArtifactProviderTest,
        EmitsModuleTargetWithoutProcessorOverride) {
   ModulePtr module;
-  IREE_ASSERT_OK(ParsePreparedCdnaArithmeticModule(&module));
+  IREE_ASSERT_OK(ParsePreparedArithmeticModule(IREE_SV("gfx942"), &module));
   ASSERT_NE(module.get(), nullptr);
 
   loom_run_hal_device_target_t target = {};
@@ -450,6 +458,18 @@ TEST_F(AmdgpuHalArtifactProviderTest,
 
   loom_amdgpu_hal_artifact_provider.deinitialize_artifact(
       &loom_amdgpu_hal_artifact_provider, &artifact, iree_allocator_system());
+}
+
+TEST_F(AmdgpuHalArtifactProviderTest, EmitsGfx11GenericModuleTarget) {
+  ExpectEmitsModuleTarget(IREE_SV("gfx11-generic"));
+}
+
+TEST_F(AmdgpuHalArtifactProviderTest, EmitsGfx12GenericModuleTarget) {
+  ExpectEmitsModuleTarget(IREE_SV("gfx12-generic"));
+}
+
+TEST_F(AmdgpuHalArtifactProviderTest, EmitsGfx12_5GenericModuleTarget) {
+  ExpectEmitsModuleTarget(IREE_SV("gfx12-5-generic"));
 }
 
 }  // namespace

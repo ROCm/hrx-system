@@ -242,20 +242,57 @@ class AmdgpuVectorMemoryCachePolicyEncodingInfo:
 
 
 @dataclass(frozen=True, slots=True)
-class AmdgpuDescriptorSetInfo:
-    generator_target: str
-    key: str
+class AmdgpuDescriptorSetIsaInfo:
     isa_xml_key: str
     isa_architecture_name: str
     isa_architecture_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuDescriptorSetInfo:
+    generator_target: str
+    key: str
+    isa_infos: tuple[AmdgpuDescriptorSetIsaInfo, ...]
     flags: int
     storage_generator_target: str | None = None
+    member_generator_targets: tuple[str, ...] = ()
     buffer_resource: AmdgpuDescriptorSetBufferResourceInfo = (
         AmdgpuDescriptorSetBufferResourceInfo()
     )
     vector_memory: AmdgpuDescriptorSetVectorMemoryInfo = (
         AmdgpuDescriptorSetVectorMemoryInfo()
     )
+
+
+AMDGPU_DESCRIPTOR_SET_ISA_CDNA3 = AmdgpuDescriptorSetIsaInfo(
+    isa_xml_key="cdna3",
+    isa_architecture_name="AMD CDNA 3",
+    isa_architecture_id=2,
+)
+
+AMDGPU_DESCRIPTOR_SET_ISA_CDNA4 = AmdgpuDescriptorSetIsaInfo(
+    isa_xml_key="cdna4",
+    isa_architecture_name="AMD CDNA 4",
+    isa_architecture_id=3,
+)
+
+AMDGPU_DESCRIPTOR_SET_ISA_RDNA3 = AmdgpuDescriptorSetIsaInfo(
+    isa_xml_key="rdna3",
+    isa_architecture_name="AMD RDNA 3",
+    isa_architecture_id=8,
+)
+
+AMDGPU_DESCRIPTOR_SET_ISA_RDNA3_5 = AmdgpuDescriptorSetIsaInfo(
+    isa_xml_key="rdna3_5",
+    isa_architecture_name="AMD RDNA 3.5",
+    isa_architecture_id=9,
+)
+
+AMDGPU_DESCRIPTOR_SET_ISA_RDNA4 = AmdgpuDescriptorSetIsaInfo(
+    isa_xml_key="rdna4",
+    isa_architecture_name="AMD RDNA 4",
+    isa_architecture_id=10,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -655,6 +692,7 @@ def rdna3_processor_info(
     processor: str,
     elf_machine_flags: int,
     *,
+    descriptor_set_key: str = "amdgpu.rdna3.core",
     elf_feature_flags: int = 0,
     elf_generic_version: int = 0,
     scheduling_bits: int = 0,
@@ -664,7 +702,7 @@ def rdna3_processor_info(
         processor=processor,
         elf_machine_flags=elf_machine_flags,
         flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
-        descriptor_set_key="amdgpu.rdna3.core",
+        descriptor_set_key=descriptor_set_key,
         elf_feature_flags=elf_feature_flags,
         elf_generic_version=elf_generic_version,
         default_wavefront_size=32,
@@ -727,13 +765,14 @@ def rdna4_processor_info(
     processor: str,
     elf_machine_flags: int,
     *,
+    descriptor_set_key: str = "amdgpu.rdna4.core",
     elf_feature_flags: int = 0,
     elf_generic_version: int = 0,
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor=processor,
         flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
-        descriptor_set_key="amdgpu.rdna4.core",
+        descriptor_set_key=descriptor_set_key,
         elf_machine_flags=elf_machine_flags,
         elf_feature_flags=elf_feature_flags,
         elf_generic_version=elf_generic_version,
@@ -752,6 +791,7 @@ def gfx125x_processor_info(
     processor: str,
     elf_machine_flags: int,
     *,
+    descriptor_set_key: str = "amdgpu.rdna4.gfx125x.core",
     elf_feature_flags: int = 0,
     elf_generic_version: int = 0,
     processor_flags: int = 0,
@@ -759,7 +799,7 @@ def gfx125x_processor_info(
     return processor_info(
         processor=processor,
         flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION | processor_flags,
-        descriptor_set_key="amdgpu.rdna4.gfx125x.core",
+        descriptor_set_key=descriptor_set_key,
         elf_machine_flags=elf_machine_flags,
         elf_feature_flags=elf_feature_flags,
         elf_generic_version=elf_generic_version,
@@ -776,9 +816,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
     AmdgpuDescriptorSetInfo(
         generator_target="cdna3",
         key="amdgpu.cdna3.core",
-        isa_xml_key="cdna3",
-        isa_architecture_name="AMD CDNA 3",
-        isa_architecture_id=2,
+        isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_CDNA3,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1,
@@ -787,9 +825,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
     AmdgpuDescriptorSetInfo(
         generator_target="rdna4_gfx125x",
         key="amdgpu.rdna4.gfx125x.core",
-        isa_xml_key="rdna4",
-        isa_architecture_name="AMD RDNA 4",
-        isa_architecture_id=10,
+        isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
@@ -798,9 +834,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
     AmdgpuDescriptorSetInfo(
         generator_target="rdna3",
         key="amdgpu.rdna3.core",
-        isa_xml_key="rdna3",
-        isa_architecture_name="AMD RDNA 3",
-        isa_architecture_id=8,
+        isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA3,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC,
@@ -809,9 +843,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
     AmdgpuDescriptorSetInfo(
         generator_target="rdna3_5",
         key="amdgpu.rdna3_5.core",
-        isa_xml_key="rdna3_5",
-        isa_architecture_name="AMD RDNA 3.5",
-        isa_architecture_id=9,
+        isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA3_5,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC,
@@ -820,9 +852,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
     AmdgpuDescriptorSetInfo(
         generator_target="rdna4",
         key="amdgpu.rdna4.core",
-        isa_xml_key="rdna4",
-        isa_architecture_name="AMD RDNA 4",
-        isa_architecture_id=10,
+        isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
@@ -831,15 +861,49 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
     AmdgpuDescriptorSetInfo(
         generator_target="cdna4",
         key="amdgpu.cdna4.core",
-        isa_xml_key="cdna4",
-        isa_architecture_name="AMD CDNA 4",
-        isa_architecture_id=3,
+        isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_CDNA4,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
         buffer_resource=AmdgpuDescriptorSetBufferResourceInfo(
             cache_swizzle=AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT,
         ),
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1,
+        ),
+    ),
+    AmdgpuDescriptorSetInfo(
+        generator_target="gfx11_generic",
+        key="amdgpu.gfx11.generic.core",
+        isa_infos=(
+            AMDGPU_DESCRIPTOR_SET_ISA_RDNA3,
+            AMDGPU_DESCRIPTOR_SET_ISA_RDNA3_5,
+        ),
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+        storage_generator_target="rdna3",
+        member_generator_targets=("rdna3", "rdna3_5"),
+        vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
+            cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC,
+        ),
+    ),
+    AmdgpuDescriptorSetInfo(
+        generator_target="gfx12_generic",
+        key="amdgpu.gfx12.generic.core",
+        isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        storage_generator_target="rdna4",
+        member_generator_targets=("rdna4",),
+        vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
+            cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
+        ),
+    ),
+    AmdgpuDescriptorSetInfo(
+        generator_target="gfx12_5_generic",
+        key="amdgpu.gfx12_5.generic.core",
+        isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        storage_generator_target="rdna4_gfx125x",
+        member_generator_targets=("rdna4_gfx125x",),
+        vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
+            cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
         ),
     ),
 )
@@ -998,12 +1062,14 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
     rdna3_processor_info(
         "gfx11-generic",
         0x054,
+        descriptor_set_key="amdgpu.gfx11.generic.core",
         elf_generic_version=generic_code_object_current_version("gfx11-generic"),
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR,
     ),
     rdna4_processor_info(
         "gfx12-generic",
         0x059,
+        descriptor_set_key="amdgpu.gfx12.generic.core",
         elf_generic_version=generic_code_object_current_version("gfx12-generic"),
     ),
     processor_info(
@@ -1016,6 +1082,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
     gfx125x_processor_info(
         "gfx12-5-generic",
         0x05B,
+        descriptor_set_key="amdgpu.gfx12_5.generic.core",
         elf_generic_version=generic_code_object_current_version("gfx12-5-generic"),
     ),
 )
@@ -1061,17 +1128,20 @@ AMDGPU_TARGET_RECORD_INFOS: tuple[AmdgpuTargetRecordInfo, ...] = (
     AmdgpuTargetRecordInfo(
         processor="gfx11-generic",
         enum_value=7,
-        doc="RDNA 3 generic code-object target row.",
+        doc="GFX11 generic code-object target row.",
+        default_for_descriptor_set=True,
     ),
     AmdgpuTargetRecordInfo(
         processor="gfx12-generic",
         enum_value=8,
-        doc="RDNA 4 generic code-object target row.",
+        doc="GFX12 generic code-object target row.",
+        default_for_descriptor_set=True,
     ),
     AmdgpuTargetRecordInfo(
         processor="gfx12-5-generic",
         enum_value=9,
-        doc="RDNA 4 gfx125x generic code-object target row.",
+        doc="GFX12.5 generic code-object target row.",
+        default_for_descriptor_set=True,
     ),
     AmdgpuTargetRecordInfo(
         processor="gfx940",
@@ -1260,13 +1330,22 @@ def validate_amdgpu_descriptor_set_isa_xml(
     info: AmdgpuDescriptorSetInfo,
     spec: AmdgpuIsaArchitectureInfo,
 ) -> None:
-    if (
-        spec.architecture_name == info.isa_architecture_name
-        and spec.architecture_id == info.isa_architecture_id
-    ):
-        return
+    for isa_info in info.isa_infos:
+        if (
+            spec.architecture_name == isa_info.isa_architecture_name
+            and spec.architecture_id == isa_info.isa_architecture_id
+        ):
+            return
+    expected_members = tuple(
+        f"{isa_info.isa_architecture_name} architecture id "
+        f"{isa_info.isa_architecture_id}"
+        for isa_info in info.isa_infos
+    )
+    expected = expected_members[0]
+    if len(expected_members) > 1:
+        expected = f"one of [{', '.join(expected_members)}]"
     raise ValueError(
         f"{spec.source_name}: AMDGPU descriptor set {info.key} expects "
-        f"{info.isa_architecture_name} architecture id {info.isa_architecture_id}, "
+        f"{expected}, "
         f"found {spec.architecture_name} architecture id {spec.architecture_id}"
     )

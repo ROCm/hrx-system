@@ -30,7 +30,7 @@ from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     amdgpu_common_reg_class_ids,
     amdgpu_descriptor_ref_keys,
     amdgpu_immediate_encoding_id_items,
-    build_amdgpu_core_descriptor_set_from_spec,
+    build_amdgpu_core_descriptor_set_from_specs,
 )
 from loom.target.arch.amdgpu.encoding import (  # noqa: E402
     AMDGPU_ENCODING_FIELD_IDS,
@@ -408,13 +408,9 @@ def _materialize_descriptor_ref_tables(
             descriptor_set_info = descriptor_set_infos_by_key[descriptor_set_key]
         except KeyError as exc:
             raise ValueError(f"AMDGPU target-ref generator got unknown descriptor set '{descriptor_set_key}'") from exc
-        try:
-            spec = isa_specs[descriptor_set_info.isa_xml_key]
-        except KeyError as exc:
-            raise ValueError(f"AMDGPU target-ref generator is missing ISA XML key '{descriptor_set_info.isa_xml_key}' for descriptor set '{descriptor_set_info.key}'") from exc
-        descriptor_set = build_amdgpu_core_descriptor_set_from_spec(
+        descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
             descriptor_set_info.generator_target,
-            spec,
+            isa_specs,
         )
         if descriptor_set.key != descriptor_set_info.key:
             raise ValueError(f"AMDGPU descriptor-set builder '{descriptor_set_info.generator_target}' produced '{descriptor_set.key}', expected '{descriptor_set_info.key}'")

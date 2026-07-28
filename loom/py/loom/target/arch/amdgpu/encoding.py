@@ -96,6 +96,8 @@ AMDGPU_ENCODING_FORMAT_XML_NAMES_BY_ID = {
 }
 
 _AMDGPU_SUPPLEMENTAL_ENCODING_FORMAT_NAMES_BY_TARGET = {
+    "gfx12_generic": ("ENC_VOP3PX2",),
+    "gfx12_5_generic": ("ENC_VOP3PX2",),
     "rdna4": ("ENC_VOP3PX2",),
     "rdna4_gfx125x": ("ENC_VOP3PX2",),
 }
