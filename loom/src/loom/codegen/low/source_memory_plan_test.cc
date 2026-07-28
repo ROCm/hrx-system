@@ -878,6 +878,44 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadClassifiesWorkitemIndex) {
       &plan, /*static_byte_offset=*/plan.static_byte_offset, 32));
 }
 
+TEST_F(SourceMemoryPlanTest, DynamicDenseLoadRetainsSubgroupUniformIndex) {
+  loom_value_id_t buffer = DefineBufferArg();
+  loom_value_id_t layout = BuildDenseLayout();
+  loom_value_id_t base_offset =
+      loom_index_constant_result(BuildOffsetConstant(0));
+
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+                                        ViewType1D(32, layout),
+                                        LOOM_LOCATION_UNKNOWN, &view_op));
+  loom_op_t* subgroup_op = nullptr;
+  IREE_ASSERT_OK(loom_kernel_subgroup_id_build(
+      &builder_, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+      LOOM_LOCATION_UNKNOWN, &subgroup_op));
+  const loom_value_id_t subgroup_id =
+      loom_kernel_subgroup_id_result(subgroup_op);
+  const loom_value_id_t dynamic_indices[] = {subgroup_id};
+  int64_t static_indices[] = {INT64_MIN};
+  loom_op_t* load_op = nullptr;
+  IREE_ASSERT_OK(loom_vector_load_build(
+      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
+      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(4),
+      LOOM_LOCATION_UNKNOWN, &load_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  ASSERT_TRUE(loom_value_facts_is_subgroup_uniform(
+      loom_value_fact_table_lookup(&facts, subgroup_id)));
+  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
+  ASSERT_EQ(plan.dynamic_term_count, 1u);
+  EXPECT_EQ(plan.dynamic_terms[0].index, subgroup_id);
+  EXPECT_TRUE(
+      loom_value_facts_is_subgroup_uniform(plan.dynamic_terms[0].byte_facts));
+}
+
 TEST_F(SourceMemoryPlanTest, DynamicDenseLoadKeepsAssumedWorkitemSource) {
   loom_value_id_t buffer = DefineBufferArg();
   loom_value_id_t layout = BuildDenseLayout();

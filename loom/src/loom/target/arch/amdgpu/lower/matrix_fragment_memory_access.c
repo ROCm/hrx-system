@@ -15,6 +15,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
+#include "loom/target/arch/amdgpu/lower/memory_bank_service.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 
 iree_status_t loom_amdgpu_fragment_memory_packet_type(
@@ -178,6 +179,9 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
   };
   loom_amdgpu_memory_report_row_populate_storage_schema(context, &plan->source,
                                                         &row);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_report_bank_service(
+      context, source_op, layout, plan, packet, element_index,
+      &row.bank_service));
   IREE_RETURN_IF_ERROR(
       loom_low_lower_memory_report_row_populate_source_interval(
           context, &packet_source, &row));
