@@ -11,7 +11,29 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from loom.target.low_descriptors import DescriptorSet
+
 from .common import *
+
+
+def _with_matrix_timings(
+    descriptor_set: DescriptorSet,
+    timings: Mapping[str, _AmdgpuMatrixTiming],
+) -> DescriptorSet:
+    return replace(
+        descriptor_set,
+        schedule_classes=(
+            *(
+                schedule_class
+                for schedule_class in descriptor_set.schedule_classes
+                if not schedule_class.name.startswith(_SCHEDULE_MFMA_QUALIFIED_PREFIX)
+            ),
+            *_amdgpu_mfma_schedule_classes(timings),
+        ),
+    )
+
 
 _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     key="amdgpu.cdna4.core",
@@ -116,6 +138,10 @@ _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
         ),
     ),
 )
+_AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE = _with_matrix_timings(
+    _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_GFX950_MATRIX_TIMINGS,
+)
 
 
 _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
@@ -177,6 +203,10 @@ _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     resources=_AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE.resources,
     schedule_classes=_AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
 )
+_AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE = _with_matrix_timings(
+    _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_GFX942_MATRIX_TIMINGS,
+)
 
 _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE = (
     _amdgpu_core_descriptor_set_intersection(
@@ -186,6 +216,10 @@ _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE = (
             _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
         ),
     )
+)
+_AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE = _with_matrix_timings(
+    _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS,
 )
 
 

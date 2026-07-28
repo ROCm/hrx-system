@@ -122,6 +122,14 @@ from loom.target.low_descriptors import (
     StorageLeaseReleaseScope,
 )
 
+from .matrix_schedule import (
+    _AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS,
+    _AMDGPU_GFX942_MATRIX_TIMINGS,
+    _AMDGPU_GFX950_MATRIX_TIMINGS,
+    _amdgpu_mfma_has_qualified_timing,
+    _AmdgpuMatrixTiming,
+)
+
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU = 1
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL = 2
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL = 3
@@ -180,6 +188,7 @@ _SCHEDULE_LDS_ATOMIC = "amdgpu.lds.atomic"
 _SCHEDULE_LDS_CROSSLANE = "amdgpu.lds.crosslane"
 _SCHEDULE_BARRIER = "amdgpu.barrier"
 _SCHEDULE_MFMA = "amdgpu.mfma"
+_SCHEDULE_MFMA_QUALIFIED_PREFIX = f"{_SCHEDULE_MFMA}."
 _SCHEDULE_WMMA = "amdgpu.wmma"
 _SCHEDULE_WMMA_SCALE = "amdgpu.wmma.scale"
 _SCHEDULE_SWMMAC = "amdgpu.swmmac"
@@ -198,6 +207,38 @@ _SCHEDULE_WAIT_IDLE = "amdgpu.wait.idle"
 _SCHEDULE_WAIT_TENSOR = "amdgpu.wait.tensor"
 _SCHEDULE_WAIT_ASYNC = "amdgpu.wait.async"
 _SCHEDULE_WAIT_X = "amdgpu.wait.x"
+
+
+def _amdgpu_mfma_schedule_class_name(descriptor_key: str) -> str:
+    if not _amdgpu_mfma_has_qualified_timing(descriptor_key):
+        raise ValueError(
+            f"AMDGPU descriptor '{descriptor_key}' has no qualified GFX9.4 "
+            "matrix timing"
+        )
+    return f"{_SCHEDULE_MFMA_QUALIFIED_PREFIX}{descriptor_key.removeprefix('amdgpu.')}"
+
+
+def _amdgpu_mfma_schedule_classes(
+    timings: Mapping[str, _AmdgpuMatrixTiming],
+) -> tuple[ScheduleClass, ...]:
+    return tuple(
+        ScheduleClass(
+            _amdgpu_mfma_schedule_class_name(descriptor_key),
+            latency_kind=LatencyKind.ESTIMATE,
+            latency_cycles=timing.latency_cycles,
+            issue_uses=(
+                IssueUse(
+                    _RESOURCE_MFMA,
+                    cycles=timing.reciprocal_throughput_cycles,
+                    units=1,
+                ),
+            ),
+            hazards=_matrix_hazards(_RESOURCE_MFMA),
+            model_quality=ModelQuality.ESTIMATED,
+        )
+        for descriptor_key, timing in timings.items()
+    )
+
 
 _AMDGPU_TRANS_DESCRIPTOR_KEYS = (
     "amdgpu.v_exp_f32",
@@ -254,7 +295,9 @@ def _amdgpu_trans_schedule_class_name(descriptor_key: str) -> str:
 def _amdgpu_schedule_class_reads_exec_state(schedule_class: str) -> bool:
     return (
         schedule_class in _EXECUTION_MASKED_SCHEDULE_CLASSES
-        or schedule_class.startswith(f"{_SCHEDULE_TRANS}.")
+        or schedule_class.startswith(
+            (f"{_SCHEDULE_TRANS}.", _SCHEDULE_MFMA_QUALIFIED_PREFIX)
+        )
     )
 
 
@@ -2916,6 +2959,7 @@ def _implicit_m0_input(
 
 
 __all__ = (
+    "_AmdgpuMatrixTiming",
     "AMDGPU_ATOMIC_DESCRIPTOR_CATEGORY",
     "AMDGPU_CACHE_DESCRIPTOR_CATEGORY",
     "AMDGPU_COMPARE_SELECT_DESCRIPTOR_CATEGORY",
@@ -3089,6 +3133,9 @@ __all__ = (
     "_GFX950_MEMORY_WAIT_HAZARDS",
     "_GFX950_VECTOR_CACHE_FIELDS",
     "_GFX9_11_VECTOR_CACHE_FIELDS",
+    "_AMDGPU_GFX942_MATRIX_TIMINGS",
+    "_AMDGPU_GFX950_MATRIX_TIMINGS",
+    "_AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS",
     "_GLOBAL_GFX950_SADDR_OFF",
     "_GLOBAL_LOAD_B16_EFFECT",
     "_GLOBAL_LOAD_B128_EFFECT",
@@ -3198,6 +3245,7 @@ __all__ = (
     "_SCHEDULE_LDS_LOAD",
     "_SCHEDULE_LDS_STORE",
     "_SCHEDULE_MFMA",
+    "_SCHEDULE_MFMA_QUALIFIED_PREFIX",
     "_SCHEDULE_MODE_CONTROL",
     "_SCHEDULE_PACKED_DOT",
     "_SCHEDULE_SALU",
@@ -3276,6 +3324,9 @@ __all__ = (
     "_amdgpu_core_descriptor_set",
     "_amdgpu_core_descriptor_set_intersection",
     "_amdgpu_descriptor_set_file_stem",
+    "_amdgpu_mfma_has_qualified_timing",
+    "_amdgpu_mfma_schedule_class_name",
+    "_amdgpu_mfma_schedule_classes",
     "_amdgpu_schedule_class_reads_exec_state",
     "_amdgpu_trans_schedule_class_name",
     "_amdgpu_trans_schedule_classes",

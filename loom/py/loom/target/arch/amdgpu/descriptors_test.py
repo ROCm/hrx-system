@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -23,9 +24,12 @@ from loom.target.arch.amdgpu.descriptors import (
     _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS,
     _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS,
     _AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_GFX942_MATRIX_TIMINGS,
+    _AMDGPU_GFX950_MATRIX_TIMINGS,
     _AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE,
@@ -44,8 +48,10 @@ from loom.target.arch.amdgpu.descriptors import (
     _REG_PART_VGPR_HIGH16,
     _REG_PART_VGPR_LOW16,
     _REG_VCC,
+    _RESOURCE_MFMA,
     _RESOURCE_SALU,
     _RESOURCE_VALU,
+    _SCHEDULE_MFMA_QUALIFIED_PREFIX,
     _SCHEDULE_MODE_CONTROL,
     _SCHEDULE_PACKED_DOT,
     _SCHEDULE_SALU,
@@ -86,6 +92,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _amdgpu_core_descriptor_set,
     _amdgpu_core_descriptor_set_bases,
     _amdgpu_core_descriptor_set_intersection,
+    _amdgpu_mfma_schedule_class_name,
     _amdgpu_trans_schedule_class_name,
     _amdgpu_trans_schedule_classes,
     _categorize_amdgpu_descriptors,
@@ -174,13 +181,6 @@ from loom.target.low_descriptors import (
 def test_generic_descriptor_contracts_are_member_intersections() -> None:
     base_cases = (
         (
-            _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
-            (
-                _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
-                _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
-            ),
-        ),
-        (
             _AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE,
             (
                 _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
@@ -201,6 +201,21 @@ def test_generic_descriptor_contracts_are_member_intersections() -> None:
             key=generic.key,
             members=members,
         )
+
+    gfx9_4_base_intersection = _amdgpu_core_descriptor_set_intersection(
+        key=_AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE.key,
+        members=(
+            _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
+            _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
+        ),
+    )
+    assert (
+        replace(
+            _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+            schedule_classes=gfx9_4_base_intersection.schedule_classes,
+        )
+        == gfx9_4_base_intersection
+    )
 
     gfx117x_overlays = {
         overlay.descriptor_key: overlay for overlay in _gfx117x_core_overlays()
@@ -479,6 +494,90 @@ def test_trans_descriptors_use_descriptor_specific_schedule_classes() -> None:
             ]
             assert schedule_class.latency_kind is LatencyKind.ESTIMATE
             assert schedule_class.latency_cycles == _AMDGPU_TRANS_PROXY_LATENCY_CYCLES
+
+
+def test_gfx9_4_matrix_schedule_classes_match_member_timings() -> None:
+    schedule_cases = (
+        (
+            _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
+            _AMDGPU_GFX942_MATRIX_TIMINGS,
+            _gfx940_core_overlays(),
+        ),
+        (
+            _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
+            _AMDGPU_GFX950_MATRIX_TIMINGS,
+            _gfx950_core_overlays(),
+        ),
+        (
+            _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+            _AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS,
+            _gfx9_4_generic_core_overlays(),
+        ),
+    )
+    for descriptor_set, timings, overlays in schedule_cases:
+        schedule_classes = {
+            schedule_class.name: schedule_class
+            for schedule_class in descriptor_set.schedule_classes
+        }
+        matrix_overlays = {
+            overlay.descriptor_key: overlay
+            for overlay in overlays
+            if overlay.semantic_tag is not None
+            and overlay.semantic_tag.startswith("matrix.")
+        }
+        assert set(matrix_overlays) == set(timings)
+        for descriptor_key, timing in timings.items():
+            schedule_class = schedule_classes[
+                _amdgpu_mfma_schedule_class_name(descriptor_key)
+            ]
+            assert schedule_class.latency_kind is LatencyKind.ESTIMATE
+            assert schedule_class.latency_cycles == timing.latency_cycles
+            assert schedule_class.issue_uses == (
+                IssueUse(
+                    _RESOURCE_MFMA,
+                    cycles=timing.reciprocal_throughput_cycles,
+                    units=1,
+                ),
+            )
+            overlay = matrix_overlays[descriptor_key]
+            assert overlay.schedule_class == _amdgpu_mfma_schedule_class_name(
+                descriptor_key
+            )
+            assert overlay.schedule_class.startswith(_SCHEDULE_MFMA_QUALIFIED_PREFIX)
+
+    differing_member_timings = {
+        descriptor_key
+        for descriptor_key in (
+            _AMDGPU_GFX942_MATRIX_TIMINGS.keys() & _AMDGPU_GFX950_MATRIX_TIMINGS.keys()
+        )
+        if _AMDGPU_GFX942_MATRIX_TIMINGS[descriptor_key]
+        != _AMDGPU_GFX950_MATRIX_TIMINGS[descriptor_key]
+    }
+    assert differing_member_timings == {"amdgpu.v_mfma_f64_16x16x4_f64"}
+    for descriptor_key, generic_timing in _AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS.items():
+        gfx942_timing = _AMDGPU_GFX942_MATRIX_TIMINGS[descriptor_key]
+        gfx950_timing = _AMDGPU_GFX950_MATRIX_TIMINGS[descriptor_key]
+        assert generic_timing.latency_cycles == max(
+            gfx942_timing.latency_cycles,
+            gfx950_timing.latency_cycles,
+        )
+        assert generic_timing.reciprocal_throughput_cycles == max(
+            gfx942_timing.reciprocal_throughput_cycles,
+            gfx950_timing.reciprocal_throughput_cycles,
+        )
+
+    gfx950_overlays = {
+        overlay.descriptor_key: overlay for overlay in _gfx950_core_overlays()
+    }
+    for descriptor_key in (
+        "amdgpu.v_mfma_scale_f32_16x16x128_f8f6f4",
+        "amdgpu.v_mfma_scale_f32_32x32x64_f8f6f4",
+    ):
+        assert gfx950_overlays[descriptor_key].fixed_encoding_fields == (
+            ("ABID", 1),
+            ("ENCODING", 0x1A7),
+            ("X2ENCODING", 0xD3AC),
+        )
 
 
 def test_trans_schedule_classes_accept_descriptor_latency_overrides() -> None:

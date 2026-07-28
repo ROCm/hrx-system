@@ -991,9 +991,12 @@ def _with_instruction_classes(descriptor_set: DescriptorSet) -> DescriptorSet:
     descriptors = []
     for descriptor in descriptor_set.descriptors:
         instruction_classes = set(descriptor.instruction_classes)
-        instruction_classes.update(
-            _AMDGPU_SCHEDULE_INSTRUCTION_CLASSES.get(descriptor.schedule_class, ())
+        schedule_instruction_classes = _AMDGPU_SCHEDULE_INSTRUCTION_CLASSES.get(
+            descriptor.schedule_class, ()
         )
+        if descriptor.schedule_class.startswith(_SCHEDULE_MFMA_QUALIFIED_PREFIX):
+            schedule_instruction_classes = (InstructionClass.MFMA,)
+        instruction_classes.update(schedule_instruction_classes)
         semantic_tag = descriptor.semantic_tag or ""
         if semantic_tag.startswith(("memory.stack.", "memory.private.")):
             instruction_classes.discard(InstructionClass.GLOBAL_MEMORY)
