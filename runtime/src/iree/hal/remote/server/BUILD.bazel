@@ -81,6 +81,30 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "epoch_semaphore_map",
+    srcs = ["epoch_semaphore_map.c"],
+    hdrs = ["epoch_semaphore_map.h"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "epoch_semaphore_map_test",
+    srcs = ["epoch_semaphore_map_test.cc"],
+    deps = [
+        ":epoch_semaphore_map",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "server",
     srcs = [
         "bulk.c",
@@ -109,6 +133,7 @@ iree_runtime_cc_library(
     ],
     deps = [
         ":bulk_staging_pool",
+        ":epoch_semaphore_map",
         ":resource_table",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
@@ -153,6 +178,7 @@ iree_runtime_cc_test(
         "session.h",
     ],
     deps = [
+        ":epoch_semaphore_map",
         ":resource_table",
         ":server",
         "//runtime/src/iree/async",
@@ -183,6 +209,7 @@ iree_runtime_cc_test(
         "session.h",
     ],
     deps = [
+        ":epoch_semaphore_map",
         ":resource_table",
         ":server",
         "//runtime/src/iree/async",
@@ -216,6 +243,7 @@ iree_runtime_cc_benchmark(
         "session.h",
     ],
     deps = [
+        ":epoch_semaphore_map",
         ":resource_table",
         ":server",
         "//runtime/src/iree/async",
@@ -251,6 +279,7 @@ iree_runtime_cc_benchmark(
         "session.h",
     ],
     deps = [
+        ":epoch_semaphore_map",
         ":resource_table",
         ":server",
         "//runtime/src/iree/async",
@@ -286,6 +315,7 @@ iree_runtime_cc_test(
         "session.h",
     ],
     deps = [
+        ":epoch_semaphore_map",
         ":resource_table",
         ":server",
         "//runtime/src/iree/async",
@@ -319,6 +349,7 @@ iree_runtime_cc_benchmark(
         "session.h",
     ],
     deps = [
+        ":epoch_semaphore_map",
         ":resource_table",
         ":server",
         "//runtime/src/iree/async",
@@ -352,6 +383,7 @@ iree_runtime_cc_test(
         "session.h",
     ],
     deps = [
+        ":epoch_semaphore_map",
         ":resource_table",
         ":server",
         "//runtime/src/iree/async",
@@ -399,6 +431,7 @@ iree_runtime_cc_test(
         "session.h",
     ],
     deps = [
+        ":epoch_semaphore_map",
         ":resource_table",
         ":server",
         "//runtime/src/iree/async",
@@ -424,6 +457,7 @@ iree_runtime_cc_test(
         "session_test.cc",
     ],
     deps = [
+        ":epoch_semaphore_map",
         ":resource_table",
         ":server",
         "//runtime/src/iree/async",
@@ -454,6 +488,7 @@ iree_runtime_cc_test(
         "session.h",
     ],
     deps = [
+        ":epoch_semaphore_map",
         ":resource_table",
         ":server",
         "//runtime/src/iree/async",

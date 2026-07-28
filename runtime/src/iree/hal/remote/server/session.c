@@ -565,14 +565,12 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
                                            iree_net_session_t* session) {
   iree_net_queue_channel_t* queue_channel = NULL;
 
-  // Snapshot the resource table and epoch mapping for cleanup outside the lock.
+  // Snapshot resources for cleanup outside the lock.
   iree_hal_remote_server_session_t resource_table_snapshot;
   memset(&resource_table_snapshot, 0, sizeof(resource_table_snapshot));
-  iree_hal_remote_server_epoch_slot_state_t* epoch_map_states = NULL;
-  iree_async_axis_t* epoch_map_axes = NULL;
-  uint64_t* epoch_map_epochs = NULL;
-  iree_hal_semaphore_t** epoch_map_semaphores = NULL;
-  iree_host_size_t epoch_map_capacity = 0;
+  iree_hal_remote_server_epoch_semaphore_map_t epoch_semaphore_map_snapshot;
+  memset(&epoch_semaphore_map_snapshot, 0,
+         sizeof(epoch_semaphore_map_snapshot));
   iree_hal_remote_server_session_t provisional_snapshot;
   memset(&provisional_snapshot, 0, sizeof(provisional_snapshot));
   iree_net_sequence_node_t* pending_releases = NULL;
@@ -596,14 +594,9 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
     memset(&server->sessions[slot].virtual_buffer_map, 0,
            sizeof(server->sessions[slot].virtual_buffer_map));
 
-    epoch_map_states = server->sessions[slot].epoch_semaphore_map.states;
-    epoch_map_axes = server->sessions[slot].epoch_semaphore_map.axes;
-    epoch_map_epochs = server->sessions[slot].epoch_semaphore_map.epochs;
-    epoch_map_semaphores =
-        server->sessions[slot].epoch_semaphore_map.semaphores;
-    epoch_map_capacity = server->sessions[slot].epoch_semaphore_map.capacity;
-    memset(&server->sessions[slot].epoch_semaphore_map, 0,
-           sizeof(server->sessions[slot].epoch_semaphore_map));
+    iree_hal_remote_server_epoch_semaphore_map_move(
+        &server->sessions[slot].epoch_semaphore_map,
+        &epoch_semaphore_map_snapshot);
 
     provisional_snapshot.provisional_map =
         server->sessions[slot].provisional_map;
@@ -633,14 +626,8 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
   iree_hal_remote_server_session_deinitialize_resource_table(
       &resource_table_snapshot, server->host_allocator);
 
-  // Release all local semaphores in the epoch mapping.
-  for (iree_host_size_t i = 0; i < epoch_map_capacity; ++i) {
-    iree_hal_semaphore_release(epoch_map_semaphores[i]);
-  }
-  iree_allocator_free(server->host_allocator, epoch_map_states);
-  iree_allocator_free(server->host_allocator, epoch_map_axes);
-  iree_allocator_free(server->host_allocator, epoch_map_epochs);
-  iree_allocator_free(server->host_allocator, epoch_map_semaphores);
+  iree_hal_remote_server_epoch_semaphore_map_deinitialize(
+      &epoch_semaphore_map_snapshot, server->host_allocator);
 
   iree_hal_remote_server_session_deinitialize_provisionals(
       &provisional_snapshot, server->host_allocator);
@@ -665,218 +652,6 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
 
   iree_hal_remote_server_bulk_session_deinitialize_transfers(
       &server->sessions[slot]);
-}
-
-//===----------------------------------------------------------------------===//
-// Epoch→semaphore mapping
-//===----------------------------------------------------------------------===//
-
-static uint64_t iree_hal_remote_server_mix_u64(uint64_t value) {
-  value ^= value >> 33;
-  value *= 0xff51afd7ed558ccdull;
-  value ^= value >> 33;
-  value *= 0xc4ceb9fe1a85ec53ull;
-  value ^= value >> 33;
-  return value;
-}
-
-static iree_host_size_t iree_hal_remote_server_epoch_semaphore_slot(
-    iree_async_axis_t axis, uint64_t epoch, iree_host_size_t capacity) {
-  uint64_t hash = iree_hal_remote_server_mix_u64(axis);
-  hash ^= iree_hal_remote_server_mix_u64(epoch);
-  return (iree_host_size_t)(hash & (capacity - 1));
-}
-
-static iree_host_size_t iree_hal_remote_server_epoch_map_capacity(
-    iree_host_size_t minimum_capacity) {
-  iree_host_size_t capacity = 64;
-  while (capacity < minimum_capacity) {
-    if (capacity > IREE_HOST_SIZE_MAX / 2) return 0;
-    capacity *= 2;
-  }
-  return capacity;
-}
-
-static iree_status_t iree_hal_remote_server_resize_epoch_semaphore_map(
-    iree_hal_remote_server_session_t* session_slot,
-    iree_host_size_t minimum_capacity, iree_allocator_t host_allocator) {
-  iree_host_size_t new_capacity =
-      iree_hal_remote_server_epoch_map_capacity(minimum_capacity);
-  if (new_capacity == 0) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "epoch semaphore map capacity overflow");
-  }
-
-  iree_hal_remote_server_epoch_slot_state_t* new_states = NULL;
-  iree_async_axis_t* new_axes = NULL;
-  uint64_t* new_epochs = NULL;
-  iree_hal_semaphore_t** new_semaphores = NULL;
-  iree_status_t status = iree_allocator_malloc_array(
-      host_allocator, new_capacity, sizeof(*new_states), (void**)&new_states);
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(host_allocator, new_capacity,
-                                         sizeof(*new_axes), (void**)&new_axes);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(
-        host_allocator, new_capacity, sizeof(*new_epochs), (void**)&new_epochs);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(host_allocator, new_capacity,
-                                         sizeof(*new_semaphores),
-                                         (void**)&new_semaphores);
-  }
-
-  if (iree_status_is_ok(status)) {
-    memset(new_states, 0, new_capacity * sizeof(*new_states));
-    memset(new_axes, 0, new_capacity * sizeof(*new_axes));
-    memset(new_epochs, 0, new_capacity * sizeof(*new_epochs));
-    memset(new_semaphores, 0, new_capacity * sizeof(*new_semaphores));
-
-    for (iree_host_size_t i = 0; i < session_slot->epoch_semaphore_map.capacity;
-         ++i) {
-      if (session_slot->epoch_semaphore_map.states &&
-          session_slot->epoch_semaphore_map.states[i] !=
-              IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_OCCUPIED) {
-        continue;
-      }
-      iree_hal_semaphore_t* semaphore =
-          session_slot->epoch_semaphore_map.semaphores[i];
-      if (!semaphore) continue;
-      iree_async_axis_t axis = session_slot->epoch_semaphore_map.axes[i];
-      uint64_t epoch = session_slot->epoch_semaphore_map.epochs[i];
-      iree_host_size_t slot = iree_hal_remote_server_epoch_semaphore_slot(
-          axis, epoch, new_capacity);
-      while (new_states[slot] == IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_OCCUPIED) {
-        slot = (slot + 1) & (new_capacity - 1);
-      }
-      new_states[slot] = IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_OCCUPIED;
-      new_axes[slot] = axis;
-      new_epochs[slot] = epoch;
-      new_semaphores[slot] = semaphore;
-    }
-
-    iree_allocator_free(host_allocator,
-                        session_slot->epoch_semaphore_map.states);
-    iree_allocator_free(host_allocator, session_slot->epoch_semaphore_map.axes);
-    iree_allocator_free(host_allocator,
-                        session_slot->epoch_semaphore_map.epochs);
-    iree_allocator_free(host_allocator,
-                        session_slot->epoch_semaphore_map.semaphores);
-    session_slot->epoch_semaphore_map.states = new_states;
-    session_slot->epoch_semaphore_map.axes = new_axes;
-    session_slot->epoch_semaphore_map.epochs = new_epochs;
-    session_slot->epoch_semaphore_map.semaphores = new_semaphores;
-    session_slot->epoch_semaphore_map.capacity = new_capacity;
-    session_slot->epoch_semaphore_map.used_count =
-        session_slot->epoch_semaphore_map.count;
-  } else {
-    iree_allocator_free(host_allocator, new_states);
-    iree_allocator_free(host_allocator, new_axes);
-    iree_allocator_free(host_allocator, new_epochs);
-    iree_allocator_free(host_allocator, new_semaphores);
-  }
-
-  return status;
-}
-
-// Stores a mapping from signal frontier entry to local semaphore.
-// Retains the semaphore.
-static iree_status_t iree_hal_remote_server_store_epoch_semaphore(
-    iree_hal_remote_server_session_t* session_slot, iree_async_axis_t axis,
-    uint64_t epoch, iree_hal_semaphore_t* semaphore,
-    iree_allocator_t host_allocator) {
-  iree_host_size_t minimum_used_capacity =
-      session_slot->epoch_semaphore_map.used_count + 1;
-  if (minimum_used_capacity * 4 >=
-      session_slot->epoch_semaphore_map.capacity * 3) {
-    IREE_RETURN_IF_ERROR(iree_hal_remote_server_resize_epoch_semaphore_map(
-        session_slot, (session_slot->epoch_semaphore_map.count + 1) * 2,
-        host_allocator));
-  }
-
-  iree_host_size_t slot = iree_hal_remote_server_epoch_semaphore_slot(
-      axis, epoch, session_slot->epoch_semaphore_map.capacity);
-  iree_host_size_t first_tombstone = IREE_HOST_SIZE_MAX;
-  while (session_slot->epoch_semaphore_map.states[slot] !=
-         IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_EMPTY) {
-    if (session_slot->epoch_semaphore_map.states[slot] ==
-        IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_TOMBSTONE) {
-      if (first_tombstone == IREE_HOST_SIZE_MAX) first_tombstone = slot;
-    } else if (session_slot->epoch_semaphore_map.axes[slot] == axis &&
-               session_slot->epoch_semaphore_map.epochs[slot] == epoch) {
-      return iree_make_status(
-          IREE_STATUS_ALREADY_EXISTS,
-          "duplicate signal frontier entry axis=0x%016" PRIx64
-          " epoch=%" PRIu64,
-          axis, epoch);
-    }
-    slot = (slot + 1) & (session_slot->epoch_semaphore_map.capacity - 1);
-  }
-  if (first_tombstone != IREE_HOST_SIZE_MAX) {
-    slot = first_tombstone;
-  } else {
-    ++session_slot->epoch_semaphore_map.used_count;
-  }
-
-  session_slot->epoch_semaphore_map.states[slot] =
-      IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_OCCUPIED;
-  session_slot->epoch_semaphore_map.axes[slot] = axis;
-  session_slot->epoch_semaphore_map.epochs[slot] = epoch;
-  session_slot->epoch_semaphore_map.semaphores[slot] = semaphore;
-  ++session_slot->epoch_semaphore_map.count;
-  iree_hal_semaphore_retain(semaphore);
-  return iree_ok_status();
-}
-
-// Looks up the local semaphore for a given frontier entry. Returns NULL if not
-// found. The returned pointer is borrowed — the epoch mapping retains it.
-static iree_hal_semaphore_t* iree_hal_remote_server_lookup_epoch_semaphore(
-    iree_hal_remote_server_session_t* session_slot, iree_async_axis_t axis,
-    uint64_t epoch) {
-  if (session_slot->epoch_semaphore_map.capacity == 0) return NULL;
-  iree_host_size_t slot = iree_hal_remote_server_epoch_semaphore_slot(
-      axis, epoch, session_slot->epoch_semaphore_map.capacity);
-  while (session_slot->epoch_semaphore_map.states[slot] !=
-         IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_EMPTY) {
-    if (session_slot->epoch_semaphore_map.states[slot] ==
-            IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_OCCUPIED &&
-        session_slot->epoch_semaphore_map.axes[slot] == axis &&
-        session_slot->epoch_semaphore_map.epochs[slot] == epoch) {
-      return session_slot->epoch_semaphore_map.semaphores[slot];
-    }
-    slot = (slot + 1) & (session_slot->epoch_semaphore_map.capacity - 1);
-  }
-  return NULL;
-}
-
-// Removes the local semaphore for a given frontier entry and transfers the map
-// retain to the caller. Returns NULL when no entry was found.
-static iree_hal_semaphore_t* iree_hal_remote_server_remove_epoch_semaphore(
-    iree_hal_remote_server_session_t* session_slot, iree_async_axis_t axis,
-    uint64_t epoch) {
-  if (session_slot->epoch_semaphore_map.capacity == 0) return NULL;
-  iree_host_size_t slot = iree_hal_remote_server_epoch_semaphore_slot(
-      axis, epoch, session_slot->epoch_semaphore_map.capacity);
-  while (session_slot->epoch_semaphore_map.states[slot] !=
-         IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_EMPTY) {
-    if (session_slot->epoch_semaphore_map.states[slot] ==
-            IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_OCCUPIED &&
-        session_slot->epoch_semaphore_map.axes[slot] == axis &&
-        session_slot->epoch_semaphore_map.epochs[slot] == epoch) {
-      iree_hal_semaphore_t* semaphore =
-          session_slot->epoch_semaphore_map.semaphores[slot];
-      session_slot->epoch_semaphore_map.states[slot] =
-          IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_TOMBSTONE;
-      session_slot->epoch_semaphore_map.axes[slot] = 0;
-      session_slot->epoch_semaphore_map.epochs[slot] = 0;
-      session_slot->epoch_semaphore_map.semaphores[slot] = NULL;
-      --session_slot->epoch_semaphore_map.count;
-      return semaphore;
-    }
-    slot = (slot + 1) & (session_slot->epoch_semaphore_map.capacity - 1);
-  }
-  return NULL;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1364,8 +1139,8 @@ static void iree_hal_remote_server_on_command_complete(
   session_active = session_slot->session_id == completion->session_id &&
                    session_slot->session != NULL;
   if (session_active) {
-    removed_semaphore = iree_hal_remote_server_remove_epoch_semaphore(
-        session_slot, signal_axis, signal_epoch);
+    removed_semaphore = iree_hal_remote_server_epoch_semaphore_map_remove(
+        &session_slot->epoch_semaphore_map, signal_axis, signal_epoch);
     queue_terminal = iree_any_bit_set(
         session_slot->queue_flags, IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_TERMINAL);
     if (!queue_terminal && iree_status_is_ok(status)) {
@@ -1951,8 +1726,8 @@ static iree_status_t iree_hal_remote_server_resolve_wait_frontier(
     }
 
     iree_hal_semaphore_t* local_semaphore =
-        iree_hal_remote_server_lookup_epoch_semaphore(
-            session_slot, wait_frontier->entries[i].axis,
+        iree_hal_remote_server_epoch_semaphore_map_lookup(
+            &session_slot->epoch_semaphore_map, wait_frontier->entries[i].axis,
             wait_frontier->entries[i].epoch);
     if (!local_semaphore) {
       return iree_make_status(IREE_STATUS_NOT_FOUND,
@@ -2077,9 +1852,9 @@ static iree_status_t iree_hal_remote_server_submit_command(
   if (iree_status_is_ok(status)) {
     iree_slim_mutex_lock(&server->session_mutex);
     if (session_slot->session_id == session_id && session_slot->session) {
-      status = iree_hal_remote_server_store_epoch_semaphore(
-          session_slot, signal_axis, signal_epoch, local_semaphore,
-          server->host_allocator);
+      status = iree_hal_remote_server_epoch_semaphore_map_insert(
+          &session_slot->epoch_semaphore_map, signal_axis, signal_epoch,
+          local_semaphore, server->host_allocator);
     } else {
       status = iree_status_from_code(IREE_STATUS_ABORTED);
     }
@@ -2133,8 +1908,8 @@ static iree_status_t iree_hal_remote_server_submit_command(
       iree_hal_semaphore_t* removed_semaphore = NULL;
       iree_slim_mutex_lock(&server->session_mutex);
       if (session_slot->session_id == session_id && session_slot->session) {
-        removed_semaphore = iree_hal_remote_server_remove_epoch_semaphore(
-            session_slot, signal_axis, signal_epoch);
+        removed_semaphore = iree_hal_remote_server_epoch_semaphore_map_remove(
+            &session_slot->epoch_semaphore_map, signal_axis, signal_epoch);
       }
       iree_slim_mutex_unlock(&server->session_mutex);
       iree_hal_semaphore_release(removed_semaphore);

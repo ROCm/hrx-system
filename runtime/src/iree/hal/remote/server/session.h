@@ -11,6 +11,7 @@
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/hal/remote/protocol/control.h"
+#include "iree/hal/remote/server/epoch_semaphore_map.h"
 #include "iree/hal/remote/server/resource_table.h"
 #include "iree/net/channel/queue/queue_channel.h"
 #include "iree/net/channel/util/sequence_window.h"
@@ -27,14 +28,6 @@ typedef struct iree_hal_remote_control_envelope_t
     iree_hal_remote_control_envelope_t;
 typedef struct iree_hal_remote_server_pending_queue_command_t
     iree_hal_remote_server_pending_queue_command_t;
-
-typedef uint8_t iree_hal_remote_server_epoch_slot_state_t;
-
-enum iree_hal_remote_server_epoch_slot_state_e {
-  IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_EMPTY = 0,
-  IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_OCCUPIED = 1,
-  IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_TOMBSTONE = 2,
-};
 
 typedef uint8_t iree_hal_remote_server_provisional_state_t;
 
@@ -100,27 +93,12 @@ typedef struct iree_hal_remote_server_session_t {
   // when the session is removed.
   iree_hal_remote_resource_table_t resource_table;
 
-  // (axis, epoch)→local semaphore mapping for wait frontier resolution. Each
+  // (axis, epoch)->local semaphore mapping for wait frontier resolution. Each
   // COMMAND creates a local semaphore for completion tracking; subsequent
   // commands with wait frontiers look up earlier frontier entries to build
   // local wait semaphore lists. The mapping retains each semaphore until its
   // command completes or the session is removed.
-  struct {
-    // Occupancy state for each open-addressed slot.
-    iree_hal_remote_server_epoch_slot_state_t* states;
-    // Signal axis for each occupied slot.
-    iree_async_axis_t* axes;
-    // Signal epoch for each occupied slot.
-    uint64_t* epochs;
-    // Retained local completion semaphore for each occupied slot.
-    iree_hal_semaphore_t** semaphores;
-    // Number of occupied slots.
-    iree_host_size_t count;
-    // Number of occupied or tombstone slots.
-    iree_host_size_t used_count;
-    // Power-of-two capacity of all slot arrays.
-    iree_host_size_t capacity;
-  } epoch_semaphore_map;
+  iree_hal_remote_server_epoch_semaphore_map_t epoch_semaphore_map;
 
   // COMMAND submission epochs processed by the server after referenced
   // resources have either been retained by the local HAL or rejected.

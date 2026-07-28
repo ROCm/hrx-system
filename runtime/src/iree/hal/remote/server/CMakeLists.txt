@@ -88,6 +88,34 @@ iree_cc_test(
 
 iree_cc_library(
   NAME
+    epoch_semaphore_map
+  HDRS
+    "epoch_semaphore_map.h"
+  SRCS
+    "epoch_semaphore_map.c"
+  DEPS
+    iree::async
+    iree::base
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    epoch_semaphore_map_test
+  SRCS
+    "epoch_semaphore_map_test.cc"
+  DEPS
+    ::epoch_semaphore_map
+    iree::async
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     server
   HDRS
     "api.h"
@@ -114,6 +142,7 @@ iree_cc_library(
     "session.h"
   DEPS
     ::bulk_staging_pool
+    ::epoch_semaphore_map
     ::resource_table
     iree::async
     iree::base
@@ -158,6 +187,7 @@ iree_cc_test(
     "server.h"
     "session.h"
   DEPS
+    ::epoch_semaphore_map
     ::resource_table
     ::server
     iree::async
@@ -187,6 +217,7 @@ iree_cc_test(
     "server.h"
     "session.h"
   DEPS
+    ::epoch_semaphore_map
     ::resource_table
     ::server
     iree::async
@@ -219,6 +250,7 @@ iree_cc_binary_benchmark(
     "server.h"
     "session.h"
   DEPS
+    ::epoch_semaphore_map
     ::resource_table
     ::server
     iree::async
@@ -255,6 +287,7 @@ iree_cc_binary_benchmark(
     "server.h"
     "session.h"
   DEPS
+    ::epoch_semaphore_map
     ::resource_table
     ::server
     iree::async
@@ -291,6 +324,7 @@ iree_cc_test(
     "server.h"
     "session.h"
   DEPS
+    ::epoch_semaphore_map
     ::resource_table
     ::server
     iree::async
@@ -323,6 +357,7 @@ iree_cc_binary_benchmark(
     "server.h"
     "session.h"
   DEPS
+    ::epoch_semaphore_map
     ::resource_table
     ::server
     iree::async
@@ -357,6 +392,7 @@ iree_cc_test(
     "server.h"
     "session.h"
   DEPS
+    ::epoch_semaphore_map
     ::resource_table
     ::server
     iree::async
@@ -405,6 +441,7 @@ iree_cc_test(
     "server.h"
     "session.h"
   DEPS
+    ::epoch_semaphore_map
     ::resource_table
     ::server
     iree::async
@@ -429,6 +466,7 @@ iree_cc_test(
     "session.h"
     "session_test.cc"
   DEPS
+    ::epoch_semaphore_map
     ::resource_table
     ::server
     iree::async
@@ -458,6 +496,7 @@ iree_cc_test(
     "server_lifecycle_test.cc"
     "session.h"
   DEPS
+    ::epoch_semaphore_map
     ::resource_table
     ::server
     iree::async
