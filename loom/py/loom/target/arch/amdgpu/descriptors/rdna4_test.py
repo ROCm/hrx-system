@@ -12,18 +12,13 @@ from loom.target.arch.amdgpu.descriptors import (
     AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64,
     amdgpu_encoding_field_id,
 )
+from loom.target.arch.amdgpu.matrix_formats import GFX125X_MATRIX_PHYSICAL_FORMATS
 from loom.target.low_descriptors import (
     ConstraintKind,
     EncodingFieldValue,
     ImmediateKind,
     NativeAsmValueKind,
 )
-
-_PHYSICAL_FORMATS = {
-    "f8": (16, {"fp8": 0, "bf8": 1}),
-    "f6": (12, {"fp6": 2, "bf6": 3}),
-    "f4": (8, {"fp4": 4}),
-}
 
 
 def _matrix_descriptors(descriptor_set, family: str):
@@ -71,14 +66,14 @@ def test_gfx125x_f8f6f4_wmma_descriptors_model_all_physical_abis() -> None:
         for domain in _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.enum_domains
     }
 
-    for lhs_format, (lhs_units, lhs_values) in _PHYSICAL_FORMATS.items():
-        for rhs_format, (rhs_units, rhs_values) in _PHYSICAL_FORMATS.items():
-            suffix = f"{lhs_format}_{rhs_format}"
+    for lhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
+        for rhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
+            suffix = f"{lhs_format.token}_{rhs_format.token}"
             descriptor = descriptors[f"amdgpu.v_wmma_f32_16x16x128_f8f6f4_{suffix}"]
             assert tuple(operand.unit_count for operand in descriptor.operands) == (
                 8,
-                lhs_units,
-                rhs_units,
+                lhs_format.register_count_for(64),
+                rhs_format.register_count_for(64),
                 8,
             )
 
@@ -90,8 +85,12 @@ def test_gfx125x_f8f6f4_wmma_descriptors_model_all_physical_abis() -> None:
                 ImmediateKind.ENUM,
                 ImmediateKind.ENUM,
             )
-            assert enum_domains[format_immediates[0].enum_domain] == lhs_values
-            assert enum_domains[format_immediates[1].enum_domain] == rhs_values
+            assert enum_domains[format_immediates[0].enum_domain] == dict(
+                lhs_format.selector_values
+            )
+            assert enum_domains[format_immediates[1].enum_domain] == dict(
+                rhs_format.selector_values
+            )
 
             form = descriptor.asm_forms[0]
             assert form.native_assembly_mnemonic == "v_wmma_f32_16x16x128_f8f6f4"
@@ -116,18 +115,18 @@ def test_gfx125x_scaled_f8f6f4_wmma_descriptors_model_all_physical_abis() -> Non
 
     expected_keys = set()
     for scale_kind in ("scale", "scale16"):
-        for lhs_format, (lhs_units, _) in _PHYSICAL_FORMATS.items():
-            for rhs_format, (rhs_units, _) in _PHYSICAL_FORMATS.items():
+        for lhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
+            for rhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
                 key = (
                     f"amdgpu.v_wmma_{scale_kind}_f32_16x16x128_f8f6f4_"
-                    f"{lhs_format}_{rhs_format}"
+                    f"{lhs_format.token}_{rhs_format.token}"
                 )
                 expected_keys.add(key)
                 descriptor = descriptors[key]
                 assert tuple(operand.unit_count for operand in descriptor.operands) == (
                     8,
-                    lhs_units,
-                    rhs_units,
+                    lhs_format.register_count_for(64),
+                    rhs_format.register_count_for(64),
                     8,
                     1 if scale_kind == "scale" else 2,
                     1 if scale_kind == "scale" else 2,

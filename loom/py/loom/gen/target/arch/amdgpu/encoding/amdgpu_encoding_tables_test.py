@@ -36,11 +36,11 @@ def test_descriptor_encoding_contract_includes_opcode_field() -> None:
 def test_identifier_seed_ignores_fields_written_during_packing() -> None:
     opcode_field = _field("OP", _bit_range(16, 7))
 
-    cdna3_seed = _identifier_seed_without_fields(0xD3BE0000, (opcode_field,))
-    cdna4_seed = _identifier_seed_without_fields(0xD3AD0000, (opcode_field,))
+    first_seed = _identifier_seed_without_fields(0xD3BE0000, (opcode_field,))
+    second_seed = _identifier_seed_without_fields(0xD3AD0000, (opcode_field,))
 
-    assert cdna3_seed == 0xD3800000
-    assert cdna4_seed == cdna3_seed
+    assert first_seed == 0xD3800000
+    assert second_seed == first_seed
 
 
 def test_identifier_seed_retains_unwritten_format_bits() -> None:
@@ -52,7 +52,7 @@ def test_identifier_seed_retains_unwritten_format_bits() -> None:
     assert lhs_seed != rhs_seed
 
 
-def test_gfx125x_encoding_field_replacement_preserves_field_order() -> None:
+def test_encoding_field_replacement_preserves_field_order() -> None:
     encoding = AmdgpuIsaEncoding(
         name="ENC_VOP3P",
         order=0,

@@ -12,6 +12,7 @@ from dataclasses import replace
 
 import pytest
 
+from loom.target.arch.amdgpu.matrix_formats import GFX125X_MATRIX_PHYSICAL_FORMATS
 from loom.target.arch.amdgpu.matrix_fragment_layouts import (
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
@@ -70,28 +71,30 @@ def test_rdna3_integer_wmma_layout_matches_instruction_coordinates(
 
 
 def test_gfx125x_selector_layouts_cover_every_physical_operand_abi() -> None:
-    physical_formats = (
-        ("f8", 16, 8),
-        ("f6", 12, 6),
-        ("f4", 8, 4),
-    )
-
-    for lhs_token, lhs_register_count, lhs_element_bit_count in physical_formats:
-        for rhs_token, rhs_register_count, rhs_element_bit_count in physical_formats:
+    for lhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
+        for rhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
             layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY[
-                f"gfx125x_wmma_f32_16x16x128_{lhs_token}_{rhs_token}"
+                f"gfx125x_wmma_f32_16x16x128_{lhs_format.token}_{rhs_format.token}"
             ]
             assert layout.tile_shape == (1, 16, 16, 128)
             assert (
                 layout.lhs.payload_element_count,
                 layout.lhs.register_count,
                 layout.lhs.element_bit_count,
-            ) == (64, lhs_register_count, lhs_element_bit_count)
+            ) == (
+                64,
+                lhs_format.register_count_for(64),
+                lhs_format.element_bit_count,
+            )
             assert (
                 layout.rhs.payload_element_count,
                 layout.rhs.register_count,
                 layout.rhs.element_bit_count,
-            ) == (64, rhs_register_count, rhs_element_bit_count)
+            ) == (
+                64,
+                rhs_format.register_count_for(64),
+                rhs_format.element_bit_count,
+            )
             assert (
                 layout.result.payload_element_count,
                 layout.result.register_count,

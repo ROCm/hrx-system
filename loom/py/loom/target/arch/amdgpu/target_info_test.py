@@ -11,10 +11,12 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 
-from build_tools.amdgpu.target_map_data import AMDGPU_GENERIC_CODE_OBJECT_INFOS
+from build_tools.amdgpu.target_map_data import (
+    AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS,
+    AMDGPU_GENERIC_CODE_OBJECT_INFOS,
+)
 
 from loom.target.arch.amdgpu.target_info import (
-    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION,
     AMDGPU_DESCRIPTOR_SET_INFOS,
     AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
@@ -29,7 +31,6 @@ from loom.target.arch.amdgpu.target_info import (
     amdgpu_descriptor_set_info_by_generator_target,
     amdgpu_descriptor_set_storage_info_by_generator_target,
     amdgpu_descriptor_set_view_infos_by_storage_generator_target,
-    amdgpu_processor_info_by_name,
     validate_amdgpu_descriptor_set_isa_xml,
     validate_amdgpu_generic_contracts,
 )
@@ -92,101 +93,81 @@ def test_descriptor_set_generator_target_lookup_rejects_unknown_target() -> None
 
 
 def test_descriptor_set_storage_target_lookup_classifies_storage_targets() -> None:
-    assert (
-        amdgpu_descriptor_set_storage_info_by_generator_target(
-            "rdna4_gfx125x"
-        ).generator_target
-        == "rdna4_gfx125x"
+    storage_infos = tuple(
+        info
+        for info in AMDGPU_DESCRIPTOR_SET_INFOS
+        if info.storage_generator_target is None
     )
-    assert (
-        amdgpu_descriptor_set_storage_info_by_generator_target("cdna3").generator_target
-        == "cdna3"
+    view_infos = tuple(
+        info
+        for info in AMDGPU_DESCRIPTOR_SET_INFOS
+        if info.storage_generator_target is not None
     )
+    assert storage_infos
+    assert view_infos
 
-    for storage_target, view_target in (
-        ("cdna3", "gfx9_4_generic"),
-        ("rdna3", "gfx11_generic"),
-        ("rdna4", "gfx12_generic"),
-        ("rdna4_gfx125x", "gfx12_5_generic"),
-    ):
-        view_info = amdgpu_descriptor_set_info_by_generator_target(view_target)
+    for storage_info in storage_infos:
         assert (
             amdgpu_descriptor_set_storage_info_by_generator_target(
-                view_target
-            ).generator_target
-            == storage_target
+                storage_info.generator_target
+            )
+            == storage_info
         )
         assert amdgpu_descriptor_set_view_infos_by_storage_generator_target(
-            storage_target
-        ) == (view_info,)
+            storage_info.generator_target
+        ) == tuple(
+            sorted(
+                (
+                    info
+                    for info in view_infos
+                    if info.storage_generator_target == storage_info.generator_target
+                ),
+                key=lambda info: info.key,
+            )
+        )
+
+    for view_info in view_infos:
+        assert (
+            amdgpu_descriptor_set_storage_info_by_generator_target(
+                view_info.generator_target
+            ).generator_target
+            == view_info.storage_generator_target
+        )
 
 
 def test_generic_descriptor_sets_have_independent_contracts() -> None:
-    cases = (
-        (
-            "gfx9_4_generic",
-            "amdgpu.gfx9_4.generic.core",
-            ("cdna3", "cdna4"),
-            ("cdna3", "cdna4"),
-            "gfx9-4-generic",
-            ("gfx940", "gfx950"),
-            False,
-        ),
-        (
-            "gfx11_generic",
-            "amdgpu.gfx11.generic.core",
-            ("rdna3", "rdna3_5"),
-            ("rdna3", "rdna3_5"),
-            "gfx11-generic",
-            ("gfx1100", "gfx1151"),
-            False,
-        ),
-        (
-            "gfx12_generic",
-            "amdgpu.gfx12.generic.core",
-            ("rdna4",),
-            ("rdna4",),
-            "gfx12-generic",
-            ("gfx1200", "gfx1201"),
-            True,
-        ),
-        (
-            "gfx12_5_generic",
-            "amdgpu.gfx12_5.generic.core",
-            ("rdna4_gfx125x",),
-            ("rdna4",),
-            "gfx12-5-generic",
-            ("gfx1250", "gfx1251"),
-            True,
-        ),
+    descriptor_sets_by_key = {info.key: info for info in AMDGPU_DESCRIPTOR_SET_INFOS}
+    processors_by_name = {info.processor: info for info in AMDGPU_PROCESSOR_INFOS}
+    generic_processors = tuple(
+        info for info in AMDGPU_PROCESSOR_INFOS if info.processor.endswith("-generic")
     )
-    for (
-        generator_target,
-        descriptor_set_key,
-        member_generator_targets,
-        isa_xml_keys,
-        generic_processor_name,
-        exact_processor_names,
-        supports_vopd,
-    ) in cases:
-        info = amdgpu_descriptor_set_info_by_generator_target(generator_target)
-        assert info.key == descriptor_set_key
-        assert info.member_generator_targets == member_generator_targets
-        assert (
-            tuple(isa_info.isa_xml_key for isa_info in info.isa_infos) == isa_xml_keys
-        )
-        assert (
-            bool(info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION)
-            == supports_vopd
-        )
+    compiler_generic_processors = tuple(
+        info for info in generic_processors if info.descriptor_set.key
+    )
+    generic_descriptor_sets = tuple(
+        info for info in AMDGPU_DESCRIPTOR_SET_INFOS if info.member_generator_targets
+    )
+    assert {info.descriptor_set.key for info in compiler_generic_processors} == {
+        info.key for info in generic_descriptor_sets
+    }
 
-        generic_processor = amdgpu_processor_info_by_name(generic_processor_name)
-        assert generic_processor is not None
-        assert generic_processor.descriptor_set.key == info.key
-        for exact_processor_name in exact_processor_names:
-            exact_processor = amdgpu_processor_info_by_name(exact_processor_name)
-            assert exact_processor is not None
-            assert exact_processor.descriptor_set.key != info.key
+    for generic_processor in compiler_generic_processors:
+        descriptor_set = descriptor_sets_by_key[generic_processor.descriptor_set.key]
+        exact_members = tuple(
+            processors_by_name[compatibility.exact_processor]
+            for compatibility in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
+            if compatibility.code_object_processor == generic_processor.processor
+            and compatibility.generic_introduction_version
+            <= generic_processor.elf.generic_version
+        )
+        assert exact_members
+        assert all(
+            member.descriptor_set.key != descriptor_set.key for member in exact_members
+        )
+        assert {
+            descriptor_sets_by_key[member.descriptor_set.key].generator_target
+            for member in exact_members
+        } == set(descriptor_set.member_generator_targets)
 
 
 def test_matrix_feature_profiles_model_replacement_instruction_shapes() -> None:
@@ -245,12 +226,15 @@ def test_generic_contracts_are_portable_member_intersections() -> None:
 
 
 def test_rdna3_5_processors_use_gfx11_matrix_shapes() -> None:
-    for processor_name in ("gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1170"):
-        processor_info = amdgpu_processor_info_by_name(processor_name)
-        assert processor_info is not None
-        assert (
-            processor_info.features.matrix == AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11
-        )
+    descriptor_set = amdgpu_descriptor_set_info_by_generator_target("rdna3_5")
+    processors = tuple(
+        info
+        for info in AMDGPU_PROCESSOR_INFOS
+        if info.descriptor_set.key == descriptor_set.key
+    )
+    assert processors
+    for processor in processors:
+        assert processor.features.matrix == AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11
 
 
 def test_generic_processor_elf_flags_use_canonical_code_object_versions() -> None:

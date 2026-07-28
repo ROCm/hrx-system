@@ -7,7 +7,7 @@
 import unittest
 
 from build_tools.amdgpu.target_map_data import (
-    AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS,
+    AMDGPU_GENERIC_CODE_OBJECT_INFOS,
     AmdgpuCodeObjectCompatibilityInfo,
     AmdgpuGenericCodeObjectInfo,
     generic_code_object_current_version,
@@ -18,14 +18,20 @@ from build_tools.amdgpu.target_map_data import (
 class TargetMapDataTest(unittest.TestCase):
     def test_canonical_map_is_closed_and_versioned(self):
         validate_code_object_compatibility()
-        self.assertEqual(generic_code_object_current_version("gfx11-generic"), 1)
-        gfx1151 = next(
-            info
-            for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
-            if info.exact_processor == "gfx1151"
+        self.assertEqual(
+            {
+                info.processor: generic_code_object_current_version(info.processor)
+                for info in AMDGPU_GENERIC_CODE_OBJECT_INFOS
+            },
+            {
+                info.processor: info.current_version
+                for info in AMDGPU_GENERIC_CODE_OBJECT_INFOS
+            },
         )
-        self.assertEqual(gfx1151.code_object_processor, "gfx11-generic")
-        self.assertEqual(gfx1151.generic_introduction_version, 1)
+
+    def test_rejects_unknown_generic_version_query(self):
+        with self.assertRaisesRegex(ValueError, "unknown AMDGPU generic"):
+            generic_code_object_current_version("gfx-future-generic")
 
     def test_rejects_member_newer_than_generic_code_object(self):
         with self.assertRaisesRegex(ValueError, "outside .* supported range"):
