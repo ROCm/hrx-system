@@ -62,6 +62,24 @@ class SetupPlanTest(unittest.TestCase):
             self.assertTrue(
                 any("--group bazel" in step.describe() for step in commands)
             )
+            install_index = next(
+                index
+                for index, step in enumerate(commands)
+                if any(
+                    argument.endswith("requirements-dev.lock.txt")
+                    for argument in step.argv
+                )
+            )
+            probe_index, probe = next(
+                (index, step)
+                for index, step in enumerate(commands)
+                if step.label == "check Lefthook CLI compatibility"
+            )
+            self.assertLess(install_index, probe_index)
+            self.assertIn("--file", probe.argv)
+            self.assertNotIn("--files", probe.argv)
+            self.assertEqual(probe.argv[probe.argv.index("--file") + 1], "dev.py")
+            self.assertIn("__iree_cli_compatibility_probe__", probe.argv)
 
     def test_windows_venv_does_not_install_unusable_semgrep_package(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

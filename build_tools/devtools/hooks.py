@@ -17,6 +17,27 @@ from build_tools.devtools.command_plan import (
 from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment
 
 
+def lefthook_cli_compatibility_probe(tool_env: ToolEnvironment) -> CommandStep:
+    # Select a deliberately absent command so Lefthook parses the real
+    # invocation and repository config without executing presubmit work.
+    return CommandStep(
+        [
+            tool_env.tool("lefthook"),
+            "run",
+            "pre-commit",
+            "--file",
+            "dev.py",
+            "--command",
+            "__iree_cli_compatibility_probe__",
+            "--no-auto-install",
+            "--no-tty",
+        ],
+        cwd=REPO_ROOT,
+        env=tool_env.path_env(),
+        label="check Lefthook CLI compatibility",
+    )
+
+
 def hook_content(lane: str, profile: str, python_executable: str) -> str:
     if lane not in ("bazel", "cmake"):
         raise ValueError(f"unknown lane: {lane}")
@@ -86,7 +107,7 @@ def hook_plan(
     if verify:
         plan.add(
             CommandStep(
-                [tool_env.tool("lefthook"), "run", "pre-commit", "--files", "dev.py"],
+                [tool_env.tool("lefthook"), "run", "pre-commit", "--file", "dev.py"],
                 cwd=REPO_ROOT,
                 env=env,
                 label="verify selected hook policy",
