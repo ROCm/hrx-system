@@ -1731,6 +1731,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         wave_size="32",
         semantic_tag="matrix.wmma.i32.16x16x16.iu8",
         intrinsic_name="llvm.amdgcn.wmma.i32.16x16x16.iu8",
+        fragment_layout="rdna4_wmma_i32_16x16x16_iu8",
     ),
     AmdgpuMatrixContract(
         name="wmma.i32.16x16x16.iu4.gfx12",
@@ -1746,6 +1747,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         wave_size="32",
         semantic_tag="matrix.wmma.i32.16x16x16.iu4",
         intrinsic_name="llvm.amdgcn.wmma.i32.16x16x16.iu4",
+        fragment_layout="rdna4_wmma_i32_16x16x16_iu4",
     ),
     AmdgpuMatrixContract(
         name="wmma.f32.16x16x16.bf16",
@@ -1931,6 +1933,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         result=payload("i32", 8, 8),
         scale_kind="none",
         wave_size="32",
+        fragment_layout="rdna3_wmmar3_i32_16x16x16_iu8",
     ),
     AmdgpuMatrixContract(
         name="wmma.i32.16x16x16.iu8.w64",
@@ -1946,6 +1949,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         wave_size="64",
         semantic_tag="matrix.wmma.i32.16x16x16.iu8",
         intrinsic_name="llvm.amdgcn.wmma.i32.16x16x16.iu8",
+        fragment_layout="rdna3_wmmar3_i32_16x16x16_iu8_w64",
     ),
     AmdgpuMatrixContract(
         name="wmma.i32.16x16x16.iu4",
@@ -1959,6 +1963,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         result=payload("i32", 8, 8),
         scale_kind="none",
         wave_size="32",
+        fragment_layout="rdna3_wmmar3_i32_16x16x16_iu4",
     ),
     AmdgpuMatrixContract(
         name="wmma.i32.16x16x16.iu4.w64",
@@ -1974,6 +1979,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         wave_size="64",
         semantic_tag="matrix.wmma.i32.16x16x16.iu4",
         intrinsic_name="llvm.amdgcn.wmma.i32.16x16x16.iu4",
+        fragment_layout="rdna3_wmmar3_i32_16x16x16_iu4_w64",
     ),
     AmdgpuMatrixContract(
         name="wmma.f32.16x16x32.f16",
@@ -1999,6 +2005,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("i32", 8, 8),
         result=payload("i32", 8, 8),
         scale_kind="none",
+        fragment_layout="rdna4_wmma_i32_16x16x32_iu4",
     ),
     AmdgpuMatrixContract(
         name="wmma.i32.16x16x64.iu8",
@@ -2011,6 +2018,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("i32", 8, 8),
         result=payload("i32", 8, 8),
         scale_kind="none",
+        fragment_layout="rdna4_wmma_i32_16x16x64_iu8",
     ),
     AmdgpuMatrixContract(
         name="wmma.scale.f32.16x16x128.f8f6f4",

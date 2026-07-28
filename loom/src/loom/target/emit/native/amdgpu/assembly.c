@@ -926,37 +926,6 @@ static bool loom_amdgpu_descriptor_is_global_to_lds(
   return has_global_read && has_workgroup_write;
 }
 
-static bool loom_amdgpu_descriptor_uses_resource_kind(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, loom_low_resource_kind_t kind) {
-  IREE_ASSERT_LT(descriptor->schedule_class_id,
-                 descriptor_set->schedule_class_count);
-  IREE_ASSERT(descriptor_set->schedule_classes != NULL);
-  const loom_low_schedule_class_t* schedule_class =
-      &descriptor_set->schedule_classes[descriptor->schedule_class_id];
-  if (schedule_class->issue_use_count == 0) {
-    return false;
-  }
-  IREE_ASSERT(descriptor_set->issue_uses != NULL);
-  IREE_ASSERT(descriptor_set->resources != NULL);
-  IREE_ASSERT_LE(schedule_class->issue_use_start,
-                 descriptor_set->issue_use_count);
-  IREE_ASSERT_LE(
-      schedule_class->issue_use_count,
-      descriptor_set->issue_use_count - schedule_class->issue_use_start);
-  for (uint16_t i = 0; i < schedule_class->issue_use_count; ++i) {
-    const loom_low_issue_use_t* issue_use =
-        &descriptor_set->issue_uses[schedule_class->issue_use_start + i];
-    IREE_ASSERT_LT(issue_use->resource_id, descriptor_set->resource_count);
-    const loom_low_resource_t* resource =
-        &descriptor_set->resources[issue_use->resource_id];
-    if (resource->kind == kind) {
-      return true;
-    }
-  }
-  return false;
-}
-
 static iree_status_t loom_amdgpu_append_comma(
     const loom_native_assembly_packet_context_t* context) {
   return iree_string_builder_append_cstring(context->builder, ", ");
@@ -3648,9 +3617,10 @@ static iree_status_t loom_amdgpu_try_append_effect_route_dispatch_packet(
 static iree_status_t loom_amdgpu_try_append_matrix_dispatch_packet(
     const loom_native_assembly_packet_context_t* context, bool* out_matched) {
   *out_matched = false;
-  if (!loom_amdgpu_descriptor_uses_resource_kind(
-          context->schedule->target.descriptor_set, context->packet->descriptor,
-          LOOM_LOW_RESOURCE_KIND_MATRIX)) {
+  if (!iree_any_bit_set(loom_amdgpu_descriptor_traits(
+                            context->schedule->target.descriptor_set,
+                            context->packet->descriptor),
+                        LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX)) {
     return iree_ok_status();
   }
   *out_matched = true;

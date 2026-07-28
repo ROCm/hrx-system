@@ -3018,18 +3018,18 @@ low.func.def target(@gfx11_target) @gfx11_stress_fragment(%s0: reg<amdgpu.sgpr>,
 }
 
 // ----
-  v_wmma_f32_16x16x16_f16 v[0:7], v[16:23], v[24:31], v[0:7]
   buffer_load_dword v11, v10, s[4:7], s8 offen offset:4
   buffer_load_b128 v[12:15], v10, s[4:7], s8 offen offset:16
   s_load_dwordx2 s[0:1], s[0:1], s8 offset:16
   s_buffer_load_dword s1, s[4:7], s8 offset:0
+  v_wmma_f32_16x16x16_f16 v[0:7], v[16:23], v[24:31], v[0:7]
   s_add_u32 s2, s2, s3
   v_add_u32 v8, v8, v9
-  s_add_u32 s1, s2, s1
-  v_add_u32 v8, v8, v11
-  buffer_store_dword v8, v10, s[4:7], s1 offen offset:8
-  buffer_store_b128 v[12:15], v10, s[4:7], s0 offen offset:32
   v_wmma_f32_16x16x16_f16 v[0:7], v[16:23], v[24:31], v[0:7]
+  s_add_u32 s1, s2, s1
+  v_add_u32 v4, v8, v11
+  buffer_store_dword v4, v10, s[4:7], s1 offen offset:8
+  buffer_store_b128 v[12:15], v10, s[4:7], s0 offen offset:32
   buffer_store_b128 v[0:3], v10, s[4:7], s8 offen offset:48
   s_waitcnt vmcnt(0) lgkmcnt(0)
   s_waitcnt_depctr depctr(0)

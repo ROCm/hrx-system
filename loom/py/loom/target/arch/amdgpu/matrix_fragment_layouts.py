@@ -326,12 +326,20 @@ def _rdna3_layout(
     key: str,
     *,
     wave_size: int,
+    source_payload_element_count: int,
+    source_element_bit_count: int,
     result_element_bit_count: int,
     result_payload_element_count: int,
     result_coordinate_stride: int,
 ) -> AmdgpuMatrixFragmentLayout:
-    source_axes_lhs = _axes(row=_axis(thread=16), reduction=_axis(element=16))
-    source_axes_rhs = _axes(column=_axis(thread=16), reduction=_axis(element=16))
+    source_axes_lhs = _axes(
+        row=_axis(thread=16),
+        reduction=_axis(element=source_payload_element_count),
+    )
+    source_axes_rhs = _axes(
+        column=_axis(thread=16),
+        reduction=_axis(element=source_payload_element_count),
+    )
     result_coordinate_count = result_payload_element_count // result_coordinate_stride
     result_axes = _axes(
         row=_axis(
@@ -345,8 +353,18 @@ def _rdna3_layout(
         key=key,
         wave_size=wave_size,
         tile_shape=(1, 16, 16, 16),
-        lhs=_role("lhs", 16, 16, source_axes_lhs),
-        rhs=_role("rhs", 16, 16, source_axes_rhs),
+        lhs=_role(
+            "lhs",
+            source_payload_element_count,
+            source_element_bit_count,
+            source_axes_lhs,
+        ),
+        rhs=_role(
+            "rhs",
+            source_payload_element_count,
+            source_element_bit_count,
+            source_axes_rhs,
+        ),
         accumulator=_role(
             "accumulator",
             result_payload_element_count,
@@ -673,6 +691,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_f32_16x16x16_f16",
         wave_size=32,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=32,
         result_payload_element_count=8,
         result_coordinate_stride=1,
@@ -680,6 +700,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_f32_16x16x16_bf16",
         wave_size=32,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=32,
         result_payload_element_count=8,
         result_coordinate_stride=1,
@@ -756,6 +778,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_f16_16x16x16_f16",
         wave_size=32,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=16,
         result_payload_element_count=16,
         result_coordinate_stride=2,
@@ -763,6 +787,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_bf16_16x16x16_bf16",
         wave_size=32,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=16,
         result_payload_element_count=16,
         result_coordinate_stride=2,
@@ -770,6 +796,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_f32_16x16x16_f16_w64",
         wave_size=64,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=32,
         result_payload_element_count=4,
         result_coordinate_stride=1,
@@ -777,6 +805,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_f32_16x16x16_bf16_w64",
         wave_size=64,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=32,
         result_payload_element_count=4,
         result_coordinate_stride=1,
@@ -784,6 +814,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_f16_16x16x16_f16_w64",
         wave_size=64,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=16,
         result_payload_element_count=8,
         result_coordinate_stride=2,
@@ -791,9 +823,33 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     _rdna3_layout(
         "rdna3_wmmar3_bf16_16x16x16_bf16_w64",
         wave_size=64,
+        source_payload_element_count=16,
+        source_element_bit_count=16,
         result_element_bit_count=16,
         result_payload_element_count=8,
         result_coordinate_stride=2,
+    ),
+    *(
+        _rdna3_layout(
+            key,
+            wave_size=wave_size,
+            source_payload_element_count=16,
+            source_element_bit_count=source_element_bit_count,
+            result_element_bit_count=32,
+            result_payload_element_count=result_payload_element_count,
+            result_coordinate_stride=1,
+        )
+        for (
+            key,
+            wave_size,
+            source_element_bit_count,
+            result_payload_element_count,
+        ) in (
+            ("rdna3_wmmar3_i32_16x16x16_iu8", 32, 8, 8),
+            ("rdna3_wmmar3_i32_16x16x16_iu8_w64", 64, 8, 4),
+            ("rdna3_wmmar3_i32_16x16x16_iu4", 32, 4, 8),
+            ("rdna3_wmmar3_i32_16x16x16_iu4_w64", 64, 4, 4),
+        )
     ),
     _single_tile_layout(
         "rdna4_wmma_f16_16x16x16_f16",
@@ -869,6 +925,10 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
             ("rdna4_wmma_f32_16x16x16_packed8", 16, 8, 8),
             ("rdna4_wmma_f32_16x16x64_packed8", 64, 32, 8),
             ("rdna4_wmma_f32_16x16x128_packed8", 128, 64, 8),
+            ("rdna4_wmma_i32_16x16x16_iu8", 16, 8, 8),
+            ("rdna4_wmma_i32_16x16x16_iu4", 16, 8, 4),
+            ("rdna4_wmma_i32_16x16x32_iu4", 32, 16, 4),
+            ("rdna4_wmma_i32_16x16x64_iu8", 64, 32, 8),
         )
     ),
     *(

@@ -22,6 +22,14 @@ bool loom_amdgpu_descriptor_uses_scalar_alu(
       LOOM_AMDGPU_DESCRIPTOR_TRAIT_SCALAR_ALU);
 }
 
+bool loom_amdgpu_descriptor_uses_matrix(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  return iree_any_bit_set(
+      loom_amdgpu_descriptor_traits(descriptor_set, descriptor),
+      LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX);
+}
+
 bool loom_amdgpu_descriptor_uses_vector_memory(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {

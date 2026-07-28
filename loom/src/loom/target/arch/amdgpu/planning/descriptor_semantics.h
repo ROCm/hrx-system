@@ -33,6 +33,11 @@ bool loom_amdgpu_descriptor_uses_scalar_alu(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor);
 
+// Returns true when |descriptor| issues on a matrix pipeline.
+bool loom_amdgpu_descriptor_uses_matrix(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor);
+
 // Returns true when |descriptor| issues on an AMDGPU vector-memory pipeline.
 bool loom_amdgpu_descriptor_uses_vector_memory(
     const loom_low_descriptor_set_t* descriptor_set,

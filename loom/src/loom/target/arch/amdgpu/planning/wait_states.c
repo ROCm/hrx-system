@@ -1786,6 +1786,8 @@ static iree_status_t loom_amdgpu_wait_state_packet_analyze(
       loom_amdgpu_descriptor_is_transcendental(descriptor_set, descriptor);
   const bool uses_vector_alu =
       loom_amdgpu_descriptor_uses_vector_alu(descriptor_set, descriptor);
+  const bool uses_matrix =
+      loom_amdgpu_descriptor_uses_matrix(descriptor_set, descriptor);
   const bool uses_vector_memory =
       loom_amdgpu_descriptor_uses_vector_memory(descriptor_set, descriptor);
   const bool uses_scalar_alu =
@@ -1864,8 +1866,13 @@ static iree_status_t loom_amdgpu_wait_state_packet_analyze(
     }
   }
 
+  // RDNA matrix instructions use the vector ALU dependency mechanism even
+  // though their schedule resource is classified separately from ordinary
+  // VALU instructions. Targets without S_DELAY_ALU reject the classification
+  // inside loom_amdgpu_wait_state_delay_alu_type.
+  const bool uses_vector_alu_dependency = uses_vector_alu || uses_matrix;
   out_info->delay_alu_type = loom_amdgpu_wait_state_delay_alu_type(
-      builder, is_transcendental, uses_vector_alu, uses_scalar_alu);
+      builder, is_transcendental, uses_vector_alu_dependency, uses_scalar_alu);
   if (out_info->delay_alu_type != LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER) {
     out_info->delay_alu_latency_cycles =
         loom_amdgpu_wait_state_delay_alu_latency_cycles(

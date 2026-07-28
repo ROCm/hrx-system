@@ -37,6 +37,8 @@ typedef enum loom_amdgpu_descriptor_trait_bit_e {
   LOOM_AMDGPU_DESCRIPTOR_TRAIT_SDWA = 1u << 6,
   // Descriptor implicitly drains gfx125x XCNT before it executes.
   LOOM_AMDGPU_DESCRIPTOR_TRAIT_XCNT_IMPLICIT_DRAIN = 1u << 7,
+  // Descriptor issues on an AMDGPU matrix pipeline.
+  LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX = 1u << 8,
 } loom_amdgpu_descriptor_trait_bit_t;
 typedef uint32_t loom_amdgpu_descriptor_traits_t;
 

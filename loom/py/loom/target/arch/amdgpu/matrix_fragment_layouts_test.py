@@ -31,6 +31,44 @@ def test_lane_xor1_column_property_accounts_for_payload_padding() -> None:
     assert not role_has_contiguous_lane_xor1_columns(f16_layout, f16_layout.result)
 
 
+@pytest.mark.parametrize(
+    "layout_key",
+    [
+        "rdna3_wmmar3_i32_16x16x16_iu8",
+        "rdna3_wmmar3_i32_16x16x16_iu8_w64",
+        "rdna3_wmmar3_i32_16x16x16_iu4",
+        "rdna3_wmmar3_i32_16x16x16_iu4_w64",
+    ],
+)
+def test_rdna3_integer_wmma_layout_matches_instruction_coordinates(
+    layout_key: str,
+) -> None:
+    layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY[layout_key]
+
+    for lane in range(layout.wave_size):
+        for element in range(layout.lhs.payload_element_count):
+            assert role_coordinate(layout, layout.lhs, lane, element) == (
+                None,
+                lane % 16,
+                None,
+                element,
+            )
+            assert role_coordinate(layout, layout.rhs, lane, element) == (
+                None,
+                None,
+                lane % 16,
+                element,
+            )
+        for role in (layout.accumulator, layout.result):
+            for element in range(role.payload_element_count):
+                assert role_coordinate(layout, role, lane, element) == (
+                    None,
+                    (layout.wave_size // 16) * element + lane // 16,
+                    lane % 16,
+                    None,
+                )
+
+
 def test_validation_rejects_missing_and_extraneous_role_axes() -> None:
     layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["rdna3_wmmar3_f32_16x16x16_f16"]
     result_axes = layout.result.axes

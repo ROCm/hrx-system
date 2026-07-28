@@ -301,6 +301,8 @@ def _descriptor_trait_names(
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU")
     if _descriptor_uses_resource_kind(context, descriptor, ResourceKind.SCALAR_ALU):
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_SCALAR_ALU")
+    if _descriptor_uses_resource_kind(context, descriptor, ResourceKind.MATRIX):
+        trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX")
     if descriptor.encoding_format_id in _VECTOR_MEMORY_ENCODING_FORMAT_IDS:
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_MEMORY")
     if descriptor.key in _TRANSCENDENTAL_DESCRIPTOR_KEYS:

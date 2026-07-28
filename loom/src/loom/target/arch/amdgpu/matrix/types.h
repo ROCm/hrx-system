@@ -324,8 +324,24 @@ typedef enum loom_amdgpu_matrix_fragment_layout_kind_e {
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_I32_32X32X4_I8_2B = 64,
   // CDNA MFMA 4 independent 4x4x4 f64-input/result blocks.
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F64_4X4X4_F64_4B = 65,
+  // RDNA3 WMMAR3 wave32 16x16x16 packed iu8 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_I32_16X16X16_IU8 = 66,
+  // RDNA3 WMMAR3 wave64 16x16x16 packed iu8 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_I32_16X16X16_IU8_W64 = 67,
+  // RDNA3 WMMAR3 wave32 16x16x16 packed iu4 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_I32_16X16X16_IU4 = 68,
+  // RDNA3 WMMAR3 wave64 16x16x16 packed iu4 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_I32_16X16X16_IU4_W64 = 69,
+  // RDNA4 WMMA 16x16x16 packed iu8 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X16_IU8 = 70,
+  // RDNA4 WMMA 16x16x16 packed iu4 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X16_IU4 = 71,
+  // RDNA4 WMMA 16x16x32 packed iu4 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X32_IU4 = 72,
+  // RDNA4 WMMA 16x16x64 packed iu8 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X64_IU8 = 73,
   // Total number of fragment layout table slots, including UNKNOWN.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT = 66,
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT = 74,
 } loom_amdgpu_matrix_fragment_layout_kind_t;
 
 typedef enum loom_amdgpu_matrix_contract_flag_bits_e {

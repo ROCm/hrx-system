@@ -36,9 +36,11 @@ from loom.target.low_descriptors import (
 
 _RESOURCE_SALU = "salu"
 _RESOURCE_VALU = "valu"
+_RESOURCE_MATRIX = "matrix"
 _SCHEDULE_NONE = "none"
 _SCHEDULE_SALU = "salu"
 _SCHEDULE_VALU = "valu"
+_SCHEDULE_MATRIX = "matrix"
 
 
 @contextmanager
@@ -98,6 +100,11 @@ def _descriptor_set(*descriptors: Descriptor) -> DescriptorSet:
                 capacity_per_cycle=1,
                 kind=ResourceKind.VECTOR_ALU,
             ),
+            Resource(
+                _RESOURCE_MATRIX,
+                capacity_per_cycle=1,
+                kind=ResourceKind.MATRIX,
+            ),
         ),
         schedule_classes=(
             ScheduleClass(
@@ -116,6 +123,12 @@ def _descriptor_set(*descriptors: Descriptor) -> DescriptorSet:
                 latency_kind=LatencyKind.EXACT,
                 model_quality=ModelQuality.EXACT,
                 issue_uses=(IssueUse(_RESOURCE_VALU, cycles=1, units=1),),
+            ),
+            ScheduleClass(
+                _SCHEDULE_MATRIX,
+                latency_kind=LatencyKind.EXACT,
+                model_quality=ModelQuality.EXACT,
+                issue_uses=(IssueUse(_RESOURCE_MATRIX, cycles=1, units=1),),
             ),
         ),
         descriptors=descriptors,
@@ -176,6 +189,7 @@ def test_descriptor_trait_names_include_memory_and_ref_facts() -> None:
         ),
         _descriptor("amdgpu.v_exp_f32", schedule_class=_SCHEDULE_VALU),
         _descriptor("amdgpu.v_readfirstlane_b32", schedule_class=_SCHEDULE_SALU),
+        _descriptor("amdgpu.v_wmma", schedule_class=_SCHEDULE_MATRIX),
     )
     trait_context = amdgpu_target_refs._descriptor_trait_context(descriptor_set)
 
@@ -191,6 +205,7 @@ def test_descriptor_trait_names_include_memory_and_ref_facts() -> None:
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_SCALAR_ALU",
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_READFIRSTLANE",
     )
+    assert amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[3]) == ("LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX",)
 
 
 def test_descriptor_trait_names_include_xcnt_implicit_drain_families() -> None:

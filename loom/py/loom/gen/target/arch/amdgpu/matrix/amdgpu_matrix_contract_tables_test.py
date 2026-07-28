@@ -198,6 +198,7 @@ def test_generation_resolves_gfx12_wmma_abi_shape_variants() -> None:
     assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X16_F16" in f16
     assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_BF16_16X16X16_BF16" in bf16
     assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_I32_16X16X16_IU4" in iu4
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X16_IU4" in iu4
 
 
 def test_generation_resolves_gfx1250_wmma_f32_fragment_layouts() -> None:
@@ -295,6 +296,12 @@ def test_generation_audits_rdna4_unknown_fragment_layout_exceptions() -> None:
         assert numeric_types - {"f16", "bf16", "f32"} or "matrix_formats" in contract.flags or "scale_formats" in contract.flags or "sign_select" in contract.flags, contract.name
 
 
+def test_generation_audits_dense_integer_wmma_fragment_layout_surface() -> None:
+    missing = tuple(contract.name for contract in AMDGPU_MATRIX_CONTRACTS if contract.family == "wmma" and contract.result.numeric_type == "i32" and contract.fragment_layout is None)
+
+    assert missing == ()
+
+
 def test_generation_resolves_gfx11_wmma_wave64_abi_shape_variants() -> None:
     f32_f16 = _contract_initializer(_contract("wmma.f32.16x16x16.f16.w64"))
     f16 = _contract_initializer(_contract("wmma.f16.16x16x16.f16.w64"))
@@ -303,11 +310,16 @@ def test_generation_resolves_gfx11_wmma_wave64_abi_shape_variants() -> None:
     assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_F32_16X16X16_F16_W64" in f32_f16
     assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_F16_16X16X16_F16_W64" in f16
     assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_I32_16X16X16_IU8_W64" in iu8
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_I32_16X16X16_IU8_W64" in iu8
 
 
 def test_generation_rejects_low_descriptor_payload_shape_drift() -> None:
     contract = _contract("wmma.i32.16x16x32.iu4")
-    drifted_contract = replace(contract, lhs=payload("iu4", 0, 0))
+    drifted_contract = replace(
+        contract,
+        lhs=payload("iu4", 0, 0),
+        fragment_layout=None,
+    )
 
     try:
         _contract_initializer(drifted_contract)
