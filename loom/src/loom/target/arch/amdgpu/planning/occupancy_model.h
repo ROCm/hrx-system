@@ -41,6 +41,21 @@ typedef enum loom_amdgpu_occupancy_wave_slot_e {
   LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_COUNT = 2,
 } loom_amdgpu_occupancy_wave_slot_t;
 
+// Hardware resources shared by waves in one occupancy calculation domain.
+//
+// On current AMDGPU processors the domain is either a CU or a WGP. Naming it
+// by its scheduling role keeps the units stable across both hardware modes.
+typedef struct loom_amdgpu_occupancy_domain_model_t {
+  // Number of SIMD execution units in the occupancy domain.
+  uint32_t simd_count;
+  // Local-memory bytes shared by workgroups in the occupancy domain.
+  uint32_t local_memory_bytes;
+  // Local-memory allocation granularity in bytes per workgroup.
+  uint32_t local_memory_allocation_granularity;
+  // Barrier-using workgroups available in the occupancy domain.
+  uint32_t max_barrier_workgroup_count;
+} loom_amdgpu_occupancy_domain_model_t;
+
 typedef struct loom_amdgpu_occupancy_model_t {
   // Dense generated AMDGPU descriptor-set ordinal.
   uint16_t descriptor_set_ordinal;
@@ -48,6 +63,8 @@ typedef struct loom_amdgpu_occupancy_model_t {
   uint32_t wave_size;
   // Maximum resident waves per SIMD.
   uint32_t max_waves_per_simd;
+  // Workgroup and local-memory resources in one occupancy domain.
+  loom_amdgpu_occupancy_domain_model_t domain;
   // Target residency policy shared by scheduling and final occupancy.
   loom_target_residency_model_t residency_model;
   // Register-class occupancy models in diagnostic order.

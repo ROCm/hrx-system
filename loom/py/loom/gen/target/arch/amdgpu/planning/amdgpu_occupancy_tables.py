@@ -229,6 +229,8 @@ def _validate_models(
                 raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} references processor {processor.processor} from {processor.descriptor_set.key}")
             if amdgpu_processor_occupancy_model(processor, wave_size) != model:
                 raise ValueError(f"AMDGPU occupancy model for {processor.processor} wave{wave_size} disagrees with processor facts")
+            if processor.limits.max_workgroup_storage_bytes > model.domain.local_memory_bytes:
+                raise ValueError(f"AMDGPU processor {processor.processor} permits more workgroup storage than its occupancy domain")
             covered_processor_waves.add(processor_wave)
         if model.max_waves_per_simd <= 0:
             raise ValueError(f"AMDGPU occupancy max waves for {descriptor_set_key} must be positive")
@@ -236,6 +238,40 @@ def _validate_models(
             model.max_waves_per_simd,
             f"AMDGPU occupancy max waves for {descriptor_set_key}",
         )
+        domain = model.domain
+        if domain.simd_count <= 0:
+            raise ValueError(f"AMDGPU occupancy SIMD count for {descriptor_set_key} must be positive")
+        if domain.local_memory_bytes <= 0:
+            raise ValueError(f"AMDGPU occupancy local memory for {descriptor_set_key} must be positive")
+        if domain.local_memory_allocation_granularity <= 0:
+            raise ValueError(f"AMDGPU occupancy local-memory granularity for {descriptor_set_key} must be positive")
+        if domain.local_memory_bytes % domain.local_memory_allocation_granularity != 0:
+            raise ValueError(f"AMDGPU occupancy local-memory granularity for {descriptor_set_key} must divide its capacity")
+        if domain.max_barrier_workgroup_count <= 0:
+            raise ValueError(f"AMDGPU occupancy barrier count for {descriptor_set_key} must be positive")
+        _validate_u32(
+            domain.simd_count,
+            f"AMDGPU occupancy SIMD count for {descriptor_set_key}",
+        )
+        _validate_u32(
+            domain.local_memory_bytes,
+            f"AMDGPU occupancy local memory for {descriptor_set_key}",
+        )
+        _validate_u32(
+            domain.local_memory_allocation_granularity,
+            f"AMDGPU occupancy local-memory granularity for {descriptor_set_key}",
+        )
+        _validate_u32(
+            domain.max_barrier_workgroup_count,
+            f"AMDGPU occupancy barrier count for {descriptor_set_key}",
+        )
+        wave_slots = model.max_waves_per_simd * domain.simd_count
+        _validate_u32(
+            wave_slots,
+            f"AMDGPU occupancy wave slots for {descriptor_set_key}",
+        )
+        if domain.max_barrier_workgroup_count > wave_slots:
+            raise ValueError(f"AMDGPU occupancy barrier count for {descriptor_set_key} exceeds its wave slots")
         register_classes = [row.register_class for row in model.register_classes]
         if len(register_classes) > 0xFFFF:
             raise ValueError(f"AMDGPU occupancy model for {descriptor_set_key} has too many register classes")
@@ -615,6 +651,12 @@ def _emit_source(models: Sequence[_AmdgpuOccupancyModelRow]) -> str:
                 f"  .descriptor_set_ordinal = {_u16_expr(amdgpu_descriptor_set_ordinal(model_row.descriptor_set_key))},",
                 f"  .wave_size = {_u32_expr(model_row.wave_size)},",
                 f"  .max_waves_per_simd = {_u32_expr(model.max_waves_per_simd)},",
+                "  .domain = {",
+                f"    .simd_count = {_u32_expr(model.domain.simd_count)},",
+                f"    .local_memory_bytes = {_u32_expr(model.domain.local_memory_bytes)},",
+                f"    .local_memory_allocation_granularity = {_u32_expr(model.domain.local_memory_allocation_granularity)},",
+                f"    .max_barrier_workgroup_count = {_u32_expr(model.domain.max_barrier_workgroup_count)},",
+                "  },",
                 "  .residency_model = {",
                 f"    .best_tier = {_u32_expr(model.max_waves_per_simd)},",
                 "    .direct_resources = {",

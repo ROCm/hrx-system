@@ -108,6 +108,7 @@ def test_occupancy_models_reject_missing_spillable_register_class() -> None:
     model = model_row.model
     replacement = AmdgpuOccupancyModelInfo(
         max_waves_per_simd=model.max_waves_per_simd,
+        domain=model.domain,
         register_classes=tuple(row for row in model.register_classes if row.register_class != "amdgpu.agpr"),
         resources=(),
     )

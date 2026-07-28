@@ -291,6 +291,201 @@
       ]
     },
     {
+      "name": "reports final AMDGPU workgroup and LDS occupancy",
+      "steps": [
+        {
+          "name": "compile-rdna-workgroup",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_workgroup_occupancy_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1100",
+              "--output={tmp}/report_workgroup_occupancy_gfx1100.hal",
+              "--emit-target-artifact={tmp}/report_workgroup_occupancy_gfx1100.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1100\"",
+                "\"workgroup_size\":{\"x\":64,\"y\":1,\"z\":1,\"flat\":64}",
+                "\"local_memory_bytes\":256",
+                "\"subgroup_size\":32,\"max_subgroups_per_simd\":16,\"resident_subgroups_per_simd\":16,\"occupancy_percent\":100,\"limiting_resource\":\"max_waves\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/report_workgroup_occupancy_gfx1100.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1250-workgroup",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_workgroup_occupancy_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--output={tmp}/report_workgroup_occupancy_gfx1250.hal",
+              "--emit-target-artifact={tmp}/report_workgroup_occupancy_gfx1250.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1250\"",
+                "\"workgroup_size\":{\"x\":64,\"y\":1,\"z\":1,\"flat\":64}",
+                "\"local_memory_bytes\":256",
+                "\"subgroup_size\":32,\"max_subgroups_per_simd\":16,\"resident_subgroups_per_simd\":8,\"occupancy_percent\":50,\"limiting_resource\":\"amdgpu.workgroup_slots\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/report_workgroup_occupancy_gfx1250.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-rdna-lds",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_lds_occupancy_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1100",
+              "--config=compile_report.lds_bytes=32769",
+              "--output={tmp}/report_lds_occupancy_gfx1100.hal",
+              "--emit-target-artifact={tmp}/report_lds_occupancy_gfx1100.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1100\"",
+                "\"workgroup_size\":{\"x\":512,\"y\":1,\"z\":1,\"flat\":512}",
+                "\"local_memory_bytes\":32769",
+                "\"subgroup_size\":32,\"max_subgroups_per_simd\":16,\"resident_subgroups_per_simd\":12,\"occupancy_percent\":75,\"limiting_resource\":\"amdgpu.lds\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/report_lds_occupancy_gfx1100.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-cdna3-lds",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_lds_occupancy_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx942",
+              "--config=compile_report.lds_bytes=32769",
+              "--output={tmp}/report_lds_occupancy_gfx942.hal",
+              "--emit-target-artifact={tmp}/report_lds_occupancy_gfx942.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx942\"",
+                "\"workgroup_size\":{\"x\":512,\"y\":1,\"z\":1,\"flat\":512}",
+                "\"local_memory_bytes\":32769",
+                "\"subgroup_size\":64,\"max_subgroups_per_simd\":8,\"resident_subgroups_per_simd\":2,\"occupancy_percent\":25,\"limiting_resource\":\"amdgpu.lds\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/report_lds_occupancy_gfx942.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1250-lds",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_lds_occupancy_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1250",
+              "--config=compile_report.lds_bytes=108545",
+              "--output={tmp}/report_lds_occupancy_gfx1250.hal",
+              "--emit-target-artifact={tmp}/report_lds_occupancy_gfx1250.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1250\"",
+                "\"workgroup_size\":{\"x\":512,\"y\":1,\"z\":1,\"flat\":512}",
+                "\"local_memory_bytes\":108545",
+                "\"subgroup_size\":32,\"max_subgroups_per_simd\":16,\"resident_subgroups_per_simd\":8,\"occupancy_percent\":50,\"limiting_resource\":\"amdgpu.lds\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/report_lds_occupancy_gfx1250.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx950-lds",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_lds_occupancy_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx950",
+              "--config=compile_report.lds_bytes=108545",
+              "--output={tmp}/report_lds_occupancy_gfx950.hal",
+              "--emit-target-artifact={tmp}/report_lds_occupancy_gfx950.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx950\"",
+                "\"workgroup_size\":{\"x\":512,\"y\":1,\"z\":1,\"flat\":512}",
+                "\"local_memory_bytes\":108545",
+                "\"subgroup_size\":64,\"max_subgroups_per_simd\":8,\"resident_subgroups_per_simd\":2,\"occupancy_percent\":25,\"limiting_resource\":\"amdgpu.lds\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/report_lds_occupancy_gfx950.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "reports gfx125x target-inserted address-state economics",
       "steps": [
         {

@@ -97,6 +97,7 @@ AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS = (
     | AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE
 )
 AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES = 64 * 1024
+AMDGPU_CDNA4_MAX_WORKGROUP_STORAGE_BYTES = 160 * 1024
 AMDGPU_GFX125X_MAX_WORKGROUP_STORAGE_BYTES = 320 * 1024
 
 AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE = "none"
@@ -320,8 +321,17 @@ class AmdgpuOccupancyResourceInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class AmdgpuOccupancyDomainInfo:
+    simd_count: int
+    local_memory_bytes: int
+    local_memory_allocation_granularity: int
+    max_barrier_workgroup_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class AmdgpuOccupancyModelInfo:
     max_waves_per_simd: int
+    domain: AmdgpuOccupancyDomainInfo
     register_classes: tuple[AmdgpuOccupancyRegisterClassInfo, ...]
     resources: tuple[AmdgpuOccupancyResourceInfo, ...] = ()
 
@@ -388,9 +398,57 @@ AMDGPU_OCCUPANCY_REGISTER_CLASS_AGPR_CDNA = AmdgpuOccupancyRegisterClassInfo(
     "amdgpu.agpr", 256, 4, limits_occupancy=False
 )
 
-AMDGPU_OCCUPANCY_CDNA = AmdgpuProcessorOccupancyInfo(
+AMDGPU_OCCUPANCY_DOMAIN_CDNA3 = AmdgpuOccupancyDomainInfo(
+    simd_count=4,
+    local_memory_bytes=64 * 1024,
+    local_memory_allocation_granularity=512,
+    max_barrier_workgroup_count=16,
+)
+AMDGPU_OCCUPANCY_DOMAIN_CDNA4 = AmdgpuOccupancyDomainInfo(
+    simd_count=4,
+    local_memory_bytes=160 * 1024,
+    local_memory_allocation_granularity=1280,
+    max_barrier_workgroup_count=16,
+)
+AMDGPU_OCCUPANCY_DOMAIN_RDNA = AmdgpuOccupancyDomainInfo(
+    simd_count=4,
+    local_memory_bytes=128 * 1024,
+    local_memory_allocation_granularity=512,
+    max_barrier_workgroup_count=32,
+)
+AMDGPU_OCCUPANCY_DOMAIN_GFX125X = AmdgpuOccupancyDomainInfo(
+    simd_count=4,
+    local_memory_bytes=320 * 1024,
+    local_memory_allocation_granularity=2048,
+    max_barrier_workgroup_count=16,
+)
+
+AMDGPU_OCCUPANCY_CDNA3 = AmdgpuProcessorOccupancyInfo(
     wave64=AmdgpuOccupancyModelInfo(
         max_waves_per_simd=8,
+        domain=AMDGPU_OCCUPANCY_DOMAIN_CDNA3,
+        register_classes=(
+            AMDGPU_OCCUPANCY_REGISTER_CLASS_SGPR_CDNA,
+            AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 512, 8),
+            AMDGPU_OCCUPANCY_REGISTER_CLASS_AGPR_CDNA,
+        ),
+        resources=(
+            AmdgpuOccupancyResourceInfo(
+                "amdgpu.vgpr_agpr",
+                512,
+                8,
+                (
+                    AmdgpuOccupancyResourceMemberInfo("amdgpu.vgpr", 4),
+                    AmdgpuOccupancyResourceMemberInfo("amdgpu.agpr"),
+                ),
+            ),
+        ),
+    ),
+)
+AMDGPU_OCCUPANCY_CDNA4 = AmdgpuProcessorOccupancyInfo(
+    wave64=AmdgpuOccupancyModelInfo(
+        max_waves_per_simd=8,
+        domain=AMDGPU_OCCUPANCY_DOMAIN_CDNA4,
         register_classes=(
             AMDGPU_OCCUPANCY_REGISTER_CLASS_SGPR_CDNA,
             AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 512, 8),
@@ -412,6 +470,7 @@ AMDGPU_OCCUPANCY_CDNA = AmdgpuProcessorOccupancyInfo(
 AMDGPU_OCCUPANCY_RDNA_1024 = AmdgpuProcessorOccupancyInfo(
     wave32=AmdgpuOccupancyModelInfo(
         max_waves_per_simd=16,
+        domain=AMDGPU_OCCUPANCY_DOMAIN_RDNA,
         register_classes=(
             AMDGPU_OCCUPANCY_REGISTER_CLASS_SGPR_RDNA,
             AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 1024, 16),
@@ -419,6 +478,7 @@ AMDGPU_OCCUPANCY_RDNA_1024 = AmdgpuProcessorOccupancyInfo(
     ),
     wave64=AmdgpuOccupancyModelInfo(
         max_waves_per_simd=16,
+        domain=AMDGPU_OCCUPANCY_DOMAIN_RDNA,
         register_classes=(
             AMDGPU_OCCUPANCY_REGISTER_CLASS_SGPR_RDNA,
             AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 512, 8),
@@ -428,6 +488,7 @@ AMDGPU_OCCUPANCY_RDNA_1024 = AmdgpuProcessorOccupancyInfo(
 AMDGPU_OCCUPANCY_RDNA_1536 = AmdgpuProcessorOccupancyInfo(
     wave32=AmdgpuOccupancyModelInfo(
         max_waves_per_simd=16,
+        domain=AMDGPU_OCCUPANCY_DOMAIN_RDNA,
         register_classes=(
             AMDGPU_OCCUPANCY_REGISTER_CLASS_SGPR_RDNA,
             AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 1536, 24),
@@ -435,6 +496,7 @@ AMDGPU_OCCUPANCY_RDNA_1536 = AmdgpuProcessorOccupancyInfo(
     ),
     wave64=AmdgpuOccupancyModelInfo(
         max_waves_per_simd=16,
+        domain=AMDGPU_OCCUPANCY_DOMAIN_RDNA,
         register_classes=(
             AMDGPU_OCCUPANCY_REGISTER_CLASS_SGPR_RDNA,
             AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 768, 12),
@@ -444,6 +506,7 @@ AMDGPU_OCCUPANCY_RDNA_1536 = AmdgpuProcessorOccupancyInfo(
 AMDGPU_OCCUPANCY_GFX125X = AmdgpuProcessorOccupancyInfo(
     wave32=AmdgpuOccupancyModelInfo(
         max_waves_per_simd=16,
+        domain=AMDGPU_OCCUPANCY_DOMAIN_GFX125X,
         register_classes=(
             AMDGPU_OCCUPANCY_REGISTER_CLASS_SGPR_RDNA,
             AmdgpuOccupancyRegisterClassInfo("amdgpu.vgpr", 1024, 16),
@@ -623,7 +686,7 @@ def cdna3_processor_info(
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_CDNA_GFX9,
         matrix_feature_profile=matrix_feature_profile,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES,
-        occupancy=AMDGPU_OCCUPANCY_CDNA,
+        occupancy=AMDGPU_OCCUPANCY_CDNA3,
     )
 
 
@@ -817,7 +880,8 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_CDNA_GFX9,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES,
-        occupancy=AMDGPU_OCCUPANCY_CDNA,
+        max_workgroup_storage_bytes=AMDGPU_CDNA4_MAX_WORKGROUP_STORAGE_BYTES,
+        occupancy=AMDGPU_OCCUPANCY_CDNA4,
     ),
     gfx9_10_processor_info(
         "gfx1010",
