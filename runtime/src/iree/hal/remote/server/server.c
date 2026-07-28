@@ -448,7 +448,8 @@ static int32_t iree_hal_remote_server_find_free_slot(
     if (!server->sessions[i].session && !server->sessions[i].queue_channel &&
         iree_hal_remote_server_bulk_session_is_empty(
             server->sessions[i].bulk_session) &&
-        server->sessions[i].flags == 0) {
+        server->sessions[i].flags == 0 &&
+        server->sessions[i].queue_flags == 0) {
       return (int32_t)i;
     }
   }

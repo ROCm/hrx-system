@@ -8,6 +8,7 @@
 
 #include "iree/async/buffer_pool.h"
 #include "iree/async/frontier.h"
+#include "iree/async/operations/scheduling.h"
 #include "iree/async/semaphore.h"
 #include "iree/hal/remote/protocol/commands.h"
 #include "iree/hal/remote/protocol/common.h"
@@ -31,6 +32,11 @@
 // protocol limit.
 #define IREE_HAL_REMOTE_INLINE_EVENT_COUNT 32
 #define IREE_HAL_REMOTE_INLINE_BARRIER_COUNT 32
+
+// Bounds retained ADVANCE records when the peer stops accepting progress.
+// Crossing the bound terminalizes the session instead of admitting unbounded
+// per-command state.
+#define IREE_HAL_REMOTE_MAX_PENDING_ADVANCES 4096
 
 //===----------------------------------------------------------------------===//
 // Session slot helpers
@@ -58,22 +64,48 @@ typedef struct iree_hal_remote_server_command_completion_t {
   iree_allocator_t host_allocator;
   // Single-entry frontier signaled by this command.
   iree_async_single_frontier_t signal_frontier;
-  // Number of resolution entries piggybacked on ADVANCE.
-  uint16_t resolution_count;
-  // Padding reserved to keep following payload storage aligned.
-  uint16_t resolution_padding[3];
+  // Fixed ADVANCE payload prefix.
+  iree_hal_remote_advance_payload_t advance_payload;
   // BUFFER_ALLOCA provisional-to-resolved mapping, valid when count is one.
   iree_hal_remote_resolution_entry_t resolution;
+  // Serialized failure status appended to |advance_payload|, or NULL.
+  uint8_t* status_wire;
 } iree_hal_remote_server_command_completion_t;
 
 static void iree_hal_remote_server_release_command_completion(
     iree_hal_remote_server_command_completion_t* completion) {
   if (!completion) return;
   iree_allocator_t host_allocator = completion->host_allocator;
+  iree_allocator_free(host_allocator, completion->status_wire);
   iree_net_queue_channel_release(completion->queue_channel);
   iree_hal_semaphore_release(completion->local_semaphore);
   iree_hal_remote_server_release(completion->server);
   iree_allocator_free(host_allocator, completion);
+}
+
+static iree_status_t iree_hal_remote_server_allocate_command_completion(
+    iree_hal_remote_server_t* server,
+    iree_hal_remote_server_session_t* session_slot, uint64_t session_id,
+    iree_net_queue_channel_t* queue_channel,
+    const iree_async_frontier_t* signal_frontier,
+    iree_hal_remote_server_command_completion_t** out_completion) {
+  *out_completion = NULL;
+  iree_hal_remote_server_command_completion_t* completion = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      server->host_allocator, sizeof(*completion), (void**)&completion));
+  memset(completion, 0, sizeof(*completion));
+  completion->host_allocator = server->host_allocator;
+  completion->server = server;
+  iree_hal_remote_server_retain(completion->server);
+  completion->session_slot = session_slot;
+  completion->session_id = session_id;
+  completion->queue_channel = queue_channel;
+  iree_net_queue_channel_retain(completion->queue_channel);
+  iree_async_single_frontier_initialize(&completion->signal_frontier,
+                                        signal_frontier->entries[0].axis,
+                                        signal_frontier->entries[0].epoch);
+  *out_completion = completion;
+  return iree_ok_status();
 }
 
 static void iree_hal_remote_server_free_command_completion_nodes(
@@ -181,9 +213,11 @@ static void iree_hal_remote_server_free_resource_release_nodes(
 static void iree_hal_remote_server_session_take_window_nodes(
     iree_hal_remote_server_session_t* session_slot,
     iree_net_sequence_node_t** out_pending_releases,
-    iree_net_sequence_node_t** out_pending_completions) {
+    iree_net_sequence_node_t** out_pending_completions,
+    iree_net_sequence_node_t** out_pending_advances) {
   *out_pending_releases = NULL;
   *out_pending_completions = NULL;
+  *out_pending_advances = NULL;
   iree_net_sequence_window_take_pending(
       &session_slot->observed_submission_window, out_pending_releases);
   iree_net_sequence_window_deinitialize(
@@ -192,16 +226,23 @@ static void iree_hal_remote_server_session_take_window_nodes(
   iree_net_sequence_window_take_pending(&session_slot->completed_signal_window,
                                         out_pending_completions);
   iree_net_sequence_window_deinitialize(&session_slot->completed_signal_window);
+
+  *out_pending_advances = session_slot->pending_advances.head;
+  memset(&session_slot->pending_advances, 0,
+         sizeof(session_slot->pending_advances));
+  session_slot->queue_flags = 0;
 }
 
 void iree_hal_remote_server_session_deinitialize_windows(
     iree_hal_remote_server_session_t* session_slot) {
   iree_net_sequence_node_t* pending_releases = NULL;
   iree_net_sequence_node_t* pending_completions = NULL;
+  iree_net_sequence_node_t* pending_advances = NULL;
   iree_hal_remote_server_session_take_window_nodes(
-      session_slot, &pending_releases, &pending_completions);
+      session_slot, &pending_releases, &pending_completions, &pending_advances);
   iree_hal_remote_server_free_resource_release_nodes(pending_releases);
   iree_hal_remote_server_free_command_completion_nodes(pending_completions);
+  iree_hal_remote_server_free_command_completion_nodes(pending_advances);
 }
 
 void iree_hal_remote_server_session_deinitialize_provisionals(
@@ -536,6 +577,7 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
   memset(&provisional_snapshot, 0, sizeof(provisional_snapshot));
   iree_net_sequence_node_t* pending_releases = NULL;
   iree_net_sequence_node_t* pending_completions = NULL;
+  iree_net_sequence_node_t* pending_advances = NULL;
 
   iree_slim_mutex_lock(&server->session_mutex);
   int32_t slot = iree_hal_remote_server_find_session_slot(server, session);
@@ -569,7 +611,8 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
            sizeof(server->sessions[slot].provisional_map));
 
     iree_hal_remote_server_session_take_window_nodes(
-        &server->sessions[slot], &pending_releases, &pending_completions);
+        &server->sessions[slot], &pending_releases, &pending_completions,
+        &pending_advances);
 
     server->sessions[slot].session = NULL;
     server->sessions[slot].carrier = NULL;
@@ -605,6 +648,7 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
   // Release owner-managed nodes that were pending in sequence windows.
   iree_hal_remote_server_free_resource_release_nodes(pending_releases);
   iree_hal_remote_server_free_command_completion_nodes(pending_completions);
+  iree_hal_remote_server_free_command_completion_nodes(pending_advances);
 
   // Stop new bulk callbacks before failing transfers. DATA payload sends are
   // zero-copy, so the bulk state drains asynchronously until send completions
@@ -839,29 +883,105 @@ static iree_hal_semaphore_t* iree_hal_remote_server_remove_epoch_semaphore(
 // Command completion
 //===----------------------------------------------------------------------===//
 
-// Sends an error ADVANCE frame to the client. The ADVANCE carries the full
-// serialized iree_status_t so the client can reconstruct the error with source
-// locations, messages, and annotations. The status is consumed by this
-// function.
-//
-// On the client side, the non-zero status_code in the advance payload triggers
-// frontier_tracker_fail_axis() which fails the semaphore and surfaces the error
-// at iree_hal_semaphore_wait().
-static void iree_hal_remote_server_send_error_advance(
-    iree_net_queue_channel_t* queue_channel,
-    const iree_async_frontier_t* signal_frontier, iree_status_t status,
-    iree_allocator_t host_allocator) {
-  IREE_TRACE_ZONE_BEGIN(z0);
+typedef struct iree_hal_remote_server_session_failure_operation_t {
+  // NOP used to enter the session's proactor thread.
+  iree_async_nop_operation_t nop;
+  // Server retained until failure publication completes.
+  iree_hal_remote_server_t* server;
+  // Session retained until failure publication completes.
+  iree_net_session_t* session;
+  // Terminal status transferred to iree_net_session_fail().
+  iree_status_t status;
+  // Host allocator used for this operation.
+  iree_allocator_t host_allocator;
+} iree_hal_remote_server_session_failure_operation_t;
 
-  // Build the advance payload header with the error status code.
-  iree_hal_remote_advance_payload_t advance_header;
-  memset(&advance_header, 0, sizeof(advance_header));
-  advance_header.status_code = (uint16_t)iree_status_code(status);
+static void iree_hal_remote_server_session_failure_operation_complete(
+    void* user_data, iree_async_operation_t* operation,
+    iree_status_t operation_status, iree_async_completion_flags_t flags) {
+  (void)operation;
+  (void)flags;
+  iree_hal_remote_server_session_failure_operation_t* failure_operation =
+      (iree_hal_remote_server_session_failure_operation_t*)user_data;
+  iree_hal_remote_server_t* server = failure_operation->server;
+  iree_net_session_t* session = failure_operation->session;
+  iree_allocator_t host_allocator = failure_operation->host_allocator;
+  iree_status_t status = failure_operation->status;
 
-  // Serialize the full status for the client.
+  if (!iree_status_is_ok(operation_status)) {
+    status = iree_status_join(
+        status, iree_status_annotate(
+                    operation_status,
+                    IREE_SV("failed to dispatch terminal session failure")));
+  }
+  iree_net_session_fail(session, status);
+
+  iree_net_session_release(session);
+  iree_allocator_free(host_allocator, failure_operation);
+  iree_hal_remote_server_release(server);
+}
+
+static void iree_hal_remote_server_fail_active_session(
+    iree_hal_remote_server_session_t* session_slot, uint64_t session_id,
+    iree_status_t status) {
+  iree_net_session_t* session = NULL;
+  iree_hal_remote_server_t* server = session_slot->server;
+  iree_slim_mutex_lock(&server->session_mutex);
+  if (session_slot->session_id == session_id && session_slot->session) {
+    session = session_slot->session;
+    iree_net_session_retain(session);
+  }
+  iree_slim_mutex_unlock(&server->session_mutex);
+  if (!session) {
+    iree_status_free(status);
+    return;
+  }
+
+  iree_hal_remote_server_session_failure_operation_t* failure_operation = NULL;
+  iree_status_t schedule_status =
+      iree_allocator_malloc(server->host_allocator, sizeof(*failure_operation),
+                            (void**)&failure_operation);
+  if (iree_status_is_ok(schedule_status)) {
+    memset(failure_operation, 0, sizeof(*failure_operation));
+    failure_operation->server = server;
+    iree_hal_remote_server_retain(server);
+    failure_operation->session = session;
+    failure_operation->status = status;
+    failure_operation->host_allocator = server->host_allocator;
+    iree_async_operation_initialize(
+        &failure_operation->nop.base, IREE_ASYNC_OPERATION_TYPE_NOP,
+        IREE_ASYNC_OPERATION_FLAG_NONE,
+        iree_hal_remote_server_session_failure_operation_complete,
+        failure_operation);
+    schedule_status = iree_async_proactor_submit_one(
+        server->proactor, &failure_operation->nop.base);
+  }
+  if (!iree_status_is_ok(schedule_status)) {
+    if (failure_operation) {
+      iree_hal_remote_server_t* retained_server = failure_operation->server;
+      iree_allocator_t host_allocator = failure_operation->host_allocator;
+      iree_allocator_free(host_allocator, failure_operation);
+      iree_hal_remote_server_release(retained_server);
+    }
+    iree_net_session_release(session);
+    iree_status_abort(iree_status_join(
+        status,
+        iree_status_annotate(schedule_status,
+                             IREE_SV("failed to schedule session failure"))));
+  }
+}
+
+// Converts |status| into an owned ADVANCE payload and consumes it.
+// Serialization is best effort: allocation failure preserves the status code
+// while omitting the diagnostic wire data.
+static void iree_hal_remote_server_prepare_failure_advance(
+    iree_hal_remote_server_command_completion_t* completion,
+    iree_status_t status) {
+  memset(&completion->advance_payload, 0, sizeof(completion->advance_payload));
+  completion->advance_payload.status_code = (uint16_t)iree_status_code(status);
+
   iree_host_size_t wire_size = 0;
   iree_net_status_wire_size(status, &wire_size);
-  uint8_t* wire_buffer = NULL;
   iree_status_t serialize_status = iree_ok_status();
   if (wire_size > UINT32_MAX) {
     serialize_status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -870,78 +990,350 @@ static void iree_hal_remote_server_send_error_advance(
                                         wire_size, UINT32_MAX);
   } else {
     serialize_status =
-        iree_allocator_malloc(host_allocator, wire_size, (void**)&wire_buffer);
+        iree_allocator_malloc(completion->host_allocator, wire_size,
+                              (void**)&completion->status_wire);
   }
   if (iree_status_is_ok(serialize_status)) {
     serialize_status = iree_net_status_wire_serialize(
-        status, iree_make_byte_span(wire_buffer, wire_size));
+        status, iree_make_byte_span(completion->status_wire, wire_size));
   }
-
   if (iree_status_is_ok(serialize_status)) {
-    advance_header.status_wire_length = (uint32_t)wire_size;
-    iree_async_span_t spans[2] = {
-        iree_async_span_from_ptr(&advance_header, sizeof(advance_header)),
-        iree_async_span_from_ptr(wire_buffer, wire_size),
-    };
-    iree_async_span_list_t payload = {spans, 2};
-    iree_status_ignore(iree_net_queue_channel_send_advance(
-        queue_channel, signal_frontier, payload, 0));
+    completion->advance_payload.status_wire_length = (uint32_t)wire_size;
   } else {
-    // Allocation or serialization failed; send code-only error ADVANCE.
-    iree_status_ignore(serialize_status);
-    iree_async_span_t spans[1] = {
-        iree_async_span_from_ptr(&advance_header, sizeof(advance_header)),
-    };
-    iree_async_span_list_t payload = {spans, 1};
-    iree_status_ignore(iree_net_queue_channel_send_advance(
-        queue_channel, signal_frontier, payload, 0));
+    iree_status_free(serialize_status);
+    iree_allocator_free(completion->host_allocator, completion->status_wire);
+    completion->status_wire = NULL;
   }
-
-  iree_allocator_free(host_allocator, wire_buffer);
   iree_status_free(status);
-  IREE_TRACE_ZONE_END(z0);
 }
 
-static void iree_hal_remote_server_send_success_advance(
+static iree_status_t iree_hal_remote_server_send_command_completion(
     iree_hal_remote_server_command_completion_t* completion) {
   iree_async_frontier_t* signal_frontier =
       iree_async_single_frontier_as_frontier(&completion->signal_frontier);
 
-  if (completion->resolution_count > 0) {
-    // BUFFER_ALLOCA: include resolution entries in the ADVANCE payload.
-    iree_hal_remote_advance_payload_t advance_header;
-    memset(&advance_header, 0, sizeof(advance_header));
-    advance_header.resolution_count = completion->resolution_count;
-    iree_async_span_t spans[2] = {
-        iree_async_span_from_ptr(&advance_header, sizeof(advance_header)),
-        iree_async_span_from_ptr(&completion->resolution,
-                                 sizeof(completion->resolution)),
-    };
-    iree_async_span_list_t payload = {spans, 2};
-    iree_status_t send_status = iree_net_queue_channel_send_advance(
-        completion->queue_channel, signal_frontier, payload,
-        /*operation_user_data=*/0);
-    iree_status_ignore(send_status);
+  iree_async_span_t spans[3];
+  iree_host_size_t span_count = 0;
+  if (completion->advance_payload.resolution_count > 0 ||
+      completion->advance_payload.status_code != IREE_STATUS_OK) {
+    spans[span_count++] = iree_async_span_from_ptr(
+        &completion->advance_payload, sizeof(completion->advance_payload));
+  }
+  if (completion->advance_payload.resolution_count > 0) {
+    spans[span_count++] = iree_async_span_from_ptr(
+        &completion->resolution, sizeof(completion->resolution));
+  }
+  if (completion->advance_payload.status_wire_length > 0) {
+    spans[span_count++] = iree_async_span_from_ptr(
+        completion->status_wire,
+        completion->advance_payload.status_wire_length);
+  }
+  iree_net_queue_channel_t* queue_channel = completion->queue_channel;
+  iree_net_queue_channel_retain(queue_channel);
+  iree_status_t status = iree_net_queue_channel_send_advance(
+      queue_channel, signal_frontier,
+      iree_async_span_list_make(spans, span_count),
+      (uint64_t)(uintptr_t)completion);
+  iree_net_queue_channel_release(queue_channel);
+  return status;
+}
+
+static iree_status_t iree_hal_remote_server_enqueue_advances_locked(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_net_sequence_node_t* advance_list) {
+  iree_host_size_t list_count = 0;
+  iree_net_sequence_node_t* list_tail = NULL;
+  for (iree_net_sequence_node_t* node = advance_list; node; node = node->next) {
+    list_tail = node;
+    ++list_count;
+  }
+  if (list_count > IREE_HAL_REMOTE_MAX_PENDING_ADVANCES -
+                       session_slot->pending_advances.count) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "remote queue retained ADVANCE limit exceeded (%u)",
+                            IREE_HAL_REMOTE_MAX_PENDING_ADVANCES);
+  }
+  if (session_slot->pending_advances.tail) {
+    session_slot->pending_advances.tail->next = advance_list;
   } else {
-    // Non-alloca: empty ADVANCE payload.
-    iree_async_span_list_t empty_payload = iree_async_span_list_empty();
-    iree_status_t send_status = iree_net_queue_channel_send_advance(
-        completion->queue_channel, signal_frontier, empty_payload,
-        /*operation_user_data=*/0);
-    iree_status_ignore(send_status);
+    session_slot->pending_advances.head = advance_list;
+  }
+  session_slot->pending_advances.tail = list_tail;
+  session_slot->pending_advances.count += list_count;
+  return iree_ok_status();
+}
+
+// Requests one retry after a new record or transport resource becomes
+// available. An active drainer will either consume the record itself or record
+// a send-ready edge if it encounters backpressure.
+static bool iree_hal_remote_server_request_advance_drain_locked(
+    iree_hal_remote_server_session_t* session_slot, uint64_t session_id) {
+  if (session_slot->session_id != session_id || !session_slot->session ||
+      !session_slot->pending_advances.head ||
+      iree_any_bit_set(
+          session_slot->queue_flags,
+          IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_DRAIN_ACTIVE)) {
+    return false;
+  }
+  session_slot->queue_flags &=
+      ~IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_BACKPRESSURED;
+  session_slot->queue_flags |=
+      IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_DRAIN_ACTIVE;
+  return true;
+}
+
+static void iree_hal_remote_server_drain_advances(
+    iree_hal_remote_server_session_t* session_slot, uint64_t session_id) {
+  iree_hal_remote_server_t* server = session_slot->server;
+  while (true) {
+    iree_hal_remote_server_command_completion_t* completion = NULL;
+    iree_slim_mutex_lock(&server->session_mutex);
+    if (session_slot->session_id == session_id && session_slot->session &&
+        session_slot->pending_advances.head) {
+      iree_net_sequence_node_t* node = session_slot->pending_advances.head;
+      session_slot->pending_advances.head = node->next;
+      if (!session_slot->pending_advances.head) {
+        session_slot->pending_advances.tail = NULL;
+      }
+      --session_slot->pending_advances.count;
+      node->next = NULL;
+      completion = iree_containerof(
+          node, iree_hal_remote_server_command_completion_t, sequence_node);
+    } else if (session_slot->session_id == session_id) {
+      session_slot->queue_flags &=
+          ~(IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_DRAIN_ACTIVE |
+            IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_READY_PENDING);
+    }
+    iree_slim_mutex_unlock(&server->session_mutex);
+    if (!completion) return;
+
+    iree_status_t send_status =
+        iree_hal_remote_server_send_command_completion(completion);
+    if (iree_status_is_ok(send_status)) {
+      // The queue channel completion callback now owns |completion|. It may
+      // already have released it when the transport completes synchronously.
+      continue;
+    }
+
+    if (iree_status_code(send_status) == IREE_STATUS_RESOURCE_EXHAUSTED) {
+      iree_status_free(send_status);
+      bool retry_immediately = false;
+      bool completion_requeued = false;
+      iree_slim_mutex_lock(&server->session_mutex);
+      if (session_slot->session_id == completion->session_id &&
+          session_slot->session) {
+        completion->sequence_node.next = session_slot->pending_advances.head;
+        session_slot->pending_advances.head = &completion->sequence_node;
+        if (!session_slot->pending_advances.tail) {
+          session_slot->pending_advances.tail = &completion->sequence_node;
+        }
+        ++session_slot->pending_advances.count;
+        completion_requeued = true;
+        session_slot->queue_flags |=
+            IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_BACKPRESSURED;
+        if (iree_any_bit_set(
+                session_slot->queue_flags,
+                IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_READY_PENDING)) {
+          session_slot->queue_flags &=
+              ~(IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_BACKPRESSURED |
+                IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_READY_PENDING);
+          retry_immediately = true;
+        } else {
+          session_slot->queue_flags &=
+              ~IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_DRAIN_ACTIVE;
+        }
+      }
+      iree_slim_mutex_unlock(&server->session_mutex);
+      if (!completion_requeued) {
+        iree_hal_remote_server_release_command_completion(completion);
+      }
+      if (retry_immediately) continue;
+      return;
+    }
+
+    iree_hal_remote_server_fail_active_session(
+        session_slot, completion->session_id,
+        iree_status_annotate(send_status,
+                             IREE_SV("failed to send remote queue ADVANCE")));
+    iree_hal_remote_server_release_command_completion(completion);
+    return;
   }
 }
 
-static void iree_hal_remote_server_process_ready_command_completions(
+static void iree_hal_remote_server_queue_ready_completions(
+    iree_hal_remote_server_session_t* session_slot, uint64_t session_id,
     iree_net_sequence_node_t* ready_list) {
-  while (ready_list) {
-    iree_net_sequence_node_t* next = ready_list->next;
-    iree_hal_remote_server_command_completion_t* completion = iree_containerof(
-        ready_list, iree_hal_remote_server_command_completion_t, sequence_node);
-    iree_hal_remote_server_send_success_advance(completion);
-    iree_hal_remote_server_release_command_completion(completion);
-    ready_list = next;
+  if (!ready_list) return;
+  iree_hal_remote_server_t* server = session_slot->server;
+  bool start_drain = false;
+  bool completions_transferred = false;
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&server->session_mutex);
+  if (session_slot->session_id == session_id && session_slot->session &&
+      !iree_any_bit_set(session_slot->queue_flags,
+                        IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_TERMINAL)) {
+    status = iree_hal_remote_server_enqueue_advances_locked(session_slot,
+                                                            ready_list);
+    completions_transferred = iree_status_is_ok(status);
+    if (completions_transferred) {
+      start_drain = iree_hal_remote_server_request_advance_drain_locked(
+          session_slot, session_id);
+    }
   }
+  iree_slim_mutex_unlock(&server->session_mutex);
+
+  if (!iree_status_is_ok(status)) {
+    iree_hal_remote_server_fail_active_session(session_slot, session_id,
+                                               status);
+  }
+  if (!completions_transferred) {
+    iree_hal_remote_server_free_command_completion_nodes(ready_list);
+  } else if (start_drain) {
+    iree_hal_remote_server_drain_advances(session_slot, session_id);
+  }
+}
+
+// Terminalizes the queue axis with |status| and consumes |completion|. Pending
+// successful completions that were already ordered remain ahead of the failure
+// ADVANCE; deferred and later completions are reclaimed without publication.
+static void iree_hal_remote_server_terminalize_queue(
+    iree_hal_remote_server_command_completion_t* completion,
+    iree_status_t status) {
+  iree_hal_remote_server_prepare_failure_advance(completion, status);
+
+  iree_hal_remote_server_session_t* session_slot = completion->session_slot;
+  iree_hal_remote_server_t* server = completion->server;
+  uint64_t session_id = completion->session_id;
+  iree_net_sequence_node_t* discarded_completions = NULL;
+  bool completion_transferred = false;
+  bool start_drain = false;
+  iree_status_t enqueue_status = iree_ok_status();
+  iree_slim_mutex_lock(&server->session_mutex);
+  if (session_slot->session_id == completion->session_id &&
+      session_slot->session &&
+      !iree_any_bit_set(session_slot->queue_flags,
+                        IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_TERMINAL)) {
+    session_slot->queue_flags |= IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_TERMINAL;
+    iree_net_sequence_window_take_pending(
+        &session_slot->completed_signal_window, &discarded_completions);
+    enqueue_status = iree_hal_remote_server_enqueue_advances_locked(
+        session_slot, &completion->sequence_node);
+    completion_transferred = iree_status_is_ok(enqueue_status);
+    if (completion_transferred) {
+      start_drain = iree_hal_remote_server_request_advance_drain_locked(
+          session_slot, session_id);
+    }
+  }
+  iree_slim_mutex_unlock(&server->session_mutex);
+
+  iree_hal_remote_server_free_command_completion_nodes(discarded_completions);
+  if (!iree_status_is_ok(enqueue_status)) {
+    iree_hal_remote_server_fail_active_session(session_slot, session_id,
+                                               enqueue_status);
+  }
+  if (!completion_transferred) {
+    iree_hal_remote_server_release_command_completion(completion);
+  } else if (start_drain) {
+    iree_hal_remote_server_drain_advances(session_slot, session_id);
+  }
+}
+
+// Fails a command whose signal frontier was accepted but could not be
+// submitted. The first failure publishes one terminal ADVANCE; later failures
+// only retire their observed submission ownership.
+static iree_status_t iree_hal_remote_server_fail_queue_command(
+    iree_hal_remote_server_session_t* session_slot,
+    const iree_async_frontier_t* signal_frontier, iree_status_t status) {
+  iree_hal_remote_server_t* server = session_slot->server;
+  iree_net_queue_channel_t* queue_channel = NULL;
+  uint64_t session_id = 0;
+  iree_slim_mutex_lock(&server->session_mutex);
+  if (session_slot->session && session_slot->queue_channel &&
+      !iree_any_bit_set(session_slot->queue_flags,
+                        IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_TERMINAL)) {
+    session_id = session_slot->session_id;
+    queue_channel = session_slot->queue_channel;
+    iree_net_queue_channel_retain(queue_channel);
+  }
+  iree_slim_mutex_unlock(&server->session_mutex);
+
+  if (queue_channel) {
+    iree_hal_remote_server_command_completion_t* completion = NULL;
+    iree_status_t allocation_status =
+        iree_hal_remote_server_allocate_command_completion(
+            server, session_slot, session_id, queue_channel, signal_frontier,
+            &completion);
+    if (iree_status_is_ok(allocation_status)) {
+      iree_hal_remote_server_terminalize_queue(completion, status);
+    } else {
+      iree_hal_remote_server_fail_active_session(
+          session_slot, session_id,
+          iree_status_join(status, allocation_status));
+    }
+    iree_net_queue_channel_release(queue_channel);
+  } else {
+    iree_status_free(status);
+  }
+
+  return iree_hal_remote_server_observe_submission_frontier(session_slot,
+                                                            signal_frontier);
+}
+
+static void iree_hal_remote_server_notify_queue_send_ready(
+    iree_hal_remote_server_session_t* session_slot, uint64_t session_id) {
+  iree_hal_remote_server_t* server = session_slot->server;
+  bool start_drain = false;
+  iree_slim_mutex_lock(&server->session_mutex);
+  if (session_slot->session_id == session_id && session_slot->session) {
+    if (iree_any_bit_set(
+            session_slot->queue_flags,
+            IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_DRAIN_ACTIVE)) {
+      session_slot->queue_flags |=
+          IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_READY_PENDING;
+    } else if (session_slot->pending_advances.head &&
+               iree_any_bit_set(
+                   session_slot->queue_flags,
+                   IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_BACKPRESSURED)) {
+      session_slot->queue_flags &=
+          ~IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_BACKPRESSURED;
+      start_drain = iree_hal_remote_server_request_advance_drain_locked(
+          session_slot, session_id);
+    }
+  }
+  iree_slim_mutex_unlock(&server->session_mutex);
+  if (start_drain) {
+    iree_hal_remote_server_drain_advances(session_slot, session_id);
+  }
+}
+
+void iree_hal_remote_server_on_queue_send_complete(void* user_data,
+                                                   uint64_t operation_user_data,
+                                                   iree_status_t status) {
+  (void)user_data;
+  iree_hal_remote_server_command_completion_t* completion =
+      (iree_hal_remote_server_command_completion_t*)(uintptr_t)
+          operation_user_data;
+  if (!iree_status_is_ok(status)) {
+    iree_hal_remote_server_fail_active_session(
+        completion->session_slot, completion->session_id,
+        iree_status_annotate(status,
+                             IREE_SV("remote queue ADVANCE transport failed")));
+  } else {
+    iree_status_free(status);
+    iree_hal_remote_server_notify_queue_send_ready(completion->session_slot,
+                                                   completion->session_id);
+  }
+  iree_hal_remote_server_release_command_completion(completion);
+}
+
+void iree_hal_remote_server_on_queue_send_ready(void* user_data) {
+  iree_hal_remote_server_session_t* session_slot =
+      (iree_hal_remote_server_session_t*)user_data;
+  iree_hal_remote_server_t* server = session_slot->server;
+  iree_slim_mutex_lock(&server->session_mutex);
+  uint64_t session_id = session_slot->session_id;
+  iree_slim_mutex_unlock(&server->session_mutex);
+  iree_hal_remote_server_notify_queue_send_ready(session_slot, session_id);
 }
 
 // Fired by the local device's semaphore when the queue operation completes.
@@ -964,6 +1356,7 @@ static void iree_hal_remote_server_on_command_complete(
   iree_hal_semaphore_t* removed_semaphore = NULL;
   bool completion_transferred = false;
   bool session_active = false;
+  bool queue_terminal = false;
 
   iree_hal_remote_server_t* server = completion->server;
   iree_hal_remote_server_session_t* session_slot = completion->session_slot;
@@ -973,7 +1366,9 @@ static void iree_hal_remote_server_on_command_complete(
   if (session_active) {
     removed_semaphore = iree_hal_remote_server_remove_epoch_semaphore(
         session_slot, signal_axis, signal_epoch);
-    if (iree_status_is_ok(status)) {
+    queue_terminal = iree_any_bit_set(
+        session_slot->queue_flags, IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_TERMINAL);
+    if (!queue_terminal && iree_status_is_ok(status)) {
       if (!removed_semaphore) {
         status = iree_make_status(
             IREE_STATUS_INTERNAL,
@@ -1012,19 +1407,19 @@ static void iree_hal_remote_server_on_command_complete(
 
   iree_hal_semaphore_release(removed_semaphore);
 
-  if (session_active) {
-    if (iree_status_is_ok(status)) {
-      iree_hal_remote_server_process_ready_command_completions(
-          ready_completions);
-    } else {
-      // Execution failed locally, or completion ordering bookkeeping detected
-      // a protocol violation. Fail the client axis immediately.
-      iree_hal_remote_server_send_error_advance(completion->queue_channel,
-                                                signal_frontier, status,
-                                                completion->host_allocator);
-    }
+  if (!session_active || queue_terminal) {
+    iree_status_free(status);
+    iree_hal_remote_server_free_command_completion_nodes(ready_completions);
+  } else if (iree_status_is_ok(status)) {
+    iree_status_free(status);
+    iree_hal_remote_server_queue_ready_completions(
+        session_slot, completion->session_id, ready_completions);
   } else {
-    iree_status_ignore(status);
+    // Execution failure or invalid completion bookkeeping terminalizes the
+    // queue axis. No later success may be published after this failure.
+    iree_hal_remote_server_free_command_completion_nodes(ready_completions);
+    iree_hal_remote_server_terminalize_queue(completion, status);
+    completion_transferred = true;
   }
 
   if (!completion_transferred) {
@@ -1437,12 +1832,8 @@ static iree_status_t iree_hal_remote_server_fail_pending_queue_command(
   const iree_async_frontier_t* signal_frontier =
       iree_hal_remote_server_pending_queue_command_signal_frontier(
           pending_command);
-  iree_hal_remote_server_send_error_advance(pending_command->queue_channel,
-                                            signal_frontier, status,
-                                            pending_command->host_allocator);
-  iree_status_t observe_status =
-      iree_hal_remote_server_observe_submission_frontier(session_slot,
-                                                         signal_frontier);
+  iree_status_t observe_status = iree_hal_remote_server_fail_queue_command(
+      session_slot, signal_frontier, status);
   iree_hal_remote_server_free_pending_queue_command(pending_command);
   return observe_status;
 }
@@ -1669,23 +2060,14 @@ static iree_status_t iree_hal_remote_server_submit_command(
   // the local command so that later failures can still be reported cleanly.
   iree_hal_remote_server_command_completion_t* completion = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(server->host_allocator, sizeof(*completion),
-                                   (void**)&completion);
+    status = iree_hal_remote_server_allocate_command_completion(
+        server, session_slot, session_id, queue_channel, signal_frontier,
+        &completion);
   }
 
   if (iree_status_is_ok(status)) {
-    memset(completion, 0, sizeof(*completion));
-    completion->host_allocator = server->host_allocator;
-    completion->server = server;
-    iree_hal_remote_server_retain(server);
-    completion->session_slot = session_slot;
-    completion->session_id = session_id;
-    completion->queue_channel = queue_channel;
-    iree_net_queue_channel_retain(completion->queue_channel);
     completion->local_semaphore = local_semaphore;
     iree_hal_semaphore_retain(local_semaphore);
-    iree_async_single_frontier_initialize(&completion->signal_frontier,
-                                          signal_axis, signal_epoch);
     completion->timepoint.callback = iree_hal_remote_server_on_command_complete;
     completion->timepoint.user_data = completion;
   }
@@ -1727,7 +2109,8 @@ static iree_status_t iree_hal_remote_server_submit_command(
     iree_hal_remote_server_op_context_t* op_context =
         (iree_hal_remote_server_op_context_t*)submit_user_data;
     if (op_context && op_context->resolution_count > 0) {
-      completion->resolution_count = op_context->resolution_count;
+      completion->advance_payload.resolution_count =
+          op_context->resolution_count;
       completion->resolution = op_context->resolution;
     }
 
@@ -1761,12 +2144,12 @@ static iree_status_t iree_hal_remote_server_submit_command(
       iree_hal_semaphore_fail(local_semaphore,
                               iree_status_clone(failure_status));
     }
-    if (queue_channel) {
-      iree_hal_remote_server_send_error_advance(queue_channel, signal_frontier,
-                                                failure_status,
-                                                server->host_allocator);
+    if (completion) {
+      iree_hal_remote_server_terminalize_queue(completion, failure_status);
+      completion = NULL;
     } else {
-      iree_status_ignore(failure_status);
+      iree_hal_remote_server_fail_active_session(session_slot, session_id,
+                                                 failure_status);
     }
   }
 
@@ -5374,26 +5757,6 @@ static iree_status_t iree_hal_remote_server_observe_submission_frontier(
   return status;
 }
 
-// Fails a command whose signal frontier was accepted but that could not be
-// submitted. This consumes |status|, sends the error to the client as an
-// ADVANCE, and observes the submission epoch so queue-ordered releases are not
-// stranded behind a command the server has already rejected.
-static iree_status_t iree_hal_remote_server_fail_queue_command(
-    iree_hal_remote_server_session_t* session_slot,
-    const iree_async_frontier_t* signal_frontier, iree_status_t status) {
-  iree_net_queue_channel_t* queue_channel = session_slot->queue_channel;
-  if (!queue_channel) {
-    iree_status_ignore(status);
-    return iree_status_from_code(IREE_STATUS_ABORTED);
-  }
-
-  iree_hal_remote_server_send_error_advance(
-      queue_channel, signal_frontier, status,
-      session_slot->server->host_allocator);
-  return iree_hal_remote_server_observe_submission_frontier(session_slot,
-                                                            signal_frontier);
-}
-
 //===----------------------------------------------------------------------===//
 // Queue channel callbacks
 //===----------------------------------------------------------------------===//
@@ -5448,6 +5811,18 @@ iree_status_t iree_hal_remote_server_on_queue_command(
   status = iree_hal_remote_server_validate_queue_frontier(
       session_slot, "signal", signal_frontier);
   if (!iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
+  iree_hal_remote_server_t* server = session_slot->server;
+  iree_slim_mutex_lock(&server->session_mutex);
+  bool queue_terminal = iree_any_bit_set(
+      session_slot->queue_flags, IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_TERMINAL);
+  iree_slim_mutex_unlock(&server->session_mutex);
+  if (queue_terminal) {
+    status = iree_hal_remote_server_observe_submission_frontier(
+        session_slot, signal_frontier);
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
@@ -5988,9 +6363,15 @@ static iree_status_t iree_hal_remote_server_on_advance(
 
 static void iree_hal_remote_server_on_queue_transport_error(
     void* user_data, iree_status_t status) {
-  (void)user_data;
-  // TODO(benvanik): propagate queue channel transport error to session.
-  iree_status_ignore(status);
+  iree_hal_remote_server_session_t* session_slot =
+      (iree_hal_remote_server_session_t*)user_data;
+  iree_hal_remote_server_t* server = session_slot->server;
+  iree_slim_mutex_lock(&server->session_mutex);
+  uint64_t session_id = session_slot->session_id;
+  iree_slim_mutex_unlock(&server->session_mutex);
+  iree_hal_remote_server_fail_active_session(
+      session_slot, session_id,
+      iree_status_annotate(status, IREE_SV("remote queue transport failed")));
 }
 
 // Context passed to the endpoint_ready callback to identify which session
@@ -6051,6 +6432,8 @@ static void iree_hal_remote_server_on_queue_endpoint_ready(
         .on_command = iree_hal_remote_server_on_queue_command,
         .on_advance = iree_hal_remote_server_on_advance,
         .on_transport_error = iree_hal_remote_server_on_queue_transport_error,
+        .on_send_complete = iree_hal_remote_server_on_queue_send_complete,
+        .on_send_ready = iree_hal_remote_server_on_queue_send_ready,
         .user_data = &server->sessions[slot],
     };
 
@@ -6299,10 +6682,9 @@ void iree_hal_remote_server_on_session_error(void* user_data,
   iree_hal_remote_server_t* server = entry->server;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Log and consume the error.
-  iree_status_ignore(status);
-
-  // Remove the failed session from tracking.
+  // The session has already published this terminal status to its frontier
+  // axes. This callback owns the diagnostic and completes server-side teardown.
+  iree_status_free(status);
   iree_hal_remote_server_remove_session(server, session);
 
   IREE_TRACE_ZONE_END(z0);

@@ -77,11 +77,14 @@ class TestBufferPool {
 struct CapturedSend {
   std::vector<uint8_t> data;
   uint64_t user_data = 0;
+  bool completed = false;
 };
 
 struct CapturingEndpoint {
   iree_net_message_endpoint_callbacks_t callbacks = {};
   bool activated = false;
+  bool complete_sends_immediately = true;
+  iree_status_code_t next_send_error = IREE_STATUS_OK;
   std::vector<CapturedSend> sends;
 
   static void SetCallbacks(void* self,
@@ -105,6 +108,11 @@ struct CapturingEndpoint {
   static iree_status_t Send(
       void* self, const iree_net_message_endpoint_send_params_t* params) {
     auto* endpoint = static_cast<CapturingEndpoint*>(self);
+    if (endpoint->next_send_error != IREE_STATUS_OK) {
+      iree_status_code_t send_error = endpoint->next_send_error;
+      endpoint->next_send_error = IREE_STATUS_OK;
+      return iree_status_from_code(send_error);
+    }
     CapturedSend captured;
     captured.user_data = params->user_data;
     for (iree_host_size_t i = 0; i < params->data.count; ++i) {
@@ -114,10 +122,9 @@ struct CapturingEndpoint {
       captured.data.insert(captured.data.end(), data, data + span.length);
     }
     endpoint->sends.push_back(std::move(captured));
-    iree_net_frame_sender_dispatch_carrier_completion(
-        /*callback_user_data=*/NULL, IREE_NET_CARRIER_COMPLETION_SEND,
-        params->user_data, iree_ok_status(), /*bytes_transferred=*/0,
-        /*recv_lease=*/NULL);
+    if (endpoint->complete_sends_immediately) {
+      endpoint->CompleteSend(endpoint->sends.size() - 1, iree_ok_status());
+    }
     return iree_ok_status();
   }
 
@@ -139,6 +146,23 @@ struct CapturingEndpoint {
   static void AbortSend(void* self, iree_net_carrier_send_handle_t handle) {}
 
   iree_net_message_endpoint_t as_endpoint() { return {this, &vtable}; }
+
+  void InjectSendReady() {
+    if (callbacks.on_send_ready) {
+      callbacks.on_send_ready(callbacks.user_data);
+    }
+  }
+
+  void CompleteSend(iree_host_size_t send_index, iree_status_t status) {
+    IREE_ASSERT_LT(send_index, sends.size());
+    CapturedSend& send = sends[send_index];
+    IREE_ASSERT_FALSE(send.completed);
+    send.completed = true;
+    iree_net_frame_sender_dispatch_carrier_completion(
+        /*callback_user_data=*/NULL, IREE_NET_CARRIER_COMPLETION_SEND,
+        send.user_data, status, /*bytes_transferred=*/0,
+        /*recv_lease=*/NULL);
+  }
 
   static const iree_net_message_endpoint_vtable_t vtable;
 };
@@ -191,6 +215,7 @@ class RemoteServerSessionHarness {
     topology_.machine_index = 1;
     topology_.session_epoch = 1;
 
+    iree_atomic_ref_count_init(&server.ref_count);
     server.host_allocator = iree_allocator_system();
     server.local_topology = topology_;
     iree_slim_mutex_initialize(&server.session_mutex);
@@ -198,6 +223,9 @@ class RemoteServerSessionHarness {
 
     iree_net_queue_channel_callbacks_t callbacks = {};
     callbacks.on_command = UnusedOnCommand;
+    callbacks.on_send_complete = iree_hal_remote_server_on_queue_send_complete;
+    callbacks.on_send_ready = iree_hal_remote_server_on_queue_send_ready;
+    callbacks.user_data = &session;
     iree_status_t status =
         header_pool_.Initialize(/*buffer_count=*/4, /*buffer_size=*/1024);
     if (iree_status_is_ok(status)) {
@@ -241,12 +269,16 @@ class RemoteServerSessionHarness {
       iree_hal_remote_resource_table_deinitialize(&session.resource_table,
                                                   iree_allocator_system());
     }
-    if (observed_window_initialized_) {
-      iree_net_sequence_window_deinitialize(
-          &session.observed_submission_window);
-    }
-    if (completed_window_initialized_) {
-      iree_net_sequence_window_deinitialize(&session.completed_signal_window);
+    if (observed_window_initialized_ && completed_window_initialized_) {
+      iree_hal_remote_server_session_deinitialize_windows(&session);
+    } else {
+      if (observed_window_initialized_) {
+        iree_net_sequence_window_deinitialize(
+            &session.observed_submission_window);
+      }
+      if (completed_window_initialized_) {
+        iree_net_sequence_window_deinitialize(&session.completed_signal_window);
+      }
     }
     iree_net_queue_channel_release(queue_channel);
     if (server_mutex_initialized_) {
@@ -392,6 +424,90 @@ TEST(RemoteServerSessionTest, QueueCommandWithoutLeaseSignalsErrorAdvance) {
   EXPECT_EQ(advance->resolution_count, 0);
   EXPECT_EQ(advance->status_code, IREE_STATUS_FAILED_PRECONDITION);
   EXPECT_GT(advance->status_wire_length, 0u);
+}
+
+TEST(RemoteServerSessionTest, BackpressuredErrorAdvanceRetriesOnSendReady) {
+  RemoteServerSessionHarness harness;
+  IREE_ASSERT_OK(harness.Initialize());
+  harness.endpoint.next_send_error = IREE_STATUS_RESOURCE_EXHAUSTED;
+
+  SubmitMissingLeaseFileRead(&harness, /*signal_epoch=*/1);
+
+  EXPECT_TRUE(iree_any_bit_set(harness.session.queue_flags,
+                               IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_TERMINAL));
+  EXPECT_TRUE(iree_any_bit_set(
+      harness.session.queue_flags,
+      IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_BACKPRESSURED));
+  EXPECT_EQ(harness.session.pending_advances.count, 1u);
+  EXPECT_TRUE(harness.endpoint.sends.empty());
+
+  harness.endpoint.InjectSendReady();
+
+  EXPECT_FALSE(iree_any_bit_set(
+      harness.session.queue_flags,
+      IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_BACKPRESSURED));
+  EXPECT_EQ(harness.session.pending_advances.count, 0u);
+  ASSERT_EQ(harness.endpoint.sends.size(), 1u);
+  const iree_hal_remote_advance_payload_t* advance = ParseSingleAdvancePayload(
+      harness.endpoint.sends[0].data, harness.queue_axis, 1);
+  ASSERT_NE(advance, nullptr);
+  EXPECT_EQ(advance->status_code, IREE_STATUS_FAILED_PRECONDITION);
+  EXPECT_GT(advance->status_wire_length, 0u);
+}
+
+TEST(RemoteServerSessionTest,
+     QueueTerminalRetiresLaterCommandsWithoutPublishing) {
+  RemoteServerSessionHarness harness;
+  IREE_ASSERT_OK(harness.Initialize());
+  harness.endpoint.next_send_error = IREE_STATUS_RESOURCE_EXHAUSTED;
+
+  SubmitMissingLeaseFileRead(&harness, /*signal_epoch=*/1);
+  SubmitMissingLeaseFileRead(&harness, /*signal_epoch=*/2);
+
+  EXPECT_EQ(iree_net_sequence_window_observed(
+                &harness.session.observed_submission_window),
+            2u);
+  EXPECT_EQ(harness.session.pending_advances.count, 1u);
+  harness.endpoint.InjectSendReady();
+
+  ASSERT_EQ(harness.endpoint.sends.size(), 1u);
+  const iree_hal_remote_advance_payload_t* advance = ParseSingleAdvancePayload(
+      harness.endpoint.sends[0].data, harness.queue_axis, 1);
+  ASSERT_NE(advance, nullptr);
+  EXPECT_EQ(advance->status_code, IREE_STATUS_FAILED_PRECONDITION);
+}
+
+TEST(RemoteServerSessionTest, TeardownReclaimsBackpressuredAdvance) {
+  RemoteServerSessionHarness harness;
+  IREE_ASSERT_OK(harness.Initialize());
+  harness.endpoint.next_send_error = IREE_STATUS_RESOURCE_EXHAUSTED;
+
+  SubmitMissingLeaseFileRead(&harness, /*signal_epoch=*/1);
+
+  EXPECT_EQ(harness.session.pending_advances.count, 1u);
+}
+
+TEST(RemoteServerSessionTest, LateSendCompletionDoesNotWakeReusedSlot) {
+  RemoteServerSessionHarness harness;
+  IREE_ASSERT_OK(harness.Initialize());
+  harness.endpoint.complete_sends_immediately = false;
+
+  SubmitMissingLeaseFileRead(&harness, /*signal_epoch=*/1);
+
+  ASSERT_EQ(harness.endpoint.sends.size(), 1u);
+  EXPECT_FALSE(harness.endpoint.sends[0].completed);
+
+  // Model teardown and reuse while the old channel still owns an admitted
+  // send. The late completion belongs to session 1 and must not publish a
+  // readiness edge into session 2's active drainer.
+  harness.session.session_id = 2;
+  harness.session.queue_flags =
+      IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_DRAIN_ACTIVE;
+  harness.endpoint.CompleteSend(/*send_index=*/0, iree_ok_status());
+
+  EXPECT_EQ(harness.session.queue_flags,
+            IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_DRAIN_ACTIVE);
+  harness.session.queue_flags = 0;
 }
 
 TEST(RemoteServerSessionTest, QueueUnsupportedOpSignalsErrorAdvance) {

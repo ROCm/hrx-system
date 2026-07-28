@@ -50,6 +50,15 @@ enum iree_hal_remote_server_session_flag_bits_e {
   IREE_HAL_REMOTE_SERVER_SESSION_FLAG_BULK_DRAIN_PENDING = 1u << 0,
 };
 
+typedef uint8_t iree_hal_remote_server_queue_flags_t;
+
+enum iree_hal_remote_server_queue_flag_bits_e {
+  IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_TERMINAL = 1u << 0,
+  IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_DRAIN_ACTIVE = 1u << 1,
+  IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_BACKPRESSURED = 1u << 2,
+  IREE_HAL_REMOTE_SERVER_QUEUE_FLAG_ADVANCE_READY_PENDING = 1u << 3,
+};
+
 // Per-client session tracking entry.
 // Stored in the server's sessions array (indexed by slot).
 typedef struct iree_hal_remote_server_session_t {
@@ -73,6 +82,9 @@ typedef struct iree_hal_remote_server_session_t {
 
   // State bits from iree_hal_remote_server_session_flag_bits_e.
   iree_hal_remote_server_session_flags_t flags;
+
+  // Queue state bits protected by server->session_mutex.
+  iree_hal_remote_server_queue_flags_t queue_flags;
 
   // Queue channel for HAL command dispatch (NULL until queue endpoint opens).
   // The channel owns the header pool for its frame_sender (freed on channel
@@ -118,6 +130,17 @@ typedef struct iree_hal_remote_server_session_t {
   // observations let later wait frontier resolution skip retired local
   // semaphores, while the contiguous prefix gates ordered ADVANCE frames.
   iree_net_sequence_window_t completed_signal_window;
+
+  // Ordered ADVANCE records waiting for transport admission. Records leave
+  // this queue only after send admission transfers them to the queue channel.
+  struct {
+    // First pending ADVANCE record.
+    iree_net_sequence_node_t* head;
+    // Last pending ADVANCE record.
+    iree_net_sequence_node_t* tail;
+    // Number of pending ADVANCE records.
+    iree_host_size_t count;
+  } pending_advances;
 
   // Provisional→resolved resource ID mapping for resources whose client-visible
   // ID can appear on the queue channel before the control operation that
@@ -188,6 +211,14 @@ iree_status_t iree_hal_remote_server_on_queue_command(
     const iree_async_frontier_t* wait_frontier,
     const iree_async_frontier_t* signal_frontier,
     iree_const_byte_span_t command_data, iree_async_buffer_lease_t* lease);
+
+// Called when a queue ADVANCE send completes.
+void iree_hal_remote_server_on_queue_send_complete(void* user_data,
+                                                   uint64_t operation_user_data,
+                                                   iree_status_t status);
+
+// Called when a backpressured queue ADVANCE send may make progress.
+void iree_hal_remote_server_on_queue_send_ready(void* user_data);
 
 // Removes a session from the server's tracking. Called when a session reaches
 // a terminal state (CLOSED or ERROR). Safe to call multiple times for the
