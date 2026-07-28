@@ -78,6 +78,8 @@ typedef struct loom_amdgpu_kernel_hsaco_summary_t {
 typedef struct loom_amdgpu_kernel_hsaco_options_t {
   // Optional ABI layout captured before target resource materialization.
   const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout;
+  // Verified ABI facts captured before allocation.
+  const loom_amdgpu_hal_kernel_abi_verify_result_t* abi_verify;
   // Optional preflight result captured before HSACO contribution construction.
   const loom_amdgpu_native_preflight_t* preflight;
   // Optional target-owned packet plan applied during native encoding.
@@ -143,9 +145,9 @@ iree_status_t loom_amdgpu_write_kernel_hsaco_contributions(
 // Emits complete AMDGPU HSACO for one ABI-lowered target-low HAL kernel.
 //
 // The output stream receives a self-contained ELF code object with metadata,
-// one kernel descriptor, and one encoded text entry. |options| may provide
-// a packet plan and an optional emission summary. Values must be
-// physically allocated and unspilled.
+// one kernel descriptor, and one encoded text entry. |options| carries
+// verified ABI facts and may provide a packet plan and emission summary.
+// Values must be physically allocated and unspilled.
 iree_status_t loom_amdgpu_emit_kernel_hsaco(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,

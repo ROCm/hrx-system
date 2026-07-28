@@ -869,6 +869,7 @@ class LowKernelEmitter {
     StreamPtr stream = CreateStream();
     const loom_amdgpu_kernel_hsaco_options_t hsaco_options = {
         /*.abi_layout=*/&materialization.abi_layout,
+        /*.abi_verify=*/&abi_verify_result,
         /*.preflight=*/{},
         /*.packet_plan=*/&packet_plan,
     };

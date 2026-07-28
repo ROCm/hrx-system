@@ -742,8 +742,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
   }
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_emission_build(
-      &frame, &plan->abi_layout, &preflight, target_listing, report,
-      out_contribution, table_arena));
+      &frame, &plan->abi_layout, &plan->abi_verify, &preflight, target_listing,
+      report, out_contribution, table_arena));
   return iree_ok_status();
 }
 

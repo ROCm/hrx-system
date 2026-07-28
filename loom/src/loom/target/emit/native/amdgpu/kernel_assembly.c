@@ -245,8 +245,9 @@ static iree_status_t loom_amdgpu_kernel_assembly_emit(
     iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
   loom_amdgpu_kernel_record_t record = {0};
   const loom_amdgpu_kernel_record_options_t record_options = {
-      .abi_layout = options ? options->abi_layout : NULL,
-      .preflight = options ? options->preflight : NULL,
+      .abi_layout = options->abi_layout,
+      .abi_verify = options->abi_verify,
+      .preflight = options->preflight,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build(
       schedule, allocation, &record_options, &record, scratch_arena));
@@ -273,7 +274,7 @@ static iree_status_t loom_amdgpu_kernel_assembly_emit(
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_string(builder, entry_envelope->assembly));
   const loom_amdgpu_assembly_fragment_options_t assembly_options = {
-      .packet_plan = options ? options->packet_plan : NULL,
+      .packet_plan = options->packet_plan,
       .storage_layout = &record.storage_layout,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_assembly_fragment_with_options(
@@ -290,20 +291,8 @@ static iree_status_t loom_amdgpu_kernel_assembly_emit(
 iree_status_t loom_amdgpu_emit_kernel_assembly(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
-    iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
-  return loom_amdgpu_kernel_assembly_emit(schedule, allocation, NULL, builder,
-                                          scratch_arena);
-}
-
-iree_status_t loom_amdgpu_emit_kernel_assembly_with_options(
-    const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_kernel_assembly_options_t* options,
     iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
-  if (options == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU kernel assembly options are required");
-  }
   return loom_amdgpu_kernel_assembly_emit(schedule, allocation, options,
                                           builder, scratch_arena);
 }

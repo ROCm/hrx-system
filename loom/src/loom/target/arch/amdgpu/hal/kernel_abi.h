@@ -316,6 +316,13 @@ typedef struct loom_amdgpu_hal_kernel_abi_layout_t {
 typedef struct loom_amdgpu_hal_kernel_abi_verify_result_t {
   // Number of AMDGPU HAL-kernel ABI errors emitted for the function.
   uint32_t error_count;
+  // Bitset of verified ABI source kinds present in the function.
+  uint64_t live_in_source_bits;
+  // Launch workgroup-coordinate state required by the verified live-ins.
+  loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flags_t
+      launch_workgroup_id_flags;
+  // Number of hidden user SGPRs consumed by verified ABI live-ins.
+  uint32_t user_sgpr_count;
   // Fixed physical values retained from verified ABI live-ins.
   loom_low_allocation_fixed_value_t
       fixed_values[LOOM_AMDGPU_HAL_KERNEL_ABI_MAX_FIXED_VALUE_COUNT];
@@ -377,12 +384,6 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_attr(
 loom_amdgpu_hal_kernel_abi_source_kind_t
 loom_amdgpu_hal_kernel_abi_live_in_source_kind(const loom_module_t* module,
                                                loom_value_id_t value_id);
-
-// Returns the gfx1250 launch workgroup-ID requirements implied by
-// |source_kind|, or zero for a source outside the launch-state ABI.
-loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flags_t
-loom_amdgpu_hal_kernel_abi_source_launch_workgroup_id_flags(
-    loom_amdgpu_hal_kernel_abi_source_kind_t source_kind);
 
 #ifdef __cplusplus
 }  // extern "C"

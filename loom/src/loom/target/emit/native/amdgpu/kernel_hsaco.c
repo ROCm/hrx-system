@@ -22,24 +22,24 @@ iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
     loom_amdgpu_kernel_hsaco_contribution_t* out_contribution,
     iree_arena_allocator_t* scratch_arena) {
   *out_contribution = (loom_amdgpu_kernel_hsaco_contribution_t){0};
-  if (options != NULL && options->summary != NULL) {
+  if (options->summary != NULL) {
     *options->summary = (loom_amdgpu_kernel_hsaco_summary_t){0};
   }
 
   loom_amdgpu_kernel_record_t record = {0};
   const loom_amdgpu_kernel_record_options_t record_options = {
-      .abi_layout = options ? options->abi_layout : NULL,
-      .preflight = options ? options->preflight : NULL,
+      .abi_layout = options->abi_layout,
+      .abi_verify = options->abi_verify,
+      .preflight = options->preflight,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build(
       schedule, allocation, &record_options, &record, scratch_arena));
 
   loom_amdgpu_encoded_instruction_stream_t stream = {0};
   const loom_amdgpu_encode_instruction_stream_options_t encode_options = {
-      .packet_plan = options ? options->packet_plan : NULL,
+      .packet_plan = options->packet_plan,
       .storage_layout = &record.storage_layout,
-      .flags = options ? options->encoding_flags
-                       : LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_NONE,
+      .flags = options->encoding_flags,
   };
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_encode_instruction_stream_result_with_options(
@@ -60,7 +60,7 @@ iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
                             "AMDGPU kernel entry instruction count overflowed");
   }
   const uint64_t coissued_instruction_count =
-      options != NULL && options->packet_plan != NULL
+      options->packet_plan != NULL
           ? (uint64_t)options->packet_plan->vopd_plan.pair_count
           : 0;
 
@@ -120,7 +120,7 @@ iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
           },
   };
 
-  if (options != NULL && options->summary != NULL) {
+  if (options->summary != NULL) {
     *options->summary = out_contribution->summary;
   }
   return iree_ok_status();
@@ -180,10 +180,9 @@ iree_status_t loom_amdgpu_emit_kernel_hsaco(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_kernel_hsaco_options_t* options, iree_io_stream_t* stream,
     iree_arena_allocator_t* scratch_arena) {
-  loom_amdgpu_kernel_hsaco_options_t contribution_options =
-      options ? *options : (loom_amdgpu_kernel_hsaco_options_t){0};
+  loom_amdgpu_kernel_hsaco_options_t contribution_options = *options;
   contribution_options.summary = NULL;
-  if (options != NULL && options->summary != NULL) {
+  if (options->summary != NULL) {
     *options->summary = (loom_amdgpu_kernel_hsaco_summary_t){0};
   }
 
@@ -192,12 +191,12 @@ iree_status_t loom_amdgpu_emit_kernel_hsaco(
       schedule, allocation, &contribution_options, &contribution,
       scratch_arena));
   const loom_amdgpu_kernel_hsaco_write_options_t write_options = {
-      .data_symbols = options ? options->data_symbols : NULL,
-      .data_symbol_count = options ? options->data_symbol_count : 0,
+      .data_symbols = options->data_symbols,
+      .data_symbol_count = options->data_symbol_count,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_write_kernel_hsaco_contributions(
       &contribution, 1, &write_options, stream, scratch_arena));
-  if (options != NULL && options->summary != NULL) {
+  if (options->summary != NULL) {
     *options->summary = contribution.summary;
   }
   return iree_ok_status();

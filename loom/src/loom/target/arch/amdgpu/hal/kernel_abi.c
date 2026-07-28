@@ -147,6 +147,8 @@ static const loom_amdgpu_hal_kernel_abi_source_info_t
             LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_X |
                 LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Z),
 };
+static_assert(IREE_ARRAYSIZE(kLoomAmdgpuHalKernelAbiSourceInfos) <= 64,
+              "AMDGPU HAL ABI source presence fits its retained bitset");
 
 #undef LOOM_AMDGPU_HAL_KERNEL_ABI_FIXED_SGPR_SOURCE_INFO
 #undef LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO
@@ -248,14 +250,6 @@ loom_amdgpu_hal_kernel_abi_live_in_source_kind(const loom_module_t* module,
   }
   return loom_amdgpu_hal_kernel_abi_source_kind_from_stable_id(
       (uint64_t)loom_low_live_in_source_id(def_op));
-}
-
-loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flags_t
-loom_amdgpu_hal_kernel_abi_source_launch_workgroup_id_flags(
-    loom_amdgpu_hal_kernel_abi_source_kind_t source_kind) {
-  const loom_amdgpu_hal_kernel_abi_source_info_t* source_info =
-      loom_amdgpu_hal_kernel_abi_source_info_from_kind(source_kind);
-  return source_info == NULL ? 0 : source_info->launch_workgroup_id_flags;
 }
 
 static iree_status_t loom_amdgpu_hal_kernel_abi_reg_class_id(
@@ -439,6 +433,7 @@ static void loom_amdgpu_hal_kernel_abi_build_fixed_values(
         user_sgpr_base, source_info->unit_count);
     user_sgpr_base += source_info->unit_count;
   }
+  result->user_sgpr_count = user_sgpr_base;
 
   uint32_t workgroup_id_sgpr = user_sgpr_base;
   for (iree_host_size_t i = 1;
@@ -1468,6 +1463,8 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_verify_live_ins(
     }
     live_in_ops[source_index] = live_in_op;
     live_in_values[source_index] = loom_low_live_in_result(live_in_op);
+    result->live_in_source_bits |= UINT64_C(1) << source_index;
+    result->launch_workgroup_id_flags |= source_info->launch_workgroup_id_flags;
 
     switch (source_info->role) {
       case LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_ROLE_WORKITEM_ID: {

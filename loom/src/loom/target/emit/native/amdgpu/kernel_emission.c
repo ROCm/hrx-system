@@ -364,6 +364,7 @@ static void loom_amdgpu_kernel_emission_record_summary(
 iree_status_t loom_amdgpu_kernel_emission_build(
     const loom_low_emission_frame_t* frame,
     const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout,
+    const loom_amdgpu_hal_kernel_abi_verify_result_t* abi_verify,
     const loom_amdgpu_native_preflight_t* preflight,
     iree_string_builder_t* target_listing, loom_target_compile_report_t* report,
     loom_amdgpu_kernel_hsaco_contribution_t* out_contribution,
@@ -381,16 +382,18 @@ iree_status_t loom_amdgpu_kernel_emission_build(
     }
     const loom_amdgpu_kernel_assembly_options_t assembly_options = {
         .abi_layout = abi_layout,
+        .abi_verify = abi_verify,
         .preflight = preflight,
         .packet_plan = &packet_plan,
     };
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_kernel_assembly_with_options(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_kernel_assembly(
         &frame->schedule, &frame->allocation, &assembly_options, target_listing,
         table_arena));
   }
 
   const loom_amdgpu_kernel_hsaco_options_t hsaco_options = {
       .abi_layout = abi_layout,
+      .abi_verify = abi_verify,
       .preflight = preflight,
       .packet_plan = &packet_plan,
       .encoding_flags =

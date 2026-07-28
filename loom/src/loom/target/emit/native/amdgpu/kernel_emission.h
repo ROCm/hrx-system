@@ -30,6 +30,7 @@ extern "C" {
 iree_status_t loom_amdgpu_kernel_emission_build(
     const loom_low_emission_frame_t* frame,
     const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout,
+    const loom_amdgpu_hal_kernel_abi_verify_result_t* abi_verify,
     const loom_amdgpu_native_preflight_t* preflight,
     iree_string_builder_t* target_listing, loom_target_compile_report_t* report,
     loom_amdgpu_kernel_hsaco_contribution_t* out_contribution,
