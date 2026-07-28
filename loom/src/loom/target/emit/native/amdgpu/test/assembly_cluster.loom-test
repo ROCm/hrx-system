@@ -34,3 +34,19 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @c
   s_add_u32 s0, s0, s2
   s_add_u32 s0, s0, s3
   s_endpgm
+
+// ====
+// RUN: emit amdgpu-native @cluster_native_encoding waits=none strategy=source fixed=%lds:physical_register:0:1 fixed=%addr:physical_register:1:1 fixed=%saddr:physical_register:4:2
+
+amdgpu.target<gfx12-5-generic> @target
+low.func.def target(@target) @cluster_native_encoding(%lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm<amdgpu.gfx12_5.generic.core> {
+  %m0 = s_mov_b32_m0_imm 3
+  cluster_load_async_to_lds_b8 %lds, %addr, %saddr, %m0
+  cluster_load_async_to_lds_b32 %lds, %addr, %saddr, %m0 {offset = 1, scope = 1}
+  cluster_load_async_to_lds_b64 %lds, %addr, %saddr, %m0 {offset = -1, nv = 1, scope = 2, th = 2}
+  cluster_load_async_to_lds_b128 %lds, %addr, %saddr, %m0 {scope = 3, th = 3}
+  s_wait_asynccnt {asynccnt = 0}
+  return
+}
+
+// ----

@@ -1613,6 +1613,44 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   loom_module_free(module);
 }
 
+TEST_F(AmdgpuHalKernelLibraryTest, RejectsRel32AddWithoutPcProvenance) {
+  static const char kSource[] =
+      "amdgpu.target<gfx1100> @gfx_target\n"
+      "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
+      "@loom_kernel() {\n"
+      "  %zero = low.op<amdgpu.s_mov_b32>() {imm32 = 0} : () -> "
+      "reg<amdgpu.sgpr>\n"
+      "  %address = low.op<amdgpu.s_add_u32.rhs_symbol_rel32_lo>(%zero) "
+      "{symbol = @iree_feedback_config, byte_offset = 16} : "
+      "(reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>\n"
+      "  low.return\n"
+      "}\n";
+  loom_module_t* module = nullptr;
+  ASSERT_NO_FATAL_FAILURE(
+      ParseSource(iree_make_cstring_view(kSource), &module));
+
+  DiagnosticCapture capture;
+  loom_amdgpu_hal_kernel_library_t library = {};
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      /*.target_selection=*/{},
+      /*.runtime_globals=*/LOOM_AMDGPU_RUNTIME_GLOBAL_FEEDBACK_CONFIG,
+      /*.data_symbols=*/{},
+      /*.data_symbol_count=*/{},
+      /*.diagnostic_sink=*/capture.sink(),
+      /*.source_resolver=*/{},
+      /*.max_errors=*/20,
+  };
+  bool emitted = false;
+  iree::Status status(loom_amdgpu_emit_hal_kernel_library(
+      module, &options, iree_allocator_system(), &emitted, &library));
+
+  EXPECT_EQ(status.code(), iree::StatusCode::kFailedPrecondition);
+  EXPECT_THAT(status.ToString(),
+              ::testing::HasSubstr("does not hold an s_getpc_b64 component"));
+  EXPECT_FALSE(emitted);
+  loom_module_free(module);
+}
+
 TEST_F(AmdgpuHalKernelLibraryTest,
        EmitsGlobalRodataSymbolsAndRel32AddressMaterialization) {
   static constexpr char kSiteSymbolName[] = "loom_sanitizer_sites";

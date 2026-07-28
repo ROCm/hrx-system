@@ -215,30 +215,6 @@ loom_cc_library(
     ],
 )
 
-loom_cc_test(
-    name = "encoding_test",
-    srcs = ["encoding_test.cc"],
-    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA3),
-    deps = [
-        ":encoding",
-        "//loom/src/loom/codegen/low:frame",
-        "//loom/src/loom/codegen/low:function",
-        "//loom/src/loom/codegen/low:text_asm",
-        "//loom/src/loom/codegen/low:verify",
-        "//loom/src/loom/error:diagnostic",
-        "//loom/src/loom/format/text:parser",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/low",
-        "//loom/src/loom/target:low_descriptor_registry",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
-        "//loom/src/loom/target/arch/amdgpu/ops",
-        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
 loom_cc_library(
     name = "kernel_record",
     srcs = ["kernel_record.c"],

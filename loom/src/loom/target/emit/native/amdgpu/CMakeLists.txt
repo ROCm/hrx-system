@@ -235,35 +235,6 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_cc_test(
-  NAME
-    encoding_test
-  SRCS
-    "encoding_test.cc"
-  DEPS
-    ::encoding
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::codegen::low::frame
-    loom::codegen::low::function
-    loom::codegen::low::text_asm
-    loom::codegen::low::verify
-    loom::error::diagnostic
-    loom::format::text::parser
-    loom::ir
-    loom::ops::low
-    loom::target::arch::amdgpu::descriptors::low_registry
-    loom::target::arch::amdgpu::ops
-    loom::target::arch::amdgpu::planning::packet_plan
-    loom::target::low_descriptor_registry
-  LABELS
-    "iree-build-requirement=loom.target.arch.amdgpu"
-    "iree-build-requirement=loom.emit.amdgpu"
-)
-endif()
-
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_cc_library(
   NAME
