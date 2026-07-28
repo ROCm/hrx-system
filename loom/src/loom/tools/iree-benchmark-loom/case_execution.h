@@ -65,6 +65,15 @@ iree_status_t iree_benchmark_loom_run_work_item_correctness_range(
     iree_host_size_t* out_sample_count,
     iree_host_size_t* out_failed_sample_count);
 
+// Measures one prepared case_end_to_end physical work item.
+iree_status_t iree_benchmark_loom_measure_case_end_to_end_work_item(
+    const loom_testbench_module_plan_t* module_plan,
+    const iree_benchmark_loom_work_plan_t* work_plan,
+    const iree_benchmark_loom_work_item_t* work_item,
+    const loom_testbench_case_execution_options_t* execution_options,
+    iree_arena_allocator_t* execution_arena, iree_allocator_t allocator,
+    iree_benchmark_loom_benchmark_result_t* out_result);
+
 // Runs one case_end_to_end physical work item and emits logical alias events.
 iree_status_t iree_benchmark_loom_run_case_end_to_end_work_item(
     const iree_benchmark_loom_run_identity_t* run,

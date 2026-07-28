@@ -332,6 +332,22 @@ iree_status_t iree_benchmark_loom_run_work_item_correctness_range(
   return status;
 }
 
+iree_status_t iree_benchmark_loom_measure_case_end_to_end_work_item(
+    const loom_testbench_module_plan_t* module_plan,
+    const iree_benchmark_loom_work_plan_t* work_plan,
+    const iree_benchmark_loom_work_item_t* work_item,
+    const loom_testbench_case_execution_options_t* execution_options,
+    iree_arena_allocator_t* execution_arena, iree_allocator_t allocator,
+    iree_benchmark_loom_benchmark_result_t* out_result) {
+  const iree_benchmark_loom_selected_benchmark_t* selection =
+      &work_plan
+           ->selected_benchmarks[work_item->representative_selection_index];
+  return iree_benchmark_loom_run_benchmark_iterations(
+      module_plan, selection->benchmark_plan, execution_options,
+      &selection->policy, work_item->begin_benchmark_sample,
+      work_item->end_benchmark_sample, execution_arena, allocator, out_result);
+}
+
 iree_status_t iree_benchmark_loom_run_case_end_to_end_work_item(
     const iree_benchmark_loom_run_identity_t* run,
     const loom_testbench_module_plan_t* module_plan,
@@ -343,12 +359,6 @@ iree_status_t iree_benchmark_loom_run_case_end_to_end_work_item(
     iree_host_size_t* inout_correctness_sample_count,
     iree_host_size_t* inout_correctness_failed_sample_count,
     iree_host_size_t* inout_failed_benchmark_count) {
-  const iree_benchmark_loom_selected_benchmark_t* selection =
-      &work_plan
-           ->selected_benchmarks[work_item->representative_selection_index];
-  const loom_testbench_benchmark_plan_t* benchmark_plan =
-      selection->benchmark_plan;
-  const iree_benchmark_loom_benchmark_policy_t* policy = &selection->policy;
   loom_testbench_case_execution_options_t benchmark_execution_options =
       *execution_options;
 
@@ -365,9 +375,8 @@ iree_status_t iree_benchmark_loom_run_case_end_to_end_work_item(
 
   iree_benchmark_loom_benchmark_result_t benchmark_result = {0};
   if (iree_status_is_ok(status) && correctness_failed_sample_count == 0) {
-    status = iree_benchmark_loom_run_benchmark_iterations(
-        module_plan, benchmark_plan, &benchmark_execution_options, policy,
-        work_item->begin_benchmark_sample, work_item->end_benchmark_sample,
+    status = iree_benchmark_loom_measure_case_end_to_end_work_item(
+        module_plan, work_plan, work_item, &benchmark_execution_options,
         execution_arena, allocator, &benchmark_result);
   }
   if (iree_status_is_ok(status) && correctness_failed_sample_count != 0) {

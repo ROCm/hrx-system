@@ -29,7 +29,7 @@ typedef enum iree_benchmark_loom_work_item_kind_e {
 #define IREE_BENCHMARK_LOOM_WORK_PLAN_INDEX_INVALID \
   IREE_BENCHMARK_LOOM_INDEX_INVALID
 
-typedef struct iree_benchmark_loom_dispatch_compile_item_t {
+typedef struct iree_benchmark_loom_hal_compile_item_t {
   // Stable compile item ordinal within the plan.
   iree_host_size_t compile_item_index;
   // Representative selected benchmark ordinal used for compilation.
@@ -40,7 +40,7 @@ typedef struct iree_benchmark_loom_dispatch_compile_item_t {
   bool has_case_sample_ordinal;
   // Case-local sample ordinal specialized into this compiled candidate.
   iree_host_size_t case_sample_ordinal;
-} iree_benchmark_loom_dispatch_compile_item_t;
+} iree_benchmark_loom_hal_compile_item_t;
 
 typedef struct iree_benchmark_loom_logical_sample_t {
   // Selected benchmark ordinal that owns this logical report sample.
@@ -66,8 +66,8 @@ typedef struct iree_benchmark_loom_work_item_t {
   iree_host_size_t work_item_index;
   // Representative selected benchmark ordinal used for execution.
   iree_host_size_t representative_selection_index;
-  // Dispatch compile item index, or INDEX_INVALID for non-dispatch work.
-  iree_host_size_t dispatch_compile_item_index;
+  // HAL compile item index, or INDEX_INVALID when the case has no actual call.
+  iree_host_size_t hal_compile_item_index;
   // Sample-compilation label used for this physical work item.
   iree_string_view_t sample_compilation;
   // First benchmark-local sample ordinal covered by this work item.
@@ -91,10 +91,10 @@ typedef struct iree_benchmark_loom_work_plan_t {
   iree_benchmark_loom_logical_sample_t* logical_samples;
   // Number of populated logical report samples.
   iree_host_size_t logical_sample_count;
-  // Deduplicated HAL dispatch compile items needed by dispatch work items.
-  iree_benchmark_loom_dispatch_compile_item_t* dispatch_compile_items;
-  // Number of populated dispatch compile items.
-  iree_host_size_t dispatch_compile_item_count;
+  // Deduplicated HAL candidate compile items needed by physical work items.
+  iree_benchmark_loom_hal_compile_item_t* hal_compile_items;
+  // Number of populated HAL compile items.
+  iree_host_size_t hal_compile_item_count;
   // Deduplicated physical work items needed by |logical_samples|.
   iree_benchmark_loom_work_item_t* work_items;
   // Number of populated physical work items.

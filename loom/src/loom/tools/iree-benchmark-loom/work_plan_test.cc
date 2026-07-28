@@ -111,7 +111,7 @@ check.benchmark<@mlp> @full {rows = 3584}
 
   EXPECT_EQ(work_plan.selected_benchmark_count, 3u);
   EXPECT_EQ(work_plan.logical_sample_count, 4u);
-  EXPECT_EQ(work_plan.dispatch_compile_item_count, 2u);
+  EXPECT_EQ(work_plan.hal_compile_item_count, 2u);
   EXPECT_EQ(work_plan.work_item_count, 2u);
 
   EXPECT_EQ(work_plan.logical_samples[0].selection_index, 0u);
@@ -128,10 +128,10 @@ check.benchmark<@mlp> @full {rows = 3584}
   EXPECT_EQ(work_plan.logical_samples[3].work_item_index, 1u);
 
   EXPECT_EQ(work_plan.work_items[0].representative_selection_index, 0u);
-  EXPECT_EQ(work_plan.work_items[0].dispatch_compile_item_index, 0u);
+  EXPECT_EQ(work_plan.work_items[0].hal_compile_item_index, 0u);
   EXPECT_EQ(work_plan.work_items[0].case_sample_ordinal, 0u);
   EXPECT_EQ(work_plan.work_items[1].representative_selection_index, 0u);
-  EXPECT_EQ(work_plan.work_items[1].dispatch_compile_item_index, 1u);
+  EXPECT_EQ(work_plan.work_items[1].hal_compile_item_index, 1u);
   EXPECT_EQ(work_plan.work_items[1].case_sample_ordinal, 1u);
 
   iree_benchmark_loom_work_plan_deinitialize(&work_plan);
@@ -161,7 +161,7 @@ check.benchmark<@sampled> @value7_b {value = 7}
 
   EXPECT_EQ(work_plan.selected_benchmark_count, 4u);
   EXPECT_EQ(work_plan.logical_sample_count, 4u);
-  EXPECT_EQ(work_plan.dispatch_compile_item_count, 0u);
+  EXPECT_EQ(work_plan.hal_compile_item_count, 0u);
   EXPECT_EQ(work_plan.work_item_count, 2u);
 
   EXPECT_EQ(work_plan.logical_samples[0].selection_index, 0u);
@@ -212,7 +212,7 @@ check.benchmark<@sampled> @all_b
 
   EXPECT_EQ(work_plan.selected_benchmark_count, 2u);
   EXPECT_EQ(work_plan.logical_sample_count, 2u);
-  EXPECT_EQ(work_plan.dispatch_compile_item_count, 1u);
+  EXPECT_EQ(work_plan.hal_compile_item_count, 1u);
   EXPECT_EQ(work_plan.work_item_count, 1u);
 
   EXPECT_EQ(work_plan.logical_samples[0].selection_index, 0u);
@@ -226,8 +226,8 @@ check.benchmark<@sampled> @all_b
   EXPECT_EQ(work_plan.logical_samples[1].case_sample_ordinal, 1u);
   EXPECT_EQ(work_plan.logical_samples[1].work_item_index, 0u);
 
-  EXPECT_TRUE(work_plan.dispatch_compile_items[0].has_case_sample_ordinal);
-  EXPECT_EQ(work_plan.dispatch_compile_items[0].case_sample_ordinal, 1u);
+  EXPECT_TRUE(work_plan.hal_compile_items[0].has_case_sample_ordinal);
+  EXPECT_EQ(work_plan.hal_compile_items[0].case_sample_ordinal, 1u);
   EXPECT_EQ(work_plan.work_items[0].begin_benchmark_sample, 1u);
   EXPECT_EQ(work_plan.work_items[0].end_benchmark_sample, 2u);
   EXPECT_EQ(work_plan.work_items[0].case_sample_ordinal, 1u);
@@ -258,11 +258,11 @@ check.benchmark<@mlp> @full {rows = 3584}
 
   EXPECT_EQ(work_plan.selected_benchmark_count, 3u);
   EXPECT_EQ(work_plan.logical_sample_count, 4u);
-  EXPECT_EQ(work_plan.dispatch_compile_item_count, 1u);
+  EXPECT_EQ(work_plan.hal_compile_item_count, 1u);
   EXPECT_EQ(work_plan.work_item_count, 2u);
-  EXPECT_FALSE(work_plan.dispatch_compile_items[0].has_case_sample_ordinal);
-  EXPECT_EQ(work_plan.work_items[0].dispatch_compile_item_index, 0u);
-  EXPECT_EQ(work_plan.work_items[1].dispatch_compile_item_index, 0u);
+  EXPECT_FALSE(work_plan.hal_compile_items[0].has_case_sample_ordinal);
+  EXPECT_EQ(work_plan.work_items[0].hal_compile_item_index, 0u);
+  EXPECT_EQ(work_plan.work_items[1].hal_compile_item_index, 0u);
 
   iree_benchmark_loom_work_plan_deinitialize(&work_plan);
 }
@@ -290,30 +290,30 @@ check.benchmark<@mlp> @full {rows = 3584}
 
   EXPECT_EQ(work_plan.selected_benchmark_count, 3u);
   EXPECT_EQ(work_plan.logical_sample_count, 8u);
-  EXPECT_EQ(work_plan.dispatch_compile_item_count, 3u);
+  EXPECT_EQ(work_plan.hal_compile_item_count, 3u);
   EXPECT_EQ(work_plan.work_item_count, 4u);
 
-  EXPECT_FALSE(work_plan.dispatch_compile_items[0].has_case_sample_ordinal);
-  EXPECT_TRUE(work_plan.dispatch_compile_items[1].has_case_sample_ordinal);
-  EXPECT_EQ(work_plan.dispatch_compile_items[1].case_sample_ordinal, 0u);
-  EXPECT_TRUE(work_plan.dispatch_compile_items[2].has_case_sample_ordinal);
-  EXPECT_EQ(work_plan.dispatch_compile_items[2].case_sample_ordinal, 1u);
+  EXPECT_FALSE(work_plan.hal_compile_items[0].has_case_sample_ordinal);
+  EXPECT_TRUE(work_plan.hal_compile_items[1].has_case_sample_ordinal);
+  EXPECT_EQ(work_plan.hal_compile_items[1].case_sample_ordinal, 0u);
+  EXPECT_TRUE(work_plan.hal_compile_items[2].has_case_sample_ordinal);
+  EXPECT_EQ(work_plan.hal_compile_items[2].case_sample_ordinal, 1u);
 
   EXPECT_TRUE(iree_string_view_equal(work_plan.work_items[0].sample_compilation,
                                      IREE_SV("once")));
-  EXPECT_EQ(work_plan.work_items[0].dispatch_compile_item_index, 0u);
+  EXPECT_EQ(work_plan.work_items[0].hal_compile_item_index, 0u);
   EXPECT_EQ(work_plan.work_items[0].case_sample_ordinal, 0u);
   EXPECT_TRUE(iree_string_view_equal(work_plan.work_items[1].sample_compilation,
                                      IREE_SV("once")));
-  EXPECT_EQ(work_plan.work_items[1].dispatch_compile_item_index, 0u);
+  EXPECT_EQ(work_plan.work_items[1].hal_compile_item_index, 0u);
   EXPECT_EQ(work_plan.work_items[1].case_sample_ordinal, 1u);
   EXPECT_TRUE(iree_string_view_equal(work_plan.work_items[2].sample_compilation,
                                      IREE_SV("per_sample")));
-  EXPECT_EQ(work_plan.work_items[2].dispatch_compile_item_index, 1u);
+  EXPECT_EQ(work_plan.work_items[2].hal_compile_item_index, 1u);
   EXPECT_EQ(work_plan.work_items[2].case_sample_ordinal, 0u);
   EXPECT_TRUE(iree_string_view_equal(work_plan.work_items[3].sample_compilation,
                                      IREE_SV("per_sample")));
-  EXPECT_EQ(work_plan.work_items[3].dispatch_compile_item_index, 2u);
+  EXPECT_EQ(work_plan.work_items[3].hal_compile_item_index, 2u);
   EXPECT_EQ(work_plan.work_items[3].case_sample_ordinal, 1u);
 
   EXPECT_NE(work_plan.logical_samples[0].work_item_index,
@@ -348,13 +348,13 @@ check.benchmark<@mlp> @decode_b {rows = 2}
 
   EXPECT_EQ(work_plan.selected_benchmark_count, 2u);
   EXPECT_EQ(work_plan.logical_sample_count, 2u);
-  EXPECT_EQ(work_plan.dispatch_compile_item_count, 1u);
+  EXPECT_EQ(work_plan.hal_compile_item_count, 1u);
   EXPECT_EQ(work_plan.work_item_count, 1u);
   EXPECT_EQ(work_plan.logical_samples[0].selection_index, 0u);
   EXPECT_EQ(work_plan.logical_samples[0].work_item_index, 0u);
   EXPECT_EQ(work_plan.logical_samples[1].selection_index, 1u);
   EXPECT_EQ(work_plan.logical_samples[1].work_item_index, 0u);
-  EXPECT_EQ(work_plan.dispatch_compile_items[0].case_sample_ordinal, 0u);
+  EXPECT_EQ(work_plan.hal_compile_items[0].case_sample_ordinal, 0u);
   EXPECT_EQ(work_plan.work_items[0].case_sample_ordinal, 0u);
 
   iree_benchmark_loom_work_plan_deinitialize(&work_plan);
@@ -385,13 +385,13 @@ check.benchmark<@sampled> @all_b
 
   EXPECT_EQ(work_plan.selected_benchmark_count, 2u);
   EXPECT_EQ(work_plan.logical_sample_count, 2u);
-  EXPECT_EQ(work_plan.dispatch_compile_item_count, 1u);
+  EXPECT_EQ(work_plan.hal_compile_item_count, 1u);
   EXPECT_EQ(work_plan.work_item_count, 1u);
   EXPECT_EQ(work_plan.logical_samples[0].begin_benchmark_sample, 1u);
   EXPECT_EQ(work_plan.logical_samples[0].case_sample_ordinal, 1u);
   EXPECT_EQ(work_plan.logical_samples[1].begin_benchmark_sample, 1u);
   EXPECT_EQ(work_plan.logical_samples[1].case_sample_ordinal, 1u);
-  EXPECT_EQ(work_plan.dispatch_compile_items[0].case_sample_ordinal, 1u);
+  EXPECT_EQ(work_plan.hal_compile_items[0].case_sample_ordinal, 1u);
   EXPECT_EQ(work_plan.work_items[0].case_sample_ordinal, 1u);
 
   iree_benchmark_loom_work_plan_deinitialize(&work_plan);

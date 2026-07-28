@@ -651,7 +651,7 @@ TEST(BenchmarkSnapshotSinkTest, DryRunReportsPlannedWorkAliases) {
   work_item.kind = IREE_BENCHMARK_LOOM_WORK_ITEM_DISPATCH_SAMPLE;
   work_item.work_item_index = 7;
   work_item.representative_selection_index = 0;
-  work_item.dispatch_compile_item_index = 0;
+  work_item.hal_compile_item_index = 0;
   work_item.sample_compilation = IREE_SV("once");
   work_item.begin_benchmark_sample = 0;
   work_item.end_benchmark_sample = 1;
