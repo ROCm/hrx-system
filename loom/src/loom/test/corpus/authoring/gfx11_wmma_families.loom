@@ -4,8 +4,8 @@
 // multiply signed -1 by unsigned 2, making their expected -32 result depend on
 // both the packed element width and the WMMA signedness selectors.
 
-amdgpu.target<gfx1150> @gfx11_wave32 {subgroup_size = 32, processor = "gfx1151"}
-amdgpu.target<gfx1150> @gfx11_wave64 {subgroup_size = 64, processor = "gfx1151"}
+amdgpu.target<gfx1151> @gfx11_wave32 {subgroup_size = 32}
+amdgpu.target<gfx1151> @gfx11_wave64 {subgroup_size = 64}
 
 kernel.def target(@gfx11_wave32) @gfx11_wmma_families_wave32() {
   %unit = index.constant 1 : index

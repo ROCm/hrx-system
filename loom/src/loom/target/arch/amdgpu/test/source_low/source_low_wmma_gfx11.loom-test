@@ -1,6 +1,6 @@
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1150> @target {subgroup_size = 32, processor = "gfx1151"}
+amdgpu.target<gfx1151> @target {subgroup_size = 32}
 func.def target(@target) @gfx11_wmma_families_wave32(
     %f16_data: vector<16xf16>,
     %bf16_data: vector<16xbf16>,
@@ -61,7 +61,7 @@ low.func.def target(@target) abi(hal_kernel) @gfx11_wmma_families_wave32(%f16_rh
 
 // ====
 
-amdgpu.target<gfx1150> @target {subgroup_size = 64, processor = "gfx1151"}
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
 func.def target(@target) @gfx11_wmma_families_wave64(
     %f16_data: vector<16xf16>,
     %bf16_data: vector<16xbf16>,

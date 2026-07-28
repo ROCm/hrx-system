@@ -686,6 +686,7 @@ def cdna3_processor_info(
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_CDNA_GFX9,
         matrix_feature_profile=matrix_feature_profile,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES,
+        max_workgroup_storage_bytes=AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES,
         occupancy=AMDGPU_OCCUPANCY_CDNA3,
     )
 
@@ -1058,6 +1059,71 @@ AMDGPU_TARGET_RECORD_INFOS: tuple[AmdgpuTargetRecordInfo, ...] = (
         processor="gfx12-5-generic",
         enum_value=9,
         doc="RDNA 4 gfx125x generic code-object target row.",
+    ),
+    AmdgpuTargetRecordInfo(
+        processor="gfx940",
+        enum_value=10,
+        doc="CDNA 3 gfx940 target row.",
+    ),
+    AmdgpuTargetRecordInfo(
+        processor="gfx941",
+        enum_value=11,
+        doc="CDNA 3 gfx941 target row.",
+    ),
+    AmdgpuTargetRecordInfo(
+        processor="gfx1101",
+        enum_value=12,
+        doc="RDNA 3 gfx1101 target row.",
+    ),
+    AmdgpuTargetRecordInfo(
+        processor="gfx1102",
+        enum_value=13,
+        doc="RDNA 3 gfx1102 target row.",
+    ),
+    AmdgpuTargetRecordInfo(
+        processor="gfx1103",
+        enum_value=14,
+        doc="RDNA 3 gfx1103 target row.",
+    ),
+    AmdgpuTargetRecordInfo(
+        processor="gfx1151",
+        enum_value=15,
+        doc="RDNA 3.5 gfx1151 target row.",
+    ),
+    AmdgpuTargetRecordInfo(
+        processor="gfx1152",
+        enum_value=16,
+        doc="RDNA 3.5 gfx1152 target row.",
+    ),
+    AmdgpuTargetRecordInfo(
+        processor="gfx1153",
+        enum_value=17,
+        doc="RDNA 3.5 gfx1153 target row.",
+    ),
+    AmdgpuTargetRecordInfo(
+        processor="gfx1170",
+        enum_value=18,
+        doc="RDNA 3.5 gfx1170 target row.",
+    ),
+    AmdgpuTargetRecordInfo(
+        processor="gfx1171",
+        enum_value=19,
+        doc="RDNA 3.5 gfx1171 target row.",
+    ),
+    AmdgpuTargetRecordInfo(
+        processor="gfx1172",
+        enum_value=20,
+        doc="RDNA 3.5 gfx1172 target row.",
+    ),
+    AmdgpuTargetRecordInfo(
+        processor="gfx1201",
+        enum_value=21,
+        doc="RDNA 4 gfx1201 target row.",
+    ),
+    AmdgpuTargetRecordInfo(
+        processor="gfx1251",
+        enum_value=22,
+        doc="RDNA 4 gfx1251 target row.",
     ),
 )
 

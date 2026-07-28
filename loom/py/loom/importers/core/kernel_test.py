@@ -155,9 +155,9 @@ kernel.def target(@hip_mcpu_gfx942) export(\"kernel\") @kernel() {
     )
 
 
-def test_create_kernel_module_uses_amdgpu_processor_override() -> None:
+def test_create_kernel_module_uses_exact_amdgpu_target_record() -> None:
     assert _printed_kernel_module_for_target_preset("hip -mcpu=gfx1101").startswith(
-        'amdgpu.target<gfx1100> @hip_mcpu_gfx1101 {processor = "gfx1101"}\n'
+        "amdgpu.target<gfx1101> @hip_mcpu_gfx1101\n"
     )
 
 

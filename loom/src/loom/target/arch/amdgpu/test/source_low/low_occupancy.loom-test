@@ -26,7 +26,7 @@ low.func.def target(@gfx1102_target) @gfx1102_pressure(%value: reg<amdgpu.vgpr>)
 
 // RUN: emit amdgpu-occupancy-json @gfx1151_pressure fixed=%value:physical_register:96:1
 
-amdgpu.target<gfx1150> @gfx1151_target {processor = "gfx1151"}
+amdgpu.target<gfx1151> @gfx1151_target
 low.func.def target(@gfx1151_target) @gfx1151_pressure(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
   low.return %value : reg<amdgpu.vgpr>
 }

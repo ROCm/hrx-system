@@ -149,6 +149,19 @@ def _validate_target_record_infos(rows: Sequence[_AmdgpuTargetRecordRow]) -> Non
                 )
 
 
+def _validate_target_record_coverage(
+    rows: Sequence[_AmdgpuTargetRecordRow],
+    processors: Sequence[AmdgpuProcessorInfo],
+) -> None:
+    expected_processors = {processor.processor for processor in processors if processor.descriptor_set.key}
+    actual_processors = {row.info.processor for row in rows}
+    if actual_processors == expected_processors:
+        return
+    missing_processors = sorted(expected_processors - actual_processors)
+    unexpected_processors = sorted(actual_processors - expected_processors)
+    raise ValueError(f"AMDGPU target records do not match descriptor-backed processors: missing={missing_processors}, unexpected={unexpected_processors}")
+
+
 def _descriptor_sets_from_rows(
     rows: Sequence[_AmdgpuTargetRecordRow],
 ) -> tuple[AmdgpuDescriptorSetInfo, ...]:
@@ -240,6 +253,7 @@ def write_target_record_tables_to_path(tables_path: Path) -> None:
         sorted_descriptor_set_infos(),
     )
     _validate_target_record_infos(rows)
+    _validate_target_record_coverage(rows, sorted_processor_infos())
     tables_path.parent.mkdir(parents=True, exist_ok=True)
     tables_path.write_text(_emit_tables(rows), encoding="utf-8")
 
