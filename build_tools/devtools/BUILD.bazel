@@ -206,6 +206,7 @@ py_test(
         "aliases.py",
         "command_plan.py",
         "environment.py",
+        "hooks.py",
         "setup.py",
         "setup_test.py",
     ],

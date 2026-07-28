@@ -11,6 +11,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from build_tools.devtools import hooks
 from build_tools.devtools.aliases import alias_steps
 from build_tools.devtools.command_plan import (
     CommandPlan,
@@ -59,6 +60,7 @@ def common_setup_plan(
             label="install Python developer tools",
         )
     )
+    plan.add(hooks.lefthook_cli_compatibility_probe(tool_env))
     platform_name = sys.platform if platform_name is None else platform_name
     if platform_name != "win32":
         plan.add(

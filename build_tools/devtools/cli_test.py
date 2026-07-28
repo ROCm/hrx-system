@@ -16,7 +16,7 @@ from unittest import mock
 
 from build_tools.devtools import aliases, cli
 from build_tools.devtools import bazel as bazel_dev
-from build_tools.devtools.command_plan import WriteFileStep
+from build_tools.devtools.command_plan import CommandStep, WriteFileStep
 
 
 def normalized_plan_description(plan) -> str:
@@ -1188,6 +1188,17 @@ class CliTest(unittest.TestCase):
             "bazel precommit --profile ci --commit",
             step.content,
         )
+
+    def test_hook_verify_uses_supported_lefthook_file_option(self):
+        args = cli.parse_arguments(["bazel", "hook", "--verify"])
+
+        plan = args.handler(args)
+        step = plan.steps[-1]
+
+        self.assertIsInstance(step, CommandStep)
+        self.assertIn("--file", step.argv)
+        self.assertNotIn("--files", step.argv)
+        self.assertEqual(step.argv[step.argv.index("--file") + 1], "dev.py")
 
     def test_cmake_hook_defaults_to_default_profile(self):
         args = cli.parse_arguments(["cmake", "hook"])
