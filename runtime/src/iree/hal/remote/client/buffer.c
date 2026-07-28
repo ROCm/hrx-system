@@ -36,11 +36,14 @@ static void iree_hal_remote_client_buffer_destroy(
 
   iree_hal_buffer_release(buffer->backing_buffer);
 
-  if (buffer->owns_remote_resource && buffer->resource_id != 0) {
+  iree_hal_remote_resource_id_t resource_id =
+      (iree_hal_remote_resource_id_t)iree_atomic_load(
+          &buffer->resource_id, iree_memory_order_relaxed);
+  if (buffer->owns_remote_resource && resource_id != 0) {
     // Release is best-effort. If the session is already disconnected, the
     // server will clean up the resource when the session closes.
     iree_status_ignore(iree_hal_remote_client_device_release_resource(
-        buffer->device, buffer->resource_id));
+        buffer->device, resource_id));
   }
 
   if (base_buffer->allocated_buffer != base_buffer) {
@@ -58,7 +61,8 @@ static iree_status_t iree_hal_remote_client_buffer_validate_mappable(
   if (iree_hal_remote_client_buffer_is_deallocated(base_buffer)) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "remote buffer has been deallocated");
-  } else if (buffer->resource_id == 0) {
+  } else if (iree_atomic_load(&buffer->resource_id,
+                              iree_memory_order_relaxed) == 0) {
     status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "remote buffer backing has not been "
                               "materialized; wait for the queue_alloca signal "
@@ -695,7 +699,8 @@ static iree_status_t iree_hal_remote_client_buffer_create_internal(
 
     buffer->host_allocator = host_allocator;
     buffer->device = device;
-    buffer->resource_id = resource_id;
+    iree_atomic_store(&buffer->resource_id, resource_id,
+                      iree_memory_order_relaxed);
     buffer->backing_buffer = NULL;
     buffer->release_callback = release_callback;
     buffer->allocation_pool = NULL;
@@ -776,7 +781,9 @@ iree_status_t iree_hal_remote_client_buffer_set_backing(
   if (!root_buffer) root_buffer = backing_buffer;
   iree_hal_buffer_retain(backing_buffer);
   buffer->backing_buffer = backing_buffer;
-  buffer->resource_id = iree_hal_remote_client_buffer_resource_id(root_buffer);
+  iree_atomic_store(&buffer->resource_id,
+                    iree_hal_remote_client_buffer_resource_id(root_buffer),
+                    iree_memory_order_relaxed);
   buffer->base.allocation_size = iree_hal_buffer_allocation_size(root_buffer);
   buffer->base.byte_offset = iree_hal_buffer_byte_offset(backing_buffer);
   return iree_ok_status();
@@ -855,13 +862,16 @@ iree_status_t iree_hal_remote_client_buffer_resolve_wire_ref(
   if (!root_buffer) root_buffer = buffer;
   iree_hal_remote_client_buffer_t* remote_buffer =
       (iree_hal_remote_client_buffer_t*)root_buffer;
-  if (remote_buffer->resource_id == 0) {
+  iree_hal_remote_resource_id_t resource_id =
+      (iree_hal_remote_resource_id_t)iree_atomic_load(
+          &remote_buffer->resource_id, iree_memory_order_relaxed);
+  if (resource_id == 0) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "remote buffer backing has not been materialized; wait for the "
         "queue_alloca signal before using it");
   }
-  *out_resource_id = remote_buffer->resource_id;
+  *out_resource_id = resource_id;
   *out_byte_offset =
       (uint64_t)(iree_hal_buffer_byte_offset(buffer) + byte_offset);
   return iree_ok_status();
@@ -891,13 +901,16 @@ iree_status_t iree_hal_remote_client_buffer_resolve_wire_range(
   if (!root_buffer) root_buffer = buffer;
   iree_hal_remote_client_buffer_t* remote_buffer =
       (iree_hal_remote_client_buffer_t*)root_buffer;
-  if (remote_buffer->resource_id == 0) {
+  iree_hal_remote_resource_id_t resource_id =
+      (iree_hal_remote_resource_id_t)iree_atomic_load(
+          &remote_buffer->resource_id, iree_memory_order_relaxed);
+  if (resource_id == 0) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "remote buffer backing has not been materialized; wait for the "
         "queue_alloca signal before using it");
   }
-  *out_resource_id = remote_buffer->resource_id;
+  *out_resource_id = resource_id;
   *out_byte_offset =
       (uint64_t)(iree_hal_buffer_byte_offset(buffer) + relative_offset);
   *out_byte_length = (uint64_t)relative_length;

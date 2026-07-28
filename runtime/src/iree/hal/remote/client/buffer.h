@@ -32,8 +32,9 @@ typedef struct iree_hal_remote_client_buffer_t {
   // Back-pointer to the owning device for release notifications.
   iree_hal_remote_client_device_t* device;
 
-  // Server-assigned resource ID.
-  iree_hal_remote_resource_id_t resource_id;
+  // Current provisional or server-assigned resource ID.
+  // May transition atomically while application threads submit queue work.
+  iree_atomic_uint64_t resource_id;
 
   // Materialized backing buffer for logical wrappers, or NULL for direct views.
   iree_hal_buffer_t* backing_buffer;
@@ -131,22 +132,27 @@ iree_status_t iree_hal_remote_client_buffer_resolve_wire_range(
     iree_hal_remote_resource_id_t* out_resource_id, uint64_t* out_byte_offset,
     uint64_t* out_byte_length);
 
-// Returns the resource_id from a remote client buffer proxy.
-// Handles subspan buffers by traversing to the root allocation.
+// Returns a snapshot of the resource_id from a remote client buffer proxy.
+// Handles subspan buffers by traversing to the root allocation. A provisional
+// ID may become canonical concurrently; either identity is valid on the wire.
 static inline iree_hal_remote_resource_id_t
 iree_hal_remote_client_buffer_resource_id(iree_hal_buffer_t* buffer) {
   iree_hal_buffer_t* allocated = iree_hal_buffer_allocated_buffer(buffer);
   if (allocated) buffer = allocated;
-  return ((iree_hal_remote_client_buffer_t*)buffer)->resource_id;
+  return (iree_hal_remote_resource_id_t)iree_atomic_load(
+      &((iree_hal_remote_client_buffer_t*)buffer)->resource_id,
+      iree_memory_order_relaxed);
 }
 
 // Updates the resource_id on a buffer proxy. Used to resolve provisional
 // IDs to canonical server-assigned IDs when the ADVANCE frame arrives.
-// Must be called before the corresponding semaphore is signaled (so the
-// application sees the resolved ID when it wakes from the wait).
+// Application threads may concurrently read either valid identity while
+// submitting work. The update must precede the corresponding semaphore signal
+// so callers that wait for allocation completion observe the canonical ID.
 static inline void iree_hal_remote_client_buffer_set_resource_id(
     iree_hal_buffer_t* buffer, iree_hal_remote_resource_id_t resolved_id) {
-  ((iree_hal_remote_client_buffer_t*)buffer)->resource_id = resolved_id;
+  iree_atomic_store(&((iree_hal_remote_client_buffer_t*)buffer)->resource_id,
+                    resolved_id, iree_memory_order_relaxed);
 }
 
 // Disarms server-side resource release for a buffer whose remote allocation
@@ -156,7 +162,8 @@ static inline void iree_hal_remote_client_buffer_disown_remote_resource(
   iree_hal_buffer_t* allocated = iree_hal_buffer_allocated_buffer(buffer);
   if (allocated) buffer = allocated;
   ((iree_hal_remote_client_buffer_t*)buffer)->owns_remote_resource = false;
-  ((iree_hal_remote_client_buffer_t*)buffer)->resource_id = 0;
+  iree_atomic_store(&((iree_hal_remote_client_buffer_t*)buffer)->resource_id, 0,
+                    iree_memory_order_relaxed);
 }
 
 #ifdef __cplusplus
