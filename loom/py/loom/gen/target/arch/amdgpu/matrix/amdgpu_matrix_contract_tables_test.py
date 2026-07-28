@@ -26,6 +26,8 @@ from loom.target.arch.amdgpu.target_info import (
 )
 from loom.target.low_descriptors import Immediate, ImmediateKind
 
+_GLOBAL_MATRIX_DESCRIPTOR_CATALOG = amdgpu_matrix_contract_tables._global_matrix_descriptor_catalog()
+
 
 def _contract(name: str) -> AmdgpuMatrixContract:
     for contract in AMDGPU_MATRIX_CONTRACTS:
@@ -100,16 +102,17 @@ def _payload_numeric_types(contract: AmdgpuMatrixContract) -> tuple[str, ...]:
 
 
 def _contract_initializer(contract: AmdgpuMatrixContract) -> str:
+    catalog = _GLOBAL_MATRIX_DESCRIPTOR_CATALOG
     return amdgpu_matrix_contract_tables._contract_initializer(
         contract,
-        keys_by_semantic_tag=(amdgpu_matrix_contract_tables._matrix_descriptor_keys_by_semantic_tag()),
-        descriptor_shapes_by_key=(amdgpu_matrix_contract_tables._matrix_descriptor_shapes_by_key()),
-        descriptor_immediates_by_key=(amdgpu_matrix_contract_tables._matrix_descriptor_immediates_by_key()),
+        keys_by_semantic_tag=catalog.keys_by_semantic_tag,
+        descriptor_shapes_by_key=catalog.shapes_by_key,
+        descriptor_immediates_by_key=catalog.immediates_by_key,
     )
 
 
 def _global_descriptor_keys() -> tuple[str | None, ...]:
-    catalog = amdgpu_matrix_contract_tables._global_matrix_descriptor_catalog()
+    catalog = _GLOBAL_MATRIX_DESCRIPTOR_CATALOG
     return amdgpu_matrix_contract_tables._contract_descriptor_keys(
         keys_by_semantic_tag=catalog.keys_by_semantic_tag,
         descriptor_shapes_by_key=catalog.shapes_by_key,
