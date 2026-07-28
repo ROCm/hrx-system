@@ -9,9 +9,7 @@
 from loom.assembly import AttrDict, SymbolRef, TemplateParam
 from loom.dialect.target import target_record_attrs
 from loom.dsl import (
-    ATTR_TYPE_STRING,
     SYMBOL_DEFINE,
-    AttrDef,
     Dialect,
     EnumCase,
     EnumDef,
@@ -25,7 +23,7 @@ from loom.target.arch.amdgpu.target_info import sorted_target_record_infos
 amdgpu_ops = Dialect(
     "amdgpu",
     dialect_id=0x17,
-    doc="AMDGPU target-family records.",
+    doc="AMDGPU processor target records.",
     default_phase=OpPhase.MODULE_METADATA,
     c_path="target/arch/amdgpu/ops",
     register_by_default=False,
@@ -44,8 +42,8 @@ amdgpu_target = Op(
     "amdgpu.target",
     group=amdgpu_ops,
     doc=(
-        "AMDGPU target-family record. The selector chooses a generated "
-        "processor/family row; optional attrs structurally override authored "
+        "AMDGPU processor target record. The selector chooses one exact or "
+        "generic processor row; optional attrs structurally override authored "
         "common target fields."
     ),
     traits=[SYMBOL_DEFINE],
@@ -65,7 +63,6 @@ amdgpu_target = Op(
     ),
     attrs=[
         *target_record_attrs(AmdgpuTargetKind),
-        AttrDef("processor", ATTR_TYPE_STRING, optional=True),
     ],
     verify="loom_amdgpu_target_record_verify",
     format=[

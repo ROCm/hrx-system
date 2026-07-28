@@ -2215,7 +2215,7 @@ static iree_status_t loom_amdgpu_wait_state_plan_build_with_scratch(
     loom_amdgpu_wait_state_builder_t* builder) {
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_allocate(builder));
   builder->processor = loom_amdgpu_target_processor_from_resolved_target(
-      builder->schedule->module, &builder->schedule->target);
+      &builder->schedule->target);
   builder->processor_scheduling =
       builder->processor != NULL ? builder->processor->features.scheduling : 0;
   builder->has_delay_alu = loom_amdgpu_wait_state_target_has_delay_alu(builder);

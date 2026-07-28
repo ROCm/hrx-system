@@ -56,7 +56,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1250> @target {processor = "gfx1251"}
+amdgpu.target<gfx1251> @target
 kernel.def target(@target) @tensor_load_to_lds_d2() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index

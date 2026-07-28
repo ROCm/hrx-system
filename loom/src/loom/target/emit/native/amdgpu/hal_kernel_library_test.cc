@@ -423,16 +423,13 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
         ParseSource(iree_make_cstring_view(kSource), out_module));
   }
 
-  void ParseWorkgroupStorageKernel(iree_string_view_t target_config,
-                                   iree_string_view_t processor_name,
+  void ParseWorkgroupStorageKernel(iree_string_view_t processor_name,
                                    uint64_t byte_length,
                                    loom_module_t** out_module) {
     std::string source = "amdgpu.target<";
-    source.append(target_config.data, target_config.size);
-    source += "> @gfx_target {processor = \"";
     source.append(processor_name.data, processor_name.size);
     source +=
-        "\"}\n"
+        "> @gfx_target\n"
         "low.kernel.def target(@gfx_target) workgroup_size(1, 1, 1) "
         "@loom_kernel() {\n"
         "  %storage = low.storage.reserve {byte_alignment = 16, "
@@ -447,12 +444,12 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
   }
 
   void EmitWorkgroupStorageKernel(
-      iree_string_view_t target_config, iree_string_view_t processor_name,
-      uint64_t byte_length, DiagnosticCapture* capture, bool* out_emitted,
+      iree_string_view_t processor_name, uint64_t byte_length,
+      DiagnosticCapture* capture, bool* out_emitted,
       loom_amdgpu_hal_kernel_library_t* out_library) {
     loom_module_t* module = nullptr;
-    ASSERT_NO_FATAL_FAILURE(ParseWorkgroupStorageKernel(
-        target_config, processor_name, byte_length, &module));
+    ASSERT_NO_FATAL_FAILURE(
+        ParseWorkgroupStorageKernel(processor_name, byte_length, &module));
 
     loom_amdgpu_hal_kernel_library_options_t options = {
         /*.processor=*/{},
@@ -608,20 +605,13 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
   void ParseKernelForProcessor(const loom_amdgpu_processor_info_t* processor,
                                loom_module_t** out_module) {
     const loom_amdgpu_target_record_info_t* record_info =
-        loom_amdgpu_target_record_default_info_for_descriptor_set(
-            processor->descriptor_set.ordinal);
+        loom_amdgpu_target_record_info_for_processor(processor->name);
     ASSERT_NE(record_info, nullptr) << StringViewToString(processor->name);
 
     std::string source = "amdgpu.target<";
-    source.append(record_info->default_processor_name.data,
-                  record_info->default_processor_name.size);
+    source.append(record_info->processor_name.data,
+                  record_info->processor_name.size);
     source += "> @gfx_target";
-    if (!iree_string_view_equal(processor->name,
-                                record_info->default_processor_name)) {
-      source += " {processor = \"";
-      source.append(processor->name.data, processor->name.size);
-      source += "\"}";
-    }
     source +=
         "\n"
         "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
@@ -883,9 +873,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   bool emitted = true;
-  ASSERT_NO_FATAL_FAILURE(
-      EmitWorkgroupStorageKernel(IREE_SV("gfx1100"), IREE_SV("gfx1100"), 65540,
-                                 &capture, &emitted, &library));
+  ASSERT_NO_FATAL_FAILURE(EmitWorkgroupStorageKernel(
+      IREE_SV("gfx1100"), 65540, &capture, &emitted, &library));
 
   EXPECT_FALSE(emitted);
   ASSERT_EQ(capture.diagnostics.size(), 1u) << DiagnosticSummary(capture);
@@ -911,9 +900,9 @@ TEST_F(AmdgpuHalKernelLibraryTest, AcceptsGfx125xLargeWorkgroupStorage) {
     DiagnosticCapture capture;
     loom_amdgpu_hal_kernel_library_t library = {};
     bool emitted = false;
-    ASSERT_NO_FATAL_FAILURE(EmitWorkgroupStorageKernel(
-        IREE_SV("gfx1250"), iree_make_cstring_view(processor_name), 114688,
-        &capture, &emitted, &library));
+    ASSERT_NO_FATAL_FAILURE(
+        EmitWorkgroupStorageKernel(iree_make_cstring_view(processor_name),
+                                   114688, &capture, &emitted, &library));
 
     EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
     EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
@@ -935,9 +924,9 @@ TEST_F(AmdgpuHalKernelLibraryTest,
     DiagnosticCapture capture;
     loom_amdgpu_hal_kernel_library_t library = {};
     bool emitted = true;
-    ASSERT_NO_FATAL_FAILURE(EmitWorkgroupStorageKernel(
-        IREE_SV("gfx1250"), iree_make_cstring_view(processor_name), 327681,
-        &capture, &emitted, &library));
+    ASSERT_NO_FATAL_FAILURE(
+        EmitWorkgroupStorageKernel(iree_make_cstring_view(processor_name),
+                                   327681, &capture, &emitted, &library));
 
     EXPECT_FALSE(emitted);
     ASSERT_EQ(capture.diagnostics.size(), 1u) << DiagnosticSummary(capture);

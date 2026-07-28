@@ -15,7 +15,7 @@ low.func.def target(@target) @tensor_d4_and_wait(%d0: reg<amdgpu.sgpr x4>, %d1: 
 // ====
 // RUN: emit amdgpu-assembly @tensor_d2_and_wait fixed=%d0:physical_register:0:4 fixed=%d1:physical_register:8:8
 
-amdgpu.target<gfx1250> @target {processor = "gfx1251"}
+amdgpu.target<gfx1251> @target
 low.func.def target(@target) @tensor_d2_and_wait(%d0: reg<amdgpu.sgpr x4>, %d1: reg<amdgpu.sgpr x8>) asm<amdgpu.rdna4.gfx125x.core> {
   tensor_load_to_lds_d2 %d0, %d1 {nv = 1, scope = 1, th = 2}
   s_wait_tensorcnt {tensorcnt = 65535}

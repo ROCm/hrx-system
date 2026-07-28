@@ -229,8 +229,7 @@ TEST_F(AmdgpuProviderTest, MaterializesSelectedProcessors) {
     ASSERT_TRUE(loom_amdgpu_target_isa(target_op));
     EXPECT_EQ(loom_amdgpu_target_kind(target_op), c.expected_kind);
     EXPECT_TRUE(iree_string_view_equal(
-        loom_amdgpu_target_record_processor_name(module.get(), target_op),
-        processor->name));
+        loom_amdgpu_target_record_processor_name(target_op), processor->name));
 
     loom_symbol_ref_t reused_ref = loom_symbol_ref_null();
     IREE_ASSERT_OK(loom_target_environment_materialize_selection(

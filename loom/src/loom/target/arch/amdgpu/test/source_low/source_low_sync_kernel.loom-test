@@ -57,7 +57,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1200> @target {processor = "gfx1201"}
+amdgpu.target<gfx1201> @target
 
 kernel.def target(@target) @single_wave_barrier_gfx1201() {
   %one = index.constant 1 : index
@@ -77,7 +77,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1200> @target {processor = "gfx1201"}
+amdgpu.target<gfx1201> @target
 
 kernel.def target(@target) @multi_wave_barrier_gfx1201() {
   %one = index.constant 1 : index
@@ -97,7 +97,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx1200> @target {processor = "gfx1201"}
+amdgpu.target<gfx1201> @target
 
 kernel.def target(@target) @multi_wave_subgroup_barrier_gfx1201() {
   %one = index.constant 1 : index

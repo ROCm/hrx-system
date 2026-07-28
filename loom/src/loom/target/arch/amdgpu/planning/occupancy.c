@@ -48,9 +48,9 @@ static const loom_amdgpu_occupancy_model_t* loom_amdgpu_occupancy_select_model(
 
 static const loom_amdgpu_occupancy_model_t*
 loom_amdgpu_occupancy_select_target_model(
-    const loom_module_t* module, const loom_low_resolved_target_t* target) {
+    const loom_low_resolved_target_t* target) {
   const loom_amdgpu_processor_info_t* processor =
-      loom_amdgpu_target_processor_from_resolved_target(module, target);
+      loom_amdgpu_target_processor_from_resolved_target(target);
   IREE_ASSERT(processor != NULL);
   const uint32_t wave_size = target->bundle_storage.snapshot.subgroup_size;
   IREE_ASSERT(
@@ -75,9 +75,9 @@ static uint32_t loom_amdgpu_occupancy_register_class_index(
 }
 
 const loom_target_residency_model_t* loom_amdgpu_occupancy_residency_model(
-    const loom_module_t* module, const loom_low_resolved_target_t* target) {
+    const loom_low_resolved_target_t* target) {
   const loom_amdgpu_occupancy_model_t* model =
-      loom_amdgpu_occupancy_select_target_model(module, target);
+      loom_amdgpu_occupancy_select_target_model(target);
   return &model->residency_model;
 }
 
@@ -597,8 +597,7 @@ iree_status_t loom_amdgpu_occupancy_build(
   *out_table = (loom_amdgpu_occupancy_table_t){0};
 
   const loom_amdgpu_processor_info_t* processor =
-      loom_amdgpu_target_processor_from_resolved_target(allocation->module,
-                                                        &allocation->target);
+      loom_amdgpu_target_processor_from_resolved_target(&allocation->target);
   if (processor == NULL) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "AMDGPU occupancy requires an AMDGPU processor "

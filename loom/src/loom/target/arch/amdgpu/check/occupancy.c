@@ -181,8 +181,7 @@ static iree_status_t loom_amdgpu_occupancy_check_resolve_residency_model(
   if (target.descriptor_set == NULL) {
     return iree_ok_status();
   }
-  *out_residency_model =
-      loom_amdgpu_occupancy_residency_model(request->module, &target);
+  *out_residency_model = loom_amdgpu_occupancy_residency_model(&target);
   return iree_ok_status();
 }
 

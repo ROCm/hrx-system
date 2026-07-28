@@ -156,7 +156,7 @@ loom_amdgpu_hal_kernel_library_emit_descriptor_set_mismatch(
 }
 
 static iree_status_t loom_amdgpu_hal_kernel_library_apply_processor(
-    loom_module_t* module, loom_target_entry_t* entry,
+    loom_target_entry_t* entry,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     iree_string_view_t processor_name) {
   if (iree_string_view_is_empty(processor_name)) {
@@ -181,8 +181,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_apply_processor(
         entry->bundle_storage.bundle.name);
   }
 
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_record_set_processor(
-      module, entry->target_op, processor));
+  loom_amdgpu_target_record_retarget_processor(entry->target_op, processor);
   return iree_ok_status();
 }
 
@@ -1003,7 +1002,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_prepare_kernel_plan(
             &entry->bundle_storage.bundle, entry->func_name, report));
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_hal_kernel_library_record_processor_capabilities(
-            loom_amdgpu_target_record_processor(module, entry->target_op),
+            loom_amdgpu_target_record_processor(entry->target_op),
             entry->func_name, report));
   }
 
@@ -1126,7 +1125,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
   };
   loom_target_bundle_storage_rebind(&resolved_target.bundle_storage);
   const loom_target_residency_model_t* residency_model =
-      loom_amdgpu_occupancy_residency_model(module, &resolved_target);
+      loom_amdgpu_occupancy_residency_model(&resolved_target);
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_build_schedule_pair_affinities(
       &resolved_target, table_arena, &schedule_pair_affinities));
   loom_low_schedule_structural_state_read_list_t schedule_state_reads =
@@ -1627,7 +1626,7 @@ iree_status_t loom_amdgpu_emit_hal_kernel_library(
   if (iree_status_is_ok(status) && selected && options != NULL) {
     for (uint16_t i = 0; i < entries.count && iree_status_is_ok(status); ++i) {
       status = loom_amdgpu_hal_kernel_library_apply_processor(
-          module, &entries.values[i], &diagnostic_emitter, options->processor);
+          &entries.values[i], &diagnostic_emitter, options->processor);
     }
   }
   if (iree_status_is_ok(status) && selected &&

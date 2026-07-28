@@ -205,7 +205,7 @@ iree_status_t loom_amdgpu_occupancy_build_target_resources(
 
 // Returns the generated target residency model for |target|.
 const loom_target_residency_model_t* loom_amdgpu_occupancy_residency_model(
-    const loom_module_t* module, const loom_low_resolved_target_t* target);
+    const loom_low_resolved_target_t* target);
 
 // Appends a compact JSON representation of |table| to |builder|.
 iree_status_t loom_amdgpu_occupancy_format_json(

@@ -16,11 +16,11 @@ const iree_string_view_t loom_amdgpu_amdhsa_target_id_prefix =
     IREE_SVL("amdgcn-amd-amdhsa--");
 
 const loom_amdgpu_processor_info_t* loom_amdgpu_target_processor_from_op(
-    const loom_module_t* module, const loom_op_t* target_op) {
+    const loom_op_t* target_op) {
   if (!loom_amdgpu_target_isa(target_op)) {
     return NULL;
   }
-  return loom_amdgpu_target_record_processor(module, target_op);
+  return loom_amdgpu_target_record_processor(target_op);
 }
 
 const loom_amdgpu_processor_info_t* loom_amdgpu_target_processor_from_ref(
@@ -30,13 +30,13 @@ const loom_amdgpu_processor_info_t* loom_amdgpu_target_processor_from_ref(
     return NULL;
   }
   const loom_symbol_t* symbol = &module->symbols.entries[target_ref.symbol_id];
-  return loom_amdgpu_target_processor_from_op(module, symbol->defining_op);
+  return loom_amdgpu_target_processor_from_op(symbol->defining_op);
 }
 
 const loom_amdgpu_processor_info_t*
 loom_amdgpu_target_processor_from_resolved_target(
-    const loom_module_t* module, const loom_low_resolved_target_t* target) {
-  return loom_amdgpu_target_processor_from_op(module, target->target_op);
+    const loom_low_resolved_target_t* target) {
+  return loom_amdgpu_target_processor_from_op(target->target_op);
 }
 
 iree_status_t loom_amdgpu_amdhsa_target_id_append(
