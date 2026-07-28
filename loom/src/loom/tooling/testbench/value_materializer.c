@@ -31,6 +31,8 @@ typedef struct loom_testbench_generator_state_t {
   loom_attribute_t first_attr;
   // Step, fill payload, or random upper-bound payload.
   loom_attribute_t second_attr;
+  // Iota element period, or zero when the sequence does not repeat.
+  iree_host_size_t iota_period;
   // Deterministic random state for RANDOM_UNIFORM.
   iree_prng_xoroshiro128_state_t prng_state;
 } loom_testbench_generator_state_t;
@@ -687,9 +689,16 @@ static double loom_testbench_random_unit_f64(
   return (double)bits * (1.0 / 9007199254740992.0);
 }
 
+static iree_host_size_t loom_testbench_iota_index(
+    const loom_testbench_generator_state_t* state, iree_host_size_t index) {
+  return state->iota_period == 0 ? index : index % state->iota_period;
+}
+
 static bool loom_testbench_iota_i64_value(int64_t offset, int64_t step,
+                                          iree_host_size_t period,
                                           iree_host_size_t index,
                                           int64_t* out_value) {
+  if (period != 0) index %= period;
   if (index > (iree_host_size_t)INT64_MAX) {
     return false;
   }
@@ -722,7 +731,8 @@ static bool loom_testbench_iota_i64_value(int64_t offset, int64_t step,
         (mapping)->contents.data_length / sizeof(*values);                    \
     for (iree_host_size_t index = 0; index < count; ++index) {                \
       int64_t generated_value = 0;                                            \
-      if (!loom_testbench_iota_i64_value(first_value, second_value, index,    \
+      if (!loom_testbench_iota_i64_value(first_value, second_value,           \
+                                         state->iota_period, index,           \
                                          &generated_value) ||                 \
           generated_value < (min_value) || generated_value > (max_value)) {   \
         return iree_make_status(IREE_STATUS_OUT_OF_RANGE,                     \
@@ -882,25 +892,33 @@ static iree_status_t loom_testbench_generate_float_buffer(
         case LOOM_SCALAR_TYPE_F8E4M3:
           LOOM_TESTBENCH_FILL_FLOAT8_TYPED(
               mapping, iree_math_f32_to_f8e4m3fn,
-              first_value + (double)index * second_value);
+              first_value + (double)loom_testbench_iota_index(state, index) *
+                                second_value);
         case LOOM_SCALAR_TYPE_F8E5M2:
           LOOM_TESTBENCH_FILL_FLOAT8_TYPED(
               mapping, iree_math_f32_to_f8e5m2,
-              first_value + (double)index * second_value);
+              first_value + (double)loom_testbench_iota_index(state, index) *
+                                second_value);
         case LOOM_SCALAR_TYPE_F16:
           LOOM_TESTBENCH_FILL_FLOAT16_TYPED(
               mapping, iree_math_f32_to_f16,
-              first_value + (double)index * second_value);
+              first_value + (double)loom_testbench_iota_index(state, index) *
+                                second_value);
         case LOOM_SCALAR_TYPE_BF16:
           LOOM_TESTBENCH_FILL_FLOAT16_TYPED(
               mapping, iree_math_f32_to_bf16,
-              first_value + (double)index * second_value);
+              first_value + (double)loom_testbench_iota_index(state, index) *
+                                second_value);
         case LOOM_SCALAR_TYPE_F32:
           LOOM_TESTBENCH_FILL_FLOAT_TYPED(
-              mapping, float, first_value + (double)index * second_value);
+              mapping, float,
+              first_value + (double)loom_testbench_iota_index(state, index) *
+                                second_value);
         case LOOM_SCALAR_TYPE_F64:
           LOOM_TESTBENCH_FILL_FLOAT_TYPED(
-              mapping, double, first_value + (double)index * second_value);
+              mapping, double,
+              first_value + (double)loom_testbench_iota_index(state, index) *
+                                second_value);
         default:
           break;
       }
@@ -1196,6 +1214,7 @@ static iree_status_t loom_testbench_materialize_value_source(
           .scalar_type = loom_type_element_type(source->type),
           .first_attr = source->iota.offset,
           .second_attr = source->iota.step,
+          .iota_period = source->iota.period,
       };
       return loom_testbench_materialize_generated_source(
           options, source, &generator_state, table);

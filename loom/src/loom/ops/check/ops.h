@@ -207,16 +207,23 @@ iree_status_t loom_check_literal_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 
-// LOOM_OP_CHECK_GENERATE_IOTA: Generates a deterministic iota-shaped value.
+// LOOM_OP_CHECK_GENERATE_IOTA: Generates a deterministic, optionally periodic iota-shaped value.
 // %lhs = check.generate.iota offset(0) step(1) : tensor<[%m]x[%n]xi32>
 LOOM_DEFINE_ISA(loom_check_generate_iota_isa, LOOM_OP_CHECK_GENERATE_IOTA)
 LOOM_DEFINE_RESULT(loom_check_generate_iota_result, 0)
 LOOM_DEFINE_ATTR_ANY(loom_check_generate_iota_offset, 0)
 LOOM_DEFINE_ATTR_ANY(loom_check_generate_iota_step, 1)
+LOOM_DEFINE_ATTR_I64(loom_check_generate_iota_period, 2)
+enum loom_check_generate_iota_build_flag_bits_e {
+  LOOM_CHECK_GENERATE_IOTA_BUILD_FLAG_HAS_PERIOD = 1u << 0,
+};
+typedef uint32_t loom_check_generate_iota_build_flags_t;
 iree_status_t loom_check_generate_iota_build(
     loom_builder_t* builder,
+    loom_check_generate_iota_build_flags_t build_flags,
     loom_attribute_t offset,
     loom_attribute_t step,
+    loom_optional int64_t period,
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);

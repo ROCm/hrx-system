@@ -345,6 +345,15 @@ static bool loom_testbench_plan_value_source(
     out_source->type = loom_testbench_value_type(module, out_source->value_id);
     out_source->iota.offset = loom_check_generate_iota_offset(op);
     out_source->iota.step = loom_check_generate_iota_step(op);
+    loom_attribute_t period_attr =
+        loom_op_attrs(op)[loom_check_generate_iota_period_ATTR_INDEX];
+    if (!loom_attr_is_absent(period_attr)) {
+      int64_t period = loom_attr_as_i64(period_attr);
+      if (period <= 0 || (uint64_t)period > (uint64_t)IREE_HOST_SIZE_MAX) {
+        return false;
+      }
+      out_source->iota.period = (iree_host_size_t)period;
+    }
     return out_source->value_id < module->values.count;
   }
   if (loom_check_generate_fill_isa(op)) {

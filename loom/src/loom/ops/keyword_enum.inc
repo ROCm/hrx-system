@@ -82,3 +82,4 @@
   LOOM_KW_BLOCKS = 73,  // "blocks"
   LOOM_KW_CLUSTER_SIZE = 74,  // "cluster_size"
   LOOM_KW_MEMORY_ACCESS = 75,  // "memory_access"
+  LOOM_KW_PERIOD = 76,  // "period"

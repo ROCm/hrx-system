@@ -82,3 +82,4 @@
     [LOOM_KW_BLOCKS] = (const uint8_t*)"\x06" "blocks",
     [LOOM_KW_CLUSTER_SIZE] = (const uint8_t*)"\x0c" "cluster_size",
     [LOOM_KW_MEMORY_ACCESS] = (const uint8_t*)"\x0d" "memory_access",
+    [LOOM_KW_PERIOD] = (const uint8_t*)"\x06" "period",

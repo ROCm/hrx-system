@@ -153,6 +153,8 @@ typedef struct loom_testbench_iota_source_plan_t {
   loom_attribute_t offset;
   // Additive step between generated elements.
   loom_attribute_t step;
+  // Positive element period, or zero when the sequence does not repeat.
+  iree_host_size_t period;
 } loom_testbench_iota_source_plan_t;
 
 typedef struct loom_testbench_fill_source_plan_t {
