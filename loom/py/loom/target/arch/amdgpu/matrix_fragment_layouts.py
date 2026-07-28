@@ -739,6 +739,18 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
         source_element_bit_count=32,
         result_payload_element_count=4,
     ),
+    _single_tile_layout(
+        "cdna_mfma_f64_16x16x4_f64",
+        wave_size=64,
+        row_count=16,
+        column_count=16,
+        reduction_count=4,
+        lhs_payload_element_count=1,
+        rhs_payload_element_count=1,
+        source_element_bit_count=64,
+        result_payload_element_count=4,
+        result_element_bit_count=64,
+    ),
     *(
         _blocked_mfma_layout(
             key,

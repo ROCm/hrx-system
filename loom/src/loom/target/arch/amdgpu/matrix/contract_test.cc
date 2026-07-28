@@ -223,10 +223,12 @@ TEST(MatrixContractTest, FeatureInfoCoversKnownFeatureBits) {
       LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_BF16_1K |
       LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_F64 |
       LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8 |
+      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_I8 |
       LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_XF32 |
       LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950 |
       LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4 |
       LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940 |
+      LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940_FP8 |
       LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX950 |
       LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11 |
       LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12 |
@@ -327,6 +329,8 @@ TEST(MatrixContractTest, Gfx90aDoubleMfmaDescriptor) {
             LOOM_AMDGPU_MATRIX_NUMERIC_F64);
   EXPECT_EQ(descriptor->result_payload.register_count, 8);
   EXPECT_EQ(descriptor->result_payload.element_count, 4);
+  EXPECT_EQ(descriptor->fragment_layout_kind,
+            LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F64_16X16X4_F64);
 }
 
 TEST(MatrixContractTest, Gfx950DenseMfmaDescriptorsExposeTargetLowIds) {
@@ -2702,6 +2706,12 @@ TEST(MatrixContractTest, ProcessorFeatureBitsGateAvailability) {
   ASSERT_NE(bf16_smfmac, nullptr);
   EXPECT_TRUE(loom_amdgpu_matrix_contract_is_available(
       bf16_smfmac, gfx9_4_generic_features, 64));
+
+  const loom_amdgpu_matrix_contract_descriptor_t* i8_mfma =
+      FindDescriptor("mfma.i32.16x16x32.i8");
+  ASSERT_NE(i8_mfma, nullptr);
+  EXPECT_TRUE(loom_amdgpu_matrix_contract_is_available(
+      i8_mfma, gfx9_4_generic_features, 64));
 
   const loom_amdgpu_matrix_contract_descriptor_t* double_mfma =
       FindDescriptor("mfma.f64.16x16x4.f64");

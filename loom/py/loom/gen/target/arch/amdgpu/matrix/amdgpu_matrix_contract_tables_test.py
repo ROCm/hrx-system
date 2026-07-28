@@ -225,6 +225,12 @@ def test_generation_resolves_gfx950_mfma_f32_fragment_layouts() -> None:
     assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_PACKED8" in fp8_bf8_32x32
 
 
+def test_generation_resolves_f64_mfma_fragment_layout() -> None:
+    f64 = _contract_initializer(_contract("mfma.f64.16x16x4.f64"))
+
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F64_16X16X4_F64" in f64
+
+
 def test_generation_emits_blocked_mfma_tile_shapes() -> None:
     f32 = _contract_initializer(_contract("mfma.f32.16x16x4.f16"))
     f64 = _contract_initializer(_contract("mfma.f64.4x4x4.f64"))

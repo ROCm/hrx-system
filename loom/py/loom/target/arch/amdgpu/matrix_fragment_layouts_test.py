@@ -297,6 +297,32 @@ def test_blocked_f64_mfma_source_layout_matches_instruction_coordinates() -> Non
         )
 
 
+def test_f64_mfma_16x16_layout_matches_instruction_coordinates() -> None:
+    layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["cdna_mfma_f64_16x16x4_f64"]
+
+    for lane in range(layout.wave_size):
+        assert role_coordinate(layout, layout.lhs, lane, 0) == (
+            None,
+            lane % 16,
+            None,
+            lane // 16,
+        )
+        assert role_coordinate(layout, layout.rhs, lane, 0) == (
+            None,
+            None,
+            lane % 16,
+            lane // 16,
+        )
+        for role in (layout.accumulator, layout.result):
+            for element in range(role.payload_element_count):
+                assert role_coordinate(layout, role, lane, element) == (
+                    None,
+                    4 * (lane // 16) + element,
+                    lane % 16,
+                    None,
+                )
+
+
 def test_result_to_lhs_partial_transpose_preserves_coordinates() -> None:
     checked_layout_count = 0
     for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:

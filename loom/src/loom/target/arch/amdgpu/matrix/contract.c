@@ -69,10 +69,6 @@ static const loom_amdgpu_matrix_feature_info_t kAmdgpuMatrixFeatureInfos[] = {
         .name = IREE_SVL("mfma-gfx940-fp8"),
     },
     {
-        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_XF32,
-        .name = IREE_SVL("mfma-gfx940-xf32"),
-    },
-    {
         .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950,
         .name = IREE_SVL("mfma-gfx950"),
     },
@@ -111,6 +107,18 @@ static const loom_amdgpu_matrix_feature_info_t kAmdgpuMatrixFeatureInfos[] = {
     {
         .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250,
         .name = IREE_SVL("swmmac-gfx1250"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_XF32,
+        .name = IREE_SVL("mfma-gfx940-xf32"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940_FP8,
+        .name = IREE_SVL("smfmac-gfx940-fp8"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_I8,
+        .name = IREE_SVL("mfma-gfx940-i8"),
     },
 };
 

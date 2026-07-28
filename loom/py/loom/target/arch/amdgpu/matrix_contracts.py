@@ -528,6 +528,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f64", 8, 4),
         result=payload("f64", 8, 4),
         scale_kind="none",
+        fragment_layout="cdna_mfma_f64_16x16x4_f64",
     ),
     AmdgpuMatrixContract(
         name="mfma.f64.4x4x4.f64",
@@ -583,7 +584,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
     AmdgpuMatrixContract(
         name="mfma.i32.16x16x32.i8",
         family="mfma",
-        features=("mfma_gfx940_fp8",),
+        features=("mfma_gfx940_i8",),
         flags=(),
         tile_shape=(16, 16, 32),
         lhs=payload("i8", 2, 8),
@@ -632,7 +633,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
     AmdgpuMatrixContract(
         name="mfma.i32.32x32x16.i8",
         family="mfma",
-        features=("mfma_gfx940_fp8",),
+        features=("mfma_gfx940_i8",),
         flags=(),
         tile_shape=(32, 32, 16),
         lhs=payload("i8", 2, 8),

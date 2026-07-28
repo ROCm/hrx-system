@@ -209,6 +209,9 @@ def test_matrix_feature_profiles_model_replacement_instruction_shapes() -> None:
             AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC
         ]
     )
+    assert "mfma_gfx940_i8" in generic_features
+    assert "mfma_gfx940_fp8" not in generic_features
+    assert "smfmac_gfx940_fp8" not in generic_features
     member_intersection = set(
         AMDGPU_MATRIX_FEATURES_BY_PROFILE[AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940]
     ) & set(

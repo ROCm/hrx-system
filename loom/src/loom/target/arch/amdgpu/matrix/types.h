@@ -61,6 +61,8 @@ typedef enum loom_amdgpu_matrix_feature_flag_bits_e {
   LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_XF32 = UINT64_C(1) << 15,
   // Processor supports gfx940 FP8/BF8 sparse MFMA variants.
   LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940_FP8 = UINT64_C(1) << 16,
+  // Processor supports gfx940 I8 MFMA shape variants.
+  LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_I8 = UINT64_C(1) << 17,
 } loom_amdgpu_matrix_feature_flag_bits_t;
 
 // Bitset of loom_amdgpu_matrix_feature_flag_bits_t values.
@@ -342,8 +344,10 @@ typedef enum loom_amdgpu_matrix_fragment_layout_kind_e {
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X32_IU4 = 72,
   // RDNA4 WMMA 16x16x64 packed iu8 input, i32 result layout.
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X64_IU8 = 73,
+  // CDNA MFMA 16x16x4 f64 input, f64 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F64_16X16X4_F64 = 74,
   // Total number of fragment layout table slots, including UNKNOWN.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT = 74,
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT = 75,
 } loom_amdgpu_matrix_fragment_layout_kind_t;
 
 typedef enum loom_amdgpu_matrix_contract_flag_bits_e {

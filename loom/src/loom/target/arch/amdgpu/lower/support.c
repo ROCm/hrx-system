@@ -750,6 +750,8 @@ static_assert(IREE_ARRAYSIZE(kAmdgpuScfSourceProducerFlags) ==
 
 static const loom_amdgpu_source_producer_flags_t
     kAmdgpuVectorSourceProducerFlags[LOOM_OP_VECTOR_COUNT_] = {
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_CONSTANT)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_STORAGE,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_FROM_ELEMENTS)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_VECTOR_STORAGE,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_SELECT)] =

@@ -73,9 +73,10 @@ AMDGPU_MATRIX_FEATURES_BY_PROFILE = {
         "mfma_gfx90a_bf16_1k",
         "mfma_gfx90a_f64",
         "mfma_gfx940_fp8",
-        "mfma_gfx940_xf32",
         "smfmac_gfx940",
+        "mfma_gfx940_xf32",
         "smfmac_gfx940_fp8",
+        "mfma_gfx940_i8",
     ),
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950: (
         "mfma_gfx908",
@@ -85,8 +86,9 @@ AMDGPU_MATRIX_FEATURES_BY_PROFILE = {
         "mfma_gfx950",
         "mfma_gfx950_scale_f8f6f4",
         "smfmac_gfx940",
-        "smfmac_gfx940_fp8",
         "smfmac_gfx950",
+        "smfmac_gfx940_fp8",
+        "mfma_gfx940_i8",
     ),
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11: ("wmma_gfx11",),
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12: (
@@ -103,6 +105,7 @@ AMDGPU_MATRIX_FEATURES_BY_PROFILE = {
         "mfma_gfx90a_bf16_1k",
         "mfma_gfx90a_f64",
         "smfmac_gfx940",
+        "mfma_gfx940_i8",
     ),
 }
 
