@@ -373,11 +373,11 @@
         {
           "path": "{tmp}/wave64_reductions.loom",
           "contains": [
-            "amdgpu.target<gfx1100> @gfx1100_wave64 {subgroup_size = 64}",
-            "kernel.def target(@gfx1100_wave64) @wave64_workgroup_reduce_sub_wave",
-            "kernel.def target(@gfx1100_wave64) @wave64_workgroup_reduce_full_wave",
-            "kernel.def target(@gfx1100_wave64) @wave64_workgroup_reduce_cross_wave",
-            "kernel.def target(@gfx1100_wave64) @wave64_workgroup_reduce_sparse_loop_accumulation",
+            "amdgpu.target<gfx11-generic> @gfx11_wave64 {subgroup_size = 64}",
+            "kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_sub_wave",
+            "kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_full_wave",
+            "kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_cross_wave",
+            "kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_sparse_loop_accumulation",
             "kernel.workgroup.reduce<addf>"
           ]
         }
@@ -390,7 +390,7 @@
         "args": [
           "{srcdir}/wave64_reductions.loom",
           "--backend=amdgpu-hal",
-          "--target=gfx1100",
+          "--target=gfx11-generic",
           "--output={tmp}/wave64_reductions.vmfb",
           "--emit-target-artifact={tmp}/wave64_reductions.hsaco",
           "--artifact-manifest=summary",
@@ -400,7 +400,7 @@
       "stderr": {
         "contains": {
           "unordered": [
-            "\"target_key\":\"gfx1100\"",
+            "\"target_key\":\"gfx11-generic\"",
             "\"artifact_format\":\"elf\"",
             "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"function\":\"wave64_workgroup_reduce_sub_wave\"",
