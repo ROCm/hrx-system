@@ -252,6 +252,17 @@ def target_preset_amdgpu_kind(target_preset: str) -> str | None:
     return selection.kind if selection is not None else None
 
 
+def target_preset_amdgpu_matrix_profile(target_preset: str) -> str | None:
+    """Return the AMDGPU matrix feature profile selected by a target preset."""
+    selection = _amdgpu_target_selection(target_preset)
+    if selection is None:
+        return None
+    from loom.target.arch.amdgpu.target_info import amdgpu_processor_info_by_name
+
+    processor_info = amdgpu_processor_info_by_name(selection.kind)
+    return processor_info.features.matrix if processor_info is not None else None
+
+
 def target_preset_amdgpu_subgroup_size(target_preset: str) -> int | None:
     """Return the fixed AMDGPU subgroup size selected by a target preset."""
     selection = _amdgpu_target_selection(target_preset)

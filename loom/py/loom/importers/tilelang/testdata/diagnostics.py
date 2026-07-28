@@ -137,7 +137,7 @@ def tileop_gemm_transpose_b(T: Any) -> TileLangImportInput:
 
 
 # ====
-# ERROR@+1: "tl.tileop.gemm vector.fragment bridge requires AMDGPU gfx1100"
+# ERROR@+1: "tl.tileop.gemm vector.fragment bridge requires an AMDGPU GFX11 WMMA target"
 @tilelang_case(
     name="tileop_gemm_unsupported_target",
     category="diagnostic",

@@ -11,6 +11,7 @@ from loom.importers.core import (
     create_kernel_module,
     kernel_module_ops,
     print_loom_module,
+    target_preset_amdgpu_matrix_profile,
     target_preset_amdgpu_subgroup_size,
 )
 from loom.ir import I32
@@ -172,3 +173,12 @@ def test_target_preset_amdgpu_subgroup_size_uses_processor_facts() -> None:
     assert target_preset_amdgpu_subgroup_size("hip -mcpu=gfx942") == 64
     assert target_preset_amdgpu_subgroup_size("hip -mcpu=gfx11-generic") == 32
     assert target_preset_amdgpu_subgroup_size("reference") is None
+
+
+def test_target_preset_amdgpu_matrix_profile_uses_processor_facts() -> None:
+    assert target_preset_amdgpu_matrix_profile("hip -mcpu=gfx1151") == "wmma_gfx11"
+    assert (
+        target_preset_amdgpu_matrix_profile("hip -mcpu=gfx11-generic") == "wmma_gfx11"
+    )
+    assert target_preset_amdgpu_matrix_profile("hip -mcpu=gfx942") == "mfma_gfx940"
+    assert target_preset_amdgpu_matrix_profile("reference") is None
