@@ -56,7 +56,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     amdgpu_descriptor_set_storage_info_by_generator_target,
     amdgpu_descriptor_set_view_infos_by_storage_generator_target,
 )
-from loom.target.low_descriptors import DescriptorSet  # noqa: E402
+from loom.target.low_descriptors import Descriptor, DescriptorSet  # noqa: E402
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,8 +198,25 @@ class _InlineF32Source:
 
 
 @dataclass(frozen=True, slots=True)
+class _EncodingFieldContract:
+    field: AmdgpuIsaEncodingField
+    value_bit_count: int
+    ranges: tuple[tuple[AmdgpuIsaBitRange, int], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _DescriptorEncodingContract:
+    descriptor_key: str
+    format_id: int
+    bit_count: int
+    word_count: int
+    identifier_seed: int
+    fields: tuple[_EncodingFieldContract, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class _EncodingContract:
-    formats: tuple[object, ...]
+    descriptors: tuple[_DescriptorEncodingContract, ...]
     source_literal: int
     scalar_source_literal: int
     scalar_inline_u32: tuple[int, int]
@@ -458,21 +475,27 @@ def _compile_formats(
     return compiled_formats, compiled_fields, compiled_ranges
 
 
-def _required_encoding_fields(
-    descriptor_set: DescriptorSet,
-) -> dict[int, set[str]]:
-    required_fields: dict[int, set[str]] = {}
-    for descriptor in descriptor_set.descriptors:
-        if descriptor.encoding_format_id == 0:
-            continue
-        descriptor_fields = required_fields.setdefault(descriptor.encoding_format_id, set())
-        descriptor_fields.update(amdgpu_encoding_field_name(operand.encoding_field_id) for operand in descriptor.operands if operand.encoding_field_id != 0)
-        for immediate in descriptor.immediates:
-            if immediate.encoding_field_id != 0:
-                descriptor_fields.add(amdgpu_encoding_field_name(immediate.encoding_field_id))
-            descriptor_fields.update(amdgpu_encoding_field_name(encoding_slice.encoding_field_id) for encoding_slice in immediate.encoding_slices if encoding_slice.encoding_field_id != 0)
-        descriptor_fields.update(amdgpu_encoding_field_name(field_value.encoding_field_id) for field_value in descriptor.encoding_field_values if field_value.encoding_field_id != 0)
-    return required_fields
+def _descriptor_encoding_field_names(descriptor: Descriptor) -> set[str]:
+    field_names = {"OP"}
+    field_names.update(amdgpu_encoding_field_name(operand.encoding_field_id) for operand in descriptor.operands if operand.encoding_field_id != 0)
+    for immediate in descriptor.immediates:
+        if immediate.encoding_field_id != 0:
+            field_names.add(amdgpu_encoding_field_name(immediate.encoding_field_id))
+        field_names.update(amdgpu_encoding_field_name(encoding_slice.encoding_field_id) for encoding_slice in immediate.encoding_slices if encoding_slice.encoding_field_id != 0)
+    field_names.update(amdgpu_encoding_field_name(field_value.encoding_field_id) for field_value in descriptor.encoding_field_values if field_value.encoding_field_id != 0)
+    return field_names
+
+
+def _identifier_seed_without_fields(
+    identifier_value: int,
+    fields: Sequence[AmdgpuIsaEncodingField],
+) -> int:
+    identifier_seed = identifier_value
+    for field in fields:
+        for bit_range in field.ranges:
+            field_mask = ((1 << bit_range.bit_count) - 1) << bit_range.bit_offset
+            identifier_seed &= ~field_mask
+    return identifier_seed
 
 
 def _compile_encoding_contract(
@@ -489,44 +512,47 @@ def _compile_encoding_contract(
             spec.operand_types,
         ),
     )
-    required_fields = _required_encoding_fields(descriptor_set)
-    format_contracts = []
-    for compiled_format in compiled_formats:
-        field_names = required_fields.get(compiled_format.format_id)
-        if field_names is None:
+    compiled_formats_by_id = {compiled_format.format_id: compiled_format for compiled_format in compiled_formats}
+    descriptor_contracts = []
+    for descriptor in descriptor_set.descriptors:
+        if descriptor.encoding_format_id == 0:
             continue
+        compiled_format = compiled_formats_by_id.get(descriptor.encoding_format_id)
+        if compiled_format is None:
+            raise ValueError(f"{spec.source_name}: AMDGPU encoding table is missing descriptor '{descriptor.key}' format id {descriptor.encoding_format_id}")
+        field_names = _descriptor_encoding_field_names(descriptor)
         compiled_format_fields = compiled_fields[compiled_format.field_start : compiled_format.field_start + compiled_format.field_count]
         fields_by_name = {compiled_field.field.name: compiled_field for compiled_field in compiled_format_fields}
         missing_fields = sorted(field_names - fields_by_name.keys())
         if missing_fields:
             encoding_name = AMDGPU_ENCODING_FORMAT_XML_NAMES_BY_ID[compiled_format.format_id]
-            raise ValueError(f"{spec.source_name}: AMDGPU encoding format '{encoding_name}' is missing descriptor fields: {', '.join(missing_fields)}")
-        field_contracts = []
+            raise ValueError(f"{spec.source_name}: AMDGPU encoding format '{encoding_name}' for descriptor '{descriptor.key}' is missing fields: {', '.join(missing_fields)}")
+        field_contracts: list[_EncodingFieldContract] = []
         for field_name in sorted(field_names):
             compiled_field = fields_by_name[field_name]
             ranges = compiled_ranges[compiled_field.range_start : compiled_field.range_start + compiled_field.range_count]
             field_contracts.append(
-                (
-                    compiled_field.field,
-                    compiled_field.value_bit_count,
-                    tuple(ranges),
+                _EncodingFieldContract(
+                    field=compiled_field.field,
+                    value_bit_count=compiled_field.value_bit_count,
+                    ranges=tuple(ranges),
                 )
             )
-        format_contracts.append(
-            (
-                compiled_format.format_id,
-                compiled_format.encoding.bit_count,
-                compiled_format.word_count,
-                compiled_format.encoding.identifier_mask,
-                compiled_format.encoding.identifier_values[0],
-                tuple(field_contracts),
+        descriptor_contracts.append(
+            _DescriptorEncodingContract(
+                descriptor_key=descriptor.key,
+                format_id=compiled_format.format_id,
+                bit_count=compiled_format.encoding.bit_count,
+                word_count=compiled_format.word_count,
+                identifier_seed=_identifier_seed_without_fields(
+                    compiled_format.encoding.identifier_values[0],
+                    tuple(contract.field for contract in field_contracts),
+                ),
+                fields=tuple(field_contracts),
             )
         )
-    missing_formats = sorted(required_fields.keys() - {row[0] for row in format_contracts})
-    if missing_formats:
-        raise ValueError(f"{spec.source_name}: AMDGPU encoding table is missing descriptor format ids: {', '.join(str(value) for value in missing_formats)}")
     return _EncodingContract(
-        formats=tuple(format_contracts),
+        descriptors=tuple(descriptor_contracts),
         source_literal=spec.operand_predefined_value("OPR_SRC", "SRC_LITERAL"),
         scalar_source_literal=spec.operand_predefined_value("OPR_SSRC", "SRC_LITERAL"),
         scalar_inline_u32=_derive_predefined_linear_range(
