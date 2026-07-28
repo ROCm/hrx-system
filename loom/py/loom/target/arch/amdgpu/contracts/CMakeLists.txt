@@ -46,7 +46,11 @@ iree_py_library(
 iree_py_test(
   NAME
     contracts_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
   SRCS
+    "arithmetic_test.py"
+    "dispatch_ownership_test.py"
     "../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.target.arch.amdgpu.contracts.arithmetic_test"

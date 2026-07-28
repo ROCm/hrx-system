@@ -23,7 +23,10 @@ iree_py_library(
 iree_py_test(
   NAME
     func_ops_test
+  MAIN
+    "../../tools/pytest_style_runner.py"
   SRCS
+    "func_ops_test.py"
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.dialect.func.func_ops_test"

@@ -59,7 +59,10 @@ iree_py_library(
 iree_py_test(
   NAME
     target_test
+  MAIN
+    "../tools/pytest_style_runner.py"
   SRCS
+    "low_legality_test.py"
     "../tools/pytest_style_runner.py"
   ARGS
     "loom.target.low_legality_test"

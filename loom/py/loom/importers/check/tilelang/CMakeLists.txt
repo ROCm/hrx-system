@@ -31,7 +31,12 @@ if(LOOM_IMPORT_TILELANG)
 iree_py_test(
   NAME
     tilelang_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
   SRCS
+    "cases_test.py"
+    "harness_test.py"
+    "runner_test.py"
     "../../../tools/pytest_style_runner.py"
   ARGS
     "loom.importers.check.tilelang.cases_test"

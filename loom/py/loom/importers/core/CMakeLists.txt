@@ -29,7 +29,12 @@ iree_py_library(
 iree_py_test(
   NAME
     core_test
+  MAIN
+    "../../tools/pytest_style_runner.py"
   SRCS
+    "kernel_test.py"
+    "names_test.py"
+    "session_test.py"
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.importers.core.kernel_test"

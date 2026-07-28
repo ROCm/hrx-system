@@ -27,7 +27,14 @@ iree_py_library(
 iree_py_test(
   NAME
     support_test
+  MAIN
+    "../../tools/pytest_style_runner.py"
   SRCS
+    "c_arrays_test.py"
+    "c_test.py"
+    "files_test.py"
+    "generated_file_test.py"
+    "string_pool_test.py"
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.support.c_arrays_test"

@@ -25,7 +25,10 @@ iree_py_library(
 iree_py_test(
   NAME
     target_records_test
+  MAIN
+    "../../../../../tools/pytest_style_runner.py"
   SRCS
+    "amdgpu_target_records_test.py"
     "../../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.amdgpu.records.amdgpu_target_records_test"

@@ -26,7 +26,10 @@ iree_py_library(
 iree_py_test(
   NAME
     config_tables_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
   SRCS
+    "amdgpu_config_tables_test.py"
     "../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.amdgpu.amdgpu_config_tables_test"
@@ -70,7 +73,10 @@ iree_py_library(
 iree_py_test(
   NAME
     target_info_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
   SRCS
+    "amdgpu_target_info_test.py"
     "../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.amdgpu.amdgpu_target_info_test"

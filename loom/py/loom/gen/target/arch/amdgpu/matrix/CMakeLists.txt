@@ -29,7 +29,10 @@ iree_py_library(
 iree_py_test(
   NAME
     contract_tables_test
+  MAIN
+    "../../../../../tools/pytest_style_runner.py"
   SRCS
+    "amdgpu_matrix_contract_tables_test.py"
     "../../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.amdgpu.matrix.amdgpu_matrix_contract_tables_test"

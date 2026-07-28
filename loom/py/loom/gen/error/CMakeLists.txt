@@ -26,7 +26,10 @@ iree_py_library(
 iree_py_test(
   NAME
     c_errors_test
+  MAIN
+    "../../tools/pytest_style_runner.py"
   SRCS
+    "c_errors_test.py"
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.error.c_errors_test"

@@ -52,7 +52,17 @@ iree_py_library(
 iree_py_test(
   NAME
     check_test
+  MAIN
+    "../../tools/pytest_style_runner.py"
   SRCS
+    "annotations_test.py"
+    "cases_test.py"
+    "import_test_test.py"
+    "main_test.py"
+    "python_test.py"
+    "registry_test.py"
+    "results_test.py"
+    "updates_test.py"
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.importers.check.annotations_test"

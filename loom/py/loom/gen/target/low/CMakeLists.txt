@@ -107,7 +107,12 @@ iree_py_library(
 iree_py_test(
   NAME
     low_descriptors_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
   SRCS
+    "low_descriptor_shard_test.py"
+    "low_descriptors_test.py"
+    "physical_validation_test.py"
     "../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.low.low_descriptor_shard_test"

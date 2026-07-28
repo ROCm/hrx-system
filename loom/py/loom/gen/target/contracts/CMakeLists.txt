@@ -245,7 +245,10 @@ iree_py_library(
 iree_py_test(
   NAME
     lower_rules_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
   SRCS
+    "lower_rules_test.py"
     "../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.contracts.lower_rules_test"

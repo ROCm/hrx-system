@@ -43,7 +43,14 @@ iree_py_library(
 iree_py_test(
   NAME
     migration_test
+  MAIN
+    "../tools/pytest_style_runner.py"
   SRCS
+    "cli_test.py"
+    "driver_test.py"
+    "manifest_test.py"
+    "rules_test.py"
+    "source_test.py"
     "../tools/pytest_style_runner.py"
   ARGS
     "loom.migration.cli_test"

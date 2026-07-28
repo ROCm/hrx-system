@@ -50,8 +50,13 @@ iree_py_library(
 iree_py_test(
   NAME
     tools_test
-  SRCS
+  MAIN
     "pytest_style_runner.py"
+  SRCS
+    "amdgpu_asm_test.py"
+    "loom_opt_test.py"
+    "pytest_style_runner.py"
+    "source_surface_test.py"
   ARGS
     "loom.tools.amdgpu_asm_test"
     "loom.tools.loom_opt_test"

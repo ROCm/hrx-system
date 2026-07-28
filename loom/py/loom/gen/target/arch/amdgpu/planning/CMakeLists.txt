@@ -60,7 +60,10 @@ iree_py_library(
 iree_py_test(
   NAME
     occupancy_tables_test
+  MAIN
+    "../../../../../tools/pytest_style_runner.py"
   SRCS
+    "amdgpu_occupancy_tables_test.py"
     "../../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.amdgpu.planning.amdgpu_occupancy_tables_test"
@@ -76,7 +79,10 @@ iree_py_test(
 iree_py_test(
   NAME
     vopd_component_tables_test
+  MAIN
+    "../../../../../tools/pytest_style_runner.py"
   SRCS
+    "amdgpu_vopd_component_tables_test.py"
     "../../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.amdgpu.planning.amdgpu_vopd_component_tables_test"
@@ -91,7 +97,10 @@ iree_py_test(
 iree_py_test(
   NAME
     wait_packet_tables_test
+  MAIN
+    "../../../../../tools/pytest_style_runner.py"
   SRCS
+    "amdgpu_wait_packet_tables_test.py"
     "../../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.amdgpu.planning.amdgpu_wait_packet_tables_test"

@@ -96,7 +96,10 @@ iree_py_library(
 iree_py_test(
   NAME
     matrix_fragment_layouts_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
   SRCS
+    "matrix_fragment_layouts_test.py"
     "../../../tools/pytest_style_runner.py"
   ARGS
     "loom.target.arch.amdgpu.matrix_fragment_layouts_test"
@@ -146,7 +149,11 @@ iree_py_library(
 iree_py_test(
   NAME
     target_info_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
   SRCS
+    "isa_xml_test.py"
+    "target_info_test.py"
     "../../../tools/pytest_style_runner.py"
   ARGS
     "loom.target.arch.amdgpu.isa_xml_test"
@@ -164,7 +171,14 @@ iree_py_test(
 iree_py_test(
   NAME
     descriptors_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
   SRCS
+    "descriptor_overlay_test.py"
+    "descriptors/rdna4_test.py"
+    "descriptors_test.py"
+    "isa_xml_test.py"
+    "low_aliases_test.py"
     "../../../tools/pytest_style_runner.py"
   ARGS
     "loom.target.arch.amdgpu.descriptor_overlay_test"

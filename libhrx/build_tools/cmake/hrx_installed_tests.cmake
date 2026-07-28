@@ -44,6 +44,7 @@ set_property(GLOBAL PROPERTY HRX_INSTALLED_TEST_DEFERRED_TARGETS "")
 set_property(GLOBAL PROPERTY HRX_INSTALLED_TEST_DEFERRED_TARGET_PATHS "")
 set_property(GLOBAL PROPERTY HRX_INSTALLED_TEST_FILES "")
 set_property(GLOBAL PROPERTY HRX_INSTALLED_TEST_TMPDIRS "")
+set_property(GLOBAL PROPERTY HRX_INSTALLED_TEST_PYTHON_SOURCE_SETS "")
 
 set(IREE_TEST_REGISTRATION_FUNCTION hrx_register_installed_test)
 set(IREE_PYTHON_TEST_REGISTRATION_FUNCTION hrx_register_installed_python_test)
@@ -202,6 +203,22 @@ function(hrx_installed_tests_install_source_tree SOURCE_DIR DEST_REL OUT_VAR)
     return()
   endif()
 
+  get_filename_component(_ABS_SOURCE_DIR "${SOURCE_DIR}" ABSOLUTE)
+  get_filename_component(_ABS_PROJECT_SOURCE_DIR
+    "${PROJECT_SOURCE_DIR}" ABSOLUTE)
+  if(_ABS_SOURCE_DIR STREQUAL _ABS_PROJECT_SOURCE_DIR)
+    message(FATAL_ERROR
+      "Installed tests cannot package the project source root as a data tree; "
+      "declare the required files explicitly")
+  endif()
+  cmake_path(IS_PREFIX _ABS_SOURCE_DIR "${CMAKE_BINARY_DIR}"
+    NORMALIZE _CONTAINS_BINARY_DIR)
+  if(_CONTAINS_BINARY_DIR)
+    message(FATAL_ERROR
+      "Installed test data tree '${SOURCE_DIR}' contains the CMake binary "
+      "directory and would recursively package its own install output")
+  endif()
+
   set(_KEY "${SOURCE_DIR}|${DEST_REL}/")
   get_property(_INSTALLED_FILES GLOBAL PROPERTY HRX_INSTALLED_TEST_FILES)
   if(NOT "${_KEY}" IN_LIST _INSTALLED_FILES)
@@ -279,6 +296,54 @@ function(hrx_installed_tests_python_package_relative_path PACKAGE_DIR OUT_VAR)
     endif()
   endif()
   set(${OUT_VAR} "${_REL_PATH}" PARENT_SCOPE)
+endfunction()
+
+function(hrx_installed_tests_python_source_relative_path
+    SOURCE_PATH PACKAGE_DIRS OUT_VAR)
+  get_filename_component(_ABS_SOURCE "${SOURCE_PATH}" ABSOLUTE)
+  foreach(_PACKAGE_DIR IN LISTS PACKAGE_DIRS)
+    get_filename_component(_ABS_PACKAGE_DIR "${_PACKAGE_DIR}" ABSOLUTE)
+    cmake_path(IS_PREFIX _ABS_PACKAGE_DIR "${_ABS_SOURCE}"
+      NORMALIZE _IN_PACKAGE)
+    if(NOT _IN_PACKAGE)
+      continue()
+    endif()
+
+    hrx_installed_tests_python_package_relative_path(
+      "${_ABS_PACKAGE_DIR}" _PACKAGE_REL_PATH)
+    cmake_path(RELATIVE_PATH _ABS_SOURCE
+      BASE_DIRECTORY "${_ABS_PACKAGE_DIR}"
+      OUTPUT_VARIABLE _SOURCE_REL_PATH)
+    cmake_path(APPEND _PACKAGE_REL_PATH "${_SOURCE_REL_PATH}"
+      OUTPUT_VARIABLE _REL_PATH)
+    set(${OUT_VAR} "${_REL_PATH}" PARENT_SCOPE)
+    return()
+  endforeach()
+
+  message(FATAL_ERROR
+    "Python test source '${SOURCE_PATH}' is not reachable from any declared "
+    "package directory: ${PACKAGE_DIRS}")
+endfunction()
+
+function(hrx_installed_tests_install_python_sources)
+  cmake_parse_arguments(
+    _RULE
+    ""
+    ""
+    "PACKAGE_DIRS;SOURCES"
+    ${ARGN}
+  )
+
+  foreach(_SOURCE IN LISTS _RULE_SOURCES)
+    if(NOT IS_ABSOLUTE "${_SOURCE}")
+      message(FATAL_ERROR
+        "Installed Python test source must be absolute: ${_SOURCE}")
+    endif()
+    hrx_installed_tests_python_source_relative_path(
+      "${_SOURCE}" "${_RULE_PACKAGE_DIRS}" _SOURCE_REL_PATH)
+    hrx_installed_tests_install_source_file(
+      "${_SOURCE}" "${_SOURCE_REL_PATH}" _INSTALLED_SOURCE)
+  endforeach()
 endfunction()
 
 function(hrx_installed_tests_resolve_data DATA OUT_SOURCE_PATH OUT_REL_PATH)
@@ -597,7 +662,7 @@ function(hrx_register_installed_python_test)
     _RULE
     ""
     "NAME;SRC;TIMEOUT"
-    "ARGS;LABELS;PACKAGE_DIRS"
+    "ARGS;DEPS;LABELS;PACKAGE_DIRS;SOURCES"
     ${ARGN}
   )
 
@@ -618,10 +683,46 @@ function(hrx_register_installed_python_test)
     endif()
     hrx_installed_tests_python_package_relative_path(
       "${_PACKAGE_DIR}" _PACKAGE_REL_PATH)
-    hrx_installed_tests_install_source_tree(
-      "${_PACKAGE_DIR}" "${_PACKAGE_REL_PATH}" _INSTALLED_PACKAGE_DIR)
+    if(_RULE_SOURCES)
+      set(_INSTALLED_PACKAGE_DIR
+        "\${CMAKE_CURRENT_LIST_DIR}/../testdata/${_PACKAGE_REL_PATH}")
+    else()
+      hrx_installed_tests_install_source_tree(
+        "${_PACKAGE_DIR}" "${_PACKAGE_REL_PATH}" _INSTALLED_PACKAGE_DIR)
+    endif()
     list(APPEND _INSTALLED_PACKAGE_DIRS "${_INSTALLED_PACKAGE_DIR}")
   endforeach()
+
+  set(_ABS_SOURCES)
+  foreach(_SOURCE IN LISTS _RULE_SOURCES)
+    if(NOT IS_ABSOLUTE "${_SOURCE}")
+      set(_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/${_SOURCE}")
+    endif()
+    list(APPEND _ABS_SOURCES "${_SOURCE}")
+  endforeach()
+  hrx_installed_tests_install_python_sources(
+    SOURCES ${_ABS_SOURCES}
+    PACKAGE_DIRS ${_RULE_PACKAGE_DIRS})
+
+  if(_RULE_DEPS)
+    get_property(_SOURCE_SET_COUNT GLOBAL
+      PROPERTY HRX_INSTALLED_TEST_PYTHON_SOURCE_SET_COUNT)
+    if(NOT _SOURCE_SET_COUNT)
+      set(_SOURCE_SET_COUNT 0)
+    endif()
+    math(EXPR _SOURCE_SET_COUNT "${_SOURCE_SET_COUNT} + 1")
+    set_property(GLOBAL PROPERTY HRX_INSTALLED_TEST_PYTHON_SOURCE_SET_COUNT
+      "${_SOURCE_SET_COUNT}")
+    set_property(GLOBAL APPEND PROPERTY HRX_INSTALLED_TEST_PYTHON_SOURCE_SETS
+      "${_SOURCE_SET_COUNT}")
+    set_property(GLOBAL
+      PROPERTY HRX_INSTALLED_TEST_PYTHON_SOURCE_DEPS_${_SOURCE_SET_COUNT}
+      "${_RULE_DEPS}")
+    set_property(GLOBAL
+      PROPERTY HRX_INSTALLED_TEST_PYTHON_SOURCE_PACKAGE_DIRS_${_SOURCE_SET_COUNT}
+      "${_RULE_PACKAGE_DIRS}")
+  endif()
+
   # CTest applies ENVIRONMENT_MODIFICATION entries sequentially. Since each
   # package path is prepended to PYTHONPATH, emit them in reverse so the final
   # installed test environment preserves the PACKAGE_DIRS order used by the
@@ -649,6 +750,26 @@ function(hrx_create_installed_tests)
   if(NOT _ENABLED)
     return()
   endif()
+
+  get_property(_PYTHON_SOURCE_SETS GLOBAL
+    PROPERTY HRX_INSTALLED_TEST_PYTHON_SOURCE_SETS)
+  foreach(_SOURCE_SET IN LISTS _PYTHON_SOURCE_SETS)
+    get_property(_PYTHON_DEPS GLOBAL
+      PROPERTY HRX_INSTALLED_TEST_PYTHON_SOURCE_DEPS_${_SOURCE_SET})
+    get_property(_PYTHON_PACKAGE_DIRS GLOBAL
+      PROPERTY HRX_INSTALLED_TEST_PYTHON_SOURCE_PACKAGE_DIRS_${_SOURCE_SET})
+    set(_PYTHON_SOURCES)
+    foreach(_PYTHON_DEP IN LISTS _PYTHON_DEPS)
+      iree_py_library_collect_sources(_DEP_SOURCES "${_PYTHON_DEP}")
+      list(APPEND _PYTHON_SOURCES ${_DEP_SOURCES})
+    endforeach()
+    if(_PYTHON_SOURCES)
+      list(REMOVE_DUPLICATES _PYTHON_SOURCES)
+    endif()
+    hrx_installed_tests_install_python_sources(
+      SOURCES ${_PYTHON_SOURCES}
+      PACKAGE_DIRS ${_PYTHON_PACKAGE_DIRS})
+  endforeach()
 
   get_property(_DEFERRED_TARGETS GLOBAL PROPERTY HRX_INSTALLED_TEST_DEFERRED_TARGETS)
   foreach(_DEFERRED_TARGET IN LISTS _DEFERRED_TARGETS)

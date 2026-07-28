@@ -22,7 +22,10 @@ iree_py_library(
 iree_py_test(
   NAME
     pass_ops_test
+  MAIN
+    "../../tools/pytest_style_runner.py"
   SRCS
+    "pass_ops_test.py"
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.dialect.pass_.pass_ops_test"

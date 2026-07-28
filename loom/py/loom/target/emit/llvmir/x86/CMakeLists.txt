@@ -23,7 +23,10 @@ iree_py_library(
 iree_py_test(
   NAME
     target_info_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
   SRCS
+    "target_info_test.py"
     "../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.target.emit.llvmir.x86.target_info_test"

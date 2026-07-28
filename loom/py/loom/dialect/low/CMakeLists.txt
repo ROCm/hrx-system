@@ -24,7 +24,10 @@ iree_py_library(
 iree_py_test(
   NAME
     low_ops_test
+  MAIN
+    "../../tools/pytest_style_runner.py"
   SRCS
+    "low_ops_test.py"
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.dialect.low.low_ops_test"

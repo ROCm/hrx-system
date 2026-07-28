@@ -26,7 +26,14 @@ iree_py_library(
 iree_py_test(
   NAME
     text_test
+  MAIN
+    "../../tools/pytest_style_runner.py"
   SRCS
+    "parser_regression_test.py"
+    "parser_test.py"
+    "printer_test.py"
+    "signature_test.py"
+    "tokenizer_test.py"
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.format.text.parser_regression_test"

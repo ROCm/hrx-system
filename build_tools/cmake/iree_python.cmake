@@ -131,7 +131,17 @@ function(iree_py_library_main OUTPUT_MAIN TARGET_NAME)
 endfunction()
 
 function(iree_py_library_collect_sources OUTPUT_SOURCE_FILES TARGET_NAME)
-  iree_package_target_name(_TARGET_NAME "${TARGET_NAME}")
+  if(TARGET "${TARGET_NAME}")
+    set(_TARGET_NAME "${TARGET_NAME}")
+    get_target_property(_ALIASED_TARGET "${_TARGET_NAME}" ALIASED_TARGET)
+    if(_ALIASED_TARGET)
+      set(_TARGET_NAME "${_ALIASED_TARGET}")
+    endif()
+  elseif("${TARGET_NAME}" MATCHES "^[^:].*::")
+    string(REPLACE "::" "_" _TARGET_NAME "${TARGET_NAME}")
+  else()
+    iree_package_target_name(_TARGET_NAME "${TARGET_NAME}")
+  endif()
   if(NOT TARGET "${_TARGET_NAME}")
     message(FATAL_ERROR "iree_py_library target ${TARGET_NAME} was not found")
   endif()
@@ -187,6 +197,8 @@ endfunction()
 # Parameters:
 # NAME: name of test
 # SRC: Test source file
+# SOURCES: All Python sources required by the test.
+# DEPS: Python library targets required by the test.
 # ARGS: Command line arguments to the Python source file.
 # LABELS: Additional labels to apply to the test. The package path is added
 #     automatically.
@@ -202,7 +214,7 @@ function(iree_local_py_test)
     _RULE
     "GENERATED_IN_BINARY_DIR"
     "NAME;SRC"
-    "ARGS;LABELS;PACKAGE_DIRS;TIMEOUT"
+    "ARGS;DEPS;LABELS;PACKAGE_DIRS;SOURCES;TIMEOUT"
     ${ARGN}
   )
 
@@ -259,6 +271,10 @@ function(iree_local_py_test)
           "${_NAME_PATH}"
         SRC
           "${_RULE_SRC}"
+        SOURCES
+          ${_RULE_SOURCES}
+        DEPS
+          ${_RULE_DEPS}
         ARGS
           ${_RULE_ARGS}
         LABELS
@@ -280,7 +296,8 @@ endfunction()
 #
 # Parameters:
 # NAME: name of test
-# SRCS: Test source file (single file only, despite name)
+# MAIN: Python source file to execute.
+# SRCS: All Python sources required by the test.
 # ARGS: Command line arguments to the Python source file.
 # LABELS: Additional labels to apply to the test. The package path is added
 #     automatically.
@@ -292,10 +309,19 @@ function(iree_py_test)
   cmake_parse_arguments(
     _RULE
     "GENERATED_IN_BINARY_DIR"
-    "NAME;SRCS"
-    "ARGS;LABELS;PACKAGE_DIRS;IMPORTS;DEPS;TIMEOUT"
+    "MAIN;NAME"
+    "ARGS;LABELS;PACKAGE_DIRS;IMPORTS;DEPS;SRCS;TIMEOUT"
     ${ARGN}
   )
+  if(_RULE_MAIN)
+    set(_RULE_MAIN_SOURCE "${_RULE_MAIN}")
+  elseif("${_RULE_SRCS}" MATCHES "^[^;]+$")
+    set(_RULE_MAIN_SOURCE "${_RULE_SRCS}")
+  else()
+    message(FATAL_ERROR
+      "iree_py_test ${_RULE_NAME} requires MAIN when declaring multiple SRCS")
+  endif()
+
   set(_HAS_EXPLICIT_PACKAGE_DIRS FALSE)
   if(NOT _RULE_PACKAGE_DIRS)
     set(_RULE_PACKAGE_DIRS
@@ -318,6 +344,7 @@ function(iree_py_test)
 
   iree_package_ns(_PACKAGE_NS)
   list(TRANSFORM _RULE_DEPS REPLACE "^::" "${_PACKAGE_NS}::")
+  set(_RULE_SOURCE_FILES ${_RULE_SRCS})
   if(NOT _HAS_EXPLICIT_PACKAGE_DIRS)
     foreach(_DEP ${_RULE_DEPS})
       iree_py_library_collect_package_dirs(_DEP_PACKAGE_DIRS "${_DEP}")
@@ -332,7 +359,11 @@ function(iree_py_test)
     NAME
       "${_RULE_NAME}"
     SRC
-      "${_RULE_SRCS}"
+      "${_RULE_MAIN_SOURCE}"
+    SOURCES
+      ${_RULE_SOURCE_FILES}
+    DEPS
+      ${_RULE_DEPS}
     ARGS
       ${_RULE_ARGS}
     LABELS

@@ -34,7 +34,10 @@ iree_py_library(
 iree_py_test(
   NAME
     narrow_float_tables_test
+  MAIN
+    "../../../../../tools/pytest_style_runner.py"
   SRCS
+    "amdgpu_narrow_float_tables_test.py"
     "../../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.amdgpu.lower.amdgpu_narrow_float_tables_test"

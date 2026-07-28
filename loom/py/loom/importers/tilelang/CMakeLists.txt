@@ -62,7 +62,26 @@ if(LOOM_IMPORT_TILELANG)
 iree_py_test(
   NAME
     tilelang_test
+  MAIN
+    "../../tools/pytest_style_runner.py"
   SRCS
+    "analysis_test.py"
+    "calls_test.py"
+    "context_test.py"
+    "corpus_test.py"
+    "coverage_test.py"
+    "differential_test.py"
+    "oracle_test.py"
+    "testdata/__init__.py"
+    "testdata/tilekernels/__init__.py"
+    "testdata/tilekernels/engram.py"
+    "testdata/tilekernels/moe_expand.py"
+    "testdata/tilekernels/moe_gate.py"
+    "testdata/tilekernels/moe_histogram.py"
+    "testdata/tilekernels/moe_normalize.py"
+    "testdata/tilekernels/moe_reduce.py"
+    "testdata/tilekernels/transpose.py"
+    "types_test.py"
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.importers.tilelang.analysis_test"
@@ -124,6 +143,8 @@ if(LOOM_IMPORT_TILELANG)
 iree_py_test(
   NAME
     tilelang_import_test
+  MAIN
+    "../check/import_test.py"
   SRCS
     "../check/import_test.py"
   ARGS
