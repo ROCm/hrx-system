@@ -76,22 +76,22 @@ def _group_count_input(tilelang: Any, T: Any, *, target: str) -> TileLangImportI
 
 
 @tilelang_case(
-    name="tilekernels_group_count_gfx1100",
+    name="tilekernels_group_count_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "moe", "histogram", "amdgpu"),
 )
-def tilekernels_group_count_gfx1100(
+def tilekernels_group_count_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
-    return _group_count_input(tilelang, T, target="hip -mcpu=gfx1100")
+    return _group_count_input(tilelang, T, target="hip -mcpu=gfx11-generic")
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("group_count_kernel") @group_count_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("group_count_kernel") @group_count_kernel() {
   %c8 = index.constant 8 : index
   %c1 = index.constant 1 : index
   %c128 = index.constant 128 : index
@@ -233,22 +233,22 @@ def _aux_fi_input(tilelang: Any, T: Any, *, target: str) -> TileLangImportInput:
 
 
 @tilelang_case(
-    name="tilekernels_aux_fi_gfx1100",
+    name="tilekernels_aux_fi_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "moe", "atomic", "amdgpu"),
 )
-def tilekernels_aux_fi_gfx1100(
+def tilekernels_aux_fi_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
-    return _aux_fi_input(tilelang, T, target="hip -mcpu=gfx1100")
+    return _aux_fi_input(tilelang, T, target="hip -mcpu=gfx11-generic")
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("aux_fi_kernel") @aux_fi_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("aux_fi_kernel") @aux_fi_kernel() {
   %c8 = index.constant 8 : index
   %c1 = index.constant 1 : index
   %c128 = index.constant 128 : index

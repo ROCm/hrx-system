@@ -43,16 +43,16 @@ def fp8_fn_buffer_views(tir: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx942",
+        target="hip -mcpu=gfx9-4-generic",
         name="fp8_fn_buffer_views",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx942> @hip_mcpu_gfx942
+amdgpu.target<gfx9-4-generic> @hip_mcpu_gfx9_4_generic
 
-kernel.def target(@hip_mcpu_gfx942) export("fp8_fn_buffer_views") @fp8_fn_buffer_views() {
+kernel.def target(@hip_mcpu_gfx9_4_generic) export("fp8_fn_buffer_views") @fp8_fn_buffer_views() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src: buffer, %dst: buffer) {
@@ -86,16 +86,16 @@ def fp8_fnuz_buffer_views(tir: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx942",
+        target="hip -mcpu=gfx9-4-generic",
         name="fp8_fnuz_buffer_views",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx942> @hip_mcpu_gfx942
+amdgpu.target<gfx9-4-generic> @hip_mcpu_gfx9_4_generic
 
-kernel.def target(@hip_mcpu_gfx942) export("fp8_fnuz_buffer_views") @fp8_fnuz_buffer_views() {
+kernel.def target(@hip_mcpu_gfx9_4_generic) export("fp8_fnuz_buffer_views") @fp8_fnuz_buffer_views() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src: buffer, %dst: buffer) {
@@ -133,7 +133,7 @@ def fp8_fnuz_scalar_load(tir: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx942",
+        target="hip -mcpu=gfx9-4-generic",
         name="fp8_fnuz_scalar_load",
     )
 
@@ -158,6 +158,6 @@ def fp8_fnuz_vector_load(tir: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx942",
+        target="hip -mcpu=gfx9-4-generic",
         name="fp8_fnuz_vector_load",
     )

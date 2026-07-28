@@ -39,15 +39,15 @@ def vector_add_store(tir: Any) -> TileLangImportInput:
         buffer_map={src: src_buffer, dst: dst_buffer},
     ).with_attr("global_symbol", "vector_add_store")
     return TileLangImportInput(
-        source=prim_func, target="hip -mcpu=gfx1100", name="vector_add_store"
+        source=prim_func, target="hip -mcpu=gfx11-generic", name="vector_add_store"
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("vector_add_store") @vector_add_store() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("vector_add_store") @vector_add_store() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src: buffer, %dst: buffer) {
@@ -90,16 +90,16 @@ def vector_add_fastmath_store(tir: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="vector_add_fastmath_store",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("vector_add_fastmath_store") @vector_add_fastmath_store() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("vector_add_fastmath_store") @vector_add_fastmath_store() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src: buffer, %dst: buffer) {
@@ -143,16 +143,16 @@ def vector_select_store(tir: Any) -> TileLangImportInput:
     ).with_attr("global_symbol", "vector_select_store")
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="vector_select_store",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("vector_select_store") @vector_select_store() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("vector_select_store") @vector_select_store() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src: buffer, %dst: buffer) {

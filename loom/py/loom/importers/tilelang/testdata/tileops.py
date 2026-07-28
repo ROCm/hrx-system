@@ -30,16 +30,16 @@ def tileop_copy_1d(tilelang: Any, T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=get_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_copy_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_copy_kernel") @tileop_copy_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_copy_kernel") @tileop_copy_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src_handle: buffer, %dst_handle: buffer) {
@@ -90,16 +90,16 @@ def tileop_copy_disable_tma_1d(tilelang: Any, T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=get_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_copy_disable_tma_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_copy_disable_tma_kernel") @tileop_copy_disable_tma_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_copy_disable_tma_kernel") @tileop_copy_disable_tma_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src_handle: buffer, %dst_handle: buffer) {
@@ -143,16 +143,16 @@ def tileop_fill_1d(tilelang: Any, T: Any, tir: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=get_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_fill_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_fill_kernel") @tileop_fill_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_fill_kernel") @tileop_fill_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%dst_handle: buffer) {
@@ -201,16 +201,16 @@ def tileop_fill_integer_zero_to_float(
 
     return TileLangImportInput(
         source=get_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_fill_integer_zero_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_fill_integer_zero_kernel") @tileop_fill_integer_zero_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_fill_integer_zero_kernel") @tileop_fill_integer_zero_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%dst_handle: buffer) {
@@ -251,16 +251,16 @@ def tileop_reduce_sum_1d(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=tileop_reduce_sum_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_reduce_sum_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_reduce_sum_kernel") @tileop_reduce_sum_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_reduce_sum_kernel") @tileop_reduce_sum_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src_handle: buffer, %dst_handle: buffer) {
@@ -326,16 +326,16 @@ def tileop_reduce_sum_fastmath_1d(tilelang: Any, T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=get_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_reduce_sum_fastmath_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_reduce_sum_fastmath_kernel") @tileop_reduce_sum_fastmath_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_reduce_sum_fastmath_kernel") @tileop_reduce_sum_fastmath_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src_handle: buffer, %dst_handle: buffer) {
@@ -392,16 +392,16 @@ def tileop_reduce_abssum_1d(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=tileop_reduce_abssum_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_reduce_abssum_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_reduce_abssum_kernel") @tileop_reduce_abssum_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_reduce_abssum_kernel") @tileop_reduce_abssum_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src_handle: buffer, %dst_handle: buffer) {
@@ -459,16 +459,16 @@ def tileop_reduce_absmax_1d(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=tileop_reduce_absmax_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_reduce_absmax_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_reduce_absmax_kernel") @tileop_reduce_absmax_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_reduce_absmax_kernel") @tileop_reduce_absmax_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src_handle: buffer, %dst_handle: buffer) {
@@ -526,16 +526,16 @@ def tileop_reduce_absmax_widen_1d(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=tileop_reduce_absmax_widen_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_reduce_absmax_widen_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_reduce_absmax_widen_kernel") @tileop_reduce_absmax_widen_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_reduce_absmax_widen_kernel") @tileop_reduce_absmax_widen_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src_handle: buffer, %dst_handle: buffer) {
@@ -591,16 +591,16 @@ def tileop_reduce_sum_2d(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=tileop_reduce_sum_2d_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_reduce_sum_2d_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_reduce_sum_2d_kernel") @tileop_reduce_sum_2d_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_reduce_sum_2d_kernel") @tileop_reduce_sum_2d_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src_handle: buffer, %dst_handle: buffer) {
@@ -678,16 +678,16 @@ def tileop_finalize_reducer_none(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=tileop_finalize_reducer_none_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_finalize_reducer_none_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_finalize_reducer_none_kernel") @tileop_finalize_reducer_none_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_finalize_reducer_none_kernel") @tileop_finalize_reducer_none_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src_handle: buffer, %dst_handle: buffer) {
@@ -757,16 +757,16 @@ def tileop_cumsum_shared_1d(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=tileop_cumsum_shared_1d_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_cumsum_shared_1d_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_cumsum_shared_1d_kernel") @tileop_cumsum_shared_1d_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_cumsum_shared_1d_kernel") @tileop_cumsum_shared_1d_kernel() {
   %c1 = index.constant 1 : index
   %c4 = index.constant 4 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c4, %c1, %c1) : index
@@ -826,16 +826,16 @@ def tileop_finalize_reducer_all(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=tileop_finalize_reducer_all_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_finalize_reducer_all_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_finalize_reducer_all_kernel") @tileop_finalize_reducer_all_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_finalize_reducer_all_kernel") @tileop_finalize_reducer_all_kernel() {
   %c1 = index.constant 1 : index
   %c4 = index.constant 4 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c4, %c1, %c1) : index
@@ -894,16 +894,16 @@ def tileop_reduce_absmax_reshape_2d_to_3d(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=tileop_reduce_absmax_reshape_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_reduce_absmax_reshape_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_reduce_absmax_reshape_kernel") @tileop_reduce_absmax_reshape_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_reduce_absmax_reshape_kernel") @tileop_reduce_absmax_reshape_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src_handle: buffer, %dst_handle: buffer) {
@@ -983,16 +983,16 @@ def tileop_copy_2d(tilelang: Any, T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=get_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_copy_2d_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_copy_2d_kernel") @tileop_copy_2d_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_copy_2d_kernel") @tileop_copy_2d_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src_handle: buffer, %dst_handle: buffer) {
@@ -1046,16 +1046,16 @@ def tileop_gemm_dense_16x16x16(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=tileop_gemm_dense_16x16x16_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_gemm_dense_16x16x16_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("tileop_gemm_dense_16x16x16_kernel") @tileop_gemm_dense_16x16x16_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("tileop_gemm_dense_16x16x16_kernel") @tileop_gemm_dense_16x16x16_kernel() {
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
