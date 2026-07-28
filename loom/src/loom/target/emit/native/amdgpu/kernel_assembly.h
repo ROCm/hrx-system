@@ -24,9 +24,13 @@
 extern "C" {
 #endif
 
+typedef struct loom_amdgpu_native_preflight_t loom_amdgpu_native_preflight_t;
+
 typedef struct loom_amdgpu_kernel_assembly_options_t {
   // Optional ABI layout captured before target resource materialization.
   const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout;
+  // Optional preflight result captured before assembly emission.
+  const loom_amdgpu_native_preflight_t* preflight;
   // Optional target-owned packet plan applied during assembly emission.
   const struct loom_amdgpu_packet_plan_t* packet_plan;
 } loom_amdgpu_kernel_assembly_options_t;

@@ -246,6 +246,7 @@ static iree_status_t loom_amdgpu_kernel_assembly_emit(
   loom_amdgpu_kernel_record_t record = {0};
   const loom_amdgpu_kernel_record_options_t record_options = {
       .abi_layout = options ? options->abi_layout : NULL,
+      .preflight = options ? options->preflight : NULL,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build(
       schedule, allocation, &record_options, &record, scratch_arena));

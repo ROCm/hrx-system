@@ -381,6 +381,7 @@ iree_status_t loom_amdgpu_kernel_emission_build(
     }
     const loom_amdgpu_kernel_assembly_options_t assembly_options = {
         .abi_layout = abi_layout,
+        .preflight = preflight,
         .packet_plan = &packet_plan,
     };
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_kernel_assembly_with_options(
