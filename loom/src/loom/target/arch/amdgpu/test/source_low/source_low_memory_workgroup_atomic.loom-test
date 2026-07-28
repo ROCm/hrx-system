@@ -1,7 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_workgroup_atomic.loom-test
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @lds_atomic_add_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -18,7 +18,7 @@ kernel.def target(@target) @lds_atomic_add_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_add_i32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_add_i32() asm<amdgpu.gfx11.generic.core> {
   %9 = storage {byte_alignment = 4, byte_length = 256} : low.storage<workgroup>
   %scratch_view = storage_address %9 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   %12 = v_mov_b32 1
@@ -29,7 +29,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @lds_atomic_scalar_loop_index_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -49,7 +49,7 @@ kernel.def target(@target) @lds_atomic_scalar_loop_index_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_scalar_loop_index_i32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_scalar_loop_index_i32() asm<amdgpu.gfx11.generic.core> {
   %zero_index = s_mov_b32 0
   %eight = s_mov_b32 8
   %one_index = s_mov_b32 1
@@ -73,7 +73,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @lds_atomic_ordering_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -93,7 +93,7 @@ kernel.def target(@target) @lds_atomic_ordering_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_ordering_i32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_ordering_i32() asm<amdgpu.gfx11.generic.core> {
   %12 = storage {byte_alignment = 4, byte_length = 256} : low.storage<workgroup>
   %scratch_view = storage_address %12 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   %15 = v_mov_b32 1
@@ -107,7 +107,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @lds_atomic_add_f32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -124,7 +124,7 @@ kernel.def target(@target) @lds_atomic_add_f32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_add_f32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_add_f32() asm<amdgpu.gfx11.generic.core> {
   %9 = storage {byte_alignment = 4, byte_length = 256} : low.storage<workgroup>
   %scratch_view = storage_address %9 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   %one = v_mov_b32 1065353216
@@ -135,7 +135,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @lds_atomic_minnum_maxnum_f32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -154,7 +154,7 @@ kernel.def target(@target) @lds_atomic_minnum_maxnum_f32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_minnum_maxnum_f32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_minnum_maxnum_f32() asm<amdgpu.gfx11.generic.core> {
   %10 = storage {byte_alignment = 4, byte_length = 256} : low.storage<workgroup>
   %scratch_view = storage_address %10 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   %limit = v_mov_b32 1065353216
@@ -167,7 +167,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @lds_atomic_bitwise_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -188,7 +188,7 @@ kernel.def target(@target) @lds_atomic_bitwise_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_bitwise_i32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_bitwise_i32() asm<amdgpu.gfx11.generic.core> {
   %11 = storage {byte_alignment = 4, byte_length = 256} : low.storage<workgroup>
   %scratch_view = storage_address %11 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   %14 = v_mov_b32 255
@@ -203,7 +203,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @lds_atomic_sub_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -220,7 +220,7 @@ kernel.def target(@target) @lds_atomic_sub_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_sub_i32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_sub_i32() asm<amdgpu.gfx11.generic.core> {
   %9 = storage {byte_alignment = 4, byte_length = 256} : low.storage<workgroup>
   %scratch_view = storage_address %9 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   %12 = v_mov_b32 1
@@ -231,7 +231,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @lds_atomic_exchange_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -247,7 +247,7 @@ kernel.def target(@target) @lds_atomic_exchange_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_exchange_i32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_exchange_i32() asm<amdgpu.gfx11.generic.core> {
   %9 = storage {byte_alignment = 4, byte_length = 256} : low.storage<workgroup>
   %scratch_view = storage_address %9 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   %12 = v_mov_b32 7
@@ -257,7 +257,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @lds_atomic_cmpxchg_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -274,7 +274,7 @@ kernel.def target(@target) @lds_atomic_cmpxchg_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_cmpxchg_i32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_cmpxchg_i32() asm<amdgpu.gfx11.generic.core> {
   %10 = storage {byte_alignment = 4, byte_length = 256} : low.storage<workgroup>
   %scratch_view = storage_address %10 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   %14 = v_mov_b32 7
@@ -285,7 +285,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @lds_atomic_minmax_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -308,7 +308,7 @@ kernel.def target(@target) @lds_atomic_minmax_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_minmax_i32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_minmax_i32() asm<amdgpu.gfx11.generic.core> {
   %12 = storage {byte_alignment = 4, byte_length = 256} : low.storage<workgroup>
   %scratch_view = storage_address %12 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   %15 = v_mov_b32 1
@@ -325,7 +325,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @lds_atomic_second_alloca_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -346,7 +346,7 @@ kernel.def target(@target) @lds_atomic_second_alloca_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_second_alloca_i32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_second_alloca_i32() asm<amdgpu.gfx11.generic.core> {
   %12 = storage {byte_alignment = 16, byte_length = 64} : low.storage<workgroup>
   %14 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %second_view = storage_address %14 : low.storage<workgroup> -> reg<amdgpu.vgpr>
