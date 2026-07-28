@@ -392,6 +392,7 @@ TEST_P(QueueTransferTest, UpdateSizeAndAlignmentClasses) {
       {/*.source_offset=*/5, /*.target_offset=*/4, /*.update_length=*/8},
       {/*.source_offset=*/1, /*.target_offset=*/1, /*.update_length=*/4},
       {/*.source_offset=*/0, /*.target_offset=*/0, /*.update_length=*/16},
+      {/*.source_offset=*/7, /*.target_offset=*/9, /*.update_length=*/528},
   };
 
   for (const UpdateCase& test_case : cases) {
