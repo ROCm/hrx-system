@@ -2810,6 +2810,10 @@ static iree_status_t loom_amdgpu_wait_plan_handle_barrier(
     loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
   const loom_amdgpu_wait_node_state_t* node_state =
       &builder->node_states[node_index];
+  if ((node_state->barrier_counter_mask |
+       node_state->workgroup_barrier_counter_mask) == 0) {
+    return iree_ok_status();
+  }
   const loom_amdgpu_wait_memory_space_flags_t generic_space =
       loom_amdgpu_wait_memory_space_flag(LOOM_LOW_MEMORY_SPACE_GENERIC);
   const loom_amdgpu_wait_memory_space_flags_t workgroup_space =
