@@ -50,7 +50,9 @@ from loom.target.arch.amdgpu.descriptors import (
     _REG_VCC,
     _RESOURCE_MFMA,
     _RESOURCE_SALU,
+    _RESOURCE_SWMMAC,
     _RESOURCE_VALU,
+    _RESOURCE_WMMA,
     _SCHEDULE_MATRIX,
     _SCHEDULE_MFMA_QUALIFIED_PREFIX,
     _SCHEDULE_MODE_CONTROL,
@@ -63,6 +65,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _SCHEDULE_VMEM_LOAD,
     _SCHEDULE_VMEM_LOAD_LDS,
     _SCHEDULE_WAIT_ALU,
+    _SCHEDULE_WMMA,
     _SOURCE_INLINE_F32_ENCODING_ID,
     _SOURCE_INLINE_U32_ENCODING_ID,
     _VBUFFER_SOFFSET_NULL,
@@ -165,6 +168,7 @@ from loom.target.low_descriptors import (
     IssueUse,
     LatencyKind,
     MemorySpace,
+    ModelQuality,
     NativeAsmValue,
     NativeAsmValueKind,
     Operand,
@@ -634,6 +638,37 @@ def test_gfx9_4_matrix_schedule_classes_match_member_timings() -> None:
             ("ENCODING", 0x1A7),
             ("X2ENCODING", 0xD3AC),
         )
+
+
+def test_gfx12_matrix_schedule_classes_match_processor_model() -> None:
+    schedule_classes = {
+        schedule_class.name: schedule_class
+        for schedule_class in _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE.schedule_classes
+    }
+    for schedule_class_name, resource_name in (
+        (_SCHEDULE_WMMA, _RESOURCE_WMMA),
+        (_SCHEDULE_SWMMAC, _RESOURCE_SWMMAC),
+    ):
+        schedule_class = schedule_classes[schedule_class_name]
+        assert schedule_class.latency_kind is LatencyKind.EXACT
+        assert schedule_class.latency_cycles == 5
+        assert schedule_class.issue_uses == (
+            IssueUse(resource_name, cycles=1, units=1),
+        )
+        assert schedule_class.model_quality is ModelQuality.EXACT
+
+    matrix_overlays = tuple(
+        overlay
+        for overlay in _gfx12_core_overlays()
+        if (overlay.semantic_tag or "").startswith("matrix.")
+    )
+    # Each of the 11 WMMA instructions has both tied-accumulator and
+    # zero-accumulator packet forms. SWMMAC contributes another 11 forms.
+    assert len(matrix_overlays) == 33
+    assert {overlay.schedule_class for overlay in matrix_overlays} == {
+        _SCHEDULE_WMMA,
+        _SCHEDULE_SWMMAC,
+    }
 
 
 def test_trans_schedule_classes_accept_descriptor_latency_overrides() -> None:
