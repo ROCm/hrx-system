@@ -6,6 +6,7 @@
 
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -53,23 +54,32 @@ iree_executable_test(
     name = "routed_gate_up_swiglu_q4k_plan_test",
     src = "//loom/src/loom/tools/iree-benchmark-loom",
     args = [
-        "$(location qwen3_moe/routed_gate_up_swiglu_q4k.loom)",
+        "$(location :routed_gate_up_swiglu_q4k_linked)",
+        "--config=qwen3_moe.routed_gate_up.input_size=2048",
         "--dry-run",
         "--output-format=jsonl",
     ],
-    data = ["qwen3_moe/routed_gate_up_swiglu_q4k.loom"],
+    data = [":routed_gate_up_swiglu_q4k_linked"],
     tags = ["hostonly"],
+)
+
+loom_link_module(
+    name = "routed_gate_up_swiglu_q4k_linked",
+    srcs = ["qwen3_moe/routed_gate_up_swiglu_q4k.loom"],
+    libraries = ["ggml/quantize_q8_1_x4.loom"],
 )
 
 iree_executable_test(
     name = "routed_gate_up_swiglu_q4k_hal_test",
     src = "//loom/src/loom/tools/iree-test-loom",
     args = [
-        "$(location qwen3_moe/routed_gate_up_swiglu_q4k.loom)",
-        "--case=@qwen3_moe_routed_gate_up_swiglu_q4k_nonzero_case",
+        "$(location :routed_gate_up_swiglu_q4k_linked)",
+        "--case=@qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_tail_case",
+        "--config=qwen3_moe.routed_gate_up.input_size=512",
         "--device=amdgpu://0",
+        "--sanitizer=access",
     ],
-    data = ["qwen3_moe/routed_gate_up_swiglu_q4k.loom"],
+    data = [":routed_gate_up_swiglu_q4k_linked"],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
         "manual",
