@@ -64,8 +64,6 @@ typedef struct loom_amdgpu_subgroup_vote_rule_t {
   loom_amdgpu_descriptor_ref_t peer_mask_descriptor_ref;
   // Constraint key used when subgroup width selection fails.
   iree_string_view_t wavefront_constraint_key;
-  // Constraint key used when native subgroup width selection fails.
-  iree_string_view_t native_width_constraint_key;
   // Constraint key used when the predicate is not a native mask.
   iree_string_view_t native_predicate_constraint_key;
   // Constraint key used when the compare descriptor is unavailable.
@@ -88,8 +86,6 @@ static const loom_amdgpu_subgroup_vote_rule_t
                     LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32,
                 .wavefront_constraint_key =
                     IREE_SVL("subgroup_vote_any.wavefront_size"),
-                .native_width_constraint_key =
-                    IREE_SVL("subgroup_vote_any.native_width"),
                 .native_predicate_constraint_key =
                     IREE_SVL("subgroup_vote_any.native_predicate"),
                 .compare_descriptor_constraint_key =
@@ -111,8 +107,6 @@ static const loom_amdgpu_subgroup_vote_rule_t
                     LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_EXEC_READ,
                 .wavefront_constraint_key =
                     IREE_SVL("subgroup_vote_all.wavefront_size"),
-                .native_width_constraint_key =
-                    IREE_SVL("subgroup_vote_all.native_width"),
                 .native_predicate_constraint_key =
                     IREE_SVL("subgroup_vote_all.native_predicate"),
                 .compare_descriptor_constraint_key =
@@ -135,8 +129,8 @@ static iree_status_t loom_amdgpu_select_subgroup_vote_plan(
   *out_wavefront_size = 0;
   *out_selected = false;
 
-  if (!loom_amdgpu_select_full_wave_direct_subgroup_width(context,
-                                                          out_wavefront_size)) {
+  if (!loom_amdgpu_select_subgroup_wavefront_size(context,
+                                                  out_wavefront_size)) {
     return iree_ok_status();
   }
 
@@ -539,10 +533,8 @@ static iree_status_t loom_amdgpu_low_legality_verify_subgroup_vote(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     const loom_amdgpu_subgroup_vote_rule_t* rule, loom_value_id_t predicate) {
   uint32_t unused_wavefront_size = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_low_legality_verify_full_wave_direct_subgroup_width(
-          context, op, rule->wavefront_constraint_key,
-          rule->native_width_constraint_key, &unused_wavefront_size));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_low_legality_verify_subgroup_wavefront(
+      context, op, rule->wavefront_constraint_key, &unused_wavefront_size));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_low_legality_verify_subgroup_native_predicate(
           context, op, predicate, rule->native_predicate_constraint_key));
