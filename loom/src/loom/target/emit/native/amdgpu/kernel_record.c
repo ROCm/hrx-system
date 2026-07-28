@@ -13,7 +13,6 @@
 #include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/ops/target.h"
-#include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/emit/native/amdgpu/kernel_entry.h"
 #include "loom/target/emit/native/amdgpu/preflight.h"
@@ -234,22 +233,6 @@ static iree_status_t loom_amdgpu_kernel_record_collect_descriptor_flags(
       // does not consume a coordinate. This is the launch-state enable for
       // TTMP6/TTMP7/TTMP9 on gfx1250.
       flags |= LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X;
-    }
-
-    const loom_low_descriptor_t* flat_cluster_workgroup_id_descriptor =
-        loom_amdgpu_descriptor_ref_descriptor(
-            schedule->target.descriptor_set,
-            LOOM_AMDGPU_DESCRIPTOR_REF_S_GETREG_B32_CLUSTER_WORKGROUP_FLAT_ID);
-    if (flat_cluster_workgroup_id_descriptor != NULL) {
-      for (iree_host_size_t i = 0; i < schedule->node_count; ++i) {
-        if (schedule->nodes[i].descriptor ==
-            flat_cluster_workgroup_id_descriptor) {
-          flags |= LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X |
-                   LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_Y |
-                   LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_Z;
-          break;
-        }
-      }
     }
   }
 

@@ -318,7 +318,7 @@ typedef struct loom_amdgpu_hal_kernel_abi_verify_result_t {
   uint32_t error_count;
   // Bitset of verified ABI source kinds present in the function.
   uint64_t live_in_source_bits;
-  // Launch workgroup-coordinate state required by the verified live-ins.
+  // Launch workgroup-coordinate state required by the verified low function.
   loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flags_t
       launch_workgroup_id_flags;
   // Number of hidden user SGPRs consumed by verified ABI live-ins.

@@ -1250,8 +1250,7 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_verify_resources(
   return iree_ok_status();
 }
 
-static iree_status_t
-loom_amdgpu_hal_kernel_abi_verify_hal_buffer_descriptor_pseudos(
+static iree_status_t loom_amdgpu_hal_kernel_abi_verify_low_ops(
     const loom_module_t* module, const loom_op_t* function_op,
     const loom_low_descriptor_set_t* descriptor_set, uint32_t max_errors,
     iree_diagnostic_emitter_t emitter,
@@ -1266,6 +1265,17 @@ loom_amdgpu_hal_kernel_abi_verify_hal_buffer_descriptor_pseudos(
   const bool supports_cache_swizzle =
       cache_swizzle_kind ==
       LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT;
+  const loom_low_descriptor_t* static_buffer_descriptor =
+      loom_amdgpu_descriptor_ref_descriptor(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_HAL_BUFFER_DESCRIPTOR);
+  const loom_low_descriptor_t* dynamic_buffer_descriptor =
+      loom_amdgpu_descriptor_ref_descriptor(
+          descriptor_set,
+          LOOM_AMDGPU_DESCRIPTOR_REF_HAL_BUFFER_DESCRIPTOR_EXTENT);
+  const loom_low_descriptor_t* cluster_workgroup_flat_id_descriptor =
+      loom_amdgpu_descriptor_ref_descriptor(
+          descriptor_set,
+          LOOM_AMDGPU_DESCRIPTOR_REF_S_GETREG_B32_CLUSTER_WORKGROUP_FLAT_ID);
 
   const loom_region_t* body = loom_low_function_const_body(function_op);
   if (body == NULL) {
@@ -1282,15 +1292,14 @@ loom_amdgpu_hal_kernel_abi_verify_hal_buffer_descriptor_pseudos(
       const loom_low_descriptor_t* descriptor =
           loom_amdgpu_hal_kernel_abi_resolve_low_op_descriptor(
               module, descriptor_set, op);
-      const loom_low_descriptor_t* static_descriptor =
-          loom_amdgpu_descriptor_ref_descriptor(
-              descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_HAL_BUFFER_DESCRIPTOR);
-      const loom_low_descriptor_t* dynamic_extent_descriptor =
-          loom_amdgpu_descriptor_ref_descriptor(
-              descriptor_set,
-              LOOM_AMDGPU_DESCRIPTOR_REF_HAL_BUFFER_DESCRIPTOR_EXTENT);
-      if (descriptor == NULL || (descriptor != static_descriptor &&
-                                 descriptor != dynamic_extent_descriptor)) {
+      if (descriptor != NULL &&
+          descriptor == cluster_workgroup_flat_id_descriptor) {
+        result->launch_workgroup_id_flags |=
+            LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_KNOWN_FLAGS;
+        continue;
+      }
+      if (descriptor == NULL || (descriptor != static_buffer_descriptor &&
+                                 descriptor != dynamic_buffer_descriptor)) {
         continue;
       }
 
@@ -1551,10 +1560,8 @@ iree_status_t loom_amdgpu_hal_kernel_abi_verify_low(
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_resources(
       module, function_op, &register_type_resolver, max_errors, emitter,
       out_result, arena));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_hal_kernel_abi_verify_hal_buffer_descriptor_pseudos(
-          module, function_op, descriptor_set, max_errors, emitter,
-          out_result));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low_ops(
+      module, function_op, descriptor_set, max_errors, emitter, out_result));
   return loom_amdgpu_hal_kernel_abi_verify_live_ins(
       module, function_op, &register_type_resolver, max_errors, emitter,
       out_result);
