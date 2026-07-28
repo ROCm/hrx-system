@@ -182,7 +182,7 @@ PassProgramPtr CreatePreparedLowPassProgram(
 ModulePtr CreatePreparedArithmeticModule(loomc_context_t* context,
                                          loomc_workspace_t* workspace) {
   SourcePtr source = CreateTextSource("amdgpu_prepared_arithmetic.loom", R"(
-amdgpu.target<gfx1100> @gfx_target
+amdgpu.target<gfx11-generic> @gfx_target
 
 low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) @loom_kernel() {
   %zero = low.const<amdgpu.v_mov_b32> {imm32 = 0} : reg<amdgpu.vgpr>
@@ -194,24 +194,28 @@ low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) @loom_kernel() {
   return DeserializeModule(context, workspace, source.get());
 }
 
-TargetSelectionPtr CreateGfx1100Selection(
-    loomc_target_environment_t* target_environment) {
+TargetProfilePtr CreateTargetProfile(
+    loomc_target_environment_t* target_environment, const char* processor) {
   loomc_amdgpu_profile_options_t profile_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
       /*.structure_size=*/sizeof(profile_options),
       /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("gfx1100-test"),
-      /*.processor=*/loomc_make_cstring_view("gfx1100"),
+      /*.identifier=*/loomc_make_cstring_view(processor),
+      /*.processor=*/loomc_make_cstring_view(processor),
   };
   loomc_target_profile_t* profile = nullptr;
   loomc_status_t status = loomc_target_profile_create_amdgpu(
       target_environment, &profile_options, loomc_allocator_system(), &profile);
   LOOMC_EXPECT_OK(status);
-  TargetProfilePtr profile_ptr(profile);
+  return TargetProfilePtr(profile);
+}
 
+TargetSelectionPtr CreateTargetSelection(
+    loomc_target_environment_t* target_environment, const char* processor) {
+  TargetProfilePtr profile = CreateTargetProfile(target_environment, processor);
   loomc_target_selection_t* selection = nullptr;
-  status = loomc_target_selection_create_from_profile(
-      profile_ptr.get(), loomc_allocator_system(), &selection);
+  loomc_status_t status = loomc_target_selection_create_from_profile(
+      profile.get(), loomc_allocator_system(), &selection);
   LOOMC_EXPECT_OK(status);
   return TargetSelectionPtr(selection);
 }
@@ -249,13 +253,23 @@ ResultPtr EmitModule(loomc_target_environment_t* target_environment,
   return ResultPtr(result);
 }
 
+TEST(AmdgpuTargetTest, CreatesExactAndGenericProfiles) {
+  TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
+  for (const char* processor : {"gfx11-generic", "gfx1151"}) {
+    TargetProfilePtr profile =
+        CreateTargetProfile(target_environment.get(), processor);
+    EXPECT_EQ(ToString(loomc_amdgpu_target_profile_processor(profile.get())),
+              processor);
+  }
+}
+
 TEST(AmdgpuTargetTest, CompileConfiguredHalKernelEmitsModuleTextArtifact) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   ContextPtr context = CreateAmdgpuContext(target_environment.get());
   WorkspacePtr workspace = CreateWorkspace();
   CompilerPtr compiler = CreateCompiler(context.get());
   TargetSelectionPtr selection =
-      CreateGfx1100Selection(target_environment.get());
+      CreateTargetSelection(target_environment.get(), "gfx11-generic");
   PassProgramPtr pass_program =
       CreatePreparedLowPassProgram(context.get(), selection.get());
   SourcePtr source = CreateTextSource("configured_store.loom", R"(
@@ -334,7 +348,7 @@ TEST(AmdgpuTargetTest, EmitRuntimeGlobalsFromTargetOptions) {
   ModulePtr module =
       CreatePreparedArithmeticModule(context.get(), workspace.get());
   TargetSelectionPtr selection =
-      CreateGfx1100Selection(target_environment.get());
+      CreateTargetSelection(target_environment.get(), "gfx11-generic");
 
   ResultPtr result = EmitModule(target_environment.get(), workspace.get(),
                                 module.get(), selection.get(),
