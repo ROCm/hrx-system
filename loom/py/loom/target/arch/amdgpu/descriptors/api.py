@@ -235,6 +235,7 @@ _NAMED_NATIVE_ASM_IMMEDIATE_FORMAT_IDS = frozenset(
         AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST,
         AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG,
         AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64,
+        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64,
         AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE,
         AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL,
     )
@@ -267,7 +268,11 @@ def _validate_native_asm_values(descriptor_set: DescriptorSet) -> None:
                         f"AMDGPU descriptor '{descriptor.key}' native asm "
                         f"modifier references unknown immediate '{value.field_name}'"
                     )
-                if ImmediateFlag.DEFAULT_VALUE not in immediate.flags:
+                if (
+                    value.target_format_id
+                    != AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64
+                    and ImmediateFlag.DEFAULT_VALUE not in immediate.flags
+                ):
                     raise ValueError(
                         f"AMDGPU descriptor '{descriptor.key}' native asm "
                         f"modifier '{value.field_name}' has no default value"

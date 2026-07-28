@@ -139,6 +139,7 @@ AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64 = 6
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG = 7
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE = 8
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL = 9
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64 = 10
 
 _REG_SGPR = "amdgpu.sgpr"
 _REG_VGPR = "amdgpu.vgpr"
@@ -1128,6 +1129,17 @@ def _native_amdgpu_named_i64_immediate(
         field_name=field_name,
         literal=name or field_name,
         target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64,
+    )
+
+
+def _native_amdgpu_required_named_i64_immediate(
+    field_name: str, *, name: str | None = None
+) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal=name or field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64,
     )
 
 
@@ -3011,6 +3023,7 @@ __all__ = (
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL",
     "AMDGPU_SCALAR_DESCRIPTOR_CATEGORY",
     "AMDGPU_VECTOR_DESCRIPTOR_CATEGORY",
@@ -3394,6 +3407,7 @@ __all__ = (
     "_native_amdgpu_named_bit_list_immediate",
     "_native_amdgpu_named_flag_immediate",
     "_native_amdgpu_named_i64_immediate",
+    "_native_amdgpu_required_named_i64_immediate",
     "_native_i64_immediate",
     "_native_amdgpu_delay_alu_immediate",
     "_native_amdgpu_scale_sel_immediate",

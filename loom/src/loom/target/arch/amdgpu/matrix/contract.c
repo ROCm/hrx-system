@@ -38,6 +38,8 @@ static const iree_string_view_t kAmdgpuMatrixNumericTypeNames[] = {
     [LOOM_AMDGPU_MATRIX_NUMERIC_FP6] = IREE_SVL("fp6"),
     [LOOM_AMDGPU_MATRIX_NUMERIC_BF6] = IREE_SVL("bf6"),
     [LOOM_AMDGPU_MATRIX_NUMERIC_FP4] = IREE_SVL("fp4"),
+    [LOOM_AMDGPU_MATRIX_NUMERIC_F8] = IREE_SVL("f8"),
+    [LOOM_AMDGPU_MATRIX_NUMERIC_F6] = IREE_SVL("f6"),
     [LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4] = IREE_SVL("f8f6f4"),
 };
 
@@ -307,6 +309,14 @@ static bool loom_amdgpu_matrix_contract_numeric_type_matches(
     loom_amdgpu_matrix_contract_flags_t descriptor_flags) {
   if (descriptor_numeric_type == request_numeric_type) {
     return true;
+  }
+  if (descriptor_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_F8) {
+    return request_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_FP8 ||
+           request_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_BF8;
+  }
+  if (descriptor_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_F6) {
+    return request_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_FP6 ||
+           request_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_BF6;
   }
   if (descriptor_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4) {
     return request_numeric_type == LOOM_AMDGPU_MATRIX_NUMERIC_FP8 ||

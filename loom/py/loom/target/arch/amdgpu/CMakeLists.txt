@@ -71,8 +71,16 @@ iree_py_library(
   SRCS
     "matrix_contracts.py"
   DEPS
+    loom::py::loom::target::arch::amdgpu::matrix_formats
     loom::py::loom::target::arch::amdgpu::matrix_fragment_layouts
     loom::py::loom::target::arch::package
+)
+
+iree_py_library(
+  NAME
+    matrix_formats
+  SRCS
+    "matrix_formats.py"
 )
 
 iree_py_library(
@@ -81,6 +89,7 @@ iree_py_library(
   SRCS
     "matrix_fragment_layouts.py"
   DEPS
+    loom::py::loom::target::arch::amdgpu::matrix_formats
     loom::py::loom::target::arch::package
 )
 
@@ -128,6 +137,7 @@ iree_py_library(
   DEPS
     loom::py::loom::target::arch::amdgpu::encoding_info
     loom::py::loom::target::arch::amdgpu::isa_xml
+    loom::py::loom::target::arch::amdgpu::matrix_formats
     loom::py::loom::target::arch::amdgpu::target_info
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::package
@@ -158,6 +168,7 @@ iree_py_test(
     "../../../tools/pytest_style_runner.py"
   ARGS
     "loom.target.arch.amdgpu.descriptor_overlay_test"
+    "loom.target.arch.amdgpu.descriptors.rdna4_test"
     "loom.target.arch.amdgpu.descriptors_test"
     "loom.target.arch.amdgpu.low_aliases_test"
   DEPS

@@ -36,6 +36,7 @@ iree_py_test(
   DEPS
     loom::py::loom::gen::target::arch::amdgpu::matrix::contract_tables
     loom::py::loom::target::arch::amdgpu::matrix_contracts
+    loom::py::loom::target::arch::amdgpu::matrix_formats
     loom::py::loom::target::arch::amdgpu::matrix_fragment_layouts
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"

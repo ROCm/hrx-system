@@ -39,6 +39,8 @@ typedef enum loom_amdgpu_native_asm_immediate_format_e {
   LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE = 8,
   // Target-format ID for a GFX12 load TH symbolic modifier.
   LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL = 9,
+  // Target-format ID for a required named integer modifier.
+  LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64 = 10,
 } loom_amdgpu_native_asm_immediate_format_t;
 
 typedef struct loom_amdgpu_assembly_emit_state_t {
@@ -662,6 +664,7 @@ static bool loom_amdgpu_native_asm_format_is_named_modifier(
   switch (target_format_id) {
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST:
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64:
+    case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64:
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG:
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE:
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL:
@@ -688,7 +691,9 @@ static iree_status_t loom_amdgpu_append_packet_immediate_named_modifier(
   int64_t value = 0;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_read_packet_immediate_i64(context, immediate, &value));
-  if (value == immediate->default_value) {
+  if (native_value->target_format_id !=
+          LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64 &&
+      value == immediate->default_value) {
     return iree_ok_status();
   }
 
@@ -713,6 +718,7 @@ static iree_status_t loom_amdgpu_append_packet_immediate_named_modifier(
       return iree_string_builder_append_cstring(context->builder, "]");
     }
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64:
+    case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64:
       return iree_string_builder_append_format(
           context->builder, " %.*s:%" PRId64, (int)name.size, name.data, value);
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG:
@@ -1241,6 +1247,7 @@ static iree_status_t loom_amdgpu_append_native_asm_form_value(
               context, value->index);
         case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST:
         case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64:
+        case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64:
         case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG:
           return loom_amdgpu_append_packet_immediate_named_modifier(context,
                                                                     value);

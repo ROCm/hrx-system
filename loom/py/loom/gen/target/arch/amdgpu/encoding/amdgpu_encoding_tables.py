@@ -93,6 +93,8 @@ def _rdna4_vop3p_supplemental_fields() -> tuple[AmdgpuIsaEncodingField, ...]:
         _field("INDEX_KEY_16BIT", _bit_range(11, 1)),
         _field("MATRIX_A_REUSE", _bit_range(13, 1)),
         _field("MATRIX_B_REUSE", _bit_range(14, 1)),
+        _field("MATRIX_A_FMT", _bit_range(11, 3)),
+        _field("MATRIX_B_FMT", _bit_range(59, 2), _bit_range(14, 1)),
     )
 
 
@@ -114,7 +116,7 @@ def _rdna4_vop3px2_supplemental_encoding() -> AmdgpuIsaEncoding:
         order=0,
         bit_count=128,
         identifier_mask=(0xFF << 24) | (0x1FF << 50) | (0xFF << 88),
-        identifier_values=((0xCC << 24) | (0x100 << 50) | (0xCC << 88),),
+        identifier_values=((0xCC << 24) | (0x080 << 50) | (0xCC << 88),),
         fields=(
             _field("MATRIX_B_SCALE_FMT", _bit_range(8, 2)),
             _field("MATRIX_A_SCALE", _bit_range(11, 1)),
@@ -128,6 +130,7 @@ def _rdna4_vop3px2_supplemental_encoding() -> AmdgpuIsaEncoding:
             _field("VDST", _bit_range(64, 8)),
             _field("MATRIX_A_FMT", _bit_range(75, 3)),
             _field("MATRIX_B_FMT", _bit_range(123, 2), _bit_range(78, 1)),
+            _field("OPSEL_HI", _bit_range(123, 2), _bit_range(78, 1)),
             _field("CLAMP", _bit_range(79, 1)),
             _field("OP", _bit_range(80, 8)),
             _field("SRC0", _bit_range(96, 9)),
@@ -146,6 +149,16 @@ def _supplemental_fields_by_encoding(
     if target == "rdna4_gfx125x":
         fields_by_encoding["ENC_VOP3"] = _gfx1250_vop3_supplemental_fields()
     return fields_by_encoding
+
+
+def _replacement_fields_by_encoding(
+    target: str,
+) -> dict[str, tuple[AmdgpuIsaEncodingField, ...]]:
+    if target == "rdna4_gfx125x":
+        return {
+            "ENC_VOP3P": (_field("OP", _bit_range(16, 8)),),
+        }
+    return {}
 
 
 _SUPPLEMENTAL_ENCODING_BUILDERS = {
@@ -171,14 +184,34 @@ def _supplement_encoding_fields(
     return replace(encoding, fields=(*encoding.fields, *supplemental_fields))
 
 
+def _replace_encoding_fields(
+    encoding: AmdgpuIsaEncoding,
+    replacement_fields: tuple[AmdgpuIsaEncodingField, ...],
+) -> AmdgpuIsaEncoding:
+    if not replacement_fields:
+        return encoding
+    replacements_by_name = {field.name: field for field in replacement_fields}
+    existing_names = {field.name for field in encoding.fields}
+    missing_names = sorted(replacements_by_name.keys() - existing_names)
+    if missing_names:
+        missing_text = ", ".join(missing_names)
+        raise ValueError(f"AMDGPU encoding '{encoding.name}' cannot replace missing fields: {missing_text}")
+    return replace(
+        encoding,
+        fields=tuple(replacements_by_name.get(field.name, field) for field in encoding.fields),
+    )
+
+
 def _with_supplemental_encodings(target: str, encodings: tuple[AmdgpuIsaEncoding, ...]) -> tuple[AmdgpuIsaEncoding, ...]:
     fields_by_encoding = _supplemental_fields_by_encoding(target)
+    replacement_fields_by_encoding = _replacement_fields_by_encoding(target)
     supplemental_encodings = _supplemental_encodings(target)
     supplemental_names = {encoding.name for encoding in supplemental_encodings}
     output = []
     for encoding in encodings:
         if encoding.name in supplemental_names:
             raise ValueError(f"AMDGPU encoding target '{target}' XML now defines supplemental encoding '{encoding.name}'")
+        encoding = _replace_encoding_fields(encoding, replacement_fields_by_encoding.get(encoding.name, ()))
         output.append(_supplement_encoding_fields(encoding, fields_by_encoding.get(encoding.name, ())))
     output.extend(supplemental_encodings)
     return tuple(output)

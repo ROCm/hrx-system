@@ -730,7 +730,7 @@ TEST(AmdgpuEncodingTest, PacksGfx1250SupplementalScaledWmma) {
   EXPECT_EQ(packet.word_count, 4u);
   EXPECT_EQ(packet.bit_count, 128u);
   EXPECT_EQ(packet.words[0], UINT32_C(0xcc350800));
-  EXPECT_EQ(packet.words[1], UINT32_C(0x0c020501));
+  EXPECT_EQ(packet.words[1], UINT32_C(0x0a020501));
   EXPECT_EQ(packet.words[2], UINT32_C(0xcc330800));
   EXPECT_EQ(packet.words[3], UINT32_C(0x14a23108));
 }

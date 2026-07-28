@@ -16,6 +16,7 @@ from loom.target.arch.amdgpu.matrix_contracts import (
     AmdgpuMatrixContract,
     payload,
 )
+from loom.target.arch.amdgpu.matrix_formats import GFX125X_MATRIX_PHYSICAL_FORMATS
 from loom.target.arch.amdgpu.matrix_fragment_layouts import (
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
 )
@@ -168,6 +169,26 @@ def test_generation_resolves_gfx1250_supplemental_matrix_descriptors() -> None:
     assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_F16_16X16X128_BF8_FP8" in swmmac
     assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX1250_SWMMAC_16BIT_16X16X128_PACKED8" in swmmac
     assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_SCALE16_F32_32X16X128_F4" in scaled_f4
+
+
+def test_generation_resolves_every_gfx125x_selector_driven_wmma_abi() -> None:
+    for scale_name in ("", "scale.", "scale16."):
+        for lhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
+            for rhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
+                name = f"wmma.{scale_name}f32.16x16x128.f8f6f4.{lhs_format.token}.{rhs_format.token}"
+                contract = _contract(name)
+                initializer = _contract_initializer(contract)
+                descriptor_suffix = name.removeprefix("wmma.").replace(".", "_").upper()
+                layout_suffix = (f"GFX125X_WMMA_F32_16X16X128_{lhs_format.token}_{rhs_format.token}").upper()
+
+                assert f".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_{descriptor_suffix}" in initializer
+                assert f".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_{layout_suffix}" in initializer
+                assert contract.lhs.numeric_type == (lhs_format.contract_numeric_type)
+                assert contract.lhs.register_count == (lhs_format.register_count_for(64))
+                assert contract.lhs.element_count == 64
+                assert contract.rhs.numeric_type == (rhs_format.contract_numeric_type)
+                assert contract.rhs.register_count == (rhs_format.register_count_for(64))
+                assert contract.rhs.element_count == 64
 
 
 def test_generation_emits_gfx950_implicit_scale_format_masks() -> None:
@@ -420,7 +441,7 @@ def test_generation_rejects_unsupported_wait_state_result_payload_count() -> Non
 
 def test_generation_rejects_selector_and_implicit_scale_format_overlap() -> None:
     contract = replace(
-        _contract("wmma.scale.f32.16x16x128.f8f6f4"),
+        _contract("wmma.scale.f32.16x16x128.f8f6f4.f8.f8"),
         implicit_scale_formats=("e8m0",),
     )
 
@@ -428,7 +449,7 @@ def test_generation_rejects_selector_and_implicit_scale_format_overlap() -> None
         _contract_initializer(contract)
     except ValueError as exc:
         message = str(exc)
-        assert "AMDGPU matrix contract 'wmma.scale.f32.16x16x128.f8f6f4'" in message
+        assert "AMDGPU matrix contract 'wmma.scale.f32.16x16x128.f8f6f4.f8.f8'" in message
         assert "scale-format selector operands and implicit scale formats" in message
     else:
         raise AssertionError("expected selector/implicit scale validation to fail")

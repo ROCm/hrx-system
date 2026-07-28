@@ -6,12 +6,16 @@
 
 from __future__ import annotations
 
+import pytest
+
 from loom.gen.target.arch.amdgpu.encoding.amdgpu_encoding_tables import (
     _bit_range,
     _descriptor_encoding_field_names,
     _field,
     _identifier_seed_without_fields,
+    _replace_encoding_fields,
 )
+from loom.target.arch.amdgpu.isa_xml import AmdgpuIsaEncoding
 from loom.target.low_descriptors import Descriptor
 
 
@@ -46,3 +50,36 @@ def test_identifier_seed_retains_unwritten_format_bits() -> None:
     rhs_seed = _identifier_seed_without_fields(0xD2BE0000, (opcode_field,))
 
     assert lhs_seed != rhs_seed
+
+
+def test_gfx125x_encoding_field_replacement_preserves_field_order() -> None:
+    encoding = AmdgpuIsaEncoding(
+        name="ENC_VOP3P",
+        order=0,
+        bit_count=64,
+        identifier_mask=0,
+        identifier_values=(0,),
+        fields=(
+            _field("OP", _bit_range(16, 7)),
+            _field("SRC0", _bit_range(32, 9)),
+        ),
+    )
+
+    replaced = _replace_encoding_fields(encoding, (_field("OP", _bit_range(16, 8)),))
+
+    assert tuple(field.name for field in replaced.fields) == ("OP", "SRC0")
+    assert replaced.fields[0].ranges == (_bit_range(16, 8),)
+
+
+def test_encoding_field_replacement_rejects_unknown_field() -> None:
+    encoding = AmdgpuIsaEncoding(
+        name="ENC_VOP3P",
+        order=0,
+        bit_count=64,
+        identifier_mask=0,
+        identifier_values=(0,),
+        fields=(_field("OP", _bit_range(16, 7)),),
+    )
+
+    with pytest.raises(ValueError, match="cannot replace missing fields: UNKNOWN"):
+        _replace_encoding_fields(encoding, (_field("UNKNOWN", _bit_range(16, 8)),))

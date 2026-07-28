@@ -69,6 +69,52 @@ def test_rdna3_integer_wmma_layout_matches_instruction_coordinates(
                 )
 
 
+def test_gfx125x_selector_layouts_cover_every_physical_operand_abi() -> None:
+    physical_formats = (
+        ("f8", 16, 8),
+        ("f6", 12, 6),
+        ("f4", 8, 4),
+    )
+
+    for lhs_token, lhs_register_count, lhs_element_bit_count in physical_formats:
+        for rhs_token, rhs_register_count, rhs_element_bit_count in physical_formats:
+            layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY[
+                f"gfx125x_wmma_f32_16x16x128_{lhs_token}_{rhs_token}"
+            ]
+            assert layout.tile_shape == (1, 16, 16, 128)
+            assert (
+                layout.lhs.payload_element_count,
+                layout.lhs.register_count,
+                layout.lhs.element_bit_count,
+            ) == (64, lhs_register_count, lhs_element_bit_count)
+            assert (
+                layout.rhs.payload_element_count,
+                layout.rhs.register_count,
+                layout.rhs.element_bit_count,
+            ) == (64, rhs_register_count, rhs_element_bit_count)
+            assert (
+                layout.result.payload_element_count,
+                layout.result.register_count,
+                layout.result.element_bit_count,
+            ) == (8, 8, 32)
+
+            for lane in (0, 15, 16, 31):
+                for element in (0, 5, 63):
+                    reduction = 64 * (lane // 16) + element
+                    assert role_coordinate(layout, layout.lhs, lane, element) == (
+                        None,
+                        lane % 16,
+                        None,
+                        reduction,
+                    )
+                    assert role_coordinate(layout, layout.rhs, lane, element) == (
+                        None,
+                        None,
+                        lane % 16,
+                        reduction,
+                    )
+
+
 def test_validation_rejects_missing_and_extraneous_role_axes() -> None:
     layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["rdna3_wmmar3_f32_16x16x16_f16"]
     result_axes = layout.result.axes
@@ -168,15 +214,15 @@ def test_validation_rejects_non_power_of_two_lane_factor() -> None:
         validate_matrix_fragment_layout(malformed)
 
 
-def test_validation_rejects_fractional_payload_register_elements() -> None:
+def test_validation_accepts_elements_that_straddle_payload_registers() -> None:
     layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["cdna_mfma_f32_16x16x16_f16"]
-    malformed = replace(
+    bitstream = replace(
         layout,
         result=replace(layout.result, element_bit_count=24),
     )
 
-    with pytest.raises(ValueError, match="cannot be split into 32-bit"):
-        validate_matrix_fragment_layout(malformed)
+    validate_matrix_fragment_layout(bitstream)
+    assert bitstream.result.register_count == 3
 
 
 def test_validation_rejects_unaddressable_coordinate_element_mapping() -> None:
