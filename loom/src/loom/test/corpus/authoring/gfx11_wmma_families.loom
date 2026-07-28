@@ -4,8 +4,8 @@
 // multiply signed -1 by unsigned 2, making their expected -32 result depend on
 // both the packed element width and the WMMA signedness selectors.
 
-amdgpu.target<gfx1151> @gfx11_wave32 {subgroup_size = 32}
-amdgpu.target<gfx1151> @gfx11_wave64 {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @gfx11_wave32 {subgroup_size = 32}
+amdgpu.target<gfx11-generic> @gfx11_wave64 {subgroup_size = 64}
 
 kernel.def target(@gfx11_wave32) @gfx11_wmma_families_wave32() {
   %unit = index.constant 1 : index
@@ -131,47 +131,38 @@ kernel.def target(@gfx11_wave64) @gfx11_wmma_families_wave64() {
   kernel.return
 }
 
-check.case public @gfx11_wmma_families_wave32_case {
-  %f32_f16_output = check.generate.fill value(0.0) : tensor<16x16xf32>
-  %f32_bf16_output = check.generate.fill value(0.0) : tensor<16x16xf32>
-  %f16_output = check.generate.fill value(0.0) : tensor<16x16xf16>
-  %bf16_output = check.generate.fill value(0.0) : tensor<16x16xbf16>
-  %i8_output = check.generate.fill value(0) : tensor<16x16xi32>
-  %i4_output = check.generate.fill value(0) : tensor<16x16xi32>
+check.case public @gfx11_wmma_families_case {
+  %wave32_f32_f16_output = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %wave32_f32_bf16_output = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %wave32_f16_output = check.generate.fill value(0.0) : tensor<16x16xf16>
+  %wave32_bf16_output = check.generate.fill value(0.0) : tensor<16x16xbf16>
+  %wave32_i8_output = check.generate.fill value(0) : tensor<16x16xi32>
+  %wave32_i4_output = check.generate.fill value(0) : tensor<16x16xi32>
+  %wave64_f32_f16_output = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %wave64_f32_bf16_output = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %wave64_f16_output = check.generate.fill value(0.0) : tensor<16x16xf16>
+  %wave64_bf16_output = check.generate.fill value(0.0) : tensor<16x16xbf16>
+  %wave64_i8_output = check.generate.fill value(0) : tensor<16x16xi32>
+  %wave64_i4_output = check.generate.fill value(0) : tensor<16x16xi32>
   %f32_expected = check.generate.fill value(16.0) : tensor<16x16xf32>
   %f16_expected = check.generate.fill value(16.0) : tensor<16x16xf16>
   %bf16_expected = check.generate.fill value(16.0) : tensor<16x16xbf16>
   %integer_expected = check.generate.fill value(-32) : tensor<16x16xi32>
-  func.call @gfx11_wmma_families_wave32(%f32_f16_output, %f32_bf16_output, %f16_output, %bf16_output, %i8_output, %i4_output) : (tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf16>, tensor<16x16xbf16>, tensor<16x16xi32>, tensor<16x16xi32>)
-  check.expect.equal actual(%f32_f16_output) expected(%f32_expected) : tensor<16x16xf32>
-  check.expect.equal actual(%f32_bf16_output) expected(%f32_expected) : tensor<16x16xf32>
-  check.expect.equal actual(%f16_output) expected(%f16_expected) : tensor<16x16xf16>
-  check.expect.equal actual(%bf16_output) expected(%bf16_expected) : tensor<16x16xbf16>
-  check.expect.equal actual(%i8_output) expected(%integer_expected) : tensor<16x16xi32>
-  check.expect.equal actual(%i4_output) expected(%integer_expected) : tensor<16x16xi32>
+  func.call @gfx11_wmma_families_wave32(%wave32_f32_f16_output, %wave32_f32_bf16_output, %wave32_f16_output, %wave32_bf16_output, %wave32_i8_output, %wave32_i4_output) : (tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf16>, tensor<16x16xbf16>, tensor<16x16xi32>, tensor<16x16xi32>)
+  func.call @gfx11_wmma_families_wave64(%wave64_f32_f16_output, %wave64_f32_bf16_output, %wave64_f16_output, %wave64_bf16_output, %wave64_i8_output, %wave64_i4_output) : (tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf16>, tensor<16x16xbf16>, tensor<16x16xi32>, tensor<16x16xi32>)
+  check.expect.equal actual(%wave32_f32_f16_output) expected(%f32_expected) : tensor<16x16xf32>
+  check.expect.equal actual(%wave32_f32_bf16_output) expected(%f32_expected) : tensor<16x16xf32>
+  check.expect.equal actual(%wave32_f16_output) expected(%f16_expected) : tensor<16x16xf16>
+  check.expect.equal actual(%wave32_bf16_output) expected(%bf16_expected) : tensor<16x16xbf16>
+  check.expect.equal actual(%wave32_i8_output) expected(%integer_expected) : tensor<16x16xi32>
+  check.expect.equal actual(%wave32_i4_output) expected(%integer_expected) : tensor<16x16xi32>
+  check.expect.equal actual(%wave64_f32_f16_output) expected(%f32_expected) : tensor<16x16xf32>
+  check.expect.equal actual(%wave64_f32_bf16_output) expected(%f32_expected) : tensor<16x16xf32>
+  check.expect.equal actual(%wave64_f16_output) expected(%f16_expected) : tensor<16x16xf16>
+  check.expect.equal actual(%wave64_bf16_output) expected(%bf16_expected) : tensor<16x16xbf16>
+  check.expect.equal actual(%wave64_i8_output) expected(%integer_expected) : tensor<16x16xi32>
+  check.expect.equal actual(%wave64_i4_output) expected(%integer_expected) : tensor<16x16xi32>
   check.return
 }
 
-check.case public @gfx11_wmma_families_wave64_case {
-  %f32_f16_output = check.generate.fill value(0.0) : tensor<16x16xf32>
-  %f32_bf16_output = check.generate.fill value(0.0) : tensor<16x16xf32>
-  %f16_output = check.generate.fill value(0.0) : tensor<16x16xf16>
-  %bf16_output = check.generate.fill value(0.0) : tensor<16x16xbf16>
-  %i8_output = check.generate.fill value(0) : tensor<16x16xi32>
-  %i4_output = check.generate.fill value(0) : tensor<16x16xi32>
-  %f32_expected = check.generate.fill value(16.0) : tensor<16x16xf32>
-  %f16_expected = check.generate.fill value(16.0) : tensor<16x16xf16>
-  %bf16_expected = check.generate.fill value(16.0) : tensor<16x16xbf16>
-  %integer_expected = check.generate.fill value(-32) : tensor<16x16xi32>
-  func.call @gfx11_wmma_families_wave64(%f32_f16_output, %f32_bf16_output, %f16_output, %bf16_output, %i8_output, %i4_output) : (tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf16>, tensor<16x16xbf16>, tensor<16x16xi32>, tensor<16x16xi32>)
-  check.expect.equal actual(%f32_f16_output) expected(%f32_expected) : tensor<16x16xf32>
-  check.expect.equal actual(%f32_bf16_output) expected(%f32_expected) : tensor<16x16xf32>
-  check.expect.equal actual(%f16_output) expected(%f16_expected) : tensor<16x16xf16>
-  check.expect.equal actual(%bf16_output) expected(%bf16_expected) : tensor<16x16xbf16>
-  check.expect.equal actual(%i8_output) expected(%integer_expected) : tensor<16x16xi32>
-  check.expect.equal actual(%i4_output) expected(%integer_expected) : tensor<16x16xi32>
-  check.return
-}
-
-check.benchmark<@gfx11_wmma_families_wave32_case>
-check.benchmark<@gfx11_wmma_families_wave64_case>
+check.benchmark<@gfx11_wmma_families_case>

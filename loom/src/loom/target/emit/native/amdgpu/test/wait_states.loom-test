@@ -67,9 +67,9 @@ amdgpu.wait_state_plan states=0 progress=3 hazards=0
 
 // RUN: emit amdgpu-wait-state-plan @gfx11_wmma_dependency_delay_alu strategy=source
 
-amdgpu.target<gfx1100> @gfx11_target
+amdgpu.target<gfx11-generic> @gfx11_target
 
-low.func.def target(@gfx11_target) @gfx11_wmma_dependency_delay_alu(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@gfx11_target) @gfx11_wmma_dependency_delay_alu(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
   %first = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %acc
   %second = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %first
   %lane = slice %second[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
@@ -86,9 +86,9 @@ state[1] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n3/o3 produ
 
 // RUN: emit amdgpu-assembly @gfx11_wmma_dependency_delay_alu strategy=source
 
-amdgpu.target<gfx1100> @gfx11_target
+amdgpu.target<gfx11-generic> @gfx11_target
 
-low.func.def target(@gfx11_target) @gfx11_wmma_dependency_delay_alu(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target(@gfx11_target) @gfx11_wmma_dependency_delay_alu(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
   %first = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %acc
   %second = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %first
   %lane = slice %second[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
