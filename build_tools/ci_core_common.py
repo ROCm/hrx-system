@@ -49,7 +49,7 @@ ARTIFACT_SETS = {
     "core-with-upstream-hip": {
         "sysdeps": ["lib", "run", "dev"],
         "base": ["lib", "run", "dev"],
-        "amd-llvm": ["lib", "run"],
+        "amd-llvm": ["lib", "run", "dev"],
         "core-runtime": ["lib", "run", "dev"],
         "core-amdsmi": ["lib", "run", "dev"],
         "aqlprofile": ["lib", "run", "dev"],

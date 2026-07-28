@@ -99,6 +99,15 @@ class CiCoreLinuxTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Unsafe S3 key"):
             ci_core_linux.s3_cache_path(Path("/tmp/cache"), "bucket", "../evil")
 
+    def test_upstream_hip_artifact_set_includes_llvm_development_files(self):
+        self.assertIn(
+            "amd-llvm_dev_generic",
+            ci_core_linux.common.wanted_artifacts(
+                "core-with-upstream-hip",
+                artifact_sets=ci_core_linux.ARTIFACT_SETS,
+            ),
+        )
+
     def test_validate_rocm_artifact_variant_rejects_mismatch(self):
         bucket = "therock-nightly-artifacts"
         prefix = "123-linux/"
