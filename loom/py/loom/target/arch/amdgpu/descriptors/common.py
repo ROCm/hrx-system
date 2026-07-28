@@ -415,20 +415,75 @@ def _amdgpu_core_descriptor_set(
     )
 
 
-def _amdgpu_core_descriptor_set_view(
+def _amdgpu_core_descriptor_set_intersection(
     *,
     key: str,
-    storage: DescriptorSet,
+    members: Sequence[DescriptorSet],
 ) -> DescriptorSet:
+    if not members:
+        raise ValueError(f"AMDGPU generic descriptor set '{key}' has no members")
+
+    def named_intersection(
+        attribute: str,
+        *,
+        key_attribute: str,
+    ) -> tuple[object, ...]:
+        member_values = tuple(getattr(member, attribute) for member in members)
+        member_maps = []
+        for member, values in zip(members, member_values, strict=True):
+            values_by_key = {getattr(value, key_attribute): value for value in values}
+            if len(values_by_key) != len(values):
+                raise ValueError(
+                    f"AMDGPU descriptor set '{member.key}' has duplicate "
+                    f"{attribute} keys"
+                )
+            member_maps.append(values_by_key)
+        return tuple(
+            value
+            for value in member_values[0]
+            if all(
+                member_map.get(getattr(value, key_attribute)) == value
+                for member_map in member_maps[1:]
+            )
+        )
+
+    member_reg_classes = tuple(
+        {reg_class.name: reg_class for reg_class in member.reg_classes}
+        for member in members
+    )
+    reg_classes = []
+    for reg_class in members[0].reg_classes:
+        member_rows = tuple(
+            member_map.get(reg_class.name) for member_map in member_reg_classes
+        )
+        if any(member_row is None for member_row in member_rows):
+            continue
+        allocatable_count = min(
+            member_row.allocatable_count
+            for member_row in member_rows
+            if member_row is not None
+        )
+        portable_row = replace(reg_class, allocatable_count=allocatable_count)
+        if any(
+            replace(member_row, allocatable_count=allocatable_count) != portable_row
+            for member_row in member_rows
+            if member_row is not None
+        ):
+            raise ValueError(
+                f"AMDGPU generic descriptor set '{key}' register class "
+                f"'{reg_class.name}' differs beyond allocatable count"
+            )
+        reg_classes.append(portable_row)
+
     return _amdgpu_core_descriptor_set(
         key=key,
-        reg_classes=storage.reg_classes,
-        register_parts=storage.register_parts,
-        enum_domains=storage.enum_domains,
-        resources=storage.resources,
-        schedule_classes=storage.schedule_classes,
-        descriptors=storage.descriptors,
-        categories=storage.categories,
+        reg_classes=tuple(reg_classes),
+        register_parts=named_intersection("register_parts", key_attribute="name"),
+        enum_domains=named_intersection("enum_domains", key_attribute="name"),
+        resources=named_intersection("resources", key_attribute="name"),
+        schedule_classes=named_intersection("schedule_classes", key_attribute="name"),
+        descriptors=named_intersection("descriptors", key_attribute="key"),
+        categories=named_intersection("categories", key_attribute="key"),
     )
 
 
@@ -3219,7 +3274,7 @@ __all__ = (
     "_WORKGROUP_BARRIER_EFFECT",
     "_amdgpu_camel_case",
     "_amdgpu_core_descriptor_set",
-    "_amdgpu_core_descriptor_set_view",
+    "_amdgpu_core_descriptor_set_intersection",
     "_amdgpu_descriptor_set_file_stem",
     "_amdgpu_schedule_class_reads_exec_state",
     "_amdgpu_trans_schedule_class_name",

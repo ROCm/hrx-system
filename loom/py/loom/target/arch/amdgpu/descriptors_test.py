@@ -20,6 +20,13 @@ from loom.target.arch.amdgpu.descriptors import (
     _ADDRESS_OFFSET_DWORD_ENCODING_ID,
     _ADDRESS_OFFSET_DWORD_STRIDE64_ENCODING_ID,
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS,
+    _AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_TRANS_DESCRIPTOR_KEYS,
     _AMDGPU_TRANS_PROXY_LATENCY_CYCLES,
     _COUNTER_ASYNC,
@@ -75,11 +82,15 @@ from loom.target.arch.amdgpu.descriptors import (
     AmdgpuMemoryAddressForm,
     _amdgpu_core_descriptor_set,
     _amdgpu_core_descriptor_set_bases,
+    _amdgpu_core_descriptor_set_intersection,
     _amdgpu_trans_schedule_class_name,
     _amdgpu_trans_schedule_classes,
     _categorize_amdgpu_descriptors,
     _gfx11_core_overlays,
+    _gfx11_generic_core_overlays,
+    _gfx12_5_generic_core_overlays,
     _gfx12_core_overlays,
+    _gfx12_generic_core_overlays,
     _gfx117x_core_overlays,
     _gfx125x_reg_classes,
     _gfx940_core_overlays,
@@ -154,6 +165,42 @@ from loom.target.low_descriptors import (
     ScheduleClassFlag,
     SpillSlotSpace,
 )
+
+
+def test_generic_descriptor_contracts_are_member_intersections() -> None:
+    base_cases = (
+        (
+            _AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+            (
+                _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
+                _AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE,
+            ),
+        ),
+        (
+            _AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+            (_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE,),
+        ),
+        (
+            _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+            (_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,),
+        ),
+    )
+    for generic, members in base_cases:
+        assert generic == _amdgpu_core_descriptor_set_intersection(
+            key=generic.key,
+            members=members,
+        )
+
+    gfx117x_overlays = {
+        overlay.descriptor_key: overlay for overlay in _gfx117x_core_overlays()
+    }
+    assert _gfx11_generic_core_overlays() == tuple(
+        overlay
+        for overlay in _gfx11_core_overlays()
+        if gfx117x_overlays.get(overlay.descriptor_key) == overlay
+    )
+    assert _gfx12_generic_core_overlays() == _gfx12_core_overlays()
+    assert _gfx12_5_generic_core_overlays() == _gfx1250_core_overlays()
 
 
 def _descriptor_set(*descriptors: Descriptor) -> DescriptorSet:

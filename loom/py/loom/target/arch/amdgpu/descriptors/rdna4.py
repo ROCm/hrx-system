@@ -640,14 +640,18 @@ _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     ),
 )
 
-_AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set_view(
-    key="amdgpu.gfx12.generic.core",
-    storage=_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE,
+_AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE = (
+    _amdgpu_core_descriptor_set_intersection(
+        key="amdgpu.gfx12.generic.core",
+        members=(_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE,),
+    )
 )
 
-_AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set_view(
-    key="amdgpu.gfx12_5.generic.core",
-    storage=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,
+_AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE = (
+    _amdgpu_core_descriptor_set_intersection(
+        key="amdgpu.gfx12_5.generic.core",
+        members=(_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,),
+    )
 )
 
 

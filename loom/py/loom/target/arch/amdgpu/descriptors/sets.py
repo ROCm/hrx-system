@@ -113,6 +113,26 @@ _CDNA_S_BUFFER_LOAD_WIDTH_OVERLAY_ROWS = (
 )
 
 
+def _amdgpu_descriptor_overlay_intersection(
+    *members: tuple[AmdgpuDescriptorOverlay, ...],
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    if not members:
+        raise ValueError("AMDGPU generic descriptor overlay set has no members")
+    member_maps = []
+    for rows in members:
+        rows_by_key = {row.descriptor_key: row for row in rows}
+        if len(rows_by_key) != len(rows):
+            raise ValueError("AMDGPU descriptor overlay set has duplicate keys")
+        member_maps.append(rows_by_key)
+    return tuple(
+        row
+        for row in members[0]
+        if all(
+            member_map.get(row.descriptor_key) == row for member_map in member_maps[1:]
+        )
+    )
+
+
 def _rdna4_vbuffer_dword_width_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     overlays: list[AmdgpuDescriptorOverlay] = []
     for base_overlay, vaddr_offset_overlay in _RDNA4_VBUFFER_DWORD_WIDTH_OVERLAY_ROWS:
@@ -1393,6 +1413,21 @@ def _gfx117x_core_overlay_descriptors(
     )
 
 
+def _gfx11_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return _amdgpu_descriptor_overlay_intersection(
+        _gfx11_core_overlays(),
+        _gfx117x_core_overlays(),
+    )
+
+
+def _gfx11_generic_core_overlay_descriptors(
+    spec: AmdgpuIsaFactSource,
+) -> tuple[Descriptor, ...]:
+    return _with_execution_mask_state_reads(
+        materialize_amdgpu_descriptor_overlays(spec, _gfx11_generic_core_overlays())
+    )
+
+
 def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         _s_add_u32_overlay(),
@@ -1800,6 +1835,18 @@ def _gfx12_core_overlay_descriptors(
     )
 
 
+def _gfx12_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return _amdgpu_descriptor_overlay_intersection(_gfx12_core_overlays())
+
+
+def _gfx12_generic_core_overlay_descriptors(
+    spec: AmdgpuIsaFactSource,
+) -> tuple[Descriptor, ...]:
+    return _with_execution_mask_state_reads(
+        materialize_amdgpu_descriptor_overlays(spec, _gfx12_generic_core_overlays())
+    )
+
+
 def _gfx1250_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *_rdna4_core_overlays(),
@@ -2128,6 +2175,20 @@ def _gfx1250_core_overlay_descriptors(
     )
 
 
+def _gfx12_5_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return _amdgpu_descriptor_overlay_intersection(_gfx1250_core_overlays())
+
+
+def _gfx12_5_generic_core_overlay_descriptors(
+    spec: AmdgpuIsaFactSource,
+) -> tuple[Descriptor, ...]:
+    spec = _gfx1250_spec_with_supplemental_encoding_facts(spec)
+    spec = _gfx1250_spec_with_supplemental_instruction_facts(spec)
+    return _with_execution_mask_state_reads(
+        materialize_amdgpu_descriptor_overlays(spec, _gfx12_5_generic_core_overlays())
+    )
+
+
 def _amdgpu_core_descriptor_set_bases() -> tuple[DescriptorSet, ...]:
     return (
         _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
@@ -2176,12 +2237,18 @@ __all__ = (
     "_gfx125x_reg_classes",
     "_gfx11_core_overlay_descriptors",
     "_gfx11_core_overlays",
+    "_gfx11_generic_core_overlay_descriptors",
+    "_gfx11_generic_core_overlays",
     "_gfx117x_core_overlay_descriptors",
     "_gfx117x_core_overlays",
+    "_gfx12_5_generic_core_overlay_descriptors",
+    "_gfx12_5_generic_core_overlays",
     "_gfx1250_core_overlay_descriptors",
     "_gfx1250_core_overlays",
     "_gfx12_core_overlay_descriptors",
     "_gfx12_core_overlays",
+    "_gfx12_generic_core_overlay_descriptors",
+    "_gfx12_generic_core_overlays",
     "_gfx940_core_overlay_descriptors",
     "_gfx940_core_overlays",
     "_gfx950_core_overlay_descriptors",
