@@ -16,7 +16,7 @@ def _test_execution_test_suite_applies_resource_group_tags(name, **kwargs):
         name = name + "_subject",
         manifests = ["//build_tools/testing/test:smoke.test.json"],
         resource_group = "gpu",
-        tags = ["requires-gpu-amd", "manual"],
+        tags = ["manual", "user-supplied-tag"],
         tools = {
             "fixture": "//build_tools/testing/test:fixture_tool",
         },
@@ -34,9 +34,9 @@ def _test_execution_test_suite_applies_resource_group_tags(name, **kwargs):
 def _test_execution_test_suite_applies_resource_group_tags_impl(env, target):
     tags = target[TestingAspectInfo].attrs.tags
     for expected_tag in [
-        "requires-gpu-amd",
         "exclusive-if-local",
         "resource_group:gpu",
+        "user-supplied-tag",
     ]:
         if expected_tag not in tags:
             env.fail("expected %r in test tags %r" % (expected_tag, tags))
