@@ -73,7 +73,7 @@ static iree_status_t CreateAmdgpuExecutableDeviceSpec(
       },
       {
           /*.family=*/IREE_SV("amdgpu"),
-          /*.target_key=*/IREE_SV("gfx1100"),
+          /*.target_key=*/IREE_SV("gfx1151"),
           /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
           /*.priority=*/100,
           /*.physical_device_affinity=*/1,
@@ -250,10 +250,10 @@ TEST_F(AmdgpuHalArtifactProviderTest,
 
   ASSERT_NE(target.data, nullptr);
   EXPECT_NE(target.target_bundle, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(target.target_key, IREE_SV("gfx1100")));
+  EXPECT_TRUE(iree_string_view_equal(target.target_key, IREE_SV("gfx1151")));
   const loom_amdgpu_processor_info_t* processor =
       static_cast<const loom_amdgpu_processor_info_t*>(target.data);
-  EXPECT_TRUE(iree_string_view_equal(processor->name, IREE_SV("gfx1100")));
+  EXPECT_TRUE(iree_string_view_equal(processor->name, IREE_SV("gfx1151")));
 
   iree_hal_device_spec_release(device_spec);
 }

@@ -45,6 +45,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION,
     AMDGPU_DESCRIPTOR_SET_INFO_KNOWN_FLAGS,
     AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE,
+    AMDGPU_ELF_GENERIC_VERSION_MASK_V6,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ACCUM_OFFSET,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_DX10_CLAMP_AND_IEEE_MODE,
@@ -666,6 +667,13 @@ def _validate_processors(
             raise ValueError(f"AMDGPU ELF feature flags for {info.processor} must fit u32")
         if info.elf.feature_flags & 0x0FF:
             raise ValueError(f"AMDGPU ELF feature flags for {info.processor} must not overlap EF_AMDGPU_MACH")
+        if info.elf.feature_flags & AMDGPU_ELF_GENERIC_VERSION_MASK_V6:
+            raise ValueError(f"AMDGPU ELF feature flags for {info.processor} must not overlap the generic version")
+        if info.elf.generic_version < 0 or info.elf.generic_version > 0xFF:
+            raise ValueError(f"AMDGPU ELF generic version for {info.processor} must fit u8")
+        is_generic_processor = info.processor.endswith("-generic")
+        if is_generic_processor != (info.elf.generic_version != 0):
+            raise ValueError(f"AMDGPU processor {info.processor} generic identity and ELF generic version disagree")
         if info.flags < 0 or info.flags > 0xFFFFFFFF:
             raise ValueError(f"AMDGPU processor info flags for {info.processor} must fit u32")
         _processor_info_flags_expr(info.flags)
@@ -827,6 +835,7 @@ def _emit_processor_rows(processors: Sequence[AmdgpuProcessorInfo]) -> list[str]
                 "    .elf = {",
                 f"      .machine_flags = UINT32_C(0x{info.elf.machine_flags:03x}),",
                 f"      .feature_flags = UINT32_C(0x{info.elf.feature_flags:x}),",
+                f"      .generic_version = UINT32_C({info.elf.generic_version}),",
                 "    },",
                 "    .wavefront = {",
                 f"      .default_size = {info.wavefront.default_size},",

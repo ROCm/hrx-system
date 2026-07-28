@@ -292,6 +292,8 @@ iree_status_t loom_amdgpu_target_info_amdhsa_target_id_elf_flags(
       target_id->xnack, LOOM_AMDGPU_ELF_FEATURE_XNACK_MASK_V4,
       LOOM_AMDGPU_ELF_FEATURE_XNACK_OFF_V4, LOOM_AMDGPU_ELF_FEATURE_XNACK_ON_V4,
       &feature_flags);
-  *out_elf_flags = processor->elf.machine_flags | feature_flags;
+  *out_elf_flags = processor->elf.machine_flags | feature_flags |
+                   (processor->elf.generic_version
+                    << LOOM_AMDGPU_ELF_GENERIC_VERSION_OFFSET_V6);
   return iree_ok_status();
 }

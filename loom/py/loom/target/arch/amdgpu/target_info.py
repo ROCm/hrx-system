@@ -203,14 +203,7 @@ AMDGPU_ELF_FEATURE_SRAMECC_ANY_V4 = 0x400
 AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4 = (
     AMDGPU_ELF_FEATURE_XNACK_ANY_V4 | AMDGPU_ELF_FEATURE_SRAMECC_ANY_V4
 )
-AMDGPU_ELF_FEATURE_GENERIC_VERSION_OFFSET_V6 = 24
-
-
-def amdgpu_generic_code_object_elf_flags(processor: str) -> int:
-    return (
-        generic_code_object_current_version(processor)
-        << AMDGPU_ELF_FEATURE_GENERIC_VERSION_OFFSET_V6
-    )
+AMDGPU_ELF_GENERIC_VERSION_MASK_V6 = 0xFF000000
 
 
 def kernel_descriptor_profile_supports_wavefront_size(
@@ -274,6 +267,7 @@ class AmdgpuProcessorDescriptorSetInfo:
 class AmdgpuProcessorElfInfo:
     machine_flags: int
     feature_flags: int = 0
+    generic_version: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -593,6 +587,7 @@ def processor_info(
     elf_machine_flags: int,
     *,
     elf_feature_flags: int = 0,
+    elf_generic_version: int = 0,
     default_wavefront_size: int = 64,
     descriptor_set_key: str = "",
     kernel_descriptor: AmdgpuProcessorKernelDescriptorInfo = (
@@ -617,6 +612,7 @@ def processor_info(
         elf=AmdgpuProcessorElfInfo(
             machine_flags=elf_machine_flags,
             feature_flags=elf_feature_flags,
+            generic_version=elf_generic_version,
         ),
         wavefront=AmdgpuProcessorWavefrontInfo(default_size=default_wavefront_size),
         kernel_descriptor=kernel_descriptor,
@@ -636,6 +632,7 @@ def gfx9_10_processor_info(
     elf_machine_flags: int,
     *,
     elf_feature_flags: int = 0,
+    elf_generic_version: int = 0,
     default_wavefront_size: int = 64,
     matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_NONE,
     kernel_descriptor: AmdgpuProcessorKernelDescriptorInfo = (
@@ -646,6 +643,7 @@ def gfx9_10_processor_info(
         processor,
         elf_machine_flags,
         elf_feature_flags=elf_feature_flags,
+        elf_generic_version=elf_generic_version,
         default_wavefront_size=default_wavefront_size,
         matrix_feature_profile=matrix_feature_profile,
         kernel_descriptor=kernel_descriptor,
@@ -658,6 +656,7 @@ def rdna3_processor_info(
     elf_machine_flags: int,
     *,
     elf_feature_flags: int = 0,
+    elf_generic_version: int = 0,
     scheduling_bits: int = 0,
     occupancy: AmdgpuProcessorOccupancyInfo = AMDGPU_OCCUPANCY_RDNA_1024,
 ) -> AmdgpuProcessorInfo:
@@ -667,6 +666,7 @@ def rdna3_processor_info(
         flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
         descriptor_set_key="amdgpu.rdna3.core",
         elf_feature_flags=elf_feature_flags,
+        elf_generic_version=elf_generic_version,
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA3_GFX11,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
@@ -728,6 +728,7 @@ def rdna4_processor_info(
     elf_machine_flags: int,
     *,
     elf_feature_flags: int = 0,
+    elf_generic_version: int = 0,
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor=processor,
@@ -735,6 +736,7 @@ def rdna4_processor_info(
         descriptor_set_key="amdgpu.rdna4.core",
         elf_machine_flags=elf_machine_flags,
         elf_feature_flags=elf_feature_flags,
+        elf_generic_version=elf_generic_version,
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA4_GFX12,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
@@ -751,6 +753,7 @@ def gfx125x_processor_info(
     elf_machine_flags: int,
     *,
     elf_feature_flags: int = 0,
+    elf_generic_version: int = 0,
     processor_flags: int = 0,
 ) -> AmdgpuProcessorInfo:
     return processor_info(
@@ -759,6 +762,7 @@ def gfx125x_processor_info(
         descriptor_set_key="amdgpu.rdna4.gfx125x.core",
         elf_machine_flags=elf_machine_flags,
         elf_feature_flags=elf_feature_flags,
+        elf_generic_version=elf_generic_version,
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA4_GFX125,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
@@ -975,44 +979,44 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
     gfx9_10_processor_info(
         "gfx9-generic",
         0x051,
-        elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4
-        | amdgpu_generic_code_object_elf_flags("gfx9-generic"),
+        elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4,
+        elf_generic_version=generic_code_object_current_version("gfx9-generic"),
     ),
     gfx9_10_processor_info(
         "gfx10-1-generic",
         0x052,
-        elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4
-        | amdgpu_generic_code_object_elf_flags("gfx10-1-generic"),
+        elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4,
+        elf_generic_version=generic_code_object_current_version("gfx10-1-generic"),
         default_wavefront_size=32,
     ),
     gfx9_10_processor_info(
         "gfx10-3-generic",
         0x053,
-        elf_feature_flags=amdgpu_generic_code_object_elf_flags("gfx10-3-generic"),
+        elf_generic_version=generic_code_object_current_version("gfx10-3-generic"),
         default_wavefront_size=32,
     ),
     rdna3_processor_info(
         "gfx11-generic",
         0x054,
-        elf_feature_flags=amdgpu_generic_code_object_elf_flags("gfx11-generic"),
+        elf_generic_version=generic_code_object_current_version("gfx11-generic"),
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR,
     ),
     rdna4_processor_info(
         "gfx12-generic",
         0x059,
-        elf_feature_flags=amdgpu_generic_code_object_elf_flags("gfx12-generic"),
+        elf_generic_version=generic_code_object_current_version("gfx12-generic"),
     ),
     processor_info(
         "gfx9-4-generic",
         0x05F,
-        elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4
-        | amdgpu_generic_code_object_elf_flags("gfx9-4-generic"),
+        elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
+        elf_generic_version=generic_code_object_current_version("gfx9-4-generic"),
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES,
     ),
     gfx125x_processor_info(
         "gfx12-5-generic",
         0x05B,
-        elf_feature_flags=amdgpu_generic_code_object_elf_flags("gfx12-5-generic"),
+        elf_generic_version=generic_code_object_current_version("gfx12-5-generic"),
     ),
 )
 

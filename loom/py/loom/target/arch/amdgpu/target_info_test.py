@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from build_tools.amdgpu.target_map_data import AMDGPU_GENERIC_CODE_OBJECT_INFOS
 
 from loom.target.arch.amdgpu.target_info import (
-    AMDGPU_ELF_FEATURE_GENERIC_VERSION_OFFSET_V6,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
@@ -141,7 +140,6 @@ def test_generic_processor_elf_flags_use_canonical_code_object_versions() -> Non
     } == generic_processors
     for generic_info in AMDGPU_GENERIC_CODE_OBJECT_INFOS:
         assert (
-            processor_infos[generic_info.processor].elf.feature_flags
-            >> AMDGPU_ELF_FEATURE_GENERIC_VERSION_OFFSET_V6
+            processor_infos[generic_info.processor].elf.generic_version
             == generic_info.current_version
         )

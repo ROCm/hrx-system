@@ -603,6 +603,7 @@ loom_cc_test(
     ::metadata
     iree::base
     iree::base::internal::arena
+    iree::hal::executable::amdgpu::code_object_target
     iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main

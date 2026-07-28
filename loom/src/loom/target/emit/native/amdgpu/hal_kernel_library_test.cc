@@ -991,7 +991,9 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedSupportedProcessor) {
         << StringViewToString(processor->name);
     if (library.hsaco_data_length > 64u) {
       EXPECT_EQ(LoadLeU32(library.hsaco_data, 48),
-                processor->elf.machine_flags | processor->elf.feature_flags)
+                processor->elf.machine_flags | processor->elf.feature_flags |
+                    (processor->elf.generic_version
+                     << LOOM_AMDGPU_ELF_GENERIC_VERSION_OFFSET_V6))
           << StringViewToString(processor->name);
     }
     EXPECT_NE(iree_string_view_find(library.target_key, processor->name, 0),

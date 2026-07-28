@@ -64,6 +64,13 @@ typedef enum loom_amdgpu_elf_feature_flag_bits_e {
 // Bitset of AMDGPU ELF EF_AMDGPU_FEATURE_* values.
 typedef uint32_t loom_amdgpu_elf_feature_flags_t;
 
+enum {
+  // Bit offset of the generic code-object version in AMDHSA v6 e_flags.
+  LOOM_AMDGPU_ELF_GENERIC_VERSION_OFFSET_V6 = 24u,
+  // Mask selecting the generic code-object version in AMDHSA v6 e_flags.
+  LOOM_AMDGPU_ELF_GENERIC_VERSION_MASK_V6 = UINT32_C(0xff000000),
+};
+
 // Target feature selector parsed from an AMDHSA target-id suffix.
 typedef uint8_t loom_amdgpu_target_feature_selection_t;
 
@@ -288,6 +295,8 @@ typedef struct loom_amdgpu_processor_elf_info_t {
   uint32_t machine_flags;
   // ELF EF_AMDGPU_FEATURE_* bits implied by the selected target-id policy.
   uint32_t feature_flags;
+  // Generic code-object version, or 0 for an exact processor.
+  uint32_t generic_version;
 } loom_amdgpu_processor_elf_info_t;
 
 typedef struct loom_amdgpu_processor_wavefront_info_t {

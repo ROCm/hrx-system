@@ -101,6 +101,7 @@ def test_target_info_table_source_is_data_only() -> None:
     assert "\nif " not in source
     assert "\nreturn " not in source
     assert ".descriptor_set = {" in source
+    assert ".generic_version = UINT32_C(0)," in source
     assert ".kernel_descriptor = {" in source
 
 
@@ -282,4 +283,51 @@ def test_hsaco_emission_support_requires_kernel_descriptor_profile() -> None:
     )
 
     with _raises_value_error("HSACO emission support but no kernel descriptor profile"):
+        amdgpu_target_info._validate_processors((processor,), (_descriptor_set_info(),))
+
+
+def test_exact_processor_rejects_generic_elf_version() -> None:
+    processor = processor_info(
+        "gfx-test",
+        0x001,
+        elf_generic_version=1,
+        descriptor_set_key="amdgpu.test.core",
+    )
+
+    with _raises_value_error("AMDGPU processor gfx-test generic identity and ELF generic version disagree"):
+        amdgpu_target_info._validate_processors((processor,), (_descriptor_set_info(),))
+
+
+def test_elf_feature_flags_reject_packed_generic_version() -> None:
+    processor = processor_info(
+        "gfx-test",
+        0x001,
+        elf_feature_flags=0x01000000,
+        descriptor_set_key="amdgpu.test.core",
+    )
+
+    with _raises_value_error("AMDGPU ELF feature flags for gfx-test must not overlap the generic version"):
+        amdgpu_target_info._validate_processors((processor,), (_descriptor_set_info(),))
+
+
+def test_generic_processor_requires_elf_version() -> None:
+    processor = processor_info(
+        "gfx-test-generic",
+        0x001,
+        descriptor_set_key="amdgpu.test.core",
+    )
+
+    with _raises_value_error("AMDGPU processor gfx-test-generic generic identity and ELF generic version disagree"):
+        amdgpu_target_info._validate_processors((processor,), (_descriptor_set_info(),))
+
+
+def test_generic_processor_elf_version_must_fit_u8() -> None:
+    processor = processor_info(
+        "gfx-test-generic",
+        0x001,
+        elf_generic_version=0x100,
+        descriptor_set_key="amdgpu.test.core",
+    )
+
+    with _raises_value_error("AMDGPU ELF generic version for gfx-test-generic must fit u8"):
         amdgpu_target_info._validate_processors((processor,), (_descriptor_set_info(),))

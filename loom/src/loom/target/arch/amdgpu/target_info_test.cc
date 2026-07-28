@@ -385,7 +385,12 @@ TEST(AmdgpuTargetInfoTest, MatchesAmdhsaGfx9PlusProcessorElfFlags) {
         loom_amdgpu_target_info_lookup_processor(c.processor, &processor));
     ASSERT_NE(processor, nullptr);
     EXPECT_TRUE(iree_string_view_equal(processor->name, c.processor));
-    EXPECT_EQ(processor->elf.machine_flags | processor->elf.feature_flags,
+    EXPECT_EQ(
+        processor->elf.feature_flags & LOOM_AMDGPU_ELF_GENERIC_VERSION_MASK_V6,
+        0u);
+    EXPECT_EQ(processor->elf.machine_flags | processor->elf.feature_flags |
+                  (processor->elf.generic_version
+                   << LOOM_AMDGPU_ELF_GENERIC_VERSION_OFFSET_V6),
               c.elf_flags);
   }
 }
@@ -451,6 +456,16 @@ TEST(AmdgpuTargetInfoTest, EncodesAmdhsaTargetIdFeatureSuffixElfFlags) {
   EXPECT_EQ(elf_flags, target_id.processor->elf.machine_flags |
                            LOOM_AMDGPU_ELF_FEATURE_SRAMECC_ON_V4 |
                            LOOM_AMDGPU_ELF_FEATURE_XNACK_OFF_V4);
+}
+
+TEST(AmdgpuTargetInfoTest, EncodesGenericCodeObjectVersionElfFlags) {
+  loom_amdgpu_amdhsa_target_id_t target_id = {};
+  IREE_ASSERT_OK(loom_amdgpu_target_info_parse_amdhsa_target_id(
+      IREE_SV("amdgcn-amd-amdhsa--gfx11-generic"), &target_id));
+  uint32_t elf_flags = 0;
+  IREE_ASSERT_OK(loom_amdgpu_target_info_amdhsa_target_id_elf_flags(
+      &target_id, &elf_flags));
+  EXPECT_EQ(elf_flags, UINT32_C(0x01000054));
 }
 
 TEST(AmdgpuTargetInfoTest, RejectsUnknownProcessor) {
