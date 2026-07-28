@@ -11,7 +11,7 @@
 # Loom packages keep source-of-truth tables in Python and generate compact C
 # data into the build tree.
 
-function(_loom_generated_python_command_prefix OUTPUT_PREFIX GENERATOR)
+function(_loom_python_command_prefix OUTPUT_PREFIX GENERATOR)
   iree_py_library_collect_package_dirs(_GENERATOR_PACKAGE_DIRS "${GENERATOR}")
   list(APPEND _GENERATOR_PACKAGE_DIRS "$ENV{PYTHONPATH}")
   if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
@@ -54,7 +54,7 @@ function(loom_generated_textual_header)
 
   iree_py_library_main(_GENERATOR "${_RULE_GENERATOR}")
   iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
-  _loom_generated_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
+  _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
 
   add_custom_command(
     OUTPUT
@@ -178,7 +178,7 @@ function(loom_generated_cc_library)
 
   iree_py_library_main(_GENERATOR "${_RULE_GENERATOR}")
   iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
-  _loom_generated_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
+  _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
 
   add_custom_command(
     OUTPUT

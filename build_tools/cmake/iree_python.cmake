@@ -67,9 +67,14 @@ function(iree_py_library)
   set(_SOURCE_FILES)
   set(_SOURCE_TARGETS)
   foreach(_SRC_FILE ${_RULE_SRCS})
-    list(APPEND _SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/${_SRC_FILE}")
-    _iree_py_library_source_target(_SOURCE_TARGET "${_SRC_FILE}")
-    list(APPEND _SOURCE_TARGETS "${_SOURCE_TARGET}")
+    if(IS_ABSOLUTE "${_SRC_FILE}")
+      list(APPEND _SOURCE_FILES "${_SRC_FILE}")
+      list(APPEND _SOURCE_TARGETS "${_SRC_FILE}")
+    else()
+      list(APPEND _SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/${_SRC_FILE}")
+      _iree_py_library_source_target(_SOURCE_TARGET "${_SRC_FILE}")
+      list(APPEND _SOURCE_TARGETS "${_SOURCE_TARGET}")
+    endif()
   endforeach()
 
   set(_IMPORT_DIRS)
@@ -95,8 +100,13 @@ function(iree_py_library)
     IREE_PY_DEPS "${_RULE_DEPS}"
   )
   if(_RULE_MAIN)
+    if(IS_ABSOLUTE "${_RULE_MAIN}")
+      set(_MAIN "${_RULE_MAIN}")
+    else()
+      set(_MAIN "${CMAKE_CURRENT_SOURCE_DIR}/${_RULE_MAIN}")
+    endif()
     set_target_properties(${_NAME} PROPERTIES
-      IREE_PY_MAIN "${CMAKE_CURRENT_SOURCE_DIR}/${_RULE_MAIN}"
+      IREE_PY_MAIN "${_MAIN}"
     )
   endif()
 

@@ -143,6 +143,7 @@ function(loom_target_table_cc_library)
 
   iree_py_library_main(_GENERATOR "${_RULE_GENERATOR}")
   iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
+  _loom_python_command_prefix(_PYTHON_COMMAND_PREFIX "${_RULE_GENERATOR}")
 
   add_custom_command(
     OUTPUT
@@ -150,6 +151,7 @@ function(loom_target_table_cc_library)
       "${_HEADER}"
       ${_GENERATED_HDRS}
     COMMAND
+      ${_PYTHON_COMMAND_PREFIX}
       "${Python3_EXECUTABLE}"
       "${_GENERATOR}"
       ${_RULE_ARGS}
