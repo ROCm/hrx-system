@@ -216,6 +216,19 @@ class _MatrixDescriptorCatalog:
     immediates_by_key: Mapping[str, tuple[Immediate, ...]]
 
 
+@dataclass(frozen=True, slots=True)
+class _MatrixSourceContractSignature:
+    block_count: int
+    tile_shape: tuple[int, int, int]
+    lhs: AmdgpuMatrixPayload
+    rhs: AmdgpuMatrixPayload
+    accumulator: AmdgpuMatrixPayload
+    result: AmdgpuMatrixPayload
+    scale_kind: str
+    flags: frozenset[str]
+    implicit_scale_formats: frozenset[str]
+
+
 def _c_identifier(value: str) -> str:
     identifier = re.sub(r"[^0-9A-Za-z_]", "_", value).strip("_")
     if not identifier:
@@ -594,6 +607,52 @@ def _validate_matrix_feature_profiles() -> None:
         raise ValueError(f"AMDGPU matrix feature bit(s) have no profile: {unassigned_text}")
 
 
+def _matrix_source_contract_signature(
+    contract: AmdgpuMatrixContract,
+) -> _MatrixSourceContractSignature:
+    return _MatrixSourceContractSignature(
+        block_count=contract.block_count,
+        tile_shape=contract.tile_shape,
+        lhs=contract.lhs,
+        rhs=contract.rhs,
+        accumulator=contract.accumulator,
+        result=contract.result,
+        scale_kind=contract.scale_kind,
+        flags=frozenset(contract.flags),
+        implicit_scale_formats=frozenset(contract.implicit_scale_formats),
+    )
+
+
+def _matrix_contract_wave_sizes(contract: AmdgpuMatrixContract) -> frozenset[int]:
+    if contract.wave_size == "any":
+        return frozenset((32, 64))
+    if contract.wave_size in ("32", "64"):
+        return frozenset((int(contract.wave_size),))
+    raise ValueError(f"AMDGPU matrix contract '{contract.name}' has unknown wave size '{contract.wave_size}'")
+
+
+def _validate_matrix_source_contracts(
+    contracts: Sequence[AmdgpuMatrixContract] = AMDGPU_MATRIX_CONTRACTS,
+) -> None:
+    for profile, profile_features in AMDGPU_MATRIX_FEATURES_BY_PROFILE.items():
+        feature_set = frozenset(profile_features)
+        contracts_by_signature: dict[_MatrixSourceContractSignature, list[AmdgpuMatrixContract]] = {}
+        for contract in contracts:
+            if not feature_set.issuperset(contract.features):
+                continue
+            signature = _matrix_source_contract_signature(contract)
+            contracts_by_signature.setdefault(signature, []).append(contract)
+        for signature_contracts in contracts_by_signature.values():
+            for index, contract in enumerate(signature_contracts):
+                contract_wave_sizes = _matrix_contract_wave_sizes(contract)
+                for other_contract in signature_contracts[index + 1 :]:
+                    overlapping_wave_sizes = contract_wave_sizes.intersection(_matrix_contract_wave_sizes(other_contract))
+                    if not overlapping_wave_sizes:
+                        continue
+                    wave_sizes = ", ".join(f"wave{wave_size}" for wave_size in sorted(overlapping_wave_sizes))
+                    raise ValueError(f"AMDGPU matrix feature profile '{profile}' exposes source-indistinguishable contracts '{contract.name}' and '{other_contract.name}' for {wave_sizes}")
+
+
 def _validate_matrix_profile_descriptor_catalog(
     *,
     descriptor_set_key: str,
@@ -631,6 +690,7 @@ def _validate_matrix_profile_descriptor_catalog(
 
 def _validate_matrix_profile_descriptor_sets(*, global_descriptor_keys: Sequence[str | None]) -> None:
     _validate_matrix_feature_profiles()
+    _validate_matrix_source_contracts()
     builders_by_descriptor_set_key = {builder.base.key: generator_target for generator_target, builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.items()}
     profiles_by_descriptor_set_key: dict[str, set[str]] = {}
     for processor_info in sorted_processor_infos():

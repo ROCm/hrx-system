@@ -2446,6 +2446,39 @@ TEST(MatrixContractTest, MatcherSelectsMatchingDescriptor) {
   EXPECT_EQ(diagnostic.wave_candidate_count, 1u);
 }
 
+TEST(MatrixContractTest, MatcherSelectsDefinedGfx1250SparseBf16Semantics) {
+  EXPECT_EQ(FindDescriptor("swmmac.bf16f32.16x16x64.bf16"), nullptr);
+
+  const loom_amdgpu_matrix_contract_flags_t source_flags =
+      LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SPARSE |
+      LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_AB_MODIFIERS |
+      LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_REUSE;
+  loom_amdgpu_matrix_contract_match_request_t request = MatchRequest(
+      LOOM_AMDGPU_MATRIX_FAMILY_UNKNOWN, 16, 16, 64,
+      LOOM_AMDGPU_MATRIX_NUMERIC_BF16, LOOM_AMDGPU_MATRIX_NUMERIC_BF16,
+      LOOM_AMDGPU_MATRIX_NUMERIC_F32, LOOM_AMDGPU_MATRIX_NUMERIC_F32,
+      LOOM_AMDGPU_MATRIX_SCALE_NONE, LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250,
+      32, source_flags, source_flags);
+  request.lhs_payload.register_count = 8;
+  request.lhs_payload.element_count = 16;
+  request.rhs_payload.register_count = 16;
+  request.rhs_payload.element_count = 32;
+  request.accumulator_payload.register_count = 8;
+  request.accumulator_payload.element_count = 8;
+  request.result_payload.register_count = 8;
+  request.result_payload.element_count = 8;
+
+  loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
+  const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
+      loom_amdgpu_matrix_contract_select(&request, &diagnostic);
+  ASSERT_NE(descriptor, nullptr);
+  EXPECT_EQ(ToString(descriptor->name), "swmmac.f32.16x16x64.bf16");
+  EXPECT_EQ(descriptor->low_descriptor_ref,
+            LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_F32_16X16X64_BF16);
+  EXPECT_EQ(diagnostic.rejection_bits,
+            LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_NONE);
+}
+
 TEST(MatrixContractTest, MatcherSelectsRdnaIntegerWmmaLowDescriptors) {
   const loom_amdgpu_matrix_contract_flags_t integer_wmma_flags =
       LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SIGN_SELECT |

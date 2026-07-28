@@ -22,6 +22,7 @@ from loom.target.arch.amdgpu.matrix_fragment_layouts import (
 )
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
 )
 from loom.target.low_descriptors import Immediate, ImmediateKind
 
@@ -274,6 +275,34 @@ def test_generation_rejects_invalid_block_count() -> None:
 
     with pytest.raises(ValueError, match="invalid tile shape"):
         _contract_initializer(contract)
+
+
+def test_generation_rejects_source_indistinguishable_contracts() -> None:
+    contract = _contract("swmmac.f32.16x16x64.bf16")
+    duplicate_contract = replace(
+        contract,
+        name="swmmac.unknown.16x16x64.bf16",
+        intrinsic_name="llvm.amdgcn.swmmac.unknown.16x16x64.bf16",
+        semantic_tag="matrix.swmmac.unknown.16x16x64.bf16",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(f"feature profile '{AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250}'.*'{contract.name}'.*'{duplicate_contract.name}'.*wave32"),
+    ):
+        amdgpu_matrix_contract_tables._validate_matrix_source_contracts((contract, duplicate_contract))
+
+
+def test_generation_accepts_source_contracts_with_disjoint_wave_sizes() -> None:
+    contract = _contract("swmmac.f32.16x16x64.bf16")
+    wave32_contract = replace(contract, wave_size="32")
+    wave64_contract = replace(
+        contract,
+        name="swmmac.unknown.16x16x64.bf16",
+        wave_size="64",
+    )
+
+    amdgpu_matrix_contract_tables._validate_matrix_source_contracts((wave32_contract, wave64_contract))
 
 
 def test_generation_audits_cdna_dense_mfma_16x16x32_f32_layout_surface() -> None:

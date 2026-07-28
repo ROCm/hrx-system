@@ -1230,19 +1230,11 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         scale_kind="none",
         source_requirements=("fragment_layout",),
     ),
-    AmdgpuMatrixContract(
-        name="swmmac.bf16f32.16x16x64.bf16",
-        family="swmmac",
-        features=("swmmac_gfx1250",),
-        flags=("sparse", "ab_modifiers", "reuse"),
-        tile_shape=(16, 16, 64),
-        lhs=payload("bf16", 8, 16),
-        rhs=payload("bf16", 16, 32),
-        accumulator=payload("f32", 8, 8),
-        result=payload("f32", 8, 8),
-        scale_kind="none",
-        source_requirements=("fragment_layout",),
-    ),
+    # LLVM exposes v_swmmac_bf16f32_16x16x64_bf16 with the same BF16 input
+    # and F32 accumulator/result signature as the ordinary F32 form above,
+    # while ROCDL assigns it a conflicting BF16 accumulator/result signature.
+    # Keep that instruction in the target-low descriptor inventory until an
+    # authoritative numerical contract can distinguish it at source level.
     AmdgpuMatrixContract(
         name="swmmac.i32.16x16x128.iu8",
         family="swmmac",
