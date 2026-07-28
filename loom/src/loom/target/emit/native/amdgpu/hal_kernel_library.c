@@ -70,10 +70,8 @@ typedef struct loom_amdgpu_hal_kernel_library_kernel_plan_t {
   loom_op_t* low_function_op;
   // ABI layout derived from prepared target-low IR.
   loom_amdgpu_hal_kernel_abi_layout_t abi_layout;
-  // Fixed allocator values derived from the HAL ABI live-ins.
-  const loom_low_allocation_fixed_value_t* fixed_values;
-  // Number of entries in |fixed_values|.
-  iree_host_size_t fixed_value_count;
+  // Verified ABI facts retained for allocation and native emission.
+  loom_amdgpu_hal_kernel_abi_verify_result_t abi_verify;
 } loom_amdgpu_hal_kernel_library_kernel_plan_t;
 
 static iree_string_view_t loom_amdgpu_hal_kernel_library_symbol_name(
@@ -548,7 +546,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_prepare_kernel_plan(
 static iree_status_t loom_amdgpu_hal_kernel_library_verify_kernel_abi(
     const loom_module_t* module,
     const loom_target_low_descriptor_registry_t* low_registry,
-    const loom_amdgpu_hal_kernel_library_kernel_plan_t* plan,
+    loom_amdgpu_hal_kernel_library_kernel_plan_t* plan,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     uint32_t max_errors, bool* out_failed,
     iree_arena_allocator_t* table_arena) {
@@ -557,15 +555,15 @@ static iree_status_t loom_amdgpu_hal_kernel_library_verify_kernel_abi(
   IREE_RETURN_IF_ERROR(loom_target_low_descriptor_set_select_for_bundle(
       &low_registry->registry, &plan->entry->bundle_storage.bundle,
       &descriptor_set));
-  loom_amdgpu_hal_kernel_abi_verify_result_t result = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
       module, plan->low_function_op, descriptor_set, max_errors,
-      loom_target_entry_emitter(diagnostic_emitter), &result, table_arena));
-  *out_failed = result.error_count != 0;
+      loom_target_entry_emitter(diagnostic_emitter), &plan->abi_verify,
+      table_arena));
+  *out_failed = plan->abi_verify.error_count != 0;
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_hal_kernel_library_compute_kernel_fixed_values(
+static iree_status_t loom_amdgpu_hal_kernel_library_prepare_kernel_abi_layout(
     const loom_module_t* module,
     loom_amdgpu_hal_kernel_library_kernel_plan_t* plan,
     iree_arena_allocator_t* table_arena) {
@@ -576,9 +574,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_compute_kernel_fixed_values(
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_layout_from_low(
         module, plan->low_function_op, &plan->abi_layout, table_arena));
   }
-  return loom_amdgpu_hal_kernel_abi_fixed_values_from_low(
-      module, plan->low_function_op, &plan->fixed_values,
-      &plan->fixed_value_count, table_arena);
+  return iree_ok_status();
 }
 
 typedef struct loom_amdgpu_hal_kernel_library_spill_lowering_context_t {
@@ -682,8 +678,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
       .schedule_structural_state_reads = schedule_state_reads,
       .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
       .memory_access_table = loom_low_memory_access_table_empty(),
-      .allocation_fixed_values = plan->fixed_values,
-      .allocation_fixed_value_count = plan->fixed_value_count,
+      .allocation_fixed_values = plan->abi_verify.fixed_values,
+      .allocation_fixed_value_count = plan->abi_verify.fixed_value_count,
       .storage_lease_provider = &storage_lease_provider,
       .emitter = loom_target_entry_emitter(diagnostic_emitter),
       .statistics = report != NULL ? &planning_statistics : NULL,
@@ -956,7 +952,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
   for (uint16_t i = 0;
        i < entries.count && iree_status_is_ok(status) && !diagnostics_failed;
        ++i) {
-    status = loom_amdgpu_hal_kernel_library_compute_kernel_fixed_values(
+    status = loom_amdgpu_hal_kernel_library_prepare_kernel_abi_layout(
         module, &plans[i], table_arena);
   }
 

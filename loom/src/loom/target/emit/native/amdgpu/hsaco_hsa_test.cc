@@ -804,10 +804,19 @@ class LowKernelEmitter {
         module_, low_function, &bundle_storage.bundle, descriptor_set,
         &materialization, arena));
 
-    const loom_low_allocation_fixed_value_t* fixed_values = nullptr;
-    iree_host_size_t fixed_value_count = 0;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_fixed_values_from_low(
-        module_, low_function, &fixed_values, &fixed_value_count, arena));
+    loom_amdgpu_hal_kernel_abi_verify_result_t abi_verify_result = {};
+    IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
+        module_, low_function, descriptor_set, /*max_errors=*/20,
+        iree_diagnostic_emitter_t{
+            /*.fn=*/PrintLowVerifyDiagnostic,
+            /*.user_data=*/nullptr,
+        },
+        &abi_verify_result, arena));
+    if (abi_verify_result.error_count != 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU HSA low kernel failed HAL ABI verification");
+    }
 
     loom_low_verify_options_t verify_options = {
         /*.descriptor_registry=*/&target_registry_.registry,
@@ -843,8 +852,8 @@ class LowKernelEmitter {
         /*.schedule_diagnostic_flags=*/{},
         /*.allocation_budgets=*/{},
         /*.allocation_budget_count=*/{},
-        /*.allocation_fixed_values=*/fixed_values,
-        /*.allocation_fixed_value_count=*/fixed_value_count,
+        /*.allocation_fixed_values=*/abi_verify_result.fixed_values,
+        /*.allocation_fixed_value_count=*/abi_verify_result.fixed_value_count,
         /*.allocation_reserved_ranges=*/{},
         /*.allocation_reserved_range_count=*/{},
         /*.storage_lease_provider=*/&storage_lease_provider,
