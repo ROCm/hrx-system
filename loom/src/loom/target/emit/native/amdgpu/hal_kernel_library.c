@@ -26,7 +26,6 @@
 #include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/target/ops.h"
-#include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/ops/ops.h"
@@ -90,99 +89,6 @@ static iree_string_view_t loom_amdgpu_hal_kernel_library_symbol_name(
   IREE_ASSERT(symbol->name_id != LOOM_STRING_ID_INVALID &&
               symbol->name_id < module->strings.count);
   return module->strings.entries[symbol->name_id];
-}
-
-static iree_status_t loom_amdgpu_hal_kernel_library_emit(
-    loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
-    const loom_op_t* op, const loom_error_def_t* error,
-    const loom_diagnostic_param_t* params, iree_host_size_t param_count) {
-  const loom_diagnostic_emission_t emission = {
-      .op = op,
-      .error = error,
-      .params = params,
-      .param_count = param_count,
-  };
-  return iree_diagnostic_emit(loom_target_entry_emitter(diagnostic_emitter),
-                              &emission);
-}
-
-static const loom_op_t* loom_amdgpu_hal_kernel_library_target_record_op(
-    const loom_target_entry_t* entry) {
-  return entry->target_op ? entry->target_op : entry->func.op;
-}
-
-static iree_status_t loom_amdgpu_hal_kernel_library_emit_unknown_processor(
-    const loom_target_entry_t* entry,
-    loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
-    iree_string_view_t processor_name) {
-  const loom_diagnostic_param_t params[] = {
-      loom_param_string(processor_name),
-  };
-  return loom_amdgpu_hal_kernel_library_emit(
-      diagnostic_emitter,
-      loom_amdgpu_hal_kernel_library_target_record_op(entry),
-      LOOM_ERR_AMDGPU_003, params, IREE_ARRAYSIZE(params));
-}
-
-static iree_status_t loom_amdgpu_hal_kernel_library_emit_no_descriptor_set(
-    const loom_target_entry_t* entry,
-    loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
-    iree_string_view_t processor_name) {
-  const loom_diagnostic_param_t params[] = {
-      loom_param_string(processor_name),
-  };
-  return loom_amdgpu_hal_kernel_library_emit(
-      diagnostic_emitter,
-      loom_amdgpu_hal_kernel_library_target_record_op(entry),
-      LOOM_ERR_AMDGPU_004, params, IREE_ARRAYSIZE(params));
-}
-
-static iree_status_t
-loom_amdgpu_hal_kernel_library_emit_descriptor_set_mismatch(
-    const loom_target_entry_t* entry,
-    loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
-    const loom_amdgpu_processor_info_t* processor,
-    iree_string_view_t target_name) {
-  const loom_diagnostic_param_t params[] = {
-      loom_param_string(processor->name),
-      loom_param_string(processor->descriptor_set.key),
-      loom_param_string(target_name),
-      loom_param_string(entry->bundle_storage.config.contract_set_key),
-  };
-  return loom_amdgpu_hal_kernel_library_emit(
-      diagnostic_emitter,
-      loom_amdgpu_hal_kernel_library_target_record_op(entry),
-      LOOM_ERR_AMDGPU_005, params, IREE_ARRAYSIZE(params));
-}
-
-static iree_status_t loom_amdgpu_hal_kernel_library_apply_processor(
-    loom_target_entry_t* entry,
-    loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
-    iree_string_view_t processor_name) {
-  if (iree_string_view_is_empty(processor_name)) {
-    return iree_ok_status();
-  }
-  const loom_amdgpu_processor_info_t* processor =
-      loom_amdgpu_target_info_find_processor(processor_name);
-  if (processor == NULL) {
-    return loom_amdgpu_hal_kernel_library_emit_unknown_processor(
-        entry, diagnostic_emitter, processor_name);
-  }
-  if (processor->descriptor_set.ordinal ==
-          LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE ||
-      iree_string_view_is_empty(processor->descriptor_set.key)) {
-    return loom_amdgpu_hal_kernel_library_emit_no_descriptor_set(
-        entry, diagnostic_emitter, processor->name);
-  }
-  if (!iree_string_view_equal(processor->descriptor_set.key,
-                              entry->bundle_storage.config.contract_set_key)) {
-    return loom_amdgpu_hal_kernel_library_emit_descriptor_set_mismatch(
-        entry, diagnostic_emitter, processor,
-        entry->bundle_storage.bundle.name);
-  }
-
-  loom_amdgpu_target_record_retarget_processor(entry->target_op, processor);
-  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_hal_kernel_library_read_stream_contents(
@@ -1622,12 +1528,6 @@ iree_status_t loom_amdgpu_emit_hal_kernel_library(
     status = loom_target_entry_select_all_entries(
         module, &target_options, entry_predicate, &diagnostic_emitter,
         IREE_SV("AMDGPU HAL-native"), &table_arena, &selected, &entries);
-  }
-  if (iree_status_is_ok(status) && selected && options != NULL) {
-    for (uint16_t i = 0; i < entries.count && iree_status_is_ok(status); ++i) {
-      status = loom_amdgpu_hal_kernel_library_apply_processor(
-          &entries.values[i], &diagnostic_emitter, options->processor);
-    }
   }
   if (iree_status_is_ok(status) && selected &&
       diagnostic_emitter.error_count == 0 && report != NULL) {

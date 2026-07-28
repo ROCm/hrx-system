@@ -40,9 +40,8 @@ typedef struct loom_run_hal_device_target_t {
   // Exact target row borrowed from the active HAL device spec. NULL for
   // offline target selections that cannot be loaded into a device.
   const iree_hal_executable_target_t* hal_target;
-  // Provider-owned target payload. Usually points at static target info. NULL
-  // requests emission from the module's target records without a runtime
-  // processor override.
+  // Provider-owned target-selection payload. Usually points at static target
+  // info. NULL requests emission from the module's authored target records.
   const void* data;
   // Per-device target-bundle storage owned by this selection. If a selection
   // containing this storage is copied, the copy must rebind the storage before

@@ -491,7 +491,6 @@ loom_cc_library(
     loom::ops::global
     loom::ops::low
     loom::ops::target
-    loom::target::arch::amdgpu::error_defs
     loom::target::arch::amdgpu::hal::kernel_abi
     loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::ops
@@ -537,7 +536,6 @@ loom_cc_test(
     loom::ops::sanitizer
     loom::sanitizer::site_table
     loom::target::arch::amdgpu::descriptors::low_registry
-    loom::target::arch::amdgpu::error_defs
     loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::planning::wait_counters
     loom::target::arch::amdgpu::provider

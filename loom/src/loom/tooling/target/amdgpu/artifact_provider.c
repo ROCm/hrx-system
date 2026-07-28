@@ -268,16 +268,12 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_emit_artifact(
   *out_emitted = false;
   *out_artifact = (loom_run_hal_artifact_t){0};
 
-  const loom_amdgpu_processor_info_t* processor =
-      (const loom_amdgpu_processor_info_t*)target->data;
-
   loom_amdgpu_hal_artifact_storage_t* storage = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(allocator, sizeof(*storage), (void**)&storage));
   *storage = (loom_amdgpu_hal_artifact_storage_t){0};
 
   const loom_amdgpu_hal_kernel_library_options_t library_options = {
-      .processor = processor ? processor->name : iree_string_view_empty(),
       .target_selection =
           {
               .bundle = target->target_bundle,
