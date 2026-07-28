@@ -37,8 +37,10 @@ from loom.target.arch.amdgpu.descriptors import (
     _AMDGPU_TRANS_DESCRIPTOR_KEYS,
     _AMDGPU_TRANS_PROXY_LATENCY_CYCLES,
     _COUNTER_ASYNC,
+    _COUNTER_LDS,
     _COUNTER_TENSOR,
     _COUNTER_VMEM_LOAD,
+    _COUNTER_VMEM_STORE,
     _D16_PARTIAL_REGISTER_ADDRESSABLE_UNIT_COUNT,
     _GFX12_TH_ATOMIC_RETURN_VALUE,
     _MUBUF_SOFFSET_INLINE_ZERO,
@@ -47,12 +49,15 @@ from loom.target.arch.amdgpu.descriptors import (
     _REG_PART_SGPR_LOW16,
     _REG_PART_VGPR_HIGH16,
     _REG_PART_VGPR_LOW16,
+    _REG_SGPR,
     _REG_VCC,
+    _REG_VGPR,
     _RESOURCE_MFMA,
     _RESOURCE_SALU,
     _RESOURCE_SWMMAC,
     _RESOURCE_VALU,
     _RESOURCE_WMMA,
+    _SCHEDULE_LDS_STORE,
     _SCHEDULE_MATRIX,
     _SCHEDULE_MFMA_QUALIFIED_PREFIX,
     _SCHEDULE_MODE_CONTROL,
@@ -126,7 +131,10 @@ from loom.target.arch.amdgpu.descriptors import (
     amdgpu_descriptor_ref_keys,
     amdgpu_encoding_field_id,
 )
-from loom.target.arch.amdgpu.descriptors.api import _with_instruction_classes
+from loom.target.arch.amdgpu.descriptors.api import (
+    _with_instruction_classes,
+    _with_storage_lease_rows,
+)
 from loom.target.arch.amdgpu.descriptors.cluster import (
     _cluster_load_async_to_lds_descriptor,
     _s_wait_asynccnt_descriptor,
@@ -161,6 +169,8 @@ from loom.target.low_descriptors import (
     EffectFlag,
     EffectKind,
     EncodingFieldValue,
+    Hazard,
+    HazardKind,
     Immediate,
     ImmediateFlag,
     ImmediateKind,
@@ -179,8 +189,12 @@ from loom.target.low_descriptors import (
     RegClassAlt,
     RegClassAltFlag,
     RegClassFlag,
+    ScheduleClass,
     ScheduleClassFlag,
     SpillSlotSpace,
+    StorageLeaseAttachment,
+    StorageLeaseFlag,
+    StorageLeaseKind,
 )
 
 
@@ -307,6 +321,215 @@ def _memory_descriptor(*, immediates: tuple[Immediate, ...]) -> Descriptor:
         immediates=immediates,
         effects=(Effect(EffectKind.READ, memory_space=MemorySpace.GLOBAL),),
     )
+
+
+def _storage_lease_signature(
+    descriptor: Descriptor,
+) -> tuple[
+    tuple[
+        StorageLeaseKind,
+        StorageLeaseAttachment,
+        int,
+        int,
+        int,
+        str,
+        tuple[StorageLeaseFlag, ...],
+    ],
+    ...,
+]:
+    return tuple(
+        (
+            lease.kind,
+            lease.attachment,
+            lease.attachment_index,
+            lease.unit_count,
+            lease.release_class_id,
+            lease.release_reason_name,
+            lease.flags,
+        )
+        for lease in descriptor.storage_leases
+    )
+
+
+def test_storage_lease_rows_project_memory_dependencies() -> None:
+    schedule_class = ScheduleClass(
+        name="amdgpu.test.memory",
+        latency_kind=LatencyKind.VARIABLE,
+        model_quality=ModelQuality.EXACT,
+        hazards=(
+            Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_VMEM_LOAD),
+            Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_VMEM_STORE),
+        ),
+    )
+    descriptor = Descriptor(
+        key="amdgpu.test.memory",
+        mnemonic="test_memory",
+        semantic_tag="memory.global.atomic.u32",
+        operands=(
+            Operand("dst", OperandRole.RESULT, (RegClassAlt(_REG_VGPR),), unit_count=2),
+            Operand("vaddr", OperandRole.OPERAND, (RegClassAlt(_REG_VGPR),)),
+            Operand(
+                "saddr",
+                OperandRole.RESOURCE,
+                (RegClassAlt(_REG_SGPR),),
+                unit_count=4,
+            ),
+            Operand(
+                "exec",
+                OperandRole.IMPLICIT,
+                (RegClassAlt(_REG_SGPR),),
+                unit_count=2,
+            ),
+        ),
+        schedule_class=schedule_class.name,
+        effects=(
+            Effect(
+                EffectKind.READ,
+                memory_space=MemorySpace.GLOBAL,
+                flags=(EffectFlag.DEPENDENCY,),
+            ),
+            Effect(
+                EffectKind.WRITE,
+                memory_space=MemorySpace.GLOBAL,
+                flags=(EffectFlag.DEPENDENCY,),
+            ),
+        ),
+    )
+    descriptor_set = replace(
+        _descriptor_set(descriptor), schedule_classes=(schedule_class,)
+    )
+
+    descriptor = _with_storage_lease_rows(descriptor_set).descriptors[0]
+
+    pressure_flags = (
+        StorageLeaseFlag.STARTS_AT_ISSUE,
+        StorageLeaseFlag.RELEASE_BEFORE_BOUNDARY,
+        StorageLeaseFlag.RELEASE_FOR_PRESSURE,
+    )
+    source_flags = (
+        StorageLeaseFlag.STARTS_AT_ISSUE,
+        StorageLeaseFlag.MAY_CARRY_ACROSS_BOUNDARY,
+    )
+    assert _storage_lease_signature(descriptor) == (
+        (
+            StorageLeaseKind.RESULT_WRITE,
+            StorageLeaseAttachment.RESULT,
+            0,
+            2,
+            _COUNTER_VMEM_LOAD,
+            "amdgpu.read_result_reuse",
+            pressure_flags,
+        ),
+        (
+            StorageLeaseKind.SOURCE_READ,
+            StorageLeaseAttachment.OPERAND,
+            0,
+            1,
+            _COUNTER_VMEM_STORE,
+            "amdgpu.store_source_reuse",
+            source_flags,
+        ),
+        (
+            StorageLeaseKind.SOURCE_READ,
+            StorageLeaseAttachment.OPERAND,
+            1,
+            4,
+            _COUNTER_VMEM_LOAD,
+            "amdgpu.memory_source_reuse",
+            source_flags,
+        ),
+        (
+            StorageLeaseKind.SOURCE_READ,
+            StorageLeaseAttachment.OPERAND,
+            1,
+            4,
+            _COUNTER_VMEM_STORE,
+            "amdgpu.memory_source_reuse",
+            source_flags,
+        ),
+    )
+
+
+def test_storage_lease_rows_project_xcnt_over_packet_inputs() -> None:
+    schedule_class = ScheduleClass(
+        name=_SCHEDULE_VMEM_LOAD,
+        latency_kind=LatencyKind.VARIABLE,
+        model_quality=ModelQuality.EXACT,
+    )
+    descriptor = Descriptor(
+        key="amdgpu.test.xcnt",
+        mnemonic="test_xcnt",
+        semantic_tag="memory.global.load.u32",
+        operands=(
+            Operand("vaddr", OperandRole.OPERAND, (RegClassAlt(_REG_VGPR),)),
+            Operand(
+                "saddr",
+                OperandRole.RESOURCE,
+                (RegClassAlt(_REG_SGPR),),
+                unit_count=2,
+            ),
+            Operand(
+                "exec",
+                OperandRole.IMPLICIT,
+                (RegClassAlt(_REG_SGPR),),
+                unit_count=2,
+            ),
+        ),
+        schedule_class=schedule_class.name,
+    )
+    descriptor_set = replace(
+        _descriptor_set(descriptor), schedule_classes=(schedule_class,)
+    )
+
+    descriptor = _with_storage_lease_rows(
+        descriptor_set, enable_gfx125x_xcnt=True
+    ).descriptors[0]
+
+    assert tuple(
+        (
+            lease.attachment_index,
+            lease.unit_count,
+            lease.release_class_name,
+            lease.release_reason_name,
+        )
+        for lease in descriptor.storage_leases
+    ) == (
+        (0, 1, "amdgpu.x", "amdgpu.memory_source_reuse"),
+        (1, 2, "amdgpu.x", "amdgpu.memory_source_reuse"),
+    )
+
+
+def test_storage_lease_rows_ignore_synchronous_lds_sources() -> None:
+    schedule_class = ScheduleClass(
+        name=_SCHEDULE_LDS_STORE,
+        latency_kind=LatencyKind.VARIABLE,
+        model_quality=ModelQuality.EXACT,
+        hazards=(Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_LDS),),
+    )
+    descriptor = Descriptor(
+        key="amdgpu.test.lds",
+        mnemonic="test_lds",
+        semantic_tag="memory.workgroup.store.u32",
+        operands=(
+            Operand("addr", OperandRole.OPERAND, (RegClassAlt(_REG_VGPR),)),
+            Operand("value", OperandRole.OPERAND, (RegClassAlt(_REG_VGPR),)),
+        ),
+        schedule_class=schedule_class.name,
+        effects=(
+            Effect(
+                EffectKind.WRITE,
+                memory_space=MemorySpace.WORKGROUP,
+                flags=(EffectFlag.DEPENDENCY,),
+            ),
+        ),
+    )
+    descriptor_set = replace(
+        _descriptor_set(descriptor), schedule_classes=(schedule_class,)
+    )
+
+    descriptor = _with_storage_lease_rows(descriptor_set).descriptors[0]
+
+    assert descriptor.storage_leases == ()
 
 
 def test_instruction_classes_project_target_packet_families() -> None:

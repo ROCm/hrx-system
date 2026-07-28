@@ -477,23 +477,6 @@ loom_cc_library(
     ],
 )
 
-loom_cc_test(
-    name = "storage_lease_test",
-    srcs = ["storage_lease_test.cc"],
-    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_CDNA3),
-    deps = [
-        ":storage_lease",
-        ":wait_plan",
-        "//loom/src/loom/codegen/low:descriptors",
-        "//loom/src/loom/codegen/low:storage_lease",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
-        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
 loom_generated_cc_library(
     name = "occupancy_model",
     srcs = ["occupancy_model.c"],
