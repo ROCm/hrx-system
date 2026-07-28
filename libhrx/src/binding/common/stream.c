@@ -544,15 +544,15 @@ iree_status_t iree_hal_streaming_stream_query(
 
   IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_flush(stream));
 
+  // A timeline query fails only when the timeline itself has failed, which is
+  // permanent: there is no transient answer to distinguish from an incomplete
+  // one, since a value below the one being waited for is reported as a value
+  // and not as an error. Reporting that failure as merely incomplete would turn
+  // a dead timeline into a poll loop that never ends, so it propagates, which
+  // is also how an event query classifies it.
   uint64_t current_value = 0;
-  iree_status_t query_status =
-      iree_hal_semaphore_query(stream->timeline_semaphore, &current_value);
-  if (iree_status_is_unavailable(query_status)) {
-    iree_status_ignore(query_status);
-    *status = 1;  // Not complete
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(query_status);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_semaphore_query(stream->timeline_semaphore, &current_value));
 
   iree_slim_mutex_lock(&stream->mutex);
   const uint64_t pending_value = stream->pending_value;
@@ -600,14 +600,14 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
   uint64_t completed_value = stream->completed_value;
   iree_slim_mutex_unlock(&stream->mutex);
 
+  // A failing query means the timeline has failed for good, which the wait
+  // below would also report; propagating it here keeps the message the failure
+  // was raised with instead of the bare code a wait carries.
   timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
   uint64_t current_value = 0;
   iree_status_t query_status =
       iree_hal_semaphore_query(stream->timeline_semaphore, &current_value);
-  if (iree_status_is_unavailable(query_status)) {
-    iree_status_ignore(query_status);
-    query_status = iree_ok_status();
-  } else if (iree_status_is_ok(query_status)) {
+  if (iree_status_is_ok(query_status)) {
     if (current_value > completed_value) {
       completed_value = current_value;
     }
