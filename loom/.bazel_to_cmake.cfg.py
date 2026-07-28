@@ -314,19 +314,11 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         return self._current_package().startswith("loom/py/loom")
 
     def _python_package_dirs(self):
-        package_dirs = [
+        return [
             "${PROJECT_SOURCE_DIR}/loom/py",
             "${PROJECT_BINARY_DIR}/loom/py",
+            "${PROJECT_SOURCE_DIR}",
         ]
-        current_package = self._current_package()
-        if current_package.startswith(
-            (
-                "loom/py/loom/gen/target/arch/amdgpu",
-                "loom/py/loom/target/arch/amdgpu",
-            )
-        ):
-            package_dirs.append("${PROJECT_SOURCE_DIR}")
-        return package_dirs
 
     def _emit_rewritten_cmake_rule(self, old_rule_name, new_rule_name, emit):
         body_start = len(self._converter.body)
