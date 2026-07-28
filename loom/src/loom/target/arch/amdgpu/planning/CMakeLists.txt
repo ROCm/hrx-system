@@ -206,6 +206,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::allocation::storage
+    loom::codegen::low::allocation::storage_lease
     loom::codegen::low::descriptors
     loom::codegen::low::packet
     loom::codegen::low::packet_hazard_plan

@@ -13,6 +13,7 @@
 #include "iree/base/internal/math.h"
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/allocation/storage.h"
+#include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/packet_hazard_plan_json.h"
 #include "loom/ir/ir.h"
@@ -2374,27 +2375,6 @@ static bool loom_amdgpu_wait_plan_storage_lease_is_live_at_node(
          lease->end_point >= program_point;
 }
 
-static bool loom_amdgpu_wait_plan_storage_lease_overlaps_range(
-    const loom_amdgpu_wait_plan_builder_t* builder,
-    const loom_low_allocation_storage_lease_t* lease,
-    loom_low_allocation_location_kind_t location_kind,
-    uint16_t descriptor_reg_class_id, uint32_t location_base,
-    uint32_t location_count) {
-  if (location_count == 0 || lease->location_count == 0 ||
-      lease->location_kind != location_kind ||
-      !loom_low_allocation_location_kind_is_register_like(location_kind) ||
-      !loom_low_allocation_storage_reg_classes_share(
-          builder->schedule->target.descriptor_set,
-          lease->descriptor_reg_class_id, descriptor_reg_class_id)) {
-    return false;
-  }
-  const uint64_t lease_begin = lease->location_base;
-  const uint64_t lease_end = lease_begin + lease->location_count;
-  const uint64_t write_begin = location_base;
-  const uint64_t write_end = write_begin + location_count;
-  return lease_begin < write_end && write_begin < lease_end;
-}
-
 static iree_status_t loom_amdgpu_wait_plan_handle_physical_write_range(
     loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index,
     loom_low_allocation_location_kind_t location_kind,
@@ -2407,24 +2387,35 @@ static iree_status_t loom_amdgpu_wait_plan_handle_physical_write_range(
   }
   IREE_ASSERT_EQ(allocation->storage_lease_instance_count,
                  allocation->storage_leases.record_count);
-  for (iree_host_size_t i = 0; i < allocation->storage_lease_instance_count;
-       ++i) {
+  IREE_ASSERT(loom_low_allocation_storage_lease_unit_index_is_enabled(
+      allocation->storage_lease_unit_index));
+  loom_low_allocation_storage_lease_unit_query_t query;
+  loom_low_allocation_storage_lease_unit_query_initialize(
+      allocation->storage_lease_unit_index,
+      builder->schedule->target.descriptor_set, descriptor_reg_class_id,
+      location_kind, location_base, location_count, &query);
+  uint32_t storage_lease_index = 0;
+  while (loom_low_allocation_storage_lease_unit_query_next(
+      &query, &storage_lease_index)) {
+    IREE_ASSERT_LT(storage_lease_index,
+                   allocation->storage_lease_instance_count);
     const loom_low_allocation_storage_lease_t* lease =
-        &allocation->storage_lease_instances[i];
+        &allocation->storage_lease_instances[storage_lease_index];
+    if (query.active_location !=
+        iree_max(location_base, lease->location_base)) {
+      continue;
+    }
     IREE_ASSERT_LT(lease->lease_record_index,
                    allocation->storage_leases.record_count);
     const loom_low_storage_lease_record_t* record =
         &allocation->storage_leases.records[lease->lease_record_index];
     const bool incoming_lease_active =
         loom_amdgpu_wait_frontier_storage_lease_is_active(&builder->frontier,
-                                                          i);
+                                                          storage_lease_index);
     const bool local_lease_active =
         loom_amdgpu_wait_plan_storage_lease_is_live_at_node(builder, lease,
                                                             record, node_index);
-    if ((!incoming_lease_active && !local_lease_active) ||
-        !loom_amdgpu_wait_plan_storage_lease_overlaps_range(
-            builder, lease, location_kind, descriptor_reg_class_id,
-            location_base, location_count)) {
+    if (!incoming_lease_active && !local_lease_active) {
       continue;
     }
     if (record->release_scope !=
@@ -2459,7 +2450,8 @@ static iree_status_t loom_amdgpu_wait_plan_handle_physical_write_range(
       // The current same-class VMEM result write proves the older incoming
       // dynamic instance complete. Retire only that incoming lease; block-end
       // publication will represent the current instruction's new instance.
-      loom_amdgpu_wait_frontier_retire_storage_lease(&builder->frontier, i);
+      loom_amdgpu_wait_frontier_retire_storage_lease(&builder->frontier,
+                                                     storage_lease_index);
       continue;
     }
     if (incoming_lease_active) {
