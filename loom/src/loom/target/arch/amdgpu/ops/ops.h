@@ -53,7 +53,7 @@ typedef enum loom_amdgpu_target_kind_e {
 } loom_amdgpu_target_kind_t;
 
 // LOOM_OP_AMDGPU_TARGET: AMDGPU processor target record. The selector chooses one exact or generic processor row; optional attrs structurally override authored common target fields.
-// amdgpu.target<gfx1100> @gfx11
+// amdgpu.target<gfx11-generic> @gfx11_generic
 LOOM_DEFINE_ISA(loom_amdgpu_target_isa, LOOM_OP_AMDGPU_TARGET)
 LOOM_DEFINE_ATTR_SYMBOL(loom_amdgpu_target_symbol, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_amdgpu_target_kind, 1, loom_amdgpu_target_kind_t)

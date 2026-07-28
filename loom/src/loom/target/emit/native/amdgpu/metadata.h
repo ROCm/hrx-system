@@ -88,7 +88,8 @@ typedef struct loom_amdgpu_metadata_kernel_t {
 } loom_amdgpu_metadata_kernel_t;
 
 typedef struct loom_amdgpu_code_object_metadata_t {
-  // Full target ID string, such as `amdgcn-amd-amdhsa--gfx1100`.
+  // Full target ID string, such as
+  // `amdgcn-amd-amdhsa--gfx11-generic`.
   iree_string_view_t target;
   // Kernel records in this code object.
   const loom_amdgpu_metadata_kernel_t* kernels;

@@ -71,7 +71,7 @@ amdgpu_target = Op(
         AttrDict(),
     ],
     examples=[
-        "amdgpu.target<gfx1100> @gfx11",
+        "amdgpu.target<gfx11-generic> @gfx11_generic",
         "amdgpu.target<gfx942> @gfx942 {subgroup_size = 64}",
         "amdgpu.target<gfx950> @gfx950 {subgroup_size = 64}",
     ],

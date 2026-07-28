@@ -334,7 +334,8 @@ typedef struct loom_amdgpu_processor_feature_info_t {
 } loom_amdgpu_processor_feature_info_t;
 
 typedef struct loom_amdgpu_processor_info_t {
-  // Processor name used in AMDHSA target IDs, such as `gfx1100`.
+  // Exact or generic processor name used in AMDHSA target IDs, such as
+  // `gfx1151` or `gfx11-generic`.
   iree_string_view_t name;
   // Dense generated processor ordinal used by target fact tables.
   uint16_t ordinal;
@@ -477,7 +478,8 @@ iree_status_t loom_amdgpu_target_info_lookup_descriptor_set_by_ordinal(
     uint16_t descriptor_set_ordinal,
     const loom_amdgpu_descriptor_set_info_t** out_descriptor_set);
 
-// Parses an AMDHSA target ID such as `amdgcn-amd-amdhsa--gfx1100`.
+// Parses an AMDHSA target ID such as
+// `amdgcn-amd-amdhsa--gfx11-generic`.
 iree_status_t loom_amdgpu_target_info_parse_amdhsa_target_id(
     iree_string_view_t target_id,
     loom_amdgpu_amdhsa_target_id_t* out_target_id);

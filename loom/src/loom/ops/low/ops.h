@@ -114,7 +114,7 @@ typedef enum loom_low_scf_for_unroll_policy_e {
 } loom_low_scf_for_unroll_policy_t;
 
 // LOOM_OP_LOW_FUNC_DEF: Target-bound low function definition with register-typed signature values.
-// low.func.def target(@gfx1100) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {
+// low.func.def target(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {
 //   %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>
 //   low.return %sum : reg<amdgpu.vgpr x1>
 // }
@@ -177,7 +177,7 @@ iree_status_t loom_low_func_def_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_LOW_KERNEL_DEF: Target-bound low kernel entry with register-typed launch ABI values. Helper calls stay in low.func.def; kernel launch/export contracts live on this entry op.
-// low.kernel.def target(@gfx1100) export("matmul") workgroup_size(16, 4, 1) @matmul(%lhs: reg<amdgpu.sgpr x4>, %rhs: reg<amdgpu.sgpr x4>, %out: reg<amdgpu.sgpr x4>) {
+// low.kernel.def target(@gfx11_generic) export("matmul") workgroup_size(16, 4, 1) @matmul(%lhs: reg<amdgpu.sgpr x4>, %rhs: reg<amdgpu.sgpr x4>, %out: reg<amdgpu.sgpr x4>) {
 //   low.return
 // }
 LOOM_DEFINE_ISA(loom_low_kernel_def_isa, LOOM_OP_LOW_KERNEL_DEF)
@@ -248,7 +248,7 @@ iree_status_t loom_low_kernel_def_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_LOW_FUNC_DECL: Target-bound low function declaration with register-typed signature values.
-// low.func.decl target(@gfx1100) @extern_add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>)
+// low.func.decl target(@gfx11_generic) @extern_add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>)
 LOOM_DEFINE_ISA(loom_low_func_decl_isa, LOOM_OP_LOW_FUNC_DECL)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_func_decl_args, 0)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_low_func_decl_results, 0)
