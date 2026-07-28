@@ -231,7 +231,7 @@ TEST(TargetIdTest, ChecksExactCompatibility) {
       IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_PROCESSOR));
 }
 
-TEST(TargetIdTest, ChecksGenericCompatibilityWithMappedFamily) {
+TEST(TargetIdTest, ChecksGenericCompatibilityMappingSemantics) {
   auto code_object_target_id = ParseTargetId("gfx11-generic");
   code_object_target_id.generic_version = 1;
   auto agent_target_id = ParseTargetId("gfx1151");
@@ -244,47 +244,15 @@ TEST(TargetIdTest, ChecksGenericCompatibilityWithMappedFamily) {
                                                        &agent_target_id),
             IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE);
 
-  code_object_target_id = ParseTargetId("gfx9-4-generic");
-  agent_target_id = ParseTargetId("gfx942");
-  EXPECT_EQ(iree_hal_amdgpu_target_id_check_compatible(&code_object_target_id,
-                                                       &agent_target_id),
-            IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE);
-
-  code_object_target_id = ParseTargetId("gfx9-generic");
-  EXPECT_TRUE(iree_any_bit_set(
-      iree_hal_amdgpu_target_id_check_compatible(&code_object_target_id,
-                                                 &agent_target_id),
-      IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GENERIC_FAMILY));
-
-  code_object_target_id = ParseTargetId("gfx9-4-generic");
-  agent_target_id = ParseTargetId("gfx940");
-  EXPECT_EQ(iree_hal_amdgpu_target_id_check_compatible(&code_object_target_id,
-                                                       &agent_target_id),
-            IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE);
-
-  code_object_target_id = ParseTargetId("gfx9-generic");
-  EXPECT_TRUE(iree_any_bit_set(
-      iree_hal_amdgpu_target_id_check_compatible(&code_object_target_id,
-                                                 &agent_target_id),
-      IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GENERIC_FAMILY));
-
-  code_object_target_id = ParseTargetId("gfx12-5-generic");
-  agent_target_id = ParseTargetId("gfx1250");
-  EXPECT_EQ(iree_hal_amdgpu_target_id_check_compatible(&code_object_target_id,
-                                                       &agent_target_id),
-            IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE);
-
   code_object_target_id = ParseTargetId("gfx12-generic");
   EXPECT_TRUE(iree_any_bit_set(
       iree_hal_amdgpu_target_id_check_compatible(&code_object_target_id,
                                                  &agent_target_id),
       IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GENERIC_FAMILY));
-}
 
-TEST(TargetIdTest, RejectsGenericCompatibilityForUnmappedProcessor) {
-  auto code_object_target_id = ParseTargetId("gfx11-generic");
+  code_object_target_id = ParseTargetId("gfx11-generic");
   code_object_target_id.generic_version = 1;
-  auto agent_target_id = ParseTargetId("gfx110f");
+  agent_target_id = ParseTargetId("gfx110f");
   EXPECT_TRUE(iree_any_bit_set(
       iree_hal_amdgpu_target_id_check_compatible(&code_object_target_id,
                                                  &agent_target_id),

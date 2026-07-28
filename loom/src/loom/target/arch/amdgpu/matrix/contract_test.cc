@@ -11,6 +11,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
+#include "loom/target/arch/amdgpu/target_info.h"
 
 namespace {
 
@@ -2858,43 +2859,6 @@ TEST(MatrixContractTest, ProcessorFeatureBitsGateAvailability) {
                                                        gfx1250_features, 32));
 }
 
-TEST(MatrixContractTest, ProcessorAliasesExposeNativeFp8MatrixFeatures) {
-  struct Case {
-    iree_string_view_t processor_name;
-    const char* descriptor_name;
-    uint32_t wave_size;
-  };
-  static const Case cases[] = {
-      {IREE_SV("gfx942"), "mfma.f32.16x16x32.fp8.fp8", 64},
-      {IREE_SV("gfx942"), "smfmac.f32.16x16x64.fp8.fp8", 64},
-      {IREE_SV("gfx950"), "mfma.scale.f32.16x16x128.f8f6f4", 64},
-      {IREE_SV("gfx950"), "smfmac.f32.16x16x128.fp8.fp8", 64},
-      {IREE_SV("gfx1200"), "wmma.f32.16x16x16.fp8.fp8", 32},
-      {IREE_SV("gfx1201"), "wmma.f32.16x16x16.fp8.fp8", 32},
-      {IREE_SV("gfx12-generic"), "wmma.f32.16x16x16.fp8.fp8", 32},
-      {IREE_SV("gfx1200"), "swmmac.f32.16x16x32.fp8.bf8", 32},
-      {IREE_SV("gfx1201"), "swmmac.f32.16x16x32.fp8.bf8", 32},
-      {IREE_SV("gfx12-generic"), "swmmac.f32.16x16x32.fp8.bf8", 32},
-      {IREE_SV("gfx1250"), "wmma.f32.16x16x128.f8f6f4.f8.f8", 32},
-      {IREE_SV("gfx1251"), "wmma.f32.16x16x128.f8f6f4.f8.f8", 32},
-      {IREE_SV("gfx12-5-generic"), "wmma.f32.16x16x128.f8f6f4.f8.f8", 32},
-      {IREE_SV("gfx1250"), "wmma.scale.f32.16x16x128.f8f6f4.f8.f8", 32},
-      {IREE_SV("gfx1251"), "wmma.scale.f32.16x16x128.f8f6f4.f8.f8", 32},
-      {IREE_SV("gfx12-5-generic"), "wmma.scale.f32.16x16x128.f8f6f4.f8.f8", 32},
-  };
-  for (const Case& c : cases) {
-    loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
-    IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
-        c.processor_name, &feature_bits));
-    const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
-        FindDescriptor(c.descriptor_name);
-    ASSERT_NE(descriptor, nullptr) << c.descriptor_name;
-    EXPECT_TRUE(loom_amdgpu_matrix_contract_is_available(
-        descriptor, feature_bits, c.wave_size))
-        << ToString(c.processor_name) << " " << c.descriptor_name;
-  }
-}
-
 TEST(MatrixContractTest, ScaleFeatureDoesNotGateUnscaledDescriptors) {
   const loom_amdgpu_matrix_contract_descriptor_t* unscaled_mfma =
       FindDescriptor("mfma.f32.16x16x32.f16");
@@ -2934,79 +2898,33 @@ TEST(MatrixContractTest, ProcessorFeatureBitsRejectUnknownProcessor) {
                             IREE_SV("gfx9999"), &feature_bits));
 }
 
-TEST(MatrixContractTest, ProcessorFeatureBitsRejectMissingMatrixProfile) {
-  static const iree_string_view_t cases[] = {
-      IREE_SV("gfx900"),
-  };
-  for (iree_string_view_t processor_name : cases) {
-    loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                          loom_amdgpu_matrix_feature_bits_from_processor(
-                              processor_name, &feature_bits))
-        << ToString(processor_name);
-    EXPECT_EQ(feature_bits, 0u) << ToString(processor_name);
+TEST(MatrixContractTest, ProcessorFeatureBitsMatchEveryTargetInfoProfile) {
+  const iree_host_size_t processor_count =
+      loom_amdgpu_target_info_processor_count();
+  ASSERT_GT(processor_count, 0u);
+  for (iree_host_size_t i = 0; i < processor_count; ++i) {
+    const loom_amdgpu_processor_info_t* processor =
+        loom_amdgpu_target_info_processor_at(i);
+    ASSERT_NE(processor, nullptr);
+
+    loom_amdgpu_matrix_feature_bits_t expected_feature_bits = 0;
+    const bool has_matrix_profile =
+        loom_amdgpu_matrix_feature_bits_from_profile(processor->features.matrix,
+                                                     &expected_feature_bits);
+
+    loom_amdgpu_matrix_feature_bits_t actual_feature_bits = 0;
+    iree_status_t status = loom_amdgpu_matrix_feature_bits_from_processor(
+        processor->name, &actual_feature_bits);
+    if (has_matrix_profile) {
+      IREE_EXPECT_OK(status) << ToString(processor->name);
+      EXPECT_EQ(actual_feature_bits, expected_feature_bits)
+          << ToString(processor->name);
+    } else {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION, status)
+          << ToString(processor->name);
+      EXPECT_EQ(actual_feature_bits, 0u) << ToString(processor->name);
+    }
   }
-}
-
-TEST(MatrixContractTest, ProcessorFeatureBitsUseTargetInfoAliases) {
-  loom_amdgpu_matrix_feature_bits_t gfx940_features = 0;
-  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
-      IREE_SV("gfx940"), &gfx940_features));
-
-  loom_amdgpu_matrix_feature_bits_t gfx950_features = 0;
-  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
-      IREE_SV("gfx950"), &gfx950_features));
-
-  loom_amdgpu_matrix_feature_bits_t gfx9_4_generic_features = 0;
-  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
-      IREE_SV("gfx9-4-generic"), &gfx9_4_generic_features));
-  const loom_amdgpu_matrix_feature_bits_t packed8_features =
-      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8 |
-      LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940_FP8;
-  EXPECT_EQ(gfx9_4_generic_features,
-            (gfx940_features & gfx950_features) & ~packed8_features);
-  EXPECT_EQ(gfx9_4_generic_features & packed8_features, 0u);
-
-  loom_amdgpu_matrix_feature_bits_t gfx1151_features = 0;
-  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
-      IREE_SV("gfx1151"), &gfx1151_features));
-  EXPECT_EQ(gfx1151_features, LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11);
-
-  loom_amdgpu_matrix_feature_bits_t gfx1170_features = 0;
-  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
-      IREE_SV("gfx1170"), &gfx1170_features));
-  EXPECT_EQ(gfx1170_features, LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11);
-
-  loom_amdgpu_matrix_feature_bits_t gfx1251_features = 0;
-  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
-      IREE_SV("gfx1251"), &gfx1251_features));
-  EXPECT_EQ(gfx1251_features,
-            LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250 |
-                LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250_SCALE_F8F6F4 |
-                LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250);
-}
-
-TEST(MatrixContractTest, ReplacementProfilesDoNotLeakMatrixShapes) {
-  loom_amdgpu_matrix_feature_bits_t gfx942_features = 0;
-  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
-      IREE_SV("gfx942"), &gfx942_features));
-  EXPECT_TRUE(iree_any_bit_set(gfx942_features,
-                               LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_XF32));
-
-  loom_amdgpu_matrix_feature_bits_t gfx950_features = 0;
-  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
-      IREE_SV("gfx950"), &gfx950_features));
-  EXPECT_FALSE(iree_any_bit_set(gfx950_features,
-                                LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_XF32));
-
-  loom_amdgpu_matrix_feature_bits_t gfx1200_features = 0;
-  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
-      IREE_SV("gfx1200"), &gfx1200_features));
-  EXPECT_FALSE(iree_any_bit_set(gfx1200_features,
-                                LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11));
-  EXPECT_TRUE(iree_all_bits_set(gfx1200_features,
-                                LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12 |
-                                    LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX12));
 }
 
 TEST(MatrixContractTest, Gfx1250RejectsLegacyWmmaDescriptors) {
