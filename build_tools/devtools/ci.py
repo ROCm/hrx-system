@@ -421,92 +421,42 @@ def cpu_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
     raise ValueError(f"unknown Bazel sanitizer config: {config}")
 
 
-def amdgpu_test_steps(
+def amdgpu_build_and_test_steps(
     targets: tuple[str, ...],
     target_selector: str,
     config: str | None = None,
     xfail_targets: tuple[str, ...] = (),
 ) -> list[CiStep]:
-    config_name = f" and {config.upper()}" if config is not None else ""
+    config_name = f" / {config.upper()}" if config is not None else ""
+    scoped_targets = targets + ci_config.AMDGPU_BAZEL_TARGET_EXCLUDES
     bazel_options = amdgpu_bazel_options(target_selector)
     host_sanitizer_tag_filters = (
         (f"-{ci_config.HOST_TSAN_INCOMPATIBLE_TEST_LABEL}",) if config == "tsan" else ()
     )
-    steps = []
-    for (
-        slice_name,
-        target_prefix,
-        default_target,
-        resource_tag,
-    ) in ci_config.AMDGPU_BAZEL_RESOURCE_SLICES:
-        slice_targets = resource_slice_targets(
-            targets + xfail_targets,
-            target_prefix=target_prefix,
-            default_target=default_target,
-        )
-        if not slice_targets:
-            continue
-        steps.append(
-            bazel_test_step(
-                f"Test IREE AMDGPU {slice_name} resources{config_name}",
-                slice_targets,
-                config=config,
-                test_tag_filters=(resource_tag,) + host_sanitizer_tag_filters,
-                test_env=amdgpu_libhsa_test_env(),
-                bazel_options=bazel_options,
-            )
-        )
-    return steps
-
-
-def resource_slice_targets(
-    targets: tuple[str, ...],
-    *,
-    target_prefix: str,
-    default_target: str,
-) -> tuple[str, ...]:
-    positive_targets = []
-    negative_targets = []
-    seen_targets = set()
-    for target in targets:
-        is_negative = target.startswith("-")
-        raw_target = target[1:] if is_negative else target
-        if raw_target in ("//...", "..."):
-            selected_target = "-" + default_target if is_negative else default_target
-        elif target_in_prefix(raw_target, target_prefix):
-            selected_target = target
-        else:
-            continue
-        if selected_target in seen_targets:
-            continue
-        if is_negative:
-            negative_targets.append(selected_target)
-        else:
-            positive_targets.append(selected_target)
-        seen_targets.add(selected_target)
-    if not positive_targets:
-        return ()
-    return tuple(positive_targets + negative_targets)
-
-
-def target_in_prefix(target: str, target_prefix: str) -> bool:
-    return (
-        target == target_prefix
-        or target.startswith(target_prefix + "/")
-        or target.startswith(target_prefix + ":")
-    )
+    return [
+        bazel_build_step(
+            f"Build IREE / AMDGPU{config_name}",
+            scoped_targets,
+            config=config,
+            bazel_options=bazel_options,
+        ),
+        bazel_test_step(
+            f"Test IREE / AMDGPU{config_name}",
+            scoped_targets + xfail_targets,
+            config=config,
+            test_tag_filters=(
+                ci_config.AMDGPU_BAZEL_TEST_TAG_FILTERS + host_sanitizer_tag_filters
+            ),
+            test_env=amdgpu_libhsa_test_env(),
+            bazel_options=bazel_options,
+        ),
+    ]
 
 
 def amdgpu_steps(targets: tuple[str, ...], target_selector: str) -> list[CiStep]:
-    bazel_options = amdgpu_bazel_options(target_selector)
     return [
         bazel_configure_step(enabled_drivers=("amdgpu",)),
-        bazel_build_step(
-            "Build IREE with AMDGPU",
-            ci_config.AMDGPU_BAZEL_DRIVER_TARGETS,
-            bazel_options=bazel_options,
-        ),
-        *amdgpu_test_steps(
+        *amdgpu_build_and_test_steps(
             targets,
             target_selector,
             xfail_targets=(
@@ -548,16 +498,18 @@ def amdgpu_config_steps(
             if config == "tsan"
             else ci_config.AMDGPU_SANITIZERS_XFAIL_TARGETS
         )
-        return amdgpu_test_steps(
+        return amdgpu_build_and_test_steps(
             targets,
             target_selector,
             config=config,
-            xfail_targets=xfail_targets,
+            xfail_targets=(
+                xfail_targets + ci_config.amdgpu_bazel_xfail_targets(target_selector)
+            ),
         )
     if config in ci_config.SANITIZER_BUILD_CONFIGS:
         return [
             bazel_build_step(
-                f"Build IREE with AMDGPU and {config.upper()}",
+                f"Build IREE / AMDGPU / {config.upper()}",
                 ci_config.AMDGPU_BAZEL_DRIVER_TARGETS,
                 config=config,
                 bazel_options=amdgpu_bazel_options(target_selector),
@@ -566,50 +518,19 @@ def amdgpu_config_steps(
     raise ValueError(f"unknown Bazel AMDGPU sanitizer config: {config}")
 
 
-def vulkan_test_steps(
-    targets: tuple[str, ...],
-    config: str | None = None,
-) -> list[CiStep]:
-    config_name = f" with {config.upper()}" if config is not None else ""
-    steps = [
-        bazel_test_step(
-            f"Test IREE Vulkan package tests{config_name}",
-            ci_config.VULKAN_BAZEL_DRIVER_TARGETS + ci_config.VULKAN_XFAIL_TARGETS,
-            config=config,
-        ),
-    ]
-    for (
-        slice_name,
-        target_prefix,
-        default_target,
-        resource_tag,
-    ) in ci_config.VULKAN_BAZEL_RESOURCE_SLICES:
-        slice_targets = resource_slice_targets(
-            targets,
-            target_prefix=target_prefix,
-            default_target=default_target,
-        )
-        if not slice_targets:
-            continue
-        steps.append(
-            bazel_test_step(
-                f"Test IREE Vulkan {slice_name} resources{config_name}",
-                slice_targets,
-                config=config,
-                test_tag_filters=(resource_tag,),
-            )
-        )
-    return steps
-
-
 def vulkan_steps(targets: tuple[str, ...]) -> list[CiStep]:
+    scoped_targets = targets + ci_config.VULKAN_BAZEL_TARGET_EXCLUDES
     return [
         bazel_configure_step(enabled_drivers=("vulkan",)),
         bazel_build_step(
-            "Build IREE with Vulkan",
-            ci_config.VULKAN_BAZEL_DRIVER_TARGETS,
+            "Build IREE / Vulkan",
+            scoped_targets,
         ),
-        *vulkan_test_steps(targets),
+        bazel_test_step(
+            "Test IREE / Vulkan",
+            scoped_targets + ci_config.VULKAN_XFAIL_TARGETS,
+            test_tag_filters=ci_config.VULKAN_BAZEL_TEST_TAG_FILTERS,
+        ),
     ]
 
 
@@ -629,7 +550,7 @@ def vulkan_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
     if config in ci_config.SANITIZER_TEST_CONFIGS:
         return [
             bazel_build_step(
-                f"Build IREE with Vulkan and {config.upper()}",
+                f"Build IREE / Vulkan / {config.upper()}",
                 ci_config.VULKAN_BAZEL_DRIVER_TARGETS,
                 config=config,
             )
@@ -637,7 +558,7 @@ def vulkan_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
     if config in ci_config.SANITIZER_BUILD_CONFIGS:
         return [
             bazel_build_step(
-                f"Build IREE with Vulkan and {config.upper()}",
+                f"Build IREE / Vulkan / {config.upper()}",
                 ci_config.VULKAN_BAZEL_DRIVER_TARGETS,
                 config=config,
             )
