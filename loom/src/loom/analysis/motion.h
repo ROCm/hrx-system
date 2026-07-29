@@ -151,11 +151,32 @@ bool loom_motion_op_can_erase(const loom_module_t* module, const loom_op_t* op);
 bool loom_motion_op_can_relocate_effect_free(const loom_module_t* module,
                                              const loom_op_t* op);
 
+// Returns true if |op| may be rebuilt independently while preserving or
+// narrowing its original dynamic execution predicate. This requires pure,
+// deterministic, identity-free semantics and rejects retained regions,
+// terminators, hints, poison boundaries, and convergence. It does not require
+// SAFE_TO_SPECULATE because rematerialization must not introduce execution on
+// an additional control path.
+bool loom_motion_op_can_rematerialize_effect_free(const loom_module_t* module,
+                                                  const loom_op_t* op);
+
 // Returns true if |op| may be executed on additional control paths. This
 // requires SAFE_TO_SPECULATE and rejects any region side effects, convergence,
 // or hints.
 bool loom_motion_op_can_speculate(const loom_module_t* module,
                                   const loom_op_t* op);
+
+// Returns true when |op| is an ordinary unmasked view or vector load with no
+// write, ordering, convergence, identity, or nondeterministic semantics.
+bool loom_motion_op_is_ordinary_load(const loom_module_t* module,
+                                     const loom_op_t* op);
+
+// Returns true when sinking an ordinary load across |op| preserves source
+// ordering. This is a deliberately alias-independent predicate: any write,
+// fence, unknown effect, nested region, convergence, or retained semantic
+// boundary blocks motion.
+bool loom_motion_read_can_cross_op(const loom_module_t* module,
+                                   const loom_op_t* op);
 
 //===----------------------------------------------------------------------===//
 // Subtree motion

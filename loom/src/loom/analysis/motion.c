@@ -140,6 +140,24 @@ bool loom_motion_op_can_relocate_effect_free(const loom_module_t* module,
   return !loom_motion_op_has_retained_regions(module, op);
 }
 
+bool loom_motion_op_can_rematerialize_effect_free(const loom_module_t* module,
+                                                  const loom_op_t* op) {
+  if (!module || !op || iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD) ||
+      op->tied_result_count != 0 || op->region_count != 0) {
+    return false;
+  }
+  const loom_trait_flags_t traits = loom_op_effective_traits(module, op);
+  if (!iree_any_bit_set(traits, LOOM_TRAIT_PURE) ||
+      loom_traits_may_read(traits) || loom_traits_may_write(traits) ||
+      iree_any_bit_set(traits, LOOM_TRAIT_TERMINATOR | LOOM_TRAIT_HINT |
+                                   LOOM_TRAIT_POISON_BOUNDARY |
+                                   LOOM_TRAIT_CONVERGENT |
+                                   LOOM_TRAIT_UNIQUE_IDENTITY)) {
+    return false;
+  }
+  return true;
+}
+
 bool loom_motion_op_can_speculate(const loom_module_t* module,
                                   const loom_op_t* op) {
   if (!module || !op || iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
@@ -151,6 +169,19 @@ bool loom_motion_op_can_speculate(const loom_module_t* module,
     return false;
   }
   return !loom_motion_op_has_retained_regions(module, op);
+}
+
+bool loom_motion_read_can_cross_op(const loom_module_t* module,
+                                   const loom_op_t* op) {
+  if (!module || !op) return false;
+  if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) return true;
+  if (op->region_count != 0) return false;
+  const loom_trait_flags_t traits = loom_op_effective_traits(module, op);
+  if (loom_traits_may_write(traits)) return false;
+  return !iree_any_bit_set(
+      traits, LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_HINT |
+                  LOOM_TRAIT_POISON_BOUNDARY | LOOM_TRAIT_CONVERGENT |
+                  LOOM_TRAIT_UNIQUE_IDENTITY);
 }
 
 //===----------------------------------------------------------------------===//
@@ -321,8 +352,8 @@ static iree_status_t loom_motion_evaluate_speculative_subtree(
   return iree_ok_status();
 }
 
-static bool loom_motion_op_is_ordinary_load_candidate(
-    const loom_module_t* module, const loom_op_t* op) {
+bool loom_motion_op_is_ordinary_load(const loom_module_t* module,
+                                     const loom_op_t* op) {
   if (!module || !op || iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD) ||
       op->region_count != 0 || op->tied_result_count != 0) {
     return false;
@@ -500,8 +531,7 @@ iree_status_t loom_motion_subtree_evaluate_hoist_before_loop(
     return iree_ok_status();
   }
 
-  if (!loom_motion_op_is_ordinary_load_candidate(analysis->module,
-                                                 candidate_op)) {
+  if (!loom_motion_op_is_ordinary_load(analysis->module, candidate_op)) {
     return loom_motion_evaluate_speculative_subtree(analysis, candidate_op,
                                                     loop.op, out_result);
   }

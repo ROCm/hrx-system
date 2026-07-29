@@ -120,6 +120,12 @@ bool loom_vector_to_scalar_can_materialize_def_lane(
     const loom_matrix_fragment_layout_t* matrix_fragment_layout,
     loom_vector_to_scalar_index_list_t indices);
 
+// Returns true when scalar lanes of |read_op| may be rebuilt immediately
+// before |consumer_op| without crossing a source ordering boundary.
+bool loom_vector_to_scalar_read_can_rematerialize_at(
+    const loom_module_t* module, const loom_op_t* read_op,
+    const loom_op_t* consumer_op);
+
 iree_status_t loom_vector_to_scalar_materialize_linear_lane(
     loom_vector_to_scalar_state_t* state, loom_value_id_t vector_value,
     loom_type_t vector_type, loom_vector_to_scalar_index_term_t ordinal,

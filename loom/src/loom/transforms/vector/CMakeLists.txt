@@ -59,6 +59,7 @@ loom_cc_library(
     "sink_single_use_reads.c"
   DEPS
     iree::base
+    loom::analysis::motion
     loom::ir
     loom::ops::op_defs
     loom::pass::types
@@ -104,6 +105,7 @@ loom_cc_library(
     iree::base::internal
     loom::analysis::contract
     loom::analysis::matrix_fragment_layout
+    loom::analysis::motion
     loom::error::error_defs
     loom::ir
     loom::ops::combining

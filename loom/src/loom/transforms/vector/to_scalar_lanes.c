@@ -7,6 +7,7 @@
 #include "loom/transforms/vector/to_scalar_lanes.h"
 
 #include "loom/analysis/contract.h"
+#include "loom/analysis/motion.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/index/ops.h"
@@ -36,6 +37,24 @@ struct loom_vector_to_scalar_lane_cache_entry_t {
   loom_value_id_t lane;
   // Next entry in the state-local arena-owned cache.
   struct loom_vector_to_scalar_lane_cache_entry_t* next;
+};
+
+typedef struct loom_vector_to_scalar_rematerialization_entry_t {
+  // Read producer whose source-position legality was classified.
+  const loom_op_t* read_op;
+  // True when the read may be rebuilt at the root consumer.
+  bool can_rematerialize;
+  // Next arena-owned entry in the root-local cache.
+  struct loom_vector_to_scalar_rematerialization_entry_t* next;
+} loom_vector_to_scalar_rematerialization_entry_t;
+
+struct loom_vector_to_scalar_rematerialization_context_t {
+  // Original source consumer being replaced by scalar lane programs.
+  const loom_op_t* consumer_op;
+  // Last original source op before consumer_op.
+  const loom_op_t* source_predecessor_op;
+  // Cached legality results keyed by distinct read producer.
+  loom_vector_to_scalar_rematerialization_entry_t* entries;
 };
 
 bool loom_vector_to_scalar_indices_are_dynamic(
@@ -785,6 +804,86 @@ bool loom_vector_to_scalar_can_materialize_def_lane(
   }
 }
 
+static bool loom_vector_to_scalar_read_can_rematerialize_through(
+    const loom_module_t* module, const loom_op_t* read_op,
+    const loom_op_t* consumer_op, const loom_op_t* source_predecessor_op) {
+  if (!loom_motion_op_is_ordinary_load(module, read_op) || !consumer_op ||
+      read_op->parent_block != consumer_op->parent_block ||
+      !source_predecessor_op ||
+      source_predecessor_op->parent_block != consumer_op->parent_block ||
+      read_op->block_ordinal > source_predecessor_op->block_ordinal) {
+    return false;
+  }
+  if (read_op == source_predecessor_op) return true;
+  const loom_op_t* crossed_op = read_op->next_op;
+  while (crossed_op && crossed_op != consumer_op) {
+    if (!loom_motion_read_can_cross_op(module, crossed_op)) return false;
+    if (crossed_op == source_predecessor_op) return true;
+    crossed_op = crossed_op->next_op;
+  }
+  return false;
+}
+
+bool loom_vector_to_scalar_read_can_rematerialize_at(
+    const loom_module_t* module, const loom_op_t* read_op,
+    const loom_op_t* consumer_op) {
+  return loom_vector_to_scalar_read_can_rematerialize_through(
+      module, read_op, consumer_op, consumer_op ? consumer_op->prev_op : NULL);
+}
+
+static iree_status_t loom_vector_to_scalar_rematerialization_initialize(
+    loom_vector_to_scalar_state_t* state) {
+  if (state->rematerialization) return iree_ok_status();
+  loom_vector_to_scalar_rematerialization_context_t* context = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(state->rewriter->arena,
+                                           sizeof(*context), (void**)&context));
+  *context = (loom_vector_to_scalar_rematerialization_context_t){
+      .consumer_op = state->op,
+      .source_predecessor_op = state->source_predecessor_op,
+  };
+  state->rematerialization = context;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vector_to_scalar_can_rematerialize_def_at_use(
+    loom_vector_to_scalar_state_t* state, const loom_op_t* def_op,
+    bool* out_can_rematerialize) {
+  *out_can_rematerialize = false;
+  if (loom_motion_op_can_rematerialize_effect_free(state->rewriter->module,
+                                                   def_op)) {
+    *out_can_rematerialize = true;
+    return iree_ok_status();
+  }
+  if (!loom_motion_op_is_ordinary_load(state->rewriter->module, def_op)) {
+    return iree_ok_status();
+  }
+
+  loom_vector_to_scalar_rematerialization_context_t* context =
+      state->rematerialization;
+  for (const loom_vector_to_scalar_rematerialization_entry_t* entry =
+           context->entries;
+       entry; entry = entry->next) {
+    if (entry->read_op == def_op) {
+      *out_can_rematerialize = entry->can_rematerialize;
+      return iree_ok_status();
+    }
+  }
+
+  loom_vector_to_scalar_rematerialization_entry_t* entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(state->rewriter->arena,
+                                           sizeof(*entry), (void**)&entry));
+  *entry = (loom_vector_to_scalar_rematerialization_entry_t){
+      .read_op = def_op,
+      .can_rematerialize = loom_vector_to_scalar_read_can_rematerialize_through(
+          state->rewriter->module, def_op, context->consumer_op,
+          context->source_predecessor_op),
+      .next = context->entries,
+  };
+  context->entries = entry;
+  *out_can_rematerialize = entry->can_rematerialize;
+  return iree_ok_status();
+}
+
 static bool loom_vector_to_scalar_try_from_elements_lane(
     loom_op_t* def_op, loom_type_t vector_type,
     loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane) {
@@ -823,6 +922,7 @@ loom_vector_to_scalar_try_physical_result_fragment_load_lane(
       .vector_type = vector_type,
       .result_scalar_type = loom_vector_to_scalar_lane_type(vector_type),
       .matrix_fragment_layout = state->matrix_fragment_layout,
+      .rematerialization = state->rematerialization,
       .location = def_op->location,
   };
 
@@ -857,6 +957,8 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
     loom_type_t vector_type, loom_vector_to_scalar_index_list_t indices,
     bool* out_materialized, loom_value_id_t* out_lane) {
   *out_materialized = false;
+  IREE_RETURN_IF_ERROR(
+      loom_vector_to_scalar_rematerialization_initialize(state));
   loom_op_t* def_op =
       loom_vector_to_scalar_value_def_op(state->rewriter->module, value);
   if (!def_op) {
@@ -870,6 +972,12 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
     return loom_vector_to_scalar_try_materialize_def_lane(
         state, loom_op_const_operands(def_op)[0], vector_type, indices,
         out_materialized, out_lane);
+  }
+  bool can_rematerialize = false;
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_can_rematerialize_def_at_use(
+      state, def_op, &can_rematerialize));
+  if (!can_rematerialize) {
+    return iree_ok_status();
   }
   if (loom_vector_to_scalar_try_from_elements_lane(def_op, vector_type, indices,
                                                    out_lane)) {
@@ -891,6 +999,7 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
         .vector_type = vector_type,
         .result_scalar_type = loom_vector_to_scalar_lane_type(vector_type),
         .matrix_fragment_layout = state->matrix_fragment_layout,
+        .rematerialization = state->rematerialization,
         .location = def_op->location,
     };
     IREE_RETURN_IF_ERROR(
@@ -908,6 +1017,7 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
         .vector_type = vector_type,
         .result_scalar_type = loom_vector_to_scalar_lane_type(vector_type),
         .matrix_fragment_layout = state->matrix_fragment_layout,
+        .rematerialization = state->rematerialization,
         .location = def_op->location,
     };
     IREE_RETURN_IF_ERROR(
@@ -936,6 +1046,7 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
         .vector_type = vector_type,
         .result_scalar_type = loom_vector_to_scalar_lane_type(vector_type),
         .matrix_fragment_layout = state->matrix_fragment_layout,
+        .rematerialization = state->rematerialization,
         .location = def_op->location,
     };
     IREE_RETURN_IF_ERROR(
@@ -968,6 +1079,7 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
       .vector_type = result_type,
       .result_scalar_type = loom_vector_to_scalar_lane_type(result_type),
       .matrix_fragment_layout = state->matrix_fragment_layout,
+      .rematerialization = state->rematerialization,
       .location = def_op->location,
   };
   if (descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DECODE &&
