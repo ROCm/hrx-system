@@ -1375,13 +1375,6 @@ iree_status_t loom_amdgpu_select_scalar_i64_ctpop_plan(
     return iree_ok_status();
   }
 
-  iree_string_view_t constraint_key = iree_string_view_empty();
-  if (!loom_amdgpu_scalar_i64_ctpop_descriptors_supported(
-          loom_low_lower_context_descriptor_set(context), kind,
-          &constraint_key)) {
-    return iree_ok_status();
-  }
-
   *out_plan = (loom_amdgpu_scalar_i64_ctpop_plan_t){
       .source = source,
       .result = result,
