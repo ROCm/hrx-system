@@ -141,13 +141,19 @@ NON_CPU_HAL_DRIVER_CTEST_REGEX = (
     r"^iree/hal/drivers/(amdgpu|cuda|hip|metal|vulkan|webgpu)/"
 )
 
-AMDGPU_BAZEL_DRIVER_TARGETS = ("//runtime/src/iree/hal/drivers/amdgpu/...",)
 AMDGPU_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/drivers/amdgpu/all",)
 DEFAULT_AMDGPU_TARGET_SELECTOR = "gfx942"
-AMDGPU_RESOURCE_TAG = "iree-run-requirement=runtime.resource.amd_gpu"
-AMDGPU_BAZEL_RESOURCE_SLICES = (
-    ("runtime", "//runtime", "//runtime/...", AMDGPU_RESOURCE_TAG),
-    ("Loom", "//loom", "//loom/...", AMDGPU_RESOURCE_TAG),
+AMDGPU_BUILD_REQUIREMENT_TAG = "iree-build-requirement=runtime.hal.amdgpu"
+AMDGPU_RUN_REQUIREMENT_TAG = "iree-run-requirement=runtime.resource.amd_gpu"
+AMDGPU_BAZEL_TEST_TAG_FILTERS = (
+    AMDGPU_BUILD_REQUIREMENT_TAG,
+    AMDGPU_RUN_REQUIREMENT_TAG,
+)
+AMDGPU_BAZEL_TARGET_EXCLUDES = (
+    "-//runtime/src/iree/hal/drivers/cuda/...",
+    "-//runtime/src/iree/hal/drivers/hip/...",
+    "-//runtime/src/iree/hal/drivers/vulkan/...",
+    "-//runtime/src/iree/hal/drivers/webgpu/...",
 )
 RUNTIME_CTEST_RESOURCE_LABEL_PREFIX = "runtime-resource="
 CTEST_RESOURCE_LABEL_EXCLUDE_REGEX = RUNTIME_CTEST_RESOURCE_LABEL_PREFIX
@@ -218,10 +224,17 @@ def amdgpu_bazel_xfail_targets(target_selector: str) -> tuple[str, ...]:
     )
 
 
-VULKAN_BAZEL_DRIVER_TARGETS = ("//runtime/src/iree/hal/drivers/vulkan/...",)
-RUNTIME_VULKAN_RESOURCE_TAG = "iree-run-requirement=runtime.resource.vulkan_device"
-VULKAN_BAZEL_RESOURCE_SLICES = (
-    ("loom", "//loom", "//loom/...", RUNTIME_VULKAN_RESOURCE_TAG),
+VULKAN_BUILD_REQUIREMENT_TAG = "iree-build-requirement=runtime.hal.vulkan"
+VULKAN_RUN_REQUIREMENT_TAG = "iree-run-requirement=runtime.resource.vulkan_device"
+VULKAN_BAZEL_TEST_TAG_FILTERS = (
+    VULKAN_BUILD_REQUIREMENT_TAG,
+    VULKAN_RUN_REQUIREMENT_TAG,
+)
+VULKAN_BAZEL_TARGET_EXCLUDES = (
+    "-//runtime/src/iree/hal/drivers/amdgpu/...",
+    "-//runtime/src/iree/hal/drivers/cuda/...",
+    "-//runtime/src/iree/hal/drivers/hip/...",
+    "-//runtime/src/iree/hal/drivers/webgpu/...",
 )
 VULKAN_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/drivers/vulkan/all",)
 VULKAN_CTEST_REGEX = r"^iree/hal/drivers/vulkan/"

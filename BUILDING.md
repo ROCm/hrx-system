@@ -149,9 +149,10 @@ CC=gcc CXX=g++ AR=ar \
 python build_tools/devtools/ci.py iree-bazel-cpu --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-cpu-sanitizers --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-vulkan --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-vulkan-sanitizers --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-amdgpu --amdgpu-target gfx942 --keep-going
-python build_tools/devtools/ci.py iree-bazel-amdgpu-sanitizers --amdgpu-target gfx942 --keep-going
+python build_tools/devtools/ci.py iree-bazel-amdgpu-asan --amdgpu-target gfx942 --keep-going
+python build_tools/devtools/ci.py iree-bazel-amdgpu-tsan --amdgpu-target gfx942 --keep-going
+python build_tools/devtools/ci.py iree-bazel-amdgpu-ubsan --amdgpu-target gfx942 --keep-going
 
 python build_tools/devtools/ci.py iree-cmake-cpu --keep-going
 python build_tools/devtools/ci.py iree-cmake-cpu-sanitizers --keep-going
@@ -163,24 +164,27 @@ python build_tools/devtools/ci.py iree-cmake-amdgpu-sanitizers --amdgpu-target g
 
 AMDGPU commands default to `gfx942`. `--amdgpu-target` accepts an exact target
 or family selector and applies it to both the runtime HAL target set and Loom's
-`iree_hal`-derived compiler target set. Bazel AMDGPU commands run resource-tagged
-tests from both `//runtime/...` and `//loom/...`.
+`iree_hal`-derived compiler target set. Bazel AMDGPU commands build both source
+trees, then run the union of tests that require the AMDGPU HAL at build time or
+an AMD GPU at execution time.
 
-The aggregate `*-sanitizers` commands batch sanitizer configurations for CI
-scheduling. Individual sanitizer commands are the targeted reproduction form:
+AMDGPU Bazel sanitizer configurations are separate CI jobs so they build and
+test independently. Aggregate CPU Bazel and CMake commands remain available as
+local batch commands. Individual sanitizer commands are the targeted
+reproduction form:
 
 ```bash
 python build_tools/devtools/ci.py iree-bazel-cpu-asan --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-vulkan-asan --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-amdgpu-tsan --amdgpu-target gfx942 --keep-going
 python build_tools/devtools/ci.py iree-cmake-cpu-ubsan --keep-going
 python build_tools/devtools/ci.py iree-cmake-vulkan-ubsan --keep-going
 python build_tools/devtools/ci.py iree-cmake-amdgpu-tsan --amdgpu-target gfx942 --keep-going
 ```
 
-Sanitizer CI tests ASAN, UBSAN, and TSAN. MSAN is build-only until the CI host
-dependency stack is MSAN-instrumented enough for test execution to produce
-runtime signal instead of dependency instrumentation noise.
+AMDGPU Bazel CI tests ASAN, UBSAN, and TSAN. It does not publish an MSAN lane:
+the CI host dependency stack is not MSAN-instrumented enough for execution to
+produce useful runtime signal. CPU Bazel and CMake retain their explicit
+build-only MSAN configurations.
 
 ## Shared Project Configuration
 
