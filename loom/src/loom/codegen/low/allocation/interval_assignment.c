@@ -83,6 +83,7 @@ loom_low_allocation_interval_assignment_search_context(
       .liveness = state->context->liveness,
       .unit_liveness = state->context->unit_liveness,
       .target_constraints = state->context->target_constraints,
+      .residency_model = state->context->residency_model,
       .assignment_map = &state->result.assignment_map,
       .placement = state->context->placement,
       .active_set = &state->active,
@@ -910,6 +911,7 @@ iree_status_t loom_low_allocation_interval_assignment_build(
     loom_low_allocation_coalescing_context_t coalescing_context = {
         .arena = context->arena,
         .liveness = context->liveness,
+        .op_points = context->op_points,
         .placement = context->placement,
         .target_constraints = context->target_constraints,
         .assignment_map = &state.result.assignment_map,

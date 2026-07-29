@@ -126,6 +126,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/ir",
+        "//loom/src/loom/target:residency",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
@@ -138,6 +139,7 @@ loom_cc_test(
     deps = [
         ":search",
         "//loom/src/loom/ir",
+        "//loom/src/loom/target:residency",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -175,6 +177,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:placement",
+        "//loom/src/loom/codegen/low:storage_relation",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

@@ -290,11 +290,12 @@ def _contract_intrinsic_name(contract: AmdgpuMatrixContract) -> str:
 
 def _matrix_descriptor_catalog(
     *,
+    descriptor_ref_keys: Iterable[str],
     descriptor_sets: Iterable[DescriptorSet],
     overlay_sets: Iterable[Iterable[AmdgpuDescriptorOverlay]],
     extra_descriptors: Iterable[Descriptor] = (),
 ) -> _MatrixDescriptorCatalog:
-    descriptor_ref_key_set = set(amdgpu_descriptor_ref_keys())
+    descriptor_ref_key_set = frozenset(descriptor_ref_keys)
     keys_by_semantic_tag: dict[str, set[str]] = {}
     shapes_by_key: dict[str, set[_MatrixDescriptorShape]] = {}
     immediates_by_key: dict[str, list[Immediate]] = {}
@@ -348,6 +349,7 @@ def _matrix_descriptor_catalog(
 
 def _global_matrix_descriptor_catalog() -> _MatrixDescriptorCatalog:
     return _matrix_descriptor_catalog(
+        descriptor_ref_keys=amdgpu_descriptor_ref_keys(),
         descriptor_sets=_amdgpu_core_descriptor_set_bases(),
         overlay_sets=(builder.overlay_rows() for builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.values()),
         extra_descriptors=(descriptor for builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.values() for descriptor in builder.extra_descriptors),
@@ -356,9 +358,12 @@ def _global_matrix_descriptor_catalog() -> _MatrixDescriptorCatalog:
 
 def _matrix_descriptor_catalog_for_builder(
     generator_target: str,
+    *,
+    descriptor_ref_keys: Iterable[str],
 ) -> _MatrixDescriptorCatalog:
     builder = _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[generator_target]
     return _matrix_descriptor_catalog(
+        descriptor_ref_keys=descriptor_ref_keys,
         descriptor_sets=(builder.base,),
         overlay_sets=(builder.overlay_rows(),),
         extra_descriptors=builder.extra_descriptors,
@@ -691,6 +696,7 @@ def _validate_matrix_profile_descriptor_catalog(
 def _validate_matrix_profile_descriptor_sets(*, global_descriptor_keys: Sequence[str | None]) -> None:
     _validate_matrix_feature_profiles()
     _validate_matrix_source_contracts()
+    descriptor_ref_keys = frozenset(descriptor_key for descriptor_key in global_descriptor_keys if descriptor_key is not None)
     builders_by_descriptor_set_key = {builder.base.key: generator_target for generator_target, builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.items()}
     profiles_by_descriptor_set_key: dict[str, set[str]] = {}
     for processor_info in sorted_processor_infos():
@@ -706,7 +712,10 @@ def _validate_matrix_profile_descriptor_sets(*, global_descriptor_keys: Sequence
 
     for descriptor_set_key in sorted(profiles_by_descriptor_set_key):
         generator_target = builders_by_descriptor_set_key[descriptor_set_key]
-        catalog = _matrix_descriptor_catalog_for_builder(generator_target)
+        catalog = _matrix_descriptor_catalog_for_builder(
+            generator_target,
+            descriptor_ref_keys=descriptor_ref_keys,
+        )
         for profile in sorted(profiles_by_descriptor_set_key[descriptor_set_key]):
             _validate_matrix_profile_descriptor_catalog(
                 descriptor_set_key=descriptor_set_key,

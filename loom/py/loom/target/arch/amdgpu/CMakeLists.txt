@@ -34,6 +34,34 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    compile_report_suggestions
+  SRCS
+    "compile_report_suggestions.py"
+  DEPS
+    loom::py::loom::target::arch::amdgpu::target_info
+    loom::py::loom::reporting::reporting
+)
+
+iree_py_test(
+  NAME
+    compile_report_suggestions_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
+  SRCS
+    "compile_report_suggestions_test.py"
+    "../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.amdgpu.compile_report_suggestions_test"
+  DEPS
+    loom::py::loom::target::arch::amdgpu::compile_report_suggestions
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_library(
+  NAME
     encoding_info
   SRCS
     "encoding.py"

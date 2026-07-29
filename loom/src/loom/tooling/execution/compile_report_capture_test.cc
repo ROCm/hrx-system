@@ -294,7 +294,12 @@ TEST(CompileReportCaptureTest, AppendsConfiguredJsonOutput) {
 
   iree_string_view_t output = iree_string_builder_view(&builder);
   EXPECT_NE(
-      iree_string_view_find(output, IREE_SV("output\n{\"artifact_kind\""), 0),
+      iree_string_view_find(
+          output, IREE_SV("output\n{\"kind\":\"loom.compile_report\""), 0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(
+          output, IREE_SV("\"schema_version\":0,\"mode\":\"summary\""), 0),
       IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
                 output, IREE_SV("\"artifact_kind\":\"vm-archive\""), 0),

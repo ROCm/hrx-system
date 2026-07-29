@@ -62,6 +62,16 @@ iree_status_t loom_amdgpu_lower_scalar_i64_alu(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_scalar_i64_alu_plan_t* plan);
 
+// Selects an AMDGPU scalar i64 population-count plan.
+iree_status_t loom_amdgpu_select_scalar_i64_ctpop_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_scalar_i64_ctpop_plan_t* out_plan, bool* out_selected);
+
+// Lowers an AMDGPU scalar i64 population-count plan.
+iree_status_t loom_amdgpu_lower_scalar_i64_ctpop(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_scalar_i64_ctpop_plan_t* plan);
+
 // Extracts the low 32 bits of an already-lowered source value into a VGPR.
 iree_status_t loom_amdgpu_extract_low_32_bits_as_vgpr(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
@@ -87,6 +97,12 @@ iree_status_t loom_amdgpu_low_legality_verify_scalar_cmpi_i64(
 
 // Verifies AMDGPU low legality for scalar i64 ALU ops.
 iree_status_t loom_amdgpu_low_legality_verify_scalar_i64_alu(
+    const loom_target_low_legality_provider_t* provider,
+    loom_target_low_legality_context_t* context, const loom_op_t* op,
+    bool* out_handled);
+
+// Verifies AMDGPU low legality for scalar i64 population count.
+iree_status_t loom_amdgpu_low_legality_verify_scalar_i64_ctpop(
     const loom_target_low_legality_provider_t* provider,
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled);

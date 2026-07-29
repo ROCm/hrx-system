@@ -1447,6 +1447,14 @@ iree_status_t loom_target_compile_report_format_json(
   loom_json_object_writer_t object;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("kind"), IREE_SV("loom.compile_report")));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("schema_version"),
+      LOOM_TARGET_COMPILE_REPORT_SCHEMA_VERSION));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("mode"),
+      loom_target_compile_report_format_mode_name(options->mode)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("artifact_kind"),
       loom_target_compile_report_artifact_kind_name(report->artifact_kind)));
   IREE_RETURN_IF_ERROR(

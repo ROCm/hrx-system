@@ -1164,9 +1164,9 @@ low.func.def target(@gfx11_target) @gfx11_vopd_fmac_chain_pair_exposure_through_
 }
 
 // ----
-  v_dual_fmac_f32 v0, v4, v8 :: v_dual_fmac_f32 v1, v6, v10
+  v_dual_fmac_f32 v8, v0, v4 :: v_dual_fmac_f32 v9, v2, v6
   s_delay_alu instid0(VALU_DEP_2)
-  v_dual_fmac_f32 v0, v5, v9 :: v_dual_fmac_f32 v1, v7, v11
+  v_dual_fmac_f32 v8, v1, v5 :: v_dual_fmac_f32 v9, v3, v7
   s_endpgm
 
 // ====

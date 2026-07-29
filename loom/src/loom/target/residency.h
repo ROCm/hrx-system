@@ -327,6 +327,17 @@ void loom_target_residency_evaluate_cliffs(
     uint32_t initial_tier, uint64_t units,
     loom_target_residency_cliff_evaluation_t* out_evaluation);
 
+// Evaluates the whole-model tier after overriding one direct resource.
+//
+// |direct_resource_units| is a trusted planning vector dense by direct
+// resource ID with the count declared by |model|. The selected resource is
+// evaluated with |override_units| instead of its vector entry. This performs no
+// allocation and is intended for hot-path candidate comparisons.
+uint32_t loom_target_residency_evaluate_tier_with_direct_resource_override(
+    const loom_target_residency_model_t* model,
+    const uint32_t* direct_resource_units, uint16_t direct_resource_id,
+    uint32_t override_units);
+
 // Evaluates all resources and the resulting whole-model residency tier.
 //
 // |direct_resource_units| is dense by direct resource ID and must exactly

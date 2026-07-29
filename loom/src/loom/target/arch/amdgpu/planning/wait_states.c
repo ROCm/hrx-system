@@ -15,7 +15,6 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
-#include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
 #include "loom/target/arch/amdgpu/planning/matrix_wait_states.h"
 #include "loom/target/arch/amdgpu/planning/structural_packet.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -649,22 +648,26 @@ static bool loom_amdgpu_wait_state_target_has_delay_alu(
 }
 
 static loom_amdgpu_delay_alu_type_t loom_amdgpu_wait_state_delay_alu_type(
-    const loom_amdgpu_wait_state_builder_t* builder, bool is_transcendental,
-    bool uses_vector_alu, bool uses_scalar_alu) {
+    const loom_amdgpu_wait_state_builder_t* builder,
+    loom_amdgpu_descriptor_traits_t descriptor_traits) {
   if (!builder->has_delay_alu) {
     return LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER;
   }
-  if (is_transcendental) {
+  if (iree_any_bit_set(descriptor_traits,
+                       LOOM_AMDGPU_DESCRIPTOR_TRAIT_TRANSCENDENTAL)) {
     if (loom_amdgpu_wait_state_has_scheduling(
             builder, LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR)) {
       return LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER;
     }
     return LOOM_AMDGPU_DELAY_ALU_TYPE_TRANS;
   }
-  if (uses_vector_alu) {
+  if (iree_any_bit_set(descriptor_traits,
+                       LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU |
+                           LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX)) {
     return LOOM_AMDGPU_DELAY_ALU_TYPE_VALU;
   }
-  if (uses_scalar_alu) {
+  if (iree_any_bit_set(descriptor_traits,
+                       LOOM_AMDGPU_DESCRIPTOR_TRAIT_SCALAR_ALU)) {
     return LOOM_AMDGPU_DELAY_ALU_TYPE_SALU;
   }
   return LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER;
@@ -779,11 +782,10 @@ static iree_status_t loom_amdgpu_wait_state_read_dst_sel_immediate(
 static iree_status_t
 loom_amdgpu_wait_state_packet_has_dst_sel_forwarding_hazard(
     const loom_amdgpu_wait_state_builder_t* builder,
-    const loom_low_packet_view_t* packet, bool* out_has_hazard) {
+    const loom_low_packet_view_t* packet,
+    loom_amdgpu_descriptor_traits_t descriptor_traits, bool* out_has_hazard) {
   *out_has_hazard = false;
-  if (packet->descriptor == NULL ||
-      !loom_amdgpu_descriptor_is_sdwa(builder->descriptor_set,
-                                      packet->descriptor)) {
+  if (!iree_any_bit_set(descriptor_traits, LOOM_AMDGPU_DESCRIPTOR_TRAIT_SDWA)) {
     return iree_ok_status();
   }
   bool has_dst_sel = false;
@@ -1782,20 +1784,14 @@ static iree_status_t loom_amdgpu_wait_state_packet_analyze(
   out_info->instruction_count = 1;
   const loom_low_descriptor_t* descriptor = packet->descriptor;
   const loom_low_descriptor_set_t* descriptor_set = builder->descriptor_set;
-  const bool is_transcendental =
-      loom_amdgpu_descriptor_is_transcendental(descriptor_set, descriptor);
-  const bool uses_vector_alu =
-      loom_amdgpu_descriptor_uses_vector_alu(descriptor_set, descriptor);
-  const bool uses_matrix =
-      loom_amdgpu_descriptor_uses_matrix(descriptor_set, descriptor);
-  const bool uses_vector_memory =
-      loom_amdgpu_descriptor_uses_vector_memory(descriptor_set, descriptor);
-  const bool uses_scalar_alu =
-      loom_amdgpu_descriptor_uses_scalar_alu(descriptor_set, descriptor);
-  if (uses_vector_alu) {
+  const loom_amdgpu_descriptor_traits_t descriptor_traits =
+      loom_amdgpu_descriptor_traits(descriptor_set, descriptor);
+  if (iree_any_bit_set(descriptor_traits,
+                       LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU)) {
     out_info->flags |= LOOM_AMDGPU_WAIT_STATE_PACKET_FLAG_USES_VECTOR_ALU;
   }
-  if (uses_vector_memory) {
+  if (iree_any_bit_set(descriptor_traits,
+                       LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_MEMORY)) {
     out_info->flags |= LOOM_AMDGPU_WAIT_STATE_PACKET_FLAG_USES_VECTOR_MEMORY;
   }
 
@@ -1822,10 +1818,16 @@ static iree_status_t loom_amdgpu_wait_state_packet_analyze(
 
   const bool processor_has_trans_waits = loom_amdgpu_wait_state_has_scheduling(
       builder, LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES);
-  if (processor_has_trans_waits && is_transcendental) {
+  if (processor_has_trans_waits &&
+      iree_any_bit_set(descriptor_traits,
+                       LOOM_AMDGPU_DESCRIPTOR_TRAIT_TRANSCENDENTAL)) {
     out_info->flags |= LOOM_AMDGPU_WAIT_STATE_PACKET_FLAG_TRANS_PRODUCER;
   }
-  if (processor_has_trans_waits && uses_vector_alu && !is_transcendental) {
+  if (processor_has_trans_waits &&
+      iree_any_bit_set(descriptor_traits,
+                       LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU) &&
+      !iree_any_bit_set(descriptor_traits,
+                        LOOM_AMDGPU_DESCRIPTOR_TRAIT_TRANSCENDENTAL)) {
     out_info->flags |=
         LOOM_AMDGPU_WAIT_STATE_PACKET_FLAG_TRANS_FORWARDING_CONSUMER;
   }
@@ -1833,19 +1835,24 @@ static iree_status_t loom_amdgpu_wait_state_packet_analyze(
   const bool processor_has_valu_sgpr_read_hazard =
       loom_amdgpu_wait_state_has_scheduling(
           builder, LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES);
-  if (loom_amdgpu_descriptor_is_dpp(descriptor_set, descriptor)) {
+  if (iree_any_bit_set(descriptor_traits, LOOM_AMDGPU_DESCRIPTOR_TRAIT_DPP)) {
     out_info->flags |= LOOM_AMDGPU_WAIT_STATE_PACKET_FLAG_DPP_CONSUMER;
   }
-  if (loom_amdgpu_descriptor_is_readfirstlane(descriptor_set, descriptor)) {
+  if (iree_any_bit_set(descriptor_traits,
+                       LOOM_AMDGPU_DESCRIPTOR_TRAIT_READFIRSTLANE)) {
     out_info->flags |=
         LOOM_AMDGPU_WAIT_STATE_PACKET_FLAG_READFIRSTLANE_CONSUMER;
   }
   if (processor_has_valu_sgpr_read_hazard &&
-      (uses_vector_alu || uses_vector_memory)) {
+      iree_any_bit_set(descriptor_traits,
+                       LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU |
+                           LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_MEMORY)) {
     out_info->flags |=
         LOOM_AMDGPU_WAIT_STATE_PACKET_FLAG_VALU_SGPR_READ_CONSUMER;
   }
-  if (processor_has_valu_sgpr_read_hazard && uses_vector_alu) {
+  if (processor_has_valu_sgpr_read_hazard &&
+      iree_any_bit_set(descriptor_traits,
+                       LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU)) {
     out_info->flags |=
         LOOM_AMDGPU_WAIT_STATE_PACKET_FLAG_VALU_SGPR_READ_PRODUCER;
   }
@@ -1855,12 +1862,13 @@ static iree_status_t loom_amdgpu_wait_state_packet_analyze(
     bool has_forwarding_hazard = false;
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_wait_state_packet_has_dst_sel_forwarding_hazard(
-            builder, packet, &has_forwarding_hazard));
+            builder, packet, descriptor_traits, &has_forwarding_hazard));
     if (has_forwarding_hazard) {
       out_info->flags |=
           LOOM_AMDGPU_WAIT_STATE_PACKET_FLAG_DST_SEL_FORWARDING_PRODUCER;
     }
-    if (uses_vector_alu) {
+    if (iree_any_bit_set(descriptor_traits,
+                         LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU)) {
       out_info->flags |=
           LOOM_AMDGPU_WAIT_STATE_PACKET_FLAG_DST_SEL_FORWARDING_CONSUMER;
     }
@@ -1870,9 +1878,8 @@ static iree_status_t loom_amdgpu_wait_state_packet_analyze(
   // though their schedule resource is classified separately from ordinary
   // VALU instructions. Targets without S_DELAY_ALU reject the classification
   // inside loom_amdgpu_wait_state_delay_alu_type.
-  const bool uses_vector_alu_dependency = uses_vector_alu || uses_matrix;
-  out_info->delay_alu_type = loom_amdgpu_wait_state_delay_alu_type(
-      builder, is_transcendental, uses_vector_alu_dependency, uses_scalar_alu);
+  out_info->delay_alu_type =
+      loom_amdgpu_wait_state_delay_alu_type(builder, descriptor_traits);
   if (out_info->delay_alu_type != LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER) {
     out_info->delay_alu_latency_cycles =
         loom_amdgpu_wait_state_delay_alu_latency_cycles(

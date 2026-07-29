@@ -61,6 +61,8 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.s_lshl_b32",
     "amdgpu.s_lshr_b32",
     "amdgpu.s_ashr_i32",
+    "amdgpu.s_bcnt1_i32_b32",
+    "amdgpu.s_bcnt1_i32_b64",
     "amdgpu.s_bfe_i32.lit",
     "amdgpu.s_bfe_u32.lit",
     "amdgpu.v_mov_b32",
@@ -83,6 +85,8 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_lshlrev_b32.vop3_imm",
     "amdgpu.v_lshrrev_b32",
     "amdgpu.v_lshrrev_b32.lit",
+    "amdgpu.v_bcnt_u32_b32",
+    "amdgpu.v_bcnt_u32_b32.src1_zero",
     "amdgpu.v_ashrrev_i32",
     "amdgpu.v_ashrrev_i32.lit",
     "amdgpu.v_bfe_i32.offset_width_inline",
@@ -1441,6 +1445,53 @@ def _index_madd_sgpr_rule() -> DescriptorRule:
     )
 
 
+def _scalar_ctpopi_i32_rules() -> tuple[DescriptorRule, ...]:
+    scalar_descriptor = _descriptor("amdgpu.s_bcnt1_i32_b32")
+    vector_descriptor = _descriptor("amdgpu.v_bcnt_u32_b32.src1_zero")
+    typed_guards = (
+        Guard.value_type("input", _I32),
+        Guard.value_type("result", _I32),
+    )
+    return (
+        DescriptorRule(
+            source_op=scalar_bitwise.scalar_ctpopi,
+            descriptor=scalar_descriptor,
+            guards=(
+                *typed_guards,
+                Guard.low_value_register_class("input", "amdgpu.sgpr"),
+                Guard.low_value_register_class("result", "amdgpu.sgpr"),
+                Guard.descriptor_available(scalar_descriptor),
+            ),
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=scalar_descriptor,
+                    operands={"input": ValueRef.operand("input")},
+                    results={"dst": ValueRef.result("result")},
+                ),
+            ),
+        ),
+        DescriptorRule(
+            source_op=scalar_bitwise.scalar_ctpopi,
+            descriptor=vector_descriptor,
+            guards=(
+                *typed_guards,
+                Guard.low_value_register_class("result", "amdgpu.vgpr"),
+                Guard.value_materializable("input", I32_VGPR_MATERIALIZER.name),
+                Guard.descriptor_available(vector_descriptor),
+            ),
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=vector_descriptor,
+                    operands={
+                        "input": _materialized_operand("input", I32_VGPR_MATERIALIZER)
+                    },
+                    results={"dst": ValueRef.result("result")},
+                ),
+            ),
+        ),
+    )
+
+
 def _rules() -> tuple[DescriptorRule, ...]:
     rules: list[DescriptorRule] = []
     rules.extend(
@@ -1672,6 +1723,7 @@ def _rules() -> tuple[DescriptorRule, ...]:
         )
     )
     rules.append(_index_madd_sgpr_rule())
+    rules.extend(_scalar_ctpopi_i32_rules())
     return tuple(rules)
 
 

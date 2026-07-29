@@ -214,6 +214,11 @@ static bool loom_low_schedule_candidate_score_less(
     if (loom_low_schedule_candidate_pair_affinity_differs(lhs, rhs)) {
       return loom_low_schedule_candidate_has_better_pair_affinity(lhs, rhs);
     }
+    if (iree_any_bit_set(lhs->flags ^ rhs->flags,
+                         LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE)) {
+      return iree_any_bit_set(
+          lhs->flags, LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE);
+    }
     if (live_value_order != 0 &&
         (loom_low_schedule_candidate_compacts_live_values(lhs) ||
          loom_low_schedule_candidate_compacts_live_values(rhs)) &&

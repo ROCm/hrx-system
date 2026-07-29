@@ -184,6 +184,25 @@ TEST_F(ResidencyTest, CliffEvaluationUsesExactBoundaries) {
       LOOM_TARGET_RESIDENCY_CLIFF_EVALUATION_FLAG_HAS_WORSE_TIER));
 }
 
+TEST_F(ResidencyTest, DirectResourceOverrideEvaluatesWholeModelTier) {
+  const uint32_t direct_units[] = {4, 2};
+  EXPECT_EQ(loom_target_residency_evaluate_tier_with_direct_resource_override(
+                &kModel, direct_units, /*direct_resource_id=*/0,
+                /*override_units=*/4),
+            4u);
+  EXPECT_EQ(loom_target_residency_evaluate_tier_with_direct_resource_override(
+                &kModel, direct_units, /*direct_resource_id=*/0,
+                /*override_units=*/5),
+            2u);
+
+  // The scalar resource remains at tier 3, but its rounded contribution makes
+  // the derived shared register file the tier-2 limiter.
+  EXPECT_EQ(loom_target_residency_evaluate_tier_with_direct_resource_override(
+                &kModel, direct_units, /*direct_resource_id=*/1,
+                /*override_units=*/5),
+            2u);
+}
+
 TEST_F(ResidencyTest, UnavailableModelIsExplicit) {
   loom_target_residency_query_t query;
   IREE_ASSERT_OK(

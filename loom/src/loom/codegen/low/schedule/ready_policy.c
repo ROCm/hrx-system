@@ -8,8 +8,6 @@
 
 #include <string.h>
 
-#include "loom/ops/low/ops.h"
-
 #define LOOM_LOW_SCHEDULE_PAIR_LOOKAHEAD_CAPACITY 16u
 
 typedef enum loom_low_schedule_ready_membership_change_e {
@@ -17,9 +15,10 @@ typedef enum loom_low_schedule_ready_membership_change_e {
   LOOM_LOW_SCHEDULE_READY_MEMBERSHIP_INSERT = 1,
 } loom_low_schedule_ready_membership_change_t;
 
-static bool loom_low_schedule_ready_policy_node_is_pair_setup(
+static bool loom_low_schedule_ready_policy_node_is_storage_setup(
     const loom_low_schedule_node_t* node) {
-  return iree_any_bit_set(node->flags, LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_SETUP);
+  return iree_any_bit_set(node->flags,
+                          LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP);
 }
 
 static void loom_low_schedule_ready_policy_update_setup_dependencies(
@@ -27,7 +26,7 @@ static void loom_low_schedule_ready_policy_update_setup_dependencies(
     loom_low_schedule_ready_policy_t* policy, uint32_t node_index,
     loom_low_schedule_ready_membership_change_t change) {
   if (policy->setup_dependency_counts == NULL ||
-      !loom_low_schedule_ready_policy_node_is_pair_setup(
+      !loom_low_schedule_ready_policy_node_is_storage_setup(
           &state->nodes[node_index])) {
     return;
   }
@@ -120,16 +119,8 @@ static bool loom_low_schedule_ready_policy_node_result_used_by(
 
 static bool loom_low_schedule_ready_policy_node_is_pair_transparent(
     const loom_low_schedule_node_t* node) {
-  if (node->kind != LOOM_LOW_SCHEDULE_NODE_STRUCTURAL || node->op == NULL) {
-    return false;
-  }
-  switch (node->op->kind) {
-    case LOOM_OP_LOW_SLICE:
-    case LOOM_OP_LOW_CONCAT:
-      return true;
-    default:
-      return false;
-  }
+  return iree_any_bit_set(node->flags,
+                          LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_TRANSPARENT);
 }
 
 static const loom_low_schedule_pair_affinity_record_t*
@@ -253,7 +244,8 @@ static bool loom_low_schedule_ready_policy_node_can_unlock_pair(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_node_t* node) {
   return state->pending_pair_affinity_node == LOOM_LOW_SCHEDULE_NODE_NONE &&
-         iree_any_bit_set(node->flags, LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_SETUP);
+         iree_any_bit_set(node->flags,
+                          LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP);
 }
 
 uint16_t loom_low_schedule_ready_policy_score_candidate_pair(

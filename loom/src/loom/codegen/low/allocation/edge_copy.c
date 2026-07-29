@@ -782,11 +782,8 @@ iree_status_t loom_low_allocation_edge_copy_plan_build(
       arena, group_count, sizeof(*plan.groups), (void**)&plan.groups));
   memset(plan.groups, 0, group_count * sizeof(*plan.groups));
 
-  loom_low_allocation_op_point_index_t op_points = {0};
-  IREE_RETURN_IF_ERROR(loom_low_allocation_op_point_index_initialize(
-      context->assignment_map.liveness, arena, &op_points));
-  IREE_RETURN_IF_ERROR(
-      loom_low_allocation_edge_copy_record_groups(context, &plan, &op_points));
+  IREE_RETURN_IF_ERROR(loom_low_allocation_edge_copy_record_groups(
+      context, &plan, context->op_points));
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_edge_copy_record_temporaries(context, &plan, arena));
   *out_plan = plan;

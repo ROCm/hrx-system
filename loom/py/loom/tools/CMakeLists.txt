@@ -29,6 +29,17 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    compile_report
+  SRCS
+    "__init__.py"
+    "compile_report.py"
+  DEPS
+    loom::py::loom::reporting::reporting
+    loom::py::loom::target::arch::compile_report_suggestions
+)
+
+iree_py_library(
+  NAME
     loom_opt
   SRCS
     "__init__.py"
@@ -36,6 +47,17 @@ iree_py_library(
   DEPS
     loom::py::loom::core
     loom::py::loom::error::error
+)
+
+iree_py_library(
+  NAME
+    loom-compile-report
+  MAIN
+    "compile_report.py"
+  SRCS
+    "compile_report.py"
+  DEPS
+    loom::py::loom::tools::compile_report
 )
 
 iree_py_library(
@@ -54,15 +76,18 @@ iree_py_test(
     "pytest_style_runner.py"
   SRCS
     "amdgpu_asm_test.py"
+    "compile_report_test.py"
     "loom_opt_test.py"
     "pytest_style_runner.py"
     "source_surface_test.py"
   ARGS
     "loom.tools.amdgpu_asm_test"
+    "loom.tools.compile_report_test"
     "loom.tools.loom_opt_test"
     "loom.tools.source_surface_test"
   DEPS
     loom::py::loom::tools::amdgpu_asm
+    loom::py::loom::tools::compile_report
     loom::py::loom::tools::loom_opt
     loom::py::loom::tools::tools
   PACKAGE_DIRS

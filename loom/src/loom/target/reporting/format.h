@@ -17,6 +17,12 @@
 extern "C" {
 #endif
 
+// Compile report schema version emitted by the JSON formatter.
+//
+// Version zero is an unstable same-compiler-time-horizon contract. Consumers
+// must require exact equality and are not expected to migrate older reports.
+#define LOOM_TARGET_COMPILE_REPORT_SCHEMA_VERSION 0u
+
 typedef enum loom_target_compile_report_format_mode_e {
   // Does not format a compile report.
   LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_NONE = 0,
@@ -46,6 +52,10 @@ void loom_target_compile_report_format_options_initialize(
 iree_status_t loom_target_compile_report_format_mode_parse(
     iree_string_view_t value,
     loom_target_compile_report_format_mode_t* out_mode);
+
+// Returns the stable JSON spelling for |mode|.
+iree_string_view_t loom_target_compile_report_format_mode_name(
+    loom_target_compile_report_format_mode_t mode);
 
 // Formats |report| as bounded line-oriented text into |builder|.
 iree_status_t loom_target_compile_report_format_text(

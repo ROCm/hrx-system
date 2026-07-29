@@ -584,6 +584,75 @@ def _s_shift_u64_overlay(
     )
 
 
+def _s_bcnt1_i32_overlay(
+    source_bit_count: int, encoding_condition: str
+) -> AmdgpuDescriptorOverlay:
+    if source_bit_count not in (32, 64):
+        raise ValueError("S_BCNT1_I32 source width must be 32 or 64")
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=f"amdgpu.s_bcnt1_i32_b{source_bit_count}",
+        instruction_name=f"S_BCNT1_I32_B{source_bit_count}",
+        mnemonic=f"s_bcnt1_i32_b{source_bit_count}",
+        encoding_name="ENC_SOP1",
+        encoding_condition=encoding_condition,
+        semantic_tag=f"integer.ctpop.u{source_bit_count}",
+        schedule_class=_SCHEDULE_SALU,
+        operands=(
+            AmdgpuOperandOverlay("SDST", _sgpr_result()),
+            AmdgpuOperandOverlay(
+                "SSRC0", _sgpr_operand("input", units=source_bit_count // 32)
+            ),
+        ),
+        implicit_operands=(_SCC_CLOBBER_OUTPUT,),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_bcnt_u32_b32_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_bcnt_u32_b32",
+        instruction_name="V_BCNT_U32_B32",
+        mnemonic="v_bcnt_u32_b32",
+        encoding_name="ENC_VOP3",
+        semantic_tag="integer.ctpop.accumulate.u32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),
+            AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("addend")),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_bcnt_u32_b32_src1_zero_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_bcnt_u32_b32.src1_zero",
+        instruction_name="V_BCNT_U32_B32",
+        mnemonic="v_bcnt_u32_b32_src1_zero",
+        encoding_name="ENC_VOP3",
+        semantic_tag="integer.ctpop.u32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),
+        ),
+        fixed_encoding_fields=(("SRC1", _predefined("0", "OPR_SRC")),),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _integer_bit_count_overlays(
+    sop1_encoding_condition: str = "default",
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return (
+        _s_bcnt1_i32_overlay(32, sop1_encoding_condition),
+        _s_bcnt1_i32_overlay(64, sop1_encoding_condition),
+        _v_bcnt_u32_b32_overlay(),
+        _v_bcnt_u32_b32_src1_zero_overlay(),
+    )
+
+
 def _s_cmp_i32_overlay(
     *,
     descriptor_key: str,
@@ -5775,6 +5844,7 @@ def _v_mov_b32_sdwa_overlay() -> AmdgpuDescriptorOverlay:
 
 
 __all__ = (
+    "_integer_bit_count_overlays",
     "_integer_bitwise_permute_overlays",
     "_integer_bitwise_shift_overlays",
     "_s_add_u32_overlay",

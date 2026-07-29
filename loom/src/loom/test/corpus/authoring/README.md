@@ -14,10 +14,10 @@ The examples are tested through production-facing tools:
   executes correctness samples, and benchmarks the same sources on AMDGPU test
   hosts.
 
-The timing flags used by the Bazel AMDGPU smoke targets are harness policy. The
-source files name workloads and correctness expectations; iteration counts,
-warmups, profiling, compile-time measurement, soak runs, and quick proof runs
-belong to `iree-benchmark-loom` flags or embedding APIs.
+The timing flags used by automated AMDGPU smoke coverage are harness policy.
+The source files name workloads and correctness expectations; iteration
+counts, warmups, profiling, compile-time measurement, soak runs, and quick
+proof runs belong to `iree-benchmark-loom` flags or embedding APIs.
 
 ## Source Map
 
@@ -79,7 +79,7 @@ Start with the host-only planner when editing source shape, check parameters,
 or benchmark rows:
 
 ```bash
-python dev.py bazel run //loom/src/loom/tools/iree-benchmark-loom:iree-benchmark-loom -- \
+iree-benchmark-loom \
   loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom \
   --dry-run \
   --output=/tmp/loom-q6q8-plan.json
@@ -95,7 +95,7 @@ Compile the same authored file to an AMDGPU HAL executable plus a native HSACO
 sidecar when validating target lowering and packaging:
 
 ```bash
-python dev.py bazel run //loom/src/loom/tools/loom-compile:loom-compile -- \
+loom-compile \
   loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom \
   --backend=amdgpu-hal \
   --target=gfx11-generic \
@@ -117,7 +117,26 @@ function, four parameters/bindings, zero constant bytes, workgroup size
 The artifact manifest describes the emitted artifact contract. The compile
 report describes compiler evidence for the invocation: status, selected backend
 and target bundle, schedule size, register pressure, instruction mix, spills,
-emitted code bytes, and memory summaries. Useful first inspections are:
+emitted code bytes, and memory summaries. Start with the bounded report views:
+
+```bash
+loom-compile-report show /tmp/loom-q6q8.compile-report.json
+loom-compile-report suggest /tmp/loom-q6q8.compile-report.json
+loom-compile-report \
+  diff /tmp/baseline.compile-report.json \
+       /tmp/loom-q6q8.compile-report.json --format=json
+```
+
+The JSON views are sparse so they can feed an autoresearch loop without
+replaying the full report. Omitted metrics are unavailable, not zero. `diff`
+requires exact schema, target, config, workload, and entry identity; it has no
+force mode for unlike compilations. `suggest` uses only explicitly registered
+target providers and reports unavailable target interpretation instead of
+guessing from bundle names.
+
+Version-zero reports are ephemeral diagnostics co-versioned with the compiler.
+Regenerate them after changing compiler versions. Use the full report and
+manifest for deeper source and packet attribution:
 
 ```bash
 jq '{artifact, targets, functions}' /tmp/loom-q6q8.manifest.json
@@ -168,7 +187,7 @@ When provider selection, inlining, or math legalization is suspect, capture IR
 snapshots around those boundaries:
 
 ```bash
-python dev.py bazel run //loom/src/loom/tools/loom-compile:loom-compile -- \
+loom-compile \
   loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom \
   --backend=amdgpu-hal \
   --target=gfx11-generic \
@@ -234,9 +253,7 @@ keep target-owned assembly/listing text with benchmark evidence, run
 build:
 
 ```bash
-python dev.py bazel run \
-  --//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null \
-  //loom/src/loom/tools/iree-benchmark-loom:iree-benchmark-loom -- \
+iree-benchmark-loom \
   loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom \
   --device=amdgpu \
   --measure=dispatch_complete \

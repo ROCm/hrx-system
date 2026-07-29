@@ -13,6 +13,20 @@ void loom_target_compile_report_format_options_initialize(
   };
 }
 
+iree_string_view_t loom_target_compile_report_format_mode_name(
+    loom_target_compile_report_format_mode_t mode) {
+  switch (mode) {
+    case LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_NONE:
+      return IREE_SV("none");
+    case LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY:
+      return IREE_SV("summary");
+    case LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS:
+      return IREE_SV("details");
+    default:
+      return IREE_SV("unknown");
+  }
+}
+
 iree_status_t loom_target_compile_report_format_mode_parse(
     iree_string_view_t value,
     loom_target_compile_report_format_mode_t* out_mode) {

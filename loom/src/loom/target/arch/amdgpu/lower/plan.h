@@ -108,7 +108,8 @@ typedef enum loom_amdgpu_index_cast_kind_e {
   LOOM_AMDGPU_INDEX_CAST_KIND_NONE = 0,
   LOOM_AMDGPU_INDEX_CAST_KIND_ALIAS = 1,
   LOOM_AMDGPU_INDEX_CAST_KIND_PRESERVING_LOW_32 = 2,
-  LOOM_AMDGPU_INDEX_CAST_KIND_DIAGNOSTIC_REJECTED = 3,
+  LOOM_AMDGPU_INDEX_CAST_KIND_ZERO_EXTENDING_LOW_32 = 3,
+  LOOM_AMDGPU_INDEX_CAST_KIND_DIAGNOSTIC_REJECTED = 4,
 } loom_amdgpu_index_cast_kind_t;
 
 typedef struct loom_amdgpu_index_cast_plan_t {
@@ -118,7 +119,9 @@ typedef struct loom_amdgpu_index_cast_plan_t {
   loom_value_id_t source;
   // Result value receiving the cast payload.
   loom_value_id_t result;
-  // Target index bit width used by preserving narrowing checks.
+  // Descriptor materializing the high zero lane for a widening cast.
+  loom_amdgpu_descriptor_ref_t zero_descriptor_ref;
+  // Target index bit width used by width-changing casts.
   uint32_t index_bitwidth;
 } loom_amdgpu_index_cast_plan_t;
 
@@ -180,6 +183,23 @@ typedef struct loom_amdgpu_scalar_i64_alu_plan_t {
   // Lowering strategy selected for the scalar i64 ALU op.
   loom_amdgpu_scalar_i64_alu_kind_t kind;
 } loom_amdgpu_scalar_i64_alu_plan_t;
+
+typedef enum loom_amdgpu_scalar_i64_ctpop_kind_e {
+  LOOM_AMDGPU_SCALAR_I64_CTPOP_KIND_NONE = 0,
+  LOOM_AMDGPU_SCALAR_I64_CTPOP_KIND_SGPR_B32 = 1,
+  LOOM_AMDGPU_SCALAR_I64_CTPOP_KIND_SGPR_B64 = 2,
+  LOOM_AMDGPU_SCALAR_I64_CTPOP_KIND_VGPR_B32 = 3,
+  LOOM_AMDGPU_SCALAR_I64_CTPOP_KIND_VGPR_B64 = 4,
+} loom_amdgpu_scalar_i64_ctpop_kind_t;
+
+typedef struct loom_amdgpu_scalar_i64_ctpop_plan_t {
+  // Source 64-bit integer whose set bits are counted.
+  loom_value_id_t source;
+  // Result 64-bit integer receiving the zero-extended population count.
+  loom_value_id_t result;
+  // Register-bank-specific population-count strategy.
+  loom_amdgpu_scalar_i64_ctpop_kind_t kind;
+} loom_amdgpu_scalar_i64_ctpop_plan_t;
 
 typedef enum loom_amdgpu_scalar_conversion_kind_e {
   LOOM_AMDGPU_SCALAR_CONVERSION_KIND_NONE = 0,

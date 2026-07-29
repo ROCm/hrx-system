@@ -147,6 +147,72 @@ low.func.def target(@test_target) @resource_stall_hides_load_latency(
 }
 
 // ====
+// RUN: emit low-schedule-json @resource_stall_places_concat_before_payload_ready strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_places_concat_before_payload_ready(
+    %lhs0: reg<test.i32 x4>, %rhs0: reg<test.i32 x4>,
+    %lhs1: reg<test.i32 x4>, %rhs1: reg<test.i32 x4>,
+    %lhs: reg<test.i32>, %rhs: reg<test.i32>) ->
+    (reg<test.i32 x8>, reg<test.i32>) {
+  // REMARK@+1: BACKEND/015
+  %part0 = low.op<test.add.v4i32>(%lhs0, %rhs0) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015
+  %part1 = low.op<test.add.v4i32>(%lhs1, %rhs1) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="low.concat", rejected_packet="test.mul.i32", chosen_data_ready_stall_cycles="0"}
+  %packed = low.concat(%part0, %part1) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
+  %independent = low.op<test.mul.i32>(%lhs, %rhs) :
+      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %packed, %independent : reg<test.i32 x8>, reg<test.i32>
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_completes_started_storage_setup strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_completes_started_storage_setup(
+    %lhs0: reg<test.i32>, %rhs0: reg<test.i32>,
+    %lhs1: reg<test.i32>, %rhs1: reg<test.i32>) ->
+    (reg<test.i32>, reg<test.i32>) {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.i32", rejected_packet="low.copy"}
+  %unrelated = low.op<test.add.i32>(%lhs0, %rhs0) :
+      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.mul.i32", rejected_packet="test.add.i32"}
+  %producer = low.op<test.mul.i32>(%lhs1, %rhs1) :
+      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %copy = low.copy %producer : reg<test.i32> -> reg<test.i32>
+  %use = low.op<test.add.i32>(%copy, %copy) :
+      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %unrelated, %use : reg<test.i32>, reg<test.i32>
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_forwards_storage_setup_readiness strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_forwards_storage_setup_readiness(
+    %ptr: reg<test.ptr>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) ->
+    (reg<test.i32 x4>, reg<test.i32>) {
+  // REMARK@+1: BACKEND/015
+  %load = low.op<test.load.v4i32>(%ptr) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="low.copy", rejected_packet="test.mul.i32", chosen_data_ready_stall_cycles="0"}
+  %copy = low.copy %load : reg<test.i32 x4> -> reg<test.i32 x4>
+  %use = low.op<test.add.v4i32>(%copy, %copy) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.mul.i32", rejected_packet="test.add.v4i32", rejected_data_ready_stall_cycles="2"}
+  %independent = low.op<test.mul.i32>(%lhs, %rhs) :
+      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %use, %independent : reg<test.i32 x4>, reg<test.i32>
+}
+
+// ====
 // RUN: emit low-schedule-json @barrier_schedule_fence strategy=resource-stall
 
 test.target<low_core> @test_target

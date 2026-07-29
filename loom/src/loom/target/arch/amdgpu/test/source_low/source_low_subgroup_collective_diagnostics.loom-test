@@ -470,33 +470,3 @@ kernel.def target(@target) @subgroup_scan_wave64_native_width_rejected() {
   %prefix = kernel.subgroup.scan<addi> %value {direction = forward, mode = inclusive} : i32
   kernel.return
 }
-
-// ====
-
-amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
-kernel.def target(@target) @subgroup_active_mask_wave64_native_width_rejected() {
-  %c1 = index.constant 1 : index
-  %c64 = index.constant 64 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
-} launch() {
-  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_active_mask.native_width"}
-  %mask = kernel.subgroup.active.mask : i64
-  kernel.return
-}
-
-// ====
-
-amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
-kernel.def target(@target) @subgroup_ballot_wave64_native_width_rejected() {
-  %c1 = index.constant 1 : index
-  %c64 = index.constant 64 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
-} launch() {
-  %lane = kernel.subgroup.lane.id : index
-  %lane_i32 = index.cast %lane : index to i32
-  %limit = scalar.constant 32 : i32
-  %predicate = scalar.cmpi slt, %lane_i32, %limit : i32
-  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_ballot.native_width"}
-  %mask = kernel.subgroup.vote.ballot %predicate : i1 -> i64
-  kernel.return
-}

@@ -1229,7 +1229,10 @@ iree_status_t loom_low_schedule_fill_nodes(
         node->kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR;
       } else if (op->region_count == 0 &&
                  iree_any_bit_set(node->traits, LOOM_TRAIT_STORAGE_RELATION)) {
-        node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_SETUP;
+        node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP;
+        if (op->kind == LOOM_OP_LOW_SLICE || op->kind == LOOM_OP_LOW_CONCAT) {
+          node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_TRANSPARENT;
+        }
       }
       if (loom_low_live_in_isa(op) || loom_low_resource_isa(op)) {
         node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY;

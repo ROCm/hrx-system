@@ -139,6 +139,7 @@ loom_cc_library(
     loom::codegen::low::descriptors
     loom::codegen::low::placement
     loom::ir
+    loom::target::residency
   PUBLIC
 )
 
@@ -153,6 +154,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir
+    loom::target::residency
 )
 
 loom_cc_library(
@@ -194,6 +196,7 @@ loom_cc_library(
     loom::analysis::liveness
     loom::codegen::low::descriptors
     loom::codegen::low::placement
+    loom::codegen::low::storage_relation
     loom::ir
   PUBLIC
 )

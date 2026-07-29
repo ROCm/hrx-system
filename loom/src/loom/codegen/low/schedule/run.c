@@ -1089,6 +1089,17 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
       IREE_RETURN_IF_ERROR(
           loom_low_schedule_note_descriptor_rows_for_node(state, chosen_node));
 
+      uint32_t result_ready_issue_cycle = state->current_issue_cycle;
+      if (state->node_ready_issue_cycles != NULL) {
+        result_ready_issue_cycle =
+            iree_max(result_ready_issue_cycle,
+                     state->node_ready_issue_cycles[chosen_node]);
+        const loom_low_schedule_class_t* schedule_class =
+            state->nodes[chosen_node].schedule_class;
+        result_ready_issue_cycle = iree_math_saturating_add_u32(
+            result_ready_issue_cycle,
+            schedule_class ? schedule_class->latency_cycles : 0);
+      }
       const uint32_t group_begin =
           loom_low_schedule_dependency_index_group_begin(
               &state->dependency_index, chosen_node);
@@ -1115,13 +1126,10 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
         if (state->node_ready_issue_cycles != NULL &&
             loom_low_schedule_dependency_index_group_has_ssa(
                 &state->dependency_index, group_index)) {
-          const loom_low_schedule_class_t* schedule_class =
-              state->nodes[chosen_node].schedule_class;
-          const uint32_t ready_cycle = iree_math_saturating_add_u32(
-              state->current_issue_cycle,
-              schedule_class ? schedule_class->latency_cycles : 0);
-          if (ready_cycle > state->node_ready_issue_cycles[consumer_node]) {
-            state->node_ready_issue_cycles[consumer_node] = ready_cycle;
+          if (result_ready_issue_cycle >
+              state->node_ready_issue_cycles[consumer_node]) {
+            state->node_ready_issue_cycles[consumer_node] =
+                result_ready_issue_cycle;
           }
         }
         if (indegrees[consumer_node] == 0 && consumer_node >= range_start &&

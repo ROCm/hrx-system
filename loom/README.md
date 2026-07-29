@@ -49,6 +49,7 @@ python dev.py bazel build \
   //loom/src/loom/tools/loom-link:loom-link \
   //loom/src/loom/tools/iree-test-loom:iree-test-loom \
   //loom/src/loom/tools/iree-benchmark-loom:iree-benchmark-loom \
+  //loom/py/loom/tools:loom-compile-report \
   //loom/binding/c:loomc \
   //loom/binding/c/example:source_info \
   //loom/binding/c/example:compile_text \
@@ -113,6 +114,30 @@ become compile-time facts before lowering.
 The authoring README includes the direct quantized AMDGPU flow for
 `loom-compile` HSACO emission, artifact manifests, compile reports, IR dumps,
 target listings, and correctness-gated dispatch benchmark bundles.
+
+## Inspect Compile Reports
+
+`loom-compile-report` provides a bounded first view over the structured reports
+emitted by `loom-compile` and `iree-benchmark-loom`:
+
+```bash
+python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
+  show /tmp/kernel.compile-report.json
+python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
+  diff /tmp/baseline.json /tmp/candidate.json --format=json
+python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
+  suggest /tmp/candidate.json --format=json
+```
+
+`show` separates emitted artifact facts from compiler analysis and omits
+unavailable metrics from its compact JSON. `diff` rejects reports unless their
+schema, target, specialization, workload, and entry identities match exactly.
+`suggest` delegates interpretation to the selected target family and cites the
+evidence behind each proposed experiment.
+
+Compile reports are version-zero, same-compiler-horizon diagnostics. Regenerate
+them with the current checkout instead of treating them as durable records or
+adding compatibility paths to the consumer.
 
 ## Try The C API
 

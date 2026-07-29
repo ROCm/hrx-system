@@ -35,6 +35,8 @@
 extern "C" {
 #endif
 
+struct loom_target_residency_model_t;
+
 // Options controlling allocation table construction.
 typedef struct loom_low_allocation_options_t {
   // Optional operation order used for live intervals.
@@ -60,6 +62,9 @@ typedef struct loom_low_allocation_options_t {
   iree_diagnostic_emitter_t emitter;
   // Optional structured allocation feedback to emit.
   loom_low_allocation_diagnostic_flags_t diagnostic_flags;
+  // Optional target residency model. Direct resources are dense by descriptor
+  // register-class ID for the resolved low target.
+  const struct loom_target_residency_model_t* residency_model;
 } loom_low_allocation_options_t;
 
 // Allocates one modeled target-low function body and writes an arena-owned

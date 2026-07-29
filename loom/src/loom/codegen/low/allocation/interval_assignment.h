@@ -14,6 +14,7 @@
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/assignment_map.h"
+#include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/table.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
@@ -27,6 +28,8 @@
 extern "C" {
 #endif
 
+struct loom_target_residency_model_t;
+
 typedef struct loom_low_allocation_interval_assignment_context_t {
   // Module containing the allocated low function.
   loom_module_t* module;
@@ -38,6 +41,8 @@ typedef struct loom_low_allocation_interval_assignment_context_t {
   const loom_low_resolved_target_t* target;
   // Liveness facts for the allocated low function body.
   const loom_liveness_analysis_t* liveness;
+  // Operation-to-program-point index over |liveness|.
+  const loom_low_allocation_op_point_index_t* op_points;
   // Function-local placement relations over |liveness|.
   const loom_low_placement_table_t* placement;
   // Mutable target storage budgets, fixed values, and reserved ranges.
@@ -50,6 +55,8 @@ typedef struct loom_low_allocation_interval_assignment_context_t {
   iree_arena_allocator_t* arena;
   // Shared read-only control-flow graph for |body|.
   const loom_cfg_graph_t* function_cfg_graph;
+  // Optional target residency model used for physical extent decisions.
+  const struct loom_target_residency_model_t* residency_model;
 } loom_low_allocation_interval_assignment_context_t;
 
 typedef struct loom_low_allocation_interval_assignment_result_t {

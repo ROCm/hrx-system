@@ -16,12 +16,6 @@
 
 #define LOOM_LOW_SCHEDULE_DESCRIPTOR_FRONTIER_CAPACITY 16u
 
-enum loom_low_schedule_unlock_flag_bits_e {
-  // At least one descriptor node becomes ready with this producer.
-  LOOM_LOW_SCHEDULE_UNLOCK_FLAG_DESCRIPTOR = 1u << 0,
-};
-typedef uint8_t loom_low_schedule_unlock_flags_t;
-
 // Incremental pressure summary for consumers unlocked by one producer.
 struct loom_low_schedule_unlock_record_t {
   // Sum of downstream pressure demand across unlocked consumers.
@@ -30,8 +24,8 @@ struct loom_low_schedule_unlock_record_t {
   uint32_t activation_units;
   // Number of retained descriptor consumers, capped at capacity + 1.
   uint8_t descriptor_count;
-  // Summary flags from loom_low_schedule_unlock_flag_bits_e.
-  loom_low_schedule_unlock_flags_t flags;
+  // Candidate facts published by final unscheduled consumers.
+  uint8_t candidate_flags;
 };
 
 typedef enum loom_low_schedule_resource_high_water_mode_e {
@@ -1131,7 +1125,8 @@ void loom_low_schedule_pressure_publish_unlock_consumer(
       iree_max(record->activation_units,
                state->node_pressure_activation_units[consumer_node]);
   if (state->nodes[consumer_node].descriptor != NULL) {
-    record->flags |= LOOM_LOW_SCHEDULE_UNLOCK_FLAG_DESCRIPTOR;
+    record->candidate_flags |=
+        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR;
     if (pressure_state->unlocks.descriptor_heads != NULL &&
         record->descriptor_count <
             LOOM_LOW_SCHEDULE_DESCRIPTOR_FRONTIER_CAPACITY) {
@@ -1144,6 +1139,9 @@ void loom_low_schedule_pressure_publish_unlock_consumer(
       ++record->descriptor_count;
     }
   }
+  record->candidate_flags |=
+      (uint8_t)(state->nodes[consumer_node].flags &
+                LOOM_LOW_SCHEDULE_NODE_FLAG_DESCRIPTOR_SETUP);
   ++state->unlock_summary_publication_count;
 }
 
@@ -1207,11 +1205,7 @@ loom_low_schedule_score_candidate_pressure_demand(
       iree_max(demand.demand_units, unlock_record->demand_units);
   demand.activation_units =
       iree_max(demand.activation_units, unlock_record->activation_units);
-  if (iree_any_bit_set(unlock_record->flags,
-                       LOOM_LOW_SCHEDULE_UNLOCK_FLAG_DESCRIPTOR)) {
-    demand.candidate_flags |=
-        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR;
-  }
+  demand.candidate_flags = unlock_record->candidate_flags;
   if (pressure_state->unlocks.descriptor_heads != NULL &&
       unlock_record->descriptor_count != 0 &&
       unlock_record->descriptor_count <=
@@ -1376,9 +1370,11 @@ void loom_low_schedule_pressure_score_candidate(
       state->node_dependency_latency_cycles != NULL
           ? state->node_dependency_latency_cycles[node_index]
           : 0;
+  const bool is_storage_setup =
+      iree_any_bit_set(node->flags, LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP);
   uint32_t data_ready_stall_cycles = 0;
   if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
-      state->node_ready_issue_cycles != NULL) {
+      state->node_ready_issue_cycles != NULL && !is_storage_setup) {
     data_ready_stall_cycles = loom_low_schedule_positive_delta_u32(
         state->node_ready_issue_cycles[node_index], state->current_issue_cycle);
   }
@@ -1421,7 +1417,10 @@ void loom_low_schedule_pressure_score_candidate(
       .pressure_cliff_units = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
       .units_until_pressure_cliff = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
       .source_ordinal = node->source_ordinal,
-      .flags = pressure_demand.candidate_flags,
+      .flags =
+          pressure_demand.candidate_flags |
+          (uint8_t)((node->flags & LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_TRANSPARENT)
+                    << 1u),
   };
   loom_low_schedule_target_pressure_score_candidate(state, pressure_state,
                                                     out_score);
@@ -1571,7 +1570,9 @@ void loom_low_schedule_pressure_compute_node_priorities(
   }
   for (iree_host_size_t i = node_count; i > 0; --i) {
     const uint32_t node_index = (uint32_t)(i - 1);
-    const loom_low_schedule_node_t* node = &state->nodes[node_index];
+    loom_low_schedule_node_t* node = &state->nodes[node_index];
+    const bool is_storage_setup = iree_any_bit_set(
+        node->flags, LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP);
     uint16_t dependency_latency_cycles = 0;
     if (state->node_dependency_latency_cycles != NULL) {
       const loom_value_ordinal_t* operand_ordinals =
@@ -1627,6 +1628,13 @@ void loom_low_schedule_pressure_compute_node_priorities(
         if (state->node_pressure_demand_units != NULL &&
             state->node_pressure_activation_units != NULL &&
             dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_SSA) {
+          if (is_storage_setup &&
+              (consumer->kind == LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR ||
+               iree_any_bit_set(
+                   consumer->flags,
+                   LOOM_LOW_SCHEDULE_NODE_FLAG_DESCRIPTOR_SETUP))) {
+            node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_DESCRIPTOR_SETUP;
+          }
           uint32_t consumer_demand =
               consumer->kind == LOOM_LOW_SCHEDULE_NODE_STRUCTURAL
                   ? state->node_pressure_demand_units[dependency->consumer_node]

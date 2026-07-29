@@ -88,6 +88,7 @@ loom_check_test_suite(
   SRCS
     "test/allocation_json.loom-test"
     "test/assembly.loom-test"
+    "test/assembly_allocation.loom-test"
     "test/assembly_cluster.loom-test"
     "test/assembly_q8.loom-test"
     "test/assembly_wmma.loom-test"

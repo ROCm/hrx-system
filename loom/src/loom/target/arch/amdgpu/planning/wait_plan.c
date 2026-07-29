@@ -17,7 +17,6 @@
 #include "loom/codegen/low/packet_hazard_plan_json.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/low/ops.h"
-#include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
 #include "loom/target/arch/amdgpu/planning/structural_packet.h"
 #include "loom/target/arch/amdgpu/planning/wait_frontier.h"
 #include "loom/target/arch/amdgpu/planning/wait_packet_tables.h"
@@ -1723,8 +1722,8 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
       node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_WRITES_EXEC;
     }
     if (supports_xcnt &&
-        (loom_amdgpu_descriptor_implicitly_drains_xcnt(descriptor_set,
-                                                       node->descriptor) ||
+        (iree_any_bit_set(descriptor_traits,
+                          LOOM_AMDGPU_DESCRIPTOR_TRAIT_XCNT_IMPLICIT_DRAIN) ||
          loom_amdgpu_wait_plan_structural_node_implicitly_drains_xcnt(schedule,
                                                                       node))) {
       node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_XCNT_IMPLICIT_DRAIN;

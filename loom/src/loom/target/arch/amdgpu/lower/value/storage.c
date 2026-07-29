@@ -22,6 +22,7 @@ void loom_amdgpu_mark_value_plan_storage_demands(
       switch (index_cast_plan->kind) {
         case LOOM_AMDGPU_INDEX_CAST_KIND_ALIAS:
         case LOOM_AMDGPU_INDEX_CAST_KIND_PRESERVING_LOW_32:
+        case LOOM_AMDGPU_INDEX_CAST_KIND_ZERO_EXTENDING_LOW_32:
           loom_low_lower_require_source_value_storage(context,
                                                       index_cast_plan->source);
           return;

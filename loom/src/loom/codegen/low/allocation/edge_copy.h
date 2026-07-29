@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment_map.h"
+#include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/table.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
@@ -29,8 +30,8 @@ typedef struct loom_low_allocation_edge_copy_context_t {
   loom_region_t* body;
   // Descriptor set selected by the low function target.
   const loom_low_descriptor_set_t* descriptor_set;
-  // Liveness ordering used by allocation.
-  loom_liveness_order_t liveness_order;
+  // Operation-to-program-point index over |assignment_map.liveness|.
+  const loom_low_allocation_op_point_index_t* op_points;
   // Mutable target storage constraints and diagnostic state.
   loom_low_allocation_target_constraints_t* target_constraints;
   // Per-allocation-unit live end points.

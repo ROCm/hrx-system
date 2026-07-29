@@ -12,6 +12,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"
+#include "loom/target/residency.h"
 
 namespace loom {
 namespace {
@@ -137,6 +138,13 @@ loom_liveness_block_info_t Block(uint32_t start_point, uint32_t end_point) {
   block.start_point = start_point;
   block.end_point = end_point;
   return block;
+}
+
+loom_value_id_t DefineModuleValue(loom_module_t* module) {
+  loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
+  IREE_CHECK_OK(loom_module_define_value(
+      module, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &value_id));
+  return value_id;
 }
 
 loom_low_placement_relation_t LocationRelation(
@@ -273,6 +281,169 @@ uint32_t FindFreeLocationWithPlacement(
   return location_base;
 }
 
+uint32_t FindFreeLocationWithStorageLease(
+    loom_module_t* module, iree_arena_allocator_t* arena,
+    const loom_target_residency_model_t* residency_model) {
+  const loom_value_id_t candidate_value = DefineModuleValue(module);
+  const loom_value_id_t leased_value = DefineModuleValue(module);
+  loom_module_value_ordinal_scratch_acquire(module);
+  loom_module_value_ordinal_scratch_set(module, candidate_value,
+                                        /*ordinal=*/0);
+  loom_module_value_ordinal_scratch_set(module, leased_value, /*ordinal=*/1);
+
+  const uint64_t descriptor_set_id = 29;
+  const loom_liveness_value_class_t value_class =
+      RegisterValueClass(descriptor_set_id);
+  const loom_liveness_interval_t intervals[] = {
+      Interval(candidate_value, /*start=*/2, /*end=*/4, value_class,
+               /*unit_count=*/1),
+      Interval(leased_value, /*start=*/0, /*end=*/1, value_class,
+               /*unit_count=*/1),
+  };
+  const uint32_t interval_indices[] = {0, 1};
+  const loom_value_id_t value_ids[] = {candidate_value, leased_value};
+  const loom_liveness_block_info_t blocks[] = {
+      Block(/*start_point=*/0, /*end_point=*/4),
+  };
+  loom_liveness_analysis_t liveness = {};
+  liveness.blocks = blocks;
+  liveness.block_count = IREE_ARRAYSIZE(blocks);
+  liveness.intervals = intervals;
+  liveness.interval_count = IREE_ARRAYSIZE(intervals);
+  liveness.value_ids = value_ids;
+  liveness.value_count = IREE_ARRAYSIZE(value_ids);
+  liveness.value_interval_indices = interval_indices;
+
+  uint32_t unit_end_point_starts[] = {0, 1};
+  uint32_t unit_end_points[] = {4, 1};
+  uint64_t edge_handoff_words[] = {0};
+  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
+  unit_liveness.end_points = unit_end_points;
+  unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.values_with_incomplete_storage_segments = {
+      liveness.value_count,
+      edge_handoff_words,
+  };
+
+  const loom_low_reg_class_t reg_class =
+      RegClass(/*allocatable_count=*/8, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
+  const loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(&reg_class, descriptor_set_id);
+  const loom_low_resolved_target_t target = ResolvedTarget(&descriptor_set);
+  uint32_t max_assigned_location_end_by_reg_class[] = {1};
+  loom_low_allocation_target_constraints_t target_constraints = {};
+  target_constraints.target = &target;
+  target_constraints.max_assigned_location_end_by_reg_class =
+      max_assigned_location_end_by_reg_class;
+
+  const loom_low_allocation_assignment_t assignments[] = {
+      Assignment(leased_value, /*start=*/0, /*end=*/1, value_class,
+                 /*location_base=*/0, /*location_count=*/1,
+                 /*unit_end_point_start=*/1),
+  };
+  const uint32_t assignment_indices_by_value_ordinal[] = {UINT32_MAX, 0};
+  loom_low_allocation_assignment_map_t assignment_map = {};
+  assignment_map.module = module;
+  assignment_map.liveness = &liveness;
+  assignment_map.assignments = assignments;
+  assignment_map.assignment_count = IREE_ARRAYSIZE(assignments);
+  assignment_map.assignment_indices_by_value_ordinal =
+      assignment_indices_by_value_ordinal;
+
+  loom_low_allocation_active_set_t active_set = {};
+  IREE_CHECK_OK(loom_low_allocation_active_set_initialize(
+      &kEmptyLiveness, /*assignment_capacity=*/1, /*unit_capacity=*/8, arena,
+      &active_set));
+
+  loom_low_schedule_block_t schedule_blocks[] = {{}};
+  schedule_blocks[0].scheduled_node_start = 0;
+  schedule_blocks[0].scheduled_node_count = 4;
+  loom_low_schedule_node_t schedule_nodes[4] = {};
+  uint32_t scheduled_node_indices[] = {0, 1, 2, 3};
+  loom_low_schedule_table_t schedule = {};
+  schedule.blocks = schedule_blocks;
+  schedule.block_count = IREE_ARRAYSIZE(schedule_blocks);
+  schedule.nodes = schedule_nodes;
+  schedule.node_count = IREE_ARRAYSIZE(schedule_nodes);
+  schedule.scheduled_node_indices = scheduled_node_indices;
+  schedule.scheduled_node_count = IREE_ARRAYSIZE(scheduled_node_indices);
+  loom_low_storage_lease_record_t lease_records[] = {{}};
+  lease_records[0].packet_index = 0;
+  lease_records[0].release_scope =
+      LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS;
+  loom_low_storage_lease_table_t lease_table = {};
+  lease_table.schedule = &schedule;
+  lease_table.records = lease_records;
+  lease_table.record_count = IREE_ARRAYSIZE(lease_records);
+  loom_low_allocation_storage_lease_t lease_instances[] = {{}};
+  lease_instances[0].lease_record_index = 0;
+  lease_instances[0].value_id = leased_value;
+  lease_instances[0].start_point = 0;
+  lease_instances[0].end_point = 4;
+  lease_instances[0].release_action_index =
+      LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE;
+  lease_instances[0].descriptor_reg_class_id = 0;
+  lease_instances[0].location_kind =
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
+  lease_instances[0].location_base = 0;
+  lease_instances[0].location_count = 1;
+  uint8_t lease_instance_written[] = {1};
+  loom_low_allocation_storage_lease_state_t storage_leases = {};
+  storage_leases.lease_table = &lease_table;
+  storage_leases.instances = lease_instances;
+  storage_leases.instance_written = lease_instance_written;
+
+  loom_low_allocation_search_context_t context = {};
+  context.module = module;
+  context.descriptor_set = &descriptor_set;
+  context.liveness = &liveness;
+  context.unit_liveness = &unit_liveness;
+  context.target_constraints = &target_constraints;
+  context.residency_model = residency_model;
+  context.assignment_map = &assignment_map;
+  context.active_set = &active_set;
+  context.storage_leases = &storage_leases;
+
+  uint32_t location_base = UINT32_MAX;
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &context, &intervals[0], Capacity(/*max_units=*/8), &location_base));
+
+  loom_module_value_ordinal_scratch_clear(module, candidate_value);
+  loom_module_value_ordinal_scratch_clear(module, leased_value);
+  loom_module_value_ordinal_scratch_release(module);
+  return location_base;
+}
+
+uint32_t FindFreeLocationWithStorageLeaseAtResidencyCliff(
+    loom_module_t* module, iree_arena_allocator_t* arena,
+    uint32_t cliff_units) {
+  const iree_string_view_t resource_names[] = {IREE_SVL("register")};
+  const loom_target_residency_cliff_t cliffs[] = {
+      {
+          /*.resource_id=*/0,
+          /*.cliff_units=*/cliff_units,
+          /*.tier_before=*/4,
+          /*.tier_after=*/2,
+      },
+  };
+  const loom_target_residency_cliff_range_t cliff_ranges[] = {
+      {/*.start=*/0, /*.count=*/1},
+  };
+  const loom_target_residency_model_t residency_model = {
+      /*.best_tier=*/4,
+      /*.direct_resources=*/
+      {
+          /*.names=*/resource_names,
+          /*.cliffs=*/cliffs,
+          /*.cliff_count=*/IREE_ARRAYSIZE(cliffs),
+          /*.cliff_ranges=*/cliff_ranges,
+          /*.resource_count=*/IREE_ARRAYSIZE(resource_names),
+      },
+  };
+  return FindFreeLocationWithStorageLease(module, arena, &residency_model);
+}
+
 TEST_F(LowAllocationSearchTest, PreservesFirstFitWithoutPlacementPreference) {
   loom_module_t* module = AllocateModule();
   const loom_value_id_t candidate_value = DefineValue(module);
@@ -283,6 +454,30 @@ TEST_F(LowAllocationSearchTest, PreservesFirstFitWithoutPlacementPreference) {
                 /*max_units=*/4, /*relation=*/nullptr),
             0u);
 
+  loom_module_free(module);
+}
+
+TEST_F(LowAllocationSearchTest, KeepsReleaseFreeLocationWithoutResidencyModel) {
+  loom_module_t* module = AllocateModule();
+  EXPECT_EQ(FindFreeLocationWithStorageLease(module, &arena_,
+                                             /*residency_model=*/nullptr),
+            1u);
+  loom_module_free(module);
+}
+
+TEST_F(LowAllocationSearchTest, KeepsReleaseFreeLocationWithinResidencyTier) {
+  loom_module_t* module = AllocateModule();
+  EXPECT_EQ(FindFreeLocationWithStorageLeaseAtResidencyCliff(module, &arena_,
+                                                             /*cliff_units=*/3),
+            1u);
+  loom_module_free(module);
+}
+
+TEST_F(LowAllocationSearchTest, ReleasesStorageLeaseBeforeResidencyCliff) {
+  loom_module_t* module = AllocateModule();
+  EXPECT_EQ(FindFreeLocationWithStorageLeaseAtResidencyCliff(module, &arena_,
+                                                             /*cliff_units=*/2),
+            0u);
   loom_module_free(module);
 }
 

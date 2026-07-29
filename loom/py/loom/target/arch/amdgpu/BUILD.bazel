@@ -33,6 +33,26 @@ iree_py_library(
 )
 
 iree_py_library(
+    name = "compile_report_suggestions",
+    srcs = ["compile_report_suggestions.py"],
+    deps = [
+        ":target_info",
+        "//loom/py/loom/reporting",
+    ],
+)
+
+iree_py_test(
+    name = "compile_report_suggestions_test",
+    srcs = [
+        "compile_report_suggestions_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amdgpu.compile_report_suggestions_test"],
+    main = "pytest_style_runner.py",
+    deps = [":compile_report_suggestions"],
+)
+
+iree_py_library(
     name = "encoding_info",
     srcs = ["encoding.py"],
 )
