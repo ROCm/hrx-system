@@ -879,7 +879,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         generator_target="rdna3_5",
         key="amdgpu.rdna3_5.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA3_5,),
-        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC,
         ),
@@ -926,7 +926,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
             AMDGPU_DESCRIPTOR_SET_ISA_RDNA3,
             AMDGPU_DESCRIPTOR_SET_ISA_RDNA3_5,
         ),
-        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
         storage_generator_target="rdna3",
         member_generator_targets=("rdna3", "rdna3_5"),
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
