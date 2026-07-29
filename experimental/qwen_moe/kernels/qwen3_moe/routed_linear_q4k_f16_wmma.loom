@@ -28,8 +28,8 @@ func.decl @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_co
 // Decodes the four adjacent Q4_K values owned by one load packet. This follows
 // llama.cpp Vulkan's mul_mm Q4_K path: dm is one 32-bit packet, the twelve
 // scale bytes are one 96-bit packet, and the four quant nibbles are one 32-bit
-// packet. Specializing the surrounding K loop folds group-dependent selects
-// and shifts for each 32-element slice.
+// packet. Value selects keep low/high scale decoding in one straight-line
+// inner loop without unrolling the eight 32-element groups.
 func.def inline @qwen3_moe_q4k_wmma_vector4(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group: index, %packet: index) -> (vector<4xf16>) {
   %zero = index.constant 0 : index
   %two = index.constant 2 : index
@@ -68,39 +68,30 @@ func.def inline @qwen3_moe_q4k_wmma_vector4(%weight: buffer, %row_byte_base: off
   %scale_shift_index = index.mul %scale_lane, %eight : index
   %scale_shift_i32 = index.cast %scale_shift_index : index to i32
   %scale_shift = vector.splat %scale_shift_i32 : vector<1xi32>
-  %scale, %minimum = scf.if %is_low -> (vector<1xi32>, vector<1xi32>) {
-    %scale0_i32 = vector.extract %scales[0] : vector<3xi32> -> i32
-    %scale1_i32 = vector.extract %scales[1] : vector<3xi32> -> i32
-    %scale0 = vector.splat %scale0_i32 : vector<1xi32>
-    %scale1 = vector.splat %scale1_i32 : vector<1xi32>
-    %shifted_scale = vector.shrui %scale0, %scale_shift : vector<1xi32>
-    %scale_value = vector.andi %shifted_scale, %sixtythree : vector<1xi32>
-    %shifted_minimum = vector.shrui %scale1, %scale_shift : vector<1xi32>
-    %minimum_value = vector.andi %shifted_minimum, %sixtythree : vector<1xi32>
-    scf.yield %scale_value, %minimum_value : vector<1xi32>, vector<1xi32>
-  } else {
-    %scale0_i32 = vector.extract %scales[0] : vector<3xi32> -> i32
-    %scale1_i32 = vector.extract %scales[1] : vector<3xi32> -> i32
-    %scale2_i32 = vector.extract %scales[2] : vector<3xi32> -> i32
-    %scale0 = vector.splat %scale0_i32 : vector<1xi32>
-    %scale1 = vector.splat %scale1_i32 : vector<1xi32>
-    %scale2 = vector.splat %scale2_i32 : vector<1xi32>
-    %high_shift_i32 = scalar.addi %scale_shift_i32, %two_i32 : i32
-    %minimum_shift_i32 = scalar.addi %scale_shift_i32, %four_i32 : i32
-    %high_shift = vector.splat %high_shift_i32 : vector<1xi32>
-    %minimum_shift = vector.splat %minimum_shift_i32 : vector<1xi32>
-    %scale_low0 = vector.shrui %scale2, %scale_shift : vector<1xi32>
-    %scale_low = vector.andi %scale_low0, %fifteen : vector<1xi32>
-    %scale_high0 = vector.shrui %scale0, %high_shift : vector<1xi32>
-    %scale_high = vector.andi %scale_high0, %fortyeight : vector<1xi32>
-    %scale_value = vector.ori %scale_low, %scale_high : vector<1xi32>
-    %minimum_low0 = vector.shrui %scale2, %minimum_shift : vector<1xi32>
-    %minimum_low = vector.andi %minimum_low0, %fifteen : vector<1xi32>
-    %minimum_high0 = vector.shrui %scale1, %high_shift : vector<1xi32>
-    %minimum_high = vector.andi %minimum_high0, %fortyeight : vector<1xi32>
-    %minimum_value = vector.ori %minimum_low, %minimum_high : vector<1xi32>
-    scf.yield %scale_value, %minimum_value : vector<1xi32>, vector<1xi32>
-  }
+  %scale0_i32 = vector.extract %scales[0] : vector<3xi32> -> i32
+  %scale1_i32 = vector.extract %scales[1] : vector<3xi32> -> i32
+  %scale2_i32 = vector.extract %scales[2] : vector<3xi32> -> i32
+  %scale0 = vector.splat %scale0_i32 : vector<1xi32>
+  %scale1 = vector.splat %scale1_i32 : vector<1xi32>
+  %scale2 = vector.splat %scale2_i32 : vector<1xi32>
+  %high_shift_i32 = scalar.addi %scale_shift_i32, %two_i32 : i32
+  %minimum_shift_i32 = scalar.addi %scale_shift_i32, %four_i32 : i32
+  %selected_scale_source = scf.select %is_low, %scale0, %scale2 : vector<1xi32>
+  %selected_minimum_source = scf.select %is_low, %scale1, %scale2 : vector<1xi32>
+  %selected_scale_high_shift_i32 = scf.select %is_low, %scale_shift_i32, %high_shift_i32 : i32
+  %selected_minimum_low_shift_i32 = scf.select %is_low, %scale_shift_i32, %minimum_shift_i32 : i32
+  %selected_scale_high_shift = vector.splat %selected_scale_high_shift_i32 : vector<1xi32>
+  %selected_minimum_low_shift = vector.splat %selected_minimum_low_shift_i32 : vector<1xi32>
+  %scale_low0 = vector.shrui %selected_scale_source, %scale_shift : vector<1xi32>
+  %scale_low = vector.andi %scale_low0, %fifteen : vector<1xi32>
+  %scale_high0 = vector.shrui %scale0, %selected_scale_high_shift : vector<1xi32>
+  %scale_high = vector.andi %scale_high0, %fortyeight : vector<1xi32>
+  %scale = vector.ori %scale_low, %scale_high : vector<1xi32>
+  %minimum_low0 = vector.shrui %selected_minimum_source, %selected_minimum_low_shift : vector<1xi32>
+  %minimum_low = vector.andi %minimum_low0, %fifteen : vector<1xi32>
+  %minimum_high0 = vector.shrui %scale1, %selected_scale_high_shift : vector<1xi32>
+  %minimum_high = vector.andi %minimum_high0, %fortyeight : vector<1xi32>
+  %minimum = vector.ori %minimum_low, %minimum_high : vector<1xi32>
   %scale_f32 = vector.uitofp %scale : vector<1xi32> to vector<1xf32>
   %minimum_f32 = vector.uitofp %minimum : vector<1xi32> to vector<1xf32>
   %d_vector1 = vector.splat %d : vector<1xf32>
