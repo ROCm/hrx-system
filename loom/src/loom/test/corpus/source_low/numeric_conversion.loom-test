@@ -76,9 +76,30 @@ func.def @vector_fptosi_i8x4(%input: vector<4xf32>) -> (vector<4xi8>) {
 
 // ====
 
+func.def @vector_fptosi_i8x8(%input: vector<8xf32>) -> (vector<8xi8>) {
+  %converted = vector.fptosi %input : vector<8xf32> to vector<8xi8>
+  func.return %converted : vector<8xi8>
+}
+
+// ====
+
 func.def @vector_fptoui_i8x4(%input: vector<4xf32>) -> (vector<4xi8>) {
   %converted = vector.fptoui %input : vector<4xf32> to vector<4xi8>
   func.return %converted : vector<4xi8>
+}
+
+// ====
+
+func.def @vector_fptoui_i8x3(%input: vector<3xf32>) -> (vector<3xi8>) {
+  %converted = vector.fptoui %input : vector<3xf32> to vector<3xi8>
+  func.return %converted : vector<3xi8>
+}
+
+// ====
+
+func.def @vector_fptoui_i8x8(%input: vector<8xf32>) -> (vector<8xi8>) {
+  %converted = vector.fptoui %input : vector<8xf32> to vector<8xi8>
+  func.return %converted : vector<8xi8>
 }
 
 // ====

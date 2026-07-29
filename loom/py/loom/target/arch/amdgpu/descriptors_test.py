@@ -1344,6 +1344,22 @@ def test_unsigned_byte_conversion_family_is_available_on_all_targets() -> None:
         )
 
 
+def test_float_to_packed_byte_primitives_are_available_on_all_targets() -> None:
+    descriptor_keys = {
+        "amdgpu.v_cvt_i32_f32",
+        "amdgpu.v_cvt_u32_f32",
+        "amdgpu.v_perm_b32",
+    }
+    for target, builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.items():
+        available_keys = {
+            descriptor.descriptor_key for descriptor in builder.overlay_rows()
+        }
+        assert descriptor_keys <= available_keys, (
+            target,
+            descriptor_keys - available_keys,
+        )
+
+
 def test_scc_free_scalar_integer_results_are_rematerializable() -> None:
     descriptor_keys = (
         "amdgpu.s_mul_i32",

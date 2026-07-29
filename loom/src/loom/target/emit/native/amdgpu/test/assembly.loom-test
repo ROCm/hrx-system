@@ -393,6 +393,19 @@ low.func.def target(@gfx11_target) @gfx11_perm_zero_source_selector_literal(%val
 
 // ====
 
+// RUN: emit amdgpu-assembly @gfx942_perm_register_selector waits=none fixed=%packed:physical_register:0:1 fixed=%src0:physical_register:1:1 fixed=%src1:physical_register:2:1 fixed=%selectors:physical_register:4:1
+amdgpu.target<gfx942> @gfx942_target
+low.func.def target(@gfx942_target) @gfx942_perm_register_selector(%src0: reg<amdgpu.vgpr>, %src1: reg<amdgpu.vgpr>, %selectors: reg<amdgpu.sgpr>) asm<amdgpu.cdna3.core> {
+  %packed = v_perm_b32 %src0, %src1, %selectors
+  return
+}
+
+// ----
+  v_perm_b32 v0, v1, v2, s4
+  s_endpgm
+
+// ====
+
 // RUN: emit amdgpu-assembly @gfx11_packed_fma_mad_assembly waits=none
 amdgpu.target<gfx1100> @gfx11_target
 low.func.def target(@gfx11_target) @gfx11_packed_fma_mad_assembly(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
