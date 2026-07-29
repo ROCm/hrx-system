@@ -34,7 +34,10 @@ iree_py_library(
         "__init__.py",
         "compile_report.py",
     ],
-    deps = ["//loom/py/loom/reporting"],
+    deps = [
+        "//loom/py/loom/reporting",
+        "//loom/py/loom/target/arch:compile_report_suggestions",
+    ],
 )
 
 iree_py_library(

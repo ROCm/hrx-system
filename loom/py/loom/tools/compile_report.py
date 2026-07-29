@@ -19,12 +19,17 @@ from loom.reporting.compile_report import (
     IncomparableCompileReportsError,
     load_compile_report,
 )
+from loom.reporting.compile_report_suggestions import (
+    build_compile_report_suggestions,
+    format_compile_report_suggestions_text,
+)
 from loom.reporting.compile_report_view import (
     build_compile_report_diff,
     build_compile_report_show,
     format_compile_report_diff_text,
     format_compile_report_show_text,
 )
+from loom.target.arch.compile_report_suggestions import suggest_compile_report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,6 +54,11 @@ def run(args: argparse.Namespace, *, stdout: TextIO) -> int:
         candidate = load_compile_report(args.candidate)
         view = build_compile_report_diff(baseline, candidate)
         text = format_compile_report_diff_text(view)
+    elif args.command == "suggest":
+        document = load_compile_report(args.report)
+        result = suggest_compile_report(document)
+        view = build_compile_report_suggestions(document, result)
+        text = format_compile_report_suggestions_text(view)
     else:
         raise AssertionError(f"unhandled command: {args.command}")
 
@@ -83,6 +93,13 @@ def _create_argument_parser() -> argparse.ArgumentParser:
     diff_parser.add_argument("baseline", type=Path, help="Baseline report path.")
     diff_parser.add_argument("candidate", type=Path, help="Candidate report path.")
     _add_output_format_argument(diff_parser)
+
+    suggest_parser = subparsers.add_parser(
+        "suggest",
+        help="Suggests target-owned optimization experiments.",
+    )
+    suggest_parser.add_argument("report", type=Path, help="Compile report JSON path.")
+    _add_output_format_argument(suggest_parser)
     return parser
 
 

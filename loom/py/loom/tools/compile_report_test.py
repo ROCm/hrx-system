@@ -14,7 +14,12 @@ import pytest
 from loom.tools.compile_report import main
 
 
-def _write_report(path: Path, *, code_byte_count: int = 512) -> None:
+def _write_report(
+    path: Path,
+    *,
+    code_byte_count: int = 512,
+    target_key: str = "gfx11-generic",
+) -> None:
     workload = {
         "workgroup_size": {"x": 64, "y": 1, "z": 1, "flat": 64},
         "workgroup_count": {"x": 4, "y": 1, "z": 1, "flat": 4},
@@ -29,7 +34,7 @@ def _write_report(path: Path, *, code_byte_count: int = 512) -> None:
         "backend": "amdgpu-hal",
         "status": {"code": 0, "name": "OK"},
         "target_family": "AMDGPU",
-        "target_key": "gfx11-generic",
+        "target_key": target_key,
         "target_bundle": "gfx11",
         "target_snapshot": "gfx11",
         "target_config": "gfx11",
@@ -105,3 +110,36 @@ def test_rejects_unversioned_report(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "schema_version" in captured.err
+
+
+def test_suggest_json_uses_exact_target_provider(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    report_path = tmp_path / "report.json"
+    _write_report(report_path)
+
+    assert main(["suggest", str(report_path), "--format=json"]) == 0
+
+    captured = capsys.readouterr()
+    view = json.loads(captured.out)
+    assert captured.err == ""
+    assert view["kind"] == "loom.compile_report.suggest"
+    assert view["provider"] == "amdgpu"
+    assert view["status"] == "available"
+    assert view["findings"] == []
+
+
+def test_suggest_json_reports_unknown_target_without_guessing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    report_path = tmp_path / "report.json"
+    _write_report(report_path, target_key="gfx9999")
+
+    assert main(["suggest", str(report_path), "--format=json"]) == 0
+
+    captured = capsys.readouterr()
+    view = json.loads(captured.out)
+    assert captured.err == ""
+    assert view["status"] == "unavailable"
+    assert view["reason"] == "unknown_target_key"
+    assert view["findings"] == []

@@ -35,6 +35,7 @@ iree_py_library(
     "compile_report.py"
   DEPS
     loom::py::loom::reporting::reporting
+    loom::py::loom::target::arch::compile_report_suggestions
 )
 
 iree_py_library(

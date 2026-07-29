@@ -15,6 +15,7 @@ iree_py_library(
   SRCS
     "__init__.py"
     "compile_report.py"
+    "compile_report_suggestions.py"
     "compile_report_view.py"
   IMPORTS
     "../.."
@@ -26,9 +27,11 @@ iree_py_test(
   MAIN
     "../tools/pytest_style_runner.py"
   SRCS
+    "compile_report_suggestions_test.py"
     "compile_report_test.py"
     "../tools/pytest_style_runner.py"
   ARGS
+    "loom.reporting.compile_report_suggestions_test"
     "loom.reporting.compile_report_test"
   DEPS
     loom::py::loom::reporting::reporting
