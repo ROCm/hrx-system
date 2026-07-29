@@ -172,6 +172,7 @@ _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS: dict[
         lhs_type="bf8",
         rhs_type="bf8",
     ),
+    **_contract_overlay_builders_from_overlays(_integer_bit_count_overlays()),
     **_contract_overlay_builders_from_overlays(_integer_bitwise_shift_overlays()),
     **_contract_overlay_builders_from_overlays(_v_cvt_f32_packed8_overlays("ocp")),
     **_contract_overlay_builders_from_overlays(_s_cmp_i32_overlays()),

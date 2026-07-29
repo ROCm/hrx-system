@@ -546,16 +546,12 @@ iree_status_t loom_scalar_rotri_facts(loom_fact_context_t* context,
   return iree_ok_status();
 }
 
-// Bit counting: exact-only over the declared integer width.
+// Bit counting is bounded by the declared integer width.
 #define BIT_COUNT_FACTS(name, result_accessor, fn)                      \
   iree_status_t name(loom_fact_context_t* context,                      \
                      const loom_module_t* module, const loom_op_t* op,  \
                      const loom_value_facts_t* operand_facts,           \
                      loom_value_facts_t* result_facts) {                \
-    if (!loom_value_facts_is_exact(operand_facts[0])) {                 \
-      result_facts[0] = loom_value_facts_unknown();                     \
-      return iree_ok_status();                                          \
-    }                                                                   \
     loom_type_t result_type =                                           \
         loom_module_value_type(module, result_accessor(op));            \
     int32_t bitwidth =                                                  \
@@ -564,8 +560,14 @@ iree_status_t loom_scalar_rotri_facts(loom_fact_context_t* context,
       result_facts[0] = loom_value_facts_unknown();                     \
       return iree_ok_status();                                          \
     }                                                                   \
-    result_facts[0] = loom_value_facts_exact_i64(                       \
-        fn((uint64_t)operand_facts[0].range_lo, bitwidth));             \
+    if (loom_value_facts_is_exact(operand_facts[0])) {                  \
+      result_facts[0] = loom_value_facts_exact_i64(                     \
+          fn((uint64_t)operand_facts[0].range_lo, bitwidth));           \
+    } else {                                                            \
+      result_facts[0] = loom_value_facts_make(0, bitwidth, 1);          \
+    }                                                                   \
+    loom_value_facts_propagate_unary_distribution(operand_facts[0],     \
+                                                  &result_facts[0]);    \
     return iree_ok_status();                                            \
   }
 
