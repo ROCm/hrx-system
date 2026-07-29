@@ -777,6 +777,7 @@ loom_amdgpu_hal_kernel_library_target_resources_from_hsaco(
       .resident_subgroups_per_simd = target_resources->resident_waves_per_simd,
       .occupancy_percent = target_resources->occupancy_percent,
       .limiting_resource = target_resources->limiting_resource,
+      .residency_summary = target_resources->residency_summary,
   };
 }
 

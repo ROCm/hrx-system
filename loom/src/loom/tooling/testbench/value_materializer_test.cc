@@ -182,6 +182,8 @@ check.case @generated {
   %i8 = check.generate.iota offset(-2) step(1) : tensor<4xi8>
   %i8_down = check.generate.iota offset(2) step(-1) : tensor<4xi8>
   %iota = check.generate.iota offset(0) step(1) : tensor<[%m]xi32>
+  %periodic_iota = check.generate.iota offset(-1) step(2) period(4) : tensor<10xi32>
+  %periodic_f32 = check.generate.iota offset(0.5) step(-1.5) period(2) : tensor<5xf32>
   %f16 = check.generate.fill value(0.5) : tensor<2xf16>
   %fill = check.generate.fill value(1.5) : tensor<3xf32>
   %bf16 = check.generate.fill value(0.25) : tensor<2xbf16>
@@ -203,7 +205,7 @@ check.case @generated {
       &options, &case_plan, /*sample_ordinal=*/1, &table));
 
   ASSERT_EQ(case_plan.parameter_count, 2u);
-  ASSERT_EQ(case_plan.value_source_count, 8u);
+  ASSERT_EQ(case_plan.value_source_count, 10u);
   loom_testbench_value_t scalar = {};
   IREE_ASSERT_OK(loom_testbench_value_table_lookup_retain(
       &table, case_plan.value_sources[0].value_id, &scalar));
@@ -233,9 +235,25 @@ check.case @generated {
                                     IREE_HAL_ELEMENT_TYPE_SINT_32, {0, 1, 2});
   loom_testbench_value_deinitialize(&iota);
 
+  loom_testbench_value_t periodic_iota = {};
+  iree_hal_buffer_view_t* periodic_iota_view = LookupBufferView(
+      &table, case_plan.value_sources[4].value_id, &periodic_iota);
+  ExpectBufferViewContents<int32_t>(periodic_iota_view, {10},
+                                    IREE_HAL_ELEMENT_TYPE_SINT_32,
+                                    {-1, 1, 3, 5, -1, 1, 3, 5, -1, 1});
+  loom_testbench_value_deinitialize(&periodic_iota);
+
+  loom_testbench_value_t periodic_f32 = {};
+  iree_hal_buffer_view_t* periodic_f32_view = LookupBufferView(
+      &table, case_plan.value_sources[5].value_id, &periodic_f32);
+  ExpectBufferViewContents<float>(periodic_f32_view, {5},
+                                  IREE_HAL_ELEMENT_TYPE_FLOAT_32,
+                                  {0.5f, -1.0f, 0.5f, -1.0f, 0.5f});
+  loom_testbench_value_deinitialize(&periodic_f32);
+
   loom_testbench_value_t f16 = {};
   iree_hal_buffer_view_t* f16_view =
-      LookupBufferView(&table, case_plan.value_sources[4].value_id, &f16);
+      LookupBufferView(&table, case_plan.value_sources[6].value_id, &f16);
   ExpectBufferViewContents<uint16_t>(
       f16_view, {2}, IREE_HAL_ELEMENT_TYPE_FLOAT_16,
       {iree_math_f32_to_f16(0.5f), iree_math_f32_to_f16(0.5f)});
@@ -243,14 +261,14 @@ check.case @generated {
 
   loom_testbench_value_t fill = {};
   iree_hal_buffer_view_t* fill_view =
-      LookupBufferView(&table, case_plan.value_sources[5].value_id, &fill);
+      LookupBufferView(&table, case_plan.value_sources[7].value_id, &fill);
   ExpectBufferViewContents<float>(
       fill_view, {3}, IREE_HAL_ELEMENT_TYPE_FLOAT_32, {1.5f, 1.5f, 1.5f});
   loom_testbench_value_deinitialize(&fill);
 
   loom_testbench_value_t bf16 = {};
   iree_hal_buffer_view_t* bf16_view =
-      LookupBufferView(&table, case_plan.value_sources[6].value_id, &bf16);
+      LookupBufferView(&table, case_plan.value_sources[8].value_id, &bf16);
   ExpectBufferViewContents<uint16_t>(
       bf16_view, {2}, IREE_HAL_ELEMENT_TYPE_BFLOAT_16,
       {iree_math_f32_to_bf16(0.25f), iree_math_f32_to_bf16(0.25f)});
@@ -258,7 +276,7 @@ check.case @generated {
 
   loom_testbench_value_t uniform = {};
   iree_hal_buffer_view_t* uniform_view =
-      LookupBufferView(&table, case_plan.value_sources[7].value_id, &uniform);
+      LookupBufferView(&table, case_plan.value_sources[9].value_id, &uniform);
   ASSERT_EQ(iree_hal_buffer_view_shape_rank(uniform_view), 1u);
   EXPECT_EQ(iree_hal_buffer_view_shape_dim(uniform_view, 0), 4);
   EXPECT_EQ(iree_hal_buffer_view_element_type(uniform_view),

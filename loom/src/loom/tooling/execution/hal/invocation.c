@@ -427,6 +427,19 @@ static iree_status_t loom_run_hal_record_dispatch_sequence_batch(
           command_buffer, candidates[step_index]->executable, function, config,
           loom_run_hal_dispatch_constants(options), bindings,
           IREE_HAL_DISPATCH_FLAG_NONE);
+      if (iree_status_is_ok(status) && step_index + 1 < sequence_count) {
+        const iree_hal_memory_barrier_t memory_barrier = {
+            .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+            .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                            IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+        };
+        status = iree_hal_command_buffer_execution_barrier(
+            command_buffer, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+            IREE_HAL_EXECUTION_STAGE_DISPATCH,
+            IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+            /*memory_barrier_count=*/1, &memory_barrier,
+            /*buffer_barrier_count=*/0, /*buffer_barriers=*/NULL);
+      }
     }
   }
   if (iree_status_is_ok(status)) {

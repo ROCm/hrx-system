@@ -201,12 +201,6 @@ def _descriptor_set_storage_generator_target(
     return info.storage_generator_target or info.generator_target
 
 
-def _vopd_isa_xml_key(info: AmdgpuDescriptorSetInfo) -> str:
-    if len(info.isa_infos) != 1:
-        raise ValueError(f"AMDGPU VOPD descriptor set '{info.key}' must have one ISA member")
-    return info.isa_infos[0].isa_xml_key
-
-
 def _descriptor_set_keys_for_group(group: str, descriptor_set_infos: Sequence[AmdgpuDescriptorSetInfo]) -> tuple[str, ...]:
     def select(storage_generator_targets: set[str]) -> tuple[str, ...]:
         return tuple(info.key for info in descriptor_set_infos if (_descriptor_set_storage_generator_target(info) in storage_generator_targets and _descriptor_set_supports_vopd(info)))
@@ -214,15 +208,18 @@ def _descriptor_set_keys_for_group(group: str, descriptor_set_infos: Sequence[Am
     if group == _DESCRIPTOR_SET_GROUP_RDNA_VOPD:
         return tuple(info.key for info in descriptor_set_infos if _descriptor_set_supports_vopd(info))
     if group == _DESCRIPTOR_SET_GROUP_GFX11_GFX12:
-        return select({"rdna3", "rdna4"})
+        return select({"rdna3", "rdna3_5", "rdna4"})
     if group == _DESCRIPTOR_SET_GROUP_RDNA4_GFX125X:
         return select({"rdna4_gfx125x"})
     raise ValueError(f"unknown AMDGPU VOPD descriptor-set group '{group}'")
 
 
-def _xml_instruction_name(component: _VopdComponentDefinition, info: AmdgpuDescriptorSetInfo) -> str | None:
+def _xml_instruction_name(
+    component: _VopdComponentDefinition,
+    isa_xml_key: str,
+) -> str | None:
     for isa_key, instruction_name in component.xml_instruction_names_by_isa_key:
-        if isa_key == _vopd_isa_xml_key(info):
+        if isa_key == isa_xml_key:
             return instruction_name
     return component.xml_instruction_name
 
@@ -273,9 +270,10 @@ def _lane_mask_from_instruction(instruction: AmdgpuIsaInstruction) -> str:
 def _validate_xml_instruction(
     component: _VopdComponentDefinition,
     info: AmdgpuDescriptorSetInfo,
+    isa_xml_key: str,
     spec: AmdgpuIsaFactSource,
 ) -> None:
-    instruction_name = _xml_instruction_name(component, info)
+    instruction_name = _xml_instruction_name(component, isa_xml_key)
     if instruction_name is None:
         return
     try:
@@ -505,11 +503,13 @@ def _validate_component_definition(
         descriptors = descriptors_by_set_key[descriptor_set_key]
         if component.descriptor_key not in descriptors:
             raise ValueError(f"{owner} references descriptor set '{descriptor_set_key}' where the scalar component descriptor is absent")
-        _validate_xml_instruction(
-            component,
-            info,
-            isa_specs[_vopd_isa_xml_key(info)],
-        )
+        for isa_info in info.isa_infos:
+            _validate_xml_instruction(
+                component,
+                info,
+                isa_info.isa_xml_key,
+                isa_specs[isa_info.isa_xml_key],
+            )
 
 
 def _descriptor_commutes_packet_operands(

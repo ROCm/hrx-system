@@ -220,6 +220,58 @@ typedef struct loom_target_residency_query_t {
   iree_host_size_t limiting_resource_count;
 } loom_target_residency_query_t;
 
+// Presence and validity bits for a compact residency transition summary.
+typedef uint32_t loom_target_residency_summary_flags_t;
+enum loom_target_residency_summary_flag_bits_e {
+  // Every resource and launch fact required by the selected model was exact.
+  LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_VALID = 1u << 0,
+  // Reducing limiting resources can recover |next_better_tier|.
+  LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_NEXT_BETTER_TIER = 1u << 1,
+  // Exactly one resource limits current residency.
+  LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_UNIQUE_LIMITING_RESOURCE = 1u << 2,
+  // The unique limiting resource has a modeled next-worse cliff.
+  LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_LIMITING_RESOURCE_NEXT_WORSE_TIER =
+      1u << 3,
+};
+
+// Compact target-owned summary retained after a full residency query expires.
+//
+// Targets populate this only from exact final resource and launch facts. A
+// zeroed summary is unavailable and must not be presented as target guidance.
+// Per-resource distances are retained only for a unique limiting resource;
+// reductions across multiple resources may use incomparable units.
+typedef struct loom_target_residency_summary_t {
+  // Presence and validity bits for optional summary fields.
+  loom_target_residency_summary_flags_t flags;
+  // Best residency tier declared by the selected target model.
+  uint32_t best_tier;
+  // Current residency tier selected by exact final resources.
+  uint32_t tier;
+  // First higher whole-model tier reachable by reducing limiting resources.
+  uint32_t next_better_tier;
+  // Number of resources jointly attaining |tier|.
+  uint32_t limiting_resource_count;
+  // Stable name of the unique limiting resource.
+  iree_string_view_t limiting_resource;
+  // Final units consumed by |limiting_resource|.
+  uint64_t limiting_resource_units;
+  // Units |limiting_resource| must shed to reach |next_better_tier|.
+  uint64_t limiting_resource_reduction_units_to_next_better_tier;
+  // Next lower tier reached by growing |limiting_resource|.
+  uint32_t limiting_resource_next_worse_tier;
+  // Absolute limiting-resource footprint at the next-worse cliff.
+  uint64_t limiting_resource_next_worse_cliff_units;
+  // Additional limiting-resource units available before the next-worse cliff.
+  uint64_t limiting_resource_additional_units_to_next_worse_tier;
+} loom_target_residency_summary_t;
+
+// Returns true when |summary| was derived from complete target-owned facts.
+static inline bool loom_target_residency_summary_is_valid(
+    const loom_target_residency_summary_t* summary) {
+  return iree_any_bit_set(summary->flags,
+                          LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_VALID);
+}
+
 // Returns true when |table| contains no direct resources and no cliffs.
 static inline bool loom_target_residency_direct_resource_table_is_empty(
     const loom_target_residency_direct_resource_table_t* table) {

@@ -79,6 +79,7 @@ iree_status_t loom_amdgpu_build_kernel_hsaco_contribution(
       .resident_waves_per_simd = target_resources.resident_waves_per_simd,
       .occupancy_percent = target_resources.occupancy_percent,
       .limiting_resource = target_resources.limiting_resource,
+      .residency_summary = target_resources.residency_summary,
   };
   *out_contribution = (loom_amdgpu_kernel_hsaco_contribution_t){
       .target = record.target_id,

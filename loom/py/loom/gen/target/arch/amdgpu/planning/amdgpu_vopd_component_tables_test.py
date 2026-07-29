@@ -19,9 +19,11 @@ def test_vopd_descriptor_set_groups_follow_target_info() -> None:
         amdgpu_vopd_component_tables._DESCRIPTOR_SET_GROUP_RDNA_VOPD,
         descriptor_set_infos,
     ) == (
+        "amdgpu.gfx11.generic.core",
         "amdgpu.gfx12.generic.core",
         "amdgpu.gfx12_5.generic.core",
         "amdgpu.rdna3.core",
+        "amdgpu.rdna3_5.core",
         "amdgpu.rdna4.core",
         "amdgpu.rdna4.gfx125x.core",
     )
@@ -29,8 +31,10 @@ def test_vopd_descriptor_set_groups_follow_target_info() -> None:
         amdgpu_vopd_component_tables._DESCRIPTOR_SET_GROUP_GFX11_GFX12,
         descriptor_set_infos,
     ) == (
+        "amdgpu.gfx11.generic.core",
         "amdgpu.gfx12.generic.core",
         "amdgpu.rdna3.core",
+        "amdgpu.rdna3_5.core",
         "amdgpu.rdna4.core",
     )
     assert amdgpu_vopd_component_tables._descriptor_set_keys_for_group(

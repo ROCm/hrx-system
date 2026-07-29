@@ -393,6 +393,19 @@ low.func.def target(@gfx11_target) @gfx11_perm_zero_source_selector_literal(%val
 
 // ====
 
+// RUN: emit amdgpu-assembly @gfx942_perm_register_selector waits=none fixed=%packed:physical_register:0:1 fixed=%src0:physical_register:1:1 fixed=%src1:physical_register:2:1 fixed=%selectors:physical_register:4:1
+amdgpu.target<gfx942> @gfx942_target
+low.func.def target(@gfx942_target) @gfx942_perm_register_selector(%src0: reg<amdgpu.vgpr>, %src1: reg<amdgpu.vgpr>, %selectors: reg<amdgpu.sgpr>) asm<amdgpu.cdna3.core> {
+  %packed = v_perm_b32 %src0, %src1, %selectors
+  return
+}
+
+// ----
+  v_perm_b32 v0, v1, v2, s4
+  s_endpgm
+
+// ====
+
 // RUN: emit amdgpu-assembly @gfx11_packed_fma_mad_assembly waits=none
 amdgpu.target<gfx1100> @gfx11_target
 low.func.def target(@gfx11_target) @gfx11_packed_fma_mad_assembly(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
@@ -752,6 +765,49 @@ low.func.def target(@gfx11_target) @gfx11_vopd_mixed_binary_f32_pair(%a0: reg<am
 
 // ----
   v_dual_mul_f32 v4, v0, v1 :: v_dual_add_f32 v5, v2, v3
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1151_vopd_mixed_binary_f32_pair strategy=source fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%a1:physical_register:2:1 fixed=%b1:physical_register:3:1 fixed=%product:physical_register:4:1 fixed=%sum:physical_register:5:1
+amdgpu.target<gfx1151> @gfx1151_target
+low.func.def target(@gfx1151_target) @gfx1151_vopd_mixed_binary_f32_pair(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>) asm<amdgpu.rdna3_5.core> {
+  %product = v_mul_f32 %a0, %b0
+  %sum = v_add_f32 %a1, %b1
+  return
+}
+
+// ----
+  v_dual_mul_f32 v4, v0, v1 :: v_dual_add_f32 v5, v2, v3
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_generic_vopd_mixed_binary_f32_pair strategy=source fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%a1:physical_register:2:1 fixed=%b1:physical_register:3:1 fixed=%product:physical_register:4:1 fixed=%sum:physical_register:5:1
+amdgpu.target<gfx11-generic> @gfx11_generic_target
+low.func.def target(@gfx11_generic_target) @gfx11_generic_vopd_mixed_binary_f32_pair(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+  %product = v_mul_f32 %a0, %b0
+  %sum = v_add_f32 %a1, %b1
+  return
+}
+
+// ----
+  v_dual_mul_f32 v4, v0, v1 :: v_dual_add_f32 v5, v2, v3
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1151_vopd_dependent_binary_f32_pair waits=none strategy=source fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%b1:physical_register:3:1 fixed=%product:physical_register:4:1 fixed=%sum:physical_register:5:1
+amdgpu.target<gfx1151> @gfx1151_target
+low.func.def target(@gfx1151_target) @gfx1151_vopd_dependent_binary_f32_pair(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>) asm<amdgpu.rdna3_5.core> {
+  %product = v_mul_f32 %a0, %b0
+  %sum = v_add_f32 %product, %b1
+  return
+}
+
+// ----
+  v_mul_f32 v4, v0, v1
+  v_add_f32 v5, v4, v3
   s_endpgm
 
 // ====
@@ -2420,6 +2476,25 @@ low.func.def target(@gfx12_target) @gfx12_cvt_f32_f16_high_vgpr_source(%input: r
 
 // ----
   v_cvt_f32_f16 v187, v131
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_cvt_f32_ubyte_family waits=none
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_cvt_f32_ubyte_family(%input: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %byte0 = v_cvt_f32_ubyte0 %input
+  %byte1 = v_cvt_f32_ubyte1 %input
+  %byte2 = v_cvt_f32_ubyte2 %input
+  %byte3 = v_cvt_f32_ubyte3 %input
+  return
+}
+
+// ----
+  v_cvt_f32_ubyte0 v1, v0
+  v_cvt_f32_ubyte1 v1, v0
+  v_cvt_f32_ubyte2 v1, v0
+  v_cvt_f32_ubyte3 v0, v0
   s_endpgm
 
 // ====

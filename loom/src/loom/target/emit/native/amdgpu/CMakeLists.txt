@@ -353,6 +353,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::hal::kernel_abi
     loom::target::arch::amdgpu::planning::occupancy
     loom::target::arch::amdgpu::planning::packet_plan
+    loom::target::residency
   PUBLIC
 )
 endif()

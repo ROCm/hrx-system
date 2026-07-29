@@ -293,11 +293,12 @@ check_literal = Op(
 check_generate_iota = Op(
     "check.generate.iota",
     group=check_ops,
-    doc="Generates a deterministic iota-shaped value.",
+    doc="Generates a deterministic, optionally periodic iota-shaped value.",
     results=[Result("result", ANY)],
     attrs=[
         AttrDef("offset", "any"),
         AttrDef("step", "any"),
+        AttrDef("period", "i64", optional=True),
     ],
     constraints=[
         LiteralMatchesElementType("offset", "result"),
@@ -307,11 +308,13 @@ check_generate_iota = Op(
     format=[
         Clause("offset", Attr("offset")),
         Clause("step", Attr("step")),
+        OptionalGroup([Clause("period", Attr("period"))], anchor="period"),
         COLON,
         TypeOf("result"),
     ],
     examples=[
         "%lhs = check.generate.iota offset(0) step(1) : tensor<[%m]x[%n]xi32>",
+        "%routes = check.generate.iota offset(0) step(1) period(128) : tensor<[%tokens]x8xi32>",
     ],
 )
 

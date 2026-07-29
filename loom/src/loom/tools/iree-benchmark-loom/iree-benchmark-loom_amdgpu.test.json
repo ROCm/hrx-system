@@ -50,6 +50,7 @@
           "--max-batches=1",
           "--input-ring-count=1",
           "--compile-report=summary",
+          "--profile-final-batch=true",
           "--output-format=jsonl"
         ]
       },
@@ -72,6 +73,9 @@
           "\"source_root\":\"output\"",
           "\"row\":\"benchmark\"",
           "\"state\":\"ok\"",
+          "\"correctness\":{\"sample_count\":1,\"failed_sample_count\":0}",
+          { "regex": "\"type\":\"dispatch_command_operation\".*\"command_index\":0,\"function_name\":\"store_i32\"" },
+          { "regex": "\"type\":\"dispatch_command_operation\".*\"command_index\":2,\"function_name\":\"double_i32\"" },
           "\"failures\":{\"row_count\":0,\"failed_benchmark_count\":0}"
         ]
       }

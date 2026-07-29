@@ -674,6 +674,65 @@ loom_target_compile_report_format_target_resource_registers_json(
   return loom_json_object_end(&object);
 }
 
+static iree_status_t loom_target_compile_report_format_residency_summary_json(
+    const loom_target_residency_summary_t* summary,
+    loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("best_tier"), summary->best_tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("current_tier"), summary->tier));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("limiting_resource_count"),
+      summary->limiting_resource_count));
+  if (iree_any_bit_set(
+          summary->flags,
+          LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_NEXT_BETTER_TIER)) {
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &object, IREE_SV("next_better_tier"), summary->next_better_tier));
+  }
+  if (iree_any_bit_set(
+          summary->flags,
+          LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_UNIQUE_LIMITING_RESOURCE)) {
+    IREE_RETURN_IF_ERROR(loom_json_object_begin_field(
+        &object, IREE_SV("unique_limiting_resource")));
+    loom_json_object_writer_t resource_object;
+    IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &resource_object));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &resource_object, IREE_SV("name"), summary->limiting_resource));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &resource_object, IREE_SV("units"), summary->limiting_resource_units));
+    if (iree_any_bit_set(
+            summary->flags,
+            LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_NEXT_BETTER_TIER)) {
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+          &resource_object, IREE_SV("reduction_units_to_next_better_tier"),
+          summary->limiting_resource_reduction_units_to_next_better_tier));
+    }
+    if (iree_any_bit_set(
+            summary->flags,
+            LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_LIMITING_RESOURCE_NEXT_WORSE_TIER)) {
+      IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&resource_object,
+                                                        IREE_SV("next_worse")));
+      loom_json_object_writer_t next_worse_object;
+      IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &next_worse_object));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &next_worse_object, IREE_SV("tier"),
+          summary->limiting_resource_next_worse_tier));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+          &next_worse_object, IREE_SV("cliff_units"),
+          summary->limiting_resource_next_worse_cliff_units));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+          &next_worse_object, IREE_SV("additional_units"),
+          summary->limiting_resource_additional_units_to_next_worse_tier));
+      IREE_RETURN_IF_ERROR(loom_json_object_end(&next_worse_object));
+    }
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&resource_object));
+  }
+  return loom_json_object_end(&object);
+}
+
 static iree_status_t loom_target_compile_report_format_target_resources_json(
     const loom_target_compile_report_target_resources_t* resources,
     loom_output_stream_t* stream) {
@@ -706,6 +765,13 @@ static iree_status_t loom_target_compile_report_format_target_resources_json(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           &object, IREE_SV("limiting_resource"), resources->limiting_resource));
+  if (loom_target_residency_summary_is_valid(&resources->residency_summary)) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("residency")));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_format_residency_summary_json(
+            &resources->residency_summary, stream));
+  }
   return loom_json_object_end(&object);
 }
 

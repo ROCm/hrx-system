@@ -61,6 +61,7 @@ loom_cc_library(
     ],
     deps = [
         "//loom/src/loom/codegen/low:planning_statistics",
+        "//loom/src/loom/target:residency",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",

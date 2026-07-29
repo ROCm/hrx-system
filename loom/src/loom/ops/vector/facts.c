@@ -264,6 +264,52 @@ static iree_status_t loom_vector_mask_range_exact_static_facts(
                                                   out_facts);
 }
 
+static iree_status_t loom_vector_mask_range_bounded_static_facts(
+    loom_fact_context_t* context, uint64_t lane_count,
+    loom_value_facts_t lower_bound, loom_value_facts_t upper_bound,
+    loom_value_facts_t step, loom_value_facts_t* out_facts, bool* out_handled) {
+  *out_handled = false;
+  if (lane_count == 0) {
+    *out_handled = true;
+    return loom_value_facts_make_uniform_element(
+        context, loom_value_facts_exact_i64(0), out_facts);
+  }
+  if (lane_count - 1 > (uint64_t)INT64_MAX ||
+      loom_value_facts_is_float(lower_bound) ||
+      loom_value_facts_is_float(upper_bound) ||
+      loom_value_facts_is_float(step)) {
+    return iree_ok_status();
+  }
+
+  int64_t maximum_lane_delta = 0;
+  int64_t maximum_step = iree_max(step.range_hi, 0);
+  int64_t maximum_lane_value = 0;
+  if (iree_checked_mul_i64((int64_t)(lane_count - 1), maximum_step,
+                           &maximum_lane_delta) &&
+      iree_checked_add_i64(lower_bound.range_hi, maximum_lane_delta,
+                           &maximum_lane_value) &&
+      maximum_lane_value < upper_bound.range_lo) {
+    *out_handled = true;
+    return loom_value_facts_make_uniform_element(
+        context, loom_value_facts_exact_i64(1), out_facts);
+  }
+
+  int64_t minimum_lane_delta = 0;
+  int64_t minimum_step = iree_min(step.range_lo, 0);
+  int64_t minimum_lane_value = 0;
+  if (iree_checked_mul_i64((int64_t)(lane_count - 1), minimum_step,
+                           &minimum_lane_delta) &&
+      iree_checked_add_i64(lower_bound.range_lo, minimum_lane_delta,
+                           &minimum_lane_value) &&
+      minimum_lane_value >= upper_bound.range_hi) {
+    *out_handled = true;
+    return loom_value_facts_make_uniform_element(
+        context, loom_value_facts_exact_i64(0), out_facts);
+  }
+
+  return iree_ok_status();
+}
+
 static bool loom_vector_facts_exact_i64_is(loom_value_facts_t facts,
                                            int64_t expected) {
   return loom_value_facts_is_exact(facts) &&
@@ -2081,16 +2127,18 @@ iree_status_t loom_vector_mask_range_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts) {
+  loom_type_t result_type =
+      loom_module_value_type(module, loom_vector_mask_range_result(op));
+  uint64_t lane_count = 0;
+  bool has_static_lane_count =
+      loom_type_static_element_count(result_type, &lane_count);
   if (loom_value_facts_is_exact(operand_facts[0]) &&
       loom_value_facts_is_exact(operand_facts[1]) &&
       loom_value_facts_is_exact(operand_facts[2]) &&
       !loom_value_facts_is_float(operand_facts[0]) &&
       !loom_value_facts_is_float(operand_facts[1]) &&
       !loom_value_facts_is_float(operand_facts[2])) {
-    loom_type_t result_type =
-        loom_module_value_type(module, loom_vector_mask_range_result(op));
-    uint64_t lane_count = 0;
-    if (loom_type_static_element_count(result_type, &lane_count)) {
+    if (has_static_lane_count) {
       bool handled = false;
       IREE_RETURN_IF_ERROR(loom_vector_mask_range_exact_static_facts(
           context, lane_count, operand_facts[0].range_lo,
@@ -2109,6 +2157,13 @@ iree_status_t loom_vector_mask_range_facts(
           loom_value_facts_exact_i64(lower_bound < upper_bound ? 1 : 0),
           &result_facts[0]);
     }
+  }
+  if (has_static_lane_count) {
+    bool handled = false;
+    IREE_RETURN_IF_ERROR(loom_vector_mask_range_bounded_static_facts(
+        context, lane_count, operand_facts[0], operand_facts[1],
+        operand_facts[2], &result_facts[0], &handled));
+    if (handled) return iree_ok_status();
   }
   loom_value_fact_vector_prefix_mask_t mask = {
       .lower_bound = operand_facts[0],

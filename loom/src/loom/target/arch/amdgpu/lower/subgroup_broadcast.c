@@ -119,8 +119,7 @@ iree_status_t loom_amdgpu_select_kernel_subgroup_broadcast_first_plan(
   }
 
   uint32_t wavefront_size = 0;
-  if (!loom_amdgpu_select_full_wave_direct_subgroup_width(context,
-                                                          &wavefront_size)) {
+  if (!loom_amdgpu_select_subgroup_wavefront_size(context, &wavefront_size)) {
     return iree_ok_status();
   }
 
@@ -305,11 +304,9 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_broadcast_first(
   }
 
   uint32_t unused_wavefront_size = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_low_legality_verify_full_wave_direct_subgroup_width(
-          context, op, IREE_SV("subgroup_broadcast_first.wavefront_size"),
-          IREE_SV("subgroup_broadcast_first.native_width"),
-          &unused_wavefront_size));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_low_legality_verify_subgroup_wavefront(
+      context, op, IREE_SV("subgroup_broadcast_first.wavefront_size"),
+      &unused_wavefront_size));
   return loom_amdgpu_low_legality_verify_descriptor_requirement(
       context, op, LOOM_AMDGPU_DESCRIPTOR_REF_V_READFIRSTLANE_B32,
       IREE_SV("descriptor.v_readfirstlane_b32"));

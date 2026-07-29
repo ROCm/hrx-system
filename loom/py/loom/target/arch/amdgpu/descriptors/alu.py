@@ -4905,6 +4905,27 @@ def _v_cvt_f32_u32_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
+def _v_cvt_f32_ubyte_overlay(byte_ordinal: int) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=f"amdgpu.v_cvt_f32_ubyte{byte_ordinal}",
+        instruction_name=f"V_CVT_F32_UBYTE{byte_ordinal}",
+        mnemonic=f"v_cvt_f32_ubyte{byte_ordinal}",
+        encoding_name="ENC_VOP1",
+        semantic_tag=f"convert.unsigned.u8.byte{byte_ordinal}.f32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),
+        ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_cvt_f32_ubyte_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return tuple(_v_cvt_f32_ubyte_overlay(i) for i in range(4))
+
+
 def _v_cvt_u32_f32_overlay() -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
         descriptor_key="amdgpu.v_cvt_u32_f32",
@@ -5861,6 +5882,7 @@ __all__ = (
     "_v_cvt_f32_f16_overlay",
     "_v_cvt_f32_i32_overlay",
     "_v_cvt_f32_packed8_overlays",
+    "_v_cvt_f32_ubyte_overlays",
     "_v_cvt_f32_u32_overlay",
     "_v_cvt_i32_f32_overlay",
     "_v_cvt_pk_bf16_f32_dpp16_overlay",

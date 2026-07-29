@@ -128,14 +128,31 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   resources.scalar_pressure_peak_live_units = 32;
   resources.scalar_register_overhead_units = 6;
   resources.vector_register_class = IREE_SVL("amdgpu.vgpr");
-  resources.vector_register_count = 112;
-  resources.vector_pressure_peak_live_units = 96;
-  resources.vector_register_overhead_units = 16;
-  resources.subgroup_size = 32;
+  resources.vector_register_count = 160;
+  resources.vector_pressure_peak_live_units = 136;
+  resources.vector_register_overhead_units = 24;
+  resources.subgroup_size = 64;
   resources.max_subgroups_per_simd = 16;
-  resources.resident_subgroups_per_simd = 8;
-  resources.occupancy_percent = 50;
+  resources.resident_subgroups_per_simd = 3;
+  resources.occupancy_percent = 18;
   resources.limiting_resource = IREE_SVL("amdgpu.vgpr");
+  resources.residency_summary.flags =
+      LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_VALID |
+      LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_NEXT_BETTER_TIER |
+      LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_UNIQUE_LIMITING_RESOURCE |
+      LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_LIMITING_RESOURCE_NEXT_WORSE_TIER;
+  resources.residency_summary.best_tier = 16;
+  resources.residency_summary.tier = 3;
+  resources.residency_summary.next_better_tier = 4;
+  resources.residency_summary.limiting_resource_count = 1;
+  resources.residency_summary.limiting_resource = IREE_SVL("amdgpu.vgpr");
+  resources.residency_summary.limiting_resource_units = 160;
+  resources.residency_summary
+      .limiting_resource_reduction_units_to_next_better_tier = 32;
+  resources.residency_summary.limiting_resource_next_worse_tier = 2;
+  resources.residency_summary.limiting_resource_next_worse_cliff_units = 176;
+  resources.residency_summary
+      .limiting_resource_additional_units_to_next_worse_tier = 16;
   loom_target_compile_report_record_target_resources(&report, &resources);
 
   iree_string_builder_t builder;
@@ -158,6 +175,16 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
       iree_string_view_find(
           text, IREE_SV("target_resources scalar_register_class=amdgpu.sgpr"),
           0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(text,
+                                  IREE_SV("residency_current_tier=3 "
+                                          "residency_limiting_resource_count=1 "
+                                          "residency_next_better_tier=4"),
+                                  0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(
+          text, IREE_SV("residency_reduction_units_to_next_better_tier=32"), 0),
       IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
       iree_string_view_find(
@@ -208,8 +235,64 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   const iree_string_view_t final_vector_resources =
       LookupObject(vector_resources, IREE_SV("final"));
   ExpectObjectUint64Equals(final_vector_resources, IREE_SV("register_count"),
-                           112);
-  ExpectObjectUint64Equals(target_resources, IREE_SV("occupancy_percent"), 50);
+                           160);
+  ExpectObjectUint64Equals(target_resources, IREE_SV("occupancy_percent"), 18);
+  const iree_string_view_t residency =
+      LookupObject(target_resources, IREE_SV("residency"));
+  ExpectObjectUint64Equals(residency, IREE_SV("best_tier"), 16);
+  ExpectObjectUint64Equals(residency, IREE_SV("current_tier"), 3);
+  ExpectObjectUint64Equals(residency, IREE_SV("next_better_tier"), 4);
+  const iree_string_view_t limiting =
+      LookupObject(residency, IREE_SV("unique_limiting_resource"));
+  ExpectObjectValueEquals(limiting, IREE_SV("name"), IREE_SV("amdgpu.vgpr"));
+  ExpectObjectUint64Equals(limiting,
+                           IREE_SV("reduction_units_to_next_better_tier"), 32);
+  iree_string_builder_deinitialize(&builder);
+  loom_target_compile_report_deinitialize(&report);
+}
+
+TEST(CompileReportFormatTest, EmitsOnlyValidResidencyEvidence) {
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_target_resources_t resources = {};
+  resources.residency_summary.flags =
+      LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_VALID |
+      LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_NEXT_BETTER_TIER;
+  resources.residency_summary.best_tier = 16;
+  resources.residency_summary.tier = 3;
+  resources.residency_summary.next_better_tier = 4;
+  resources.residency_summary.limiting_resource_count = 2;
+  loom_target_compile_report_record_target_resources(&report, &resources);
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+  const loom_target_compile_report_format_options_t options = {
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+  };
+  IREE_ASSERT_OK(
+      loom_target_compile_report_format_json(&report, &options, &stream));
+  iree_string_view_t output = iree_string_builder_view(&builder);
+  EXPECT_NE(iree_string_view_find(output,
+                                  IREE_SV("\"limiting_resource_count\":2"), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(
+      iree_string_view_find(output, IREE_SV("\"unique_limiting_resource\""), 0),
+      IREE_STRING_VIEW_NPOS);
+  iree_string_builder_deinitialize(&builder);
+  loom_target_compile_report_deinitialize(&report);
+
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_record_target_resources(&report, &resources);
+  report.target_resources.residency_summary = {};
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_for_builder(&builder, &stream);
+  IREE_ASSERT_OK(
+      loom_target_compile_report_format_json(&report, &options, &stream));
+  output = iree_string_builder_view(&builder);
+  EXPECT_EQ(iree_string_view_find(output, IREE_SV("\"residency\""), 0),
+            IREE_STRING_VIEW_NPOS);
   iree_string_builder_deinitialize(&builder);
   loom_target_compile_report_deinitialize(&report);
 }
