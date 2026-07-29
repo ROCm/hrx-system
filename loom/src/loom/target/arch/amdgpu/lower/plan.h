@@ -789,8 +789,8 @@ typedef enum loom_amdgpu_subgroup_reduce_crosslane_kind_e {
 typedef enum loom_amdgpu_subgroup_reduce_publication_kind_e {
   // Publish a correct reduced VGPR payload to every active subgroup lane.
   LOOM_AMDGPU_SUBGROUP_REDUCE_PUBLICATION_ALL_LANES = 0,
-  // Publish a correct reduced VGPR payload only for lane-zero-guarded uses.
-  LOOM_AMDGPU_SUBGROUP_REDUCE_PUBLICATION_LEADER_LANE = 1,
+  // Combine 32-lane halves through SGPRs and broadcast the completed payload.
+  LOOM_AMDGPU_SUBGROUP_REDUCE_PUBLICATION_SCALAR_BROADCAST = 1,
 } loom_amdgpu_subgroup_reduce_publication_kind_t;
 
 typedef struct loom_amdgpu_subgroup_reduce_plan_t {

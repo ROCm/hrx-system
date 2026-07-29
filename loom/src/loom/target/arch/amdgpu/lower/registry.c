@@ -1368,10 +1368,10 @@ static const loom_amdgpu_subgroup_reduce_strategy_report_row_t
             .crosslane_kind =
                 LOOM_AMDGPU_SUBGROUP_REDUCE_CROSSLANE_DPP_ROW_PERMLANEX16,
             .publication_kind =
-                LOOM_AMDGPU_SUBGROUP_REDUCE_PUBLICATION_LEADER_LANE,
+                LOOM_AMDGPU_SUBGROUP_REDUCE_PUBLICATION_SCALAR_BROADCAST,
             .report_key =
                 IREE_SVL("amdgpu.subgroup_reduce.strategy.dpp_row_permlanex16."
-                         "leader_lane.row_pair"),
+                         "scalar_broadcast.row_pair"),
         },
 };
 
