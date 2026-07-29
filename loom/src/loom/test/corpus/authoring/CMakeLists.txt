@@ -18,6 +18,8 @@ iree_native_test(
     "--dry-run"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom"
   LABELS
     "hostonly"
 )
@@ -32,6 +34,8 @@ iree_native_test(
     "--dry-run"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fragment_repack_bf16.loom"
   LABELS
     "hostonly"
 )
@@ -46,6 +50,8 @@ iree_native_test(
     "--dry-run"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fp8_finite_storage_decode.loom"
   LABELS
     "hostonly"
 )
@@ -60,6 +66,8 @@ iree_native_test(
     "--dry-run"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/gfx11_wmma_families.loom"
   LABELS
     "hostonly"
 )
@@ -74,6 +82,8 @@ iree_native_test(
     "--dry-run"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/gfx9_4_mfma_families.loom"
   LABELS
     "hostonly"
 )
@@ -88,6 +98,8 @@ iree_native_test(
     "--dry-run"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/indexed_row_gather_f32.loom"
   LABELS
     "hostonly"
 )
@@ -102,6 +114,8 @@ iree_native_test(
     "--dry-run"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/loop_carried_lane_liveness.loom"
   LABELS
     "hostonly"
 )
@@ -116,6 +130,8 @@ iree_native_test(
     "--dry-run"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/memset_i8.loom"
   LABELS
     "hostonly"
 )
@@ -130,6 +146,8 @@ iree_native_test(
     "--dry-run"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom"
   LABELS
     "hostonly"
 )
@@ -151,6 +169,8 @@ iree_native_test(
     "--input-ring-count=1"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -176,6 +196,8 @@ iree_native_test(
     "--input-ring-count=1"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fragment_repack_bf16.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -201,6 +223,8 @@ iree_native_test(
     "--input-ring-count=1"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fp8_finite_storage_decode.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -226,6 +250,8 @@ iree_native_test(
     "--input-ring-count=1"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/gfx11_wmma_families.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -251,6 +277,8 @@ iree_native_test(
     "--input-ring-count=1"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/gfx9_4_mfma_families.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -276,6 +304,8 @@ iree_native_test(
     "--input-ring-count=1"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/indexed_row_gather_f32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -301,6 +331,8 @@ iree_native_test(
     "--input-ring-count=1"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/loop_carried_lane_liveness.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -326,6 +358,8 @@ iree_native_test(
     "--input-ring-count=1"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/memset_i8.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -351,6 +385,8 @@ iree_native_test(
     "--input-ring-count=1"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"

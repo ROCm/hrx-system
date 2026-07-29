@@ -37,6 +37,7 @@ py_test(
         "ci_core_linux_test.py",
     ],
     main = "ci_core_linux_test.py",
+    deps = ["//build_tools/devtools"],
 )
 
 py_test(
@@ -47,4 +48,36 @@ py_test(
         "ci_core_windows_test.py",
     ],
     main = "ci_core_windows_test.py",
+)
+
+py_test(
+    name = "cmake_data_dependencies_test",
+    srcs = ["cmake_data_dependencies_test.py"],
+    data = [
+        "cmake/iree_macros.cmake",
+        "cmake/testdata/data_dependencies/CMakeLists.txt",
+        "cmake/testdata/data_dependencies/fixture.txt",
+        "cmake/testdata/data_dependencies/tool.c",
+    ],
+)
+
+py_test(
+    name = "cmake_test_metadata_test",
+    srcs = ["cmake_test_metadata_test.py"],
+    data = [
+        "cmake/iree_configure_testing.cmake",
+        "cmake/iree_macros.cmake",
+        "cmake/testdata/test_metadata/CMakeLists.txt",
+    ],
+)
+
+filegroup(
+    name = "cmake_test_metadata_fixture",
+    srcs = [
+        "cmake/empty_file",
+        "cmake/iree_configure_testing.cmake",
+        "cmake/iree_macros.cmake",
+        "cmake/testdata/test_metadata/CMakeLists.txt",
+    ],
+    visibility = ["//build_tools/devtools:__pkg__"],
 )

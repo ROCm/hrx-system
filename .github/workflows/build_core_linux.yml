@@ -93,7 +93,6 @@ jobs:
       HRX_TEST_GPU: ${{ inputs.test_gpu }}
       HRX_PACKAGE: ${{ inputs.package }}
       HRX_PACKAGE_SUFFIX: ${{ inputs.package_suffix }}
-      CCACHE_DIR: ${{ github.workspace }}/build/linux/caches/ccache
       PIP_CACHE_DIR: ${{ github.workspace }}/build/linux/caches/pip
     steps:
       - name: Checkout repository
@@ -108,10 +107,10 @@ jobs:
       - name: Fetch ROCm artifacts
         run: python3 build_tools/ci_core_linux.py fetch-rocm
 
-      - name: Configure, build, and install
+      - name: Prepare CMake build
         run: python3 build_tools/ci_core_linux.py build
 
-      - name: Run installed tests
+      - name: Run tests
         if: ${{ inputs.run_tests }}
         run: python3 build_tools/ci_core_linux.py test
 

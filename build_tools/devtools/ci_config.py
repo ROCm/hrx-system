@@ -27,10 +27,6 @@ SANITIZER_BUILD_CONFIGS = ("msan",)
 # conventional Bazel tag and CTest label.
 HOST_TSAN_INCOMPATIBLE_TEST_LABEL = "notsan"
 
-CMAKE_SANITIZER_SMOKE_TEST_BUILD_TARGETS = (
-    "iree::base::status_test",
-    "loom::format::bytecode::varint_test",
-)
 CMAKE_SANITIZER_SMOKE_LIBRARY_BUILD_TARGETS = (
     "iree::base",
     "loom::format::bytecode::varint",

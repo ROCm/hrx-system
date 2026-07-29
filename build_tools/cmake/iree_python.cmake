@@ -261,7 +261,28 @@ function(iree_local_py_test)
       "PYTHONDONTWRITEBYTECODE=1"
   )
 
+  set(_TEST_BUILD_TARGETS)
+  if(_RULE_DEPS)
+    set(_TEST_BUILD_TARGET "${_NAME}_test_deps")
+    add_custom_target("${_TEST_BUILD_TARGET}" ALL)
+    set_property(
+      TARGET "${_TEST_BUILD_TARGET}"
+      PROPERTY FOLDER ${IREE_IDE_FOLDER}/test
+    )
+    foreach(_TEST_DEPENDENCY IN LISTS _RULE_DEPS)
+      iree_register_target_dependency(
+        TARGET "${_TEST_BUILD_TARGET}"
+        DEPENDENCY "${_TEST_DEPENDENCY}"
+      )
+    endforeach()
+    list(APPEND _TEST_BUILD_TARGETS "${_TEST_BUILD_TARGET}")
+  endif()
+
   iree_configure_test(${_NAME_PATH})
+  iree_register_test_build_targets(
+    "${_NAME_PATH}"
+    TARGETS ${_TEST_BUILD_TARGETS}
+  )
 
   if(IREE_PYTHON_TEST_REGISTRATION_FUNCTION AND
      NOT IREE_SKIP_TEST_REGISTRATION)

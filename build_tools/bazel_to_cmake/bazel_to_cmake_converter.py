@@ -965,6 +965,33 @@ class BuildFileFunctions(object):
             list_name, targets, sort=True, quote=False
         )
 
+    def _convert_data_list_block(self, data, block_name="DATA"):
+        if data is None:
+            return ""
+
+        converted_data = []
+        target_file_prefix = "$<TARGET_FILE:"
+        for label in data:
+            if label.startswith("@"):
+                try:
+                    cmake_targets = self._targets.convert_target(label)
+                except (KeyError, ValueError):
+                    continue
+                if not cmake_targets or not all(cmake_targets):
+                    continue
+            for path in self._cmake_location_paths(label):
+                if path.startswith(target_file_prefix) and path.endswith(">"):
+                    converted_data.append(path[len(target_file_prefix) : -1])
+                else:
+                    converted_data.append(path)
+
+        converted_data = list(dict.fromkeys(filter(None, converted_data)))
+        if not converted_data:
+            return ""
+        return self._convert_string_list_block(
+            block_name, converted_data, sort=True, quote=True
+        )
+
     def _convert_amdgpu_bitcode_deps_block(self, deps):
         if deps is None:
             return ""
@@ -2607,7 +2634,7 @@ class BuildFileFunctions(object):
 
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
         manifests_block = self._convert_srcs_block(manifests, block_name="MANIFESTS")
-        data_block = self._convert_srcs_block(data, block_name="DATA")
+        data_block = self._convert_data_list_block(data)
         args_block = self._convert_string_list_block(
             "ARGS", self._convert_location_args(args), sort=False
         )
@@ -2731,6 +2758,7 @@ class BuildFileFunctions(object):
         args_block = self._convert_string_list_block(
             "ARGS", self._convert_native_test_location_args(args)
         )
+        data_block = self._convert_data_list_block(data)
         env_block = self._convert_string_list_block(
             "ENV", self._convert_native_test_env(env), sort=False
         )
@@ -2746,6 +2774,7 @@ class BuildFileFunctions(object):
             f"{name_block}"
             f"{args_block}"
             f"{test_binary_block}"
+            f"{data_block}"
             f"{env_block}"
             f"{labels_block}"
             f"{sanitizer_suppressions_block}"

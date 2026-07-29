@@ -861,11 +861,6 @@ def cmake_sanitizer_smoke_steps() -> list[CiStep]:
                     sanitizer=config,
                     build_tests=True,
                 ),
-                cmake_build_step(
-                    command_name,
-                    f"Build IREE CMake sanitizer smoke with {config.upper()}",
-                    ci_config.CMAKE_SANITIZER_SMOKE_TEST_BUILD_TARGETS,
-                ),
                 cmake_test_step(
                     command_name,
                     f"Test IREE CMake sanitizer smoke with {config.upper()}",

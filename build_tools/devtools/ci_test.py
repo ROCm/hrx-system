@@ -1131,7 +1131,7 @@ class CiTest(unittest.TestCase):
             any("Test IREE CMake with MSAN" in step.name for step in steps)
         )
 
-    def test_cmake_sanitizer_smoke_command_builds_minimal_targets(self):
+    def test_cmake_sanitizer_smoke_builds_selected_test_closures(self):
         args = ci.parse_arguments(["iree-cmake-sanitizer-smoke"])
 
         steps = ci.steps_from_args(args)
@@ -1171,32 +1171,11 @@ class CiTest(unittest.TestCase):
         )
 
         build_steps = [step for step in steps if step.name.startswith("Build IREE")]
-        for target in ci_config.CMAKE_SANITIZER_SMOKE_TEST_BUILD_TARGETS:
-            self.assertTrue(
-                any(
-                    target in step.argv
-                    for step in build_steps
-                    if "MSAN" not in step.name
-                )
-            )
         msan_build_step = next(step for step in build_steps if "MSAN" in step.name)
         for target in ci_config.CMAKE_SANITIZER_SMOKE_LIBRARY_BUILD_TARGETS:
             self.assertIn(target, msan_build_step.argv)
-        for target in ci_config.CMAKE_SANITIZER_SMOKE_TEST_BUILD_TARGETS:
-            self.assertNotIn(target, msan_build_step.argv)
-
-        self.assertEqual(len(build_steps), 4)
-        for step in build_steps:
-            expected_targets = (
-                ci_config.CMAKE_SANITIZER_SMOKE_LIBRARY_BUILD_TARGETS
-                if "MSAN" in step.name
-                else ci_config.CMAKE_SANITIZER_SMOKE_TEST_BUILD_TARGETS
-            )
-            self.assertEqual(
-                set(step.argv).intersection(expected_targets),
-                set(expected_targets),
-            )
-            self.assertNotIn("all", step.argv)
+        self.assertEqual(len(build_steps), 1)
+        self.assertNotIn("all", msan_build_step.argv)
 
         test_steps = [step for step in steps if step.name.startswith("Test IREE")]
         self.assertEqual(len(test_steps), 3)

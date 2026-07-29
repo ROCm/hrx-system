@@ -33,9 +33,6 @@
 #     For example: lsan vulkan.
 # TIMEOUT: Test target timeout in seconds.
 #
-# Note: the DATA argument is not actually adding dependencies because CMake
-# doesn't have a good way to specify a data dependency for a test.
-#
 # Usage:
 # iree_cc_binary(
 #   NAME
@@ -108,9 +105,40 @@ function(iree_native_test)
       list(APPEND _TEST_ARGS "${_ARG}")
     endif(_FILE_ARG)
   endforeach(_ARG)
+  list(REMOVE_DUPLICATES _RULE_DATA)
 
   # Replace binary passed by relative ::name with iree::package::name
   string(REGEX REPLACE "^::" "${_PACKAGE_NS}::" _SRC_TARGET ${_RULE_SRC})
+
+  set(_TEST_BUILD_TARGET "${_NAME}_test_deps")
+  add_custom_target(${_TEST_BUILD_TARGET} ALL)
+  iree_register_target_dependency(
+    TARGET
+      "${_TEST_BUILD_TARGET}"
+    DEPENDENCY
+      "${_SRC_TARGET}"
+  )
+  set(_TEST_FILE_DATA)
+  set(_TEST_TARGET_DATA)
+  iree_add_data_dependencies(
+    NAME
+      "${_TEST_BUILD_TARGET}"
+    DATA
+      ${_RULE_DATA}
+    OUT_FILE_DATA
+      _TEST_FILE_DATA
+    OUT_TARGET_DATA
+      _TEST_TARGET_DATA
+  )
+  set_property(
+    TARGET ${_TEST_BUILD_TARGET}
+    PROPERTY FOLDER ${IREE_IDE_FOLDER}/test
+  )
+
+  set(_TEST_RUNTIME_DATA ${_TEST_FILE_DATA})
+  foreach(_DATA_TARGET IN LISTS _TEST_TARGET_DATA)
+    list(APPEND _TEST_RUNTIME_DATA "$<TARGET_FILE:${_DATA_TARGET}>")
+  endforeach()
 
   if(ANDROID)
     # Define a custom target for pushing and running the test on Android device.
@@ -126,7 +154,7 @@ function(iree_native_test)
     # Use environment variables to instruct the script to push artifacts
     # onto the Android device before running the test. This needs to match
     # with the expectation of the run_android_test.{sh|bat|ps1} script.
-    string(REPLACE ";" " " _DATA_SPACE_SEPARATED "${_RULE_DATA}")
+    string(REPLACE ";" " " _DATA_SPACE_SEPARATED "${_TEST_RUNTIME_DATA}")
     set(
       _ENVIRONMENT_VARS
         "TEST_ANDROID_ABS_DIR=${_ANDROID_ABS_DIR}"
@@ -173,6 +201,10 @@ function(iree_native_test)
     iree_configure_test(${_TEST_NAME})
     set(_IREE_TEST_CAN_REGISTER ON)
   endif()
+  iree_register_test_build_targets(
+    "${_TEST_NAME}"
+    TARGETS "${_TEST_BUILD_TARGET}"
+  )
 
   # Apply accumulated test environment variables after the test exists.
   if(_TEST_ENVIRONMENT_VARS)
@@ -186,11 +218,11 @@ function(iree_native_test)
 
   list(APPEND _RULE_LABELS "${_PACKAGE_PATH}")
   set_property(TEST ${_TEST_NAME} PROPERTY LABELS "${_RULE_LABELS}")
-  set_property(TEST "${_TEST_NAME}" PROPERTY REQUIRED_FILES "${_RULE_DATA}")
+  set_property(TEST "${_TEST_NAME}" PROPERTY REQUIRED_FILES "${_TEST_RUNTIME_DATA}")
   set_property(TEST ${_TEST_NAME} PROPERTY TIMEOUT ${_RULE_TIMEOUT})
   iree_register_test_resource_build_target(
     TEST_BUILD_TARGET
-      "${_SRC_TARGET}"
+      "${_TEST_BUILD_TARGET}"
     LABELS
       ${_RULE_LABELS}
   )

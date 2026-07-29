@@ -97,5 +97,7 @@ function(loom_link_module)
   iree_package_name(_PACKAGE_NAME)
   set(_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
   add_custom_target("${_TARGET}" DEPENDS "${_OUTPUT}")
-  iree_register_generated_compile_input("${_TARGET}")
+  iree_register_generated_output_producer("${_TARGET}"
+    OUTPUTS "${_OUTPUT}"
+  )
 endfunction()

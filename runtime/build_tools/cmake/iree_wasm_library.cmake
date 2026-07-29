@@ -430,4 +430,8 @@ function(iree_wasm_cc_test)
     NAME "${_TEST_NAME}"
     COMMAND "${_NODE_EXECUTABLE}" "${_OUTPUT_MJS}"
   )
+  iree_register_test_build_targets(
+    "${_TEST_NAME}"
+    TARGETS "${_TEST_NAME}"
+  )
 endfunction()

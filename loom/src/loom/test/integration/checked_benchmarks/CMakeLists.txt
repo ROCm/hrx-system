@@ -20,6 +20,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/paged_kv_block_gather_score_tile_f32.loom"
   LABELS
     "hostonly"
 )
@@ -36,6 +38,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/paged_kv_block_gather_score_tile_f32.loom"
   LABELS
     "hostonly"
 )
@@ -52,6 +56,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/paged_kv_block_gather_score_tile_f32.loom"
   LABELS
     "hostonly"
 )
@@ -68,6 +74,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/paged_decode_attention_tile_f32.loom"
   LABELS
     "hostonly"
 )
@@ -84,6 +92,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/rope_pair_rotate_tile_f32.loom"
   LABELS
     "hostonly"
 )
@@ -100,6 +110,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/rope_pair_rotate_tile_f32.loom"
   LABELS
     "hostonly"
 )
@@ -116,6 +128,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/split_kv_online_softmax_combine_f32.loom"
   LABELS
     "hostonly"
 )
@@ -132,6 +146,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/online_softmax_tail_attention_tile_f32.loom"
   LABELS
     "hostonly"
 )
@@ -148,6 +164,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/top2_routing_expert_gather_f32.loom"
   LABELS
     "hostonly"
 )
@@ -164,6 +182,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/top2_routing_expert_gather_f32.loom"
   LABELS
     "hostonly"
 )
@@ -180,6 +200,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/weighted_expert_route_gather_f32.loom"
   LABELS
     "hostonly"
 )
@@ -196,6 +218,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/weighted_expert_route_gather_f32.loom"
   LABELS
     "hostonly"
 )
@@ -212,6 +236,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/workgroup_rank_sort_f32_i32.loom"
   LABELS
     "hostonly"
 )
@@ -228,6 +254,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/workgroup_rank_sort_f32_i32.loom"
   LABELS
     "hostonly"
 )
@@ -244,6 +272,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/packed_s8_fields_f16scale_f32dot.loom"
   LABELS
     "hostonly"
 )
@@ -260,6 +290,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/signed_i8_tile_quantize_f32.loom"
   LABELS
     "hostonly"
 )
@@ -276,6 +308,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/signed_i8_tile_quantize_f32.loom"
   LABELS
     "hostonly"
 )
@@ -292,6 +326,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/fragment_result_dynamic_strided_f16acc_f32_store.loom"
   LABELS
     "hostonly"
 )
@@ -308,6 +344,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/fragment_result_f16_lds_roundtrip.loom"
   LABELS
     "hostonly"
 )
@@ -331,6 +369,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/paged_kv_block_gather_score_tile_f32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -357,6 +397,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/paged_kv_block_gather_score_tile_f32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -383,6 +425,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/paged_kv_block_gather_score_tile_f32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -409,6 +453,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/paged_decode_attention_tile_f32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -435,6 +481,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/rope_pair_rotate_tile_f32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -461,6 +509,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/rope_pair_rotate_tile_f32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -487,6 +537,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/split_kv_online_softmax_combine_f32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -513,6 +565,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/online_softmax_tail_attention_tile_f32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -539,6 +593,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/top2_routing_expert_gather_f32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -565,6 +621,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/top2_routing_expert_gather_f32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -591,6 +649,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/weighted_expert_route_gather_f32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -617,6 +677,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/weighted_expert_route_gather_f32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -643,6 +705,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/workgroup_rank_sort_f32_i32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -669,6 +733,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/workgroup_rank_sort_f32_i32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -695,6 +761,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/packed_s8_fields_f16scale_f32dot.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -721,6 +789,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/signed_i8_tile_quantize_f32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -747,6 +817,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/signed_i8_tile_quantize_f32.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -773,6 +845,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/fragment_result_dynamic_strided_f16acc_f32_store.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -799,6 +873,8 @@ iree_native_test(
     "--output-format=jsonl"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/integration/checked_benchmarks/fragment_result_f16_lds_roundtrip.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"

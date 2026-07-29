@@ -48,6 +48,7 @@ from build_tools.ci_core_common import (
     run,
     sanitizer_options,
 )
+from build_tools.devtools import ctest as ctest_dev
 
 PACKAGE_NAMES = [
     "hrx-public-linux-x86_64",
@@ -247,8 +248,6 @@ def build_core(args: argparse.Namespace) -> None:
         f"CMAKE_ASM_COMPILER={c_compiler}",
         f"CMAKE_AR={ar}",
         f"CMAKE_RANLIB={ranlib}",
-        "CMAKE_C_COMPILER_LAUNCHER=ccache",
-        "CMAKE_CXX_COMPILER_LAUNCHER=ccache",
         "CMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld",
         "CMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld",
         "CMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld",
@@ -290,6 +289,13 @@ def build_core(args: argparse.Namespace) -> None:
         env=env,
         pretty_command=True,
     )
+    if args.sanitizer != "none":
+        log(
+            "Sanitizer build tree configured; selected source tests own the "
+            "build closure."
+        )
+        return
+
     run(
         ["cmake", "--build", build_dir, "--target", args.target], cwd=REPO_ROOT, env=env
     )
@@ -315,7 +321,65 @@ def build_core(args: argparse.Namespace) -> None:
         )
 
 
+def ctest_arguments(args: argparse.Namespace) -> list[str]:
+    ctest_parallelism = args.ctest_parallelism or default_ctest_parallelism()
+    arguments = ["--parallel", str(ctest_parallelism)]
+    if args.ctest_regex:
+        arguments.extend(["-R", args.ctest_regex])
+    ctest_exclude_regex = combine_ctest_exclude_regex(
+        *CORE_CTEST_EXCLUDE_REGEXES, args.ctest_exclude_regex
+    )
+    if ctest_exclude_regex:
+        arguments.extend(["-E", ctest_exclude_regex])
+    if args.ctest_label_regex:
+        arguments.extend(["-L", args.ctest_label_regex])
+    if args.ctest_label_exclude_regex:
+        arguments.extend(["-LE", args.ctest_label_exclude_regex])
+    return arguments
+
+
+def apply_test_environment(
+    args: argparse.Namespace,
+    env: dict[str, str],
+) -> dict[str, str]:
+    env = dict(env)
+    if args.cts_device:
+        env["HRX_CTS_DEVICE"] = args.cts_device
+    if args.test_tmpdir is not None:
+        env["HRX_TEST_TMPDIR"] = os.fspath(args.test_tmpdir.resolve())
+    return env
+
+
+def test_source_build(args: argparse.Namespace) -> None:
+    rocm_root = args.rocm_root.resolve()
+    build_dir = args.build_dir.resolve()
+    require_path(rocm_root, "ROCm build root")
+    require_path(build_dir / "CTestTestfile.cmake", "source CTest file")
+
+    env = add_sanitizer_runtime_env(
+        rocm_build_env(rocm_root),
+        sanitizer=args.sanitizer,
+        rocm_root=rocm_root,
+    )
+    env = apply_test_environment(args, env)
+    test_step = ctest_dev.CTestBuildAndRunStep(
+        cmake="cmake",
+        ctest="ctest",
+        build_dir=build_dir,
+        arguments=[*ctest_arguments(args), "--no-tests=error"],
+        cwd=REPO_ROOT,
+        env=env,
+    )
+    result = test_step.run(verbose=True)
+    if result != 0:
+        raise subprocess.CalledProcessError(result, "selected CTest build and run")
+
+
 def test_core(args: argparse.Namespace) -> None:
+    if args.sanitizer != "none":
+        test_source_build(args)
+        return
+
     rocm_root = args.rocm_root.resolve()
     smoke_build_dir = args.package_smoke_build_dir.resolve()
     if args.prepare_public_deps:
@@ -330,42 +394,20 @@ def test_core(args: argparse.Namespace) -> None:
 
     if rocm_root.exists():
         base_env = rocm_build_env(rocm_root)
-    elif args.sanitizer != "none" or args.package_smoke:
+    elif args.package_smoke:
         require_path(rocm_root, "ROCm build root")
         base_env = rocm_build_env(rocm_root)
     else:
         base_env = dict(os.environ)
 
-    env = install_runtime_env(install_root, base_env)
-    if args.sanitizer != "none":
-        env = add_sanitizer_runtime_env(
-            env, sanitizer=args.sanitizer, rocm_root=rocm_root
-        )
-    if args.cts_device:
-        env["HRX_CTS_DEVICE"] = args.cts_device
-    if args.test_tmpdir is not None:
-        env["HRX_TEST_TMPDIR"] = os.fspath(args.test_tmpdir.resolve())
-
-    ctest_parallelism = args.ctest_parallelism or default_ctest_parallelism()
+    env = apply_test_environment(args, install_runtime_env(install_root, base_env))
     ctest_cmd = [
         "ctest",
         "--test-dir",
         installed_tests_dir,
         "--output-on-failure",
-        "--parallel",
-        str(ctest_parallelism),
+        *ctest_arguments(args),
     ]
-    if args.ctest_regex:
-        ctest_cmd.extend(["-R", args.ctest_regex])
-    ctest_exclude_regex = combine_ctest_exclude_regex(
-        *CORE_CTEST_EXCLUDE_REGEXES, args.ctest_exclude_regex
-    )
-    if ctest_exclude_regex:
-        ctest_cmd.extend(["-E", ctest_exclude_regex])
-    if args.ctest_label_regex:
-        ctest_cmd.extend(["-L", args.ctest_label_regex])
-    if args.ctest_label_exclude_regex:
-        ctest_cmd.extend(["-LE", args.ctest_label_exclude_regex])
     run(ctest_cmd, cwd=REPO_ROOT, env=env, stderr_to_stdout=True)
     run([install_root / "bin" / "hrx-info"], cwd=REPO_ROOT, env=env)
     run([install_root / "bin" / "hrx-info", "--device=cpu:0"], cwd=REPO_ROOT, env=env)

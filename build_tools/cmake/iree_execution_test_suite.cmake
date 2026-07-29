@@ -91,21 +91,38 @@ function(iree_execution_test_suite)
   # Build declared tools before any CTest selection attempts to run the suite.
   add_custom_target(${_TEST_TARGET_NAME} ALL)
   foreach(_TOOL_TARGET IN LISTS _TOOL_TARGETS)
-    iree_register_test_target_dependency(
+    iree_register_target_dependency(
       TARGET
         "${_TEST_TARGET_NAME}"
       DEPENDENCY
         "${_TOOL_TARGET}"
     )
   endforeach()
+  set(_DATA_DEPENDENCIES)
+  foreach(_DATA IN LISTS _RULE_DATA)
+    if(IS_ABSOLUTE "${_DATA}" OR
+       TARGET "${_DATA}" OR
+       "${_DATA}" MATCHES "::")
+      list(APPEND _DATA_DEPENDENCIES "${_DATA}")
+    else()
+      list(APPEND _DATA_DEPENDENCIES "${CMAKE_CURRENT_SOURCE_DIR}/${_DATA}")
+    endif()
+  endforeach()
+  iree_add_data_dependencies(
+    NAME
+      "${_TEST_TARGET_NAME}"
+    DATA
+      ${_DATA_DEPENDENCIES}
+    OUT_FILE_DATA
+      _TEST_FILE_DATA
+    OUT_TARGET_DATA
+      _TEST_TARGET_DATA
+  )
   set_property(TARGET ${_TEST_TARGET_NAME} PROPERTY FOLDER ${IREE_IDE_FOLDER}/test)
 
-  foreach(_DATA IN LISTS _RULE_DATA)
-    if(IS_ABSOLUTE "${_DATA}")
-      list(APPEND _REQUIRED_FILES "${_DATA}")
-    else()
-      list(APPEND _REQUIRED_FILES "${CMAKE_CURRENT_SOURCE_DIR}/${_DATA}")
-    endif()
+  list(APPEND _REQUIRED_FILES ${_TEST_FILE_DATA})
+  foreach(_DATA_TARGET IN LISTS _TEST_TARGET_DATA)
+    list(APPEND _REQUIRED_FILES "$<TARGET_FILE:${_DATA_TARGET}>")
   endforeach()
 
   list(APPEND _TEST_ARGS ${_RULE_ARGS})
@@ -119,6 +136,10 @@ function(iree_execution_test_suite)
       ${_TEST_ARGS}
   )
   iree_configure_test(${_TEST_NAME})
+  iree_register_test_build_targets(
+    "${_TEST_NAME}"
+    TARGETS "${_TEST_TARGET_NAME}"
+  )
 
   if(NOT DEFINED _RULE_TIMEOUT)
     set(_RULE_TIMEOUT 60)

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Mapping
 
 from build_tools.devtools import cmake_file_api, cmake_fuzz, cmake_try
+from build_tools.devtools import ctest as ctest_dev
 from build_tools.devtools.command_plan import (
     CommandPlan,
     CommandStep,
@@ -650,19 +651,32 @@ def test_plan(
     backend_args: list[str],
     env: dict[str, str] | None = None,
 ) -> CommandPlan:
+    requested_build_dir = build_dir(configured_build_dir)
+    command_env = tool_env.path_env() if env is None else env
+    if ctest_dev.is_inspection_only(backend_args):
+        return CommandPlan(
+            [
+                CommandStep(
+                    ctest_dev.ctest_run_command(
+                        tool_env.tool("ctest"),
+                        requested_build_dir,
+                        backend_args,
+                    ),
+                    cwd=REPO_ROOT,
+                    env=command_env,
+                    label="inspect cmake tests",
+                )
+            ]
+        )
     return CommandPlan(
         [
-            CommandStep(
-                [
-                    tool_env.tool("ctest"),
-                    "--test-dir",
-                    str(build_dir(configured_build_dir)),
-                    "--output-on-failure",
-                    *backend_args,
-                ],
+            ctest_dev.CTestBuildAndRunStep(
+                cmake=tool_env.tool("cmake"),
+                ctest=tool_env.tool("ctest"),
+                build_dir=requested_build_dir,
+                arguments=backend_args,
                 cwd=REPO_ROOT,
-                env=tool_env.path_env() if env is None else env,
-                label="cmake test",
+                env=command_env,
             )
         ]
     )

@@ -22,6 +22,7 @@ py_library(
         "cmake_fuzz.py",
         "cmake_try.py",
         "command_plan.py",
+        "ctest.py",
         "doctor.py",
         "environment.py",
         "fuzz.py",
@@ -115,6 +116,7 @@ py_test(
         "cmake_fuzz.py",
         "cmake_try.py",
         "command_plan.py",
+        "ctest.py",
         "doctor.py",
         "environment.py",
         "fuzz.py",
@@ -147,6 +149,7 @@ py_test(
         "cmake_test.py",
         "cmake_try.py",
         "command_plan.py",
+        "ctest.py",
         "environment.py",
         "fuzz.py",
     ],
@@ -160,6 +163,19 @@ py_test(
         "command_plan_test.py",
     ],
     main = "command_plan_test.py",
+)
+
+py_test(
+    name = "ctest_test",
+    srcs = [
+        "__init__.py",
+        "command_plan.py",
+        "ctest.py",
+        "ctest_test.py",
+        "environment.py",
+    ],
+    data = ["//build_tools:cmake_test_metadata_fixture"],
+    main = "ctest_test.py",
 )
 
 py_test(
