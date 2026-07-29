@@ -141,7 +141,6 @@ NON_CPU_HAL_DRIVER_CTEST_REGEX = (
     r"^iree/hal/drivers/(amdgpu|cuda|hip|metal|vulkan|webgpu)/"
 )
 
-AMDGPU_BAZEL_DRIVER_TARGETS = ("//runtime/src/iree/hal/drivers/amdgpu/...",)
 AMDGPU_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/drivers/amdgpu/all",)
 DEFAULT_AMDGPU_TARGET_SELECTOR = "gfx942"
 AMDGPU_BUILD_REQUIREMENT_TAG = "iree-build-requirement=runtime.hal.amdgpu"
@@ -225,7 +224,6 @@ def amdgpu_bazel_xfail_targets(target_selector: str) -> tuple[str, ...]:
     )
 
 
-VULKAN_BAZEL_DRIVER_TARGETS = ("//runtime/src/iree/hal/drivers/vulkan/...",)
 VULKAN_BUILD_REQUIREMENT_TAG = "iree-build-requirement=runtime.hal.vulkan"
 VULKAN_RUN_REQUIREMENT_TAG = "iree-run-requirement=runtime.resource.vulkan_device"
 VULKAN_BAZEL_TEST_TAG_FILTERS = (

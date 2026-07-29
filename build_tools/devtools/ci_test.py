@@ -709,53 +709,27 @@ class CiTest(unittest.TestCase):
             test_step.argv,
         )
 
-    def test_bazel_vulkan_single_sanitizer_command_builds_one_configuration(self):
-        args = ci.parse_arguments(
-            [
-                "iree-bazel-vulkan-asan",
-                "--target",
-                "//runtime/...",
-            ]
-        )
+    def test_bazel_gpu_command_surface_omits_nonexecuting_lanes(self):
+        for command in (
+            "iree-bazel-amdgpu-msan",
+            "iree-bazel-amdgpu-sanitizers",
+            "iree-bazel-vulkan-asan",
+            "iree-bazel-vulkan-msan",
+            "iree-bazel-vulkan-tsan",
+            "iree-bazel-vulkan-ubsan",
+            "iree-bazel-vulkan-sanitizers",
+        ):
+            with self.subTest(command=command):
+                self.assertNotIn(command, ci.BAZEL_COMMANDS)
 
-        steps = ci.steps_from_args(args)
-        command_lines = [step.command_line() for step in steps]
-
-        self.assertTrue(
-            any("bazel build --config=asan" in line for line in command_lines)
-        )
-        self.assertFalse(
-            any("bazel test --config=asan" in line for line in command_lines)
-        )
-        self.assertFalse(any("--config=ubsan" in line for line in command_lines))
-        self.assertFalse(any("--config=tsan" in line for line in command_lines))
-        self.assertFalse(any("--config=msan" in line for line in command_lines))
-
-    def test_bazel_vulkan_sanitizers_build_with_generic_clang_configs(self):
-        args = ci.parse_arguments(
-            [
-                "iree-bazel-vulkan-sanitizers",
-                "--target",
-                "//runtime/...",
-            ]
-        )
-
-        steps = ci.steps_from_args(args)
-        command_lines = [step.command_line() for step in steps]
-
-        self.assertTrue(
-            any("bazel build --config=asan" in line for line in command_lines)
-        )
-        self.assertTrue(
-            any("bazel build --config=tsan" in line for line in command_lines)
-        )
-        self.assertTrue(
-            any("bazel build --config=ubsan" in line for line in command_lines)
-        )
-        self.assertTrue(
-            any("bazel build --config=msan" in line for line in command_lines)
-        )
-        self.assertFalse(any("bazel test --config=" in line for line in command_lines))
+        for command in (
+            "iree-bazel-amdgpu-asan",
+            "iree-bazel-amdgpu-tsan",
+            "iree-bazel-amdgpu-ubsan",
+            "iree-bazel-vulkan",
+        ):
+            with self.subTest(command=command):
+                self.assertIn(command, ci.BAZEL_COMMANDS)
 
     def test_vulkan_workflows_require_hardware_preflight(self):
         for path, job_name in (
@@ -811,17 +785,30 @@ class CiTest(unittest.TestCase):
                 self.assertNotIn("/ Sanitizers", block)
                 self.assertNotIn("-sanitizers", block)
 
-    def test_bazel_gpu_sanitizer_workflows_stay_batched(self):
-        for job_name in ("linux_bazel_amdgpu", "linux_bazel_vulkan"):
-            with self.subTest(job=job_name):
-                block = self.workflow_job_block(
-                    ".github/workflows/ci_iree_bazel.yml", job_name
-                )
-                self.assertIn("/ Sanitizers", block)
-                self.assertRegex(
-                    block,
-                    r"command: iree-bazel-(amdgpu|vulkan)-sanitizers",
-                )
+    def test_bazel_amdgpu_sanitizer_workflow_is_split_by_configuration(self):
+        block = self.workflow_job_block(
+            ".github/workflows/ci_iree_bazel.yml", "linux_bazel_amdgpu"
+        )
+        for sanitizer in ("ASAN", "TSAN", "UBSAN"):
+            self.assertIn(f"name: Linux / AMDGPU / gfx942 / {sanitizer}", block)
+            self.assertIn(f"command: iree-bazel-amdgpu-{sanitizer.lower()}", block)
+        self.assertNotIn("/ Sanitizers", block)
+        self.assertNotIn("iree-bazel-amdgpu-msan", block)
+        self.assertNotIn("iree-bazel-amdgpu-sanitizers", block)
+
+    def test_bazel_vulkan_workflow_has_no_nonexecuting_sanitizer_lane(self):
+        block = self.workflow_job_block(
+            ".github/workflows/ci_iree_bazel.yml", "linux_bazel_vulkan"
+        )
+        self.assertIn("name: Linux / Vulkan", block)
+        self.assertIn(
+            "python3 build_tools/devtools/ci.py iree-bazel-vulkan --keep-going",
+            block,
+        )
+        self.assertNotIn("matrix.", block)
+        self.assertNotIn("strategy:", block)
+        self.assertNotIn("/ Sanitizers", block)
+        self.assertNotRegex(block, r"iree-bazel-vulkan-(asan|msan|tsan|ubsan)")
 
     def test_core_gpu_workflow_routes_exact_gpu_labels(self):
         block = self.workflow_job_block(

@@ -170,17 +170,9 @@ jobs:
           python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
 
   linux_bazel_vulkan:
-    name: ${{ matrix.name }}
+    name: Linux / Vulkan
     runs-on: [self-hosted, Linux, X64, gpu_navi4x]
     timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Linux / Vulkan
-            command: iree-bazel-vulkan
-          - name: Linux / Vulkan / Sanitizers
-            command: iree-bazel-vulkan-sanitizers
     env:
       AR: ${{ github.workspace }}/build/iree-bazel-vulkan/rocm-root/lib/llvm/bin/llvm-ar
       CC: ${{ github.workspace }}/build/iree-bazel-vulkan/rocm-root/lib/llvm/bin/clang
@@ -224,8 +216,8 @@ jobs:
 
       - name: Run IREE Bazel CI
         run: |
-          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going"
-          python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
+          echo "python3 build_tools/devtools/ci.py iree-bazel-vulkan --keep-going"
+          python3 build_tools/devtools/ci.py iree-bazel-vulkan --keep-going
 
   linux_bazel_amdgpu:
     name: ${{ matrix.name }}
@@ -275,8 +267,18 @@ jobs:
             optional: false
             runner_label: linux-gfx120X-gpu-rocm
             target_selector: gfx120X-all
-          - name: Linux / AMDGPU / gfx942 / Sanitizers
-            command: iree-bazel-amdgpu-sanitizers
+          - name: Linux / AMDGPU / gfx942 / ASAN
+            command: iree-bazel-amdgpu-asan
+            optional: false
+            runner_label: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            target_selector: gfx942
+          - name: Linux / AMDGPU / gfx942 / TSAN
+            command: iree-bazel-amdgpu-tsan
+            optional: false
+            runner_label: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            target_selector: gfx942
+          - name: Linux / AMDGPU / gfx942 / UBSAN
+            command: iree-bazel-amdgpu-ubsan
             optional: false
             runner_label: linux-gfx942-1gpu-ccs-csp-ossci-rocm
             target_selector: gfx942
