@@ -87,7 +87,7 @@ typedef struct loom_run_hal_iteration_t {
 } loom_run_hal_iteration_t;
 
 typedef struct loom_run_hal_dispatch_batch_options_t {
-  // Number of identical dispatches recorded into the reusable command buffer.
+  // Number of sequential dispatches recorded into the reusable command buffer.
   iree_host_size_t dispatch_count;
   // Command-buffer mode used while recording the batch.
   iree_hal_command_buffer_mode_t command_buffer_mode;
@@ -265,8 +265,10 @@ iree_status_t loom_run_hal_dispatch(
     const loom_run_hal_invocation_options_t* options);
 
 // Records a reusable command buffer containing |batch_options->dispatch_count|
-// copies of |plan|'s dispatch. The batch clones |plan| bindings once and may be
-// executed repeatedly by loom_run_hal_dispatch_batch_execute.
+// sequential copies of |plan|'s dispatch. The batch clones |plan| bindings once
+// and may be executed repeatedly by loom_run_hal_dispatch_batch_execute.
+// Adjacent dispatches carry execution and write-visibility edges. No barrier
+// follows the terminal dispatch.
 iree_status_t loom_run_hal_dispatch_batch_prepare(
     const loom_run_hal_runtime_t* runtime,
     const loom_run_hal_prepared_candidate_t* candidate,
@@ -275,10 +277,11 @@ iree_status_t loom_run_hal_dispatch_batch_prepare(
     iree_allocator_t allocator, loom_run_hal_dispatch_batch_t* out_batch);
 
 // Records a reusable command buffer containing |batch_options->dispatch_count|
-// copies of |plan|'s dispatch. Dispatch slot i uses binding list
+// sequential copies of |plan|'s dispatch. Dispatch slot i uses binding list
 // |(binding_list_offset + i) % binding_list_count| from |binding_lists|. The
 // batch clones each binding list once and may be executed repeatedly by
-// loom_run_hal_dispatch_batch_execute.
+// loom_run_hal_dispatch_batch_execute. Adjacent dispatches carry execution and
+// write-visibility edges. No barrier follows the terminal dispatch.
 iree_status_t loom_run_hal_dispatch_batch_prepare_from_binding_ring(
     const loom_run_hal_runtime_t* runtime,
     const loom_run_hal_prepared_candidate_t* candidate,
@@ -294,9 +297,10 @@ iree_status_t loom_run_hal_dispatch_batch_prepare_from_binding_ring(
 // is a flattened row-major array with |plan_ring_count * sequence_count|
 // entries, indexed as ring slot first and sequence step second. Each logical
 // batch slot i records every sequence step using ring slot
-// |(plan_ring_offset + i) % plan_ring_count|. Adjacent steps carry dispatch
-// execution and write-visibility edges. No barrier follows the terminal step
-// of a logical sequence.
+// |(plan_ring_offset + i) % plan_ring_count|. Every physical dispatch is
+// separated from its successor by an execution and write-visibility edge,
+// including the boundary between logical batch slots. No barrier follows the
+// terminal dispatch.
 iree_status_t loom_run_hal_dispatch_sequence_batch_prepare_from_plan_ring(
     const loom_run_hal_runtime_t* runtime, iree_host_size_t sequence_count,
     const loom_run_hal_prepared_candidate_t* const* candidates,

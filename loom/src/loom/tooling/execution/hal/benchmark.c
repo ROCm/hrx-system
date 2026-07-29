@@ -200,6 +200,22 @@ static iree_status_t loom_run_hal_benchmark_execute_batch(void* user_data) {
   return loom_run_hal_dispatch_batch_execute(context->runtime, batch);
 }
 
+static iree_status_t loom_run_hal_benchmark_warm_profiled_batch(
+    const loom_run_hal_runtime_t* runtime, loom_run_hal_dispatch_batch_t* batch,
+    const loom_run_benchmark_options_t* timing_options) {
+  const iree_time_t start_time_ns = iree_time_now();
+  iree_host_size_t batch_count = 0;
+  iree_duration_t duration_ns = 0;
+  while (batch_count < timing_options->warmup_batch_count ||
+         duration_ns < timing_options->warmup_min_duration_ns) {
+    IREE_RETURN_IF_ERROR(loom_run_hal_dispatch_batch_execute(runtime, batch));
+    ++batch_count;
+    const iree_time_t now_ns = iree_time_now();
+    duration_ns = now_ns >= start_time_ns ? now_ns - start_time_ns : 0;
+  }
+  return iree_ok_status();
+}
+
 static void loom_run_hal_profile_summary_record_error(
     loom_run_hal_profile_summary_t* profile, const iree_status_t status) {
   profile->has_error = true;
@@ -361,6 +377,13 @@ static iree_status_t loom_run_hal_benchmark_run_profiled_batch(
         sink = tee_sink;
       }
     }
+  }
+  if (iree_status_is_ok(status)) {
+    // Preparing profile-retaining command buffers and sinks can leave the
+    // device idle long enough to change its clock or cache state. Replay the
+    // final batch under the same warmup policy immediately before profiling.
+    status = loom_run_hal_benchmark_warm_profiled_batch(runtime, batch,
+                                                        &options->timing);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_device_profiling_options_t profiling_options = {

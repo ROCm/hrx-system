@@ -387,6 +387,9 @@ static iree_status_t loom_run_hal_record_dispatch_batch(
     status = iree_hal_command_buffer_dispatch(
         command_buffer, executable, function, config, constants, bindings,
         IREE_HAL_DISPATCH_FLAG_NONE);
+    if (iree_status_is_ok(status) && i + 1 < batch_options->dispatch_count) {
+      status = loom_run_hal_record_dispatch_sequence_edge(command_buffer);
+    }
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_end(command_buffer);
@@ -456,7 +459,10 @@ static iree_status_t loom_run_hal_record_dispatch_sequence_batch(
           command_buffer, candidates[step_index]->executable, function, config,
           loom_run_hal_dispatch_constants(options), bindings,
           IREE_HAL_DISPATCH_FLAG_NONE);
-      if (iree_status_is_ok(status) && step_index + 1 < sequence_count) {
+      const bool is_terminal_dispatch =
+          batch_index + 1 == batch_options->dispatch_count &&
+          step_index + 1 == sequence_count;
+      if (iree_status_is_ok(status) && !is_terminal_dispatch) {
         status = loom_run_hal_record_dispatch_sequence_edge(command_buffer);
       }
     }
