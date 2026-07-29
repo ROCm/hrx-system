@@ -650,6 +650,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsGfx1250HardwareEntryEnvelope) {
   loom_module_t* module = nullptr;
   ASSERT_NO_FATAL_FAILURE(ParseKernelForProcessor(processor, &module));
 
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
@@ -660,6 +662,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsGfx1250HardwareEntryEnvelope) {
       /*.diagnostic_sink=*/capture.sink(),
       /*.source_resolver=*/{},
       /*.max_errors=*/20,
+      /*.report=*/&report,
   };
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
@@ -691,9 +694,22 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsGfx1250HardwareEntryEnvelope) {
   EXPECT_EQ(hsaco.substr(entry_file_offset, sizeof(kExpectedEntryText)),
             std::string(reinterpret_cast<const char*>(kExpectedEntryText),
                         sizeof(kExpectedEntryText)));
+  EXPECT_EQ(report.entry_rows.count, 1u);
+  EXPECT_TRUE(HasEntry(report, "loom_kernel"));
+  EXPECT_EQ(report.emitted_instruction_count,
+            report.emission_breakdown.body_instruction_count +
+                report.emission_breakdown.entry_instruction_count);
+  EXPECT_EQ(report.emission_breakdown.entry_instruction_count, 3u);
+  EXPECT_EQ(report.target_resources.subgroup_size, 32u);
+  EXPECT_EQ(report.target_resources.max_subgroups_per_simd, 16u);
+  EXPECT_EQ(report.target_resources.resident_subgroups_per_simd, 8u);
+  EXPECT_EQ(report.target_resources.occupancy_percent, 50u);
+  EXPECT_TRUE(iree_string_view_equal(report.target_resources.limiting_resource,
+                                     IREE_SV("amdgpu.workgroup_slots")));
 
   loom_amdgpu_hal_kernel_library_deinitialize(&library,
                                               iree_allocator_system());
+  loom_target_compile_report_deinitialize(&report);
   loom_module_free(module);
 }
 
@@ -990,7 +1006,9 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsTensorWaitCounter) {
 
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());
-  report.requested_detail_flags = LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN;
+  report.requested_detail_flags =
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
       /*.target_selection=*/{},
@@ -1010,6 +1028,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsTensorWaitCounter) {
   EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
   EXPECT_TRUE(
       HasWaitCounter(report, LOOM_AMDGPU_WAIT_COUNTER_TENSOR, "tensor"));
+  EXPECT_GT(report.target_insertion_summary.static_packet_count, 0u);
+  EXPECT_GT(report.target_insertion_rows.count, 0u);
 
   loom_amdgpu_hal_kernel_library_deinitialize(&library,
                                               iree_allocator_system());

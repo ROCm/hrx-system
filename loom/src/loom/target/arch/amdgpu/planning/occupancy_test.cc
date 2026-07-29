@@ -9,6 +9,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/target/arch/amdgpu/target_info.h"
 
 namespace loom {
 namespace {
@@ -128,6 +129,60 @@ TEST_F(AmdgpuOccupancyTargetResourcesTest,
       loom_target_residency_summary_is_valid(&resources.residency_summary));
   EXPECT_TRUE(iree_string_view_equal(resources.limiting_resource,
                                      IREE_SV("amdgpu.lds")));
+}
+
+TEST_F(AmdgpuOccupancyTargetResourcesTest,
+       AppliesProcessorLaunchResourceLimits) {
+  struct OccupancyCase {
+    // Processor whose generated occupancy model is evaluated.
+    const char* processor;
+    // Wave width selected for the processor.
+    uint32_t wave_size;
+    // Fixed number of workitems in the workgroup.
+    uint32_t flat_workgroup_size;
+    // Fixed local-memory allocation in bytes.
+    uint32_t local_memory_bytes;
+    // Maximum resident waves admitted by the processor.
+    uint32_t max_waves_per_simd;
+    // Resident waves after applying launch resource limits.
+    uint32_t resident_waves_per_simd;
+    // Resident wave percentage after applying launch resource limits.
+    uint32_t occupancy_percent;
+    // Stable resource responsible for the resulting occupancy.
+    const char* limiting_resource;
+  };
+  static constexpr OccupancyCase kCases[] = {
+      {"gfx1100", 32, 64, 256, 16, 16, 100, "max_waves"},
+      {"gfx1250", 32, 64, 256, 16, 8, 50, "amdgpu.workgroup_slots"},
+      {"gfx1100", 32, 512, 32769, 16, 12, 75, "amdgpu.lds"},
+      {"gfx942", 64, 512, 32769, 8, 2, 25, "amdgpu.lds"},
+      {"gfx1250", 32, 512, 108545, 16, 8, 50, "amdgpu.lds"},
+      {"gfx950", 64, 512, 108545, 8, 2, 25, "amdgpu.lds"},
+  };
+
+  for (const OccupancyCase& test_case : kCases) {
+    SCOPED_TRACE(test_case.processor);
+    const loom_amdgpu_occupancy_target_resources_t resources =
+        Build(iree_make_cstring_view(test_case.processor), test_case.wave_size,
+              /*scalar_register_count=*/4,
+              /*vector_register_count=*/1, test_case.flat_workgroup_size,
+              test_case.local_memory_bytes);
+
+    EXPECT_TRUE(iree_string_view_equal(resources.scalar_register_class,
+                                       IREE_SV("amdgpu.sgpr")));
+    EXPECT_EQ(resources.scalar_register_count, 4u);
+    EXPECT_TRUE(iree_string_view_equal(resources.vector_register_class,
+                                       IREE_SV("amdgpu.vgpr")));
+    EXPECT_EQ(resources.vector_register_count, 1u);
+    EXPECT_EQ(resources.wave_size, test_case.wave_size);
+    EXPECT_EQ(resources.max_waves_per_simd, test_case.max_waves_per_simd);
+    EXPECT_EQ(resources.resident_waves_per_simd,
+              test_case.resident_waves_per_simd);
+    EXPECT_EQ(resources.occupancy_percent, test_case.occupancy_percent);
+    EXPECT_TRUE(iree_string_view_equal(
+        resources.limiting_resource,
+        iree_make_cstring_view(test_case.limiting_resource)));
+  }
 }
 
 }  // namespace
