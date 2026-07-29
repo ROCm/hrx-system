@@ -980,8 +980,7 @@ static bool loom_amdgpu_fragment_memory_view_matches(
           ? LOOM_AMDGPU_FRAGMENT_BLOCKED_VIEW_RANK
           : LOOM_AMDGPU_FRAGMENT_UNBLOCKED_VIEW_RANK;
   if (!loom_type_is_view(view_type) ||
-      loom_type_rank(view_type) != expected_view_rank ||
-      !loom_type_is_all_static(view_type)) {
+      loom_type_rank(view_type) != expected_view_rank) {
     return false;
   }
   const loom_scalar_type_t view_element_type =
