@@ -340,6 +340,7 @@ loom_cc_library(
     loom::codegen::low::verify
     loom::ir
     loom::ops::op_defs
+    loom::ops::target
     loom::pass::environment
     loom::pass::registry
     loom::target::reporting::artifact_manifest

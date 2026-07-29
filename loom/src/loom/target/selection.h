@@ -4,13 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Invocation-selected target pass capability.
+// Target compiler pass capability.
 //
-// Target selections are reusable target-profile facts. Some compiler phases
-// also need a module-local target record symbol so target-like source
-// predicates, provider selection, and produced target-low funcs can agree on
-// the selected target without rewriting source root attrs. This capability
-// carries both.
+// The target environment supplies provider-owned compiler semantics without
+// selecting a target for the module. The current invocation overlay also
+// carries a reusable target profile and module-local target record so source
+// predicates and produced target-low funcs can agree while specialization
+// requests are introduced.
 
 #ifndef LOOM_TARGET_SELECTION_H_
 #define LOOM_TARGET_SELECTION_H_
@@ -28,6 +28,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_target_environment_t loom_target_environment_t;
+
 // Capability type for loom_target_pass_capability_t.
 extern const loom_pass_environment_capability_type_t
     loom_target_pass_capability_type;
@@ -36,7 +38,10 @@ typedef struct loom_target_pass_capability_t {
   // Base capability header. Must remain the first field.
   loom_pass_environment_capability_t base;
 
-  // Invocation-selected target bundle and target-owned payload.
+  // Target providers linked into the compiler session, or NULL.
+  const loom_target_environment_t* target_environment;
+
+  // Invocation-selected structured target profile.
   loom_target_selection_t target_selection;
 
   // Module-local target record materialized for |target_selection|, or null.
@@ -45,6 +50,7 @@ typedef struct loom_target_pass_capability_t {
 
 // Creates a borrowed target pass capability.
 loom_target_pass_capability_t loom_target_pass_capability_make(
+    const loom_target_environment_t* target_environment,
     loom_target_selection_t target_selection, loom_symbol_ref_t target_ref);
 
 // Looks up the target capability from |environment|. Returns NULL when absent.
@@ -57,7 +63,12 @@ loom_target_pass_capability_from_environment(
 const loom_target_pass_capability_t* loom_target_pass_capability_from_pass(
     const loom_pass_t* pass);
 
-// Returns the invocation-selected target bundle/payload, or an empty selection.
+// Returns the target providers linked into the compiler session, or NULL.
+const loom_target_environment_t* loom_target_pass_capability_target_environment(
+    const loom_target_pass_capability_t* capability);
+
+// Returns the invocation-selected structured target profile, or an empty
+// selection.
 loom_target_selection_t loom_target_pass_capability_target_selection(
     const loom_target_pass_capability_t* capability);
 

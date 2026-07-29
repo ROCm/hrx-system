@@ -56,7 +56,9 @@ TEST(TargetSelectionTest, EnvironmentCarriesInvocationTargetSelection) {
       /*.symbol_id=*/5,
   };
   const loom_target_pass_capability_t target_capability =
-      loom_target_pass_capability_make(target_selection, invocation_target_ref);
+      loom_target_pass_capability_make(
+          /*target_environment=*/nullptr, target_selection,
+          invocation_target_ref);
   const loom_pass_environment_capability_t* capabilities[] = {
       &target_capability.base,
   };
@@ -132,7 +134,8 @@ TEST(TargetSelectionTest, InvocationRefinesOnlyCompatibleTargetFamily) {
       /*.symbol_id=*/5,
   };
   const loom_target_pass_capability_t target_capability =
-      loom_target_pass_capability_make({/*.profile=*/&kSelectedProfile},
+      loom_target_pass_capability_make(/*target_environment=*/nullptr,
+                                       {/*.profile=*/&kSelectedProfile},
                                        invocation_target_ref);
 
   EXPECT_TRUE(loom_target_pass_capability_can_refine_target_bundle(

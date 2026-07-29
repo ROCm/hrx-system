@@ -130,8 +130,8 @@ class LowLowerPassTest : public ::testing::Test {
     loom_pass_environment_t environment =
         loom_low_pass_environment_storage_initialize(
             &registry_.registry, policy_registry, nullptr, nullptr, nullptr,
-            nullptr, target_selection, target_ref,
-            &low_pass_environment_storage);
+            nullptr, /*target_environment=*/nullptr, target_selection,
+            target_ref, &low_pass_environment_storage);
     loom_pass_t pass = {};
     pass.info = pass_info;
     pass.module_run = loom_low_source_to_low_run;
@@ -225,8 +225,8 @@ class LowLowerPassTest : public ::testing::Test {
     loom_pass_environment_t environment =
         loom_low_pass_environment_storage_initialize(
             &registry_.registry, &policy_registry_, nullptr, nullptr, nullptr,
-            nullptr, target_selection, target_ref,
-            &low_pass_environment_storage);
+            nullptr, /*target_environment=*/nullptr, target_selection,
+            target_ref, &low_pass_environment_storage);
     loom_pass_tool_run_options_t run_options = {
         /*.registry=*/&kPassRegistry,
         /*.environment=*/environment,

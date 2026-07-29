@@ -46,6 +46,57 @@ static const loom_low_verify_provider_t* kLoomAmdgpuLowVerifyProviders[] = {
     &loom_amdgpu_low_verify_provider,
 };
 
+// Processor rows establish AMDGPU code-object refinement. Exact stepping
+// qualifiers remain exact requirements, while generic processor records carry
+// no stepping requirement. Common indexed facts then preserve structured
+// representation, subgroup, and capacity requirements independently of that
+// family relation.
+static bool loom_amdgpu_provider_satisfies_requirement(
+    loom_target_record_view_t effective_target,
+    loom_target_record_view_t target_requirement) {
+  if (!loom_amdgpu_processor_satisfies_code_object_requirement(
+          loom_amdgpu_target_record_processor(
+              effective_target.facts->target.op),
+          loom_amdgpu_target_record_processor(
+              target_requirement.facts->target.op))) {
+    return false;
+  }
+
+  const loom_amdgpu_gfx1250_revision_t required_revision =
+      loom_amdgpu_target_record_effective_gfx1250_revision(
+          target_requirement.facts->target.op);
+  if (required_revision != LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED &&
+      loom_amdgpu_target_record_effective_gfx1250_revision(
+          effective_target.facts->target.op) != required_revision) {
+    return false;
+  }
+
+  const loom_target_bundle_storage_t* effective_storage =
+      &effective_target.facts->storage;
+  const loom_target_bundle_storage_t* requirement_storage =
+      &target_requirement.facts->storage;
+
+  // Processor refinement deliberately changes a generic descriptor-set
+  // contract into the exact processor contract. An explicitly overridden
+  // contract key remains a requirement instead of being silently discarded.
+  const loom_attribute_t required_contract_set_key =
+      loom_op_attrs(target_requirement.facts->target
+                        .op)[loom_amdgpu_target_contract_set_key_ATTR_INDEX];
+  if (!loom_attr_is_absent(required_contract_set_key) &&
+      !iree_string_view_equal(effective_storage->config.contract_set_key,
+                              requirement_storage->config.contract_set_key)) {
+    return false;
+  }
+
+  // ABI and export facts belong to each function contract. Target
+  // applicability preserves structural target constraints and requires all
+  // authored target feature bits.
+  return loom_target_snapshot_satisfies_requirement(
+             &effective_storage->snapshot, &requirement_storage->snapshot) &&
+         iree_all_bits_set(effective_storage->config.contract_feature_bits,
+                           requirement_storage->config.contract_feature_bits);
+}
+
 static iree_status_t loom_amdgpu_provider_validate_materialized_target_symbol(
     const loom_module_t* module, iree_string_view_t symbol_name,
     const loom_amdgpu_target_profile_t* profile, loom_symbol_ref_t target_ref,
@@ -262,6 +313,11 @@ const loom_target_provider_t loom_amdgpu_target_provider = {
     .pass_registry = &loom_amdgpu_pass_registry,
     .contribute_pipeline = loom_amdgpu_provider_contribute_pipeline,
     .materialize_selection = loom_amdgpu_provider_materialize_selection,
+    .record_semantics =
+        {
+            .op_kind = LOOM_OP_AMDGPU_TARGET,
+            .satisfies_requirement = loom_amdgpu_provider_satisfies_requirement,
+        },
 };
 
 static const loom_target_provider_t* const kLoomAmdgpuTargetProviders[] = {

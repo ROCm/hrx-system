@@ -226,7 +226,8 @@ func.def target(@other_target) @rejected() {
   const loom_symbol_ref_t selected_target_ref =
       FindSymbolRef(module.get(), IREE_SV("test_target"));
   const loom_target_pass_capability_t target_capability =
-      loom_target_pass_capability_make(loom_target_selection_empty(),
+      loom_target_pass_capability_make(/*target_environment=*/nullptr,
+                                       loom_target_selection_empty(),
                                        selected_target_ref);
   const loom_pass_environment_capability_t* capabilities[] = {
       &target_capability.base,

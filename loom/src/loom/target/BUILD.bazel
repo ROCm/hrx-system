@@ -313,6 +313,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/target",
         "//loom/src/loom/pass:environment",
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/target/reporting:artifact_manifest",

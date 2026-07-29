@@ -9,6 +9,140 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 
+bool loom_target_satisfies_requirement(
+    const loom_target_environment_t* environment,
+    loom_target_record_view_t effective_target,
+    loom_target_record_view_t target_requirement) {
+  if (!loom_target_record_view_is_valid(effective_target) ||
+      !loom_target_record_view_is_valid(target_requirement)) {
+    return false;
+  }
+  if (effective_target.module == target_requirement.module &&
+      effective_target.facts->target.op ==
+          target_requirement.facts->target.op) {
+    return true;
+  }
+  if (environment == NULL || effective_target.facts->target.op->kind !=
+                                 target_requirement.facts->target.op->kind) {
+    return false;
+  }
+
+  const loom_target_provider_set_t* provider_set = environment->provider_set;
+  for (iree_host_size_t i = 0; i < provider_set->provider_count; ++i) {
+    const loom_target_provider_t* provider = provider_set->providers[i];
+    if (provider->record_semantics.op_kind !=
+        effective_target.facts->target.op->kind) {
+      continue;
+    }
+    return provider->record_semantics.satisfies_requirement(effective_target,
+                                                            target_requirement);
+  }
+  return false;
+}
+
+static bool loom_target_limit_satisfies(uint64_t effective_limit,
+                                        uint64_t required_limit) {
+  return required_limit == 0 || effective_limit >= required_limit;
+}
+
+bool loom_target_snapshot_satisfies_requirement(
+    const loom_target_snapshot_t* effective_snapshot,
+    const loom_target_snapshot_t* target_requirement) {
+  IREE_ASSERT_ARGUMENT(effective_snapshot);
+  IREE_ASSERT_ARGUMENT(target_requirement);
+  return effective_snapshot->codegen_format ==
+             target_requirement->codegen_format &&
+         effective_snapshot->artifact_format ==
+             target_requirement->artifact_format &&
+         effective_snapshot->default_pointer_bitwidth ==
+             target_requirement->default_pointer_bitwidth &&
+         effective_snapshot->index_bitwidth ==
+             target_requirement->index_bitwidth &&
+         effective_snapshot->offset_bitwidth ==
+             target_requirement->offset_bitwidth &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_workgroup_size.x,
+             target_requirement->max_workgroup_size.x) &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_workgroup_size.y,
+             target_requirement->max_workgroup_size.y) &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_workgroup_size.z,
+             target_requirement->max_workgroup_size.z) &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_flat_workgroup_size,
+             target_requirement->max_flat_workgroup_size) &&
+         (target_requirement->subgroup_size == 0 ||
+          effective_snapshot->subgroup_size ==
+              target_requirement->subgroup_size) &&
+         loom_target_limit_satisfies(effective_snapshot->max_grid_size.x,
+                                     target_requirement->max_grid_size.x) &&
+         loom_target_limit_satisfies(effective_snapshot->max_grid_size.y,
+                                     target_requirement->max_grid_size.y) &&
+         loom_target_limit_satisfies(effective_snapshot->max_grid_size.z,
+                                     target_requirement->max_grid_size.z) &&
+         loom_target_limit_satisfies(effective_snapshot->max_flat_grid_size,
+                                     target_requirement->max_flat_grid_size) &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_workgroup_count.x,
+             target_requirement->max_workgroup_count.x) &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_workgroup_count.y,
+             target_requirement->max_workgroup_count.y) &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_workgroup_count.z,
+             target_requirement->max_workgroup_count.z) &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_workgroup_storage_bytes,
+             target_requirement->max_workgroup_storage_bytes) &&
+         effective_snapshot->memory_spaces.generic ==
+             target_requirement->memory_spaces.generic &&
+         effective_snapshot->memory_spaces.global ==
+             target_requirement->memory_spaces.global &&
+         effective_snapshot->memory_spaces.workgroup ==
+             target_requirement->memory_spaces.workgroup &&
+         effective_snapshot->memory_spaces.constant ==
+             target_requirement->memory_spaces.constant &&
+         effective_snapshot->memory_spaces.private_memory ==
+             target_requirement->memory_spaces.private_memory &&
+         effective_snapshot->memory_spaces.host ==
+             target_requirement->memory_spaces.host &&
+         effective_snapshot->memory_spaces.descriptor ==
+             target_requirement->memory_spaces.descriptor;
+}
+
+static iree_status_t loom_target_provider_set_validate_record_semantics(
+    const loom_target_provider_set_t* provider_set) {
+  for (iree_host_size_t i = 0; i < provider_set->provider_count; ++i) {
+    const loom_target_provider_record_semantics_t semantics =
+        provider_set->providers[i]->record_semantics;
+    const bool has_op_kind = semantics.op_kind != LOOM_OP_KIND_UNKNOWN;
+    const bool has_relation = semantics.satisfies_requirement != NULL;
+    if (has_op_kind != has_relation) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "target provider %" PRIhsz
+          " record semantics must define both an op kind and a satisfaction "
+          "relation",
+          i);
+    }
+    if (!has_op_kind) {
+      continue;
+    }
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      if (provider_set->providers[j]->record_semantics.op_kind ==
+          semantics.op_kind) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "target op kind 0x%04X has semantics providers at indices %" PRIhsz
+            " and %" PRIhsz,
+            (unsigned)semantics.op_kind, j, i);
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_target_environment_append_low_descriptor_registry(
     loom_target_environment_t* environment,
     const loom_target_provider_t* provider) {
@@ -181,6 +315,8 @@ iree_status_t loom_target_environment_initialize(
   *out_environment = (loom_target_environment_t){
       .provider_set = provider_set,
   };
+  IREE_RETURN_IF_ERROR(
+      loom_target_provider_set_validate_record_semantics(provider_set));
 
   const loom_pass_registry_t*
       pass_registries[LOOM_TARGET_PROVIDER_PASS_REGISTRY_CAPACITY] = {0};

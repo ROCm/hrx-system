@@ -126,8 +126,8 @@ static iree_status_t loom_low_source_workload_prepare_low_functions(
           options->descriptor_registry, /*lower_policy_registry=*/NULL,
           /*legality_provider_list=*/NULL, /*legalizer_provider_list=*/NULL,
           /*math_policy_registry=*/NULL, /*compile_report=*/NULL,
-          loom_target_selection_empty(), loom_symbol_ref_null(),
-          &environment_storage);
+          /*target_environment=*/NULL, loom_target_selection_empty(),
+          loom_symbol_ref_null(), &environment_storage);
   loom_pass_program_t program = {0};
   if (iree_status_is_ok(status)) {
     const loom_pass_program_compile_options_t compile_options = {

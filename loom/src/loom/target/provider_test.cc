@@ -76,6 +76,14 @@ static iree_status_t ContributePreparation(
                                 loom_named_attr_slice_empty(), &run_op);
 }
 
+static bool AlwaysSatisfiesTargetRequirement(
+    loom_target_record_view_t effective_target,
+    loom_target_record_view_t target_requirement) {
+  (void)effective_target;
+  (void)target_requirement;
+  return true;
+}
+
 struct PipelineBuildData {
   const loom_target_environment_t* environment;
 };
@@ -272,6 +280,26 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
   EXPECT_EQ(descriptor->info, &TargetBetaPassInfo);
 
   loom_target_environment_deinitialize(&environment);
+}
+
+TEST_F(TargetProviderTest, RejectsAmbiguousRecordSemanticsOwnership) {
+  loom_target_provider_t first_provider = {};
+  first_provider.record_semantics = {
+      /*.op_kind=*/LOOM_OP_KIND(LOOM_DIALECT_TEST, 0),
+      /*.satisfies_requirement=*/AlwaysSatisfiesTargetRequirement,
+  };
+  loom_target_provider_t second_provider = {};
+  second_provider.record_semantics = first_provider.record_semantics;
+  const loom_target_provider_t* const providers[] = {
+      &first_provider,
+      &second_provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
 }
 
 }  // namespace

@@ -323,6 +323,34 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV)
 loom_cc_test(
   NAME
+    provider_test
+  SRCS
+    "provider_test.cc"
+  DEPS
+    ::features
+    ::profile
+    ::provider
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::format::text::parser
+    loom::ir
+    loom::ops::op_registry
+    loom::ops::target
+    loom::target::arch::spirv::ops
+    loom::target::arch::spirv::records::target_records
+    loom::target::provider
+    loom::testing::module_ptr
+  LABELS
+    "iree-build-requirement=loom.target.arch.spirv"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_test(
+  NAME
     cooperative_properties_test
   SRCS
     "cooperative_properties_test.cc"

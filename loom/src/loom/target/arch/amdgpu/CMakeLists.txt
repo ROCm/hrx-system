@@ -349,17 +349,24 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::codegen::low::pipeline::pass_environment
+    loom::format::text::parser
     loom::ir
+    loom::ops::func
     loom::ops::op_registry
     loom::ops::pass
+    loom::ops::target
     loom::pass::builder
     loom::pass::registry
     loom::pass::testing::registry_verify
+    loom::pass::tooling
     loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info
     loom::target::provider
     loom::testing::module_ptr
+    loom::transforms::symbol::template_selection
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
 )

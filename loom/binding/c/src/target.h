@@ -28,6 +28,9 @@ typedef void (*loomc_target_profile_deinitialize_fn_t)(
 // Prepared target pass capability tables derived from a public target
 // environment.
 typedef struct loomc_target_pass_environment_t {
+  // Target providers owning compiler semantics used by target-aware passes.
+  const loom_target_environment_t* target_environment;
+
   // Target-low descriptor registry used by target-low passes and emitters.
   loom_target_low_descriptor_registry_t low_descriptor_registry;
 

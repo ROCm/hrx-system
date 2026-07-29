@@ -29,12 +29,14 @@ const loom_pass_environment_capability_type_t loom_target_pass_capability_type =
 };
 
 loom_target_pass_capability_t loom_target_pass_capability_make(
+    const loom_target_environment_t* target_environment,
     loom_target_selection_t target_selection, loom_symbol_ref_t target_ref) {
   return (loom_target_pass_capability_t){
       .base =
           {
               .type = &loom_target_pass_capability_type,
           },
+      .target_environment = target_environment,
       .target_selection = target_selection,
       .target_ref = target_ref,
   };
@@ -55,6 +57,11 @@ const loom_target_pass_capability_t* loom_target_pass_capability_from_pass(
   return pass && pass->environment
              ? loom_target_pass_capability_from_environment(pass->environment)
              : NULL;
+}
+
+const loom_target_environment_t* loom_target_pass_capability_target_environment(
+    const loom_target_pass_capability_t* capability) {
+  return capability ? capability->target_environment : NULL;
 }
 
 loom_target_selection_t loom_target_pass_capability_target_selection(

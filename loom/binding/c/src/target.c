@@ -162,6 +162,7 @@ static loomc_status_t loomc_target_pass_environment_initialize(
   *out_environment = (loomc_target_pass_environment_t){0};
   const loom_target_environment_t* internal_environment =
       &target_environment->environment;
+  out_environment->target_environment = internal_environment;
   LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(
       loom_target_environment_initialize_low_descriptor_registry(
           internal_environment, &out_environment->low_descriptor_registry)));
@@ -380,7 +381,8 @@ loomc_target_pass_environment_make_loom_pass_environment(
       &environment->low_lower_policy_registry,
       &environment->low_legality_provider_list,
       &environment->legalizer_provider_list, &environment->math_policy_registry,
-      NULL, target_selection, target_ref, out_storage);
+      /*compile_report=*/NULL, environment->target_environment,
+      target_selection, target_ref, out_storage);
 }
 
 void loomc_target_pass_environment_initialize_text_asm_environment(

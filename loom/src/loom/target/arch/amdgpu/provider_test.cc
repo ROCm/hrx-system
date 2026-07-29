@@ -6,22 +6,32 @@
 
 #include "loom/target/arch/amdgpu/provider.h"
 
+#include <string>
+#include <vector>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/analysis/symbol_facts.h"
+#include "loom/codegen/low/pipeline/pass_environment.h"
+#include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/func/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/ops/pass/ops.h"
+#include "loom/ops/target/facts.h"
 #include "loom/pass/builder.h"
 #include "loom/pass/registry.h"
 #include "loom/pass/testing/registry_verify.h"
+#include "loom/pass/tooling.h"
 #include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/testing/module_ptr.h"
+#include "loom/transforms/symbol/template_selection.h"
 
 namespace loom {
 namespace {
@@ -75,9 +85,12 @@ class AmdgpuProviderTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_target_environment_register_context(
         &target_environment_, &context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
+    iree_arena_initialize(&block_pool_, &analysis_arena_);
+    loom_symbol_fact_table_initialize(&fact_table_, &analysis_arena_);
   }
 
   void TearDown() override {
+    iree_arena_deinitialize(&analysis_arena_);
     loom_target_environment_deinitialize(&target_environment_);
     loom_context_deinitialize(&context_);
     iree_arena_block_pool_deinitialize(&block_pool_);
@@ -93,6 +106,42 @@ class AmdgpuProviderTest : public ::testing::Test {
     return iree_ok_status();
   }
 
+  ModulePtr Parse(iree_string_view_t source) {
+    loom_text_parse_options_t parse_options = {
+        /*.diagnostic_sink=*/{},
+        /*.max_errors=*/20,
+    };
+    loom_module_t* module = nullptr;
+    IREE_CHECK_OK(loom_text_parse(source, IREE_SV("amdgpu_provider_test.loom"),
+                                  &context_, &block_pool_, &parse_options,
+                                  &module));
+    IREE_ASSERT(module != nullptr);
+    return ModulePtr(module);
+  }
+
+  loom_symbol_ref_t FindSymbolRef(const loom_module_t* module,
+                                  iree_string_view_t name) {
+    const loom_string_id_t name_id = loom_module_lookup_string(module, name);
+    IREE_ASSERT(name_id != LOOM_STRING_ID_INVALID);
+    const uint16_t symbol_id = loom_module_find_symbol(module, name_id);
+    IREE_ASSERT(symbol_id != LOOM_SYMBOL_ID_INVALID);
+    return (loom_symbol_ref_t){
+        /*.module_id=*/0,
+        /*.symbol_id=*/symbol_id,
+    };
+  }
+
+  loom_target_record_view_t Target(const loom_module_t* module,
+                                   loom_symbol_ref_t target_ref) {
+    const loom_symbol_facts_base_t* base_facts = nullptr;
+    IREE_CHECK_OK(loom_symbol_fact_table_lookup_ref(&fact_table_, module,
+                                                    target_ref, &base_facts));
+    const loom_target_symbol_facts_t* target_facts =
+        loom_target_symbol_facts_cast(base_facts);
+    IREE_ASSERT(target_facts != nullptr);
+    return loom_target_record_view_make(module, target_facts);
+  }
+
   const loom_op_t* TargetOpFromRef(const loom_module_t* module,
                                    loom_symbol_ref_t target_ref) {
     IREE_ASSERT(loom_symbol_ref_is_valid(target_ref));
@@ -104,9 +153,76 @@ class AmdgpuProviderTest : public ::testing::Test {
     return symbol->defining_op;
   }
 
+  loom_symbol_ref_t SelectedCallee(const loom_module_t* module,
+                                   iree_string_view_t function_name) {
+    const loom_symbol_ref_t function_ref = FindSymbolRef(module, function_name);
+    loom_func_like_t function = loom_func_like_cast(
+        module, module->symbols.entries[function_ref.symbol_id].defining_op);
+    IREE_ASSERT(loom_func_like_isa(function));
+    loom_block_t* block =
+        loom_region_entry_block(loom_func_like_body(function));
+    IREE_ASSERT(block != nullptr);
+    for (const loom_op_t* op = block->first_op; op != nullptr;
+         op = op->next_op) {
+      if (loom_func_call_isa(op)) {
+        return loom_func_call_callee(op);
+      }
+    }
+    return loom_symbol_ref_null();
+  }
+
+  iree_status_t RunTemplateSelection(loom_module_t* module) {
+    static const loom_pass_descriptor_t kPassDescriptor = {
+        /*.key=*/IREE_SVL("select-templates"),
+        /*.info=*/loom_template_selection_pass_info,
+        /*.module_run=*/{loom_template_selection_run},
+        /*.create=*/loom_template_selection_create,
+    };
+    static const loom_pass_registry_t kPassRegistry = {
+        /*.descriptors=*/&kPassDescriptor,
+        /*.descriptor_count=*/1,
+    };
+    loom_low_pass_environment_storage_t environment_storage = {};
+    const loom_pass_environment_t environment =
+        loom_low_pass_environment_storage_initialize(
+            /*descriptor_registry=*/nullptr,
+            /*lower_policy_registry=*/nullptr,
+            /*legality_provider_list=*/nullptr,
+            /*legalizer_provider_list=*/nullptr,
+            /*math_policy_registry=*/nullptr,
+            /*compile_report=*/nullptr, &target_environment_,
+            loom_target_selection_empty(), loom_symbol_ref_null(),
+            &environment_storage);
+    const loom_pass_tool_run_options_t options = {
+        /*.registry=*/&kPassRegistry,
+        /*.environment=*/environment,
+        /*.predicate_provider=*/{},
+        /*.block_pool=*/&block_pool_,
+    };
+    loom_pass_run_result_t result = {};
+    IREE_RETURN_IF_ERROR(loom_pass_tool_run_flat_pipeline(
+        module, IREE_SV("select-templates"), &options, &result));
+    if (result.error_count != 0) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "template selection emitted diagnostics");
+    }
+    return iree_ok_status();
+  }
+
+  // Block pool shared by parsed modules and analysis storage.
   iree_arena_block_pool_t block_pool_;
+
+  // Finalized context containing the production AMDGPU dialect package.
   loom_context_t context_;
+
+  // Production AMDGPU target provider environment under test.
   loom_target_environment_t target_environment_;
+
+  // Arena retaining indexed target facts for each test.
+  iree_arena_allocator_t analysis_arena_;
+
+  // Dense target fact index attached to the test's module.
+  loom_symbol_fact_table_t fact_table_;
 };
 
 TEST_F(AmdgpuProviderTest, ProvidesSortedPassRegistry) {
@@ -278,6 +394,243 @@ TEST_F(AmdgpuProviderTest, MaterializesGfx1250A0Revision) {
             LOOM_AMDGPU_TARGET_KIND_GFX1250);
   EXPECT_EQ(loom_amdgpu_target_record_effective_gfx1250_revision(target_op),
             LOOM_AMDGPU_GFX1250_REVISION_A0);
+}
+
+TEST_F(AmdgpuProviderTest, SatisfiesCanonicalProcessorRequirements) {
+  ModulePtr module =
+      Parse(IREE_SV("amdgpu.target<gfx1151> @gfx1151_a\n"
+                    "amdgpu.target<gfx1151> @gfx1151_b\n"
+                    "amdgpu.target<gfx1150> @gfx1150\n"
+                    "amdgpu.target<gfx11-generic> @gfx11_generic\n"
+                    "amdgpu.target<gfx11-generic> @gfx11_wave32 "
+                    "{subgroup_size = 32}\n"
+                    "amdgpu.target<gfx11-generic> @gfx11_wave64 "
+                    "{subgroup_size = 64}\n"
+                    "amdgpu.target<gfx11-generic> @gfx11_small_workgroup "
+                    "{max_workgroup_size_x = 128}\n"
+                    "amdgpu.target<gfx11-generic> @gfx11_feature "
+                    "{contract_feature_bits = 1}\n"
+                    "amdgpu.target<gfx11-generic> @gfx11_explicit_contract "
+                    "{contract_set_key = \"amdgpu.gfx11.generic.core\"}\n"
+                    "amdgpu.target<gfx1170> @gfx1170\n"));
+
+  const loom_target_record_view_t gfx1151_a =
+      Target(module.get(), FindSymbolRef(module.get(), IREE_SV("gfx1151_a")));
+  const loom_target_record_view_t gfx1151_b =
+      Target(module.get(), FindSymbolRef(module.get(), IREE_SV("gfx1151_b")));
+  const loom_target_record_view_t gfx1150 =
+      Target(module.get(), FindSymbolRef(module.get(), IREE_SV("gfx1150")));
+  const loom_target_record_view_t gfx11_generic = Target(
+      module.get(), FindSymbolRef(module.get(), IREE_SV("gfx11_generic")));
+  const loom_target_record_view_t gfx11_wave32 = Target(
+      module.get(), FindSymbolRef(module.get(), IREE_SV("gfx11_wave32")));
+  const loom_target_record_view_t gfx11_wave64 = Target(
+      module.get(), FindSymbolRef(module.get(), IREE_SV("gfx11_wave64")));
+  const loom_target_record_view_t gfx11_small_workgroup =
+      Target(module.get(),
+             FindSymbolRef(module.get(), IREE_SV("gfx11_small_workgroup")));
+  const loom_target_record_view_t gfx11_feature = Target(
+      module.get(), FindSymbolRef(module.get(), IREE_SV("gfx11_feature")));
+  const loom_target_record_view_t gfx11_explicit_contract =
+      Target(module.get(),
+             FindSymbolRef(module.get(), IREE_SV("gfx11_explicit_contract")));
+  const loom_target_record_view_t gfx1170 =
+      Target(module.get(), FindSymbolRef(module.get(), IREE_SV("gfx1170")));
+
+  const loom_op_t* generic_op = gfx11_generic.facts->target.op;
+  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_, gfx1151_a,
+                                                gfx1151_a));
+  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_, gfx1151_a,
+                                                gfx1151_b));
+  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_, gfx1151_a,
+                                                gfx11_generic));
+  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_, gfx1151_a,
+                                                gfx11_wave32));
+  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_, gfx1151_a,
+                                                gfx11_small_workgroup));
+  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_,
+                                                 gfx11_generic, gfx1151_a));
+  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_,
+                                                 gfx1151_a, gfx1150));
+  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_, gfx1170,
+                                                 gfx11_generic));
+  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_,
+                                                 gfx1151_a, gfx11_wave64));
+  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_,
+                                                 gfx1151_a, gfx11_feature));
+  EXPECT_FALSE(loom_target_satisfies_requirement(
+      &target_environment_, gfx1151_a, gfx11_explicit_contract));
+
+  EXPECT_EQ(gfx11_generic.facts->target.op, generic_op);
+  EXPECT_EQ(loom_amdgpu_target_kind(generic_op),
+            LOOM_AMDGPU_TARGET_KIND_GFX11_GENERIC);
+}
+
+TEST_F(AmdgpuProviderTest, PreservesExactGfx1250RevisionRequirements) {
+  ModulePtr module =
+      Parse(IREE_SV("amdgpu.target<gfx1250> @gfx1250_a0 "
+                    "{gfx1250_revision = a0}\n"
+                    "amdgpu.target<gfx1250> @gfx1250_b0 "
+                    "{gfx1250_revision = b0}\n"
+                    "amdgpu.target<gfx12-5-generic> @gfx12_5_generic\n"));
+
+  const loom_target_record_view_t gfx1250_a0 =
+      Target(module.get(), FindSymbolRef(module.get(), IREE_SV("gfx1250_a0")));
+  const loom_target_record_view_t gfx1250_b0 =
+      Target(module.get(), FindSymbolRef(module.get(), IREE_SV("gfx1250_b0")));
+  const loom_target_record_view_t gfx12_5_generic = Target(
+      module.get(), FindSymbolRef(module.get(), IREE_SV("gfx12_5_generic")));
+
+  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_,
+                                                gfx1250_a0, gfx1250_a0));
+  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_,
+                                                gfx1250_b0, gfx1250_b0));
+  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_,
+                                                 gfx1250_a0, gfx1250_b0));
+  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_,
+                                                 gfx1250_b0, gfx1250_a0));
+  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_,
+                                                gfx1250_a0, gfx12_5_generic));
+  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_,
+                                                gfx1250_b0, gfx12_5_generic));
+  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_,
+                                                 gfx12_5_generic, gfx1250_a0));
+}
+
+TEST_F(AmdgpuProviderTest, ExhaustsSupportedRecordSatisfactionRelation) {
+  struct MaterializedRecord {
+    // Generated processor row represented by the target record.
+    const loom_amdgpu_processor_info_t* processor;
+
+    // Indexed materialized target record for the processor.
+    loom_target_record_view_t target;
+  };
+
+  ModulePtr module = Parse(IREE_SV(""));
+  std::vector<MaterializedRecord> records;
+  const iree_host_size_t processor_count =
+      loom_amdgpu_target_info_processor_count();
+  for (iree_host_size_t i = 0; i < processor_count; ++i) {
+    const loom_amdgpu_processor_info_t* processor =
+        loom_amdgpu_target_info_processor_at(i);
+    ASSERT_NE(processor, nullptr);
+    if (loom_amdgpu_target_bundle_for_descriptor_set(
+            processor->descriptor_set.ordinal) == nullptr) {
+      continue;
+    }
+
+    loom_amdgpu_target_profile_t profile = {};
+    const loom_amdgpu_gfx1250_revision_t gfx1250_revision =
+        iree_string_view_equal(processor->name, IREE_SV("gfx1250"))
+            ? LOOM_AMDGPU_GFX1250_REVISION_B0
+            : LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED;
+    const loom_amdgpu_amdhsa_profile_facts_t amdhsa = {
+        /*.processor=*/processor,
+        /*.gfx1250_revision=*/gfx1250_revision,
+        /*.sramecc=*/LOOM_AMDGPU_TARGET_FEATURE_DEFAULT,
+        /*.xnack=*/LOOM_AMDGPU_TARGET_FEATURE_DEFAULT,
+    };
+    IREE_ASSERT_OK(loom_amdgpu_target_profile_initialize(&amdhsa, &profile));
+    const loom_target_selection_t selection = {
+        /*.profile=*/&profile.base,
+    };
+    loom_symbol_ref_t target_ref = loom_symbol_ref_null();
+    IREE_ASSERT_OK(loom_target_environment_materialize_selection(
+        &target_environment_, module.get(), selection, &target_ref));
+    const loom_target_record_view_t target = Target(module.get(), target_ref);
+    ASSERT_TRUE(loom_target_record_view_is_valid(target));
+    records.push_back({
+        /*.processor=*/processor,
+        /*.target=*/target,
+    });
+  }
+
+  ASSERT_FALSE(records.empty());
+  for (const MaterializedRecord& effective : records) {
+    for (const MaterializedRecord& requirement : records) {
+      const bool expected =
+          loom_amdgpu_processor_satisfies_code_object_requirement(
+              effective.processor, requirement.processor);
+      EXPECT_EQ(loom_target_satisfies_requirement(
+                    &target_environment_, effective.target, requirement.target),
+                expected)
+          << "effective "
+          << std::string(effective.processor->name.data,
+                         effective.processor->name.size)
+          << ", requirement "
+          << std::string(requirement.processor->name.data,
+                         requirement.processor->name.size);
+    }
+  }
+}
+
+TEST_F(AmdgpuProviderTest, SelectsRequirementsPerFunctionTarget) {
+  ModulePtr module = Parse(
+      IREE_SV("amdgpu.target<gfx1150> @gfx1150\n"
+              "amdgpu.target<gfx1151> @gfx1151\n"
+              "amdgpu.target<gfx11-generic> @gfx11_generic\n"
+              "amdgpu.target<gfx1170> @gfx1170\n"
+              "\n"
+              "func.template<demo.pick> target(@gfx1150) priority(30) "
+              "@gfx1150_provider(%value: i32) -> (i32) {\n"
+              "  func.return %value : i32\n"
+              "}\n"
+              "\n"
+              "func.template<demo.pick> target(@gfx11_generic) priority(20) "
+              "@gfx11_provider(%value: i32) -> (i32) {\n"
+              "  func.return %value : i32\n"
+              "}\n"
+              "\n"
+              "func.template<demo.pick> priority(1) "
+              "@fallback(%value: i32) -> (i32) {\n"
+              "  func.return %value : i32\n"
+              "}\n"
+              "\n"
+              "func.def public target(@gfx1151) "
+              "@entry_gfx1151(%value: i32) -> (i32) {\n"
+              "  %result = func.apply<demo.pick>(%value) : (i32) -> (i32)\n"
+              "  func.return %result : i32\n"
+              "}\n"
+              "\n"
+              "func.def public target(@gfx1170) "
+              "@entry_gfx1170(%value: i32) -> (i32) {\n"
+              "  %result = func.apply<demo.pick>(%value) : (i32) -> (i32)\n"
+              "  func.return %result : i32\n"
+              "}\n"));
+
+  const loom_symbol_ref_t generic_target_ref =
+      FindSymbolRef(module.get(), IREE_SV("gfx11_generic"));
+  const loom_op_t* generic_target_op =
+      TargetOpFromRef(module.get(), generic_target_ref);
+
+  IREE_ASSERT_OK(RunTemplateSelection(module.get()));
+
+  const loom_symbol_ref_t rewritten_generic_provider_ref =
+      FindSymbolRef(module.get(), IREE_SV("gfx11_provider"));
+  const loom_symbol_ref_t gfx1151_callee =
+      SelectedCallee(module.get(), IREE_SV("entry_gfx1151"));
+  EXPECT_EQ(gfx1151_callee.module_id, rewritten_generic_provider_ref.module_id);
+  EXPECT_EQ(gfx1151_callee.symbol_id, rewritten_generic_provider_ref.symbol_id);
+  const loom_symbol_ref_t fallback_ref =
+      FindSymbolRef(module.get(), IREE_SV("fallback"));
+  const loom_symbol_ref_t gfx1170_callee =
+      SelectedCallee(module.get(), IREE_SV("entry_gfx1170"));
+  EXPECT_EQ(gfx1170_callee.module_id, fallback_ref.module_id);
+  EXPECT_EQ(gfx1170_callee.symbol_id, fallback_ref.symbol_id);
+
+  const loom_symbol_ref_t rewritten_generic_target_ref =
+      FindSymbolRef(module.get(), IREE_SV("gfx11_generic"));
+  EXPECT_EQ(TargetOpFromRef(module.get(), rewritten_generic_target_ref),
+            generic_target_op);
+  loom_func_like_t generic_provider = loom_func_like_cast(
+      module.get(),
+      module->symbols.entries[rewritten_generic_provider_ref.symbol_id]
+          .defining_op);
+  ASSERT_TRUE(loom_func_like_isa(generic_provider));
+  const loom_symbol_ref_t provider_target =
+      loom_func_like_target(generic_provider);
+  EXPECT_EQ(provider_target.module_id, rewritten_generic_target_ref.module_id);
+  EXPECT_EQ(provider_target.symbol_id, rewritten_generic_target_ref.symbol_id);
 }
 
 }  // namespace

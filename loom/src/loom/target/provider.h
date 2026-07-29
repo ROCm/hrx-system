@@ -21,6 +21,7 @@
 #include "loom/codegen/low/verify.h"
 #include "loom/ir/context.h"
 #include "loom/ir/ir.h"
+#include "loom/ops/target/facts.h"
 #include "loom/pass/environment.h"
 #include "loom/pass/registry.h"
 #include "loom/target/legalization.h"
@@ -56,6 +57,70 @@ typedef void (*loom_target_math_policy_registry_initializer_t)(
 typedef struct loom_builder_t loom_builder_t;
 typedef struct loom_target_environment_t loom_target_environment_t;
 typedef struct loom_target_provider_t loom_target_provider_t;
+
+// Borrowed view of one indexed target record and its owning module. The module
+// and symbol-fact arena must outlive the view and every query using it.
+typedef struct loom_target_record_view_t {
+  // Module that owns |facts|.
+  const loom_module_t* module;
+
+  // Indexed typed facts for the target record.
+  const loom_target_symbol_facts_t* facts;
+} loom_target_record_view_t;
+
+// Creates a borrowed target record view.
+static inline loom_target_record_view_t loom_target_record_view_make(
+    const loom_module_t* module, const loom_target_symbol_facts_t* facts) {
+  return (loom_target_record_view_t){
+      /*.module=*/module,
+      /*.facts=*/facts,
+  };
+}
+
+// Returns true when |view| contains a target record.
+static inline bool loom_target_record_view_is_valid(
+    loom_target_record_view_t view) {
+  return view.module != NULL && view.facts != NULL &&
+         loom_target_like_isa(view.facts->target);
+}
+
+// Returns whether an effective target satisfies an authored target
+// requirement.
+//
+// Identical record views satisfy by identity. Distinct records must have the
+// same target op kind and a provider in |environment| that owns the relation.
+// Views may belong to different modules. The query never mutates either
+// record. |environment| may be NULL when only identity satisfaction is
+// required.
+bool loom_target_satisfies_requirement(
+    const loom_target_environment_t* environment,
+    loom_target_record_view_t effective_target,
+    loom_target_record_view_t target_requirement);
+
+// Returns whether |effective_snapshot| satisfies the structural requirements
+// in |target_requirement|. Representation widths and address spaces must
+// match, fixed subgroup sizes must agree, and effective capacity limits must
+// meet or exceed nonzero required limits. Names, ABI/export plans, target
+// configuration, and family identity are outside this structural comparison.
+bool loom_target_snapshot_satisfies_requirement(
+    const loom_target_snapshot_t* effective_snapshot,
+    const loom_target_snapshot_t* target_requirement);
+
+// Target-family satisfaction callback for distinct target records.
+typedef bool (*loom_target_provider_satisfies_requirement_fn_t)(
+    loom_target_record_view_t effective_target,
+    loom_target_record_view_t target_requirement);
+
+// Provider-owned semantics for one target-record op kind.
+typedef struct loom_target_provider_record_semantics_t {
+  // Target op kind whose records are owned by this provider.
+  loom_op_kind_t op_kind;
+
+  // Infallible satisfaction relation for distinct verified records of
+  // |op_kind|. The indexed records are borrowed and may belong to different
+  // modules.
+  loom_target_provider_satisfies_requirement_fn_t satisfies_requirement;
+} loom_target_provider_record_semantics_t;
 
 // Target materialization request passed to target providers.
 typedef struct loom_target_selection_materialization_request_t {
@@ -273,6 +338,8 @@ struct loom_target_provider_t {
   loom_target_provider_pipeline_contribution_fn_t contribute_pipeline;
   // Optional invocation-target materialization callback.
   loom_target_provider_materialize_selection_fn_t materialize_selection;
+  // Optional target-record semantics owned by this provider.
+  loom_target_provider_record_semantics_t record_semantics;
 };
 
 // Static target provider table linked into a binary or embedding.

@@ -274,6 +274,29 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "provider_test",
+    srcs = ["provider_test.cc"],
+    deps = [
+        ":features",
+        ":profile",
+        ":provider",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/spirv/ops",
+        "//loom/src/loom/target/arch/spirv/records:target_records",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "cooperative_properties_test",
     srcs = ["cooperative_properties_test.cc"],
     deps = [

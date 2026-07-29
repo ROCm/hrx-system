@@ -222,7 +222,8 @@ iree_status_t loom_compile_run_pipeline(
           &options->low_descriptor_registry->registry,
           &low_lower_policy_registry, &low_legality_provider_list,
           &legalizer_provider_list, &math_policy_registry, options->report,
-          options->target_selection, target_ref, &low_pass_environment_storage),
+          options->target_environment, options->target_selection, target_ref,
+          &low_pass_environment_storage),
       .predicate_provider =
           loom_target_pass_predicate_provider(&predicate_storage),
       .block_pool = block_pool,
