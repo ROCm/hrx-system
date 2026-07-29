@@ -10,9 +10,9 @@ The examples are tested through production-facing tools:
 
 - `iree-benchmark-loom --dry-run` proves `check.case` and `check.benchmark`
   planning without requiring a local GPU during host-only CI.
-- `iree-benchmark-loom --device=amdgpu --measure=dispatch_complete` compiles,
-  executes correctness samples, and benchmarks the same sources on AMDGPU test
-  hosts.
+- `iree-benchmark-loom --device=amdgpu --measure=dispatch_complete --profile-final-batch=true`
+  compiles, executes correctness samples, measures warmed queue completion, and
+  replays the same workload with precise device timestamps on AMDGPU test hosts.
 
 The timing flags used by automated AMDGPU smoke coverage are harness policy.
 The source files name workloads and correctness expectations; iteration
@@ -263,6 +263,7 @@ iree-benchmark-loom \
   --min-time-ms=0 \
   --max-batches=1 \
   --input-ring-count=1 \
+  --profile-final-batch=true \
   --artifact-bundle-dir=/tmp/loom-q6q8-run \
   --artifact-bundle-policy=debug \
   --artifact-manifest=summary \
@@ -325,12 +326,27 @@ llvm-objdump -d --mcpu=gfx11-generic /tmp/loom-q6q8.hsaco
 
 Treat the evidence channels separately. Planner output answers "what would run?"
 Compile reports answer "what did the compiler emit?" Artifact manifests answer
-"what does this loader-ready artifact contain?" `dispatch_complete` benchmark
-rows answer "how long did completed HAL dispatch work take?" The quick command
-above intentionally uses one hot-reuse input ring and tiny iteration counts for
-smoke coverage; serious timing should use larger batches, warmups, a stable
-minimum duration, and enough input-ring bytes to avoid measuring only cache-hot
-data reuse.
+"what does this loader-ready artifact contain?"
+
+`dispatch_complete` produces two related timing views when
+`--profile-final-batch=true`. `measurement.operation_timing_ns` measures the
+warmed major batch from host submission through queue completion. The final
+profiled batch then replays the same candidate, configuration, invocation plan,
+bindings, and dispatch multiplicity with profile metadata retained;
+`profiled_dispatch_timing.duration_ns` contains its precise device timestamps.
+Profiling stays outside the major timing window because instrumentation may
+perturb queue-completion timing.
+
+Kernel comparisons against Vulkan, HIP, or another device profiler use
+`profiled_dispatch_timing.duration_ns` on the Loom side. Host queue-completion
+time is never compared with device time. Batch shape still matters: match
+dispatch multiplicity and inspect `profiled_dispatch_timing.overlapped` before
+comparing a throughput batch with an isolated dispatch.
+
+The quick command above intentionally uses one hot-reuse input ring and tiny
+iteration counts for smoke coverage; serious timing should use warmups, a
+stable major measurement window, a representative input ring, and final-batch
+profiling.
 
 ## AMDGPU Global And Descriptor Memory Feedback
 

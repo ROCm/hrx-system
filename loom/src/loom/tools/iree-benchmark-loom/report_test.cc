@@ -428,6 +428,12 @@ TEST(BenchmarkReportTest, WritesHalTimingCountsAndWarnings) {
       LookupObject(timing_interpretation, IREE_SV("score")),
       IREE_SV("operation_timing_ns")));
   EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(timing_interpretation, IREE_SV("score_time_domain")),
+      IREE_SV("host_wall")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(timing_interpretation, IREE_SV("score_meaning")),
+      IREE_SV("host_queue_completion_normalized_logical_operation_time")));
+  EXPECT_TRUE(iree_string_view_equal(
       LookupObject(timing_interpretation, IREE_SV("score_unit")),
       IREE_SV("logical_operation")));
   iree_string_view_t warnings =
@@ -520,7 +526,13 @@ TEST(BenchmarkReportTest, LabelsOverlappedProfiledDispatchBatches) {
       LookupObject(measurement, IREE_SV("timing_interpretation"));
   EXPECT_TRUE(iree_string_view_equal(
       LookupObject(timing_interpretation, IREE_SV("score_meaning")),
-      IREE_SV("throughput_normalized_batch_time")));
+      IREE_SV("host_queue_completion_throughput_normalized_batch_time")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(timing_interpretation, IREE_SV("device_timing")),
+      IREE_SV("profiled_dispatch_timing.duration_ns")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(timing_interpretation, IREE_SV("device_timing_meaning")),
+      IREE_SV("same_workload_profiled_replay")));
   EXPECT_TRUE(iree_string_view_equal(
       LookupObject(timing_interpretation, IREE_SV("profiled_dispatch_overlap")),
       IREE_SV("true")));

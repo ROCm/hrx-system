@@ -1368,6 +1368,8 @@ iree_status_t iree_benchmark_loom_write_hal_timing_interpretation_json(
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("score"), IREE_SV("operation_timing_ns")));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("score_time_domain"), IREE_SV("host_wall")));
   const iree_benchmark_loom_profiled_dispatch_timing_t profiled_dispatch =
       iree_benchmark_loom_profiled_dispatch_timing(
           &benchmark_result->hal_benchmark.profile);
@@ -1375,13 +1377,20 @@ iree_status_t iree_benchmark_loom_write_hal_timing_interpretation_json(
       benchmark_result->hal_benchmark.timing.batch_size > 1 &&
       profiled_dispatch.overlapped;
   const iree_string_view_t score_meaning =
-      overlapped_logical_batch ? IREE_SV("throughput_normalized_batch_time")
-                               : IREE_SV("normalized_logical_operation_time");
+      overlapped_logical_batch
+          ? IREE_SV("host_queue_completion_throughput_normalized_batch_time")
+          : IREE_SV("host_queue_completion_normalized_logical_operation_time");
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("score_meaning"), score_meaning));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("score_unit"), IREE_SV("logical_operation")));
   if (profiled_dispatch.available) {
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("device_timing"),
+        IREE_SV("profiled_dispatch_timing.duration_ns")));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("device_timing_meaning"),
+        IREE_SV("same_workload_profiled_replay")));
     IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
         &object, IREE_SV("profiled_dispatch_overlap"),
         profiled_dispatch.overlapped));
