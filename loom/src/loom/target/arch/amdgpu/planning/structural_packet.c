@@ -10,7 +10,6 @@
 #include "loom/codegen/low/allocation/move_topology.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/ops/low/ops.h"
-#include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 static bool loom_amdgpu_structural_packet_branch_falls_through(
     const loom_low_schedule_table_t* schedule,
@@ -52,42 +51,16 @@ static uint64_t loom_amdgpu_structural_packet_control_transfer_count(
   return true_fallthrough || false_fallthrough ? 1 : 2;
 }
 
-static void loom_amdgpu_structural_packet_classify_moves(
-    const loom_low_allocation_table_t* allocation,
-    loom_low_move_range_t move_range,
-    loom_amdgpu_structural_packet_info_t* out_info) {
-  for (iree_host_size_t i = 0; i < move_range.count; ++i) {
-    const loom_low_move_t* move = &allocation->moves[move_range.start + i];
-    if (move->destination.descriptor_reg_class_id ==
-        LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
-      ++out_info->vector_alu_instruction_count;
-    } else if (move->destination.descriptor_reg_class_id ==
-               LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
-      ++out_info->scalar_alu_instruction_count;
-    }
-  }
-  if (out_info->vector_alu_instruction_count != 0) {
-    out_info->flags |= LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_WRITES_VALU;
-  }
-}
-
 static void loom_amdgpu_structural_packet_analyze_move_range(
-    const loom_low_allocation_table_t* allocation,
     loom_low_move_range_t move_range,
-    loom_amdgpu_structural_packet_analysis_flags_t analysis_flags,
     loom_amdgpu_structural_packet_info_t* out_info) {
   out_info->flags |= LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MOVEMENT;
   out_info->instruction_count += move_range.count;
+  out_info->moves = move_range;
   if (move_range.count == 0) {
     return;
   }
   out_info->flags |= LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES;
-  if (iree_all_bits_set(
-          analysis_flags,
-          LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_ISSUE_PIPELINES)) {
-    loom_amdgpu_structural_packet_classify_moves(allocation, move_range,
-                                                 out_info);
-  }
 }
 
 static void loom_amdgpu_structural_packet_analyze_packet_moves(
@@ -114,8 +87,8 @@ static void loom_amdgpu_structural_packet_analyze_packet_moves(
     out_info->flags |= LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_FORWARDS_DEPENDENCIES;
     return;
   }
-  loom_amdgpu_structural_packet_analyze_move_range(
-      allocation, group->move_group.moves, analysis_flags, out_info);
+  loom_amdgpu_structural_packet_analyze_move_range(group->move_group.moves,
+                                                   out_info);
 }
 
 loom_amdgpu_structural_packet_info_t loom_amdgpu_structural_packet_analyze(
@@ -145,8 +118,7 @@ loom_amdgpu_structural_packet_info_t loom_amdgpu_structural_packet_analyze(
     return info;
   }
   if (loom_low_storage_address_isa(op)) {
-    info.flags = LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES |
-                 LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_WRITES_VALU;
+    info.flags = LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES;
     info.instruction_count = 1;
     info.vector_alu_instruction_count = 1;
     return info;
@@ -157,8 +129,8 @@ loom_amdgpu_structural_packet_info_t loom_amdgpu_structural_packet_analyze(
           loom_low_allocation_find_edge_copy_group_by_source_ordinal(
               allocation, node->source_ordinal);
       IREE_ASSERT(group != NULL);
-      loom_amdgpu_structural_packet_analyze_move_range(
-          allocation, group->move_group.moves, analysis_flags, &info);
+      loom_amdgpu_structural_packet_analyze_move_range(group->move_group.moves,
+                                                       &info);
     }
     const uint64_t control_transfer_count =
         loom_amdgpu_structural_packet_control_transfer_count(schedule, node);

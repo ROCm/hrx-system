@@ -85,13 +85,13 @@ static void loom_amdgpu_occupancy_collect_allocations(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_occupancy_model_t* model,
     loom_amdgpu_occupancy_register_class_t* class_summaries) {
-  IREE_ASSERT_EQ(allocation->assigned_extents.count,
+  IREE_ASSERT_EQ(allocation->physical_extents.count,
                  model->descriptor_reg_class_count);
   for (iree_host_size_t i = 0; i < model->register_class_count; ++i) {
     const uint16_t reg_class_id =
         model->register_classes[i].descriptor_reg_class_id;
     class_summaries[i].allocated_units =
-        allocation->assigned_extents.ends_by_reg_class[reg_class_id];
+        allocation->physical_extents.ends_by_reg_class[reg_class_id];
   }
 }
 

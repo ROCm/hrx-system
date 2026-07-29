@@ -143,8 +143,6 @@ typedef struct loom_amdgpu_vopd_plan_builder_t {
   const loom_amdgpu_address_state_plan_t* address_state;
   // Optional planned wait packets that block second-component fusion.
   const loom_amdgpu_wait_packet_plan_t* wait_packets;
-  // Optional planned wait states that block second-component fusion.
-  const loom_amdgpu_wait_state_plan_t* wait_states;
   // Arena owning all output and scratch arrays.
   iree_arena_allocator_t* arena;
   // Descriptor-ordinal-indexed VOPD component rule index + 1 rows.
@@ -712,27 +710,6 @@ static void loom_amdgpu_vopd_mark_wait_packet_insertions(
   }
 }
 
-static void loom_amdgpu_vopd_mark_wait_state_insertions(
-    loom_amdgpu_vopd_plan_builder_t* builder) {
-  if (builder->wait_states == NULL) {
-    return;
-  }
-  for (iree_host_size_t i = 0; i < builder->wait_states->state_count; ++i) {
-    const loom_amdgpu_wait_state_t* wait_state =
-        &builder->wait_states->states[i];
-    if (wait_state->action == LOOM_AMDGPU_WAIT_STATE_ACTION_S_DELAY_ALU) {
-      // Native emitters can move S_DELAY_ALU before the fused VOPD packet and
-      // consume the wait state attached to the second component.
-      continue;
-    }
-    const uint32_t packet_index = loom_amdgpu_vopd_packet_index_for_insertion(
-        builder->schedule, wait_state->block_index,
-        wait_state->scheduled_ordinal);
-    builder->packet_flags[packet_index] |=
-        LOOM_AMDGPU_VOPD_PACKET_FLAG_INSERTION_BLOCKED;
-  }
-}
-
 static iree_status_t loom_amdgpu_vopd_mark_transparent_packets(
     loom_amdgpu_vopd_plan_builder_t* builder) {
   if (builder->packet_flags == NULL) {
@@ -868,7 +845,6 @@ static iree_status_t loom_amdgpu_vopd_plan_allocate(
       loom_amdgpu_vopd_plan_allocate_trans_result_guard(builder));
   loom_amdgpu_vopd_mark_address_state_insertions(builder);
   loom_amdgpu_vopd_mark_wait_packet_insertions(builder);
-  loom_amdgpu_vopd_mark_wait_state_insertions(builder);
   return iree_ok_status();
 }
 
@@ -2119,7 +2095,6 @@ iree_status_t loom_amdgpu_vopd_plan_build(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_address_state_plan_t* address_state,
     const loom_amdgpu_wait_packet_plan_t* wait_packets,
-    const loom_amdgpu_wait_state_plan_t* wait_states,
     iree_arena_allocator_t* arena, loom_amdgpu_vopd_plan_t* out_plan) {
   *out_plan = (loom_amdgpu_vopd_plan_t){0};
   if (!loom_amdgpu_vopd_target_supports_base_vopd(&schedule->target)) {
@@ -2143,7 +2118,6 @@ iree_status_t loom_amdgpu_vopd_plan_build(
           loom_amdgpu_target_processor_from_resolved_target(&schedule->target),
       .address_state = address_state,
       .wait_packets = wait_packets,
-      .wait_states = wait_states,
       .arena = arena,
       .component_rule_lookup = component_rule_lookup,
       .component_rule_lookup_count = component_rule_lookup_count,

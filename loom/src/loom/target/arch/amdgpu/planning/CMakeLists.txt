@@ -133,6 +133,7 @@ loom_cc_library(
   DEPS
     ::matrix_wait_states
     ::structural_packet
+    ::vopd_plan
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
@@ -309,13 +310,11 @@ loom_cc_library(
     ::address_state
     ::structural_packet
     ::wait_packets
-    ::wait_states
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::diagnostics
     loom::codegen::low::packet
-    loom::codegen::low::packet_hazard_plan
     loom::codegen::low::schedule
     loom::ir
     loom::ops::low

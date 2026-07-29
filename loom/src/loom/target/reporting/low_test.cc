@@ -643,7 +643,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.error_count=*/1,
           /*.assignments=*/assignments,
           /*.assignment_count=*/IREE_ARRAYSIZE(assignments),
-          /*.assigned_extents=*/{},
+          /*.physical_extents=*/{},
           /*.assignment_indices_by_value_ordinal=*/
           assignment_indices_by_value_ordinal,
           /*.unit_end_points=*/{},

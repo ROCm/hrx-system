@@ -369,7 +369,7 @@ static bool loom_low_emission_frame_crosses_new_pressure_cliff(
   const loom_target_residency_direct_resource_table_t* direct_resources =
       &residency_model->direct_resources;
   IREE_ASSERT_EQ(direct_resources->resource_count,
-                 allocation->assigned_extents.count);
+                 allocation->physical_extents.count);
   for (uint16_t resource_id = 0; resource_id < direct_resources->resource_count;
        ++resource_id) {
     const loom_target_residency_cliff_range_t range =
@@ -384,7 +384,7 @@ static bool loom_low_emission_frame_crosses_new_pressure_cliff(
     loom_target_residency_cliff_evaluation_t allocated_evaluation;
     loom_target_residency_evaluate_cliffs(
         cliffs, range.count, residency_model->best_tier,
-        allocation->assigned_extents.ends_by_reg_class[resource_id],
+        allocation->physical_extents.ends_by_reg_class[resource_id],
         &allocated_evaluation);
     if (allocated_evaluation.tier < baseline_evaluation.tier) return true;
   }
@@ -397,12 +397,12 @@ static bool loom_low_emission_frame_crosses_new_pressure_cliff(
     const uint64_t baseline_resource_units =
         loom_low_emission_frame_residency_resource_units(
             resource_table, resource_id, baseline_units_by_reg_class,
-            allocation->assigned_extents.count);
+            allocation->physical_extents.count);
     const uint64_t allocated_resource_units =
         loom_low_emission_frame_residency_resource_units(
             resource_table, resource_id,
-            allocation->assigned_extents.ends_by_reg_class,
-            allocation->assigned_extents.count);
+            allocation->physical_extents.ends_by_reg_class,
+            allocation->physical_extents.count);
     const loom_target_residency_cliff_t* cliffs =
         resource->cliff_count == 0
             ? NULL
@@ -689,12 +689,12 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
               &pair_replication_preferred_pairs));
           if (!loom_target_residency_model_is_empty(residency_model)) {
             IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-                repair_arena, frame.allocation.assigned_extents.count,
+                repair_arena, frame.allocation.physical_extents.count,
                 sizeof(*pair_replication_baseline_units_by_reg_class),
                 (void**)&pair_replication_baseline_units_by_reg_class));
             memcpy(pair_replication_baseline_units_by_reg_class,
-                   frame.allocation.assigned_extents.ends_by_reg_class,
-                   frame.allocation.assigned_extents.count *
+                   frame.allocation.physical_extents.ends_by_reg_class,
+                   frame.allocation.physical_extents.count *
                        sizeof(*pair_replication_baseline_units_by_reg_class));
           }
           pair_replication_baseline_packet_move_count =

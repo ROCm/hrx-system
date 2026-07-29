@@ -277,7 +277,7 @@ iree_status_t loom_low_allocate_function(
         .error_count = state.target_constraints.error_count,
         .assignments = state.interval_assignment.assignments,
         .assignment_count = state.interval_assignment.assignment_count,
-        .assigned_extents =
+        .physical_extents =
             {
                 .ends_by_reg_class =
                     state.target_constraints

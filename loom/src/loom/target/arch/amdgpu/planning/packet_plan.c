@@ -21,9 +21,11 @@ iree_status_t loom_amdgpu_packet_plan_build(
                                                    &out_plan->wait_plan));
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_plan_build(
       &out_plan->wait_plan, arena, &out_plan->wait_packets));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_plan_build(
-      schedule, allocation, arena, &out_plan->wait_states));
-  return loom_amdgpu_vopd_plan_build(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_plan_build(
       schedule, allocation, &out_plan->address_state, &out_plan->wait_packets,
-      &out_plan->wait_states, arena, &out_plan->vopd_plan);
+      arena, &out_plan->vopd_plan));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_plan_build(
+      schedule, allocation, &out_plan->vopd_plan, arena,
+      &out_plan->wait_states));
+  return iree_ok_status();
 }

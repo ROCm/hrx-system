@@ -930,7 +930,7 @@ low.func.def target(@gfx11_target) @gfx11_vopd_rope_pair_rotate_motif(%even: reg
 
 // ----
   v_dual_mul_f32 v4, v0, v3 :: v_dual_mul_f32 v5, v1, v2
-  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
+  s_delay_alu instid0(VALU_DEP_1)
   v_dual_sub_f32 v6, v4, v5 :: v_dual_mul_f32 v7, v2, v0
   v_mul_f32 v8, v1, v3
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
@@ -1095,7 +1095,7 @@ low.func.def target(@gfx11_target) @gfx11_vopd_delay_alu_binary_pairs_assembly(%
 
 // ----
   v_dual_add_f32 v4, v0, v2 :: v_dual_add_f32 v5, v1, v3
-  s_delay_alu instid0(VALU_DEP_2)
+  s_delay_alu instid0(VALU_DEP_1)
   v_dual_mul_f32 v4, v4, v2 :: v_dual_mul_f32 v5, v5, v3
   s_endpgm
 
@@ -1139,7 +1139,7 @@ low.func.def target(@gfx11_target) @gfx11_vopd_fmac_chain_pair_exposure(%acc0: r
 
 // ----
   v_dual_fmac_f32 v0, v1, v2 :: v_dual_fmac_f32 v3, v4, v5
-  s_delay_alu instid0(VALU_DEP_2)
+  s_delay_alu instid0(VALU_DEP_1)
   v_dual_fmac_f32 v0, v6, v7 :: v_dual_fmac_f32 v3, v8, v9
   s_endpgm
 
@@ -1165,26 +1165,30 @@ low.func.def target(@gfx11_target) @gfx11_vopd_fmac_chain_pair_exposure_through_
 
 // ----
   v_dual_fmac_f32 v8, v0, v4 :: v_dual_fmac_f32 v9, v2, v6
-  s_delay_alu instid0(VALU_DEP_2)
+  s_delay_alu instid0(VALU_DEP_1)
   v_dual_fmac_f32 v8, v1, v5 :: v_dual_fmac_f32 v9, v3, v7
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vopd_delay_alu_binary_pairs strategy=source fixed=%sum0:physical_register:4:1 fixed=%sum1:physical_register:5:1 fixed=%product0:physical_register:4:1 fixed=%product1:physical_register:5:1
+// RUN: emit amdgpu-assembly @gfx11_vopd_compression_preserves_delay_alu strategy=source fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:2:1 fixed=%a1:physical_register:1:1 fixed=%b1:physical_register:3:1 fixed=%shared:physical_register:8:1 fixed=%shared_copy:physical_register:9:1 fixed=%gap0:physical_register:4:1 fixed=%gap1:physical_register:5:1 fixed=%gap2:physical_register:6:1 fixed=%gap3:physical_register:7:1 fixed=%consumer:physical_register:10:1
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_vopd_delay_alu_binary_pairs(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
-  %sum0 = v_add_f32 %a0, %b0
-  %sum1 = v_add_f32 %a1, %b1
-  %product0 = v_mul_f32 %sum0, %b0
-  %product1 = v_mul_f32 %sum1, %b1
+low.func.def target(@gfx11_target) @gfx11_vopd_compression_preserves_delay_alu(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %shared_copy = copy %shared {detached = true} : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %gap0 = v_mul_f32 %a0, %b0
+  %gap1 = v_mul_f32 %a1, %b1
+  %gap2 = v_add_f32 %a0, %b0
+  %gap3 = v_add_f32 %a1, %b1
+  %consumer = v_mul_f32 %shared_copy, %a0
   return
 }
 
 // ----
-  v_dual_add_f32 v4, v0, v2 :: v_dual_add_f32 v5, v1, v3
-  s_delay_alu instid0(VALU_DEP_2)
-  v_dual_mul_f32 v4, v4, v2 :: v_dual_mul_f32 v5, v5, v3
+  v_mov_b32 v9, v8
+  v_dual_mul_f32 v4, v0, v2 :: v_dual_mul_f32 v5, v1, v3
+  v_dual_add_f32 v6, v0, v2 :: v_dual_add_f32 v7, v1, v3
+  s_delay_alu instid0(VALU_DEP_3)
+  v_mul_f32 v10, v9, v0
   s_endpgm
 
 // ====
@@ -3721,6 +3725,30 @@ low.func.def target(@gfx11_target) @gfx11_concat_packet_cycle_after_initial_noop
   v_mov_b32 v2, v3
   v_mov_b32 v3, v5
   buffer_store_b128 v[0:3], v4, s[0:3], s4 offen offset:0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_edge_cycle_scratch_wait strategy=source fixed=%vaddr:physical_register:3:1 fixed=%loaded:physical_register:0:1 fixed=%lhs:physical_register:1:1 fixed=%rhs:physical_register:2:1 fixed=%keep0:physical_register:0:1 fixed=%a:physical_register:1:1 fixed=%b:physical_register:2:1 fixed=%keep3:physical_register:3:1
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_edge_cycle_scratch_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %loaded = buffer_load_dword %resource, %vaddr, %soffset
+  low.br ^join(%loaded: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.vgpr>, %vaddr: reg<amdgpu.vgpr>)
+^join(%keep0: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %keep3: reg<amdgpu.vgpr>):
+  %sum = v_add_u32 %a, %b
+  %keep_sum = v_add_u32 %keep0, %keep3
+  return
+}
+
+// ----
+  buffer_load_dword v0, v3, s[0:3], s4 offen offset:0
+  v_mov_b32 v4, v1
+  v_mov_b32 v1, v2
+  v_mov_b32 v2, v4
+.Lbb1:
+  v_add_u32 v1, v1, v2
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v0, v0, v3
   s_endpgm
 
 // ====

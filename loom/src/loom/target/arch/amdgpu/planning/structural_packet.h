@@ -19,8 +19,6 @@ typedef enum loom_amdgpu_structural_packet_analysis_flag_bits_e {
   // Treat structural movement as opaque materialization when no allocation
   // table is available.
   LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION = 1u << 0,
-  // Classify finalized physical moves by their native issue pipeline.
-  LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_ISSUE_PIPELINES = 1u << 1,
 } loom_amdgpu_structural_packet_analysis_flag_bits_t;
 typedef uint32_t loom_amdgpu_structural_packet_analysis_flags_t;
 
@@ -31,8 +29,6 @@ typedef enum loom_amdgpu_structural_packet_flag_bits_e {
   LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES = 1u << 1,
   // The packet forwards dependency-producing values without target work.
   LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_FORWARDS_DEPENDENCIES = 1u << 2,
-  // The materialized packet writes target-visible VALU state.
-  LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_WRITES_VALU = 1u << 3,
   // The materialized packet reads the target-visible SCC state.
   LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_READS_SCC = 1u << 4,
 } loom_amdgpu_structural_packet_flag_bits_t;
@@ -44,11 +40,11 @@ typedef struct loom_amdgpu_structural_packet_info_t {
   // Scheduled native instructions represented by the structural packet,
   // excluding target insertion overlays.
   uint64_t instruction_count;
-  // Native vector-ALU instructions. Finalized moves are included when issue
-  // pipeline classification was requested.
+  // Final sequential physical moves emitted by the structural packet.
+  loom_low_move_range_t moves;
+  // Native vector-ALU instructions outside of |moves|.
   uint64_t vector_alu_instruction_count;
-  // Native scalar-ALU instructions. Finalized moves are included when issue
-  // pipeline classification was requested.
+  // Native scalar-ALU instructions outside of |moves|.
   uint64_t scalar_alu_instruction_count;
 } loom_amdgpu_structural_packet_info_t;
 

@@ -32,6 +32,8 @@
 extern "C" {
 #endif
 
+struct loom_amdgpu_vopd_plan_t;
+
 // Maximum number of cycles a single `s_nop` packet can wait. The SOPP SIMM16
 // operand is encoded as wait_cycles - 1, and current AMDGPU targets use a
 // 4-bit no-op payload.
@@ -128,12 +130,14 @@ iree_string_view_t loom_amdgpu_wait_state_reason_name(
 iree_string_view_t loom_amdgpu_wait_state_action_name(
     loom_amdgpu_wait_state_action_t action);
 
-// Builds fixed AMDGPU wait-state insertions from a scheduled and allocated low
-// function. The caller must keep |schedule| and |allocation| immutable and
-// |arena| alive for as long as |out_plan| is used.
+// Builds fixed AMDGPU wait-state insertions from the final scheduled,
+// allocated, and VOPD-packetized low function. |vopd_plan| may be NULL when
+// the target has no native packetization. The caller must keep the input plans
+// immutable and |arena| alive for as long as |out_plan| is used.
 iree_status_t loom_amdgpu_wait_state_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
+    const struct loom_amdgpu_vopd_plan_t* vopd_plan,
     iree_arena_allocator_t* arena, loom_amdgpu_wait_state_plan_t* out_plan);
 
 // Formats the wait-state plan as compact deterministic text for loom-check
