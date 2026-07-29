@@ -35,6 +35,9 @@ typedef struct iree_hal_amdgpu_device_spec_physical_device_params_t {
   iree_hal_uuid_t uuid;
   // PCI address.
   iree_hal_pci_address_t pci;
+  // Device-side timestamp tick rate in hz, from
+  // HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY. Must be nonzero.
+  uint64_t timestamp_frequency_hz;
   // Host NUMA node nearest this physical device.
   iree_hal_numa_node_t numa;
   // Physical device ordinal within the AMDGPU topology.
@@ -68,8 +71,6 @@ typedef struct iree_hal_amdgpu_device_spec_params_t {
   iree_string_view_t logical_device_id;
   // Human-readable logical device name.
   iree_string_view_t display_name;
-  // HSA timestamp frequency in ticks per second.
-  uint64_t timestamp_frequency_hz;
   // Number of physical devices in |physical_devices|.
   iree_host_size_t physical_device_count;
   // Physical devices covered by the logical device.

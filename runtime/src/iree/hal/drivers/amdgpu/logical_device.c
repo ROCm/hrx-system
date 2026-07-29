@@ -1936,6 +1936,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_device_spec(
       physical_params->pci.device = physical_device->pci_device;
       physical_params->pci.function = physical_device->pci_function;
     }
+    physical_params->timestamp_frequency_hz =
+        physical_device->timestamp_frequency_hz;
     physical_params->numa.node_id = physical_device->host_numa_node;
     physical_params->physical_ordinal =
         (uint32_t)physical_device->device_ordinal;
@@ -1964,8 +1966,6 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_device_spec(
     iree_hal_amdgpu_device_spec_params_t spec_params = {
         .logical_device_id = logical_device->identifier,
         .display_name = logical_device->identifier,
-        .timestamp_frequency_hz =
-            logical_device->system->info.timestamp_frequency,
         .physical_device_count = physical_device_count,
         .physical_devices = physical_devices,
         .device_memory_capacity_bytes = device_memory_capacity_bytes,

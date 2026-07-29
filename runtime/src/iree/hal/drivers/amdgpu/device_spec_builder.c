@@ -31,6 +31,33 @@ static iree_status_t iree_hal_amdgpu_device_spec_verify_params(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU device spec allocator is NULL");
   }
+  for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {
+    if (IREE_UNLIKELY(params->physical_devices[i].timestamp_frequency_hz ==
+                      0)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "AMDGPU physical device %" PRIhsz
+                              " has no timestamp frequency; timestamp deltas "
+                              "cannot be converted to a duration",
+                              i);
+    }
+  }
+
+  // The device-scope timing spec carries one tick rate for the whole logical
+  // device, so physical devices ticking at different rates have no correct
+  // value to publish there. The params come from an exported entry point, so
+  // this check is input validation rather than an assertable invariant.
+  for (iree_host_size_t i = 1; i < params->physical_device_count; ++i) {
+    if (IREE_UNLIKELY(params->physical_devices[i].timestamp_frequency_hz !=
+                      params->physical_devices[0].timestamp_frequency_hz)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU physical devices have no common timestamp frequency: "
+          "device 0 reports %" PRIu64 " hz but device %" PRIhsz
+          " reports %" PRIu64 " hz",
+          params->physical_devices[0].timestamp_frequency_hz, i,
+          params->physical_devices[i].timestamp_frequency_hz);
+    }
+  }
   return iree_ok_status();
 }
 
@@ -262,7 +289,7 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_queues(
         .queue_count = physical_device->queue_count,
         .priority_count = 1,
         .timestamp_valid_bits = 64,
-        .timestamp_frequency_hz = params->timestamp_frequency_hz,
+        .timestamp_frequency_hz = physical_device->timestamp_frequency_hz,
         .physical_device_affinity = 1ull << i,
         .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
                       IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
@@ -423,15 +450,24 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_dispatch(
 static iree_status_t iree_hal_amdgpu_device_spec_populate_timing(
     const iree_hal_amdgpu_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
+  // Every GPU agent has a wallclock at a known rate independent of its gfx
+  // arch, so every logical device this driver builds describes a domain.
+  iree_hal_device_timing_spec_flags_t flags =
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS |
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HOST_CORRELATION |
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DISPATCH_EVENTS |
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HARDWARE_COUNTERS |
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_TRACE_CAPTURE |
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_PROFILING_PERTURBS_EXECUTION;
+
+  // verify_params established that every physical device reports the same
+  // nonzero rate, so device 0's rate is the rate of every agent here.
   iree_hal_device_timing_spec_t timing = {
+      // The agent wallclock is a 64-bit counter.
       .timestamp_valid_bits = 64,
-      .timestamp_frequency_hz = params->timestamp_frequency_hz,
-      .flags = IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS |
-               IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HOST_CORRELATION |
-               IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DISPATCH_EVENTS |
-               IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HARDWARE_COUNTERS |
-               IREE_HAL_DEVICE_TIMING_SPEC_FLAG_TRACE_CAPTURE |
-               IREE_HAL_DEVICE_TIMING_SPEC_FLAG_PROFILING_PERTURBS_EXECUTION,
+      .timestamp_frequency_hz =
+          params->physical_devices[0].timestamp_frequency_hz,
+      .flags = flags,
   };
   return iree_hal_device_spec_builder_set_timing(builder, &timing);
 }

@@ -64,7 +64,8 @@ typedef struct iree_hal_amdgpu_host_queue_epoch_wait_t {
   iree_atomic_intptr_t* error_status;
   // Producer host queue. Borrowed from the logical device.
   iree_hal_amdgpu_host_queue_t* host_queue;
-  // HSA timestamp ticks per second for wait-hint conversion.
+  // HSA system timestamp ticks per second, the domain hsa_signal_wait timeouts
+  // are expressed in.
   uint64_t timestamp_frequency;
   // Maximum HSA wait quantum in timestamp ticks before rechecking host state.
   uint64_t wait_timeout_hint;
