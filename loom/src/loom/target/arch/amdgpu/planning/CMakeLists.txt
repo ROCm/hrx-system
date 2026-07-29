@@ -82,8 +82,6 @@ loom_cc_library(
     "descriptor_semantics.c"
   DEPS
     iree::base
-    iree::base::internal::arena
-    loom::codegen::low::descriptors
     loom::codegen::low::schedule
     loom::target::arch::amdgpu::refs::target_refs
   PUBLIC
@@ -148,7 +146,6 @@ loom_cc_library(
   SRCS
     "wait_states.c"
   DEPS
-    ::descriptor_semantics
     ::matrix_wait_states
     ::structural_packet
     iree::base
@@ -214,7 +211,6 @@ loom_cc_library(
   SRCS
     "wait_plan.c"
   DEPS
-    ::descriptor_semantics
     ::structural_packet
     ::wait_counters
     ::wait_frontier
@@ -610,7 +606,6 @@ loom_cc_library(
     "vopd_plan.c"
   DEPS
     ::address_state
-    ::descriptor_semantics
     ::structural_packet
     ::wait_packets
     ::wait_states

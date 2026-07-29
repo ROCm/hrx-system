@@ -1036,9 +1036,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_build_schedule_pair_affinities(
       &resolved_target, table_arena, &schedule_pair_affinities));
   loom_low_schedule_structural_state_read_list_t schedule_state_reads =
-      loom_low_schedule_structural_state_read_list_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_build_structural_state_reads(
-      descriptor_set, table_arena, &schedule_state_reads));
+      loom_amdgpu_descriptor_structural_state_reads();
 
   loom_low_emission_frame_t frame = {0};
   loom_low_planning_statistics_t planning_statistics = {0};

@@ -15,7 +15,6 @@
 #include "loom/ir/ir.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
-#include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
 #include "loom/target/arch/amdgpu/planning/structural_packet.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
@@ -856,8 +855,11 @@ static bool loom_amdgpu_vopd_schedule_has_trans_result_packet(
   const loom_low_descriptor_set_t* descriptor_set =
       builder->schedule->target.descriptor_set;
   for (iree_host_size_t i = 0; i < builder->schedule->node_count; ++i) {
-    if (loom_amdgpu_descriptor_is_transcendental(
-            descriptor_set, builder->schedule->nodes[i].descriptor)) {
+    const loom_amdgpu_descriptor_traits_t descriptor_traits =
+        loom_amdgpu_descriptor_traits(descriptor_set,
+                                      builder->schedule->nodes[i].descriptor);
+    if (iree_any_bit_set(descriptor_traits,
+                         LOOM_AMDGPU_DESCRIPTOR_TRAIT_TRANSCENDENTAL)) {
       return true;
     }
   }
@@ -1210,16 +1212,19 @@ static void loom_amdgpu_vopd_advance_trans_result_packet(
   }
   const loom_low_descriptor_set_t* descriptor_set =
       builder->schedule->target.descriptor_set;
-  if (loom_amdgpu_descriptor_uses_vector_memory(descriptor_set,
-                                                packet->descriptor)) {
+  const loom_amdgpu_descriptor_traits_t descriptor_traits =
+      loom_amdgpu_descriptor_traits(descriptor_set, packet->descriptor);
+  const bool is_transcendental = iree_any_bit_set(
+      descriptor_traits, LOOM_AMDGPU_DESCRIPTOR_TRAIT_TRANSCENDENTAL);
+  if (iree_any_bit_set(descriptor_traits,
+                       LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_MEMORY)) {
     loom_amdgpu_vopd_clear_trans_result_windows(builder);
   }
-  const bool is_vector_alu = loom_amdgpu_descriptor_uses_vector_alu(
-      descriptor_set, packet->descriptor);
-  const bool is_transcendental = loom_amdgpu_descriptor_is_transcendental(
-      descriptor_set, packet->descriptor);
-  loom_amdgpu_vopd_increment_trans_result_windows(builder, is_vector_alu,
-                                                  is_transcendental);
+  loom_amdgpu_vopd_increment_trans_result_windows(
+      builder,
+      iree_any_bit_set(descriptor_traits,
+                       LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU),
+      is_transcendental);
   loom_amdgpu_vopd_clear_trans_result_packet_results(builder, packet);
   if (is_transcendental) {
     loom_amdgpu_vopd_record_trans_result_packet_results(builder, packet);
@@ -1234,16 +1239,18 @@ static void loom_amdgpu_vopd_advance_trans_result_pair(
   }
   const loom_low_descriptor_set_t* descriptor_set =
       builder->schedule->target.descriptor_set;
-  const bool first_vector_alu =
-      loom_amdgpu_descriptor_uses_vector_alu(descriptor_set, first->descriptor);
-  const bool second_vector_alu = loom_amdgpu_descriptor_uses_vector_alu(
-      descriptor_set, second->descriptor);
-  const bool first_trans = loom_amdgpu_descriptor_is_transcendental(
-      descriptor_set, first->descriptor);
-  const bool second_trans = loom_amdgpu_descriptor_is_transcendental(
-      descriptor_set, second->descriptor);
+  const loom_amdgpu_descriptor_traits_t first_traits =
+      loom_amdgpu_descriptor_traits(descriptor_set, first->descriptor);
+  const loom_amdgpu_descriptor_traits_t second_traits =
+      loom_amdgpu_descriptor_traits(descriptor_set, second->descriptor);
+  const bool first_trans = iree_any_bit_set(
+      first_traits, LOOM_AMDGPU_DESCRIPTOR_TRAIT_TRANSCENDENTAL);
+  const bool second_trans = iree_any_bit_set(
+      second_traits, LOOM_AMDGPU_DESCRIPTOR_TRAIT_TRANSCENDENTAL);
   loom_amdgpu_vopd_increment_trans_result_windows(
-      builder, first_vector_alu || second_vector_alu,
+      builder,
+      iree_any_bit_set(first_traits | second_traits,
+                       LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU),
       first_trans || second_trans);
   loom_amdgpu_vopd_clear_trans_result_packet_results(builder, first);
   loom_amdgpu_vopd_clear_trans_result_packet_results(builder, second);

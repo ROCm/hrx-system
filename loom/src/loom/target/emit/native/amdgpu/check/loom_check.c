@@ -354,8 +354,8 @@ static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
   *out_residency_model = loom_amdgpu_occupancy_residency_model(&target);
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_build_schedule_pair_affinities(
       &target, request->case_arena, out_affinities));
-  return loom_amdgpu_descriptor_build_structural_state_reads(
-      target.descriptor_set, request->case_arena, out_state_reads);
+  *out_state_reads = loom_amdgpu_descriptor_structural_state_reads();
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(

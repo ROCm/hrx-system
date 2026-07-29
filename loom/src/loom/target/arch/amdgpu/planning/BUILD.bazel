@@ -115,11 +115,9 @@ loom_cc_library(
     hdrs = ["descriptor_semantics.h"],
     visibility = _AMDGPU_NATIVE_PLANNING_VISIBILITY,
     deps = [
-        "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -162,7 +160,6 @@ loom_cc_library(
     srcs = ["wait_states.c"],
     hdrs = ["wait_states.h"],
     deps = [
-        ":descriptor_semantics",
         ":matrix_wait_states",
         ":structural_packet",
         "//loom/src/loom/codegen/low:allocation",
@@ -220,7 +217,6 @@ loom_cc_library(
     hdrs = ["wait_plan.h"],
     visibility = _AMDGPU_ROOT_VISIBILITY + _AMDGPU_LOWER_VISIBILITY,
     deps = [
-        ":descriptor_semantics",
         ":structural_packet",
         ":wait_counters",
         ":wait_frontier",
@@ -414,7 +410,6 @@ loom_cc_library(
     visibility = _AMDGPU_NATIVE_PLANNING_VISIBILITY,
     deps = [
         ":address_state",
-        ":descriptor_semantics",
         ":structural_packet",
         ":wait_packets",
         ":wait_states",
