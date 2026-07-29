@@ -317,6 +317,7 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::device::headers
     iree::hal::drivers::amdgpu::device::timestamp
     iree::hal::drivers::amdgpu::device::tsan
+    iree::hal::drivers::amdgpu::util::agent_target
     iree::hal::drivers::amdgpu::util::block_pool
     iree::hal::drivers::amdgpu::util::device_clock
     iree::hal::drivers::amdgpu::util::device_library
@@ -415,6 +416,7 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::device::binaries::toc
     iree::hal::drivers::amdgpu::device::dispatch
     iree::hal::drivers::amdgpu::device::headers
+    iree::hal::drivers::amdgpu::util::agent_target
     iree::hal::drivers::amdgpu::util::block_pool
     iree::hal::drivers::amdgpu::util::device_library
     iree::hal::drivers::amdgpu::util::feedback_channel

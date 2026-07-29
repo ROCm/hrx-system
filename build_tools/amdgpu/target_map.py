@@ -18,6 +18,7 @@ import argparse
 import difflib
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 if __package__:
@@ -41,8 +42,39 @@ DEFAULT_TARGET_SELECTIONS = (
     "gfx12-generic",
 )
 
+
+@dataclass(frozen=True, slots=True)
+class DeviceBinaryTarget:
+    """One independently named builtin device-library artifact."""
+
+    name: str
+    architecture: str
+    target_ids: tuple[str, ...] = ()
+    compile_options: tuple[str, ...] = ()
+    link_options: tuple[str, ...] = ()
+
+
+# Device-binary variants are artifact identities, not public processor names.
+# Each row binds one artifact to the fully qualified physical target IDs that
+# cannot safely consume their normal code-object-family artifact.
+DEVICE_BINARY_VARIANTS = (
+    DeviceBinaryTarget(
+        name="gfx1250-a0",
+        architecture="gfx1250",
+        target_ids=("gfx1250:gfx1250-b0-specific-",),
+        compile_options=("-mllvm", "-amdgpu-gfx1250-b0-specific=false"),
+        link_options=("-plugin-opt=-amdgpu-gfx1250-b0-specific=false",),
+    ),
+)
+
 FEATURE_SRAMECC = "sramecc"
 FEATURE_XNACK = "xnack"
+FEATURE_GFX1250_B0_SPECIFIC = "gfx1250-b0-specific"
+TARGET_ID_FEATURE_ORDER = (
+    FEATURE_SRAMECC,
+    FEATURE_XNACK,
+    FEATURE_GFX1250_B0_SPECIFIC,
+)
 
 # Feature support follows ROCr's ISA registry. A target absent from a feature
 # set does not support that feature; supported targets may still select an
@@ -64,6 +96,7 @@ TARGET_FEATURE_SUPPORT = {
     "gfx1011": (FEATURE_XNACK,),
     "gfx1012": (FEATURE_XNACK,),
     "gfx1013": (FEATURE_XNACK,),
+    "gfx1250": (FEATURE_GFX1250_B0_SPECIFIC,),
 }
 
 ELF_MACHINE_PROCESSORS = (
@@ -249,6 +282,98 @@ def code_object_targets():
     return values
 
 
+def device_binary_targets():
+    values = []
+    names = set()
+    for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
+        for variant in device_binary_variants_for_exact(info.exact_processor):
+            if variant.name not in names:
+                values.append(variant)
+                names.add(variant.name)
+        if info.code_object_processor not in names:
+            values.append(
+                DeviceBinaryTarget(
+                    name=info.code_object_processor,
+                    architecture=info.code_object_processor,
+                )
+            )
+            names.add(info.code_object_processor)
+    return values
+
+
+def device_binary_target_names():
+    return [target.name for target in device_binary_targets()]
+
+
+def device_binary_target(name):
+    for target in device_binary_targets():
+        if target.name == name:
+            return target
+    return None
+
+
+def target_id_processor(target_id):
+    return target_id.split(":", 1)[0]
+
+
+def device_binary_variants_for_exact(exact_target):
+    return [
+        variant
+        for variant in DEVICE_BINARY_VARIANTS
+        if any(
+            target_id_processor(target_id) == exact_target
+            for target_id in variant.target_ids
+        )
+    ]
+
+
+def exact_targets_for_code_object(code_object_target):
+    return [
+        info.exact_processor
+        for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
+        if info.code_object_processor == code_object_target
+    ]
+
+
+def expand_device_binary_target_selections(selections):
+    """Expands public target selectors to ordered device-binary target names."""
+    exact = set(exact_targets())
+    code_objects = set(code_object_targets())
+    exact_to_code_object = {
+        info.exact_processor: info.code_object_processor
+        for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
+    }
+    families = {family: family_targets(targets) for family, targets in TARGET_FAMILIES}
+    expanded_targets = []
+
+    def append_exact(exact_target):
+        append_unique(
+            expanded_targets,
+            [
+                variant.name
+                for variant in device_binary_variants_for_exact(exact_target)
+            ],
+        )
+        append_unique(expanded_targets, [exact_to_code_object[exact_target]])
+
+    for selection in selections:
+        if selection in code_objects:
+            for exact_target in exact_targets_for_code_object(selection):
+                append_exact(exact_target)
+        elif selection in exact:
+            append_exact(selection)
+        elif selection in families:
+            for exact_target in families[selection]:
+                append_exact(exact_target)
+        else:
+            available = sorted(code_objects | exact | set(families))
+            raise ValueError(
+                "unknown AMDGPU target selector '{}'. Available selectors "
+                "include: {}".format(selection, ", ".join(available))
+            )
+    return expanded_targets
+
+
 def family_targets(targets):
     if targets is ALL_EXACT_TARGETS:
         return exact_targets()
@@ -280,6 +405,103 @@ def validate_target_map():
         raise ValueError("duplicate AMDGPU target families in target map")
 
     exact_set = set(exact)
+    code_object_set = set(code_object_targets())
+    device_binary_names = device_binary_target_names()
+    if len(set(device_binary_names)) != len(device_binary_names):
+        raise ValueError("duplicate AMDGPU device binary targets in target map")
+    public_selectors = exact_set | code_object_set | set(families)
+    variant_name_list = [variant.name for variant in DEVICE_BINARY_VARIANTS]
+    duplicate_variant_names = sorted(
+        name for name in set(variant_name_list) if variant_name_list.count(name) > 1
+    )
+    if duplicate_variant_names:
+        raise ValueError(
+            "duplicate AMDGPU device binary variants: {}".format(
+                ", ".join(duplicate_variant_names)
+            )
+        )
+    variant_names = set(variant_name_list)
+    conflicting_variant_names = sorted(variant_names & public_selectors)
+    if conflicting_variant_names:
+        raise ValueError(
+            "device binary variants conflict with public target selectors: {}".format(
+                ", ".join(conflicting_variant_names)
+            )
+        )
+    qualified_target_artifacts = {}
+    for variant in DEVICE_BINARY_VARIANTS:
+        if variant.architecture not in exact_set | code_object_set:
+            raise ValueError(
+                "device binary variant {} references unknown architecture {}".format(
+                    variant.name, variant.architecture
+                )
+            )
+        if not variant.target_ids:
+            raise ValueError(
+                "device binary variant {} has no qualified target IDs".format(
+                    variant.name
+                )
+            )
+        for target_id in variant.target_ids:
+            target_id_parts = target_id.split(":")
+            target_processor = target_id_parts[0]
+            if target_processor not in exact_set:
+                raise ValueError(
+                    "device binary variant {} target ID {} references an "
+                    "unknown exact target".format(variant.name, target_id)
+                )
+            if len(target_id_parts) == 1:
+                raise ValueError(
+                    "device binary variant {} target ID {} has no feature "
+                    "qualification".format(variant.name, target_id)
+                )
+            feature_names = []
+            supported_features = set(TARGET_FEATURE_SUPPORT.get(target_processor, ()))
+            for feature_suffix in target_id_parts[1:]:
+                if len(feature_suffix) < 2 or feature_suffix[-1] not in "+-":
+                    raise ValueError(
+                        "device binary variant {} target ID {} has malformed "
+                        "feature suffix {}".format(
+                            variant.name, target_id, feature_suffix
+                        )
+                    )
+                feature_name = feature_suffix[:-1]
+                if feature_name not in supported_features:
+                    raise ValueError(
+                        "device binary variant {} target ID {} qualifies "
+                        "unsupported feature {}".format(
+                            variant.name, target_id, feature_name
+                        )
+                    )
+                if feature_name in feature_names:
+                    raise ValueError(
+                        "device binary variant {} target ID {} repeats feature "
+                        "{}".format(variant.name, target_id, feature_name)
+                    )
+                feature_names.append(feature_name)
+            canonical_feature_names = [
+                feature_name
+                for feature_name in TARGET_ID_FEATURE_ORDER
+                if feature_name in feature_names
+            ]
+            if feature_names != canonical_feature_names:
+                raise ValueError(
+                    "device binary variant {} target ID {} does not use "
+                    "canonical feature order {}".format(
+                        variant.name,
+                        target_id,
+                        ":".join(canonical_feature_names),
+                    )
+                )
+            previous_artifact = qualified_target_artifacts.get(target_id)
+            if previous_artifact is not None:
+                raise ValueError(
+                    "device binary target ID {} is claimed by both {} and {}".format(
+                        target_id, previous_artifact, variant.name
+                    )
+                )
+            qualified_target_artifacts[target_id] = variant.name
+
     feature_targets = set(TARGET_FEATURE_SUPPORT)
     unknown_feature_targets = sorted(feature_targets - exact_set)
     if unknown_feature_targets:
@@ -429,6 +651,22 @@ def bzl_string_dict(name, values):
     return "\n".join(lines)
 
 
+def bzl_string_list_dict(name, values):
+    lines = [
+        "# buildifier: disable=unsorted-dict-items",
+        "{} = {{".format(name),
+    ]
+    for key, entries in values:
+        if len(entries) == 1:
+            lines.append('    "{}": ["{}"],'.format(key, entries[0]))
+        else:
+            lines.append('    "{}": ['.format(key))
+            lines.extend(['        "{}",'.format(entry) for entry in entries])
+            lines.append("    ],")
+    lines.append("}")
+    return "\n".join(lines)
+
+
 def bzl_family_dict(name):
     lines = [
         "# buildifier: disable=unsorted-dict-items",
@@ -461,12 +699,32 @@ def render_bzl():
                 ),
                 bzl_list("IREE_AMDGPU_EXACT_TARGETS", exact_targets()),
                 bzl_list("IREE_AMDGPU_CODE_OBJECT_TARGETS", code_object_targets()),
+                bzl_list(
+                    "IREE_AMDGPU_DEVICE_BINARY_TARGETS",
+                    device_binary_target_names(),
+                ),
                 bzl_string_dict(
                     "IREE_AMDGPU_EXACT_TARGET_CODE_OBJECTS",
                     (
                         (info.exact_processor, info.code_object_processor)
                         for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
                     ),
+                ),
+                bzl_string_list_dict(
+                    "IREE_AMDGPU_EXACT_TARGET_DEVICE_BINARY_VARIANTS",
+                    [
+                        (
+                            exact_target,
+                            [
+                                variant.name
+                                for variant in device_binary_variants_for_exact(
+                                    exact_target
+                                )
+                            ],
+                        )
+                        for exact_target in exact_targets()
+                        if device_binary_variants_for_exact(exact_target)
+                    ],
                 ),
                 bzl_list("IREE_AMDGPU_TARGET_FAMILY_NAMES", target_family_names()),
                 bzl_family_dict("IREE_AMDGPU_TARGET_FAMILIES"),
@@ -496,11 +754,23 @@ def render_cmake():
         "",
         cmake_list("_IREE_AMDGPU_CODE_OBJECT_TARGETS", code_object_targets()),
         "",
+        cmake_list("_IREE_AMDGPU_DEVICE_BINARY_TARGETS", device_binary_target_names()),
+        "",
     ]
     for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
         lines.append(
             'set(_IREE_AMDGPU_TARGET_CODE_OBJECT_{} "{}")'.format(
                 info.exact_processor, info.code_object_processor
+            )
+        )
+    for exact_target in exact_targets():
+        variants = device_binary_variants_for_exact(exact_target)
+        if not variants:
+            continue
+        lines.append(
+            cmake_list(
+                "_IREE_AMDGPU_TARGET_DEVICE_BINARY_VARIANTS_{}".format(exact_target),
+                [variant.name for variant in variants],
             )
         )
     lines.extend(
@@ -534,6 +804,9 @@ def render_target_id_inl(repo_root):
     feature_flag_names = {
         FEATURE_SRAMECC: "IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_SRAMECC",
         FEATURE_XNACK: "IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_XNACK",
+        FEATURE_GFX1250_B0_SPECIFIC: (
+            "IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_GFX1250_B0_SPECIFIC"
+        ),
     }
     processor_info_rows, supports_wavefront_size = import_loom_target_info(repo_root)
     processor_infos = {info.processor: info for info in processor_info_rows}
@@ -554,6 +827,36 @@ def render_target_id_inl(repo_root):
             )
         )
     lines.append("")
+    return "\n".join(lines)
+
+
+def render_device_library_target_map_inl():
+    output_path = (
+        "runtime/src/iree/hal/drivers/amdgpu/util/device_library_target_map.inl"
+    )
+    lines = [
+        generated_header("//", output_path),
+        "//",
+        "// Define IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT(artifact, target)",
+        "// before including this file.",
+        "",
+        "// clang-format off",
+        "#if defined(IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT)",
+    ]
+    for variant in DEVICE_BINARY_VARIANTS:
+        for target_id in variant.target_ids:
+            lines.append(
+                'IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT("{}", "{}")'.format(
+                    variant.name,
+                    target_id,
+                )
+            )
+    lines.extend(
+        [
+            "#endif  // IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT",
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -639,12 +942,15 @@ def render_header():
 def generated_outputs(repo_root):
     build_tools_output_dir = repo_root / "build_tools/amdgpu"
     target_output_dir = repo_root / "runtime/src/iree/hal/executable/amdgpu"
+    driver_util_output_dir = repo_root / "runtime/src/iree/hal/drivers/amdgpu/util"
     return {
         build_tools_output_dir / "target_map.bzl": render_bzl(),
         build_tools_output_dir / "target_map.cmake": render_cmake(),
         build_tools_output_dir / "elf_machine_map.inl": render_elf_machine_map_inl(),
         build_tools_output_dir / "target_map.h": render_header(),
         target_output_dir / "target_id_map.inl": render_target_id_inl(repo_root),
+        driver_util_output_dir
+        / "device_library_target_map.inl": render_device_library_target_map_inl(),
     }
 
 
@@ -670,7 +976,7 @@ def check_outputs(repo_root, outputs):
         failed = True
     if failed:
         print(
-            "Run 'python build_tools/amdgpu/target_map.py' to regenerate.",
+            "Run 'python3 build_tools/amdgpu/target_map.py' to regenerate.",
             file=sys.stderr,
         )
         return 1

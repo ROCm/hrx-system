@@ -350,9 +350,7 @@ ERR_BACKEND_017 = ErrorDef(
         "'{fallback_reason}', static offset {static_offset_bytes} byte(s), "
         "element {element_bytes} byte(s), vector lanes {vector_lanes}, "
         "dynamic stride {dynamic_stride_bytes} byte(s), vector lane stride "
-        "{vector_lane_stride_bytes} byte(s), bank stride {bank_stride_words} "
-        "word(s), conflict degree {bank_conflict_degree}, bank conflict "
-        "'{bank_conflict_kind}'"
+        "{vector_lane_stride_bytes} byte(s)"
     ),
     params=(
         ErrorParam("target_key", ParamKind.STRING),
@@ -371,9 +369,6 @@ ERR_BACKEND_017 = ErrorDef(
         ErrorParam("vector_lanes", ParamKind.U32),
         ErrorParam("dynamic_stride_bytes", ParamKind.U32),
         ErrorParam("vector_lane_stride_bytes", ParamKind.U32),
-        ErrorParam("bank_stride_words", ParamKind.U32),
-        ErrorParam("bank_conflict_degree", ParamKind.U32),
-        ErrorParam("bank_conflict_kind", ParamKind.STRING),
     ),
 )
 

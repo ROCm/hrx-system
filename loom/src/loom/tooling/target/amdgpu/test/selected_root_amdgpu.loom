@@ -1,5 +1,9 @@
 amdgpu.target<gfx11-generic> @gfx11_generic_target
 
+config.decl @test.targetless.workgroups_x : %value: index where [range(%value, 1, 16)]
+
+config.decl @test.targetless.workgroup_size_x : %value: index where [range(%value, 1, 256)]
+
 kernel.def target(@gfx11_generic_target) export("selected_store_i32") @selected_store_i32() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -13,9 +17,11 @@ kernel.def target(@gfx11_generic_target) export("selected_store_i32") @selected_
   kernel.return
 }
 
-kernel.def export("unselected_targetless_store_i32") @unselected_targetless_store_i32() {
+kernel.def export("configured_targetless_store_i32") @configured_targetless_store_i32() {
+  %workgroups_x = config.get @test.targetless.workgroups_x : index
+  %workgroup_size_x = config.get @test.targetless.workgroup_size_x : index
   %unit = index.constant 1 : index
-  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%output: buffer) {
   %zero_offset = index.constant 0 : offset
   %zero_index = index.constant 0 : index

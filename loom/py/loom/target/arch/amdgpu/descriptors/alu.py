@@ -300,6 +300,7 @@ def _s_mul_i32_rhs_inline_overlay() -> AmdgpuDescriptorOverlay:
         ),
         asm_forms=_asm(
             mnemonic="s_mul_i32_rhs_inline",
+            native_assembly_mnemonic="s_mul_i32",
             results=("dst",),
             operands=("lhs",),
             immediates=("imm32",),
@@ -435,6 +436,7 @@ def _s_binary_u32_rhs_inline_overlay(
         implicit_operands=(_SCC_CLOBBER_OUTPUT,),
         asm_forms=_asm(
             mnemonic=f"{mnemonic}_rhs_inline",
+            native_assembly_mnemonic=mnemonic,
             results=("dst",),
             operands=("lhs",),
             immediates=("imm32",),
@@ -4718,12 +4720,23 @@ def _v_cvt_pk_f16_packed8_overlay(
         descriptor_key=f"amdgpu.v_cvt_pk_f16_{source_type}.{source_semantics}",
         instruction_name=f"V_CVT_PK_F16_{source_type.upper()}",
         mnemonic=f"v_cvt_pk_f16_{source_type}",
-        encoding_name="ENC_VOP1",
+        encoding_name="ENC_VOP1_VGPR",
         semantic_tag=(f"convert.float.{source_type}.{source_semantics}x2.f16x2"),
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
-            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),
+            AmdgpuOperandOverlay(
+                "VSRC0",
+                _vgpr_operand(
+                    "input",
+                    register_part=_REG_PART_VGPR_LOW16,
+                    address_map_kind=OperandAddressMapKind.LOW_SUBSET,
+                    addressable_unit_count=(
+                        _D16_PARTIAL_REGISTER_ADDRESSABLE_UNIT_COUNT
+                    ),
+                ),
+                size_exception_reason=_PACKED8_SOURCE_SIZE_REASON,
+            ),
         ),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )

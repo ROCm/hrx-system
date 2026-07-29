@@ -13,6 +13,7 @@
 #define LOOM_OPS_AMDGPU_OPS_H_
 
 #include "loom/ops/op_defs.h"
+#include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -87,6 +88,7 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_amdgpu_target_linkage, 28, loom_target_linkage_
 LOOM_DEFINE_ATTR_I64(loom_amdgpu_target_hal_buffer_resource_flags, 29)
 LOOM_DEFINE_ATTR_STRING(loom_amdgpu_target_contract_set_key, 30)
 LOOM_DEFINE_ATTR_I64(loom_amdgpu_target_contract_feature_bits, 31)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_amdgpu_target_gfx1250_revision, 32, loom_amdgpu_gfx1250_revision_t)
 enum loom_amdgpu_target_build_flag_bits_e {
   LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CODEGEN_FORMAT = 1u << 0,
   LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_ARTIFACT_FORMAT = 1u << 1,
@@ -118,6 +120,7 @@ enum loom_amdgpu_target_build_flag_bits_e {
   LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_HAL_BUFFER_RESOURCE_FLAGS = 1u << 27,
   LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CONTRACT_SET_KEY = 1u << 28,
   LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CONTRACT_FEATURE_BITS = 1u << 29,
+  LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_GFX1250_REVISION = 1u << 30,
 };
 typedef uint32_t loom_amdgpu_target_build_flags_t;
 iree_status_t loom_amdgpu_target_build(
@@ -155,6 +158,7 @@ iree_status_t loom_amdgpu_target_build(
     loom_optional int64_t hal_buffer_resource_flags,
     loom_optional loom_string_id_t contract_set_key,
     loom_optional int64_t contract_feature_bits,
+    loom_optional uint8_t gfx1250_revision,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_amdgpu_target_record_verify(

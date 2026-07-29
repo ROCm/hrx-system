@@ -127,9 +127,11 @@ AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS = {
 
 AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION = 1 << 0
 AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE = 1 << 1
+AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE = 1 << 2
 AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS = (
     AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
     | AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE
+    | AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
 )
 AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES = 64 * 1024
 AMDGPU_CDNA4_MAX_WORKGROUP_STORAGE_BYTES = 160 * 1024
@@ -833,7 +835,11 @@ def gfx125x_processor_info(
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor=processor,
-        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION | processor_flags,
+        flags=(
+            AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
+            | AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
+            | processor_flags
+        ),
         descriptor_set_key=descriptor_set_key,
         elf_machine_flags=elf_machine_flags,
         elf_feature_flags=elf_feature_flags,
@@ -860,6 +866,15 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
     AmdgpuDescriptorSetInfo(
         generator_target="rdna4_gfx125x",
         key="amdgpu.rdna4.gfx125x.core",
+        isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
+            cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
+        ),
+    ),
+    AmdgpuDescriptorSetInfo(
+        generator_target="rdna4_gfx1251",
+        key="amdgpu.rdna4.gfx1251.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
@@ -949,8 +964,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         key="amdgpu.gfx12_5.generic.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
-        storage_generator_target="rdna4_gfx125x",
-        member_generator_targets=("rdna4_gfx125x",),
+        member_generator_targets=("rdna4_gfx1251", "rdna4_gfx125x"),
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
         ),
@@ -1076,6 +1090,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
     gfx125x_processor_info(
         "gfx1251",
         0x05A,
+        descriptor_set_key="amdgpu.rdna4.gfx1251.core",
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
     ),
     processor_info(
@@ -1259,6 +1274,7 @@ AMDGPU_TARGET_RECORD_INFOS: tuple[AmdgpuTargetRecordInfo, ...] = (
         processor="gfx1251",
         enum_value=22,
         doc="RDNA 4 gfx1251 target row.",
+        default_for_descriptor_set=True,
     ),
     AmdgpuTargetRecordInfo(
         processor="gfx9-4-generic",

@@ -17,3 +17,8 @@ amdgpu.target<gfx1250> @gfx1250_wave64 {subgroup_size = 64}
 
 // ERROR@+1: AMDGPU/026 {target_name="gfx1100_zero", subgroup_size="0", processor="gfx1100"}
 amdgpu.target<gfx1100> @gfx1100_zero {subgroup_size = 0}
+
+// ====
+
+// ERROR@+1: AMDGPU/046 {target_name="gfx1100_a0", revision="a0", processor="gfx1100"}
+amdgpu.target<gfx1100> @gfx1100_a0 {gfx1250_revision = a0}

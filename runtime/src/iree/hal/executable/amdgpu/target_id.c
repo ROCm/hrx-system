@@ -10,6 +10,7 @@ typedef enum iree_hal_amdgpu_target_feature_support_bits_e {
   IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_NONE = 0u,
   IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_SRAMECC = 1u << 0,
   IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_XNACK = 1u << 1,
+  IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_GFX1250_B0_SPECIFIC = 1u << 2,
 } iree_hal_amdgpu_target_feature_support_bits_t;
 typedef uint32_t iree_hal_amdgpu_target_feature_support_flags_t;
 
@@ -139,6 +140,14 @@ static void iree_hal_amdgpu_target_id_apply_known_feature_support(
                         IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_XNACK)) {
     target_id->xnack = IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_UNSUPPORTED;
   }
+  if (target_id->gfx1250_b0_specific ==
+          IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY &&
+      !iree_any_bit_set(
+          mapping->feature_support,
+          IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_GFX1250_B0_SPECIFIC)) {
+    target_id->gfx1250_b0_specific =
+        IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_UNSUPPORTED;
+  }
 }
 
 static bool iree_hal_amdgpu_parse_generic_processor(
@@ -200,7 +209,8 @@ static iree_status_t iree_hal_amdgpu_target_id_parse_processor(
 static iree_status_t iree_hal_amdgpu_target_id_parse_feature(
     iree_string_view_t feature,
     iree_hal_amdgpu_target_feature_state_t* inout_sramecc,
-    iree_hal_amdgpu_target_feature_state_t* inout_xnack) {
+    iree_hal_amdgpu_target_feature_state_t* inout_xnack,
+    iree_hal_amdgpu_target_feature_state_t* inout_gfx1250_b0_specific) {
   if (feature.size < 2) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU target feature suffix is empty");
@@ -225,6 +235,8 @@ static iree_status_t iree_hal_amdgpu_target_id_parse_feature(
     feature_state = inout_sramecc;
   } else if (iree_string_view_equal(name, IREE_SV("xnack"))) {
     feature_state = inout_xnack;
+  } else if (iree_string_view_equal(name, IREE_SV("gfx1250-b0-specific"))) {
+    feature_state = inout_gfx1250_b0_specific;
   } else {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported AMDGPU target feature suffix: %.*s",
@@ -246,6 +258,7 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_target_id_parse(
   memset(out_target_id, 0, sizeof(*out_target_id));
   out_target_id->sramecc = IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY;
   out_target_id->xnack = IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY;
+  out_target_id->gfx1250_b0_specific = IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY;
 
   const iree_hal_amdgpu_target_id_parse_flags_t known_flags =
       IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_HSA_PREFIX |
@@ -308,8 +321,17 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_target_id_parse(
       feature = feature_list;
     }
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_parse_feature(
-        feature, &out_target_id->sramecc, &out_target_id->xnack));
+        feature, &out_target_id->sramecc, &out_target_id->xnack,
+        &out_target_id->gfx1250_b0_specific));
     feature_list = remaining_features;
+  }
+  if (out_target_id->gfx1250_b0_specific !=
+          IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY &&
+      (out_target_id->kind != IREE_HAL_AMDGPU_TARGET_KIND_EXACT ||
+       !iree_string_view_equal(out_target_id->processor, IREE_SV("gfx1250")))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "gfx1250-b0-specific target feature requires processor gfx1250");
   }
   iree_hal_amdgpu_target_id_apply_known_feature_support(out_target_id);
   return iree_ok_status();
@@ -322,6 +344,44 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_target_id_parse_hsa_isa_name(
       IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_HSA_PREFIX |
           IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_FEATURE_SUFFIXES,
       out_target_id);
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_amdgpu_target_id_apply_asic_revision(
+    uint32_t asic_revision, iree_hal_amdgpu_target_id_t* target_id) {
+  IREE_ASSERT_ARGUMENT(target_id);
+  if (target_id->kind != IREE_HAL_AMDGPU_TARGET_KIND_EXACT ||
+      !iree_string_view_equal(target_id->processor, IREE_SV("gfx1250"))) {
+    return iree_ok_status();
+  }
+
+  const iree_hal_amdgpu_target_feature_state_t reported_state =
+      asic_revision == 0 ? IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF
+                         : IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON;
+  if (target_id->gfx1250_b0_specific ==
+      IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY) {
+    target_id->gfx1250_b0_specific = reported_state;
+    return iree_ok_status();
+  }
+  if (target_id->gfx1250_b0_specific != reported_state) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "gfx1250 ISA identity contradicts HSA ASIC revision %u", asic_revision);
+  }
+  return iree_ok_status();
+}
+
+IREE_API_EXPORT bool iree_hal_amdgpu_target_id_equal(
+    const iree_hal_amdgpu_target_id_t* lhs,
+    const iree_hal_amdgpu_target_id_t* rhs) {
+  IREE_ASSERT_ARGUMENT(lhs);
+  IREE_ASSERT_ARGUMENT(rhs);
+  return lhs->kind == rhs->kind && lhs->version.major == rhs->version.major &&
+         lhs->version.minor == rhs->version.minor &&
+         lhs->version.stepping == rhs->version.stepping &&
+         lhs->generic_version == rhs->generic_version &&
+         lhs->sramecc == rhs->sramecc && lhs->xnack == rhs->xnack &&
+         lhs->gfx1250_b0_specific == rhs->gfx1250_b0_specific &&
+         iree_string_view_equal(lhs->processor, rhs->processor);
 }
 
 typedef struct iree_hal_amdgpu_target_id_formatter_t {
@@ -382,6 +442,9 @@ iree_hal_amdgpu_target_id_format(const iree_hal_amdgpu_target_id_t* target_id,
       &formatter, IREE_SV("sramecc"), target_id->sramecc);
   iree_hal_amdgpu_target_id_formatter_append_feature(
       &formatter, IREE_SV("xnack"), target_id->xnack);
+  iree_hal_amdgpu_target_id_formatter_append_feature(
+      &formatter, IREE_SV("gfx1250-b0-specific"),
+      target_id->gfx1250_b0_specific);
   if (out_buffer_length != NULL) {
     *out_buffer_length = formatter.length;
   }
@@ -517,6 +580,12 @@ iree_hal_amdgpu_target_id_check_compatible(
                                                  agent_target_id->xnack)) {
     compatibility |= IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_XNACK;
   }
+  if (!iree_hal_amdgpu_target_feature_compatible(
+          code_object_target_id->gfx1250_b0_specific,
+          agent_target_id->gfx1250_b0_specific)) {
+    compatibility |=
+        IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GFX1250_REVISION;
+  }
   return compatibility;
 }
 
@@ -573,6 +642,12 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_target_compatibility_format(
                        IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_XNACK)) {
     iree_hal_amdgpu_target_compatibility_formatter_append_reason(
         &formatter, &reason_count, IREE_SV("xnack"));
+  }
+  if (iree_any_bit_set(
+          compatibility,
+          IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GFX1250_REVISION)) {
+    iree_hal_amdgpu_target_compatibility_formatter_append_reason(
+        &formatter, &reason_count, IREE_SV("gfx1250 revision"));
   }
   if (out_buffer_length != NULL) {
     *out_buffer_length = formatter.length;

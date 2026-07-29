@@ -19,6 +19,8 @@ struct DeviceLibraryTest : public ::testing::Test {
   static iree_allocator_t host_allocator;
   static iree_hal_amdgpu_libhsa_t libhsa;
   static iree_hal_amdgpu_topology_t topology;
+  static iree_hal_amdgpu_agent_target_t
+      gpu_agent_targets[IREE_HAL_AMDGPU_MAX_GPU_AGENT];
 
   static void SetUpTestSuite() {
     IREE_TRACE_SCOPE();
@@ -36,10 +38,18 @@ struct DeviceLibraryTest : public ::testing::Test {
     if (topology.gpu_agent_count == 0) {
       GTEST_SKIP() << "no GPU devices available, skipping tests";
     }
+    for (iree_host_size_t i = 0; i < topology.gpu_agent_count; ++i) {
+      IREE_ASSERT_OK(iree_hal_amdgpu_agent_target_query(
+          &libhsa, topology.gpu_agents[i], host_allocator,
+          &gpu_agent_targets[i]));
+    }
   }
 
   static void TearDownTestSuite() {
     IREE_TRACE_SCOPE();
+    for (iree_host_size_t i = 0; i < topology.gpu_agent_count; ++i) {
+      iree_hal_amdgpu_agent_target_deinitialize(&gpu_agent_targets[i]);
+    }
     iree_hal_amdgpu_topology_deinitialize(&topology);
     iree_hal_amdgpu_libhsa_deinitialize(&libhsa);
   }
@@ -47,13 +57,15 @@ struct DeviceLibraryTest : public ::testing::Test {
 iree_allocator_t DeviceLibraryTest::host_allocator;
 iree_hal_amdgpu_libhsa_t DeviceLibraryTest::libhsa;
 iree_hal_amdgpu_topology_t DeviceLibraryTest::topology;
+iree_hal_amdgpu_agent_target_t
+    DeviceLibraryTest::gpu_agent_targets[IREE_HAL_AMDGPU_MAX_GPU_AGENT];
 
 TEST_F(DeviceLibraryTest, Load) {
   IREE_TRACE_SCOPE();
 
   iree_hal_amdgpu_device_library_t library;
   IREE_ASSERT_OK(iree_hal_amdgpu_device_library_initialize(
-      &libhsa, &topology, host_allocator, &library));
+      &libhsa, &topology, gpu_agent_targets, host_allocator, &library));
 
   for (iree_host_size_t i = 0; i < topology.gpu_agent_count; ++i) {
     hsa_agent_t agent = topology.gpu_agents[i];

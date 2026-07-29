@@ -13,7 +13,6 @@
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
-#include "loom/target/arch/amdgpu/lower/memory_bank_conflict.h"
 
 iree_string_view_t loom_amdgpu_memory_space_name(
     loom_value_fact_memory_space_t memory_space) {
@@ -460,9 +459,6 @@ iree_status_t loom_amdgpu_record_memory_access_diagnostic(
 
   const iree_string_view_t packet_key =
       loom_amdgpu_memory_access_descriptor_key(descriptor_set, access);
-  const loom_amdgpu_memory_bank_conflict_summary_t bank_summary =
-      loom_amdgpu_memory_access_bank_conflict_summary(
-          access, loom_amdgpu_memory_bank_default_lds_geometry());
   return loom_target_low_legality_record_memory_access(
       context, op, loom_amdgpu_memory_space_name(access->source.memory_space),
       loom_amdgpu_memory_operation_name(kind), packet_key,
@@ -477,9 +473,7 @@ iree_status_t loom_amdgpu_record_memory_access_diagnostic(
       access->source.dynamic_term_count == 1
           ? access->source.dynamic_terms[0].byte_stride
           : 0,
-      access->source.vector_lane_byte_stride, bank_summary.bank_stride_words,
-      bank_summary.conflict_degree,
-      loom_amdgpu_memory_bank_conflict_kind_key(bank_summary.kind));
+      access->source.vector_lane_byte_stride);
 }
 
 static iree_status_t loom_amdgpu_record_memory_cache_policy(

@@ -6,7 +6,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/../../test/corpus/sanitizer/amdgpu_asan_actual.loom",
+          "{srcdir}/../../../../test/corpus/sanitizer/amdgpu_asan_actual.loom",
           "--case=@asan_global_store_valid_case",
           "--device=amdgpu",
           "--sanitizer=asan",
@@ -32,7 +32,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/../../test/corpus/sanitizer/amdgpu_asan_actual.loom",
+          "{srcdir}/../../../../test/corpus/sanitizer/amdgpu_asan_actual.loom",
           "--case=@asan_global_store_redzone_case",
           "--device=amdgpu",
           "--sanitizer=asan",

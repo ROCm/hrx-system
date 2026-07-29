@@ -6,7 +6,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/amdgpu_hal_actual.loom",
+          "{srcdir}/amdgpu_hal_actual.loom",
           "--device=amdgpu"
         ]
       },
@@ -28,7 +28,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/amdgpu_compile_rejection.loom",
+          "{srcdir}/amdgpu_compile_rejection.loom",
           "--case=@dynamic_workgroup_count_case",
           "--device=amdgpu"
         ]
@@ -67,7 +67,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/generated_tensor_cases.loom",
+          "{srcdir}/generated_tensor_cases.loom",
           "--case=@fp8_generated_fill",
           "--device=amdgpu"
         ]
@@ -89,7 +89,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/amdgpu_unused_kernargs.loom",
+          "{srcdir}/amdgpu_unused_kernargs.loom",
           "--case=@unused_kernargs_case",
           "--device=amdgpu"
         ]

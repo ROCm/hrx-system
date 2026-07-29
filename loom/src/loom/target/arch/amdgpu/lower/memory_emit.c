@@ -19,7 +19,6 @@
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
-#include "loom/target/arch/amdgpu/lower/memory_bank_conflict.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/util/numeric_format.h"
@@ -292,21 +291,13 @@ static iree_status_t loom_amdgpu_record_memory_packet_report(
       descriptor_set, packet->access.descriptor->key_string_offset);
   const loom_low_source_memory_operation_kind_t operation_kind =
       source->operation_kind;
-  const bool is_workgroup_memory =
-      source->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
-  loom_amdgpu_memory_bank_conflict_summary_t bank_summary = {0};
   iree_string_view_t fallback_reason = iree_string_view_empty();
-  iree_string_view_t bank_conflict_kind = iree_string_view_empty();
-  if (is_workgroup_memory) {
-    bank_summary = loom_amdgpu_memory_access_bank_conflict_summary(
-        &packet->access, loom_amdgpu_memory_bank_default_lds_geometry());
+  if (source->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
     fallback_reason = loom_amdgpu_memory_ds_addtid_reason_key(
         descriptor_set, loom_low_lower_context_module(context),
         loom_low_lower_context_source_function(context),
         loom_low_lower_context_bundle(context), &packet->access,
         operation_kind);
-    bank_conflict_kind =
-        loom_amdgpu_memory_bank_conflict_kind_key(bank_summary.kind);
   }
   loom_low_lower_memory_report_row_t row = {
       .function_name = loom_low_lower_context_function_name(context),
@@ -336,9 +327,6 @@ static iree_status_t loom_amdgpu_record_memory_packet_report(
           loom_amdgpu_memory_report_dynamic_stride_bytes(source),
       .vector_lane_stride_bytes = loom_amdgpu_memory_report_positive_u32(
           source->vector_lane_byte_stride),
-      .bank_stride_words = bank_summary.bank_stride_words,
-      .bank_conflict_degree = bank_summary.conflict_degree,
-      .bank_conflict_kind = bank_conflict_kind,
   };
   loom_amdgpu_memory_report_row_populate_storage_schema(context, source, &row);
   IREE_RETURN_IF_ERROR(

@@ -1,0 +1,181 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "compiles parameterized gfx1250 matrix kernel",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/gfx1250_configured_fragment_bank.loom",
+          "--backend=amdgpu-hal",
+          "--target=gfx1250",
+          "--config=test.fragment_bank.m_fragments=8",
+          "--config=test.fragment_bank.n_fragments=4",
+          "--config=test.fragment_bank.k_fragments=2",
+          "--config=test.fragment_bank.workgroup_size=32",
+          "--config=test.fragment_bank.scratch_elements=32",
+          "--output={tmp}/configured_fragment_bank.hal",
+          "--emit-target-artifact={tmp}/configured_fragment_bank.hsaco"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/configured_fragment_bank.hal",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/configured_fragment_bank.hsaco",
+          "non_empty": true
+        }
+      ]
+    },
+    {
+      "name": "selects invocation-compatible AMDGPU template families",
+      "steps": [
+        {
+          "name": "compile-gfx1100-exact",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/target_family_template_provider_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1100",
+              "--output={tmp}/target_family_gfx1100.hal",
+              "--emit-target-artifact={tmp}/target_family_gfx1100.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/target_family_gfx1100.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/target_family_gfx1100.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-gfx1251-exact",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/target_family_template_provider_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1251",
+              "--output={tmp}/target_family_gfx1251.hal",
+              "--emit-target-artifact={tmp}/target_family_gfx1251.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/target_family_gfx1251.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/target_family_gfx1251.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "reject-incompatible-gfx1200-family",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/target_family_template_provider_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx1200",
+              "--output={tmp}/target_family_gfx1200.hal"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "error [LOWERING/045]",
+              "target_mismatch"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "resolves target selection after root and config selection",
+      "steps": [
+        {
+          "name": "compile-authored-target-root",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/selected_root_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--root=@selected_store_i32",
+              "--output={tmp}/selected_root_amdgpu.hal",
+              "--emit-target-artifact={tmp}/selected_root_amdgpu.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/selected_root_amdgpu.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/selected_root_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-configured-invocation-target-root",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/selected_root_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--root=@configured_targetless_store_i32",
+              "--target=gfx1151",
+              "--config=test.targetless.workgroups_x=2",
+              "--config=test.targetless.workgroup_size_x=64",
+              "--output={tmp}/targetless_root_amdgpu.hal",
+              "--emit-target-artifact={tmp}/targetless_root_amdgpu.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/targetless_root_amdgpu.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/targetless_root_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "reject-targetless-root-without-invocation-target",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/selected_root_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--root=@configured_targetless_store_i32",
+              "--config=test.targetless.workgroups_x=2",
+              "--config=test.targetless.workgroup_size_x=64",
+              "--output={tmp}/missing_target_amdgpu.hal"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "HAL backend 'amdgpu-hal' requires --target= when 1 kernel.def root omit target(...) attrs"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

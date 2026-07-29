@@ -38,6 +38,16 @@ extern "C" {
 // properties used for HAL binding resources.
 #define LOOM_AMDGPU_HAL_BUFFER_RESOURCE_FLAGS UINT32_C(0x31027000)
 
+// gfx1250 silicon revision selected for compilation and native emission.
+typedef enum loom_amdgpu_gfx1250_revision_e {
+  // No gfx1250 revision applies to the selected processor.
+  LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED = 0,
+  // gfx1250 A0 silicon behavior and errata.
+  LOOM_AMDGPU_GFX1250_REVISION_A0 = 1,
+  // gfx1250 B0 silicon behavior.
+  LOOM_AMDGPU_GFX1250_REVISION_B0 = 2,
+} loom_amdgpu_gfx1250_revision_t;
+
 typedef enum loom_amdgpu_elf_feature_flag_bits_e {
   // Mask selecting the AMDHSA code-object v4+ XNACK feature state.
   LOOM_AMDGPU_ELF_FEATURE_XNACK_MASK_V4 = UINT32_C(0x300),
@@ -130,10 +140,14 @@ typedef enum loom_amdgpu_processor_info_flag_bits_e {
   // Clustered dispatches provide workgroup and cluster identity in the GFX1250
   // launch-state TTMP and IB_STS2 ABI.
   LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE = 1u << 1,
+  // Hardware kernel entries require the GFX125x initial VMEM and replay-mode
+  // envelope before their scheduled instruction body.
+  LOOM_AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE = 1u << 2,
   // Processor info flags known by the AMDGPU target package.
   LOOM_AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS =
       LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION |
-      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
+      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE |
+      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE,
 } loom_amdgpu_processor_info_flag_bits_t;
 
 // Bitset of loom_amdgpu_processor_info_flag_bits_t values.
@@ -352,6 +366,14 @@ typedef struct loom_amdgpu_processor_info_t {
   // Instruction and scheduling feature profiles for this processor.
   loom_amdgpu_processor_feature_info_t features;
 } loom_amdgpu_processor_info_t;
+
+// AMDGPU compilation target selected by tooling or target IR.
+typedef struct loom_amdgpu_target_profile_t {
+  // Exact or generic processor facts selected for compilation.
+  const loom_amdgpu_processor_info_t* processor;
+  // gfx1250 silicon revision, or UNSPECIFIED for other processors.
+  loom_amdgpu_gfx1250_revision_t gfx1250_revision;
+} loom_amdgpu_target_profile_t;
 
 typedef struct loom_amdgpu_amdhsa_target_id_t {
   // Processor row selected by the target-id processor component.

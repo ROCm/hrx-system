@@ -46,8 +46,10 @@ static iree_status_t loom_amdgpu_hal_testbench_query_descriptor_set_requirement(
   IREE_RETURN_IF_ERROR(context->artifact_provider->select_device_target(
       context->artifact_provider, &context->runtime, context->host_allocator,
       &target));
+  const loom_amdgpu_target_profile_t* profile =
+      (const loom_amdgpu_target_profile_t*)target.data;
   const loom_amdgpu_processor_info_t* processor =
-      (const loom_amdgpu_processor_info_t*)target.data;
+      profile != NULL ? profile->processor : NULL;
   const bool satisfied =
       processor != NULL && iree_string_view_equal(processor->descriptor_set.key,
                                                   required_descriptor_set);

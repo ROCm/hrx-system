@@ -147,6 +147,8 @@ typedef enum loom_amdgpu_encoding_format_e {
   LOOM_AMDGPU_ENCODING_FORMAT_VOPDXY = 67,
   // Wave32 dual-VALU packet format with a shared literal payload.
   LOOM_AMDGPU_ENCODING_FORMAT_VOPDXY_LITERAL = 68,
+  // GFX125x vector one-source format with a low-half VGPR source.
+  LOOM_AMDGPU_ENCODING_FORMAT_VOP1_VGPR = 69,
 } loom_amdgpu_encoding_format_t;
 
 typedef uint8_t loom_amdgpu_encoding_format_flags_t;

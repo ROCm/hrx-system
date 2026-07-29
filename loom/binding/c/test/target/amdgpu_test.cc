@@ -202,6 +202,7 @@ TargetProfilePtr CreateTargetProfile(
       /*.next=*/nullptr,
       /*.identifier=*/loomc_make_cstring_view(processor),
       /*.processor=*/loomc_make_cstring_view(processor),
+      /*.gfx1250_revision=*/LOOMC_AMDGPU_GFX1250_REVISION_DEFAULT,
   };
   loomc_target_profile_t* profile = nullptr;
   loomc_status_t status = loomc_target_profile_create_amdgpu(
@@ -218,6 +219,58 @@ TargetSelectionPtr CreateTargetSelection(
       profile.get(), loomc_allocator_system(), &selection);
   LOOMC_EXPECT_OK(status);
   return TargetSelectionPtr(selection);
+}
+
+TEST(AmdgpuTargetTest, TargetProfilePreservesGfx1250Revision) {
+  TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
+  struct TestCase {
+    loomc_amdgpu_gfx1250_revision_t requested_revision;
+    loomc_amdgpu_gfx1250_revision_t expected_revision;
+  };
+  const TestCase test_cases[] = {
+      {LOOMC_AMDGPU_GFX1250_REVISION_DEFAULT, LOOMC_AMDGPU_GFX1250_REVISION_B0},
+      {LOOMC_AMDGPU_GFX1250_REVISION_A0, LOOMC_AMDGPU_GFX1250_REVISION_A0},
+      {LOOMC_AMDGPU_GFX1250_REVISION_B0, LOOMC_AMDGPU_GFX1250_REVISION_B0},
+  };
+  for (const TestCase& test_case : test_cases) {
+    loomc_amdgpu_profile_options_t options = {
+        /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
+        /*.structure_size=*/sizeof(options),
+        /*.next=*/nullptr,
+        /*.identifier=*/loomc_make_cstring_view("gfx1250-test"),
+        /*.processor=*/loomc_make_cstring_view("gfx1250"),
+        /*.gfx1250_revision=*/test_case.requested_revision,
+    };
+    loomc_target_profile_t* profile = nullptr;
+    LOOMC_EXPECT_OK(
+        loomc_target_profile_create_amdgpu(target_environment.get(), &options,
+                                           loomc_allocator_system(), &profile));
+    TargetProfilePtr profile_ptr(profile);
+    ASSERT_NE(profile_ptr.get(), nullptr);
+    EXPECT_EQ(
+        ToString(loomc_amdgpu_target_profile_processor(profile_ptr.get())),
+        "gfx1250");
+    EXPECT_EQ(loomc_amdgpu_target_profile_gfx1250_revision(profile_ptr.get()),
+              test_case.expected_revision);
+  }
+}
+
+TEST(AmdgpuTargetTest, RejectsGfx1250RevisionForOtherProcessors) {
+  TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
+  loomc_amdgpu_profile_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.identifier=*/loomc_make_cstring_view("gfx1100-a0"),
+      /*.processor=*/loomc_make_cstring_view("gfx1100"),
+      /*.gfx1250_revision=*/LOOMC_AMDGPU_GFX1250_REVISION_A0,
+  };
+  loomc_target_profile_t* profile = nullptr;
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_target_profile_create_amdgpu(target_environment.get(), &options,
+                                         loomc_allocator_system(), &profile));
+  EXPECT_EQ(profile, nullptr);
 }
 
 ResultPtr EmitModule(loomc_target_environment_t* target_environment,

@@ -19,6 +19,7 @@
 #include "loom/target/arch/amdgpu/planning/vopd_plan.h"
 #include "loom/target/emit/native/amdgpu/assembly.h"
 #include "loom/target/emit/native/amdgpu/encoding.h"
+#include "loom/target/emit/native/amdgpu/hal_kernel_library.h"
 #include "loom/target/emit/native/amdgpu/spill_lowering.h"
 #include "loom/tools/loom-check/diagnostics.h"
 #include "loom/tools/loom-check/low_emit.h"
@@ -69,6 +70,9 @@ static bool loom_amdgpu_loom_check_emit_provider_matches(
   (void)provider;
   return iree_string_view_equal(target_name, IREE_SV("amdgpu-assembly")) ||
          iree_string_view_equal(target_name, IREE_SV("amdgpu-asm")) ||
+         iree_string_view_equal(target_name,
+                                IREE_SV("amdgpu-kernel-assembly")) ||
+         iree_string_view_equal(target_name, IREE_SV("amdgpu-kernel-asm")) ||
          iree_string_view_equal(target_name,
                                 IREE_SV("amdgpu-allocation-json")) ||
          iree_string_view_equal(target_name, IREE_SV("amdgpu-packet-json")) ||
@@ -358,10 +362,61 @@ static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
   return iree_ok_status();
 }
 
+static bool loom_amdgpu_loom_check_is_kernel_assembly_target(
+    iree_string_view_t target_name) {
+  return iree_string_view_equal(target_name,
+                                IREE_SV("amdgpu-kernel-assembly")) ||
+         iree_string_view_equal(target_name, IREE_SV("amdgpu-kernel-asm"));
+}
+
+static iree_status_t loom_amdgpu_loom_check_emit_hal_kernel_assembly(
+    const loom_check_emit_provider_request_t* request) {
+  const loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink =
+          {
+              .fn = loom_check_diagnostic_collector_sink,
+              .user_data = request->diagnostic_collector,
+          },
+      .source_resolver = request->source_resolver,
+      .max_errors = 20,
+      .capture_target_listing = true,
+  };
+  bool emitted = false;
+  loom_amdgpu_hal_kernel_library_t library = {0};
+  iree_status_t status = loom_amdgpu_emit_hal_kernel_library(
+      request->module, &options, request->host_allocator, &emitted, &library);
+  if (iree_status_is_ok(status) && emitted) {
+    if (!iree_string_view_equal(library.target_listing_format,
+                                IREE_SV("amdgpu-assembly")) ||
+        library.target_listing_data == NULL) {
+      status = iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "AMDGPU HAL kernel library omitted its requested assembly listing");
+    } else {
+      status = iree_string_builder_append_string(
+          &request->result->actual_output,
+          iree_make_string_view(library.target_listing_data,
+                                library.target_listing_data_length));
+    }
+  } else if (iree_status_is_ok(status) &&
+             (request->diagnostic_collector == NULL ||
+              request->diagnostic_collector->count == 0)) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU HAL kernel library did not select an emittable kernel");
+  }
+  loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                              request->host_allocator);
+  return status;
+}
+
 static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request) {
   (void)provider;
+  if (loom_amdgpu_loom_check_is_kernel_assembly_target(request->target_name)) {
+    return loom_amdgpu_loom_check_emit_hal_kernel_assembly(request);
+  }
   loom_amdgpu_loom_check_emit_options_t options;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_loom_check_parse_emit_options(request, &options));
@@ -394,6 +449,10 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
   IREE_RETURN_IF_ERROR(loom_amdgpu_loom_check_build_schedule_models(
       request, options.function_symbol_name, &residency_model,
       &schedule_pair_affinities, &schedule_state_reads));
+  if (request->diagnostic_collector != NULL &&
+      request->diagnostic_collector->count != 0) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
       request, options.function_symbol_name, options.schedule_strategy,
       options.schedule_diagnostic_flags, options.allocation_budgets,
@@ -452,7 +511,8 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_append_names(
   (void)provider;
   return iree_string_builder_append_cstring(
       builder,
-      "amdgpu-assembly, amdgpu-asm, amdgpu-allocation-json, "
+      "amdgpu-assembly, amdgpu-asm, amdgpu-kernel-assembly, "
+      "amdgpu-kernel-asm, amdgpu-allocation-json, "
       "amdgpu-packet-json, amdgpu-vopd-plan-json, "
       "amdgpu-wait-counter-plan-json, amdgpu-wait-state-plan, "
       "amdgpu-wait-state-plan-json, amdgpu-native");

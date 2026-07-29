@@ -258,17 +258,25 @@ loom_cc_library(
 
 loom_cc_library(
     name = "low_verify",
-    srcs = ["low_verify.c"],
-    hdrs = ["low_verify.h"],
+    srcs = [
+        "gfx1250_a0_errata.c",
+        "low_verify.c",
+    ],
+    hdrs = [
+        "gfx1250_a0_errata.h",
+        "low_verify.h",
+    ],
     deps = [
         ":error_defs",
         ":low_aliases",
+        "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/target/arch/amdgpu/encoding",
         "//loom/src/loom/target/arch/amdgpu/ops",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
     ],
 )

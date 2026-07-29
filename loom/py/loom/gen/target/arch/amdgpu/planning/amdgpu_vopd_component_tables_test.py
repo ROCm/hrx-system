@@ -25,6 +25,7 @@ def test_vopd_descriptor_set_groups_follow_target_info() -> None:
         "amdgpu.rdna3.core",
         "amdgpu.rdna3_5.core",
         "amdgpu.rdna4.core",
+        "amdgpu.rdna4.gfx1251.core",
         "amdgpu.rdna4.gfx125x.core",
     )
     assert amdgpu_vopd_component_tables._descriptor_set_keys_for_group(
@@ -42,6 +43,7 @@ def test_vopd_descriptor_set_groups_follow_target_info() -> None:
         descriptor_set_infos,
     ) == (
         "amdgpu.gfx12_5.generic.core",
+        "amdgpu.rdna4.gfx1251.core",
         "amdgpu.rdna4.gfx125x.core",
     )
 

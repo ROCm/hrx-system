@@ -979,6 +979,68 @@ ERR_AMDGPU_044 = ErrorDef(
     ),
 )
 
+# ERR_AMDGPU_045: AMDGPU HAL-kernel ABI fixed live-ins overlap.
+ERR_AMDGPU_045 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=45,
+    severity=Severity.ERROR,
+    summary="AMDGPU HAL-kernel ABI fixed live-ins overlap.",
+    message=(
+        "AMDGPU HAL-kernel ABI live-in source '{source_name}' and "
+        "'{conflicting_source_name}' both require fixed SGPR {fixed_location}"
+    ),
+    params=(
+        ErrorParam("source_name", ParamKind.STRING),
+        ErrorParam("conflicting_source_name", ParamKind.STRING),
+        ErrorParam("fixed_location", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Use one live-in source that represents all fields imported from the "
+        "fixed register"
+    ),
+)
+
+# ERR_AMDGPU_046: gfx1250 revision targets a different processor.
+ERR_AMDGPU_046 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=46,
+    severity=Severity.ERROR,
+    summary="gfx1250 revision targets a different processor.",
+    message=(
+        "AMDGPU target '@{target_name}' selects gfx1250 revision "
+        "'{revision}' for processor '{processor}'"
+    ),
+    params=(
+        ErrorParam("target_name", ParamKind.STRING),
+        ErrorParam("revision", ParamKind.STRING),
+        ErrorParam("processor", ParamKind.STRING),
+    ),
+    fix_hint=("Remove the gfx1250 revision or select the gfx1250 processor"),
+)
+
+# ERR_AMDGPU_047: gfx1250 A0 packet requires stepping legalization.
+ERR_AMDGPU_047 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=47,
+    severity=Severity.ERROR,
+    summary="gfx1250 A0 packet requires stepping legalization.",
+    message=(
+        "AMDGPU descriptor '{descriptor_name}' in '@{function_name}' is not "
+        "legal for gfx1250 revision '{revision}' in descriptor set "
+        "'{descriptor_set_name}': erratum '{erratum_key}' requires "
+        "legalization '{legalization_key}'"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("descriptor_name", ParamKind.STRING),
+        ErrorParam("descriptor_set_name", ParamKind.STRING),
+        ErrorParam("revision", ParamKind.STRING),
+        ErrorParam("erratum_key", ParamKind.STRING),
+        ErrorParam("legalization_key", ParamKind.STRING),
+    ),
+    fix_hint=("Apply the named gfx1250 A0 legalization before native emission"),
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_006,
@@ -1020,4 +1082,7 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_042,
     ERR_AMDGPU_043,
     ERR_AMDGPU_044,
+    ERR_AMDGPU_045,
+    ERR_AMDGPU_046,
+    ERR_AMDGPU_047,
 )

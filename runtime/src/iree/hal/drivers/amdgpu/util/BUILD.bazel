@@ -101,6 +101,28 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "agent_target",
+    srcs = ["agent_target.c"],
+    hdrs = ["agent_target.h"],
+    deps = [
+        ":libhsa",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/executable/amdgpu:target_id",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "agent_target_test",
+    srcs = ["agent_target_test.cc"],
+    deps = [
+        ":agent_target",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "topology_test",
     srcs = ["topology_test.cc"],
@@ -356,6 +378,7 @@ iree_runtime_cc_library(
     srcs = ["device_library.c"],
     hdrs = ["device_library.h"],
     deps = [
+        ":agent_target",
         ":device_library_target",
         ":libhsa",
         ":loaded_code_object",
@@ -381,6 +404,7 @@ iree_runtime_cc_library(
     name = "device_library_target",
     srcs = ["device_library_target.c"],
     hdrs = ["device_library_target.h"],
+    textual_hdrs = ["device_library_target_map.inl"],
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal/executable/amdgpu:target_id",
@@ -391,6 +415,7 @@ iree_runtime_cc_library(
     name = "util",
     deps = [
         ":affinity",
+        ":agent_target",
         ":block_pool",
         ":device_library",
         ":device_library_target",

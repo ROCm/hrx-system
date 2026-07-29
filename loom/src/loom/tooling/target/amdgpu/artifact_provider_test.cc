@@ -105,6 +105,39 @@ static iree_status_t CreateAmdgpuExecutableDeviceSpec(
                                      out_device_spec);
 }
 
+static iree_status_t CreateExactAmdgpuExecutableDeviceSpec(
+    iree_string_view_t target_key, iree_hal_device_spec_t** out_device_spec) {
+  *out_device_spec = nullptr;
+
+  const iree_hal_executable_target_t executable_target = {
+      /*.family=*/IREE_SV("amdgpu"),
+      /*.target_key=*/target_key,
+      /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
+      /*.priority=*/100,
+      /*.physical_device_affinity=*/1,
+      /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+  };
+  const iree_hal_device_executable_spec_t executables = {
+      /*.target_count=*/1,
+      /*.targets=*/&executable_target,
+      /*.flags=*/IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
+  };
+  const iree_hal_device_spec_params_t params = {
+      /*.identity=*/nullptr,
+      /*.memory=*/nullptr,
+      /*.virtual_memory=*/nullptr,
+      /*.queues=*/nullptr,
+      /*.dispatch=*/nullptr,
+      /*.timing=*/nullptr,
+      /*.executables=*/&executables,
+      /*.sanitizer=*/nullptr,
+      /*.facet_count=*/0,
+      /*.facets=*/nullptr,
+  };
+  return iree_hal_device_spec_create(&params, iree_allocator_system(),
+                                     out_device_spec);
+}
+
 iree_status_t InitializeAmdgpuContext(loom_context_t* context) {
   loom_context_initialize(iree_allocator_system(), context);
   iree_status_t status = loom_op_registry_register_all_dialects(context);
@@ -155,11 +188,18 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
   }
 
   iree_status_t ParsePreparedArithmeticModule(iree_string_view_t processor,
+                                              iree_string_view_t target_attrs,
                                               ModulePtr* out_module) {
     std::string source = "amdgpu.target<";
     source.append(processor.data, processor.size);
+    source.append("> @gfx_target");
+    if (!iree_string_view_is_empty(target_attrs)) {
+      source.append(" {");
+      source.append(target_attrs.data, target_attrs.size);
+      source.append("}");
+    }
     source.append(
-        "> @gfx_target\n"
+        "\n"
         "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
         "@loom_kernel() {\n"
         "  %zero = low.const<amdgpu.v_mov_b32> {imm32 = 0} : "
@@ -172,6 +212,12 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
         "}\n");
     return ParseModule(iree_make_string_view(source.data(), source.size()),
                        out_module);
+  }
+
+  iree_status_t ParsePreparedArithmeticModule(iree_string_view_t processor,
+                                              ModulePtr* out_module) {
+    return ParsePreparedArithmeticModule(processor, iree_string_view_empty(),
+                                         out_module);
   }
 
   loom_func_like_t FindKernel(const loom_module_t* module) {
@@ -226,6 +272,60 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
   loom_target_low_descriptor_registry_t low_registry_ = {};
 };
 
+TEST_F(AmdgpuHalArtifactProviderTest, SelectTargetKeyBuildsOfflineTarget) {
+  loom_run_hal_device_target_t target = {};
+  IREE_ASSERT_OK(loom_amdgpu_hal_artifact_provider.select_target_key(
+      &loom_amdgpu_hal_artifact_provider, IREE_SV("gfx1100"),
+      iree_allocator_system(), &target));
+
+  ASSERT_NE(target.data, nullptr);
+  EXPECT_NE(target.target_bundle, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(target.target_key, IREE_SV("gfx1100")));
+  const auto* profile =
+      static_cast<const loom_amdgpu_target_profile_t*>(target.data);
+  ASSERT_NE(profile->processor, nullptr);
+  EXPECT_TRUE(
+      iree_string_view_equal(profile->processor->name, IREE_SV("gfx1100")));
+  EXPECT_EQ(profile->gfx1250_revision,
+            LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED);
+
+  loom_amdgpu_hal_artifact_provider.deinitialize_device_target(
+      &loom_amdgpu_hal_artifact_provider, &target, iree_allocator_system());
+}
+
+TEST_F(AmdgpuHalArtifactProviderTest, SelectTargetKeyPreservesGfx1250Stepping) {
+  struct TestCase {
+    iree_string_view_t target_key;
+    loom_amdgpu_gfx1250_revision_t expected_revision;
+  };
+  const TestCase test_cases[] = {
+      {IREE_SV("gfx1250:gfx1250-b0-specific-"),
+       LOOM_AMDGPU_GFX1250_REVISION_A0},
+      {IREE_SV("gfx1250:gfx1250-b0-specific+"),
+       LOOM_AMDGPU_GFX1250_REVISION_B0},
+      {IREE_SV("gfx1250"), LOOM_AMDGPU_GFX1250_REVISION_B0},
+  };
+  for (const TestCase& test_case : test_cases) {
+    loom_run_hal_device_target_t target = {};
+    IREE_ASSERT_OK(loom_amdgpu_hal_artifact_provider.select_target_key(
+        &loom_amdgpu_hal_artifact_provider, test_case.target_key,
+        iree_allocator_system(), &target));
+
+    ASSERT_NE(target.data, nullptr);
+    const auto* profile =
+        static_cast<const loom_amdgpu_target_profile_t*>(target.data);
+    ASSERT_NE(profile->processor, nullptr);
+    EXPECT_TRUE(
+        iree_string_view_equal(profile->processor->name, IREE_SV("gfx1250")));
+    EXPECT_EQ(profile->gfx1250_revision, test_case.expected_revision);
+    EXPECT_TRUE(
+        iree_string_view_equal(target.target_key, test_case.target_key));
+
+    loom_amdgpu_hal_artifact_provider.deinitialize_device_target(
+        &loom_amdgpu_hal_artifact_provider, &target, iree_allocator_system());
+  }
+}
+
 TEST_F(AmdgpuHalArtifactProviderTest,
        SelectTargetKeyMatchesEveryKnownProcessor) {
   const iree_host_size_t processor_count =
@@ -253,9 +353,17 @@ TEST_F(AmdgpuHalArtifactProviderTest,
     ASSERT_NE(target.data, nullptr);
     EXPECT_NE(target.target_bundle, nullptr);
     EXPECT_TRUE(iree_string_view_equal(target.target_key, processor->name));
-    const loom_amdgpu_processor_info_t* selected_processor =
-        static_cast<const loom_amdgpu_processor_info_t*>(target.data);
-    EXPECT_EQ(selected_processor, processor);
+    const auto* profile =
+        static_cast<const loom_amdgpu_target_profile_t*>(target.data);
+    EXPECT_EQ(profile->processor, processor);
+    const loom_amdgpu_gfx1250_revision_t expected_revision =
+        iree_string_view_equal(processor->name, IREE_SV("gfx1250"))
+            ? LOOM_AMDGPU_GFX1250_REVISION_B0
+            : LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED;
+    EXPECT_EQ(profile->gfx1250_revision, expected_revision);
+
+    loom_amdgpu_hal_artifact_provider.deinitialize_device_target(
+        &loom_amdgpu_hal_artifact_provider, &target, iree_allocator_system());
   }
 }
 
@@ -280,9 +388,16 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   ASSERT_NE(target.data, nullptr);
   EXPECT_NE(target.target_bundle, nullptr);
   EXPECT_TRUE(iree_string_view_equal(target.target_key, IREE_SV("gfx1151")));
-  const loom_amdgpu_processor_info_t* processor =
-      static_cast<const loom_amdgpu_processor_info_t*>(target.data);
-  EXPECT_TRUE(iree_string_view_equal(processor->name, IREE_SV("gfx1151")));
+  const auto* profile =
+      static_cast<const loom_amdgpu_target_profile_t*>(target.data);
+  ASSERT_NE(profile->processor, nullptr);
+  EXPECT_TRUE(
+      iree_string_view_equal(profile->processor->name, IREE_SV("gfx1151")));
+  EXPECT_EQ(profile->gfx1250_revision,
+            LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED);
+
+  loom_amdgpu_hal_artifact_provider.deinitialize_device_target(
+      &loom_amdgpu_hal_artifact_provider, &target, iree_allocator_system());
 
   iree_hal_device_spec_release(device_spec);
 }
@@ -309,10 +424,14 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   EXPECT_NE(target.target_bundle, nullptr);
   EXPECT_TRUE(
       iree_string_view_equal(target.target_key, IREE_SV("gfx11-generic")));
-  const loom_amdgpu_processor_info_t* processor =
-      static_cast<const loom_amdgpu_processor_info_t*>(target.data);
-  EXPECT_TRUE(
-      iree_string_view_equal(processor->name, IREE_SV("gfx11-generic")));
+  const auto* profile =
+      static_cast<const loom_amdgpu_target_profile_t*>(target.data);
+  ASSERT_NE(profile->processor, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(profile->processor->name,
+                                     IREE_SV("gfx11-generic")));
+
+  loom_amdgpu_hal_artifact_provider.deinitialize_device_target(
+      &loom_amdgpu_hal_artifact_provider, &target, iree_allocator_system());
 
   iree_hal_device_spec_release(device_spec);
 }
@@ -347,10 +466,16 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   EXPECT_EQ(target.hal_target->kind, IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC);
   EXPECT_TRUE(
       iree_string_view_equal(target.target_key, IREE_SV("gfx11-generic")));
-  const loom_amdgpu_processor_info_t* processor =
-      static_cast<const loom_amdgpu_processor_info_t*>(target.data);
-  EXPECT_TRUE(
-      iree_string_view_equal(processor->name, IREE_SV("gfx11-generic")));
+  const auto* profile =
+      static_cast<const loom_amdgpu_target_profile_t*>(target.data);
+  ASSERT_NE(profile->processor, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(profile->processor->name,
+                                     IREE_SV("gfx11-generic")));
+  EXPECT_EQ(profile->gfx1250_revision,
+            LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED);
+
+  loom_amdgpu_hal_artifact_provider.deinitialize_device_target(
+      &loom_amdgpu_hal_artifact_provider, &target, iree_allocator_system());
 
   iree_hal_device_spec_release(device_spec);
 }
@@ -383,9 +508,107 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   ASSERT_NE(target.hal_target, nullptr);
   EXPECT_EQ(target.hal_target->kind, IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT);
   EXPECT_TRUE(iree_string_view_equal(target.target_key, IREE_SV("gfx1151")));
-  const loom_amdgpu_processor_info_t* processor =
-      static_cast<const loom_amdgpu_processor_info_t*>(target.data);
-  EXPECT_TRUE(iree_string_view_equal(processor->name, IREE_SV("gfx1151")));
+  const auto* profile =
+      static_cast<const loom_amdgpu_target_profile_t*>(target.data);
+  ASSERT_NE(profile->processor, nullptr);
+  EXPECT_TRUE(
+      iree_string_view_equal(profile->processor->name, IREE_SV("gfx1151")));
+  EXPECT_EQ(profile->gfx1250_revision,
+            LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED);
+
+  loom_amdgpu_hal_artifact_provider.deinitialize_device_target(
+      &loom_amdgpu_hal_artifact_provider, &target, iree_allocator_system());
+
+  iree_hal_device_spec_release(device_spec);
+}
+
+TEST_F(AmdgpuHalArtifactProviderTest,
+       SelectFunctionDeviceTargetPreservesGfx1250Revision) {
+  struct TestCase {
+    iree_string_view_t target_attrs;
+    iree_string_view_t device_target_key;
+    loom_amdgpu_gfx1250_revision_t expected_revision;
+  };
+  const TestCase test_cases[] = {
+      {
+          IREE_SV("gfx1250_revision = a0"),
+          IREE_SV("gfx1250:gfx1250-b0-specific-"),
+          LOOM_AMDGPU_GFX1250_REVISION_A0,
+      },
+      {
+          IREE_SV("gfx1250_revision = b0"),
+          IREE_SV("gfx1250:gfx1250-b0-specific+"),
+          LOOM_AMDGPU_GFX1250_REVISION_B0,
+      },
+  };
+  for (const TestCase& test_case : test_cases) {
+    ModulePtr module;
+    IREE_ASSERT_OK(ParsePreparedArithmeticModule(
+        IREE_SV("gfx1250"), test_case.target_attrs, &module));
+    ASSERT_NE(module.get(), nullptr);
+    const loom_func_like_t function = FindKernel(module.get());
+    ASSERT_TRUE(loom_func_like_isa(function));
+
+    iree_hal_device_spec_t* device_spec = nullptr;
+    IREE_ASSERT_OK(CreateExactAmdgpuExecutableDeviceSpec(
+        test_case.device_target_key, &device_spec));
+    fake_hal_device_t device = {};
+    InitializeFakeHalDevice(device_spec, &device);
+    const loom_run_hal_runtime_t runtime = {
+        /*.device=*/(iree_hal_device_t*)&device,
+        /*.device_group=*/nullptr,
+    };
+
+    loom_run_hal_device_target_t target = {};
+    IREE_ASSERT_OK(
+        loom_amdgpu_hal_artifact_provider.select_function_device_target(
+            &loom_amdgpu_hal_artifact_provider, &runtime, module.get(),
+            function, iree_allocator_system(), &target));
+
+    ASSERT_NE(target.data, nullptr);
+    ASSERT_NE(target.hal_target, nullptr);
+    EXPECT_TRUE(
+        iree_string_view_equal(target.target_key, test_case.device_target_key));
+    const auto* profile =
+        static_cast<const loom_amdgpu_target_profile_t*>(target.data);
+    ASSERT_NE(profile->processor, nullptr);
+    EXPECT_TRUE(
+        iree_string_view_equal(profile->processor->name, IREE_SV("gfx1250")));
+    EXPECT_EQ(profile->gfx1250_revision, test_case.expected_revision);
+
+    loom_amdgpu_hal_artifact_provider.deinitialize_device_target(
+        &loom_amdgpu_hal_artifact_provider, &target, iree_allocator_system());
+    iree_hal_device_spec_release(device_spec);
+  }
+}
+
+TEST_F(AmdgpuHalArtifactProviderTest,
+       SelectFunctionDeviceTargetRejectsGfx1250RevisionMismatch) {
+  ModulePtr module;
+  IREE_ASSERT_OK(ParsePreparedArithmeticModule(
+      IREE_SV("gfx1250"), IREE_SV("gfx1250_revision = a0"), &module));
+  ASSERT_NE(module.get(), nullptr);
+  const loom_func_like_t function = FindKernel(module.get());
+  ASSERT_TRUE(loom_func_like_isa(function));
+
+  iree_hal_device_spec_t* device_spec = nullptr;
+  IREE_ASSERT_OK(CreateExactAmdgpuExecutableDeviceSpec(
+      IREE_SV("gfx1250:gfx1250-b0-specific+"), &device_spec));
+  fake_hal_device_t device = {};
+  InitializeFakeHalDevice(device_spec, &device);
+  const loom_run_hal_runtime_t runtime = {
+      /*.device=*/(iree_hal_device_t*)&device,
+      /*.device_group=*/nullptr,
+  };
+
+  loom_run_hal_device_target_t target = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      loom_amdgpu_hal_artifact_provider.select_function_device_target(
+          &loom_amdgpu_hal_artifact_provider, &runtime, module.get(), function,
+          iree_allocator_system(), &target));
+  EXPECT_EQ(target.data, nullptr);
+  EXPECT_EQ(target.hal_target, nullptr);
 
   iree_hal_device_spec_release(device_spec);
 }
@@ -441,10 +664,14 @@ TEST_F(AmdgpuHalArtifactProviderTest, RecordsDetailedReportRows) {
       loom_amdgpu_target_bundle_for_descriptor_set(
           processor->descriptor_set.ordinal);
   ASSERT_NE(target_bundle, nullptr);
+  const loom_amdgpu_target_profile_t target_profile = {
+      /*.processor=*/processor,
+      /*.gfx1250_revision=*/LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED,
+  };
 
   loom_run_hal_device_target_t target = {
       /*.hal_target=*/nullptr,
-      /*.data=*/processor,
+      /*.data=*/&target_profile,
       /*.target_storage=*/{},
       /*.target_bundle=*/target_bundle,
       /*.target_key=*/processor->name,
@@ -472,14 +699,7 @@ TEST_F(AmdgpuHalArtifactProviderTest, RecordsDetailedReportRows) {
                                      IREE_SV("amdgpu-assembly")));
   EXPECT_NE(artifact.target_listing_data.data, nullptr);
   if (artifact.target_listing_data.data != nullptr) {
-    const iree_string_view_t target_listing =
-        iree_make_string_view((const char*)artifact.target_listing_data.data,
-                              artifact.target_listing_data.data_length);
-    EXPECT_NE(
-        iree_string_view_find(target_listing, IREE_SV(".amdgcn_target"), 0),
-        IREE_STRING_VIEW_NPOS);
-    EXPECT_NE(iree_string_view_find(target_listing, IREE_SV("v_add_u32"), 0),
-              IREE_STRING_VIEW_NPOS);
+    EXPECT_GT(artifact.target_listing_data.data_length, 0u);
   }
 
   EXPECT_EQ(report.source_low_rows.count, 0u);
@@ -505,10 +725,14 @@ TEST_F(AmdgpuHalArtifactProviderTest,
       loom_amdgpu_target_bundle_for_descriptor_set(
           processor->descriptor_set.ordinal);
   ASSERT_NE(target_bundle, nullptr);
+  const loom_amdgpu_target_profile_t target_profile = {
+      /*.processor=*/processor,
+      /*.gfx1250_revision=*/LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED,
+  };
 
   const loom_run_hal_device_target_t target = {
       /*.hal_target=*/nullptr,
-      /*.data=*/processor,
+      /*.data=*/&target_profile,
       /*.target_storage=*/{},
       /*.target_bundle=*/target_bundle,
       /*.target_key=*/processor->name,

@@ -13,7 +13,10 @@
 #include "loom/codegen/low/packet.h"
 #include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amdgpu/ops/target.h"
+#include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
+#include "loom/target/emit/native/amdgpu/kernel_entry.h"
 #include "loom/target/emit/native/amdgpu/preflight.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
 #include "loom/target/launch.h"
@@ -360,8 +363,9 @@ static iree_status_t loom_amdgpu_kernel_record_collect_hidden_user_sgprs(
 }
 
 static iree_status_t loom_amdgpu_kernel_record_collect_descriptor_flags(
+    const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation, uint32_t system_sgpr_base,
-    bool target_has_packed_workitem_id,
+    bool target_has_packed_workitem_id, bool target_has_cluster_launch_state,
     loom_amdgpu_kernel_descriptor_flags_t* out_flags) {
   *out_flags = 0;
   static const loom_amdgpu_kernel_record_workgroup_id_t workgroup_ids[] = {
@@ -417,6 +421,41 @@ static iree_status_t loom_amdgpu_kernel_record_collect_descriptor_flags(
               .label = IREE_SVL("packed workitem_id.x/y/z"),
           },
       };
+  static const loom_amdgpu_kernel_descriptor_flags_t
+      launch_workgroup_id_descriptor_flags[] = {
+          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X,
+          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_Y,
+          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_Z,
+      };
+
+  if (target_has_cluster_launch_state) {
+    loom_target_workgroup_cluster_size_t cluster_size = {0};
+    if (loom_low_kernel_def_static_workgroup_cluster_size(schedule->function_op,
+                                                          &cluster_size)) {
+      // A clustered dispatch requires the x enable bit even when the kernel
+      // does not consume a coordinate. This is the launch-state enable for
+      // TTMP6/TTMP7/TTMP9 on gfx1250.
+      *out_flags |= LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X;
+    }
+
+    const loom_low_descriptor_t* flat_cluster_workgroup_id_descriptor =
+        loom_amdgpu_descriptor_ref_descriptor(
+            schedule->target.descriptor_set,
+            LOOM_AMDGPU_DESCRIPTOR_REF_S_GETREG_B32_CLUSTER_WORKGROUP_FLAT_ID);
+    if (flat_cluster_workgroup_id_descriptor != NULL) {
+      for (iree_host_size_t i = 0; i < schedule->node_count; ++i) {
+        if (schedule->nodes[i].descriptor ==
+            flat_cluster_workgroup_id_descriptor) {
+          *out_flags |=
+              LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X |
+              LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_Y |
+              LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_Z;
+          break;
+        }
+      }
+    }
+  }
+
   uint32_t found_workgroup_mask = 0;
   const loom_low_allocation_assignment_t*
       workgroup_id_assignments[IREE_ARRAYSIZE(workgroup_ids)] = {0};
@@ -431,6 +470,19 @@ static iree_status_t loom_amdgpu_kernel_record_collect_descriptor_flags(
     const loom_amdgpu_hal_kernel_abi_source_kind_t source_kind =
         loom_amdgpu_hal_kernel_abi_live_in_source_kind(allocation->module,
                                                        assignment->value_id);
+    const loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flags_t launch_flags =
+        loom_amdgpu_hal_kernel_abi_source_launch_workgroup_id_flags(
+            source_kind);
+    if (launch_flags != 0) {
+      for (uint32_t dimension = 0;
+           dimension < IREE_ARRAYSIZE(launch_workgroup_id_descriptor_flags);
+           ++dimension) {
+        if (iree_any_bit_set(launch_flags, 1u << dimension)) {
+          *out_flags |= launch_workgroup_id_descriptor_flags[dimension];
+        }
+      }
+      continue;
+    }
     uint32_t workgroup_dimension = 0;
     if (loom_amdgpu_kernel_record_workgroup_dimension(source_kind,
                                                       &workgroup_dimension)) {
@@ -693,9 +745,11 @@ iree_status_t loom_amdgpu_kernel_record_build(
       hidden_user_sgprs.descriptor_flags;
   loom_amdgpu_kernel_descriptor_flags_t topology_descriptor_flags = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_collect_descriptor_flags(
-      allocation, user_sgpr_count,
+      schedule, allocation, user_sgpr_count,
       loom_amdgpu_processor_kernel_descriptor_has_flags(
           processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID),
+      loom_amdgpu_processor_info_has_flags(
+          processor, LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE),
       &topology_descriptor_flags));
   descriptor_flags |= topology_descriptor_flags;
   uint32_t system_vgpr_workitem_id = 0;
@@ -703,9 +757,18 @@ iree_status_t loom_amdgpu_kernel_record_build(
       loom_amdgpu_kernel_descriptor_workitem_id_mode_from_flags(
           descriptor_flags, &system_vgpr_workitem_id));
 
-  const uint32_t next_free_sgpr = preflight->next_free_sgpr > user_sgpr_count
-                                      ? preflight->next_free_sgpr
-                                      : user_sgpr_count;
+  const loom_amdgpu_kernel_entry_envelope_t* entry_envelope =
+      loom_amdgpu_kernel_entry_envelope_for_processor(processor);
+  uint32_t next_free_sgpr = preflight->next_free_sgpr > user_sgpr_count
+                                ? preflight->next_free_sgpr
+                                : user_sgpr_count;
+  if (entry_envelope->minimum_sgpr_count > next_free_sgpr) {
+    next_free_sgpr = entry_envelope->minimum_sgpr_count;
+  }
+  uint32_t next_free_vgpr = preflight->next_free_vgpr;
+  if (entry_envelope->minimum_vgpr_count > next_free_vgpr) {
+    next_free_vgpr = entry_envelope->minimum_vgpr_count;
+  }
 
   iree_string_view_t target_id = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_amdhsa_target_id_format(
@@ -749,12 +812,15 @@ iree_status_t loom_amdgpu_kernel_record_build(
               .private_segment_fixed_size =
                   (uint32_t)segment_usage.private_segment_fixed_size,
               .sgpr_count = next_free_sgpr,
-              .vgpr_count = preflight->next_free_vgpr,
+              .vgpr_count = next_free_vgpr,
               .max_flat_workgroup_size = max_flat_workgroup_size,
               .required_workgroup_size = hal_kernel->required_workgroup_size,
               .has_required_workgroup_size = has_required_workgroup_size,
               .workgroup_cluster_size = workgroup_cluster_size,
               .has_workgroup_cluster_size = has_workgroup_cluster_size,
+              .gfx1250_revision =
+                  loom_amdgpu_target_record_effective_gfx1250_revision(
+                      schedule->target.target_op),
               .arguments = arguments,
               .argument_count = abi_layout->parameter_count,
           },

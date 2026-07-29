@@ -18,6 +18,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID,
     AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11,
     AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
+    AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE,
     AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
     AmdgpuDescriptorSetInfo,
     AmdgpuDescriptorSetIsaInfo,
@@ -137,6 +138,22 @@ def test_descriptor_sets_reject_none_memory_cache_policy() -> None:
         amdgpu_target_info._validate_descriptor_sets((_descriptor_set_info(),))
 
 
+def test_generic_descriptor_members_may_share_an_isa_contract() -> None:
+    descriptor_sets_by_key = {info.key: info for info in amdgpu_target_info_data.AMDGPU_DESCRIPTOR_SET_INFOS}
+    descriptor_sets = tuple(
+        sorted(
+            (
+                descriptor_sets_by_key["amdgpu.gfx12_5.generic.core"],
+                descriptor_sets_by_key["amdgpu.rdna4.gfx1251.core"],
+                descriptor_sets_by_key["amdgpu.rdna4.gfx125x.core"],
+            ),
+            key=lambda info: info.key,
+        )
+    )
+
+    amdgpu_target_info._validate_descriptor_sets(descriptor_sets)
+
+
 def test_memory_cache_policy_rejects_incomplete_temporal_th_table() -> None:
     temporal_th = amdgpu_target_info_data.AMDGPU_VECTOR_MEMORY_CACHE_POLICY_TEMPORAL_TH
     rows = tuple(row for row in temporal_th if row[0] != "bypass")
@@ -183,6 +200,15 @@ def test_target_info_flag_expressions_cover_every_known_bit() -> None:
 
 def test_cluster_launch_state_is_scoped_to_gfx1250() -> None:
     assert {info.processor for info in amdgpu_target_info_data.AMDGPU_PROCESSOR_INFOS if info.flags & AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE} == {"gfx1250"}
+
+
+def test_gfx125x_entry_envelope_covers_concrete_and_generic_processors() -> None:
+    processors = {info.processor: info for info in amdgpu_target_info_data.AMDGPU_PROCESSOR_INFOS}
+
+    assert processors["gfx1250"].flags & AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
+    assert processors["gfx1251"].flags & AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
+    assert processors["gfx12-5-generic"].flags & AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
+    assert not processors["gfx1200"].flags & AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
 
 
 def test_target_info_flag_expressions_reject_unknown_bits() -> None:

@@ -1041,6 +1041,14 @@ class _AmdgpuCoreDescriptorSetBuilder:
     flags: int = 0
 
 
+_GFX125X_EXTRA_DESCRIPTORS = (
+    _s_delay_alu_descriptor(),
+    _s_wait_xcnt_descriptor(),
+    *_gfx125x_cluster_descriptors(),
+    *_gfx125x_tensor_descriptors(),
+)
+
+
 _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
     "cdna3": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
@@ -1079,12 +1087,7 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
         base=_AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
         overlay_rows=_gfx12_5_generic_core_overlays,
         overlay_descriptors=_gfx12_5_generic_core_overlay_descriptors,
-        extra_descriptors=(
-            _s_delay_alu_descriptor(),
-            _s_wait_xcnt_descriptor(),
-            *_gfx125x_cluster_descriptors(),
-            *_gfx125x_tensor_descriptors(),
-        ),
+        extra_descriptors=_GFX125X_EXTRA_DESCRIPTORS,
         flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     ),
     "rdna3_5": _AmdgpuCoreDescriptorSetBuilder(
@@ -1103,12 +1106,14 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
         base=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,
         overlay_rows=_gfx1250_core_overlays,
         overlay_descriptors=_gfx1250_core_overlay_descriptors,
-        extra_descriptors=(
-            _s_delay_alu_descriptor(),
-            _s_wait_xcnt_descriptor(),
-            *_gfx125x_cluster_descriptors(),
-            *_gfx125x_tensor_descriptors(),
-        ),
+        extra_descriptors=_GFX125X_EXTRA_DESCRIPTORS,
+        flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
+    ),
+    "rdna4_gfx1251": _AmdgpuCoreDescriptorSetBuilder(
+        base=_AMDGPU_RDNA4_GFX1251_CORE_DESCRIPTOR_SET_BASE,
+        overlay_rows=_gfx1250_core_overlays,
+        overlay_descriptors=_gfx1251_core_overlay_descriptors,
+        extra_descriptors=_GFX125X_EXTRA_DESCRIPTORS,
         flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     ),
 }

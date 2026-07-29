@@ -16,10 +16,29 @@
 namespace iree::hal::amdgpu {
 namespace {
 
-static std::vector<std::string> CandidateValues(const char* isa_name) {
+using iree::testing::status::StatusIs;
+
+static iree_hal_amdgpu_target_id_t ParseTargetId(const char* target_name) {
+  iree_hal_amdgpu_target_id_t target_id;
+  IREE_CHECK_OK(iree_hal_amdgpu_target_id_parse_hsa_isa_name(
+      iree_make_cstring_view(target_name), &target_id));
+  return target_id;
+}
+
+static iree_hal_amdgpu_target_id_t QualifiedTargetId(const char* target_name,
+                                                     uint32_t asic_revision) {
+  iree_hal_amdgpu_target_id_t target_id = ParseTargetId(target_name);
+  IREE_CHECK_OK(
+      iree_hal_amdgpu_target_id_apply_asic_revision(asic_revision, &target_id));
+  return target_id;
+}
+
+static std::vector<std::string> CandidateValues(
+    const iree_hal_amdgpu_target_id_t& physical_target_id,
+    const iree_hal_amdgpu_target_id_t& isa_target_id) {
   iree_hal_amdgpu_device_library_target_candidate_list_t candidates = {0};
-  IREE_CHECK_OK(iree_hal_amdgpu_device_library_target_candidates_from_isa(
-      iree_make_cstring_view(isa_name), &candidates));
+  IREE_CHECK_OK(iree_hal_amdgpu_device_library_target_candidates_from_agent_isa(
+      &physical_target_id, &isa_target_id, &candidates));
   std::vector<std::string> values;
   values.reserve(candidates.count);
   for (iree_host_size_t i = 0; i < candidates.count; ++i) {
@@ -27,6 +46,12 @@ static std::vector<std::string> CandidateValues(const char* isa_name) {
                         candidates.values[i].value.size);
   }
   return values;
+}
+
+static std::vector<std::string> CandidateValues(const char* target_name,
+                                                uint32_t asic_revision = 0) {
+  const auto target_id = QualifiedTargetId(target_name, asic_revision);
+  return CandidateValues(target_id, target_id);
 }
 
 TEST(DeviceLibraryTargetTest,
@@ -41,15 +66,45 @@ TEST(DeviceLibraryTargetTest,
   EXPECT_EQ(values[3], "gfx9-4-generic");
 }
 
-TEST(DeviceLibraryTargetTest, IncludesGfx12_5GenericFallback) {
+TEST(DeviceLibraryTargetTest, Gfx1250A0SelectsOnlyExactVariant) {
   const auto values = CandidateValues("amdgcn-amd-amdhsa--gfx1250");
 
-  ASSERT_EQ(values.size(), 2u);
-  EXPECT_EQ(values[0], "gfx1250");
-  EXPECT_EQ(values[1], "gfx12-5-generic");
+  ASSERT_EQ(values.size(), 1u);
+  EXPECT_EQ(values[0], "gfx1250-a0");
+}
+
+TEST(DeviceLibraryTargetTest, Gfx1250A0RejectsGenericAlternateIsa) {
+  const auto physical_target_id =
+      QualifiedTargetId("amdgcn-amd-amdhsa--gfx1250", 0);
+  const auto generic_isa_target_id =
+      QualifiedTargetId("amdgcn-amd-amdhsa--gfx12-5-generic", 0);
+
+  EXPECT_TRUE(
+      CandidateValues(physical_target_id, generic_isa_target_id).empty());
+}
+
+TEST(DeviceLibraryTargetTest, Gfx1250B0IncludesGenericFallback) {
+  const auto values = CandidateValues("amdgcn-amd-amdhsa--gfx1250", 1);
+
+  ASSERT_EQ(values.size(), 3u);
+  EXPECT_EQ(values[0], "gfx1250:gfx1250-b0-specific+");
+  EXPECT_EQ(values[1], "gfx1250");
+  EXPECT_EQ(values[2], "gfx12-5-generic");
+}
+
+TEST(DeviceLibraryTargetTest, RejectsUnqualifiedGfx1250PhysicalIdentity) {
+  const auto target_id = ParseTargetId("amdgcn-amd-amdhsa--gfx1250");
+  iree_hal_amdgpu_device_library_target_candidate_list_t candidates = {0};
+
+  EXPECT_THAT(
+      Status(iree_hal_amdgpu_device_library_target_candidates_from_agent_isa(
+          &target_id, &target_id, &candidates)),
+      StatusIs(StatusCode::kFailedPrecondition));
 }
 
 TEST(DeviceLibraryTargetTest, MatchesOnlyWholeFileArchSegments) {
+  EXPECT_TRUE(iree_hal_amdgpu_device_library_target_matches_file_arch(
+      IREE_SV("gfx1250-a0.so"), IREE_SV("gfx1250-a0")));
   EXPECT_TRUE(iree_hal_amdgpu_device_library_target_matches_file_arch(
       IREE_SV("gfx9-4-generic.so"), IREE_SV("gfx9-4-generic")));
   EXPECT_TRUE(iree_hal_amdgpu_device_library_target_matches_file_arch(
@@ -57,6 +112,8 @@ TEST(DeviceLibraryTargetTest, MatchesOnlyWholeFileArchSegments) {
 
   EXPECT_FALSE(iree_hal_amdgpu_device_library_target_matches_file_arch(
       IREE_SV("gfx942x.so"), IREE_SV("gfx942")));
+  EXPECT_FALSE(iree_hal_amdgpu_device_library_target_matches_file_arch(
+      IREE_SV("gfx1250-a0.so"), IREE_SV("gfx1250")));
   EXPECT_FALSE(iree_hal_amdgpu_device_library_target_matches_file_arch(
       IREE_SV("gfx9-4-generic.so"), IREE_SV("gfx9-4-generic:sramecc+:xnack-")));
   EXPECT_FALSE(iree_hal_amdgpu_device_library_target_matches_file_arch(

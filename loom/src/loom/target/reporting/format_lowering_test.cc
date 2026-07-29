@@ -88,7 +88,7 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   memory.memory_space = IREE_SVL("workgroup");
   memory.operation_kind = IREE_SVL("load");
   memory.packet_key = IREE_SVL("amdgpu.ds_read2_b32");
-  memory.strategy_key = IREE_SVL("ds_2addr_bank_report");
+  memory.strategy_key = IREE_SVL("ds_2addr_memory_report");
   memory.address_form = IREE_SVL("ds_2addr");
   memory.dynamic_term_kind = IREE_SVL("vaddr");
   memory.fallback_reason = IREE_SVL("cross_wave_workgroup");
@@ -97,9 +97,6 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   memory.issued_read_byte_count = 8;
   memory.dynamic_stride_bytes = 32;
   memory.vector_lane_stride_bytes = 8;
-  memory.bank_stride_words = 8;
-  memory.bank_conflict_degree = 8;
-  memory.bank_conflict_kind = IREE_SVL("bank-conflict-risk");
   memory.storage_element_format = IREE_SVL("f8e4m3fn");
   memory.storage_scale_format = IREE_SVL("f32");
   memory.storage_payload_packing = IREE_SVL("dense_lanes");
@@ -133,9 +130,6 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
                                     "source_op=vector.load"),
                             0),
       IREE_STRING_VIEW_NPOS);
-  EXPECT_NE(iree_string_view_find(
-                text, IREE_SV("bank_conflict_kind=bank-conflict-risk"), 0),
-            IREE_STRING_VIEW_NPOS);
   iree_string_builder_deinitialize(&builder);
 
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -159,8 +153,7 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   ExpectObjectValueEquals(memory_row, IREE_SV("packet"),
                           IREE_SV("amdgpu.ds_read2_b32"));
   ExpectObjectValueEquals(memory_row, IREE_SV("strategy"),
-                          IREE_SV("ds_2addr_bank_report"));
-  ExpectObjectUint64Equals(memory_row, IREE_SV("bank_conflict_degree"), 8);
+                          IREE_SV("ds_2addr_memory_report"));
   const iree_string_view_t storage =
       LookupObject(memory_row, IREE_SV("storage"));
   ExpectObjectValueEquals(storage, IREE_SV("element_format"),

@@ -31,33 +31,6 @@ extern "C" {
 #endif  // __cplusplus
 
 //===----------------------------------------------------------------------===//
-// ISA Support
-//===----------------------------------------------------------------------===//
-
-// Returns success if all GPU agents in the topology support the same ISA.
-// Several places in the code assume homogeneous devices and will need to change
-// in heterogeneous cases where some executables can only be used on a subset of
-// GPUs. This wouldn't be terrible to support but devices with different
-// attributes are expected to be their own unique HAL devices.
-iree_status_t iree_hal_amdgpu_verify_device_isa_commonality(
-    const iree_hal_amdgpu_libhsa_t* libhsa,
-    const iree_hal_amdgpu_topology_t* topology);
-
-// Returns whether |target_key| is supported by |device_agent|. Some devices may
-// support multiple ISAs.
-//
-// Supports AMDGPU target IDs in both compiler spelling (`gfx1100`,
-// `gfx942:xnack-`) and the canonical ISA names reported by HSA
-// (`amdgcn-amd-amdhsa--gfx1100`). Matching uses structured target-ID
-// compatibility so generic code-object targets and explicit feature modes can
-// be checked without relying on string equality.
-//
-// Optionally |out_isa| can be used to get the agent ISA matching the target.
-iree_status_t iree_hal_amdgpu_executable_target_supported(
-    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
-    iree_string_view_t target_key, bool* out_supported, hsa_isa_t* out_isa);
-
-//===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_executable_t
 //===----------------------------------------------------------------------===//
 

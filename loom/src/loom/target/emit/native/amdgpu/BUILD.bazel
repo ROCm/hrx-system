@@ -83,6 +83,7 @@ loom_cc_library(
     deps = [
         ":assembly",
         ":encoding",
+        ":hal_kernel_library",
         ":spill_lowering",
         "//loom/src/loom/codegen/low:allocation_json",
         "//loom/src/loom/codegen/low:frame",
@@ -109,6 +110,7 @@ loom_check_test_suite(
         "test/assembly_cluster.loom-test",
         "test/assembly_q8.loom-test",
         "test/assembly_wmma.loom-test",
+        "test/hal_kernel_library.loom-test",
         "test/packet.loom-test",
         "test/packet_json.loom-test",
         "test/spill_lowering.loom-test",
@@ -124,6 +126,7 @@ loom_cc_library(
     hdrs = ["metadata.h"],
     deps = [
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
         "//runtime/src/iree/base",
     ],
 )
@@ -222,6 +225,7 @@ loom_cc_library(
     hdrs = ["kernel_record.h"],
     deps = [
         ":descriptor",
+        ":kernel_entry",
         ":metadata",
         ":preflight",
         ":storage_layout",
@@ -234,6 +238,8 @@ loom_cc_library(
         "//loom/src/loom/target:launch",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
+        "//loom/src/loom/target/arch/amdgpu/ops",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/target/arch/amdgpu/target_id",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -279,17 +285,41 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "kernel_entry",
+    srcs = ["kernel_entry.c"],
+    hdrs = ["kernel_entry.h"],
+    deps = [
+        ":text_fixup",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "kernel_assembly",
     srcs = ["kernel_assembly.c"],
     hdrs = ["kernel_assembly.h"],
     deps = [
         ":assembly",
+        ":kernel_entry",
         ":kernel_record",
         ":metadata",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "kernel_entry_test",
+    srcs = ["kernel_entry_test.cc"],
+    deps = [
+        ":kernel_entry",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -300,6 +330,7 @@ loom_cc_library(
     deps = [
         ":encoding",
         ":hsaco",
+        ":kernel_entry",
         ":kernel_record",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low/schedule",

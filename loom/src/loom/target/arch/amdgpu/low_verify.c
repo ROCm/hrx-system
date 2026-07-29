@@ -10,14 +10,18 @@
 #include "loom/codegen/low/packet.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/gfx1250_a0_errata.h"
 #include "loom/target/arch/amdgpu/low_aliases.h"
 #include "loom/target/arch/amdgpu/ops/ops.h"
+#include "loom/target/arch/amdgpu/ops/target.h"
 
 typedef struct loom_amdgpu_low_verify_state_t {
   // Target resolved for the current function.
   const loom_low_resolved_target_t* target;
   // Borrowed function name used in diagnostics.
   iree_string_view_t function_name;
+  // Effective gfx1250 revision, or UNSPECIFIED for other processors.
+  loom_amdgpu_gfx1250_revision_t gfx1250_revision;
 } loom_amdgpu_low_verify_state_t;
 
 static iree_status_t loom_amdgpu_low_verify_begin_function(
@@ -39,9 +43,39 @@ static iree_status_t loom_amdgpu_low_verify_begin_function(
       .function_name = loom_low_diagnostic_function_name(
           loom_low_verify_context_module(context),
           loom_low_verify_context_function_op(context)),
+      .gfx1250_revision = loom_amdgpu_target_record_effective_gfx1250_revision(
+          target->target_op),
   };
   *out_provider_state = state;
   return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_low_verify_gfx1250_a0_errata(
+    loom_low_verify_context_t* context,
+    const loom_amdgpu_low_verify_state_t* state,
+    const loom_low_resolved_descriptor_packet_t* packet) {
+  if (state->gfx1250_revision != LOOM_AMDGPU_GFX1250_REVISION_A0) {
+    return iree_ok_status();
+  }
+  const loom_amdgpu_gfx1250_a0_erratum_t* erratum =
+      loom_amdgpu_gfx1250_a0_erratum_for_descriptor(
+          state->target->descriptor_set, packet->descriptor);
+  if (erratum == NULL) {
+    return iree_ok_status();
+  }
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(state->function_name),
+      loom_param_with_field_ref(
+          loom_param_string(packet->key),
+          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+                                    packet->key_attr_index)),
+      loom_param_string(state->target->descriptor_set_key),
+      loom_param_string(IREE_SV("a0")),
+      loom_param_string(erratum->erratum_key),
+      loom_param_string(erratum->legalization_key),
+  };
+  return loom_low_verify_context_emit(context, packet->op, LOOM_ERR_AMDGPU_047,
+                                      params, IREE_ARRAYSIZE(params));
 }
 
 static iree_status_t loom_amdgpu_low_emit_blocked_alias(
@@ -184,7 +218,9 @@ static iree_status_t loom_amdgpu_low_verify_op(
     return iree_ok_status();
   }
   if (packet->descriptor != NULL) {
-    return loom_amdgpu_low_verify_dpp_control(context, state, packet);
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_low_verify_dpp_control(context, state, packet));
+    return loom_amdgpu_low_verify_gfx1250_a0_errata(context, state, packet);
   }
   const loom_amdgpu_low_blocked_alias_t* alias =
       loom_amdgpu_low_blocked_alias_lookup(packet->key);

@@ -62,6 +62,7 @@ loom_cc_library(
   DEPS
     ::assembly
     ::encoding
+    ::hal_kernel_library
     ::spill_lowering
     iree::base
     loom::codegen::low::allocation_json
@@ -92,6 +93,7 @@ loom_check_test_suite(
     "test/assembly_cluster.loom-test"
     "test/assembly_q8.loom-test"
     "test/assembly_wmma.loom-test"
+    "test/hal_kernel_library.loom-test"
     "test/packet.loom-test"
     "test/packet_json.loom-test"
     "test/spill_lowering.loom-test"
@@ -111,6 +113,7 @@ loom_cc_library(
     "metadata.c"
   DEPS
     iree::base
+    loom::target::arch::amdgpu::target_info
     loom::target::types
   PUBLIC
 )
@@ -246,6 +249,7 @@ loom_cc_library(
     "kernel_record.c"
   DEPS
     ::descriptor
+    ::kernel_entry
     ::metadata
     ::preflight
     ::storage_layout
@@ -258,6 +262,8 @@ loom_cc_library(
     loom::ir
     loom::ops::low
     loom::target::arch::amdgpu::hal::kernel_abi
+    loom::target::arch::amdgpu::ops
+    loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::launch
@@ -317,6 +323,23 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_cc_library(
   NAME
+    kernel_entry
+  HDRS
+    "kernel_entry.h"
+  SRCS
+    "kernel_entry.c"
+  DEPS
+    ::text_fixup
+    iree::base
+    iree::base::internal::arena
+    loom::target::arch::amdgpu::target_info
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_library(
+  NAME
     kernel_assembly
   HDRS
     "kernel_assembly.h"
@@ -324,6 +347,7 @@ loom_cc_library(
     "kernel_assembly.c"
   DEPS
     ::assembly
+    ::kernel_entry
     ::kernel_record
     ::metadata
     iree::base
@@ -331,6 +355,23 @@ loom_cc_library(
     loom::codegen::low::schedule
     loom::target::arch::amdgpu::hal::kernel_abi
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_test(
+  NAME
+    kernel_entry_test
+  SRCS
+    "kernel_entry_test.cc"
+  DEPS
+    ::kernel_entry
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
 )
 endif()
 
@@ -345,6 +386,7 @@ loom_cc_library(
   DEPS
     ::encoding
     ::hsaco
+    ::kernel_entry
     ::kernel_record
     iree::base
     iree::base::internal::arena

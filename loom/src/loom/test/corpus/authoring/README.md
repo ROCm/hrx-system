@@ -390,13 +390,12 @@ visible before object disassembly enters the debugging loop.
 
 ## AMDGPU Shared-Memory Feedback
 
-The AMDGPU compile report can explain selected workgroup-memory packets and the
-static LDS bank pattern visible from the source facts. This is structural
-compiler feedback, not a runtime performance verdict: final tuning still needs
-measurements and profiler counters when occupancy, cache behavior, scheduling,
-or data-dependent control flow dominates. The useful shift is that a source
-author can see the selected packet, stride facts, and bank-conflict
-classification while the source layout is still in view.
+The AMDGPU compile report explains selected workgroup-memory packets and the
+source address strides retained at packet selection. It does not classify LDS
+bank conflicts: that requires an instruction- and target-specific service model
+in addition to the source stride. Runtime measurements and profiler counters
+remain necessary when occupancy, cache behavior, scheduling, or data-dependent
+control flow dominates.
 
 Compile with detailed reports when investigating shared-memory layout,
 padding, swizzling, vectorization, or imported kernel staging choices:
@@ -416,8 +415,7 @@ reported source memory operation:
 ```bash
 jq '.source_low.memory_rows[]?
   | {function, source_op, operation, packet, vector_lanes,
-     dynamic_stride_bytes, vector_lane_stride_bytes,
-     bank_stride_words, bank_conflict_degree, bank_conflict_kind}' \
+     dynamic_stride_bytes, vector_lane_stride_bytes}' \
   /tmp/shared-memory-vector-tile.compile-report.json
 ```
 
@@ -432,25 +430,9 @@ loom-compile loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.l
   --compile-report=text-details \
   --compile-report-output=/tmp/shared-memory-vector-tile.compile-report.txt
 
-rg 'source_low_memory|bank_conflict|ds_' \
+rg 'source_low_memory|dynamic_stride_bytes|ds_' \
   /tmp/shared-memory-vector-tile.compile-report.txt
 ```
-
-The classification key is a compact summary of the facts Loom could prove for
-the selected AMDGPU LDS packet:
-
-| Classification | Meaning |
-| --- | --- |
-| `bank-conflict-free` | Static facts prove conflict degree one for the selected target bank geometry. |
-| `padded-bank-conflict-free` | The access is conflict-free and the stride exposes visible padding beyond the packet footprint. |
-| `bank-conflict-risk` | Static facts imply a conflict degree greater than one; padding, swizzling, or a different staging shape deserves investigation. |
-| `bank-pattern-unknown` | Loom selected a workgroup-memory packet but the current facts do not prove one lane-to-bank pattern. |
-
-The report should be read before object-level profiling when the question is
-whether the source layout and selected packet shape make sense. Runtime tools
-such as `rocprof` and Nsight still decide whether the complete kernel is fast,
-but they should not be the first place a source author learns that a static LDS
-access pattern is structurally suspicious.
 
 ## Memset i8
 

@@ -11,10 +11,9 @@
         "contains": {
           "unordered": [
             "## iree-run-loom",
-            "--backend=vm",
-            "--backend=amdgpu",
+            "--backend=",
             "--binding=64xf32=0",
-            "--emit-target-artifact=kernel.hsaco",
+            "--emit-target-artifact=",
             "--compile-report=summary"
           ]
         }

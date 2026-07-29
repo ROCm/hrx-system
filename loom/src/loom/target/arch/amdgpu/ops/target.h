@@ -26,15 +26,19 @@ iree_string_view_t loom_amdgpu_target_record_processor_name(
 const loom_amdgpu_processor_info_t* loom_amdgpu_target_record_processor(
     const loom_op_t* target_op);
 
-// Builds the exact AMDGPU target record for |processor|.
-iree_status_t loom_amdgpu_target_record_build_for_processor(
-    loom_builder_t* builder, const loom_amdgpu_processor_info_t* processor,
+// Returns the effective gfx1250 revision selected by |target_op|.
+//
+// A gfx1250 target without an explicit revision selects B0. Other processors
+// return UNSPECIFIED.
+loom_amdgpu_gfx1250_revision_t
+loom_amdgpu_target_record_effective_gfx1250_revision(
+    const loom_op_t* target_op);
+
+// Builds the exact AMDGPU target record for |profile|.
+iree_status_t loom_amdgpu_target_record_build_for_profile(
+    loom_builder_t* builder, const loom_amdgpu_target_profile_t* profile,
     loom_symbol_ref_t symbol, loom_location_id_t location,
     loom_op_t** out_target_op);
-
-// Retargets |target_op| to the exact target record for |processor|.
-void loom_amdgpu_target_record_retarget_processor(
-    loom_op_t* target_op, const loom_amdgpu_processor_info_t* processor);
 
 iree_status_t loom_amdgpu_target_record_verify(
     const loom_module_t* module, const loom_op_t* op,
