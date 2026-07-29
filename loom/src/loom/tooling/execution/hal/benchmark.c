@@ -6,6 +6,7 @@
 
 #include "loom/tooling/execution/hal/benchmark.h"
 
+#include <stdint.h>
 #include <string.h>
 
 #include "iree/hal/utils/profile_file.h"
@@ -274,7 +275,116 @@ typedef struct loom_run_hal_profile_summary_capture_context_t {
   const iree_hal_profile_statistics_sink_t* sink;
   // Profile summary receiving bounded row copies.
   loom_run_hal_profile_summary_t* profile;
+  // Scratch storage receiving individually represented dispatch durations.
+  iree_duration_t* dispatch_durations_ns;
+  // Number of durations written to |dispatch_durations_ns|.
+  iree_host_size_t dispatch_duration_count;
 } loom_run_hal_profile_summary_capture_context_t;
+
+static void loom_run_hal_profile_summary_select_dispatch_source(
+    loom_run_hal_profile_summary_capture_context_t* context,
+    iree_hal_profile_statistics_row_type_t source_row_type) {
+  context->profile->dispatch_distribution =
+      (loom_run_hal_profile_dispatch_distribution_t){
+          .comparable = true,
+          .homogeneous_function = true,
+          .source_row_type = source_row_type,
+      };
+  context->dispatch_duration_count = 0;
+}
+
+static void loom_run_hal_profile_summary_capture_dispatch_duration(
+    loom_run_hal_profile_summary_capture_context_t* context,
+    const iree_hal_profile_statistics_row_t* row) {
+  const bool is_command_operation =
+      row->row_type ==
+      IREE_HAL_PROFILE_STATISTICS_ROW_TYPE_DISPATCH_COMMAND_OPERATION;
+  const bool is_function =
+      row->row_type == IREE_HAL_PROFILE_STATISTICS_ROW_TYPE_DISPATCH_FUNCTION;
+  if (!is_command_operation && !is_function) {
+    return;
+  }
+
+  loom_run_hal_profile_dispatch_distribution_t* distribution =
+      &context->profile->dispatch_distribution;
+  if (is_command_operation &&
+      distribution->source_row_type !=
+          IREE_HAL_PROFILE_STATISTICS_ROW_TYPE_DISPATCH_COMMAND_OPERATION) {
+    // Per-command rows preserve one duration per dispatch in a profiled
+    // command-buffer replay and supersede duplicate function aggregates.
+    loom_run_hal_profile_summary_select_dispatch_source(context, row->row_type);
+  } else if (is_function && distribution->source_row_type ==
+                                IREE_HAL_PROFILE_STATISTICS_ROW_TYPE_NONE) {
+    // Direct queue dispatches have no command-buffer identity and therefore
+    // fall back to function rows.
+    loom_run_hal_profile_summary_select_dispatch_source(context, row->row_type);
+  } else if (row->row_type != distribution->source_row_type) {
+    return;
+  }
+
+  distribution->source_sample_count += row->sample_count;
+  distribution->invalid_sample_count += row->invalid_sample_count;
+  const uint64_t valid_sample_count =
+      row->sample_count - row->invalid_sample_count;
+  if (valid_sample_count == 0) {
+    return;
+  }
+  if (valid_sample_count != 1 ||
+      !iree_all_bits_set(row->flags,
+                         IREE_HAL_PROFILE_STATISTICS_ROW_FLAG_TIMING)) {
+    distribution->unrepresented_sample_count += valid_sample_count;
+    return;
+  }
+
+  uint64_t duration_ns = 0;
+  if (!iree_hal_profile_statistics_sink_scale_duration_to_ns(
+          context->sink, row, row->total_duration, &duration_ns) ||
+      duration_ns > INT64_MAX) {
+    ++distribution->unrepresented_sample_count;
+    return;
+  }
+
+  if (context->dispatch_duration_count == 0) {
+    distribution->physical_device_ordinal = row->physical_device_ordinal;
+    distribution->time_domain = row->time_domain;
+    distribution->executable_id = row->executable_id;
+    distribution->function_ordinal = row->function_ordinal;
+  } else {
+    if (distribution->physical_device_ordinal != row->physical_device_ordinal ||
+        distribution->time_domain != row->time_domain) {
+      distribution->comparable = false;
+      ++distribution->unrepresented_sample_count;
+      return;
+    }
+    if (distribution->executable_id != row->executable_id ||
+        distribution->function_ordinal != row->function_ordinal) {
+      distribution->homogeneous_function = false;
+    }
+  }
+
+  context->dispatch_durations_ns[context->dispatch_duration_count++] =
+      (iree_duration_t)duration_ns;
+}
+
+static iree_status_t
+loom_run_hal_profile_summary_finalize_dispatch_distribution(
+    loom_run_hal_profile_summary_capture_context_t* context) {
+  loom_run_hal_profile_dispatch_distribution_t* distribution =
+      &context->profile->dispatch_distribution;
+  if (context->dispatch_duration_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_run_benchmark_compute_timing_stats(
+      context->dispatch_durations_ns, context->dispatch_duration_count,
+      &distribution->duration_ns));
+  distribution->available = true;
+  distribution->complete =
+      distribution->comparable && distribution->invalid_sample_count == 0 &&
+      distribution->unrepresented_sample_count == 0 &&
+      context->profile->dropped_record_count == 0 &&
+      distribution->duration_ns.count == distribution->source_sample_count;
+  return iree_ok_status();
+}
 
 static void loom_run_hal_profile_summary_copy_function_name(
     const iree_hal_profile_statistics_sink_t* sink,
@@ -327,6 +437,7 @@ static iree_status_t loom_run_hal_profile_summary_capture_row(
   loom_run_hal_profile_summary_capture_context_t* context =
       (loom_run_hal_profile_summary_capture_context_t*)user_data;
   loom_run_hal_profile_summary_t* profile = context->profile;
+  loom_run_hal_profile_summary_capture_dispatch_duration(context, row);
   if (profile->captured_row_count >= LOOM_RUN_HAL_PROFILE_SUMMARY_MAX_ROWS) {
     ++profile->truncated_row_count;
     return iree_ok_status();
@@ -437,15 +548,29 @@ static iree_status_t loom_run_hal_benchmark_run_profiled_batch(
         iree_hal_profile_statistics_sink_row_count(statistics_sink);
     out_profile->dropped_record_count =
         iree_hal_profile_statistics_sink_dropped_record_count(statistics_sink);
+    iree_duration_t* dispatch_durations_ns = NULL;
+    if (out_profile->row_count != 0) {
+      status = iree_allocator_malloc_array(allocator, out_profile->row_count,
+                                           sizeof(*dispatch_durations_ns),
+                                           (void**)&dispatch_durations_ns);
+    }
     loom_run_hal_profile_summary_capture_context_t context = {
         .sink = statistics_sink,
         .profile = out_profile,
+        .dispatch_durations_ns = dispatch_durations_ns,
     };
-    status = iree_hal_profile_statistics_sink_for_each_row(
-        statistics_sink, (iree_hal_profile_statistics_row_callback_t){
-                             .fn = loom_run_hal_profile_summary_capture_row,
-                             .user_data = &context,
-                         });
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_profile_statistics_sink_for_each_row(
+          statistics_sink, (iree_hal_profile_statistics_row_callback_t){
+                               .fn = loom_run_hal_profile_summary_capture_row,
+                               .user_data = &context,
+                           });
+    }
+    if (iree_status_is_ok(status)) {
+      status =
+          loom_run_hal_profile_summary_finalize_dispatch_distribution(&context);
+    }
+    iree_allocator_free(allocator, dispatch_durations_ns);
   } else if (!loom_run_hal_benchmark_options_request_explicit_profile_counters(
                  options)) {
     loom_run_hal_profile_summary_record_error(out_profile, status);

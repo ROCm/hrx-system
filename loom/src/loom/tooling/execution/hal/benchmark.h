@@ -88,6 +88,35 @@ typedef struct loom_run_hal_profile_row_summary_t {
   char function_name[LOOM_RUN_HAL_PROFILE_FUNCTION_NAME_CAPACITY];
 } loom_run_hal_profile_row_summary_t;
 
+typedef struct loom_run_hal_profile_dispatch_distribution_t {
+  // True when at least one individually represented duration was scaled.
+  bool available;
+  // True when every source dispatch sample has an individual scaled duration.
+  bool complete;
+  // True when all represented samples use the same device and time domain.
+  bool comparable;
+  // True when all represented samples name the same executable function.
+  bool homogeneous_function;
+  // Aggregate row type used to recover individual dispatch durations.
+  iree_hal_profile_statistics_row_type_t source_row_type;
+  // Physical device ordinal shared by represented samples.
+  uint32_t physical_device_ordinal;
+  // Time domain shared by represented samples before nanosecond scaling.
+  iree_hal_profile_statistics_time_domain_t time_domain;
+  // Session-local executable identifier shared by homogeneous samples.
+  uint64_t executable_id;
+  // Executable function ordinal shared by homogeneous samples.
+  uint32_t function_ordinal;
+  // Number of source dispatch samples described by selected aggregate rows.
+  uint64_t source_sample_count;
+  // Number of source dispatch samples rejected by the profile producer.
+  uint64_t invalid_sample_count;
+  // Number of valid samples lacking an individual comparable scaled duration.
+  uint64_t unrepresented_sample_count;
+  // Robust statistics over individually represented dispatch durations.
+  loom_run_benchmark_timing_stats_t duration_ns;
+} loom_run_hal_profile_dispatch_distribution_t;
+
 typedef struct loom_run_hal_profile_summary_t {
   // True when final-batch profiling was requested.
   bool requested;
@@ -115,6 +144,8 @@ typedef struct loom_run_hal_profile_summary_t {
   iree_host_size_t row_count;
   // Source records reported as dropped by the profile producer.
   uint64_t dropped_record_count;
+  // Exact device-duration distribution recovered from dispatch profile rows.
+  loom_run_hal_profile_dispatch_distribution_t dispatch_distribution;
   // Number of row summaries copied into |rows|.
   iree_host_size_t captured_row_count;
   // Number of aggregate rows omitted because |rows| was full.

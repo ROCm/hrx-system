@@ -826,6 +826,61 @@ static iree_status_t iree_benchmark_loom_write_hal_profile_row_summary_json(
   return loom_json_object_end(&object);
 }
 
+static iree_status_t
+iree_benchmark_loom_write_hal_profile_dispatch_distribution_json(
+    const loom_run_hal_profile_dispatch_distribution_t* distribution,
+    loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("available"), distribution->available));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("complete"), distribution->complete));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("comparable"), distribution->comparable));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("homogeneous_function"),
+      distribution->homogeneous_function));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("source"),
+      iree_make_cstring_view(
+          iree_benchmark_loom_profile_statistics_row_type_name(
+              distribution->source_row_type))));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("source_row_type"), distribution->source_row_type));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("source_sample_count"),
+      distribution->source_sample_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("invalid_sample_count"),
+      distribution->invalid_sample_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("unrepresented_sample_count"),
+      distribution->unrepresented_sample_count));
+  if (distribution->available) {
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &object, IREE_SV("physical_device_ordinal"),
+        distribution->physical_device_ordinal));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("source_time_domain"),
+        iree_make_cstring_view(
+            iree_benchmark_loom_profile_statistics_time_domain_name(
+                distribution->time_domain))));
+    if (distribution->homogeneous_function) {
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+          &object, IREE_SV("executable_id"), distribution->executable_id));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &object, IREE_SV("function_ordinal"),
+          distribution->function_ordinal));
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("duration_ns")));
+    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_benchmark_timing_stats_json(
+        &distribution->duration_ns, stream));
+  }
+  return loom_json_object_end(&object);
+}
+
 iree_status_t iree_benchmark_loom_write_hal_profile_summary_json(
     const loom_run_hal_profile_summary_t* profile,
     loom_output_stream_t* stream) {
@@ -861,6 +916,14 @@ iree_status_t iree_benchmark_loom_write_hal_profile_summary_json(
       &object, IREE_SV("truncated_row_count"), profile->truncated_row_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
       &object, IREE_SV("dropped_record_count"), profile->dropped_record_count));
+  if (profile->dispatch_distribution.source_row_type !=
+      IREE_HAL_PROFILE_STATISTICS_ROW_TYPE_NONE) {
+    IREE_RETURN_IF_ERROR(loom_json_object_begin_field(
+        &object, IREE_SV("dispatch_distribution")));
+    IREE_RETURN_IF_ERROR(
+        iree_benchmark_loom_write_hal_profile_dispatch_distribution_json(
+            &profile->dispatch_distribution, stream));
+  }
   IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("rows")));
   loom_json_array_writer_t rows;
   IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &rows));
@@ -968,6 +1031,7 @@ enum {
   IREE_BENCHMARK_LOOM_SHORT_MEASURED_DURATION_NS = 1000 * 1000,
   IREE_BENCHMARK_LOOM_SUB_MICROSECOND_DURATION_NS = 1000,
   IREE_BENCHMARK_LOOM_SMALL_PHYSICAL_DISPATCH_SAMPLE_COUNT = 100,
+  IREE_BENCHMARK_LOOM_MIN_PROFILED_DISPATCH_SAMPLE_COUNT = 16,
 };
 
 typedef struct iree_benchmark_loom_profiled_dispatch_timing_t {
@@ -979,8 +1043,8 @@ typedef struct iree_benchmark_loom_profiled_dispatch_timing_t {
   bool has_scaled_duration_ns;
   // True when contributing dispatch durations overlap in the final batch.
   bool overlapped;
-  // True when captured profile rows were truncated before reporting.
-  bool truncated;
+  // True when bounded diagnostic row copies omit profile detail rows.
+  bool detail_rows_truncated;
   // Number of dispatch-function rows that contributed to the summary.
   iree_host_size_t row_count;
   // Number of dispatch-function rows ignored as non-comparable.
@@ -1015,6 +1079,8 @@ typedef struct iree_benchmark_loom_profiled_dispatch_timing_t {
   uint64_t minimum_duration_ns;
   // Maximum valid dispatch duration in nanoseconds when scaled.
   uint64_t maximum_duration_ns;
+  // Exact per-dispatch duration distribution recovered during profiling.
+  loom_run_hal_profile_dispatch_distribution_t dispatch_distribution;
 } iree_benchmark_loom_profiled_dispatch_timing_t;
 
 static uint64_t iree_benchmark_loom_saturating_add_u64(uint64_t lhs,
@@ -1098,7 +1164,8 @@ static iree_benchmark_loom_profiled_dispatch_timing_t
 iree_benchmark_loom_profiled_dispatch_timing(
     const loom_run_hal_profile_summary_t* profile) {
   iree_benchmark_loom_profiled_dispatch_timing_t timing = {0};
-  timing.truncated = profile->truncated_row_count != 0;
+  timing.detail_rows_truncated = profile->truncated_row_count != 0;
+  timing.dispatch_distribution = profile->dispatch_distribution;
   for (iree_host_size_t i = 0; i < profile->captured_row_count; ++i) {
     const loom_run_hal_profile_row_summary_t* row = &profile->rows[i];
     if (row->row_type !=
@@ -1263,7 +1330,8 @@ static iree_status_t iree_benchmark_loom_write_profiled_dispatch_timing_json(
   IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
       &object, IREE_SV("overlapped"), timing->overlapped));
   IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
-      &object, IREE_SV("truncated"), timing->truncated));
+      &object, IREE_SV("detail_rows_truncated"),
+      timing->detail_rows_truncated));
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
       &object, IREE_SV("row_count"), timing->row_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
@@ -1301,6 +1369,14 @@ static iree_status_t iree_benchmark_loom_write_profiled_dispatch_timing_json(
     IREE_RETURN_IF_ERROR(
         iree_benchmark_loom_write_profiled_dispatch_duration_ns_json(timing,
                                                                      stream));
+  }
+  if (timing->dispatch_distribution.source_row_type !=
+      IREE_HAL_PROFILE_STATISTICS_ROW_TYPE_NONE) {
+    IREE_RETURN_IF_ERROR(loom_json_object_begin_field(
+        &object, IREE_SV("dispatch_distribution")));
+    IREE_RETURN_IF_ERROR(
+        iree_benchmark_loom_write_hal_profile_dispatch_distribution_json(
+            &timing->dispatch_distribution, stream));
   }
   return loom_json_object_end(&object);
 }
@@ -1347,13 +1423,44 @@ static iree_status_t iree_benchmark_loom_write_hal_timing_warnings_json(
   const iree_benchmark_loom_profiled_dispatch_timing_t profiled_dispatch =
       iree_benchmark_loom_profiled_dispatch_timing(
           &benchmark_result->hal_benchmark.profile);
+  const loom_run_hal_profile_dispatch_distribution_t* profiled_distribution =
+      &profiled_dispatch.dispatch_distribution;
   if (timing->batch_size > 1 && profiled_dispatch.overlapped) {
     IREE_RETURN_IF_ERROR(loom_json_array_write_string_element(
         &warnings, IREE_SV("profiled_dispatch_overlap")));
   }
-  if (profiled_dispatch.truncated) {
-    IREE_RETURN_IF_ERROR(loom_json_array_write_string_element(
-        &warnings, IREE_SV("profiled_dispatch_rows_truncated")));
+  if (benchmark_result->hal_benchmark.profile.requested &&
+      benchmark_result->hal_benchmark.profile.executed) {
+    if (!profiled_distribution->available) {
+      IREE_RETURN_IF_ERROR(loom_json_array_write_string_element(
+          &warnings, IREE_SV("profiled_dispatch_distribution_unavailable")));
+    } else {
+      if (!profiled_distribution->complete) {
+        IREE_RETURN_IF_ERROR(loom_json_array_write_string_element(
+            &warnings, IREE_SV("profiled_dispatch_distribution_incomplete")));
+      }
+      if (!profiled_distribution->comparable) {
+        IREE_RETURN_IF_ERROR(loom_json_array_write_string_element(
+            &warnings,
+            IREE_SV("profiled_dispatch_distribution_noncomparable")));
+      }
+      if (!profiled_distribution->homogeneous_function) {
+        IREE_RETURN_IF_ERROR(loom_json_array_write_string_element(
+            &warnings,
+            IREE_SV("profiled_dispatch_distribution_heterogeneous")));
+      }
+      if (profiled_distribution->duration_ns.count <
+          IREE_BENCHMARK_LOOM_MIN_PROFILED_DISPATCH_SAMPLE_COUNT) {
+        IREE_RETURN_IF_ERROR(loom_json_array_write_string_element(
+            &warnings, IREE_SV("low_profiled_dispatch_sample_count")));
+      }
+      if (accepted_spread != 0 &&
+          profiled_distribution->duration_ns.p90_to_p50_delta_ppm >
+              accepted_spread) {
+        IREE_RETURN_IF_ERROR(loom_json_array_write_string_element(
+            &warnings, IREE_SV("unstable_profiled_dispatch_p90_to_p50")));
+      }
+    }
   }
   return loom_json_array_end(&warnings);
 }
@@ -1384,13 +1491,35 @@ iree_status_t iree_benchmark_loom_write_hal_timing_interpretation_json(
       &object, IREE_SV("score_meaning"), score_meaning));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("score_unit"), IREE_SV("logical_operation")));
+  iree_host_size_t physical_dispatches_per_logical_operation = 0;
+  IREE_RETURN_IF_ERROR(
+      iree_benchmark_loom_hal_physical_dispatches_per_logical_operation(
+          benchmark_result, &physical_dispatches_per_logical_operation));
+  const loom_run_hal_profile_dispatch_distribution_t* profiled_distribution =
+      &profiled_dispatch.dispatch_distribution;
+  const bool has_device_score =
+      physical_dispatches_per_logical_operation == 1 &&
+      !profiled_dispatch.overlapped && profiled_distribution->available &&
+      profiled_distribution->complete && profiled_distribution->comparable &&
+      profiled_distribution->homogeneous_function &&
+      profiled_distribution->duration_ns.count >=
+          IREE_BENCHMARK_LOOM_MIN_PROFILED_DISPATCH_SAMPLE_COUNT;
+  if (has_device_score) {
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("device_score"),
+        IREE_SV(
+            "profiled_dispatch_timing.dispatch_distribution.duration_ns.p50")));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("device_score_time_domain"),
+        IREE_SV("device_tick_scaled_ns")));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("device_score_meaning"),
+        IREE_SV("same_workload_profiled_replay_physical_dispatch_p50")));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+        &object, IREE_SV("device_score_sample_count"),
+        profiled_distribution->duration_ns.count));
+  }
   if (profiled_dispatch.available) {
-    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-        &object, IREE_SV("device_timing"),
-        IREE_SV("profiled_dispatch_timing.duration_ns")));
-    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-        &object, IREE_SV("device_timing_meaning"),
-        IREE_SV("same_workload_profiled_replay")));
     IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
         &object, IREE_SV("profiled_dispatch_overlap"),
         profiled_dispatch.overlapped));

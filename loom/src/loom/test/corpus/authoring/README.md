@@ -333,15 +333,20 @@ Compile reports answer "what did the compiler emit?" Artifact manifests answer
 warmed major batch from host submission through queue completion. The final
 profiled batch then replays the same candidate, configuration, invocation plan,
 bindings, and dispatch multiplicity with profile metadata retained;
-`profiled_dispatch_timing.duration_ns` contains its precise device timestamps.
-Profiling stays outside the major timing window because instrumentation may
-perturb queue-completion timing.
+`profiled_dispatch_timing.duration_ns` contains aggregate device timing and
+`profiled_dispatch_timing.dispatch_distribution.duration_ns` contains exact
+per-dispatch p50, p90, and spread statistics when every final-replay sample can
+be reconstructed. Profiling stays outside the major timing window because
+instrumentation may perturb queue-completion timing.
 
 Kernel comparisons against Vulkan, HIP, or another device profiler use
-`profiled_dispatch_timing.duration_ns` on the Loom side. Host queue-completion
-time is never compared with device time. Batch shape still matters: match
-dispatch multiplicity and inspect `profiled_dispatch_timing.overlapped` before
-comparing a throughput batch with an isolated dispatch.
+`profiled_dispatch_timing.dispatch_distribution.duration_ns.p50` on the Loom
+side. The report promotes that field as `timing_interpretation.device_score`
+only when at least 16 complete, comparable, homogeneous, non-overlapping
+samples describe one physical dispatch per logical operation. Host
+queue-completion time is never compared with device time. Batch shape still
+matters: match dispatch multiplicity and inspect the distribution provenance
+before comparing results.
 
 An isolated `--batch-size=1` benchmark submits through direct HAL
 `queue_dispatch`; no command buffer is created. Larger batches use reusable
