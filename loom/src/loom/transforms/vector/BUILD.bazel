@@ -56,6 +56,7 @@ loom_cc_library(
     srcs = ["sink_single_use_reads.c"],
     hdrs = ["sink_single_use_reads.h"],
     deps = [
+        "//loom/src/loom/analysis:motion",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/pass:types",
@@ -99,6 +100,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/analysis:contract",
         "//loom/src/loom/analysis:matrix_fragment_layout",
+        "//loom/src/loom/analysis:motion",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:combining",

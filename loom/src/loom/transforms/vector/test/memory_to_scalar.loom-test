@@ -195,3 +195,82 @@ func.def @atomic_memory_stays_vector(%buffer: buffer, %origin: index, %offsets: 
   %old = vector.atomic.rmw<addi> %value, %view[%origin][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xi32>, view<32xi32, #dense>, vector<2xindex>
   func.return %old : vector<2xi32>
 }
+
+// ====
+
+func.def @masked_store_rematerializes_ordinary_read(%input: buffer, %output: buffer, %origin: index, %mask: vector<2xi1>) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<32xf16, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xf32, #dense>
+  %loaded = vector.load %input_view[%origin] : view<32xf16, #dense> -> vector<2xf16>
+  %wide = vector.extf %loaded : vector<2xf16> to vector<2xf32>
+  vector.store.mask %wide, %output_view[%origin], %mask : vector<2xf32>, view<32xf32, #dense>, vector<2xi1>
+  func.return
+}
+
+// ----
+func.def @masked_store_rematerializes_ordinary_read(%input: buffer, %output: buffer, %origin: index, %mask: vector<2xi1>) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<32xf16, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xf32, #dense>
+  %9 = vector.extract %mask[0] : vector<2xi1> -> i1
+  scf.if %9 {
+    %10 = view.load %input_view[%origin] : view<32xf16, #dense> -> f16
+    %11 = scalar.extf %10 : f16 to f32
+    view.store %11, %output_view[%origin] : f32, view<32xf32, #dense>
+  } else {
+  }
+  %12 = vector.extract %mask[1] : vector<2xi1> -> i1
+  scf.if %12 {
+    %13 = index.constant 1 : index
+    %14 = index.add %origin, %13 : index
+    %15 = view.load %input_view[%14] : view<32xf16, #dense> -> f16
+    %16 = scalar.extf %15 : f16 to f32
+    view.store %16, %output_view[%14] : f32, view<32xf32, #dense>
+  } else {
+  }
+  func.return
+}
+
+// ====
+
+func.def @masked_store_preserves_effecting_producer_position(%storage: buffer, %output: buffer, %origin: index, %mask: vector<2xi1>, %replacement: vector<2xf16>) {
+  %base = index.constant 0 : offset
+  %storage_view = buffer.view %storage[%base] : buffer -> view<32xf16, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xf32, #dense>
+  %loaded = vector.load %storage_view[%origin] : view<32xf16, #dense> -> vector<2xf16>
+  %wide = vector.extf %loaded : vector<2xf16> to vector<2xf32>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  vector.store %replacement, %storage_view[%origin] : vector<2xf16>, view<32xf16, #dense>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  vector.store.mask %wide, %output_view[%origin], %mask : vector<2xf32>, view<32xf32, #dense>, vector<2xi1>
+  func.return
+}
+
+// ----
+func.def @masked_store_preserves_effecting_producer_position(%storage: buffer, %output: buffer, %origin: index, %mask: vector<2xi1>, %replacement: vector<2xf16>) {
+  %base = index.constant 0 : offset
+  %storage_view = buffer.view %storage[%base] : buffer -> view<32xf16, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xf32, #dense>
+  %loaded = vector.load %storage_view[%origin] : view<32xf16, #dense> -> vector<2xf16>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  vector.store %replacement, %storage_view[%origin] : vector<2xf16>, view<32xf16, #dense>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  %10 = vector.extract %mask[0] : vector<2xi1> -> i1
+  scf.if %10 {
+    %11 = vector.extract %loaded[0] : vector<2xf16> -> f16
+    %12 = scalar.extf %11 : f16 to f32
+    view.store %12, %output_view[%origin] : f32, view<32xf32, #dense>
+  } else {
+  }
+  %13 = vector.extract %mask[1] : vector<2xi1> -> i1
+  scf.if %13 {
+    %14 = vector.extract %loaded[1] : vector<2xf16> -> f16
+    %15 = scalar.extf %14 : f16 to f32
+    %16 = index.constant 1 : index
+    %17 = index.add %origin, %16 : index
+    view.store %15, %output_view[%17] : f32, view<32xf32, #dense>
+  } else {
+  }
+  func.return
+}

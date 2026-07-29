@@ -6,6 +6,7 @@
 
 #include "loom/transforms/vector/sink_single_use_reads.h"
 
+#include "loom/analysis/motion.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/rewriter.h"
@@ -186,22 +187,6 @@ static bool loom_sink_single_use_reads_is_read_candidate(
   return loom_value_has_single_use(loom_module_value(context->module, result));
 }
 
-static bool loom_sink_single_use_reads_can_cross(
-    const loom_sink_single_use_reads_context_t* context, loom_op_t* op) {
-  if (op->flags & LOOM_OP_FLAG_DEAD) return true;
-  if (op->region_count != 0) return false;
-  const loom_trait_flags_t traits =
-      loom_op_effective_traits(context->module, op);
-  if (loom_traits_may_write(traits)) return false;
-  if (iree_any_bit_set(traits, LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_HINT |
-                                   LOOM_TRAIT_POISON_BOUNDARY |
-                                   LOOM_TRAIT_CONVERGENT |
-                                   LOOM_TRAIT_UNIQUE_IDENTITY)) {
-    return false;
-  }
-  return !iree_any_bit_set(traits, LOOM_TRAIT_UNKNOWN_EFFECTS);
-}
-
 static bool loom_sink_single_use_reads_find_same_block_user(
     const loom_sink_single_use_reads_context_t* context, loom_op_t* op,
     loom_op_t** out_user_op) {
@@ -300,7 +285,7 @@ static iree_status_t loom_sink_single_use_reads_collect_block(
     context->ops[index] = op;
     context->segments[index] = segment;
     ++index;
-    if (!loom_sink_single_use_reads_can_cross(context, op)) {
+    if (!loom_motion_read_can_cross_op(context->module, op)) {
       ++segment;
     }
   }

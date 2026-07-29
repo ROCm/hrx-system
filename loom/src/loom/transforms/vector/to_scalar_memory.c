@@ -725,8 +725,12 @@ static bool loom_vector_to_scalar_fragment_store_source_is_supported(
     return loom_vector_to_scalar_fragment_store_source_is_supported(
         state, loom_op_const_operands(def_op)[0]);
   }
-  if (loom_vector_fragment_load_isa(def_op) || loom_vector_splat_isa(def_op) ||
-      loom_vector_constant_isa(def_op) || loom_vector_poison_isa(def_op)) {
+  if (loom_vector_fragment_load_isa(def_op)) {
+    return loom_vector_to_scalar_read_can_rematerialize_at(
+        state->rewriter->module, def_op, state->op);
+  }
+  if (loom_vector_splat_isa(def_op) || loom_vector_constant_isa(def_op) ||
+      loom_vector_poison_isa(def_op)) {
     return true;
   }
   if (loom_vector_mma_isa(def_op)) {
@@ -771,8 +775,14 @@ static uint32_t loom_vector_to_scalar_fragment_store_source_rejection_bits(
     return loom_vector_to_scalar_fragment_store_source_rejection_bits(
         state, loom_op_const_operands(def_op)[0]);
   }
-  if (loom_vector_fragment_load_isa(def_op) || loom_vector_splat_isa(def_op) ||
-      loom_vector_constant_isa(def_op) || loom_vector_poison_isa(def_op)) {
+  if (loom_vector_fragment_load_isa(def_op)) {
+    return loom_vector_to_scalar_read_can_rematerialize_at(
+               state->rewriter->module, def_op, state->op)
+               ? LOOM_CONTRACT_REJECTION_NONE
+               : LOOM_CONTRACT_REJECTION_POLICY;
+  }
+  if (loom_vector_splat_isa(def_op) || loom_vector_constant_isa(def_op) ||
+      loom_vector_poison_isa(def_op)) {
     return LOOM_CONTRACT_REJECTION_NONE;
   }
   if (loom_vector_mma_isa(def_op)) {
@@ -1103,8 +1113,10 @@ loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_ops(
 
   loom_type_t local_source_lane_types[8] = {0};
   loom_type_t local_store_lane_types[8] = {0};
+  const loom_op_t* local_source_predecessor_ops[8] = {0};
   loom_type_t* source_lane_types = local_source_lane_types;
   loom_type_t* store_lane_types = local_store_lane_types;
+  const loom_op_t** source_predecessor_ops = local_source_predecessor_ops;
   if (op_count > IREE_ARRAYSIZE(local_source_lane_types)) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         rewriter->builder.arena, op_count, sizeof(*source_lane_types),
@@ -1112,6 +1124,9 @@ loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_ops(
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         rewriter->builder.arena, op_count, sizeof(*store_lane_types),
         (void**)&store_lane_types));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        rewriter->builder.arena, op_count, sizeof(*source_predecessor_ops),
+        (void**)&source_predecessor_ops));
   }
   for (iree_host_size_t i = 0; i < op_count; ++i) {
     if (!loom_vector_fragment_store_isa(ops[i]) ||
@@ -1120,6 +1135,7 @@ loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_ops(
             &store_lane_types[i])) {
       return iree_ok_status();
     }
+    source_predecessor_ops[i] = ops[i]->prev_op;
   }
   if (iree_any_bit_set(
           flags, LOOM_VECTOR_TO_SCALAR_FLAG_REQUIRE_PRODUCER_LANE_PROGRAM)) {
@@ -1152,7 +1168,7 @@ loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_ops(
       .matrix_fragment_layout = matrix_fragment_layout,
       .location = first_op->location,
   };
-  loom_vector_to_scalar_state_bind_statistics(&state, pass);
+  loom_vector_to_scalar_state_initialize(&state, pass);
 
   loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
   loom_value_id_t upper_bound = LOOM_VALUE_ID_INVALID;
@@ -1188,6 +1204,8 @@ loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_ops(
       loom_region_entry_arg_id(loom_scf_for_body(loop), 0);
   for (iree_host_size_t i = 0; i < op_count; ++i) {
     state.op = ops[i];
+    state.source_predecessor_op = source_predecessor_ops[i];
+    state.rematerialization = NULL;
     state.vector_type = loom_module_value_type(
         rewriter->module, loom_vector_fragment_store_value(ops[i]));
     state.result_scalar_type = source_lane_types[i];
