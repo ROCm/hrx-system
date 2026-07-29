@@ -18,6 +18,7 @@ def _write_report(
     path: Path,
     *,
     code_byte_count: int = 512,
+    target_family: str = "AMDGPU",
     target_key: str = "gfx11-generic",
 ) -> None:
     workload = {
@@ -33,7 +34,7 @@ def _write_report(
         "artifact_format": "hsaco",
         "backend": "amdgpu-hal",
         "status": {"code": 0, "name": "OK"},
-        "target_family": "AMDGPU",
+        "target_family": target_family,
         "target_key": target_key,
         "target_bundle": "gfx11",
         "target_snapshot": "gfx11",
@@ -142,4 +143,21 @@ def test_suggest_json_reports_unknown_target_without_guessing(
     assert captured.err == ""
     assert view["status"] == "unavailable"
     assert view["reason"] == "unknown_target_key"
+    assert view["findings"] == []
+
+
+def test_suggest_json_reports_unsupported_family_without_provider(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    report_path = tmp_path / "report.json"
+    _write_report(report_path, target_family="TEST", target_key="test0")
+
+    assert main(["suggest", str(report_path), "--format=json"]) == 0
+
+    captured = capsys.readouterr()
+    view = json.loads(captured.out)
+    assert captured.err == ""
+    assert view["status"] == "unavailable"
+    assert view["reason"] == "unsupported_target_family"
+    assert "provider" not in view
     assert view["findings"] == []
