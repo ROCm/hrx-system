@@ -145,7 +145,7 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
   %route_count = config.get @qwen3_moe.routed_gate_up.route_count : index
   %expert_count = config.get @qwen3_moe.routed_gate_up.expert_count : index
   %output_size = config.get @qwen3_moe.routed_gate_up.output_size : index
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %bounded_route_count = index.assume %route_count [range(%route_count, 1, 8)] : index
   %bounded_expert_count = index.assume %expert_count [range(%expert_count, 1, 128)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 4096)] : index
@@ -221,11 +221,12 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
   %expert_route_count_reduced = kernel.workgroup.reduce<addi> %lane_expert_route_count : i32
   %expert_route_count_i32 = kernel.subgroup.broadcast.first %expert_route_count_reduced : i32
   %expert_route_count0 = index.cast %expert_route_count_i32 : i32 to index
-  %expert_route_count = index.assume %expert_route_count0 [range(%expert_route_count0, 0, 512)] : index
+  %expert_route_count = index.assume %expert_route_count0 [range(%expert_route_count0, 0, 2048)] : index
   // Route partitions are distributed across the launch grid and continue in
   // uniform strides for concentrated routing. Balanced Qwen prefill gives each
-  // expert exactly one 32-row tile at 512 tokens; concentrated experts can
-  // consume the full token count without changing the launch geometry.
+  // expert 32, 64, or 128 rows at 512, 1024, or 2048 tokens. Concentrated
+  // experts can consume the full token count without changing the launch
+  // geometry.
   scf.for %route_tile_base = [%initial_route_tile_base to %expert_route_count step %route_partition_step] {
     // The first wave snapshots the compact route map once. Every K tile then
     // reuses these 32 entries while the full workgroup cooperatively fills the
@@ -283,7 +284,7 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
             %valid_assignment = scalar.cmpi sge, %assignment_i32, %zero_i32 : i32
             %activation_values = scf.if %valid_assignment -> (vector<4xf16>) {
               %assignment0 = index.cast %assignment_i32 : i32 to index
-              %assignment = index.assume %assignment0 [range(%assignment0, 0, 4095)] : index
+              %assignment = index.assume %assignment0 [range(%assignment0, 0, 16383)] : index
               %bounded_assignment, %bounded_assignment_count = index.assume %assignment, %assignment_count [lt(%assignment, %assignment_count)] : index, index
               %token0 = index.div %bounded_assignment, %bounded_route_count : index
               %token, %input_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
@@ -342,8 +343,8 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
     }
     %safe_assignment0_0 = index.cast %safe_assignment0_i32 : i32 to index
     %safe_assignment1_0 = index.cast %safe_assignment1_i32 : i32 to index
-    %safe_assignment0 = index.assume %safe_assignment0_0 [range(%safe_assignment0_0, 0, 4095)] : index
-    %safe_assignment1 = index.assume %safe_assignment1_0 [range(%safe_assignment1_0, 0, 4095)] : index
+    %safe_assignment0 = index.assume %safe_assignment0_0 [range(%safe_assignment0_0, 0, 16383)] : index
+    %safe_assignment1 = index.assume %safe_assignment1_0 [range(%safe_assignment1_0, 0, 16383)] : index
     %bounded_assignment0, %bounded_assignment_count0 = index.assume %safe_assignment0, %assignment_count [lt(%safe_assignment0, %assignment_count)] : index, index
     %bounded_assignment1, %bounded_assignment_count1 = index.assume %safe_assignment1, %assignment_count [lt(%safe_assignment1, %assignment_count)] : index, index
     %subgroup_channel_base = index.add %channel_tile_base, %subgroup_channel_add : index
@@ -422,7 +423,7 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_gate_up_swiglu_q4k_
   %route_count = config.get @qwen3_moe.routed_gate_up.route_count : index
   %expert_count = config.get @qwen3_moe.routed_gate_up.expert_count : index
   %output_size = config.get @qwen3_moe.routed_gate_up.output_size : index
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %bounded_route_count = index.assume %route_count [range(%route_count, 1, 8)] : index
   %bounded_expert_count = index.assume %expert_count [range(%expert_count, 1, 128)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 4096)] : index
@@ -498,7 +499,7 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_gate_up_swiglu_q4k_
   %expert_route_count_reduced = kernel.workgroup.reduce<addi> %lane_expert_route_count : i32
   %expert_route_count_i32 = kernel.subgroup.broadcast.first %expert_route_count_reduced : i32
   %expert_route_count0 = index.cast %expert_route_count_i32 : i32 to index
-  %expert_route_count = index.assume %expert_route_count0 [range(%expert_route_count0, 0, 512)] : index
+  %expert_route_count = index.assume %expert_route_count0 [range(%expert_route_count0, 0, 2048)] : index
   scf.for %route_tile_base = [%initial_route_tile_base to %expert_route_count step %route_partition_step] {
     %loads_route = index.cmp ult, %workitem, %thirtytwo : index
     scf.if %loads_route {
@@ -550,7 +551,7 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_gate_up_swiglu_q4k_
         %valid_assignment = scalar.cmpi sge, %assignment_i32, %zero_i32 : i32
         %activation_values = scf.if %valid_assignment -> (vector<4xf16>) {
           %assignment0 = index.cast %assignment_i32 : i32 to index
-          %assignment = index.assume %assignment0 [range(%assignment0, 0, 4095)] : index
+          %assignment = index.assume %assignment0 [range(%assignment0, 0, 16383)] : index
           %bounded_assignment, %bounded_assignment_count = index.assume %assignment, %assignment_count [lt(%assignment, %assignment_count)] : index, index
           %token0 = index.div %bounded_assignment, %bounded_route_count : index
           %token, %input_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
@@ -624,8 +625,8 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_gate_up_swiglu_q4k_
     }
     %safe_assignment0_0 = index.cast %safe_assignment0_i32 : i32 to index
     %safe_assignment1_0 = index.cast %safe_assignment1_i32 : i32 to index
-    %safe_assignment0 = index.assume %safe_assignment0_0 [range(%safe_assignment0_0, 0, 4095)] : index
-    %safe_assignment1 = index.assume %safe_assignment1_0 [range(%safe_assignment1_0, 0, 4095)] : index
+    %safe_assignment0 = index.assume %safe_assignment0_0 [range(%safe_assignment0_0, 0, 16383)] : index
+    %safe_assignment1 = index.assume %safe_assignment1_0 [range(%safe_assignment1_0, 0, 16383)] : index
     %bounded_assignment0, %bounded_assignment_count0 = index.assume %safe_assignment0, %assignment_count [lt(%safe_assignment0, %assignment_count)] : index, index
     %bounded_assignment1, %bounded_assignment_count1 = index.assume %safe_assignment1, %assignment_count [lt(%safe_assignment1, %assignment_count)] : index, index
     %subgroup_channel_base = index.madd %subgroup, %sixteen, %channel_tile_base : index
@@ -689,7 +690,7 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_swiglu_f32(%token_c
 } launch(%token_count: index, %gate: buffer, %up: buffer, %output: buffer) {
   %route_count = config.get @qwen3_moe.routed_gate_up.route_count : index
   %output_size = config.get @qwen3_moe.routed_gate_up.output_size : index
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %bounded_route_count = index.assume %route_count [range(%route_count, 1, 8)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 4096)] : index
   %workgroup = kernel.workgroup.id<x> : index
@@ -748,7 +749,7 @@ check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_differential_cas
 }
 
 check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case {
-  %token_count = check.param.choice values([17, 32, 63, 128, 129, 512]) name("token_count") : index
+  %token_count = check.param.choice values([17, 32, 63, 128, 129, 512, 1024, 2048]) name("token_count") : index
   %route_count = check.literal value(8) : index
   %route_stride = check.literal value(8) : index
   %expert_count = check.literal value(128) : index
@@ -757,36 +758,38 @@ check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case {
   // The compact iota exactly matches the oracle's balanced ring:
   // expert(token, route) = (8 * token + route) % 128.
   %route_ids = check.generate.iota offset(0) step(1) period(128) : tensor<[%token_count]x8xi32>
-  %expert_table = check.generate.fill value(-1) : tensor<65664xi32>
+  // One count per expert followed by 2048 assignment slots per expert.
+  %expert_table = check.generate.fill value(-1) : tensor<262272xi32>
   %gate_weight = check.generate.fill value(0) : tensor<128x768x8x144xi8>
   %up_weight = check.generate.fill value(0) : tensor<128x768x8x144xi8>
   %gate_projection = check.generate.fill value(1.0) : tensor<[%token_count]x8x768xf32>
   %up_projection = check.generate.fill value(1.0) : tensor<[%token_count]x8x768xf32>
   %output = check.generate.fill value(1.0) : tensor<[%token_count]x8x768xf32>
   %expected = check.generate.fill value(0.0) : tensor<[%token_count]x8x768xf32>
-  func.call @qwen3_moe_build_expert_table(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table) : (index, index, index, index, tensor<[%token_count]x8xi32>, tensor<65664xi32>)
-  func.call @qwen3_moe_routed_linear_q4k_f16_wmma(%token_count, %input, %expert_table, %gate_weight, %gate_projection) : (index, tensor<[%token_count]x2048xf32>, tensor<65664xi32>, tensor<128x768x8x144xi8>, tensor<[%token_count]x8x768xf32>)
-  func.call @qwen3_moe_routed_linear_q4k_f16_wmma(%token_count, %input, %expert_table, %up_weight, %up_projection) : (index, tensor<[%token_count]x2048xf32>, tensor<65664xi32>, tensor<128x768x8x144xi8>, tensor<[%token_count]x8x768xf32>)
+  func.call @qwen3_moe_build_expert_table(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table) : (index, index, index, index, tensor<[%token_count]x8xi32>, tensor<262272xi32>)
+  func.call @qwen3_moe_routed_linear_q4k_f16_wmma(%token_count, %input, %expert_table, %gate_weight, %gate_projection) : (index, tensor<[%token_count]x2048xf32>, tensor<262272xi32>, tensor<128x768x8x144xi8>, tensor<[%token_count]x8x768xf32>)
+  func.call @qwen3_moe_routed_linear_q4k_f16_wmma(%token_count, %input, %expert_table, %up_weight, %up_projection) : (index, tensor<[%token_count]x2048xf32>, tensor<262272xi32>, tensor<128x768x8x144xi8>, tensor<[%token_count]x8x768xf32>)
   func.call @qwen3_moe_routed_swiglu_f32(%token_count, %gate_projection, %up_projection, %output) : (index, tensor<[%token_count]x8x768xf32>, tensor<[%token_count]x8x768xf32>, tensor<[%token_count]x8x768xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x8x768xf32>
   check.return
 }
 
 check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_benchmark_case {
-  %token_count = check.param.choice values([17, 32, 63, 128, 129, 512]) name("token_count") : index
+  %token_count = check.param.choice values([17, 32, 63, 128, 129, 512, 1024, 2048]) name("token_count") : index
   %route_count = check.literal value(8) : index
   %route_stride = check.literal value(8) : index
   %expert_count = check.literal value(128) : index
   %output_size = check.literal value(768) : index
   %input = check.generate.fill value(0.0) : tensor<[%token_count]x2048xf32>
   %route_ids = check.generate.iota offset(0) step(1) period(128) : tensor<[%token_count]x8xi32>
-  %expert_table = check.generate.fill value(-1) : tensor<65664xi32>
+  // One count per expert followed by 2048 assignment slots per expert.
+  %expert_table = check.generate.fill value(-1) : tensor<262272xi32>
   %gate_weight = check.generate.fill value(0) : tensor<128x768x8x144xi8>
   %up_weight = check.generate.fill value(0) : tensor<128x768x8x144xi8>
   %output = check.generate.fill value(1.0) : tensor<[%token_count]x8x768xf32>
   %expected = check.generate.fill value(0.0) : tensor<[%token_count]x8x768xf32>
-  func.call @qwen3_moe_build_expert_table(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table) : (index, index, index, index, tensor<[%token_count]x8xi32>, tensor<65664xi32>)
-  func.call @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma(%token_count, %input, %expert_table, %gate_weight, %up_weight, %output) : (index, tensor<[%token_count]x2048xf32>, tensor<65664xi32>, tensor<128x768x8x144xi8>, tensor<128x768x8x144xi8>, tensor<[%token_count]x8x768xf32>)
+  func.call @qwen3_moe_build_expert_table(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table) : (index, index, index, index, tensor<[%token_count]x8xi32>, tensor<262272xi32>)
+  func.call @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma(%token_count, %input, %expert_table, %gate_weight, %up_weight, %output) : (index, tensor<[%token_count]x2048xf32>, tensor<262272xi32>, tensor<128x768x8x144xi8>, tensor<128x768x8x144xi8>, tensor<[%token_count]x8x768xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x8x768xf32>
   check.return
 }
@@ -805,6 +808,10 @@ check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case> @q
 
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_prefill_512 {token_count = 512}
 
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_prefill_1024 {token_count = 1024}
+
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_prefill_2048 {token_count = 2048}
+
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_prefill_17 {token_count = 17}
 
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_prefill_32 {token_count = 32}
@@ -816,3 +823,7 @@ check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_benchmark_ca
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_prefill_129 {token_count = 129}
 
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_prefill_512 {token_count = 512}
+
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_prefill_1024 {token_count = 1024}
+
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_prefill_2048 {token_count = 2048}
