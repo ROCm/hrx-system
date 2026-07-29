@@ -69,3 +69,14 @@ py_test(
         "cmake/testdata/test_metadata/CMakeLists.txt",
     ],
 )
+
+filegroup(
+    name = "cmake_test_metadata_fixture",
+    srcs = [
+        "cmake/empty_file",
+        "cmake/iree_configure_testing.cmake",
+        "cmake/iree_macros.cmake",
+        "cmake/testdata/test_metadata/CMakeLists.txt",
+    ],
+    visibility = ["//build_tools/devtools:__pkg__"],
+)

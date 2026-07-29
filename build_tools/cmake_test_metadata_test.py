@@ -67,6 +67,9 @@ class CMakeTestMetadataTest(unittest.TestCase):
                 "benchmark": ["benchmark_root"],
                 "runtime-resource": ["runtime_resource_root"],
                 "manual": ["manual_root"],
+                "fixture-setup": ["fixture_setup_root"],
+                "fixture-required": ["fixture_required_root"],
+                "fixture-cleanup": ["fixture_cleanup_root"],
                 "source-only": [],
                 "tool-backed": ["tool_backed_root"],
             }

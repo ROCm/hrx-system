@@ -73,6 +73,11 @@ iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON
 iree-cmake-test -R hrx
 ```
 
+`iree-cmake-test` asks CTest for the exact selected records, builds the
+concrete CMake roots declared by those records, and then runs the same
+selection. A filtered test run therefore needs no separate matching
+`iree-cmake-build` invocation, and source-only selections perform no build.
+
 PATH aliases are also the stable spelling for launcher-backed commands:
 
 ```bash
@@ -483,5 +488,10 @@ cmake --build build/cmake --target hrx
 
 ```bash
 python dev.py cmake test -R hrx
+ctest --test-dir build/cmake -R hrx --show-only=json-v1
+cmake --build build/cmake --target selected-root-a selected-root-b
 ctest --test-dir build/cmake --output-on-failure -R hrx
 ```
+
+In the raw pipeline, `selected-root-a selected-root-b` stands for the stable
+union of `IREE_BUILD_TARGETS` values in the JSON records.

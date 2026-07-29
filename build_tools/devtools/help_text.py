@@ -209,7 +209,7 @@ CMake.""",
 locked importer site-packages path through Bazel test_env.""",
             )
         return CommandHelp(
-            description="Run CTest in the configured CMake build tree.",
+            description="Build and run selected CTests in the configured CMake tree.",
             arguments="CTest options.",
             epilog="""Examples:
   python dev.py cmake test
@@ -218,7 +218,9 @@ locked importer site-packages path through Bazel test_env.""",
   python dev.py cmake test --importer-env tilelang -R tilelang
   python dev.py cmake test --importer-env mlir -R mlir
 
-CTest runs in the selected CMake build tree with --output-on-failure.
+CTest first enumerates the exact selection, builds the concrete CMake roots
+declared by those tests, and then runs the same selection with
+`--output-on-failure`. Source-only selections skip the build.
 `--importer-env <name>` runs CTest with the locked importer site-packages path
 on PYTHONPATH.""",
         )
@@ -621,7 +623,10 @@ executable and does not build implicitly. `iree-cmake-try` builds temporary
 C/C++ snippets against the configured tree. `iree-cmake-fuzz` builds and execs
 a configured libFuzzer target. `python dev.py cmake compile-commands` prints
 the configured compile database path for clang tooling. `python dev.py cmake
-clang-tidy` runs IREE clang-tidy checks against that compile database."""
+clang-tidy` runs IREE clang-tidy checks against that compile database.
+`iree-cmake-test` asks CTest for the exact selected records, builds their
+declared CMake roots, and runs the same selection; no separate matching build
+target is required."""
 
 
 def bazel_command_agent_markdown(command: str) -> str:
@@ -900,7 +905,7 @@ concrete generator targets."""
     if command == "test":
         return """## iree-cmake-test
 
-Run CTest in the configured CMake build tree.
+Build and run selected CTests in the configured CMake build tree.
 
 ```bash
 iree-cmake-test
@@ -908,7 +913,9 @@ iree-cmake-test -R hrx
 iree-cmake-test --rerun-failed
 ```
 
-CTest options are forwarded unchanged."""
+CTest options are forwarded unchanged to selection and execution. The wrapper
+uses CTest's JSON model to build the concrete roots declared by the selected
+records before execution. Source-only selections perform no build."""
 
     if command == "run":
         return """## iree-cmake-run

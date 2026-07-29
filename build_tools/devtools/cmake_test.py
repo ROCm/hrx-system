@@ -191,6 +191,16 @@ class CMakeTest(unittest.TestCase):
         )
         self.assertIn("ctest", test_plan.describe())
         self.assertIn("-R hrx", test_plan.describe())
+        self.assertIn("IREE_BUILD_TARGETS", test_plan.describe())
+        self.assertIn("cmake --build", test_plan.describe())
+
+        inspect_plan = cmake_dev.test_plan(
+            tool_env,
+            configured_build_dir=Path("build/cmake-debug"),
+            backend_args=["-N", "-R", "hrx"],
+        )
+        self.assertIn("ctest", inspect_plan.describe())
+        self.assertNotIn("cmake --build", inspect_plan.describe())
 
     def test_fresh_configure_preserves_configured_generator(self):
         tool_env = ToolEnvironment(ToolMode.SYSTEM, None)

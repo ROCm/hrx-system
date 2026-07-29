@@ -18,8 +18,20 @@ include("${IREE_REPO_ROOT}/build_tools/cmake/iree_macros.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_configure_testing.cmake")
 
 function(add_metadata_test TEST_NAME BUILD_TARGET)
-  add_custom_target("${BUILD_TARGET}")
-  add_test(NAME "${TEST_NAME}" COMMAND "${CMAKE_COMMAND}" -E true)
+  set(_SENTINEL "${CMAKE_CURRENT_BINARY_DIR}/${TEST_NAME}.built")
+  add_custom_command(
+    OUTPUT "${_SENTINEL}"
+    COMMAND "${CMAKE_COMMAND}" -E touch "${_SENTINEL}"
+    VERBATIM
+  )
+  add_custom_target("${BUILD_TARGET}" DEPENDS "${_SENTINEL}")
+  add_test(
+    NAME "${TEST_NAME}"
+    COMMAND
+      "${CMAKE_COMMAND}" -E compare_files
+      "${_SENTINEL}"
+      "${IREE_REPO_ROOT}/build_tools/cmake/empty_file"
+  )
   iree_register_test_build_targets(
     "${TEST_NAME}"
     TARGETS "${BUILD_TARGET}"
@@ -40,13 +52,34 @@ set_property(
 add_metadata_test(manual manual_root)
 set_property(TEST manual PROPERTY LABELS manual)
 
+add_metadata_test(fixture-setup fixture_setup_root)
+set_property(TEST fixture-setup PROPERTY FIXTURES_SETUP shared-fixture)
+
+add_metadata_test(fixture-required fixture_required_root)
+set_property(TEST fixture-required PROPERTY FIXTURES_REQUIRED shared-fixture)
+
+add_metadata_test(fixture-cleanup fixture_cleanup_root)
+set_property(TEST fixture-cleanup PROPERTY FIXTURES_CLEANUP shared-fixture)
+
 add_test(NAME source-only COMMAND "${CMAKE_COMMAND}" -E true)
 iree_register_test_build_targets(source-only)
 
-add_custom_target(tool)
+set(_TOOL_SENTINEL "${CMAKE_CURRENT_BINARY_DIR}/tool.built")
+add_custom_command(
+  OUTPUT "${_TOOL_SENTINEL}"
+  COMMAND "${CMAKE_COMMAND}" -E touch "${_TOOL_SENTINEL}"
+  VERBATIM
+)
+add_custom_target(tool DEPENDS "${_TOOL_SENTINEL}")
 add_custom_target(tool_backed_root)
 add_dependencies(tool_backed_root tool)
-add_test(NAME tool-backed COMMAND "${CMAKE_COMMAND}" -E true)
+add_test(
+  NAME tool-backed
+  COMMAND
+    "${CMAKE_COMMAND}" -E compare_files
+    "${_TOOL_SENTINEL}"
+    "${IREE_REPO_ROOT}/build_tools/cmake/empty_file"
+)
 iree_register_test_build_targets(
   tool-backed
   TARGETS tool_backed_root
