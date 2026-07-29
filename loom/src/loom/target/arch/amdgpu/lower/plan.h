@@ -1246,6 +1246,15 @@ typedef enum loom_amdgpu_fragment_memory_payload_form_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32 = 4,
 } loom_amdgpu_fragment_memory_payload_form_t;
 
+typedef enum loom_amdgpu_fragment_memory_packetization_e {
+  // Fragment registers load or store through native 32-bit packet groups.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE = 0,
+  // Each fragment register transfers one meaningful low 16-bit element.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_SCALAR_B16 = 1,
+  // Two independently addressed 16-bit elements are packed per register.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_B16 = 2,
+} loom_amdgpu_fragment_memory_packetization_t;
+
 typedef enum loom_amdgpu_fragment_memory_epilogue_strategy_e {
   // No special result-fragment store epilogue strategy is selected.
   LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_NONE = 0,
@@ -1330,6 +1339,8 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   loom_amdgpu_fragment_memory_packet_flags_t packet_flags;
   // Payload storage form selected for the fragment movement.
   loom_amdgpu_fragment_memory_payload_form_t payload_form;
+  // Memory packetization selected from fragment and physical view layouts.
+  loom_amdgpu_fragment_memory_packetization_t packetization;
   // Result-fragment store epilogue strategy selected from layout and packet
   // facts.
   loom_amdgpu_fragment_memory_epilogue_strategy_t epilogue_strategy;

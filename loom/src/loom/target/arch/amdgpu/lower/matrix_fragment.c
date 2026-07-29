@@ -136,14 +136,6 @@ bool loom_amdgpu_matrix_fragment_role_layout_uses_packed_b16_elements(
          packed_axis == LOOM_MATRIX_FRAGMENT_AXIS_ROW;
 }
 
-bool loom_amdgpu_matrix_fragment_role_layout_uses_scalar_b16_packets(
-    const loom_matrix_fragment_role_layout_t* role_layout) {
-  return loom_amdgpu_matrix_fragment_role_layout_uses_low_subword(
-             role_layout) ||
-         loom_amdgpu_matrix_fragment_role_layout_uses_packed_b16_elements(
-             role_layout);
-}
-
 bool loom_amdgpu_matrix_fragment_payload_matches_role_storage(
     loom_type_t payload_type, loom_scalar_type_t expected_element_type,
     const loom_matrix_fragment_role_layout_t* role_layout) {
