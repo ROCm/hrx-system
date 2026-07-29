@@ -1329,23 +1329,6 @@ HIPAPI hipError_t hipMemGetHandleForAddressRange(
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
-                                   hipMemAllocationType type) {
-  (void)pool;
-  (void)location;
-  (void)type;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipMemSetMemPool(hipMemLocation* location,
-                                   hipMemAllocationType type,
-                                   hipMemPool_t pool) {
-  (void)location;
-  (void)type;
-  (void)pool;
-  return hipErrorNotSupported;
-}
-
 static bool hrx_hip_batch_access_order_valid(hipMemcpySrcAccessOrder order) {
   return order == hipMemcpySrcAccessOrderInvalid ||
          order == hipMemcpySrcAccessOrderStream ||

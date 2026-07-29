@@ -8,16 +8,20 @@ iree_cc_library(
   NAME
     common
   HDRS
+    "direct_transfer.h"
     "fat_binary.h"
     "graph.h"
     "hrx_bridge.h"
     "internal.h"
     "kernel_arguments.h"
     "kpack.h"
+    "memory.h"
+    "stream.h"
     "tls.h"
   SRCS
     "context.c"
     "device.c"
+    "direct_transfer.c"
     "event.c"
     "fat_binary.c"
     "graph.c"

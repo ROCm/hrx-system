@@ -110,7 +110,8 @@ static iree_status_t iree_hal_streaming_query_device_info(
                             "iree_device_size_t range");
   }
   device->total_memory = (iree_device_size_t)total_memory;
-  device->free_memory = device->total_memory;
+  iree_atomic_store(&device->free_memory, device->total_memory,
+                    iree_memory_order_relaxed);
 
   const iree_hal_device_spec_t* device_spec =
       iree_hal_device_spec(device->hal_device);

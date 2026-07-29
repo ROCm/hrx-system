@@ -8,6 +8,7 @@
 
 #include "common/internal.h"
 #include "common/kernel_arguments.h"
+#include "common/memory.h"
 
 //===----------------------------------------------------------------------===//
 // iree_hal_streaming_graph_t (template)
@@ -166,9 +167,8 @@ iree_status_t iree_hal_streaming_graph_allocate_host_staging(
 
   iree_hal_streaming_buffer_t* buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_memory_allocate_host(
-              graph->context, size,
-              IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT, &buffer));
+      z0, iree_hal_streaming_memory_allocate_host_staging(graph->context, size,
+                                                          &buffer));
 
   iree_hal_streaming_graph_owned_host_allocation_t* owned_allocation = NULL;
   iree_status_t status = iree_arena_allocate(

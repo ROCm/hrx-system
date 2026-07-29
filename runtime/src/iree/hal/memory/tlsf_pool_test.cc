@@ -383,6 +383,46 @@ TEST_F(TLSFPoolTest, ReserveGrowsForLivePressure) {
   iree_hal_pool_release_reservation(pool_, &first_reservation, NULL);
 }
 
+TEST_F(TLSFPoolTest, TrimToPreservesLiveSlab) {
+  iree_hal_pool_reservation_t first_reservation;
+  iree_hal_pool_acquire_info_t reserve_info;
+  iree_hal_pool_acquire_result_t result;
+  IREE_ASSERT_OK(iree_hal_pool_acquire_reservation(
+      pool_, 4096, 16, /*requester_frontier=*/NULL,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, &first_reservation, &reserve_info,
+      &result));
+  EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
+
+  iree_hal_pool_reservation_t second_reservation;
+  IREE_ASSERT_OK(iree_hal_pool_acquire_reservation(
+      pool_, 16, 16, /*requester_frontier=*/NULL,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, &second_reservation, &reserve_info,
+      &result));
+  EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
+  EXPECT_NE(first_reservation.slab_index, second_reservation.slab_index);
+
+  iree_hal_pool_release_reservation(pool_, &first_reservation, NULL);
+  IREE_ASSERT_OK(iree_hal_tlsf_pool_trim_to(pool_, 16));
+
+  iree_hal_pool_stats_t stats;
+  iree_hal_pool_query_stats(pool_, &stats);
+  EXPECT_EQ(stats.slab_count, 1u);
+  EXPECT_EQ(stats.bytes_committed, 4096u);
+  EXPECT_EQ(stats.reservation_count, 1u);
+
+  iree_hal_buffer_params_t params = {0};
+  params.usage =
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+  params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  iree_hal_buffer_t* buffer = NULL;
+  IREE_ASSERT_OK(iree_hal_pool_materialize_reservation(
+      pool_, params, &second_reservation,
+      IREE_HAL_POOL_MATERIALIZE_FLAG_TRANSFER_RESERVATION_OWNERSHIP, &buffer));
+  ASSERT_NE(buffer, nullptr);
+  iree_hal_buffer_release(buffer);
+}
+
 TEST(TLSFPool, ReleaseNodeReuseAvoidsRepeatedHostAllocation) {
   iree_hal_test_counting_allocator_t allocator_state = {
       /*.backing_allocator=*/iree_allocator_system(),

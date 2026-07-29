@@ -131,6 +131,15 @@ iree_status_t iree_hal_amdgpu_query_fine_global_memory_pool(
       out_available, out_pool);
 }
 
+iree_status_t iree_hal_amdgpu_query_extended_fine_global_memory_pool(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
+    bool* out_available, hsa_amd_memory_pool_t* out_pool) {
+  return iree_hal_amdgpu_query_global_memory_pool(
+      libhsa, agent,
+      HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED,
+      out_available, out_pool);
+}
+
 bool iree_hal_amdgpu_try_find_coarse_global_memory_pool(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
     hsa_amd_memory_pool_t* out_pool) {

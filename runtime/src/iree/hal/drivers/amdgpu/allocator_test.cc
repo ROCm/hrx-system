@@ -532,9 +532,9 @@ TEST_F(AllocatorTest, QueryMemoryHeapsReportsHsaLimits) {
                             test_device.allocator(),
                             /*capacity=*/0, /*heaps=*/NULL, &heap_count));
   ASSERT_GE(heap_count, 2u);
-  ASSERT_LE(heap_count, 3u);
+  ASSERT_LE(heap_count, 4u);
 
-  std::array<iree_hal_allocator_memory_heap_t, 3> heaps;
+  std::array<iree_hal_allocator_memory_heap_t, 4> heaps;
   IREE_ASSERT_OK(iree_hal_allocator_query_memory_heaps(
       test_device.allocator(), heaps.size(), heaps.data(), &heap_count));
   ASSERT_GE(heap_count, 2u);
@@ -553,7 +553,7 @@ TEST_F(AllocatorTest, OversizedAllocationIsRejectedByCompatibility) {
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
 
-  std::array<iree_hal_allocator_memory_heap_t, 3> heaps;
+  std::array<iree_hal_allocator_memory_heap_t, 4> heaps;
   iree_host_size_t heap_count = 0;
   IREE_ASSERT_OK(iree_hal_allocator_query_memory_heaps(
       test_device.allocator(), heaps.size(), heaps.data(), &heap_count));
@@ -698,7 +698,7 @@ TEST_F(AllocatorTest, OverAlignedAllocationIsRejected) {
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
 
-  std::array<iree_hal_allocator_memory_heap_t, 3> heaps;
+  std::array<iree_hal_allocator_memory_heap_t, 4> heaps;
   iree_host_size_t heap_count = 0;
   IREE_ASSERT_OK(iree_hal_allocator_query_memory_heaps(
       test_device.allocator(), heaps.size(), heaps.data(), &heap_count));
