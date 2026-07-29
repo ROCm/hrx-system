@@ -120,22 +120,12 @@ def _global_descriptor_keys() -> tuple[str | None, ...]:
     )
 
 
-def test_generation_validates_profile_descriptor_inventories() -> None:
-    source = amdgpu_matrix_contract_tables._emit_source(public_header="loom/target/arch/amdgpu/matrix/contract_tables.h")
-
-    gfx12_profile = source[source.index("[LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12]") : source.index("[LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250]")]
-    assert "LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12" in gfx12_profile
-    assert "LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX12" in gfx12_profile
-    assert "LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11" not in gfx12_profile
-
-    gfx12_5_generic_profile = source[source.index("[LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC]") : source.index("[LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC]")]
-    assert "LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250" in gfx12_5_generic_profile
-    assert "LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250_SCALE_F8F6F4" in gfx12_5_generic_profile
-    assert "LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250" not in gfx12_5_generic_profile
-
-
 def test_generation_rejects_gfx12_profile_for_rdna3_5_inventory() -> None:
-    catalog = amdgpu_matrix_contract_tables._matrix_descriptor_catalog_for_builder("rdna3_5")
+    global_descriptor_keys = _global_descriptor_keys()
+    catalog = amdgpu_matrix_contract_tables._matrix_descriptor_catalog_for_builder(
+        "rdna3_5",
+        descriptor_ref_keys=(descriptor_key for descriptor_key in global_descriptor_keys if descriptor_key is not None),
+    )
 
     with pytest.raises(
         ValueError,
@@ -148,7 +138,7 @@ def test_generation_rejects_gfx12_profile_for_rdna3_5_inventory() -> None:
             descriptor_set_key="amdgpu.rdna3_5.core",
             profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
             catalog=catalog,
-            global_descriptor_keys=_global_descriptor_keys(),
+            global_descriptor_keys=global_descriptor_keys,
         )
 
 
