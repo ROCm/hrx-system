@@ -51,12 +51,12 @@ low.func.def target(@target) @bf16_two_k_block_loads_schedule_before_wmma(%worki
   v_lshlrev_b32 v0, 2, v0
   s_delay_alu instid0(VALU_DEP_2)
   v_lshlrev_b32 v1, 6, v1
-  global_load_b128 v[4:7], v1, s[0:1] offset:0
-  global_load_b128 v[16:19], v1, s[0:1] offset:16
+  global_load_b128 v[16:19], v1, s[0:1] offset:0
+  global_load_b128 v[20:23], v1, s[0:1] offset:16
   global_load_b128 v[24:27], v1, s[2:3] offset:0
   global_load_b128 v[28:31], v1, s[2:3] offset:16
-  global_load_b128 v[20:23], v1, s[0:1] offset:32
-  global_load_b128 v[32:35], v1, s[0:1] offset:48
+  global_load_b128 v[32:35], v1, s[0:1] offset:32
+  global_load_b128 v[36:39], v1, s[0:1] offset:48
   global_load_b128 v[40:43], v1, s[2:3] offset:32
   global_load_b128 v[44:47], v1, s[2:3] offset:48
   v_mov_b32 v9, v8
@@ -66,29 +66,11 @@ low.func.def target(@target) @bf16_two_k_block_loads_schedule_before_wmma(%worki
   v_mov_b32 v13, v8
   v_mov_b32 v14, v8
   v_mov_b32 v15, v8
-  s_waitcnt vmcnt(6) lgkmcnt(63)
-  v_mov_b32 v48, v4
-  v_mov_b32 v49, v5
-  v_mov_b32 v50, v6
-  v_mov_b32 v51, v7
-  v_mov_b32 v52, v16
-  v_mov_b32 v53, v17
-  v_mov_b32 v54, v18
-  v_mov_b32 v55, v19
   s_waitcnt vmcnt(4) lgkmcnt(63)
-  v_wmma_f32_16x16x16_bf16 v[8:15], v[48:55], v[24:31], v[8:15]
-  s_waitcnt vmcnt(2) lgkmcnt(63)
-  v_mov_b32 v16, v20
-  v_mov_b32 v17, v21
-  v_mov_b32 v18, v22
-  v_mov_b32 v19, v23
-  v_mov_b32 v20, v32
-  v_mov_b32 v21, v33
-  v_mov_b32 v22, v34
-  v_mov_b32 v23, v35
+  v_wmma_f32_16x16x16_bf16 v[8:15], v[16:23], v[24:31], v[8:15]
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_delay_alu instid0(VALU_DEP_1)
-  v_wmma_f32_16x16x16_bf16 v[8:15], v[16:23], v[40:47], v[8:15]
+  v_wmma_f32_16x16x16_bf16 v[8:15], v[32:39], v[40:47], v[8:15]
   global_store_b32 v0, v8, s[4:5] offset:0
   global_store_b32 v0, v9, s[4:5] offset:128
   global_store_b32 v0, v10, s[4:5] offset:256
@@ -262,12 +244,12 @@ low.func.def target(@target) @gfx1250_fp8_materialized_bf16_two_k_block_schedule
   v_lshlrev_b32 v0, 2, v0
   s_delay_alu instid0(VALU_DEP_2)
   v_lshlrev_b32 v2, 7, v1
-  global_load_b128 v[4:7], v2, s[0:1] offset:0
-  global_load_b128 v[16:19], v2, s[0:1] offset:16
-  global_load_b128 v[20:23], v2, s[0:1] offset:32
-  global_load_b128 v[24:27], v2, s[0:1] offset:48
+  global_load_b128 v[16:19], v2, s[0:1] offset:0
+  global_load_b128 v[20:23], v2, s[0:1] offset:16
+  global_load_b128 v[24:27], v2, s[0:1] offset:32
+  global_load_b128 v[28:31], v2, s[0:1] offset:48
   v_lshlrev_b32 v1, 6, v1
-  global_load_b128 v[28:31], v1, s[2:3] offset:0
+  global_load_b128 v[4:7], v1, s[2:3] offset:0
   global_load_b128 v[32:35], v1, s[2:3] offset:16
   v_mov_b32 v9, v8
   v_mov_b32 v10, v8
@@ -276,94 +258,76 @@ low.func.def target(@target) @gfx1250_fp8_materialized_bf16_two_k_block_schedule
   v_mov_b32 v13, v8
   v_mov_b32 v14, v8
   v_mov_b32 v15, v8
-  s_wait_loadcnt loadcnt(4)
-  v_mov_b32 v40, v4
-  v_mov_b32 v41, v5
-  v_mov_b32 v42, v6
-  v_mov_b32 v43, v7
-  v_mov_b32 v44, v16
-  v_mov_b32 v45, v17
-  v_mov_b32 v46, v18
-  v_mov_b32 v47, v19
-  s_wait_loadcnt loadcnt(2)
-  v_mov_b32 v16, v20
-  v_mov_b32 v17, v21
-  v_mov_b32 v18, v22
-  v_mov_b32 v19, v23
-  v_mov_b32 v20, v24
-  v_mov_b32 v21, v25
-  v_mov_b32 v22, v26
-  v_mov_b32 v23, v27
   s_wait_loadcnt loadcnt(1)
-  v_lshrrev_b32 v3, 16, v28
-  v_cvt_pk_f32_fp8 v[4:5], v28
+  v_lshrrev_b32 v3, 16, v4
+  v_cvt_pk_f32_fp8 v[36:37], v4
+  s_delay_alu instid0(VALU_DEP_2)
+  v_cvt_pk_f32_fp8 v[38:39], v3
+  s_delay_alu instid0(VALU_DEP_2)
+  v_cvt_pk_bf16_f32 v40, v36, v37
+  s_delay_alu instid0(VALU_DEP_2)
+  v_cvt_pk_bf16_f32 v41, v38, v39
+  v_lshrrev_b32 v3, 16, v5
+  v_cvt_pk_f32_fp8 v[4:5], v5
+  s_delay_alu instid0(VALU_DEP_2)
+  v_cvt_pk_f32_fp8 v[36:37], v3
+  s_delay_alu instid0(VALU_DEP_2)
+  v_cvt_pk_bf16_f32 v42, v4, v5
+  s_delay_alu instid0(VALU_DEP_2)
+  v_cvt_pk_bf16_f32 v43, v36, v37
+  v_lshrrev_b32 v3, 16, v6
+  v_cvt_pk_f32_fp8 v[4:5], v6
+  s_delay_alu instid0(VALU_DEP_2)
+  v_cvt_pk_f32_fp8 v[36:37], v3
+  s_delay_alu instid0(VALU_DEP_2)
+  v_cvt_pk_bf16_f32 v44, v4, v5
+  s_delay_alu instid0(VALU_DEP_2)
+  v_cvt_pk_bf16_f32 v45, v36, v37
+  v_lshrrev_b32 v3, 16, v7
+  v_cvt_pk_f32_fp8 v[4:5], v7
   s_delay_alu instid0(VALU_DEP_2)
   v_cvt_pk_f32_fp8 v[6:7], v3
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v24, v4, v5
+  v_cvt_pk_bf16_f32 v46, v4, v5
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v25, v6, v7
-  v_lshrrev_b32 v3, 16, v29
-  v_cvt_pk_f32_fp8 v[4:5], v29
-  s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_f32_fp8 v[6:7], v3
-  s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v26, v4, v5
-  s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v27, v6, v7
-  v_lshrrev_b32 v3, 16, v30
-  v_cvt_pk_f32_fp8 v[4:5], v30
-  s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_f32_fp8 v[6:7], v3
-  s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v28, v4, v5
-  s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v29, v6, v7
-  v_lshrrev_b32 v3, 16, v31
-  v_cvt_pk_f32_fp8 v[4:5], v31
-  s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_f32_fp8 v[6:7], v3
-  s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v30, v4, v5
-  s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v31, v6, v7
+  v_cvt_pk_bf16_f32 v47, v6, v7
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
-  v_wmma_f32_16x16x32_bf16 v[8:15], v[40:47], v[24:31], v[8:15]
+  v_wmma_f32_16x16x32_bf16 v[8:15], v[16:23], v[40:47], v[8:15]
   s_wait_loadcnt loadcnt(0)
   v_lshrrev_b32 v3, 16, v32
   v_cvt_pk_f32_fp8 v[4:5], v32
   s_delay_alu instid0(VALU_DEP_2)
   v_cvt_pk_f32_fp8 v[6:7], v3
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v24, v4, v5
+  v_cvt_pk_bf16_f32 v16, v4, v5
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v25, v6, v7
+  v_cvt_pk_bf16_f32 v17, v6, v7
   v_lshrrev_b32 v3, 16, v33
   v_cvt_pk_f32_fp8 v[4:5], v33
   s_delay_alu instid0(VALU_DEP_2)
   v_cvt_pk_f32_fp8 v[6:7], v3
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v26, v4, v5
+  v_cvt_pk_bf16_f32 v18, v4, v5
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v27, v6, v7
+  v_cvt_pk_bf16_f32 v19, v6, v7
   v_lshrrev_b32 v3, 16, v34
   v_cvt_pk_f32_fp8 v[4:5], v34
   s_delay_alu instid0(VALU_DEP_2)
   v_cvt_pk_f32_fp8 v[6:7], v3
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v28, v4, v5
+  v_cvt_pk_bf16_f32 v20, v4, v5
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v29, v6, v7
+  v_cvt_pk_bf16_f32 v21, v6, v7
   v_lshrrev_b32 v3, 16, v35
   v_cvt_pk_f32_fp8 v[4:5], v35
   s_delay_alu instid0(VALU_DEP_2)
   v_cvt_pk_f32_fp8 v[6:7], v3
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v30, v4, v5
+  v_cvt_pk_bf16_f32 v22, v4, v5
   s_delay_alu instid0(VALU_DEP_2)
-  v_cvt_pk_bf16_f32 v31, v6, v7
+  v_cvt_pk_bf16_f32 v23, v6, v7
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
-  v_wmma_f32_16x16x32_bf16 v[8:15], v[16:23], v[24:31], v[8:15]
+  v_wmma_f32_16x16x32_bf16 v[8:15], v[24:31], v[16:23], v[8:15]
   global_store_b32 v0, v8, s[4:5] offset:0
   s_wait_storecnt storecnt(0)
   s_endpgm
@@ -439,19 +403,19 @@ low.func.def target(@target) @bf16_four_k_block_loads_schedule_before_wmma(%work
   v_lshlrev_b32 v0, 2, v0
   s_delay_alu instid0(VALU_DEP_2)
   v_lshlrev_b32 v1, 7, v1
-  global_load_b128 v[4:7], v1, s[0:1] offset:0
-  global_load_b128 v[16:19], v1, s[0:1] offset:16
+  global_load_b128 v[16:19], v1, s[0:1] offset:0
+  global_load_b128 v[20:23], v1, s[0:1] offset:16
   global_load_b128 v[24:27], v1, s[2:3] offset:0
   global_load_b128 v[28:31], v1, s[2:3] offset:16
-  global_load_b128 v[20:23], v1, s[0:1] offset:32
-  global_load_b128 v[32:35], v1, s[0:1] offset:48
+  global_load_b128 v[32:35], v1, s[0:1] offset:32
+  global_load_b128 v[36:39], v1, s[0:1] offset:48
   global_load_b128 v[40:43], v1, s[2:3] offset:32
   global_load_b128 v[44:47], v1, s[2:3] offset:48
-  global_load_b128 v[36:39], v1, s[0:1] offset:64
-  global_load_b128 v[48:51], v1, s[0:1] offset:80
+  global_load_b128 v[48:51], v1, s[0:1] offset:64
+  global_load_b128 v[52:55], v1, s[0:1] offset:80
   global_load_b128 v[56:59], v1, s[2:3] offset:64
   global_load_b128 v[60:63], v1, s[2:3] offset:80
-  global_load_b128 v[52:55], v1, s[0:1] offset:96
+  global_load_b128 v[4:7], v1, s[0:1] offset:96
   global_load_b128 v[64:67], v1, s[0:1] offset:112
   global_load_b128 v[72:75], v1, s[2:3] offset:96
   global_load_b128 v[76:79], v1, s[2:3] offset:112
@@ -462,46 +426,19 @@ low.func.def target(@target) @bf16_four_k_block_loads_schedule_before_wmma(%work
   v_mov_b32 v13, v8
   v_mov_b32 v14, v8
   v_mov_b32 v15, v8
-  s_waitcnt vmcnt(14) lgkmcnt(63)
-  v_mov_b32 v80, v4
-  v_mov_b32 v81, v5
-  v_mov_b32 v82, v6
-  v_mov_b32 v83, v7
-  v_mov_b32 v84, v16
-  v_mov_b32 v85, v17
-  v_mov_b32 v86, v18
-  v_mov_b32 v87, v19
   s_waitcnt vmcnt(12) lgkmcnt(63)
-  v_wmma_f32_16x16x16_bf16 v[8:15], v[80:87], v[24:31], v[8:15]
-  s_waitcnt vmcnt(10) lgkmcnt(63)
-  v_mov_b32 v16, v20
-  v_mov_b32 v17, v21
-  v_mov_b32 v18, v22
-  v_mov_b32 v19, v23
-  v_mov_b32 v20, v32
-  v_mov_b32 v21, v33
-  v_mov_b32 v22, v34
-  v_mov_b32 v23, v35
+  v_wmma_f32_16x16x16_bf16 v[8:15], v[16:23], v[24:31], v[8:15]
   s_waitcnt vmcnt(8) lgkmcnt(63)
   s_delay_alu instid0(VALU_DEP_1)
-  v_wmma_f32_16x16x16_bf16 v[8:15], v[16:23], v[40:47], v[8:15]
-  s_waitcnt vmcnt(6) lgkmcnt(63)
-  v_mov_b32 v16, v36
-  v_mov_b32 v17, v37
-  v_mov_b32 v18, v38
-  v_mov_b32 v19, v39
-  v_mov_b32 v20, v48
-  v_mov_b32 v21, v49
-  v_mov_b32 v22, v50
-  v_mov_b32 v23, v51
+  v_wmma_f32_16x16x16_bf16 v[8:15], v[32:39], v[40:47], v[8:15]
   s_waitcnt vmcnt(4) lgkmcnt(63)
   s_delay_alu instid0(VALU_DEP_1)
-  v_wmma_f32_16x16x16_bf16 v[8:15], v[16:23], v[56:63], v[8:15]
+  v_wmma_f32_16x16x16_bf16 v[8:15], v[48:55], v[56:63], v[8:15]
   s_waitcnt vmcnt(2) lgkmcnt(63)
-  v_mov_b32 v16, v52
-  v_mov_b32 v17, v53
-  v_mov_b32 v18, v54
-  v_mov_b32 v19, v55
+  v_mov_b32 v16, v4
+  v_mov_b32 v17, v5
+  v_mov_b32 v18, v6
+  v_mov_b32 v19, v7
   v_mov_b32 v20, v64
   v_mov_b32 v21, v65
   v_mov_b32 v22, v66
