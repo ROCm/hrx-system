@@ -79,6 +79,13 @@ iree_status_t iree_hal_amdgpu_query_fine_global_memory_pool(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
     bool* out_available, hsa_amd_memory_pool_t* out_pool);
 
+// Queries whether an extended fine-grained memory pool is available on the
+// |agent|. Such pools provide the device-side uncached memory mapping used by
+// allocation requests that cannot use the normal device cache hierarchy.
+iree_status_t iree_hal_amdgpu_query_extended_fine_global_memory_pool(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
+    bool* out_available, hsa_amd_memory_pool_t* out_pool);
+
 // Tries to find a coarse-grained memory pool on the |agent|.
 // Returns true and populates |out_pool| if found, false otherwise.
 bool iree_hal_amdgpu_try_find_coarse_global_memory_pool(

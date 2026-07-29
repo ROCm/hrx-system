@@ -95,6 +95,11 @@ enum iree_hal_memory_type_bits_t {
   IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL =
       IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE | (1u << 5),
 
+  // Memory accesses issued by the device bypass its normal cache hierarchy.
+  // This is an allocation requirement: drivers must reject the request when
+  // they cannot provide an uncached device-memory mapping.
+  IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED = 1u << 7,
+
   // The allocator will choose the optimal memory type based on buffer usage,
   // preferring to place the allocation in device-local memory.
   //
@@ -1082,12 +1087,23 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_mapping_subspan(
 //===----------------------------------------------------------------------===//
 
 // Creates a buffer referencing a subspan of some base allocation.
-// Optionally |device_allocator| can be provided if this subspan references
-// managed buffers that need deallocation callbacks.
 IREE_API_EXPORT iree_status_t iree_hal_subspan_buffer_create(
     iree_hal_buffer_t* allocated_buffer, iree_device_size_t byte_offset,
     iree_device_size_t byte_length, iree_allocator_t host_allocator,
     iree_hal_buffer_t** out_buffer);
+
+// Creates a buffer referencing a subspan of some base allocation and invokes
+// |release_callback| after the subspan releases its retained base buffer.
+//
+// This is used by allocators that need pool bookkeeping to observe the final
+// lifetime of a materialized view. The callback is intentionally sequenced
+// after the base release so it may release a pool slab without invalidating the
+// subspan while its final reference is being destroyed.
+IREE_API_EXPORT iree_status_t iree_hal_subspan_buffer_create_with_callback(
+    iree_hal_buffer_t* allocated_buffer, iree_device_size_t byte_offset,
+    iree_device_size_t byte_length,
+    iree_hal_buffer_release_callback_t release_callback,
+    iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
 
 //===----------------------------------------------------------------------===//
 // iree_hal_heap_buffer_t

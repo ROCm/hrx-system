@@ -917,6 +917,8 @@ typedef enum hipMemAllocationHandleType {
 typedef enum hipMemAllocationType {
   hipMemAllocationTypeInvalid = 0,
   hipMemAllocationTypePinned = 1,
+  hipMemAllocationTypeManaged = 2,
+  hipMemAllocationTypeUncached = 0x40000000,
   hipMemAllocationTypeMax = 0x7FFFFFFF
 } hipMemAllocationType;
 

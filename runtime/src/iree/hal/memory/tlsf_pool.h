@@ -24,9 +24,8 @@ extern "C" {
 // Options for creating a HAL pool that wraps iree_hal_memory_tlsf_t.
 typedef struct iree_hal_tlsf_pool_options_t {
   // Raw TLSF allocator configuration for each slab. The range length is the
-  // fixed slab size and the maximum single reservation served by this pool.
+  // fixed slab size and maximum single reservation served by this pool.
   // Live-pressure exhaustion grows by acquiring another slab of this size.
-  // Larger requests are oversized for TLSF and should route to a direct pool.
   iree_hal_memory_tlsf_options_t tlsf_options;
 
   // ASAN policy used to shape hidden backing ranges for reservations.
@@ -67,6 +66,12 @@ IREE_API_EXPORT iree_status_t iree_hal_tlsf_pool_create(
     iree_async_notification_t* notification,
     iree_hal_pool_epoch_query_t epoch_query, iree_allocator_t host_allocator,
     iree_hal_pool_t** out_pool);
+
+// Releases fully idle slabs while retaining at least |min_bytes_to_keep| of
+// committed backing. |pool| must have been created by
+// iree_hal_tlsf_pool_create.
+IREE_API_EXPORT iree_status_t iree_hal_tlsf_pool_trim_to(
+    iree_hal_pool_t* pool, iree_device_size_t min_bytes_to_keep);
 
 #ifdef __cplusplus
 }  // extern "C"

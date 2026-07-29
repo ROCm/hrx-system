@@ -31,6 +31,9 @@ typedef struct iree_hal_amdgpu_allocator_memory_pool_t {
   // HSA memory pool used for allocations.
   hsa_amd_memory_pool_t memory_pool;
 
+  // HSA allocation flags required for buffers from |memory_pool|.
+  uint32_t allocation_flags;
+
   // Allocation sizes submitted to HSA are rounded up to this granule.
   iree_device_size_t allocation_granule;
 
@@ -49,6 +52,10 @@ typedef struct iree_hal_amdgpu_allocator_memory_pools_t {
   // Fine-grained GPU-local pools used only for explicit host-visible requests.
   iree_hal_amdgpu_allocator_memory_pool_t
       device_fine[IREE_HAL_AMDGPU_MAX_GPU_AGENT];
+
+  // GPU-local pools used for allocations that bypass the normal device cache.
+  iree_hal_amdgpu_allocator_memory_pool_t
+      device_uncached[IREE_HAL_AMDGPU_MAX_GPU_AGENT];
 
   // Fine-grained host-local pools nearest to each GPU.
   iree_hal_amdgpu_allocator_memory_pool_t
@@ -508,6 +515,8 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
           IREE_HAL_MEMORY_TYPE_HOST_CACHED | IREE_HAL_MEMORY_TYPE_HOST_LOCAL);
   const bool requires_device_local =
       iree_all_bits_set(required_type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
+  const bool requires_device_uncached =
+      iree_any_bit_set(required_type, IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED);
   const bool prefers_device_local =
       iree_any_bit_set(requested_type, IREE_HAL_MEMORY_TYPE_OPTIMAL) &&
       iree_any_bit_set(required_type, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
@@ -533,7 +542,12 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
   iree_hal_buffer_usage_t supported_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
                                             IREE_HAL_BUFFER_USAGE_DISPATCH |
                                             sharing_usage;
-  if (requires_host_local) {
+  if (requires_device_uncached) {
+    if (!requires_device_local || requires_host_access) return false;
+    memory_pool = &allocator->memory_pools.device_uncached[device_ordinal];
+    memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
+                  IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED;
+  } else if (requires_host_local) {
     if (requires_device_local) return false;
     memory_pool = &allocator->memory_pools.host_fine[device_ordinal];
     memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
@@ -715,6 +729,29 @@ iree_status_t iree_hal_amdgpu_allocator_create(
           logical_device->system->host_memory_pools[host_ordinal].fine_pool,
           &allocator->memory_pools.host_fine[i]);
     }
+
+    hsa_amd_memory_pool_t device_uncached_pool = {0};
+    bool device_uncached_pool_available = false;
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amdgpu_query_extended_fine_global_memory_pool(
+          libhsa, topology->gpu_agents[i], &device_uncached_pool_available,
+          &device_uncached_pool);
+    }
+    if (iree_status_is_ok(status) && device_uncached_pool_available) {
+      status = iree_hal_amdgpu_allocator_query_pool_properties(
+          libhsa, device_uncached_pool,
+          &allocator->memory_pools.device_uncached[i]);
+    }
+    if (iree_status_is_ok(status) &&
+        logical_device->physical_devices[i]->isa.target_id.version.major >=
+            12) {
+      if (!device_uncached_pool_available) {
+        allocator->memory_pools.device_uncached[i] =
+            allocator->memory_pools.device_coarse[i];
+      }
+      allocator->memory_pools.device_uncached[i].allocation_flags |=
+          HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+    }
   }
 
   if (iree_status_is_ok(status)) {
@@ -814,6 +851,14 @@ static iree_status_t iree_hal_amdgpu_allocator_query_memory_heaps(
           allocator->topology->gpu_agent_count,
           &device_fine_max_allocation_size, &device_fine_min_alignment);
 
+  iree_device_size_t device_uncached_max_allocation_size = 0;
+  iree_device_size_t device_uncached_min_alignment = 0;
+  const bool device_uncached_available =
+      iree_hal_amdgpu_allocator_query_pool_family_limits(
+          allocator->memory_pools.device_uncached,
+          allocator->topology->gpu_agent_count,
+          &device_uncached_max_allocation_size, &device_uncached_min_alignment);
+
   iree_device_size_t host_fine_max_allocation_size = 0;
   iree_device_size_t host_fine_min_alignment = 0;
   const bool host_fine_available =
@@ -835,7 +880,7 @@ static iree_status_t iree_hal_amdgpu_allocator_query_memory_heaps(
       IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM |
       IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE;
 
-  iree_hal_allocator_memory_heap_t available_heaps[3] = {0};
+  iree_hal_allocator_memory_heap_t available_heaps[4] = {0};
   iree_host_size_t heap_count = 0;
   if (device_coarse_available) {
     available_heaps[heap_count++] = (iree_hal_allocator_memory_heap_t){
@@ -854,6 +899,16 @@ static iree_status_t iree_hal_amdgpu_allocator_query_memory_heaps(
         .allowed_usage = mappable_usage,
         .max_allocation_size = device_fine_max_allocation_size,
         .min_alignment = device_fine_min_alignment,
+    };
+  }
+  if (device_uncached_available) {
+    available_heaps[heap_count++] = (iree_hal_allocator_memory_heap_t){
+        .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
+                IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED,
+        .allowed_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
+                         IREE_HAL_BUFFER_USAGE_DISPATCH | sharing_usage,
+        .max_allocation_size = device_uncached_max_allocation_size,
+        .min_alignment = device_uncached_min_alignment,
     };
   }
   if (host_fine_available) {
@@ -1089,7 +1144,8 @@ static bool iree_hal_amdgpu_allocator_should_use_asan_pool(
          iree_all_bits_set(memory_placement->memory_type,
                            IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL) &&
          !iree_any_bit_set(memory_placement->memory_type,
-                           IREE_HAL_MEMORY_TYPE_HOST_VISIBLE);
+                           IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+                               IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED);
 }
 
 static bool iree_hal_amdgpu_allocator_should_publish_asan_allocation(
@@ -1271,7 +1327,7 @@ static iree_status_t iree_hal_amdgpu_allocator_allocate_buffer(
           allocation_size, memory_placement.memory_pool->allocation_granule,
           &allocation_size)) {
     IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "allocation size %" PRIdsz
                             " overflows HSA memory pool allocation granule",
                             allocation_size);
@@ -1280,7 +1336,7 @@ static iree_status_t iree_hal_amdgpu_allocator_allocate_buffer(
                     memory_placement.memory_pool->max_allocation_size)) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
+        IREE_STATUS_RESOURCE_EXHAUSTED,
         "AMDGPU allocation size %" PRIu64
         " exceeds HSA memory pool max allocation size %" PRIu64,
         (uint64_t)allocation_size,
@@ -1292,7 +1348,8 @@ static iree_status_t iree_hal_amdgpu_allocator_allocate_buffer(
   iree_hal_amdgpu_access_agent_list_t access_agents;
   iree_status_t status = iree_hsa_amd_memory_pool_allocate(
       IREE_LIBHSA(allocator->libhsa), memory_placement.memory_pool->memory_pool,
-      (size_t)allocation_size, HSA_AMD_MEMORY_POOL_STANDARD_FLAG, &host_ptr);
+      (size_t)allocation_size, memory_placement.memory_pool->allocation_flags,
+      &host_ptr);
 
   // Grant the physical devices selected by the buffer placement access. A
   // placement of ANY remains intentionally broad within the logical topology,
@@ -1475,6 +1532,14 @@ static iree_status_t iree_hal_amdgpu_allocator_import_device_allocation(
     const iree_hal_external_buffer_t* external_buffer,
     iree_hal_buffer_release_callback_t release_callback,
     iree_hal_buffer_t** out_buffer) {
+  // HSA pointer metadata does not expose the allocation cache policy. Do not
+  // claim that an externally allocated pointer is uncached without being able
+  // to establish that invariant.
+  if (iree_any_bit_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "AMDGPU device allocation import cannot verify uncached memory");
+  }
   if (IREE_UNLIKELY(
           !iree_device_size_is_valid_alignment(params->min_alignment))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
