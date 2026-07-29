@@ -494,4 +494,5 @@ ctest --test-dir build/cmake --output-on-failure -R hrx
 ```
 
 In the raw pipeline, `selected-root-a selected-root-b` stands for the stable
-union of `IREE_BUILD_TARGETS` values in the JSON records.
+union produced by joining the selected CTest names with the validated
+`iree_ctest_build_targets.json` catalog generated beside the CTest files.

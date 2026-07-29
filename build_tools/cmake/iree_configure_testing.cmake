@@ -15,19 +15,16 @@ set_property(GLOBAL PROPERTY IREE_TEST_RESOURCE_BUILD_TARGETS "")
 set_property(GLOBAL PROPERTY IREE_TEST_BUILD_METADATA_KEYS "")
 set(IREE_TEST_TMPDIR_ROOT "${IREE_BINARY_DIR}/test_tmpdir")
 set(IREE_RUNTIME_RESOURCE_LABEL_PREFIX "runtime-resource=")
-
-define_property(TEST
-  PROPERTY IREE_BUILD_TARGETS
-  BRIEF_DOCS "CMake targets required to run the test"
-  FULL_DOCS
-    "Concrete CMake targets whose transitive build closure makes the test runnable."
-)
+set(IREE_CTEST_BUILD_TARGETS_FILE
+  "${CMAKE_BINARY_DIR}/iree_ctest_build_targets.json")
 
 # iree_register_test_build_targets
 #
-# Attaches concrete build roots to a CTest record. An empty TARGETS list is an
+# Records concrete build roots for a CTest record. An empty TARGETS list is an
 # explicit source-only closure and remains distinct from a test that never
-# joined this contract.
+# joined this contract. Finalization writes the validated catalog beside the
+# generated CTest files so test runners can join CTest's selected names to the
+# corresponding build roots without relying on custom-property serialization.
 #
 # Rule owners must provide concrete, buildable target names. Targets are
 # validated after all repository directories have been processed.
@@ -53,8 +50,6 @@ function(iree_register_test_build_targets TEST_NAME)
 
   set(_BUILD_TARGETS ${_RULE_TARGETS})
   list(REMOVE_DUPLICATES _BUILD_TARGETS)
-  set_property(TEST "${TEST_NAME}"
-    PROPERTY IREE_BUILD_TARGETS "${_BUILD_TARGETS}")
   set_property(GLOBAL APPEND PROPERTY IREE_TEST_BUILD_METADATA_KEYS
     "${_TEST_KEY}")
   set_property(GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_NAME_${_TEST_KEY}"
@@ -165,6 +160,30 @@ function(iree_finalize_test_build_targets)
         "${_TEST_NAME}")
     endif()
   endforeach()
+
+  set(_BUILD_TARGET_CATALOG
+    "{\"kind\":\"ireeCtestBuildTargets\",\"version\":1,\"tests\":{}}")
+  foreach(_TEST_KEY IN LISTS _TEST_METADATA_KEYS)
+    get_property(_TEST_NAME
+      GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_NAME_${_TEST_KEY}")
+    get_property(_BUILD_TARGETS
+      GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_TARGETS_${_TEST_KEY}")
+    set(_BUILD_TARGETS_JSON "[]")
+    set(_BUILD_TARGET_INDEX 0)
+    foreach(_BUILD_TARGET IN LISTS _BUILD_TARGETS)
+      string(JSON _BUILD_TARGETS_JSON
+        SET "${_BUILD_TARGETS_JSON}"
+        ${_BUILD_TARGET_INDEX}
+        "\"${_BUILD_TARGET}\"")
+      math(EXPR _BUILD_TARGET_INDEX "${_BUILD_TARGET_INDEX} + 1")
+    endforeach()
+    string(JSON _BUILD_TARGET_CATALOG
+      SET "${_BUILD_TARGET_CATALOG}"
+      tests "${_TEST_NAME}" "${_BUILD_TARGETS_JSON}")
+  endforeach()
+  file(WRITE
+    "${IREE_CTEST_BUILD_TARGETS_FILE}"
+    "${_BUILD_TARGET_CATALOG}\n")
 
   get_property(_RESOURCE_BUILD_TARGETS
     GLOBAL PROPERTY IREE_TEST_RESOURCE_BUILD_TARGETS)

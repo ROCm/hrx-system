@@ -29,27 +29,35 @@ def ctest_model(*tests: dict) -> str:
     )
 
 
-def test_record(name: str, value=...) -> dict:
-    properties = []
-    if value is not ...:
-        properties.append(
-            {
-                "name": ctest_dev.BUILD_TARGETS_PROPERTY,
-                "value": value,
-            }
-        )
-    return {"name": name, "properties": properties}
+def test_record(name: str) -> dict:
+    return {"name": name, "properties": []}
+
+
+def build_target_catalog(*entries: tuple[str, object]) -> str:
+    return json.dumps(
+        {
+            "kind": "ireeCtestBuildTargets",
+            "version": 1,
+            "tests": dict(entries),
+        }
+    )
 
 
 class CTestTest(unittest.TestCase):
     def test_parses_and_deduplicates_build_targets(self):
         selection = ctest_dev.parse_ctest_selection(
             ctest_model(
-                test_record("compiled", "compiled_root"),
-                test_record("native", ["native_root", "tool_root"]),
-                test_record("source-only", ""),
-                test_record("shared-tool", "tool_root"),
-            )
+                test_record("compiled"),
+                test_record("native"),
+                test_record("source-only"),
+                test_record("shared-tool"),
+            ),
+            build_target_catalog(
+                ("compiled", ["compiled_root"]),
+                ("native", ["native_root", "tool_root"]),
+                ("source-only", []),
+                ("shared-tool", ["tool_root"]),
+            ),
         )
 
         self.assertEqual(
@@ -65,24 +73,30 @@ class CTestTest(unittest.TestCase):
         invalid_models = [
             (
                 ctest_model(test_record("unmanaged")),
-                "selected CTest test unmanaged is missing IREE_BUILD_TARGETS",
+                build_target_catalog(),
+                "selected CTest test unmanaged is missing from the "
+                "CMake build-target catalog",
             ),
             (
-                ctest_model(test_record("malformed", [1])),
-                "selected CTest test malformed has invalid IREE_BUILD_TARGETS entry: 1",
+                ctest_model(test_record("malformed")),
+                build_target_catalog(("malformed", [1])),
+                "selected CTest test malformed has an invalid "
+                "build-target catalog entry: 1",
             ),
             (
-                ctest_model(test_record("malformed", {})),
-                "selected CTest test malformed has non-string IREE_BUILD_TARGETS",
+                ctest_model(test_record("malformed")),
+                build_target_catalog(("malformed", {})),
+                "selected CTest test malformed has a non-list "
+                "build-target catalog entry",
             ),
         ]
-        for model, expected_message in invalid_models:
+        for model, catalog, expected_message in invalid_models:
             with self.subTest(expected_message=expected_message):
                 with self.assertRaisesRegex(
                     ctest_dev.CTestMetadataError,
                     expected_message,
                 ):
-                    ctest_dev.parse_ctest_selection(model)
+                    ctest_dev.parse_ctest_selection(model, catalog)
 
     def test_build_commands_are_stable_and_command_length_safe(self):
         commands = ctest_dev.cmake_build_commands(

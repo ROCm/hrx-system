@@ -17,12 +17,12 @@ from pathlib import Path
 
 from build_tools.devtools.command_plan import CommandStep, quote_command
 
-BUILD_TARGETS_PROPERTY = "IREE_BUILD_TARGETS"
+BUILD_TARGETS_CATALOG_FILENAME = "iree_ctest_build_targets.json"
 MAX_BUILD_COMMAND_LENGTH = 8192
 
 
 class CTestMetadataError(ValueError):
-    """Raised when CTest JSON does not carry a valid build closure."""
+    """Raised when CTest selection or build-root metadata is invalid."""
 
 
 @dataclass(frozen=True)
@@ -31,9 +31,12 @@ class CTestSelection:
     build_targets: tuple[str, ...]
 
 
-def parse_ctest_selection(payload: str) -> CTestSelection:
+def parse_ctest_selection(
+    ctest_payload: str,
+    build_target_catalog_payload: str,
+) -> CTestSelection:
     try:
-        model = json.loads(payload)
+        model = json.loads(ctest_payload)
     except json.JSONDecodeError as exc:
         raise CTestMetadataError(f"CTest did not emit valid JSON: {exc}") from exc
 
@@ -45,6 +48,22 @@ def parse_ctest_selection(payload: str) -> CTestSelection:
     tests = model.get("tests")
     if not isinstance(tests, list):
         raise CTestMetadataError("CTest JSON model has no tests list")
+
+    try:
+        build_target_catalog = json.loads(build_target_catalog_payload)
+    except json.JSONDecodeError as exc:
+        raise CTestMetadataError(
+            f"CMake build-target catalog is not valid JSON: {exc}"
+        ) from exc
+    if (
+        not isinstance(build_target_catalog, dict)
+        or build_target_catalog.get("kind") != "ireeCtestBuildTargets"
+        or build_target_catalog.get("version") != 1
+    ):
+        raise CTestMetadataError("CMake build-target catalog has an invalid schema")
+    catalog_tests = build_target_catalog.get("tests")
+    if not isinstance(catalog_tests, dict):
+        raise CTestMetadataError("CMake build-target catalog has no tests object")
 
     test_names = []
     build_targets = []
@@ -61,50 +80,23 @@ def parse_ctest_selection(payload: str) -> CTestSelection:
             )
         test_names.append(test_name)
 
-        properties = test.get("properties")
-        if not isinstance(properties, list):
+        if test_name not in catalog_tests:
             raise CTestMetadataError(
-                f"selected CTest test {test_name} has no properties list"
+                f"selected CTest test {test_name} is missing from the "
+                "CMake build-target catalog"
             )
-        build_properties = [
-            prop
-            for prop in properties
-            if isinstance(prop, dict) and prop.get("name") == BUILD_TARGETS_PROPERTY
-        ]
-        if not build_properties:
+        test_build_targets = catalog_tests[test_name]
+        if not isinstance(test_build_targets, list):
             raise CTestMetadataError(
-                f"selected CTest test {test_name} is missing {BUILD_TARGETS_PROPERTY}"
-            )
-        if len(build_properties) != 1:
-            raise CTestMetadataError(
-                f"selected CTest test {test_name} has duplicate "
-                f"{BUILD_TARGETS_PROPERTY} properties"
-            )
-        build_property = build_properties[0]
-        if "value" not in build_property:
-            raise CTestMetadataError(
-                f"selected CTest test {test_name} has malformed "
-                f"{BUILD_TARGETS_PROPERTY}"
-            )
-
-        value = build_property["value"]
-        if value is None or value == "":
-            test_build_targets = []
-        elif isinstance(value, str):
-            test_build_targets = [value]
-        elif isinstance(value, list):
-            test_build_targets = value
-        else:
-            raise CTestMetadataError(
-                f"selected CTest test {test_name} has non-string "
-                f"{BUILD_TARGETS_PROPERTY}: {value!r}"
+                f"selected CTest test {test_name} has a non-list "
+                f"build-target catalog entry: {test_build_targets!r}"
             )
 
         for build_target in test_build_targets:
             if not isinstance(build_target, str) or not build_target:
                 raise CTestMetadataError(
-                    f"selected CTest test {test_name} has invalid "
-                    f"{BUILD_TARGETS_PROPERTY} entry: {build_target!r}"
+                    f"selected CTest test {test_name} has an invalid "
+                    f"build-target catalog entry: {build_target!r}"
                 )
             if build_target in seen_build_targets:
                 continue
@@ -222,7 +214,7 @@ class CTestBuildAndRunStep:
                     ),
                     cwd=self.cwd,
                     env=self.env,
-                    label="enumerate the exact CTest selection and its build closure",
+                    label="enumerate the exact CTest selection",
                 ).describe(),
                 CommandStep(
                     [
@@ -230,7 +222,7 @@ class CTestBuildAndRunStep:
                         "--build",
                         str(self.build_dir),
                         "--target",
-                        f"<{BUILD_TARGETS_PROPERTY}...>",
+                        "<selected-ctest-build-roots...>",
                     ],
                     cwd=self.cwd,
                     env=self.env,
@@ -282,8 +274,22 @@ class CTestBuildAndRunStep:
                 print(selection_result.stdout.rstrip())
             return selection_result.returncode
 
+        build_target_catalog_path = self.build_dir / BUILD_TARGETS_CATALOG_FILENAME
         try:
-            selection = parse_ctest_selection(selection_result.stdout)
+            build_target_catalog_payload = build_target_catalog_path.read_text()
+        except OSError as exc:
+            print(
+                "dev.py: failed to read CTest build-target catalog "
+                f"{build_target_catalog_path}: {exc}",
+                file=sys.stderr,
+            )
+            return 1
+
+        try:
+            selection = parse_ctest_selection(
+                selection_result.stdout,
+                build_target_catalog_payload,
+            )
             command_env = self.env if self.env is not None else os.environ
             build_config = ctest_build_config(self.arguments)
             if build_config is None:

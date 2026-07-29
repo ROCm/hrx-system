@@ -191,7 +191,7 @@ class CMakeTest(unittest.TestCase):
         )
         self.assertIn("ctest", test_plan.describe())
         self.assertIn("-R hrx", test_plan.describe())
-        self.assertIn("IREE_BUILD_TARGETS", test_plan.describe())
+        self.assertIn("selected-ctest-build-roots", test_plan.describe())
         self.assertIn("cmake --build", test_plan.describe())
 
         inspect_plan = cmake_dev.test_plan(

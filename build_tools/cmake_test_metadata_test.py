@@ -61,6 +61,9 @@ class CMakeTestMetadataTest(unittest.TestCase):
             )
             test_model = json.loads(ctest_result.stdout)
             tests = {test["name"]: test for test in test_model["tests"]}
+            build_target_catalog = json.loads(
+                (build_dir / "iree_ctest_build_targets.json").read_text()
+            )
 
             expected_roots = {
                 "host": ["host_root"],
@@ -73,19 +76,15 @@ class CMakeTestMetadataTest(unittest.TestCase):
                 "source-only": [],
                 "tool-backed": ["tool_backed_root"],
             }
-            for test_name, roots in expected_roots.items():
-                with self.subTest(test_name=test_name):
-                    properties = {
-                        prop["name"]: prop.get("value")
-                        for prop in tests[test_name]["properties"]
-                    }
-                    self.assertIn("IREE_BUILD_TARGETS", properties)
-                    actual_roots = properties["IREE_BUILD_TARGETS"]
-                    if actual_roots in (None, ""):
-                        actual_roots = []
-                    elif isinstance(actual_roots, str):
-                        actual_roots = [actual_roots]
-                    self.assertEqual(actual_roots, roots)
+            self.assertEqual(
+                build_target_catalog,
+                {
+                    "kind": "ireeCtestBuildTargets",
+                    "version": 1,
+                    "tests": expected_roots,
+                },
+            )
+            self.assertEqual(set(tests), set(expected_roots))
 
             labels = {
                 test_name: next(
