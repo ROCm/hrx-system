@@ -1,11 +1,16 @@
 amdgpu.target<gfx1100> @gfx1100
-amdgpu.target<gfx1250> @gfx125x
+amdgpu.target<gfx1250> @gfx1250
+amdgpu.target<gfx1251> @gfx1251
 
 func.template<demo.target_family> target(@gfx1100) @gfx1100_provider(%value: i32) -> (i32) {
   func.return %value : i32
 }
 
-func.template<demo.target_family> target(@gfx125x) @gfx125x_provider(%value: i32) -> (i32) {
+func.template<demo.target_family> target(@gfx1250) @gfx1250_provider(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<demo.target_family> target(@gfx1251) @gfx1251_provider(%value: i32) -> (i32) {
   func.return %value : i32
 }
 

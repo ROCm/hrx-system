@@ -26,14 +26,12 @@ from loom.target.arch.amdgpu.descriptors import (
     _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS,
     _AMDGPU_GFX11_GENERIC_CORE_DESCRIPTOR_SET_BASE,
-    _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_GFX942_MATRIX_TIMINGS,
     _AMDGPU_GFX950_MATRIX_TIMINGS,
     _AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE,
-    _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_TRANS_DESCRIPTOR_KEYS,
     _AMDGPU_TRANS_PROXY_LATENCY_CYCLES,
     _COUNTER_ASYNC,
@@ -211,25 +209,12 @@ def test_generic_descriptor_contracts_are_member_intersections() -> None:
             _AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE,
             (_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE,),
         ),
-        (
-            _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
-            (_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,),
-        ),
     )
     for generic, members in base_cases:
         expected = _amdgpu_core_descriptor_set_intersection(
             key=generic.key,
             members=members,
         )
-        if generic.key == "amdgpu.gfx12_5.generic.core":
-            expected = replace(
-                expected,
-                descriptors=tuple(
-                    descriptor
-                    for descriptor in expected.descriptors
-                    if not (descriptor.semantic_tag or "").startswith("matrix.swmmac.")
-                ),
-            )
         assert generic == expected
 
     gfx9_4_base_intersection = _amdgpu_core_descriptor_set_intersection(
@@ -1658,6 +1643,7 @@ def test_s_delay_alu_descriptor_is_exposed_on_rdna_families() -> None:
         "rdna3",
         "rdna3_5",
         "rdna4",
+        "rdna4_gfx1251",
         "rdna4_gfx125x",
     }
     assert "amdgpu.s_delay_alu" in amdgpu_descriptor_ref_keys()
@@ -1748,7 +1734,11 @@ def test_tensor_memory_descriptors_are_gfx125x_scoped() -> None:
         "amdgpu.s_wait_tensorcnt",
     }
 
-    gfx125x_targets = {"gfx12_5_generic", "rdna4_gfx125x"}
+    gfx125x_targets = {
+        "gfx12_5_generic",
+        "rdna4_gfx1251",
+        "rdna4_gfx125x",
+    }
     for target in gfx125x_targets:
         assert tensor_keys <= target_descriptor_keys[target]
     for target, descriptor_keys in target_descriptor_keys.items():
@@ -1832,7 +1822,11 @@ def test_cluster_memory_descriptors_are_gfx125x_scoped() -> None:
         "amdgpu.s_wait_asynccnt",
     }
 
-    gfx125x_targets = {"gfx12_5_generic", "rdna4_gfx125x"}
+    gfx125x_targets = {
+        "gfx12_5_generic",
+        "rdna4_gfx1251",
+        "rdna4_gfx125x",
+    }
     for target in gfx125x_targets:
         assert cluster_keys <= target_descriptor_keys[target]
     for target, descriptor_keys in target_descriptor_keys.items():

@@ -265,6 +265,7 @@ static const loom_target_math_policy_t kAmdgpuGfx125xMathPolicy = {
 #define LOOM_AMDGPU_MATH_POLICY_Rdna3 (&kAmdgpuMathPolicy)
 #define LOOM_AMDGPU_MATH_POLICY_Rdna35 (&kAmdgpuMathPolicy)
 #define LOOM_AMDGPU_MATH_POLICY_Rdna4 (&kAmdgpuMathPolicy)
+#define LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx1251 (&kAmdgpuGfx125xMathPolicy)
 #define LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx125x (&kAmdgpuGfx125xMathPolicy)
 
 static const loom_target_math_policy_registry_entry_t
@@ -289,6 +290,7 @@ static const loom_target_math_policy_registry_entry_t
 #undef LOOM_AMDGPU_MATH_POLICY_Rdna3
 #undef LOOM_AMDGPU_MATH_POLICY_Rdna35
 #undef LOOM_AMDGPU_MATH_POLICY_Rdna4
+#undef LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx1251
 #undef LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx125x
 
 void loom_amdgpu_math_policy_registry_initialize(

@@ -56,7 +56,7 @@
           ]
         },
         {
-          "name": "compile-gfx1251-through-gfx125x-family",
+          "name": "compile-gfx1251-exact",
           "run": {
             "tool": "loom-compile",
             "args": [

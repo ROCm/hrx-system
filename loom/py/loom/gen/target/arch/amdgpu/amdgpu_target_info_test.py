@@ -138,6 +138,22 @@ def test_descriptor_sets_reject_none_memory_cache_policy() -> None:
         amdgpu_target_info._validate_descriptor_sets((_descriptor_set_info(),))
 
 
+def test_generic_descriptor_members_may_share_an_isa_contract() -> None:
+    descriptor_sets_by_key = {info.key: info for info in amdgpu_target_info_data.AMDGPU_DESCRIPTOR_SET_INFOS}
+    descriptor_sets = tuple(
+        sorted(
+            (
+                descriptor_sets_by_key["amdgpu.gfx12_5.generic.core"],
+                descriptor_sets_by_key["amdgpu.rdna4.gfx1251.core"],
+                descriptor_sets_by_key["amdgpu.rdna4.gfx125x.core"],
+            ),
+            key=lambda info: info.key,
+        )
+    )
+
+    amdgpu_target_info._validate_descriptor_sets(descriptor_sets)
+
+
 def test_memory_cache_policy_rejects_incomplete_temporal_th_table() -> None:
     temporal_th = amdgpu_target_info_data.AMDGPU_VECTOR_MEMORY_CACHE_POLICY_TEMPORAL_TH
     rows = tuple(row for row in temporal_th if row[0] != "bypass")

@@ -210,7 +210,13 @@ def _descriptor_set_keys_for_group(group: str, descriptor_set_infos: Sequence[Am
     if group == _DESCRIPTOR_SET_GROUP_GFX11_GFX12:
         return select({"rdna3", "rdna3_5", "rdna4"})
     if group == _DESCRIPTOR_SET_GROUP_RDNA4_GFX125X:
-        return select({"rdna4_gfx125x"})
+        return select(
+            {
+                "gfx12_5_generic",
+                "rdna4_gfx1251",
+                "rdna4_gfx125x",
+            }
+        )
     raise ValueError(f"unknown AMDGPU VOPD descriptor-set group '{group}'")
 
 

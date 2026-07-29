@@ -669,7 +669,9 @@ def _validate_descriptor_sets(descriptor_sets: Sequence[AmdgpuDescriptorSetInfo]
                     raise ValueError(f"AMDGPU descriptor set {info.key} references unknown member generator target '{member_generator_target}'")
                 if member_info.member_generator_targets:
                     raise ValueError(f"AMDGPU descriptor set {info.key} uses generic member target '{member_generator_target}'")
-                member_isa_infos.extend(member_info.isa_infos)
+                for isa_info in member_info.isa_infos:
+                    if isa_info not in member_isa_infos:
+                        member_isa_infos.append(isa_info)
             if tuple(member_isa_infos) != info.isa_infos:
                 raise ValueError(f"AMDGPU descriptor set {info.key} ISA membership does not match its member generator targets")
         _buffer_resource_cache_swizzle_expr(info.buffer_resource.cache_swizzle)
