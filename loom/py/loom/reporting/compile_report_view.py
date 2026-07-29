@@ -1,0 +1,631 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+"""Target-neutral views and strict diffs for Loom compile reports."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+
+from loom.reporting.compile_report import (
+    COMPILE_REPORT_SCHEMA_VERSION,
+    CompileReportDocument,
+    CompileReportEntryIdentity,
+    compile_report_entry_identity,
+    match_compile_report_entries,
+    report_identity_json,
+)
+
+SHOW_KIND = "loom.compile_report.show"
+DIFF_KIND = "loom.compile_report.diff"
+
+_MISSING = object()
+
+
+class EvidenceClass(Enum):
+    """Provenance class for a displayed report value."""
+
+    ARTIFACT_FACT = "artifact_fact"
+    COMPILER_ANALYSIS = "compiler_analysis"
+
+
+@dataclass(frozen=True)
+class MetricSpec:
+    """One stable scalar selected from a version-zero entry."""
+
+    key: str
+    label: str
+    path: str
+    evidence: EvidenceClass
+    unit: str | None = None
+
+
+def _artifact(key: str, label: str, path: str, unit: str | None = None) -> MetricSpec:
+    return MetricSpec(key, label, path, EvidenceClass.ARTIFACT_FACT, unit)
+
+
+def _analysis(key: str, label: str, path: str, unit: str | None = None) -> MetricSpec:
+    return MetricSpec(key, label, path, EvidenceClass.COMPILER_ANALYSIS, unit)
+
+
+_METRIC_SPECS = (
+    _artifact("instruction_count", "instructions", "instruction_count"),
+    _artifact("code_byte_count", "code bytes", "code_byte_count", "bytes"),
+    _artifact(
+        "code_storage_byte_count",
+        "code storage bytes",
+        "code_storage_byte_count",
+        "bytes",
+    ),
+    _artifact("local_memory_bytes", "local memory", "local_memory_bytes", "bytes"),
+    _artifact(
+        "private_memory_bytes",
+        "private memory",
+        "private_memory_bytes",
+        "bytes",
+    ),
+    _artifact(
+        "scalar_alu_count",
+        "scalar ALU instructions",
+        "static_instruction_mix.scalar_alu_count",
+    ),
+    _artifact(
+        "vector_alu_count",
+        "vector ALU instructions",
+        "static_instruction_mix.vector_alu_count",
+    ),
+    _artifact(
+        "matrix_count",
+        "matrix instructions",
+        "static_instruction_mix.matrix_count",
+    ),
+    _artifact(
+        "global_load_count",
+        "global loads",
+        "static_instruction_mix.global_load_count",
+    ),
+    _artifact(
+        "global_store_count",
+        "global stores",
+        "static_instruction_mix.global_store_count",
+    ),
+    _artifact(
+        "buffer_load_count",
+        "buffer loads",
+        "static_instruction_mix.buffer_load_count",
+    ),
+    _artifact(
+        "buffer_store_count",
+        "buffer stores",
+        "static_instruction_mix.buffer_store_count",
+    ),
+    _artifact(
+        "local_memory_count",
+        "local-memory instructions",
+        "static_instruction_mix.local_memory_count",
+    ),
+    _artifact(
+        "conversion_count",
+        "conversion instructions",
+        "static_instruction_mix.conversion_count",
+    ),
+    _artifact(
+        "register_move_count",
+        "register moves",
+        "static_instruction_mix.register_move_count",
+    ),
+    _artifact("barrier_count", "barriers", "static_instruction_mix.barrier_count"),
+    _artifact("branch_count", "branches", "static_instruction_mix.branch_count"),
+    _analysis(
+        "scalar_register_count",
+        "final scalar registers",
+        "target_resources.scalar.final.register_count",
+    ),
+    _analysis(
+        "vector_register_count",
+        "final vector registers",
+        "target_resources.vector.final.register_count",
+    ),
+    _analysis(
+        "scalar_pressure_peak",
+        "scheduled scalar pressure",
+        "target_resources.scalar.scheduled_pressure.peak_live_units",
+    ),
+    _analysis(
+        "vector_pressure_peak",
+        "scheduled vector pressure",
+        "target_resources.vector.scheduled_pressure.peak_live_units",
+    ),
+    _analysis(
+        "resident_subgroups_per_simd",
+        "resident subgroups per SIMD",
+        "target_resources.resident_subgroups_per_simd",
+    ),
+    _analysis(
+        "occupancy_percent",
+        "modeled occupancy",
+        "target_resources.occupancy_percent",
+        "percent",
+    ),
+    _analysis(
+        "limiting_resource",
+        "occupancy limit",
+        "target_resources.limiting_resource",
+    ),
+    _analysis(
+        "residency_current_tier",
+        "residency tier",
+        "target_resources.residency.current_tier",
+    ),
+    _analysis(
+        "residency_next_better_tier",
+        "next better residency tier",
+        "target_resources.residency.next_better_tier",
+    ),
+    _analysis(
+        "residency_limiting_resource",
+        "residency limiting resource",
+        "target_resources.residency.unique_limiting_resource.name",
+    ),
+    _analysis(
+        "residency_reduction_to_next_better_tier",
+        "units to next better tier",
+        "target_resources.residency.unique_limiting_resource."
+        "reduction_units_to_next_better_tier",
+    ),
+    _analysis(
+        "residency_additional_units_to_next_worse_tier",
+        "units to next worse tier",
+        "target_resources.residency.unique_limiting_resource."
+        "next_worse.additional_units",
+    ),
+    _analysis(
+        "dispatch_read_bytes",
+        "estimated dispatch reads",
+        "economics.memory.dispatch_issued.read_bytes",
+        "bytes",
+    ),
+    _analysis(
+        "dispatch_write_bytes",
+        "estimated dispatch writes",
+        "economics.memory.dispatch_issued.write_bytes",
+        "bytes",
+    ),
+    _analysis(
+        "dispatch_total_bytes",
+        "estimated dispatch traffic",
+        "economics.memory.dispatch_issued.total_bytes",
+        "bytes",
+    ),
+    _analysis(
+        "dispatch_vector_alu_count",
+        "estimated dispatch vector ALU",
+        "economics.operations.dispatch.vector_alu_count",
+    ),
+    _analysis(
+        "dispatch_matrix_count",
+        "estimated dispatch matrix operations",
+        "economics.operations.dispatch.matrix_count",
+    ),
+    _analysis("schedule_node_count", "schedule nodes", "schedule_node_count"),
+    _analysis(
+        "schedule_dependency_count",
+        "schedule dependencies",
+        "schedule_dependency_count",
+    ),
+    _analysis(
+        "schedule_hazard_gap_count",
+        "schedule hazard gaps",
+        "schedule_hazard_gap_count",
+    ),
+    _analysis(
+        "allocation_spill_count",
+        "planned spills",
+        "allocation_spill_count",
+    ),
+    _analysis(
+        "materialized_copy_count",
+        "materialized copies",
+        "allocation_materialized_copy_count",
+    ),
+    _analysis(
+        "materialized_spill_storage_bytes",
+        "spill storage",
+        "allocation_materialized_spill_storage_bytes",
+        "bytes",
+    ),
+    _analysis(
+        "materialized_reload_bytes",
+        "reload traffic",
+        "allocation_materialized_reload_bytes",
+        "bytes",
+    ),
+    _analysis("wait_action_count", "wait actions", "wait_plan.action_count"),
+    _analysis("full_drain_count", "full drains", "wait_plan.full_drain_count"),
+    _analysis("partial_wait_count", "partial waits", "wait_plan.partial_wait_count"),
+)
+
+
+def build_compile_report_show(
+    document: CompileReportDocument,
+) -> dict[str, object]:
+    """Builds a deterministic target-neutral report view."""
+    view: dict[str, object] = {
+        "kind": SHOW_KIND,
+        "schema_version": COMPILE_REPORT_SCHEMA_VERSION,
+        "missing_evidence": "omitted_metrics_are_unavailable",
+        "source": document.source,
+        "container_kind": document.container_kind,
+        "status": {
+            "code": document.status_code,
+            "name": document.status_name,
+        },
+        "identity": report_identity_json(document),
+        "entries": [
+            _show_entry_json(
+                entry,
+                compile_report_entry_identity(entry),
+                document.report.get("workload"),
+            )
+            for entry in document.entries
+        ],
+    }
+    if document.envelope_context:
+        view["envelope_context"] = dict(document.envelope_context)
+    return view
+
+
+def build_compile_report_diff(
+    baseline: CompileReportDocument,
+    candidate: CompileReportDocument,
+) -> dict[str, object]:
+    """Builds a deterministic diff after enforcing exact comparability."""
+    pairs = match_compile_report_entries(baseline, candidate)
+    entries = []
+    unchanged_entry_count = 0
+    for pair in pairs:
+        artifact_facts = _diff_metrics(
+            pair.baseline,
+            pair.candidate,
+            EvidenceClass.ARTIFACT_FACT,
+        )
+        compiler_analysis = _diff_metrics(
+            pair.baseline,
+            pair.candidate,
+            EvidenceClass.COMPILER_ANALYSIS,
+        )
+        if not _diff_group_has_changes(artifact_facts) and not _diff_group_has_changes(
+            compiler_analysis
+        ):
+            unchanged_entry_count += 1
+            continue
+        entries.append(
+            {
+                "identity": pair.identity.to_json_object(),
+                "artifact_facts": artifact_facts,
+                "compiler_analysis": compiler_analysis,
+            }
+        )
+    return {
+        "kind": DIFF_KIND,
+        "schema_version": COMPILE_REPORT_SCHEMA_VERSION,
+        "missing_evidence": "omitted_metrics_are_unavailable",
+        "baseline_source": baseline.source,
+        "candidate_source": candidate.source,
+        "identity": report_identity_json(baseline),
+        "changed_entry_count": len(entries),
+        "unchanged_entry_count": unchanged_entry_count,
+        "entries": entries,
+    }
+
+
+def format_compile_report_show_text(view: dict[str, object]) -> str:
+    """Formats a show view for humans and agent prompts."""
+    identity = _expect_dict(view["identity"])
+    status = _expect_dict(view["status"])
+    lines = [
+        "Loom compile report",
+        f"  source: {view['source']}",
+        (
+            f"  schema: loom.compile_report v{identity['schema_version']} "
+            f"({identity['mode']}, {view['container_kind']})"
+        ),
+        f"  status: {status['name']} ({status['code']})",
+        f"  artifact: {_format_artifact(identity)}",
+        f"  target: {_format_target(identity)}",
+        f"  specialization: {_format_specialization(identity)}",
+    ]
+    envelope_context = _expect_dict(view.get("envelope_context", {}))
+    if envelope_context:
+        lines.append(f"  benchmark: {_format_context(envelope_context)}")
+    config_bindings = _expect_list(identity.get("config_bindings", []))
+    if config_bindings:
+        lines.append("  config:")
+        for binding_value in config_bindings:
+            binding = _expect_dict(binding_value)
+            lines.append(f"    {binding['key']} = {binding['value']}")
+    workload = identity.get("workload")
+    if isinstance(workload, dict):
+        lines.append(f"  workload: {_format_workload(workload)}")
+
+    entries = _expect_list(view["entries"])
+    if not entries:
+        lines.append("  entries: none")
+    for entry_value in entries:
+        entry = _expect_dict(entry_value)
+        entry_identity = _expect_dict(entry["identity"])
+        lines.append("")
+        lines.append(f"Entry {_entry_display_name(entry_identity)}")
+        _append_metric_group(
+            lines,
+            "Artifact facts",
+            _expect_dict(entry["artifact_facts"]),
+            EvidenceClass.ARTIFACT_FACT,
+        )
+        _append_metric_group(
+            lines,
+            "Compiler analysis",
+            _expect_dict(entry["compiler_analysis"]),
+            EvidenceClass.COMPILER_ANALYSIS,
+        )
+    return "\n".join(lines) + "\n"
+
+
+def format_compile_report_diff_text(view: dict[str, object]) -> str:
+    """Formats a strict diff for humans and agent prompts."""
+    identity = _expect_dict(view["identity"])
+    lines = [
+        "Loom compile report diff",
+        f"  baseline: {view['baseline_source']}",
+        f"  candidate: {view['candidate_source']}",
+        f"  target: {_format_target(identity)}",
+        f"  specialization: {_format_specialization(identity)}",
+        (
+            f"  entries: {view['changed_entry_count']} changed, "
+            f"{view['unchanged_entry_count']} unchanged"
+        ),
+    ]
+    for entry_value in _expect_list(view["entries"]):
+        entry = _expect_dict(entry_value)
+        entry_identity = _expect_dict(entry["identity"])
+        lines.append("")
+        lines.append(f"Entry {_entry_display_name(entry_identity)}")
+        _append_diff_group(
+            lines,
+            "Artifact facts",
+            _expect_dict(entry["artifact_facts"]),
+            EvidenceClass.ARTIFACT_FACT,
+        )
+        _append_diff_group(
+            lines,
+            "Compiler analysis",
+            _expect_dict(entry["compiler_analysis"]),
+            EvidenceClass.COMPILER_ANALYSIS,
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _show_entry_json(
+    entry: dict[str, object],
+    identity: CompileReportEntryIdentity,
+    report_workload: object,
+) -> dict[str, object]:
+    view = {
+        "identity": identity.to_json_object(),
+        "artifact_facts": _show_metrics(entry, EvidenceClass.ARTIFACT_FACT),
+        "compiler_analysis": _show_metrics(entry, EvidenceClass.COMPILER_ANALYSIS),
+    }
+    if entry.get("workload") is not None and entry.get("workload") != report_workload:
+        view["workload"] = entry["workload"]
+    return view
+
+
+def _show_metrics(
+    entry: dict[str, object], evidence: EvidenceClass
+) -> dict[str, object]:
+    metrics = {}
+    for spec in _METRIC_SPECS:
+        if spec.evidence is not evidence:
+            continue
+        value = _lookup(entry, spec.path)
+        if value is not _MISSING:
+            metrics[spec.key] = value
+    return metrics
+
+
+def _diff_metrics(
+    baseline: dict[str, object],
+    candidate: dict[str, object],
+    evidence: EvidenceClass,
+) -> dict[str, object]:
+    changed: dict[str, object] = {}
+    incomplete: dict[str, object] = {}
+    unchanged_count = 0
+    unavailable_count = 0
+    for spec in _METRIC_SPECS:
+        if spec.evidence is not evidence:
+            continue
+        baseline_value = _lookup(baseline, spec.path)
+        candidate_value = _lookup(candidate, spec.path)
+        if baseline_value is _MISSING and candidate_value is _MISSING:
+            unavailable_count += 1
+            continue
+        if baseline_value is _MISSING or candidate_value is _MISSING:
+            incomplete[spec.key] = {
+                "baseline": None if baseline_value is _MISSING else baseline_value,
+                "candidate": None if candidate_value is _MISSING else candidate_value,
+            }
+            continue
+        if baseline_value == candidate_value:
+            unchanged_count += 1
+            continue
+        metric: dict[str, object] = {
+            "baseline": baseline_value,
+            "candidate": candidate_value,
+        }
+        if _is_number(baseline_value) and _is_number(candidate_value):
+            delta = candidate_value - baseline_value
+            metric["delta"] = delta
+            if baseline_value != 0:
+                metric["change_percent"] = delta * 100.0 / baseline_value
+        changed[spec.key] = metric
+    return {
+        "changed": changed,
+        "incomplete": incomplete,
+        "unchanged_count": unchanged_count,
+        "unavailable_count": unavailable_count,
+    }
+
+
+def _diff_group_has_changes(group: dict[str, object]) -> bool:
+    return bool(group["changed"] or group["incomplete"])
+
+
+def _lookup(root: object, path: str) -> object:
+    value = root
+    for component in path.split("."):
+        if not isinstance(value, dict) or component not in value:
+            return _MISSING
+        value = value[component]
+    return value
+
+
+def _is_number(value: object) -> bool:
+    return not isinstance(value, bool) and isinstance(value, (int, float))
+
+
+def _append_metric_group(
+    lines: list[str],
+    heading: str,
+    metric_values: dict[str, object],
+    evidence: EvidenceClass,
+) -> None:
+    lines.append(f"  {heading}")
+    for spec in _METRIC_SPECS:
+        if spec.evidence is not evidence:
+            continue
+        value = _format_value(metric_values.get(spec.key), spec.unit)
+        lines.append(f"    {spec.label}: {value}")
+
+
+def _append_diff_group(
+    lines: list[str],
+    heading: str,
+    metric_values: dict[str, object],
+    evidence: EvidenceClass,
+) -> None:
+    changed = _expect_dict(metric_values["changed"])
+    incomplete = _expect_dict(metric_values["incomplete"])
+    lines.append(f"  {heading}")
+    if not changed and not incomplete:
+        lines.append("    no metric changes")
+    for spec in _METRIC_SPECS:
+        if spec.evidence is not evidence:
+            continue
+        metric_value = changed.get(spec.key, incomplete.get(spec.key))
+        if metric_value is None:
+            continue
+        metric = _expect_dict(metric_value)
+        baseline = _format_value(metric["baseline"], spec.unit)
+        candidate = _format_value(metric["candidate"], spec.unit)
+        suffix = ""
+        if "delta" in metric:
+            suffix = f", delta {_format_signed_value(metric['delta'], spec.unit)}"
+        if "change_percent" in metric:
+            suffix += f" ({metric['change_percent']:+.2f}%)"
+        lines.append(f"    {spec.label}: {baseline} -> {candidate}{suffix}")
+    lines.append(
+        f"    unchanged: {metric_values['unchanged_count']}; "
+        f"unavailable in both: {metric_values['unavailable_count']}"
+    )
+
+
+def _format_value(value: object, unit: object) -> str:
+    if value is None:
+        return "unavailable"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        formatted = f"{value:,}"
+    elif isinstance(value, float):
+        formatted = f"{value:.4g}"
+    else:
+        return str(value)
+    if unit == "bytes":
+        return f"{formatted} B"
+    if unit == "percent":
+        return f"{formatted}%"
+    return formatted
+
+
+def _format_signed_value(value: object, unit: object) -> str:
+    if isinstance(value, int) and not isinstance(value, bool):
+        formatted = f"{value:+,}"
+    elif isinstance(value, float):
+        formatted = f"{value:+.4g}"
+    else:
+        return str(value)
+    if unit == "bytes":
+        return f"{formatted} B"
+    if unit == "percent":
+        return f"{formatted} percentage points"
+    return formatted
+
+
+def _format_target(identity: dict[str, object]) -> str:
+    family = identity.get("target_family") or "unavailable"
+    key = identity.get("target_key") or "unavailable"
+    backend = identity.get("backend")
+    suffix = f" via {backend}" if backend else ""
+    return f"{family}/{key}{suffix}"
+
+
+def _format_artifact(identity: dict[str, object]) -> str:
+    kind = identity.get("artifact_kind") or "unavailable"
+    artifact_format = identity.get("artifact_format")
+    suffix = f" ({artifact_format})" if artifact_format else ""
+    return f"{kind}{suffix}"
+
+
+def _format_specialization(identity: dict[str, object]) -> str:
+    values = (
+        ("bundle", identity.get("target_bundle")),
+        ("snapshot", identity.get("target_snapshot")),
+        ("config", identity.get("target_config")),
+    )
+    return ", ".join(f"{label}={value or 'unavailable'}" for label, value in values)
+
+
+def _format_context(context: dict[str, object]) -> str:
+    return ", ".join(f"{key}={value}" for key, value in context.items())
+
+
+def _format_workload(workload: dict[str, object]) -> str:
+    fields = []
+    for key in ("workgroup_size", "workgroup_count", "workgroup_cluster_size"):
+        value = workload.get(key)
+        if isinstance(value, dict):
+            fields.append(f"{key}=({value.get('x')},{value.get('y')},{value.get('z')})")
+    if "dispatch_workitem_count" in workload:
+        fields.append(f"workitems={workload['dispatch_workitem_count']}")
+    return ", ".join(fields) if fields else "unavailable"
+
+
+def _entry_display_name(identity: dict[str, object]) -> str:
+    return str(identity["name"])
+
+
+def _expect_dict(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise TypeError("invalid internal compile report view object")
+    return value
+
+
+def _expect_list(value: object) -> list[object]:
+    if not isinstance(value, list):
+        raise TypeError("invalid internal compile report view array")
+    return value
