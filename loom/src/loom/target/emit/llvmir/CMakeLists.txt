@@ -162,6 +162,7 @@ loom_cc_library(
     ::core
     ::target_env
     iree::base
+    loom::target::arch::amdgpu::buffer_resource
     loom::target::emit::llvmir::amdgpu::intrinsics
     loom::target::emit::llvmir::amdgpu::target_env
     loom::target::emit::llvmir::x86::intrinsics

@@ -14,6 +14,7 @@
 #endif
 
 #if LOOM_LLVMIR_TEST_MODULE_ENABLE_TARGET_SCENARIOS
+#include "loom/target/arch/amdgpu/buffer_resource.h"
 #include "loom/target/emit/llvmir/amdgpu/intrinsics.h"
 #include "loom/target/emit/llvmir/amdgpu/target_env.h"
 #include "loom/target/emit/llvmir/x86/intrinsics.h"
@@ -1800,13 +1801,14 @@ static iree_status_t loom_llvmir_test_populate_amdgpu_intrinsics(
 
   loom_llvmir_value_id_t stride_zero = LOOM_LLVMIR_VALUE_ID_INVALID;
   loom_llvmir_value_id_t records = LOOM_LLVMIR_VALUE_ID_INVALID;
-  loom_llvmir_value_id_t control = LOOM_LLVMIR_VALUE_ID_INVALID;
+  loom_llvmir_value_id_t flags = LOOM_LLVMIR_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_llvmir_module_add_integer_constant(
       module, i16_type, 0, &stride_zero));
   IREE_RETURN_IF_ERROR(loom_llvmir_module_add_integer_constant(
       module, i64_type, resource_record_count, &records));
   IREE_RETURN_IF_ERROR(loom_llvmir_module_add_integer_constant(
-      module, i32_type, profile->kernel.binding_resource_control, &control));
+      module, i32_type, LOOM_AMDGPU_BUFFER_RESOURCE_BASE48_UNIFIED_RAW_WORD3,
+      &flags));
 
   loom_llvmir_block_t* entry = NULL;
   IREE_RETURN_IF_ERROR(
@@ -1828,7 +1830,7 @@ static iree_status_t loom_llvmir_test_populate_amdgpu_intrinsics(
   loom_llvmir_value_id_t x_resource = LOOM_LLVMIR_VALUE_ID_INVALID;
   loom_llvmir_value_id_t y_resource = LOOM_LLVMIR_VALUE_ID_INVALID;
   loom_llvmir_value_id_t z_resource = LOOM_LLVMIR_VALUE_ID_INVALID;
-  loom_llvmir_value_id_t resource_args[] = {x, stride_zero, records, control};
+  loom_llvmir_value_id_t resource_args[] = {x, stride_zero, records, flags};
   IREE_RETURN_IF_ERROR(loom_llvmir_build_call(
       entry,
       &(loom_llvmir_call_desc_t){

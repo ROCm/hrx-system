@@ -116,7 +116,7 @@ loom_cc_library(
     hdrs = ["buffer_resource.h"],
     visibility = (
         _AMDGPU_HAL_VISIBILITY + [
-            "//loom/src/loom/target/emit/llvmir/amdgpu:__pkg__",
+            "//loom/src/loom/target/emit/llvmir:__pkg__",
         ]
     ),
     deps = [
