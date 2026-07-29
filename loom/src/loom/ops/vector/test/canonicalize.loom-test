@@ -525,6 +525,111 @@ func.def @mask_range_static_all_false() -> (vector<4xi1>) {
 
 // ====
 
+// Bounded dynamic operands prove every static lane is below the exclusive
+// upper bound.
+func.def @mask_range_bounded_all_true(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 0, 752)] : index
+  %hi = index.assume %hi0 [range(%hi0, 768, 1024)] : index
+  %step = index.assume %step0 [range(%step0, 0, 1)] : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+// ----
+func.def @mask_range_bounded_all_true(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %r = vector.constant true : vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+
+// ====
+
+// A non-positive step makes lane zero the maximum lane value.
+func.def @mask_range_bounded_all_true_negative_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 0, 4)] : index
+  %hi = index.assume %hi0 [range(%hi0, 5, 8)] : index
+  %step = index.assume %step0 [range(%step0, -8, -1)] : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+// ----
+func.def @mask_range_bounded_all_true_negative_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %r = vector.constant true : vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+
+// ====
+
+// A non-negative step makes lane zero the minimum lane value. Equality with
+// the exclusive upper bound is false.
+func.def @mask_range_bounded_all_false_positive_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 8, 16)] : index
+  %hi = index.assume %hi0 [range(%hi0, 0, 8)] : index
+  %step = index.assume %step0 [range(%step0, 1, 8)] : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+// ----
+func.def @mask_range_bounded_all_false_positive_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %r = vector.constant false : vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+
+// ====
+
+// The minimum lane accounts for a negative step when proving an all-false
+// bounded mask.
+func.def @mask_range_bounded_all_false_negative_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 768, 1024)] : index
+  %hi = index.assume %hi0 [range(%hi0, 0, 512)] : index
+  %step = index.assume %step0 [range(%step0, -8, -1)] : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+// ----
+func.def @mask_range_bounded_all_false_negative_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %r = vector.constant false : vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+
+// ====
+
+// Ranges that can cross the exclusive upper bound remain structural masks.
+func.def @mask_range_bounded_partial_negative_step(%lo0: index, %hi0: index, %step0: index) -> (vector<2xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 4, 10)] : index
+  %hi = index.assume %hi0 [range(%hi0, 5, 5)] : index
+  %step = index.assume %step0 [range(%step0, -10, -1)] : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<2xi1>
+  func.return %r : vector<2xi1>
+}
+// ----
+func.def @mask_range_bounded_partial_negative_step(%lo0: index, %hi0: index, %step0: index) -> (vector<2xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 4, 10)] : index
+  %hi = index.constant 5 : index
+  %step = index.assume %step0 [range(%step0, -10, -1)] : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<2xi1>
+  func.return %r : vector<2xi1>
+}
+
+// ====
+
+// A positive-step range that may reach the exclusive bound remains structural.
+func.def @mask_range_bounded_partial_positive_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 0, 1)] : index
+  %hi = index.assume %hi0 [range(%hi0, 16, 16)] : index
+  %step = index.assume %step0 [range(%step0, 1, 1)] : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+// ----
+func.def @mask_range_bounded_partial_positive_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 0, 1)] : index
+  %hi = index.constant 16 : index
+  %step = index.constant 1 : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+
+// ====
+
 // A negative step can make later lanes true even when lane 0 is false.
 func.def @mask_range_negative_step_not_all_false() -> (vector<2xi1>) {
   %c10 = index.constant 10 : index
@@ -1261,6 +1366,29 @@ func.def @load_mask_full_range_to_load(%buffer: buffer, %offset: offset, %old: v
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
   %r = vector.load %view[0] : view<16xf32, %layout> -> vector<4xf32>
   func.return %r : vector<4xf32>
+}
+
+// ====
+
+// A bounded full range removes the masked-memory operation, not just the
+// standalone mask producer.
+func.def @store_mask_bounded_full_range_to_store(%buffer: buffer, %offset: offset, %value: vector<16xf32>, %lo0: index, %hi0: index, %step0: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1024xf32, %layout>
+  %lo = index.assume %lo0 [range(%lo0, 0, 752)] : index
+  %hi = index.assume %hi0 [range(%hi0, 768, 1024)] : index
+  %step = index.assume %step0 [range(%step0, 0, 1)] : index
+  %mask = vector.mask.range [%lo to %hi step %step] : index -> vector<16xi1>
+  vector.store.mask %value, %view[%lo], %mask : vector<16xf32>, view<1024xf32, %layout>, vector<16xi1>
+  func.return
+}
+// ----
+func.def @store_mask_bounded_full_range_to_store(%buffer: buffer, %offset: offset, %value: vector<16xf32>, %lo0: index, %hi0: index, %step0: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1024xf32, %layout>
+  %lo = index.assume %lo0 [range(%lo0, 0, 752)] : index
+  vector.store %value, %view[%lo] : vector<16xf32>, view<1024xf32, %layout>
+  func.return
 }
 
 // ====
