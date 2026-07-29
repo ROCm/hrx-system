@@ -169,8 +169,9 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
   %zero_offset = index.constant 0 : offset
   %four_bytes = index.constant 4 : offset
   %q4_block_bytes = index.constant 144 : index
-  %operand_stage_bytes = index.constant 5120 : offset
-  %route_stage_bytes = index.constant 256 : offset
+  %weight_stage_bytes = index.constant 5120 : offset
+  %activation_stage_bytes = index.constant 2560 : offset
+  %route_stage_bytes = index.constant 128 : offset
   %wave_result_stage_bytes = index.constant 512 : offset
   %result_stage_bytes = index.constant 1024 : offset
   %zero_i32 = scalar.constant 0 : i32
@@ -191,15 +192,15 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
   %count_view = buffer.view %expert_table_noalias[%zero_offset] : buffer -> view<[%bounded_expert_count]xi32, #dense>
   %assignment_view = buffer.view %expert_table_noalias[%assignment_table_byte_base] : buffer -> view<[%bounded_expert_count]x[%bounded_token_count]xi32, #dense>
   %output_view = buffer.view %output_noalias[%zero_offset] : buffer -> view<[%output_row_count]x[%bounded_output_size]xf32, #dense>
-  %weight_stage = buffer.alloca %operand_stage_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %activation_stage = buffer.alloca %operand_stage_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %weight_stage = buffer.alloca %weight_stage_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %activation_stage = buffer.alloca %activation_stage_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %route_stage = buffer.alloca %route_stage_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %result_stage = buffer.alloca %result_stage_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %weight_stage_view = buffer.view %weight_stage[%zero_offset] : buffer -> view<64x40xf16, #dense>
-  %activation_stage_physical_view = buffer.view %activation_stage[%zero_offset] : buffer -> view<64x40xf16, #dense>
+  %activation_stage_physical_view = buffer.view %activation_stage[%zero_offset] : buffer -> view<32x40xf16, #dense>
   %activation_fragment_layout = encoding.layout.strided [1, %forty] : encoding<layout>
-  %activation_fragment_view = buffer.view %activation_stage[%zero_offset] : buffer -> view<32x64xf16, %activation_fragment_layout>
-  %route_stage_view = buffer.view %route_stage[%zero_offset] : buffer -> view<64xi32, #dense>
+  %activation_fragment_view = buffer.view %activation_stage[%zero_offset] : buffer -> view<32x32xf16, %activation_fragment_layout>
+  %route_stage_view = buffer.view %route_stage[%zero_offset] : buffer -> view<32xi32, #dense>
   %wave_result_stage_offset = index.scale %subgroup, %wave_result_stage_bytes : index, offset -> offset
   %result_fragment_layout = encoding.layout.strided [1, %sixteen] : encoding<layout>
   %result_fragment_view = buffer.view %result_stage[%wave_result_stage_offset] : buffer -> view<16x16xf16, %result_fragment_layout>
@@ -241,7 +242,7 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
       } else {
         scf.yield %minus_one_i32 : i32
       }
-      view.store %assignment_i32, %route_stage_view[%local_route] : i32, view<64xi32, #dense>
+      view.store %assignment_i32, %route_stage_view[%local_route] : i32, view<32xi32, #dense>
     }
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
     %load_packet = index.rem %workitem, %eight : index
@@ -275,11 +276,12 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
             scf.yield %zero_f16x4 : vector<4xf16>
           }
           %is_activation_row = index.cmp ult, %local_row, %thirtytwo : index
-          %activation_values = scf.if %is_activation_row -> (vector<4xf16>) {
+          vector.store %weight_values, %weight_stage_view[%local_row, %load_k] : vector<4xf16>, view<64x40xf16, #dense>
+          scf.if %is_activation_row {
             %activation_row = index.assume %local_row [range(%local_row, 0, 31)] : index
-            %assignment_i32 = view.load %route_stage_view[%activation_row] : view<64xi32, #dense> -> i32
+            %assignment_i32 = view.load %route_stage_view[%activation_row] : view<32xi32, #dense> -> i32
             %valid_assignment = scalar.cmpi sge, %assignment_i32, %zero_i32 : i32
-            %loaded_or_zero = scf.if %valid_assignment -> (vector<4xf16>) {
+            %activation_values = scf.if %valid_assignment -> (vector<4xf16>) {
               %assignment0 = index.cast %assignment_i32 : i32 to index
               %assignment = index.assume %assignment0 [range(%assignment0, 0, 4095)] : index
               %bounded_assignment, %bounded_assignment_count = index.assume %assignment, %assignment_count [lt(%assignment, %assignment_count)] : index, index
@@ -292,19 +294,15 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
             } else {
               scf.yield %zero_f16x4 : vector<4xf16>
             }
-            scf.yield %loaded_or_zero : vector<4xf16>
-          } else {
-            scf.yield %zero_f16x4 : vector<4xf16>
+            vector.store %activation_values, %activation_stage_physical_view[%activation_row, %load_k] : vector<4xf16>, view<32x40xf16, #dense>
           }
-          vector.store %weight_values, %weight_stage_view[%local_row, %load_k] : vector<4xf16>, view<64x40xf16, #dense>
-          vector.store %activation_values, %activation_stage_physical_view[%local_row, %load_k] : vector<4xf16>, view<64x40xf16, #dense>
         }
         kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
         %next00, %next01, %next10, %next11 = scf.for %k_half = [%zero to %thirtytwo step %sixteen](%half_acc00 = %acc00 : vector<8xf16>, %half_acc01 = %acc01 : vector<8xf16>, %half_acc10 = %acc10 : vector<8xf16>, %half_acc11 = %acc11 : vector<8xf16>) -> (vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>) unroll {
           %lhs0 = vector.fragment.load<lhs> %weight_stage_view[%subgroup_channel_add, %k_half] shape [%m, %k] : view<64x40xf16, #dense> -> vector<16xf16>
           %lhs1 = vector.fragment.load<lhs> %weight_stage_view[%subgroup_channel1, %k_half] shape [%m, %k] : view<64x40xf16, #dense> -> vector<16xf16>
-          %rhs0 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %zero] shape [%k, %n] : view<32x64xf16, %activation_fragment_layout> -> vector<16xf16>
-          %rhs1 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %sixteen] shape [%k, %n] : view<32x64xf16, %activation_fragment_layout> -> vector<16xf16>
+          %rhs0 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %zero] shape [%k, %n] : view<32x32xf16, %activation_fragment_layout> -> vector<16xf16>
+          %rhs1 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %sixteen] shape [%k, %n] : view<32x32xf16, %activation_fragment_layout> -> vector<16xf16>
           %half_next00 = vector.mma %lhs0, %rhs0, %half_acc00 : vector<16xf16>, vector<16xf16>, vector<8xf16>
           %half_next01 = vector.mma %lhs0, %rhs1, %half_acc01 : vector<16xf16>, vector<16xf16>, vector<8xf16>
           %half_next10 = vector.mma %lhs1, %rhs0, %half_acc10 : vector<16xf16>, vector<16xf16>, vector<8xf16>
@@ -328,8 +326,8 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
     %publish_packet = index.assume %publish_packet0 [range(%publish_packet0, 0, 3)] : index
     %publish_channel_add = index.mul %publish_packet, %four : index
     %local_route1 = index.add %sixteen, %publish_route : index
-    %assignment0_i32 = view.load %route_stage_view[%publish_route] : view<64xi32, #dense> -> i32
-    %assignment1_i32 = view.load %route_stage_view[%local_route1] : view<64xi32, #dense> -> i32
+    %assignment0_i32 = view.load %route_stage_view[%publish_route] : view<32xi32, #dense> -> i32
+    %assignment1_i32 = view.load %route_stage_view[%local_route1] : view<32xi32, #dense> -> i32
     %assignment0_nonnegative = scalar.cmpi sge, %assignment0_i32, %zero_i32 : i32
     %assignment1_nonnegative = scalar.cmpi sge, %assignment1_i32, %zero_i32 : i32
     %safe_assignment0_i32 = scf.if %assignment0_nonnegative -> (i32) {
