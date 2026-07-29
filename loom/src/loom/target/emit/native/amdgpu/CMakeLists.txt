@@ -402,6 +402,32 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_cc_library(
   NAME
+    kernel_emission
+  HDRS
+    "kernel_emission.h"
+  SRCS
+    "kernel_emission.c"
+  DEPS
+    ::kernel_assembly
+    ::kernel_hsaco
+    ::preflight
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::frame
+    loom::ir
+    loom::target::arch::amdgpu::hal::kernel_abi
+    loom::target::arch::amdgpu::planning::packet_plan
+    loom::target::arch::amdgpu::planning::wait_counters
+    loom::target::arch::amdgpu::refs::target_refs
+    loom::target::reporting::low
+    loom::target::reporting::report
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_library(
+  NAME
     hsaco
   HDRS
     "hsaco.h"
@@ -460,7 +486,7 @@ loom_cc_library(
   SRCS
     "hal_kernel_library.c"
   DEPS
-    ::kernel_assembly
+    ::kernel_emission
     ::kernel_hsaco
     ::preflight
     ::runtime_globals
@@ -486,10 +512,8 @@ loom_cc_library(
     loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::planning::descriptor_semantics
     loom::target::arch::amdgpu::planning::occupancy
-    loom::target::arch::amdgpu::planning::packet_plan
     loom::target::arch::amdgpu::planning::storage_lease
     loom::target::arch::amdgpu::planning::vopd_plan
-    loom::target::arch::amdgpu::planning::wait_counters
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_info

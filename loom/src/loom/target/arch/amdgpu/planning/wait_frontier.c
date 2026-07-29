@@ -376,20 +376,18 @@ static void loom_amdgpu_wait_frontier_publish_node_vmem_results(
   }
 }
 
-static void loom_amdgpu_wait_frontier_publish_node_storage_leases(
+static void loom_amdgpu_wait_frontier_publish_packet_storage_leases(
     const loom_amdgpu_wait_frontier_t* frontier, uint64_t* words,
-    uint32_t node_index, uint32_t excluded_counter_mask) {
-  for (iree_host_size_t lease_index = 0;
-       lease_index < frontier->storage_leases.lease_count; ++lease_index) {
-    const loom_low_allocation_storage_lease_t* lease =
-        &frontier->allocation->storage_lease_instances[lease_index];
-    IREE_ASSERT_LT(lease->lease_record_index,
-                   frontier->allocation->storage_leases.record_count);
+    iree_host_size_t packet_index, uint32_t excluded_counter_mask,
+    iree_host_size_t* inout_next_storage_lease_index) {
+  while (*inout_next_storage_lease_index <
+         frontier->storage_leases.lease_count) {
+    const iree_host_size_t lease_index = *inout_next_storage_lease_index;
     const loom_low_storage_lease_record_t* record =
-        &frontier->allocation->storage_leases
-             .records[lease->lease_record_index];
-    if (record->node_index != node_index ||
-        record->release_scope !=
+        &frontier->allocation->storage_leases.records[lease_index];
+    if (record->packet_index != packet_index) break;
+    ++*inout_next_storage_lease_index;
+    if (record->release_scope !=
             LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS ||
         !loom_amdgpu_wait_counter_id_is_valid(record->release_class_id) ||
         iree_any_bit_set(
@@ -399,6 +397,25 @@ static void loom_amdgpu_wait_frontier_publish_node_storage_leases(
     }
     loom_amdgpu_wait_storage_lease_state_set(words, lease_index);
   }
+}
+
+static iree_host_size_t loom_amdgpu_wait_frontier_storage_lease_lower_bound(
+    const loom_amdgpu_wait_frontier_t* frontier,
+    iree_host_size_t packet_index) {
+  iree_host_size_t first_lease_index = 0;
+  iree_host_size_t lease_index_limit = frontier->storage_leases.lease_count;
+  while (first_lease_index < lease_index_limit) {
+    const iree_host_size_t middle_lease_index =
+        first_lease_index + (lease_index_limit - first_lease_index) / 2;
+    const loom_low_storage_lease_record_t* record =
+        &frontier->allocation->storage_leases.records[middle_lease_index];
+    if (record->packet_index < packet_index) {
+      first_lease_index = middle_lease_index + 1;
+    } else {
+      lease_index_limit = middle_lease_index;
+    }
+  }
+  return first_lease_index;
 }
 
 static void loom_amdgpu_wait_frontier_apply_static_xcnt_producer(
@@ -419,6 +436,7 @@ static void loom_amdgpu_wait_frontier_apply_static_xcnt_producer(
 static void loom_amdgpu_wait_frontier_build_local_states(
     loom_amdgpu_wait_frontier_t* frontier) {
   const loom_low_schedule_table_t* schedule = frontier->schedule;
+  iree_host_size_t next_storage_lease_index = 0;
   for (iree_host_size_t block_index = 0; block_index < schedule->block_count;
        ++block_index) {
     const loom_low_schedule_block_t* block = &schedule->blocks[block_index];
@@ -443,8 +461,10 @@ static void loom_amdgpu_wait_frontier_build_local_states(
             ? NULL
             : &frontier->xcnt.static_outgoing_flags[block_index];
     for (uint32_t i = 0; i < block->scheduled_node_count; ++i) {
+      const iree_host_size_t packet_index =
+          (iree_host_size_t)block->scheduled_node_start + i;
       const uint32_t node_index =
-          schedule->scheduled_node_indices[block->scheduled_node_start + i];
+          schedule->scheduled_node_indices[packet_index];
       const loom_amdgpu_wait_frontier_node_t* node =
           &frontier->nodes[node_index];
       if (memory_state != NULL) {
@@ -478,9 +498,9 @@ static void loom_amdgpu_wait_frontier_build_local_states(
             node->xcnt_group_flags);
       }
       if (storage_lease_words != NULL) {
-        loom_amdgpu_wait_frontier_publish_node_storage_leases(
-            frontier, storage_lease_words, node_index,
-            /*excluded_counter_mask=*/0);
+        loom_amdgpu_wait_frontier_publish_packet_storage_leases(
+            frontier, storage_lease_words, packet_index,
+            /*excluded_counter_mask=*/0, &next_storage_lease_index);
       }
     }
   }
@@ -633,14 +653,6 @@ iree_status_t loom_amdgpu_wait_frontier_initialize(
           },
       .active_block_index = UINT16_MAX,
   };
-
-  if (allocation != NULL && allocation->storage_lease_instance_count !=
-                                allocation->storage_leases.record_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU wait frontier requires one allocation storage lease per "
-        "storage-lease record");
-  }
 
   bool has_memory_producer = false;
   bool has_vmem_result_producer = false;
@@ -1103,10 +1115,16 @@ void loom_amdgpu_wait_frontier_end_block(
       outgoing_storage_lease_words != NULL) {
     const loom_low_schedule_block_t* block =
         &frontier->schedule->blocks[block_index];
+    iree_host_size_t next_storage_lease_index =
+        outgoing_storage_lease_words == NULL
+            ? 0
+            : loom_amdgpu_wait_frontier_storage_lease_lower_bound(
+                  frontier, block->scheduled_node_start);
     for (uint32_t i = 0; i < block->scheduled_node_count; ++i) {
+      const iree_host_size_t packet_index =
+          (iree_host_size_t)block->scheduled_node_start + i;
       const uint32_t node_index =
-          frontier->schedule
-              ->scheduled_node_indices[block->scheduled_node_start + i];
+          frontier->schedule->scheduled_node_indices[packet_index];
       const loom_amdgpu_wait_frontier_node_t* node =
           &frontier->nodes[node_index];
       if (outgoing_memory_state != NULL) {
@@ -1126,9 +1144,10 @@ void loom_amdgpu_wait_frontier_end_block(
             frontier, outgoing_vmem_result_words, node_index);
       }
       if (outgoing_storage_lease_words != NULL) {
-        loom_amdgpu_wait_frontier_publish_node_storage_leases(
-            frontier, outgoing_storage_lease_words, node_index,
-            node->drained_after_production_counter_mask);
+        loom_amdgpu_wait_frontier_publish_packet_storage_leases(
+            frontier, outgoing_storage_lease_words, packet_index,
+            node->drained_after_production_counter_mask,
+            &next_storage_lease_index);
       }
     }
   }

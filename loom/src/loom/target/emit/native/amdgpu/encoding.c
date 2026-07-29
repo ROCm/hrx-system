@@ -80,6 +80,8 @@ typedef struct loom_amdgpu_encode_state_t {
   const loom_amdgpu_wait_state_plan_t* wait_states;
   // Optional planned VOPD pairs consumed by packet index.
   const loom_amdgpu_vopd_plan_t* vopd_plan;
+  // Optional encoding products requested by the caller.
+  loom_amdgpu_encode_instruction_stream_flags_t flags;
   // Cached descriptor rows needed by native encoding helper packets.
   loom_amdgpu_native_descriptor_refs_t descriptors;
   // Scheduled packet currently being expanded into native instructions.
@@ -114,10 +116,6 @@ typedef struct loom_amdgpu_encode_state_t {
   iree_host_size_t next_wait_packet_index;
   // Next wait-state row to compare with the current scheduled packet.
   iree_host_size_t next_wait_state_index;
-  // True when the current packet already encoded an S_DELAY_ALU wait state.
-  bool packet_emitted_delay_alu;
-  // S_DELAY_ALU immediate encoded for the current packet.
-  uint16_t packet_delay_alu_immediate;
   // Planned byte offset for each scheduled block.
   iree_host_size_t* block_offsets;
   // Block-local per-SGPR PC component facts used by symbolic rel32 fixups.
@@ -270,7 +268,12 @@ static void loom_amdgpu_append_encoding_packet(
 
 static void loom_amdgpu_record_native_insertion(
     loom_amdgpu_encode_state_t* state, loom_amdgpu_native_insertion_kind_t kind,
-    uint16_t immediate) {
+    loom_amdgpu_descriptor_ref_t descriptor_ref, uint16_t immediate) {
+  if (!iree_all_bits_set(
+          state->flags,
+          LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_CAPTURE_NATIVE_INSERTIONS)) {
+    return;
+  }
   if (state->native_insertions != NULL) {
     IREE_ASSERT_LT(state->native_insertion_count,
                    state->native_insertion_capacity);
@@ -282,9 +285,25 @@ static void loom_amdgpu_record_native_insertion(
             .node_index = state->current_packet->node_index,
             .scheduled_ordinal = node->scheduled_ordinal,
             .immediate = immediate,
+            .descriptor_ref = descriptor_ref,
         };
   }
   ++state->native_insertion_count;
+}
+
+static void loom_amdgpu_record_native_descriptor_insertion(
+    loom_amdgpu_encode_state_t* state, loom_amdgpu_native_insertion_kind_t kind,
+    const loom_low_descriptor_t* descriptor, uint16_t immediate) {
+  if (!iree_all_bits_set(
+          state->flags,
+          LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_CAPTURE_NATIVE_INSERTIONS)) {
+    return;
+  }
+  const loom_amdgpu_descriptor_ref_t descriptor_ref =
+      loom_amdgpu_descriptor_ref_for_descriptor(
+          state->schedule->target.descriptor_set, descriptor);
+  IREE_ASSERT_NE(descriptor_ref, LOOM_AMDGPU_DESCRIPTOR_REF_NONE);
+  loom_amdgpu_record_native_insertion(state, kind, descriptor_ref, immediate);
 }
 
 static iree_status_t loom_amdgpu_encode_vgpr_msb_mode(
@@ -301,7 +320,8 @@ static iree_status_t loom_amdgpu_encode_vgpr_msb_mode(
       immediate, &encoded_packet));
   loom_amdgpu_append_encoding_packet(state, &encoded_packet);
   loom_amdgpu_record_native_insertion(
-      state, LOOM_AMDGPU_NATIVE_INSERTION_ADDRESS_STATE, immediate);
+      state, LOOM_AMDGPU_NATIVE_INSERTION_ADDRESS_STATE,
+      LOOM_AMDGPU_DESCRIPTOR_REF_S_SET_VGPR_MSB, immediate);
   state->current_vgpr_msb_mode = new_mode;
   return iree_ok_status();
 }
@@ -978,6 +998,9 @@ static iree_status_t loom_amdgpu_encode_s_nop_cycles(
                                : cycle_count;
     IREE_RETURN_IF_ERROR(loom_amdgpu_encode_sopp_simm16(
         state, state->target->sopp.nop, (uint16_t)(chunk - 1)));
+    loom_amdgpu_record_native_insertion(
+        state, LOOM_AMDGPU_NATIVE_INSERTION_S_NOP,
+        LOOM_AMDGPU_DESCRIPTOR_REF_NONE, (uint16_t)(chunk - 1));
     cycle_count -= chunk;
   }
   return iree_ok_status();
@@ -989,8 +1012,12 @@ static iree_status_t loom_amdgpu_encode_s_delay_alu(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "AMDGPU target does not support S_DELAY_ALU");
   }
-  return loom_amdgpu_encode_sopp_simm16(state, state->target->sopp.delay_alu,
-                                        delay_alu_immediate);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_encode_sopp_simm16(
+      state, state->target->sopp.delay_alu, delay_alu_immediate));
+  loom_amdgpu_record_native_insertion(
+      state, LOOM_AMDGPU_NATIVE_INSERTION_S_DELAY_ALU,
+      LOOM_AMDGPU_DESCRIPTOR_REF_S_DELAY_ALU, delay_alu_immediate);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_encode_wait_state_action(
@@ -1011,29 +1038,6 @@ static iree_status_t loom_amdgpu_encode_wait_state_action(
   }
 }
 
-static void loom_amdgpu_note_encoded_wait_state(
-    loom_amdgpu_encode_state_t* state,
-    const loom_amdgpu_wait_state_t* wait_state) {
-  if (wait_state->action != LOOM_AMDGPU_WAIT_STATE_ACTION_S_DELAY_ALU) {
-    return;
-  }
-  state->packet_emitted_delay_alu = true;
-  state->packet_delay_alu_immediate = wait_state->delay_alu_immediate;
-}
-
-static bool loom_amdgpu_wait_state_is_movable_vopd_second_delay(
-    const loom_amdgpu_wait_state_t* wait_state) {
-  return wait_state->action == LOOM_AMDGPU_WAIT_STATE_ACTION_S_DELAY_ALU;
-}
-
-static bool loom_amdgpu_current_packet_has_same_delay_alu(
-    const loom_amdgpu_encode_state_t* state,
-    const loom_amdgpu_wait_state_t* wait_state) {
-  return state->packet_emitted_delay_alu &&
-         wait_state->action == LOOM_AMDGPU_WAIT_STATE_ACTION_S_DELAY_ALU &&
-         state->packet_delay_alu_immediate == wait_state->delay_alu_immediate;
-}
-
 static bool loom_amdgpu_wait_state_matches_packet(
     const loom_amdgpu_wait_state_t* wait_state,
     const loom_low_packet_view_t* packet) {
@@ -1041,34 +1045,6 @@ static bool loom_amdgpu_wait_state_matches_packet(
   return wait_state->block_index == node->block_index &&
          wait_state->scheduled_ordinal == node->scheduled_ordinal &&
          wait_state->node_index == packet->node_index;
-}
-
-static iree_status_t loom_amdgpu_encode_movable_vopd_second_wait_states(
-    loom_amdgpu_encode_state_t* state,
-    const loom_low_packet_view_t* second_packet) {
-  if (state->wait_states == NULL) {
-    return iree_ok_status();
-  }
-  while (state->next_wait_state_index < state->wait_states->state_count) {
-    const loom_amdgpu_wait_state_t* wait_state =
-        &state->wait_states->states[state->next_wait_state_index];
-    if (!loom_amdgpu_wait_state_matches_packet(wait_state, second_packet)) {
-      return iree_ok_status();
-    }
-    if (!loom_amdgpu_wait_state_is_movable_vopd_second_delay(wait_state)) {
-      IREE_ASSERT_UNREACHABLE(
-          "verified AMDGPU VOPD plans only move delay waits before a fused "
-          "second component");
-      IREE_BUILTIN_UNREACHABLE();
-    }
-    if (!loom_amdgpu_current_packet_has_same_delay_alu(state, wait_state)) {
-      IREE_RETURN_IF_ERROR(
-          loom_amdgpu_encode_wait_state_action(state, wait_state));
-      loom_amdgpu_note_encoded_wait_state(state, wait_state);
-    }
-    ++state->next_wait_state_index;
-  }
-  return iree_ok_status();
 }
 
 static void loom_amdgpu_push_immediate_encoding_field_values(
@@ -1369,10 +1345,6 @@ static iree_status_t loom_amdgpu_try_encode_vopd_packet(
   IREE_ASSERT(vopd_packet->role == LOOM_AMDGPU_VOPD_PACKET_ROLE_FIRST);
   const loom_amdgpu_vopd_pair_t* pair =
       &state->vopd_plan->pairs[vopd_packet->pair_index];
-  const loom_low_packet_view_t second_packet =
-      loom_low_packet_at(state->schedule, pair->second_packet_index);
-  IREE_RETURN_IF_ERROR(loom_amdgpu_encode_movable_vopd_second_wait_states(
-      state, &second_packet));
   return loom_amdgpu_encode_vopd_pair(state, pair);
 }
 
@@ -1723,8 +1695,11 @@ static iree_status_t loom_amdgpu_encode_generic_wait_packet(
 static iree_status_t loom_amdgpu_encode_wait_packet(
     loom_amdgpu_encode_state_t* state,
     const loom_amdgpu_wait_packet_t* wait_packet) {
-  return loom_amdgpu_encode_generic_wait_packet(state, wait_packet->descriptor,
-                                                wait_packet);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_encode_generic_wait_packet(
+      state, wait_packet->descriptor, wait_packet));
+  loom_amdgpu_record_native_descriptor_insertion(
+      state, LOOM_AMDGPU_NATIVE_INSERTION_WAIT, wait_packet->descriptor, 0);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_encode_wait_packets_before_packet(
@@ -1785,7 +1760,6 @@ static iree_status_t loom_amdgpu_encode_wait_states_before_packet(
     }
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_encode_wait_state_action(state, wait_state));
-    loom_amdgpu_note_encoded_wait_state(state, wait_state);
     ++state->next_wait_state_index;
   }
   return iree_ok_status();
@@ -1793,8 +1767,6 @@ static iree_status_t loom_amdgpu_encode_wait_states_before_packet(
 
 static iree_status_t loom_amdgpu_encode_packet(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
-  state->packet_emitted_delay_alu = false;
-  state->packet_delay_alu_immediate = 0;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_encode_address_state_before_packet(state, packet));
   IREE_RETURN_IF_ERROR(
@@ -1961,6 +1933,9 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
       packet_plan ? &packet_plan->wait_states : NULL;
   const loom_amdgpu_vopd_plan_t* vopd_plan =
       packet_plan ? &packet_plan->vopd_plan : NULL;
+  const loom_amdgpu_encode_instruction_stream_flags_t flags =
+      options ? options->flags
+              : LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_NONE;
   const loom_amdgpu_descriptor_set_info_t* target = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_encoding_target(schedule, &target));
   const loom_amdgpu_encoding_table_t* encoding_table =
@@ -2019,6 +1994,7 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
       .wait_packets = wait_packets,
       .wait_states = wait_states,
       .vopd_plan = vopd_plan,
+      .flags = flags,
       .descriptors = descriptors,
       .arena = arena,
       .block_offsets = block_offsets,
@@ -2055,6 +2031,7 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
       .wait_packets = wait_packets,
       .wait_states = wait_states,
       .vopd_plan = vopd_plan,
+      .flags = flags,
       .descriptors = descriptors,
       .arena = arena,
       .data = data,

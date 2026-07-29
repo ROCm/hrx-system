@@ -154,6 +154,9 @@ static iree_status_t loom_low_allocation_move_plan_resolve_temporary(
     }
     *out_temporary = temporary;
     *out_resolved = true;
+    loom_low_allocation_target_constraints_record_location_extent(
+        context->target_constraints, temporary.descriptor_reg_class_id,
+        temporary.location_kind, temporary.location, 1);
     return iree_ok_status();
   }
 

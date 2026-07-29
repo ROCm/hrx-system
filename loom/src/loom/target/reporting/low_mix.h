@@ -41,6 +41,7 @@ void loom_target_compile_report_low_dynamic_context_deinitialize(
 // Accumulates the static instruction mix of |node| into |mix|.
 void loom_target_compile_report_accumulate_low_node_static_mix(
     const loom_low_schedule_table_t* schedule,
+    const loom_low_allocation_table_t* allocation,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_schedule_node_t* node,
     loom_target_compile_report_static_instruction_mix_t* mix);

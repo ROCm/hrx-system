@@ -343,6 +343,27 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "kernel_emission",
+    srcs = ["kernel_emission.c"],
+    hdrs = ["kernel_emission.h"],
+    deps = [
+        ":kernel_assembly",
+        ":kernel_hsaco",
+        ":preflight",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
+        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+        "//loom/src/loom/target/arch/amdgpu/planning:wait_counters",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/target/reporting:low",
+        "//loom/src/loom/target/reporting:report",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "hsaco",
     srcs = ["hsaco.c"],
     hdrs = ["hsaco.h"],
@@ -385,7 +406,7 @@ loom_cc_library(
     hdrs = ["hal_kernel_library.h"],
     visibility = _AMDGPU_TOOLING_VISIBILITY,
     deps = [
-        ":kernel_assembly",
+        ":kernel_emission",
         ":kernel_hsaco",
         ":preflight",
         ":runtime_globals",
@@ -414,10 +435,8 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/ops",
         "//loom/src/loom/target/arch/amdgpu/planning:descriptor_semantics",
         "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
-        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
         "//loom/src/loom/target/arch/amdgpu/planning:storage_lease",
         "//loom/src/loom/target/arch/amdgpu/planning:vopd_plan",
-        "//loom/src/loom/target/arch/amdgpu/planning:wait_counters",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/target/reporting:artifact_manifest_collect",
         "//loom/src/loom/target/reporting:low",

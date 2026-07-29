@@ -55,6 +55,14 @@ typedef struct loom_amdgpu_kernel_hsaco_target_resources_t {
 typedef struct loom_amdgpu_kernel_hsaco_summary_t {
   // Number of native instructions emitted into the kernel text stream.
   uint64_t instruction_count;
+  // Number of native instructions in the final scheduled kernel body.
+  uint64_t body_instruction_count;
+  // Number of target-owned native instructions in the kernel entry envelope.
+  uint64_t entry_instruction_count;
+  // Number of final native instructions containing coissued components.
+  uint64_t coissued_instruction_count;
+  // Number of semantic components carried by coissued instructions.
+  uint64_t coissued_component_count;
   // Number of bytes in the semantic kernel text stream.
   uint64_t text_byte_count;
   // Number of bytes in the stored kernel text stream including local padding.
@@ -70,6 +78,8 @@ typedef struct loom_amdgpu_kernel_hsaco_summary_t {
 typedef struct loom_amdgpu_kernel_hsaco_options_t {
   // Optional ABI layout captured before target resource materialization.
   const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout;
+  // Verified ABI facts captured before allocation.
+  const loom_amdgpu_hal_kernel_abi_verify_result_t* abi_verify;
   // Optional preflight result captured before HSACO contribution construction.
   const loom_amdgpu_native_preflight_t* preflight;
   // Optional target-owned packet plan applied during native encoding.
@@ -80,6 +90,8 @@ typedef struct loom_amdgpu_kernel_hsaco_options_t {
   iree_host_size_t data_symbol_count;
   // Optional target-owned emission summary populated after successful emission.
   loom_amdgpu_kernel_hsaco_summary_t* summary;
+  // Optional encoding products retained in the kernel contribution.
+  loom_amdgpu_encode_instruction_stream_flags_t encoding_flags;
 } loom_amdgpu_kernel_hsaco_options_t;
 
 typedef struct loom_amdgpu_kernel_hsaco_write_options_t {
@@ -97,7 +109,8 @@ typedef struct loom_amdgpu_kernel_hsaco_contribution_t {
   iree_string_view_t processor;
   // Kernel entry metadata, descriptor flags, and encoded native text.
   loom_amdgpu_hsaco_kernel_t kernel;
-  // Target-owned instructions inserted during native encoding.
+  // Target-owned instructions inserted during native encoding when capture was
+  // requested.
   const loom_amdgpu_native_insertion_t* native_insertions;
   // Number of entries in |native_insertions|.
   iree_host_size_t native_insertion_count;
@@ -132,9 +145,9 @@ iree_status_t loom_amdgpu_write_kernel_hsaco_contributions(
 // Emits complete AMDGPU HSACO for one ABI-lowered target-low HAL kernel.
 //
 // The output stream receives a self-contained ELF code object with metadata,
-// one kernel descriptor, and one encoded text entry. |options| may provide
-// a packet plan and an optional emission summary. Values must be
-// physically allocated and unspilled.
+// one kernel descriptor, and one encoded text entry. |options| carries
+// verified ABI facts and may provide a packet plan and emission summary.
+// Values must be physically allocated and unspilled.
 iree_status_t loom_amdgpu_emit_kernel_hsaco(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,

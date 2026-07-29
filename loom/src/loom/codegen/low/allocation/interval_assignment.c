@@ -493,8 +493,11 @@ static iree_status_t loom_low_allocation_interval_assignment_append_assignment(
       state->result.assignment_count;
   state->result.assignment_indices_by_value_ordinal[value_ordinal] =
       assignment_index;
-  loom_low_allocation_target_constraints_record_assignment_location_end(
-      state->context->target_constraints, &stored_assignment);
+  loom_low_allocation_target_constraints_record_location_extent(
+      state->context->target_constraints,
+      stored_assignment.descriptor_reg_class_id,
+      stored_assignment.location_kind, stored_assignment.location_base,
+      stored_assignment.location_count);
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_storage_lease_state_record_assignment(
           state->context->storage_leases,

@@ -95,6 +95,14 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   loom_target_compile_report_record_emission(&report, /*instruction_count=*/8,
                                              /*code_byte_count=*/64,
                                              /*code_storage_byte_count=*/80);
+  const loom_target_compile_report_emission_breakdown_t emission_breakdown = {
+      /*.body_instruction_count=*/6,
+      /*.entry_instruction_count=*/2,
+      /*.coissued_instruction_count=*/1,
+      /*.coissued_component_count=*/2,
+  };
+  loom_target_compile_report_record_emission_breakdown(&report,
+                                                       &emission_breakdown);
   loom_target_compile_report_record_memory(&report, /*private_memory_bytes=*/16,
                                            /*local_memory_bytes=*/32);
 
@@ -191,6 +199,14 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
           text, IREE_SV("economics memory per_workitem_issued_read_bytes=24"),
           0),
       IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                text,
+                IREE_SV("emission instructions=8 code_bytes=64 "
+                        "storage_bytes=80 body_instructions=6 "
+                        "entry_instructions=2 coissued_instructions=1 "
+                        "coissued_components=2"),
+                0),
+            IREE_STRING_VIEW_NPOS);
   iree_string_builder_deinitialize(&builder);
 
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -232,6 +248,12 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   const iree_string_view_t memory = LookupObject(root, IREE_SV("memory"));
   ExpectObjectUint64Equals(memory, IREE_SV("private_bytes"), 16);
   ExpectObjectUint64Equals(memory, IREE_SV("local_bytes"), 32);
+  const iree_string_view_t emission = LookupObject(root, IREE_SV("emission"));
+  ExpectObjectUint64Equals(emission, IREE_SV("instruction_count"), 8);
+  ExpectObjectUint64Equals(emission, IREE_SV("body_instruction_count"), 6);
+  ExpectObjectUint64Equals(emission, IREE_SV("entry_instruction_count"), 2);
+  ExpectObjectUint64Equals(emission, IREE_SV("coissued_instruction_count"), 1);
+  ExpectObjectUint64Equals(emission, IREE_SV("coissued_component_count"), 2);
   const iree_string_view_t target_resources =
       LookupObject(root, IREE_SV("target_resources"));
   const iree_string_view_t vector_resources =
@@ -325,6 +347,17 @@ TEST(CompileReportFormatTest, FormatsEntryReportsAndTargetCapabilities) {
       &entry, /*spill_storage_count=*/4, /*spill_storage_bytes=*/40,
       /*spill_store_count=*/5, /*spill_store_bytes=*/50, /*reload_count=*/6,
       /*reload_bytes=*/60);
+  loom_target_compile_report_record_emission(&entry, /*instruction_count=*/8,
+                                             /*code_byte_count=*/64,
+                                             /*code_storage_byte_count=*/80);
+  const loom_target_compile_report_emission_breakdown_t emission_breakdown = {
+      /*.body_instruction_count=*/6,
+      /*.entry_instruction_count=*/2,
+      /*.coissued_instruction_count=*/1,
+      /*.coissued_component_count=*/2,
+  };
+  loom_target_compile_report_record_emission_breakdown(&entry,
+                                                       &emission_breakdown);
 
   loom_target_compile_report_target_capability_row_t capability = {};
   capability.function_name = entry.function_name;
@@ -373,6 +406,11 @@ TEST(CompileReportFormatTest, FormatsEntryReportsAndTargetCapabilities) {
                            2);
   ExpectObjectUint64Equals(
       entry_row, IREE_SV("allocation_materialized_spill_storage_count"), 4);
+  ExpectObjectUint64Equals(entry_row, IREE_SV("instruction_count"), 8);
+  ExpectObjectUint64Equals(entry_row, IREE_SV("body_instruction_count"), 6);
+  ExpectObjectUint64Equals(entry_row, IREE_SV("entry_instruction_count"), 2);
+  ExpectObjectUint64Equals(entry_row, IREE_SV("coissued_instruction_count"), 1);
+  ExpectObjectUint64Equals(entry_row, IREE_SV("coissued_component_count"), 2);
 
   const iree_string_view_t capability_rows =
       LookupObject(root, IREE_SV("target_capability_rows"));

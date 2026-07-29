@@ -23,7 +23,6 @@
 #include "loom/codegen/low/packet.h"
 #include "loom/target/arch/amdgpu/planning/address_state.h"
 #include "loom/target/arch/amdgpu/planning/wait_packets.h"
-#include "loom/target/arch/amdgpu/planning/wait_states.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -387,16 +386,16 @@ const loom_amdgpu_vopd_component_info_t* loom_amdgpu_vopd_component_info_for_op(
     uint16_t op);
 
 // Builds conservative AMDGPU VOPD pairings from a scheduled and allocated low
-// function. Optional address-state and wait plans suppress pairs that would
-// consume an insertion point before the second component. The caller must keep
-// |schedule| and |allocation| immutable and |arena| alive for as long as
-// |out_plan| is used.
+// function. Optional address-state and wait-packet plans suppress pairs that
+// would consume an insertion point before the second component. Fixed
+// wait-state planning runs over the resulting native packet stream. The caller
+// must keep |schedule| and |allocation| immutable and |arena| alive for as long
+// as |out_plan| is used.
 iree_status_t loom_amdgpu_vopd_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_address_state_plan_t* address_state,
     const loom_amdgpu_wait_packet_plan_t* wait_packets,
-    const loom_amdgpu_wait_state_plan_t* wait_states,
     iree_arena_allocator_t* arena, loom_amdgpu_vopd_plan_t* out_plan);
 
 // Builds AMDGPU scheduling affinities for descriptors that can later form VOPD

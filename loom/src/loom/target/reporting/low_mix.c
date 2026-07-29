@@ -62,6 +62,29 @@ loom_target_compile_report_low_structural_control_transfer_count(
   return true_fallthrough || false_fallthrough ? 1 : 2;
 }
 
+static uint64_t loom_target_compile_report_low_structural_move_count(
+    const loom_low_allocation_table_t* allocation,
+    const loom_low_schedule_node_t* node) {
+  if (node->op == NULL) {
+    return 0;
+  }
+  if (node->kind == LOOM_LOW_SCHEDULE_NODE_TERMINATOR &&
+      loom_low_br_isa(node->op)) {
+    const loom_low_allocation_edge_copy_group_t* group =
+        loom_low_allocation_find_edge_copy_group_by_source_ordinal(
+            allocation, node->source_ordinal);
+    return group != NULL ? group->move_group.moves.count : 0;
+  }
+  if (!loom_low_copy_isa(node->op) && !loom_low_slice_isa(node->op) &&
+      !loom_low_concat_isa(node->op)) {
+    return 0;
+  }
+  const loom_low_allocation_packet_move_group_t* group =
+      loom_low_allocation_find_packet_move_group_by_source_ordinal(
+          allocation, node->source_ordinal);
+  return group != NULL ? group->move_group.moves.count : 0;
+}
+
 static uint64_t loom_target_compile_report_low_effect_byte_count(
     const loom_low_effect_t* effect, bool* out_known) {
   *out_known = effect->width_bits != 0 && (effect->width_bits % 8u) == 0;
@@ -177,9 +200,12 @@ static void loom_target_compile_report_accumulate_low_memory_effects(
 
 void loom_target_compile_report_accumulate_low_node_static_mix(
     const loom_low_schedule_table_t* schedule,
+    const loom_low_allocation_table_t* allocation,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_schedule_node_t* node,
     loom_target_compile_report_static_instruction_mix_t* mix) {
+  mix->register_move_count +=
+      loom_target_compile_report_low_structural_move_count(allocation, node);
   if (node->kind == LOOM_LOW_SCHEDULE_NODE_TERMINATOR) {
     const uint64_t control_transfer_count =
         loom_target_compile_report_low_structural_control_transfer_count(
@@ -966,7 +992,7 @@ void loom_target_compile_report_record_low_static_instruction_mix(
   for (iree_host_size_t i = 0; i < frame->schedule.node_count; ++i) {
     const loom_low_schedule_node_t* node = &frame->schedule.nodes[i];
     loom_target_compile_report_accumulate_low_node_static_mix(
-        &frame->schedule, descriptor_set, node, &mix);
+        &frame->schedule, &frame->allocation, descriptor_set, node, &mix);
   }
   loom_target_compile_report_record_static_instruction_mix(report, &mix);
 }
@@ -991,8 +1017,8 @@ iree_status_t loom_target_compile_report_record_low_dynamic_mix(
     }
     loom_target_compile_report_static_instruction_mix_t node_mix = {0};
     loom_target_compile_report_accumulate_low_node_static_mix(
-        &frame->schedule, frame->schedule.target.descriptor_set, node,
-        &node_mix);
+        &frame->schedule, &frame->allocation,
+        frame->schedule.target.descriptor_set, node, &node_mix);
     exact = loom_target_compile_report_accumulate_scaled_static_mix(
         &mix, &node_mix, multiplier);
   }

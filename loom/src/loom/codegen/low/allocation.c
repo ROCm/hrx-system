@@ -277,7 +277,7 @@ iree_status_t loom_low_allocate_function(
         .error_count = state.target_constraints.error_count,
         .assignments = state.interval_assignment.assignments,
         .assignment_count = state.interval_assignment.assignment_count,
-        .assigned_extents =
+        .physical_extents =
             {
                 .ends_by_reg_class =
                     state.target_constraints
@@ -307,6 +307,7 @@ iree_status_t loom_low_allocate_function(
         .storage_leases = options->storage_leases,
         .storage_lease_instances = state.storage_leases.instances,
         .storage_lease_instance_count = state.storage_leases.instance_count,
+        .storage_lease_unit_index = state.storage_leases.unit_index,
         .storage_release_actions = state.storage_leases.release_actions,
         .storage_release_action_count =
             state.storage_leases.release_action_count,

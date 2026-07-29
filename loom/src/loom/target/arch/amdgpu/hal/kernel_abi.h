@@ -238,6 +238,11 @@ typedef enum loom_amdgpu_hal_kernel_abi_source_kind_e {
   LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_WORKGROUP_INFO_XZ = 20,
 } loom_amdgpu_hal_kernel_abi_source_kind_t;
 
+// Maximum number of fixed physical values required by one AMDGPU HAL kernel
+// ABI. This covers hidden user SGPRs, three coordinate dimensions, packed
+// workitem state, M0, and the fixed cluster-launch sources.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_MAX_FIXED_VALUE_COUNT (8u + 2u * 3u)
+
 // Returns the stable low.live_in source spelling for |source_kind|, or an
 // empty string for unknown/invalid kinds.
 iree_string_view_t loom_amdgpu_hal_kernel_abi_source_name(
@@ -311,6 +316,18 @@ typedef struct loom_amdgpu_hal_kernel_abi_layout_t {
 typedef struct loom_amdgpu_hal_kernel_abi_verify_result_t {
   // Number of AMDGPU HAL-kernel ABI errors emitted for the function.
   uint32_t error_count;
+  // Bitset of verified ABI source kinds present in the function.
+  uint64_t live_in_source_bits;
+  // Launch workgroup-coordinate state required by the verified low function.
+  loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flags_t
+      launch_workgroup_id_flags;
+  // Number of hidden user SGPRs consumed by verified ABI live-ins.
+  uint32_t user_sgpr_count;
+  // Fixed physical values retained from verified ABI live-ins.
+  loom_low_allocation_fixed_value_t
+      fixed_values[LOOM_AMDGPU_HAL_KERNEL_ABI_MAX_FIXED_VALUE_COUNT];
+  // Number of populated entries in |fixed_values|.
+  iree_host_size_t fixed_value_count;
 } loom_amdgpu_hal_kernel_abi_verify_result_t;
 
 // Emits AMDGPU HAL-kernel ABI diagnostics for |function_op|.
@@ -367,31 +384,6 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_attr(
 loom_amdgpu_hal_kernel_abi_source_kind_t
 loom_amdgpu_hal_kernel_abi_live_in_source_kind(const loom_module_t* module,
                                                loom_value_id_t value_id);
-
-// Returns the gfx1250 launch workgroup-ID requirements implied by
-// |source_kind|, or zero for a source outside the launch-state ABI.
-loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flags_t
-loom_amdgpu_hal_kernel_abi_source_launch_workgroup_id_flags(
-    loom_amdgpu_hal_kernel_abi_source_kind_t source_kind);
-
-// Finds AMDGPU ABI live-ins that require fixed physical locations during
-// allocation.
-//
-// The returned array is arena-owned. The current ABI fixes hidden user SGPRs in
-// AMDHSA order: dispatch pointer, then kernarg segment pointer. Each pointer
-// consumes two SGPRs starting at the next available user-SGPR location.
-// workgroup_id.x/y/z live-ins use the SGPRs immediately following enabled user
-// SGPRs. Unpacked workitem_id.x/y/z live-ins use v0/v1/v2, and packed
-// workitem-id live-ins use v0 when present. gfx1250 cluster launch-state
-// live-ins use the architected TTMP6, TTMP7, and TTMP9 locations.
-//
-// The function must already have passed
-// loom_amdgpu_hal_kernel_abi_verify_low. Status is reserved for allocation and
-// contract misuse that would otherwise make fixed-value construction unsafe.
-iree_status_t loom_amdgpu_hal_kernel_abi_fixed_values_from_low(
-    const loom_module_t* module, const loom_op_t* function_op,
-    const loom_low_allocation_fixed_value_t** out_fixed_values,
-    iree_host_size_t* out_fixed_value_count, iree_arena_allocator_t* arena);
 
 #ifdef __cplusplus
 }  // extern "C"

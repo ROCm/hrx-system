@@ -848,6 +848,8 @@ low.func.def target(@target) @explicit_join_lgkm_wait_satisfies_cross_block_lds_
   return
 }
 
+// The zero arm materializes its concat as dependent VALU edge copies. GFX11
+// must delay the first copy after producing %zero_lane.
 // ----
   s_cbranch_scc0 .Lbb2
 .Lbb1:
@@ -855,6 +857,7 @@ low.func.def target(@target) @explicit_join_lgkm_wait_satisfies_cross_block_lds_
   s_branch .Lbb3
 .Lbb2:
   v_mov_b32 v4, 0
+  s_delay_alu instid0(VALU_DEP_1)
   v_mov_b32 v5, v4
   v_mov_b32 v6, v4
   v_mov_b32 v7, v4

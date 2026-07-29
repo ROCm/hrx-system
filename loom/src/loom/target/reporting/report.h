@@ -88,6 +88,8 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING = 1u << 24,
   // Target-inserted native packet rows were recorded or counted.
   LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS = 1u << 25,
+  // Final target body, entry, and coissued instruction counts were recorded.
+  LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION_BREAKDOWN = 1u << 26,
 };
 
 typedef enum loom_target_compile_report_move_cause_e {
@@ -303,14 +305,31 @@ typedef struct loom_target_compile_report_move_cause_counts_t {
   uint64_t unit_count;
 } loom_target_compile_report_move_cause_counts_t;
 
-// Static feature counters for low packets that survive target emission.
+// Final target instruction-count decomposition.
+//
+// The total emitted instruction count includes the target entry envelope and
+// the final target body. Coissued instructions are a subset of the body and
+// retain all of their semantic components in the instruction mix.
+typedef struct loom_target_compile_report_emission_breakdown_t {
+  // Final native instructions in the scheduled target body.
+  uint64_t body_instruction_count;
+  // Target-owned instructions outside the scheduled body at hardware entry.
+  uint64_t entry_instruction_count;
+  // Final native instructions that coissue multiple semantic components.
+  uint64_t coissued_instruction_count;
+  // Semantic instruction components carried by coissued instructions.
+  uint64_t coissued_component_count;
+} loom_target_compile_report_emission_breakdown_t;
+
+// Static feature counters for low packets and finalized structural moves that
+// survive target emission.
 //
 // These counters are compile-time proxies derived from generated descriptor
-// instruction classes and structural low terminators. They are intentionally
-// separate from measured HAL profiling counters and may overlap: for example a
-// global atomic packet is both global memory and atomic. Byte counts are static
-// descriptor-effect widths for one issue of the emitted low stream, not
-// evaluated dynamic workload traffic.
+// instruction classes, structural low terminators, and allocation-owned final
+// move groups. They are intentionally separate from measured HAL profiling
+// counters and may overlap: for example a global atomic packet is both global
+// memory and atomic. Byte counts are static descriptor-effect widths for one
+// issue of the emitted low stream, not evaluated dynamic workload traffic.
 typedef struct loom_target_compile_report_static_instruction_mix_t {
   // Descriptor-backed schedule nodes inspected for feature classification.
   uint64_t descriptor_count;
@@ -401,7 +420,7 @@ typedef struct loom_target_compile_report_static_instruction_mix_t {
   // Descriptor-backed nodes identified as cache maintenance or prefetch
   // packets.
   uint64_t cache_count;
-  // Descriptor-backed nodes identified as register moves or copies.
+  // Descriptor-backed register moves and finalized structural physical moves.
   uint64_t register_move_count;
 } loom_target_compile_report_static_instruction_mix_t;
 
@@ -608,6 +627,8 @@ typedef struct loom_target_compile_report_entry_t {
   uint64_t emitted_code_byte_count;
   // Number of target code storage bytes including target-local padding.
   uint64_t emitted_code_storage_byte_count;
+  // Final target instruction-count decomposition.
+  loom_target_compile_report_emission_breakdown_t emission_breakdown;
   // Estimated target private memory bytes.
   uint64_t private_memory_bytes;
   // Estimated target local/shared memory bytes.
@@ -1684,6 +1705,8 @@ typedef struct loom_target_compile_report_t {
   uint64_t emitted_code_byte_count;
   // Number of target code storage bytes including target-local padding.
   uint64_t emitted_code_storage_byte_count;
+  // Final target instruction-count decomposition.
+  loom_target_compile_report_emission_breakdown_t emission_breakdown;
   // Number of source operations selected during source-to-low lowering.
   uint64_t source_low_selected_op_count;
   // Number of low operations emitted during source-to-low lowering.
@@ -1879,6 +1902,11 @@ void loom_target_compile_report_record_dynamic_instruction_mix(
 void loom_target_compile_report_record_emission(
     loom_target_compile_report_t* report, uint64_t instruction_count,
     uint64_t code_byte_count, uint64_t code_storage_byte_count);
+
+// Records an authoritative decomposition of final target instructions.
+void loom_target_compile_report_record_emission_breakdown(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_emission_breakdown_t* breakdown);
 
 // Records target memory estimates in |report|.
 void loom_target_compile_report_record_memory(

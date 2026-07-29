@@ -67,6 +67,7 @@ low.func.def target(@target) @bf16_two_k_block_loads_schedule_before_wmma(%worki
   v_mov_b32 v14, v8
   v_mov_b32 v15, v8
   s_waitcnt vmcnt(4) lgkmcnt(63)
+  s_delay_alu instid0(VALU_DEP_1)
   v_wmma_f32_16x16x16_bf16 v[8:15], v[16:23], v[24:31], v[8:15]
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_delay_alu instid0(VALU_DEP_1)
@@ -454,6 +455,7 @@ low.func.def target(@target) @bf16_four_k_block_loads_schedule_before_wmma(%work
   v_mov_b32 v14, v8
   v_mov_b32 v15, v8
   s_waitcnt vmcnt(12) lgkmcnt(63)
+  s_delay_alu instid0(VALU_DEP_1)
   v_wmma_f32_16x16x16_bf16 v[8:15], v[16:23], v[24:31], v[8:15]
   s_waitcnt vmcnt(8) lgkmcnt(63)
   s_delay_alu instid0(VALU_DEP_1)

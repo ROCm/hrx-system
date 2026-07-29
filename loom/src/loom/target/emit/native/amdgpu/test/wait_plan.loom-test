@@ -11,6 +11,20 @@ low.func.def target(@gfx11_target) @gfx11_smem_result_wait(%kernarg: reg<amdgpu.
 
 // ====
 
+// RUN: emit amdgpu-wait-counter-plan-json @gfx11_multi_counter_consumer_wait strategy=source fixed=%loaded:physical_register:0:1 fixed=%trans:physical_register:1:1 fixed=%result:physical_register:2:1
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_multi_counter_consumer_wait(%resource: reg<amdgpu.sgpr x4>, %address: reg<amdgpu.vgpr>, %offset: reg<amdgpu.sgpr>, %input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %loaded = buffer_load_dword %resource, %address, %offset
+  %trans = v_exp_f32 %input
+  %result = v_add_f32 %trans, %loaded
+  return %result
+}
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"gfx11_multi_counter_consumer_wait","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":2,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":5,"class_name":"amdgpu.alu","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":2,"insertion_packet":2,"block":0,"scheduled_ordinal":2,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":6,"reason_name":"amdgpu.trans_result_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":2,"insertion_packet":2,"block":0,"scheduled_ordinal":2,"progress_class_id":5,"progress_class_name":"amdgpu.alu","required":1,"observed":0,"residual":1}]}
+
+// ====
+
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_explicit_smem_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target
 low.func.def target(@gfx11_target) @gfx11_explicit_smem_wait(%kernarg: reg<amdgpu.sgpr x2>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {

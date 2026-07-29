@@ -9,7 +9,7 @@
 
 #include "iree/base/api.h"
 #include "loom/codegen/low/allocation.h"
-#include "loom/ir/ir.h"
+#include "loom/codegen/low/schedule/types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,8 +17,7 @@ extern "C" {
 
 typedef enum loom_amdgpu_structural_packet_analysis_flag_bits_e {
   // Treat structural movement as opaque materialization when no allocation
-  // table
-  // is available.
+  // table is available.
   LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION = 1u << 0,
 } loom_amdgpu_structural_packet_analysis_flag_bits_t;
 typedef uint32_t loom_amdgpu_structural_packet_analysis_flags_t;
@@ -30,26 +29,31 @@ typedef enum loom_amdgpu_structural_packet_flag_bits_e {
   LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES = 1u << 1,
   // The packet forwards dependency-producing values without target work.
   LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_FORWARDS_DEPENDENCIES = 1u << 2,
-  // The materialized packet writes target-visible VALU state.
-  LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_WRITES_VALU = 1u << 3,
-  // The materialized packet writes target-visible SALU state.
-  LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_WRITES_SALU = 1u << 4,
+  // The materialized packet reads the target-visible SCC state.
+  LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_READS_SCC = 1u << 4,
 } loom_amdgpu_structural_packet_flag_bits_t;
 typedef uint32_t loom_amdgpu_structural_packet_flags_t;
 
 typedef struct loom_amdgpu_structural_packet_info_t {
   // Classification flags for the structural packet.
   loom_amdgpu_structural_packet_flags_t flags;
-  // Number of target instructions represented by the structural packet.
+  // Scheduled native instructions represented by the structural packet,
+  // excluding target insertion overlays.
   uint64_t instruction_count;
+  // Final sequential physical moves emitted by the structural packet.
+  loom_low_move_range_t moves;
+  // Native vector-ALU instructions outside of |moves|.
+  uint64_t vector_alu_instruction_count;
+  // Native scalar-ALU instructions outside of |moves|.
+  uint64_t scalar_alu_instruction_count;
 } loom_amdgpu_structural_packet_info_t;
 
-// Analyzes AMDGPU scheduling semantics for a structural low packet.
-iree_status_t loom_amdgpu_structural_packet_analyze(
-    const loom_low_allocation_table_t* allocation, const loom_op_t* op,
-    uint32_t source_ordinal,
-    loom_amdgpu_structural_packet_analysis_flags_t analysis_flags,
-    loom_amdgpu_structural_packet_info_t* out_info);
+// Returns AMDGPU native scheduling facts for one structural low packet.
+loom_amdgpu_structural_packet_info_t loom_amdgpu_structural_packet_analyze(
+    const loom_low_schedule_table_t* schedule,
+    const loom_low_allocation_table_t* allocation,
+    const loom_low_schedule_node_t* node,
+    loom_amdgpu_structural_packet_analysis_flags_t analysis_flags);
 
 #ifdef __cplusplus
 }  // extern "C"

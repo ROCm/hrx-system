@@ -13,6 +13,7 @@
 #include "iree/base/internal/math.h"
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/allocation/storage.h"
+#include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/packet_hazard_plan_json.h"
 #include "loom/ir/ir.h"
@@ -23,8 +24,6 @@
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/util/segmented_storage.h"
-
-#define LOOM_AMDGPU_WAIT_PLAN_ACTION_INDEX_NONE UINT32_MAX
 
 // Target payload size for lazily appended wait-action segments. Segments stay
 // small enough to share normal compiler workspace blocks with other planning
@@ -206,10 +205,6 @@ typedef struct loom_amdgpu_wait_plan_builder_t {
   loom_amdgpu_wait_block_arg_source_t* block_arg_sources;
   // Storage-release actions grouped by insertion node.
   loom_low_storage_release_action_index_t storage_release_action_index;
-  // First residual hazard action per insertion node.
-  uint32_t* first_hazard_action_by_node;
-  // Next residual hazard action for the same insertion node.
-  uint32_t* next_hazard_action;
   // DFS visit epoch per value while forwarding SSA wait dependencies.
   uint32_t* dependency_visit_epochs;
   // Explicit worklist used with |dependency_visit_epochs|.
@@ -241,6 +236,10 @@ typedef struct loom_amdgpu_wait_plan_builder_t {
   loom_amdgpu_wait_plan_action_t* actions;
   // Number of populated action rows.
   iree_host_size_t action_count;
+  // Cursor into packet-ordered actions while projecting residual hazards.
+  iree_host_size_t hazard_action_cursor;
+  // Packet index of the next residual hazard, or IREE_HOST_SIZE_MAX.
+  iree_host_size_t next_hazard_packet_index;
   // Exact number of canonical packet-progress rows.
   iree_host_size_t progress_event_count;
   // Exact number of target-owned canonical packet-hazard rows.
@@ -500,23 +499,17 @@ static const loom_low_allocation_assignment_t* loom_amdgpu_wait_plan_assignment(
                                                              value_id, NULL);
 }
 
-static iree_status_t loom_amdgpu_wait_plan_classify_structural_node(
-    const loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index,
-    loom_amdgpu_structural_packet_flags_t* out_flags) {
-  *out_flags = 0;
-  if (node_index >= builder->schedule->node_count) {
-    return iree_ok_status();
-  }
+static loom_amdgpu_structural_packet_flags_t
+loom_amdgpu_wait_plan_classify_structural_node(
+    const loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
   const loom_low_schedule_node_t* node = &builder->schedule->nodes[node_index];
   if (node->kind != LOOM_LOW_SCHEDULE_NODE_STRUCTURAL || node->op == NULL) {
-    return iree_ok_status();
+    return 0;
   }
-  loom_amdgpu_structural_packet_info_t info = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_structural_packet_analyze(
-      builder->allocation, node->op, node->source_ordinal,
-      LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION, &info));
-  *out_flags = info.flags;
-  return iree_ok_status();
+  return loom_amdgpu_structural_packet_analyze(
+             builder->schedule, builder->allocation, node,
+             LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION)
+      .flags;
 }
 
 static bool loom_amdgpu_wait_plan_node_forwards_dependencies(
@@ -619,6 +612,13 @@ static iree_status_t loom_amdgpu_wait_plan_allocate_physical_state(
   return iree_ok_status();
 }
 
+static bool loom_amdgpu_wait_plan_action_is_residual_hazard(
+    const loom_amdgpu_wait_plan_action_t* action) {
+  return action->kind == LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED &&
+         !iree_any_bit_set(action->flags,
+                           LOOM_AMDGPU_WAIT_PLAN_ACTION_FLAG_STORAGE_RELEASE);
+}
+
 static iree_status_t loom_amdgpu_wait_plan_append_action(
     loom_amdgpu_wait_plan_builder_t* builder,
     loom_amdgpu_wait_plan_action_t action) {
@@ -637,6 +637,9 @@ static iree_status_t loom_amdgpu_wait_plan_append_action(
   builder->action_stream.tail->actions[builder->action_stream.tail_count++] =
       action;
   ++builder->action_count;
+  if (loom_amdgpu_wait_plan_action_is_residual_hazard(&action)) {
+    ++builder->hazard_event_count;
+  }
   return iree_ok_status();
 }
 
@@ -666,13 +669,6 @@ static iree_status_t loom_amdgpu_wait_plan_finalize_actions(
   }
   IREE_ASSERT_EQ(output_count, builder->action_count);
   return iree_ok_status();
-}
-
-static bool loom_amdgpu_wait_plan_action_is_residual_hazard(
-    const loom_amdgpu_wait_plan_action_t* action) {
-  return action->kind == LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED &&
-         !iree_any_bit_set(action->flags,
-                           LOOM_AMDGPU_WAIT_PLAN_ACTION_FLAG_STORAGE_RELEASE);
 }
 
 static iree_status_t loom_amdgpu_wait_plan_ensure_dependency_link_capacity(
@@ -1779,9 +1775,8 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
     IREE_ASSERT_EQ(
         frontier_node->write_counter_mask & ~node_state->hazard_counter_mask,
         0u);
-    loom_amdgpu_structural_packet_flags_t structural_flags = 0;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_classify_structural_node(
-        builder, (uint32_t)i, &structural_flags));
+    const loom_amdgpu_structural_packet_flags_t structural_flags =
+        loom_amdgpu_wait_plan_classify_structural_node(builder, (uint32_t)i);
     if (iree_any_bit_set(
             structural_flags,
             LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_FORWARDS_DEPENDENCIES)) {
@@ -2381,27 +2376,6 @@ static bool loom_amdgpu_wait_plan_storage_lease_is_live_at_node(
          lease->end_point >= program_point;
 }
 
-static bool loom_amdgpu_wait_plan_storage_lease_overlaps_range(
-    const loom_amdgpu_wait_plan_builder_t* builder,
-    const loom_low_allocation_storage_lease_t* lease,
-    loom_low_allocation_location_kind_t location_kind,
-    uint16_t descriptor_reg_class_id, uint32_t location_base,
-    uint32_t location_count) {
-  if (location_count == 0 || lease->location_count == 0 ||
-      lease->location_kind != location_kind ||
-      !loom_low_allocation_location_kind_is_register_like(location_kind) ||
-      !loom_low_allocation_storage_reg_classes_share(
-          builder->schedule->target.descriptor_set,
-          lease->descriptor_reg_class_id, descriptor_reg_class_id)) {
-    return false;
-  }
-  const uint64_t lease_begin = lease->location_base;
-  const uint64_t lease_end = lease_begin + lease->location_count;
-  const uint64_t write_begin = location_base;
-  const uint64_t write_end = write_begin + location_count;
-  return lease_begin < write_end && write_begin < lease_end;
-}
-
 static iree_status_t loom_amdgpu_wait_plan_handle_physical_write_range(
     loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index,
     loom_low_allocation_location_kind_t location_kind,
@@ -2414,24 +2388,35 @@ static iree_status_t loom_amdgpu_wait_plan_handle_physical_write_range(
   }
   IREE_ASSERT_EQ(allocation->storage_lease_instance_count,
                  allocation->storage_leases.record_count);
-  for (iree_host_size_t i = 0; i < allocation->storage_lease_instance_count;
-       ++i) {
+  IREE_ASSERT(loom_low_allocation_storage_lease_unit_index_is_enabled(
+      allocation->storage_lease_unit_index));
+  loom_low_allocation_storage_lease_unit_query_t query;
+  loom_low_allocation_storage_lease_unit_query_initialize(
+      allocation->storage_lease_unit_index,
+      builder->schedule->target.descriptor_set, descriptor_reg_class_id,
+      location_kind, location_base, location_count, &query);
+  uint32_t storage_lease_index = 0;
+  while (loom_low_allocation_storage_lease_unit_query_next(
+      &query, &storage_lease_index)) {
+    IREE_ASSERT_LT(storage_lease_index,
+                   allocation->storage_lease_instance_count);
     const loom_low_allocation_storage_lease_t* lease =
-        &allocation->storage_lease_instances[i];
+        &allocation->storage_lease_instances[storage_lease_index];
+    if (query.active_location !=
+        iree_max(location_base, lease->location_base)) {
+      continue;
+    }
     IREE_ASSERT_LT(lease->lease_record_index,
                    allocation->storage_leases.record_count);
     const loom_low_storage_lease_record_t* record =
         &allocation->storage_leases.records[lease->lease_record_index];
     const bool incoming_lease_active =
         loom_amdgpu_wait_frontier_storage_lease_is_active(&builder->frontier,
-                                                          i);
+                                                          storage_lease_index);
     const bool local_lease_active =
         loom_amdgpu_wait_plan_storage_lease_is_live_at_node(builder, lease,
                                                             record, node_index);
-    if ((!incoming_lease_active && !local_lease_active) ||
-        !loom_amdgpu_wait_plan_storage_lease_overlaps_range(
-            builder, lease, location_kind, descriptor_reg_class_id,
-            location_base, location_count)) {
+    if (!incoming_lease_active && !local_lease_active) {
       continue;
     }
     if (record->release_scope !=
@@ -2466,7 +2451,8 @@ static iree_status_t loom_amdgpu_wait_plan_handle_physical_write_range(
       // The current same-class VMEM result write proves the older incoming
       // dynamic instance complete. Retire only that incoming lease; block-end
       // publication will represent the current instruction's new instance.
-      loom_amdgpu_wait_frontier_retire_storage_lease(&builder->frontier, i);
+      loom_amdgpu_wait_frontier_retire_storage_lease(&builder->frontier,
+                                                     storage_lease_index);
       continue;
     }
     if (incoming_lease_active) {
@@ -2825,6 +2811,10 @@ static iree_status_t loom_amdgpu_wait_plan_handle_barrier(
     loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
   const loom_amdgpu_wait_node_state_t* node_state =
       &builder->node_states[node_index];
+  if ((node_state->barrier_counter_mask |
+       node_state->workgroup_barrier_counter_mask) == 0) {
+    return iree_ok_status();
+  }
   const loom_amdgpu_wait_memory_space_flags_t generic_space =
       loom_amdgpu_wait_memory_space_flag(LOOM_LOW_MEMORY_SPACE_GENERIC);
   const loom_amdgpu_wait_memory_space_flags_t workgroup_space =
@@ -3159,50 +3149,6 @@ static iree_status_t loom_amdgpu_wait_plan_build_actions(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_wait_plan_build_hazard_action_index(
-    loom_amdgpu_wait_plan_builder_t* builder) {
-  if (builder->action_count == 0) {
-    return iree_ok_status();
-  }
-  IREE_ASSERT_LE(builder->action_count, UINT32_MAX);
-  const loom_low_schedule_table_t* schedule = builder->schedule;
-  if (schedule->node_count == 0) {
-    return iree_ok_status();
-  }
-
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(builder->arena, schedule->node_count,
-                                sizeof(*builder->first_hazard_action_by_node),
-                                (void**)&builder->first_hazard_action_by_node));
-  for (iree_host_size_t i = 0; i < schedule->node_count; ++i) {
-    builder->first_hazard_action_by_node[i] =
-        LOOM_AMDGPU_WAIT_PLAN_ACTION_INDEX_NONE;
-  }
-
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(builder->arena, builder->action_count,
-                                sizeof(*builder->next_hazard_action),
-                                (void**)&builder->next_hazard_action));
-  for (iree_host_size_t i = 0; i < builder->action_count; ++i) {
-    builder->next_hazard_action[i] = LOOM_AMDGPU_WAIT_PLAN_ACTION_INDEX_NONE;
-  }
-
-  for (iree_host_size_t i = builder->action_count; i > 0; --i) {
-    const uint32_t action_index = (uint32_t)(i - 1);
-    const loom_amdgpu_wait_plan_action_t* action =
-        &builder->actions[action_index];
-    if (!loom_amdgpu_wait_plan_action_is_residual_hazard(action)) {
-      continue;
-    }
-    ++builder->hazard_event_count;
-    IREE_ASSERT_LT(action->node_index, schedule->node_count);
-    builder->next_hazard_action[action_index] =
-        builder->first_hazard_action_by_node[action->node_index];
-    builder->first_hazard_action_by_node[action->node_index] = action_index;
-  }
-  return iree_ok_status();
-}
-
 static void loom_amdgpu_wait_plan_emit_counter_progress(
     loom_low_packet_progress_emit_fn_t emit, void* emit_user_data,
     uint16_t counter_id, loom_low_packet_progress_action_t action,
@@ -3221,13 +3167,13 @@ static void loom_amdgpu_wait_plan_emit_counter_progress_mask(
     loom_low_packet_progress_emit_fn_t emit, void* emit_user_data,
     uint32_t counter_mask, loom_low_packet_progress_action_t action,
     uint32_t units) {
-  for (uint32_t slot = 0; slot < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT; ++slot) {
-    if ((counter_mask & loom_amdgpu_wait_counter_mask_from_slot(slot)) == 0) {
-      continue;
-    }
+  while (counter_mask != 0) {
+    const uint32_t slot =
+        (uint32_t)iree_math_count_trailing_zeros_u32(counter_mask);
     const uint16_t counter_id = loom_amdgpu_wait_counter_id_from_slot(slot);
     loom_amdgpu_wait_plan_emit_counter_progress(emit, emit_user_data,
                                                 counter_id, action, units);
+    counter_mask &= counter_mask - 1;
   }
 }
 
@@ -3287,6 +3233,24 @@ static void loom_amdgpu_wait_plan_emit_hazard_action(
   emit(emit_user_data, &event);
 }
 
+static void loom_amdgpu_wait_plan_advance_hazard_action(
+    loom_amdgpu_wait_plan_builder_t* builder) {
+  while (builder->hazard_action_cursor < builder->action_count) {
+    const loom_amdgpu_wait_plan_action_t* action =
+        &builder->actions[builder->hazard_action_cursor];
+    if (loom_amdgpu_wait_plan_action_is_residual_hazard(action)) {
+      const loom_low_schedule_block_t* block =
+          &builder->schedule->blocks[action->block_index];
+      builder->next_hazard_packet_index =
+          (iree_host_size_t)block->scheduled_node_start +
+          action->scheduled_ordinal;
+      return;
+    }
+    ++builder->hazard_action_cursor;
+  }
+  builder->next_hazard_packet_index = IREE_HOST_SIZE_MAX;
+}
+
 static void loom_amdgpu_wait_plan_hazard_query(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
@@ -3296,19 +3260,18 @@ static void loom_amdgpu_wait_plan_hazard_query(
   (void)schedule;
   (void)allocation;
   (void)progress;
-  const loom_amdgpu_wait_plan_builder_t* builder =
-      (const loom_amdgpu_wait_plan_builder_t*)user_data;
-  if (builder->first_hazard_action_by_node == NULL) {
+  loom_amdgpu_wait_plan_builder_t* builder =
+      (loom_amdgpu_wait_plan_builder_t*)user_data;
+  if (builder->next_hazard_packet_index != packet->packet_index) {
     return;
   }
-  for (uint32_t action_index =
-           builder->first_hazard_action_by_node[packet->node_index];
-       action_index != LOOM_AMDGPU_WAIT_PLAN_ACTION_INDEX_NONE;
-       action_index = builder->next_hazard_action[action_index]) {
+  do {
     const loom_amdgpu_wait_plan_action_t* action =
-        &builder->actions[action_index];
+        &builder->actions[builder->hazard_action_cursor];
     loom_amdgpu_wait_plan_emit_hazard_action(action, emit, emit_user_data);
-  }
+    ++builder->hazard_action_cursor;
+    loom_amdgpu_wait_plan_advance_hazard_action(builder);
+  } while (builder->next_hazard_packet_index == packet->packet_index);
 }
 
 static iree_status_t loom_amdgpu_wait_plan_build_common_tables(
@@ -3326,6 +3289,8 @@ static iree_status_t loom_amdgpu_wait_plan_build_common_tables(
     progress = &builder->progress;
   }
 
+  builder->hazard_action_cursor = 0;
+  loom_amdgpu_wait_plan_advance_hazard_action(builder);
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       .user_data = builder,
       .event_count = builder->hazard_event_count,
@@ -3379,9 +3344,6 @@ iree_status_t loom_amdgpu_wait_plan_build(
   }
   if (iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_plan_finalize_actions(&builder);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_amdgpu_wait_plan_build_hazard_action_index(&builder);
   }
   if (iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_plan_build_common_tables(&builder);

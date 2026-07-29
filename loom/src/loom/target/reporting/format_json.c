@@ -625,6 +625,23 @@ static iree_status_t loom_target_compile_report_format_emission_json(
   IREE_RETURN_IF_ERROR(
       loom_json_object_write_uint64_field(&object, IREE_SV("instruction_count"),
                                           report->emitted_instruction_count));
+  if (iree_any_bit_set(report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION_BREAKDOWN)) {
+    const loom_target_compile_report_emission_breakdown_t* breakdown =
+        &report->emission_breakdown;
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &object, IREE_SV("body_instruction_count"),
+        breakdown->body_instruction_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &object, IREE_SV("entry_instruction_count"),
+        breakdown->entry_instruction_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &object, IREE_SV("coissued_instruction_count"),
+        breakdown->coissued_instruction_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &object, IREE_SV("coissued_component_count"),
+        breakdown->coissued_component_count));
+  }
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
       &object, IREE_SV("code_byte_count"), report->emitted_code_byte_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
@@ -1290,6 +1307,23 @@ static iree_status_t loom_target_compile_report_format_entry_json(
   }
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
       &object, IREE_SV("instruction_count"), row->emitted_instruction_count));
+  if (iree_any_bit_set(row->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION_BREAKDOWN)) {
+    const loom_target_compile_report_emission_breakdown_t* breakdown =
+        &row->emission_breakdown;
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &object, IREE_SV("body_instruction_count"),
+        breakdown->body_instruction_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &object, IREE_SV("entry_instruction_count"),
+        breakdown->entry_instruction_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &object, IREE_SV("coissued_instruction_count"),
+        breakdown->coissued_instruction_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &object, IREE_SV("coissued_component_count"),
+        breakdown->coissued_component_count));
+  }
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
       &object, IREE_SV("code_byte_count"), row->emitted_code_byte_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(

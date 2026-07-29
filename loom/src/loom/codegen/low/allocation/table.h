@@ -25,6 +25,9 @@
 extern "C" {
 #endif
 
+typedef struct loom_low_allocation_storage_lease_unit_index_t
+    loom_low_allocation_storage_lease_unit_index_t;
+
 typedef enum loom_low_allocation_remark_kind_e {
   // Unknown or uninitialized remark kind.
   LOOM_LOW_ALLOCATION_REMARK_UNKNOWN = 0,
@@ -266,14 +269,14 @@ typedef struct loom_low_allocation_table_t {
   const loom_low_allocation_assignment_t* assignments;
   // Number of records in |assignments|.
   iree_host_size_t assignment_count;
-  // Dense assigned-location extents retained from allocation search.
+  // Dense physical extents retained from assignment and move planning.
   struct {
-    // Maximum one-past-last assigned location indexed by descriptor register
-    // class ID. The location kind is the canonical kind for each class.
+    // Maximum one-past-last assigned or move-scratch location indexed by
+    // descriptor register class ID.
     const uint32_t* ends_by_reg_class;
     // Number of entries in |ends_by_reg_class|.
     iree_host_size_t count;
-  } assigned_extents;
+  } physical_extents;
   // Assignment indices by liveness local value ordinal. Entries without an
   // assignment contain UINT32_MAX.
   const uint32_t* assignment_indices_by_value_ordinal;
@@ -319,6 +322,10 @@ typedef struct loom_low_allocation_table_t {
   const loom_low_allocation_storage_lease_t* storage_lease_instances;
   // Number of records in |storage_lease_instances|.
   iree_host_size_t storage_lease_instance_count;
+  // Physical-unit index over |storage_lease_instances| retained from
+  // allocation, or NULL when no register-like leases were materialized.
+  const loom_low_allocation_storage_lease_unit_index_t*
+      storage_lease_unit_index;
   // Allocator-requested storage release actions in allocation order.
   const loom_low_storage_release_action_t* storage_release_actions;
   // Number of records in |storage_release_actions|.
