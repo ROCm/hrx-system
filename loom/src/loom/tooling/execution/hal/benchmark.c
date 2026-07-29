@@ -200,15 +200,40 @@ static iree_status_t loom_run_hal_benchmark_execute_batch(void* user_data) {
   return loom_run_hal_dispatch_batch_execute(context->runtime, batch);
 }
 
+typedef struct loom_run_hal_benchmark_queue_dispatch_context_t {
+  // HAL runtime that owns the device used for dispatch.
+  const loom_run_hal_runtime_t* runtime;
+  // Prepared direct queue dispatch reused across benchmark operations.
+  loom_run_hal_queue_dispatch_t* dispatch;
+  // Borrowed binding lists rotated across benchmark operations.
+  const loom_run_hal_binding_list_t* binding_lists;
+  // Number of entries in |binding_lists|.
+  iree_host_size_t binding_list_count;
+  // Index of the binding list used by the next dispatch.
+  iree_host_size_t next_binding_list_index;
+} loom_run_hal_benchmark_queue_dispatch_context_t;
+
+static iree_status_t loom_run_hal_benchmark_execute_queue_dispatch(
+    void* user_data) {
+  loom_run_hal_benchmark_queue_dispatch_context_t* context =
+      (loom_run_hal_benchmark_queue_dispatch_context_t*)user_data;
+  const loom_run_hal_binding_list_t* binding_list =
+      &context->binding_lists[context->next_binding_list_index];
+  context->next_binding_list_index =
+      (context->next_binding_list_index + 1) % context->binding_list_count;
+  return loom_run_hal_queue_dispatch_execute(context->runtime,
+                                             context->dispatch, binding_list);
+}
+
 static iree_status_t loom_run_hal_benchmark_warm_profiled_batch(
-    const loom_run_hal_runtime_t* runtime, loom_run_hal_dispatch_batch_t* batch,
+    loom_run_benchmark_batch_callback_t callback,
     const loom_run_benchmark_options_t* timing_options) {
   const iree_time_t start_time_ns = iree_time_now();
   iree_host_size_t batch_count = 0;
   iree_duration_t duration_ns = 0;
   while (batch_count < timing_options->warmup_batch_count ||
          duration_ns < timing_options->warmup_min_duration_ns) {
-    IREE_RETURN_IF_ERROR(loom_run_hal_dispatch_batch_execute(runtime, batch));
+    IREE_RETURN_IF_ERROR(callback.fn(callback.user_data));
     ++batch_count;
     const iree_time_t now_ns = iree_time_now();
     duration_ns = now_ns >= start_time_ns ? now_ns - start_time_ns : 0;
@@ -339,7 +364,8 @@ static iree_status_t loom_run_hal_profile_summary_capture_row(
 }
 
 static iree_status_t loom_run_hal_benchmark_run_profiled_batch(
-    const loom_run_hal_runtime_t* runtime, loom_run_hal_dispatch_batch_t* batch,
+    const loom_run_hal_runtime_t* runtime,
+    loom_run_benchmark_batch_callback_t callback,
     const loom_run_hal_benchmark_options_t* options, iree_allocator_t allocator,
     loom_run_hal_profile_summary_t* out_profile) {
   *out_profile = (loom_run_hal_profile_summary_t){
@@ -379,11 +405,11 @@ static iree_status_t loom_run_hal_benchmark_run_profiled_batch(
     }
   }
   if (iree_status_is_ok(status)) {
-    // Preparing profile-retaining command buffers and sinks can leave the
-    // device idle long enough to change its clock or cache state. Replay the
-    // final batch under the same warmup policy immediately before profiling.
-    status = loom_run_hal_benchmark_warm_profiled_batch(runtime, batch,
-                                                        &options->timing);
+    // Preparing profile metadata and sinks can leave the device idle long
+    // enough to change its clock or cache state. Replay the final batch under
+    // the same warmup policy immediately before profiling.
+    status =
+        loom_run_hal_benchmark_warm_profiled_batch(callback, &options->timing);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_device_profiling_options_t profiling_options = {
@@ -398,7 +424,7 @@ static iree_status_t loom_run_hal_benchmark_run_profiled_batch(
         iree_hal_device_profiling_begin(runtime->device, &profiling_options);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_run_hal_dispatch_batch_execute(runtime, batch);
+    status = callback.fn(callback.user_data);
     if (iree_status_is_ok(status)) {
       status = iree_hal_device_profiling_flush(runtime->device);
     }
@@ -466,8 +492,18 @@ static iree_status_t loom_run_hal_benchmark_profile_final_batch(
       /*binding_list_offset=*/0, &profile_dispatch_options, allocator,
       &profile_batch);
   if (iree_status_is_ok(status)) {
+    loom_run_hal_benchmark_batch_context_t context = {
+        .runtime = runtime,
+        .batches = &profile_batch,
+        .batch_count = 1,
+    };
     status = loom_run_hal_benchmark_run_profiled_batch(
-        runtime, &profile_batch, options, allocator, out_profile);
+        runtime,
+        (loom_run_benchmark_batch_callback_t){
+            .fn = loom_run_hal_benchmark_execute_batch,
+            .user_data = &context,
+        },
+        options, allocator, out_profile);
   } else {
     loom_run_hal_profile_summary_record_error(out_profile, status);
     iree_status_free(status);
@@ -510,8 +546,18 @@ static iree_status_t loom_run_hal_benchmark_profile_final_sequence_batch(
           /*plan_ring_offset=*/0, &profile_dispatch_options, allocator,
           &profile_batch);
   if (iree_status_is_ok(status)) {
+    loom_run_hal_benchmark_batch_context_t context = {
+        .runtime = runtime,
+        .batches = &profile_batch,
+        .batch_count = 1,
+    };
     status = loom_run_hal_benchmark_run_profiled_batch(
-        runtime, &profile_batch, options, allocator, out_profile);
+        runtime,
+        (loom_run_benchmark_batch_callback_t){
+            .fn = loom_run_hal_benchmark_execute_batch,
+            .user_data = &context,
+        },
+        options, allocator, out_profile);
   } else {
     loom_run_hal_profile_summary_record_error(out_profile, status);
     iree_status_free(status);
@@ -540,6 +586,58 @@ iree_status_t loom_run_hal_benchmark_dispatch_plan(
       options, allocator, out_result);
 }
 
+static iree_status_t loom_run_hal_benchmark_queue_dispatch_binding_ring(
+    const loom_run_hal_runtime_t* runtime,
+    const loom_run_hal_prepared_candidate_t* candidate,
+    const loom_run_hal_invocation_plan_t* plan,
+    iree_host_size_t binding_list_count,
+    const loom_run_hal_binding_list_t* binding_lists,
+    const loom_run_hal_benchmark_options_t* options, iree_allocator_t allocator,
+    loom_run_hal_benchmark_result_t* out_result) {
+  for (iree_host_size_t i = 0; i < binding_list_count; ++i) {
+    if (binding_lists[i].count != plan->bindings.count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "HAL benchmark binding ring entry %" PRIhsz
+                              " binding count %" PRIhsz
+                              " must match plan binding count %" PRIhsz,
+                              i, binding_lists[i].count, plan->bindings.count);
+    }
+  }
+
+  loom_run_hal_queue_dispatch_t dispatch = {0};
+  iree_status_t status =
+      loom_run_hal_queue_dispatch_prepare(runtime, candidate, plan, &dispatch);
+  loom_run_hal_benchmark_queue_dispatch_context_t context = {
+      .runtime = runtime,
+      .dispatch = &dispatch,
+      .binding_lists = binding_lists,
+      .binding_list_count = binding_list_count,
+  };
+  const loom_run_benchmark_batch_callback_t callback = {
+      .fn = loom_run_hal_benchmark_execute_queue_dispatch,
+      .user_data = &context,
+  };
+  if (iree_status_is_ok(status)) {
+    status = loom_run_benchmark_run_batches(callback, &options->timing,
+                                            allocator, &out_result->timing);
+  }
+  if (iree_status_is_ok(status) &&
+      iree_all_bits_set(options->flags,
+                        LOOM_RUN_HAL_BENCHMARK_FLAG_PROFILE_FINAL_BATCH)) {
+    status = loom_run_hal_benchmark_run_profiled_batch(
+        runtime, callback, options, allocator, &out_result->profile);
+  }
+  if (iree_status_is_ok(status)) {
+    out_result->binding_ring_count = binding_list_count;
+    out_result->command_buffer_ring_count = 0;
+  }
+  loom_run_hal_queue_dispatch_deinitialize(&dispatch);
+  if (!iree_status_is_ok(status)) {
+    loom_run_hal_benchmark_result_initialize(out_result);
+  }
+  return status;
+}
+
 iree_status_t loom_run_hal_benchmark_dispatch_binding_ring(
     const loom_run_hal_runtime_t* runtime,
     const loom_run_hal_prepared_candidate_t* candidate,
@@ -554,6 +652,16 @@ iree_status_t loom_run_hal_benchmark_dispatch_binding_ring(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "HAL benchmark binding ring must contain at least "
                             "one binding list");
+  }
+  if (binding_lists == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "HAL benchmark binding ring requires binding "
+                            "lists");
+  }
+  if (options->dispatch_batch.dispatch_count == 1) {
+    return loom_run_hal_benchmark_queue_dispatch_binding_ring(
+        runtime, candidate, plan, binding_list_count, binding_lists, options,
+        allocator, out_result);
   }
 
   const iree_host_size_t command_buffer_ring_count = iree_host_size_ceil_div(

@@ -95,6 +95,25 @@ typedef struct loom_run_hal_dispatch_batch_options_t {
   iree_hal_execute_flags_t execute_flags;
 } loom_run_hal_dispatch_batch_options_t;
 
+typedef struct loom_run_hal_queue_dispatch_t {
+  // Prepared HAL executable retained for repeated queue dispatches.
+  iree_hal_executable_t* executable;
+  // Resolved executable function dispatched by each submission.
+  iree_hal_executable_function_t function;
+  // Static dispatch configuration copied from the invocation plan.
+  iree_hal_dispatch_config_t config;
+  // Dispatch constants copied from the invocation plan in HAL ABI order.
+  uint32_t constants[LOOM_RUN_HAL_MAX_CONSTANT_COUNT];
+  // Number of entries in |constants|.
+  iree_host_size_t constant_count;
+  // Required number of direct buffer bindings for each submission.
+  iree_host_size_t binding_count;
+  // Timeline semaphore signaled after each direct queue dispatch.
+  iree_hal_semaphore_t* semaphore;
+  // Payload value to signal on the next direct queue dispatch.
+  uint64_t next_signal_value;
+} loom_run_hal_queue_dispatch_t;
+
 typedef struct loom_run_hal_dispatch_batch_t {
   // Host allocator used for batch-owned arrays.
   iree_allocator_t host_allocator;
@@ -194,6 +213,14 @@ void loom_run_hal_iteration_deinitialize(loom_run_hal_iteration_t* iteration);
 void loom_run_hal_dispatch_batch_options_initialize(
     loom_run_hal_dispatch_batch_options_t* out_options);
 
+// Initializes an empty direct HAL queue dispatch.
+void loom_run_hal_queue_dispatch_initialize(
+    loom_run_hal_queue_dispatch_t* out_dispatch);
+
+// Releases storage owned by |dispatch|.
+void loom_run_hal_queue_dispatch_deinitialize(
+    loom_run_hal_queue_dispatch_t* dispatch);
+
 // Initializes an empty HAL dispatch batch.
 void loom_run_hal_dispatch_batch_initialize(
     loom_run_hal_dispatch_batch_t* out_batch);
@@ -263,6 +290,25 @@ iree_status_t loom_run_hal_dispatch(
     iree_hal_device_t* device, iree_hal_executable_t* executable,
     const loom_run_hal_binding_list_t* binding_list,
     const loom_run_hal_invocation_options_t* options);
+
+// Prepares one direct queue dispatch for repeated submission.
+//
+// Executable lookup, launch configuration, constants, and completion state are
+// resolved once. Buffer bindings are supplied per execution so callers can
+// rotate production input rings without rebuilding the prepared operation.
+iree_status_t loom_run_hal_queue_dispatch_prepare(
+    const loom_run_hal_runtime_t* runtime,
+    const loom_run_hal_prepared_candidate_t* candidate,
+    const loom_run_hal_invocation_plan_t* plan,
+    loom_run_hal_queue_dispatch_t* out_dispatch);
+
+// Submits |dispatch| with |binding_list| directly to the device queue and waits
+// for completion. The binding list may be released or mutated after this call
+// returns.
+iree_status_t loom_run_hal_queue_dispatch_execute(
+    const loom_run_hal_runtime_t* runtime,
+    loom_run_hal_queue_dispatch_t* dispatch,
+    const loom_run_hal_binding_list_t* binding_list);
 
 // Records a reusable command buffer containing |batch_options->dispatch_count|
 // sequential copies of |plan|'s dispatch. The batch clones |plan| bindings once

@@ -343,6 +343,17 @@ time is never compared with device time. Batch shape still matters: match
 dispatch multiplicity and inspect `profiled_dispatch_timing.overlapped` before
 comparing a throughput batch with an isolated dispatch.
 
+An isolated `--batch-size=1` benchmark submits through direct HAL
+`queue_dispatch`; no command buffer is created. Larger batches use reusable
+command buffers with execution barriers between dispatches so submission
+overhead is amortized without allowing accidental overlap.
+
+GPU kernel optimization uses a serialized multi-dispatch batch with independent
+binding sets as its primary score. This sustains device clocks, amortizes host
+submission, and gives the final profiled replay enough device samples to expose
+variance. A one-dispatch direct submission is an isolated latency cross-check,
+not a statistically strong kernel-throughput result.
+
 The quick command above intentionally uses one hot-reuse input ring and tiny
 iteration counts for smoke coverage; serious timing should use warmups, a
 stable major measurement window, a representative input ring, and final-batch

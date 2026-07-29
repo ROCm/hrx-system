@@ -129,7 +129,8 @@ typedef struct loom_run_hal_benchmark_options_t {
   loom_run_hal_benchmark_flags_t flags;
   // Generic warmup, measured timing, batch, and stability policy.
   loom_run_benchmark_options_t timing;
-  // Command-buffer recording and queue execute options for the batch.
+  // Dispatch multiplicity and command-buffer options for multi-dispatch
+  // batches.
   loom_run_hal_dispatch_batch_options_t dispatch_batch;
   // Producer profiling flags used for a requested final profiled batch.
   iree_hal_device_profiling_flags_t profile_flags;
@@ -150,9 +151,10 @@ typedef struct loom_run_hal_benchmark_options_t {
 typedef struct loom_run_hal_benchmark_result_t {
   // Generic host timing benchmark result.
   loom_run_benchmark_result_t timing;
-  // Number of physical binding lists rotated through command-buffer dispatches.
+  // Number of physical binding lists rotated through benchmark operations.
   iree_host_size_t binding_ring_count;
-  // Number of pre-recorded command buffers rotated across benchmark batches.
+  // Number of pre-recorded command buffers rotated across benchmark batches,
+  // or zero when isolated operations use direct queue dispatch.
   iree_host_size_t command_buffer_ring_count;
   // Final profiled-batch summary.
   loom_run_hal_profile_summary_t profile;
@@ -166,7 +168,9 @@ void loom_run_hal_benchmark_options_initialize(
 void loom_run_hal_benchmark_result_initialize(
     loom_run_hal_benchmark_result_t* out_result);
 
-// Prepares and times a reusable HAL command buffer containing a dispatch batch.
+// Prepares and times one logical dispatch batch. Isolated single-dispatch
+// batches use direct queue dispatch; larger batches use reusable command
+// buffers to amortize submission overhead.
 iree_status_t loom_run_hal_benchmark_dispatch_plan(
     const loom_run_hal_runtime_t* runtime,
     const loom_run_hal_prepared_candidate_t* candidate,
@@ -174,8 +178,9 @@ iree_status_t loom_run_hal_benchmark_dispatch_plan(
     const loom_run_hal_benchmark_options_t* options, iree_allocator_t allocator,
     loom_run_hal_benchmark_result_t* out_result);
 
-// Prepares and times reusable HAL command buffers whose dispatch slots cycle
-// across |binding_lists|. Each measured batch still executes
+// Prepares and times dispatches whose operation slots cycle across
+// |binding_lists|. Isolated single-dispatch batches use direct queue dispatch;
+// larger batches use reusable command buffers. Each measured batch executes
 // |options->dispatch_batch.dispatch_count| dispatches.
 iree_status_t loom_run_hal_benchmark_dispatch_binding_ring(
     const loom_run_hal_runtime_t* runtime,
