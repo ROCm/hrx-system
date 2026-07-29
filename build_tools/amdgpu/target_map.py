@@ -6,10 +6,11 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 """Generates shared AMDGPU target and code-object map fragments.
 
-The map in this file is the source of truth for the small generated tables used
-by Bazel, CMake, Loom, and the runtime. Code-object membership and version facts
+Canonical processor, code-object, target-ID qualification, and artifact facts
 live in target_map_data.py so Python consumers can share them without importing
-this generator. Runtime target rows also carry processor facts imported from
+this generator. This module owns build-family selectors, the legacy ELF machine
+catalog, and projections for Bazel, CMake, Loom, and the runtime. Runtime target
+rows also carry processor facts imported from
 loom.target.arch.amdgpu.target_info so those facts stay tied to Loom's target
 table. Keep build logic in Starlark/CMake; keep target facts in Python tables.
 """
@@ -18,18 +19,29 @@ import argparse
 import difflib
 import re
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 if __package__:
     from .target_map_data import (
-        AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS,
-        validate_code_object_compatibility,
+        AMDGPU_DEVICE_BINARY_VARIANTS,
+        AMDGPU_EXACT_TARGET_INFOS,
+        AMDGPU_GENERIC_CODE_OBJECT_INFOS,
+        TARGET_ID_FEATURE_SRAMECC,
+        TARGET_ID_FEATURE_XNACK,
+        AmdgpuDeviceBinaryTarget,
+        target_id_features_for_processor,
+        validate_target_map_data,
     )
 else:
     from target_map_data import (
-        AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS,
-        validate_code_object_compatibility,
+        AMDGPU_DEVICE_BINARY_VARIANTS,
+        AMDGPU_EXACT_TARGET_INFOS,
+        AMDGPU_GENERIC_CODE_OBJECT_INFOS,
+        TARGET_ID_FEATURE_SRAMECC,
+        TARGET_ID_FEATURE_XNACK,
+        AmdgpuDeviceBinaryTarget,
+        target_id_features_for_processor,
+        validate_target_map_data,
     )
 
 DEFAULT_TARGET_SELECTIONS = (
@@ -42,62 +54,6 @@ DEFAULT_TARGET_SELECTIONS = (
     "gfx12-generic",
 )
 
-
-@dataclass(frozen=True, slots=True)
-class DeviceBinaryTarget:
-    """One independently named builtin device-library artifact."""
-
-    name: str
-    architecture: str
-    target_ids: tuple[str, ...] = ()
-    compile_options: tuple[str, ...] = ()
-    link_options: tuple[str, ...] = ()
-
-
-# Device-binary variants are artifact identities, not public processor names.
-# Each row binds one artifact to the fully qualified physical target IDs that
-# cannot safely consume their normal code-object-family artifact.
-DEVICE_BINARY_VARIANTS = (
-    DeviceBinaryTarget(
-        name="gfx1250-a0",
-        architecture="gfx1250",
-        target_ids=("gfx1250:gfx1250-b0-specific-",),
-        compile_options=("-mllvm", "-amdgpu-gfx1250-b0-specific=false"),
-        link_options=("-plugin-opt=-amdgpu-gfx1250-b0-specific=false",),
-    ),
-)
-
-FEATURE_SRAMECC = "sramecc"
-FEATURE_XNACK = "xnack"
-FEATURE_GFX1250_B0_SPECIFIC = "gfx1250-b0-specific"
-TARGET_ID_FEATURE_ORDER = (
-    FEATURE_SRAMECC,
-    FEATURE_XNACK,
-    FEATURE_GFX1250_B0_SPECIFIC,
-)
-
-# Feature support follows ROCr's ISA registry. A target absent from a feature
-# set does not support that feature; supported targets may still select an
-# explicit on/off mode at runtime.
-TARGET_FEATURE_SUPPORT = {
-    "gfx900": (FEATURE_XNACK,),
-    "gfx902": (FEATURE_XNACK,),
-    "gfx904": (FEATURE_XNACK,),
-    "gfx906": (FEATURE_SRAMECC, FEATURE_XNACK),
-    "gfx908": (FEATURE_SRAMECC, FEATURE_XNACK),
-    "gfx909": (FEATURE_XNACK,),
-    "gfx90c": (FEATURE_XNACK,),
-    "gfx90a": (FEATURE_SRAMECC, FEATURE_XNACK),
-    "gfx940": (FEATURE_SRAMECC, FEATURE_XNACK),
-    "gfx941": (FEATURE_SRAMECC, FEATURE_XNACK),
-    "gfx942": (FEATURE_SRAMECC, FEATURE_XNACK),
-    "gfx950": (FEATURE_SRAMECC, FEATURE_XNACK),
-    "gfx1010": (FEATURE_XNACK,),
-    "gfx1011": (FEATURE_XNACK,),
-    "gfx1012": (FEATURE_XNACK,),
-    "gfx1013": (FEATURE_XNACK,),
-    "gfx1250": (FEATURE_GFX1250_B0_SPECIFIC,),
-}
 
 ELF_MACHINE_PROCESSORS = (
     (0x020, "gfx600"),
@@ -163,13 +119,10 @@ ELF_MACHINE_PROCESSORS = (
 )
 
 # Feature support for ELF machine processors that are not exact build targets.
-# This includes legacy decode-only processors and generic code-object processors.
+# This includes legacy decode-only processors.
 ELF_MACHINE_FEATURE_SUPPORT = {
-    "gfx801": (FEATURE_XNACK,),
-    "gfx810": (FEATURE_XNACK,),
-    "gfx9-generic": (FEATURE_SRAMECC, FEATURE_XNACK),
-    "gfx10-1-generic": (FEATURE_XNACK,),
-    "gfx9-4-generic": (FEATURE_SRAMECC, FEATURE_XNACK),
+    "gfx801": (TARGET_ID_FEATURE_XNACK,),
+    "gfx810": (TARGET_ID_FEATURE_XNACK,),
 }
 
 ALL_EXACT_TARGETS = object()
@@ -272,12 +225,12 @@ def append_unique(values, new_values):
 
 
 def exact_targets():
-    return [info.exact_processor for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS]
+    return [info.exact_processor for info in AMDGPU_EXACT_TARGET_INFOS]
 
 
 def code_object_targets():
     values = []
-    for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
+    for info in AMDGPU_EXACT_TARGET_INFOS:
         append_unique(values, [info.code_object_processor])
     return values
 
@@ -285,14 +238,14 @@ def code_object_targets():
 def device_binary_targets():
     values = []
     names = set()
-    for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
+    for info in AMDGPU_EXACT_TARGET_INFOS:
         for variant in device_binary_variants_for_exact(info.exact_processor):
             if variant.name not in names:
                 values.append(variant)
                 names.add(variant.name)
         if info.code_object_processor not in names:
             values.append(
-                DeviceBinaryTarget(
+                AmdgpuDeviceBinaryTarget(
                     name=info.code_object_processor,
                     architecture=info.code_object_processor,
                 )
@@ -312,25 +265,18 @@ def device_binary_target(name):
     return None
 
 
-def target_id_processor(target_id):
-    return target_id.split(":", 1)[0]
-
-
 def device_binary_variants_for_exact(exact_target):
     return [
         variant
-        for variant in DEVICE_BINARY_VARIANTS
-        if any(
-            target_id_processor(target_id) == exact_target
-            for target_id in variant.target_ids
-        )
+        for variant in AMDGPU_DEVICE_BINARY_VARIANTS
+        if any(match.processor == exact_target for match in variant.target_matches)
     ]
 
 
 def exact_targets_for_code_object(code_object_target):
     return [
         info.exact_processor
-        for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
+        for info in AMDGPU_EXACT_TARGET_INFOS
         if info.code_object_processor == code_object_target
     ]
 
@@ -341,7 +287,7 @@ def expand_device_binary_target_selections(selections):
     code_objects = set(code_object_targets())
     exact_to_code_object = {
         info.exact_processor: info.code_object_processor
-        for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
+        for info in AMDGPU_EXACT_TARGET_INFOS
     }
     families = {family: family_targets(targets) for family, targets in TARGET_FAMILIES}
     expanded_targets = []
@@ -387,15 +333,15 @@ def target_family_names():
 def elf_machine_targets():
     values = []
     for machine, processor in ELF_MACHINE_PROCESSORS:
-        features = TARGET_FEATURE_SUPPORT.get(
-            processor, ELF_MACHINE_FEATURE_SUPPORT.get(processor, ())
-        )
+        features = target_id_features_for_processor(processor)
+        if not features:
+            features = ELF_MACHINE_FEATURE_SUPPORT.get(processor, ())
         values.append((machine, processor, features))
     return values
 
 
 def validate_target_map():
-    validate_code_object_compatibility()
+    validate_target_map_data()
     exact = exact_targets()
     if len(set(exact)) != len(exact):
         raise ValueError("duplicate exact AMDGPU targets in target map")
@@ -410,16 +356,7 @@ def validate_target_map():
     if len(set(device_binary_names)) != len(device_binary_names):
         raise ValueError("duplicate AMDGPU device binary targets in target map")
     public_selectors = exact_set | code_object_set | set(families)
-    variant_name_list = [variant.name for variant in DEVICE_BINARY_VARIANTS]
-    duplicate_variant_names = sorted(
-        name for name in set(variant_name_list) if variant_name_list.count(name) > 1
-    )
-    if duplicate_variant_names:
-        raise ValueError(
-            "duplicate AMDGPU device binary variants: {}".format(
-                ", ".join(duplicate_variant_names)
-            )
-        )
+    variant_name_list = [variant.name for variant in AMDGPU_DEVICE_BINARY_VARIANTS]
     variant_names = set(variant_name_list)
     conflicting_variant_names = sorted(variant_names & public_selectors)
     if conflicting_variant_names:
@@ -428,89 +365,6 @@ def validate_target_map():
                 ", ".join(conflicting_variant_names)
             )
         )
-    qualified_target_artifacts = {}
-    for variant in DEVICE_BINARY_VARIANTS:
-        if variant.architecture not in exact_set | code_object_set:
-            raise ValueError(
-                "device binary variant {} references unknown architecture {}".format(
-                    variant.name, variant.architecture
-                )
-            )
-        if not variant.target_ids:
-            raise ValueError(
-                "device binary variant {} has no qualified target IDs".format(
-                    variant.name
-                )
-            )
-        for target_id in variant.target_ids:
-            target_id_parts = target_id.split(":")
-            target_processor = target_id_parts[0]
-            if target_processor not in exact_set:
-                raise ValueError(
-                    "device binary variant {} target ID {} references an "
-                    "unknown exact target".format(variant.name, target_id)
-                )
-            if len(target_id_parts) == 1:
-                raise ValueError(
-                    "device binary variant {} target ID {} has no feature "
-                    "qualification".format(variant.name, target_id)
-                )
-            feature_names = []
-            supported_features = set(TARGET_FEATURE_SUPPORT.get(target_processor, ()))
-            for feature_suffix in target_id_parts[1:]:
-                if len(feature_suffix) < 2 or feature_suffix[-1] not in "+-":
-                    raise ValueError(
-                        "device binary variant {} target ID {} has malformed "
-                        "feature suffix {}".format(
-                            variant.name, target_id, feature_suffix
-                        )
-                    )
-                feature_name = feature_suffix[:-1]
-                if feature_name not in supported_features:
-                    raise ValueError(
-                        "device binary variant {} target ID {} qualifies "
-                        "unsupported feature {}".format(
-                            variant.name, target_id, feature_name
-                        )
-                    )
-                if feature_name in feature_names:
-                    raise ValueError(
-                        "device binary variant {} target ID {} repeats feature "
-                        "{}".format(variant.name, target_id, feature_name)
-                    )
-                feature_names.append(feature_name)
-            canonical_feature_names = [
-                feature_name
-                for feature_name in TARGET_ID_FEATURE_ORDER
-                if feature_name in feature_names
-            ]
-            if feature_names != canonical_feature_names:
-                raise ValueError(
-                    "device binary variant {} target ID {} does not use "
-                    "canonical feature order {}".format(
-                        variant.name,
-                        target_id,
-                        ":".join(canonical_feature_names),
-                    )
-                )
-            previous_artifact = qualified_target_artifacts.get(target_id)
-            if previous_artifact is not None:
-                raise ValueError(
-                    "device binary target ID {} is claimed by both {} and {}".format(
-                        target_id, previous_artifact, variant.name
-                    )
-                )
-            qualified_target_artifacts[target_id] = variant.name
-
-    feature_targets = set(TARGET_FEATURE_SUPPORT)
-    unknown_feature_targets = sorted(feature_targets - exact_set)
-    if unknown_feature_targets:
-        raise ValueError(
-            "target feature support references unknown exact targets: {}".format(
-                ", ".join(unknown_feature_targets)
-            )
-        )
-
     elf_machine_feature_targets = set(ELF_MACHINE_FEATURE_SUPPORT)
     elf_machine_processors = [processor for _, processor in ELF_MACHINE_PROCESSORS]
     elf_machine_processor_set = set(elf_machine_processors)
@@ -707,7 +561,7 @@ def render_bzl():
                     "IREE_AMDGPU_EXACT_TARGET_CODE_OBJECTS",
                     (
                         (info.exact_processor, info.code_object_processor)
-                        for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
+                        for info in AMDGPU_EXACT_TARGET_INFOS
                     ),
                 ),
                 bzl_string_list_dict(
@@ -757,7 +611,7 @@ def render_cmake():
         cmake_list("_IREE_AMDGPU_DEVICE_BINARY_TARGETS", device_binary_target_names()),
         "",
     ]
-    for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
+    for info in AMDGPU_EXACT_TARGET_INFOS:
         lines.append(
             'set(_IREE_AMDGPU_TARGET_CODE_OBJECT_{} "{}")'.format(
                 info.exact_processor, info.code_object_processor
@@ -797,36 +651,72 @@ def render_target_id_inl(repo_root):
     lines = [
         generated_header("//", output_path),
         "//",
-        "// Included inside iree_hal_amdgpu_target_id_mappings.",
+        "// Define IREE_AMDGPU_TARGET_MAPPING and/or",
+        "// IREE_AMDGPU_ASIC_REVISION before including this file.",
         "",
         "// clang-format off",
+        "#if defined(IREE_AMDGPU_TARGET_MAPPING)",
     ]
     feature_flag_names = {
-        FEATURE_SRAMECC: "IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_SRAMECC",
-        FEATURE_XNACK: "IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_XNACK",
-        FEATURE_GFX1250_B0_SPECIFIC: (
-            "IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_GFX1250_B0_SPECIFIC"
-        ),
+        TARGET_ID_FEATURE_SRAMECC: "IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_SRAMECC",
+        TARGET_ID_FEATURE_XNACK: "IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_XNACK",
     }
     processor_info_rows, supports_wavefront_size = import_loom_target_info(repo_root)
     processor_infos = {info.processor: info for info in processor_info_rows}
-    for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
-        processor_info = processor_infos[info.exact_processor]
-        features = TARGET_FEATURE_SUPPORT.get(info.exact_processor, ())
+    target_rows = [
+        (
+            info.exact_processor,
+            info.code_object_processor,
+            info.generic_introduction_version,
+            info.target_id_features,
+        )
+        for info in AMDGPU_EXACT_TARGET_INFOS
+    ] + [
+        (
+            info.processor,
+            info.processor,
+            0,
+            info.target_id_features,
+        )
+        for info in AMDGPU_GENERIC_CODE_OBJECT_INFOS
+    ]
+    for (
+        processor,
+        code_object_processor,
+        generic_introduction_version,
+        features,
+    ) in target_rows:
+        processor_info = processor_infos[processor]
         feature_flags = " | ".join(feature_flag_names[feature] for feature in features)
         if not feature_flags:
             feature_flags = "IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_NONE"
         lines.append(
-            '{{IREE_SVL("{}"), IREE_SVL("{}"), {}, {}, {{{}, {}}}}},'.format(
-                info.exact_processor,
-                info.code_object_processor,
-                info.generic_introduction_version,
+            'IREE_AMDGPU_TARGET_MAPPING("{}", "{}", {}, {}, {}, {})'.format(
+                processor,
+                code_object_processor,
+                generic_introduction_version,
                 feature_flags,
                 processor_info.wavefront.default_size,
                 wavefront_size_flags_expr(supports_wavefront_size, processor_info),
             )
         )
-    lines.append("")
+    lines.extend(
+        [
+            "#endif  // IREE_AMDGPU_TARGET_MAPPING",
+            "",
+            "#if defined(IREE_AMDGPU_ASIC_REVISION)",
+        ]
+    )
+    for info in AMDGPU_EXACT_TARGET_INFOS:
+        for revision in info.asic_revisions:
+            lines.append(
+                'IREE_AMDGPU_ASIC_REVISION("{}", {}, "{}")'.format(
+                    info.exact_processor,
+                    revision.value,
+                    revision.name,
+                )
+            )
+    lines.extend(["#endif  // IREE_AMDGPU_ASIC_REVISION", ""])
     return "\n".join(lines)
 
 
@@ -837,18 +727,19 @@ def render_device_library_target_map_inl():
     lines = [
         generated_header("//", output_path),
         "//",
-        "// Define IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT(artifact, target)",
-        "// before including this file.",
+        "// Define IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT(",
+        "//     artifact, processor, asic_revision) before including this file.",
         "",
         "// clang-format off",
         "#if defined(IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT)",
     ]
-    for variant in DEVICE_BINARY_VARIANTS:
-        for target_id in variant.target_ids:
+    for variant in AMDGPU_DEVICE_BINARY_VARIANTS:
+        for target_match in variant.target_matches:
             lines.append(
-                'IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT("{}", "{}")'.format(
+                'IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT("{}", "{}", {})'.format(
                     variant.name,
-                    target_id,
+                    target_match.processor,
+                    target_match.asic_revision,
                 )
             )
     lines.extend(
@@ -873,8 +764,8 @@ def render_elf_machine_map_inl():
         "#if defined(IREE_AMDGPU_ELF_MACHINE_TARGET)",
     ]
     for machine, processor, features in elf_machine_targets():
-        sramecc = "true" if FEATURE_SRAMECC in features else "false"
-        xnack = "true" if FEATURE_XNACK in features else "false"
+        sramecc = "true" if TARGET_ID_FEATURE_SRAMECC in features else "false"
+        xnack = "true" if TARGET_ID_FEATURE_XNACK in features else "false"
         lines.append(
             'IREE_AMDGPU_ELF_MACHINE_TARGET(0x{:03x}u, "{}", {}, {})'.format(
                 machine, processor, sramecc, xnack
@@ -904,7 +795,7 @@ def render_header():
         "    const char* exact_target) {",
         "  if (!exact_target) return NULL;",
     ]
-    for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
+    for info in AMDGPU_EXACT_TARGET_INFOS:
         lines.append(
             '  if (strcmp(exact_target, "{}") == 0) return "{}";'.format(
                 info.exact_processor, info.code_object_processor

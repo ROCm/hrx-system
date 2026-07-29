@@ -5,8 +5,10 @@ used by runtime, libhrx, and future runtime-side consumers that need AMDGPU
 code objects. The center of gravity is target selection, not any one runtime
 package:
 
-- `target_map.py` is the source of truth for exact GPU architectures,
-  code-object targets, qualified device-binary artifacts, and family selectors.
+- `target_map_data.py` is the source of truth for exact GPU architectures,
+  code-object targets, target-ID feature support, and qualified device-binary
+  artifacts. `target_map.py` owns family selectors and generates the consumer
+  projections.
 - `selectors.bzl` and `selectors.cmake` validate selectors and expand them to
   exact HSA ISA targets, compatible code-object targets, or the complete
   device-binary artifact set.
@@ -75,9 +77,10 @@ The generated files are checked in. The presubmit check runs:
 python3 build_tools/amdgpu/target_map.py --check
 ```
 
-Architecture updates start in `AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS` in
-`target_map_data.py` and `DEVICE_BINARY_VARIANTS` or `TARGET_FAMILIES` in
-`target_map.py`. The evidence to check before changing the map is TheRock's
+Architecture updates start in `AMDGPU_EXACT_TARGET_INFOS`,
+`AMDGPU_GENERIC_CODE_OBJECT_INFOS`, or `AMDGPU_DEVICE_BINARY_VARIANTS` in
+`target_map_data.py`, and in `TARGET_FAMILIES` in `target_map.py`. The evidence
+to check before changing the map is TheRock's
 `cmake/therock_amdgpu_targets.cmake` for selector and family membership, and
 LLVM AMDGPU generic processor documentation/tablegen data for generic
 code-object compatibility and variant codegen options.

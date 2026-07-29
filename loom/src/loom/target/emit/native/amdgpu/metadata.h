@@ -82,9 +82,8 @@ typedef struct loom_amdgpu_metadata_kernel_t {
   loom_target_workgroup_cluster_size_t workgroup_cluster_size;
   // True when |workgroup_cluster_size| should be emitted as `.cluster_dims`.
   bool has_workgroup_cluster_size;
-  // gfx1250 silicon revision required by this kernel, or UNSPECIFIED for
-  // kernels targeting another processor.
-  loom_amdgpu_gfx1250_revision_t gfx1250_revision;
+  // Target-required AMDHSA kernel metadata extensions.
+  loom_amdgpu_metadata_string_property_set_t target_extensions;
   // Argument records in kernarg offset order.
   const loom_amdgpu_metadata_argument_t* arguments;
   // Number of records in |arguments|.

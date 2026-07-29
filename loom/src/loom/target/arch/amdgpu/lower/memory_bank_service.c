@@ -30,25 +30,20 @@ static const loom_amdgpu_lds_bank_service_model_t*
 loom_amdgpu_memory_bank_service_model(loom_low_lower_context_t* context,
                                       const loom_low_descriptor_t* descriptor) {
   const loom_module_t* module = loom_low_lower_context_module(context);
-  if (loom_amdgpu_target_gfx1250_revision_from_ref(
-          module, loom_low_lower_context_target_ref(context)) ==
-      LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED) {
+  loom_amdgpu_target_identity_t identity = {0};
+  if (!loom_amdgpu_target_identity_from_ref(
+          module, loom_low_lower_context_target_ref(context), &identity)) {
     return NULL;
   }
+  loom_amdgpu_target_properties_t properties = {0};
+  loom_amdgpu_target_properties_resolve(
+      &identity, loom_low_lower_context_bundle(context), &properties);
 
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);
-  switch (
-      loom_amdgpu_descriptor_ref_for_descriptor(descriptor_set, descriptor)) {
-    case LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_B128:
-      return loom_amdgpu_lds_bank_service_gfx1250_b128_model(
-          LOOM_AMDGPU_LDS_BANK_SERVICE_DIRECTION_READ);
-    case LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B128:
-      return loom_amdgpu_lds_bank_service_gfx1250_b128_model(
-          LOOM_AMDGPU_LDS_BANK_SERVICE_DIRECTION_WRITE);
-    default:
-      return NULL;
-  }
+  return loom_amdgpu_lds_bank_service_model_lookup(
+      properties.lds_bank_service_model_set_ordinal,
+      loom_amdgpu_descriptor_ref_for_descriptor(descriptor_set, descriptor));
 }
 
 static void loom_amdgpu_memory_bank_service_initialize_report(
@@ -244,7 +239,7 @@ iree_status_t loom_amdgpu_memory_report_bank_service(
 
   // Default LDS packet selection already proved the complete address range
   // fits the 32-bit DS address domain. The target model supplies the verified
-  // gfx1250 wave size, so these relative lane addresses cannot overflow.
+  // wave size, so these relative lane addresses cannot overflow.
   uint64_t lane_base_byte_offsets[LOOM_AMDGPU_LDS_BANK_SERVICE_MAX_WAVE_SIZE] =
       {0};
   for (uint8_t lane = 0; lane < model->wave_size; ++lane) {

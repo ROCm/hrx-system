@@ -310,11 +310,10 @@ loom_cc_library(
     ::profile
     iree::base
     loom::ir
-    loom::pass::builder
     loom::target::arch::spirv::descriptors::low_registry
     loom::target::arch::spirv::lower
     loom::target::arch::spirv::ops
-    loom::target::arch::spirv::records::target_records
+    loom::target::materialization
     loom::target::provider
   PUBLIC
 )

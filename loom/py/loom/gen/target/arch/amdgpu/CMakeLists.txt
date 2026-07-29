@@ -66,6 +66,7 @@ iree_py_library(
   DEPS
     loom::py::loom::gen::support::support
     loom::py::loom::target::low_descriptors
+    loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::arch::amdgpu::target_info
 )

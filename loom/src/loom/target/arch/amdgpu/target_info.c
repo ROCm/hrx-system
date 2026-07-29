@@ -90,7 +90,7 @@ bool loom_amdgpu_processor_satisfies_code_object_requirement(
   return effective_processor->generic_code_object.processor_ordinal ==
              required_processor->ordinal &&
          effective_processor->generic_code_object.introduction_version <=
-             required_processor->elf.generic_version;
+             required_processor->properties.elf.generic_version;
 }
 
 iree_status_t loom_amdgpu_target_info_lookup_descriptor_set(
@@ -161,21 +161,19 @@ static iree_status_t loom_amdgpu_target_info_validate_target_id_chars(
 }
 
 static iree_status_t loom_amdgpu_target_info_parse_target_feature(
-    iree_string_view_t feature,
-    loom_amdgpu_target_feature_selection_t* inout_sramecc,
-    loom_amdgpu_target_feature_selection_t* inout_xnack) {
+    const loom_amdgpu_processor_info_t* processor, iree_string_view_t feature,
+    loom_amdgpu_amdhsa_feature_states_t* inout_features) {
   if (feature.size < 2) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU AMDHSA target feature suffix is empty");
   }
 
   const char selector = feature.data[feature.size - 1];
-  loom_amdgpu_target_feature_selection_t selection =
-      LOOM_AMDGPU_TARGET_FEATURE_DEFAULT;
+  loom_amdgpu_target_feature_state_t state = LOOM_AMDGPU_TARGET_FEATURE_ANY;
   if (selector == '+') {
-    selection = LOOM_AMDGPU_TARGET_FEATURE_ON;
+    state = LOOM_AMDGPU_TARGET_FEATURE_ON;
   } else if (selector == '-') {
-    selection = LOOM_AMDGPU_TARGET_FEATURE_OFF;
+    state = LOOM_AMDGPU_TARGET_FEATURE_OFF;
   } else {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -184,25 +182,54 @@ static iree_status_t loom_amdgpu_target_info_parse_target_feature(
   }
 
   const iree_string_view_t name = iree_string_view_remove_suffix(feature, 1);
-  loom_amdgpu_target_feature_selection_t* feature_selection = NULL;
+  loom_amdgpu_target_feature_state_t* feature_state = NULL;
+  loom_amdgpu_target_id_feature_support_bit_t feature_support =
+      LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE;
   if (iree_string_view_equal(name, IREE_SV("sramecc"))) {
-    feature_selection = inout_sramecc;
+    feature_state = &inout_features->sramecc;
+    feature_support = LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC;
   } else if (iree_string_view_equal(name, IREE_SV("xnack"))) {
-    feature_selection = inout_xnack;
+    feature_state = &inout_features->xnack;
+    feature_support = LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK;
   } else {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "unsupported AMDGPU AMDHSA target feature suffix: %.*s",
         (int)feature.size, feature.data);
   }
-  if (*feature_selection != LOOM_AMDGPU_TARGET_FEATURE_DEFAULT) {
+  if (!loom_amdgpu_processor_supports_target_id_features(processor,
+                                                         feature_support)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU processor '%.*s' does not support target feature '%.*s'",
+        (int)processor->name.size, processor->name.data, (int)name.size,
+        name.data);
+  }
+  if (*feature_state != LOOM_AMDGPU_TARGET_FEATURE_ANY) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "duplicate AMDGPU AMDHSA target feature suffix: %.*s", (int)name.size,
         name.data);
   }
-  *feature_selection = selection;
+  *feature_state = state;
   return iree_ok_status();
+}
+
+void loom_amdgpu_amdhsa_feature_states_initialize(
+    const loom_amdgpu_processor_info_t* processor,
+    loom_amdgpu_amdhsa_feature_states_t* out_features) {
+  IREE_ASSERT_ARGUMENT(processor);
+  IREE_ASSERT_ARGUMENT(out_features);
+  *out_features = (loom_amdgpu_amdhsa_feature_states_t){
+      .sramecc = loom_amdgpu_processor_supports_target_id_features(
+                     processor, LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC)
+                     ? LOOM_AMDGPU_TARGET_FEATURE_ANY
+                     : LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED,
+      .xnack = loom_amdgpu_processor_supports_target_id_features(
+                   processor, LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK)
+                   ? LOOM_AMDGPU_TARGET_FEATURE_ANY
+                   : LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED,
+  };
 }
 
 iree_status_t loom_amdgpu_target_info_parse_amdhsa_target_id(
@@ -247,10 +274,8 @@ iree_status_t loom_amdgpu_target_info_parse_amdhsa_target_id(
   const loom_amdgpu_processor_info_t* processor = NULL;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_target_info_lookup_processor(processor_name, &processor));
-  loom_amdgpu_target_feature_selection_t sramecc =
-      LOOM_AMDGPU_TARGET_FEATURE_DEFAULT;
-  loom_amdgpu_target_feature_selection_t xnack =
-      LOOM_AMDGPU_TARGET_FEATURE_DEFAULT;
+  loom_amdgpu_amdhsa_feature_states_t features = {0};
+  loom_amdgpu_amdhsa_feature_states_initialize(processor, &features);
   iree_string_view_t remaining_features = feature_suffix;
   while (!iree_string_view_is_empty(remaining_features)) {
     iree_string_view_t feature = iree_string_view_empty();
@@ -260,24 +285,55 @@ iree_status_t loom_amdgpu_target_info_parse_amdhsa_target_id(
       feature = remaining_features;
     }
     IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_parse_target_feature(
-        feature, &sramecc, &xnack));
+        processor, feature, &features));
     remaining_features = next_features;
   }
   *out_target_id = (loom_amdgpu_amdhsa_target_id_t){
       .processor = processor,
       .feature_suffix = feature_suffix,
-      .sramecc = sramecc,
-      .xnack = xnack,
+      .features = features,
   };
   return iree_ok_status();
 }
 
+const loom_amdgpu_processor_asic_revision_info_t*
+loom_amdgpu_target_info_find_asic_revision(
+    const loom_amdgpu_processor_info_t* processor, uint32_t value) {
+  IREE_ASSERT_ARGUMENT(processor);
+  for (uint16_t i = 0; i < processor->asic_revisions.count; ++i) {
+    const loom_amdgpu_processor_asic_revision_info_t* revision =
+        &processor->asic_revisions.entries[i];
+    if (revision->value == value) {
+      return revision;
+    }
+  }
+  return NULL;
+}
+
+iree_status_t loom_amdgpu_target_info_lookup_asic_revision(
+    const loom_amdgpu_processor_info_t* processor, uint32_t value,
+    const loom_amdgpu_processor_asic_revision_info_t** out_revision) {
+  IREE_ASSERT_ARGUMENT(processor);
+  IREE_ASSERT_ARGUMENT(out_revision);
+  *out_revision = loom_amdgpu_target_info_find_asic_revision(processor, value);
+  if (*out_revision != NULL || processor->asic_revisions.count == 0) {
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "AMDGPU processor '%.*s' has unknown physical ASIC revision %" PRIu32,
+      (int)processor->name.size, processor->name.data, value);
+}
+
 static void loom_amdgpu_target_info_apply_feature_selection(
-    loom_amdgpu_target_feature_selection_t selection, uint32_t feature_mask,
+    loom_amdgpu_target_feature_state_t state, uint32_t feature_mask,
     uint32_t off_value, uint32_t on_value, uint32_t* inout_feature_flags) {
-  if (selection == LOOM_AMDGPU_TARGET_FEATURE_DEFAULT) return;
+  if (state != LOOM_AMDGPU_TARGET_FEATURE_OFF &&
+      state != LOOM_AMDGPU_TARGET_FEATURE_ON) {
+    return;
+  }
   *inout_feature_flags &= ~feature_mask;
-  if (selection == LOOM_AMDGPU_TARGET_FEATURE_ON) {
+  if (state == LOOM_AMDGPU_TARGET_FEATURE_ON) {
     *inout_feature_flags |= on_value;
   } else {
     *inout_feature_flags |= off_value;
@@ -289,23 +345,23 @@ iree_status_t loom_amdgpu_target_info_amdhsa_target_id_elf_flags(
   IREE_ASSERT_ARGUMENT(out_elf_flags);
   *out_elf_flags = 0;
   const loom_amdgpu_processor_info_t* processor = target_id->processor;
-  if (processor->elf.machine_flags == 0) {
+  if (processor->properties.elf.machine_flags == 0) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU processor '%.*s' has no ELF e_flags mapping",
         (int)processor->name.size, processor->name.data);
   }
-  uint32_t feature_flags = processor->elf.feature_flags;
+  uint32_t feature_flags = processor->properties.elf.feature_flags;
   loom_amdgpu_target_info_apply_feature_selection(
-      target_id->sramecc, LOOM_AMDGPU_ELF_FEATURE_SRAMECC_MASK_V4,
+      target_id->features.sramecc, LOOM_AMDGPU_ELF_FEATURE_SRAMECC_MASK_V4,
       LOOM_AMDGPU_ELF_FEATURE_SRAMECC_OFF_V4,
       LOOM_AMDGPU_ELF_FEATURE_SRAMECC_ON_V4, &feature_flags);
   loom_amdgpu_target_info_apply_feature_selection(
-      target_id->xnack, LOOM_AMDGPU_ELF_FEATURE_XNACK_MASK_V4,
+      target_id->features.xnack, LOOM_AMDGPU_ELF_FEATURE_XNACK_MASK_V4,
       LOOM_AMDGPU_ELF_FEATURE_XNACK_OFF_V4, LOOM_AMDGPU_ELF_FEATURE_XNACK_ON_V4,
       &feature_flags);
-  *out_elf_flags = processor->elf.machine_flags | feature_flags |
-                   (processor->elf.generic_version
+  *out_elf_flags = processor->properties.elf.machine_flags | feature_flags |
+                   (processor->properties.elf.generic_version
                     << LOOM_AMDGPU_ELF_GENERIC_VERSION_OFFSET_V6);
   return iree_ok_status();
 }

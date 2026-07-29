@@ -21,6 +21,7 @@ iree_py_library(
     name = "target_info",
     srcs = [
         "__init__.py",
+        "lds_bank_service.py",
         "names.py",
         "target_info.py",
     ],

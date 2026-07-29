@@ -10,6 +10,7 @@
 #include <cstdint>
 
 #include "iree/testing/gtest.h"
+#include "loom/target/arch/amdgpu/target_info.h"
 
 namespace loom {
 namespace {
@@ -52,7 +53,17 @@ static void ExpectProfile(const loom_amdgpu_lds_bank_service_result_t& result,
   EXPECT_EQ(result.maximum_request_multiplicity, maximum_multiplicity);
 }
 
-TEST(AmdgpuLdsBankServiceTest, Gfx1250B128MatchesReferenceProfiles) {
+static const loom_amdgpu_lds_bank_service_model_t* LookupB128Model(
+    loom_amdgpu_descriptor_ref_t descriptor_ref) {
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_find_processor(IREE_SV("gfx1250"));
+  IREE_ASSERT(processor != nullptr);
+  return loom_amdgpu_lds_bank_service_model_lookup(
+      processor->properties.features.lds_bank_service_model_set_ordinal,
+      descriptor_ref);
+}
+
+TEST(AmdgpuLdsBankServiceTest, RegisteredB128ModelsMatchReferenceProfiles) {
   struct Case {
     uint32_t lane_stride_bytes;
     uint16_t required_rounds;
@@ -64,10 +75,9 @@ TEST(AmdgpuLdsBankServiceTest, Gfx1250B128MatchesReferenceProfiles) {
       {80, 8, 1},
       {96, 8, 1},
   };
-  for (const auto direction : {LOOM_AMDGPU_LDS_BANK_SERVICE_DIRECTION_READ,
-                               LOOM_AMDGPU_LDS_BANK_SERVICE_DIRECTION_WRITE}) {
-    const auto* model =
-        loom_amdgpu_lds_bank_service_gfx1250_b128_model(direction);
+  for (const auto descriptor_ref : {LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_B128,
+                                    LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B128}) {
+    const auto* model = LookupB128Model(descriptor_ref);
     ASSERT_NE(model, nullptr);
     for (const Case& test_case : kCases) {
       const auto result = EvaluateLinear(model, test_case.lane_stride_bytes);
@@ -87,16 +97,31 @@ TEST(AmdgpuLdsBankServiceTest, Gfx1250B128MatchesReferenceProfiles) {
   }
 }
 
+TEST(AmdgpuLdsBankServiceTest, LookupRequiresModelAndDescriptorBinding) {
+  EXPECT_EQ(loom_amdgpu_lds_bank_service_model_lookup(
+                LOOM_AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE,
+                LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_B128),
+            nullptr);
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_find_processor(IREE_SV("gfx1250"));
+  ASSERT_NE(processor, nullptr);
+  EXPECT_EQ(
+      loom_amdgpu_lds_bank_service_model_lookup(
+          processor->properties.features.lds_bank_service_model_set_ordinal,
+          LOOM_AMDGPU_DESCRIPTOR_REF_NONE),
+      nullptr);
+}
+
 static constexpr uint64_t LaneRangeMask(uint8_t begin, uint8_t count) {
   return ((UINT64_C(1) << count) - UINT64_C(1)) << begin;
 }
 
 TEST(AmdgpuLdsBankServiceTest, ModelPhasesChangeStride96Result) {
-  const auto* gfx1250_model = loom_amdgpu_lds_bank_service_gfx1250_b128_model(
-      LOOM_AMDGPU_LDS_BANK_SERVICE_DIRECTION_READ);
-  ASSERT_NE(gfx1250_model, nullptr);
-  const auto gfx1250_result = EvaluateLinear(gfx1250_model, 96);
-  ExpectProfile(gfx1250_result, /*required_rounds=*/8,
+  const auto* registered_model =
+      LookupB128Model(LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_B128);
+  ASSERT_NE(registered_model, nullptr);
+  const auto registered_result = EvaluateLinear(registered_model, 96);
+  ExpectProfile(registered_result, /*required_rounds=*/8,
                 /*uncontended_rounds=*/8, /*maximum_multiplicity=*/1);
 
   const loom_amdgpu_lds_bank_service_model_t ck_wave64_model = {
@@ -132,8 +157,7 @@ TEST(AmdgpuLdsBankServiceTest, ModelPhasesChangeStride96Result) {
 
 TEST(AmdgpuLdsBankServiceTest, ReadRequestPolicyChangesBroadcastProfile) {
   const auto* count_each_model =
-      loom_amdgpu_lds_bank_service_gfx1250_b128_model(
-          LOOM_AMDGPU_LDS_BANK_SERVICE_DIRECTION_READ);
+      LookupB128Model(LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_B128);
   ASSERT_NE(count_each_model, nullptr);
   const auto count_each_result = EvaluateLinear(count_each_model, 0);
   ExpectProfile(count_each_result, /*required_rounds=*/32,

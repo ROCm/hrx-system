@@ -411,7 +411,7 @@ def expand_target_selections(selections: Sequence[str]) -> list[str]:
 
 def resolve_device_binary_targets(
     target_names: Sequence[str],
-) -> list[amdgpu_target_map.DeviceBinaryTarget]:
+) -> list[amdgpu_target_map.AmdgpuDeviceBinaryTarget]:
     targets = []
     seen = set()
     unknown_targets = []
@@ -593,7 +593,7 @@ def minimize_code_object(
 
 def build_target(
     *,
-    target: amdgpu_target_map.DeviceBinaryTarget,
+    target: amdgpu_target_map.AmdgpuDeviceBinaryTarget,
     source_paths: Sequence[Path],
     repo_root: Path,
     binary_root: Path | None,

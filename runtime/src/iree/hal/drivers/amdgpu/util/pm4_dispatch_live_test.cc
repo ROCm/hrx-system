@@ -146,16 +146,16 @@ static hsa_status_t FindAgentCodeObjectTarget(hsa_isa_t isa, void* user_data) {
     return HSA_STATUS_ERROR;
   }
 
-  iree_hal_amdgpu_target_id_t exact_target_id;
-  iree_status_t status = iree_hal_amdgpu_target_id_parse_hsa_isa_name(
+  iree_hal_amdgpu_target_identity_t exact_target_id;
+  iree_status_t status = iree_hal_amdgpu_target_identity_parse_hsa_isa_name(
       iree_make_cstring_view(name.data()), &exact_target_id);
   if (!iree_status_is_ok(status)) {
     iree_status_free(status);
     return HSA_STATUS_SUCCESS;
   }
 
-  iree_hal_amdgpu_target_id_t code_object_target_id;
-  status = iree_hal_amdgpu_target_id_lookup_code_object_target(
+  iree_hal_amdgpu_target_identity_t code_object_target_id;
+  status = iree_hal_amdgpu_target_identity_project_code_object(
       &exact_target_id, &code_object_target_id);
   if (!iree_status_is_ok(status)) {
     iree_status_free(status);

@@ -9,21 +9,30 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 
 from loom.gen.target.arch.amdgpu import amdgpu_target_info
 from loom.target.arch.amdgpu import target_info as amdgpu_target_info_data
+from loom.target.arch.amdgpu.lds_bank_service import (
+    AMDGPU_LDS_BANK_SERVICE_MODEL_INFOS,
+    AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES,
+    validate_amdgpu_lds_bank_service_model_coverage,
+)
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+    AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID,
     AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11,
+    AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY,
     AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
-    AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE,
     AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+    AMDGPU_TARGET_ID_FEATURE_SUPPORT_KNOWN_FLAGS,
     AmdgpuDescriptorSetInfo,
     AmdgpuDescriptorSetIsaInfo,
     AmdgpuDescriptorSetVectorMemoryInfo,
     AmdgpuKernelDescriptorVgprGranules,
+    AmdgpuProcessorAsicRevisionInfo,
     AmdgpuProcessorKernelDescriptorInfo,
     processor_info,
 )
@@ -72,6 +81,29 @@ def test_memory_cache_policy_fragments_are_data_only() -> None:
     assert "[LOOM_CACHE_TEMPORAL_BYPASS] = 3" in temporal_th
 
 
+def test_lds_bank_service_fragment_is_data_only() -> None:
+    source = amdgpu_target_info._emit_lds_bank_service_model_rows()
+
+    assert "typedef " not in source
+    assert "#ifndef " not in source
+    assert "#include " not in source
+    assert "\nif " not in source
+    assert "\nreturn " not in source
+    assert "kAmdgpuLdsBankServiceModelSet0Bindings[]" in source
+    assert "kAmdgpuLdsBankServiceModelSets[]" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_B128" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B128" in source
+    assert 'IREE_SVL("amdgpu.lds.wave32.b128.quad-phases.read.count-each")' in source
+
+
+def test_lds_bank_service_rejects_unselected_model_data() -> None:
+    with _raises_value_error("models are not selected by a target row"):
+        validate_amdgpu_lds_bank_service_model_coverage(
+            (),
+            AMDGPU_LDS_BANK_SERVICE_MODEL_INFOS,
+        )
+
+
 def test_target_info_table_source_is_data_only() -> None:
     descriptor_set_info = amdgpu_target_info.sorted_descriptor_set_infos()[0]
     descriptor_row = amdgpu_target_info._AmdgpuDescriptorSetRow(
@@ -104,10 +136,72 @@ def test_target_info_table_source_is_data_only() -> None:
     assert "\nreturn " not in source
     assert ".descriptor_set = {" in source
     assert ".generic_version = UINT32_C(0)," in source
+    assert ".target_id = {" in source
+    assert (".supported_features = LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE,") in source
+    assert ".asic_revisions = {" in source
+    assert ".entries = NULL," in source
+    assert ".count = UINT16_C(0)," in source
+    assert ".default_ordinal = UINT16_C(0)," in source
     assert ".generic_code_object = {" in source
     assert ".processor_ordinal = LOOM_AMDGPU_PROCESSOR_ORDINAL_NONE," in source
     assert ".introduction_version = UINT16_C(0)," in source
     assert ".kernel_descriptor = {" in source
+    assert ".kernel_entry = {" in source
+    assert ".instructions = {" in source
+    assert (".lds_bank_service_model_set_ordinal = LOOM_AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE,") in source
+
+
+def test_multiple_revisioned_processors_generate_data_rows_only() -> None:
+    processors_by_name = {info.processor: info for info in amdgpu_target_info_data.AMDGPU_PROCESSOR_INFOS}
+    template = processors_by_name["gfx1250"]
+    processors = (
+        replace(template, processor="gfx-test-a"),
+        replace(
+            template,
+            processor="gfx-test-b",
+            asic_revisions=(
+                AmdgpuProcessorAsicRevisionInfo(
+                    value=7,
+                    name="c0",
+                    lds_bank_service_models=(AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES),
+                    kernel_metadata_extensions=((".test_revision", "C0"),),
+                ),
+                AmdgpuProcessorAsicRevisionInfo(
+                    value=9,
+                    name="d0",
+                    kernel_metadata_extensions=((".test_revision", "D0"),),
+                ),
+            ),
+            default_asic_revision=9,
+        ),
+    )
+    descriptor_set_info = amdgpu_target_info.sorted_descriptor_set_infos()[0]
+    descriptor_row = amdgpu_target_info._AmdgpuDescriptorSetRow(
+        info=descriptor_set_info,
+        sopp=amdgpu_target_info._AmdgpuSoppOpcodeRow(
+            nop=0,
+            delay_alu=0,
+            endpgm=1,
+            branch=2,
+            conditional_branch_scc0=4,
+            conditional_branch_scc1=5,
+        ),
+    )
+
+    source = amdgpu_target_info._emit_tables_source(
+        processors=processors,
+        descriptor_set_rows=(descriptor_row,),
+    )
+
+    assert "loom_amdgpu_target_info_gfx_test_a_asic_revisions[]" in source
+    assert "loom_amdgpu_target_info_gfx_test_b_asic_revisions[]" in source
+    assert ".value = UINT32_C(7)," in source
+    assert '.name = IREE_SVL("c0"),' in source
+    assert ".lds_bank_service_model_set_ordinal = UINT16_C(0)," in source
+    assert '.key = IREE_SVL(".test_revision"),' in source
+    assert ".default_ordinal = UINT16_C(1)," in source
+    assert "\nif " not in source
+    assert "\nreturn " not in source
 
 
 def test_generic_code_object_fields_cover_canonical_map() -> None:
@@ -115,7 +209,7 @@ def test_generic_code_object_fields_cover_canonical_map() -> None:
     processor_ordinals = {info.processor: ordinal for ordinal, info in enumerate(processors)}
     processors_by_name = {info.processor: info for info in processors}
 
-    for compatibility in amdgpu_target_info_data.AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
+    for compatibility in amdgpu_target_info_data.AMDGPU_EXACT_TARGET_INFOS:
         exact_processor = processors_by_name[compatibility.exact_processor]
         generic_processor_ordinal, introduction_version = amdgpu_target_info._processor_generic_code_object_fields(exact_processor, processor_ordinals)
         if compatibility.generic_introduction_version != 0:
@@ -194,6 +288,16 @@ def test_target_info_flag_expressions_cover_every_known_bit() -> None:
             amdgpu_target_info._PROCESSOR_INFO_FLAG_EXPRS,
         ),
         (
+            amdgpu_target_info._instruction_constraint_bits_expr,
+            AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS,
+            amdgpu_target_info._INSTRUCTION_CONSTRAINT_BIT_EXPRS,
+        ),
+        (
+            amdgpu_target_info._target_id_feature_support_flags_expr,
+            AMDGPU_TARGET_ID_FEATURE_SUPPORT_KNOWN_FLAGS,
+            amdgpu_target_info._TARGET_ID_FEATURE_SUPPORT_FLAG_EXPRS,
+        ),
+        (
             amdgpu_target_info._wavefront_size_flags_expr,
             amdgpu_target_info_data.AMDGPU_WAVEFRONT_SIZE_KNOWN_FLAGS,
             amdgpu_target_info._WAVEFRONT_SIZE_FLAG_EXPRS,
@@ -221,13 +325,12 @@ def test_cluster_launch_state_is_scoped_to_gfx1250() -> None:
     assert {info.processor for info in amdgpu_target_info_data.AMDGPU_PROCESSOR_INFOS if info.flags & AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE} == {"gfx1250"}
 
 
-def test_gfx125x_entry_envelope_covers_concrete_and_generic_processors() -> None:
+def test_initial_vmem_replay_entry_profile_covers_required_processors() -> None:
     processors = {info.processor: info for info in amdgpu_target_info_data.AMDGPU_PROCESSOR_INFOS}
 
-    assert processors["gfx1250"].flags & AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
-    assert processors["gfx1251"].flags & AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
-    assert processors["gfx12-5-generic"].flags & AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
-    assert not processors["gfx1200"].flags & AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
+    for processor_name in ("gfx1250", "gfx1251", "gfx12-5-generic"):
+        assert processors[processor_name].kernel_entry.profile == AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY
+    assert processors["gfx1200"].kernel_entry.profile != AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY
 
 
 def test_target_info_flag_expressions_reject_unknown_bits() -> None:
@@ -235,6 +338,10 @@ def test_target_info_flag_expressions_reject_unknown_bits() -> None:
         amdgpu_target_info._descriptor_set_info_flags_expr(1 << 63)
     with _raises_value_error("unknown AMDGPU processor info flags"):
         amdgpu_target_info._processor_info_flags_expr(1 << 31)
+    with _raises_value_error("unknown AMDGPU instruction constraint flags"):
+        amdgpu_target_info._instruction_constraint_bits_expr(1 << 31)
+    with _raises_value_error("unknown AMDGPU target-ID feature support"):
+        amdgpu_target_info._target_id_feature_support_flags_expr(1 << 31)
     with _raises_value_error("unknown AMDGPU wavefront-size flags"):
         amdgpu_target_info._wavefront_size_flags_expr(1 << 31)
     with _raises_value_error("unknown AMDGPU kernel descriptor ABI flags"):

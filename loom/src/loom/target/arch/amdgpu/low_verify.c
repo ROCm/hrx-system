@@ -11,7 +11,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
-#include "loom/target/arch/amdgpu/gfx1250_a0_errata.h"
+#include "loom/target/arch/amdgpu/instruction_constraints.h"
 #include "loom/target/arch/amdgpu/low_aliases.h"
 #include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/ops/target.h"
@@ -22,8 +22,12 @@ typedef struct loom_amdgpu_low_verify_state_t {
   const loom_low_resolved_target_t* target;
   // Borrowed function name used in diagnostics.
   iree_string_view_t function_name;
-  // Effective gfx1250 revision, or UNSPECIFIED for other processors.
-  loom_amdgpu_gfx1250_revision_t gfx1250_revision;
+  // Normalized compiler-semantic properties for the resolved target record.
+  loom_amdgpu_target_properties_t properties;
+  // Borrowed exact processor identity used only as diagnostic context.
+  iree_string_view_t processor_name;
+  // Canonical ASIC revision name used only as diagnostic context.
+  iree_string_view_t asic_revision_name;
 } loom_amdgpu_low_verify_state_t;
 
 static iree_status_t loom_amdgpu_low_verify_begin_function(
@@ -40,44 +44,66 @@ static iree_status_t loom_amdgpu_low_verify_begin_function(
   loom_amdgpu_low_verify_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(
       loom_low_verify_context_arena(context), sizeof(*state), (void**)&state));
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_record_processor(target->target_op);
+  IREE_ASSERT(processor != NULL);
+  const loom_amdgpu_processor_asic_revision_info_t* asic_revision =
+      loom_amdgpu_target_record_asic_revision(target->target_op);
   *state = (loom_amdgpu_low_verify_state_t){
       .target = target,
       .function_name = loom_low_diagnostic_function_name(
           loom_low_verify_context_module(context),
           loom_low_verify_context_function_op(context)),
-      .gfx1250_revision = loom_amdgpu_target_record_effective_gfx1250_revision(
-          target->target_op),
+      .processor_name = processor->name,
+      .asic_revision_name =
+          asic_revision != NULL ? asic_revision->name : IREE_SV("none"),
   };
+  loom_amdgpu_target_record_resolve_properties(
+      target->target_op, &target->bundle_storage.bundle, &state->properties);
   *out_provider_state = state;
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_low_verify_gfx1250_a0_errata(
+static iree_status_t loom_amdgpu_low_verify_instruction_constraints(
     loom_low_verify_context_t* context,
     const loom_amdgpu_low_verify_state_t* state,
     const loom_low_resolved_descriptor_packet_t* packet) {
-  if (state->gfx1250_revision != LOOM_AMDGPU_GFX1250_REVISION_A0) {
+  if (state->properties.instruction_constraints == 0) {
     return iree_ok_status();
   }
-  const loom_amdgpu_gfx1250_a0_erratum_t* erratum =
-      loom_amdgpu_gfx1250_a0_erratum_for_descriptor(
-          state->target->descriptor_set, packet->descriptor);
-  if (erratum == NULL) {
-    return iree_ok_status();
+  loom_amdgpu_instruction_constraint_bits_t active_constraints =
+      loom_amdgpu_instruction_constraints_for_descriptor(
+          state->target->descriptor_set, packet->descriptor) &
+      state->properties.instruction_constraints;
+  while (active_constraints != 0) {
+    // Select the least-significant atom for deterministic diagnostics.
+    const loom_amdgpu_instruction_constraint_bit_t constraint_bit =
+        (loom_amdgpu_instruction_constraint_bit_t)(active_constraints &
+                                                   (~active_constraints + 1u));
+    active_constraints &= ~constraint_bit;
+    const loom_amdgpu_instruction_constraint_info_t constraint =
+        loom_amdgpu_instruction_constraint_info(constraint_bit);
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(state->function_name),
+        loom_param_with_field_ref(
+            loom_param_string(packet->key),
+            loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+                                      packet->key_attr_index)),
+        loom_param_string(state->target->descriptor_set_key),
+        loom_param_string(state->processor_name),
+        loom_param_string(state->asic_revision_name),
+        loom_param_string(
+            loom_amdgpu_instruction_constraint_kind_name(constraint.kind)),
+        loom_param_string(constraint.constraint_key),
+        loom_param_string(loom_amdgpu_instruction_constraint_resolution_name(
+            constraint.resolution)),
+    };
+    IREE_RETURN_IF_ERROR(
+        loom_low_verify_context_emit(context, packet->op, LOOM_ERR_AMDGPU_047,
+                                     params, IREE_ARRAYSIZE(params)));
+    if (loom_low_verify_context_should_stop(context)) break;
   }
-  const loom_diagnostic_param_t params[] = {
-      loom_param_string(state->function_name),
-      loom_param_with_field_ref(
-          loom_param_string(packet->key),
-          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
-                                    packet->key_attr_index)),
-      loom_param_string(state->target->descriptor_set_key),
-      loom_param_string(IREE_SV("a0")),
-      loom_param_string(erratum->erratum_key),
-      loom_param_string(erratum->legalization_key),
-  };
-  return loom_low_verify_context_emit(context, packet->op, LOOM_ERR_AMDGPU_047,
-                                      params, IREE_ARRAYSIZE(params));
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_low_emit_blocked_alias(
@@ -257,7 +283,8 @@ static iree_status_t loom_amdgpu_low_verify_op(
   if (packet->descriptor != NULL) {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_low_verify_dpp_control(context, state, packet));
-    return loom_amdgpu_low_verify_gfx1250_a0_errata(context, state, packet);
+    return loom_amdgpu_low_verify_instruction_constraints(context, state,
+                                                          packet);
   }
   const loom_amdgpu_low_blocked_alias_t* alias =
       loom_amdgpu_low_blocked_alias_lookup(packet->key);

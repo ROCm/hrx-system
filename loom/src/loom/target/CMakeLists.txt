@@ -32,6 +32,21 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    materialization
+  HDRS
+    "materialization.h"
+  SRCS
+    "materialization.c"
+  DEPS
+    ::types
+    iree::base
+    loom::ir
+    loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     residency
   HDRS
     "residency.h"
@@ -332,6 +347,7 @@ loom_cc_library(
     ::low_descriptor_registry
     ::low_legality
     ::low_packet_diagnostics
+    ::materialization
     ::math_policy
     ::profile
     iree::base

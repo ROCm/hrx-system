@@ -51,18 +51,6 @@ static iree_string_view_t loom_amdgpu_metadata_argument_value_kind(
   return iree_string_view_empty();
 }
 
-static iree_string_view_t loom_amdgpu_metadata_gfx1250_revision_name(
-    loom_amdgpu_gfx1250_revision_t revision) {
-  switch (revision) {
-    case LOOM_AMDGPU_GFX1250_REVISION_A0:
-      return IREE_SV("A0");
-    case LOOM_AMDGPU_GFX1250_REVISION_B0:
-      return IREE_SV("B0");
-    default:
-      return iree_string_view_empty();
-  }
-}
-
 static iree_status_t loom_amdgpu_metadata_validate_argument(
     const loom_amdgpu_metadata_argument_t* argument) {
   IREE_RETURN_IF_ERROR(loom_amdgpu_metadata_validate_string(
@@ -171,42 +159,9 @@ static iree_status_t loom_amdgpu_metadata_validate(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU metadata requires at least one kernel");
   }
-  const bool is_gfx1250 =
-      iree_string_view_equal(target_id.processor->name, IREE_SV("gfx1250"));
-  loom_amdgpu_gfx1250_revision_t code_object_revision =
-      LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED;
   for (iree_host_size_t i = 0; i < metadata->kernel_count; ++i) {
     const loom_amdgpu_metadata_kernel_t* kernel = &metadata->kernels[i];
     IREE_RETURN_IF_ERROR(loom_amdgpu_metadata_validate_kernel(kernel));
-    if (!is_gfx1250) {
-      if (kernel->gfx1250_revision !=
-          LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AMDGPU metadata kernel %" PRIhsz
-            " specifies a gfx1250 revision for processor '%.*s'",
-            i, (int)target_id.processor->name.size,
-            target_id.processor->name.data);
-      }
-      continue;
-    }
-    if (kernel->gfx1250_revision != LOOM_AMDGPU_GFX1250_REVISION_A0 &&
-        kernel->gfx1250_revision != LOOM_AMDGPU_GFX1250_REVISION_B0) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AMDGPU metadata kernel %" PRIhsz
-          " targeting gfx1250 requires an A0 or B0 silicon revision",
-          i);
-    }
-    if (code_object_revision == LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED) {
-      code_object_revision = kernel->gfx1250_revision;
-    } else if (kernel->gfx1250_revision != code_object_revision) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AMDGPU metadata kernel %" PRIhsz
-          " gfx1250 revision does not match the code object",
-          i);
-    }
   }
   return iree_ok_status();
 }
@@ -315,12 +270,12 @@ static iree_status_t loom_amdgpu_metadata_append_kernel_assembly(
                                           kernel->workgroup_cluster_size.y,
                                           kernel->workgroup_cluster_size.z));
   }
-  const iree_string_view_t gfx1250_revision =
-      loom_amdgpu_metadata_gfx1250_revision_name(kernel->gfx1250_revision);
-  if (!iree_string_view_is_empty(gfx1250_revision)) {
+  for (uint16_t i = 0; i < kernel->target_extensions.count; ++i) {
+    const loom_amdgpu_metadata_string_property_t* property =
+        &kernel->target_extensions.entries[i];
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        builder, "      .gfx1250_revision: %.*s\n", (int)gfx1250_revision.size,
-        gfx1250_revision.data));
+        builder, "      %.*s: %.*s\n", (int)property->key.size,
+        property->key.data, (int)property->value.size, property->value.data));
   }
   if (kernel->argument_count == 0) {
     return iree_string_builder_append_cstring(builder, "      .args: []\n");
@@ -532,16 +487,38 @@ static iree_status_t loom_amdgpu_metadata_append_argument_msgpack(
   return iree_ok_status();
 }
 
+static iree_status_t
+loom_amdgpu_metadata_append_target_extensions_before_msgpack(
+    const loom_amdgpu_metadata_string_property_set_t* metadata,
+    iree_string_view_t boundary, uint16_t* inout_ordinal,
+    iree_string_builder_t* builder) {
+  while (*inout_ordinal < metadata->count) {
+    const loom_amdgpu_metadata_string_property_t* property =
+        &metadata->entries[*inout_ordinal];
+    if (!iree_string_view_is_empty(boundary) &&
+        iree_string_view_compare(property->key, boundary) > 0) {
+      break;
+    }
+    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
+        builder, property->key, property->value));
+    ++*inout_ordinal;
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_metadata_append_kernel_msgpack(
     const loom_amdgpu_metadata_kernel_t* kernel,
     iree_string_builder_t* builder) {
-  const iree_string_view_t gfx1250_revision =
-      loom_amdgpu_metadata_gfx1250_revision_name(kernel->gfx1250_revision);
   const iree_host_size_t field_count =
       11 + (kernel->has_required_workgroup_size ? 1 : 0) +
       (kernel->has_workgroup_cluster_size ? 1 : 0) +
-      (!iree_string_view_is_empty(gfx1250_revision) ? 1 : 0);
+      kernel->target_extensions.count;
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_map(builder, field_count));
+  uint16_t target_extension_ordinal = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_metadata_append_target_extensions_before_msgpack(
+          &kernel->target_extensions, IREE_SV(".args"),
+          &target_extension_ordinal, builder));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_msgpack_append_string(builder, IREE_SV(".args")));
   IREE_RETURN_IF_ERROR(
@@ -552,6 +529,10 @@ static iree_status_t loom_amdgpu_metadata_append_kernel_msgpack(
   }
   if (kernel->has_workgroup_cluster_size) {
     IREE_RETURN_IF_ERROR(
+        loom_amdgpu_metadata_append_target_extensions_before_msgpack(
+            &kernel->target_extensions, IREE_SV(".cluster_dims"),
+            &target_extension_ordinal, builder));
+    IREE_RETURN_IF_ERROR(
         loom_amdgpu_msgpack_append_string(builder, IREE_SV(".cluster_dims")));
     IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_array(builder, 3));
     IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
@@ -561,27 +542,51 @@ static iree_status_t loom_amdgpu_metadata_append_kernel_msgpack(
     IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
         builder, kernel->workgroup_cluster_size.z));
   }
-  if (!iree_string_view_is_empty(gfx1250_revision)) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
-        builder, IREE_SV(".gfx1250_revision"), gfx1250_revision));
-  }
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_metadata_append_target_extensions_before_msgpack(
+          &kernel->target_extensions, IREE_SV(".group_segment_fixed_size"),
+          &target_extension_ordinal, builder));
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
       builder, IREE_SV(".group_segment_fixed_size"),
       kernel->group_segment_fixed_size));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_metadata_append_target_extensions_before_msgpack(
+          &kernel->target_extensions, IREE_SV(".kernarg_segment_align"),
+          &target_extension_ordinal, builder));
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
       builder, IREE_SV(".kernarg_segment_align"),
       kernel->kernarg_segment_alignment));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_metadata_append_target_extensions_before_msgpack(
+          &kernel->target_extensions, IREE_SV(".kernarg_segment_size"),
+          &target_extension_ordinal, builder));
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
       builder, IREE_SV(".kernarg_segment_size"), kernel->kernarg_segment_size));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_metadata_append_target_extensions_before_msgpack(
+          &kernel->target_extensions, IREE_SV(".max_flat_workgroup_size"),
+          &target_extension_ordinal, builder));
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
       builder, IREE_SV(".max_flat_workgroup_size"),
       kernel->max_flat_workgroup_size));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_metadata_append_target_extensions_before_msgpack(
+          &kernel->target_extensions, IREE_SV(".name"),
+          &target_extension_ordinal, builder));
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
       builder, IREE_SV(".name"), kernel->name));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_metadata_append_target_extensions_before_msgpack(
+          &kernel->target_extensions, IREE_SV(".private_segment_fixed_size"),
+          &target_extension_ordinal, builder));
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
       builder, IREE_SV(".private_segment_fixed_size"),
       kernel->private_segment_fixed_size));
   if (kernel->has_required_workgroup_size) {
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_metadata_append_target_extensions_before_msgpack(
+            &kernel->target_extensions, IREE_SV(".reqd_workgroup_size"),
+            &target_extension_ordinal, builder));
     IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string(
         builder, IREE_SV(".reqd_workgroup_size")));
     IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_array(builder, 3));
@@ -592,15 +597,33 @@ static iree_status_t loom_amdgpu_metadata_append_kernel_msgpack(
     IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32(
         builder, kernel->required_workgroup_size.z));
   }
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_metadata_append_target_extensions_before_msgpack(
+          &kernel->target_extensions, IREE_SV(".sgpr_count"),
+          &target_extension_ordinal, builder));
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
       builder, IREE_SV(".sgpr_count"), kernel->sgpr_count));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_metadata_append_target_extensions_before_msgpack(
+          &kernel->target_extensions, IREE_SV(".symbol"),
+          &target_extension_ordinal, builder));
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_string_field(
       builder, IREE_SV(".symbol"), kernel->descriptor_symbol));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_metadata_append_target_extensions_before_msgpack(
+          &kernel->target_extensions, IREE_SV(".vgpr_count"),
+          &target_extension_ordinal, builder));
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
       builder, IREE_SV(".vgpr_count"), kernel->vgpr_count));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_metadata_append_target_extensions_before_msgpack(
+          &kernel->target_extensions, IREE_SV(".wavefront_size"),
+          &target_extension_ordinal, builder));
   IREE_RETURN_IF_ERROR(loom_amdgpu_msgpack_append_uint32_field(
       builder, IREE_SV(".wavefront_size"), kernel->wavefront_size));
-  return iree_ok_status();
+  return loom_amdgpu_metadata_append_target_extensions_before_msgpack(
+      &kernel->target_extensions, iree_string_view_empty(),
+      &target_extension_ordinal, builder);
 }
 
 iree_status_t loom_amdgpu_metadata_append_msgpack(

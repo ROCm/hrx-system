@@ -397,6 +397,9 @@ static iree_status_t loom_target_artifact_manifest_format_target_json(
           &object, "processor", target->processor));
   IREE_RETURN_IF_ERROR(
       loom_target_artifact_manifest_json_write_optional_string_field(
+          &object, "processor_revision", target->processor_revision));
+  IREE_RETURN_IF_ERROR(
+      loom_target_artifact_manifest_json_write_optional_string_field(
           &object, "triple", target->triple));
   IREE_RETURN_IF_ERROR(
       loom_target_artifact_manifest_json_write_optional_string_field(

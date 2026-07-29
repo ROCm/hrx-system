@@ -15,6 +15,8 @@
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/target/arch/amdgpu/profile.h"
+#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/descriptor.h"
 #include "loom/target/emit/native/elf.h"
@@ -243,7 +245,7 @@ loom_amdgpu_metadata_kernel_t MinimalKernel(iree_string_view_t name,
       /*.has_required_workgroup_size=*/true,
       /*.workgroup_cluster_size=*/{},
       /*.has_workgroup_cluster_size=*/false,
-      /*.gfx1250_revision=*/LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED,
+      /*.target_extensions=*/{},
       /*.arguments=*/nullptr,
       /*.argument_count=*/0,
   };
@@ -253,10 +255,13 @@ std::string StringViewToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
 
-std::string AmdhsaTargetIdForProcessor(
-    const loom_amdgpu_processor_info_t* processor) {
-  return std::string("amdgcn-amd-amdhsa--") +
-         StringViewToString(processor->name);
+std::string CodeObjectTargetIdForIdentity(
+    const loom_amdgpu_target_identity_t& identity) {
+  TestArena arena;
+  iree_string_view_t target_id = iree_string_view_empty();
+  IREE_CHECK_OK(loom_amdgpu_amdhsa_code_object_target_id_format(
+      &identity, arena.arena(), &target_id));
+  return StringViewToString(target_id);
 }
 
 TEST(AmdgpuHsacoTest, WritesGfx1100CodeObjectEnvelope) {
@@ -782,23 +787,28 @@ TEST(AmdgpuHsacoTest, WritesSupportedProcessorCodeObjectFlags) {
     const loom_amdgpu_processor_info_t* processor =
         loom_amdgpu_target_info_processor_at(i);
     ASSERT_NE(processor, nullptr);
-    if (!loom_amdgpu_processor_supports_hsaco(processor)) {
+    if (!loom_amdgpu_processor_properties_support_hsaco(
+            &processor->properties)) {
       continue;
     }
     ++supported_count;
 
+    loom_amdgpu_target_identity_t identity = {};
+    loom_amdgpu_target_identity_initialize(processor, &identity);
     loom_amdgpu_metadata_kernel_t metadata =
         MinimalKernel(IREE_SV("loom_kernel"), IREE_SV("loom_kernel.kd"));
-    metadata.wavefront_size = processor->wavefront.default_size;
-    if (iree_string_view_equal(processor->name, IREE_SV("gfx1250"))) {
-      metadata.gfx1250_revision = LOOM_AMDGPU_GFX1250_REVISION_B0;
-    }
+    metadata.wavefront_size = processor->properties.wavefront.default_size;
+    loom_amdgpu_target_profile_t target_profile = {};
+    IREE_ASSERT_OK(
+        loom_amdgpu_target_profile_initialize(&identity, &target_profile));
+    metadata.target_extensions =
+        target_profile.properties.kernel_metadata_extensions;
     const loom_amdgpu_hsaco_kernel_t kernel = {
         /*.metadata=*/metadata,
         /*.descriptor_options=*/{},
         /*.text=*/iree_make_const_byte_span(s_endpgm, sizeof(s_endpgm)),
     };
-    const std::string target_id = AmdhsaTargetIdForProcessor(processor);
+    const std::string target_id = CodeObjectTargetIdForIdentity(identity);
     const loom_amdgpu_hsaco_file_t file = {
         /*.target=*/iree_make_string_view(target_id.data(), target_id.size()),
         /*.processor=*/processor->name,
@@ -817,23 +827,25 @@ TEST(AmdgpuHsacoTest, WritesSupportedProcessorCodeObjectFlags) {
     EXPECT_EQ((uint8_t)bytes[8], LOOM_NATIVE_ELF_ABI_VERSION_AMDGPU_HSA_V6)
         << StringViewToString(processor->name);
     EXPECT_EQ(LoadLeU32(bytes, 48),
-              processor->elf.machine_flags | processor->elf.feature_flags |
-                  (processor->elf.generic_version
+              processor->properties.elf.machine_flags |
+                  processor->properties.elf.feature_flags |
+                  (processor->properties.elf.generic_version
                    << LOOM_AMDGPU_ELF_GENERIC_VERSION_OFFSET_V6))
         << StringViewToString(processor->name);
 
-    iree_hal_amdgpu_target_id_t decoded_target_id = {};
+    iree_hal_amdgpu_target_identity_t decoded_target_id = {};
     IREE_ASSERT_OK(iree_hal_amdgpu_code_object_target_id_from_elf(
         iree_make_const_byte_span(bytes.data(), bytes.size()),
         &decoded_target_id));
     EXPECT_TRUE(
         iree_string_view_equal(decoded_target_id.processor, processor->name))
         << StringViewToString(processor->name);
-    EXPECT_EQ(decoded_target_id.kind, processor->elf.generic_version
+    EXPECT_EQ(decoded_target_id.kind, processor->properties.elf.generic_version
                                           ? IREE_HAL_AMDGPU_TARGET_KIND_GENERIC
                                           : IREE_HAL_AMDGPU_TARGET_KIND_EXACT)
         << StringViewToString(processor->name);
-    EXPECT_EQ(decoded_target_id.generic_version, processor->elf.generic_version)
+    EXPECT_EQ(decoded_target_id.generic_version,
+              processor->properties.elf.generic_version)
         << StringViewToString(processor->name);
 
     const std::vector<Section> sections = ReadSections(bytes);
@@ -1033,15 +1045,17 @@ TEST(AmdgpuHsacoTest, RejectsMismatchedProcessor) {
 
 TEST(AmdgpuHsacoTest, WritesTargetFeatureSuffixCodeObjectFlags) {
   const uint8_t text[] = {0x00, 0x00, 0x81, 0xbf};
+  loom_amdgpu_metadata_kernel_t metadata =
+      MinimalKernel(IREE_SV("loom_kernel"), IREE_SV("loom_kernel.kd"));
+  metadata.wavefront_size = 64;
   const loom_amdgpu_hsaco_kernel_t kernel = {
-      /*.metadata=*/
-      MinimalKernel(IREE_SV("loom_kernel"), IREE_SV("loom_kernel.kd")),
+      /*.metadata=*/metadata,
       /*.descriptor_options=*/{},
       /*.text=*/iree_make_const_byte_span(text, sizeof(text)),
   };
   const loom_amdgpu_hsaco_file_t file = {
-      /*.target=*/IREE_SV("amdgcn-amd-amdhsa--gfx1100:sramecc+:xnack-"),
-      /*.processor=*/IREE_SV("gfx1100"),
+      /*.target=*/IREE_SV("amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-"),
+      /*.processor=*/IREE_SV("gfx942"),
       /*.kernels=*/&kernel,
       /*.kernel_count=*/1,
   };
@@ -1053,7 +1067,7 @@ TEST(AmdgpuHsacoTest, WritesTargetFeatureSuffixCodeObjectFlags) {
   const std::string bytes = StreamBytes(stream.get());
 
   ASSERT_GE(bytes.size(), 64u);
-  EXPECT_EQ(LoadLeU32(bytes, 48), LOOM_NATIVE_ELF_AMDGPU_FLAG_MACH_GFX1100 |
+  EXPECT_EQ(LoadLeU32(bytes, 48), LOOM_NATIVE_ELF_AMDGPU_FLAG_MACH_GFX942 |
                                       LOOM_AMDGPU_ELF_FEATURE_SRAMECC_ON_V4 |
                                       LOOM_AMDGPU_ELF_FEATURE_XNACK_OFF_V4);
 }

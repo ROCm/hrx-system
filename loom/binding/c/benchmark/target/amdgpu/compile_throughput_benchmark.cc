@@ -79,8 +79,10 @@ class AmdgpuI32ChainScenario final : public TargetCompileScenario {
         /*.structure_size=*/sizeof(profile_options),
         /*.next=*/nullptr,
         /*.identifier=*/processor,
-        /*.processor=*/processor,
-        /*.gfx1250_revision=*/LOOMC_AMDGPU_GFX1250_REVISION_DEFAULT,
+        /*.identity=*/
+        {
+            /*.processor=*/processor,
+        },
     };
     loomc_target_profile_t* raw_profile = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_target_profile_create_amdgpu(

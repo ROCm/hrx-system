@@ -8,67 +8,50 @@
 
 #include <stddef.h>
 
-static const loom_amdgpu_lds_bank_service_model_t kGfx1250ReadB128Model = {
-    .key = IREE_SVL("gfx1250.rocroller.ds_read_b128"),
-    .revision = IREE_SVL("ROCm/rocm-libraries@a7e3879c8847:LDSModel.cpp"),
-    .evidence_class =
-        LOOM_AMDGPU_LDS_BANK_SERVICE_EVIDENCE_VENDOR_SOFTWARE_MODEL_UNVALIDATED,
-    .direction = LOOM_AMDGPU_LDS_BANK_SERVICE_DIRECTION_READ,
-    .request_policy = LOOM_AMDGPU_LDS_BANK_SERVICE_REQUEST_POLICY_COUNT_EACH,
-    .wave_size = 32,
-    .bank_count = 32,
-    .bank_word_byte_count = 4,
-    .packet_word_count = 4,
-    .phase_count = 8,
-    .phase_lane_masks =
-        {
-            UINT64_C(0x0000000F),
-            UINT64_C(0x000000F0),
-            UINT64_C(0x00000F00),
-            UINT64_C(0x0000F000),
-            UINT64_C(0x000F0000),
-            UINT64_C(0x00F00000),
-            UINT64_C(0x0F000000),
-            UINT64_C(0xF0000000),
-        },
-};
+typedef struct loom_amdgpu_lds_bank_service_model_binding_t {
+  // Stable descriptor family evaluated by this model.
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
+  // Immutable structural service model.
+  loom_amdgpu_lds_bank_service_model_t model;
+} loom_amdgpu_lds_bank_service_model_binding_t;
 
-static const loom_amdgpu_lds_bank_service_model_t kGfx1250WriteB128Model = {
-    .key = IREE_SVL("gfx1250.rocroller.ds_write_b128"),
-    .revision = IREE_SVL("ROCm/rocm-libraries@a7e3879c8847:LDSModel.cpp"),
-    .evidence_class =
-        LOOM_AMDGPU_LDS_BANK_SERVICE_EVIDENCE_VENDOR_SOFTWARE_MODEL_UNVALIDATED,
-    .direction = LOOM_AMDGPU_LDS_BANK_SERVICE_DIRECTION_WRITE,
-    .request_policy = LOOM_AMDGPU_LDS_BANK_SERVICE_REQUEST_POLICY_COUNT_EACH,
-    .wave_size = 32,
-    .bank_count = 32,
-    .bank_word_byte_count = 4,
-    .packet_word_count = 4,
-    .phase_count = 8,
-    .phase_lane_masks =
-        {
-            UINT64_C(0x0000000F),
-            UINT64_C(0x000000F0),
-            UINT64_C(0x00000F00),
-            UINT64_C(0x0000F000),
-            UINT64_C(0x000F0000),
-            UINT64_C(0x00F00000),
-            UINT64_C(0x0F000000),
-            UINT64_C(0xF0000000),
-        },
-};
+typedef struct loom_amdgpu_lds_bank_service_model_set_t {
+  // Models sorted by descriptor reference.
+  const loom_amdgpu_lds_bank_service_model_binding_t* bindings;
+  // Number of models in |bindings|.
+  iree_host_size_t count;
+} loom_amdgpu_lds_bank_service_model_set_t;
+
+#include "loom/target/arch/amdgpu/analysis/lds_bank_service_model_rows.inl"
 
 const loom_amdgpu_lds_bank_service_model_t*
-loom_amdgpu_lds_bank_service_gfx1250_b128_model(
-    loom_amdgpu_lds_bank_service_direction_t direction) {
-  switch (direction) {
-    case LOOM_AMDGPU_LDS_BANK_SERVICE_DIRECTION_READ:
-      return &kGfx1250ReadB128Model;
-    case LOOM_AMDGPU_LDS_BANK_SERVICE_DIRECTION_WRITE:
-      return &kGfx1250WriteB128Model;
-    default:
-      return NULL;
+loom_amdgpu_lds_bank_service_model_lookup(
+    loom_amdgpu_lds_bank_service_model_set_ordinal_t model_set_ordinal,
+    loom_amdgpu_descriptor_ref_t descriptor_ref) {
+  if (model_set_ordinal ==
+      LOOM_AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE) {
+    return NULL;
   }
+  IREE_ASSERT(model_set_ordinal <
+              IREE_ARRAYSIZE(kAmdgpuLdsBankServiceModelSets));
+  const loom_amdgpu_lds_bank_service_model_set_t* model_set =
+      &kAmdgpuLdsBankServiceModelSets[model_set_ordinal];
+  iree_host_size_t low = 0;
+  iree_host_size_t high = model_set->count;
+  while (low < high) {
+    const iree_host_size_t mid = low + (high - low) / 2;
+    const loom_amdgpu_lds_bank_service_model_binding_t* binding =
+        &model_set->bindings[mid];
+    if (binding->descriptor_ref == descriptor_ref) {
+      return &binding->model;
+    }
+    if (binding->descriptor_ref < descriptor_ref) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  return NULL;
 }
 
 iree_string_view_t loom_amdgpu_lds_bank_service_evidence_class_name(

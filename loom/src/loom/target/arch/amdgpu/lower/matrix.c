@@ -39,8 +39,8 @@ static void loom_amdgpu_matrix_target_facts_from_environment(
               "AMDGPU matrix lowering requires an AMDGPU processor target "
               "record");
   loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
-  (void)loom_amdgpu_matrix_feature_bits_from_profile(processor->features.matrix,
-                                                     &feature_bits);
+  (void)loom_amdgpu_matrix_feature_bits_from_profile(
+      processor->properties.features.matrix, &feature_bits);
   if (environment->bundle == NULL || environment->bundle->snapshot == NULL ||
       environment->bundle->snapshot->subgroup_size == 0) {
     IREE_ASSERT_UNREACHABLE("selected AMDGPU matrix target subgroup size");

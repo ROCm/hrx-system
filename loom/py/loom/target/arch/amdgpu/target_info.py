@@ -18,23 +18,38 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from build_tools.amdgpu.target_map_data import (
-    AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS,
+    AMDGPU_EXACT_TARGET_INFOS,
     AMDGPU_GENERIC_CODE_OBJECT_INFOS,
-    AmdgpuCodeObjectCompatibilityInfo,
+    AMDGPU_TARGET_ID_FEATURE_ORDER,
+    TARGET_ID_FEATURE_SRAMECC,
+    TARGET_ID_FEATURE_XNACK,
+    AmdgpuAsicRevisionInfo,
+    AmdgpuExactTargetInfo,
+    exact_target_info,
     generic_code_object_current_version,
+    target_id_features_for_processor,
 )
 
 from loom.dialect.cache import CacheScope, CacheTemporal
+from loom.target.arch.amdgpu.lds_bank_service import (
+    AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES,
+    amdgpu_lds_bank_service_model_info_by_key,
+    validate_amdgpu_lds_bank_service_model_selection,
+)
 
 AMDGPU_AMDHSA_TARGET_TRIPLE = "amdgcn-amd-amdhsa"
 AMDGPU_PROCESSOR_ORDINAL_NONE = (2**16) - 1
 AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE = (2**16) - 1
+AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE = (2**16) - 1
 
 AMDGPU_KERNEL_DESCRIPTOR_PROFILE_NONE = "none"
 AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX9 = "gfx9"
 AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11 = "gfx11"
 AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX12 = "gfx12"
 AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125 = "gfx125"
+
+AMDGPU_KERNEL_ENTRY_PROFILE_NONE = "none"
+AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY = "initial_vmem_replay"
 
 AMDGPU_MATRIX_FEATURE_PROFILE_NONE = "none"
 AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908 = "mfma_gfx908"
@@ -130,12 +145,45 @@ AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS = {
 
 AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION = 1 << 0
 AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE = 1 << 1
-AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE = 1 << 2
 AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS = (
     AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
     | AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE
-    | AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
 )
+
+AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT = 1 << 0
+AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION = 1 << 1
+AMDGPU_INSTRUCTION_CONSTRAINT_CLUSTER_MULTICAST_MASK_PRESERVATION = 1 << 2
+AMDGPU_INSTRUCTION_CONSTRAINT_TENSOR_MULTICAST_MASK_PRESERVATION = 1 << 3
+AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K64_SCALE_PREFIX = 1 << 4
+AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K128_SPLIT = 1 << 5
+AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_F4_32X16_SPLIT = 1 << 6
+AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_SCALE_ENCODING = 1 << 7
+AMDGPU_INSTRUCTION_CONSTRAINT_SWMMAC_LOW_PRECISION_LOWERING = 1 << 8
+AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING = 1 << 9
+AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS = (
+    AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT
+    | AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION
+    | AMDGPU_INSTRUCTION_CONSTRAINT_CLUSTER_MULTICAST_MASK_PRESERVATION
+    | AMDGPU_INSTRUCTION_CONSTRAINT_TENSOR_MULTICAST_MASK_PRESERVATION
+    | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K64_SCALE_PREFIX
+    | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K128_SPLIT
+    | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_F4_32X16_SPLIT
+    | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_SCALE_ENCODING
+    | AMDGPU_INSTRUCTION_CONSTRAINT_SWMMAC_LOW_PRECISION_LOWERING
+    | AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING
+)
+
+AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE = 0
+AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC = 1 << 0
+AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK = 1 << 1
+AMDGPU_TARGET_ID_FEATURE_SUPPORT_KNOWN_FLAGS = (
+    AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC | AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK
+)
+AMDGPU_TARGET_ID_FEATURE_SUPPORT_FLAGS_BY_NAME = {
+    TARGET_ID_FEATURE_SRAMECC: AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC,
+    TARGET_ID_FEATURE_XNACK: AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
+}
+
 AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES = 64 * 1024
 AMDGPU_CDNA4_MAX_WORKGROUP_STORAGE_BYTES = 160 * 1024
 AMDGPU_GFX125X_MAX_WORKGROUP_STORAGE_BYTES = 320 * 1024
@@ -332,6 +380,27 @@ AMDGPU_DESCRIPTOR_SET_ISA_RDNA4 = AmdgpuDescriptorSetIsaInfo(
     isa_architecture_id=10,
 )
 
+# Kernel metadata fields written directly by the native AMDGPU emitter.
+# Revision rows may add external extension fields but may not replace these
+# standard fields.
+AMDGPU_STANDARD_KERNEL_METADATA_KEYS = frozenset(
+    (
+        ".args",
+        ".cluster_dims",
+        ".group_segment_fixed_size",
+        ".kernarg_segment_align",
+        ".kernarg_segment_size",
+        ".max_flat_workgroup_size",
+        ".name",
+        ".private_segment_fixed_size",
+        ".reqd_workgroup_size",
+        ".sgpr_count",
+        ".symbol",
+        ".vgpr_count",
+        ".wavefront_size",
+    )
+)
+
 
 @dataclass(frozen=True, slots=True)
 class AmdgpuProcessorDescriptorSetInfo:
@@ -343,6 +412,28 @@ class AmdgpuProcessorElfInfo:
     machine_flags: int
     feature_flags: int = 0
     generic_version: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuProcessorTargetIdInfo:
+    supported_features: int = AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuProcessorAsicRevisionInfo:
+    value: int
+    name: str
+    instruction_constraints: int = 0
+    lds_bank_service_models: tuple[str, ...] = ()
+    kernel_metadata_extensions: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuProcessorAsicRevisionSemantics:
+    value: int
+    instruction_constraints: int = 0
+    lds_bank_service_models: tuple[str, ...] | None = None
+    kernel_metadata_extensions: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,9 +457,20 @@ class AmdgpuProcessorKernelDescriptorInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class AmdgpuProcessorKernelEntryInfo:
+    profile: str = AMDGPU_KERNEL_ENTRY_PROFILE_NONE
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuProcessorInstructionInfo:
+    base_constraints: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class AmdgpuProcessorFeatureInfo:
     matrix: str = AMDGPU_MATRIX_FEATURE_PROFILE_NONE
     scheduling: int = 0
+    lds_bank_service_models: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -426,8 +528,13 @@ class AmdgpuProcessorInfo:
     flags: int
     descriptor_set: AmdgpuProcessorDescriptorSetInfo
     elf: AmdgpuProcessorElfInfo
+    target_id: AmdgpuProcessorTargetIdInfo
+    asic_revisions: tuple[AmdgpuProcessorAsicRevisionInfo, ...]
+    default_asic_revision: int | None
     wavefront: AmdgpuProcessorWavefrontInfo
     kernel_descriptor: AmdgpuProcessorKernelDescriptorInfo
+    kernel_entry: AmdgpuProcessorKernelEntryInfo = AmdgpuProcessorKernelEntryInfo()
+    instructions: AmdgpuProcessorInstructionInfo = AmdgpuProcessorInstructionInfo()
     features: AmdgpuProcessorFeatureInfo = AmdgpuProcessorFeatureInfo()
     limits: AmdgpuProcessorLimitInfo = AmdgpuProcessorLimitInfo()
     occupancy: AmdgpuProcessorOccupancyInfo = AmdgpuProcessorOccupancyInfo()
@@ -437,6 +544,8 @@ AMDGPU_OCCUPANCY_NONE = AmdgpuProcessorOccupancyInfo()
 
 
 AMDGPU_KERNEL_DESCRIPTOR_INFO_NONE = AmdgpuProcessorKernelDescriptorInfo()
+AMDGPU_KERNEL_ENTRY_INFO_NONE = AmdgpuProcessorKernelEntryInfo()
+AMDGPU_PROCESSOR_INSTRUCTION_INFO_NONE = AmdgpuProcessorInstructionInfo()
 AMDGPU_KERNEL_DESCRIPTOR_INFO_PACKED_WORKITEM_ID = AmdgpuProcessorKernelDescriptorInfo(
     flags=AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID,
 )
@@ -459,6 +568,10 @@ AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA4_GFX125 = AmdgpuProcessorKernelDescriptorInfo
     profile=AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125,
     flags=AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAGS_RDNA4,
     vgpr_granules=AmdgpuKernelDescriptorVgprGranules(wave32=16, wave64=8),
+)
+
+AMDGPU_KERNEL_ENTRY_INFO_INITIAL_VMEM_REPLAY = AmdgpuProcessorKernelEntryInfo(
+    profile=AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY
 )
 
 # These facts mirror LLVM's AMDGPU::IsaInfo occupancy model:
@@ -658,6 +771,28 @@ AMDGPU_VECTOR_MEMORY_CACHE_POLICY_TEMPORAL_TH: tuple[tuple[str, int], ...] = (
 )
 
 
+def amdgpu_target_id_feature_support_flags(
+    target_id_features: Sequence[str],
+) -> int:
+    flags = AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE
+    for feature in target_id_features:
+        try:
+            flags |= AMDGPU_TARGET_ID_FEATURE_SUPPORT_FLAGS_BY_NAME[feature]
+        except KeyError as exc:
+            raise ValueError(f"unknown AMDGPU target-ID feature '{feature}'") from exc
+    return flags
+
+
+def amdgpu_processor_target_id_info(
+    processor: str,
+) -> AmdgpuProcessorTargetIdInfo:
+    return AmdgpuProcessorTargetIdInfo(
+        supported_features=amdgpu_target_id_feature_support_flags(
+            target_id_features_for_processor(processor)
+        )
+    )
+
+
 def processor_info(
     processor: str,
     elf_machine_flags: int,
@@ -669,8 +804,14 @@ def processor_info(
     kernel_descriptor: AmdgpuProcessorKernelDescriptorInfo = (
         AMDGPU_KERNEL_DESCRIPTOR_INFO_NONE
     ),
+    kernel_entry: AmdgpuProcessorKernelEntryInfo = AMDGPU_KERNEL_ENTRY_INFO_NONE,
+    instructions: AmdgpuProcessorInstructionInfo = (
+        AMDGPU_PROCESSOR_INSTRUCTION_INFO_NONE
+    ),
+    asic_revision_semantics: tuple[AmdgpuProcessorAsicRevisionSemantics, ...] = (),
     matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_NONE,
     scheduling_bits: int = 0,
+    lds_bank_service_models: tuple[str, ...] = (),
     max_workgroup_storage_bytes: int = 0,
     flags: int = 0,
     occupancy: AmdgpuProcessorOccupancyInfo = AMDGPU_OCCUPANCY_NONE,
@@ -681,6 +822,67 @@ def processor_info(
             if max_workgroup_storage_bytes != 0
             else AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES
         )
+    canonical_exact_target = exact_target_info(processor)
+    semantic_values = tuple(semantics.value for semantics in asic_revision_semantics)
+    if len(set(semantic_values)) != len(semantic_values):
+        raise ValueError(
+            f"AMDGPU processor {processor} repeats an ASIC revision semantic overlay"
+        )
+    if semantic_values != tuple(sorted(semantic_values)):
+        raise ValueError(
+            f"AMDGPU processor {processor} ASIC revision semantic overlays "
+            "are not in ascending value order"
+        )
+    canonical_revision_values = (
+        {revision.value for revision in canonical_exact_target.asic_revisions}
+        if canonical_exact_target is not None
+        else set()
+    )
+    unknown_semantic_values = sorted(set(semantic_values) - canonical_revision_values)
+    if unknown_semantic_values:
+        raise ValueError(
+            f"AMDGPU processor {processor} has semantic overlays for unknown "
+            "ASIC revisions: "
+            + ", ".join(str(value) for value in unknown_semantic_values)
+        )
+    semantics_by_value = {
+        semantics.value: semantics for semantics in asic_revision_semantics
+    }
+
+    def materialize_revision(
+        revision: AmdgpuAsicRevisionInfo,
+    ) -> AmdgpuProcessorAsicRevisionInfo:
+        semantics = semantics_by_value.get(revision.value)
+        return AmdgpuProcessorAsicRevisionInfo(
+            value=revision.value,
+            name=revision.name,
+            instruction_constraints=(
+                semantics.instruction_constraints if semantics is not None else 0
+            ),
+            lds_bank_service_models=(
+                semantics.lds_bank_service_models
+                if semantics is not None
+                and semantics.lds_bank_service_models is not None
+                else lds_bank_service_models
+            ),
+            kernel_metadata_extensions=(
+                semantics.kernel_metadata_extensions if semantics is not None else ()
+            ),
+        )
+
+    asic_revisions = tuple(
+        materialize_revision(revision)
+        for revision in (
+            canonical_exact_target.asic_revisions
+            if canonical_exact_target is not None
+            else ()
+        )
+    )
+    default_asic_revision = (
+        canonical_exact_target.default_asic_revision
+        if canonical_exact_target is not None
+        else None
+    )
     return AmdgpuProcessorInfo(
         processor=processor,
         flags=flags,
@@ -690,11 +892,17 @@ def processor_info(
             feature_flags=elf_feature_flags,
             generic_version=elf_generic_version,
         ),
+        target_id=amdgpu_processor_target_id_info(processor),
+        asic_revisions=asic_revisions,
+        default_asic_revision=default_asic_revision,
         wavefront=AmdgpuProcessorWavefrontInfo(default_size=default_wavefront_size),
         kernel_descriptor=kernel_descriptor,
+        kernel_entry=kernel_entry,
+        instructions=instructions,
         features=AmdgpuProcessorFeatureInfo(
             matrix=matrix_feature_profile,
             scheduling=scheduling_bits,
+            lds_bank_service_models=lds_bank_service_models,
         ),
         limits=AmdgpuProcessorLimitInfo(
             max_workgroup_storage_bytes=max_workgroup_storage_bytes,
@@ -834,22 +1042,27 @@ def gfx125x_processor_info(
     elf_feature_flags: int = 0,
     elf_generic_version: int = 0,
     processor_flags: int = 0,
+    instructions: AmdgpuProcessorInstructionInfo = (
+        AMDGPU_PROCESSOR_INSTRUCTION_INFO_NONE
+    ),
+    asic_revision_semantics: tuple[AmdgpuProcessorAsicRevisionSemantics, ...] = (),
     matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
+    lds_bank_service_models: tuple[str, ...] = (),
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor=processor,
-        flags=(
-            AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
-            | AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
-            | processor_flags
-        ),
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION | processor_flags,
         descriptor_set_key=descriptor_set_key,
         elf_machine_flags=elf_machine_flags,
         elf_feature_flags=elf_feature_flags,
         elf_generic_version=elf_generic_version,
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA4_GFX125,
+        kernel_entry=AMDGPU_KERNEL_ENTRY_INFO_INITIAL_VMEM_REPLAY,
+        instructions=instructions,
+        asic_revision_semantics=asic_revision_semantics,
         matrix_feature_profile=matrix_feature_profile,
+        lds_bank_service_models=lds_bank_service_models,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
         max_workgroup_storage_bytes=AMDGPU_GFX125X_MAX_WORKGROUP_STORAGE_BYTES,
         occupancy=AMDGPU_OCCUPANCY_GFX125X,
@@ -1089,6 +1302,31 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         0x049,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
         processor_flags=AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
+        lds_bank_service_models=(
+            AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES
+        ),
+        asic_revision_semantics=(
+            AmdgpuProcessorAsicRevisionSemantics(
+                value=0,
+                instruction_constraints=(
+                    AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT
+                    | AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION
+                    | AMDGPU_INSTRUCTION_CONSTRAINT_CLUSTER_MULTICAST_MASK_PRESERVATION
+                    | AMDGPU_INSTRUCTION_CONSTRAINT_TENSOR_MULTICAST_MASK_PRESERVATION
+                    | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K64_SCALE_PREFIX
+                    | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K128_SPLIT
+                    | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_F4_32X16_SPLIT
+                    | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_SCALE_ENCODING
+                    | AMDGPU_INSTRUCTION_CONSTRAINT_SWMMAC_LOW_PRECISION_LOWERING
+                    | AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING
+                ),
+                kernel_metadata_extensions=((".gfx1250_revision", "A0"),),
+            ),
+            AmdgpuProcessorAsicRevisionSemantics(
+                value=1,
+                kernel_metadata_extensions=((".gfx1250_revision", "B0"),),
+            ),
+        ),
     ),
     gfx125x_processor_info(
         "gfx1251",
@@ -1331,10 +1569,44 @@ def amdgpu_processor_info_by_name(processor: str) -> AmdgpuProcessorInfo | None:
     return None
 
 
+def amdgpu_processor_default_instruction_constraints(
+    info: AmdgpuProcessorInfo,
+) -> int:
+    constraints = info.instructions.base_constraints
+    if info.default_asic_revision is not None:
+        revision = next(
+            revision
+            for revision in info.asic_revisions
+            if revision.value == info.default_asic_revision
+        )
+        constraints |= revision.instruction_constraints
+    return constraints
+
+
+def amdgpu_lds_bank_service_model_sets(
+    processors: Sequence[AmdgpuProcessorInfo],
+) -> tuple[tuple[str, ...], ...]:
+    """Returns the interned non-empty model sets selected by target rows."""
+
+    model_sets = {
+        model_keys
+        for processor in processors
+        for model_keys in (
+            processor.features.lds_bank_service_models,
+            *(
+                revision.lds_bank_service_models
+                for revision in processor.asic_revisions
+            ),
+        )
+        if model_keys
+    }
+    return tuple(sorted(model_sets))
+
+
 def amdgpu_generic_code_object_compatibility_info(
     exact_processor: str,
-) -> AmdgpuCodeObjectCompatibilityInfo | None:
-    for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
+) -> AmdgpuExactTargetInfo | None:
+    for info in AMDGPU_EXACT_TARGET_INFOS:
         if info.exact_processor != exact_processor:
             continue
         if info.generic_introduction_version != 0:
@@ -1348,7 +1620,7 @@ def validate_amdgpu_code_object_processor_rows(
 ) -> None:
     processors_by_name = {info.processor: info for info in processors}
     required_processor_names = {
-        info.exact_processor for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
+        info.exact_processor for info in AMDGPU_EXACT_TARGET_INFOS
     } | {info.processor for info in AMDGPU_GENERIC_CODE_OBJECT_INFOS}
     missing_processor_names = sorted(
         required_processor_names - processors_by_name.keys()
@@ -1386,6 +1658,147 @@ def validate_amdgpu_code_object_processor_rows(
                 f"AMDGPU generic processor {generic_info.processor} has "
                 f"target-info version {processor.elf.generic_version}, "
                 f"expected canonical version {generic_info.current_version}"
+            )
+
+
+def validate_amdgpu_target_id_processor_rows(
+    processors: Sequence[AmdgpuProcessorInfo],
+) -> None:
+    expected_feature_names = set(AMDGPU_TARGET_ID_FEATURE_ORDER)
+    mapped_feature_names = set(AMDGPU_TARGET_ID_FEATURE_SUPPORT_FLAGS_BY_NAME)
+    if mapped_feature_names != expected_feature_names:
+        raise ValueError(
+            "Loom AMDGPU target-ID feature projection disagrees with the "
+            "canonical target map"
+        )
+
+    processors_by_name = {info.processor: info for info in processors}
+    required_processor_names = {
+        info.exact_processor for info in AMDGPU_EXACT_TARGET_INFOS
+    } | {info.processor for info in AMDGPU_GENERIC_CODE_OBJECT_INFOS}
+    missing_processor_names = sorted(
+        required_processor_names - processors_by_name.keys()
+    )
+    if missing_processor_names:
+        raise ValueError(
+            "AMDGPU target-info table is missing canonical target-ID "
+            f"processors: {', '.join(missing_processor_names)}"
+        )
+
+    for processor in required_processor_names:
+        actual = processors_by_name[processor].target_id
+        expected = amdgpu_processor_target_id_info(processor)
+        if actual != expected:
+            raise ValueError(
+                f"AMDGPU processor {processor} target-ID qualification "
+                "disagrees with the canonical target map"
+            )
+
+
+def validate_amdgpu_processor_revision_rows(
+    processors: Sequence[AmdgpuProcessorInfo],
+) -> None:
+    """Validates Loom semantics attached to canonical physical revisions."""
+
+    lds_model_infos_by_key = amdgpu_lds_bank_service_model_info_by_key()
+    for processor in processors:
+        constraints = processor.instructions.base_constraints
+        validate_amdgpu_lds_bank_service_model_selection(
+            f"AMDGPU processor {processor.processor}",
+            processor.features.lds_bank_service_models,
+            lds_model_infos_by_key,
+        )
+        for revision in processor.asic_revisions:
+            constraints |= revision.instruction_constraints
+            validate_amdgpu_lds_bank_service_model_selection(
+                f"AMDGPU processor {processor.processor} ASIC revision {revision.name}",
+                revision.lds_bank_service_models,
+                lds_model_infos_by_key,
+            )
+            previous_metadata_key: str | None = None
+            for key, value in revision.kernel_metadata_extensions:
+                if (
+                    not key
+                    or key[0] != "."
+                    or any(
+                        ord(character) <= ord(" ") or character in ("'", "\\")
+                        for character in key
+                    )
+                ):
+                    raise ValueError(
+                        f"AMDGPU processor {processor.processor} ASIC revision "
+                        f"{revision.name} has invalid metadata key {key!r}"
+                    )
+                if not value or any(
+                    ord(character) <= ord(" ") or character in ("'", "\\")
+                    for character in value
+                ):
+                    raise ValueError(
+                        f"AMDGPU processor {processor.processor} ASIC revision "
+                        f"{revision.name} has invalid metadata value {value!r}"
+                    )
+                if previous_metadata_key is not None and previous_metadata_key >= key:
+                    raise ValueError(
+                        f"AMDGPU processor {processor.processor} ASIC revision "
+                        f"{revision.name} metadata keys are not unique and sorted"
+                    )
+                if key in AMDGPU_STANDARD_KERNEL_METADATA_KEYS:
+                    raise ValueError(
+                        f"AMDGPU processor {processor.processor} ASIC revision "
+                        f"{revision.name} metadata key {key!r} replaces a "
+                        "standard kernel metadata field"
+                    )
+                previous_metadata_key = key
+        unknown_constraints = constraints & ~AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS
+        if unknown_constraints:
+            raise ValueError(
+                f"AMDGPU processor {processor.processor} uses unknown "
+                f"instruction constraints 0x{unknown_constraints:x}"
+            )
+        if processor.asic_revisions:
+            portable_model_keys = set(
+                processor.asic_revisions[0].lds_bank_service_models
+            )
+            for revision in processor.asic_revisions[1:]:
+                portable_model_keys.intersection_update(
+                    revision.lds_bank_service_models
+                )
+            portable_models = tuple(
+                model_key
+                for model_key in processor.asic_revisions[0].lds_bank_service_models
+                if model_key in portable_model_keys
+            )
+            if processor.features.lds_bank_service_models != portable_models:
+                raise ValueError(
+                    f"AMDGPU processor {processor.processor} LDS bank-service "
+                    "models do not match the ASIC-revision intersection"
+                )
+        canonical_exact_target = exact_target_info(processor.processor)
+        canonical_revisions = (
+            tuple(
+                (revision.value, revision.name)
+                for revision in canonical_exact_target.asic_revisions
+            )
+            if canonical_exact_target is not None
+            else ()
+        )
+        actual_revisions = tuple(
+            (revision.value, revision.name) for revision in processor.asic_revisions
+        )
+        if actual_revisions != canonical_revisions:
+            raise ValueError(
+                f"AMDGPU processor {processor.processor} ASIC revisions "
+                "disagree with the canonical target map"
+            )
+        canonical_default_revision = (
+            canonical_exact_target.default_asic_revision
+            if canonical_exact_target is not None
+            else None
+        )
+        if processor.default_asic_revision != canonical_default_revision:
+            raise ValueError(
+                f"AMDGPU processor {processor.processor} default ASIC revision "
+                "disagrees with the canonical target map"
             )
 
 
@@ -1549,7 +1962,7 @@ def validate_amdgpu_generic_contracts(
         generic_processor = generic_processors[0]
         exact_members = tuple(
             processors_by_name[compatibility.exact_processor]
-            for compatibility in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
+            for compatibility in AMDGPU_EXACT_TARGET_INFOS
             if (
                 compatibility.code_object_processor == generic_processor.processor
                 and compatibility.generic_introduction_version
@@ -1658,6 +2071,48 @@ def validate_amdgpu_generic_contracts(
             raise ValueError(
                 f"AMDGPU generic processor {generic_processor.processor} "
                 "kernel descriptor facts do not match every member"
+            )
+        if any(
+            member.kernel_entry != generic_processor.kernel_entry
+            for member in exact_members
+        ):
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} "
+                "kernel entry facts do not match every member"
+            )
+
+        portable_instruction_constraints = 0
+        for member in exact_members:
+            portable_instruction_constraints |= (
+                amdgpu_processor_default_instruction_constraints(member)
+            )
+        if (
+            amdgpu_processor_default_instruction_constraints(generic_processor)
+            != portable_instruction_constraints
+        ):
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} "
+                "instruction constraints do not match the union of member "
+                "restrictions"
+            )
+
+        portable_lds_model_keys = set(exact_members[0].features.lds_bank_service_models)
+        for member in exact_members[1:]:
+            portable_lds_model_keys.intersection_update(
+                member.features.lds_bank_service_models
+            )
+        portable_lds_bank_service_models = tuple(
+            model_key
+            for model_key in exact_members[0].features.lds_bank_service_models
+            if model_key in portable_lds_model_keys
+        )
+        if (
+            generic_processor.features.lds_bank_service_models
+            != portable_lds_bank_service_models
+        ):
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} LDS "
+                "bank-service models do not match the member intersection"
             )
 
         scheduling_bits = 0

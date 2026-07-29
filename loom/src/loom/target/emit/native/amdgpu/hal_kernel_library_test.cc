@@ -25,6 +25,7 @@
 #include "loom/target/arch/amdgpu/planning/wait_counters.h"
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
+#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
 #include "loom/target/emit/native/elf.h"
@@ -567,8 +568,9 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
         ParseSource(iree_make_cstring_view(kSource), out_module));
   }
 
-  void ParseKernelForProcessor(const loom_amdgpu_processor_info_t* processor,
-                               loom_module_t** out_module) {
+  void ParseKernelForProcessor(
+      const loom_amdgpu_processor_info_t* processor, loom_module_t** out_module,
+      iree_string_view_t target_attrs = iree_string_view_empty()) {
     const loom_amdgpu_target_record_info_t* record_info =
         loom_amdgpu_target_record_info_for_processor(processor->name);
     ASSERT_NE(record_info, nullptr) << StringViewToString(processor->name);
@@ -577,6 +579,11 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
     source.append(record_info->processor_name.data,
                   record_info->processor_name.size);
     source += "> @gfx_target";
+    if (!iree_string_view_is_empty(target_attrs)) {
+      source += " {";
+      source.append(target_attrs.data, target_attrs.size);
+      source += "}";
+    }
     source +=
         "\n"
         "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
@@ -596,7 +603,7 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
 
   bool IsProcessorDescriptorSetLinked(
       const loom_amdgpu_processor_info_t* processor) const {
-    return IsDescriptorSetLinked(processor->descriptor_set.key);
+    return IsDescriptorSetLinked(processor->properties.descriptor_set.key);
   }
 
   void EmitGfx942Kernel(DiagnosticCapture* capture, bool* out_emitted) {
@@ -853,7 +860,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedSupportedProcessor) {
     const loom_amdgpu_processor_info_t* processor =
         loom_amdgpu_target_info_processor_at(i);
     ASSERT_NE(processor, nullptr);
-    if (!loom_amdgpu_processor_supports_hsaco(processor)) {
+    if (!loom_amdgpu_processor_properties_support_hsaco(
+            &processor->properties)) {
       continue;
     }
     if (!IsProcessorDescriptorSetLinked(processor)) {
@@ -889,14 +897,25 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedSupportedProcessor) {
         << StringViewToString(processor->name);
     if (library.hsaco_data_length > 64u) {
       EXPECT_EQ(LoadLeU32(library.hsaco_data, 48),
-                processor->elf.machine_flags | processor->elf.feature_flags |
-                    (processor->elf.generic_version
+                processor->properties.elf.machine_flags |
+                    processor->properties.elf.feature_flags |
+                    (processor->properties.elf.generic_version
                      << LOOM_AMDGPU_ELF_GENERIC_VERSION_OFFSET_V6))
           << StringViewToString(processor->name);
     }
     EXPECT_NE(iree_string_view_find(library.target_key, processor->name, 0),
               IREE_STRING_VIEW_NPOS)
         << StringViewToString(processor->name);
+    loom_amdgpu_target_identity_t identity = {};
+    loom_amdgpu_target_identity_initialize(processor, &identity);
+    iree_arena_allocator_t target_id_arena;
+    iree_arena_initialize(&block_pool_, &target_id_arena);
+    iree_string_view_t expected_target_id = iree_string_view_empty();
+    IREE_ASSERT_OK(loom_amdgpu_artifact_target_key_format_arena(
+        &identity, &target_id_arena, &expected_target_id));
+    EXPECT_TRUE(iree_string_view_equal(library.target_key, expected_target_id))
+        << StringViewToString(processor->name);
+    iree_arena_deinitialize(&target_id_arena);
     std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
                       library.hsaco_data_length);
     EXPECT_NE(hsaco.find("loom_kernel.kd"), std::string::npos)
@@ -907,6 +926,168 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedSupportedProcessor) {
     loom_module_free(module);
   }
   EXPECT_GE(linked_supported_count, 1u);
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest,
+       PreservesQualifiedIdentityAcrossArtifactSurfaces) {
+  struct QualifiedTargetCase {
+    // Exact processor carrying the authored identity facts.
+    const loom_amdgpu_processor_info_t* processor;
+    // Target-record attributes selecting exact identity coordinates.
+    std::string target_attrs;
+    // Canonical artifact target key retaining all identity coordinates.
+    std::string artifact_target_key;
+    // AMDHSA code-object target ID projected from the identity.
+    std::string code_object_target;
+    // Exact canonical feature array expected in the artifact manifest.
+    std::string features_json;
+    // Optional processor revision field expected in the artifact manifest.
+    std::string processor_revision_json;
+  };
+  std::vector<QualifiedTargetCase> cases;
+  const loom_amdgpu_processor_info_t* gfx942 = nullptr;
+  IREE_ASSERT_OK(
+      loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx942"), &gfx942));
+  cases.push_back({
+      /*.processor=*/gfx942,
+      /*.target_attrs=*/"sramecc = on, xnack = off",
+      /*.artifact_target_key=*/"gfx942:sramecc+:xnack-",
+      /*.code_object_target=*/
+      "amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-",
+      /*.features_json=*/"\"features\":[\"sramecc+\",\"xnack-\"]",
+      /*.processor_revision_json=*/{},
+  });
+
+  for (iree_host_size_t processor_ordinal = 0;
+       processor_ordinal < loom_amdgpu_target_info_processor_count();
+       ++processor_ordinal) {
+    const loom_amdgpu_processor_info_t* processor =
+        loom_amdgpu_target_info_processor_at(processor_ordinal);
+    ASSERT_NE(processor, nullptr);
+    for (uint16_t revision_ordinal = 0;
+         revision_ordinal < processor->asic_revisions.count;
+         ++revision_ordinal) {
+      const loom_amdgpu_processor_asic_revision_info_t* revision =
+          &processor->asic_revisions.entries[revision_ordinal];
+      loom_amdgpu_target_identity_t identity = {};
+      loom_amdgpu_target_identity_initialize(processor, &identity);
+      identity.asic_revision = revision;
+
+      char artifact_target_key_storage[128] = {};
+      iree_string_view_t artifact_target_key = iree_string_view_empty();
+      IREE_ASSERT_OK(loom_amdgpu_artifact_target_key_format(
+          &identity, sizeof(artifact_target_key_storage),
+          artifact_target_key_storage, &artifact_target_key));
+      iree_arena_allocator_t target_id_arena;
+      iree_arena_initialize(&block_pool_, &target_id_arena);
+      iree_string_view_t code_object_target = iree_string_view_empty();
+      IREE_ASSERT_OK(loom_amdgpu_amdhsa_code_object_target_id_format(
+          &identity, &target_id_arena, &code_object_target));
+      cases.push_back({
+          /*.processor=*/processor,
+          /*.target_attrs=*/
+          "asic_revision = " + std::to_string(revision->value),
+          /*.artifact_target_key=*/StringViewToString(artifact_target_key),
+          /*.code_object_target=*/StringViewToString(code_object_target),
+          /*.features_json=*/{},
+          /*.processor_revision_json=*/
+          "\"processor_revision\":\"" + StringViewToString(revision->name) +
+              "\"",
+      });
+      iree_arena_deinitialize(&target_id_arena);
+    }
+  }
+
+  iree_host_size_t exercised_count = 0;
+  iree_host_size_t exercised_revision_count = 0;
+  for (const QualifiedTargetCase& test_case : cases) {
+    SCOPED_TRACE(test_case.artifact_target_key);
+    const loom_amdgpu_processor_info_t* processor = test_case.processor;
+    if (!IsProcessorDescriptorSetLinked(processor)) {
+      continue;
+    }
+    ++exercised_count;
+
+    loom_module_t* module = nullptr;
+    ASSERT_NO_FATAL_FAILURE(ParseKernelForProcessor(
+        processor, &module,
+        iree_make_string_view(test_case.target_attrs.data(),
+                              test_case.target_attrs.size())));
+    loom_target_artifact_manifest_collect_options_t manifest_options = {};
+    loom_target_artifact_manifest_collect_options_initialize(&manifest_options);
+    manifest_options.mode = LOOM_TARGET_ARTIFACT_MANIFEST_MODE_SUMMARY;
+    DiagnosticCapture capture;
+    loom_amdgpu_hal_kernel_library_t library = {};
+    const loom_amdgpu_hal_kernel_library_options_t options = {
+        /*.target_selection=*/{},
+        /*.runtime_globals=*/{},
+        /*.data_symbols=*/{},
+        /*.data_symbol_count=*/{},
+        /*.diagnostic_sink=*/capture.sink(),
+        /*.source_resolver=*/{},
+        /*.max_errors=*/20,
+        /*.report=*/nullptr,
+        /*.capture_target_listing=*/false,
+        /*.artifact_name=*/{},
+        /*.artifact_manifest_identifier=*/{},
+        /*.artifact_manifest=*/manifest_options,
+    };
+    bool emitted = false;
+    IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
+        module, &options, iree_allocator_system(), &emitted, &library));
+    EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
+    EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
+    EXPECT_TRUE(iree_string_view_equal(
+        library.target_key,
+        iree_make_string_view(test_case.artifact_target_key.data(),
+                              test_case.artifact_target_key.size())));
+
+    ASSERT_GE(library.hsaco_data_length, 64u);
+    loom_amdgpu_amdhsa_target_id_t parsed_target_id = {};
+    IREE_ASSERT_OK(loom_amdgpu_target_info_parse_amdhsa_target_id(
+        iree_make_string_view(test_case.code_object_target.data(),
+                              test_case.code_object_target.size()),
+        &parsed_target_id));
+    uint32_t expected_elf_flags = 0;
+    IREE_ASSERT_OK(loom_amdgpu_target_info_amdhsa_target_id_elf_flags(
+        &parsed_target_id, &expected_elf_flags));
+    EXPECT_EQ(LoadLeU32(library.hsaco_data, 48), expected_elf_flags);
+
+    const std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
+                            library.hsaco_data_length);
+    EXPECT_NE(hsaco.find(test_case.code_object_target), std::string::npos);
+
+    ASSERT_NE(library.artifact_manifest.contents.data, nullptr);
+    const std::string manifest(
+        reinterpret_cast<const char*>(library.artifact_manifest.contents.data),
+        library.artifact_manifest.contents.data_length);
+    EXPECT_NE(manifest.find("\"family\":\"amdgpu\""), std::string::npos)
+        << manifest;
+    EXPECT_NE(manifest.find(std::string("\"processor\":\"") +
+                            StringViewToString(processor->name) + "\""),
+              std::string::npos)
+        << manifest;
+    EXPECT_NE(manifest.find(std::string("\"code_object_target\":\"") +
+                            test_case.code_object_target + "\""),
+              std::string::npos)
+        << manifest;
+    if (!test_case.features_json.empty()) {
+      EXPECT_NE(manifest.find(test_case.features_json), std::string::npos)
+          << manifest;
+    }
+    if (!test_case.processor_revision_json.empty()) {
+      EXPECT_NE(manifest.find(test_case.processor_revision_json),
+                std::string::npos)
+          << manifest;
+      ++exercised_revision_count;
+    }
+
+    loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                                iree_allocator_system());
+    loom_module_free(module);
+  }
+  EXPECT_GE(exercised_count, 1u);
+  EXPECT_GE(exercised_revision_count, 1u);
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
@@ -935,7 +1116,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
         loom_amdgpu_target_info_find_processor(
             iree_make_cstring_view(test_case.processor_name));
     ASSERT_NE(processor, nullptr) << test_case.processor_name;
-    if (!loom_amdgpu_processor_supports_hsaco(processor) ||
+    if (!loom_amdgpu_processor_properties_support_hsaco(
+            &processor->properties) ||
         !IsProcessorDescriptorSetLinked(processor)) {
       continue;
     }
@@ -981,7 +1163,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
         << test_case.processor_name;
     loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
     ASSERT_TRUE(loom_amdgpu_matrix_feature_bits_from_profile(
-        processor->features.matrix, &feature_bits))
+        processor->properties.features.matrix, &feature_bits))
         << test_case.processor_name;
     EXPECT_TRUE(HasTargetCapabilityU64(report, "amdgpu", "matrix_feature_bits",
                                        feature_bits))

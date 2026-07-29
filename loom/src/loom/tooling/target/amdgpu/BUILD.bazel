@@ -87,6 +87,7 @@ loom_cc_test(
         "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
         "//loom/src/loom/target/arch/amdgpu/ops",
         "//loom/src/loom/target/arch/amdgpu/records:target_records",
+        "//loom/src/loom/target/arch/amdgpu/target_id",
         "//loom/src/loom/target/emit/native/amdgpu:runtime_globals",
         "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/testing:module_ptr",

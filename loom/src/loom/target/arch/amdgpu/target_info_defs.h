@@ -33,6 +33,12 @@ extern "C" {
 // Sentinel for a processor without target-low descriptor support.
 #define LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE UINT16_MAX
 
+// Sentinel for a target without an exact LDS bank-service model set.
+#define LOOM_AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE UINT16_MAX
+
+// Dense generated reference to an immutable LDS bank-service model set.
+typedef uint16_t loom_amdgpu_lds_bank_service_model_set_ordinal_t;
+
 // Default raw buffer-resource descriptor control word for global HAL bindings.
 //
 // This is the final descriptor word consumed by MUBUF/MTBUF packets. It matches
@@ -40,16 +46,6 @@ extern "C" {
 // element format, resource-level OOB behavior, and the standard memory
 // properties used for HAL binding resources.
 #define LOOM_AMDGPU_HAL_BUFFER_RESOURCE_FLAGS UINT32_C(0x31027000)
-
-// gfx1250 silicon revision selected for compilation and native emission.
-typedef enum loom_amdgpu_gfx1250_revision_e {
-  // No gfx1250 revision applies to the selected processor.
-  LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED = 0,
-  // gfx1250 A0 silicon behavior and errata.
-  LOOM_AMDGPU_GFX1250_REVISION_A0 = 1,
-  // gfx1250 B0 silicon behavior.
-  LOOM_AMDGPU_GFX1250_REVISION_B0 = 2,
-} loom_amdgpu_gfx1250_revision_t;
 
 typedef enum loom_amdgpu_elf_feature_flag_bits_e {
   // Mask selecting the AMDHSA code-object v4+ XNACK feature state.
@@ -84,17 +80,92 @@ enum {
   LOOM_AMDGPU_ELF_GENERIC_VERSION_MASK_V6 = UINT32_C(0xff000000),
 };
 
-// Target feature selector parsed from an AMDHSA target-id suffix.
-typedef uint8_t loom_amdgpu_target_feature_selection_t;
+// Normalized state of one AMDHSA target-ID feature.
+typedef uint8_t loom_amdgpu_target_feature_state_t;
 
-enum loom_amdgpu_target_feature_selection_e {
-  // Feature inherits the processor's default code-object policy.
-  LOOM_AMDGPU_TARGET_FEATURE_DEFAULT = 0,
+enum loom_amdgpu_target_feature_state_e {
+  // Feature is unconstrained by the target identity.
+  LOOM_AMDGPU_TARGET_FEATURE_ANY = 0,
+  // Feature is known not to be supported by the selected processor.
+  LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED = 1,
   // Feature is explicitly disabled, such as `xnack-`.
-  LOOM_AMDGPU_TARGET_FEATURE_OFF = 1,
+  LOOM_AMDGPU_TARGET_FEATURE_OFF = 2,
   // Feature is explicitly enabled, such as `sramecc+`.
-  LOOM_AMDGPU_TARGET_FEATURE_ON = 2,
+  LOOM_AMDGPU_TARGET_FEATURE_ON = 3,
 };
+
+// Returns the canonical attribute spelling for |state|.
+static inline iree_string_view_t loom_amdgpu_target_feature_state_attr_name(
+    loom_amdgpu_target_feature_state_t state) {
+  switch (state) {
+    case LOOM_AMDGPU_TARGET_FEATURE_ANY:
+      return IREE_SV("any");
+    case LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED:
+      return IREE_SV("unsupported");
+    case LOOM_AMDGPU_TARGET_FEATURE_OFF:
+      return IREE_SV("off");
+    case LOOM_AMDGPU_TARGET_FEATURE_ON:
+      return IREE_SV("on");
+    default:
+      IREE_CHECK_UNREACHABLE("unknown AMDGPU target feature state");
+      return iree_string_view_empty();
+  }
+}
+
+typedef struct loom_amdgpu_amdhsa_feature_states_t {
+  // SRAM ECC target-ID feature state.
+  loom_amdgpu_target_feature_state_t sramecc;
+  // XNACK target-ID feature state.
+  loom_amdgpu_target_feature_state_t xnack;
+} loom_amdgpu_amdhsa_feature_states_t;
+
+typedef enum loom_amdgpu_target_id_feature_support_bit_e {
+  // No AMDHSA target-ID features are supported.
+  LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE = 0u,
+  // Processor supports the AMDHSA `sramecc` target-ID feature.
+  LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC = 1u << 0,
+  // Processor supports the AMDHSA `xnack` target-ID feature.
+  LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK = 1u << 1,
+  // AMDHSA target-ID feature bits known by the AMDGPU target package.
+  LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_KNOWN_FLAGS =
+      LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC |
+      LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
+} loom_amdgpu_target_id_feature_support_bit_t;
+
+// Bitset of loom_amdgpu_target_id_feature_support_bit_t values.
+typedef uint32_t loom_amdgpu_target_id_feature_support_flags_t;
+
+// Returns mutable storage for one finite AMDHSA feature state, or NULL when
+// |feature| is not a singular known feature.
+static inline loom_amdgpu_target_feature_state_t*
+loom_amdgpu_amdhsa_feature_state_select(
+    loom_amdgpu_amdhsa_feature_states_t* features,
+    loom_amdgpu_target_id_feature_support_bit_t feature) {
+  switch (feature) {
+    case LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC:
+      return &features->sramecc;
+    case LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK:
+      return &features->xnack;
+    default:
+      return NULL;
+  }
+}
+
+// Returns one finite AMDHSA feature state, or UNSUPPORTED when |feature| is
+// not a singular known feature.
+static inline loom_amdgpu_target_feature_state_t
+loom_amdgpu_amdhsa_feature_state_query(
+    const loom_amdgpu_amdhsa_feature_states_t* features,
+    loom_amdgpu_target_id_feature_support_bit_t feature) {
+  switch (feature) {
+    case LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC:
+      return features->sramecc;
+    case LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK:
+      return features->xnack;
+    default:
+      return LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED;
+  }
+}
 
 typedef enum loom_amdgpu_kernel_descriptor_profile_e {
   // No kernel descriptor writer is implemented for this processor yet.
@@ -108,6 +179,15 @@ typedef enum loom_amdgpu_kernel_descriptor_profile_e {
   // GFX125x AMDHSA code-object v5 kernel descriptor packing.
   LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125 = 4,
 } loom_amdgpu_kernel_descriptor_profile_t;
+
+// Hardware kernel-entry behavior selected independently of processor identity.
+typedef enum loom_amdgpu_kernel_entry_profile_e {
+  // Scheduled instructions begin at the hardware kernel entry point.
+  LOOM_AMDGPU_KERNEL_ENTRY_PROFILE_NONE = 0,
+  // Prepend an unclaused VMEM access and establish wave replay mode before the
+  // scheduled instruction body.
+  LOOM_AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY = 1,
+} loom_amdgpu_kernel_entry_profile_t;
 
 // Exact matrix instruction-shape inventories. Profiles are not cumulative ISA
 // generations: a later processor may replace an earlier operand or fragment
@@ -143,14 +223,10 @@ typedef enum loom_amdgpu_processor_info_flag_bits_e {
   // Clustered dispatches provide workgroup and cluster identity in the GFX1250
   // launch-state TTMP and IB_STS2 ABI.
   LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE = 1u << 1,
-  // Hardware kernel entries require the GFX125x initial VMEM and replay-mode
-  // envelope before their scheduled instruction body.
-  LOOM_AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE = 1u << 2,
   // Processor info flags known by the AMDGPU target package.
   LOOM_AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS =
       LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION |
-      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE |
-      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE,
+      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
 } loom_amdgpu_processor_info_flag_bits_t;
 
 // Bitset of loom_amdgpu_processor_info_flag_bits_t values.
@@ -184,6 +260,50 @@ typedef enum loom_amdgpu_processor_scheduling_bit_e {
 
 // Bitset of loom_amdgpu_processor_scheduling_bit_t values.
 typedef uint32_t loom_amdgpu_processor_scheduling_bits_t;
+
+// Instruction restrictions that require target-owned legalization or hazard
+// handling before native emission.
+typedef enum loom_amdgpu_instruction_constraint_bit_e {
+  // Paired DS addresses require target-specific alignment legalization.
+  LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT = 1u << 0,
+  // DS ADDTID packets require an explicitly materialized address.
+  LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION = 1u
+                                                                         << 1,
+  // Cluster multicast operations require mask preservation around the packet.
+  LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_CLUSTER_MULTICAST_MASK_PRESERVATION = 1u
+                                                                           << 2,
+  // Tensor multicast operations require mask preservation around the packet.
+  LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_TENSOR_MULTICAST_MASK_PRESERVATION = 1u
+                                                                          << 3,
+  // K64 FP8/BF8 WMMA requires a neutral regular-scale prefix.
+  LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K64_SCALE_PREFIX = 1u << 4,
+  // K128 FP8/BF8 WMMA must be split into regular-scale K64 packets.
+  LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K128_SPLIT = 1u << 5,
+  // 32x16 F4 WMMA must be split into 16x16 packets.
+  LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_F4_32X16_SPLIT = 1u << 6,
+  // Scaled WMMA packets require target-specific encoding legalization.
+  LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_SCALE_ENCODING = 1u << 7,
+  // Low-precision SWMMAC packets require a target-specific lowering.
+  LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_SWMMAC_LOW_PRECISION_LOWERING = 1u << 8,
+  // Integer matrix packets require coexecution spacing.
+  LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING = 1u
+                                                                          << 9,
+  // Instruction constraints known by the AMDGPU target package.
+  LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS =
+      LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT |
+      LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION |
+      LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_CLUSTER_MULTICAST_MASK_PRESERVATION |
+      LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_TENSOR_MULTICAST_MASK_PRESERVATION |
+      LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K64_SCALE_PREFIX |
+      LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K128_SPLIT |
+      LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_F4_32X16_SPLIT |
+      LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_SCALE_ENCODING |
+      LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_SWMMAC_LOW_PRECISION_LOWERING |
+      LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING,
+} loom_amdgpu_instruction_constraint_bit_t;
+
+// Bitset of loom_amdgpu_instruction_constraint_bit_t values.
+typedef uint32_t loom_amdgpu_instruction_constraint_bits_t;
 
 // Maximum nearby vector ALU packet interval covered by the
 // LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR hazard window.
@@ -320,6 +440,50 @@ typedef struct loom_amdgpu_processor_elf_info_t {
   uint32_t generic_version;
 } loom_amdgpu_processor_elf_info_t;
 
+typedef struct loom_amdgpu_processor_target_id_info_t {
+  // AMDHSA target-ID features supported by this processor.
+  loom_amdgpu_target_id_feature_support_flags_t supported_features;
+} loom_amdgpu_processor_target_id_info_t;
+
+// One string-valued AMDHSA kernel metadata extension.
+typedef struct loom_amdgpu_metadata_string_property_t {
+  // External metadata map key including its leading period.
+  iree_string_view_t key;
+  // External metadata string value.
+  iree_string_view_t value;
+} loom_amdgpu_metadata_string_property_t;
+
+// String-valued AMDHSA kernel metadata extensions.
+typedef struct loom_amdgpu_metadata_string_property_set_t {
+  // Metadata properties in canonical serialization order.
+  const loom_amdgpu_metadata_string_property_t* entries;
+  // Number of metadata properties in |entries|.
+  uint16_t count;
+} loom_amdgpu_metadata_string_property_set_t;
+
+typedef struct loom_amdgpu_processor_asic_revision_info_t {
+  // Physical HSA ASIC revision value.
+  uint32_t value;
+  // Canonical human-readable revision name such as `a0`.
+  iree_string_view_t name;
+  // Instruction constraints active for this physical revision.
+  loom_amdgpu_instruction_constraint_bits_t instruction_constraints;
+  // Complete LDS bank-service model set selected for this physical revision.
+  loom_amdgpu_lds_bank_service_model_set_ordinal_t
+      lds_bank_service_model_set_ordinal;
+  // AMDHSA kernel metadata projected by this physical revision.
+  loom_amdgpu_metadata_string_property_set_t kernel_metadata_extensions;
+} loom_amdgpu_processor_asic_revision_info_t;
+
+typedef struct loom_amdgpu_processor_asic_revision_set_t {
+  // Generated finite revision rows for this processor.
+  const loom_amdgpu_processor_asic_revision_info_t* entries;
+  // Number of revision rows in |entries|.
+  uint16_t count;
+  // Revision-row ordinal selected for offline compilation by default.
+  uint16_t default_ordinal;
+} loom_amdgpu_processor_asic_revision_set_t;
+
 typedef struct loom_amdgpu_processor_generic_code_object_info_t {
   // Dense ordinal of the compatible generic processor, or NONE.
   uint16_t processor_ordinal;
@@ -350,33 +514,66 @@ typedef struct loom_amdgpu_processor_kernel_descriptor_info_t {
   loom_amdgpu_kernel_descriptor_vgpr_granules_t vgpr_granules;
 } loom_amdgpu_processor_kernel_descriptor_info_t;
 
+typedef struct loom_amdgpu_processor_kernel_entry_info_t {
+  // Hardware kernel-entry behavior required before the scheduled body.
+  loom_amdgpu_kernel_entry_profile_t profile;
+} loom_amdgpu_processor_kernel_entry_info_t;
+
+typedef struct loom_amdgpu_processor_instruction_info_t {
+  // Constraints active for every ASIC revision of this processor.
+  loom_amdgpu_instruction_constraint_bits_t base_constraints;
+} loom_amdgpu_processor_instruction_info_t;
+
 typedef struct loom_amdgpu_processor_feature_info_t {
   // Matrix instruction feature profile implemented for this processor.
   loom_amdgpu_matrix_feature_profile_t matrix;
   // Target-local scheduling and hazard facts for this processor.
   loom_amdgpu_processor_scheduling_bits_t scheduling;
+  // Processor-wide LDS bank-service models shared by every ASIC revision.
+  loom_amdgpu_lds_bank_service_model_set_ordinal_t
+      lds_bank_service_model_set_ordinal;
 } loom_amdgpu_processor_feature_info_t;
 
-typedef struct loom_amdgpu_processor_info_t {
-  // Exact or generic processor name used in AMDHSA target IDs, such as
-  // `gfx1151` or `gfx11-generic`.
-  iree_string_view_t name;
-  // Dense generated processor ordinal used by target fact tables.
-  uint16_t ordinal;
+// Compiler-semantic properties selected by one exact or generic processor.
+//
+// These properties deliberately exclude the external processor name,
+// exact/generic compatibility, and target-ID feature applicability. Compiler
+// policy consumes this view instead of branching on processor identity.
+typedef struct loom_amdgpu_processor_properties_t {
+  // Dense generated occupancy-model selector.
+  uint16_t occupancy_model_ordinal;
   // Processor-wide target-info capability flags.
   loom_amdgpu_processor_info_flags_t flags;
   // Target-low descriptor-set identity selected for this processor.
   loom_amdgpu_processor_descriptor_set_info_t descriptor_set;
   // AMDHSA ELF code-object identity for this processor.
   loom_amdgpu_processor_elf_info_t elf;
-  // Versioned generic code-object relation for this exact processor.
-  loom_amdgpu_processor_generic_code_object_info_t generic_code_object;
   // Wavefront facts selected for this processor.
   loom_amdgpu_processor_wavefront_info_t wavefront;
   // Kernel descriptor ABI facts selected for this processor.
   loom_amdgpu_processor_kernel_descriptor_info_t kernel_descriptor;
+  // Hardware kernel-entry behavior selected for this processor.
+  loom_amdgpu_processor_kernel_entry_info_t kernel_entry;
+  // Instruction constraints and revision-feature effects.
+  loom_amdgpu_processor_instruction_info_t instructions;
   // Instruction and scheduling feature profiles for this processor.
   loom_amdgpu_processor_feature_info_t features;
+} loom_amdgpu_processor_properties_t;
+
+typedef struct loom_amdgpu_processor_info_t {
+  // Exact or generic processor name used in AMDHSA target IDs, such as
+  // `gfx1151` or `gfx11-generic`.
+  iree_string_view_t name;
+  // Dense generated processor identity ordinal.
+  uint16_t ordinal;
+  // AMDHSA target-ID qualification facts for this processor identity.
+  loom_amdgpu_processor_target_id_info_t target_id;
+  // Finite physical ASIC revisions and the offline default.
+  loom_amdgpu_processor_asic_revision_set_t asic_revisions;
+  // Versioned generic code-object relation for this exact processor identity.
+  loom_amdgpu_processor_generic_code_object_info_t generic_code_object;
+  // Compiler-semantic properties selected by this processor identity.
+  loom_amdgpu_processor_properties_t properties;
 } loom_amdgpu_processor_info_t;
 
 typedef struct loom_amdgpu_amdhsa_target_id_t {
@@ -384,11 +581,19 @@ typedef struct loom_amdgpu_amdhsa_target_id_t {
   const loom_amdgpu_processor_info_t* processor;
   // Target-id feature suffix after ':', or empty when no suffix is present.
   iree_string_view_t feature_suffix;
-  // SRAM ECC feature selection parsed from the target-id suffix.
-  loom_amdgpu_target_feature_selection_t sramecc;
-  // XNACK feature selection parsed from the target-id suffix.
-  loom_amdgpu_target_feature_selection_t xnack;
+  // Structured feature states parsed from the target-ID suffix.
+  loom_amdgpu_amdhsa_feature_states_t features;
 } loom_amdgpu_amdhsa_target_id_t;
+
+// Returns true when |processor| supports every requested non-empty target-ID
+// feature.
+static inline bool loom_amdgpu_processor_supports_target_id_features(
+    const loom_amdgpu_processor_info_t* processor,
+    loom_amdgpu_target_id_feature_support_flags_t features) {
+  return processor != NULL &&
+         features != LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE &&
+         iree_all_bits_set(processor->target_id.supported_features, features);
+}
 
 // Returns the support flag for |wavefront_size|, or zero when unsupported.
 static inline loom_amdgpu_wavefront_size_flags_t
@@ -409,38 +614,40 @@ static inline bool loom_amdgpu_wavefront_size_is_valid(
   return loom_amdgpu_wavefront_size_flag(wavefront_size) != 0;
 }
 
-// Returns true when |processor| can execute kernels with |wavefront_size|.
-static inline bool loom_amdgpu_processor_supports_wavefront_size(
-    const loom_amdgpu_processor_info_t* processor, uint32_t wavefront_size) {
+// Returns true when |properties| can execute kernels with |wavefront_size|.
+static inline bool loom_amdgpu_processor_properties_support_wavefront_size(
+    const loom_amdgpu_processor_properties_t* properties,
+    uint32_t wavefront_size) {
   const loom_amdgpu_wavefront_size_flags_t requested_size =
       loom_amdgpu_wavefront_size_flag(wavefront_size);
-  return processor != NULL && requested_size != 0 &&
-         iree_all_bits_set(processor->wavefront.supported_sizes,
+  return properties != NULL && requested_size != 0 &&
+         iree_all_bits_set(properties->wavefront.supported_sizes,
                            requested_size);
 }
 
-// Returns true when |processor| advertises every requested kernel descriptor
+// Returns true when |properties| advertises every requested kernel descriptor
 // ABI flag.
-static inline bool loom_amdgpu_processor_kernel_descriptor_has_flags(
-    const loom_amdgpu_processor_info_t* processor,
+static inline bool loom_amdgpu_processor_properties_kernel_descriptor_has_flags(
+    const loom_amdgpu_processor_properties_t* properties,
     loom_amdgpu_kernel_descriptor_abi_flags_t flags) {
-  return processor != NULL &&
-         iree_all_bits_set(processor->kernel_descriptor.flags, flags);
+  return properties != NULL &&
+         iree_all_bits_set(properties->kernel_descriptor.flags, flags);
 }
 
-// Returns true when |processor| advertises every requested processor-info flag.
-static inline bool loom_amdgpu_processor_info_has_flags(
-    const loom_amdgpu_processor_info_t* processor,
+// Returns true when |properties| advertises every requested processor-info
+// flag.
+static inline bool loom_amdgpu_processor_properties_have_flags(
+    const loom_amdgpu_processor_properties_t* properties,
     loom_amdgpu_processor_info_flags_t flags) {
-  return processor != NULL && iree_all_bits_set(processor->flags, flags);
+  return properties != NULL && iree_all_bits_set(properties->flags, flags);
 }
 
-// Returns true when |processor| advertises every requested scheduling bit.
-static inline bool loom_amdgpu_processor_has_scheduling(
-    const loom_amdgpu_processor_info_t* processor,
+// Returns true when |properties| advertises every requested scheduling bit.
+static inline bool loom_amdgpu_processor_properties_have_scheduling(
+    const loom_amdgpu_processor_properties_t* properties,
     loom_amdgpu_processor_scheduling_bits_t bits) {
-  return processor != NULL &&
-         iree_all_bits_set(processor->features.scheduling, bits);
+  return properties != NULL &&
+         iree_all_bits_set(properties->features.scheduling, bits);
 }
 
 // Returns true when |descriptor_set| advertises every requested descriptor-set
@@ -459,11 +666,11 @@ static inline bool loom_amdgpu_descriptor_set_info_supports_vopd(
       descriptor_set, LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION);
 }
 
-// Returns true when |processor| supports native AMDHSA HSACO emission.
-static inline bool loom_amdgpu_processor_supports_hsaco(
-    const loom_amdgpu_processor_info_t* processor) {
-  return loom_amdgpu_processor_info_has_flags(
-      processor, LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION);
+// Returns true when |properties| supports native AMDHSA HSACO emission.
+static inline bool loom_amdgpu_processor_properties_support_hsaco(
+    const loom_amdgpu_processor_properties_t* properties) {
+  return loom_amdgpu_processor_properties_have_flags(
+      properties, LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION);
 }
 
 // Returns the number of known AMDGPU processor fact rows.
@@ -515,11 +722,33 @@ iree_status_t loom_amdgpu_target_info_lookup_descriptor_set_by_ordinal(
     uint16_t descriptor_set_ordinal,
     const loom_amdgpu_descriptor_set_info_t** out_descriptor_set);
 
+// Initializes AMDHSA feature states from generated processor support facts.
+//
+// Supported features are unconstrained and unsupported features are explicit.
+// Physical ASIC revision rules are applied separately.
+void loom_amdgpu_amdhsa_feature_states_initialize(
+    const loom_amdgpu_processor_info_t* processor,
+    loom_amdgpu_amdhsa_feature_states_t* out_features);
+
 // Parses an AMDHSA target ID such as
 // `amdgcn-amd-amdhsa--gfx11-generic`.
 iree_status_t loom_amdgpu_target_info_parse_amdhsa_target_id(
     iree_string_view_t target_id,
     loom_amdgpu_amdhsa_target_id_t* out_target_id);
+
+// Finds the finite physical ASIC revision row selected by |value|, or NULL.
+const loom_amdgpu_processor_asic_revision_info_t*
+loom_amdgpu_target_info_find_asic_revision(
+    const loom_amdgpu_processor_info_t* processor, uint32_t value);
+
+// Looks up the finite physical ASIC revision row selected by |value|.
+//
+// Processors without revision-specific semantics return NULL. A processor with
+// revision rows rejects unknown physical values instead of guessing that a
+// later revision has existing semantics.
+iree_status_t loom_amdgpu_target_info_lookup_asic_revision(
+    const loom_amdgpu_processor_info_t* processor, uint32_t value,
+    const loom_amdgpu_processor_asic_revision_info_t** out_revision);
 
 // Resolves the AMDGPU ELF e_flags implied by |target_id|.
 iree_status_t loom_amdgpu_target_info_amdhsa_target_id_elf_flags(

@@ -47,11 +47,10 @@ static iree_hal_amdgpu_gfxip_version_t GfxIp(uint16_t major, uint16_t minor,
 
 static iree_hal_amdgpu_gfxip_version_t GfxIpFromProcessor(
     const char* processor) {
-  iree_hal_amdgpu_target_id_t target_id = {};
-  IREE_CHECK_OK(iree_hal_amdgpu_target_id_parse(
-      iree_make_cstring_view(processor),
-      IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_NONE, &target_id));
-  return target_id.version;
+  iree_hal_amdgpu_target_identity_t identity = {};
+  IREE_CHECK_OK(iree_hal_amdgpu_target_identity_parse_artifact_key(
+      iree_make_cstring_view(processor), &identity));
+  return identity.version;
 }
 
 static hsa_amd_memory_pool_link_info_t LinkInfo(

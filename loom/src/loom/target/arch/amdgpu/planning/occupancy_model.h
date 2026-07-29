@@ -78,11 +78,11 @@ typedef struct loom_amdgpu_occupancy_model_t {
   iree_host_size_t descriptor_reg_class_count;
 } loom_amdgpu_occupancy_model_t;
 
-// Returns the generated occupancy model for |processor| and |wave_size|.
+// Returns the generated occupancy model for |properties| and |wave_size|.
 //
-// The processor and wave mode must have passed target verification.
-const loom_amdgpu_occupancy_model_t* loom_amdgpu_occupancy_model_for_processor(
-    const loom_amdgpu_processor_info_t* processor, uint32_t wave_size);
+// The target properties and wave mode must have passed target verification.
+const loom_amdgpu_occupancy_model_t* loom_amdgpu_occupancy_model_for_properties(
+    const loom_amdgpu_processor_properties_t* properties, uint32_t wave_size);
 
 #ifdef __cplusplus
 }  // extern "C"

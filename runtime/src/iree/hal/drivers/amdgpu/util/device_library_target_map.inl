@@ -2,10 +2,10 @@
 // Do not edit directly; edit the Python source tables and regenerate.
 // Output: runtime/src/iree/hal/drivers/amdgpu/util/device_library_target_map.inl
 //
-// Define IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT(artifact, target)
-// before including this file.
+// Define IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT(
+//     artifact, processor, asic_revision) before including this file.
 
 // clang-format off
 #if defined(IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT)
-IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT("gfx1250-a0", "gfx1250:gfx1250-b0-specific-")
+IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT("gfx1250-a0", "gfx1250", 0)
 #endif  // IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT

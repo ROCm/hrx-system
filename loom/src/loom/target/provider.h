@@ -122,24 +122,42 @@ typedef struct loom_target_provider_record_semantics_t {
   loom_target_provider_satisfies_requirement_fn_t satisfies_requirement;
 } loom_target_provider_record_semantics_t;
 
-// Target materialization request passed to target providers.
-typedef struct loom_target_selection_materialization_request_t {
-  // Composed target environment receiving the request.
-  const loom_target_environment_t* target_environment;
+// Returns the diagnostic symbol-name stem for a materialized profile record.
+//
+// The returned name is never used as semantic identity. Common materialization
+// reuses an equal record under any name and uniquifies this stem when another
+// symbol already occupies it.
+typedef iree_string_view_t (
+    *loom_target_provider_materialization_symbol_stem_fn_t)(
+    const loom_target_profile_t* profile);
 
-  // Mutable module that will receive any materialized target record.
-  loom_module_t* module;
+// Returns whether |target_op| has the same provider-owned durable projection
+// as |profile|.
+//
+// Common materialization calls this only for records whose op kind matches the
+// provider's record semantics. The profile type is the provider's registered
+// |profile_type|.
+typedef bool (*loom_target_provider_record_matches_profile_fn_t)(
+    const loom_module_t* module, const loom_op_t* target_op,
+    const loom_target_profile_t* profile);
 
-  // Invocation-selected structured target profile.
-  loom_target_selection_t target_selection;
-} loom_target_selection_materialization_request_t;
+// Builds one provider-owned durable target record for |profile|.
+typedef iree_status_t (*loom_target_provider_build_profile_record_fn_t)(
+    loom_builder_t* builder, const loom_target_profile_t* profile,
+    loom_symbol_ref_t symbol, loom_location_id_t location,
+    loom_op_t** out_target_op);
 
-// Materializes a provider-owned target selection into a module-local target
-// record.
-typedef iree_status_t (*loom_target_provider_materialize_selection_fn_t)(
-    const loom_target_provider_t* provider,
-    const loom_target_selection_materialization_request_t* request,
-    loom_symbol_ref_t* out_target_ref);
+// Provider-owned projection hooks used by common target materialization.
+typedef struct loom_target_provider_materialization_t {
+  // Produces an incidental symbol-name stem for a new target record.
+  loom_target_provider_materialization_symbol_stem_fn_t symbol_stem;
+
+  // Compares one existing record with a structured target profile.
+  loom_target_provider_record_matches_profile_fn_t record_matches_profile;
+
+  // Builds a record carrying the complete durable profile projection.
+  loom_target_provider_build_profile_record_fn_t build_profile_record;
+} loom_target_provider_materialization_t;
 
 // Target emission artifact storage release callback.
 typedef void (*loom_target_emit_artifact_release_fn_t)(
@@ -336,8 +354,8 @@ struct loom_target_provider_t {
   const loom_pass_registry_t* pass_registry;
   // Optional pass-pipeline contribution callback.
   loom_target_provider_pipeline_contribution_fn_t contribute_pipeline;
-  // Optional invocation-target materialization callback.
-  loom_target_provider_materialize_selection_fn_t materialize_selection;
+  // Optional structured target-record materialization hooks.
+  loom_target_provider_materialization_t materialization;
   // Optional target-record semantics owned by this provider.
   loom_target_provider_record_semantics_t record_semantics;
 };
@@ -497,7 +515,12 @@ iree_status_t loom_target_environment_contribute_pipeline(
     loom_pass_environment_t pass_environment, loom_builder_t* builder);
 
 // Materializes |target_selection| into |module| using the provider owning its
-// profile type. Empty selections return a null target ref.
+// profile type.
+//
+// An existing provider-owned record with the same complete durable projection
+// is reused regardless of its symbol name. Otherwise a new record receives a
+// collision-free incidental symbol name. Empty selections return a null target
+// ref.
 iree_status_t loom_target_environment_materialize_selection(
     const loom_target_environment_t* environment, loom_module_t* module,
     loom_target_selection_t target_selection,

@@ -169,10 +169,9 @@ class AmdgpuDeviceBinariesTest(unittest.TestCase):
         self,
     ):
         target = amdgpu_device_binaries.resolve_device_binary_targets(["gfx1250-a0"])[0]
-        self.assertEqual(
-            target.target_ids,
-            ("gfx1250:gfx1250-b0-specific-",),
-        )
+        self.assertEqual(len(target.target_matches), 1)
+        self.assertEqual(target.target_matches[0].processor, "gfx1250")
+        self.assertEqual(target.target_matches[0].asic_revision, 0)
         toolchain = amdgpu_device_binaries.Toolchain(
             clang=Path("/tools/clang"),
             llvm_link=Path("/tools/llvm-link"),

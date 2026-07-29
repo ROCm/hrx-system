@@ -1,6 +1,6 @@
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1250> @target {gfx1250_revision = a0}
+amdgpu.target<gfx1250> @target {asic_revision = 0}
 
 kernel.def target(@target) @a0_lds_two_address_selection() {
   %unit = index.constant 1 : index
@@ -15,9 +15,9 @@ kernel.def target(@target) @a0_lds_two_address_selection() {
   %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64x4xi32, %layout>
   %output_view = buffer.view %output[%zero] : buffer -> view<64x2xi32, #dense>
   %one = vector.constant 1 : vector<2xi32>
-  // ERROR@+1: AMDGPU/047 {function_name="a0_lds_two_address_selection", descriptor_name="amdgpu.ds_write2_b32", revision="a0", erratum_key="gfx1250.a0.ds2_alignment", legalization_key="split_ds2_to_single_address"}
+  // ERROR@+1: AMDGPU/047 {function_name="a0_lds_two_address_selection", descriptor_name="amdgpu.ds_write2_b32", revision="a0", constraint_key="amdgpu.ds.paired_address_alignment", legalization_key="split_ds2_to_single_address"}
   vector.store %one, %scratch_view[%workitem, 0] : vector<2xi32>, view<64x4xi32, %layout>
-  // ERROR@+1: AMDGPU/047 {function_name="a0_lds_two_address_selection", descriptor_name="amdgpu.ds_read2_b32", revision="a0", erratum_key="gfx1250.a0.ds2_alignment", legalization_key="split_ds2_to_single_address"}
+  // ERROR@+1: AMDGPU/047 {function_name="a0_lds_two_address_selection", descriptor_name="amdgpu.ds_read2_b32", revision="a0", constraint_key="amdgpu.ds.paired_address_alignment", legalization_key="split_ds2_to_single_address"}
   %loaded = vector.load %scratch_view[%workitem, 0] : view<64x4xi32, %layout> -> vector<2xi32>
   vector.store %loaded, %output_view[%workitem, 0] : vector<2xi32>, view<64x2xi32, #dense>
   kernel.return
@@ -25,7 +25,7 @@ kernel.def target(@target) @a0_lds_two_address_selection() {
 
 // ====
 
-amdgpu.target<gfx1250> @target {gfx1250_revision = a0}
+amdgpu.target<gfx1250> @target {asic_revision = 0}
 
 func.def target(@target) @a0_k128_matrix_selection(%lhs_data: vector<16xi32>, %rhs_data: vector<16xi32>, %init_data: vector<8xf16>) -> (vector<8xf16>) {
   %m = index.constant 16 : index
@@ -35,7 +35,7 @@ func.def target(@target) @a0_k128_matrix_selection(%lhs_data: vector<16xi32>, %r
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<16xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<16xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf16>
-  // ERROR@+1: AMDGPU/047 {function_name="a0_k128_matrix_selection", descriptor_name="amdgpu.v_wmma_f16_16x16x128_bf8_bf8", revision="a0", erratum_key="gfx1250.a0.wmma_k128_fp8_bf8", legalization_key="split_wmma_k128_to_regular_scale_k64"}
+  // ERROR@+1: AMDGPU/047 {function_name="a0_k128_matrix_selection", descriptor_name="amdgpu.v_wmma_f16_16x16x128_bf8_bf8", revision="a0", constraint_key="amdgpu.wmma.fp8_bf8_k128_split", legalization_key="split_wmma_k128_to_regular_scale_k64"}
   %result = vector.mma %lhs, %rhs, %init : vector<16xi32>, vector<16xi32>, vector<8xf16>
   func.return %result : vector<8xf16>
 }
@@ -48,7 +48,7 @@ func.def target(@target) @a0_k64_matrix_selection(%lhs_data: vector<8xi32>, %rhs
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<8xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
-  // ERROR@+1: AMDGPU/047 {function_name="a0_k64_matrix_selection", descriptor_name="amdgpu.v_wmma_f32_16x16x64_fp8_fp8", revision="a0", erratum_key="gfx1250.a0.wmma_k64_fp8_bf8", legalization_key="prefix_wmma_k64_with_neutral_regular_scale"}
+  // ERROR@+1: AMDGPU/047 {function_name="a0_k64_matrix_selection", descriptor_name="amdgpu.v_wmma_f32_16x16x64_fp8_fp8", revision="a0", constraint_key="amdgpu.wmma.fp8_bf8_k64_scale_prefix", legalization_key="prefix_wmma_k64_with_neutral_regular_scale"}
   %result = vector.mma %lhs, %rhs, %init : vector<8xi32>, vector<8xi32>, vector<8xf32>
   func.return %result : vector<8xf32>
 }
@@ -61,7 +61,7 @@ func.def target(@target) @a0_k64_f16_matrix_selection(%lhs_data: vector<8xi32>, 
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<8xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf16>
-  // ERROR@+1: AMDGPU/047 {function_name="a0_k64_f16_matrix_selection", descriptor_name="amdgpu.v_wmma_f16_16x16x64_fp8_fp8", revision="a0", erratum_key="gfx1250.a0.wmma_k64_fp8_bf8", legalization_key="prefix_wmma_k64_with_neutral_regular_scale"}
+  // ERROR@+1: AMDGPU/047 {function_name="a0_k64_f16_matrix_selection", descriptor_name="amdgpu.v_wmma_f16_16x16x64_fp8_fp8", revision="a0", constraint_key="amdgpu.wmma.fp8_bf8_k64_scale_prefix", legalization_key="prefix_wmma_k64_with_neutral_regular_scale"}
   %result = vector.mma %lhs, %rhs, %init : vector<8xi32>, vector<8xi32>, vector<8xf16>
   func.return %result : vector<8xf16>
 }
@@ -75,7 +75,7 @@ func.def target(@target) @a0_sparse_f32_matrix_selection(%lhs_data: vector<8xi32
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %metadata : vector<2xi32>, schema = %lhs_schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<16xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
-  // ERROR@+1: AMDGPU/047 {function_name="a0_sparse_f32_matrix_selection", descriptor_name="amdgpu.v_swmmac_f32_16x16x128_fp8_fp8", revision="a0", erratum_key="gfx1250.a0.swmmac_fp8_bf8", legalization_key="lower_low_precision_swmmac_for_a0"}
+  // ERROR@+1: AMDGPU/047 {function_name="a0_sparse_f32_matrix_selection", descriptor_name="amdgpu.v_swmmac_f32_16x16x128_fp8_fp8", revision="a0", constraint_key="amdgpu.swmmac.low_precision_lowering", legalization_key="lower_low_precision_swmmac"}
   %result = vector.mma %lhs, %rhs, %init : vector<8xi32>, vector<16xi32>, vector<8xf32>
   func.return %result : vector<8xf32>
 }
@@ -89,7 +89,7 @@ func.def target(@target) @a0_sparse_f16_matrix_selection(%lhs_data: vector<8xi32
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %metadata : vector<2xi32>, schema = %lhs_schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<16xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf16>
-  // ERROR@+1: AMDGPU/047 {function_name="a0_sparse_f16_matrix_selection", descriptor_name="amdgpu.v_swmmac_f16_16x16x128_fp8_fp8", revision="a0", erratum_key="gfx1250.a0.swmmac_fp8_bf8", legalization_key="lower_low_precision_swmmac_for_a0"}
+  // ERROR@+1: AMDGPU/047 {function_name="a0_sparse_f16_matrix_selection", descriptor_name="amdgpu.v_swmmac_f16_16x16x128_fp8_fp8", revision="a0", constraint_key="amdgpu.swmmac.low_precision_lowering", legalization_key="lower_low_precision_swmmac"}
   %result = vector.mma %lhs, %rhs, %init : vector<8xi32>, vector<16xi32>, vector<8xf16>
   func.return %result : vector<8xf16>
 }
@@ -103,14 +103,14 @@ func.def target(@target) @a0_sparse_k32_matrix_selection(%lhs_data: vector<2xi32
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
-  // ERROR@+1: AMDGPU/047 {function_name="a0_sparse_k32_matrix_selection", descriptor_name="amdgpu.v_swmmac_f32_16x16x32_fp8_bf8", revision="a0", erratum_key="gfx1250.a0.swmmac_fp8_bf8", legalization_key="lower_low_precision_swmmac_for_a0"}
+  // ERROR@+1: AMDGPU/047 {function_name="a0_sparse_k32_matrix_selection", descriptor_name="amdgpu.v_swmmac_f32_16x16x32_fp8_bf8", revision="a0", constraint_key="amdgpu.swmmac.low_precision_lowering", legalization_key="lower_low_precision_swmmac"}
   %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<4xi32>, vector<8xf32>
   func.return %result : vector<8xf32>
 }
 
 // ====
 
-amdgpu.target<gfx1250> @target {gfx1250_revision = b0}
+amdgpu.target<gfx1250> @target {asic_revision = 1}
 
 func.def target(@target) @b0_sparse_k32_matrix_selection(%fp8_lhs_data: vector<2xi32>, %fp8_rhs_data: vector<4xi32>, %bf8_lhs_data: vector<2xi32>, %bf8_rhs_data: vector<4xi32>, %init_data: vector<8xf32>, %metadata: vector<1xi32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
   %m = index.constant 16 : index

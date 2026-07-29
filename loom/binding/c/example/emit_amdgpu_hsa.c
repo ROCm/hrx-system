@@ -294,8 +294,8 @@ typedef struct emit_amdgpu_hsa_state_t {
   // HSA-reported ISA target id for the selected GPU agent.
   char isa_name[1024];
 
-  // Loom AMDGPU processor derived from `isa_name`.
-  loomc_string_view_t processor;
+  // Structured Loom AMDHSA target derived from HSA agent facts.
+  loomc_amdgpu_target_identity_t target_identity;
 
   // HSA-reported GPU ASIC revision.
   uint32_t asic_revision;
@@ -1012,8 +1012,9 @@ static loomc_status_t discover_hsa_target(emit_amdgpu_hsa_state_t* state) {
   }
   snprintf(state->isa_name, sizeof(state->isa_name), "%s", isa_search.isa_name);
 
-  loomc_status_t parse_status = loomc_amdgpu_processor_from_hsa_isa_name(
-      loomc_make_cstring_view(state->isa_name), &state->processor);
+  loomc_status_t parse_status = loomc_amdgpu_target_identity_from_hsa_isa_name(
+      loomc_make_cstring_view(state->isa_name), state->asic_revision,
+      &state->target_identity);
   if (!loomc_status_is_ok(parse_status)) {
     emit_amdgpu_hsa_state_skip_from_loomc_status(
         state, "Loom does not support the HSA-reported AMDGPU ISA",
@@ -1082,13 +1083,7 @@ static loomc_status_t create_target_profile_and_selection(
       .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
       .structure_size = sizeof(profile_options),
       .identifier = loomc_make_cstring_view("hsa-current-amdgpu"),
-      .processor = state->processor,
-      .gfx1250_revision =
-          loomc_string_view_equal(state->processor,
-                                  loomc_make_cstring_view("gfx1250"))
-              ? (state->asic_revision == 0 ? LOOMC_AMDGPU_GFX1250_REVISION_A0
-                                           : LOOMC_AMDGPU_GFX1250_REVISION_B0)
-              : LOOMC_AMDGPU_GFX1250_REVISION_DEFAULT,
+      .identity = state->target_identity,
   };
   loomc_status_t status = loomc_target_profile_create_amdgpu(
       state->target_environment, &profile_options, loomc_allocator_system(),
@@ -1172,7 +1167,8 @@ static loomc_status_t compile_module_to_prepared_low(
       "hsa cpu_agent=%s gpu_agent=%s isa=%s processor=%.*s "
       "asic_revision=%" PRIu32 "\n",
       state->cpu_agent_name, state->gpu_agent_name, state->isa_name,
-      (int)state->processor.size, state->processor.data, state->asic_revision);
+      (int)state->target_identity.processor.size,
+      state->target_identity.processor.data, state->asic_revision);
   loomc_target_selection_options_t target_options = {
       .type = LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
       .structure_size = sizeof(target_options),

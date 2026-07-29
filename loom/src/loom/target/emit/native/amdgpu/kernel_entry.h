@@ -16,7 +16,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "loom/target/arch/amdgpu/target_info.h"
+#include "loom/target/arch/amdgpu/target_info_defs.h"
 #include "loom/target/emit/native/amdgpu/text_fixup.h"
 
 #ifdef __cplusplus
@@ -36,11 +36,11 @@ typedef struct loom_amdgpu_kernel_entry_envelope_t {
   uint32_t minimum_vgpr_count;
 } loom_amdgpu_kernel_entry_envelope_t;
 
-// Returns the immutable hardware-entry envelope selected by |processor|.
-// Processors without an envelope return an empty record.
+// Returns the immutable hardware-entry envelope selected by |properties|.
+// Targets without an entry profile return an empty record.
 const loom_amdgpu_kernel_entry_envelope_t*
-loom_amdgpu_kernel_entry_envelope_for_processor(
-    const loom_amdgpu_processor_info_t* processor);
+loom_amdgpu_kernel_entry_envelope_for_properties(
+    const loom_amdgpu_processor_properties_t* properties);
 
 // Prepends |envelope| to |body_text| and displaces all body-relative fixups.
 // Empty envelopes return the original body storage and fixup array directly.

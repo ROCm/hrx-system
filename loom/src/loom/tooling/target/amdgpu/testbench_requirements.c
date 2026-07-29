@@ -50,10 +50,11 @@ static iree_status_t loom_amdgpu_hal_testbench_query_descriptor_set_requirement(
   const loom_amdgpu_target_profile_t* target_profile =
       loom_amdgpu_target_profile_cast(target.target_profile);
   const loom_amdgpu_processor_info_t* processor =
-      target_profile ? target_profile->amdhsa.processor : NULL;
+      target_profile ? target_profile->identity.processor : NULL;
   const bool satisfied =
-      processor != NULL && iree_string_view_equal(processor->descriptor_set.key,
-                                                  required_descriptor_set);
+      processor != NULL &&
+      iree_string_view_equal(processor->properties.descriptor_set.key,
+                             required_descriptor_set);
   out_result->state =
       satisfied ? LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_SATISFIED
                 : LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNSATISFIED;

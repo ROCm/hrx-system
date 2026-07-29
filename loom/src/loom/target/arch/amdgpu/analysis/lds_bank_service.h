@@ -17,6 +17,8 @@
 #include <stdint.h>
 
 #include "iree/base/api.h"
+#include "loom/target/arch/amdgpu/refs/target_refs.h"
+#include "loom/target/arch/amdgpu/target_info_defs.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -89,10 +91,16 @@ typedef struct loom_amdgpu_lds_bank_service_result_t {
   uint16_t maximum_request_multiplicity;
 } loom_amdgpu_lds_bank_service_result_t;
 
-// Returns the named rocRoller-derived gfx1250 b128 service model.
+// Returns the immutable model selected by |model_set_ordinal| and
+// |descriptor_ref|.
+//
+// Generated target rows intern complete, unambiguous model sets. Multiple
+// processors and revisions may select the same set without introducing
+// processor-specific query functions.
 const loom_amdgpu_lds_bank_service_model_t*
-loom_amdgpu_lds_bank_service_gfx1250_b128_model(
-    loom_amdgpu_lds_bank_service_direction_t direction);
+loom_amdgpu_lds_bank_service_model_lookup(
+    loom_amdgpu_lds_bank_service_model_set_ordinal_t model_set_ordinal,
+    loom_amdgpu_descriptor_ref_t descriptor_ref);
 
 // Returns the stable report key for |evidence_class|.
 iree_string_view_t loom_amdgpu_lds_bank_service_evidence_class_name(

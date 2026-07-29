@@ -224,6 +224,7 @@ _TARGET_PROJECTION_FIELDS: dict[str, tuple[str, str]] = {
     "max_workgroup_size_y": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_size.y"),
     "max_workgroup_size_z": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_size.z"),
     "max_flat_workgroup_size": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_flat_workgroup_size"),
+    "max_workgroup_storage_bytes": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U64", "snapshot.max_workgroup_storage_bytes"),
     "subgroup_size": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.subgroup_size"),
     "max_grid_size_x": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_grid_size.x"),
     "max_grid_size_y": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_grid_size.y"),

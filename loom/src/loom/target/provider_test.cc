@@ -84,6 +84,12 @@ static bool AlwaysSatisfiesTargetRequirement(
   return true;
 }
 
+static iree_string_view_t MaterializationSymbolStem(
+    const loom_target_profile_t* profile) {
+  (void)profile;
+  return IREE_SV("target");
+}
+
 struct PipelineBuildData {
   const loom_target_environment_t* environment;
 };
@@ -293,6 +299,20 @@ TEST_F(TargetProviderTest, RejectsAmbiguousRecordSemanticsOwnership) {
   const loom_target_provider_t* const providers[] = {
       &first_provider,
       &second_provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
+}
+
+TEST_F(TargetProviderTest, RejectsPartialMaterializationContract) {
+  loom_target_provider_t provider = {};
+  provider.materialization.symbol_stem = MaterializationSymbolStem;
+  const loom_target_provider_t* const providers[] = {
+      &provider,
   };
   const loom_target_provider_set_t provider_set =
       loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));

@@ -868,7 +868,7 @@ iree_hal_amdgpu_physical_device_initialize_vendor_packet_strategy(
                             out_physical_device->device_ordinal);
   }
   const iree_hal_amdgpu_gfxip_version_t gfxip_version =
-      agent_target->primary_isa.target_id.version;
+      agent_target->primary_isa.identity.version;
 
   iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities =
       iree_hal_amdgpu_select_vendor_packet_capabilities(gfxip_version);
@@ -999,7 +999,7 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
         iree_hal_amdgpu_physical_device_initialize_cpu_visible_device_coarse_memory(
             libhsa, device_agent, coarse_block_memory_pool,
             &out_physical_device->hdp_flush,
-            out_physical_device->agent_target->primary_isa.target_id.version,
+            out_physical_device->agent_target->primary_isa.identity.version,
             &system->topology,
             &out_physical_device->cpu_visible_device_coarse_memory);
   }

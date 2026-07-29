@@ -133,7 +133,7 @@ iree_hal_amdgpu_code_object_decode_v4_feature(uint32_t e_flags, uint32_t mask,
 
 IREE_API_EXPORT iree_status_t iree_hal_amdgpu_code_object_target_id_from_elf(
     iree_const_byte_span_t elf_data,
-    iree_hal_amdgpu_target_id_t* out_target_id) {
+    iree_hal_amdgpu_target_identity_t* out_target_id) {
   IREE_ASSERT_ARGUMENT(out_target_id);
   memset(out_target_id, 0, sizeof(*out_target_id));
 
@@ -193,19 +193,18 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_code_object_target_id_from_elf(
         e_flags & IREE_HAL_AMDGPU_EF_MACH);
   }
 
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_parse(
-      machine_target->processor, IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_NONE,
-      out_target_id));
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_parse_processor(
+      machine_target->processor, out_target_id));
 
   const uint8_t abi_version = header[IREE_HAL_AMDGPU_ELF_EI_ABIVERSION];
   if (abi_version == IREE_HAL_AMDGPU_ELF_HSA_ABI_VERSION_V3) {
-    out_target_id->sramecc =
+    out_target_id->amdhsa_features.sramecc =
         iree_all_bits_set(e_flags, IREE_HAL_AMDGPU_EF_FEATURE_SRAMECC_V3)
             ? IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON
         : machine_target->sramecc_supported
             ? IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF
             : IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_UNSUPPORTED;
-    out_target_id->xnack =
+    out_target_id->amdhsa_features.xnack =
         iree_all_bits_set(e_flags, IREE_HAL_AMDGPU_EF_FEATURE_XNACK_V3)
             ? IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON
         : machine_target->xnack_supported
@@ -214,16 +213,18 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_code_object_target_id_from_elf(
   } else if (abi_version == IREE_HAL_AMDGPU_ELF_HSA_ABI_VERSION_V4 ||
              abi_version == IREE_HAL_AMDGPU_ELF_HSA_ABI_VERSION_V5 ||
              abi_version == IREE_HAL_AMDGPU_ELF_HSA_ABI_VERSION_V6) {
-    out_target_id->sramecc = iree_hal_amdgpu_code_object_decode_v4_feature(
-        e_flags, IREE_HAL_AMDGPU_EF_FEATURE_SRAMECC_V4,
-        IREE_HAL_AMDGPU_EF_FEATURE_SRAMECC_ANY_V4,
-        IREE_HAL_AMDGPU_EF_FEATURE_SRAMECC_OFF_V4,
-        IREE_HAL_AMDGPU_EF_FEATURE_SRAMECC_ON_V4);
-    out_target_id->xnack = iree_hal_amdgpu_code_object_decode_v4_feature(
-        e_flags, IREE_HAL_AMDGPU_EF_FEATURE_XNACK_V4,
-        IREE_HAL_AMDGPU_EF_FEATURE_XNACK_ANY_V4,
-        IREE_HAL_AMDGPU_EF_FEATURE_XNACK_OFF_V4,
-        IREE_HAL_AMDGPU_EF_FEATURE_XNACK_ON_V4);
+    out_target_id->amdhsa_features.sramecc =
+        iree_hal_amdgpu_code_object_decode_v4_feature(
+            e_flags, IREE_HAL_AMDGPU_EF_FEATURE_SRAMECC_V4,
+            IREE_HAL_AMDGPU_EF_FEATURE_SRAMECC_ANY_V4,
+            IREE_HAL_AMDGPU_EF_FEATURE_SRAMECC_OFF_V4,
+            IREE_HAL_AMDGPU_EF_FEATURE_SRAMECC_ON_V4);
+    out_target_id->amdhsa_features.xnack =
+        iree_hal_amdgpu_code_object_decode_v4_feature(
+            e_flags, IREE_HAL_AMDGPU_EF_FEATURE_XNACK_V4,
+            IREE_HAL_AMDGPU_EF_FEATURE_XNACK_ANY_V4,
+            IREE_HAL_AMDGPU_EF_FEATURE_XNACK_OFF_V4,
+            IREE_HAL_AMDGPU_EF_FEATURE_XNACK_ON_V4);
     if (abi_version == IREE_HAL_AMDGPU_ELF_HSA_ABI_VERSION_V6) {
       out_target_id->generic_version =
           (e_flags & IREE_HAL_AMDGPU_EF_GENERIC_VERSION) >>

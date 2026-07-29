@@ -1675,7 +1675,7 @@ typedef struct loom_target_compile_report_t {
   iree_string_view_t backend_name;
   // Target family name selected by the backend, if any.
   iree_string_view_t target_family_name;
-  // Backend-facing target key selected for compilation, if any.
+  // Backend-facing target key carried by the emitted artifact, if any.
   iree_string_view_t target_key;
   // Resolved target record name selected for compilation, if any.
   iree_string_view_t target_bundle_name;

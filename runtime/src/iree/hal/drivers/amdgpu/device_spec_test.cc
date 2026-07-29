@@ -14,13 +14,12 @@ namespace {
 static void CreateDeviceSpecForProcessor(
     iree_string_view_t processor, uint32_t wavefront_size,
     iree_hal_allocator_t* allocator, iree_hal_device_spec_t** out_device_spec) {
-  iree_hal_amdgpu_target_id_t target_id = {};
-  IREE_ASSERT_OK(iree_hal_amdgpu_target_id_parse(
-      processor, IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_ARCH_ONLY,
-      &target_id));
+  iree_hal_amdgpu_target_identity_t identity = {};
+  IREE_ASSERT_OK(
+      iree_hal_amdgpu_target_identity_parse_artifact_key(processor, &identity));
 
   iree_hal_amdgpu_device_spec_physical_device_params_t physical_device = {
-      /*.target_id=*/target_id,
+      /*.identity=*/identity,
       /*.uuid=*/{{0x11}},
       /*.pci=*/{/*.domain=*/0, /*.bus=*/3, /*.device=*/0, /*.function=*/0},
       /*.numa=*/{/*.node_id=*/1},
@@ -160,16 +159,14 @@ TEST(DeviceSpecTest, AdvertisesTargetsPerPhysicalDevice) {
       iree_hal_allocator_create_heap(IREE_SV("test"), iree_allocator_system(),
                                      iree_allocator_system(), &allocator));
 
-  iree_hal_amdgpu_target_id_t target_ids[2];
-  IREE_ASSERT_OK(iree_hal_amdgpu_target_id_parse(
-      IREE_SV("gfx1100"), IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_ARCH_ONLY,
-      &target_ids[0]));
-  IREE_ASSERT_OK(iree_hal_amdgpu_target_id_parse(
-      IREE_SV("gfx1101"), IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_ARCH_ONLY,
-      &target_ids[1]));
+  iree_hal_amdgpu_target_identity_t identities[2];
+  IREE_ASSERT_OK(iree_hal_amdgpu_target_identity_parse_artifact_key(
+      IREE_SV("gfx1100"), &identities[0]));
+  IREE_ASSERT_OK(iree_hal_amdgpu_target_identity_parse_artifact_key(
+      IREE_SV("gfx1101"), &identities[1]));
   iree_hal_amdgpu_device_spec_physical_device_params_t physical_devices[2] = {
       {
-          /*.target_id=*/target_ids[0],
+          /*.identity=*/identities[0],
           /*.uuid=*/{},
           /*.pci=*/{},
           /*.numa=*/{},
@@ -181,7 +178,7 @@ TEST(DeviceSpecTest, AdvertisesTargetsPerPhysicalDevice) {
           /*.flags=*/IREE_HAL_AMDGPU_DEVICE_SPEC_PHYSICAL_DEVICE_FLAG_NONE,
       },
       {
-          /*.target_id=*/target_ids[1],
+          /*.identity=*/identities[1],
           /*.uuid=*/{},
           /*.pci=*/{},
           /*.numa=*/{},

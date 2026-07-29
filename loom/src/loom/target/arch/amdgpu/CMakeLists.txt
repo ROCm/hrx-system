@@ -285,14 +285,15 @@ loom_cc_library(
   NAME
     low_verify
   HDRS
-    "gfx1250_a0_errata.h"
+    "instruction_constraints.h"
     "low_verify.h"
   SRCS
-    "gfx1250_a0_errata.c"
+    "instruction_constraints.c"
     "low_verify.c"
   DEPS
     ::error_defs
     ::low_aliases
+    ::target_info_defs
     iree::base
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
@@ -330,7 +331,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::diagnostics::packet_diagnostics
     loom::target::arch::amdgpu::lower
     loom::target::arch::amdgpu::ops
-    loom::target::arch::amdgpu::records::target_records
+    loom::target::materialization
     loom::target::provider
   PUBLIC
 )

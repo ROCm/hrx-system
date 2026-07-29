@@ -25,18 +25,52 @@
 extern "C" {
 #endif
 
-/// gfx1250 silicon revision selected by an AMDGPU target profile.
-typedef enum loomc_amdgpu_gfx1250_revision_e {
-  /// Uses the default revision for the selected processor. gfx1250 defaults to
-  /// B0; the value has no effect on other processors.
-  LOOMC_AMDGPU_GFX1250_REVISION_DEFAULT = 0,
+/// Normalized state of one AMDHSA target-ID feature.
+typedef enum loomc_amdgpu_target_feature_state_e {
+  /// The target identity does not constrain the feature.
+  LOOMC_AMDGPU_TARGET_FEATURE_ANY = 0,
 
-  /// Selects gfx1250 A0 silicon behavior and errata.
-  LOOMC_AMDGPU_GFX1250_REVISION_A0 = 1,
+  /// The selected processor is known not to support the feature.
+  LOOMC_AMDGPU_TARGET_FEATURE_UNSUPPORTED = 1,
 
-  /// Selects gfx1250 B0 silicon behavior.
-  LOOMC_AMDGPU_GFX1250_REVISION_B0 = 2,
-} loomc_amdgpu_gfx1250_revision_t;
+  /// The feature is explicitly disabled, such as `xnack-`.
+  LOOMC_AMDGPU_TARGET_FEATURE_OFF = 2,
+
+  /// The feature is explicitly enabled, such as `sramecc+`.
+  LOOMC_AMDGPU_TARGET_FEATURE_ON = 3,
+} loomc_amdgpu_target_feature_state_t;
+
+/// Structured AMDHSA target-ID feature states.
+typedef struct loomc_amdgpu_amdhsa_feature_states_t {
+  /// SRAM ECC target-ID feature state.
+  loomc_amdgpu_target_feature_state_t sramecc;
+
+  /// XNACK target-ID feature state.
+  loomc_amdgpu_target_feature_state_t xnack;
+} loomc_amdgpu_amdhsa_feature_states_t;
+
+/// Optional physical HSA ASIC revision.
+typedef struct loomc_amdgpu_asic_revision_t {
+  /// True when `value` selects an explicit physical revision.
+  bool specified;
+
+  /// Physical HSA ASIC revision value when `specified` is true.
+  uint32_t value;
+} loomc_amdgpu_asic_revision_t;
+
+/// Complete structured AMDGPU identity used to construct a target profile.
+typedef struct loomc_amdgpu_target_identity_t {
+  /// Exact or generic AMDGPU processor name, such as `gfx1151`, `gfx942`, or
+  /// `gfx11-generic`.
+  loomc_string_view_t processor;
+
+  /// Structured AMDHSA target-ID feature states.
+  loomc_amdgpu_amdhsa_feature_states_t amdhsa_features;
+
+  /// Physical HSA ASIC revision. An unspecified value uses the generated
+  /// offline default for the selected processor.
+  loomc_amdgpu_asic_revision_t asic_revision;
+} loomc_amdgpu_target_identity_t;
 
 /// AMDGPU processor profile creation options.
 typedef struct loomc_amdgpu_profile_options_t {
@@ -52,16 +86,11 @@ typedef struct loomc_amdgpu_profile_options_t {
 
   /// Stable profile identifier used in diagnostics.
   ///
-  /// Empty uses `processor`.
+  /// Empty uses `identity.processor`.
   loomc_string_view_t identifier;
 
-  /// Exact or generic AMDGPU processor name, such as `gfx1151`, `gfx942`, or
-  /// `gfx11-generic`.
-  loomc_string_view_t processor;
-
-  /// gfx1250 silicon revision. Explicit A0/B0 values require processor
-  /// `gfx1250`; DEFAULT selects B0 for gfx1250 and is ignored otherwise.
-  loomc_amdgpu_gfx1250_revision_t gfx1250_revision;
+  /// Structured AMDGPU target identity.
+  loomc_amdgpu_target_identity_t identity;
 } loomc_amdgpu_profile_options_t;
 
 /// Creates an AMDGPU target profile from an exact or generic processor name.
@@ -81,37 +110,38 @@ LOOMC_API_EXPORT loomc_status_t loomc_target_profile_create_amdgpu(
     const loomc_amdgpu_profile_options_t* options, loomc_allocator_t allocator,
     loomc_target_profile_t** out_profile);
 
-/// Returns the processor selected by an AMDGPU target profile.
+/// Returns the complete identity selected by an AMDGPU target profile.
 ///
 /// @param profile AMDGPU target profile to query.
-/// @return Empty when `profile` is `NULL` or was not created by the AMDGPU
-/// profile API.
-LOOMC_API_EXPORT loomc_string_view_t
-loomc_amdgpu_target_profile_processor(const loomc_target_profile_t* profile);
-
-/// Returns the gfx1250 revision selected by an AMDGPU target profile.
+/// @param out_identity Receives the structured AMDGPU identity.
+/// @return OK when `profile` is an AMDGPU target profile.
 ///
-/// @param profile AMDGPU target profile to query.
-/// @return A0 or B0 for gfx1250 profiles. DEFAULT is returned when `profile`
-/// is `NULL`, was not created by the AMDGPU profile API, or selects another
-/// processor.
-LOOMC_API_EXPORT loomc_amdgpu_gfx1250_revision_t
-loomc_amdgpu_target_profile_gfx1250_revision(
-    const loomc_target_profile_t* profile);
+/// @lifetime
+/// `out_identity->processor` remains valid until `profile` is released.
+LOOMC_API_EXPORT loomc_status_t loomc_amdgpu_target_profile_query_identity(
+    const loomc_target_profile_t* profile,
+    loomc_amdgpu_target_identity_t* out_identity);
 
-/// Extracts an AMDGPU processor name from an HSA ISA target id.
+/// Adapts an HSA ISA name and physical ASIC revision to an AMDGPU identity.
 ///
 /// HSA agents report ISA names such as
-/// `amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-`. Loom target profiles use the
-/// processor component, such as `gfx942`. The returned view is owned by Loom's
-/// static AMDGPU target tables and remains valid for the lifetime of the
-/// process.
+/// `amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-`. The adapter preserves every
+/// structured target-ID feature and applies the HSA-reported ASIC revision
+/// through Loom's generated processor qualification facts. Processors without
+/// revision-specific compiler semantics remain revision-unqualified.
 ///
 /// @param hsa_isa_name HSA ISA target id reported by the runtime.
-/// @param out_processor Receives a borrowed processor-name view on success.
-/// @return OK when the target id is an AMDHSA target id with a known processor.
-LOOMC_API_EXPORT loomc_status_t loomc_amdgpu_processor_from_hsa_isa_name(
-    loomc_string_view_t hsa_isa_name, loomc_string_view_t* out_processor);
+/// @param asic_revision Physical ASIC revision reported by HSA.
+/// @param out_identity Receives the structured AMDGPU target identity.
+/// @return OK when the target id names a known processor and the physical
+/// revision is known when that processor has revision-specific semantics.
+///
+/// @lifetime
+/// `out_identity->processor` is owned by Loom's static AMDGPU target tables
+/// and remains valid for the lifetime of the process.
+LOOMC_API_EXPORT loomc_status_t loomc_amdgpu_target_identity_from_hsa_isa_name(
+    loomc_string_view_t hsa_isa_name, uint32_t asic_revision,
+    loomc_amdgpu_target_identity_t* out_identity);
 
 #ifdef __cplusplus
 }  // extern "C"

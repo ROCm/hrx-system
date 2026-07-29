@@ -837,7 +837,7 @@ ordinary_workgroup_y:
 
 // RUN: emit amdgpu-kernel-assembly
 
-amdgpu.target<gfx1250> @target {gfx1250_revision = a0}
+amdgpu.target<gfx1250> @target {asic_revision = 0}
 low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 2) @ordinary_workgroup_z() asm<amdgpu.rdna4.gfx125x.core> {
   %packed_z = live_in<amdgpu.cluster_id_z> : reg<amdgpu.sgpr>
   %value = s_lshr_b32_rhs_inline %packed_z, 16

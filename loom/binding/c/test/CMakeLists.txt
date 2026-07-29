@@ -138,8 +138,10 @@ loom_cc_test(
     loom::ir
     loom::ops::op_registry
     loom::ops::test
+    loom::target::materialization
     loom::target::profile
     loom::target::provider
+    loom::target::test::target_record_table
     loom::target::types
     loom::verify
 )

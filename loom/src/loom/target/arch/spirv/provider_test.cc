@@ -199,5 +199,82 @@ TEST_F(SpirvProviderTest, MaterializedProfileSatisfiesStructuredRequirements) {
   EXPECT_EQ(loom_spirv_target_abi(baseline_op), LOOM_TARGET_ABI_UNKNOWN);
 }
 
+TEST_F(SpirvProviderTest, MaterializesByDurableProjectionIdentity) {
+  ModulePtr module = Parse(IREE_SV(""));
+
+  loom_target_bundle_storage_t first_storage = {
+      /*.snapshot=*/*loom_spirv_low_target_bundle_vulkan1_3.snapshot,
+      /*.export_plan=*/*loom_spirv_low_target_bundle_vulkan1_3.export_plan,
+      /*.config=*/*loom_spirv_low_target_bundle_vulkan1_3.config,
+      /*.bundle=*/loom_spirv_low_target_bundle_vulkan1_3,
+  };
+  loom_target_bundle_storage_rebind(&first_storage);
+  first_storage.bundle.name = iree_string_view_empty();
+  first_storage.snapshot.subgroup_size = 32;
+
+  loom_spirv_cooperative_property_set_t first_inventory = {};
+  loom_spirv_target_profile_t first_profile = {};
+  loom_spirv_target_profile_initialize(&first_storage.bundle, &first_inventory,
+                                       &first_profile);
+  loom_symbol_ref_t first_ref = loom_symbol_ref_null();
+  IREE_ASSERT_OK(loom_target_environment_materialize_selection(
+      &target_environment_, module.get(),
+      loom_target_selection_t{/*.profile=*/&first_profile.base}, &first_ref));
+  EXPECT_TRUE(iree_string_view_equal(
+      module->strings
+          .entries[module->symbols.entries[first_ref.symbol_id].name_id],
+      IREE_SV("spirv_vulkan1_3")));
+
+  loom_target_bundle_storage_t equal_storage = first_storage;
+  loom_target_bundle_storage_rebind(&equal_storage);
+  equal_storage.bundle.name = IREE_SV("different-diagnostic-name");
+  loom_spirv_cooperative_property_set_t different_inventory = {
+      /*.feature_bits=*/LOOM_SPIRV_FEATURE_FLOAT16,
+  };
+  loom_spirv_target_profile_t equal_profile = {};
+  loom_spirv_target_profile_initialize(&equal_storage.bundle,
+                                       &different_inventory, &equal_profile);
+  loom_symbol_ref_t equal_ref = loom_symbol_ref_null();
+  IREE_ASSERT_OK(loom_target_environment_materialize_selection(
+      &target_environment_, module.get(),
+      loom_target_selection_t{/*.profile=*/&equal_profile.base}, &equal_ref));
+  EXPECT_EQ(equal_ref.module_id, first_ref.module_id);
+  EXPECT_EQ(equal_ref.symbol_id, first_ref.symbol_id);
+
+  loom_target_bundle_storage_t distinct_storage = first_storage;
+  loom_target_bundle_storage_rebind(&distinct_storage);
+  distinct_storage.bundle.name = equal_storage.bundle.name;
+  distinct_storage.snapshot.subgroup_size = 64;
+  loom_spirv_target_profile_t distinct_profile = {};
+  loom_spirv_target_profile_initialize(&distinct_storage.bundle,
+                                       &first_inventory, &distinct_profile);
+  loom_symbol_ref_t distinct_ref = loom_symbol_ref_null();
+  IREE_ASSERT_OK(loom_target_environment_materialize_selection(
+      &target_environment_, module.get(),
+      loom_target_selection_t{/*.profile=*/&distinct_profile.base},
+      &distinct_ref));
+  EXPECT_NE(distinct_ref.symbol_id, first_ref.symbol_id);
+
+  loom_target_bundle_storage_t distinct_copy = distinct_storage;
+  loom_target_bundle_storage_rebind(&distinct_copy);
+  loom_spirv_target_profile_t distinct_copy_profile = {};
+  loom_spirv_target_profile_initialize(&distinct_copy.bundle,
+                                       /*cooperative_properties=*/nullptr,
+                                       &distinct_copy_profile);
+  loom_symbol_ref_t distinct_copy_ref = loom_symbol_ref_null();
+  IREE_ASSERT_OK(loom_target_environment_materialize_selection(
+      &target_environment_, module.get(),
+      loom_target_selection_t{/*.profile=*/&distinct_copy_profile.base},
+      &distinct_copy_ref));
+  EXPECT_EQ(distinct_copy_ref.symbol_id, distinct_ref.symbol_id);
+
+  const loom_target_record_view_t first_target =
+      Target(&effective_fact_table_, module.get(), first_ref);
+  const loom_target_record_view_t distinct_target =
+      Target(&effective_fact_table_, module.get(), distinct_ref);
+  EXPECT_EQ(first_target.facts->storage.snapshot.subgroup_size, 32u);
+  EXPECT_EQ(distinct_target.facts->storage.snapshot.subgroup_size, 64u);
+}
+
 }  // namespace
 }  // namespace loom

@@ -230,7 +230,7 @@ class TargetConfig:
             exact_members = [
                 compatibility_info.exact_processor
                 for compatibility_info in (
-                    self._root_target_map.AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
+                    self._root_target_map.AMDGPU_EXACT_TARGET_INFOS
                 )
                 if (
                     compatibility_info.code_object_processor

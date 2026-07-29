@@ -30,7 +30,10 @@ typedef struct loom_amdgpu_hal_device_target_storage_t {
   // can be recovered from its target-neutral base pointer.
   loom_amdgpu_target_profile_t profile;
 
-  // Owned provider-facing target key reported with the selected target.
+  // NUL-terminated storage for the canonical provider-facing target key.
+  char target_key_storage[128];
+
+  // Canonical provider-facing target key borrowing |target_key_storage|.
   iree_string_view_t target_key;
 } loom_amdgpu_hal_device_target_storage_t;
 
@@ -40,33 +43,21 @@ static void loom_amdgpu_hal_device_target_storage_deinitialize(
   if (storage == NULL) {
     return;
   }
-  iree_allocator_free(allocator, (void*)storage->target_key.data);
   iree_allocator_free(allocator, storage);
 }
 
-static loom_amdgpu_target_feature_selection_t
+static loom_amdgpu_target_feature_state_t
 loom_amdgpu_hal_artifact_provider_map_feature_state(
     iree_hal_amdgpu_target_feature_state_t state) {
   switch (state) {
+    case IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_UNSUPPORTED:
+      return LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED;
     case IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF:
       return LOOM_AMDGPU_TARGET_FEATURE_OFF;
     case IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON:
       return LOOM_AMDGPU_TARGET_FEATURE_ON;
     default:
-      return LOOM_AMDGPU_TARGET_FEATURE_DEFAULT;
-  }
-}
-
-static iree_hal_amdgpu_target_feature_state_t
-loom_amdgpu_hal_artifact_provider_map_feature_selection(
-    loom_amdgpu_target_feature_selection_t selection) {
-  switch (selection) {
-    case LOOM_AMDGPU_TARGET_FEATURE_OFF:
-      return IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF;
-    case LOOM_AMDGPU_TARGET_FEATURE_ON:
-      return IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON;
-    default:
-      return IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY;
+      return LOOM_AMDGPU_TARGET_FEATURE_ANY;
   }
 }
 
@@ -74,46 +65,29 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_parse_target_profile(
     iree_string_view_t target_key, loom_amdgpu_target_profile_t* out_profile) {
   *out_profile = (loom_amdgpu_target_profile_t){0};
 
-  iree_hal_amdgpu_target_id_t target_id = {0};
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_parse(
-      target_key,
-      IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_HSA_PREFIX |
-          IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_ARCH_ONLY |
-          IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_FEATURE_SUFFIXES,
-      &target_id));
+  iree_hal_amdgpu_target_identity_t hal_identity = {0};
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_parse_artifact_key(
+      target_key, &hal_identity));
   const loom_amdgpu_processor_info_t* processor = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_lookup_processor(
-      target_id.processor, &processor));
+      hal_identity.processor, &processor));
 
-  loom_amdgpu_gfx1250_revision_t gfx1250_revision =
-      LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED;
-  if (iree_string_view_equal(processor->name, IREE_SV("gfx1250"))) {
-    switch (target_id.gfx1250_b0_specific) {
-      case IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF:
-        gfx1250_revision = LOOM_AMDGPU_GFX1250_REVISION_A0;
-        break;
-      case IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY:
-      case IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON:
-        gfx1250_revision = LOOM_AMDGPU_GFX1250_REVISION_B0;
-        break;
-      case IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_UNSUPPORTED:
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "gfx1250 target '%.*s' reports unsupported silicon revision "
-            "selection",
-            (int)target_key.size, target_key.data);
-    }
-  }
-
-  const loom_amdgpu_amdhsa_profile_facts_t amdhsa = {
+  loom_amdgpu_target_identity_t identity = {
       .processor = processor,
-      .gfx1250_revision = gfx1250_revision,
-      .sramecc = loom_amdgpu_hal_artifact_provider_map_feature_state(
-          target_id.sramecc),
-      .xnack =
-          loom_amdgpu_hal_artifact_provider_map_feature_state(target_id.xnack),
+      .amdhsa_features =
+          {
+              .sramecc = loom_amdgpu_hal_artifact_provider_map_feature_state(
+                  hal_identity.amdhsa_features.sramecc),
+              .xnack = loom_amdgpu_hal_artifact_provider_map_feature_state(
+                  hal_identity.amdhsa_features.xnack),
+          },
   };
-  return loom_amdgpu_target_profile_initialize(&amdhsa, out_profile);
+  if (hal_identity.asic_revision.specified) {
+    identity.asic_revision = loom_amdgpu_target_info_find_asic_revision(
+        processor, hal_identity.asic_revision.value);
+    IREE_ASSERT(identity.asic_revision != NULL);
+  }
+  return loom_amdgpu_target_profile_initialize(&identity, out_profile);
 }
 
 static iree_status_t
@@ -121,37 +95,19 @@ loom_amdgpu_hal_artifact_provider_format_profile_target_key(
     const loom_amdgpu_target_profile_t* profile,
     iree_host_size_t buffer_capacity, char* buffer,
     iree_string_view_t* out_target_key) {
-  const loom_amdgpu_amdhsa_profile_facts_t* amdhsa = &profile->amdhsa;
-  const iree_hal_amdgpu_target_id_t target_id = {
-      .sramecc = loom_amdgpu_hal_artifact_provider_map_feature_selection(
-          amdhsa->sramecc),
-      .xnack = loom_amdgpu_hal_artifact_provider_map_feature_selection(
-          amdhsa->xnack),
-      .gfx1250_b0_specific =
-          amdhsa->gfx1250_revision == LOOM_AMDGPU_GFX1250_REVISION_A0
-              ? IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF
-          : amdhsa->gfx1250_revision == LOOM_AMDGPU_GFX1250_REVISION_B0
-              ? IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON
-              : IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY,
-      .processor = amdhsa->processor->name,
-  };
-  iree_host_size_t target_key_length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_format(
-      &target_id, buffer_capacity, buffer, &target_key_length));
-  *out_target_key = iree_make_string_view(buffer, target_key_length);
-  return iree_ok_status();
+  return loom_amdgpu_artifact_target_key_format(
+      &profile->identity, buffer_capacity, buffer, out_target_key);
 }
 
 static iree_status_t loom_amdgpu_hal_artifact_provider_try_select_profile(
     const loom_amdgpu_target_profile_t* profile,
-    const iree_hal_executable_target_t* hal_target,
-    iree_string_view_t target_key, iree_allocator_t allocator,
+    const iree_hal_executable_target_t* hal_target, iree_allocator_t allocator,
     bool* out_selected, loom_run_hal_device_target_t* out_target) {
   IREE_ASSERT_ARGUMENT(out_selected);
   IREE_ASSERT_ARGUMENT(out_target);
   *out_selected = false;
 
-  if (!loom_amdgpu_processor_supports_hsaco(profile->amdhsa.processor)) {
+  if (!loom_amdgpu_target_properties_support_hsaco(&profile->properties)) {
     return iree_ok_status();
   }
 
@@ -161,16 +117,14 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_try_select_profile(
   *storage = (loom_amdgpu_hal_device_target_storage_t){
       .profile = *profile,
   };
-  void* target_key_data = NULL;
-  iree_status_t status = iree_allocator_clone(
-      allocator, iree_make_const_byte_span(target_key.data, target_key.size),
-      &target_key_data);
+  iree_status_t status =
+      loom_amdgpu_hal_artifact_provider_format_profile_target_key(
+          &storage->profile, sizeof(storage->target_key_storage),
+          storage->target_key_storage, &storage->target_key);
   if (!iree_status_is_ok(status)) {
     loom_amdgpu_hal_device_target_storage_deinitialize(storage, allocator);
     return status;
   }
-  storage->target_key =
-      iree_make_string_view((const char*)target_key_data, target_key.size);
 
   *out_target = (loom_run_hal_device_target_t){
       .hal_target = hal_target,
@@ -189,7 +143,7 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_try_select_target_key(
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_artifact_provider_parse_target_profile(
       target_key, &profile));
   return loom_amdgpu_hal_artifact_provider_try_select_profile(
-      &profile, hal_target, target_key, allocator, out_selected, out_target);
+      &profile, hal_target, allocator, out_selected, out_target);
 }
 
 static iree_status_t loom_amdgpu_hal_artifact_provider_try_select_device_target(
@@ -280,13 +234,11 @@ loom_amdgpu_hal_artifact_provider_select_function_device_target(
     return loom_amdgpu_hal_artifact_provider_select_device_target(
         provider, runtime, allocator, out_target);
   }
-  const loom_amdgpu_amdhsa_profile_facts_t amdhsa = {
-      .processor = processor,
-      .gfx1250_revision =
-          loom_amdgpu_target_gfx1250_revision_from_ref(module, target_ref),
-      .sramecc = LOOM_AMDGPU_TARGET_FEATURE_DEFAULT,
-      .xnack = LOOM_AMDGPU_TARGET_FEATURE_DEFAULT,
-  };
+  const loom_op_t* target_op =
+      module->symbols.entries[target_ref.symbol_id].defining_op;
+  IREE_ASSERT(target_op != NULL);
+  loom_amdgpu_target_identity_t amdhsa = {0};
+  loom_amdgpu_target_record_resolve_identity(target_op, &amdhsa);
   loom_amdgpu_target_profile_t profile = {0};
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_target_profile_initialize(&amdhsa, &profile));
@@ -324,8 +276,7 @@ loom_amdgpu_hal_artifact_provider_select_function_device_target(
 
   bool selected = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_artifact_provider_try_select_profile(
-      &profile, result.target, result.target->target_key, allocator, &selected,
-      out_target));
+      &profile, result.target, allocator, &selected, out_target));
   if (!selected) {
     return iree_make_status(
         IREE_STATUS_UNAVAILABLE,
@@ -349,7 +300,7 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_select_target_key(
   const loom_amdgpu_target_profile_t* target_profile =
       loom_amdgpu_target_profile_cast(out_target->target_profile);
   const loom_amdgpu_processor_info_t* processor =
-      target_profile ? target_profile->amdhsa.processor : NULL;
+      target_profile ? target_profile->identity.processor : NULL;
   if (!selected || processor == NULL) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "AMDGPU target '%.*s' cannot be emitted as HSACO "

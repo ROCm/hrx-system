@@ -377,6 +377,8 @@ static iree_hal_hip_device_facts_t iree_hal_hip_device_spec_from_properties(
   iree_hal_hip_copy_fixed_cstring(properties->gcnArchName,
                                   sizeof(spec.architecture.gcn_arch_name),
                                   spec.architecture.gcn_arch_name);
+  spec.architecture.asic_revision =
+      iree_hal_hip_u32_from_nonnegative_int(properties->asicRevision);
   return spec;
 }
 

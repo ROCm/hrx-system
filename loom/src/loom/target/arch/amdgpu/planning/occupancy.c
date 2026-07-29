@@ -42,8 +42,8 @@ static iree_status_t loom_amdgpu_occupancy_round_up_u32(
 }
 
 static const loom_amdgpu_occupancy_model_t* loom_amdgpu_occupancy_select_model(
-    const loom_amdgpu_processor_info_t* processor, uint32_t wave_size) {
-  return loom_amdgpu_occupancy_model_for_processor(processor, wave_size);
+    const loom_amdgpu_processor_properties_t* properties, uint32_t wave_size) {
+  return loom_amdgpu_occupancy_model_for_properties(properties, wave_size);
 }
 
 static const loom_amdgpu_occupancy_model_t*
@@ -53,9 +53,9 @@ loom_amdgpu_occupancy_select_target_model(
       loom_amdgpu_target_processor_from_resolved_target(target);
   IREE_ASSERT(processor != NULL);
   const uint32_t wave_size = target->bundle_storage.snapshot.subgroup_size;
-  IREE_ASSERT(
-      loom_amdgpu_processor_supports_wavefront_size(processor, wave_size));
-  return loom_amdgpu_occupancy_select_model(processor, wave_size);
+  IREE_ASSERT(loom_amdgpu_processor_properties_support_wavefront_size(
+      &processor->properties, wave_size));
+  return loom_amdgpu_occupancy_select_model(&processor->properties, wave_size);
 }
 
 static uint32_t loom_amdgpu_occupancy_register_class_index(
@@ -498,7 +498,8 @@ iree_status_t loom_amdgpu_occupancy_build_target_resources(
         IREE_STATUS_INVALID_ARGUMENT,
         "AMDGPU final occupancy requires a resolved processor");
   }
-  if (!loom_amdgpu_processor_supports_wavefront_size(processor, wave_size)) {
+  if (!loom_amdgpu_processor_properties_support_wavefront_size(
+          &processor->properties, wave_size)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU final occupancy processor '%.*s' does not support wave size "
@@ -507,7 +508,7 @@ iree_status_t loom_amdgpu_occupancy_build_target_resources(
   }
 
   const loom_amdgpu_occupancy_model_t* model =
-      loom_amdgpu_occupancy_select_model(processor, wave_size);
+      loom_amdgpu_occupancy_select_model(&processor->properties, wave_size);
   const loom_target_residency_derived_resource_table_t* resource_table =
       &model->residency_model.derived_resources;
 
@@ -676,11 +677,11 @@ iree_status_t loom_amdgpu_occupancy_build(
                             "AMDGPU occupancy requires a fixed target "
                             "subgroup size");
   }
-  IREE_ASSERT(
-      loom_amdgpu_processor_supports_wavefront_size(processor, wave_size));
+  IREE_ASSERT(loom_amdgpu_processor_properties_support_wavefront_size(
+      &processor->properties, wave_size));
 
   const loom_amdgpu_occupancy_model_t* model =
-      loom_amdgpu_occupancy_select_model(processor, wave_size);
+      loom_amdgpu_occupancy_select_model(&processor->properties, wave_size);
   const loom_target_residency_derived_resource_table_t* resource_table =
       &model->residency_model.derived_resources;
 

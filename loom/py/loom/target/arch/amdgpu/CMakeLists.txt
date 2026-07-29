@@ -23,6 +23,7 @@ iree_py_library(
     target_info
   SRCS
     "__init__.py"
+    "lds_bank_service.py"
     "names.py"
     "target_info.py"
   DEPS

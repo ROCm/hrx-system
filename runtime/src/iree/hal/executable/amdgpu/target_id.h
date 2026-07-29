@@ -47,38 +47,42 @@ typedef enum iree_hal_amdgpu_target_kind_e {
   IREE_HAL_AMDGPU_TARGET_KIND_GENERIC,
 } iree_hal_amdgpu_target_kind_t;
 
-// Parsed AMDGPU target ID.
-typedef struct iree_hal_amdgpu_target_id_t {
+// Structured AMDHSA target-ID feature states.
+typedef struct iree_hal_amdgpu_amdhsa_feature_states_t {
+  // SRAM ECC selector state.
+  iree_hal_amdgpu_target_feature_state_t sramecc;
+  // XNACK selector state.
+  iree_hal_amdgpu_target_feature_state_t xnack;
+} iree_hal_amdgpu_amdhsa_feature_states_t;
+
+// Optional physical ASIC revision.
+typedef struct iree_hal_amdgpu_asic_revision_t {
+  // True when |value| and |name| identify a generated revision row.
+  bool specified;
+  // Physical HSA ASIC revision value when |specified| is true.
+  uint32_t value;
+  // Canonical revision name when |specified| is true.
+  iree_string_view_t name;
+} iree_hal_amdgpu_asic_revision_t;
+
+// Structured AMDGPU target identity.
+typedef struct iree_hal_amdgpu_target_identity_t {
   // Processor name class used to interpret |version|.
   iree_hal_amdgpu_target_kind_t kind;
   // Parsed gfx IP version or generic family version.
   iree_hal_amdgpu_gfxip_version_t version;
   // Generic code-object format version from ELF e_flags, or 0 if unspecified.
   uint32_t generic_version;
-  // SRAM ECC selector state.
-  iree_hal_amdgpu_target_feature_state_t sramecc;
-  // XNACK selector state.
-  iree_hal_amdgpu_target_feature_state_t xnack;
-  // gfx1250 B0-specific instruction and scheduling behavior selector state.
-  iree_hal_amdgpu_target_feature_state_t gfx1250_b0_specific;
+  // Normalized AMDHSA target-ID feature states.
+  iree_hal_amdgpu_amdhsa_feature_states_t amdhsa_features;
+  // Physical ASIC revision when required to fully identify the target.
+  iree_hal_amdgpu_asic_revision_t asic_revision;
   // Borrowed processor name without feature suffixes or HSA triple prefix.
   iree_string_view_t processor;
-} iree_hal_amdgpu_target_id_t;
+} iree_hal_amdgpu_target_identity_t;
 
-// Parser modes for AMDGPU target IDs.
-typedef enum iree_hal_amdgpu_target_id_parse_flag_bits_e {
-  // Requires a bare processor name with no feature suffixes.
-  IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_NONE = 0u,
-  // Accepts `amdgcn-amd-amdhsa--`-prefixed HSA ISA names.
-  IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_HSA_PREFIX = 1u << 0,
-  // Accepts bare processor names such as `gfx942`.
-  IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_ARCH_ONLY = 1u << 1,
-  // Accepts AMDGPU feature suffixes such as `:sramecc+:xnack-`.
-  IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_FEATURE_SUFFIXES = 1u << 2,
-} iree_hal_amdgpu_target_id_parse_flag_bits_t;
-typedef uint32_t iree_hal_amdgpu_target_id_parse_flags_t;
-
-// Compatibility reasons reported by iree_hal_amdgpu_target_id_check_compatible.
+// Compatibility reasons reported by
+// iree_hal_amdgpu_target_identity_check_compatible.
 typedef enum iree_hal_amdgpu_target_compatibility_bits_e {
   // Code object target identity is compatible with the agent target identity.
   IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE = 0u,
@@ -92,8 +96,8 @@ typedef enum iree_hal_amdgpu_target_compatibility_bits_e {
   IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_SRAMECC = 1u << 3,
   // Explicit XNACK mode does not match the agent.
   IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_XNACK = 1u << 4,
-  // gfx1250 A0/B0-specific behavior does not match the agent.
-  IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GFX1250_REVISION = 1u << 5,
+  // Explicit physical ASIC revision does not match the agent.
+  IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_ASIC_REVISION = 1u << 5,
 } iree_hal_amdgpu_target_compatibility_bits_t;
 typedef uint32_t iree_hal_amdgpu_target_compatibility_t;
 
@@ -116,67 +120,83 @@ typedef struct iree_hal_amdgpu_wavefront_size_support_t {
   iree_hal_amdgpu_wavefront_size_flags_t explicit_supported_sizes;
 } iree_hal_amdgpu_wavefront_size_support_t;
 
-// Parses an AMDGPU target ID into |out_target_id|.
+// Parses one exact or generic processor name into a target identity.
 //
-// String views in |out_target_id| borrow from |value| and are only valid while
-// |value| storage remains live.
-iree_status_t iree_hal_amdgpu_target_id_parse(
-    iree_string_view_t value, iree_hal_amdgpu_target_id_parse_flags_t flags,
-    iree_hal_amdgpu_target_id_t* out_target_id);
+// Feature modes remain unconstrained or unsupported according to the generated
+// processor table. No artifact-only coordinates are accepted.
+iree_status_t iree_hal_amdgpu_target_identity_parse_processor(
+    iree_string_view_t processor,
+    iree_hal_amdgpu_target_identity_t* out_identity);
+
+// Parses a canonical AMDGPU artifact target key.
+//
+// The processor and real AMDHSA feature suffixes use target-ID syntax. An
+// optional `asic-revision=<name>` coordinate preserves physical identity not
+// representable by an AMDHSA target ID. Returned string views either borrow
+// from |value| or reference generated static revision rows.
+iree_status_t iree_hal_amdgpu_target_identity_parse_artifact_key(
+    iree_string_view_t value, iree_hal_amdgpu_target_identity_t* out_identity);
 
 // Parses an HSA ISA name reported by HSA_ISA_INFO_NAME.
-iree_status_t iree_hal_amdgpu_target_id_parse_hsa_isa_name(
-    iree_string_view_t value, iree_hal_amdgpu_target_id_t* out_target_id);
+iree_status_t iree_hal_amdgpu_target_identity_parse_hsa_isa_name(
+    iree_string_view_t value, iree_hal_amdgpu_target_identity_t* out_identity);
 
-// Applies the HSA-reported physical ASIC revision to |target_id|.
+// Returns true when the physical ASIC revision is required to fully qualify
+// |identity|.
+bool iree_hal_amdgpu_target_identity_requires_asic_revision(
+    const iree_hal_amdgpu_target_identity_t* identity);
+
+// Applies the HSA-reported physical ASIC revision to |identity|.
 //
-// gfx1250 ASIC revision 0 selects A0 behavior and revisions greater than zero
-// select B0-specific behavior. Other processors are unchanged. An explicitly
-// qualified gfx1250 target that contradicts |asic_revision| is rejected.
-iree_status_t iree_hal_amdgpu_target_id_apply_asic_revision(
-    uint32_t asic_revision, iree_hal_amdgpu_target_id_t* target_id);
+// Processors without finite revision rows are unchanged. Processors with
+// revision rows reject unknown values rather than inferring semantics.
+iree_status_t iree_hal_amdgpu_target_identity_apply_asic_revision(
+    uint32_t asic_revision, iree_hal_amdgpu_target_identity_t* identity);
 
 // Returns true when |lhs| and |rhs| describe the same target identity.
 //
 // Borrowed string storage addresses are ignored; processor names and all
 // structured target properties are compared by value.
-bool iree_hal_amdgpu_target_id_equal(const iree_hal_amdgpu_target_id_t* lhs,
-                                     const iree_hal_amdgpu_target_id_t* rhs);
+bool iree_hal_amdgpu_target_identity_equal(
+    const iree_hal_amdgpu_target_identity_t* lhs,
+    const iree_hal_amdgpu_target_identity_t* rhs);
 
-// Formats |target_id| into canonical AMDGPU target-ID syntax.
+// Formats |identity| as a canonical AMDGPU artifact target key.
 //
 // If |buffer_capacity| is insufficient, |out_buffer_length| still receives the
 // required character length excluding the NUL terminator.
-iree_status_t iree_hal_amdgpu_target_id_format(
-    const iree_hal_amdgpu_target_id_t* target_id,
+iree_status_t iree_hal_amdgpu_target_identity_format_artifact_key(
+    const iree_hal_amdgpu_target_identity_t* identity,
     iree_host_size_t buffer_capacity, char* buffer,
     iree_host_size_t* out_buffer_length);
 
-// Maps an exact target ID to the processor used for code objects and device
-// libraries. If no generic-compatible mapping is known, the exact target is
-// returned unchanged.
-iree_status_t iree_hal_amdgpu_target_id_lookup_code_object_target(
-    const iree_hal_amdgpu_target_id_t* exact_target_id,
-    iree_hal_amdgpu_target_id_t* out_code_object_target_id);
+// Projects an exact target identity into its AMDHSA code-object identity.
+//
+// The code-object processor mapping and AMDHSA feature modes are preserved.
+// Artifact-only ASIC revision identity is deliberately omitted. If no generic
+// code-object mapping is known, the exact processor is retained.
+iree_status_t iree_hal_amdgpu_target_identity_project_code_object(
+    const iree_hal_amdgpu_target_identity_t* exact_identity,
+    iree_hal_amdgpu_target_identity_t* out_code_object_identity);
 
 // Returns the wavefront-size flag for |wavefront_size|, or zero if unsupported.
 iree_hal_amdgpu_wavefront_size_flags_t iree_hal_amdgpu_wavefront_size_flag(
     uint32_t wavefront_size);
 
-// Looks up wavefront-size facts for an exact processor target ID.
+// Looks up wavefront-size facts for an exact processor identity.
 //
 // The returned support preserves the processor table's explicit mode support.
 // The implicit default mode is executable even when it is not explicitly
 // selectable by the kernel descriptor ABI.
-bool iree_hal_amdgpu_target_id_lookup_wavefront_size_support(
-    const iree_hal_amdgpu_target_id_t* exact_target_id,
+bool iree_hal_amdgpu_target_identity_lookup_wavefront_size_support(
+    const iree_hal_amdgpu_target_identity_t* exact_identity,
     iree_hal_amdgpu_wavefront_size_support_t* out_support);
 
-// Checks whether |code_object_target_id| can execute on |agent_target_id|.
+// Checks whether |artifact_identity| can execute on |agent_identity|.
 iree_hal_amdgpu_target_compatibility_t
-iree_hal_amdgpu_target_id_check_compatible(
-    const iree_hal_amdgpu_target_id_t* code_object_target_id,
-    const iree_hal_amdgpu_target_id_t* agent_target_id);
+iree_hal_amdgpu_target_identity_check_compatible(
+    const iree_hal_amdgpu_target_identity_t* artifact_identity,
+    const iree_hal_amdgpu_target_identity_t* agent_identity);
 
 // Formats compatibility mismatch bits into a comma-separated diagnostic string.
 //

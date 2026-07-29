@@ -83,8 +83,9 @@ bool loom_amdgpu_cluster_preamble_target_supports_launch_state(
     const loom_module_t* module, loom_symbol_ref_t target_ref) {
   const loom_amdgpu_processor_info_t* processor =
       loom_amdgpu_target_processor_from_ref(module, target_ref);
-  return loom_amdgpu_processor_info_has_flags(
-      processor, LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE);
+  return loom_amdgpu_processor_properties_have_flags(
+      processor != NULL ? &processor->properties : NULL,
+      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE);
 }
 
 static iree_status_t loom_amdgpu_cluster_preamble_state(

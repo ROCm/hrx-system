@@ -29,7 +29,7 @@ typedef struct iree_hal_amdgpu_agent_isa_value_t {
 
 // Immutable target identity for one HSA ISA.
 //
-// The record owns all string storage referenced by |target_id| and must remain
+// The record owns all string storage referenced by |identity| and must remain
 // at a stable address after initialization.
 typedef struct iree_hal_amdgpu_agent_isa_target_t {
   // HSA ISA handle.
@@ -40,7 +40,7 @@ typedef struct iree_hal_amdgpu_agent_isa_target_t {
   iree_string_view_t isa_name;
   // Parsed and stepping-qualified target identity borrowing from
   // |isa_name_storage|.
-  iree_hal_amdgpu_target_id_t target_id;
+  iree_hal_amdgpu_target_identity_t identity;
 } iree_hal_amdgpu_agent_isa_target_t;
 
 // Immutable target identities queried for one physical HSA GPU agent.
@@ -86,13 +86,13 @@ iree_status_t iree_hal_amdgpu_agent_target_query(
 void iree_hal_amdgpu_agent_target_deinitialize(
     iree_hal_amdgpu_agent_target_t* target);
 
-// Returns the highest-priority agent ISA compatible with |target_id|.
+// Returns the highest-priority agent ISA compatible with |required_identity|.
 //
 // Returns NULL when no reported ISA is compatible.
 const iree_hal_amdgpu_agent_isa_target_t*
 iree_hal_amdgpu_agent_target_find_compatible_isa(
     const iree_hal_amdgpu_agent_target_t* target,
-    const iree_hal_amdgpu_target_id_t* target_id);
+    const iree_hal_amdgpu_target_identity_t* required_identity);
 
 // Returns the HSA ISA target at |ordinal|, or NULL if out of range.
 static inline const iree_hal_amdgpu_agent_isa_target_t*

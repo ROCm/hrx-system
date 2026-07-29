@@ -30,7 +30,7 @@ typedef enum iree_hal_amdgpu_device_spec_physical_device_flag_bits_e {
 // Immutable AMDGPU physical-device facts used to create a device spec.
 typedef struct iree_hal_amdgpu_device_spec_physical_device_params_t {
   // Parsed target identity for this physical device.
-  iree_hal_amdgpu_target_id_t target_id;
+  iree_hal_amdgpu_target_identity_t identity;
   // Stable physical device UUID bytes.
   iree_hal_uuid_t uuid;
   // PCI address.

@@ -385,7 +385,7 @@ loom_cc_library(
     ::text_fixup
     iree::base
     iree::base::internal::arena
-    loom::target::arch::amdgpu::target_info
+    loom::target::arch::amdgpu::target_info_defs
   PUBLIC
 )
 endif()
@@ -571,6 +571,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::planning::vopd_plan
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::refs::target_refs
+    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::entry_selection
     loom::target::function_contract
@@ -610,6 +611,7 @@ loom_cc_test(
     loom::target::arch::amdgpu::planning::wait_counters
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::records::target_records
+    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::emit::native::elf
     loom::testing::diagnostic_matchers
@@ -675,6 +677,8 @@ loom_cc_test(
     iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::target::arch::amdgpu::profile
+    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::emit::native::elf
   LABELS
@@ -737,6 +741,7 @@ loom_cc_test(
     loom::target::arch::amdgpu::planning::storage_lease
     loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::records::target_records
+    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::low_descriptor_registry
   LABELS

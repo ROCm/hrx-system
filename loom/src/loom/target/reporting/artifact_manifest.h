@@ -104,6 +104,8 @@ typedef struct loom_target_artifact_manifest_target_t {
   // Optional exact or generic processor spelling, such as "gfx1151" or
   // "gfx11-generic".
   iree_string_view_t processor;
+  // Optional physical processor revision, such as "a0".
+  iree_string_view_t processor_revision;
   // Optional target triple spelling.
   iree_string_view_t triple;
   // Optional target profile spelling.
