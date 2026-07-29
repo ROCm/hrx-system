@@ -222,6 +222,35 @@ static iree_status_t loom_amdgpu_occupancy_apply_residency_evaluation(
   return iree_ok_status();
 }
 
+static void loom_amdgpu_occupancy_capture_unique_limiting_resource(
+    const loom_target_residency_query_t* query,
+    const loom_target_residency_resource_evaluation_t* resource,
+    loom_target_residency_summary_t* summary) {
+  if (query->limiting_resource_count != 1 ||
+      !iree_any_bit_set(
+          resource->flags,
+          LOOM_TARGET_RESIDENCY_RESOURCE_EVALUATION_FLAG_LIMITING)) {
+    return;
+  }
+  summary->flags |=
+      LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_UNIQUE_LIMITING_RESOURCE;
+  summary->limiting_resource = resource->name;
+  summary->limiting_resource_units = resource->units;
+  summary->limiting_resource_reduction_units_to_next_better_tier =
+      resource->reduction_units_to_next_better_tier;
+  if (iree_any_bit_set(
+          resource->flags,
+          LOOM_TARGET_RESIDENCY_RESOURCE_EVALUATION_FLAG_HAS_NEXT_WORSE_TIER)) {
+    summary->flags |=
+        LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_LIMITING_RESOURCE_NEXT_WORSE_TIER;
+    summary->limiting_resource_next_worse_tier = resource->next_worse_tier;
+    summary->limiting_resource_next_worse_cliff_units =
+        resource->next_worse_cliff_units;
+    summary->limiting_resource_additional_units_to_next_worse_tier =
+        resource->additional_units_to_next_worse_tier;
+  }
+}
+
 static iree_status_t loom_amdgpu_occupancy_finalize_register_limits(
     const loom_amdgpu_occupancy_model_t* model,
     loom_amdgpu_occupancy_register_class_t* class_summaries,
@@ -259,6 +288,17 @@ static iree_status_t loom_amdgpu_occupancy_finalize_register_limits(
       residency_model->direct_resources.resource_count, arena,
       &residency_query));
   IREE_ASSERT(residency_query.model_available);
+  table->residency_summary = (loom_target_residency_summary_t){
+      .flags = LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_VALID |
+               (residency_query.has_next_better_tier
+                    ? LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_NEXT_BETTER_TIER
+                    : 0),
+      .best_tier = residency_query.best_tier,
+      .tier = residency_query.tier,
+      .next_better_tier = residency_query.next_better_tier,
+      .limiting_resource_count =
+          (uint32_t)residency_query.limiting_resource_count,
+  };
   table->resident_waves_per_simd = residency_query.tier;
   table->limiting_resource_kind =
       LOOM_AMDGPU_OCCUPANCY_LIMITING_RESOURCE_MAX_WAVES;
@@ -286,6 +326,10 @@ static iree_status_t loom_amdgpu_occupancy_finalize_register_limits(
         &class_summary->wave_limit, &class_summary->next_cliff_units,
         &class_summary->units_until_next_cliff));
     IREE_ASSERT_EQ(allocated_units, class_summary->allocated_units);
+    loom_amdgpu_occupancy_capture_unique_limiting_resource(
+        &residency_query,
+        &residency_query.resources[class_model->descriptor_reg_class_id],
+        &table->residency_summary);
     if (table->limiting_resource_kind ==
             LOOM_AMDGPU_OCCUPANCY_LIMITING_RESOURCE_MAX_WAVES &&
         table->resident_waves_per_simd < table->max_waves_per_simd &&
@@ -316,6 +360,10 @@ static iree_status_t loom_amdgpu_occupancy_finalize_register_limits(
         &pressure_resource->allocated_units, &pressure_resource->rounded_units,
         &pressure_resource->wave_limit, &pressure_resource->next_cliff_units,
         &pressure_resource->units_until_next_cliff));
+    loom_amdgpu_occupancy_capture_unique_limiting_resource(
+        &residency_query,
+        &residency_query.resources[residency_query.direct_resource_count + i],
+        &table->residency_summary);
     if (table->limiting_resource_kind ==
             LOOM_AMDGPU_OCCUPANCY_LIMITING_RESOURCE_MAX_WAVES &&
         table->resident_waves_per_simd < table->max_waves_per_simd &&
@@ -347,6 +395,7 @@ static void loom_amdgpu_occupancy_apply_launch_limits(
     const loom_amdgpu_occupancy_model_t* model, uint32_t flat_workgroup_size,
     uint32_t local_memory_bytes, loom_amdgpu_occupancy_table_t* table) {
   table->flat_workgroup_size = flat_workgroup_size;
+  uint32_t launch_wave_limit = 0;
   if (flat_workgroup_size != 0) {
     const uint32_t waves_per_workgroup = loom_amdgpu_occupancy_ceil_div_u32(
         flat_workgroup_size, table->wave_size);
@@ -382,8 +431,7 @@ static void loom_amdgpu_occupancy_apply_launch_limits(
     const uint32_t local_memory_wave_limit =
         loom_amdgpu_occupancy_wave_limit_for_workgroups(
             model, waves_per_workgroup, local_memory_workgroup_count);
-    const uint32_t launch_wave_limit =
-        iree_min(workgroup_wave_limit, local_memory_wave_limit);
+    launch_wave_limit = iree_min(workgroup_wave_limit, local_memory_wave_limit);
     if (launch_wave_limit < table->resident_waves_per_simd ||
         (launch_wave_limit == table->resident_waves_per_simd &&
          launch_wave_limit < table->max_waves_per_simd &&
@@ -400,6 +448,17 @@ static void loom_amdgpu_occupancy_apply_launch_limits(
 
   table->occupancy_percent =
       (table->resident_waves_per_simd * 100u) / table->max_waves_per_simd;
+
+  const bool has_exact_transition =
+      flat_workgroup_size != 0 &&
+      table->resident_waves_per_simd == table->residency_summary.tier &&
+      (!iree_any_bit_set(
+           table->residency_summary.flags,
+           LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_NEXT_BETTER_TIER) ||
+       launch_wave_limit >= table->residency_summary.next_better_tier);
+  if (!has_exact_transition) {
+    table->residency_summary = (loom_target_residency_summary_t){0};
+  }
 }
 
 static iree_string_view_t loom_amdgpu_occupancy_limiting_resource_name(
@@ -471,6 +530,7 @@ iree_status_t loom_amdgpu_occupancy_build_target_resources(
 
   iree_string_view_t scalar_register_class = iree_string_view_empty();
   iree_string_view_t vector_register_class = iree_string_view_empty();
+  bool has_complete_direct_resource_values = true;
   for (iree_host_size_t i = 0; i < model->register_class_count; ++i) {
     const loom_amdgpu_occupancy_register_class_model_t* class_model =
         &model->register_classes[i];
@@ -489,6 +549,8 @@ iree_status_t loom_amdgpu_occupancy_build_target_resources(
                LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
       vector_register_class = class_model->register_class;
       register_classes[i].allocated_units = vector_register_count;
+    } else {
+      has_complete_direct_resource_values = false;
     }
   }
   IREE_ASSERT(!iree_string_view_is_empty(scalar_register_class),
@@ -522,6 +584,9 @@ iree_status_t loom_amdgpu_occupancy_build_target_resources(
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_finalize_register_limits(
       model, register_classes, pressure_resources, arena, &table));
+  if (!has_complete_direct_resource_values) {
+    table.residency_summary = (loom_target_residency_summary_t){0};
+  }
   loom_amdgpu_occupancy_apply_launch_limits(model, flat_workgroup_size,
                                             local_memory_bytes, &table);
 
@@ -535,6 +600,7 @@ iree_status_t loom_amdgpu_occupancy_build_target_resources(
       .resident_waves_per_simd = table.resident_waves_per_simd,
       .occupancy_percent = table.occupancy_percent,
       .limiting_resource = loom_amdgpu_occupancy_limiting_resource_name(&table),
+      .residency_summary = table.residency_summary,
   };
   return iree_ok_status();
 }

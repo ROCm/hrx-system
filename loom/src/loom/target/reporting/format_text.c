@@ -259,7 +259,7 @@ static iree_status_t loom_target_compile_report_append_target_resources_fields(
           resources->vector_register_class);
   const iree_string_view_t limiting_resource =
       loom_target_compile_report_text_non_empty(resources->limiting_resource);
-  return iree_string_builder_append_format(
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder,
       "scalar_register_class=%.*s scalar_final_registers=%" PRIu64
       " scalar_scheduled_pressure_peak=%" PRIu64
@@ -279,7 +279,56 @@ static iree_status_t loom_target_compile_report_append_target_resources_fields(
       resources->vector_register_overhead_units, resources->subgroup_size,
       resources->resident_subgroups_per_simd, resources->max_subgroups_per_simd,
       resources->occupancy_percent, (int)limiting_resource.size,
-      limiting_resource.data);
+      limiting_resource.data));
+  const loom_target_residency_summary_t* summary =
+      &resources->residency_summary;
+  if (!loom_target_residency_summary_is_valid(summary)) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      " residency_best_tier=%" PRIu32 " residency_current_tier=%" PRIu32
+      " residency_limiting_resource_count=%" PRIu32,
+      summary->best_tier, summary->tier, summary->limiting_resource_count));
+  if (iree_any_bit_set(
+          summary->flags,
+          LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_NEXT_BETTER_TIER)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, " residency_next_better_tier=%" PRIu32,
+        summary->next_better_tier));
+  }
+  if (!iree_any_bit_set(
+          summary->flags,
+          LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_UNIQUE_LIMITING_RESOURCE)) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      " residency_unique_limiting_resource=%.*s"
+      " residency_limiting_resource_units=%" PRIu64,
+      (int)summary->limiting_resource.size, summary->limiting_resource.data,
+      summary->limiting_resource_units));
+  if (iree_any_bit_set(
+          summary->flags,
+          LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_NEXT_BETTER_TIER)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, " residency_reduction_units_to_next_better_tier=%" PRIu64,
+        summary->limiting_resource_reduction_units_to_next_better_tier));
+  }
+  if (iree_any_bit_set(
+          summary->flags,
+          LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_LIMITING_RESOURCE_NEXT_WORSE_TIER)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        " residency_limiting_resource_next_worse_tier=%" PRIu32
+        " residency_limiting_resource_next_worse_cliff_units=%" PRIu64
+        " residency_limiting_resource_additional_units_to_next_worse_tier="
+        "%" PRIu64,
+        summary->limiting_resource_next_worse_tier,
+        summary->limiting_resource_next_worse_cliff_units,
+        summary->limiting_resource_additional_units_to_next_worse_tier));
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_target_compile_report_format_summary(

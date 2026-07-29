@@ -138,6 +138,8 @@ typedef struct loom_amdgpu_occupancy_table_t {
   uint32_t resident_waves_per_simd;
   // Estimated resident wave occupancy as a percentage of |max_waves_per_simd|.
   uint32_t occupancy_percent;
+  // Target residency transition summary before or after exact launch limits.
+  loom_target_residency_summary_t residency_summary;
   // Kind of resource that limited occupancy.
   loom_amdgpu_occupancy_limiting_resource_kind_t limiting_resource_kind;
   // Index into |register_classes| or |pressure_resources| according to
@@ -182,6 +184,8 @@ typedef struct loom_amdgpu_occupancy_target_resources_t {
   uint32_t occupancy_percent;
   // Stable resource name limiting final occupancy, or "max_waves".
   iree_string_view_t limiting_resource;
+  // Exact target residency transition summary, or zero when unavailable.
+  loom_target_residency_summary_t residency_summary;
 } loom_amdgpu_occupancy_target_resources_t;
 
 // Builds an AMDGPU occupancy estimate from |allocation|. The caller must keep

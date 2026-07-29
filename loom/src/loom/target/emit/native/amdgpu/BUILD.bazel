@@ -302,6 +302,7 @@ loom_cc_library(
         ":kernel_record",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/target:residency",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
         "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
         "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",

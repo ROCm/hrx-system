@@ -61,6 +61,7 @@ loom_cc_library(
     iree::base
     iree::base::internal
     loom::codegen::low::planning_statistics
+    loom::target::residency
     loom::target::types
   PUBLIC
 )

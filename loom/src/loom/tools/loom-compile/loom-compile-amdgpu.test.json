@@ -410,7 +410,10 @@
                 "\"local_memory_bytes\":32769",
                 "\"subgroup_size\":64,\"max_subgroups_per_simd\":8,\"resident_subgroups_per_simd\":2,\"occupancy_percent\":25,\"limiting_resource\":\"amdgpu.lds\""
               ]
-            }
+            },
+            "not_contains": [
+              "\"residency\":"
+            ]
           },
           "files": [
             {
@@ -1314,6 +1317,7 @@
                 "\"wmma_count\":2",
                 "\"source_low\":{\"selected_op_count\":12,\"emitted_op_count\":42,\"count\":12",
                 "\"target_resources\":{\"scalar\":{\"register_class\":\"amdgpu.sgpr\",\"final\":{\"register_count\":4,\"overhead_units\":0},\"scheduled_pressure\":{\"peak_live_units\":4}},\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":24,\"overhead_units\":7},\"scheduled_pressure\":{\"peak_live_units\":17}}",
+                "\"residency\":{\"best_tier\":16,\"current_tier\":16,\"limiting_resource_count\":0}",
                 "\"source_op\":\"vector.mma\"",
                 "\"descriptor_key\":\"amdgpu.v_wmma_f32_16x16x16_f16\"",
                 "\"descriptor_semantic_tag\":\"matrix.wmma.f32.16x16x16.f16\"",

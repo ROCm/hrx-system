@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "loom/codegen/low/planning_statistics.h"
 #include "loom/target/reporting/target_insertion.h"
+#include "loom/target/residency.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -442,6 +443,8 @@ typedef struct loom_target_compile_report_target_resources_t {
   uint32_t occupancy_percent;
   // Stable resource name limiting final occupancy, or "max_waves".
   iree_string_view_t limiting_resource;
+  // Exact target residency transition summary, or zero when unavailable.
+  loom_target_residency_summary_t residency_summary;
 } loom_target_compile_report_target_resources_t;
 
 typedef uint8_t loom_target_compile_report_capability_value_kind_t;

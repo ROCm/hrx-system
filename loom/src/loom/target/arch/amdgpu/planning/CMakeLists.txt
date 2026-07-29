@@ -734,4 +734,21 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_test(
+  NAME
+    occupancy_test
+  SRCS
+    "occupancy_test.cc"
+  DEPS
+    ::occupancy
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::arch::amdgpu::target_info
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

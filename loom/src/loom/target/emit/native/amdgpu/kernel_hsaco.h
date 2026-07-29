@@ -21,6 +21,7 @@
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
 #include "loom/target/emit/native/amdgpu/encoding.h"
 #include "loom/target/emit/native/amdgpu/hsaco.h"
+#include "loom/target/residency.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,6 +48,8 @@ typedef struct loom_amdgpu_kernel_hsaco_target_resources_t {
   uint32_t occupancy_percent;
   // Stable resource name limiting final occupancy, or "max_waves".
   iree_string_view_t limiting_resource;
+  // Exact target residency transition summary, or zero when unavailable.
+  loom_target_residency_summary_t residency_summary;
 } loom_amdgpu_kernel_hsaco_target_resources_t;
 
 typedef struct loom_amdgpu_kernel_hsaco_summary_t {
