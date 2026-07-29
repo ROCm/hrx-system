@@ -30,7 +30,7 @@ kernel.def target(@qwen3_moe_attention_gfx11_wave64) @qwen3_moe_flash_attention_
   %query_tile_count = index.div %padded_query_token_count, %sixteen : index
   kernel.launch.config workgroups(%query_tile_count, %query_head_count, %one) workgroup_size(%twofiftysix, %one, %one) : index
 } launch(%query_token_count: index, %key_value_token_count: index, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %output: buffer) {
-  %bounded_query_token_count = index.assume %query_token_count [range(%query_token_count, 1, 512)] : index
+  %bounded_query_token_count = index.assume %query_token_count [range(%query_token_count, 1, 2048)] : index
   %bounded_key_value_token_count = index.assume %key_value_token_count [range(%key_value_token_count, 1, 32768)] : index
   %query_head_count0 = config.get @qwen3_moe.attention.query_head_count : index
   %key_value_head_count0 = config.get @qwen3_moe.attention.key_value_head_count : index
@@ -478,8 +478,8 @@ check.case public @qwen3_moe_flash_attention_f32_f16_wmma_key_value_tail_case {
 }
 
 check.case public @qwen3_moe_flash_attention_f32_f16_wmma_benchmark_case {
-  %query_token_count = check.param.choice values([1, 32, 128, 512]) name("query_token_count") : index
-  %key_value_token_count = check.param.choice values([256, 512, 2048, 32768]) name("key_value_token_count") : index
+  %query_token_count = check.param.choice values([1, 32, 128, 512, 1024, 2048]) name("query_token_count") : index
+  %key_value_token_count = check.param.choice values([256, 512, 1024, 2048, 32768]) name("key_value_token_count") : index
   %query = check.generate.fill value(0.0) : tensor<[%query_token_count]x32x128xf32>
   %key = check.generate.fill value(0.0) : tensor<[%key_value_token_count]x4x128xf16>
   %value = check.generate.fill value(0.0) : tensor<[%key_value_token_count]x4x128xf16>
@@ -510,3 +510,7 @@ check.benchmark<@qwen3_moe_flash_attention_f32_f16_wmma_benchmark_case> @qwen3_m
 check.benchmark<@qwen3_moe_flash_attention_f32_f16_wmma_benchmark_case> @qwen3_moe_flash_attention_f32_f16_wmma_prefill_512 {key_value_token_count = 512, query_token_count = 512}
 
 check.benchmark<@qwen3_moe_flash_attention_f32_f16_wmma_benchmark_case> @qwen3_moe_flash_attention_f32_f16_wmma_prefill_512_context_2048 {key_value_token_count = 2048, query_token_count = 512}
+
+check.benchmark<@qwen3_moe_flash_attention_f32_f16_wmma_benchmark_case> @qwen3_moe_flash_attention_f32_f16_wmma_prefill_1024 {key_value_token_count = 1024, query_token_count = 1024}
+
+check.benchmark<@qwen3_moe_flash_attention_f32_f16_wmma_benchmark_case> @qwen3_moe_flash_attention_f32_f16_wmma_prefill_2048 {key_value_token_count = 2048, query_token_count = 2048}
