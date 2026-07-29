@@ -104,10 +104,20 @@ class AmdgpuAddressStateTest : public ::testing::Test {
     nodes_[2].traits = LOOM_TRAIT_TERMINATOR;
     nodes_[2].kind = LOOM_LOW_SCHEDULE_NODE_TERMINATOR;
 
+    region_blocks_[0] = &source_block_;
+    region_.block_count = IREE_ARRAYSIZE(region_blocks_);
+    region_.block_capacity = IREE_ARRAYSIZE(region_blocks_);
+    region_.blocks = region_blocks_;
+    source_block_.parent_region = &region_;
+    source_block_.region_index = 0;
+    for (loom_low_schedule_node_t& node : nodes_) {
+      node.block = &source_block_;
+    }
     scheduled_node_indices_[0] = 0;
     scheduled_node_indices_[1] = 1;
     scheduled_node_indices_[2] = 2;
     block_ = {};
+    block_.block = &source_block_;
     block_.node_start = 0;
     block_.node_count = 3;
     block_.scheduled_node_start = 0;
@@ -147,11 +157,16 @@ class AmdgpuAddressStateTest : public ::testing::Test {
         assignment_indices_by_value_ordinal_;
   }
 
-  loom_amdgpu_address_state_requirement_t Requirement(uint32_t node_index) {
-    loom_amdgpu_address_state_requirement_t requirement = {};
-    IREE_EXPECT_OK(loom_amdgpu_address_state_query_requirement(
-        &schedule_, &allocation_, &nodes_[node_index], &requirement));
-    return requirement;
+  loom_amdgpu_address_state_requirement_t Requirement(uint32_t packet_index) {
+    const loom_low_packet_view_t packet =
+        loom_low_packet_at(&schedule_, packet_index);
+    return loom_amdgpu_address_state_requirement_for_packet(&allocation_,
+                                                            &packet);
+  }
+
+  iree_status_t BuildPlan(loom_amdgpu_address_state_plan_t* out_plan) {
+    return loom_amdgpu_address_state_plan_build(&schedule_, &allocation_,
+                                                &arena_, out_plan);
   }
 
   iree_arena_block_pool_t block_pool_;
@@ -161,6 +176,9 @@ class AmdgpuAddressStateTest : public ::testing::Test {
   const loom_low_descriptor_t* descriptor_ = nullptr;
   loom_module_t module_ = {};
   loom_op_t function_op_ = {};
+  loom_region_t region_ = {};
+  loom_block_t source_block_ = {};
+  loom_block_t* region_blocks_[1] = {};
   loom_low_schedule_block_t block_ = {};
   loom_low_schedule_node_t nodes_[3] = {};
   uint32_t scheduled_node_indices_[3] = {};
@@ -181,8 +199,7 @@ TEST_F(AmdgpuAddressStateTest, BuildsDeterministicScheduledTransitions) {
   ASSERT_NE(first_requirement.value, second_requirement.value);
 
   loom_amdgpu_address_state_plan_t first_plan = {};
-  IREE_ASSERT_OK(loom_amdgpu_address_state_plan_build(&schedule_, &allocation_,
-                                                      &arena_, &first_plan));
+  IREE_ASSERT_OK(BuildPlan(&first_plan));
   ASSERT_EQ(first_plan.transition_count, 3u);
   EXPECT_EQ(first_plan.transitions[0].node_index, 0u);
   EXPECT_EQ(first_plan.transitions[0].mode_immediate, first_requirement.value);
@@ -197,8 +214,7 @@ TEST_F(AmdgpuAddressStateTest, BuildsDeterministicScheduledTransitions) {
                 static_cast<uint16_t>(second_requirement.value) << 8));
 
   loom_amdgpu_address_state_plan_t second_plan = {};
-  IREE_ASSERT_OK(loom_amdgpu_address_state_plan_build(&schedule_, &allocation_,
-                                                      &arena_, &second_plan));
+  IREE_ASSERT_OK(BuildPlan(&second_plan));
   ASSERT_EQ(second_plan.transition_count, first_plan.transition_count);
   EXPECT_EQ(std::memcmp(
                 second_plan.transitions, first_plan.transitions,
@@ -232,73 +248,14 @@ TEST_F(AmdgpuAddressStateTest, ProducesNoTransitionsForLowVgprWindow) {
     assignments_[i].location_base = static_cast<uint32_t>(i);
   }
   loom_amdgpu_address_state_plan_t plan = {};
-  IREE_ASSERT_OK(loom_amdgpu_address_state_plan_build(&schedule_, &allocation_,
-                                                      &arena_, &plan));
+  IREE_ASSERT_OK(BuildPlan(&plan));
   EXPECT_EQ(plan.transition_count, 0u);
 }
 
 TEST_F(AmdgpuAddressStateTest, StructuralPacketsHaveNoDescriptorRequirement) {
-  nodes_[0].kind = LOOM_LOW_SCHEDULE_NODE_STRUCTURAL;
-  const loom_amdgpu_address_state_requirement_t requirement = Requirement(0);
+  const loom_amdgpu_address_state_requirement_t requirement = Requirement(2);
   EXPECT_EQ(requirement.mask, 0u);
   EXPECT_EQ(requirement.value, 0u);
-}
-
-TEST_F(AmdgpuAddressStateTest, RejectsIncorrectPreviousMode) {
-  loom_amdgpu_address_state_plan_t plan = {};
-  IREE_ASSERT_OK(loom_amdgpu_address_state_plan_build(&schedule_, &allocation_,
-                                                      &arena_, &plan));
-  ASSERT_EQ(plan.transition_count, 3u);
-  loom_amdgpu_address_state_transition_t transitions[3];
-  std::memcpy(transitions, plan.transitions, sizeof(transitions));
-  transitions[1].mode_immediate &= UINT16_C(0x00FF);
-  plan.transitions = transitions;
-
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_amdgpu_address_state_plan_verify(&schedule_, &allocation_, &plan));
-}
-
-TEST_F(AmdgpuAddressStateTest, RejectsMissingBlockReset) {
-  loom_amdgpu_address_state_plan_t plan = {};
-  IREE_ASSERT_OK(loom_amdgpu_address_state_plan_build(&schedule_, &allocation_,
-                                                      &arena_, &plan));
-  ASSERT_EQ(plan.transition_count, 3u);
-  --plan.transition_count;
-
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      loom_amdgpu_address_state_plan_verify(&schedule_, &allocation_, &plan));
-}
-
-TEST_F(AmdgpuAddressStateTest, RejectsStaleHighWindowTransitions) {
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(assignments_); ++i) {
-    assignments_[i].location_base = static_cast<uint32_t>(i);
-  }
-  const loom_low_operand_t& result_operand =
-      descriptor_set_->operands[descriptor_->operand_start];
-  const uint8_t stale_mode =
-      static_cast<uint8_t>(0x1u << loom_amdgpu_vgpr_msb_slot_shift(
-                               static_cast<loom_amdgpu_vgpr_msb_slot_t>(
-                                   result_operand.address_state_slot)));
-  loom_amdgpu_address_state_transition_t transitions[2] = {
-      {/*.block_index=*/0, /*.node_index=*/0, /*.scheduled_ordinal=*/0,
-       /*.mode_immediate=*/stale_mode, /*.reserved=*/0},
-      {/*.block_index=*/0, /*.node_index=*/2, /*.scheduled_ordinal=*/2,
-       /*.mode_immediate=*/
-       static_cast<uint16_t>(static_cast<uint16_t>(stale_mode) << 8),
-       /*.reserved=*/0},
-  };
-  const loom_amdgpu_address_state_plan_t plan = {
-      /*.schedule=*/&schedule_,
-      /*.allocation=*/&allocation_,
-      /*.transitions=*/transitions,
-      /*.transition_count=*/IREE_ARRAYSIZE(transitions),
-  };
-
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      loom_amdgpu_address_state_plan_verify(&schedule_, &allocation_, &plan));
 }
 
 }  // namespace

@@ -44,6 +44,8 @@ typedef enum loom_amdgpu_native_asm_immediate_format_e {
 } loom_amdgpu_native_asm_immediate_format_t;
 
 typedef struct loom_amdgpu_assembly_emit_state_t {
+  // Function-local storage layout shared by all storage-address packets.
+  const loom_amdgpu_storage_layout_t* storage_layout;
   // Address-state plan consumed in scheduled insertion order.
   const loom_amdgpu_address_state_plan_t* address_state;
   // Wait-packet plan consumed in scheduled insertion order.
@@ -68,20 +70,18 @@ typedef struct loom_amdgpu_assembly_emit_state_t {
   uint16_t packet_delay_alu_immediate;
 } loom_amdgpu_assembly_emit_state_t;
 
-static iree_status_t loom_amdgpu_descriptor_key(
-    const loom_native_assembly_packet_context_t* context,
-    iree_string_view_t* out_key) {
+static iree_string_view_t loom_amdgpu_descriptor_key(
+    const loom_native_assembly_packet_context_t* context) {
   return loom_native_assembly_descriptor_string(
       context->schedule->target.descriptor_set,
-      context->packet->descriptor->key_string_offset, out_key);
+      context->packet->descriptor->key_string_offset);
 }
 
 static iree_status_t loom_amdgpu_append_mnemonic(
     const loom_native_assembly_packet_context_t* context) {
-  iree_string_view_t mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
+  const iree_string_view_t mnemonic = loom_native_assembly_descriptor_string(
       context->schedule->target.descriptor_set,
-      context->packet->descriptor->mnemonic_string_offset, &mnemonic));
+      context->packet->descriptor->mnemonic_string_offset);
   return iree_string_builder_append_string(context->builder, mnemonic);
 }
 
@@ -198,54 +198,6 @@ static iree_status_t loom_amdgpu_append_assignment(
       (int)register_class.size, register_class.data);
 }
 
-static iree_status_t loom_amdgpu_descriptor_operand_assignment(
-    const loom_native_assembly_packet_context_t* context,
-    uint16_t descriptor_operand_index,
-    const loom_low_allocation_assignment_t** out_assignment) {
-  *out_assignment = NULL;
-  const loom_low_descriptor_t* descriptor = context->packet->descriptor;
-  const loom_op_t* op = context->packet->node->op;
-  if (descriptor_operand_index >= descriptor->operand_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU assembly descriptor operand %" PRIu16
-                            " is out of range",
-                            descriptor_operand_index);
-  }
-  if (descriptor_operand_index < descriptor->result_count) {
-    if (descriptor_operand_index >= op->result_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU assembly descriptor result %" PRIu16
-                              " has no matching SSA result",
-                              descriptor_operand_index);
-    }
-    *out_assignment = loom_amdgpu_map_assignment(
-        context, loom_op_const_results(op)[descriptor_operand_index]);
-    return iree_ok_status();
-  }
-
-  const loom_low_descriptor_set_t* descriptor_set =
-      context->schedule->target.descriptor_set;
-  const loom_low_operand_t* operand =
-      &descriptor_set
-           ->operands[descriptor->operand_start + descriptor_operand_index];
-  if (loom_low_operand_role_is_packet_operand(operand->role)) {
-    const uint16_t packet_operand_index = operand->source_value_index;
-    if (packet_operand_index >= op->operand_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU assembly descriptor operand %" PRIu16
-                              " maps outside the packet operands",
-                              descriptor_operand_index);
-    }
-    *out_assignment = loom_amdgpu_map_assignment(
-        context, loom_op_const_operands(op)[packet_operand_index]);
-    return iree_ok_status();
-  }
-  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                          "AMDGPU assembly descriptor operand %" PRIu16
-                          " does not name an explicit packet value",
-                          descriptor_operand_index);
-}
-
 static iree_status_t loom_amdgpu_append_descriptor_assignment(
     const loom_native_assembly_packet_context_t* context,
     uint16_t descriptor_operand_index) {
@@ -255,36 +207,15 @@ static iree_status_t loom_amdgpu_append_descriptor_assignment(
   const loom_low_operand_t* operand =
       &descriptor_set
            ->operands[descriptor->operand_start + descriptor_operand_index];
-  const loom_low_allocation_assignment_t* assignment = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_operand_assignment(
-      context, descriptor_operand_index, &assignment));
+  const loom_low_allocation_assignment_t* assignment =
+      loom_low_packet_descriptor_operand_assignment(
+          context->allocation, context->packet, descriptor_operand_index);
   if (assignment->descriptor_reg_class_id != LOOM_AMDGPU_REG_CLASS_ID_VGPR ||
       operand->address_map_kind != LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE) {
     return loom_amdgpu_append_assignment(context, assignment);
   }
-  const uint32_t addressable_unit_count = operand->addressable_unit_count;
-  if (addressable_unit_count == 0) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU assembly target-state VGPR operand has no "
-                            "addressable window size");
-  }
-  if (assignment->location_count == 0) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU assembly target-state VGPR operand has an "
-                            "empty assignment");
-  }
-  const uint64_t assigned_last =
-      (uint64_t)assignment->location_base + assignment->location_count - 1u;
-  if (assignment->location_base / addressable_unit_count !=
-      assigned_last / addressable_unit_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU assembly target-state VGPR range v[%" PRIu32 ":%" PRIu64
-        "] crosses a %" PRIu32 "-register window",
-        assignment->location_base, assigned_last, addressable_unit_count);
-  }
   return loom_amdgpu_append_register_range_units(
-      context, "v", assignment->location_base % addressable_unit_count,
+      context, "v", assignment->location_base % operand->addressable_unit_count,
       assignment->location_count);
 }
 
@@ -415,9 +346,8 @@ static iree_status_t loom_amdgpu_read_packet_immediate_i64(
     const loom_low_immediate_t* immediate, int64_t* out_value) {
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
-  iree_string_view_t name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-      descriptor_set, immediate->field_name_string_offset, &name));
+  const iree_string_view_t name = loom_native_assembly_descriptor_string(
+      descriptor_set, immediate->field_name_string_offset);
   const loom_named_attr_t* attr = loom_native_assembly_find_attr(
       context->schedule->module, loom_amdgpu_packet_attrs(context), name);
   if (attr == NULL) {
@@ -479,9 +409,8 @@ static iree_status_t loom_amdgpu_append_packet_immediate(
     const loom_low_immediate_t* immediate) {
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
-  iree_string_view_t name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-      descriptor_set, immediate->field_name_string_offset, &name));
+  const iree_string_view_t name = loom_native_assembly_descriptor_string(
+      descriptor_set, immediate->field_name_string_offset);
   if (immediate->kind == LOOM_LOW_IMMEDIATE_KIND_ORDINAL &&
       iree_all_bits_set(immediate->flags, LOOM_LOW_IMMEDIATE_FLAG_SYMBOLIC)) {
     const loom_named_attr_t* attr = loom_native_assembly_find_attr(
@@ -524,9 +453,8 @@ static iree_status_t loom_amdgpu_read_packet_immediate_by_name_i64(
     IREE_ASSERT(descriptor_set->immediates != NULL);
     const loom_low_immediate_t* immediate =
         &descriptor_set->immediates[immediate_index];
-    iree_string_view_t name = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-        descriptor_set, immediate->field_name_string_offset, &name));
+    const iree_string_view_t name = loom_native_assembly_descriptor_string(
+        descriptor_set, immediate->field_name_string_offset);
     if (iree_string_view_equal(name, field_name)) {
       return loom_amdgpu_read_packet_immediate_i64(context, immediate,
                                                    out_value);
@@ -697,9 +625,8 @@ static iree_status_t loom_amdgpu_append_packet_immediate_named_modifier(
     return iree_ok_status();
   }
 
-  iree_string_view_t name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-      descriptor_set, native_value->literal_string_offset, &name));
+  const iree_string_view_t name = loom_native_assembly_descriptor_string(
+      descriptor_set, native_value->literal_string_offset);
   switch (native_value->target_format_id) {
     case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST: {
       IREE_ASSERT(native_value->bit_width > 0 && native_value->bit_width < 64);
@@ -862,16 +789,14 @@ static iree_status_t loom_amdgpu_find_packet_immediate(
   for (uint16_t i = 0; i < descriptor->immediate_count; ++i) {
     const loom_low_immediate_t* immediate =
         &descriptor_set->immediates[descriptor->immediate_start + i];
-    iree_string_view_t name = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-        descriptor_set, immediate->field_name_string_offset, &name));
+    const iree_string_view_t name = loom_native_assembly_descriptor_string(
+        descriptor_set, immediate->field_name_string_offset);
     if (iree_string_view_equal(name, field_name)) {
       *out_immediate = immediate;
       return iree_ok_status();
     }
   }
-  iree_string_view_t descriptor_key = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_key(context, &descriptor_key));
+  const iree_string_view_t descriptor_key = loom_amdgpu_descriptor_key(context);
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "AMDGPU assembly descriptor '%.*s' has no immediate "
                           "attribute '%.*s'",
@@ -966,8 +891,7 @@ static iree_status_t loom_amdgpu_lookup_canonical_asm_form(
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
   if (descriptor->canonical_asm_form_ordinal ==
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
-    iree_string_view_t key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_key(context, &key));
+    const iree_string_view_t key = loom_amdgpu_descriptor_key(context);
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU assembly descriptor '%.*s' has no canonical asm form",
@@ -983,9 +907,9 @@ static iree_status_t loom_amdgpu_lookup_canonical_asm_form(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_asm_form_native_mnemonic(
+static iree_string_view_t loom_amdgpu_asm_form_native_mnemonic(
     const loom_native_assembly_packet_context_t* context,
-    const loom_low_asm_form_t* form, iree_string_view_t* out_mnemonic) {
+    const loom_low_asm_form_t* form) {
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
   loom_bstring_table_offset_t string_offset = form->mnemonic_string_offset;
@@ -993,8 +917,7 @@ static iree_status_t loom_amdgpu_asm_form_native_mnemonic(
       LOOM_LOW_STRING_OFFSET_NONE) {
     string_offset = form->native_assembly_mnemonic_string_offset;
   }
-  return loom_native_assembly_descriptor_string(descriptor_set, string_offset,
-                                                out_mnemonic);
+  return loom_native_assembly_descriptor_string(descriptor_set, string_offset);
 }
 
 static iree_status_t loom_amdgpu_append_descriptor_value_list(
@@ -1215,9 +1138,8 @@ static iree_status_t loom_amdgpu_append_native_asm_form_value(
       context->schedule->target.descriptor_set;
   switch (value->kind) {
     case LOOM_LOW_NATIVE_ASM_VALUE_KIND_LITERAL: {
-      iree_string_view_t literal = iree_string_view_empty();
-      IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-          descriptor_set, value->literal_string_offset, &literal));
+      const iree_string_view_t literal = loom_native_assembly_descriptor_string(
+          descriptor_set, value->literal_string_offset);
       return iree_string_builder_append_string(context->builder, literal);
     }
     case LOOM_LOW_NATIVE_ASM_VALUE_KIND_RESULT:
@@ -1316,9 +1238,9 @@ static iree_status_t loom_amdgpu_append_asm_form_immediates(
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_append_asm_form_separator(context, in_list));
     if (asm_immediate->name_string_offset != LOOM_LOW_STRING_OFFSET_NONE) {
-      iree_string_view_t spelling = iree_string_view_empty();
-      IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-          descriptor_set, asm_immediate->name_string_offset, &spelling));
+      const iree_string_view_t spelling =
+          loom_native_assembly_descriptor_string(
+              descriptor_set, asm_immediate->name_string_offset);
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           context->builder, "%.*s(", (int)spelling.size, spelling.data));
       IREE_RETURN_IF_ERROR(
@@ -1338,9 +1260,8 @@ static iree_status_t loom_amdgpu_append_canonical_asm_form_packet(
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
   const loom_low_asm_form_t* form = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_canonical_asm_form(context, &form));
-  iree_string_view_t mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_asm_form_native_mnemonic(context, form, &mnemonic));
+  const iree_string_view_t mnemonic =
+      loom_amdgpu_asm_form_native_mnemonic(context, form);
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_string(context->builder, mnemonic));
   bool in_list = false;
@@ -1385,9 +1306,8 @@ static iree_status_t loom_amdgpu_append_memory_immediate_suffixes(
   for (uint16_t i = 0; i < descriptor->immediate_count; ++i) {
     const loom_low_immediate_t* immediate =
         &descriptor_set->immediates[descriptor->immediate_start + i];
-    iree_string_view_t name = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-        descriptor_set, immediate->field_name_string_offset, &name));
+    const iree_string_view_t name = loom_native_assembly_descriptor_string(
+        descriptor_set, immediate->field_name_string_offset);
     int64_t value = 0;
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_read_packet_immediate_i64(context, immediate, &value));
@@ -1432,9 +1352,8 @@ static iree_status_t loom_amdgpu_try_append_native_memory_packet(
     return iree_ok_status();
   }
   *out_matched = true;
-  iree_string_view_t mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_asm_form_native_mnemonic(context, form, &mnemonic));
+  const iree_string_view_t mnemonic =
+      loom_amdgpu_asm_form_native_mnemonic(context, form);
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_string(context->builder, mnemonic));
   bool in_list = false;
@@ -1464,9 +1383,8 @@ static iree_status_t loom_amdgpu_append_memory_packet(
   } else {
     const loom_low_asm_form_t* form = NULL;
     IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_canonical_asm_form(context, &form));
-    iree_string_view_t mnemonic = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_asm_form_native_mnemonic(context, form, &mnemonic));
+    const iree_string_view_t mnemonic =
+        loom_amdgpu_asm_form_native_mnemonic(context, form);
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_string(context->builder, mnemonic));
     bool in_list = false;
@@ -1910,8 +1828,7 @@ loom_amdgpu_descriptor_packet_route_flags(
 
 static iree_status_t loom_amdgpu_append_unsupported_read_write_packet(
     const loom_native_assembly_packet_context_t* context) {
-  iree_string_view_t key = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_key(context, &key));
+  const iree_string_view_t key = loom_amdgpu_descriptor_key(context);
   return iree_make_status(
       IREE_STATUS_FAILED_PRECONDITION,
       "AMDGPU assembly descriptor '%.*s' has both read and write effects",
@@ -2103,27 +2020,8 @@ static iree_status_t loom_amdgpu_append_materialized_wait_packet(
     const loom_amdgpu_wait_packet_plan_t* wait_packets) {
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
-  const uint32_t descriptor_ordinal =
-      loom_low_descriptor_set_descriptor_ordinal(descriptor_set,
-                                                 wait_packet->descriptor);
-  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU wait packet descriptor row does not belong to the selected "
-        "descriptor set");
-  }
-  if (wait_packet->immediate_start > wait_packets->immediate_count ||
-      wait_packet->immediate_count >
-          wait_packets->immediate_count - wait_packet->immediate_start) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU wait packet immediate range is out of range");
-  }
-  const loom_low_descriptor_t* descriptor =
-      loom_low_descriptor_set_descriptor_at(descriptor_set, descriptor_ordinal);
-  iree_string_view_t mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-      descriptor_set, descriptor->mnemonic_string_offset, &mnemonic));
+  const iree_string_view_t mnemonic = loom_native_assembly_descriptor_string(
+      descriptor_set, wait_packet->descriptor->mnemonic_string_offset);
 
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, "  "));
@@ -2140,22 +2038,6 @@ static iree_status_t loom_amdgpu_append_materialized_wait_packet(
   return iree_string_builder_append_cstring(context->builder, "\n");
 }
 
-static bool loom_amdgpu_wait_packet_is_before_node(
-    const loom_amdgpu_wait_packet_t* wait_packet,
-    const loom_low_schedule_node_t* node) {
-  return wait_packet->block_index < node->block_index ||
-         (wait_packet->block_index == node->block_index &&
-          wait_packet->scheduled_ordinal < node->scheduled_ordinal);
-}
-
-static bool loom_amdgpu_address_state_is_before_node(
-    const loom_amdgpu_address_state_transition_t* transition,
-    const loom_low_schedule_node_t* node) {
-  return transition->block_index < node->block_index ||
-         (transition->block_index == node->block_index &&
-          transition->scheduled_ordinal < node->scheduled_ordinal);
-}
-
 static iree_status_t loom_amdgpu_prepare_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
   loom_amdgpu_assembly_emit_state_t* state =
@@ -2168,12 +2050,16 @@ static iree_status_t loom_amdgpu_prepare_packet(
   if (state->current_block_index == block_index) {
     return iree_ok_status();
   }
-  if (state->current_vgpr_msb_mode != 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU assembly left VGPR-MSB address state active at the end of "
-        "block %" PRIu32,
-        state->current_block_index);
+  if (state->address_state == NULL) {
+    if (state->current_vgpr_msb_mode != 0) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU assembly left VGPR-MSB address state active at the end of "
+          "block %" PRIu32,
+          state->current_block_index);
+    }
+  } else {
+    IREE_ASSERT_EQ(state->current_vgpr_msb_mode, 0);
   }
   state->current_block_index = block_index;
   return iree_ok_status();
@@ -2199,38 +2085,19 @@ static iree_status_t loom_amdgpu_append_address_state_before_packet(
          state->address_state->transition_count) {
     const loom_amdgpu_address_state_transition_t* transition =
         &state->address_state->transitions[state->next_address_state_index];
-    if (loom_amdgpu_address_state_is_before_node(transition,
-                                                 context->packet->node)) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU address-state plan contains an insertion point before the "
-          "current scheduled packet");
-    }
     if (!loom_amdgpu_address_state_matches_packet(transition,
                                                   context->packet)) {
       return iree_ok_status();
     }
-    const uint8_t previous_mode = (uint8_t)(transition->mode_immediate >> 8);
     const uint8_t new_mode = (uint8_t)(transition->mode_immediate & 0xFFu);
-    if (state->current_vgpr_msb_mode != previous_mode) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU address-state transition previous mode does not match the "
-          "assembly stream");
-    }
     const loom_low_descriptor_t* descriptor =
         loom_amdgpu_descriptor_ref_descriptor(
             context->schedule->target.descriptor_set,
             LOOM_AMDGPU_DESCRIPTOR_REF_S_SET_VGPR_MSB);
-    if (descriptor == NULL) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "AMDGPU address-state plan requires a missing "
-                              "s_set_vgpr_msb descriptor");
-    }
-    iree_string_view_t mnemonic = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
+    IREE_ASSERT(descriptor != NULL);
+    const iree_string_view_t mnemonic = loom_native_assembly_descriptor_string(
         context->schedule->target.descriptor_set,
-        descriptor->mnemonic_string_offset, &mnemonic));
+        descriptor->mnemonic_string_offset);
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         context->builder, "  %.*s %" PRIu16 "\n", (int)mnemonic.size,
         mnemonic.data, transition->mode_immediate));
@@ -2256,16 +2123,9 @@ static iree_status_t loom_amdgpu_append_wait_packets_before_packet(
   if (state->wait_packets == NULL) {
     return iree_ok_status();
   }
-  const loom_low_schedule_node_t* node = context->packet->node;
   while (state->next_wait_packet_index < state->wait_packets->packet_count) {
     const loom_amdgpu_wait_packet_t* wait_packet =
         &state->wait_packets->packets[state->next_wait_packet_index];
-    if (loom_amdgpu_wait_packet_is_before_node(wait_packet, node)) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU wait packet plan contains an insertion point before the "
-          "current scheduled packet");
-    }
     if (!loom_amdgpu_wait_packet_matches_packet(wait_packet, context->packet)) {
       return iree_ok_status();
     }
@@ -2274,14 +2134,6 @@ static iree_status_t loom_amdgpu_append_wait_packets_before_packet(
     ++state->next_wait_packet_index;
   }
   return iree_ok_status();
-}
-
-static bool loom_amdgpu_wait_state_is_before_node(
-    const loom_amdgpu_wait_state_t* wait_state,
-    const loom_low_schedule_node_t* node) {
-  return wait_state->block_index < node->block_index ||
-         (wait_state->block_index == node->block_index &&
-          wait_state->scheduled_ordinal < node->scheduled_ordinal);
 }
 
 static bool loom_amdgpu_wait_state_matches_packet(
@@ -2359,16 +2211,9 @@ static iree_status_t loom_amdgpu_append_wait_states_before_packet(
   if (state->wait_states == NULL) {
     return iree_ok_status();
   }
-  const loom_low_schedule_node_t* node = context->packet->node;
   while (state->next_wait_state_index < state->wait_states->state_count) {
     const loom_amdgpu_wait_state_t* wait_state =
         &state->wait_states->states[state->next_wait_state_index];
-    if (loom_amdgpu_wait_state_is_before_node(wait_state, node)) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU wait-state plan contains an insertion point before the "
-          "current scheduled packet");
-    }
     if (!loom_amdgpu_wait_state_matches_packet(wait_state, context->packet)) {
       return iree_ok_status();
     }
@@ -2451,32 +2296,15 @@ typedef struct loom_amdgpu_assembly_move_state_t {
   uint32_t emitted_count;
 } loom_amdgpu_assembly_move_state_t;
 
-static iree_status_t loom_amdgpu_vgpr_msb_insert_requirement(
+static void loom_amdgpu_vgpr_msb_insert_requirement(
     loom_amdgpu_vgpr_msb_slot_t slot, uint32_t bank, uint8_t* mask,
     uint8_t* value) {
-  if (slot == LOOM_AMDGPU_VGPR_MSB_SLOT_NONE) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU VGPR-MSB assembly state has no encoding "
-                            "slot");
-  }
-  if (bank > 3) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU VGPR-MSB assembly state bank %" PRIu32
-                            " exceeds the two-bit selector range",
-                            bank);
-  }
+  IREE_ASSERT_LT(bank, LOOM_AMDGPU_VGPR_MSB_BANK_COUNT);
   const uint8_t shift = loom_amdgpu_vgpr_msb_slot_shift(slot);
   const uint8_t slot_mask = (uint8_t)(0x3u << shift);
   const uint8_t slot_value = (uint8_t)(bank << shift);
-  if ((*mask & slot_mask) != 0 && (*value & slot_mask) != slot_value) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU VGPR-MSB assembly state requires conflicting banks for one "
-        "encoding slot");
-  }
   *mask |= slot_mask;
   *value = (uint8_t)((*value & ~slot_mask) | slot_value);
-  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_append_move_line_prefix(
@@ -2498,10 +2326,9 @@ static iree_status_t loom_amdgpu_append_vgpr_msb_mode(
           state->context->schedule->target.descriptor_set,
           LOOM_AMDGPU_DESCRIPTOR_REF_S_SET_VGPR_MSB);
   IREE_ASSERT(descriptor != NULL);
-  iree_string_view_t mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
+  const iree_string_view_t mnemonic = loom_native_assembly_descriptor_string(
       state->context->schedule->target.descriptor_set,
-      descriptor->mnemonic_string_offset, &mnemonic));
+      descriptor->mnemonic_string_offset);
   const uint16_t immediate =
       (uint16_t)(((uint16_t)state->emit_state->current_vgpr_msb_mode << 8) |
                  new_mode);
@@ -2541,12 +2368,12 @@ static iree_status_t loom_amdgpu_append_move(
     uint8_t mask = 0;
     uint8_t value = 0;
     if (destination->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_vgpr_msb_insert_requirement(
-          LOOM_AMDGPU_VGPR_MSB_SLOT_DST, destination_bank, &mask, &value));
+      loom_amdgpu_vgpr_msb_insert_requirement(LOOM_AMDGPU_VGPR_MSB_SLOT_DST,
+                                              destination_bank, &mask, &value);
     }
     if (source->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_vgpr_msb_insert_requirement(
-          LOOM_AMDGPU_VGPR_MSB_SLOT_SRC0, source_bank, &mask, &value));
+      loom_amdgpu_vgpr_msb_insert_requirement(LOOM_AMDGPU_VGPR_MSB_SLOT_SRC0,
+                                              source_bank, &mask, &value);
     }
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_append_vgpr_msb_requirement(state, mask, value));
@@ -2616,9 +2443,8 @@ static iree_status_t loom_amdgpu_packet_move_temporaries(
   }
   IREE_RETURN_IF_ERROR(loom_low_move_sequence_scratch_reserve_temporaries(
       context->move_scratch, group->temporary_count, out_temporary_locations));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_populate_packet_move_temporaries(
-      context->allocation, group, *out_temporary_locations,
-      group->temporary_count));
+  loom_low_move_sequence_populate_packet_move_temporaries(
+      context->allocation, group, *out_temporary_locations);
   *out_temporary_location_count = group->temporary_count;
   return iree_ok_status();
 }
@@ -2640,9 +2466,8 @@ static iree_status_t loom_amdgpu_emit_edge_copy_group(
     loom_amdgpu_assembly_emit_state_t* emit_state,
     const loom_low_allocation_edge_copy_group_t* group, bool* out_emitted) {
   *out_emitted = false;
-  iree_host_size_t move_count = 0;
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_edge_copy_units(
-      context->allocation, group, &move_count));
+  const iree_host_size_t move_count =
+      loom_low_move_sequence_edge_copy_unit_count(context->allocation, group);
   if (move_count == 0) {
     return iree_ok_status();
   }
@@ -2652,10 +2477,10 @@ static iree_status_t loom_amdgpu_emit_edge_copy_group(
   loom_low_move_location_t* temporaries = NULL;
   IREE_RETURN_IF_ERROR(loom_low_move_sequence_scratch_reserve_temporaries(
       context->move_scratch, group->temporary_count, &temporaries));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_populate_edge_copy_units(
-      context->allocation, group, moves, move_count));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_populate_edge_copy_temporaries(
-      context->allocation, group, temporaries, group->temporary_count));
+  loom_low_move_sequence_populate_edge_copy_units(context->allocation, group,
+                                                  moves);
+  loom_low_move_sequence_populate_edge_copy_temporaries(context->allocation,
+                                                        group, temporaries);
   loom_amdgpu_assembly_move_state_t move_state = {
       .context = context,
       .emit_state = emit_state,
@@ -2694,35 +2519,7 @@ static iree_status_t loom_amdgpu_append_copy_packet(
   if (loom_amdgpu_assignments_match(source_assignment, result_assignment)) {
     return iree_ok_status();
   }
-  if (source_assignment->location_count != result_assignment->location_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU assembly copy requires matching register ranges");
-  }
   const uint32_t register_count = source_assignment->location_count;
-  const uint32_t last_register_offset = register_count - 1;
-  if (source_assignment->location_base > UINT32_MAX - last_register_offset ||
-      result_assignment->location_base > UINT32_MAX - last_register_offset) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU assembly copy register range exceeds uint32_t");
-  }
-
-  if (source_assignment->descriptor_reg_class_id !=
-      result_assignment->descriptor_reg_class_id) {
-    iree_string_view_t source_register_class = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_low_allocation_assignment_register_class_name(
-        context->allocation, source_assignment, &source_register_class));
-    iree_string_view_t result_register_class = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_low_allocation_assignment_register_class_name(
-        context->allocation, result_assignment, &result_register_class));
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU assembly copy between register classes '%.*s' and '%.*s' is "
-        "unsupported",
-        (int)source_register_class.size, source_register_class.data,
-        (int)result_register_class.size, result_register_class.data);
-  }
 
   iree_string_view_t mnemonic = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_copy_mnemonic(
@@ -2732,10 +2529,10 @@ static iree_status_t loom_amdgpu_append_copy_packet(
   IREE_RETURN_IF_ERROR(loom_low_move_sequence_scratch_reserve_moves(
       context->move_scratch, register_count, &moves));
   for (uint32_t i = 0; i < register_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_low_move_location_from_assignment_unit(
-        result_assignment, i, &moves[i].destination));
-    IREE_RETURN_IF_ERROR(loom_low_move_location_from_assignment_unit(
-        source_assignment, i, &moves[i].source));
+    moves[i].destination =
+        loom_low_move_location_from_assignment_unit(result_assignment, i);
+    moves[i].source =
+        loom_low_move_location_from_assignment_unit(source_assignment, i);
   }
   loom_low_move_location_t* temporaries = NULL;
   iree_host_size_t temporary_count = 0;
@@ -2751,9 +2548,8 @@ static iree_status_t loom_amdgpu_append_slice_packet(
   loom_amdgpu_assembly_emit_state_t* emit_state =
       (loom_amdgpu_assembly_emit_state_t*)user_data;
   const loom_op_t* op = context->packet->node->op;
-  iree_host_size_t move_count = 0;
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_slice_units(
-      context->allocation, op, &move_count));
+  const iree_host_size_t move_count =
+      loom_low_move_sequence_slice_unit_count(context->allocation, op);
   if (move_count == 0) {
     return iree_ok_status();
   }
@@ -2767,8 +2563,7 @@ static iree_status_t loom_amdgpu_append_slice_packet(
   loom_low_move_t* moves = NULL;
   IREE_RETURN_IF_ERROR(loom_low_move_sequence_scratch_reserve_moves(
       context->move_scratch, move_count, &moves));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_populate_slice_units(
-      context->allocation, op, moves, move_count));
+  loom_low_move_sequence_populate_slice_units(context->allocation, op, moves);
   loom_low_move_location_t* temporaries = NULL;
   iree_host_size_t temporary_count = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_move_temporaries(
@@ -2782,9 +2577,8 @@ static iree_status_t loom_amdgpu_append_concat_packet(
   loom_amdgpu_assembly_emit_state_t* emit_state =
       (loom_amdgpu_assembly_emit_state_t*)user_data;
   const loom_op_t* op = context->packet->node->op;
-  iree_host_size_t move_count = 0;
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_concat_units(
-      context->allocation, op, &move_count));
+  const iree_host_size_t move_count =
+      loom_low_move_sequence_concat_unit_count(context->allocation, op);
   if (move_count == 0) {
     return iree_ok_status();
   }
@@ -2798,8 +2592,7 @@ static iree_status_t loom_amdgpu_append_concat_packet(
   loom_low_move_t* moves = NULL;
   IREE_RETURN_IF_ERROR(loom_low_move_sequence_scratch_reserve_moves(
       context->move_scratch, move_count, &moves));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_populate_concat_units(
-      context->allocation, op, moves, move_count));
+  loom_low_move_sequence_populate_concat_units(context->allocation, op, moves);
   loom_low_move_location_t* temporaries = NULL;
   iree_host_size_t temporary_count = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_move_temporaries(
@@ -2814,21 +2607,10 @@ static iree_status_t loom_amdgpu_append_storage_address_packet(
       (loom_amdgpu_assembly_emit_state_t*)user_data;
   const loom_op_t* op = context->packet->node->op;
   loom_amdgpu_storage_layout_reference_t reference;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_resolve_reference(
-      context->schedule->module, context->schedule->function_op,
+  IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_lookup_reference(
+      emit_state->storage_layout, context->schedule->module,
       loom_low_storage_address_storage(op), &reference));
-  const int64_t signed_offset = loom_low_storage_address_offset(op);
-  if (signed_offset < 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU assembly low.storage.address offset must be non-negative");
-  }
-  const uint64_t offset = (uint64_t)signed_offset;
-  if (offset >= reference.byte_length) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU assembly low.storage.address offset "
-                            "exceeds storage reference size");
-  }
+  const uint64_t offset = (uint64_t)loom_low_storage_address_offset(op);
   uint64_t byte_offset = reference.reservation.byte_offset;
   if (byte_offset > UINT32_MAX ||
       reference.byte_offset > UINT32_MAX - byte_offset) {
@@ -2845,12 +2627,6 @@ static iree_status_t loom_amdgpu_append_storage_address_packet(
 
   const loom_low_allocation_assignment_t* assignment =
       loom_amdgpu_map_assignment(context, loom_low_storage_address_result(op));
-  if (assignment->descriptor_reg_class_id != LOOM_AMDGPU_REG_CLASS_ID_VGPR ||
-      assignment->location_count != 1) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU assembly low.storage.address result must "
-                            "be one VGPR");
-  }
   loom_amdgpu_assembly_move_state_t move_state = {
       .context = context,
       .emit_state = emit_state,
@@ -2860,9 +2636,9 @@ static iree_status_t loom_amdgpu_append_storage_address_packet(
   const uint32_t window = LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE;
   uint8_t mask = 0;
   uint8_t value = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vgpr_msb_insert_requirement(
-      LOOM_AMDGPU_VGPR_MSB_SLOT_DST, assignment->location_base / window, &mask,
-      &value));
+  loom_amdgpu_vgpr_msb_insert_requirement(LOOM_AMDGPU_VGPR_MSB_SLOT_DST,
+                                          assignment->location_base / window,
+                                          &mask, &value);
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_append_vgpr_msb_requirement(&move_state, mask, value));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_move_line_prefix(&move_state));
@@ -2942,8 +2718,7 @@ static iree_status_t loom_amdgpu_validate_assembly_packet_shape(
       descriptor->immediate_count == shape->immediate_count) {
     return iree_ok_status();
   }
-  iree_string_view_t key = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_key(context, &key));
+  const iree_string_view_t key = loom_amdgpu_descriptor_key(context);
   return iree_make_status(
       IREE_STATUS_FAILED_PRECONDITION,
       "AMDGPU assembly %s descriptor '%.*s' has unsupported shape",
@@ -3051,8 +2826,7 @@ static bool loom_amdgpu_match_source_immediate_asm_form(
 
 static iree_status_t loom_amdgpu_source_immediate_unsupported_shape(
     const loom_native_assembly_packet_context_t* context) {
-  iree_string_view_t key = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_key(context, &key));
+  const iree_string_view_t key = loom_amdgpu_descriptor_key(context);
   return iree_make_status(
       IREE_STATUS_FAILED_PRECONDITION,
       "AMDGPU assembly source-immediate descriptor '%.*s' has unsupported "
@@ -3424,6 +3198,11 @@ static iree_status_t loom_amdgpu_append_vopd_mnemonic(
   return iree_string_builder_append_cstring(context->builder, " ");
 }
 
+static iree_status_t loom_amdgpu_append_vopd_vgpr(
+    const loom_native_assembly_packet_context_t* context, uint16_t vgpr) {
+  return iree_string_builder_append_format(context->builder, "v%" PRIu16, vgpr);
+}
+
 static iree_string_view_t loom_amdgpu_vopd_component_assembly_mnemonic(
     const loom_native_assembly_packet_context_t* context,
     const loom_amdgpu_vopd_component_info_t* info) {
@@ -3440,124 +3219,97 @@ static iree_string_view_t loom_amdgpu_vopd_component_assembly_mnemonic(
 
 static iree_status_t loom_amdgpu_append_vopd_tied_accumulate_component(
     const loom_native_assembly_packet_context_t* context,
-    const loom_low_packet_view_t* packet,
-    const loom_amdgpu_vopd_component_info_t* info, iree_string_view_t mnemonic,
-    bool sources_swapped) {
-  loom_native_assembly_packet_context_t component_context = *context;
-  component_context.packet = packet;
-  const uint8_t src0_index =
-      sources_swapped ? info->operands.vsrc1_index : info->operands.src0_index;
-  const uint8_t vsrc1_index =
-      sources_swapped ? info->operands.src0_index : info->operands.vsrc1_index;
+    const loom_amdgpu_vopd_component_t* component,
+    iree_string_view_t mnemonic) {
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_mnemonic(context, mnemonic));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_result(&component_context, 0));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_vgpr(context, component->vdst));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_append_operand(&component_context, src0_index));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_vgpr(context, component->src0));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-  return loom_amdgpu_append_operand(&component_context, vsrc1_index);
+  return loom_amdgpu_append_vopd_vgpr(context, component->vsrc1);
 }
 
 static iree_status_t loom_amdgpu_append_vopd_fmaak_component(
     const loom_native_assembly_packet_context_t* context,
-    const loom_low_packet_view_t* packet, iree_string_view_t mnemonic,
-    uint32_t literal_u32, bool sources_swapped) {
-  loom_native_assembly_packet_context_t component_context = *context;
-  component_context.packet = packet;
-  const uint8_t src0_index = sources_swapped ? 1 : 0;
-  const uint8_t vsrc1_index = sources_swapped ? 0 : 1;
+    const loom_amdgpu_vopd_component_t* component,
+    iree_string_view_t mnemonic) {
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_mnemonic(context, mnemonic));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_result(&component_context, 0));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_vgpr(context, component->vdst));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_append_operand(&component_context, src0_index));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_vgpr(context, component->src0));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_append_operand(&component_context, vsrc1_index));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_vgpr(context, component->vsrc1));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
   return iree_string_builder_append_format(context->builder, "0x%08" PRIx32,
-                                           literal_u32);
+                                           component->immediate_u32);
 }
 
 static iree_status_t loom_amdgpu_append_vopd_fmamk_component(
     const loom_native_assembly_packet_context_t* context,
-    const loom_low_packet_view_t* packet, iree_string_view_t mnemonic,
-    uint32_t literal_u32) {
-  loom_native_assembly_packet_context_t component_context = *context;
-  component_context.packet = packet;
+    const loom_amdgpu_vopd_component_t* component,
+    iree_string_view_t mnemonic) {
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_mnemonic(context, mnemonic));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_result(&component_context, 0));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_vgpr(context, component->vdst));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_operand(&component_context, 0));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_vgpr(context, component->src0));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      context->builder, "0x%08" PRIx32, literal_u32));
+      context->builder, "0x%08" PRIx32, component->immediate_u32));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-  return loom_amdgpu_append_operand(&component_context, 1);
+  return loom_amdgpu_append_vopd_vgpr(context, component->vsrc1);
 }
 
 static iree_status_t loom_amdgpu_append_vopd_binary_component(
     const loom_native_assembly_packet_context_t* context,
-    const loom_low_packet_view_t* packet, iree_string_view_t mnemonic,
-    bool sources_swapped) {
-  loom_native_assembly_packet_context_t component_context = *context;
-  component_context.packet = packet;
-  const uint8_t src0_index = sources_swapped ? 1 : 0;
-  const uint8_t vsrc1_index = sources_swapped ? 0 : 1;
+    const loom_amdgpu_vopd_component_t* component,
+    iree_string_view_t mnemonic) {
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_mnemonic(context, mnemonic));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_result(&component_context, 0));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_vgpr(context, component->vdst));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_append_operand(&component_context, src0_index));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_vgpr(context, component->src0));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-  return loom_amdgpu_append_operand(&component_context, vsrc1_index);
+  return loom_amdgpu_append_vopd_vgpr(context, component->vsrc1);
 }
 
 static iree_status_t loom_amdgpu_append_vopd_mov_component(
     const loom_native_assembly_packet_context_t* context,
-    const loom_low_packet_view_t* packet, iree_string_view_t mnemonic) {
-  loom_native_assembly_packet_context_t component_context = *context;
-  component_context.packet = packet;
+    const loom_amdgpu_vopd_component_t* component,
+    iree_string_view_t mnemonic) {
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_mnemonic(context, mnemonic));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_result(&component_context, 0));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_vgpr(context, component->vdst));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-  return loom_amdgpu_append_packet_immediate_i64(&component_context, 0);
+  return iree_string_builder_append_format(context->builder, "%" PRIu32,
+                                           component->immediate_u32);
 }
 
 static iree_status_t loom_amdgpu_append_vopd_component(
     const loom_native_assembly_packet_context_t* context,
-    const loom_low_packet_view_t* packet, uint16_t vopd_op,
-    uint32_t literal_u32, bool sources_swapped) {
+    const loom_amdgpu_vopd_component_t* component) {
   const loom_amdgpu_vopd_component_info_t* info =
-      loom_amdgpu_vopd_component_info_for_op(vopd_op);
+      loom_amdgpu_vopd_component_info_for_op(component->op);
   if (info == NULL) {
     IREE_ASSERT_UNREACHABLE(
         "verified AMDGPU VOPD plans must reference supported component ops");
     IREE_BUILTIN_UNREACHABLE();
   }
-  IREE_ASSERT(
-      !sources_swapped ||
-      iree_any_bit_set(info->flags,
-                       LOOM_AMDGPU_VOPD_COMPONENT_FLAG_COMMUTABLE_SOURCES));
   const iree_string_view_t mnemonic =
       loom_amdgpu_vopd_component_assembly_mnemonic(context, info);
   switch (info->form) {
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_TIED_ACCUMULATE:
       return loom_amdgpu_append_vopd_tied_accumulate_component(
-          context, packet, info, mnemonic, sources_swapped);
+          context, component, mnemonic);
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_FMAAK_LITERAL:
-      return loom_amdgpu_append_vopd_fmaak_component(
-          context, packet, mnemonic, literal_u32, sources_swapped);
+      return loom_amdgpu_append_vopd_fmaak_component(context, component,
+                                                     mnemonic);
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_FMAMK_LITERAL:
-      IREE_ASSERT(!sources_swapped);
-      return loom_amdgpu_append_vopd_fmamk_component(context, packet, mnemonic,
-                                                     literal_u32);
+      return loom_amdgpu_append_vopd_fmamk_component(context, component,
+                                                     mnemonic);
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR:
-      return loom_amdgpu_append_vopd_binary_component(context, packet, mnemonic,
-                                                      sources_swapped);
+      return loom_amdgpu_append_vopd_binary_component(context, component,
+                                                      mnemonic);
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_INLINE_MOV:
-      IREE_ASSERT(!sources_swapped);
-      return loom_amdgpu_append_vopd_mov_component(context, packet, mnemonic);
+      return loom_amdgpu_append_vopd_mov_component(context, component,
+                                                   mnemonic);
     default:
       IREE_ASSERT_UNREACHABLE(
           "AMDGPU VOPD component metadata must use a known form");
@@ -3567,26 +3319,18 @@ static iree_status_t loom_amdgpu_append_vopd_component(
 
 static iree_status_t loom_amdgpu_append_vopd_pair_packet(
     const loom_native_assembly_packet_context_t* context,
-    const loom_low_packet_view_t* second_packet,
     const loom_amdgpu_vopd_pair_t* pair) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_component(
-      context, context->packet, pair->op_x, pair->literal_u32,
-      iree_any_bit_set(pair->flags,
-                       LOOM_AMDGPU_VOPD_PAIR_FLAG_X_SOURCES_SWAPPED)));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_component(context, &pair->x));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, " :: "));
-  return loom_amdgpu_append_vopd_component(
-      context, second_packet, pair->op_y, pair->literal_u32,
-      iree_any_bit_set(pair->flags,
-                       LOOM_AMDGPU_VOPD_PAIR_FLAG_Y_SOURCES_SWAPPED));
+  return loom_amdgpu_append_vopd_component(context, &pair->y);
 }
 
 static iree_status_t loom_amdgpu_try_append_mnemonic_dispatch_packet(
     const loom_native_assembly_packet_context_t* context, bool* out_matched) {
-  iree_string_view_t mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
+  const iree_string_view_t mnemonic = loom_native_assembly_descriptor_string(
       context->schedule->target.descriptor_set,
-      context->packet->descriptor->mnemonic_string_offset, &mnemonic));
+      context->packet->descriptor->mnemonic_string_offset);
   return loom_amdgpu_try_append_mnemonic_rule_packet(context, mnemonic,
                                                      out_matched);
 }
@@ -3607,10 +3351,10 @@ static iree_status_t loom_amdgpu_try_append_canonical_asm_form_dispatch_packet(
     // to the final canonical fallback after route-specific dispatchers run.
     return iree_ok_status();
   }
-  iree_string_view_t canonical_mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-      context->schedule->target.descriptor_set,
-      canonical_form->mnemonic_string_offset, &canonical_mnemonic));
+  const iree_string_view_t canonical_mnemonic =
+      loom_native_assembly_descriptor_string(
+          context->schedule->target.descriptor_set,
+          canonical_form->mnemonic_string_offset);
   return loom_amdgpu_try_append_asm_form_rule_packet(
       context, canonical_mnemonic, out_matched);
 }
@@ -3700,17 +3444,19 @@ static iree_status_t loom_amdgpu_append_stateful_descriptor_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
   loom_amdgpu_assembly_emit_state_t* state =
       (loom_amdgpu_assembly_emit_state_t*)user_data;
-  loom_amdgpu_address_state_requirement_t requirement = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_query_requirement(
-      context->schedule, context->allocation, context->packet->node,
-      &requirement));
-  const uint8_t current_mode = state == NULL ? 0 : state->current_vgpr_msb_mode;
-  if ((current_mode & requirement.mask) !=
-      (requirement.value & requirement.mask)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU descriptor packet reached assembly emission without its "
-        "required address-state transition");
+  if (state == NULL || state->address_state == NULL) {
+    const loom_amdgpu_address_state_requirement_t requirement =
+        loom_amdgpu_address_state_requirement_for_packet(context->allocation,
+                                                         context->packet);
+    const uint8_t current_mode =
+        state == NULL ? 0 : state->current_vgpr_msb_mode;
+    if ((current_mode & requirement.mask) !=
+        (requirement.value & requirement.mask)) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU descriptor packet reached assembly emission without its "
+          "required address-state transition");
+    }
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_descriptor_packet(NULL, context));
   return loom_amdgpu_update_vgpr_msb_mode_after_descriptor(state, context);
@@ -3736,13 +3482,11 @@ static iree_status_t loom_amdgpu_append_vopd_or_descriptor_packet(
   IREE_ASSERT(vopd_packet->role == LOOM_AMDGPU_VOPD_PACKET_ROLE_FIRST);
   const loom_amdgpu_vopd_pair_t* pair =
       &state->vopd_plan->pairs[vopd_packet->pair_index];
-  loom_low_packet_view_t second_packet = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_low_packet_view_at(context->schedule, context->allocation,
-                              pair->second_packet_index, &second_packet));
+  const loom_low_packet_view_t second_packet =
+      loom_low_packet_at(context->schedule, pair->second_packet_index);
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_movable_vopd_second_wait_states(
       state, context, &second_packet));
-  return loom_amdgpu_append_vopd_pair_packet(context, &second_packet, pair);
+  return loom_amdgpu_append_vopd_pair_packet(context, pair);
 }
 
 static iree_status_t loom_amdgpu_append_return_packet(
@@ -3850,11 +3594,10 @@ static iree_status_t loom_amdgpu_verify_assembly_target(
     const loom_low_schedule_table_t* schedule) {
   if (schedule->target.descriptor_set->target_stable_id !=
       LOOM_AMDGPU_TARGET_STABLE_ID) {
-    iree_string_view_t target_key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-        schedule->target.descriptor_set,
-        schedule->target.descriptor_set->target_key_string_offset,
-        &target_key));
+    const iree_string_view_t target_key =
+        loom_native_assembly_descriptor_string(
+            schedule->target.descriptor_set,
+            schedule->target.descriptor_set->target_key_string_offset);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "AMDGPU assembly emitter received target '%.*s'",
                             (int)target_key.size, target_key.data);
@@ -3906,29 +3649,8 @@ iree_status_t loom_amdgpu_emit_assembly_fragment(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_verify_assembly_target(schedule));
-  loom_amdgpu_assembly_emit_state_t emit_state = {
-      .current_block_index = LOOM_LOW_PACKET_INDEX_NONE,
-  };
-  const loom_native_assembly_format_options_t options =
-      loom_amdgpu_assembly_options(
-          &emit_state,
-          (loom_native_assembly_append_packet_callback_t){
-              .fn = loom_amdgpu_prepare_packet,
-              .user_data = &emit_state,
-          },
-          (loom_native_assembly_append_packet_callback_t){
-              .fn = loom_amdgpu_append_stateful_descriptor_packet,
-              .user_data = &emit_state,
-          });
-  IREE_RETURN_IF_ERROR(loom_native_assembly_format_fragment(
-      schedule, allocation, &options, builder, scratch_arena));
-  if (emit_state.current_vgpr_msb_mode != 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU assembly left VGPR-MSB address state active at function end");
-  }
-  return iree_ok_status();
+  return loom_amdgpu_emit_assembly_fragment_with_options(
+      schedule, allocation, /*options=*/NULL, builder, scratch_arena);
 }
 
 iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
@@ -3937,10 +3659,17 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
     const loom_amdgpu_assembly_fragment_options_t* options,
     iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
   IREE_RETURN_IF_ERROR(loom_amdgpu_verify_assembly_target(schedule));
+  loom_amdgpu_storage_layout_t derived_storage_layout;
+  const loom_amdgpu_storage_layout_t* storage_layout =
+      options ? options->storage_layout : NULL;
+  if (storage_layout == NULL) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_build(
+        schedule->module, schedule->function_op, scratch_arena,
+        &derived_storage_layout));
+    storage_layout = &derived_storage_layout;
+  }
   const loom_amdgpu_packet_plan_t* packet_plan =
       options ? options->packet_plan : NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_packet_plan_verify(schedule, allocation, packet_plan));
   const loom_amdgpu_address_state_plan_t* address_state =
       packet_plan ? &packet_plan->address_state : NULL;
   const loom_amdgpu_wait_packet_plan_t* wait_packets =
@@ -3951,6 +3680,7 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
       packet_plan ? &packet_plan->vopd_plan : NULL;
 
   loom_amdgpu_assembly_emit_state_t emit_state = {
+      .storage_layout = storage_layout,
       .address_state = address_state,
       .wait_packets = wait_packets,
       .wait_states = wait_states,
@@ -3970,31 +3700,17 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
           });
   IREE_RETURN_IF_ERROR(loom_native_assembly_format_fragment(
       schedule, allocation, &format_options, builder, scratch_arena));
-  if (address_state != NULL &&
-      emit_state.next_address_state_index != address_state->transition_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU assembly address-state plan contains an unmatched insertion "
-        "point");
+  if (address_state != NULL) {
+    IREE_ASSERT_EQ(emit_state.next_address_state_index,
+                   address_state->transition_count);
   }
-  if (emit_state.current_vgpr_msb_mode != 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU assembly left VGPR-MSB address state active at function end");
+  IREE_ASSERT_EQ(emit_state.current_vgpr_msb_mode, 0);
+  if (wait_packets != NULL) {
+    IREE_ASSERT_EQ(emit_state.next_wait_packet_index,
+                   wait_packets->packet_count);
   }
-  if (wait_packets != NULL &&
-      emit_state.next_wait_packet_index != wait_packets->packet_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU assembly wait packet plan contains an unmatched insertion "
-        "point");
-  }
-  if (wait_states != NULL &&
-      emit_state.next_wait_state_index != wait_states->state_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU assembly wait-state plan contains an unmatched insertion "
-        "point");
+  if (wait_states != NULL) {
+    IREE_ASSERT_EQ(emit_state.next_wait_state_index, wait_states->state_count);
   }
   return iree_ok_status();
 }

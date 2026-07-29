@@ -80,7 +80,8 @@ typedef enum loom_low_operand_role_e {
 typedef enum loom_low_operand_address_map_kind_e {
   // Operand can directly address any unit assigned by its register class.
   LOOM_LOW_OPERAND_ADDRESS_MAP_DIRECT = 0,
-  // Operand directly encodes only the low |addressable_unit_count| units.
+  // Operand directly encodes only the low |addressable_unit_count| units. A
+  // nonzero address-state slot also requires that slot's low window.
   LOOM_LOW_OPERAND_ADDRESS_MAP_LOW_SUBSET = 1,
   // Operand encodes a low window selected by target-owned address state.
   LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE = 2,
@@ -533,8 +534,10 @@ typedef struct loom_low_operand_t {
   // Directly addressable low units for bounded address maps, or zero when the
   // map directly addresses the selected register class.
   uint16_t addressable_unit_count;
-  // Target-owned state slot selecting the active address window, or zero when
-  // the address map does not depend on target state.
+  // Target-owned state slot controlling the encoded address window. For a
+  // target-state map it selects the assigned window; for a low-subset map it
+  // requires the low window. Zero means the operand does not participate in
+  // target address state.
   uint16_t address_state_slot;
   // Target-owned data-format identifier.
   uint16_t data_format_id;

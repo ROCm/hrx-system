@@ -17,6 +17,8 @@ from loom.target.arch.amdgpu.encoding import (
     AMDGPU_DPP_CONTROL_ENCODING_FORMAT_IDS,
     AMDGPU_ENCODING_FORMAT_NONE,
     AMDGPU_ENCODING_FORMAT_XML_NAMES_BY_ID,
+    AMDGPU_GFX125X_VGPR_MSB_BANK_COUNT,
+    AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE,
     AmdgpuVgprMsbSlot,
     amdgpu_dpp_control_is_valid,
     amdgpu_encoding_field_id,
@@ -399,9 +401,6 @@ def _with_overlay_descriptors(
     return descriptor_set
 
 
-_GFX125X_VGPR_MSB_ADDRESSABLE_UNIT_COUNT = 256
-
-
 def _operand_has_vgpr_alt(operand: Operand) -> bool:
     return any(reg_alt.reg_class == _REG_VGPR for reg_alt in operand.reg_alts)
 
@@ -444,20 +443,27 @@ def _with_gfx125x_operand_address_state(
 ) -> Operand:
     if not _operand_is_explicit_register(operand) or not _operand_has_vgpr_alt(operand):
         return operand
+    address_state_slot = _gfx125x_operand_vgpr_msb_slot(descriptor, operand)
+    if operand.address_map_kind is OperandAddressMapKind.LOW_SUBSET:
+        if (
+            address_state_slot == AmdgpuVgprMsbSlot.NONE
+            or operand.address_state_slot != 0
+        ):
+            return operand
+        return replace(operand, address_state_slot=int(address_state_slot))
     if operand.address_map_kind is not OperandAddressMapKind.DIRECT:
         return operand
-    address_state_slot = _gfx125x_operand_vgpr_msb_slot(descriptor, operand)
     if address_state_slot != AmdgpuVgprMsbSlot.NONE:
         return replace(
             operand,
             address_map_kind=OperandAddressMapKind.TARGET_STATE,
-            addressable_unit_count=_GFX125X_VGPR_MSB_ADDRESSABLE_UNIT_COUNT,
+            addressable_unit_count=AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE,
             address_state_slot=int(address_state_slot),
         )
     return replace(
         operand,
         address_map_kind=OperandAddressMapKind.LOW_SUBSET,
-        addressable_unit_count=_GFX125X_VGPR_MSB_ADDRESSABLE_UNIT_COUNT,
+        addressable_unit_count=AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE,
     )
 
 
@@ -467,10 +473,7 @@ def _with_gfx125x_vgpr_msb_address_state(descriptor: Descriptor) -> Descriptor:
         for operand in descriptor.operands
     )
     updated_descriptor = replace(descriptor, operands=operands)
-    if any(
-        operand.address_map_kind is OperandAddressMapKind.TARGET_STATE
-        for operand in operands
-    ):
+    if any(operand.address_state_slot != 0 for operand in operands):
         updated_descriptor = _with_mode_state_read(updated_descriptor)
     return updated_descriptor
 
@@ -522,6 +525,31 @@ def _descriptor_tied_operand_roots(descriptor: Descriptor) -> tuple[int, ...]:
 
 
 def _validate_gfx125x_vgpr_msb_address_state(descriptor_set: DescriptorSet) -> None:
+    vgpr_reg_class = next(
+        (
+            reg_class
+            for reg_class in descriptor_set.reg_classes
+            if reg_class.name == _REG_VGPR
+        ),
+        None,
+    )
+    if vgpr_reg_class is not None:
+        maximum_vgpr_count = (
+            AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE * AMDGPU_GFX125X_VGPR_MSB_BANK_COUNT
+        )
+        fixed_vgpr_end = (
+            vgpr_reg_class.fixed_location_base + vgpr_reg_class.fixed_location_count
+        )
+        if (
+            vgpr_reg_class.allocatable_count > maximum_vgpr_count
+            or fixed_vgpr_end > maximum_vgpr_count
+        ):
+            raise ValueError(
+                f"gfx125x VGPR register class exceeds the "
+                f"{AMDGPU_GFX125X_VGPR_MSB_BANK_COUNT}-bank "
+                f"S_SET_VGPR_MSB capacity of {maximum_vgpr_count} registers"
+            )
+
     descriptors_by_key = {
         descriptor.key: descriptor for descriptor in descriptor_set.descriptors
     }
@@ -529,25 +557,28 @@ def _validate_gfx125x_vgpr_msb_address_state(descriptor_set: DescriptorSet) -> N
         mode_descriptor = descriptors_by_key["amdgpu.s_set_vgpr_msb"]
     except KeyError as exc:
         raise ValueError(
-            "gfx125x VGPR-MSB target-state operands require 'amdgpu.s_set_vgpr_msb'"
+            "gfx125x VGPR-MSB address-state operands require 'amdgpu.s_set_vgpr_msb'"
         ) from exc
     if not _descriptor_writes_mode_state(mode_descriptor):
         raise ValueError(
             "gfx125x descriptor 'amdgpu.s_set_vgpr_msb' must write MODE state"
         )
     for descriptor in descriptor_set.descriptors:
-        has_target_state_operand = False
+        has_address_state_operand = False
         tied_operand_roots = _descriptor_tied_operand_roots(descriptor)
         address_state_slot_operands: dict[int, int] = {}
         for operand_index, operand in enumerate(descriptor.operands):
-            if operand.address_map_kind is not OperandAddressMapKind.TARGET_STATE:
+            if (
+                operand.address_map_kind is not OperandAddressMapKind.TARGET_STATE
+                and operand.address_state_slot == 0
+            ):
                 continue
-            has_target_state_operand = True
+            has_address_state_operand = True
             expected_slot = _gfx125x_operand_vgpr_msb_slot(descriptor, operand)
             if expected_slot == AmdgpuVgprMsbSlot.NONE:
                 raise ValueError(
                     f"gfx125x descriptor '{descriptor.key}' marks operand "
-                    f"'{operand.field_name}' as VGPR-MSB target-state, but "
+                    f"'{operand.field_name}' as VGPR-MSB address-state, but "
                     "the operand encoding field has no S_SET_VGPR_MSB slot"
                 )
             if operand.address_state_slot != int(expected_slot):
@@ -572,22 +603,43 @@ def _validate_gfx125x_vgpr_msb_address_state(descriptor_set: DescriptorSet) -> N
             address_state_slot_operands.setdefault(
                 operand.address_state_slot, operand_index
             )
-            if (
-                operand.addressable_unit_count
-                != _GFX125X_VGPR_MSB_ADDRESSABLE_UNIT_COUNT
-            ):
+            if operand.address_map_kind is OperandAddressMapKind.TARGET_STATE:
+                if (
+                    operand.addressable_unit_count
+                    != AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE
+                ):
+                    raise ValueError(
+                        f"gfx125x descriptor '{descriptor.key}' marks operand "
+                        f"'{operand.field_name}' as VGPR-MSB target-state with "
+                        f"{operand.addressable_unit_count} addressable units; "
+                        f"expected {AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE}"
+                    )
+            elif operand.address_map_kind is OperandAddressMapKind.LOW_SUBSET:
+                if not (
+                    0
+                    < operand.addressable_unit_count
+                    <= AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE
+                ):
+                    raise ValueError(
+                        f"gfx125x descriptor '{descriptor.key}' marks operand "
+                        f"'{operand.field_name}' as VGPR-MSB low-subset with "
+                        f"{operand.addressable_unit_count} addressable units; "
+                        f"expected between 1 and "
+                        f"{AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE}"
+                    )
+            else:
                 raise ValueError(
                     f"gfx125x descriptor '{descriptor.key}' marks operand "
-                    f"'{operand.field_name}' as VGPR-MSB target-state with "
-                    f"{operand.addressable_unit_count} addressable units; "
-                    f"expected {_GFX125X_VGPR_MSB_ADDRESSABLE_UNIT_COUNT}"
+                    f"'{operand.field_name}' with S_SET_VGPR_MSB slot "
+                    f"{operand.address_state_slot} but uses the "
+                    f"'{operand.address_map_kind.name.lower()}' address map"
                 )
-        if has_target_state_operand and not any(
+        if has_address_state_operand and not any(
             _is_mode_state_read(operand) for operand in descriptor.operands
         ):
             raise ValueError(
                 f"gfx125x descriptor '{descriptor.key}' uses VGPR-MSB "
-                "target-state operands but does not read MODE state"
+                "address-state operands but does not read MODE state"
             )
 
 

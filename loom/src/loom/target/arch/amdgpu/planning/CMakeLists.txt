@@ -192,6 +192,7 @@ loom_cc_library(
   DEPS
     ::wait_counters
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::codegen::low::allocation::table
     loom::codegen::low::memory_access
@@ -629,21 +630,6 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_cc_test(
-  NAME
-    vopd_plan_test
-  SRCS
-    "vopd_plan_test.cc"
-  DEPS
-    ::vopd_plan
-    iree::testing::gtest
-    iree::testing::gtest_main
-  LABELS
-    "iree-build-requirement=loom.target.arch.amdgpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
     packet_plan
@@ -660,7 +646,6 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
-    loom::codegen::low::packet
     loom::codegen::low::schedule
   PUBLIC
 )

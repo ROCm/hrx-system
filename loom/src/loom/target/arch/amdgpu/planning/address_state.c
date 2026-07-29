@@ -15,153 +15,53 @@
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
-static iree_status_t loom_amdgpu_address_state_insert_slot_bank(
+static void loom_amdgpu_address_state_insert_slot_bank(
     loom_amdgpu_vgpr_msb_slot_t slot, uint32_t bank,
     loom_amdgpu_address_state_requirement_t* requirement) {
-  if (slot < LOOM_AMDGPU_VGPR_MSB_SLOT_SRC0 ||
-      slot > LOOM_AMDGPU_VGPR_MSB_SLOT_DST) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU target-state operand has invalid VGPR-MSB slot %u",
-        (unsigned)slot);
-  }
-  if (bank > 3) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU target-state operand requires VGPR-MSB bank %" PRIu32, bank);
-  }
+  IREE_ASSERT_LE(bank, 3u);
   const uint8_t shift = loom_amdgpu_vgpr_msb_slot_shift(slot);
   const uint8_t slot_mask = (uint8_t)(0x3u << shift);
   const uint8_t slot_value = (uint8_t)(bank << shift);
-  if ((requirement->mask & slot_mask) != 0 &&
-      (requirement->value & slot_mask) != slot_value) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU packet requires different VGPR-MSB banks for one operand "
-        "slot");
-  }
+  IREE_ASSERT((requirement->mask & slot_mask) == 0 ||
+              (requirement->value & slot_mask) == slot_value);
   requirement->mask |= slot_mask;
   requirement->value =
       (uint8_t)((requirement->value & ~slot_mask) | slot_value);
-  return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_address_state_operand_assignment(
-    const loom_low_schedule_table_t* schedule,
+loom_amdgpu_address_state_requirement_t
+loom_amdgpu_address_state_requirement_for_packet(
     const loom_low_allocation_table_t* allocation,
-    const loom_low_schedule_node_t* node, uint16_t descriptor_operand_index,
-    const loom_low_allocation_assignment_t** out_assignment) {
-  *out_assignment = NULL;
-  const loom_low_descriptor_set_t* descriptor_set =
-      schedule->target.descriptor_set;
-  const loom_low_operand_t* operand =
-      &descriptor_set->operands[node->descriptor->operand_start +
-                                descriptor_operand_index];
-  const uint16_t result_count = node->descriptor->result_count;
-  if (descriptor_operand_index < result_count) {
-    const uint16_t result_index = operand->source_value_index;
-    if (result_index >= node->result_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU target-state descriptor result %" PRIu16
-                              " has no matching schedule result",
-                              descriptor_operand_index);
-    }
-    const loom_value_ordinal_t* result_ordinals =
-        loom_low_schedule_node_const_result_ordinals(node);
-    *out_assignment = loom_low_allocation_assignment_for_value_ordinal(
-        allocation, result_ordinals[result_index], NULL);
-    return iree_ok_status();
-  }
-
-  if (loom_low_operand_role_is_packet_operand(operand->role)) {
-    const uint16_t packet_operand_index = operand->source_value_index;
-    if (packet_operand_index >= node->operand_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU target-state descriptor operand %" PRIu16
-                              " has no matching schedule operand",
-                              descriptor_operand_index);
-    }
-    const loom_value_ordinal_t* operand_ordinals =
-        loom_low_schedule_node_const_operand_ordinals(node);
-    *out_assignment = loom_low_allocation_assignment_for_value_ordinal(
-        allocation, operand_ordinals[packet_operand_index], NULL);
-    return iree_ok_status();
-  }
-
-  return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                          "AMDGPU target-state descriptor operand %" PRIu16
-                          " has no matching schedule operand",
-                          descriptor_operand_index);
-}
-
-iree_status_t loom_amdgpu_address_state_query_requirement(
-    const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    const loom_low_schedule_node_t* node,
-    loom_amdgpu_address_state_requirement_t* out_requirement) {
-  if (schedule == NULL || allocation == NULL || node == NULL ||
-      out_requirement == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "schedule, allocation, node, and output requirement are required");
-  }
-  *out_requirement = (loom_amdgpu_address_state_requirement_t){0};
-  if (node->kind != LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR) {
-    return iree_ok_status();
-  }
-  const loom_low_descriptor_t* descriptor = node->descriptor;
+    const loom_low_packet_view_t* packet) {
+  loom_amdgpu_address_state_requirement_t requirement = {0};
+  const loom_low_descriptor_t* descriptor = packet->descriptor;
   if (descriptor == NULL) {
-    return iree_ok_status();
+    return requirement;
   }
   const loom_low_descriptor_set_t* descriptor_set =
-      schedule->target.descriptor_set;
+      allocation->target.descriptor_set;
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const loom_low_operand_t* operand =
         &descriptor_set->operands[descriptor->operand_start + (uint32_t)i];
-    if (operand->address_map_kind !=
-        LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE) {
+    if (operand->address_state_slot == 0) {
       continue;
     }
-    const loom_low_allocation_assignment_t* assignment = NULL;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_operand_assignment(
-        schedule, allocation, node, i, &assignment));
-    if (assignment == NULL ||
-        assignment->location_kind !=
+    const loom_low_allocation_assignment_t* assignment =
+        loom_low_packet_descriptor_operand_assignment(allocation, packet, i);
+    if (assignment->location_kind !=
             LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER ||
         assignment->descriptor_reg_class_id != LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
       continue;
     }
-    if (assignment->location_count != operand->unit_count) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU target-state operand has %" PRIu32
-          " assigned VGPRs but descriptor requires %" PRIu16,
-          assignment->location_count, operand->unit_count);
-    }
-    if (assignment->location_count == 0 ||
-        operand->addressable_unit_count != LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU target-state operand must use a non-empty %u-VGPR window",
-          LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE);
-    }
-    const uint64_t assigned_last =
-        (uint64_t)assignment->location_base + assignment->location_count - 1u;
-    if (assignment->location_base / LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE !=
-        assigned_last / LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU target-state VGPR range v[%" PRIu32
-                              ":%" PRIu64 "] crosses a %u-register window",
-                              assignment->location_base, assigned_last,
-                              LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE);
-    }
     const uint32_t bank =
-        assignment->location_base / LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_insert_slot_bank(
+        operand->address_map_kind == LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE
+            ? assignment->location_base / LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE
+            : 0;
+    loom_amdgpu_address_state_insert_slot_bank(
         (loom_amdgpu_vgpr_msb_slot_t)operand->address_state_slot, bank,
-        out_requirement));
+        &requirement);
   }
-  return iree_ok_status();
+  return requirement;
 }
 
 static iree_status_t loom_amdgpu_address_state_read_mode_immediate(
@@ -214,14 +114,6 @@ iree_status_t loom_amdgpu_address_state_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     iree_arena_allocator_t* arena, loom_amdgpu_address_state_plan_t* out_plan) {
-  if (schedule == NULL || allocation == NULL || arena == NULL ||
-      out_plan == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "schedule, allocation, arena, and output plan are required for "
-        "AMDGPU address-state planning");
-  }
-  IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
   *out_plan = (loom_amdgpu_address_state_plan_t){
       .schedule = schedule,
       .allocation = allocation,
@@ -258,18 +150,10 @@ iree_status_t loom_amdgpu_address_state_plan_build(
     uint32_t terminator_node_index = LOOM_LOW_SCHEDULE_NODE_NONE;
     for (uint32_t scheduled_ordinal = 0;
          scheduled_ordinal < block->scheduled_node_count; ++scheduled_ordinal) {
-      const iree_host_size_t packet_index =
-          (iree_host_size_t)block->scheduled_node_start + scheduled_ordinal;
-      const uint32_t node_index =
-          schedule->scheduled_node_indices[packet_index];
-      if (node_index >= schedule->node_count) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "AMDGPU address-state schedule references node %" PRIu32
-            " but schedule has %" PRIhsz " nodes",
-            node_index, schedule->node_count);
-      }
-      const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
+      const loom_low_packet_view_t packet = loom_low_packet_at_block_ordinal(
+          schedule, (uint32_t)block_index, scheduled_ordinal);
+      const uint32_t node_index = packet.node_index;
+      const loom_low_schedule_node_t* node = packet.node;
       if (iree_any_bit_set(node->traits, LOOM_TRAIT_TERMINATOR)) {
         terminator = node;
         terminator_node_index = node_index;
@@ -288,9 +172,8 @@ iree_status_t loom_amdgpu_address_state_plan_build(
         continue;
       }
 
-      loom_amdgpu_address_state_requirement_t requirement = {0};
-      IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_query_requirement(
-          schedule, allocation, node, &requirement));
+      const loom_amdgpu_address_state_requirement_t requirement =
+          loom_amdgpu_address_state_requirement_for_packet(allocation, &packet);
       if (requirement.mask == 0 || (current_mode & requirement.mask) ==
                                        (requirement.value & requirement.mask)) {
         continue;
@@ -326,150 +209,5 @@ iree_status_t loom_amdgpu_address_state_plan_build(
 
   out_plan->transitions = transitions;
   out_plan->transition_count = transition_count;
-  return loom_amdgpu_address_state_plan_verify(schedule, allocation, out_plan);
-}
-
-iree_status_t loom_amdgpu_address_state_plan_verify(
-    const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    const loom_amdgpu_address_state_plan_t* plan) {
-  if (plan == NULL) {
-    return iree_ok_status();
-  }
-  if (schedule == NULL || allocation == NULL || plan->schedule != schedule ||
-      plan->allocation != allocation) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU address-state plan must be derived from the emitted schedule "
-        "and allocation");
-  }
-  if (plan->transition_count != 0 && plan->transitions == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU address-state plan has transitions but no "
-                            "transition table");
-  }
-  uint64_t previous_position = 0;
-  bool has_previous_position = false;
-  for (iree_host_size_t i = 0; i < plan->transition_count; ++i) {
-    const loom_amdgpu_address_state_transition_t* transition =
-        &plan->transitions[i];
-    if (transition->reserved != 0 ||
-        transition->block_index >= schedule->block_count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AMDGPU address-state transition %" PRIhsz
-                              " has invalid metadata",
-                              i);
-    }
-    const loom_low_schedule_block_t* block =
-        &schedule->blocks[transition->block_index];
-    if (transition->scheduled_ordinal >= block->scheduled_node_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU address-state transition %" PRIhsz
-                              " references a missing scheduled packet",
-                              i);
-    }
-    const iree_host_size_t packet_index =
-        (iree_host_size_t)block->scheduled_node_start +
-        transition->scheduled_ordinal;
-    if (packet_index >= schedule->scheduled_node_count ||
-        schedule->scheduled_node_indices[packet_index] !=
-            transition->node_index) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AMDGPU address-state transition %" PRIhsz
-                              " does not match its scheduled node",
-                              i);
-    }
-    const uint64_t position = ((uint64_t)transition->block_index << 32) |
-                              transition->scheduled_ordinal;
-    if (has_previous_position && position <= previous_position) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AMDGPU address-state transitions are not in strict scheduled "
-          "order");
-    }
-    if ((uint8_t)(transition->mode_immediate >> 8) ==
-        (uint8_t)(transition->mode_immediate & 0xFFu)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AMDGPU address-state transition does not "
-                              "change MODE");
-    }
-    previous_position = position;
-    has_previous_position = true;
-  }
-
-  const loom_low_descriptor_t* set_vgpr_msb_descriptor =
-      loom_amdgpu_descriptor_ref_descriptor(
-          schedule->target.descriptor_set,
-          LOOM_AMDGPU_DESCRIPTOR_REF_S_SET_VGPR_MSB);
-  iree_host_size_t transition_index = 0;
-  for (iree_host_size_t block_index = 0; block_index < schedule->block_count;
-       ++block_index) {
-    const loom_low_schedule_block_t* block = &schedule->blocks[block_index];
-    uint8_t current_mode = 0;
-    for (uint32_t scheduled_ordinal = 0;
-         scheduled_ordinal < block->scheduled_node_count; ++scheduled_ordinal) {
-      const iree_host_size_t packet_index =
-          (iree_host_size_t)block->scheduled_node_start + scheduled_ordinal;
-      const uint32_t node_index =
-          schedule->scheduled_node_indices[packet_index];
-      const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
-      if (transition_index < plan->transition_count) {
-        const loom_amdgpu_address_state_transition_t* transition =
-            &plan->transitions[transition_index];
-        if (transition->block_index == block_index &&
-            transition->scheduled_ordinal == scheduled_ordinal) {
-          const uint8_t previous_mode =
-              (uint8_t)(transition->mode_immediate >> 8);
-          if (previous_mode != current_mode) {
-            return iree_make_status(
-                IREE_STATUS_INVALID_ARGUMENT,
-                "AMDGPU address-state transition %" PRIhsz
-                " previous mode does not match the scheduled stream",
-                transition_index);
-          }
-          current_mode = (uint8_t)(transition->mode_immediate & 0xFFu);
-          ++transition_index;
-        }
-      }
-
-      if (set_vgpr_msb_descriptor != NULL &&
-          node->descriptor == set_vgpr_msb_descriptor) {
-        uint16_t mode_immediate = 0;
-        IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_read_mode_immediate(
-            schedule, node, &mode_immediate));
-        if ((uint8_t)(mode_immediate >> 8) != current_mode) {
-          return iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "AMDGPU authored s_set_vgpr_msb previous mode does not match "
-              "the verified address-state stream");
-        }
-        current_mode = (uint8_t)(mode_immediate & 0xFFu);
-        continue;
-      }
-
-      loom_amdgpu_address_state_requirement_t requirement = {0};
-      IREE_RETURN_IF_ERROR(loom_amdgpu_address_state_query_requirement(
-          schedule, allocation, node, &requirement));
-      if ((current_mode & requirement.mask) !=
-          (requirement.value & requirement.mask)) {
-        return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                                "AMDGPU address-state plan does not satisfy "
-                                "scheduled node %" PRIu32,
-                                node_index);
-      }
-    }
-    if (current_mode != 0) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU address-state plan leaves MODE active at the end of block "
-          "%" PRIhsz,
-          block_index);
-    }
-  }
-  if (transition_index != plan->transition_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU address-state plan contains an unmatched transition");
-  }
   return iree_ok_status();
 }

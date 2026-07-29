@@ -820,9 +820,7 @@ static iree_status_t loom_low_packet_json_write(
   IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &packets));
   for (iree_host_size_t i = 0; i < loom_low_packet_count(schedule); ++i) {
     IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&packets));
-    loom_low_packet_view_t packet;
-    IREE_RETURN_IF_ERROR(
-        loom_low_packet_view_at(schedule, allocation, i, &packet));
+    const loom_low_packet_view_t packet = loom_low_packet_at(schedule, i);
     IREE_RETURN_IF_ERROR(loom_low_packet_json_write_packet(
         schedule, allocation, &type_print_context.options, &packet, &stream));
   }
@@ -842,8 +840,6 @@ iree_status_t loom_low_packet_format_json(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     iree_string_builder_t* builder) {
-  IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
-
   loom_low_allocation_value_scratch_t value_scratch = {0};
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_acquire_value_scratch(allocation, &value_scratch));

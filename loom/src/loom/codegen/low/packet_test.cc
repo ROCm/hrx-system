@@ -105,56 +105,6 @@ void InitializePacketTestState(PacketTestState* state) {
   state->allocation.target.descriptor_set = &state->descriptor_set;
 }
 
-TEST(LowPacketTest, ViewsScheduledPackets) {
-  PacketTestState state;
-  InitializePacketTestState(&state);
-
-  EXPECT_EQ(loom_low_packet_count(&state.schedule), 2u);
-
-  uint32_t node_index = LOOM_LOW_SCHEDULE_NODE_NONE;
-  IREE_ASSERT_OK(
-      loom_low_packet_node_index_at(&state.schedule, 0, &node_index));
-  EXPECT_EQ(node_index, 1u);
-
-  loom_low_packet_view_t packet;
-  IREE_ASSERT_OK(
-      loom_low_packet_view_at(&state.schedule, &state.allocation, 0, &packet));
-  EXPECT_EQ(packet.packet_index, 0u);
-  EXPECT_EQ(packet.node_index, 1u);
-  EXPECT_EQ(packet.node, &state.nodes[1]);
-  EXPECT_EQ(packet.descriptor, nullptr);
-
-  IREE_ASSERT_OK(
-      loom_low_packet_view_at(&state.schedule, &state.allocation, 1, &packet));
-  EXPECT_EQ(packet.packet_index, 1u);
-  EXPECT_EQ(packet.node_index, 0u);
-  EXPECT_EQ(packet.node, &state.nodes[0]);
-  EXPECT_EQ(packet.descriptor, &state.descriptors[1]);
-}
-
-TEST(LowPacketTest, ViewsBlockScheduledOrdinals) {
-  PacketTestState state;
-  InitializePacketTestState(&state);
-
-  iree_host_size_t packet_index = LOOM_LOW_PACKET_INDEX_NONE;
-  IREE_ASSERT_OK(loom_low_packet_index_at_block_ordinal(&state.schedule, 0, 0,
-                                                        &packet_index));
-  EXPECT_EQ(packet_index, 0u);
-
-  uint32_t node_index = LOOM_LOW_SCHEDULE_NODE_NONE;
-  IREE_ASSERT_OK(loom_low_packet_node_index_at_block_ordinal(&state.schedule, 0,
-                                                             0, &node_index));
-  EXPECT_EQ(node_index, 1u);
-
-  loom_low_packet_view_t packet;
-  IREE_ASSERT_OK(loom_low_packet_view_at_block_ordinal(
-      &state.schedule, &state.allocation, 0, 1, &packet));
-  EXPECT_EQ(packet.packet_index, 1u);
-  EXPECT_EQ(packet.node_index, 0u);
-  EXPECT_EQ(packet.node, &state.nodes[0]);
-  EXPECT_EQ(packet.descriptor, &state.descriptors[1]);
-}
-
 TEST(LowPacketTest, GetsDescriptorPacketOpAttrs) {
   loom_named_attr_t named_attrs[1] = {};
   named_attrs[0].name_id = 7;
@@ -216,47 +166,6 @@ TEST(LowPacketTest, GetsPacketViewAttrs) {
   EXPECT_EQ(attrs.count, 0u);
 }
 
-TEST(LowPacketTest, RejectsInvalidBlockScheduledOrdinal) {
-  PacketTestState state;
-  InitializePacketTestState(&state);
-
-  iree_host_size_t packet_index = LOOM_LOW_PACKET_INDEX_NONE;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_low_packet_index_at_block_ordinal(
-                            &state.schedule, 1, 0, &packet_index));
-  EXPECT_EQ(packet_index, LOOM_LOW_PACKET_INDEX_NONE);
-
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_low_packet_index_at_block_ordinal(
-                            &state.schedule, 0, 2, &packet_index));
-  EXPECT_EQ(packet_index, LOOM_LOW_PACKET_INDEX_NONE);
-}
-
-TEST(LowPacketTest, RejectsBlockOrdinalOutsidePacketStream) {
-  PacketTestState state;
-  InitializePacketTestState(&state);
-  state.blocks[0].scheduled_node_start = 1;
-  state.blocks[0].scheduled_node_count = 2;
-
-  iree_host_size_t packet_index = LOOM_LOW_PACKET_INDEX_NONE;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_low_packet_index_at_block_ordinal(
-                            &state.schedule, 0, 1, &packet_index));
-  EXPECT_EQ(packet_index, LOOM_LOW_PACKET_INDEX_NONE);
-}
-
-TEST(LowPacketTest, RejectsBlockOrdinalReferencingInvalidNode) {
-  PacketTestState state;
-  InitializePacketTestState(&state);
-  state.scheduled_node_indices[0] = 2;
-
-  uint32_t node_index = LOOM_LOW_SCHEDULE_NODE_NONE;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_low_packet_node_index_at_block_ordinal(
-                            &state.schedule, 0, 0, &node_index));
-  EXPECT_EQ(node_index, LOOM_LOW_SCHEDULE_NODE_NONE);
-}
-
 TEST(LowPacketTest, ValidatesSelectedAsmForms) {
   PacketTestState state;
   InitializePacketTestState(&state);
@@ -264,9 +173,7 @@ TEST(LowPacketTest, ValidatesSelectedAsmForms) {
   IREE_EXPECT_OK(loom_low_packet_validate_asm_form_table(
       &state.schedule, &state.asm_form_table));
 
-  loom_low_packet_view_t packet;
-  IREE_ASSERT_OK(
-      loom_low_packet_view_at(&state.schedule, &state.allocation, 1, &packet));
+  const loom_low_packet_view_t packet = loom_low_packet_at(&state.schedule, 1);
 
   uint32_t asm_form_ordinal = LOOM_LOW_ASM_FORM_ORDINAL_NONE;
   IREE_ASSERT_OK(loom_low_packet_lookup_asm_form(
@@ -279,9 +186,7 @@ TEST(LowPacketTest, FallsBackToCanonicalAsmForm) {
   InitializePacketTestState(&state);
   state.selected_asm_form_ordinals[1] = LOOM_LOW_ASM_FORM_ORDINAL_NONE;
 
-  loom_low_packet_view_t packet;
-  IREE_ASSERT_OK(
-      loom_low_packet_view_at(&state.schedule, &state.allocation, 1, &packet));
+  const loom_low_packet_view_t packet = loom_low_packet_at(&state.schedule, 1);
 
   uint32_t asm_form_ordinal = LOOM_LOW_ASM_FORM_ORDINAL_NONE;
   IREE_ASSERT_OK(loom_low_packet_lookup_asm_form(
@@ -291,69 +196,6 @@ TEST(LowPacketTest, FallsBackToCanonicalAsmForm) {
   IREE_ASSERT_OK(loom_low_packet_lookup_asm_form(
       &state.schedule, /*asm_forms=*/nullptr, &packet, &asm_form_ordinal));
   EXPECT_EQ(asm_form_ordinal, 0u);
-}
-
-TEST(LowPacketTest, RejectsSelectedAsmFormCountMismatch) {
-  PacketTestState state;
-  InitializePacketTestState(&state);
-  state.asm_form_table.asm_form_ordinal_count = 1;
-
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_low_packet_validate_asm_form_table(
-                            &state.schedule, &state.asm_form_table));
-}
-
-TEST(LowPacketTest, RejectsSelectedAsmFormForStructuralPacket) {
-  PacketTestState state;
-  InitializePacketTestState(&state);
-  state.selected_asm_form_ordinals[0] = 0;
-
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_low_packet_validate_asm_form_table(
-                            &state.schedule, &state.asm_form_table));
-}
-
-TEST(LowPacketTest, RejectsSelectedAsmFormDescriptorMismatch) {
-  PacketTestState state;
-  InitializePacketTestState(&state);
-  state.selected_asm_form_ordinals[1] = 1;
-
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_low_packet_validate_asm_form_table(
-                            &state.schedule, &state.asm_form_table));
-}
-
-TEST(LowPacketTest, RejectsMismatchedTables) {
-  PacketTestState state;
-  InitializePacketTestState(&state);
-  loom_op_t other_function_op = {};
-  state.allocation.function_op = &other_function_op;
-
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_low_packet_validate_tables(&state.schedule, &state.allocation));
-}
-
-TEST(LowPacketTest, RejectsUnnamedTableFunction) {
-  PacketTestState state;
-  InitializePacketTestState(&state);
-  state.schedule.function_op = nullptr;
-  state.allocation.function_op = nullptr;
-
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_low_packet_validate_tables(&state.schedule, &state.allocation));
-}
-
-TEST(LowPacketTest, RejectsOutOfRangePacketIndex) {
-  PacketTestState state;
-  InitializePacketTestState(&state);
-
-  uint32_t node_index = LOOM_LOW_SCHEDULE_NODE_NONE;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_OUT_OF_RANGE,
-      loom_low_packet_node_index_at(&state.schedule, 2, &node_index));
-  EXPECT_EQ(node_index, LOOM_LOW_SCHEDULE_NODE_NONE);
 }
 
 TEST(LowPacketTest, MapsBlocksAndHazardGapsToPacketIndices) {

@@ -301,11 +301,6 @@ static iree_status_t loom_low_emission_frame_build_with_diagnostic_emitter(
     status = loom_low_allocate_function(&model, &allocation_options, arena,
                                         &out_frame->allocation);
   }
-  if (iree_status_is_ok(status) && out_frame->schedule.error_count == 0 &&
-      out_frame->allocation.error_count == 0) {
-    status = loom_low_packet_validate_tables(&out_frame->schedule,
-                                             &out_frame->allocation);
-  }
   if (iree_status_is_ok(status)) {
     out_frame->target = out_frame->schedule.target;
     loom_target_bundle_storage_rebind(&out_frame->target.bundle_storage);

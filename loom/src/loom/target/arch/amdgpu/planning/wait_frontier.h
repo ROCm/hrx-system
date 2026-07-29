@@ -23,6 +23,13 @@ extern "C" {
 // One bit for each normalized low memory space.
 typedef uint8_t loom_amdgpu_wait_memory_space_flags_t;
 
+enum {
+  // Number of normalized memory-space alias classes from GENERIC through
+  // WASM_MEMORY.
+  LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT =
+      LOOM_LOW_MEMORY_SPACE_WASM_MEMORY - LOOM_LOW_MEMORY_SPACE_GENERIC + 1u,
+};
+
 typedef enum loom_amdgpu_wait_memory_access_flag_bits_e {
   // Outstanding asynchronous reads.
   LOOM_AMDGPU_WAIT_MEMORY_ACCESS_FLAG_READ = 1u << 0,
@@ -59,11 +66,11 @@ typedef struct loom_amdgpu_wait_frontier_node_t {
   loom_amdgpu_vmem_result_order_class_t vmem_result_order_class;
 } loom_amdgpu_wait_frontier_node_t;
 
-// Outstanding memory-space flags grouped by target counter and access kind.
+// Outstanding counter masks indexed by aliasing consumer memory space.
 typedef struct loom_amdgpu_wait_memory_state_t {
-  // Packed read and write space flags indexed by target counter slot. Read
-  // flags occupy the low byte and write flags occupy the high byte.
-  uint16_t counter_access_space_flags[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT];
+  // Packed read counters in the low byte and write counters in the high byte
+  // for each normalized consumer space.
+  uint16_t access_counter_masks[LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT];
 } loom_amdgpu_wait_memory_state_t;
 
 // Cross-block wait frontier for one scheduled function.
@@ -106,6 +113,15 @@ typedef struct loom_amdgpu_wait_frontier_t {
     iree_host_size_t lease_count;
     // Number of packed state words per block.
     iree_host_size_t word_count;
+    // Lease membership grouped by release counter.
+    struct {
+      // Inline words for a one-word storage frontier.
+      uint64_t inline_words[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT];
+      // Words indexed by AMDGPU wait-counter slot. Points into |inline_words|
+      // for one-word frontiers and otherwise into the arena; present whenever
+      // |active_words| is present.
+      uint64_t* words;
+    } release_membership;
     // Conservative transitive outgoing words for every block.
     uint64_t* static_outgoing_words;
     // Refined outgoing words recorded after each processed block.
@@ -133,7 +149,8 @@ loom_amdgpu_wait_memory_space_flags_t loom_amdgpu_wait_memory_space_flag(
     loom_low_memory_space_t memory_space);
 
 // Initializes bounded cross-block state from the schedule CFG, allocation,
-// and node classifications. All retained storage is owned by |arena|.
+// and node classifications. Dynamically retained storage is owned by |arena|;
+// inline state lives in |out_frontier|.
 iree_status_t loom_amdgpu_wait_frontier_initialize(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,

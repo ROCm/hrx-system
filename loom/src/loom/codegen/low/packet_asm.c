@@ -449,9 +449,8 @@ static iree_status_t loom_low_packet_asm_append_block(
   for (uint32_t i = 0; i < block->scheduled_node_count; ++i) {
     const iree_host_size_t packet_index =
         (iree_host_size_t)block->scheduled_node_start + i;
-    loom_low_packet_view_t packet = {0};
-    IREE_RETURN_IF_ERROR(loom_low_packet_view_at(schedule, state->allocation,
-                                                 packet_index, &packet));
+    const loom_low_packet_view_t packet =
+        loom_low_packet_at(schedule, packet_index);
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "  "));
     IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_packet(state, &packet));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
@@ -464,7 +463,6 @@ iree_status_t loom_low_packet_asm_format(
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_asm_options_t* options,
     iree_string_builder_t* builder) {
-  IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
   if (options->selected_asm_forms != NULL) {
     IREE_RETURN_IF_ERROR(loom_low_packet_validate_asm_form_table(
         schedule, options->selected_asm_forms));

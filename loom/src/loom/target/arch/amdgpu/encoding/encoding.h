@@ -21,6 +21,10 @@ extern "C" {
 #endif
 
 #define LOOM_AMDGPU_ENCODING_MAX_WORD_COUNT 4u
+// Maximum encoding fields staged while packing one descriptor packet.
+// Generated target encoding tables prove that every format fits this
+// workspace at build time.
+#define LOOM_AMDGPU_ENCODING_PACKET_FIELD_VALUE_CAPACITY 32u
 // Sentinel passed to loom_amdgpu_encoding_pack when the descriptor supplies all
 // opcode-like fields through explicit encoding field values.
 #define LOOM_AMDGPU_ENCODING_OPCODE_NONE UINT16_MAX
@@ -315,6 +319,8 @@ typedef enum loom_amdgpu_vgpr_msb_slot_e {
 enum {
   // Number of low VGPR indices addressed by one S_SET_VGPR_MSB selector bank.
   LOOM_AMDGPU_VGPR_MSB_WINDOW_SIZE = 256,
+  // Number of banks encoded by each S_SET_VGPR_MSB selector.
+  LOOM_AMDGPU_VGPR_MSB_BANK_COUNT = 4,
 };
 
 // Returns the two-bit S_SET_VGPR_MSB mode shift for a non-NONE |slot|.

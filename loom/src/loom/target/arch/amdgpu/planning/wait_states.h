@@ -24,8 +24,8 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/string_builder.h"
 #include "loom/codegen/low/allocation.h"
+#include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/packet_hazard_plan.h"
-#include "loom/codegen/low/schedule/types.h"
 #include "loom/target/arch/amdgpu/planning/matrix_wait_states.h"
 
 #ifdef __cplusplus

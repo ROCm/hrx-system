@@ -13,7 +13,6 @@
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/emit/native/amdgpu/register_class.h"
-#include "loom/target/emit/native/fragment.h"
 
 static const loom_low_storage_space_set_t kLoomAmdgpuNativeStorageSpaces =
     LOOM_LOW_STORAGE_SPACE_SET_SCRATCH | LOOM_LOW_STORAGE_SPACE_SET_PRIVATE |
@@ -250,8 +249,6 @@ iree_status_t loom_amdgpu_native_preflight_analyze(
     const loom_amdgpu_native_preflight_options_t* options,
     loom_amdgpu_native_preflight_t* out_preflight) {
   *out_preflight = (loom_amdgpu_native_preflight_t){0};
-  IREE_RETURN_IF_ERROR(
-      loom_native_fragment_validate_emission_inputs(schedule, allocation));
   *out_preflight = (loom_amdgpu_native_preflight_t){
       .schedule = schedule,
       .allocation = allocation,

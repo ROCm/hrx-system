@@ -1039,7 +1039,6 @@ static iree_status_t loom_ireevm_emit_packet(
 static iree_status_t loom_ireevm_validate_tables(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation) {
-  IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
   if (schedule->target.descriptor_set != loom_ireevm_core_descriptor_set()) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "VM bytecode emission requires ireevm.core");
@@ -1073,9 +1072,8 @@ static iree_status_t loom_ireevm_emit_function_body(
     for (uint32_t i = 0; i < block->scheduled_node_count; ++i) {
       iree_host_size_t packet_index =
           (iree_host_size_t)block->scheduled_node_start + i;
-      loom_low_packet_view_t packet = {0};
-      IREE_RETURN_IF_ERROR(loom_low_packet_view_at(
-          state->schedule, state->allocation, packet_index, &packet));
+      const loom_low_packet_view_t packet =
+          loom_low_packet_at(state->schedule, packet_index);
       IREE_RETURN_IF_ERROR(loom_ireevm_emit_packet(state, &packet));
     }
     iree_host_size_t block_length =

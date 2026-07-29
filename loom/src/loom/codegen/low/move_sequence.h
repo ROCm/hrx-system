@@ -119,70 +119,55 @@ iree_status_t loom_low_move_sequence_scratch_reserve_temporaries(
     loom_low_move_location_t** out_temporary_locations);
 
 // Returns the location for one assignment unit.
-iree_status_t loom_low_move_location_from_assignment_unit(
-    const loom_low_allocation_assignment_t* assignment, uint32_t unit_index,
-    loom_low_move_location_t* out_location);
+loom_low_move_location_t loom_low_move_location_from_assignment_unit(
+    const loom_low_allocation_assignment_t* assignment, uint32_t unit_index);
 
-// Counts scalar unit moves required by one allocation edge-copy group.
-iree_status_t loom_low_move_sequence_count_edge_copy_units(
+// Returns the scalar unit moves required by one allocation edge-copy group.
+iree_host_size_t loom_low_move_sequence_edge_copy_unit_count(
+    const loom_low_allocation_table_t* allocation,
+    const loom_low_allocation_edge_copy_group_t* group);
+
+// Populates the exact edge-copy unit count returned above into |moves|.
+void loom_low_move_sequence_populate_edge_copy_units(
+    const loom_low_allocation_table_t* allocation,
+    const loom_low_allocation_edge_copy_group_t* group, loom_low_move_t* moves);
+
+// Populates the scratch units planned for one allocation edge-copy group.
+void loom_low_move_sequence_populate_edge_copy_temporaries(
     const loom_low_allocation_table_t* allocation,
     const loom_low_allocation_edge_copy_group_t* group,
-    iree_host_size_t* out_move_count);
+    loom_low_move_location_t* temporary_locations);
 
-// Populates |moves| from one allocation edge-copy group. |move_count| must
-// match loom_low_move_sequence_count_edge_copy_units.
-iree_status_t loom_low_move_sequence_populate_edge_copy_units(
-    const loom_low_allocation_table_t* allocation,
-    const loom_low_allocation_edge_copy_group_t* group, loom_low_move_t* moves,
-    iree_host_size_t move_count);
-
-// Populates |temporary_locations| from the scratch units planned for one
-// allocation edge-copy group. |temporary_location_count| must match
-// group->temporary_count.
-iree_status_t loom_low_move_sequence_populate_edge_copy_temporaries(
-    const loom_low_allocation_table_t* allocation,
-    const loom_low_allocation_edge_copy_group_t* group,
-    loom_low_move_location_t* temporary_locations,
-    iree_host_size_t temporary_location_count);
-
-// Populates |temporary_locations| from the scratch units planned for one
-// packet-local move group. |temporary_location_count| must match
-// group->temporary_count.
-iree_status_t loom_low_move_sequence_populate_packet_move_temporaries(
+// Populates the scratch units planned for one packet-local move group.
+void loom_low_move_sequence_populate_packet_move_temporaries(
     const loom_low_allocation_table_t* allocation,
     const loom_low_allocation_packet_move_temporary_group_t* group,
-    loom_low_move_location_t* temporary_locations,
-    iree_host_size_t temporary_location_count);
+    loom_low_move_location_t* temporary_locations);
 
-// Counts scalar unit moves required to materialize one low.slice. Coalesced
-// structural slices require zero moves.
-iree_status_t loom_low_move_sequence_count_slice_units(
-    const loom_low_allocation_table_t* allocation, const loom_op_t* op,
-    iree_host_size_t* out_move_count);
+// Returns the scalar unit moves required to materialize one low.slice.
+// Coalesced structural slices require zero moves.
+iree_host_size_t loom_low_move_sequence_slice_unit_count(
+    const loom_low_allocation_table_t* allocation, const loom_op_t* op);
 
-// Populates |moves| from one low.slice. |move_count| must match
-// loom_low_move_sequence_count_slice_units.
-iree_status_t loom_low_move_sequence_populate_slice_units(
+// Populates the exact low.slice unit count returned above into |moves|.
+void loom_low_move_sequence_populate_slice_units(
     const loom_low_allocation_table_t* allocation, const loom_op_t* op,
-    loom_low_move_t* moves, iree_host_size_t move_count);
+    loom_low_move_t* moves);
 
-// Counts scalar unit moves required to materialize one low.concat. Coalesced
-// structural concats require zero moves.
-iree_status_t loom_low_move_sequence_count_concat_units(
-    const loom_low_allocation_table_t* allocation, const loom_op_t* op,
-    iree_host_size_t* out_move_count);
+// Returns the scalar unit moves required to materialize one low.concat.
+// Coalesced structural concats require zero moves.
+iree_host_size_t loom_low_move_sequence_concat_unit_count(
+    const loom_low_allocation_table_t* allocation, const loom_op_t* op);
 
-// Populates |moves| from one low.concat. |move_count| must match
-// loom_low_move_sequence_count_concat_units.
-iree_status_t loom_low_move_sequence_populate_concat_units(
+// Populates the exact low.concat unit count returned above into |moves|.
+void loom_low_move_sequence_populate_concat_units(
     const loom_low_allocation_table_t* allocation, const loom_op_t* op,
-    loom_low_move_t* moves, iree_host_size_t move_count);
+    loom_low_move_t* moves);
 
 // Emits |moves| as a sequential move list that preserves parallel-copy
 // semantics. Identity moves are elided. Acyclic overlap is handled by choosing
-// a safe order. Cycles use a matching storage-class entry in
-// |temporary_locations| and otherwise fail loud with
-// IREE_STATUS_FAILED_PRECONDITION.
+// a safe order. Allocation supplies one matching storage-class entry in
+// |temporary_locations| for every cyclic move class.
 //
 // The first |move_count| rows in |scratch->moves| are mutated during
 // sequencing.

@@ -1041,6 +1041,30 @@ ERR_AMDGPU_047 = ErrorDef(
     fix_hint=("Apply the named gfx1250 A0 legalization before native emission"),
 )
 
+# ERR_AMDGPU_049: AMDGPU storage address result type is unsupported.
+ERR_AMDGPU_049 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=49,
+    severity=Severity.ERROR,
+    summary="AMDGPU storage address result type is unsupported.",
+    message=(
+        "AMDGPU target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected '{op_name}' in '@{function_name}': result "
+        "'{result_name}' has type {actual_type}, but native storage addresses "
+        "require descriptor register-class ID {expected_reg_class_id} with "
+        "{expected_unit_count} unit"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("result_name", ParamKind.STRING),
+        ErrorParam("actual_type", ParamKind.TYPE),
+        ErrorParam("expected_reg_class_id", ParamKind.U32),
+        ErrorParam("expected_unit_count", ParamKind.U32),
+    ),
+    fix_hint="Materialize AMDGPU storage addresses as one VGPR",
+)
+
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_006,
@@ -1085,4 +1109,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_045,
     ERR_AMDGPU_046,
     ERR_AMDGPU_047,
+    ERR_AMDGPU_049,
 )

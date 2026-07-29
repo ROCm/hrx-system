@@ -134,11 +134,7 @@ static iree_status_t loom_low_storage_layout_visit_reserve(
       .byte_alignment = byte_alignment,
   };
   if (state->records != NULL) {
-    if (state->record_count >= state->record_capacity) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "low storage layout record count changed while building");
-    }
+    IREE_ASSERT_LT(state->record_count, state->record_capacity);
     state->records[state->record_count] = (loom_low_storage_layout_record_t){
         .storage_value_id = storage_value_id,
         .reservation = reservation,
@@ -337,11 +333,7 @@ iree_status_t loom_low_storage_layout_build(
   IREE_RETURN_IF_ERROR(loom_low_storage_layout_scan(
       module, function_op, records, count_state.record_count,
       LOOM_VALUE_ID_INVALID, NULL, NULL, NULL, &build_state));
-  if (build_state.record_count != count_state.record_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "low storage layout record count changed while building");
-  }
+  IREE_ASSERT_EQ(build_state.record_count, count_state.record_count);
   *out_layout = (loom_low_storage_layout_t){
       .space_sizes = build_state.space_sizes,
       .records = records,

@@ -20,7 +20,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/string_builder.h"
 #include "loom/codegen/low/allocation.h"
-#include "loom/codegen/low/schedule/types.h"
+#include "loom/codegen/low/packet.h"
 #include "loom/target/arch/amdgpu/planning/address_state.h"
 #include "loom/target/arch/amdgpu/planning/wait_packets.h"
 #include "loom/target/arch/amdgpu/planning/wait_states.h"
@@ -287,6 +287,22 @@ typedef struct loom_amdgpu_vopd_rejection_component_t {
   uint32_t literal_u32;
 } loom_amdgpu_vopd_rejection_component_t;
 
+// Final native-emission facts for one component of a planned VOPD packet.
+typedef struct loom_amdgpu_vopd_component_t {
+  // VOPD operation id encoded in this component slot.
+  uint16_t op;
+  // Destination VGPR encoded in this component slot.
+  uint16_t vdst;
+  // First explicit source VGPR, or zero when the component has no VGPR SRC0.
+  uint16_t src0;
+  // Second explicit source VGPR, or zero when the component has no VGPR VSRC1.
+  uint16_t vsrc1;
+  // Unified architectural selector encoded in the component SRC0 field.
+  uint16_t src0_selector;
+  // Component immediate payload, or zero when the form has no immediate.
+  uint32_t immediate_u32;
+} loom_amdgpu_vopd_component_t;
+
 // One native VOPD packet replacing two schedule-visible component packets.
 typedef struct loom_amdgpu_vopd_pair_t {
   // Why this VOPD pair was formed.
@@ -301,22 +317,10 @@ typedef struct loom_amdgpu_vopd_pair_t {
   uint32_t first_node_index;
   // Schedule node index for the Y component.
   uint32_t second_node_index;
-  // VOPD operation id encoded in the X slot.
-  uint16_t op_x;
-  // VOPD operation id encoded in the Y slot.
-  uint16_t op_y;
-  // Destination VGPR encoded in the X slot.
-  uint16_t x_vdst;
-  // First explicit source VGPR encoded in the X slot.
-  uint16_t x_src0;
-  // Second explicit source VGPR encoded in the X slot.
-  uint16_t x_vsrc1;
-  // Destination VGPR encoded in the Y slot.
-  uint16_t y_vdst;
-  // First explicit source VGPR encoded in the Y slot.
-  uint16_t y_src0;
-  // Second explicit source VGPR encoded in the Y slot.
-  uint16_t y_vsrc1;
+  // Final X-slot component emission facts.
+  loom_amdgpu_vopd_component_t x;
+  // Final Y-slot component emission facts.
+  loom_amdgpu_vopd_component_t y;
   // Pair-local payload and encoding flags.
   loom_amdgpu_vopd_pair_flags_t flags;
   // Shared literal payload when LOOM_AMDGPU_VOPD_PAIR_FLAG_LITERAL is set.
@@ -385,7 +389,7 @@ const loom_amdgpu_vopd_component_info_t* loom_amdgpu_vopd_component_info_for_op(
 // Builds conservative AMDGPU VOPD pairings from a scheduled and allocated low
 // function. Optional address-state and wait plans suppress pairs that would
 // consume an insertion point before the second component. The caller must keep
-// |schedule|, |allocation|, and |arena| immutable/alive for as long as
+// |schedule| and |allocation| immutable and |arena| alive for as long as
 // |out_plan| is used.
 iree_status_t loom_amdgpu_vopd_plan_build(
     const loom_low_schedule_table_t* schedule,
@@ -402,20 +406,6 @@ iree_status_t loom_amdgpu_vopd_plan_build(
 iree_status_t loom_amdgpu_vopd_build_schedule_pair_affinities(
     const loom_low_resolved_target_t* target, iree_arena_allocator_t* arena,
     loom_low_schedule_pair_affinity_list_t* out_affinities);
-
-// Verifies that |plan| describes |schedule| and |allocation|.
-iree_status_t loom_amdgpu_vopd_plan_verify(
-    const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    const loom_amdgpu_vopd_plan_t* plan);
-
-// Verifies that wait insertions do not target the second component of any VOPD
-// pair. Emission cannot preserve such an insertion without breaking the dual
-// packet.
-iree_status_t loom_amdgpu_vopd_plan_verify_wait_insertions(
-    const loom_amdgpu_vopd_plan_t* plan,
-    const loom_amdgpu_wait_packet_plan_t* wait_packets,
-    const loom_amdgpu_wait_state_plan_t* wait_states);
 
 // Returns the VOPD membership record for |packet_index|, or NULL.
 const loom_amdgpu_vopd_packet_t* loom_amdgpu_vopd_plan_packet_at(

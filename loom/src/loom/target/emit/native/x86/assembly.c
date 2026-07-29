@@ -29,26 +29,23 @@ static const char* const kX86Gpr8Names[] = {
     "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b",
 };
 
-static iree_status_t loom_x86_descriptor_key(
-    const loom_native_assembly_packet_context_t* context,
-    iree_string_view_t* out_key) {
+static iree_string_view_t loom_x86_descriptor_key(
+    const loom_native_assembly_packet_context_t* context) {
   return loom_native_assembly_descriptor_string(
       context->schedule->target.descriptor_set,
-      context->packet->descriptor->key_string_offset, out_key);
+      context->packet->descriptor->key_string_offset);
 }
 
-static iree_status_t loom_x86_descriptor_mnemonic(
-    const loom_native_assembly_packet_context_t* context,
-    iree_string_view_t* out_mnemonic) {
+static iree_string_view_t loom_x86_descriptor_mnemonic(
+    const loom_native_assembly_packet_context_t* context) {
   return loom_native_assembly_descriptor_string(
       context->schedule->target.descriptor_set,
-      context->packet->descriptor->mnemonic_string_offset, out_mnemonic);
+      context->packet->descriptor->mnemonic_string_offset);
 }
 
 static iree_status_t loom_x86_append_mnemonic(
     const loom_native_assembly_packet_context_t* context) {
-  iree_string_view_t mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_x86_descriptor_mnemonic(context, &mnemonic));
+  const iree_string_view_t mnemonic = loom_x86_descriptor_mnemonic(context);
   return iree_string_builder_append_string(context->builder, mnemonic);
 }
 
@@ -275,9 +272,8 @@ static iree_status_t loom_x86_read_packet_immediate(
   }
   const loom_low_immediate_t* immediate =
       &descriptor_set->immediates[immediate_row];
-  iree_string_view_t field_name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-      descriptor_set, immediate->field_name_string_offset, &field_name));
+  const iree_string_view_t field_name = loom_native_assembly_descriptor_string(
+      descriptor_set, immediate->field_name_string_offset);
   const loom_named_attr_t* attr = loom_native_assembly_find_attr(
       context->schedule->module, loom_x86_packet_attrs(context), field_name);
   if (attr == NULL) {
@@ -317,9 +313,9 @@ static iree_status_t loom_x86_descriptor_immediate_index_by_name(
   for (uint16_t i = 0; i < descriptor->immediate_count; ++i) {
     const loom_low_immediate_t* immediate =
         &descriptor_set->immediates[descriptor->immediate_start + i];
-    iree_string_view_t candidate_name = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-        descriptor_set, immediate->field_name_string_offset, &candidate_name));
+    const iree_string_view_t candidate_name =
+        loom_native_assembly_descriptor_string(
+            descriptor_set, immediate->field_name_string_offset);
     if (!iree_string_view_equal(candidate_name, field_name)) {
       continue;
     }
@@ -522,8 +518,7 @@ static iree_status_t loom_x86_canonical_asm_form(
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
   if (descriptor->canonical_asm_form_ordinal ==
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
-    iree_string_view_t key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_x86_descriptor_key(context, &key));
+    const iree_string_view_t key = loom_x86_descriptor_key(context);
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "x86 assembly descriptor '%.*s' has no canonical asm form",
@@ -573,8 +568,7 @@ static iree_status_t loom_x86_append_tied_unary_packet(
   const loom_low_asm_form_t* form = NULL;
   IREE_RETURN_IF_ERROR(loom_x86_canonical_asm_form(context, &form));
   if (form->result_operand_index_count != 1 || form->operand_index_count != 1) {
-    iree_string_view_t key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_x86_descriptor_key(context, &key));
+    const iree_string_view_t key = loom_x86_descriptor_key(context);
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "x86 tied unary descriptor '%.*s' has an "
                             "unsupported asm form",
@@ -639,19 +633,16 @@ static iree_status_t loom_x86_append_cmp_setcc_packet(
     const loom_native_assembly_packet_context_t* context) {
   const loom_op_t* op = context->packet->node->op;
   if (op->result_count != 1 || op->operand_count != 2) {
-    iree_string_view_t key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_x86_descriptor_key(context, &key));
+    const iree_string_view_t key = loom_x86_descriptor_key(context);
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "x86 compare descriptor '%.*s' has an unsupported "
                             "operand shape",
                             (int)key.size, key.data);
   }
-  iree_string_view_t mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_x86_descriptor_mnemonic(context, &mnemonic));
+  iree_string_view_t mnemonic = loom_x86_descriptor_mnemonic(context);
   if (!iree_string_view_consume_prefix(&mnemonic, IREE_SV("cmp.")) ||
       !iree_string_view_starts_with(mnemonic, IREE_SV("set"))) {
-    iree_string_view_t key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_x86_descriptor_key(context, &key));
+    const iree_string_view_t key = loom_x86_descriptor_key(context);
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "x86 compare descriptor '%.*s' has an unsupported "
                             "mnemonic",
@@ -684,8 +675,7 @@ static iree_status_t loom_x86_append_lea_packet(
   const loom_op_t* op = context->packet->node->op;
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
   if (op->result_count != 1 || op->operand_count < 1 || op->operand_count > 2) {
-    iree_string_view_t key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_x86_descriptor_key(context, &key));
+    const iree_string_view_t key = loom_x86_descriptor_key(context);
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "x86 assembly LEA descriptor '%.*s' has an "
                             "unsupported operand shape",
@@ -714,8 +704,7 @@ static iree_status_t loom_x86_append_lea_packet(
     base_value_id = loom_op_const_operands(op)[0];
   }
   if (op->operand_count == 1 && !has_scale && !has_displacement) {
-    iree_string_view_t key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_x86_descriptor_key(context, &key));
+    const iree_string_view_t key = loom_x86_descriptor_key(context);
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "x86 assembly LEA descriptor '%.*s' does not "
                             "define an address transform",
@@ -893,8 +882,7 @@ static iree_status_t loom_x86_append_load_packet(
     IREE_RETURN_IF_ERROR(
         loom_x86_read_packet_address_scale_attr(context, &scale));
   } else if (op->operand_count != 1) {
-    iree_string_view_t key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_x86_descriptor_key(context, &key));
+    const iree_string_view_t key = loom_x86_descriptor_key(context);
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "x86 assembly load descriptor '%.*s' has an "
                             "unsupported operand shape",
@@ -927,8 +915,7 @@ static iree_status_t loom_x86_append_store_packet(
     IREE_RETURN_IF_ERROR(
         loom_x86_read_packet_address_scale_attr(context, &scale));
   } else {
-    iree_string_view_t key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_x86_descriptor_key(context, &key));
+    const iree_string_view_t key = loom_x86_descriptor_key(context);
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "x86 assembly store descriptor '%.*s' has an "
                             "unsupported operand shape",
@@ -951,8 +938,7 @@ static iree_status_t loom_x86_append_const_packet(
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
   if (descriptor->result_count != 1 || descriptor->operand_count != 1 ||
       descriptor->immediate_count != 1) {
-    iree_string_view_t key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_x86_descriptor_key(context, &key));
+    const iree_string_view_t key = loom_x86_descriptor_key(context);
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "x86 assembly const descriptor '%.*s' is "
                             "unsupported",
@@ -965,16 +951,15 @@ static iree_status_t loom_x86_append_const_packet(
   const loom_low_immediate_t* immediate =
       &descriptor_set->immediates[descriptor->immediate_start];
   if (immediate->kind != LOOM_LOW_IMMEDIATE_KIND_SIGNED) {
-    iree_string_view_t key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_x86_descriptor_key(context, &key));
+    const iree_string_view_t key = loom_x86_descriptor_key(context);
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "x86 assembly const descriptor '%.*s' has an "
                             "unsupported immediate kind",
                             (int)key.size, key.data);
   }
-  iree_string_view_t immediate_name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
-      descriptor_set, immediate->field_name_string_offset, &immediate_name));
+  const iree_string_view_t immediate_name =
+      loom_native_assembly_descriptor_string(
+          descriptor_set, immediate->field_name_string_offset);
   int64_t value = 0;
   IREE_RETURN_IF_ERROR(
       loom_x86_read_packet_i64_attr(context, immediate_name, &value));
@@ -1060,9 +1045,8 @@ static iree_status_t loom_x86_append_move(
 static iree_status_t loom_x86_emit_edge_copy_group(
     const loom_native_assembly_packet_context_t* context,
     const loom_low_allocation_edge_copy_group_t* group) {
-  iree_host_size_t move_count = 0;
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_edge_copy_units(
-      context->allocation, group, &move_count));
+  const iree_host_size_t move_count =
+      loom_low_move_sequence_edge_copy_unit_count(context->allocation, group);
   if (move_count == 0) {
     return iree_ok_status();
   }
@@ -1072,10 +1056,10 @@ static iree_status_t loom_x86_emit_edge_copy_group(
   loom_low_move_location_t* temporaries = NULL;
   IREE_RETURN_IF_ERROR(loom_low_move_sequence_scratch_reserve_temporaries(
       context->move_scratch, group->temporary_count, &temporaries));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_populate_edge_copy_units(
-      context->allocation, group, moves, move_count));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_populate_edge_copy_temporaries(
-      context->allocation, group, temporaries, group->temporary_count));
+  loom_low_move_sequence_populate_edge_copy_units(context->allocation, group,
+                                                  moves);
+  loom_low_move_sequence_populate_edge_copy_temporaries(context->allocation,
+                                                        group, temporaries);
   loom_x86_assembly_move_state_t move_state = {
       .context = context,
   };
@@ -1114,8 +1098,7 @@ static iree_status_t loom_x86_append_descriptor_packet(
       descriptor_set, descriptor, LOOM_LOW_EFFECT_KIND_WRITE,
       &has_write_effect));
   if (has_read_effect && has_write_effect) {
-    iree_string_view_t key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_x86_descriptor_key(context, &key));
+    const iree_string_view_t key = loom_x86_descriptor_key(context);
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "x86 assembly descriptor '%.*s' has both read and "
                             "write effects",
@@ -1145,8 +1128,7 @@ static iree_status_t loom_x86_append_descriptor_packet(
   if (uses_tied_ternary_form) {
     return loom_x86_append_tied_ternary_packet(context);
   }
-  iree_string_view_t mnemonic = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_x86_descriptor_mnemonic(context, &mnemonic));
+  const iree_string_view_t mnemonic = loom_x86_descriptor_mnemonic(context);
   if (iree_string_view_starts_with(mnemonic, IREE_SV("cmp.set"))) {
     return loom_x86_append_cmp_setcc_packet(context);
   }
@@ -1248,10 +1230,9 @@ iree_status_t loom_x86_emit_assembly_fragment(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
-  iree_string_view_t target_key = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
+  const iree_string_view_t target_key = loom_native_assembly_descriptor_string(
       schedule->target.descriptor_set,
-      schedule->target.descriptor_set->target_key_string_offset, &target_key));
+      schedule->target.descriptor_set->target_key_string_offset);
   if (!iree_string_view_equal(target_key, IREE_SV("x86"))) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "x86 assembly emitter received target '%.*s'",
