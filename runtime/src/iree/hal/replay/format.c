@@ -107,6 +107,8 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "device.queue_dispatch";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_EXECUTE:
       return "device.queue_execute";
+    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_TIMESTAMP:
+      return "device.queue_timestamp";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_FLUSH:
       return "device.queue_flush";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_PROFILING_BEGIN:

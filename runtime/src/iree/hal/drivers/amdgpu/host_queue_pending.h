@@ -72,6 +72,15 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_fill(
     iree_host_size_t pattern_length, iree_hal_fill_flags_t flags,
     iree_hal_amdgpu_pending_op_t** out_op);
 
+// Captures a queue_timestamp operation for later issue. Caller must
+// hold queue->locks.submission_mutex.
+iree_status_t iree_hal_amdgpu_host_queue_defer_timestamp(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t* wait_semaphore_list,
+    const iree_hal_semaphore_list_t* signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags, iree_hal_amdgpu_pending_op_t** out_op);
+
 // Captures a queue_copy/read/write operation for later issue. Caller must hold
 // queue->locks.submission_mutex.
 iree_status_t iree_hal_amdgpu_host_queue_defer_copy(

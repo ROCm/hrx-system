@@ -957,6 +957,55 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_execute(
     iree_hal_buffer_binding_table_t binding_table,
     iree_hal_execute_flags_t flags);
 
+// Flags controlling iree_hal_device_queue_timestamp behavior.
+typedef uint64_t iree_hal_timestamp_flags_t;
+enum iree_hal_timestamp_flag_bits_t {
+  IREE_HAL_TIMESTAMP_FLAG_NONE = 0u,
+};
+
+// Enqueues a device-side timestamp at the point in the |queue_affinity|
+// timeline reached after |wait_semaphore_list| is satisfied, signaling
+// |signal_semaphore_list| when that point is reached. A single 64-bit device
+// timestamp tick is written by the device into |target_buffer| at
+// |target_offset|. The target must be 8-byte aligned and be a transfer target
+// the device can write 8 bytes into; to read the tick back on the host the
+// buffer must additionally be host-visible (e.g. mappable). Callers must wait
+// on |signal_semaphore_list| before reading the tick back from |target_buffer|.
+//
+// The captured value is a tick in the timestamp domain of the queue the
+// implementation selects for |queue_affinity|. A device may span several
+// physical devices whose timestamp domains are independent counters, and each
+// queue family in iree_hal_device_spec_queues() publishes the timestamp facts
+// and physical_device_affinity identifying the domain its queues capture in.
+// Two ticks may only be compared or subtracted when both captures resolved to
+// the same domain. Two captures issued with the same |queue_affinity| always
+// resolve to the same domain: as with iree_hal_device_queue_execute an
+// affinity selects one queue and a queue captures in one domain, so reusing an
+// affinity keeps captures comparable on a device spanning several physical
+// devices. Which family an affinity resolves to is internal to the
+// implementation, but a caller pairing its own captures need not know it:
+// iree_hal_queue_affinity_t bits and physical-device affinity bits are
+// independent namespaces that the device spec does not map between. Differing
+// affinities may or may not share a domain, though a device reporting one
+// queue family covering one physical device has a single domain in which any
+// two of its captures are comparable. Correlation across domains, or with host
+// time, is not expressed by this operation.
+//
+// Convert with the facts of the family the capture resolved to: only the low
+// timestamp_valid_bits of a tick are defined and the counter wraps at that
+// width, so reduce the difference of two ticks modulo that width before
+// dividing it by the family's timestamp_frequency_hz to convert to seconds.
+// Subtracting the raw values is only correct where timestamp_valid_bits is 64.
+// iree_hal_device_spec_timing() summarizes the same two facts device-scope and
+// may aggregate families that differ, so it stands in for the family facts
+// only on a device reporting one queue family.
+IREE_API_EXPORT iree_status_t iree_hal_device_queue_timestamp(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags);
+
 // Enqueues a barrier waiting for |wait_semaphore_list| and signaling
 // |signal_semaphore_list| when reached.
 // Equivalent to iree_hal_device_queue_execute with no command buffers.
@@ -1245,6 +1294,13 @@ typedef struct iree_hal_device_vtable_t {
       iree_hal_command_buffer_t* command_buffer,
       iree_hal_buffer_binding_table_t binding_table,
       iree_hal_execute_flags_t flags);
+
+  iree_status_t(IREE_API_PTR* queue_timestamp)(
+      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+      iree_hal_timestamp_flags_t flags);
 
   iree_status_t(IREE_API_PTR* queue_flush)(
       iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity);
