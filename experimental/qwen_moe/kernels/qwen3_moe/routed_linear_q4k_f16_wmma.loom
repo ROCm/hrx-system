@@ -326,6 +326,8 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
     // WMMA produces [channel][route] fragments. Store each through a
     // transposed, wave-private LDS slice so one lane can scatter 16 contiguous
     // channels to the routed output row, then immediately reuse the slice.
+    // Subgroup-scoped fences suffice because waves never access each other's
+    // result slice.
     %publishes_lane = index.cmp ult, %lane, %sixteen : index
     %publish_lane0 = index.min %lane, %fifteen : index
     %publish_lane = index.assume %publish_lane0 [range(%publish_lane0, 0, 15)] : index
@@ -370,77 +372,76 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
     %writes30 = scalar.andi %publishes_route0, %valid_channel3 : i1
     %writes31 = scalar.andi %publishes_route1, %valid_channel3 : i1
     vector.fragment.store<result> %result00, %result_fragment_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf16, %result_fragment_layout>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     scf.if %writes00 {
       %values = vector.load %result_physical_view[%publish_lane, %zero] : view<16x16xf16, #dense> -> vector<16xf16>
       %wide = vector.extf %values : vector<16xf16> to vector<16xf32>
       %mask = vector.mask.range [%channel0 to %bounded_output_size step %one] : index -> vector<16xi1>
       vector.store.mask %wide, %output_view[%bounded_assignment0, %channel0], %mask : vector<16xf32>, view<[%output_row_count]x[%bounded_output_size]xf32, #dense>, vector<16xi1>
     }
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     vector.fragment.store<result> %result01, %result_fragment_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf16, %result_fragment_layout>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     scf.if %writes01 {
       %values = vector.load %result_physical_view[%publish_lane, %zero] : view<16x16xf16, #dense> -> vector<16xf16>
       %wide = vector.extf %values : vector<16xf16> to vector<16xf32>
       %mask = vector.mask.range [%channel0 to %bounded_output_size step %one] : index -> vector<16xi1>
       vector.store.mask %wide, %output_view[%bounded_assignment1, %channel0], %mask : vector<16xf32>, view<[%output_row_count]x[%bounded_output_size]xf32, #dense>, vector<16xi1>
     }
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     vector.fragment.store<result> %result10, %result_fragment_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf16, %result_fragment_layout>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     scf.if %writes10 {
       %values = vector.load %result_physical_view[%publish_lane, %zero] : view<16x16xf16, #dense> -> vector<16xf16>
       %wide = vector.extf %values : vector<16xf16> to vector<16xf32>
       %mask = vector.mask.range [%channel1 to %bounded_output_size step %one] : index -> vector<16xi1>
       vector.store.mask %wide, %output_view[%bounded_assignment0, %channel1], %mask : vector<16xf32>, view<[%output_row_count]x[%bounded_output_size]xf32, #dense>, vector<16xi1>
     }
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     vector.fragment.store<result> %result11, %result_fragment_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf16, %result_fragment_layout>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     scf.if %writes11 {
       %values = vector.load %result_physical_view[%publish_lane, %zero] : view<16x16xf16, #dense> -> vector<16xf16>
       %wide = vector.extf %values : vector<16xf16> to vector<16xf32>
       %mask = vector.mask.range [%channel1 to %bounded_output_size step %one] : index -> vector<16xi1>
       vector.store.mask %wide, %output_view[%bounded_assignment1, %channel1], %mask : vector<16xf32>, view<[%output_row_count]x[%bounded_output_size]xf32, #dense>, vector<16xi1>
     }
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     vector.fragment.store<result> %result20, %result_fragment_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf16, %result_fragment_layout>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     scf.if %writes20 {
       %values = vector.load %result_physical_view[%publish_lane, %zero] : view<16x16xf16, #dense> -> vector<16xf16>
       %wide = vector.extf %values : vector<16xf16> to vector<16xf32>
       %mask = vector.mask.range [%channel2 to %bounded_output_size step %one] : index -> vector<16xi1>
       vector.store.mask %wide, %output_view[%bounded_assignment0, %channel2], %mask : vector<16xf32>, view<[%output_row_count]x[%bounded_output_size]xf32, #dense>, vector<16xi1>
     }
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     vector.fragment.store<result> %result21, %result_fragment_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf16, %result_fragment_layout>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     scf.if %writes21 {
       %values = vector.load %result_physical_view[%publish_lane, %zero] : view<16x16xf16, #dense> -> vector<16xf16>
       %wide = vector.extf %values : vector<16xf16> to vector<16xf32>
       %mask = vector.mask.range [%channel2 to %bounded_output_size step %one] : index -> vector<16xi1>
       vector.store.mask %wide, %output_view[%bounded_assignment1, %channel2], %mask : vector<16xf32>, view<[%output_row_count]x[%bounded_output_size]xf32, #dense>, vector<16xi1>
     }
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     vector.fragment.store<result> %result30, %result_fragment_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf16, %result_fragment_layout>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     scf.if %writes30 {
       %values = vector.load %result_physical_view[%publish_lane, %zero] : view<16x16xf16, #dense> -> vector<16xf16>
       %wide = vector.extf %values : vector<16xf16> to vector<16xf32>
       %mask = vector.mask.range [%channel3 to %bounded_output_size step %one] : index -> vector<16xi1>
       vector.store.mask %wide, %output_view[%bounded_assignment0, %channel3], %mask : vector<16xf32>, view<[%output_row_count]x[%bounded_output_size]xf32, #dense>, vector<16xi1>
     }
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     vector.fragment.store<result> %result31, %result_fragment_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf16, %result_fragment_layout>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     scf.if %writes31 {
       %values = vector.load %result_physical_view[%publish_lane, %zero] : view<16x16xf16, #dense> -> vector<16xf16>
       %wide = vector.extf %values : vector<16xf16> to vector<16xf32>
       %mask = vector.mask.range [%channel3 to %bounded_output_size step %one] : index -> vector<16xi1>
       vector.store.mask %wide, %output_view[%bounded_assignment1, %channel3], %mask : vector<16xf32>, view<[%output_row_count]x[%bounded_output_size]xf32, #dense>, vector<16xi1>
     }
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   }
   kernel.return
 }
