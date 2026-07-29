@@ -12,6 +12,7 @@
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/spill_traffic.h"
 #include "loom/codegen/low/allocation/storage.h"
+#include "loom/target/residency.h"
 
 static bool loom_low_allocation_search_align_up_u32(uint32_t value,
                                                     uint32_t alignment,
@@ -333,6 +334,44 @@ static void loom_low_allocation_search_find_location_for_release_policy(
   }
 }
 
+static uint32_t loom_low_allocation_search_location_residency_tier(
+    const loom_low_allocation_search_context_t* context,
+    const loom_low_allocation_assignment_t* candidate_template,
+    const loom_low_allocation_search_location_choice_t* choice) {
+  const loom_target_residency_model_t* model = context->residency_model;
+  const uint16_t reg_class_id = candidate_template->descriptor_reg_class_id;
+  IREE_ASSERT_EQ(model->direct_resources.resource_count,
+                 context->descriptor_set->reg_class_count);
+  IREE_ASSERT_LT(reg_class_id, model->direct_resources.resource_count);
+  const uint32_t current_units =
+      context->target_constraints
+          ->max_assigned_location_end_by_reg_class[reg_class_id];
+  const uint32_t choice_units = iree_max(
+      current_units, iree_math_saturating_add_u32(
+                         choice->base, candidate_template->location_count));
+  return loom_target_residency_evaluate_tier_with_direct_resource_override(
+      model,
+      context->target_constraints->max_assigned_location_end_by_reg_class,
+      reg_class_id, choice_units);
+}
+
+static bool loom_low_allocation_search_location_crosses_residency_cliff(
+    const loom_low_allocation_search_context_t* context,
+    const loom_low_allocation_assignment_t* candidate_template,
+    const loom_low_allocation_search_location_choice_t* choice,
+    uint32_t* out_choice_tier) {
+  const uint16_t reg_class_id = candidate_template->descriptor_reg_class_id;
+  const uint32_t* current_units_by_reg_class =
+      context->target_constraints->max_assigned_location_end_by_reg_class;
+  const uint32_t current_tier =
+      loom_target_residency_evaluate_tier_with_direct_resource_override(
+          context->residency_model, current_units_by_reg_class, reg_class_id,
+          current_units_by_reg_class[reg_class_id]);
+  *out_choice_tier = loom_low_allocation_search_location_residency_tier(
+      context, candidate_template, choice);
+  return *out_choice_tier < current_tier;
+}
+
 bool loom_low_allocation_search_find_free_location(
     loom_low_allocation_search_context_t* context,
     const loom_liveness_interval_t* interval,
@@ -380,17 +419,40 @@ bool loom_low_allocation_search_find_free_location(
     *out_base = pressure_release.base;
     return true;
   }
+  const bool has_storage_release_records =
+      loom_low_allocation_search_has_storage_release_records(context);
+  loom_low_allocation_search_location_choice_t release_allowed = {0};
+  bool searched_release_allowed = false;
+  if (release_free.found && has_storage_release_records &&
+      !loom_target_residency_model_is_empty(context->residency_model)) {
+    uint32_t release_free_tier = 0;
+    if (loom_low_allocation_search_location_crosses_residency_cliff(
+            context, &candidate_template, &release_free, &release_free_tier)) {
+      loom_low_allocation_search_find_location_for_release_policy(
+          context, &candidate_template, &preference, last_base, alignment,
+          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED, &release_allowed);
+      searched_release_allowed = true;
+      if (release_allowed.found && release_allowed.base < release_free.base &&
+          loom_low_allocation_search_location_residency_tier(
+              context, &candidate_template, &release_allowed) >
+              release_free_tier) {
+        *out_base = release_allowed.base;
+        return true;
+      }
+    }
+  }
   if (release_free.found) {
     *out_base = release_free.base;
     return true;
   }
-  if (!loom_low_allocation_search_has_storage_release_records(context)) {
+  if (!has_storage_release_records) {
     return false;
   }
-  loom_low_allocation_search_location_choice_t release_allowed = {0};
-  loom_low_allocation_search_find_location_for_release_policy(
-      context, &candidate_template, &preference, last_base, alignment,
-      LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED, &release_allowed);
+  if (!searched_release_allowed) {
+    loom_low_allocation_search_find_location_for_release_policy(
+        context, &candidate_template, &preference, last_base, alignment,
+        LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED, &release_allowed);
+  }
   if (release_allowed.found) {
     *out_base = release_allowed.base;
     return true;

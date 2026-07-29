@@ -160,6 +160,7 @@ iree_status_t loom_low_allocate_function(
             .placement = &state.placement,
             .target_constraints = &state.target_constraints,
             .unit_liveness = &state.unit_liveness,
+            .residency_model = options->residency_model,
             .storage_leases = &state.storage_leases,
             .arena = arena,
             .function_cfg_graph = &model->cfg_graph,

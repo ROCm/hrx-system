@@ -83,6 +83,7 @@ loom_low_allocation_interval_assignment_search_context(
       .liveness = state->context->liveness,
       .unit_liveness = state->context->unit_liveness,
       .target_constraints = state->context->target_constraints,
+      .residency_model = state->context->residency_model,
       .assignment_map = &state->result.assignment_map,
       .placement = state->context->placement,
       .active_set = &state->active,

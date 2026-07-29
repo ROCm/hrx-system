@@ -290,6 +290,7 @@ static iree_status_t loom_low_emission_frame_build_with_diagnostic_emitter(
       .fixed_value_count = options->allocation_fixed_value_count,
       .reserved_ranges = options->allocation_reserved_ranges,
       .reserved_range_count = options->allocation_reserved_range_count,
+      .residency_model = options->residency_model,
       .storage_leases = storage_leases,
       .placement_pair_uses = out_frame->schedule.placement_pair_uses,
       .emitter = diagnostic_emitter,

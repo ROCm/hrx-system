@@ -27,6 +27,8 @@
 extern "C" {
 #endif
 
+struct loom_target_residency_model_t;
+
 typedef struct loom_low_allocation_interval_assignment_context_t {
   // Module containing the allocated low function.
   loom_module_t* module;
@@ -50,6 +52,8 @@ typedef struct loom_low_allocation_interval_assignment_context_t {
   iree_arena_allocator_t* arena;
   // Shared read-only control-flow graph for |body|.
   const loom_cfg_graph_t* function_cfg_graph;
+  // Optional target residency model used for physical extent decisions.
+  const struct loom_target_residency_model_t* residency_model;
 } loom_low_allocation_interval_assignment_context_t;
 
 typedef struct loom_low_allocation_interval_assignment_result_t {

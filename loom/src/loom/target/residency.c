@@ -55,6 +55,69 @@ void loom_target_residency_evaluate_cliffs(
   }
 }
 
+static uint64_t loom_target_residency_direct_resource_units_with_override(
+    const uint32_t* direct_resource_units, uint16_t resource_id,
+    uint16_t override_resource_id, uint32_t override_units) {
+  return resource_id == override_resource_id
+             ? override_units
+             : direct_resource_units[resource_id];
+}
+
+uint32_t loom_target_residency_evaluate_tier_with_direct_resource_override(
+    const loom_target_residency_model_t* model,
+    const uint32_t* direct_resource_units, uint16_t direct_resource_id,
+    uint32_t override_units) {
+  IREE_ASSERT_ARGUMENT(model);
+  IREE_ASSERT_ARGUMENT(direct_resource_units);
+  IREE_ASSERT_LT(direct_resource_id, model->direct_resources.resource_count);
+
+  uint32_t tier = model->best_tier;
+  for (uint16_t resource_id = 0;
+       resource_id < model->direct_resources.resource_count; ++resource_id) {
+    const loom_target_residency_cliff_range_t range =
+        model->direct_resources.cliff_ranges[resource_id];
+    const loom_target_residency_cliff_t* cliffs =
+        range.count == 0 ? NULL : &model->direct_resources.cliffs[range.start];
+    const uint64_t units =
+        loom_target_residency_direct_resource_units_with_override(
+            direct_resource_units, resource_id, direct_resource_id,
+            override_units);
+    loom_target_residency_cliff_evaluation_t evaluation;
+    loom_target_residency_evaluate_cliffs(cliffs, range.count, model->best_tier,
+                                          units, &evaluation);
+    tier = iree_min(tier, evaluation.tier);
+  }
+
+  for (uint16_t resource_id = 0;
+       resource_id < model->derived_resources.resource_count; ++resource_id) {
+    const loom_target_residency_derived_resource_t* resource =
+        &model->derived_resources.resources[resource_id];
+    uint64_t resource_units = 0;
+    for (uint16_t i = 0; i < resource->member_count; ++i) {
+      const loom_target_residency_derived_member_t* member =
+          &model->derived_resources.members[resource->member_start + i];
+      const uint64_t direct_units =
+          loom_target_residency_direct_resource_units_with_override(
+              direct_resource_units, member->direct_resource_id,
+              direct_resource_id, override_units);
+      const uint64_t contribution = loom_target_residency_round_resource_units(
+          direct_units, member->contribution_granularity);
+      resource_units =
+          iree_math_saturating_add_u64(resource_units, contribution);
+    }
+    const loom_target_residency_cliff_t* cliffs =
+        resource->cliff_count == 0
+            ? NULL
+            : &model->derived_resources.cliffs[resource->cliff_start];
+    loom_target_residency_cliff_evaluation_t evaluation;
+    loom_target_residency_evaluate_cliffs(cliffs, resource->cliff_count,
+                                          model->best_tier, resource_units,
+                                          &evaluation);
+    tier = iree_min(tier, evaluation.tier);
+  }
+  return tier;
+}
+
 static iree_status_t loom_target_residency_validate_cliff_chain(
     const loom_target_residency_cliff_t* cliffs, iree_host_size_t cliff_count,
     uint16_t expected_resource_id, uint32_t initial_tier,
