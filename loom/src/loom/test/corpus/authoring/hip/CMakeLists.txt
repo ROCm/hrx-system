@@ -20,19 +20,19 @@ iree_execution_test_suite(
     "loom-compile=loom::tools::loom-compile"
     "loom-opt=loom::tools::loom-opt"
   DATA
-    "cluster_b128_multicast.loom"
-    "lane_distribution.loom"
-    "packed_field_contracts.loom"
-    "q8_block_unroll.loom"
-    "q8_hip_shaped_unroll_unresolved.loom"
-    "q8_load_width.loom"
-    "q8_q4_signedness.loom"
-    "shared_memory_tile.loom"
-    "shared_memory_transpose.loom"
-    "shared_memory_vector_tile.loom"
-    "shared_memory_wave_tile.loom"
-    "target_provider_selection.loom"
-    "wave64_reductions.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/cluster_b128_multicast.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/lane_distribution.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/packed_field_contracts.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/q8_block_unroll.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/q8_hip_shaped_unroll_unresolved.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/q8_load_width.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/q8_q4_signedness.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_tile.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_transpose.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_wave_tile.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/target_provider_selection.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/wave64_reductions.loom"
   LABELS
     "hostonly"
 )
@@ -55,6 +55,8 @@ iree_native_test(
     "--input-ring-count=1"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/wave64_reductions.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -80,6 +82,8 @@ iree_native_test(
     "--input-ring-count=1"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_tile.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -105,6 +109,8 @@ iree_native_test(
     "--input-ring-count=1"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_wave_tile.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -130,6 +136,8 @@ iree_native_test(
     "--input-ring-count=1"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_transpose.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"
@@ -155,6 +163,8 @@ iree_native_test(
     "--input-ring-count=1"
   SRC
     loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"

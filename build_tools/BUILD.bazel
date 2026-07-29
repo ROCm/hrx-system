@@ -48,3 +48,14 @@ py_test(
     ],
     main = "ci_core_windows_test.py",
 )
+
+py_test(
+    name = "cmake_data_dependencies_test",
+    srcs = ["cmake_data_dependencies_test.py"],
+    data = [
+        "cmake/iree_macros.cmake",
+        "cmake/testdata/data_dependencies/CMakeLists.txt",
+        "cmake/testdata/data_dependencies/fixture.txt",
+        "cmake/testdata/data_dependencies/tool.c",
+    ],
+)

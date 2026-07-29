@@ -285,6 +285,9 @@ loom_check_test_suite(
     "test/emit.loom-test"
     "test/source_structured_control.loom-test"
     "test/workgroup_storage.loom-test"
+  DATA
+    "iree::third_party::spirv_dis"
+    "iree::third_party::spirv_val"
   ENV
     "LOOM_SPIRV_DIS=$<TARGET_FILE:iree::third_party::spirv_dis>"
     "LOOM_SPIRV_VAL=$<TARGET_FILE:iree::third_party::spirv_val>"

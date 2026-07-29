@@ -876,16 +876,6 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             )
         return src[: -len(extension)]
 
-    def _convert_loom_check_data(self, data):
-        if not data:
-            return None
-        converted_data = []
-        for label in data:
-            if label.startswith("@") or label.startswith("//third_party:"):
-                continue
-            converted_data.append(self._normalize_label(label))
-        return converted_data or None
-
     def loom_check_runner_binary(
         self,
         name,
@@ -936,9 +926,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         args_block = self._convert_string_list_block(
             "ARGS", [f"${{CMAKE_CURRENT_SOURCE_DIR}}/{src}"]
         )
-        data_block = self._convert_string_list_block(
-            "DATA", self._convert_loom_check_data(data)
-        )
+        data_block = self._convert_data_list_block(data)
         env_block = self._convert_string_list_block(
             "ENV", self._convert_native_test_env(env), sort=False
         )
@@ -989,9 +977,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             if runner == default_runner
             else self._convert_single_target_block("RUNNER", runner)
         )
-        data_block = self._convert_string_list_block(
-            "DATA", self._convert_loom_check_data(data)
-        )
+        data_block = self._convert_data_list_block(data)
         env_block = self._convert_string_list_block(
             "ENV", self._convert_native_test_env(env), sort=False
         )

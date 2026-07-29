@@ -157,6 +157,7 @@ loom_check_test_suite(
     ],
     data = [
         "//loom/src/loom/test/corpus/source_low:vector_dot.loom-test",
+        "//third_party:spirv_dis",
     ],
     tags = ["gpu"],
     test_name_prefix_to_strip = "test/source_low/",
@@ -181,6 +182,7 @@ loom_check_test_suite(
             'vector_dot.loom-test"',
             cmake,
         )
+        self.assertIn('"iree::third_party::spirv_dis"', cmake)
         self.assertIn('    "gpu"', cmake)
         self.assertIn('    "test/source_low/"', cmake)
         self.assertNotIn('    "loom-check"', cmake)
@@ -273,6 +275,10 @@ iree_executable_test(
         self.assertIn("  STRIP_CHECK", cmake)
         self.assertIn("  REQUIRE_RESOLVED_CONFIG", cmake)
         self.assertIn('"{{${CMAKE_CURRENT_BINARY_DIR}/linked.loombc}}"', cmake)
+        self.assertIn(
+            '  DATA\n    "${CMAKE_CURRENT_BINARY_DIR}/linked.loombc"',
+            cmake,
+        )
 
     def test_rejects_compiler_monorepo_external_targets(self):
         converter = bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""})
@@ -712,6 +718,31 @@ iree_executable_test(
             converter.body,
         )
 
+    def test_native_test_preserves_file_and_target_data(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir=str(repo_root / "build_tools/testing/test"),
+            repo_root=str(repo_root),
+        )
+
+        functions.native_test(
+            name="data_test",
+            src="//tools:runner",
+            data=[
+                "input.txt",
+                "//third_party:spirv_val",
+            ],
+        )
+
+        self.assertIn(
+            '"${PROJECT_SOURCE_DIR}/build_tools/testing/test/input.txt"',
+            converter.body,
+        )
+        self.assertIn('"iree::third_party::spirv_val"', converter.body)
+
     def test_cc_binary_benchmark_converts_location_args_to_source_paths(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
@@ -787,6 +818,32 @@ iree_executable_test(
             converter.body,
         )
 
+    def test_execution_test_suite_preserves_file_and_target_data(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir=str(repo_root / "build_tools/testing/test"),
+            repo_root=str(repo_root),
+        )
+
+        functions.iree_execution_test_suite(
+            name="execution_test",
+            manifests=["smoke.test.json"],
+            tools={"runner": "//tools:runner"},
+            data=[
+                "input.txt",
+                "//third_party:spirv_dis",
+            ],
+        )
+
+        self.assertIn(
+            '"${PROJECT_SOURCE_DIR}/build_tools/testing/test/input.txt"',
+            converter.body,
+        )
+        self.assertIn('"iree::third_party::spirv_dis"', converter.body)
+
     def test_native_test_converts_location_env(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
@@ -827,12 +884,15 @@ iree_executable_test(
         functions.native_test(
             name="external_env_test",
             src="//tools:runner",
+            data=["@wasi_sdk//:llvm-objdump"],
             env={
                 "LLVM_OBJDUMP": "$(rootpath @wasi_sdk//:llvm-objdump)",
             },
         )
 
         self.assertNotIn("ENV", converter.body)
+        self.assertNotIn("DATA", converter.body)
+        self.assertNotIn("@wasi_sdk", converter.body)
         self.assertNotIn("TARGET_FILE:pkg_@wasi_sdk", converter.body)
 
     def test_cc_test_emits_sanitizer_suppressions(self):
