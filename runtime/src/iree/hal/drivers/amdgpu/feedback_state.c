@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 
+#include "iree/base/internal/debugging.h"
 #include "iree/base/threading/affinity.h"
 #include "iree/base/threading/thread.h"
 #include "iree/hal/drivers/amdgpu/abi/asan.h"
@@ -147,8 +148,14 @@ static uint32_t iree_hal_amdgpu_feedback_state_physical_device_ordinal(
 static const iree_hal_amdgpu_source_context_t*
 iree_hal_amdgpu_feedback_state_source_context(
     const iree_hal_amdgpu_feedback_packet_t* packet) {
-  return (const iree_hal_amdgpu_source_context_t*)(uintptr_t)
-      packet->source_context;
+  const iree_hal_amdgpu_source_context_t* source_context =
+      (const iree_hal_amdgpu_source_context_t*)(uintptr_t)
+          packet->source_context;
+  if (source_context) {
+    // Pair with the release before this pointer enters the device/HSA path.
+    IREE_TSAN_ACQUIRE((void*)source_context);
+  }
+  return source_context;
 }
 
 static void iree_hal_amdgpu_feedback_state_publish_asan_event(

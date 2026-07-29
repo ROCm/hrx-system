@@ -1330,6 +1330,9 @@ static iree_status_t iree_hal_amdgpu_executable_publish_feedback_config(
           "AMDGPU feedback config global `%s` did not resolve to device memory",
           IREE_HAL_AMDGPU_FEEDBACK_CONFIG_GLOBAL_NAME);
     }
+    // The context pointer crosses the device global and feedback packet before
+    // an HSA signal wakes the host reader. TSAN cannot observe that path.
+    IREE_TSAN_RELEASE(&executable->source_context);
     IREE_RETURN_IF_ERROR(
         iree_hsa_memory_copy(IREE_LIBHSA(executable->libhsa), target_ptr,
                              &config, sizeof(config)),
