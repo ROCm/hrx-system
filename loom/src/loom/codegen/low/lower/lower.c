@@ -227,6 +227,7 @@ static void loom_low_lower_assert_options(
   IREE_ASSERT(loom_symbol_ref_is_valid(options->target_ref));
   IREE_ASSERT_EQ(options->target_ref.module_id, 0);
   IREE_ASSERT_LT(options->target_ref.symbol_id, module->symbols.count);
+  IREE_ASSERT(options->target_op != NULL);
   IREE_ASSERT(options->bundle != NULL);
   IREE_ASSERT(options->bundle->snapshot != NULL);
   IREE_ASSERT(options->bundle->export_plan != NULL);
@@ -3373,6 +3374,7 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
         .bundle = options->bundle,
         .target_profile = options->target_profile,
         .target_ref = options->target_ref,
+        .target_op = options->target_op,
         .descriptor_registry = options->descriptor_registry,
         .error_catalog = options->policy->error_catalog,
         .provider_list = options->legality_provider_list,

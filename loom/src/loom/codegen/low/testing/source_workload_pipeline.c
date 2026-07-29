@@ -220,6 +220,7 @@ iree_status_t loom_low_source_workload_run_pipeline(
       }
       const loom_low_lower_options_t lower_options = {
           .target_ref = selection->target_ref,
+          .target_op = selection->target_op,
           .bundle = selection->target_bundle,
           .target_profile = selection->target_profile,
           .descriptor_registry = options->descriptor_registry,

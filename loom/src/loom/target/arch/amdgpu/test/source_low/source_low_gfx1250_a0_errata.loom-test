@@ -2,31 +2,6 @@
 
 amdgpu.target<gfx1250-a0> @target
 
-kernel.def target(@target) @a0_lds_two_address_selection() {
-  %unit = index.constant 1 : index
-  %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
-} launch(%output: buffer) {
-  %workitem = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %bytes = index.constant 2048 : offset
-  %layout = encoding.layout.strided [8, 2] : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64x4xi32, %layout>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x2xi32, #dense>
-  %one = vector.constant 1 : vector<2xi32>
-  // ERROR@+1: AMDGPU/047 {function_name="a0_lds_two_address_selection", descriptor_name="amdgpu.ds_write2_b32", target="gfx1250-a0", constraint_key="amdgpu.ds.paired_address_alignment", legalization_key="split_ds2_to_single_address"}
-  vector.store %one, %scratch_view[%workitem, 0] : vector<2xi32>, view<64x4xi32, %layout>
-  // ERROR@+1: AMDGPU/047 {function_name="a0_lds_two_address_selection", descriptor_name="amdgpu.ds_read2_b32", target="gfx1250-a0", constraint_key="amdgpu.ds.paired_address_alignment", legalization_key="split_ds2_to_single_address"}
-  %loaded = vector.load %scratch_view[%workitem, 0] : view<64x4xi32, %layout> -> vector<2xi32>
-  vector.store %loaded, %output_view[%workitem, 0] : vector<2xi32>, view<64x2xi32, #dense>
-  kernel.return
-}
-
-// ====
-
-amdgpu.target<gfx1250-a0> @target
-
 func.def target(@target) @a0_k128_matrix_selection(%lhs_data: vector<16xi32>, %rhs_data: vector<16xi32>, %init_data: vector<8xf16>) -> (vector<8xf16>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index

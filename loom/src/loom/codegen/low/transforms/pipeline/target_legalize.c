@@ -1461,6 +1461,7 @@ static iree_status_t loom_low_target_legalize_verify_final(
   const loom_target_low_legality_options_t legality_options = {
       .bundle = state->selection->target_bundle,
       .target_ref = state->selection->target_ref,
+      .target_op = state->selection->target_op,
       .descriptor_registry = state->lower_options.descriptor_registry,
       .error_catalog = state->selection->policy->error_catalog,
       .provider_list = state->legality_provider_list,
@@ -1542,6 +1543,7 @@ static iree_status_t loom_low_target_legalize_function(
   }
   state.lower_options = (loom_low_lower_options_t){
       .target_ref = selection->target_ref,
+      .target_op = selection->target_op,
       .bundle = selection->target_bundle,
       .target_profile = selection->target_profile,
       .descriptor_registry = descriptor_registry,

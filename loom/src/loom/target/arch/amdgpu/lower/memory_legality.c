@@ -12,6 +12,7 @@
 #include "loom/target/arch/amdgpu/lower/legality.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
+#include "loom/target/arch/amdgpu/target_id/target_id.h"
 
 static iree_string_view_t loom_amdgpu_cache_policy_scope_param(
     const loom_vector_memory_cache_policy_t* policy) {
@@ -97,10 +98,14 @@ iree_status_t loom_amdgpu_low_legality_verify_memory(
   const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_low_legality(
       context, &alloca_layout));
+  const loom_amdgpu_target_info_t* target =
+      loom_amdgpu_target_from_op(loom_target_low_legality_target_op(context));
+  IREE_ASSERT(target != NULL);
   if (!loom_amdgpu_memory_access_plan_select(
           module, loom_target_low_legality_fact_table(context), descriptor_set,
           view_regions, loom_target_low_legality_function(context), bundle,
-          alloca_layout, op, &source, &plan, &source_diagnostic, &diagnostic)) {
+          target->instruction_constraints, alloca_layout, op, &source, &plan,
+          &source_diagnostic, &diagnostic)) {
     bool handled = false;
     if (diagnostic.rejection_bits != 0) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_memory_access_rejection_diagnostic(

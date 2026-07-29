@@ -27,6 +27,13 @@ static const loom_op_t* loom_amdgpu_target_op_from_ref(
   return module->symbols.entries[target_ref.symbol_id].defining_op;
 }
 
+const loom_amdgpu_target_info_t* loom_amdgpu_target_from_op(
+    const loom_op_t* target_op) {
+  return loom_amdgpu_target_isa(target_op)
+             ? loom_amdgpu_target_record_target(target_op)
+             : NULL;
+}
+
 const loom_amdgpu_processor_info_t* loom_amdgpu_target_processor_from_ref(
     const loom_module_t* module, loom_symbol_ref_t target_ref) {
   return loom_amdgpu_target_processor_from_op(
