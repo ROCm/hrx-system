@@ -180,6 +180,16 @@ def test_parses_direct_and_benchmark_envelope_reports() -> None:
             ),
             "duplicate key",
         ),
+        (
+            lambda report: report.__setitem__("target_key", {"processor": "gfx1100"}),
+            "target_key",
+        ),
+        (
+            lambda report: report["entries"]["rows"][0].__setitem__(
+                "workload", "96 workgroups"
+            ),
+            "workload",
+        ),
     ],
 )
 def test_rejects_invalid_version_zero_documents(mutation, message: str) -> None:

@@ -33,6 +33,10 @@ _REPORT_IDENTITY_FIELDS = (
     "workload",
 )
 
+_REPORT_STRING_IDENTITY_FIELDS = tuple(
+    field for field in _REPORT_IDENTITY_FIELDS if field not in ("mode", "workload")
+)
+
 _ENTRY_IDENTITY_FIELDS = (
     "function",
     "source_function",
@@ -196,6 +200,11 @@ def parse_compile_report(
         raise CompileReportError(
             f"{source}.mode: expected 'summary' or 'details', got {mode!r}"
         )
+    for field in _REPORT_STRING_IDENTITY_FIELDS:
+        if field in report:
+            _optional_string(report[field], f"{source}.{field}")
+    if "workload" in report:
+        _require_object(report["workload"], f"{source}.workload")
 
     status = _require_object(report.get("status"), f"{source}.status")
     _require_integer(status.get("code"), f"{source}.status.code")
@@ -208,6 +217,15 @@ def parse_compile_report(
         identity = compile_report_entry_identity(
             entry, f"{source}.entries.rows[{index}]"
         )
+        for field in _ENTRY_CONTEXT_FIELDS:
+            if field not in entry:
+                continue
+            if field == "workload":
+                _require_object(entry[field], f"{source}.entries.rows[{index}].{field}")
+            else:
+                _optional_string(
+                    entry[field], f"{source}.entries.rows[{index}].{field}"
+                )
         if identity in entry_identities:
             raise CompileReportError(
                 f"{source}.entries.rows[{index}]: duplicate entry identity "
