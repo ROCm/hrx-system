@@ -200,6 +200,10 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
       loom_target_compile_report_format_json(&report, &options, &stream));
   const iree_string_view_t root =
       ParseJsonDocument(iree_string_builder_view(&builder));
+  ExpectObjectValueEquals(root, IREE_SV("kind"),
+                          IREE_SV("loom.compile_report"));
+  ExpectObjectUint64Equals(root, IREE_SV("schema_version"), 0);
+  ExpectObjectValueEquals(root, IREE_SV("mode"), IREE_SV("details"));
   ExpectObjectValueEquals(root, IREE_SV("artifact_kind"),
                           IREE_SV("vm-archive"));
   ExpectObjectValueEquals(root, IREE_SV("backend"), IREE_SV("amdgpu-hal"));

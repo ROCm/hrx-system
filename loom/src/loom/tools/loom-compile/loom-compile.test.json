@@ -62,6 +62,9 @@
           "stderr": {
             "save": "{tmp}/compile_report.json",
             "contains": [
+              "\"kind\":\"loom.compile_report\"",
+              "\"schema_version\":0",
+              "\"mode\":\"summary\"",
               "\"artifact_kind\":\"vm-archive\"",
               "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
@@ -284,6 +287,9 @@
           },
           "stdout": {
             "contains": [
+              "\"kind\":\"loom.compile_report\"",
+              "\"schema_version\":0",
+              "\"mode\":\"summary\"",
               "\"artifact_kind\":\"vm-archive\"",
               "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]

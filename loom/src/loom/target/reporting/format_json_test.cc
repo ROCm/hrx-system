@@ -436,6 +436,8 @@ TEST(CompileReportFormatTest, ParsesModes) {
   IREE_ASSERT_OK(
       loom_target_compile_report_format_mode_parse(IREE_SV("summary"), &mode));
   EXPECT_EQ(mode, LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY);
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_target_compile_report_format_mode_name(mode), IREE_SV("summary")));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_target_compile_report_format_mode_parse(IREE_SV("verbose"), &mode));
