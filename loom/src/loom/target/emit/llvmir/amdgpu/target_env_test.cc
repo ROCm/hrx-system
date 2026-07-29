@@ -150,7 +150,7 @@ TEST(LlvmIrAmdgpuTargetEnvTest, AmdgpuHalProfileNamesKernelAbi) {
   EXPECT_EQ(profile->kernel.required_workgroup_size.z, 0u);
   EXPECT_EQ(profile->kernel.flat_workgroup_size_min, 1u);
   EXPECT_EQ(profile->kernel.flat_workgroup_size_max, 1024u);
-  EXPECT_EQ(profile->kernel.binding_resource_control, 0x31027000u);
+  EXPECT_EQ(profile->kernel.binding_resource_control, 0x31016000u);
 
   loom_llvmir_attr_t
       binding_attrs[LOOM_LLVMIR_TARGET_PROFILE_MAX_KERNEL_BINDING_ATTR_COUNT];

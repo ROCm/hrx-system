@@ -664,7 +664,7 @@ low.func.def target(@target) abi(hal_kernel) @descriptor_load_i16() -> (reg<amdg
   %13 = s_and_b32 %11, %12
   %14 = concat(%10, %13) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %15 = s_mov_b32 2
-  %16 = s_mov_b32 822243328
+  %16 = s_mov_b32 822173696
   %17 = concat(%14, %15, %16) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %loaded = buffer_load_i16_off_zero %17
   return %loaded
@@ -692,7 +692,7 @@ low.func.def target(@target) abi(hal_kernel) @descriptor_store_i16(%value: reg<a
   %13 = s_and_b32 %11, %12
   %14 = concat(%10, %13) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %15 = s_mov_b32 2
-  %16 = s_mov_b32 822243328
+  %16 = s_mov_b32 822173696
   %17 = concat(%14, %15, %16) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   buffer_store_short %value, %17, %7, %8
   return
@@ -718,7 +718,7 @@ low.func.def target(@target) abi(hal_kernel) @descriptor_load_i8x2() -> (reg<amd
   %13 = s_and_b32 %11, %12
   %14 = concat(%10, %13) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %15 = s_mov_b32 2
-  %16 = s_mov_b32 822243328
+  %16 = s_mov_b32 822173696
   %17 = concat(%14, %15, %16) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %loaded = buffer_load_u16_off_zero %17
   return %loaded
@@ -746,7 +746,7 @@ low.func.def target(@target) abi(hal_kernel) @descriptor_store_i8x2(%value: reg<
   %13 = s_and_b32 %11, %12
   %14 = concat(%10, %13) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %15 = s_mov_b32 2
-  %16 = s_mov_b32 822243328
+  %16 = s_mov_b32 822173696
   %17 = concat(%14, %15, %16) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   buffer_store_short %value, %17, %7, %8
   return
@@ -772,7 +772,7 @@ low.func.def target(@target) abi(hal_kernel) @descriptor_b128_off_zero() -> (reg
   %13 = s_and_b32 %11, %12
   %14 = concat(%10, %13) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %15 = s_mov_b32 16
-  %16 = s_mov_b32 822243328
+  %16 = s_mov_b32 822173696
   %17 = concat(%14, %15, %16) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %loaded = buffer_load_b128_off_zero %17
   return %loaded
@@ -801,7 +801,7 @@ low.func.def target(@target) abi(hal_kernel) @descriptor_dynamic_base_static_ext
   %18 = s_mov_b32 65535
   %19 = s_and_b32 %17, %18
   %20 = concat(%16, %19) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %21 = s_mov_b32 822243328
+  %21 = s_mov_b32 822173696
   %22 = concat(%20, %13, %21) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %loaded = buffer_load_dword %22, %11, %base {offset = 8}
   return %loaded
@@ -832,7 +832,7 @@ low.func.def target(@target) abi(hal_kernel) @descriptor_dynamic_projected_base_
   %20 = s_mov_b32 65535
   %21 = s_and_b32 %19, %20
   %22 = concat(%18, %21) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %23 = s_mov_b32 822243328
+  %23 = s_mov_b32 822173696
   %24 = concat(%22, %15, %23) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %loaded = buffer_load_dword %24, %13, %base {offset = 12}
   return %loaded
@@ -864,7 +864,7 @@ low.func.def target(@target) abi(hal_kernel) @descriptor_dynamic_extent_load_f32
   %23 = s_mov_b32 65535
   %24 = s_and_b32 %22, %23
   %25 = concat(%21, %24) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %26 = s_mov_b32 822243328
+  %26 = s_mov_b32 822173696
   %27 = concat(%25, %18, %26) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %loaded = buffer_load_dword %27, %16, %17
   return %loaded
@@ -894,7 +894,7 @@ low.func.def target(@target) abi(hal_kernel) @descriptor_static_extent_overflow_
   %19 = s_and_b32 %17, %18
   %20 = concat(%16, %19) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %21 = s_mov_b32 4294967295
-  %22 = s_mov_b32 822243328
+  %22 = s_mov_b32 822173696
   %23 = concat(%20, %21, %22) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %loaded = buffer_load_dword %23, %12, %13
   return %loaded
@@ -926,7 +926,7 @@ low.func.def target(@target) abi(hal_kernel) @descriptor_dynamic_extent_overflow
   %23 = s_and_b32 %21, %22
   %24 = concat(%20, %23) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %25 = s_mov_b32 4294967295
-  %26 = s_mov_b32 822243328
+  %26 = s_mov_b32 822173696
   %27 = concat(%24, %25, %26) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %loaded = buffer_load_dword %27, %16, %17
   return %loaded
@@ -961,7 +961,7 @@ low.func.def target(@target) abi(hal_kernel) @descriptor_dynamic_base_extent_loa
   %28 = s_mov_b32 65535
   %29 = s_and_b32 %27, %28
   %30 = concat(%26, %29) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %31 = s_mov_b32 822243328
+  %31 = s_mov_b32 822173696
   %32 = concat(%30, %23, %31) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %loaded = buffer_load_dword %32, %19, %21
   return %loaded
@@ -994,7 +994,7 @@ low.func.def target(@target) abi(hal_kernel) @descriptor_dynamic_extent_store_f3
   %22 = s_mov_b32 65535
   %23 = s_and_b32 %21, %22
   %24 = concat(%20, %23) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %25 = s_mov_b32 822243328
+  %25 = s_mov_b32 822173696
   %26 = concat(%24, %18, %25) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   buffer_store_b128 %value, %26, %16, %17
   return
@@ -1030,7 +1030,7 @@ low.func.def target(@target) abi(hal_kernel) @descriptor_dynamic_base_extent_sto
   %27 = s_mov_b32 65535
   %28 = s_and_b32 %26, %27
   %29 = concat(%25, %28) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %30 = s_mov_b32 822243328
+  %30 = s_mov_b32 822173696
   %31 = concat(%29, %23, %30) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   buffer_store_b128 %value, %31, %19, %21
   return

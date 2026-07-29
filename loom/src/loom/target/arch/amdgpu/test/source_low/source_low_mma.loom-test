@@ -336,7 +336,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1)
   %64 = s_and_b32 %62, %63
   %65 = concat(%61, %64) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %66 = s_mov_b32 512
-  %67 = s_mov_b32 822243328
+  %67 = s_mov_b32 822173696
   %68 = concat(%65, %66, %67) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %28 = s_mov_b32 0
   %29 = v_and_b32_src0_inline %22, 15

@@ -110,6 +110,21 @@ loom_cc_library(
     deps = ["//runtime/src/iree/base"],
 )
 
+loom_cc_library(
+    name = "buffer_resource",
+    srcs = ["buffer_resource.c"],
+    hdrs = ["buffer_resource.h"],
+    visibility = (
+        _AMDGPU_HAL_VISIBILITY + [
+            "//loom/src/loom/target/emit/llvmir/amdgpu:__pkg__",
+        ]
+    ),
+    deps = [
+        ":target_info_defs",
+        "//runtime/src/iree/base",
+    ],
+)
+
 loom_generated_cc_library(
     name = "target_info",
     srcs = ["target_info.c"],

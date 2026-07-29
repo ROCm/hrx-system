@@ -192,6 +192,21 @@ AMDGPU_GFX125X_MAX_WORKGROUP_STORAGE_BYTES = 320 * 1024
 AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE = "none"
 AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT = "stride14_enable_bit"
 
+AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_NONE = "none"
+AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_BASE48_NUM_RECORDS32_LEGACY_FORMAT = (
+    "base48_num_records32_legacy_format"
+)
+AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_BASE48_NUM_RECORDS32_UNIFIED_FORMAT = (
+    "base48_num_records32_unified_format"
+)
+AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_BASE57_NUM_RECORDS45 = "base57_num_records45"
+AMDGPU_BUFFER_RESOURCE_RECORD_ENCODINGS = (
+    AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_NONE,
+    AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_BASE48_NUM_RECORDS32_LEGACY_FORMAT,
+    AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_BASE48_NUM_RECORDS32_UNIFIED_FORMAT,
+    AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_BASE57_NUM_RECORDS45,
+)
+
 AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE = "none"
 AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC = "gfx9_11_glc_slc_dlc"
 AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH = "gfx12_nv_scope_th"
@@ -311,7 +326,19 @@ def kernel_descriptor_profile_supports_wavefront_size(
 
 @dataclass(frozen=True, slots=True)
 class AmdgpuDescriptorSetBufferResourceInfo:
+    record_encoding: str = AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_NONE
     cache_swizzle: str = AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE
+
+
+AMDGPU_BUFFER_RESOURCE_INFO_BASE48_LEGACY = AmdgpuDescriptorSetBufferResourceInfo(
+    record_encoding=AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_BASE48_NUM_RECORDS32_LEGACY_FORMAT,
+)
+AMDGPU_BUFFER_RESOURCE_INFO_BASE48_UNIFIED = AmdgpuDescriptorSetBufferResourceInfo(
+    record_encoding=AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_BASE48_NUM_RECORDS32_UNIFIED_FORMAT,
+)
+AMDGPU_BUFFER_RESOURCE_INFO_BASE57 = AmdgpuDescriptorSetBufferResourceInfo(
+    record_encoding=AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_BASE57_NUM_RECORDS45,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1000,6 +1027,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         key="amdgpu.cdna3.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_CDNA3,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+        buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE48_LEGACY,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1,
         ),
@@ -1009,6 +1037,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         key="amdgpu.rdna4.gfx125x.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE57,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
         ),
@@ -1018,6 +1047,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         key="amdgpu.rdna4.gfx1251.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE57,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
         ),
@@ -1027,6 +1057,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         key="amdgpu.rdna3.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA3,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE48_UNIFIED,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC,
         ),
@@ -1036,6 +1067,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         key="amdgpu.rdna3_5.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA3_5,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE48_UNIFIED,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC,
         ),
@@ -1045,6 +1077,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         key="amdgpu.rdna4.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE48_UNIFIED,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
         ),
@@ -1055,6 +1088,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_CDNA4,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
         buffer_resource=AmdgpuDescriptorSetBufferResourceInfo(
+            record_encoding=AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_BASE48_NUM_RECORDS32_LEGACY_FORMAT,
             cache_swizzle=AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT,
         ),
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
@@ -1071,6 +1105,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
         storage_generator_target="cdna3",
         member_generator_targets=("cdna3", "cdna4"),
+        buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE48_LEGACY,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1,
         ),
@@ -1085,6 +1120,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
         storage_generator_target="rdna3",
         member_generator_targets=("rdna3", "rdna3_5"),
+        buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE48_UNIFIED,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC,
         ),
@@ -1096,6 +1132,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
         storage_generator_target="rdna4",
         member_generator_targets=("rdna4",),
+        buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE48_UNIFIED,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
         ),
@@ -1106,6 +1143,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
         member_generator_targets=("rdna4_gfx1251", "rdna4_gfx125x"),
+        buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE57,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
         ),
@@ -1973,6 +2011,69 @@ def _validate_portable_occupancy_model(
                     )
 
 
+def _validate_amdgpu_generic_descriptor_contract(
+    descriptor_set: AmdgpuDescriptorSetInfo,
+    exact_member_descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
+) -> None:
+    portable_descriptor_flags = exact_member_descriptor_sets[0].flags
+    for member_descriptor_set in exact_member_descriptor_sets[1:]:
+        portable_descriptor_flags &= member_descriptor_set.flags
+    if descriptor_set.flags != portable_descriptor_flags:
+        raise ValueError(
+            f"AMDGPU generic descriptor set {descriptor_set.key} flags do "
+            "not match the member intersection"
+        )
+
+    vector_memory_encoding = exact_member_descriptor_sets[
+        0
+    ].vector_memory.cache_policy_encoding
+    if any(
+        member_descriptor_set.vector_memory.cache_policy_encoding
+        != vector_memory_encoding
+        for member_descriptor_set in exact_member_descriptor_sets[1:]
+    ):
+        raise ValueError(
+            f"AMDGPU generic descriptor set {descriptor_set.key} members "
+            "have divergent vector-memory cache-policy encodings"
+        )
+    if descriptor_set.vector_memory.cache_policy_encoding != vector_memory_encoding:
+        raise ValueError(
+            f"AMDGPU generic descriptor set {descriptor_set.key} "
+            "vector-memory cache-policy encoding does not match every member"
+        )
+
+    member_record_encodings = {
+        member_descriptor_set.buffer_resource.record_encoding
+        for member_descriptor_set in exact_member_descriptor_sets
+    }
+    if len(member_record_encodings) != 1:
+        raise ValueError(
+            f"AMDGPU generic descriptor set {descriptor_set.key} members "
+            "have divergent buffer-resource record encodings"
+        )
+    portable_record_encoding = next(iter(member_record_encodings))
+    if descriptor_set.buffer_resource.record_encoding != portable_record_encoding:
+        raise ValueError(
+            f"AMDGPU generic descriptor set {descriptor_set.key} buffer "
+            "resource record encoding does not match every member"
+        )
+
+    member_cache_swizzles = {
+        member_descriptor_set.buffer_resource.cache_swizzle
+        for member_descriptor_set in exact_member_descriptor_sets
+    }
+    portable_cache_swizzle = (
+        next(iter(member_cache_swizzles))
+        if len(member_cache_swizzles) == 1
+        else AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE
+    )
+    if descriptor_set.buffer_resource.cache_swizzle != portable_cache_swizzle:
+        raise ValueError(
+            f"AMDGPU generic descriptor set {descriptor_set.key} buffer "
+            "resource cache swizzle is not portable across every member"
+        )
+
+
 def validate_amdgpu_generic_contracts(
     processors: Sequence[AmdgpuProcessorInfo],
     descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
@@ -2037,45 +2138,9 @@ def validate_amdgpu_generic_contracts(
             descriptor_sets_by_key[member.descriptor_set.key]
             for member in exact_members
         )
-        portable_descriptor_flags = exact_member_descriptor_sets[0].flags
-        for member_descriptor_set in exact_member_descriptor_sets[1:]:
-            portable_descriptor_flags &= member_descriptor_set.flags
-        if descriptor_set.flags != portable_descriptor_flags:
-            raise ValueError(
-                f"AMDGPU generic descriptor set {descriptor_set.key} flags do "
-                "not match the member intersection"
-            )
-        vector_memory_encoding = exact_member_descriptor_sets[
-            0
-        ].vector_memory.cache_policy_encoding
-        if any(
-            member_descriptor_set.vector_memory.cache_policy_encoding
-            != vector_memory_encoding
-            for member_descriptor_set in exact_member_descriptor_sets[1:]
-        ):
-            raise ValueError(
-                f"AMDGPU generic descriptor set {descriptor_set.key} members "
-                "have divergent vector-memory cache-policy encodings"
-            )
-        if descriptor_set.vector_memory.cache_policy_encoding != vector_memory_encoding:
-            raise ValueError(
-                f"AMDGPU generic descriptor set {descriptor_set.key} "
-                "vector-memory cache-policy encoding does not match every member"
-            )
-        member_cache_swizzles = {
-            member_descriptor_set.buffer_resource.cache_swizzle
-            for member_descriptor_set in exact_member_descriptor_sets
-        }
-        portable_cache_swizzle = (
-            next(iter(member_cache_swizzles))
-            if len(member_cache_swizzles) == 1
-            else AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE
+        _validate_amdgpu_generic_descriptor_contract(
+            descriptor_set, exact_member_descriptor_sets
         )
-        if descriptor_set.buffer_resource.cache_swizzle != portable_cache_swizzle:
-            raise ValueError(
-                f"AMDGPU generic descriptor set {descriptor_set.key} buffer "
-                "resource cache swizzle is not portable across every member"
-            )
 
         portable_flags = exact_members[0].flags
         for member in exact_members[1:]:

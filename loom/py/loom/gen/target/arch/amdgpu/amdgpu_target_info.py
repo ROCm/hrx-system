@@ -59,6 +59,8 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_AMDHSA_TARGET_TRIPLE,
     AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE,
     AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT,
+    AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_NONE,
+    AMDGPU_BUFFER_RESOURCE_RECORD_ENCODINGS,
     AMDGPU_CACHE_SCOPE_KEYWORDS,
     AMDGPU_CACHE_TEMPORAL_KEYWORDS,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
@@ -212,6 +214,8 @@ _BUFFER_RESOURCE_CACHE_SWIZZLE_EXPRS = {
     AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE: "LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE",
     AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT: "LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT",
 }
+
+_BUFFER_RESOURCE_RECORD_ENCODING_EXPRS = {encoding: f"LOOM_AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_{_c_ident(encoding)}" for encoding in AMDGPU_BUFFER_RESOURCE_RECORD_ENCODINGS}
 
 _VECTOR_MEMORY_CACHE_POLICY_ENCODING_EXPRS = {encoding: f"LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_{_c_ident(encoding)}" for encoding in AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODINGS}
 
@@ -397,6 +401,14 @@ def _buffer_resource_cache_swizzle_expr(kind: str) -> str:
         kind,
         _BUFFER_RESOURCE_CACHE_SWIZZLE_EXPRS,
         "buffer-resource cache swizzle kind",
+    )
+
+
+def _buffer_resource_record_encoding_expr(kind: str) -> str:
+    return _enum_expr(
+        kind,
+        _BUFFER_RESOURCE_RECORD_ENCODING_EXPRS,
+        "buffer-resource record encoding",
     )
 
 
@@ -923,6 +935,9 @@ def _validate_descriptor_sets(descriptor_sets: Sequence[AmdgpuDescriptorSetInfo]
                         member_isa_infos.append(isa_info)
             if tuple(member_isa_infos) != info.isa_infos:
                 raise ValueError(f"AMDGPU descriptor set {info.key} ISA membership does not match its member generator targets")
+        _buffer_resource_record_encoding_expr(info.buffer_resource.record_encoding)
+        if info.buffer_resource.record_encoding == AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_NONE:
+            raise ValueError(f"AMDGPU descriptor set {info.key} must declare a buffer-resource record encoding")
         _buffer_resource_cache_swizzle_expr(info.buffer_resource.cache_swizzle)
         _vector_memory_cache_policy_encoding_expr(info.vector_memory.cache_policy_encoding)
         if info.vector_memory.cache_policy_encoding == AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE:
@@ -1112,6 +1127,7 @@ def _emit_descriptor_set_rows(rows: Sequence[_AmdgpuDescriptorSetRow]) -> list[s
                 "    },",
                 f"    .flags = {_descriptor_set_info_flags_expr(info.flags)},",
                 "    .buffer_resource = {",
+                f"      .record_encoding = {_buffer_resource_record_encoding_expr(info.buffer_resource.record_encoding)},",
                 f"      .cache_swizzle = {_buffer_resource_cache_swizzle_expr(info.buffer_resource.cache_swizzle)},",
                 "    },",
                 "    .vector_memory = {",

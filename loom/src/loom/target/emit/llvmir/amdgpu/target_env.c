@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 
-#include "loom/target/arch/amdgpu/hal/binding_descriptor.h"
+#include "loom/target/arch/amdgpu/buffer_resource.h"
 
 #define LOOM_LLVMIR_AMDGPU_TARGET_TRIPLE IREE_SVL("amdgcn-amd-amdhsa")
 #define LOOM_LLVMIR_AMDGPU_DATA_LAYOUT                           \
@@ -117,7 +117,7 @@ static const loom_llvmir_target_profile_t kAmdgpuHalProfile = {
             .flat_workgroup_size_min = 1,
             .flat_workgroup_size_max = 1024,
             .binding_resource_control =
-                LOOM_AMDGPU_HAL_BINDING_RESOURCE_CONTROL,
+                LOOM_AMDGPU_BUFFER_RESOURCE_BASE48_UNIFIED_RAW_WORD3,
             .flat_workgroup_size_attr_name =
                 IREE_SVL("amdgpu-flat-work-group-size"),
             .uniform_workgroup_size_attr_name =

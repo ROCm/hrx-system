@@ -49,7 +49,7 @@ loom_cc_library(
     visibility = _LLVMIR_TARGET_ENV_VISIBILITY,
     deps = [
         "//loom/src/loom/target:types",
-        "//loom/src/loom/target/arch/amdgpu/hal:binding_descriptor",
+        "//loom/src/loom/target/arch/amdgpu:buffer_resource",
         "//loom/src/loom/target/emit/llvmir:target_presets",
         "//runtime/src/iree/base",
     ],

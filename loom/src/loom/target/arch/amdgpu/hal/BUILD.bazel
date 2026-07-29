@@ -69,6 +69,7 @@ loom_cc_library(
         "//loom/src/loom/ops/low",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/amdgpu:buffer_resource",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",

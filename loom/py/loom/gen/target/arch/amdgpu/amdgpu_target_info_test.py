@@ -17,6 +17,7 @@ from loom.target.arch.amdgpu.lds_bank_service import (
     validate_amdgpu_lds_bank_service_model_coverage,
 )
 from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_BUFFER_RESOURCE_INFO_BASE48_UNIFIED,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
     AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH,
@@ -58,6 +59,7 @@ def _descriptor_set_info() -> AmdgpuDescriptorSetInfo:
             ),
         ),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+        buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE48_UNIFIED,
     )
 
 

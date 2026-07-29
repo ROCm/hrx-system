@@ -62,6 +62,21 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    buffer_resource
+  HDRS
+    "buffer_resource.h"
+  SRCS
+    "buffer_resource.c"
+  DEPS
+    ::target_info_defs
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_generated_cc_library(
   NAME
     target_info

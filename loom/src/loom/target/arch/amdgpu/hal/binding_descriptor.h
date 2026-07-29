@@ -9,15 +9,6 @@
 #ifndef LOOM_TARGET_ARCH_AMDGPU_HAL_BINDING_DESCRIPTOR_H_
 #define LOOM_TARGET_ARCH_AMDGPU_HAL_BINDING_DESCRIPTOR_H_
 
-#include <stdint.h>
-
-// Raw buffer-resource descriptor control word for global HAL bindings.
-//
-// This is the final descriptor word consumed by MUBUF/MTBUF packets. It matches
-// the word emitted by LLVM/IREE for amdgcn-amd-amdhsa raw buffers with 32-bit
-// element format and resource-level out-of-bounds behavior.
-#define LOOM_AMDGPU_HAL_BINDING_RESOURCE_CONTROL UINT32_C(0x31027000)
-
 // Attribute order for low.op<amdgpu.hal.buffer_descriptor>. The descriptor
 // verifier canonicalizes fields into this order; verifier and materializer code
 // use ordinals so target lowering never re-parses attribute names.

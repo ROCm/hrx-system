@@ -26,7 +26,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   %17 = s_and_b32 %15, %16
   %18 = concat(%14, %17) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %19 = s_mov_b32 256
-  %20 = s_mov_b32 822243328
+  %20 = s_mov_b32 822173696
   %21 = concat(%18, %19, %20) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   s_waitcnt {vmcnt = 0}
   s_waitcnt_vscnt {vscnt = 0}
@@ -62,7 +62,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   %19 = s_and_b32 %17, %18
   %20 = concat(%16, %19) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %21 = s_mov_b32 256
-  %22 = s_mov_b32 822243328
+  %22 = s_mov_b32 822173696
   %23 = concat(%20, %21, %22) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %14 = v_mov_b32 1
   %old = buffer_atomic_add_u32_rtn %14, %23, %11, %12
@@ -99,7 +99,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   %19 = s_and_b32 %17, %18
   %20 = concat(%16, %19) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %21 = s_mov_b32 256
-  %22 = s_mov_b32 822243328
+  %22 = s_mov_b32 822173696
   %23 = concat(%20, %21, %22) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   s_waitcnt {vmcnt = 0}
   s_waitcnt_vscnt {vscnt = 0}
@@ -139,7 +139,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   %24 = s_and_b32 %22, %23
   %25 = concat(%21, %24) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %26 = s_mov_b32 256
-  %27 = s_mov_b32 822243328
+  %27 = s_mov_b32 822173696
   %28 = concat(%25, %26, %27) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   s_waitcnt {vmcnt = 0}
   s_waitcnt_vscnt {vscnt = 0}
@@ -180,7 +180,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   %17 = s_and_b32 %15, %16
   %18 = concat(%14, %17) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %19 = s_mov_b32 256
-  %20 = s_mov_b32 822243328
+  %20 = s_mov_b32 822173696
   %21 = concat(%18, %19, %20) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   s_waitcnt {vmcnt = 0}
   s_waitcnt_vscnt {vscnt = 0}
