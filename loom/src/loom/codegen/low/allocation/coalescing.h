@@ -15,7 +15,6 @@
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/assignment_map.h"
-#include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/search.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/placement.h"
@@ -24,6 +23,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+struct loom_low_schedule_table_t;
 
 typedef iree_status_t (*loom_low_allocation_coalescing_append_assignment_fn_t)(
     void* user_data, const loom_low_allocation_assignment_t* assignment,
@@ -39,8 +40,8 @@ typedef struct loom_low_allocation_coalescing_context_t {
   iree_arena_allocator_t* arena;
   // Liveness facts for the allocated low function body.
   const loom_liveness_analysis_t* liveness;
-  // Operation-to-program-point index over |liveness|.
-  const loom_low_allocation_op_point_index_t* op_points;
+  // Optional final schedule defining |liveness|'s top-level operation order.
+  const struct loom_low_schedule_table_t* schedule;
   // Function-local placement relations.
   const loom_low_placement_table_t* placement;
   // Target storage budgets, fixed values, and reserved ranges.

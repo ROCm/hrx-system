@@ -197,6 +197,7 @@ loom_cc_library(
     loom::analysis::liveness
     loom::codegen::low::descriptors
     loom::codegen::low::placement
+    loom::codegen::low::schedule
     loom::codegen::low::storage_relation
     loom::ir
   PUBLIC

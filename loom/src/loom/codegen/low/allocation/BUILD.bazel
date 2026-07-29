@@ -179,6 +179,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/codegen/low:storage_relation",
+        "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

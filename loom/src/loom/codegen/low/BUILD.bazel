@@ -334,6 +334,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/allocation:target_constraints",
         "//loom/src/loom/codegen/low/allocation:unit_liveness",
         "//loom/src/loom/codegen/low/allocation:unit_location",
+        "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",

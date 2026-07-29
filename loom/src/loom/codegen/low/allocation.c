@@ -18,6 +18,7 @@
 #include "loom/codegen/low/allocation/unit_location.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/function.h"
+#include "loom/codegen/low/schedule/types.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
@@ -40,8 +41,8 @@ typedef struct loom_low_allocation_build_state_t {
   loom_low_allocation_target_constraints_t target_constraints;
   // Liveness analysis for |body|.
   loom_liveness_analysis_t liveness;
-  // Operation-to-program-point index over |liveness|.
-  loom_low_allocation_op_point_index_t op_points;
+  // Temporary index still consumed by the legacy physical-move planners.
+  loom_low_allocation_op_point_index_t legacy_move_op_points;
   // Function-local placement relations over |liveness|.
   loom_low_placement_table_t placement;
   // Mutable per-allocation-unit live end points.
@@ -124,19 +125,25 @@ iree_status_t loom_low_allocate_function(
       &state.target_constraints);
 
   const loom_local_value_domain_t* value_domain = &model->value_domain;
+  const loom_liveness_order_t operation_order =
+      options->schedule != NULL ? options->schedule->operation_order
+                                : loom_liveness_order_empty();
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_liveness_analyze_local_value_domain_with_cfg_graph(
-        value_domain, &model->cfg_graph, options->liveness_order, arena,
+        value_domain, &model->cfg_graph, operation_order, arena,
         &state.liveness);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
-    status = loom_low_allocation_op_point_index_initialize(
-        &state.liveness, arena, &state.op_points);
-  }
-  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
+    const loom_low_placement_pair_use_list_t placement_pair_uses =
+        options->schedule != NULL ? options->schedule->placement_pair_uses
+                                  : loom_low_placement_pair_use_list_empty();
     status = loom_low_placement_analyze_region(
         model->module, state.body, value_domain, &state.liveness,
-        options->placement_pair_uses, arena, &state.placement);
+        placement_pair_uses, arena, &state.placement);
+  }
+  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
+    status = loom_low_allocation_op_point_index_initialize(
+        &state.liveness, arena, &state.legacy_move_op_points);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_unit_liveness_initialize(
@@ -165,7 +172,7 @@ iree_status_t loom_low_allocate_function(
             .function_op = state.function_op,
             .target = &state.target,
             .liveness = &state.liveness,
-            .op_points = &state.op_points,
+            .schedule = options->schedule,
             .placement = &state.placement,
             .target_constraints = &state.target_constraints,
             .unit_liveness = &state.unit_liveness,
@@ -228,7 +235,7 @@ iree_status_t loom_low_allocate_function(
     const loom_low_allocation_edge_copy_context_t edge_copy_context = {
         .body = state.body,
         .descriptor_set = state.target.descriptor_set,
-        .op_points = &state.op_points,
+        .op_points = &state.legacy_move_op_points,
         .target_constraints = &state.target_constraints,
         .unit_liveness = &state.unit_liveness,
         .placement = &state.placement,
@@ -243,7 +250,7 @@ iree_status_t loom_low_allocate_function(
         .module = state.module,
         .body = state.body,
         .descriptor_set = state.target.descriptor_set,
-        .op_points = &state.op_points,
+        .op_points = &state.legacy_move_op_points,
         .target_constraints = &state.target_constraints,
         .unit_liveness = &state.unit_liveness,
         .assignment_map = state.interval_assignment.assignment_map,

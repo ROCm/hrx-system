@@ -86,9 +86,6 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   liveness.value_ids = value_ids;
   liveness.value_count = IREE_ARRAYSIZE(value_ids);
   liveness.value_interval_indices = interval_indices;
-  loom_low_allocation_op_point_index_t op_points = {};
-  IREE_ASSERT_OK(loom_low_allocation_op_point_index_initialize(
-      &liveness, &arena_, &op_points));
 
   uint32_t unit_end_point_start[] = {0};
   uint32_t unit_end_points[] = {8, 8};
@@ -139,7 +136,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       /*.function_op=*/&function_op,
       /*.target=*/&target,
       /*.liveness=*/&liveness,
-      /*.op_points=*/&op_points,
+      /*.schedule=*/nullptr,
       /*.placement=*/&placement,
       /*.target_constraints=*/&target_constraints,
       /*.unit_liveness=*/&unit_liveness,
@@ -205,9 +202,6 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   liveness.value_ids = value_ids;
   liveness.value_count = IREE_ARRAYSIZE(value_ids);
   liveness.value_interval_indices = interval_indices;
-  loom_low_allocation_op_point_index_t op_points = {};
-  IREE_ASSERT_OK(loom_low_allocation_op_point_index_initialize(
-      &liveness, &arena_, &op_points));
 
   uint32_t unit_end_point_starts[] = {0, 1};
   uint32_t unit_end_points[] = {6, 6};
@@ -305,7 +299,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       /*.function_op=*/&function_op,
       /*.target=*/&target,
       /*.liveness=*/&liveness,
-      /*.op_points=*/&op_points,
+      /*.schedule=*/nullptr,
       /*.placement=*/&placement,
       /*.target_constraints=*/&target_constraints,
       /*.unit_liveness=*/&unit_liveness,
