@@ -1,8 +1,8 @@
 // Gfx11 routed-expert projection matching llama.cpp Vulkan's matrix path.
 //
-// Each two-wave workgroup computes 64 output channels for 64 routed rows of one
-// expert. The waves share padded FP16 operand stages, each owns 32 routed
-// columns and eight WMMA accumulators, and scatters one transposed accumulator
+// Each two-wave workgroup computes 64 output channels for 32 routed rows of one
+// expert. The waves share padded FP16 operand stages, each owns 32 output
+// channels and four WMMA accumulators, and scatters one transposed accumulator
 // fragment at a time through a compact route map. Gate and up invoke this same
 // projection independently before the separate SwiGLU epilogue.
 //
@@ -163,7 +163,7 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
   %sixteen = index.constant 16 : index
   %thirtytwo = index.constant 32 : index
   %forty = index.constant 40 : index
-  %fortyeight = index.constant 48 : index
+  %sixtythree = index.constant 63 : index
   %sixtyfour = index.constant 64 : index
   %twofiftysix = index.constant 256 : index
   %zero_offset = index.constant 0 : offset
@@ -205,7 +205,10 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
   %result_fragment_view = buffer.view %result_stage[%wave_result_stage_offset] : buffer -> view<16x16xf16, %result_fragment_layout>
   %result_physical_view = buffer.view %result_stage[%wave_result_stage_offset] : buffer -> view<16x16xf16, #dense>
   %channel_tile_base = index.mul %channel_tile, %sixtyfour : index
-  %route_tile_base = index.mul %route_tile, %sixtyfour : index
+  %initial_route_tile_base = index.mul %route_tile, %thirtytwo : index
+  %padded_token_count = index.add %bounded_token_count, %sixtythree : index
+  %route_partition_count = index.div %padded_token_count, %sixtyfour : index
+  %route_partition_step = index.mul %route_partition_count, %thirtytwo : index
   %bounded_expert, %table_expert_count = index.assume %expert, %bounded_expert_count [lt(%expert, %bounded_expert_count)] : index, index
   %is_workitem_zero = index.cmp eq, %workitem, %zero : index
   %lane_expert_route_count = scf.if %is_workitem_zero -> (i32) {
@@ -218,14 +221,17 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
   %expert_route_count_i32 = kernel.subgroup.broadcast.first %expert_route_count_reduced : i32
   %expert_route_count0 = index.cast %expert_route_count_i32 : i32 to index
   %expert_route_count = index.assume %expert_route_count0 [range(%expert_route_count0, 0, 512)] : index
-  %tile_has_rows = index.cmp ult, %route_tile_base, %expert_route_count : index
-  scf.if %tile_has_rows {
+  // Route partitions are distributed across the launch grid and continue in
+  // uniform strides for concentrated routing. Balanced Qwen prefill gives each
+  // expert exactly one 32-row tile at 512 tokens; concentrated experts can
+  // consume the full token count without changing the launch geometry.
+  scf.for %route_tile_base = [%initial_route_tile_base to %expert_route_count step %route_partition_step] {
     // The first wave snapshots the compact route map once. Every K tile then
-    // reuses these 64 entries while the full workgroup cooperatively fills the
+    // reuses these 32 entries while the full workgroup cooperatively fills the
     // operand stages.
-    %loads_route = index.cmp ult, %workitem, %sixtyfour : index
+    %loads_route = index.cmp ult, %workitem, %thirtytwo : index
     scf.if %loads_route {
-      %local_route = index.assume %workitem [range(%workitem, 0, 63)] : index
+      %local_route = index.assume %workitem [range(%workitem, 0, 31)] : index
       %assignment_ordinal = index.add %route_tile_base, %local_route : index
       %valid_row = index.cmp ult, %assignment_ordinal, %expert_route_count : index
       %assignment_i32 = scf.if %valid_row -> (i32) {
@@ -243,18 +249,14 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
     %load_row0 = index.div %workitem, %eight : index
     %load_row = index.assume %load_row0 [range(%load_row0, 0, 15)] : index
     %expert_byte_base = index.mul %bounded_expert, %weight_expert_bytes : index
-    %subgroup_route_base = index.mul %subgroup, %thirtytwo : index
-    %subgroup_route1 = index.add %subgroup_route_base, %sixteen : index
+    %subgroup_channel_add = index.mul %subgroup, %thirtytwo : index
+    %subgroup_channel1 = index.add %subgroup_channel_add, %sixteen : index
     %init00 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<8xf16>
     %init01 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<8xf16>
     %init10 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<8xf16>
     %init11 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<8xf16>
-    %init20 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<8xf16>
-    %init21 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<8xf16>
-    %init30 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<8xf16>
-    %init31 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<8xf16>
-    %result00, %result01, %result10, %result11, %result20, %result21, %result30, %result31 = scf.for %q4_block = [%zero to %q4_block_count step %one](%block_acc00 = %init00 : vector<8xf16>, %block_acc01 = %init01 : vector<8xf16>, %block_acc10 = %init10 : vector<8xf16>, %block_acc11 = %init11 : vector<8xf16>, %block_acc20 = %init20 : vector<8xf16>, %block_acc21 = %init21 : vector<8xf16>, %block_acc30 = %init30 : vector<8xf16>, %block_acc31 = %init31 : vector<8xf16>) -> (vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>) {
-      %block_result00, %block_result01, %block_result10, %block_result11, %block_result20, %block_result21, %block_result30, %block_result31 = scf.for %q4_group = [%zero to %eight step %one](%acc00 = %block_acc00 : vector<8xf16>, %acc01 = %block_acc01 : vector<8xf16>, %acc10 = %block_acc10 : vector<8xf16>, %acc11 = %block_acc11 : vector<8xf16>, %acc20 = %block_acc20 : vector<8xf16>, %acc21 = %block_acc21 : vector<8xf16>, %acc30 = %block_acc30 : vector<8xf16>, %acc31 = %block_acc31 : vector<8xf16>) -> (vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>) {
+    %result00, %result01, %result10, %result11 = scf.for %q4_block = [%zero to %q4_block_count step %one](%block_acc00 = %init00 : vector<8xf16>, %block_acc01 = %init01 : vector<8xf16>, %block_acc10 = %init10 : vector<8xf16>, %block_acc11 = %init11 : vector<8xf16>) -> (vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>) {
+      %block_result00, %block_result01, %block_result10, %block_result11 = scf.for %q4_group = [%zero to %eight step %one](%acc00 = %block_acc00 : vector<8xf16>, %acc01 = %block_acc01 : vector<8xf16>, %acc10 = %block_acc10 : vector<8xf16>, %acc11 = %block_acc11 : vector<8xf16>) -> (vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>) {
         %block_k_base = index.mul %q4_block, %twofiftysix : index
         %group_k_add = index.mul %q4_group, %thirtytwo : index
         %k_origin = index.add %block_k_base, %group_k_add : index
@@ -272,18 +274,25 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
           } else {
             scf.yield %zero_f16x4 : vector<4xf16>
           }
-          %assignment_i32 = view.load %route_stage_view[%local_row] : view<64xi32, #dense> -> i32
-          %valid_assignment = scalar.cmpi sge, %assignment_i32, %zero_i32 : i32
-          %activation_values = scf.if %valid_assignment -> (vector<4xf16>) {
-            %assignment0 = index.cast %assignment_i32 : i32 to index
-            %assignment = index.assume %assignment0 [range(%assignment0, 0, 4095)] : index
-            %bounded_assignment, %bounded_assignment_count = index.assume %assignment, %assignment_count [lt(%assignment, %assignment_count)] : index, index
-            %token0 = index.div %bounded_assignment, %bounded_route_count : index
-            %token, %input_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
-            %input_k = index.add %k_origin, %load_k : index
-            %loaded = vector.load %input_view[%token, %input_k] : view<[%bounded_token_count]x[%input_size]xf32, #dense> -> vector<4xf32>
-            %converted = vector.fptrunc %loaded : vector<4xf32> to vector<4xf16>
-            scf.yield %converted : vector<4xf16>
+          %is_activation_row = index.cmp ult, %local_row, %thirtytwo : index
+          %activation_values = scf.if %is_activation_row -> (vector<4xf16>) {
+            %activation_row = index.assume %local_row [range(%local_row, 0, 31)] : index
+            %assignment_i32 = view.load %route_stage_view[%activation_row] : view<64xi32, #dense> -> i32
+            %valid_assignment = scalar.cmpi sge, %assignment_i32, %zero_i32 : i32
+            %loaded_or_zero = scf.if %valid_assignment -> (vector<4xf16>) {
+              %assignment0 = index.cast %assignment_i32 : i32 to index
+              %assignment = index.assume %assignment0 [range(%assignment0, 0, 4095)] : index
+              %bounded_assignment, %bounded_assignment_count = index.assume %assignment, %assignment_count [lt(%assignment, %assignment_count)] : index, index
+              %token0 = index.div %bounded_assignment, %bounded_route_count : index
+              %token, %input_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
+              %input_k = index.add %k_origin, %load_k : index
+              %loaded = vector.load %input_view[%token, %input_k] : view<[%bounded_token_count]x[%input_size]xf32, #dense> -> vector<4xf32>
+              %converted = vector.fptrunc %loaded : vector<4xf32> to vector<4xf16>
+              scf.yield %converted : vector<4xf16>
+            } else {
+              scf.yield %zero_f16x4 : vector<4xf16>
+            }
+            scf.yield %loaded_or_zero : vector<4xf16>
           } else {
             scf.yield %zero_f16x4 : vector<4xf16>
           }
@@ -291,27 +300,21 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
           vector.store %activation_values, %activation_stage_physical_view[%local_row, %load_k] : vector<4xf16>, view<64x40xf16, #dense>
         }
         kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-        %next00, %next01, %next10, %next11, %next20, %next21, %next30, %next31 = scf.for %k_half = [%zero to %thirtytwo step %sixteen](%half_acc00 = %acc00 : vector<8xf16>, %half_acc01 = %acc01 : vector<8xf16>, %half_acc10 = %acc10 : vector<8xf16>, %half_acc11 = %acc11 : vector<8xf16>, %half_acc20 = %acc20 : vector<8xf16>, %half_acc21 = %acc21 : vector<8xf16>, %half_acc30 = %acc30 : vector<8xf16>, %half_acc31 = %acc31 : vector<8xf16>) -> (vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>) unroll {
-          %lhs0 = vector.fragment.load<lhs> %weight_stage_view[%zero, %k_half] shape [%m, %k] : view<64x40xf16, #dense> -> vector<16xf16>
-          %lhs1 = vector.fragment.load<lhs> %weight_stage_view[%sixteen, %k_half] shape [%m, %k] : view<64x40xf16, #dense> -> vector<16xf16>
-          %lhs2 = vector.fragment.load<lhs> %weight_stage_view[%thirtytwo, %k_half] shape [%m, %k] : view<64x40xf16, #dense> -> vector<16xf16>
-          %lhs3 = vector.fragment.load<lhs> %weight_stage_view[%fortyeight, %k_half] shape [%m, %k] : view<64x40xf16, #dense> -> vector<16xf16>
-          %rhs0 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %subgroup_route_base] shape [%k, %n] : view<32x64xf16, %activation_fragment_layout> -> vector<16xf16>
-          %rhs1 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %subgroup_route1] shape [%k, %n] : view<32x64xf16, %activation_fragment_layout> -> vector<16xf16>
+        %next00, %next01, %next10, %next11 = scf.for %k_half = [%zero to %thirtytwo step %sixteen](%half_acc00 = %acc00 : vector<8xf16>, %half_acc01 = %acc01 : vector<8xf16>, %half_acc10 = %acc10 : vector<8xf16>, %half_acc11 = %acc11 : vector<8xf16>) -> (vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>) unroll {
+          %lhs0 = vector.fragment.load<lhs> %weight_stage_view[%subgroup_channel_add, %k_half] shape [%m, %k] : view<64x40xf16, #dense> -> vector<16xf16>
+          %lhs1 = vector.fragment.load<lhs> %weight_stage_view[%subgroup_channel1, %k_half] shape [%m, %k] : view<64x40xf16, #dense> -> vector<16xf16>
+          %rhs0 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %zero] shape [%k, %n] : view<32x64xf16, %activation_fragment_layout> -> vector<16xf16>
+          %rhs1 = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %sixteen] shape [%k, %n] : view<32x64xf16, %activation_fragment_layout> -> vector<16xf16>
           %half_next00 = vector.mma %lhs0, %rhs0, %half_acc00 : vector<16xf16>, vector<16xf16>, vector<8xf16>
           %half_next01 = vector.mma %lhs0, %rhs1, %half_acc01 : vector<16xf16>, vector<16xf16>, vector<8xf16>
           %half_next10 = vector.mma %lhs1, %rhs0, %half_acc10 : vector<16xf16>, vector<16xf16>, vector<8xf16>
           %half_next11 = vector.mma %lhs1, %rhs1, %half_acc11 : vector<16xf16>, vector<16xf16>, vector<8xf16>
-          %half_next20 = vector.mma %lhs2, %rhs0, %half_acc20 : vector<16xf16>, vector<16xf16>, vector<8xf16>
-          %half_next21 = vector.mma %lhs2, %rhs1, %half_acc21 : vector<16xf16>, vector<16xf16>, vector<8xf16>
-          %half_next30 = vector.mma %lhs3, %rhs0, %half_acc30 : vector<16xf16>, vector<16xf16>, vector<8xf16>
-          %half_next31 = vector.mma %lhs3, %rhs1, %half_acc31 : vector<16xf16>, vector<16xf16>, vector<8xf16>
-          scf.yield %half_next00, %half_next01, %half_next10, %half_next11, %half_next20, %half_next21, %half_next30, %half_next31 : vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>
+          scf.yield %half_next00, %half_next01, %half_next10, %half_next11 : vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>
         }
         kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-        scf.yield %next00, %next01, %next10, %next11, %next20, %next21, %next30, %next31 : vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>
+        scf.yield %next00, %next01, %next10, %next11 : vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>
       }
-      scf.yield %block_result00, %block_result01, %block_result10, %block_result11, %block_result20, %block_result21, %block_result30, %block_result31 : vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>
+      scf.yield %block_result00, %block_result01, %block_result10, %block_result11 : vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>
     }
     // WMMA produces [channel][route] fragments. Store each through a
     // transposed, wave-private LDS slice so every lane can scatter four
@@ -324,9 +327,8 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
     %publish_packet0 = index.rem %lane, %four : index
     %publish_packet = index.assume %publish_packet0 [range(%publish_packet0, 0, 3)] : index
     %publish_channel_add = index.mul %publish_packet, %four : index
-    %local_route0 = index.add %subgroup_route_base, %publish_route : index
-    %local_route1 = index.add %subgroup_route1, %publish_route : index
-    %assignment0_i32 = view.load %route_stage_view[%local_route0] : view<64xi32, #dense> -> i32
+    %local_route1 = index.add %sixteen, %publish_route : index
+    %assignment0_i32 = view.load %route_stage_view[%publish_route] : view<64xi32, #dense> -> i32
     %assignment1_i32 = view.load %route_stage_view[%local_route1] : view<64xi32, #dense> -> i32
     %assignment0_nonnegative = scalar.cmpi sge, %assignment0_i32, %zero_i32 : i32
     %assignment1_nonnegative = scalar.cmpi sge, %assignment1_i32, %zero_i32 : i32
@@ -346,25 +348,16 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
     %safe_assignment1 = index.assume %safe_assignment1_0 [range(%safe_assignment1_0, 0, 4095)] : index
     %bounded_assignment0, %bounded_assignment_count0 = index.assume %safe_assignment0, %assignment_count [lt(%safe_assignment0, %assignment_count)] : index, index
     %bounded_assignment1, %bounded_assignment_count1 = index.assume %safe_assignment1, %assignment_count [lt(%safe_assignment1, %assignment_count)] : index, index
-    %channel0 = index.add %channel_tile_base, %publish_channel_add : index
-    %channel1_base = index.add %channel_tile_base, %sixteen : index
+    %subgroup_channel_base = index.add %channel_tile_base, %subgroup_channel_add : index
+    %channel0 = index.add %subgroup_channel_base, %publish_channel_add : index
+    %channel1_base = index.add %subgroup_channel_base, %sixteen : index
     %channel1 = index.add %channel1_base, %publish_channel_add : index
-    %channel2_base = index.add %channel_tile_base, %thirtytwo : index
-    %channel2 = index.add %channel2_base, %publish_channel_add : index
-    %channel3_base = index.add %channel_tile_base, %fortyeight : index
-    %channel3 = index.add %channel3_base, %publish_channel_add : index
     %valid_channel0 = index.cmp ult, %channel0, %bounded_output_size : index
     %valid_channel1 = index.cmp ult, %channel1, %bounded_output_size : index
-    %valid_channel2 = index.cmp ult, %channel2, %bounded_output_size : index
-    %valid_channel3 = index.cmp ult, %channel3, %bounded_output_size : index
     %writes00 = scalar.andi %assignment0_nonnegative, %valid_channel0 : i1
     %writes01 = scalar.andi %assignment1_nonnegative, %valid_channel0 : i1
     %writes10 = scalar.andi %assignment0_nonnegative, %valid_channel1 : i1
     %writes11 = scalar.andi %assignment1_nonnegative, %valid_channel1 : i1
-    %writes20 = scalar.andi %assignment0_nonnegative, %valid_channel2 : i1
-    %writes21 = scalar.andi %assignment1_nonnegative, %valid_channel2 : i1
-    %writes30 = scalar.andi %assignment0_nonnegative, %valid_channel3 : i1
-    %writes31 = scalar.andi %assignment1_nonnegative, %valid_channel3 : i1
     vector.fragment.store<result> %result00, %result_fragment_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf16, %result_fragment_layout>
     kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
     scf.if %writes00 {
@@ -400,42 +393,9 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
       %mask = vector.mask.range [%channel1 to %bounded_output_size step %one] : index -> vector<4xi1>
       vector.store.mask %wide, %output_view[%bounded_assignment1, %channel1], %mask : vector<4xf32>, view<[%output_row_count]x[%bounded_output_size]xf32, #dense>, vector<4xi1>
     }
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
-    vector.fragment.store<result> %result20, %result_fragment_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf16, %result_fragment_layout>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
-    scf.if %writes20 {
-      %values = vector.load %result_physical_view[%publish_route, %publish_channel_add] : view<16x16xf16, #dense> -> vector<4xf16>
-      %wide = vector.extf %values : vector<4xf16> to vector<4xf32>
-      %mask = vector.mask.range [%channel2 to %bounded_output_size step %one] : index -> vector<4xi1>
-      vector.store.mask %wide, %output_view[%bounded_assignment0, %channel2], %mask : vector<4xf32>, view<[%output_row_count]x[%bounded_output_size]xf32, #dense>, vector<4xi1>
-    }
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
-    vector.fragment.store<result> %result21, %result_fragment_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf16, %result_fragment_layout>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
-    scf.if %writes21 {
-      %values = vector.load %result_physical_view[%publish_route, %publish_channel_add] : view<16x16xf16, #dense> -> vector<4xf16>
-      %wide = vector.extf %values : vector<4xf16> to vector<4xf32>
-      %mask = vector.mask.range [%channel2 to %bounded_output_size step %one] : index -> vector<4xi1>
-      vector.store.mask %wide, %output_view[%bounded_assignment1, %channel2], %mask : vector<4xf32>, view<[%output_row_count]x[%bounded_output_size]xf32, #dense>, vector<4xi1>
-    }
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
-    vector.fragment.store<result> %result30, %result_fragment_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf16, %result_fragment_layout>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
-    scf.if %writes30 {
-      %values = vector.load %result_physical_view[%publish_route, %publish_channel_add] : view<16x16xf16, #dense> -> vector<4xf16>
-      %wide = vector.extf %values : vector<4xf16> to vector<4xf32>
-      %mask = vector.mask.range [%channel3 to %bounded_output_size step %one] : index -> vector<4xi1>
-      vector.store.mask %wide, %output_view[%bounded_assignment0, %channel3], %mask : vector<4xf32>, view<[%output_row_count]x[%bounded_output_size]xf32, #dense>, vector<4xi1>
-    }
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
-    vector.fragment.store<result> %result31, %result_fragment_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf16, %result_fragment_layout>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
-    scf.if %writes31 {
-      %values = vector.load %result_physical_view[%publish_route, %publish_channel_add] : view<16x16xf16, #dense> -> vector<4xf16>
-      %wide = vector.extf %values : vector<4xf16> to vector<4xf32>
-      %mask = vector.mask.range [%channel3 to %bounded_output_size step %one] : index -> vector<4xi1>
-      vector.store.mask %wide, %output_view[%bounded_assignment1, %channel3], %mask : vector<4xf32>, view<[%output_row_count]x[%bounded_output_size]xf32, #dense>, vector<4xi1>
-    }
+    // Route and result stages are reused by the next concentrated-routing
+    // partition. All waves must finish publication before either stage changes.
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   }
   kernel.return
 }
@@ -514,11 +474,13 @@ check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_differential_cas
 check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case {
   %token_count = check.param.choice values([17, 32, 63, 128, 129, 512]) name("token_count") : index
   %route_count = check.literal value(8) : index
-  %route_stride = check.literal value(128) : index
+  %route_stride = check.literal value(8) : index
   %expert_count = check.literal value(128) : index
   %output_size = check.literal value(768) : index
   %input = check.generate.fill value(0.0) : tensor<[%token_count]x2048xf32>
-  %route_ids = check.generate.iota offset(0) step(1) period(127) : tensor<[%token_count]x128xi32>
+  // The compact iota exactly matches the oracle's balanced ring:
+  // expert(token, route) = (8 * token + route) % 128.
+  %route_ids = check.generate.iota offset(0) step(1) period(128) : tensor<[%token_count]x8xi32>
   %expert_table = check.generate.fill value(-1) : tensor<65664xi32>
   %gate_weight = check.generate.fill value(0) : tensor<128x768x8x144xi8>
   %up_weight = check.generate.fill value(0) : tensor<128x768x8x144xi8>
@@ -526,7 +488,7 @@ check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case {
   %up_projection = check.generate.fill value(1.0) : tensor<[%token_count]x8x768xf32>
   %output = check.generate.fill value(1.0) : tensor<[%token_count]x8x768xf32>
   %expected = check.generate.fill value(0.0) : tensor<[%token_count]x8x768xf32>
-  func.call @qwen3_moe_build_expert_table(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table) : (index, index, index, index, tensor<[%token_count]x128xi32>, tensor<65664xi32>)
+  func.call @qwen3_moe_build_expert_table(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table) : (index, index, index, index, tensor<[%token_count]x8xi32>, tensor<65664xi32>)
   func.call @qwen3_moe_routed_linear_q4k_f16_wmma(%token_count, %input, %expert_table, %gate_weight, %gate_projection) : (index, tensor<[%token_count]x2048xf32>, tensor<65664xi32>, tensor<128x768x8x144xi8>, tensor<[%token_count]x8x768xf32>)
   func.call @qwen3_moe_routed_linear_q4k_f16_wmma(%token_count, %input, %expert_table, %up_weight, %up_projection) : (index, tensor<[%token_count]x2048xf32>, tensor<65664xi32>, tensor<128x768x8x144xi8>, tensor<[%token_count]x8x768xf32>)
   func.call @qwen3_moe_routed_swiglu_f32(%token_count, %gate_projection, %up_projection, %output) : (index, tensor<[%token_count]x8x768xf32>, tensor<[%token_count]x8x768xf32>, tensor<[%token_count]x8x768xf32>)
