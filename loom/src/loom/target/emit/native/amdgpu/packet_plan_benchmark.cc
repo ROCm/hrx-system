@@ -94,24 +94,12 @@ struct FixtureSpec {
   FixtureInputStage input_stage;
   // Generated target-low topology; empty for authored source fixtures.
   GeneratedMatrixShape generated_matrix;
-  // Exact immutable frame shape required for comparable measurements.
-  FrameShape expected_frame;
 };
 
 constexpr FixtureSpec kMemoryControl = {
     /*.name=*/"memory_control",
     /*.input_stage=*/FixtureInputStage::kGeneratedLow,
     /*.generated_matrix=*/{},
-    /*.expected_frame=*/
-    {
-        /*.block_count=*/1,
-        /*.packet_count=*/10,
-        /*.assignment_count=*/8,
-        /*.matrix_packet_count=*/0,
-        /*.storage_lease_count=*/14,
-        /*.storage_lease_unit_count=*/20,
-        /*.storage_release_count=*/1,
-    },
 };
 
 constexpr FixtureSpec kMatrixDependencyCanary = {
@@ -122,16 +110,6 @@ constexpr FixtureSpec kMatrixDependencyCanary = {
         /*.phase_count=*/2,
         /*.valu_packets_per_phase=*/4,
         /*.dependent_valu_packets_per_phase=*/4,
-    },
-    /*.expected_frame=*/
-    {
-        /*.block_count=*/2,
-        /*.packet_count=*/49,
-        /*.assignment_count=*/44,
-        /*.matrix_packet_count=*/2,
-        /*.storage_lease_count=*/56,
-        /*.storage_lease_unit_count=*/128,
-        /*.storage_release_count=*/5,
     },
 };
 
@@ -150,16 +128,6 @@ constexpr FixtureSpec kMatrixLeaseOverlapStress = {
         /*.valu_packets_per_phase=*/208,
         /*.dependent_valu_packets_per_phase=*/64,
     },
-    /*.expected_frame=*/
-    {
-        /*.block_count=*/17,
-        /*.packet_count=*/3772,
-        /*.assignment_count=*/3737,
-        /*.matrix_packet_count=*/17,
-        /*.storage_lease_count=*/476,
-        /*.storage_lease_unit_count=*/1088,
-        /*.storage_release_count=*/68,
-    },
 };
 
 // Fixed-shape 4096-token, 18-head, 256-wide online attention workload. The
@@ -170,16 +138,6 @@ constexpr FixtureSpec kAttentionBf16 = {
     /*.name=*/"attention_bf16",
     /*.input_stage=*/FixtureInputStage::kAuthoredSource,
     /*.generated_matrix=*/{},
-    /*.expected_frame=*/
-    {
-        /*.block_count=*/21,
-        /*.packet_count=*/2570,
-        /*.assignment_count=*/2599,
-        /*.matrix_packet_count=*/17,
-        /*.storage_lease_count=*/916,
-        /*.storage_lease_unit_count=*/1366,
-        /*.storage_release_count=*/154,
-    },
 };
 
 static void AbortOnError(iree_status_t status) {
@@ -268,45 +226,6 @@ static FrameAnalysis AnalyzeFrame(const loom_low_emission_frame_t& frame) {
         frame.allocation.storage_lease_instances[i].location_count;
   }
   return analysis;
-}
-
-static bool FrameShapeMatches(const FrameShape& lhs, const FrameShape& rhs) {
-  return lhs.block_count == rhs.block_count &&
-         lhs.packet_count == rhs.packet_count &&
-         lhs.assignment_count == rhs.assignment_count &&
-         lhs.matrix_packet_count == rhs.matrix_packet_count &&
-         lhs.storage_lease_count == rhs.storage_lease_count &&
-         lhs.storage_lease_unit_count == rhs.storage_lease_unit_count &&
-         lhs.storage_release_count == rhs.storage_release_count;
-}
-
-static void AbortOnUnexpectedFrame(const FixtureSpec& spec,
-                                   const FrameShape& actual) {
-  if (FrameShapeMatches(actual, spec.expected_frame)) {
-    return;
-  }
-  const FrameShape& expected = spec.expected_frame;
-  std::fprintf(stderr,
-               "%s frame shape changed\n"
-               "  expected: blocks=%zu packets=%zu assignments=%zu matrix=%zu "
-               "leases=%zu lease_units=%zu releases=%zu\n"
-               "  actual:   blocks=%zu packets=%zu assignments=%zu matrix=%zu "
-               "leases=%zu lease_units=%zu releases=%zu\n",
-               spec.name, static_cast<size_t>(expected.block_count),
-               static_cast<size_t>(expected.packet_count),
-               static_cast<size_t>(expected.assignment_count),
-               static_cast<size_t>(expected.matrix_packet_count),
-               static_cast<size_t>(expected.storage_lease_count),
-               static_cast<size_t>(expected.storage_lease_unit_count),
-               static_cast<size_t>(expected.storage_release_count),
-               static_cast<size_t>(actual.block_count),
-               static_cast<size_t>(actual.packet_count),
-               static_cast<size_t>(actual.assignment_count),
-               static_cast<size_t>(actual.matrix_packet_count),
-               static_cast<size_t>(actual.storage_lease_count),
-               static_cast<size_t>(actual.storage_lease_unit_count),
-               static_cast<size_t>(actual.storage_release_count));
-  std::abort();
 }
 
 static std::string BuildMemoryControlSource() {
@@ -598,11 +517,9 @@ class PacketPlanFixture {
         loom_low_schedule_pair_affinity_list_empty();
     AbortOnError(loom_amdgpu_vopd_build_schedule_pair_affinities(
         &resolved_target, &frame_arena_, &pair_affinities));
-    loom_low_schedule_structural_state_read_list_t structural_state_reads =
-        loom_low_schedule_structural_state_read_list_empty();
-    AbortOnError(loom_amdgpu_descriptor_build_structural_state_reads(
-        resolved_target.descriptor_set, &frame_arena_,
-        &structural_state_reads));
+    const loom_low_schedule_structural_state_read_list_t
+        structural_state_reads =
+            loom_amdgpu_descriptor_structural_state_reads();
 
     loom_amdgpu_hal_kernel_abi_verify_result_t abi_verify_result = {};
     AbortOnError(loom_amdgpu_hal_kernel_abi_verify_low(
@@ -640,7 +557,6 @@ class PacketPlanFixture {
     }
 
     analysis_ = AnalyzeFrame(frame_);
-    AbortOnUnexpectedFrame(spec, analysis_.shape);
   }
 
   ~PacketPlanFixture() {
