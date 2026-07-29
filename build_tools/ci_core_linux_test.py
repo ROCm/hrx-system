@@ -178,6 +178,74 @@ class CiCoreLinuxTest(unittest.TestCase):
         self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=ON", configure_cmd)
         self.assertNotIn("-DCMAKE_C_COMPILER_LAUNCHER=ccache", configure_cmd)
         self.assertNotIn("-DCMAKE_CXX_COMPILER_LAUNCHER=ccache", configure_cmd)
+        self.assertEqual(commands[1][0:2], ["cmake", "--build"])
+        self.assertIn("all", commands[1])
+        self.assertEqual(
+            [command[0:2] for command in commands[2:]],
+            [["cmake", "--install"], ["cmake", "--install"]],
+        )
+
+    def test_sanitizer_build_only_configures_the_source_test_tree(self):
+        commands = self.build_core_commands({"HRX_SANITIZER": "asan"})
+
+        self.assertEqual(len(commands), 1)
+        self.assertIn("-DIREE_ENABLE_ASAN=ON", commands[0])
+        self.assertIn("-DIREE_BUILD_TESTS=ON", commands[0])
+
+    def test_sanitizer_tests_build_the_selected_source_ctest_closure(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            rocm_root = root / "rocm"
+            rocm_root.mkdir()
+            build_dir = root / "build"
+            build_dir.mkdir()
+            (build_dir / "CTestTestfile.cmake").touch()
+
+            parser = argparse.ArgumentParser()
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "HRX_SANITIZER": "asan",
+                    "HRX_CTEST_REGEX": "^iree/",
+                    "HRX_CTEST_EXCLUDE_REGEX": "excluded",
+                    "HRX_CTEST_LABEL_EXCLUDE_REGEX": "runtime-resource=|manual",
+                    "HRX_CTEST_PARALLELISM": "3",
+                },
+                clear=True,
+            ):
+                ci_core_linux.add_shared_args(parser)
+                args = parser.parse_args([])
+                args.rocm_root = rocm_root
+                args.build_dir = build_dir
+
+                selected_test_step = mock.Mock()
+                selected_test_step.run.return_value = 0
+                with mock.patch.object(
+                    ci_core_linux.ctest_dev,
+                    "CTestBuildAndRunStep",
+                    return_value=selected_test_step,
+                ) as step_type:
+                    ci_core_linux.test_core(args)
+
+        step_type.assert_called_once()
+        step_args = step_type.call_args.kwargs
+        self.assertEqual(step_args["build_dir"], build_dir)
+        self.assertEqual(
+            step_args["arguments"],
+            [
+                "--parallel",
+                "3",
+                "-R",
+                "^iree/",
+                "-E",
+                "(excluded)",
+                "-LE",
+                "runtime-resource=|manual",
+                "--no-tests=error",
+            ],
+        )
+        self.assertIn("ASAN_OPTIONS", step_args["env"])
+        selected_test_step.run.assert_called_once_with(verbose=True)
 
     def test_build_core_preserves_standard_compiler_launcher_options(self):
         commands = self.build_core_commands(
@@ -198,6 +266,8 @@ class CiCoreLinuxTest(unittest.TestCase):
     def test_core_linux_workflow_has_no_unbacked_ccache_directory(self):
         workflow = (REPO_ROOT / ".github/workflows/build_core_linux.yml").read_text()
         self.assertNotIn("CCACHE_DIR", workflow)
+        self.assertIn("- name: Prepare CMake build", workflow)
+        self.assertIn("- name: Run tests", workflow)
 
 
 if __name__ == "__main__":

@@ -37,6 +37,7 @@ py_test(
         "ci_core_linux_test.py",
     ],
     main = "ci_core_linux_test.py",
+    deps = ["//build_tools/devtools"],
 )
 
 py_test(

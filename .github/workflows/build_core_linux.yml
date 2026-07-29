@@ -107,10 +107,10 @@ jobs:
       - name: Fetch ROCm artifacts
         run: python3 build_tools/ci_core_linux.py fetch-rocm
 
-      - name: Configure, build, and install
+      - name: Prepare CMake build
         run: python3 build_tools/ci_core_linux.py build
 
-      - name: Run installed tests
+      - name: Run tests
         if: ${{ inputs.run_tests }}
         run: python3 build_tools/ci_core_linux.py test
 
