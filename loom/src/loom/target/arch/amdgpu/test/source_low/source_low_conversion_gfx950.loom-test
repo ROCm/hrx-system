@@ -17,3 +17,21 @@ low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_bf16x3(%input: reg<
   %converted = concat(%7, %10) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %converted
 }
+
+// ====
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @vector_uitofp_i8x4(%input: vector<4xi8>) -> (vector<4xf32>) {
+  %converted = vector.uitofp %input : vector<4xi8> to vector<4xf32>
+  func.return %converted : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_uitofp_i8x4(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna4.core> {
+  %5 = v_cvt_f32_ubyte0 %input
+  %6 = v_cvt_f32_ubyte1 %input
+  %7 = v_cvt_f32_ubyte2 %input
+  %8 = v_cvt_f32_ubyte3 %input
+  %converted = concat(%5, %6, %7, %8) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %converted
+}

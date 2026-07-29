@@ -131,15 +131,35 @@ func.def target(@target) @vector_uitofp_i8x4(%input: vector<4xi8>) -> (vector<4x
 
 // ----
 low.func.def target(@target) abi(hal_kernel) @vector_uitofp_i8x4(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
-  %5 = v_and_b32_lit %input, 255
-  %6 = v_cvt_f32_u32 %5
-  %7 = v_bfe_u32_offset_width_inline %input {offset = 8, width = 8}
-  %8 = v_cvt_f32_u32 %7
-  %9 = v_bfe_u32_offset_width_inline %input {offset = 16, width = 8}
-  %10 = v_cvt_f32_u32 %9
-  %11 = v_bfe_u32_offset_width_inline %input {offset = 24, width = 8}
-  %12 = v_cvt_f32_u32 %11
-  %converted = concat(%6, %8, %10, %12) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %5 = v_cvt_f32_ubyte0 %input
+  %6 = v_cvt_f32_ubyte1 %input
+  %7 = v_cvt_f32_ubyte2 %input
+  %8 = v_cvt_f32_ubyte3 %input
+  %converted = concat(%5, %6, %7, %8) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+func.def target(@target) @vector_uitofp_i8x8(%input: vector<8xi8>) -> (vector<8xf32>) {
+  %converted = vector.uitofp %input : vector<8xi8> to vector<8xf32>
+  func.return %converted : vector<8xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_uitofp_i8x8(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.gfx11.generic.core> {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %6 = v_cvt_f32_ubyte0 %5
+  %7 = v_cvt_f32_ubyte1 %5
+  %8 = v_cvt_f32_ubyte2 %5
+  %9 = v_cvt_f32_ubyte3 %5
+  %10 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %11 = v_cvt_f32_ubyte0 %10
+  %12 = v_cvt_f32_ubyte1 %10
+  %13 = v_cvt_f32_ubyte2 %10
+  %14 = v_cvt_f32_ubyte3 %10
+  %converted = concat(%6, %7, %8, %9, %11, %12, %13, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
   return %converted
 }
 

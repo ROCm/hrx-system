@@ -34,6 +34,13 @@ func.def @vector_uitofp_i8x4(%input: vector<4xi8>) -> (vector<4xf32>) {
 
 // ====
 
+func.def @vector_uitofp_i8x8(%input: vector<8xi8>) -> (vector<8xf32>) {
+  %converted = vector.uitofp %input : vector<8xi8> to vector<8xf32>
+  func.return %converted : vector<8xf32>
+}
+
+// ====
+
 func.def @vector_sitofp_i16x2(%input: vector<2xi16>) -> (vector<2xf32>) {
   %converted = vector.sitofp %input : vector<2xi16> to vector<2xf32>
   func.return %converted : vector<2xf32>

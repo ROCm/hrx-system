@@ -1282,6 +1282,10 @@ def test_full_width_conversion_results_are_rematerializable() -> None:
         "amdgpu.v_cvt_i32_f32",
         "amdgpu.v_cvt_f32_f16",
         "amdgpu.v_cvt_f32_u32",
+        "amdgpu.v_cvt_f32_ubyte0",
+        "amdgpu.v_cvt_f32_ubyte1",
+        "amdgpu.v_cvt_f32_ubyte2",
+        "amdgpu.v_cvt_f32_ubyte3",
         "amdgpu.v_cvt_u32_f32",
     )
     excluded_descriptor_keys = (
@@ -1321,6 +1325,23 @@ def test_full_width_conversion_results_are_rematerializable() -> None:
                 constraint.kind is ConstraintKind.REMATERIALIZABLE
                 for constraint in descriptor.constraints
             ), descriptor_key
+
+
+def test_unsigned_byte_conversion_family_is_available_on_all_targets() -> None:
+    descriptor_keys = {
+        "amdgpu.v_cvt_f32_ubyte0",
+        "amdgpu.v_cvt_f32_ubyte1",
+        "amdgpu.v_cvt_f32_ubyte2",
+        "amdgpu.v_cvt_f32_ubyte3",
+    }
+    for target, builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.items():
+        available_keys = {
+            descriptor.descriptor_key for descriptor in builder.overlay_rows()
+        }
+        assert descriptor_keys <= available_keys, (
+            target,
+            descriptor_keys - available_keys,
+        )
 
 
 def test_scc_free_scalar_integer_results_are_rematerializable() -> None:

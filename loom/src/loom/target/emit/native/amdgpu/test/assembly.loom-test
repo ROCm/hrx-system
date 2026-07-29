@@ -2467,6 +2467,25 @@ low.func.def target(@gfx12_target) @gfx12_cvt_f32_f16_high_vgpr_source(%input: r
 
 // ====
 
+// RUN: emit amdgpu-assembly @gfx11_cvt_f32_ubyte_family waits=none
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_cvt_f32_ubyte_family(%input: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %byte0 = v_cvt_f32_ubyte0 %input
+  %byte1 = v_cvt_f32_ubyte1 %input
+  %byte2 = v_cvt_f32_ubyte2 %input
+  %byte3 = v_cvt_f32_ubyte3 %input
+  return
+}
+
+// ----
+  v_cvt_f32_ubyte0 v1, v0
+  v_cvt_f32_ubyte1 v1, v0
+  v_cvt_f32_ubyte2 v1, v0
+  v_cvt_f32_ubyte3 v0, v0
+  s_endpgm
+
+// ====
+
 // RUN: emit amdgpu-assembly @gfx11_buffer_off_zero waits=none
 amdgpu.target<gfx1100> @gfx11_target
 low.func.def target(@gfx11_target) @gfx11_buffer_off_zero(%resource: reg<amdgpu.sgpr x4>) {
