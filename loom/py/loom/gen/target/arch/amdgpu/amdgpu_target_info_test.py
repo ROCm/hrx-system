@@ -104,7 +104,26 @@ def test_target_info_table_source_is_data_only() -> None:
     assert "\nreturn " not in source
     assert ".descriptor_set = {" in source
     assert ".generic_version = UINT32_C(0)," in source
+    assert ".generic_code_object = {" in source
+    assert ".processor_ordinal = LOOM_AMDGPU_PROCESSOR_ORDINAL_NONE," in source
+    assert ".introduction_version = UINT16_C(0)," in source
     assert ".kernel_descriptor = {" in source
+
+
+def test_generic_code_object_fields_cover_canonical_map() -> None:
+    processors = amdgpu_target_info.sorted_processor_infos()
+    processor_ordinals = {info.processor: ordinal for ordinal, info in enumerate(processors)}
+    processors_by_name = {info.processor: info for info in processors}
+
+    for compatibility in amdgpu_target_info_data.AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
+        exact_processor = processors_by_name[compatibility.exact_processor]
+        generic_processor_ordinal, introduction_version = amdgpu_target_info._processor_generic_code_object_fields(exact_processor, processor_ordinals)
+        if compatibility.generic_introduction_version != 0:
+            assert generic_processor_ordinal == processor_ordinals[compatibility.code_object_processor]
+            assert introduction_version == compatibility.generic_introduction_version
+        else:
+            assert generic_processor_ordinal is None
+            assert introduction_version == 0
 
 
 def test_memory_cache_policy_rejects_missing_encoding_row() -> None:

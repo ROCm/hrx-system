@@ -32,6 +32,107 @@ TEST(AmdgpuTargetInfoTest, IteratesProcessors) {
   }
 }
 
+TEST(AmdgpuTargetInfoTest, ExhaustsCodeObjectSatisfactionRelation) {
+  const iree_host_size_t count = loom_amdgpu_target_info_processor_count();
+  for (iree_host_size_t effective_index = 0; effective_index < count;
+       ++effective_index) {
+    const loom_amdgpu_processor_info_t* effective_processor =
+        loom_amdgpu_target_info_processor_at(effective_index);
+    ASSERT_NE(effective_processor, nullptr);
+
+    const uint16_t generic_processor_ordinal =
+        effective_processor->generic_code_object.processor_ordinal;
+    if (generic_processor_ordinal == LOOM_AMDGPU_PROCESSOR_ORDINAL_NONE) {
+      EXPECT_EQ(effective_processor->generic_code_object.introduction_version,
+                0u);
+    } else {
+      const loom_amdgpu_processor_info_t* generic_processor =
+          loom_amdgpu_target_info_processor_at(generic_processor_ordinal);
+      ASSERT_NE(generic_processor, nullptr);
+      EXPECT_GT(generic_processor->elf.generic_version, 0u);
+      EXPECT_GT(effective_processor->generic_code_object.introduction_version,
+                0u);
+      EXPECT_LE(effective_processor->generic_code_object.introduction_version,
+                generic_processor->elf.generic_version);
+    }
+
+    for (iree_host_size_t required_index = 0; required_index < count;
+         ++required_index) {
+      const loom_amdgpu_processor_info_t* required_processor =
+          loom_amdgpu_target_info_processor_at(required_index);
+      ASSERT_NE(required_processor, nullptr);
+      const bool expected =
+          effective_processor->ordinal == required_processor->ordinal ||
+          (generic_processor_ordinal == required_processor->ordinal &&
+           effective_processor->generic_code_object.introduction_version <=
+               required_processor->elf.generic_version);
+      EXPECT_EQ(loom_amdgpu_processor_satisfies_code_object_requirement(
+                    effective_processor, required_processor),
+                expected)
+          << "effective ordinal " << effective_processor->ordinal
+          << ", required ordinal " << required_processor->ordinal;
+    }
+  }
+}
+
+TEST(AmdgpuTargetInfoTest, MatchesNamedCodeObjectRelationWitnesses) {
+  const loom_amdgpu_processor_info_t* gfx1151 =
+      loom_amdgpu_target_info_find_processor(IREE_SV("gfx1151"));
+  const loom_amdgpu_processor_info_t* gfx1170 =
+      loom_amdgpu_target_info_find_processor(IREE_SV("gfx1170"));
+  const loom_amdgpu_processor_info_t* gfx11_generic =
+      loom_amdgpu_target_info_find_processor(IREE_SV("gfx11-generic"));
+  const loom_amdgpu_processor_info_t* gfx1250 =
+      loom_amdgpu_target_info_find_processor(IREE_SV("gfx1250"));
+  const loom_amdgpu_processor_info_t* gfx1251 =
+      loom_amdgpu_target_info_find_processor(IREE_SV("gfx1251"));
+  const loom_amdgpu_processor_info_t* gfx12_generic =
+      loom_amdgpu_target_info_find_processor(IREE_SV("gfx12-generic"));
+  const loom_amdgpu_processor_info_t* gfx12_5_generic =
+      loom_amdgpu_target_info_find_processor(IREE_SV("gfx12-5-generic"));
+  ASSERT_NE(gfx1151, nullptr);
+  ASSERT_NE(gfx1170, nullptr);
+  ASSERT_NE(gfx11_generic, nullptr);
+  ASSERT_NE(gfx1250, nullptr);
+  ASSERT_NE(gfx1251, nullptr);
+  ASSERT_NE(gfx12_generic, nullptr);
+  ASSERT_NE(gfx12_5_generic, nullptr);
+
+  EXPECT_TRUE(loom_amdgpu_processor_satisfies_code_object_requirement(
+      gfx1151, gfx11_generic));
+  EXPECT_FALSE(loom_amdgpu_processor_satisfies_code_object_requirement(
+      gfx1170, gfx11_generic));
+  EXPECT_FALSE(loom_amdgpu_processor_satisfies_code_object_requirement(
+      gfx1151, gfx1170));
+  EXPECT_TRUE(loom_amdgpu_processor_satisfies_code_object_requirement(
+      gfx1250, gfx12_5_generic));
+  EXPECT_TRUE(loom_amdgpu_processor_satisfies_code_object_requirement(
+      gfx1251, gfx12_5_generic));
+  EXPECT_FALSE(loom_amdgpu_processor_satisfies_code_object_requirement(
+      gfx1250, gfx12_generic));
+}
+
+TEST(AmdgpuTargetInfoTest, HonorsGenericCodeObjectIntroductionVersion) {
+  const loom_amdgpu_processor_info_t* gfx1151 =
+      loom_amdgpu_target_info_find_processor(IREE_SV("gfx1151"));
+  const loom_amdgpu_processor_info_t* gfx11_generic =
+      loom_amdgpu_target_info_find_processor(IREE_SV("gfx11-generic"));
+  ASSERT_NE(gfx1151, nullptr);
+  ASSERT_NE(gfx11_generic, nullptr);
+
+  loom_amdgpu_processor_info_t effective_processor = *gfx1151;
+  loom_amdgpu_processor_info_t required_processor = *gfx11_generic;
+  effective_processor.generic_code_object.introduction_version = 2;
+
+  required_processor.elf.generic_version = 1;
+  EXPECT_FALSE(loom_amdgpu_processor_satisfies_code_object_requirement(
+      &effective_processor, &required_processor));
+
+  required_processor.elf.generic_version = 2;
+  EXPECT_TRUE(loom_amdgpu_processor_satisfies_code_object_requirement(
+      &effective_processor, &required_processor));
+}
+
 TEST(AmdgpuTargetInfoTest, IteratesDescriptorSets) {
   const iree_host_size_t count = loom_amdgpu_target_info_descriptor_set_count();
   ASSERT_GT(count, 0u);

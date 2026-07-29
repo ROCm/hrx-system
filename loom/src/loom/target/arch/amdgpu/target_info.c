@@ -81,6 +81,18 @@ iree_status_t loom_amdgpu_target_info_lookup_processor(
                           (int)processor_name.size, processor_name.data);
 }
 
+bool loom_amdgpu_processor_satisfies_code_object_requirement(
+    const loom_amdgpu_processor_info_t* effective_processor,
+    const loom_amdgpu_processor_info_t* required_processor) {
+  if (effective_processor->ordinal == required_processor->ordinal) {
+    return true;
+  }
+  return effective_processor->generic_code_object.processor_ordinal ==
+             required_processor->ordinal &&
+         effective_processor->generic_code_object.introduction_version <=
+             required_processor->elf.generic_version;
+}
+
 iree_status_t loom_amdgpu_target_info_lookup_descriptor_set(
     iree_string_view_t descriptor_set_key,
     const loom_amdgpu_descriptor_set_info_t** out_descriptor_set) {

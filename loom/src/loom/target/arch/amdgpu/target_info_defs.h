@@ -27,7 +27,10 @@ extern "C" {
 // Stable target-family identity for AMDGPU low descriptor sets.
 #define LOOM_AMDGPU_TARGET_STABLE_ID UINT64_C(0x6c46df5542915cc5)
 
-// Sentinel for processors or descriptor sets without target-low support.
+// Sentinel for a processor relation without a referenced processor.
+#define LOOM_AMDGPU_PROCESSOR_ORDINAL_NONE UINT16_MAX
+
+// Sentinel for a processor without target-low descriptor support.
 #define LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE UINT16_MAX
 
 // Default raw buffer-resource descriptor control word for global HAL bindings.
@@ -317,6 +320,13 @@ typedef struct loom_amdgpu_processor_elf_info_t {
   uint32_t generic_version;
 } loom_amdgpu_processor_elf_info_t;
 
+typedef struct loom_amdgpu_processor_generic_code_object_info_t {
+  // Dense ordinal of the compatible generic processor, or NONE.
+  uint16_t processor_ordinal;
+  // First generic code-object version compatible with this exact processor.
+  uint16_t introduction_version;
+} loom_amdgpu_processor_generic_code_object_info_t;
+
 typedef struct loom_amdgpu_processor_wavefront_info_t {
   // Default metadata wavefront size in lanes.
   uint32_t default_size;
@@ -359,6 +369,8 @@ typedef struct loom_amdgpu_processor_info_t {
   loom_amdgpu_processor_descriptor_set_info_t descriptor_set;
   // AMDHSA ELF code-object identity for this processor.
   loom_amdgpu_processor_elf_info_t elf;
+  // Versioned generic code-object relation for this exact processor.
+  loom_amdgpu_processor_generic_code_object_info_t generic_code_object;
   // Wavefront facts selected for this processor.
   loom_amdgpu_processor_wavefront_info_t wavefront;
   // Kernel descriptor ABI facts selected for this processor.
@@ -481,6 +493,17 @@ loom_amdgpu_target_info_descriptor_set_at(uint16_t descriptor_set_ordinal);
 iree_status_t loom_amdgpu_target_info_lookup_processor(
     iree_string_view_t processor,
     const loom_amdgpu_processor_info_t** out_processor);
+
+// Returns true when |effective_processor| refines |required_processor| under
+// AMDGPU's versioned code-object processor relation.
+//
+// Identical exact or generic processors satisfy themselves. An exact processor
+// may additionally satisfy its canonical generic processor when that generic
+// record's current version includes the exact processor. Generic processors do
+// not satisfy exact processors or other generic families.
+bool loom_amdgpu_processor_satisfies_code_object_requirement(
+    const loom_amdgpu_processor_info_t* effective_processor,
+    const loom_amdgpu_processor_info_t* required_processor);
 
 // Looks up a supported AMDGPU target-low descriptor set by key.
 iree_status_t loom_amdgpu_target_info_lookup_descriptor_set(

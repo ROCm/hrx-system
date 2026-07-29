@@ -72,6 +72,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE,
     AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
     AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS,
+    AMDGPU_PROCESSOR_ORDINAL_NONE,
     AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
     AMDGPU_PROCESSOR_SCHEDULING_KNOWN_BITS,
     AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES,
@@ -92,9 +93,11 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AmdgpuProcessorInfo,
     AmdgpuVectorMemoryCachePolicyEncodingInfo,
     amdgpu_descriptor_set_ordinal,
+    amdgpu_generic_code_object_compatibility_info,
     kernel_descriptor_profile_supports_wavefront_size,
     sorted_descriptor_set_infos,
     sorted_processor_infos,
+    validate_amdgpu_code_object_processor_rows,
     validate_amdgpu_descriptor_set_isa_xml,
     validate_amdgpu_generic_contracts,
 )
@@ -703,8 +706,8 @@ def _validate_processors(
         raise ValueError("AMDGPU processor target-info keys must be sorted")
     if len(processor_names) != len(set(processor_names)):
         raise ValueError("AMDGPU processor target-info keys must be unique")
-    if len(processors) > 0x10000:
-        raise ValueError("AMDGPU processor target-info rows must fit u16 ordinals")
+    if len(processors) >= AMDGPU_PROCESSOR_ORDINAL_NONE:
+        raise ValueError("AMDGPU processor target-info ordinals must fit uint16_t")
     descriptor_set_keys = {info.key for info in descriptor_sets}
     for info in processors:
         kernel_descriptor = info.kernel_descriptor
@@ -870,12 +873,31 @@ def _processor_descriptor_set_ordinal_expr(info: AmdgpuProcessorInfo) -> str:
     return _u16_expr(amdgpu_descriptor_set_ordinal(info.descriptor_set.key))
 
 
+def _processor_generic_code_object_fields(
+    info: AmdgpuProcessorInfo,
+    processor_ordinals: Mapping[str, int],
+) -> tuple[int | None, int]:
+    compatibility = amdgpu_generic_code_object_compatibility_info(info.processor)
+    if compatibility is None:
+        return None, 0
+    return (
+        processor_ordinals[compatibility.code_object_processor],
+        compatibility.generic_introduction_version,
+    )
+
+
 def _emit_processor_rows(processors: Sequence[AmdgpuProcessorInfo]) -> list[str]:
     lines = [
         "const loom_amdgpu_processor_info_t loom_amdgpu_target_info_processor_infos[] = {",
     ]
+    processor_ordinals = {info.processor: ordinal for ordinal, info in enumerate(processors)}
     for processor_ordinal, info in enumerate(processors):
         kernel_descriptor = info.kernel_descriptor
+        (
+            generic_processor_ordinal,
+            generic_introduction_version,
+        ) = _processor_generic_code_object_fields(info, processor_ordinals)
+        generic_processor_ordinal_expr = "LOOM_AMDGPU_PROCESSOR_ORDINAL_NONE" if generic_processor_ordinal is None else _u16_expr(generic_processor_ordinal)
         lines.extend(
             [
                 "  {",
@@ -890,6 +912,10 @@ def _emit_processor_rows(processors: Sequence[AmdgpuProcessorInfo]) -> list[str]
                 f"      .machine_flags = UINT32_C(0x{info.elf.machine_flags:03x}),",
                 f"      .feature_flags = UINT32_C(0x{info.elf.feature_flags:x}),",
                 f"      .generic_version = UINT32_C({info.elf.generic_version}),",
+                "    },",
+                "    .generic_code_object = {",
+                f"      .processor_ordinal = {generic_processor_ordinal_expr},",
+                f"      .introduction_version = {_u16_expr(generic_introduction_version)},",
                 "    },",
                 "    .wavefront = {",
                 f"      .default_size = {info.wavefront.default_size},",
@@ -966,6 +992,7 @@ def write_target_info_to_paths(
     _validate_descriptor_sets(descriptor_sets)
     _validate_descriptor_set_rows(descriptor_set_rows)
     _validate_processors(processors, descriptor_sets)
+    validate_amdgpu_code_object_processor_rows(processors)
     header = _emit_header(descriptor_sets)
     tables_header = _emit_tables_header()
     source = _emit_tables_source(processors, descriptor_set_rows)

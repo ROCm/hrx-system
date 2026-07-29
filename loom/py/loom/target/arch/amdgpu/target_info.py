@@ -19,12 +19,15 @@ from typing import Protocol
 
 from build_tools.amdgpu.target_map_data import (
     AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS,
+    AMDGPU_GENERIC_CODE_OBJECT_INFOS,
+    AmdgpuCodeObjectCompatibilityInfo,
     generic_code_object_current_version,
 )
 
 from loom.dialect.cache import CacheScope, CacheTemporal
 
 AMDGPU_AMDHSA_TARGET_TRIPLE = "amdgcn-amd-amdhsa"
+AMDGPU_PROCESSOR_ORDINAL_NONE = (2**16) - 1
 AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE = (2**16) - 1
 
 AMDGPU_KERNEL_DESCRIPTOR_PROFILE_NONE = "none"
@@ -1326,6 +1329,64 @@ def amdgpu_processor_info_by_name(processor: str) -> AmdgpuProcessorInfo | None:
         if info.processor == processor:
             return info
     return None
+
+
+def amdgpu_generic_code_object_compatibility_info(
+    exact_processor: str,
+) -> AmdgpuCodeObjectCompatibilityInfo | None:
+    for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
+        if info.exact_processor != exact_processor:
+            continue
+        if info.generic_introduction_version != 0:
+            return info
+        return None
+    return None
+
+
+def validate_amdgpu_code_object_processor_rows(
+    processors: Sequence[AmdgpuProcessorInfo],
+) -> None:
+    processors_by_name = {info.processor: info for info in processors}
+    required_processor_names = {
+        info.exact_processor for info in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
+    } | {info.processor for info in AMDGPU_GENERIC_CODE_OBJECT_INFOS}
+    missing_processor_names = sorted(
+        required_processor_names - processors_by_name.keys()
+    )
+    if missing_processor_names:
+        raise ValueError(
+            "AMDGPU target-info table is missing canonical code-object "
+            f"processors: {', '.join(missing_processor_names)}"
+        )
+
+    expected_generic_processor_names = {
+        info.processor for info in AMDGPU_GENERIC_CODE_OBJECT_INFOS
+    }
+    actual_generic_processor_names = {
+        info.processor for info in processors if info.elf.generic_version != 0
+    }
+    if actual_generic_processor_names != expected_generic_processor_names:
+        missing_generic_processor_names = sorted(
+            expected_generic_processor_names - actual_generic_processor_names
+        )
+        unexpected_processor_names = sorted(
+            actual_generic_processor_names - expected_generic_processor_names
+        )
+        raise ValueError(
+            "AMDGPU target-info generic code-object processors disagree with "
+            f"the canonical map; missing: "
+            f"{', '.join(missing_generic_processor_names) or 'none'}; "
+            f"unexpected: {', '.join(unexpected_processor_names) or 'none'}"
+        )
+
+    for generic_info in AMDGPU_GENERIC_CODE_OBJECT_INFOS:
+        processor = processors_by_name[generic_info.processor]
+        if processor.elf.generic_version != generic_info.current_version:
+            raise ValueError(
+                f"AMDGPU generic processor {generic_info.processor} has "
+                f"target-info version {processor.elf.generic_version}, "
+                f"expected canonical version {generic_info.current_version}"
+            )
 
 
 def _occupancy_rounded_units(units: int, granularity: int) -> int:

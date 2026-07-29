@@ -31,6 +31,8 @@ from loom.target.arch.amdgpu.target_info import (
     amdgpu_descriptor_set_info_by_generator_target,
     amdgpu_descriptor_set_storage_info_by_generator_target,
     amdgpu_descriptor_set_view_infos_by_storage_generator_target,
+    amdgpu_generic_code_object_compatibility_info,
+    validate_amdgpu_code_object_processor_rows,
     validate_amdgpu_descriptor_set_isa_xml,
     validate_amdgpu_generic_contracts,
 )
@@ -237,8 +239,10 @@ def test_rdna3_5_processors_use_gfx11_matrix_shapes() -> None:
         assert processor.features.matrix == AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11
 
 
-def test_generic_processor_elf_flags_use_canonical_code_object_versions() -> None:
+def test_processor_rows_cover_canonical_code_object_relation() -> None:
     processor_infos = {info.processor: info for info in AMDGPU_PROCESSOR_INFOS}
+    validate_amdgpu_code_object_processor_rows(AMDGPU_PROCESSOR_INFOS)
+
     generic_processors = {info.processor for info in AMDGPU_GENERIC_CODE_OBJECT_INFOS}
     assert {
         processor for processor in processor_infos if processor.endswith("-generic")
@@ -248,3 +252,27 @@ def test_generic_processor_elf_flags_use_canonical_code_object_versions() -> Non
             processor_infos[generic_info.processor].elf.generic_version
             == generic_info.current_version
         )
+
+    for compatibility in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS:
+        assert compatibility.exact_processor in processor_infos
+        assert compatibility.code_object_processor in processor_infos
+        derived_compatibility = amdgpu_generic_code_object_compatibility_info(
+            compatibility.exact_processor
+        )
+        if compatibility.generic_introduction_version != 0:
+            assert derived_compatibility == compatibility
+            generic_processor = processor_infos[compatibility.code_object_processor]
+            assert (
+                compatibility.generic_introduction_version
+                <= generic_processor.elf.generic_version
+            )
+        else:
+            assert derived_compatibility is None
+
+
+def test_code_object_relation_rejects_missing_canonical_processor() -> None:
+    processors = tuple(
+        info for info in AMDGPU_PROCESSOR_INFOS if info.processor != "gfx1151"
+    )
+    with _raises_value_error("missing canonical.*gfx1151"):
+        validate_amdgpu_code_object_processor_rows(processors)
