@@ -117,7 +117,28 @@ function, four parameters/bindings, zero constant bytes, workgroup size
 The artifact manifest describes the emitted artifact contract. The compile
 report describes compiler evidence for the invocation: status, selected backend
 and target bundle, schedule size, register pressure, instruction mix, spills,
-emitted code bytes, and memory summaries. Useful first inspections are:
+emitted code bytes, and memory summaries. Start with the bounded report views:
+
+```bash
+python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
+  show /tmp/loom-q6q8.compile-report.json
+python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
+  suggest /tmp/loom-q6q8.compile-report.json
+python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
+  diff /tmp/baseline.compile-report.json \
+       /tmp/loom-q6q8.compile-report.json --format=json
+```
+
+The JSON views are sparse so they can feed an autoresearch loop without
+replaying the full report. Omitted metrics are unavailable, not zero. `diff`
+requires exact schema, target, config, workload, and entry identity; it has no
+force mode for unlike compilations. `suggest` uses only explicitly registered
+target providers and reports unavailable target interpretation instead of
+guessing from bundle names.
+
+Version-zero reports are ephemeral diagnostics co-versioned with the compiler.
+Regenerate them after changing compiler versions. Use the full report and
+manifest for deeper source and packet attribution:
 
 ```bash
 jq '{artifact, targets, functions}' /tmp/loom-q6q8.manifest.json

@@ -169,7 +169,7 @@ IREE_FLAG_NAMED(
     string, compile_report, "compile-report", "",
     "Optional compile report output. Use 'summary'/'details' for structured "
     "JSON, 'text-summary'/'text-details' for human-readable text, or "
-    "empty/'none'.");
+    "empty/'none'. Inspect structured reports with loom-compile-report.");
 IREE_FLAG_NAMED(
     string, artifact_manifest, "artifact-manifest", "",
     "Optional emitted artifact manifest sidecar. Use 'summary', 'details', "
@@ -1141,6 +1141,9 @@ static void loom_compile_print_agents_markdown(FILE* stream) {
       "  --artifact-manifest=details --emit-artifact-manifest=manifest.json "
       "\\\n"
       "  --emit-target-artifact=kernel.hsaco --output=kernel.vmfb\n"
+      "loom-compile-report show report.json\n"
+      "loom-compile-report diff baseline.json report.json --format=json\n"
+      "loom-compile-report suggest report.json --format=json\n"
       "loom-compile kernel.loom --backend=amdgpu-hal "
       "--target=gfx11-generic \\\n"
       "  --dump-ir-after-all --dump-ir-format=jsonl "
@@ -1348,7 +1351,13 @@ static void loom_compile_print_agents_markdown(FILE* stream) {
       "```\n"
       "\n"
       "`--compile-report=summary|details` records compiler-side facts and\n"
-      "status. `--artifact-manifest=summary|details|analysis` records the\n"
+      "status. `loom-compile-report show|diff|suggest` provides compact\n"
+      "same-checkout views, exact comparison, and target-owned optimization\n"
+      "experiments. Version-zero reports are ephemeral diagnostics; "
+      "regenerate\n"
+      "them with the current compiler instead of carrying compatibility "
+      "paths.\n"
+      "`--artifact-manifest=summary|details|analysis` records the\n"
       "artifact's functions, globals, targets, ABI metadata, and optional\n"
       "analysis. `--dump-ir-*` captures intermediate IR with the same tracing\n"
       "flags used by `loom-opt`. JSONL trace rows embed whole-module "
