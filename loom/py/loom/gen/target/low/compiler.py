@@ -128,7 +128,7 @@ def _semantic_tag_has_prefix(semantic_tag: str, prefix: str) -> bool:
     return semantic_tag == prefix or semantic_tag.startswith(f"{prefix}.")
 
 
-def _derive_instruction_classes(
+def derive_instruction_classes(
     descriptor: Descriptor,
     schedule_class: ScheduleClass,
     resources: dict[str, Resource],
@@ -778,6 +778,7 @@ def compile_descriptor_set(
     allowlist: DescriptorAllowlist | None = None,
     *,
     allow_ambiguous_asm_mnemonics: bool = False,
+    required_schedule_class_names: Sequence[str] = (),
 ) -> CompiledDescriptorSet:
     if spec.generator_version == 0:
         raise ValueError(f"descriptor set '{spec.key}' has zero generator version")
@@ -825,7 +826,10 @@ def compile_descriptor_set(
     used_reg_class_names: set[str] = set(reg_class_inputs)
     used_register_part_names: set[str] = set()
     used_resource_names: set[str] = set()
-    used_schedule_names: set[str] = set()
+    used_schedule_names = set(required_schedule_class_names)
+    unknown_required_schedule_names = sorted(used_schedule_names - schedule_inputs.keys())
+    if unknown_required_schedule_names:
+        raise ValueError(f"descriptor set '{spec.key}' requires unknown schedule classes: {', '.join(unknown_required_schedule_names)}")
     used_enum_domain_names: set[str] = set()
     for descriptor in selected_descriptors:
         result_count = result_counts_by_descriptor[descriptor.key]
@@ -950,7 +954,7 @@ def compile_descriptor_set(
             used_reg_class_names.add(pressure_delta.reg_class)
 
     instruction_classes = [
-        _derive_instruction_classes(
+        derive_instruction_classes(
             descriptor,
             schedule_inputs[descriptor.schedule_class],
             resource_inputs,

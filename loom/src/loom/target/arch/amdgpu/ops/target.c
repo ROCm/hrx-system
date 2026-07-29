@@ -223,10 +223,11 @@ static iree_status_t loom_amdgpu_target_record_verify_feature_attr(
 }
 
 static uint32_t loom_amdgpu_target_record_default_wavefront_size(
+    const loom_amdgpu_target_info_t* target,
     const loom_amdgpu_processor_info_t* processor) {
   const loom_target_bundle_t* bundle =
       loom_amdgpu_target_bundle_for_descriptor_set(
-          processor->properties.descriptor_set.ordinal);
+          target->descriptor_set_ordinal);
   if (bundle != NULL && bundle->snapshot != NULL) {
     return bundle->snapshot->subgroup_size;
   }
@@ -247,8 +248,8 @@ static bool loom_amdgpu_target_record_effective_wavefront_size(
     *out_wavefront_size = (uint32_t)value;
     return true;
   }
-  *out_wavefront_size =
-      loom_amdgpu_target_record_default_wavefront_size(processor);
+  *out_wavefront_size = loom_amdgpu_target_record_default_wavefront_size(
+      loom_amdgpu_target_record_target(target_op), processor);
   return true;
 }
 

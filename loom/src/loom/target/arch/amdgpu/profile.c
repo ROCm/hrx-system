@@ -177,15 +177,15 @@ iree_status_t loom_amdgpu_target_profile_initialize(
       &normalized_identity.amdhsa_features.xnack));
   const loom_target_bundle_t* target_bundle =
       loom_amdgpu_target_bundle_for_descriptor_set(
-          processor->properties.descriptor_set.ordinal);
+          identity->target->descriptor_set_ordinal);
   if (target_bundle == NULL) {
     return iree_make_status(
         IREE_STATUS_UNAVAILABLE,
-        "AMDGPU processor '%.*s' has no Loom target bundle for descriptor "
+        "AMDGPU target '%.*s' has no Loom target bundle for descriptor "
         "set '%.*s'",
-        (int)processor->name.size, processor->name.data,
-        (int)processor->properties.descriptor_set.key.size,
-        processor->properties.descriptor_set.key.data);
+        (int)identity->target->name.size, identity->target->name.data,
+        (int)identity->target->descriptor_set_key.size,
+        identity->target->descriptor_set_key.data);
   }
 
   loom_amdgpu_target_properties_t properties = {0};

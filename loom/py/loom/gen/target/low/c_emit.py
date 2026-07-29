@@ -27,7 +27,13 @@ from loom.target.low_descriptors import (
     DescriptorSet,
     Hazard,
     HazardReferenceKind,
+    InstructionClass,
+    IssueUse,
     Operand,
+    PressureDelta,
+    RegClass,
+    Resource,
+    ScheduleClass,
     descriptor_stable_id,
 )
 
@@ -225,6 +231,7 @@ def _intern_descriptor_set_view_metadata(compiled: CompiledDescriptorSet, view_s
 def _descriptor_row_lines(
     compiled: CompiledDescriptorSet,
     descriptors: Sequence[Descriptor],
+    instruction_classes: Sequence[tuple[InstructionClass, ...]],
     descriptor_rows: Sequence[dict[str, int]],
     canonical_asm_form_ordinals: Sequence[int | None],
 ) -> list[list[str]]:
@@ -256,10 +263,120 @@ def _descriptor_row_lines(
             f".operand_form_count = {descriptor_rows[i]['operand_form_count']},",
             f".schedule_class_id = {compiled.schedule_class_ids[descriptor.schedule_class]},",
             f".flags = {c_spelling.flag_expr(descriptor.flags)},",
-            f".instruction_class_flags = {c_spelling.flag_expr(compiled.instruction_classes[i])},",
+            f".instruction_class_flags = {c_spelling.flag_expr(instruction_classes[i])},",
             f".canonical_asm_form_ordinal = {c_spelling.canonical_asm_form_ordinal_expr(canonical_asm_form_ordinals[i])},",
         ]
         for i, descriptor in enumerate(descriptors)
+    ]
+
+
+def _reg_class_row_lines(
+    compiled: CompiledDescriptorSet,
+    reg_classes: Sequence[RegClass],
+) -> list[list[str]]:
+    pool = compiled.string_pool
+    return [
+        [
+            f".name_string_offset = {pool.ref(f'reg_{reg_class.name}')},",
+            f".target_bank_id = {reg_class.target_bank_id},",
+            f".flags = {c_spelling.flag_expr(reg_class.flags)},",
+            f".alloc_unit_bits = {reg_class.alloc_unit_bits},",
+            f".allocatable_count = {reg_class.allocatable_count},",
+            f".fixed_location_base = {reg_class.fixed_location_base},",
+            f".fixed_location_count = {reg_class.fixed_location_count},",
+            f".alias_set_id = {reg_class.alias_set_id},",
+            ".spill_class_id = " + ("LOOM_LOW_REG_CLASS_NONE" if reg_class.spill_class is None else str(compiled.reg_class_ids[reg_class.spill_class])) + ",",
+            f".full_register_part_mask = {c_spelling.hex_u32_literal(reg_class.full_register_part_mask)},",
+            f".spill_slot_space = {reg_class.spill_slot_space.c_name},",
+        ]
+        for reg_class in reg_classes
+    ]
+
+
+def _resource_row_lines(
+    compiled: CompiledDescriptorSet,
+    resources: Sequence[Resource],
+) -> list[list[str]]:
+    pool = compiled.string_pool
+    return [
+        [
+            f".name_string_offset = {pool.ref(f'resource_{resource.name}')},",
+            f".capacity_per_cycle = {resource.capacity_per_cycle},",
+            f".flags = {c_spelling.flag_expr(resource.flags)},",
+            f".kind = {resource.kind.c_name},",
+            f".contention_group_id = {resource.contention_group_id},",
+        ]
+        for resource in resources
+    ]
+
+
+def _issue_use_row_lines(
+    issue_uses: Sequence[IssueUse],
+    resource_ids: dict[str, int],
+) -> list[list[str]]:
+    return [
+        [
+            f".resource_id = {resource_ids[issue_use.resource]},",
+            f".cycles = {issue_use.cycles},",
+            f".units = {issue_use.units},",
+            f".stage = {issue_use.stage},",
+        ]
+        for issue_use in issue_uses
+    ]
+
+
+def _hazard_row_lines(
+    hazards: Sequence[Hazard],
+    resource_ids: dict[str, int],
+) -> list[list[str]]:
+    return [
+        [
+            f".kind = {hazard.kind.c_name},",
+            f".reference_kind = {_hazard_reference_kind(hazard).c_name},",
+            f".reference_id = {_hazard_reference_id(hazard, resource_ids)},",
+            f".producer_stage = {hazard.producer_stage},",
+            f".consumer_stage = {hazard.consumer_stage},",
+            f".distance = {hazard.distance},",
+            f".flags = {c_spelling.flag_expr(hazard.flags)},",
+        ]
+        for hazard in hazards
+    ]
+
+
+def _pressure_delta_row_lines(
+    pressure_deltas: Sequence[PressureDelta],
+    reg_class_ids: dict[str, int],
+) -> list[list[str]]:
+    return [
+        [
+            f".reg_class_id = {reg_class_ids[pressure.reg_class]},",
+            f".delta = {pressure.delta},",
+        ]
+        for pressure in pressure_deltas
+    ]
+
+
+def _schedule_class_row_lines(
+    compiled: CompiledDescriptorSet,
+    schedule_classes: Sequence[ScheduleClass],
+    schedule_rows: Sequence[dict[str, int]],
+) -> list[list[str]]:
+    pool = compiled.string_pool
+    return [
+        [
+            f".name_string_offset = {pool.ref(f'schedule_{schedule_class.name}')},",
+            f".latency_cycles = {schedule_class.latency_cycles},",
+            f".latency_kind = {schedule_class.latency_kind.c_name},",
+            f".issue_use_start = {schedule_rows[i]['issue_use_start']},",
+            f".issue_use_count = {schedule_rows[i]['issue_use_count']},",
+            f".hazard_start = {schedule_rows[i]['hazard_start']},",
+            f".hazard_count = {schedule_rows[i]['hazard_count']},",
+            f".flags = {c_spelling.flag_expr(schedule_class.flags)},",
+            f".model_quality = {schedule_class.model_quality.c_name},",
+            f".pressure_delta_start = {schedule_rows[i]['pressure_delta_start']},",
+            f".pressure_delta_count = {schedule_rows[i]['pressure_delta_count']},",
+        ]
+        for i, schedule_class in enumerate(schedule_classes)
     ]
 
 
@@ -351,6 +468,11 @@ def emit_source_for_views(
 ) -> str:
     spec = compiled.spec
     pool = compiled.string_pool
+    storage_reg_classes = tuple(compiled.reg_classes)
+    storage_resources = tuple(compiled.resources)
+    storage_issue_uses = tuple(compiled.issue_uses)
+    storage_hazards = tuple(compiled.hazards)
+    storage_pressure_deltas = tuple(compiled.pressure_deltas)
     for view in views:
         _intern_descriptor_set_view_metadata(compiled, view.spec)
     lines = [
@@ -380,22 +502,7 @@ def emit_source_for_views(
         "loom_low_reg_class_t",
         spec.c_table_prefix,
         "RegClasses",
-        [
-            [
-                f".name_string_offset = {pool.ref(f'reg_{reg_class.name}')},",
-                f".target_bank_id = {reg_class.target_bank_id},",
-                f".flags = {c_spelling.flag_expr(reg_class.flags)},",
-                f".alloc_unit_bits = {reg_class.alloc_unit_bits},",
-                f".allocatable_count = {reg_class.allocatable_count},",
-                f".fixed_location_base = {reg_class.fixed_location_base},",
-                f".fixed_location_count = {reg_class.fixed_location_count},",
-                f".alias_set_id = {reg_class.alias_set_id},",
-                ".spill_class_id = " + ("LOOM_LOW_REG_CLASS_NONE" if reg_class.spill_class is None else str(compiled.reg_class_ids[reg_class.spill_class])) + ",",
-                f".full_register_part_mask = {c_spelling.hex_u32_literal(reg_class.full_register_part_mask)},",
-                f".spill_slot_space = {reg_class.spill_slot_space.c_name},",
-            ]
-            for reg_class in compiled.reg_classes
-        ],
+        _reg_class_row_lines(compiled, compiled.reg_classes),
     )
     _emit_array(
         lines,
@@ -560,85 +667,99 @@ def emit_source_for_views(
         "loom_low_resource_t",
         spec.c_table_prefix,
         "Resources",
-        [
-            [
-                f".name_string_offset = {pool.ref(f'resource_{resource.name}')},",
-                f".capacity_per_cycle = {resource.capacity_per_cycle},",
-                f".flags = {c_spelling.flag_expr(resource.flags)},",
-                f".kind = {resource.kind.c_name},",
-                f".contention_group_id = {resource.contention_group_id},",
-            ]
-            for resource in compiled.resources
-        ],
+        _resource_row_lines(compiled, compiled.resources),
     )
     _emit_array(
         lines,
         "loom_low_issue_use_t",
         spec.c_table_prefix,
         "IssueUses",
-        [
-            [
-                f".resource_id = {compiled.resource_ids[issue_use.resource]},",
-                f".cycles = {issue_use.cycles},",
-                f".units = {issue_use.units},",
-                f".stage = {issue_use.stage},",
-            ]
-            for issue_use in compiled.issue_uses
-        ],
+        _issue_use_row_lines(compiled.issue_uses, compiled.resource_ids),
     )
     _emit_array(
         lines,
         "loom_low_hazard_t",
         spec.c_table_prefix,
         "Hazards",
-        [
-            [
-                f".kind = {hazard.kind.c_name},",
-                f".reference_kind = {_hazard_reference_kind(hazard).c_name},",
-                f".reference_id = {_hazard_reference_id(hazard, compiled.resource_ids)},",
-                f".producer_stage = {hazard.producer_stage},",
-                f".consumer_stage = {hazard.consumer_stage},",
-                f".distance = {hazard.distance},",
-                f".flags = {c_spelling.flag_expr(hazard.flags)},",
-            ]
-            for hazard in compiled.hazards
-        ],
+        _hazard_row_lines(compiled.hazards, compiled.resource_ids),
     )
     _emit_array(
         lines,
         "loom_low_pressure_delta_t",
         spec.c_table_prefix,
         "PressureDeltas",
-        [
-            [
-                f".reg_class_id = {compiled.reg_class_ids[pressure.reg_class]},",
-                f".delta = {pressure.delta},",
-            ]
-            for pressure in compiled.pressure_deltas
-        ],
+        _pressure_delta_row_lines(
+            compiled.pressure_deltas,
+            compiled.reg_class_ids,
+        ),
     )
     _emit_array(
         lines,
         "loom_low_schedule_class_t",
         spec.c_table_prefix,
         "ScheduleClasses",
-        [
-            [
-                f".name_string_offset = {pool.ref(f'schedule_{schedule_class.name}')},",
-                f".latency_cycles = {schedule_class.latency_cycles},",
-                f".latency_kind = {schedule_class.latency_kind.c_name},",
-                f".issue_use_start = {compiled.schedule_rows[i]['issue_use_start']},",
-                f".issue_use_count = {compiled.schedule_rows[i]['issue_use_count']},",
-                f".hazard_start = {compiled.schedule_rows[i]['hazard_start']},",
-                f".hazard_count = {compiled.schedule_rows[i]['hazard_count']},",
-                f".flags = {c_spelling.flag_expr(schedule_class.flags)},",
-                f".model_quality = {schedule_class.model_quality.c_name},",
-                f".pressure_delta_start = {compiled.schedule_rows[i]['pressure_delta_start']},",
-                f".pressure_delta_count = {compiled.schedule_rows[i]['pressure_delta_count']},",
-            ]
-            for i, schedule_class in enumerate(compiled.schedule_classes)
-        ],
+        _schedule_class_row_lines(
+            compiled,
+            compiled.schedule_classes,
+            compiled.schedule_rows,
+        ),
     )
+    for view in views:
+        if view.reg_classes != storage_reg_classes:
+            _emit_array(
+                lines,
+                "loom_low_reg_class_t",
+                view.spec.c_table_prefix,
+                "RegClasses",
+                _reg_class_row_lines(compiled, view.reg_classes),
+            )
+        if view.resources != storage_resources:
+            _emit_array(
+                lines,
+                "loom_low_resource_t",
+                view.spec.c_table_prefix,
+                "Resources",
+                _resource_row_lines(compiled, view.resources),
+            )
+        if view.issue_uses != storage_issue_uses:
+            _emit_array(
+                lines,
+                "loom_low_issue_use_t",
+                view.spec.c_table_prefix,
+                "IssueUses",
+                _issue_use_row_lines(view.issue_uses, compiled.resource_ids),
+            )
+        if view.hazards != storage_hazards:
+            _emit_array(
+                lines,
+                "loom_low_hazard_t",
+                view.spec.c_table_prefix,
+                "Hazards",
+                _hazard_row_lines(view.hazards, compiled.resource_ids),
+            )
+        if view.pressure_deltas != storage_pressure_deltas:
+            _emit_array(
+                lines,
+                "loom_low_pressure_delta_t",
+                view.spec.c_table_prefix,
+                "PressureDeltas",
+                _pressure_delta_row_lines(
+                    view.pressure_deltas,
+                    compiled.reg_class_ids,
+                ),
+            )
+        if not view.uses_storage_schedule_classes:
+            _emit_array(
+                lines,
+                "loom_low_schedule_class_t",
+                view.spec.c_table_prefix,
+                "ScheduleClasses",
+                _schedule_class_row_lines(
+                    compiled,
+                    view.schedule_classes,
+                    view.schedule_rows,
+                ),
+            )
     if compiled.feature_mask_words:
         c_arrays.append_value_array(
             lines,
@@ -697,6 +818,7 @@ def emit_source_for_views(
         _descriptor_row_lines(
             compiled,
             compiled.descriptors,
+            compiled.instruction_classes,
             compiled.descriptor_rows,
             compiled.canonical_asm_form_ordinals,
         ),
@@ -704,7 +826,6 @@ def emit_source_for_views(
     for view in views:
         if view.uses_storage_descriptor_tables:
             continue
-        view_descriptors = [compiled.descriptors[descriptor_ordinal] for descriptor_ordinal in view.descriptor_ordinals]
         _emit_array(
             lines,
             "loom_low_descriptor_t",
@@ -712,7 +833,8 @@ def emit_source_for_views(
             "Descriptors",
             _descriptor_row_lines(
                 compiled,
-                view_descriptors,
+                view.descriptors,
+                view.instruction_classes,
                 view.descriptor_rows,
                 view.canonical_asm_form_ordinals,
             ),
@@ -810,15 +932,30 @@ def emit_source_for_views(
         "operand_form_operand_indices": "operand_form_operand_index_count",
     }
 
-    def append_optional_table(field_name: str, table_name: str, view_lines: list[str]) -> None:
-        rows = getattr(compiled, field_name)
+    def append_optional_table(
+        field_name: str,
+        table_name: str,
+        view_lines: list[str],
+        *,
+        table_prefix: str | None = None,
+        rows: Sequence[object] | None = None,
+    ) -> None:
+        if rows is None:
+            rows = getattr(compiled, field_name)
         if rows:
-            view_lines.append(f"    .{field_name} = k{spec.c_table_prefix}{table_name},")
-            view_lines.append(f"    .{table_count_fields[field_name]} = IREE_ARRAYSIZE(k{spec.c_table_prefix}{table_name}),")
+            resolved_table_prefix = table_prefix or spec.c_table_prefix
+            view_lines.append(f"    .{field_name} = k{resolved_table_prefix}{table_name},")
+            view_lines.append(f"    .{table_count_fields[field_name]} = IREE_ARRAYSIZE(k{resolved_table_prefix}{table_name}),")
 
     for view in views:
         view_spec = view.spec
         descriptor_table_prefix = spec.c_table_prefix if view.uses_storage_descriptor_tables else view_spec.c_table_prefix
+        reg_class_table_prefix = spec.c_table_prefix if view.reg_classes == storage_reg_classes else view_spec.c_table_prefix
+        resource_table_prefix = spec.c_table_prefix if view.resources == storage_resources else view_spec.c_table_prefix
+        schedule_class_table_prefix = spec.c_table_prefix if view.uses_storage_schedule_classes else view_spec.c_table_prefix
+        issue_use_table_prefix = spec.c_table_prefix if view.issue_uses == storage_issue_uses else view_spec.c_table_prefix
+        hazard_table_prefix = spec.c_table_prefix if view.hazards == storage_hazards else view_spec.c_table_prefix
+        pressure_delta_table_prefix = spec.c_table_prefix if view.pressure_deltas == storage_pressure_deltas else view_spec.c_table_prefix
         asm_form_table_prefix = spec.c_table_prefix if view.uses_storage_asm_form_tables else view_spec.c_table_prefix
         operand_form_table_prefix = spec.c_table_prefix if view.uses_storage_operand_form_tables else view_spec.c_table_prefix
         view_lines = [
@@ -850,14 +987,50 @@ def emit_source_for_views(
         append_optional_table("effects", "Effects", view_lines)
         append_optional_table("constraints", "Constraints", view_lines)
         append_optional_table("storage_leases", "StorageLeases", view_lines)
-        append_optional_table("reg_classes", "RegClasses", view_lines)
+        append_optional_table(
+            "reg_classes",
+            "RegClasses",
+            view_lines,
+            table_prefix=reg_class_table_prefix,
+            rows=view.reg_classes,
+        )
         append_optional_table("register_parts", "RegisterParts", view_lines)
         append_optional_table("reg_class_alts", "RegClassAlts", view_lines)
-        append_optional_table("schedule_classes", "ScheduleClasses", view_lines)
-        append_optional_table("issue_uses", "IssueUses", view_lines)
-        append_optional_table("resources", "Resources", view_lines)
-        append_optional_table("hazards", "Hazards", view_lines)
-        append_optional_table("pressure_deltas", "PressureDeltas", view_lines)
+        append_optional_table(
+            "schedule_classes",
+            "ScheduleClasses",
+            view_lines,
+            table_prefix=schedule_class_table_prefix,
+            rows=view.schedule_classes,
+        )
+        append_optional_table(
+            "issue_uses",
+            "IssueUses",
+            view_lines,
+            table_prefix=issue_use_table_prefix,
+            rows=view.issue_uses,
+        )
+        append_optional_table(
+            "resources",
+            "Resources",
+            view_lines,
+            table_prefix=resource_table_prefix,
+            rows=view.resources,
+        )
+        append_optional_table(
+            "hazards",
+            "Hazards",
+            view_lines,
+            table_prefix=hazard_table_prefix,
+            rows=view.hazards,
+        )
+        append_optional_table(
+            "pressure_deltas",
+            "PressureDeltas",
+            view_lines,
+            table_prefix=pressure_delta_table_prefix,
+            rows=view.pressure_deltas,
+        )
         if view.asm_forms:
             view_lines.append(f"    .asm_forms = k{asm_form_table_prefix}AsmForms,")
             view_lines.append(f"    .asm_form_count = IREE_ARRAYSIZE(k{asm_form_table_prefix}AsmForms),")
@@ -897,6 +1070,15 @@ def emit_source(compiled: CompiledDescriptorSet) -> str:
         views=[
             DescriptorSetView(
                 spec=compiled.spec,
+                descriptors=tuple(compiled.descriptors),
+                instruction_classes=tuple(compiled.instruction_classes),
+                reg_classes=tuple(compiled.reg_classes),
+                resources=tuple(compiled.resources),
+                schedule_classes=tuple(compiled.schedule_classes),
+                issue_uses=tuple(compiled.issue_uses),
+                hazards=tuple(compiled.hazards),
+                pressure_deltas=tuple(compiled.pressure_deltas),
+                schedule_rows=tuple(compiled.schedule_rows),
                 descriptor_ordinals=tuple(range(len(compiled.descriptors))),
                 descriptor_refs=compiled.descriptor_refs,
                 descriptor_rows=compiled.descriptor_rows,
@@ -904,6 +1086,7 @@ def emit_source(compiled: CompiledDescriptorSet) -> str:
                 asm_forms=compiled.asm_forms,
                 operand_forms=compiled.operand_forms,
                 uses_storage_descriptor_tables=True,
+                uses_storage_schedule_classes=True,
                 uses_storage_asm_form_tables=True,
                 uses_storage_operand_form_tables=True,
             )

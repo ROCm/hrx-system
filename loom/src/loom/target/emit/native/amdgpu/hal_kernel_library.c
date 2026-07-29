@@ -355,10 +355,11 @@ loom_amdgpu_hal_kernel_library_record_matrix_feature_capabilities(
 }
 
 static iree_status_t
-loom_amdgpu_hal_kernel_library_record_processor_capabilities(
+loom_amdgpu_hal_kernel_library_record_target_profile_capabilities(
+    const loom_amdgpu_target_info_t* target,
     const loom_amdgpu_processor_info_t* processor,
     iree_string_view_t function_name, loom_target_compile_report_t* report) {
-  if (processor == NULL) {
+  if (target == NULL || processor == NULL) {
     return iree_ok_status();
   }
   const iree_string_view_t namespace_name = IREE_SV("amdgpu");
@@ -369,7 +370,7 @@ loom_amdgpu_hal_kernel_library_record_processor_capabilities(
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_hal_kernel_library_record_target_capability_string(
           report, function_name, namespace_name, IREE_SV("descriptor_set"),
-          processor->properties.descriptor_set.key));
+          target->descriptor_set_key));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_hal_kernel_library_record_target_capability_u64(
           report, function_name, namespace_name,
@@ -591,7 +592,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_prepare_kernel_plan(
         loom_amdgpu_hal_kernel_library_record_target_snapshot_capabilities(
             &entry->bundle_storage.bundle, entry->func_name, report));
     IREE_RETURN_IF_ERROR(
-        loom_amdgpu_hal_kernel_library_record_processor_capabilities(
+        loom_amdgpu_hal_kernel_library_record_target_profile_capabilities(
+            loom_amdgpu_target_record_target(entry->target_op),
             loom_amdgpu_target_record_processor(entry->target_op),
             entry->func_name, report));
   }

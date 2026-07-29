@@ -268,6 +268,10 @@ static iree_status_t loom_amdgpu_kernel_emission_record_native_insertions(
       case LOOM_AMDGPU_NATIVE_INSERTION_S_DELAY_ALU:
         insertion_kind = LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_DELAY;
         break;
+      case LOOM_AMDGPU_NATIVE_INSERTION_V_NOP:
+        insertion_kind = LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_DELAY;
+        packet_key = IREE_SV("amdgpu.v_nop");
+        break;
       case LOOM_AMDGPU_NATIVE_INSERTION_NONE:
       default:
         IREE_ASSERT_UNREACHABLE(

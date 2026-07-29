@@ -46,6 +46,8 @@ _DESCRIPTOR_SET_GFX12_5_GENERIC = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["
 
 _DESCRIPTOR_SET_RDNA3_5 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna3_5.core"]
 
+_DESCRIPTOR_SET_RDNA4_GFX1250_A0 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4.gfx1250_a0.core"]
+
 _DESCRIPTOR_SET_RDNA4_GFX1251 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4.gfx1251.core"]
 
 _DESCRIPTOR_SET_RDNA4_GFX125X = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4.gfx125x.core"]
@@ -248,11 +250,24 @@ loom_target_table_cc_library(
         "--public-header=loom/target/arch/amdgpu/encoding/rdna4_gfx125x_encoding_tables.h",
     ],
     exclude_from_cmake_all = True,
+    generated_hdr_flags = ["--view-header=rdna4_gfx1250_a0"],
+    generated_hdrs = ["rdna4_gfx1250_a0_encoding_tables.h"],
     generator = _AMDGPU_ENCODING_TABLE_GENERATOR,
     inputs = ["@amdgpu_isa_xml//:amdgpu_isa_rdna4.xml"],
-    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA4_GFX125X),
     deps = [
         ":encoding_defs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_target_table_cc_library(
+    name = "rdna4_gfx1250_a0_encoding_tables",
+    header = "rdna4_gfx1250_a0_encoding_tables.h",
+    header_only = True,
+    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA4_GFX1250_A0),
+    deps = [
+        ":encoding_defs",
+        ":rdna4_gfx125x_encoding_tables",
         "//runtime/src/iree/base",
     ],
 )

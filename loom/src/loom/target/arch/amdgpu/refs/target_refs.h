@@ -39,6 +39,12 @@ typedef enum loom_amdgpu_descriptor_trait_bit_e {
   LOOM_AMDGPU_DESCRIPTOR_TRAIT_XCNT_IMPLICIT_DRAIN = 1u << 7,
   // Descriptor issues on an AMDGPU matrix pipeline.
   LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX = 1u << 8,
+  // Descriptor advances the vector issue stream used by matrix coexecution.
+  // This includes ordinary VALU, WMMA/SWMMAC, and tensor-to-LDS packets even
+  // when their primary schedule resources are modeled separately.
+  LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ISSUE = 1u << 9,
+  // Descriptor establishes a matrix/vector coexecution retention window.
+  LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX_COEXECUTION_SOURCE = 1u << 10,
 } loom_amdgpu_descriptor_trait_bit_t;
 typedef uint32_t loom_amdgpu_descriptor_traits_t;
 

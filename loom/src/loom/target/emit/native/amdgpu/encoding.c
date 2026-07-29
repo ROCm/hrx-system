@@ -1020,6 +1020,20 @@ static iree_status_t loom_amdgpu_encode_s_delay_alu(
   return iree_ok_status();
 }
 
+static iree_status_t loom_amdgpu_encode_v_nop_slots(
+    loom_amdgpu_encode_state_t* state, uint16_t issue_count) {
+  for (uint16_t i = 0; i < issue_count; ++i) {
+    loom_amdgpu_encoding_packet_t encoded_packet;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_v_nop(state->encoding_table,
+                                                         &encoded_packet));
+    loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+    loom_amdgpu_record_native_insertion(state,
+                                        LOOM_AMDGPU_NATIVE_INSERTION_V_NOP,
+                                        LOOM_AMDGPU_DESCRIPTOR_REF_NONE, 0);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_encode_wait_state_action(
     loom_amdgpu_encode_state_t* state,
     const loom_amdgpu_wait_state_t* wait_state) {
@@ -1029,6 +1043,8 @@ static iree_status_t loom_amdgpu_encode_wait_state_action(
     case LOOM_AMDGPU_WAIT_STATE_ACTION_S_DELAY_ALU:
       return loom_amdgpu_encode_s_delay_alu(state,
                                             wait_state->delay_alu_immediate);
+    case LOOM_AMDGPU_WAIT_STATE_ACTION_V_NOP:
+      return loom_amdgpu_encode_v_nop_slots(state, wait_state->cycle_count);
     case LOOM_AMDGPU_WAIT_STATE_ACTION_UNKNOWN:
     default: {
       IREE_ASSERT_UNREACHABLE(

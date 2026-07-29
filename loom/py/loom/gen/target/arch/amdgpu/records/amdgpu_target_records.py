@@ -33,6 +33,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AmdgpuProcessorInfo,
     AmdgpuTargetInfo,
     amdgpu_descriptor_set_ordinal,
+    amdgpu_target_descriptor_set_key,
     sorted_descriptor_set_infos,
     sorted_processor_infos,
     sorted_target_infos,
@@ -84,11 +85,13 @@ def _lookup_processor(
 
 def _lookup_descriptor_set(
     descriptor_sets: dict[str, AmdgpuDescriptorSetInfo],
+    target: AmdgpuTargetInfo,
     processor: AmdgpuProcessorInfo,
 ) -> AmdgpuDescriptorSetInfo:
-    descriptor_set = descriptor_sets.get(processor.descriptor_set.key)
+    descriptor_set_key = amdgpu_target_descriptor_set_key(target, processor)
+    descriptor_set = descriptor_sets.get(descriptor_set_key)
     if descriptor_set is None:
-        raise ValueError(f"AMDGPU target record '{processor.processor}' references unknown descriptor set '{processor.descriptor_set.key}'")
+        raise ValueError(f"AMDGPU target record '{target.target}' references unknown descriptor set '{descriptor_set_key}'")
     return descriptor_set
 
 
@@ -102,7 +105,7 @@ def _materialize_rows(
     rows: list[_AmdgpuTargetRecordRow] = []
     for info in targets:
         processor = _lookup_processor(processors_by_name, info.processor)
-        descriptor_set = _lookup_descriptor_set(descriptor_sets_by_key, processor)
+        descriptor_set = _lookup_descriptor_set(descriptor_sets_by_key, info, processor)
         rows.append(
             _AmdgpuTargetRecordRow(
                 info=info,

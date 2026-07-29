@@ -206,6 +206,10 @@ void loom_low_schedule_compact_resource_summaries(
     if (state->resource_summaries[read_index].use_count == 0) {
       continue;
     }
+    // Retain the flag union while this mandatory compaction already touches
+    // each used resource instead of adding work to every issue use.
+    state->used_resource_flags |=
+        state->resource_summaries[read_index].resource_flags;
     state->resource_summaries[write_index++] =
         state->resource_summaries[read_index];
   }

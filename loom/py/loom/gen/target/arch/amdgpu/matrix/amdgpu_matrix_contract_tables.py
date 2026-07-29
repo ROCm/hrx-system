@@ -61,7 +61,9 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
     AMDGPU_MATRIX_FEATURE_PROFILES,
     AMDGPU_MATRIX_FEATURES_BY_PROFILE,
+    amdgpu_target_descriptor_set_key,
     sorted_processor_infos,
+    sorted_target_infos,
 )
 from loom.target.low_descriptors import (  # noqa: E402
     Descriptor,
@@ -699,15 +701,17 @@ def _validate_matrix_profile_descriptor_sets(*, global_descriptor_keys: Sequence
     descriptor_ref_keys = frozenset(descriptor_key for descriptor_key in global_descriptor_keys if descriptor_key is not None)
     builders_by_descriptor_set_key = {builder.base.key: generator_target for generator_target, builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.items()}
     profiles_by_descriptor_set_key: dict[str, set[str]] = {}
-    for processor_info in sorted_processor_infos():
+    processors_by_name = {processor.processor: processor for processor in sorted_processor_infos()}
+    for target_info in sorted_target_infos():
+        processor_info = processors_by_name[target_info.processor]
         profile = processor_info.features.matrix
         if profile not in AMDGPU_MATRIX_FEATURES_BY_PROFILE:
             raise ValueError(f"AMDGPU processor '{processor_info.processor}' has unknown matrix feature profile '{profile}'")
-        descriptor_set_key = processor_info.descriptor_set.key
+        descriptor_set_key = amdgpu_target_descriptor_set_key(target_info, processor_info)
         if not descriptor_set_key:
             continue
         if descriptor_set_key not in builders_by_descriptor_set_key:
-            raise ValueError(f"AMDGPU processor '{processor_info.processor}' references descriptor set '{descriptor_set_key}' without a builder")
+            raise ValueError(f"AMDGPU target '{target_info.target}' references descriptor set '{descriptor_set_key}' without a builder")
         profiles_by_descriptor_set_key.setdefault(descriptor_set_key, set()).add(profile)
 
     for descriptor_set_key in sorted(profiles_by_descriptor_set_key):

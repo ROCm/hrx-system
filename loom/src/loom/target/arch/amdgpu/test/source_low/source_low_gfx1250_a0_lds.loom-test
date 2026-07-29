@@ -41,7 +41,7 @@ kernel.def target(@target) @a0_legalizes_constrained_lds_packets() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @a0_legalizes_constrained_lds_packets() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @a0_legalizes_constrained_lds_packets() asm<amdgpu.rdna4.gfx1250_a0.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %23 = storage {byte_alignment = 16, byte_length = 4096} : low.storage<workgroup>
   %25 = v_mov_b32 1

@@ -45,7 +45,7 @@ TEST(AmdgpuTargetProfileTest, PreservesStructuredTargetFacts) {
             LOOM_AMDGPU_TARGET_FEATURE_OFF);
   EXPECT_EQ(loom_target_profile_bundle(&profile.base),
             loom_amdgpu_target_bundle_for_descriptor_set(
-                processor->properties.descriptor_set.ordinal));
+                target->descriptor_set_ordinal));
   EXPECT_EQ(profile.properties.target, target);
   EXPECT_EQ(profile.properties.processor, &processor->properties);
   EXPECT_EQ(profile.properties.common,
@@ -54,6 +54,33 @@ TEST(AmdgpuTargetProfileTest, PreservesStructuredTargetFacts) {
             LOOM_AMDGPU_TARGET_FEATURE_ON);
   EXPECT_EQ(profile.properties.amdhsa_features.xnack,
             LOOM_AMDGPU_TARGET_FEATURE_OFF);
+}
+
+TEST(AmdgpuTargetProfileTest, SelectsTargetLocalDescriptorContract) {
+  const loom_amdgpu_target_info_t* gfx1250 = LookupTarget("gfx1250");
+  const loom_amdgpu_target_info_t* gfx1250_a0 = LookupTarget("gfx1250-a0");
+  ASSERT_NE(gfx1250->descriptor_set_ordinal,
+            gfx1250_a0->descriptor_set_ordinal);
+  EXPECT_FALSE(iree_string_view_equal(gfx1250->descriptor_set_key,
+                                      gfx1250_a0->descriptor_set_key));
+
+  loom_amdgpu_target_identity_t b0_identity = {};
+  loom_amdgpu_target_identity_initialize(gfx1250, &b0_identity);
+  loom_amdgpu_target_profile_t b0_profile = {};
+  IREE_ASSERT_OK(
+      loom_amdgpu_target_profile_initialize(&b0_identity, &b0_profile));
+
+  loom_amdgpu_target_identity_t a0_identity = {};
+  loom_amdgpu_target_identity_initialize(gfx1250_a0, &a0_identity);
+  loom_amdgpu_target_profile_t a0_profile = {};
+  IREE_ASSERT_OK(
+      loom_amdgpu_target_profile_initialize(&a0_identity, &a0_profile));
+
+  EXPECT_NE(loom_target_profile_bundle(&b0_profile.base),
+            loom_target_profile_bundle(&a0_profile.base));
+  EXPECT_EQ(b0_profile.properties.processor, a0_profile.properties.processor);
+  EXPECT_EQ(b0_profile.properties.target, gfx1250);
+  EXPECT_EQ(a0_profile.properties.target, gfx1250_a0);
 }
 
 TEST(AmdgpuTargetProfileTest, RejectsUnsupportedTargetFeatures) {

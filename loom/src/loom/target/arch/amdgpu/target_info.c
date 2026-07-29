@@ -61,6 +61,13 @@ loom_amdgpu_target_info_descriptor_set_at(uint16_t descriptor_set_ordinal) {
   return &loom_amdgpu_target_info_descriptor_set_infos[descriptor_set_ordinal];
 }
 
+const loom_amdgpu_matrix_coexecution_profile_info_t*
+loom_amdgpu_target_info_matrix_coexecution_profile(
+    loom_amdgpu_matrix_coexecution_profile_t profile) {
+  IREE_ASSERT_LT(profile, LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_COUNT);
+  return &loom_amdgpu_target_info_matrix_coexecution_profile_infos[profile];
+}
+
 iree_status_t loom_amdgpu_target_info_lookup_processor(
     iree_string_view_t processor_name,
     const loom_amdgpu_processor_info_t** out_processor) {

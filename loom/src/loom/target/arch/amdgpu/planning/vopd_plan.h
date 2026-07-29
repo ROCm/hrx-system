@@ -369,6 +369,9 @@ typedef struct loom_amdgpu_vopd_plan_t {
   iree_host_size_t packet_count;
 } loom_amdgpu_vopd_plan_t;
 
+struct loom_amdgpu_matrix_coexecution_t;
+struct loom_amdgpu_processor_properties_t;
+
 // Returns the stable spelling for a VOPD packet role.
 iree_string_view_t loom_amdgpu_vopd_packet_role_name(
     loom_amdgpu_vopd_packet_role_t role);
@@ -394,9 +397,12 @@ const loom_amdgpu_vopd_component_info_t* loom_amdgpu_vopd_component_info_for_op(
 iree_status_t loom_amdgpu_vopd_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
+    const struct loom_amdgpu_processor_properties_t* processor_properties,
     const loom_amdgpu_address_state_plan_t* address_state,
     const loom_amdgpu_wait_packet_plan_t* wait_packets,
-    iree_arena_allocator_t* arena, loom_amdgpu_vopd_plan_t* out_plan);
+    struct loom_amdgpu_matrix_coexecution_t* matrix_coexecution,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* transient_arena,
+    loom_amdgpu_vopd_plan_t* out_plan);
 
 // Builds AMDGPU scheduling affinities for descriptors that can later form VOPD
 // pairs on |target|. These are scheduling hints only;

@@ -599,10 +599,7 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
 
   bool IsTargetDescriptorSetLinked(
       const loom_amdgpu_target_info_t* target) const {
-    const loom_amdgpu_processor_info_t* processor =
-        loom_amdgpu_target_info_target_processor(target);
-    IREE_ASSERT(processor != nullptr);
-    return IsDescriptorSetLinked(processor->properties.descriptor_set.key);
+    return IsDescriptorSetLinked(target->descriptor_set_key);
   }
 
   void EmitGfx942Kernel(DiagnosticCapture* capture, bool* out_emitted) {

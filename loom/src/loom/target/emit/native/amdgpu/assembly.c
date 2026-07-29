@@ -2167,6 +2167,12 @@ static iree_status_t loom_amdgpu_append_wait_state_action(
           context, wait_state->delay_alu_immediate));
       return iree_string_builder_append_cstring(context->builder, "\n");
     }
+    case LOOM_AMDGPU_WAIT_STATE_ACTION_V_NOP:
+      for (uint16_t i = 0; i < wait_state->cycle_count; ++i) {
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_cstring(context->builder, "  v_nop\n"));
+      }
+      return iree_ok_status();
     case LOOM_AMDGPU_WAIT_STATE_ACTION_UNKNOWN:
     default: {
       IREE_ASSERT_UNREACHABLE(

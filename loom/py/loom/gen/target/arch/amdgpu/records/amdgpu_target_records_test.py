@@ -100,6 +100,10 @@ def test_target_records_materialize_current_rows() -> None:
         if row.info.default_for_descriptor_set:
             assert (f"LOOM_AMDGPU_TARGET_RECORD_DEFAULT(UINT16_C({row.descriptor_set_ordinal}), {suffix})") in source
 
+    rows_by_target = {row.info.target: row for row in rows}
+    assert rows_by_target["gfx1250"].descriptor_set.key == "amdgpu.rdna4.gfx125x.core"
+    assert rows_by_target["gfx1250-a0"].descriptor_set.key == "amdgpu.rdna4.gfx1250_a0.core"
+
 
 def test_target_record_enum_values_are_stable_and_explicit() -> None:
     assert {info.target: info.enum_value for info in sorted_target_infos()} == {

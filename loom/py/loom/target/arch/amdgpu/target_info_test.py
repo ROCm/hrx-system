@@ -43,6 +43,7 @@ from loom.target.arch.amdgpu.target_info import (
     amdgpu_descriptor_set_storage_info_by_generator_target,
     amdgpu_descriptor_set_view_infos_by_storage_generator_target,
     amdgpu_generic_code_object_compatibility_info,
+    amdgpu_target_descriptor_set_key,
     amdgpu_target_info_by_name,
     amdgpu_target_instruction_constraints,
     validate_amdgpu_code_object_processor_rows,
@@ -299,6 +300,7 @@ def test_physical_targets_resolve_to_canonical_target_rows() -> None:
 
 
 def test_target_semantics_are_keyed_by_canonical_target() -> None:
+    processors = {info.processor: info for info in AMDGPU_PROCESSOR_INFOS}
     gfx1250 = amdgpu_target_info_by_name("gfx1250")
     gfx1250_a0 = amdgpu_target_info_by_name("gfx1250-a0")
     assert gfx1250 is not None
@@ -309,6 +311,14 @@ def test_target_semantics_are_keyed_by_canonical_target() -> None:
     )
     assert gfx1250_a0.semantics.kernel_metadata_extensions == (
         (".gfx1250_revision", "A0"),
+    )
+    assert (
+        amdgpu_target_descriptor_set_key(gfx1250, processors["gfx1250"])
+        == "amdgpu.rdna4.gfx125x.core"
+    )
+    assert (
+        amdgpu_target_descriptor_set_key(gfx1250_a0, processors["gfx1250"])
+        == "amdgpu.rdna4.gfx1250_a0.core"
     )
 
 
@@ -323,6 +333,27 @@ def test_target_rows_reject_noncanonical_overlay_identity() -> None:
     )
 
     with _raises_value_error("omit canonical overlays"):
+        validate_amdgpu_target_rows(
+            AMDGPU_PROCESSOR_INFOS,
+            targets,
+        )
+
+
+def test_target_rows_reject_unrelated_descriptor_override() -> None:
+    targets = list(AMDGPU_TARGET_INFOS)
+    overlay_index = next(
+        index for index, target in enumerate(targets) if target.target == "gfx1250-a0"
+    )
+    overlay = targets[overlay_index]
+    targets[overlay_index] = replace(
+        overlay,
+        semantics=replace(
+            overlay.semantics,
+            descriptor_set_key="amdgpu.rdna4.core",
+        ),
+    )
+
+    with _raises_value_error("does not view its processor descriptor contract"):
         validate_amdgpu_target_rows(
             AMDGPU_PROCESSOR_INFOS,
             targets,

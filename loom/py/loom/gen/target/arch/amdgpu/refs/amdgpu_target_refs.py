@@ -58,9 +58,11 @@ from loom.target.low_descriptors import (  # noqa: E402
     Immediate,
     ImmediateFlag,
     ImmediateKind,
+    InstructionClass,
     OperandFlag,
     OperandRole,
     Resource,
+    ResourceFlag,
     ResourceKind,
     ScheduleClass,
     target_relative_name,
@@ -405,23 +407,22 @@ def _validate_spill_lowering_descriptor_shape(
         )
 
 
-def _descriptor_uses_resource_kind(
+def _descriptor_issue_resources(
     context: _DescriptorTraitContext,
     descriptor: Descriptor,
-    kind: ResourceKind,
-) -> bool:
+) -> tuple[Resource, ...]:
     try:
         schedule_class = context.schedule_classes[descriptor.schedule_class]
     except KeyError as exc:
         raise ValueError(f"AMDGPU descriptor set '{context.descriptor_set.key}' descriptor '{descriptor.key}' references missing schedule class '{descriptor.schedule_class}'") from exc
+    resources: list[Resource] = []
     for issue_use in schedule_class.issue_uses:
         try:
             resource = context.resources[issue_use.resource]
         except KeyError as exc:
             raise ValueError(f"AMDGPU descriptor set '{context.descriptor_set.key}' schedule class '{schedule_class.name}' references missing resource '{issue_use.resource}'") from exc
-        if resource.kind == kind:
-            return True
-    return False
+        resources.append(resource)
+    return tuple(resources)
 
 
 def _descriptor_trait_context(descriptor_set: DescriptorSet) -> _DescriptorTraitContext:
@@ -437,11 +438,32 @@ def _descriptor_trait_names(
     descriptor: Descriptor,
 ) -> tuple[str, ...]:
     trait_names: list[str] = []
-    if _descriptor_uses_resource_kind(context, descriptor, ResourceKind.VECTOR_ALU):
+    issue_resources = _descriptor_issue_resources(context, descriptor)
+    matrix_coexecution_sources = tuple(resource for resource in issue_resources if ResourceFlag.MATRIX_COEXECUTION_SOURCE in resource.flags)
+    if len(matrix_coexecution_sources) > 1:
+        raise ValueError(f"AMDGPU descriptor set '{context.descriptor_set.key}' descriptor '{descriptor.key}' must use at most one matrix coexecution source resource")
+    if matrix_coexecution_sources and matrix_coexecution_sources[0].kind != ResourceKind.MATRIX:
+        raise ValueError(f"AMDGPU descriptor set '{context.descriptor_set.key}' descriptor '{descriptor.key}' matrix coexecution source resource must be a matrix resource")
+    if matrix_coexecution_sources:
+        source_families = tuple(
+            instruction_class
+            for instruction_class in (
+                InstructionClass.WMMA,
+                InstructionClass.SWMMAC,
+            )
+            if instruction_class in descriptor.instruction_classes
+        )
+        if len(source_families) != 1:
+            raise ValueError(
+                f"AMDGPU descriptor set '{context.descriptor_set.key}' descriptor '{descriptor.key}' matrix coexecution source must belong to exactly one WMMA or SWMMAC instruction class"
+            )
+    uses_vector_alu = any(resource.kind == ResourceKind.VECTOR_ALU for resource in issue_resources)
+    uses_matrix = any(resource.kind == ResourceKind.MATRIX for resource in issue_resources)
+    if uses_vector_alu:
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU")
-    if _descriptor_uses_resource_kind(context, descriptor, ResourceKind.SCALAR_ALU):
+    if any(resource.kind == ResourceKind.SCALAR_ALU for resource in issue_resources):
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_SCALAR_ALU")
-    if _descriptor_uses_resource_kind(context, descriptor, ResourceKind.MATRIX):
+    if uses_matrix:
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX")
     if descriptor.encoding_format_id in _VECTOR_MEMORY_ENCODING_FORMAT_IDS:
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_MEMORY")
@@ -455,6 +477,10 @@ def _descriptor_trait_names(
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_SDWA")
     if descriptor.key in _XCNT_IMPLICIT_DRAIN_DESCRIPTOR_KEYS or descriptor.key.startswith(_XCNT_IMPLICIT_DRAIN_DESCRIPTOR_KEY_PREFIXES):
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_XCNT_IMPLICIT_DRAIN")
+    if any(ResourceFlag.VECTOR_ISSUE in resource.flags for resource in issue_resources) or InstructionClass.LDSDMA in descriptor.instruction_classes:
+        trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ISSUE")
+    if matrix_coexecution_sources:
+        trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX_COEXECUTION_SOURCE")
     return tuple(trait_names)
 
 
@@ -695,7 +721,11 @@ def _emit_source(
         lines.append("")
         immediate_slot_table_name = _descriptor_set_immediate_slot_table_name(descriptor_set_table.descriptor_set_key)
         lines.append(f"static const loom_amdgpu_descriptor_immediate_slots_t {immediate_slot_table_name}[] = {{")
-        for sdwa_dst_sel_slot, literal_slot, address_offset_slot in zip(
+        for (
+            sdwa_dst_sel_slot,
+            literal_slot,
+            address_offset_slot,
+        ) in zip(
             descriptor_set_table.sdwa_dst_sel_immediate_slots,
             descriptor_set_table.literal_immediate_slots,
             descriptor_set_table.address_offset_immediate_slots,

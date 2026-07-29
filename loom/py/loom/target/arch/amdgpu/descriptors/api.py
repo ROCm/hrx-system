@@ -26,6 +26,16 @@ from loom.target.arch.amdgpu.encoding import (
     amdgpu_gfx125x_vgpr_msb_slot,
     amdgpu_supplemental_encoding_format_names,
 )
+from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE,
+    AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE,
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC,
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
+    AMDGPU_PROCESSOR_INFOS,
+    AMDGPU_TARGET_INFOS,
+    amdgpu_descriptor_set_info_by_generator_target,
+    amdgpu_target_descriptor_set_key,
+)
 from loom.target.low_descriptors import InstructionClass
 
 from .categories import *
@@ -310,6 +320,169 @@ def _validate_native_asm_values(descriptor_set: DescriptorSet) -> None:
                     )
 
 
+def _operand_has_vgpr_alt(operand: Operand) -> bool:
+    return any(reg_alt.reg_class == _REG_VGPR for reg_alt in operand.reg_alts)
+
+
+_MATRIX_COEXECUTION_OPERAND_LAYOUTS = {
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA: (
+        (0, OperandRole.RESULT, amdgpu_encoding_field_id("VDST")),
+        (1, OperandRole.OPERAND, amdgpu_encoding_field_id("SRC0")),
+        (2, OperandRole.OPERAND, amdgpu_encoding_field_id("SRC1")),
+    ),
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC: (
+        (0, OperandRole.RESULT, amdgpu_encoding_field_id("VDST")),
+        (2, OperandRole.OPERAND, amdgpu_encoding_field_id("SRC0")),
+        (3, OperandRole.OPERAND, amdgpu_encoding_field_id("SRC1")),
+        (4, OperandRole.OPERAND, amdgpu_encoding_field_id("SRC2")),
+    ),
+}
+
+
+def _validate_matrix_coexecution_profile_coverage(
+    generator_target: str,
+    descriptor_set: DescriptorSet,
+) -> None:
+    descriptor_set_info = amdgpu_descriptor_set_info_by_generator_target(
+        generator_target
+    )
+    processors_by_name = {
+        processor.processor: processor for processor in AMDGPU_PROCESSOR_INFOS
+    }
+    targets = tuple(
+        (target, processors_by_name[target.processor])
+        for target in AMDGPU_TARGET_INFOS
+        if amdgpu_target_descriptor_set_key(
+            target, processors_by_name[target.processor]
+        )
+        == descriptor_set_info.key
+    )
+    if not targets:
+        raise ValueError(
+            f"AMDGPU descriptor target '{generator_target}' has no compiler target "
+            "using its descriptor set"
+        )
+
+    resources = {resource.name: resource for resource in descriptor_set.resources}
+    schedule_classes = {
+        schedule_class.name: schedule_class
+        for schedule_class in descriptor_set.schedule_classes
+    }
+    requirements: dict[tuple[str, int], list[str]] = {}
+    for descriptor in descriptor_set.descriptors:
+        schedule_class = schedule_classes[descriptor.schedule_class]
+        source_resources = tuple(
+            resources[issue_use.resource]
+            for issue_use in schedule_class.issue_uses
+            if ResourceFlag.MATRIX_COEXECUTION_SOURCE
+            in resources[issue_use.resource].flags
+        )
+        if not source_resources:
+            continue
+        if len(source_resources) != 1:
+            raise ValueError(
+                f"AMDGPU descriptor target '{generator_target}' descriptor "
+                f"'{descriptor.key}' must issue on one matrix coexecution "
+                "resource"
+            )
+        source_resource = source_resources[0]
+        if ResourceFlag.VECTOR_ISSUE not in source_resource.flags:
+            raise ValueError(
+                f"AMDGPU descriptor target '{generator_target}' descriptor "
+                f"'{descriptor.key}' matrix coexecution resource "
+                f"'{source_resource.name}' is not a vector issue"
+            )
+        if schedule_class.latency_kind is LatencyKind.VARIABLE:
+            raise ValueError(
+                f"AMDGPU descriptor target '{generator_target}' descriptor "
+                f"'{descriptor.key}' matrix coexecution latency cannot select "
+                "a stable release rule"
+            )
+        source_families = tuple(
+            source
+            for instruction_class, source in (
+                (
+                    InstructionClass.WMMA,
+                    AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
+                ),
+                (
+                    InstructionClass.SWMMAC,
+                    AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC,
+                ),
+            )
+            if instruction_class in descriptor.instruction_classes
+        )
+        if len(source_families) != 1:
+            raise ValueError(
+                f"AMDGPU descriptor target '{generator_target}' descriptor "
+                f"'{descriptor.key}' must belong to one matrix source family"
+            )
+        source_family = source_families[0]
+        operand_layout = _MATRIX_COEXECUTION_OPERAND_LAYOUTS[source_family]
+        if len(descriptor.operands) <= operand_layout[-1][0]:
+            raise ValueError(
+                f"AMDGPU descriptor target '{generator_target}' descriptor "
+                f"'{descriptor.key}' does not provide the {source_family} "
+                "coexecution operand layout"
+            )
+        for operand_index, expected_role, expected_encoding_field_id in operand_layout:
+            operand = descriptor.operands[operand_index]
+            if operand.role is not expected_role:
+                raise ValueError(
+                    f"AMDGPU descriptor target '{generator_target}' descriptor "
+                    f"'{descriptor.key}' coexecution operand {operand_index} "
+                    f"has role {operand.role.name}; expected {expected_role.name}"
+                )
+            if operand.encoding_field_id != expected_encoding_field_id:
+                raise ValueError(
+                    f"AMDGPU descriptor target '{generator_target}' descriptor "
+                    f"'{descriptor.key}' coexecution operand {operand_index} "
+                    "does not map the expected encoding field"
+                )
+            if not _operand_has_vgpr_alt(operand):
+                raise ValueError(
+                    f"AMDGPU descriptor target '{generator_target}' descriptor "
+                    f"'{descriptor.key}' coexecution operand {operand_index} "
+                    "cannot use a VGPR"
+                )
+        requirement = (source_family, schedule_class.latency_cycles)
+        requirements.setdefault(requirement, []).append(descriptor.key)
+
+    for target, processor in targets:
+        profile = processor.features.matrix_coexecution
+        if not requirements:
+            if profile != AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE:
+                raise ValueError(
+                    f"AMDGPU target '{target.target}' selects matrix "
+                    f"coexecution profile '{profile}' without any source "
+                    "descriptors"
+                )
+            continue
+        if profile == AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE:
+            raise ValueError(
+                f"AMDGPU target '{target.target}' has matrix "
+                "coexecution source descriptors but no release profile"
+            )
+        rules = AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE.get(profile)
+        if rules is None:
+            raise ValueError(
+                f"AMDGPU target '{target.target}' selects unknown "
+                f"matrix coexecution profile '{profile}'"
+            )
+        covered_requirements = {(rule.source, rule.latency_cycles) for rule in rules}
+        for requirement, descriptor_keys in requirements.items():
+            if requirement in covered_requirements:
+                continue
+            source, latency_cycles = requirement
+            examples = ", ".join(descriptor_keys[:3])
+            raise ValueError(
+                f"AMDGPU target '{target.target}' matrix "
+                f"coexecution profile '{profile}' has no {source} "
+                f"{latency_cycles}-cycle fallback rule required by "
+                f"descriptor(s): {examples}"
+            )
+
+
 def amdgpu_descriptor_ref_keys() -> tuple[str, ...]:
     """Returns descriptor keys known to the AMDGPU target family."""
 
@@ -399,10 +572,6 @@ def _with_overlay_descriptors(
     )
     _validate_address_immediate_units(descriptor_set)
     return descriptor_set
-
-
-def _operand_has_vgpr_alt(operand: Operand) -> bool:
-    return any(reg_alt.reg_class == _REG_VGPR for reg_alt in operand.reg_alts)
 
 
 def _operand_is_explicit_register(operand: Operand) -> bool:
@@ -1013,6 +1182,7 @@ _AMDGPU_SCHEDULE_INSTRUCTION_CLASSES = {
     _SCHEDULE_VMEM_LOAD_LDS: (
         InstructionClass.GLOBAL_MEMORY,
         InstructionClass.LOCAL_MEMORY,
+        InstructionClass.LDSDMA,
     ),
     _SCHEDULE_VMEM_STORE: (InstructionClass.GLOBAL_MEMORY,),
     _SCHEDULE_VMEM_ATOMIC_RETURN: (InstructionClass.GLOBAL_MEMORY,),
@@ -1024,10 +1194,12 @@ _AMDGPU_SCHEDULE_INSTRUCTION_CLASSES = {
     _SCHEDULE_TENSOR_LOAD_LDS: (
         InstructionClass.GLOBAL_MEMORY,
         InstructionClass.LOCAL_MEMORY,
+        InstructionClass.LDSDMA,
     ),
     _SCHEDULE_CLUSTER_LOAD_LDS: (
         InstructionClass.GLOBAL_MEMORY,
         InstructionClass.LOCAL_MEMORY,
+        InstructionClass.LDSDMA,
     ),
     _SCHEDULE_MFMA: (InstructionClass.MFMA,),
     _SCHEDULE_WMMA: (InstructionClass.WMMA,),
@@ -1161,6 +1333,13 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
         extra_descriptors=_GFX125X_EXTRA_DESCRIPTORS,
         flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     ),
+    "rdna4_gfx1250_a0": _AmdgpuCoreDescriptorSetBuilder(
+        base=_AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE,
+        overlay_rows=_gfx1250_core_overlays,
+        overlay_descriptors=_gfx1250_a0_core_overlay_descriptors,
+        extra_descriptors=_GFX125X_EXTRA_DESCRIPTORS,
+        flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
+    ),
     "rdna4_gfx1251": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_RDNA4_GFX1251_CORE_DESCRIPTOR_SET_BASE,
         overlay_rows=_gfx1250_core_overlays,
@@ -1197,6 +1376,7 @@ def _build_amdgpu_core_descriptor_set_from_spec(
     _validate_dpp_control_fields(descriptor_set)
     _validate_matrix_high_half_select_fields(descriptor_set)
     _validate_native_asm_values(descriptor_set)
+    _validate_matrix_coexecution_profile_coverage(target, descriptor_set)
     return descriptor_set
 
 

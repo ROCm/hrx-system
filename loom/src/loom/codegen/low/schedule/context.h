@@ -310,6 +310,8 @@ typedef struct loom_low_schedule_build_state_t {
   // Per-resource aggregate resource pressure, dense by descriptor resource id
   // until compacted after scheduling.
   loom_low_schedule_resource_summary_t* resource_summaries;
+  // Union of descriptor resource flags referenced by scheduled nodes.
+  loom_low_resource_flags_t used_resource_flags;
   // Number of populated scheduled_node_indices entries.
   iree_host_size_t scheduled_node_count;
   // Number of error diagnostics emitted while attempting scheduling.

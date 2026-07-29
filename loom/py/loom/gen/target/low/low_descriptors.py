@@ -21,6 +21,12 @@ from loom.gen.target.low.compiled import DescriptorAllowlist, GeneratedDescripto
 from loom.target.low_descriptors import DescriptorSet
 
 
+def _required_schedule_class_names(
+    view_specs: Sequence[DescriptorSet],
+) -> tuple[str, ...]:
+    return tuple(sorted({descriptor.schedule_class for view_spec in view_specs for descriptor in view_spec.descriptors if descriptor.schedule_class is not None}))
+
+
 def generate_descriptor_set(
     spec: DescriptorSet,
     allowlist: DescriptorAllowlist | None = None,
@@ -38,18 +44,19 @@ def generate_descriptor_set_shared_source(
 ) -> str:
     """Generates one C source containing shared storage and multiple set views.
 
-    Each view selects descriptors from |storage_spec| by stable key. Supporting
-    tables are shared as a storage superset, while descriptor, operand-form, and
-    asm-form tables are reused only when the selected view surface matches the
-    storage rows. A view may provide its own asm forms for the same descriptor
-    keys; those forms are compiled and validated against the shared storage
-    vocabulary during generation.
+    Each view selects descriptors from |storage_spec| by stable key. Dense table
+    IDs follow the storage superset, while target-specific register, resource,
+    schedule, descriptor, operand-form, and asm-form tables are emitted only
+    when a view differs from the storage rows. A view may provide its own asm
+    forms for the same descriptor keys; those forms are compiled and validated
+    against the shared storage vocabulary during generation.
     """
 
     compiled = compiler.compile_descriptor_set(
         storage_spec,
         allowlist=None,
         allow_ambiguous_asm_mnemonics=True,
+        required_schedule_class_names=_required_schedule_class_names(view_specs),
     )
     descriptor_set_views = tuple(views.descriptor_set_view_for_spec(compiled, view_spec) for view_spec in view_specs)
     return c_emit.emit_source_for_views(compiled, views=descriptor_set_views)
@@ -65,6 +72,7 @@ def generate_descriptor_set_shared_header(
         storage_spec,
         allowlist=None,
         allow_ambiguous_asm_mnemonics=True,
+        required_schedule_class_names=_required_schedule_class_names((view_spec,)),
     )
     views.descriptor_set_view_for_spec(compiled, view_spec)
     return c_emit.emit_header_for_spec(compiled, view_spec)

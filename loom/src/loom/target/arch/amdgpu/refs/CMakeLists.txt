@@ -74,6 +74,10 @@ if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
   list(APPEND _target_refs_platform_args "--descriptor-set=amdgpu.gfx12_5.generic.core")
   list(APPEND _target_refs_platform_args "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml")
 endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE)
+  list(APPEND _target_refs_platform_args "--descriptor-set=amdgpu.rdna4.gfx1250_a0.core")
+  list(APPEND _target_refs_platform_args "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml")
+endif()
 loom_generated_cc_library(
   NAME
     target_refs

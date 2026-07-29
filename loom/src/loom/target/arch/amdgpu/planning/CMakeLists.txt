@@ -104,6 +104,32 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
+    matrix_coexecution
+  HDRS
+    "matrix_coexecution.h"
+  SRCS
+    "matrix_coexecution.c"
+  DEPS
+    ::descriptor_semantics
+    ::structural_packet
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::allocation
+    loom::codegen::low::packet
+    loom::codegen::low::schedule
+    loom::ir
+    loom::target::arch::amdgpu::matrix::types
+    loom::target::arch::amdgpu::refs::target_refs
+    loom::target::arch::amdgpu::target_info
+    loom::target::arch::amdgpu::target_info_defs
+    loom::util::cfg_graph
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
     structural_packet
   HDRS
     "structural_packet.h"
@@ -131,6 +157,8 @@ loom_cc_library(
   SRCS
     "wait_states.c"
   DEPS
+    ::descriptor_semantics
+    ::matrix_coexecution
     ::matrix_wait_states
     ::structural_packet
     ::vopd_plan
@@ -147,7 +175,6 @@ loom_cc_library(
     loom::target::arch::amdgpu::encoding
     loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::refs::target_refs
-    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::util::json
     loom::util::stream
@@ -308,6 +335,8 @@ loom_cc_library(
     "vopd_plan.c"
   DEPS
     ::address_state
+    ::descriptor_semantics
+    ::matrix_coexecution
     ::structural_packet
     ::wait_packets
     iree::base
@@ -320,7 +349,6 @@ loom_cc_library(
     loom::ops::low
     loom::target::arch::amdgpu::encoding
     loom::target::arch::amdgpu::refs::target_refs
-    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::util::json
     loom::util::stream
@@ -338,6 +366,7 @@ loom_cc_library(
     "packet_plan.c"
   DEPS
     ::address_state
+    ::matrix_coexecution
     ::vopd_plan
     ::wait_packets
     ::wait_plan
@@ -346,6 +375,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::schedule
+    loom::target::arch::amdgpu::target_id
   PUBLIC
 )
 endif()

@@ -675,6 +675,8 @@ typedef struct loom_low_schedule_table_t {
   iree_host_size_t candidate_decision_count;
   // Number of descriptor issue-use rows referenced by scheduled nodes.
   iree_host_size_t resource_use_count;
+  // Union of descriptor resource flags referenced by scheduled nodes.
+  loom_low_resource_flags_t used_resource_flags;
   // Descriptor effects in scheduled order.
   const loom_low_schedule_effect_use_t* effect_uses;
   // Number of effect-use records.

@@ -37,6 +37,7 @@ from loom.target.arch.amdgpu.names import (  # noqa: E402
 )
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AmdgpuDescriptorSetInfo,
+    amdgpu_target_descriptor_set_key,
     sorted_descriptor_set_infos,
     sorted_processor_infos,
     sorted_target_infos,
@@ -51,7 +52,7 @@ def _selected_descriptor_set_infos() -> tuple[AmdgpuDescriptorSetInfo, ...]:
         processor = processors_by_name.get(target.processor)
         if processor is None:
             raise ValueError(f"AMDGPU target '{target.target}' has no processor row '{target.processor}'")
-        descriptor_set_key = processor.descriptor_set.key
+        descriptor_set_key = amdgpu_target_descriptor_set_key(target, processor)
         if not descriptor_set_key:
             raise ValueError(f"AMDGPU target '{target.target}' has no descriptor-set key")
         if descriptor_set_key not in descriptor_sets_by_key:

@@ -31,6 +31,8 @@ typedef enum loom_amdgpu_native_insertion_kind_e {
   LOOM_AMDGPU_NATIVE_INSERTION_S_NOP = 3,
   // An S_DELAY_ALU delay packet.
   LOOM_AMDGPU_NATIVE_INSERTION_S_DELAY_ALU = 4,
+  // A V_NOP vector issue packet.
+  LOOM_AMDGPU_NATIVE_INSERTION_V_NOP = 5,
 } loom_amdgpu_native_insertion_kind_t;
 
 // One target-owned instruction inserted while encoding a scheduled packet.
