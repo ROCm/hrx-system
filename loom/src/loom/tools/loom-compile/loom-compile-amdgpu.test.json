@@ -511,9 +511,9 @@
               "unordered": [
                 "\"status\":{\"code\":0,\"name\":\"OK\"}",
                 "\"target_key\":\"gfx1250\"",
-                "\"instruction_count\":733",
-                "\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":344",
-                "\"target_insertions\":{\"static_packet_count\":55,\"exact_dynamic_packet_count\":55,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":55,\"row_count\":55",
+                "\"instruction_count\":593",
+                "\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":340",
+                "\"target_insertions\":{\"static_packet_count\":47,\"exact_dynamic_packet_count\":47,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":47,\"row_count\":47",
                 "\"packet_key\":\"amdgpu.s_set_vgpr_msb\"",
                 "\"boundary_operation\":\"low.copy\",\"boundary_descriptor_key\":null"
               ]
@@ -549,9 +549,9 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx1250\"",
-                "\"instruction_count\":802",
-                "\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":452",
-                "\"target_insertions\":{\"static_packet_count\":96,\"exact_dynamic_packet_count\":96,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":372,\"row_count\":96",
+                "\"instruction_count\":623",
+                "\"vector\":{\"register_class\":\"amdgpu.vgpr\",\"final\":{\"register_count\":468",
+                "\"target_insertions\":{\"static_packet_count\":55,\"exact_dynamic_packet_count\":55,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":208,\"row_count\":55",
                 "\"dynamic_instruction_mix\":{\"descriptor_count\":",
                 "\"matrix_count\":132,\"mfma_count\":0,\"smfmac_count\":0,\"wmma_count\":132"
               ]
@@ -583,8 +583,8 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx1251\"",
-                "\"instruction_count\":733",
-                "\"target_insertions\":{\"static_packet_count\":55,\"exact_dynamic_packet_count\":55,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":55,\"row_count\":55"
+                "\"instruction_count\":593",
+                "\"target_insertions\":{\"static_packet_count\":47,\"exact_dynamic_packet_count\":47,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":47,\"row_count\":47"
               ]
             }
           },
@@ -614,8 +614,8 @@
             "contains": {
               "unordered": [
                 "\"target_key\":\"gfx1251\"",
-                "\"instruction_count\":802",
-                "\"target_insertions\":{\"static_packet_count\":96,\"exact_dynamic_packet_count\":96,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":372,\"row_count\":96"
+                "\"instruction_count\":623",
+                "\"target_insertions\":{\"static_packet_count\":55,\"exact_dynamic_packet_count\":55,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":208,\"row_count\":55"
               ]
             }
           },

@@ -204,9 +204,23 @@ typedef struct loom_low_schedule_candidate_score_t {
 } loom_low_schedule_candidate_score_t;
 
 enum loom_low_schedule_candidate_flag_bits_e {
+  // Candidate unlocks a descriptor-backed scheduling node.
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR = 1u << 0,
+  // Candidate unlocks a descriptor without growing register pressure.
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_NON_GROWING_DESCRIPTOR = 1u << 1,
+  // Candidate exposes actionable structural storage setup. Numeric identity
+  // with LOOM_LOW_SCHEDULE_NODE_FLAG_DESCRIPTOR_SETUP lets final-producer
+  // publication copy the fact without a branch or lookup.
+  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE =
+      LOOM_LOW_SCHEDULE_NODE_FLAG_DESCRIPTOR_SETUP,
 };
+static_assert(
+    LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE <= UINT8_MAX,
+    "candidate flags must fit in loom_low_schedule_candidate_score_t");
+static_assert(
+    (LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_TRANSPARENT << 1u) ==
+        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE,
+    "pair-transparent nodes must map directly to storage-advance candidates");
 
 // Returns true when |strategy| simulates register and target pressure.
 static inline bool loom_low_schedule_strategy_uses_pressure(

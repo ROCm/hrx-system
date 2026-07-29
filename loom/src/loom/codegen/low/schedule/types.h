@@ -54,12 +54,19 @@ enum loom_low_schedule_node_flag_bits_e {
   LOOM_LOW_SCHEDULE_NODE_FLAG_VALUE_ORDINALS_OVERFLOW = 1u << 0,
   // Node occupies a fixed source-order position between reorderable ranges.
   LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY = 1u << 1,
-  // Structural node can supply dependencies while setting up a target pair.
-  LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_SETUP = 1u << 2,
+  // Structural node establishes storage without consuming payload contents.
+  LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP = 1u << 2,
   // Node observes completion of externally visible program-exit memory.
   LOOM_LOW_SCHEDULE_NODE_FLAG_PROGRAM_EXIT_MEMORY = 1u << 3,
   // Descriptor results overwrite storage before untied operands are consumed.
   LOOM_LOW_SCHEDULE_NODE_FLAG_EARLY_CLOBBER = 1u << 4,
+  // Structural node is transparent between target packet-pair candidates.
+  // Its bit immediately precedes DESCRIPTOR_SETUP so candidate scoring can
+  // map direct transparency to the common storage-advance fact with one shift.
+  LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_TRANSPARENT = 1u << 5,
+  // Structural node advances an SSA storage path into a descriptor operand.
+  LOOM_LOW_SCHEDULE_NODE_FLAG_DESCRIPTOR_SETUP =
+      LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_TRANSPARENT << 1u,
 };
 typedef uint16_t loom_low_schedule_node_flags_t;
 
