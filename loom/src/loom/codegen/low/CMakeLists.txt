@@ -159,7 +159,6 @@ loom_cc_library(
   SRCS
     "storage_layout.c"
   DEPS
-    ::function
     iree::base
     iree::base::internal::arena
     loom::ir
@@ -335,6 +334,7 @@ loom_cc_library(
     loom::codegen::low::allocation::interval_order
     loom::codegen::low::allocation::live_range
     loom::codegen::low::allocation::loop_edge_relocation
+    loom::codegen::low::allocation::move_plan
     loom::codegen::low::allocation::move_topology
     loom::codegen::low::allocation::packet_move
     loom::codegen::low::allocation::search
@@ -346,27 +346,12 @@ loom_cc_library(
     loom::codegen::low::allocation::target_constraints
     loom::codegen::low::allocation::unit_liveness
     loom::codegen::low::allocation::unit_location
+    loom::codegen::low::schedule
     loom::error::emitter
     loom::error::error_defs
     loom::ir
     loom::ops::low
     loom::target::registers
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    move_sequence
-  HDRS
-    "move_sequence.h"
-  SRCS
-    "move_sequence.c"
-  DEPS
-    ::allocation
-    iree::base
-    iree::base::internal::arena
-    loom::codegen::low::allocation::move_topology
-    loom::ops::low
   PUBLIC
 )
 
@@ -813,18 +798,6 @@ loom_cc_test(
     loom::target::test::target_record_table
     loom::testing::diagnostic_matchers
     loom::testing::module_ptr
-)
-
-loom_cc_test(
-  NAME
-    move_sequence_test
-  SRCS
-    "move_sequence_test.cc"
-  DEPS
-    ::move_sequence
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
 )
 
 loom_cc_test(

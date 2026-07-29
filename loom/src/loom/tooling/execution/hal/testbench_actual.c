@@ -22,6 +22,66 @@
 #include "loom/tooling/execution/compile_report_capture.h"
 #include "loom/util/fact_table.h"
 
+typedef struct loom_run_hal_testbench_actual_sequence_span_t
+    loom_run_hal_testbench_actual_sequence_span_t;
+typedef struct loom_run_hal_testbench_actual_sequence_invocation_t
+    loom_run_hal_testbench_actual_sequence_invocation_t;
+
+struct loom_run_hal_testbench_actual_sequence_invocation_t {
+  // HAL provider for this actual invocation.
+  loom_run_hal_testbench_actual_provider_t* provider;
+  // Contiguous actual-invocation span containing this invocation.
+  loom_run_hal_testbench_actual_sequence_span_t* span;
+};
+
+struct loom_run_hal_testbench_actual_sequence_span_t {
+  // Shared HAL context used by every provider in this span.
+  loom_run_hal_testbench_context_t* context;
+  // Prepared invocation entries indexed by span-local invocation ordinal.
+  loom_run_hal_testbench_actual_sequence_invocation_t* invocations;
+  // First source invocation ordinal represented by this span.
+  iree_host_size_t first_invocation_index;
+  // Number of contiguous actual invocations in this span.
+  iree_host_size_t invocation_count;
+  // Stable value-table payload addresses in flattened invocation input order.
+  const loom_testbench_value_t** input_values;
+  // Number of entries in |input_values|.
+  iree_host_size_t input_count;
+  // Buffer-valued entries from |input_values| in HAL binding order.
+  const loom_testbench_value_t** binding_values;
+  // Submission table populated from |binding_values| before each execution.
+  iree_hal_buffer_binding_t* binding_table;
+  // Binding byte lengths captured while recording a sample sequence.
+  iree_device_size_t* binding_lengths;
+  // Number of entries in each binding array.
+  iree_host_size_t binding_count;
+  // Reusable recording descriptors in invocation order.
+  loom_run_hal_dispatch_sequence_step_t* steps;
+  // Reusable command sequence indexed by case sample ordinal.
+  loom_run_hal_dispatch_sequence_t* sample_sequences;
+  // Number of entries in |sample_sequences|.
+  iree_host_size_t sample_count;
+  // Value-table slots currently addressed by |input_values|.
+  const loom_testbench_value_slot_t* value_slots;
+  // True once every provider has completed its compile attempt.
+  bool providers_prepared;
+  // True when one of the prepared providers rejected compilation.
+  bool compile_rejected;
+};
+
+struct loom_run_hal_testbench_actual_sequence_execution_t {
+  // Host allocator used for sequence execution storage.
+  iree_allocator_t host_allocator;
+  // Case plan whose actual invocations are mapped by this execution.
+  const loom_testbench_case_plan_t* case_plan;
+  // Prepared execution entries indexed by source invocation ordinal.
+  loom_run_hal_testbench_actual_sequence_invocation_t* invocations;
+  // Prepared contiguous actual-invocation spans.
+  loom_run_hal_testbench_actual_sequence_span_t* spans;
+  // Number of entries in |spans|.
+  iree_host_size_t span_count;
+};
+
 void loom_run_hal_testbench_context_initialize(
     const loom_run_hal_artifact_provider_registry_t* artifact_provider_registry,
     iree_allocator_t host_allocator,
@@ -1047,6 +1107,452 @@ iree_status_t loom_run_hal_testbench_actual_invoke(
   return status;
 }
 
+static void loom_run_hal_testbench_actual_sequence_span_deinitialize(
+    loom_run_hal_testbench_actual_sequence_span_t* span,
+    iree_allocator_t host_allocator) {
+  if (span == NULL) {
+    return;
+  }
+  if (span->sample_sequences != NULL) {
+    for (iree_host_size_t sample_index = 0; sample_index < span->sample_count;
+         ++sample_index) {
+      loom_run_hal_dispatch_sequence_deinitialize(
+          &span->sample_sequences[sample_index]);
+    }
+  }
+  iree_allocator_free(host_allocator, span->sample_sequences);
+  iree_allocator_free(host_allocator, span->steps);
+  iree_allocator_free(host_allocator, span->binding_lengths);
+  iree_allocator_free(host_allocator, span->binding_table);
+  iree_allocator_free(host_allocator, span->binding_values);
+  iree_allocator_free(host_allocator, span->input_values);
+  *span = (loom_run_hal_testbench_actual_sequence_span_t){0};
+}
+
+static iree_status_t loom_run_hal_testbench_actual_sequence_span_initialize(
+    const loom_testbench_case_plan_t* case_plan,
+    loom_run_hal_testbench_actual_sequence_invocation_t* invocations,
+    iree_host_size_t first_invocation_index, iree_host_size_t invocation_count,
+    iree_allocator_t host_allocator,
+    loom_run_hal_testbench_actual_sequence_span_t* out_span) {
+  *out_span = (loom_run_hal_testbench_actual_sequence_span_t){
+      .context = invocations[0].provider->context,
+      .invocations = invocations,
+      .first_invocation_index = first_invocation_index,
+      .invocation_count = invocation_count,
+      .sample_count = case_plan->sample_count,
+  };
+
+  iree_host_size_t input_count = 0;
+  iree_host_size_t binding_count = 0;
+  for (iree_host_size_t invocation_offset = 0;
+       invocation_offset < invocation_count; ++invocation_offset) {
+    const loom_run_hal_testbench_actual_provider_t* provider =
+        invocations[invocation_offset].provider;
+    IREE_ASSERT(provider != NULL);
+    IREE_ASSERT(provider->context == out_span->context);
+    const loom_testbench_invocation_plan_t* invocation =
+        provider->actual_invocation;
+    IREE_ASSERT(
+        invocation ==
+        &case_plan->invocations[first_invocation_index + invocation_offset]);
+    if (!iree_host_size_checked_add(input_count, invocation->input_count,
+                                    &input_count)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "HAL actual sequence input count overflowed");
+    }
+    iree_host_size_t step_binding_count = 0;
+    for (iree_host_size_t input_index = 0;
+         input_index < invocation->input_count; ++input_index) {
+      const loom_type_t input_type = loom_module_value_type(
+          invocation->module, invocation->input_value_ids[input_index]);
+      if (loom_type_is_shaped(input_type)) {
+        ++step_binding_count;
+      } else if (!loom_type_is_scalar(input_type)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "HAL actual invocation input %zu has unsupported type kind %u",
+            input_index, (unsigned)loom_type_kind(input_type));
+      }
+    }
+    if (step_binding_count > LOOM_RUN_HAL_MAX_BINDING_COUNT ||
+        !iree_host_size_checked_add(binding_count, step_binding_count,
+                                    &binding_count)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "HAL actual sequence binding count exceeds supported limits");
+    }
+  }
+  out_span->input_count = input_count;
+  out_span->binding_count = binding_count;
+
+  iree_status_t status = iree_ok_status();
+  if (input_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, input_count,
+                                         sizeof(*out_span->input_values),
+                                         (void**)&out_span->input_values);
+  }
+  if (iree_status_is_ok(status) && binding_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, binding_count,
+                                         sizeof(*out_span->binding_values),
+                                         (void**)&out_span->binding_values);
+  }
+  if (iree_status_is_ok(status) && binding_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, binding_count,
+                                         sizeof(*out_span->binding_table),
+                                         (void**)&out_span->binding_table);
+  }
+  if (iree_status_is_ok(status) && binding_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, binding_count,
+                                         sizeof(*out_span->binding_lengths),
+                                         (void**)&out_span->binding_lengths);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(host_allocator, invocation_count,
+                                         sizeof(*out_span->steps),
+                                         (void**)&out_span->steps);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_allocator_malloc_array(host_allocator, case_plan->sample_count,
+                                    sizeof(*out_span->sample_sequences),
+                                    (void**)&out_span->sample_sequences);
+  }
+  if (!iree_status_is_ok(status)) {
+    loom_run_hal_testbench_actual_sequence_span_deinitialize(out_span,
+                                                             host_allocator);
+    return status;
+  }
+  if (input_count != 0) {
+    memset(out_span->input_values, 0,
+           input_count * sizeof(*out_span->input_values));
+  }
+  if (binding_count != 0) {
+    memset(out_span->binding_values, 0,
+           binding_count * sizeof(*out_span->binding_values));
+    memset(out_span->binding_table, 0,
+           binding_count * sizeof(*out_span->binding_table));
+    memset(out_span->binding_lengths, 0,
+           binding_count * sizeof(*out_span->binding_lengths));
+  }
+  memset(out_span->steps, 0, invocation_count * sizeof(*out_span->steps));
+  if (case_plan->sample_count != 0) {
+    memset(out_span->sample_sequences, 0,
+           case_plan->sample_count * sizeof(*out_span->sample_sequences));
+  }
+
+  iree_host_size_t binding_offset = 0;
+  for (iree_host_size_t invocation_offset = 0;
+       invocation_offset < invocation_count; ++invocation_offset) {
+    loom_run_hal_testbench_actual_provider_t* provider =
+        invocations[invocation_offset].provider;
+    const loom_testbench_invocation_plan_t* invocation =
+        provider->actual_invocation;
+    iree_host_size_t step_binding_count = 0;
+    for (iree_host_size_t input_index = 0;
+         input_index < invocation->input_count; ++input_index) {
+      const loom_type_t input_type = loom_module_value_type(
+          invocation->module, invocation->input_value_ids[input_index]);
+      step_binding_count += loom_type_is_shaped(input_type) ? 1 : 0;
+    }
+    out_span->steps[invocation_offset] =
+        (loom_run_hal_dispatch_sequence_step_t){
+            .candidate = &provider->prepared_candidate,
+            .binding_lengths = step_binding_count == 0
+                                   ? NULL
+                                   : &out_span->binding_lengths[binding_offset],
+            .binding_count = step_binding_count,
+        };
+    binding_offset += step_binding_count;
+  }
+  return iree_ok_status();
+}
+
+void loom_run_hal_testbench_actual_sequence_execution_destroy(
+    loom_run_hal_testbench_actual_sequence_execution_t* execution) {
+  if (execution == NULL) {
+    return;
+  }
+  const iree_allocator_t host_allocator = execution->host_allocator;
+  for (iree_host_size_t span_index = 0; span_index < execution->span_count;
+       ++span_index) {
+    loom_run_hal_testbench_actual_sequence_span_deinitialize(
+        &execution->spans[span_index], host_allocator);
+  }
+  iree_allocator_free(host_allocator, execution->spans);
+  iree_allocator_free(host_allocator, execution->invocations);
+  iree_allocator_free(host_allocator, execution);
+}
+
+iree_status_t loom_run_hal_testbench_actual_sequence_execution_create(
+    const loom_testbench_case_plan_t* case_plan,
+    iree_host_size_t provider_count,
+    loom_run_hal_testbench_actual_provider_t* const* providers,
+    iree_allocator_t host_allocator,
+    loom_run_hal_testbench_actual_sequence_execution_t** out_execution) {
+  *out_execution = NULL;
+  loom_run_hal_testbench_actual_sequence_execution_t* execution = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*execution),
+                                             (void**)&execution));
+  *execution = (loom_run_hal_testbench_actual_sequence_execution_t){
+      .host_allocator = host_allocator,
+      .case_plan = case_plan,
+  };
+
+  iree_status_t status = iree_ok_status();
+  if (case_plan->invocation_count != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, case_plan->invocation_count,
+        sizeof(*execution->invocations), (void**)&execution->invocations);
+  }
+  if (iree_status_is_ok(status) && case_plan->invocation_count != 0) {
+    memset(execution->invocations, 0,
+           case_plan->invocation_count * sizeof(*execution->invocations));
+  }
+  if (iree_status_is_ok(status) && provider_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, provider_count,
+                                         sizeof(*execution->spans),
+                                         (void**)&execution->spans);
+  }
+  if (iree_status_is_ok(status) && provider_count != 0) {
+    memset(execution->spans, 0, provider_count * sizeof(*execution->spans));
+  }
+
+  iree_host_size_t provider_index = 0;
+  for (iree_host_size_t invocation_index = 0;
+       iree_status_is_ok(status) &&
+       invocation_index < case_plan->invocation_count;) {
+    if (case_plan->invocations[invocation_index].kind !=
+        LOOM_TESTBENCH_INVOCATION_ACTUAL) {
+      ++invocation_index;
+      continue;
+    }
+    const iree_host_size_t first_invocation_index = invocation_index;
+    do {
+      IREE_ASSERT(provider_index < provider_count);
+      loom_run_hal_testbench_actual_provider_t* provider =
+          providers[provider_index++];
+      IREE_ASSERT(provider != NULL);
+      IREE_ASSERT(provider->actual_invocation ==
+                  &case_plan->invocations[invocation_index]);
+      execution->invocations[invocation_index].provider = provider;
+      ++invocation_index;
+    } while (invocation_index < case_plan->invocation_count &&
+             case_plan->invocations[invocation_index].kind ==
+                 LOOM_TESTBENCH_INVOCATION_ACTUAL);
+    loom_run_hal_testbench_actual_sequence_span_t* span =
+        &execution->spans[execution->span_count++];
+    status = loom_run_hal_testbench_actual_sequence_span_initialize(
+        case_plan, &execution->invocations[first_invocation_index],
+        first_invocation_index, invocation_index - first_invocation_index,
+        host_allocator, span);
+    for (iree_host_size_t i = first_invocation_index;
+         iree_status_is_ok(status) && i < invocation_index; ++i) {
+      execution->invocations[i].span = span;
+    }
+  }
+  IREE_ASSERT(provider_index == provider_count);
+  if (iree_status_is_ok(status)) {
+    *out_execution = execution;
+  } else {
+    loom_run_hal_testbench_actual_sequence_execution_destroy(execution);
+  }
+  return status;
+}
+
+static iree_host_size_t loom_run_hal_testbench_actual_sequence_invocation_index(
+    const loom_run_hal_testbench_actual_sequence_execution_t* execution,
+    const loom_testbench_invocation_plan_t* invocation) {
+  IREE_ASSERT(invocation >= execution->case_plan->invocations);
+  IREE_ASSERT(invocation < execution->case_plan->invocations +
+                               execution->case_plan->invocation_count);
+  return (iree_host_size_t)(invocation - execution->case_plan->invocations);
+}
+
+static iree_status_t loom_run_hal_testbench_actual_sequence_invoke(
+    void* user_data, const loom_testbench_invocation_plan_t* invocation,
+    iree_host_size_t input_count, const loom_testbench_value_t* inputs,
+    iree_host_size_t result_count, loom_testbench_value_t* out_results) {
+  loom_run_hal_testbench_actual_sequence_execution_t* execution =
+      (loom_run_hal_testbench_actual_sequence_execution_t*)user_data;
+  const iree_host_size_t invocation_index =
+      loom_run_hal_testbench_actual_sequence_invocation_index(execution,
+                                                              invocation);
+  loom_run_hal_testbench_actual_provider_t* provider =
+      execution->invocations[invocation_index].provider;
+  IREE_ASSERT(provider != NULL);
+  return loom_run_hal_testbench_actual_invoke(
+      provider, invocation, input_count, inputs, result_count, out_results);
+}
+
+static iree_status_t loom_run_hal_testbench_actual_sequence_resolve_inputs(
+    loom_run_hal_testbench_actual_sequence_span_t* span,
+    const loom_testbench_value_table_t* table) {
+  iree_host_size_t input_offset = 0;
+  iree_host_size_t binding_offset = 0;
+  for (iree_host_size_t invocation_offset = 0;
+       invocation_offset < span->invocation_count; ++invocation_offset) {
+    const loom_testbench_invocation_plan_t* invocation =
+        span->invocations[invocation_offset].provider->actual_invocation;
+    for (iree_host_size_t input_index = 0;
+         input_index < invocation->input_count; ++input_index) {
+      const loom_testbench_value_t* input = NULL;
+      IREE_RETURN_IF_ERROR(loom_testbench_value_table_lookup_borrow(
+          table, invocation->input_value_ids[input_index], &input));
+      span->input_values[input_offset++] = input;
+      const loom_type_t input_type = loom_module_value_type(
+          invocation->module, invocation->input_value_ids[input_index]);
+      if (loom_type_is_shaped(input_type)) {
+        span->binding_values[binding_offset++] = input;
+      }
+    }
+  }
+  IREE_ASSERT(input_offset == span->input_count);
+  IREE_ASSERT(binding_offset == span->binding_count);
+  span->value_slots = table->slots;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_run_hal_testbench_actual_sequence_prepare_sample(
+    loom_run_hal_testbench_actual_sequence_span_t* span,
+    iree_host_size_t sample_ordinal) {
+  iree_host_size_t input_offset = 0;
+  iree_host_size_t binding_offset = 0;
+  for (iree_host_size_t invocation_offset = 0;
+       invocation_offset < span->invocation_count; ++invocation_offset) {
+    loom_run_hal_testbench_actual_provider_t* provider =
+        span->invocations[invocation_offset].provider;
+    loom_run_hal_dispatch_sequence_step_t* step =
+        &span->steps[invocation_offset];
+    step->options = provider->invocation_options;
+    const loom_testbench_invocation_plan_t* invocation =
+        provider->actual_invocation;
+    for (iree_host_size_t input_index = 0;
+         input_index < invocation->input_count; ++input_index) {
+      const loom_testbench_value_t* input = span->input_values[input_offset++];
+      const loom_type_t input_type = loom_module_value_type(
+          invocation->module, invocation->input_value_ids[input_index]);
+      if (loom_type_is_shaped(input_type)) {
+        if (!loom_testbench_value_is_buffer(input) ||
+            input->buffer.buffer == NULL) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "HAL actual invocation shaped input is not a buffer");
+        }
+        span->binding_lengths[binding_offset++] = input->buffer.byte_length;
+      } else {
+        IREE_RETURN_IF_ERROR(
+            loom_run_hal_testbench_invocation_options_push_constant(
+                input, input_type, &step->options));
+      }
+    }
+  }
+  IREE_ASSERT(input_offset == span->input_count);
+  IREE_ASSERT(binding_offset == span->binding_count);
+  return loom_run_hal_dispatch_sequence_prepare(
+      &span->context->runtime, span->invocation_count, span->steps,
+      &span->sample_sequences[sample_ordinal]);
+}
+
+static void loom_run_hal_testbench_actual_sequence_populate_binding_table(
+    loom_run_hal_testbench_actual_sequence_span_t* span) {
+  for (iree_host_size_t binding_index = 0; binding_index < span->binding_count;
+       ++binding_index) {
+    const loom_testbench_value_t* input = span->binding_values[binding_index];
+    span->binding_table[binding_index] = (iree_hal_buffer_binding_t){
+        .buffer = input->buffer.buffer,
+        .offset = input->buffer.byte_offset,
+        .length = input->buffer.byte_length,
+    };
+  }
+}
+
+static iree_status_t loom_run_hal_testbench_actual_sequence_invoke_span(
+    void* user_data, iree_host_size_t sample_ordinal,
+    iree_host_size_t invocation_count,
+    const loom_testbench_prepared_invocation_t* invocations,
+    loom_testbench_value_table_t* table) {
+  loom_run_hal_testbench_actual_sequence_execution_t* execution =
+      (loom_run_hal_testbench_actual_sequence_execution_t*)user_data;
+  const iree_host_size_t first_invocation_index =
+      loom_run_hal_testbench_actual_sequence_invocation_index(
+          execution, invocations[0].plan);
+  loom_run_hal_testbench_actual_sequence_span_t* span =
+      execution->invocations[first_invocation_index].span;
+  IREE_ASSERT(span != NULL);
+  IREE_ASSERT(span->first_invocation_index == first_invocation_index);
+  IREE_ASSERT(span->invocation_count == invocation_count);
+  IREE_ASSERT(sample_ordinal < span->sample_count);
+
+  if (span->value_slots != table->slots) {
+    IREE_RETURN_IF_ERROR(
+        loom_run_hal_testbench_actual_sequence_resolve_inputs(span, table));
+  }
+  if (!span->providers_prepared) {
+    for (iree_host_size_t provider_index = 0;
+         provider_index < span->invocation_count; ++provider_index) {
+      loom_run_hal_testbench_actual_provider_t* provider =
+          span->invocations[provider_index].provider;
+      IREE_RETURN_IF_ERROR(
+          loom_run_hal_testbench_actual_provider_compile(provider));
+      span->compile_rejected |= provider->compile_rejected;
+    }
+    span->providers_prepared = true;
+  }
+  if (span->compile_rejected) {
+    return iree_ok_status();
+  }
+
+  loom_run_hal_dispatch_sequence_t* sample_sequence =
+      &span->sample_sequences[sample_ordinal];
+  if (sample_sequence->command_buffer == NULL) {
+    IREE_RETURN_IF_ERROR(loom_run_hal_testbench_actual_sequence_prepare_sample(
+        span, sample_ordinal));
+  }
+  loom_run_hal_testbench_actual_sequence_populate_binding_table(span);
+  return loom_run_hal_dispatch_sequence_execute(
+      &span->context->runtime, sample_sequence,
+      (iree_hal_buffer_binding_table_t){
+          .count = span->binding_count,
+          .bindings = span->binding_table,
+      });
+}
+
+static iree_status_t loom_run_hal_testbench_actual_sequence_query_issue(
+    void* user_data, const loom_testbench_invocation_plan_t* invocation,
+    loom_testbench_sample_issue_t* out_issue) {
+  *out_issue = (loom_testbench_sample_issue_t){0};
+  loom_run_hal_testbench_actual_sequence_execution_t* execution =
+      (loom_run_hal_testbench_actual_sequence_execution_t*)user_data;
+  const iree_host_size_t invocation_index =
+      loom_run_hal_testbench_actual_sequence_invocation_index(execution,
+                                                              invocation);
+  const loom_run_hal_testbench_actual_provider_t* provider =
+      execution->invocations[invocation_index].provider;
+  IREE_ASSERT(provider != NULL);
+  if (provider->compile_rejected) {
+    *out_issue = (loom_testbench_sample_issue_t){
+        .category = LOOM_TESTBENCH_SAMPLE_ISSUE_COMPILE_REJECTED,
+        .provider = IREE_SV("actual"),
+        .stage = provider->compile_failure_stage,
+        .kind = provider->compile_failure_kind,
+        .message = provider->compile_failure_message,
+    };
+  }
+  return iree_ok_status();
+}
+
+loom_testbench_invocation_provider_t
+loom_run_hal_testbench_actual_sequence_execution_provider(
+    loom_run_hal_testbench_actual_sequence_execution_t* execution) {
+  return (loom_testbench_invocation_provider_t){
+      .invoke = loom_run_hal_testbench_actual_sequence_invoke,
+      .invoke_sequence = loom_run_hal_testbench_actual_sequence_invoke_span,
+      .query_issue = loom_run_hal_testbench_actual_sequence_query_issue,
+      .user_data = execution,
+  };
+}
+
 iree_status_t loom_run_hal_testbench_actual_sequence_initialize(
     const loom_run_hal_testbench_actual_sequence_options_t* options,
     loom_run_hal_testbench_actual_sequence_t* out_sequence) {
@@ -1108,6 +1614,22 @@ iree_status_t loom_run_hal_testbench_actual_sequence_initialize(
     loom_run_hal_testbench_actual_provider_initialize(
         &provider_options, &out_sequence->providers[provider_index++]);
   }
+  loom_run_hal_testbench_actual_provider_t** providers = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(
+        out_sequence->host_allocator, out_sequence->provider_count,
+        sizeof(*providers), (void**)&providers);
+  }
+  for (iree_host_size_t i = 0;
+       iree_status_is_ok(status) && i < out_sequence->provider_count; ++i) {
+    providers[i] = &out_sequence->providers[i];
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_actual_sequence_execution_create(
+        options->case_plan, out_sequence->provider_count, providers,
+        out_sequence->host_allocator, &out_sequence->execution);
+  }
+  iree_allocator_free(out_sequence->host_allocator, providers);
   if (!iree_status_is_ok(status)) {
     loom_run_hal_testbench_actual_sequence_deinitialize(out_sequence);
   }
@@ -1119,6 +1641,7 @@ void loom_run_hal_testbench_actual_sequence_deinitialize(
   if (sequence == NULL) {
     return;
   }
+  loom_run_hal_testbench_actual_sequence_execution_destroy(sequence->execution);
   for (iree_host_size_t i = 0; i < sequence->provider_count; ++i) {
     loom_run_hal_testbench_actual_provider_deinitialize(
         &sequence->providers[i]);
@@ -1127,51 +1650,12 @@ void loom_run_hal_testbench_actual_sequence_deinitialize(
   *sequence = (loom_run_hal_testbench_actual_sequence_t){0};
 }
 
-iree_status_t loom_run_hal_testbench_actual_sequence_invoke(
-    void* user_data, const loom_testbench_invocation_plan_t* invocation,
-    iree_host_size_t input_count, const loom_testbench_value_t* inputs,
-    iree_host_size_t result_count, loom_testbench_value_t* out_results) {
-  loom_run_hal_testbench_actual_sequence_t* sequence =
-      (loom_run_hal_testbench_actual_sequence_t*)user_data;
-  for (iree_host_size_t i = 0; i < sequence->provider_count; ++i) {
-    loom_run_hal_testbench_actual_provider_t* provider =
-        &sequence->providers[i];
-    if (provider->actual_invocation == invocation) {
-      return loom_run_hal_testbench_actual_invoke(
-          provider, invocation, input_count, inputs, result_count, out_results);
-    }
-  }
-  return iree_make_status(
-      IREE_STATUS_FAILED_PRECONDITION,
-      "HAL actual sequence received an unexpected invocation");
-}
-
-iree_status_t loom_run_hal_testbench_actual_sequence_query_issue(
-    void* user_data, const loom_testbench_invocation_plan_t* invocation,
-    loom_testbench_sample_issue_t* out_issue) {
-  *out_issue = (loom_testbench_sample_issue_t){0};
-  loom_run_hal_testbench_actual_sequence_t* sequence =
-      (loom_run_hal_testbench_actual_sequence_t*)user_data;
-  for (iree_host_size_t i = 0; i < sequence->provider_count; ++i) {
-    const loom_run_hal_testbench_actual_provider_t* provider =
-        &sequence->providers[i];
-    if (provider->actual_invocation != invocation) {
-      continue;
-    }
-    if (provider->compile_rejected) {
-      *out_issue = (loom_testbench_sample_issue_t){
-          .category = LOOM_TESTBENCH_SAMPLE_ISSUE_COMPILE_REJECTED,
-          .provider = IREE_SV("actual"),
-          .stage = provider->compile_failure_stage,
-          .kind = provider->compile_failure_kind,
-          .message = provider->compile_failure_message,
-      };
-    }
-    return iree_ok_status();
-  }
-  return iree_make_status(
-      IREE_STATUS_FAILED_PRECONDITION,
-      "HAL actual sequence received an unexpected invocation issue query");
+loom_testbench_invocation_provider_t
+loom_run_hal_testbench_actual_sequence_provider(
+    loom_run_hal_testbench_actual_sequence_t* sequence) {
+  IREE_ASSERT(sequence->execution != NULL);
+  return loom_run_hal_testbench_actual_sequence_execution_provider(
+      sequence->execution);
 }
 
 iree_status_t loom_run_hal_testbench_create_invocation_inputs_from_table(

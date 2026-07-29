@@ -982,10 +982,9 @@ loom_amdgpu_hal_kernel_library_validate_final_workgroup_storage(
     return iree_ok_status();
   }
 
-  loom_low_storage_layout_space_sizes_t sizes = {0};
-  IREE_RETURN_IF_ERROR(loom_low_storage_layout_collect_space_sizes(
-      frame->module, frame->function_op, &sizes));
-  if (sizes.workgroup_bytes <= limit) {
+  const uint64_t workgroup_bytes =
+      frame->schedule.storage_layout.space_sizes.workgroup_bytes;
+  if (workgroup_bytes <= limit) {
     return iree_ok_status();
   }
 
@@ -995,7 +994,7 @@ loom_amdgpu_hal_kernel_library_validate_final_workgroup_storage(
       loom_param_string(
           loom_low_diagnostic_function_name(frame->module, frame->function_op)),
       loom_param_string(loom_low_diagnostic_target_key(&frame->target)),
-      loom_param_u64(sizes.workgroup_bytes),
+      loom_param_u64(workgroup_bytes),
       loom_param_u64(limit),
   };
   const loom_diagnostic_emission_t emission = {

@@ -206,6 +206,21 @@ TEST(LlvmIrAmdgpuTargetEnvTest, DerivesAmdgpuHalProfileFromGenericBundle) {
 }
 
 TEST(LlvmIrAmdgpuTargetEnvTest,
+     DerivedProfilePreservesZeroBufferResourceFlags) {
+  loom_target_export_plan_t export_plan =
+      *loom_llvmir_target_bundle_amdgpu_hal()->export_plan;
+  export_plan.hal_kernel.buffer_resource_flags = 0;
+  loom_target_bundle_t bundle = *loom_llvmir_target_bundle_amdgpu_hal();
+  bundle.export_plan = &export_plan;
+
+  loom_llvmir_target_profile_storage_t storage = {};
+  loom_llvmir_target_profile_storage_initialize_from_bundle(
+      &bundle, loom_llvmir_target_profile_amdgpu_hal(), &storage);
+
+  EXPECT_EQ(storage.profile.kernel.binding_resource_flags, 0u);
+}
+
+TEST(LlvmIrAmdgpuTargetEnvTest,
      AmdgpuProjectionRequiresTripleForGenericKernel) {
   static const loom_target_snapshot_t kSnapshot = {
       /*.name=*/IREE_SVL("generic-llvmir-kernel"),

@@ -95,6 +95,10 @@ static iree_status_t loom_low_schedule_initialize_storage(
       state->arena, state->body->block_count, sizeof(*state->blocks),
       (void**)&state->blocks));
   memset(state->blocks, 0, state->body->block_count * sizeof(*state->blocks));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(state->arena, state->body->block_count,
+                                sizeof(*state->liveness_block_orders),
+                                (void**)&state->liveness_block_orders));
   if (node_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(state->arena, node_count,
                                                    sizeof(*state->nodes),
@@ -103,6 +107,9 @@ static iree_status_t loom_low_schedule_initialize_storage(
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, node_count, sizeof(*state->scheduled_node_indices),
         (void**)&state->scheduled_node_indices));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, node_count, sizeof(*state->scheduled_ops),
+        (void**)&state->scheduled_ops));
     const iree_host_size_t placement_pair_use_capacity = node_count / 2;
     if (state->options->pair_affinities.placement_recipe_count != 0 &&
         placement_pair_use_capacity != 0) {
@@ -1028,6 +1035,13 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
         block_record->node_start + block_record->node_count;
     block_record->scheduled_node_start = (uint32_t)state->scheduled_node_count;
     block_record->scheduled_node_count = 0;
+    state->liveness_block_orders[block_index] = (loom_liveness_block_order_t){
+        .block = block_record->block,
+        .ops = block_record->node_count != 0
+                   ? &state->scheduled_ops[state->scheduled_node_count]
+                   : NULL,
+        .op_count = block_record->node_count,
+    };
     state->current_block_index = block_index;
     state->current_issue_cycle = 0;
     state->pending_pair_affinity_node = LOOM_LOW_SCHEDULE_NODE_NONE;
@@ -1073,8 +1087,10 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
       state->nodes[chosen_node].scheduled_ordinal = scheduled_in_block++;
       ++scheduled_in_range;
       state->current_issue_cycle = state->nodes[chosen_node].scheduled_ordinal;
-      state->scheduled_node_indices[state->scheduled_node_count++] =
-          chosen_node;
+      state->scheduled_node_indices[state->scheduled_node_count] = chosen_node;
+      state->scheduled_ops[state->scheduled_node_count] =
+          state->nodes[chosen_node].op;
+      ++state->scheduled_node_count;
       ++block_record->scheduled_node_count;
       loom_low_schedule_ready_policy_note_node_scheduled(state, chosen_node);
       if (loom_low_schedule_strategy_uses_pressure(state->options->strategy)) {
@@ -1253,6 +1269,7 @@ iree_status_t loom_low_schedule_function(
   };
   loom_target_bundle_storage_rebind(&state.target.bundle_storage);
   loom_low_schedule_dependency_graph_initialize(&state.dependencies);
+  loom_low_storage_layout_builder_initialize(&state.storage_layout_builder);
   IREE_ASSERT(state.body != NULL);
   IREE_RETURN_IF_ERROR(loom_low_schedule_verify_memory_access_table(
       options->memory_access_table, model->function_op, state.body));
@@ -1333,16 +1350,25 @@ iree_status_t loom_low_schedule_function(
   }
 
   if (iree_status_is_ok(status)) {
+    loom_low_storage_layout_t storage_layout;
+    loom_low_storage_layout_builder_finish(&state.storage_layout_builder,
+                                           &storage_layout);
     *out_table = (loom_low_schedule_table_t){
         .module = model->module,
         .function_op = model->function_op,
         .target = state.target,
         .memory_access_table = options->memory_access_table,
+        .storage_layout = storage_layout,
         .value_ids = model->value_domain.value_ids,
         .value_count = model->value_domain.value_count,
         .liveness = liveness,
         .blocks = state.blocks,
         .block_count = state.body->block_count,
+        .operation_order =
+            {
+                .blocks = state.liveness_block_orders,
+                .block_count = state.body->block_count,
+            },
         .cfg_graph = model->cfg_graph,
         .nodes = state.nodes,
         .node_count = node_count,

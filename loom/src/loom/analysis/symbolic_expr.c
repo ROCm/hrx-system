@@ -2902,6 +2902,27 @@ static iree_status_t loom_symbolic_expr_prove_direct_value_relation(
     loom_symbolic_integer_relation_t relation, loom_value_id_t left_value,
     loom_value_id_t right_value, loom_symbolic_proof_result_t* out_result) {
   *out_result = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  const loom_condition_integer_relation_t queried_relation = {
+      .relation = relation,
+      .left =
+          {
+              .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+              .value_id = left_value,
+          },
+      .right =
+          {
+              .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+              .value_id = right_value,
+          },
+  };
+  bool condition_result = false;
+  if (loom_condition_fact_set_proves_integer_relation(
+          context->condition_facts, &queried_relation, &condition_result)) {
+    *out_result =
+        condition_result ? LOOM_SYMBOLIC_PROOF_TRUE : LOOM_SYMBOLIC_PROOF_FALSE;
+    return iree_ok_status();
+  }
+
   bool assumed_relation_matched = false;
   IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_assumed_value_relation(
       context, relation, left_value, right_value, &assumed_relation_matched,

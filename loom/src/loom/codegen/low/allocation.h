@@ -19,7 +19,6 @@
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/diagnostics.h"
-#include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/move_topology.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/allocation/table.h"
@@ -36,11 +35,13 @@ extern "C" {
 #endif
 
 struct loom_target_residency_model_t;
+struct loom_low_schedule_table_t;
 
 // Options controlling allocation table construction.
 typedef struct loom_low_allocation_options_t {
-  // Optional operation order used for live intervals.
-  loom_liveness_order_t liveness_order;
+  // Optional final schedule. Allocation uses its retained operation order for
+  // liveness and its node ordinals for schedule-sensitive coalescing.
+  const struct loom_low_schedule_table_t* schedule;
   // Explicit per-class register budgets.
   const loom_low_allocation_budget_t* budgets;
   // Number of entries in |budgets|.
@@ -53,11 +54,8 @@ typedef struct loom_low_allocation_options_t {
   const loom_low_allocation_reserved_range_t* reserved_ranges;
   // Number of entries in |reserved_ranges|.
   iree_host_size_t reserved_range_count;
-  // Optional target storage leases built over the same scheduled low function
-  // represented by |liveness_order|.
+  // Optional target storage leases built over |schedule|.
   loom_low_storage_lease_table_t storage_leases;
-  // Concrete placement-sensitive pair opportunities from the final schedule.
-  loom_low_placement_pair_use_list_t placement_pair_uses;
   // Structured diagnostic emitter for allocation failures and feedback.
   iree_diagnostic_emitter_t emitter;
   // Optional structured allocation feedback to emit.

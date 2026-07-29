@@ -91,6 +91,10 @@ void iree_benchmark_loom_hal_actual_provider_deinitialize(
   if (provider == NULL) {
     return;
   }
+  if (provider->context == NULL) {
+    *provider = (iree_benchmark_loom_hal_actual_provider_t){0};
+    return;
+  }
   loom_run_hal_testbench_actual_provider_deinitialize(&provider->execution);
   if (provider->compile_report_capture_initialized) {
     loom_run_compile_report_capture_deinitialize(
@@ -145,7 +149,6 @@ iree_status_t iree_benchmark_loom_hal_actual_sequence_initialize(
   if (iree_status_is_ok(status)) {
     memset(out_sequence->providers, 0,
            actual_invocation_count * sizeof(*out_sequence->providers));
-    out_sequence->provider_count = actual_invocation_count;
   }
 
   iree_host_size_t provider_index = 0;
@@ -170,9 +173,25 @@ iree_status_t iree_benchmark_loom_hal_actual_sequence_initialize(
           &out_sequence->providers[provider_index]);
     }
     if (iree_status_is_ok(status)) {
-      ++provider_index;
+      out_sequence->provider_count = ++provider_index;
     }
   }
+  loom_run_hal_testbench_actual_provider_t** execution_providers = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(
+        host_allocator, out_sequence->provider_count,
+        sizeof(*execution_providers), (void**)&execution_providers);
+  }
+  for (iree_host_size_t i = 0;
+       iree_status_is_ok(status) && i < out_sequence->provider_count; ++i) {
+    execution_providers[i] = &out_sequence->providers[i].execution;
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_actual_sequence_execution_create(
+        case_plan, out_sequence->provider_count, execution_providers,
+        host_allocator, &out_sequence->execution);
+  }
+  iree_allocator_free(host_allocator, execution_providers);
   if (!iree_status_is_ok(status)) {
     iree_benchmark_loom_hal_actual_sequence_deinitialize(out_sequence);
   }
@@ -184,6 +203,7 @@ void iree_benchmark_loom_hal_actual_sequence_deinitialize(
   if (sequence == NULL) {
     return;
   }
+  loom_run_hal_testbench_actual_sequence_execution_destroy(sequence->execution);
   for (iree_host_size_t i = 0; i < sequence->provider_count; ++i) {
     iree_benchmark_loom_hal_actual_provider_deinitialize(
         &sequence->providers[i]);
@@ -195,26 +215,6 @@ void iree_benchmark_loom_hal_actual_sequence_deinitialize(
 iree_status_t iree_benchmark_loom_hal_actual_provider_compile(
     iree_benchmark_loom_hal_actual_provider_t* provider) {
   return loom_run_hal_testbench_actual_provider_compile(&provider->execution);
-}
-
-iree_status_t iree_benchmark_loom_hal_actual_sequence_invoke(
-    void* user_data, const loom_testbench_invocation_plan_t* invocation,
-    iree_host_size_t input_count, const loom_testbench_value_t* inputs,
-    iree_host_size_t result_count, loom_testbench_value_t* out_results) {
-  iree_benchmark_loom_hal_actual_sequence_t* sequence =
-      (iree_benchmark_loom_hal_actual_sequence_t*)user_data;
-  for (iree_host_size_t i = 0; i < sequence->provider_count; ++i) {
-    iree_benchmark_loom_hal_actual_provider_t* provider =
-        &sequence->providers[i];
-    if (provider->execution.actual_invocation == invocation) {
-      return loom_run_hal_testbench_actual_invoke(
-          &provider->execution, invocation, input_count, inputs, result_count,
-          out_results);
-    }
-  }
-  return iree_make_status(
-      IREE_STATUS_FAILED_PRECONDITION,
-      "HAL actual sequence received an unexpected invocation");
 }
 
 void iree_benchmark_loom_benchmark_result_set_compile_rejection(

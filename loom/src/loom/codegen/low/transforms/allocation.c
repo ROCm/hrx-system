@@ -422,7 +422,6 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
   iree_host_size_t iteration_limit = 0;
   iree_host_size_t rematerialization_iteration_count = 0;
   iree_host_size_t rematerialization_iteration_limit = 0;
-  bool allow_existing_storage_traffic = false;
   for (;;) {
     loom_low_allocation_table_t table = {0};
     IREE_RETURN_IF_ERROR(loom_low_materialize_allocation_build_table(
@@ -536,7 +535,6 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
 
     loom_low_allocation_materialization_result_t result = {0};
     loom_low_allocation_materialization_options_t materialization_options = {
-        .allow_existing_storage_traffic = allow_existing_storage_traffic,
         .has_supported_storage_spaces =
             state && state->has_spill_storage_spaces,
         .supported_storage_spaces = state ? state->spill_storage_spaces
@@ -546,7 +544,7 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
         .emitter = pass->diagnostic_emitter,
     };
     IREE_RETURN_IF_ERROR(loom_low_allocation_materialize_spills(
-        module, &table, &materialization_options, pass->arena, &result));
+        &table, &materialization_options, pass->arena, &result));
     if (result.error_count != 0) {
       return iree_ok_status();
     }
@@ -565,7 +563,6 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
     statistics->spills += (int64_t)result.spill_count;
     statistics->reloads += (int64_t)result.reload_count;
     loom_pass_mark_changed(pass);
-    allow_existing_storage_traffic = true;
     ++iteration_count;
   }
 }

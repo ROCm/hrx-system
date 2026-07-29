@@ -33,41 +33,6 @@ iree_py_binary(
     ],
 )
 
-iree_py_binary(
-    name = "wait_packet_tables",
-    srcs = [
-        "__init__.py",
-        "amdgpu_wait_packet_tables.py",
-    ],
-    main = "amdgpu_wait_packet_tables.py",
-    visibility = GENERATOR_VISIBILITY,
-    deps = [
-        "//loom/py/loom/gen/support",
-        "//loom/py/loom/target:low_descriptors",
-        "//loom/py/loom/target/arch/amdgpu:descriptors",
-        "//loom/py/loom/target/arch/amdgpu:isa_xml",
-        "//loom/py/loom/target/arch/amdgpu:target_info",
-    ],
-)
-
-iree_py_binary(
-    name = "vopd_component_tables",
-    srcs = [
-        "__init__.py",
-        "amdgpu_vopd_component_tables.py",
-    ],
-    main = "amdgpu_vopd_component_tables.py",
-    visibility = GENERATOR_VISIBILITY,
-    deps = [
-        "//loom/py/loom/gen/support",
-        "//loom/py/loom/gen/target/low:low_descriptors",
-        "//loom/py/loom/target:low_descriptors",
-        "//loom/py/loom/target/arch/amdgpu:descriptors",
-        "//loom/py/loom/target/arch/amdgpu:isa_xml",
-        "//loom/py/loom/target/arch/amdgpu:target_info",
-    ],
-)
-
 iree_py_test(
     name = "occupancy_tables_test",
     srcs = [
@@ -79,31 +44,5 @@ iree_py_test(
     deps = [
         ":occupancy_tables",
         "//loom/py/loom/target/arch/amdgpu:target_info",
-    ],
-)
-
-iree_py_test(
-    name = "vopd_component_tables_test",
-    srcs = [
-        "amdgpu_vopd_component_tables_test.py",
-        "//loom/py/loom/tools:pytest_style_runner.py",
-    ],
-    args = ["loom.gen.target.arch.amdgpu.planning.amdgpu_vopd_component_tables_test"],
-    main = "pytest_style_runner.py",
-    deps = [":vopd_component_tables"],
-)
-
-iree_py_test(
-    name = "wait_packet_tables_test",
-    srcs = [
-        "amdgpu_wait_packet_tables_test.py",
-        "//loom/py/loom/tools:pytest_style_runner.py",
-    ],
-    args = ["loom.gen.target.arch.amdgpu.planning.amdgpu_wait_packet_tables_test"],
-    main = "pytest_style_runner.py",
-    deps = [
-        ":wait_packet_tables",
-        "//loom/py/loom/target:low_descriptors",
-        "//loom/py/loom/target/arch/amdgpu:descriptors",
     ],
 )

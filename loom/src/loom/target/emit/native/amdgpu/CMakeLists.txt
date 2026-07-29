@@ -37,7 +37,6 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::descriptors
-    loom::codegen::low::move_sequence
     loom::codegen::low::packet
     loom::codegen::low::schedule
     loom::ir
@@ -162,6 +161,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::codegen::low::storage_layout
     loom::ir
     loom::ops::low
   LABELS
@@ -225,7 +225,6 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::descriptors
-    loom::codegen::low::move_sequence
     loom::codegen::low::packet
     loom::codegen::low::schedule
     loom::ir
@@ -306,6 +305,7 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
+    loom::codegen::low::storage_layout
     loom::ir
     loom::ops::low
     loom::target::arch::amdgpu::descriptors::low_registry

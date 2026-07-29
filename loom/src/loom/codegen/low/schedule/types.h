@@ -24,6 +24,7 @@
 #include "loom/codegen/low/memory_access.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/schedule/dependencies.h"
+#include "loom/codegen/low/storage_layout.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
@@ -622,6 +623,8 @@ typedef struct loom_low_schedule_table_t {
   loom_low_resolved_target_t target;
   // Borrowed source-derived memory summaries attached to scheduled nodes.
   loom_low_memory_access_table_t memory_access_table;
+  // Function-local storage reservations packed during source node collection.
+  loom_low_storage_layout_t storage_layout;
   // Function-local value IDs indexed by local value ordinal.
   const loom_value_id_t* value_ids;
   // Number of entries in |value_ids|.
@@ -632,6 +635,8 @@ typedef struct loom_low_schedule_table_t {
   const loom_low_schedule_block_t* blocks;
   // Number of block records.
   iree_host_size_t block_count;
+  // Final top-level operation order retained for downstream liveness analysis.
+  loom_liveness_order_t operation_order;
   // Read-only control-flow graph shared by target planning overlays.
   loom_cfg_graph_t cfg_graph;
   // Per-op schedule nodes in source order.
@@ -692,6 +697,40 @@ typedef struct loom_low_schedule_table_t {
   // Number of resource summary records.
   iree_host_size_t resource_summary_count;
 } loom_low_schedule_table_t;
+
+// Returns the source-order schedule node for |op|, or NULL when |op| does not
+// belong to |schedule|. The returned node retains its final scheduled ordinal.
+static inline const loom_low_schedule_node_t* loom_low_schedule_node_for_op(
+    const loom_low_schedule_table_t* schedule, const loom_op_t* op) {
+  if (schedule == NULL || op == NULL || op->parent_block == NULL ||
+      iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
+    return NULL;
+  }
+  const loom_block_t* block = op->parent_block;
+  const uint16_t block_index = block->region_index;
+  if (block_index >= schedule->block_count ||
+      schedule->blocks[block_index].block != block) {
+    return NULL;
+  }
+  const loom_low_schedule_block_t* block_record =
+      &schedule->blocks[block_index];
+  uint32_t begin = block_record->node_start;
+  uint32_t end = begin + block_record->node_count;
+  while (begin < end) {
+    const uint32_t middle = begin + (end - begin) / 2u;
+    const loom_op_t* candidate_op = schedule->nodes[middle].op;
+    if (candidate_op->block_ordinal < op->block_ordinal) {
+      begin = middle + 1u;
+    } else {
+      end = middle;
+    }
+  }
+  const uint32_t block_end =
+      block_record->node_start + block_record->node_count;
+  return begin < block_end && schedule->nodes[begin].op == op
+             ? &schedule->nodes[begin]
+             : NULL;
+}
 
 #ifdef __cplusplus
 }  // extern "C"

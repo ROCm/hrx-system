@@ -9,6 +9,7 @@
 #include "loom/codegen/low/allocation/edge_alias.h"
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/storage.h"
+#include "loom/codegen/low/schedule/types.h"
 #include "loom/codegen/low/storage_relation.h"
 
 static bool loom_low_allocation_coalescing_value_ordinal_for_value(
@@ -270,6 +271,11 @@ loom_low_allocation_coalescing_value_units_have_use_after_clobber(
   *out_has_use = false;
   const loom_value_id_t value_id =
       loom_low_placement_value_id(context->placement, value_ordinal);
+  const loom_low_schedule_node_t* consuming_node =
+      context->schedule != NULL
+          ? loom_low_schedule_node_for_op(context->schedule, consuming_op)
+          : NULL;
+  IREE_ASSERT(context->schedule == NULL || consuming_node != NULL);
   loom_consumption_region_query_t* region_query = NULL;
   loom_consumption_use_after_query_t use_after_query = {0};
   bool use_after_query_ready = false;
@@ -291,10 +297,16 @@ loom_low_allocation_coalescing_value_units_have_use_after_clobber(
     bool use_after_clobber = use_op == consuming_op;
     if (!use_after_clobber &&
         use_op->parent_block == consuming_op->parent_block) {
-      uint32_t use_point = UINT32_MAX;
-      IREE_RETURN_IF_ERROR(loom_low_allocation_op_point_index_lookup(
-          context->op_points, use_op, &use_point));
-      use_after_clobber = use_point >= clobber_point;
+      if (context->schedule != NULL) {
+        const loom_low_schedule_node_t* use_node =
+            loom_low_schedule_node_for_op(context->schedule, use_op);
+        IREE_ASSERT(use_node != NULL);
+        use_after_clobber =
+            use_node->scheduled_ordinal >= consuming_node->scheduled_ordinal;
+      } else {
+        use_after_clobber =
+            use_op->block_ordinal >= consuming_op->block_ordinal;
+      }
     } else if (!use_after_clobber) {
       if (!use_after_query_ready) {
         IREE_RETURN_IF_ERROR(context->consumption_query(

@@ -172,7 +172,6 @@ loom_cc_library(
     srcs = ["storage_layout.c"],
     hdrs = ["storage_layout.h"],
     deps = [
-        ":function",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
@@ -324,6 +323,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/allocation:interval_order",
         "//loom/src/loom/codegen/low/allocation:live_range",
         "//loom/src/loom/codegen/low/allocation:loop_edge_relocation",
+        "//loom/src/loom/codegen/low/allocation:move_plan",
         "//loom/src/loom/codegen/low/allocation:move_topology",
         "//loom/src/loom/codegen/low/allocation:packet_move",
         "//loom/src/loom/codegen/low/allocation:search",
@@ -335,24 +335,12 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/allocation:target_constraints",
         "//loom/src/loom/codegen/low/allocation:unit_liveness",
         "//loom/src/loom/codegen/low/allocation:unit_location",
+        "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
-loom_cc_library(
-    name = "move_sequence",
-    srcs = ["move_sequence.c"],
-    hdrs = ["move_sequence.h"],
-    deps = [
-        ":allocation",
-        "//loom/src/loom/codegen/low/allocation:move_topology",
-        "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -743,17 +731,6 @@ loom_cc_test(
         "//loom/src/loom/target/test:target_record_table",
         "//loom/src/loom/testing:diagnostic_matchers",
         "//loom/src/loom/testing:module_ptr",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_test(
-    name = "move_sequence_test",
-    srcs = ["move_sequence_test.cc"],
-    deps = [
-        ":move_sequence",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

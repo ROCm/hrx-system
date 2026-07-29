@@ -8,7 +8,6 @@
 
 #include <inttypes.h>
 
-#include "loom/codegen/low/move_sequence.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/x86/register_classes.h"
@@ -1045,36 +1044,15 @@ static iree_status_t loom_x86_append_move(
 static iree_status_t loom_x86_emit_edge_copy_group(
     const loom_native_assembly_packet_context_t* context,
     const loom_low_allocation_edge_copy_group_t* group) {
-  const iree_host_size_t move_count =
-      loom_low_move_sequence_edge_copy_unit_count(context->allocation, group);
-  if (move_count == 0) {
-    return iree_ok_status();
-  }
-  loom_low_move_t* moves = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_scratch_reserve_moves(
-      context->move_scratch, move_count, &moves));
-  loom_low_move_location_t* temporaries = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_scratch_reserve_temporaries(
-      context->move_scratch, group->temporary_count, &temporaries));
-  loom_low_move_sequence_populate_edge_copy_units(context->allocation, group,
-                                                  moves);
-  loom_low_move_sequence_populate_edge_copy_temporaries(context->allocation,
-                                                        group, temporaries);
   loom_x86_assembly_move_state_t move_state = {
       .context = context,
   };
-  loom_low_move_sequence_options_t options = {
-      .descriptor_set = context->allocation->target.descriptor_set,
-      .temporary_locations = temporaries,
-      .temporary_location_count = group->temporary_count,
-      .emit_move =
-          {
-              .fn = loom_x86_append_move,
-              .user_data = &move_state,
-          },
-  };
-  IREE_RETURN_IF_ERROR(
-      loom_low_move_sequence_emit(context->move_scratch, move_count, &options));
+  for (iree_host_size_t i = 0; i < group->move_group.moves.count; ++i) {
+    const loom_low_move_t* move =
+        &context->allocation->moves[group->move_group.moves.start + i];
+    IREE_RETURN_IF_ERROR(
+        loom_x86_append_move(&move_state, &move->destination, &move->source));
+  }
   if (move_state.emitted_count != 0) {
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(context->builder, "\n  "));

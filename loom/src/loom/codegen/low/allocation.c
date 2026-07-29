@@ -18,6 +18,7 @@
 #include "loom/codegen/low/allocation/unit_location.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/function.h"
+#include "loom/codegen/low/schedule/types.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
@@ -40,8 +41,6 @@ typedef struct loom_low_allocation_build_state_t {
   loom_low_allocation_target_constraints_t target_constraints;
   // Liveness analysis for |body|.
   loom_liveness_analysis_t liveness;
-  // Operation-to-program-point index over |liveness|.
-  loom_low_allocation_op_point_index_t op_points;
   // Function-local placement relations over |liveness|.
   loom_low_placement_table_t placement;
   // Mutable per-allocation-unit live end points.
@@ -50,9 +49,11 @@ typedef struct loom_low_allocation_build_state_t {
   loom_low_allocation_interval_assignment_result_t interval_assignment;
   // Mutable low.copy decision plan being built.
   loom_low_allocation_copy_decision_plan_t copy_decision_plan;
+  // Allocation-owned final structural moves and reusable sequencing scratch.
+  loom_low_allocation_move_plan_t move_plan;
   // Mutable branch edge-copy plan being built.
   loom_low_allocation_edge_copy_plan_t edge_copy_plan;
-  // Mutable packet-local move scratch plan being built.
+  // Mutable packet-local final move plan being built.
   loom_low_allocation_packet_move_plan_t packet_move_plan;
   // Mutable assignment-backed storage leases and release actions being built.
   loom_low_allocation_storage_lease_state_t storage_leases;
@@ -98,6 +99,7 @@ iree_status_t loom_low_allocate_function(
       .function_op = model->function_op,
       .target = model->target,
       .error_count = model->error_count,
+      .cfg_graph = model->cfg_graph,
   };
   loom_target_bundle_storage_rebind(&out_table->target.bundle_storage);
   if (model->error_count != 0) return iree_ok_status();
@@ -123,19 +125,21 @@ iree_status_t loom_low_allocate_function(
       &state.target_constraints);
 
   const loom_local_value_domain_t* value_domain = &model->value_domain;
+  const loom_liveness_order_t operation_order =
+      options->schedule != NULL ? options->schedule->operation_order
+                                : loom_liveness_order_empty();
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_liveness_analyze_local_value_domain_with_cfg_graph(
-        value_domain, &model->cfg_graph, options->liveness_order, arena,
+        value_domain, &model->cfg_graph, operation_order, arena,
         &state.liveness);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
-    status = loom_low_allocation_op_point_index_initialize(
-        &state.liveness, arena, &state.op_points);
-  }
-  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
+    const loom_low_placement_pair_use_list_t placement_pair_uses =
+        options->schedule != NULL ? options->schedule->placement_pair_uses
+                                  : loom_low_placement_pair_use_list_empty();
     status = loom_low_placement_analyze_region(
         model->module, state.body, value_domain, &state.liveness,
-        options->placement_pair_uses, arena, &state.placement);
+        placement_pair_uses, arena, &state.placement);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_unit_liveness_initialize(
@@ -164,7 +168,7 @@ iree_status_t loom_low_allocate_function(
             .function_op = state.function_op,
             .target = &state.target,
             .liveness = &state.liveness,
-            .op_points = &state.op_points,
+            .schedule = options->schedule,
             .placement = &state.placement,
             .target_constraints = &state.target_constraints,
             .unit_liveness = &state.unit_liveness,
@@ -219,19 +223,32 @@ iree_status_t loom_low_allocate_function(
     status = loom_low_allocation_copy_decision_plan_build(
         &copy_decision_context, arena, &state.copy_decision_plan);
   }
-  // Parallel-move scratch also belongs to the final physical assignment. A
-  // provisional spill assignment may report false scratch conflicts against
-  // registers that repair will release.
+  // Final structural moves also belong to the final physical assignment. A
+  // provisional spill assignment may report false cycle-scratch conflicts
+  // against registers that repair will release.
+  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0 &&
+      assignment_is_final) {
+    const loom_low_allocation_move_plan_context_t move_plan_context = {
+        .descriptor_set = state.target.descriptor_set,
+        .target_constraints = &state.target_constraints,
+        .unit_liveness = &state.unit_liveness,
+        .assignment_map = state.interval_assignment.assignment_map,
+    };
+    const iree_host_size_t move_input_capacity =
+        state.placement.branch_unit_count +
+        state.placement.packet_move_unit_count;
+    const iree_host_size_t raw_group_capacity =
+        iree_max(state.placement.branch_unit_count,
+                 state.placement.packet_move_unit_count);
+    status = loom_low_allocation_move_plan_initialize(
+        &move_plan_context, arena, move_input_capacity, raw_group_capacity,
+        &state.move_plan);
+  }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0 &&
       assignment_is_final) {
     const loom_low_allocation_edge_copy_context_t edge_copy_context = {
-        .body = state.body,
-        .descriptor_set = state.target.descriptor_set,
-        .op_points = &state.op_points,
-        .target_constraints = &state.target_constraints,
-        .unit_liveness = &state.unit_liveness,
         .placement = &state.placement,
-        .assignment_map = state.interval_assignment.assignment_map,
+        .move_plan = &state.move_plan,
     };
     status = loom_low_allocation_edge_copy_plan_build(&edge_copy_context, arena,
                                                       &state.edge_copy_plan);
@@ -239,13 +256,8 @@ iree_status_t loom_low_allocate_function(
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0 &&
       assignment_is_final) {
     const loom_low_allocation_packet_move_context_t packet_move_context = {
-        .module = state.module,
-        .body = state.body,
-        .descriptor_set = state.target.descriptor_set,
-        .op_points = &state.op_points,
-        .target_constraints = &state.target_constraints,
-        .unit_liveness = &state.unit_liveness,
-        .assignment_map = state.interval_assignment.assignment_map,
+        .placement = &state.placement,
+        .move_plan = &state.move_plan,
     };
     status = loom_low_allocation_packet_move_plan_build(
         &packet_move_context, arena, &state.packet_move_plan);
@@ -261,8 +273,6 @@ iree_status_t loom_low_allocate_function(
         .placement = state.placement,
         .fixed_values = state.target_constraints.fixed_values,
         .fixed_value_count = state.target_constraints.fixed_value_count,
-        .reserved_ranges = state.target_constraints.reserved_ranges,
-        .reserved_range_count = state.target_constraints.reserved_range_count,
         .allocation_mode = loom_low_function_allocation(model->function_op),
         .error_count = state.target_constraints.error_count,
         .assignments = state.interval_assignment.assignments,
@@ -289,12 +299,10 @@ iree_status_t loom_low_allocate_function(
         .edge_copy_count = state.edge_copy_plan.copy_count,
         .edge_copy_groups = state.edge_copy_plan.groups,
         .edge_copy_group_count = state.edge_copy_plan.group_count,
-        .edge_copy_temporaries = state.edge_copy_plan.temporaries,
-        .edge_copy_temporary_count = state.edge_copy_plan.temporary_count,
-        .packet_move_temporary_groups = state.packet_move_plan.groups,
-        .packet_move_temporary_group_count = state.packet_move_plan.group_count,
-        .packet_move_temporaries = state.packet_move_plan.temporaries,
-        .packet_move_temporary_count = state.packet_move_plan.temporary_count,
+        .packet_move_groups = state.packet_move_plan.groups,
+        .packet_move_group_count = state.packet_move_plan.group_count,
+        .moves = state.move_plan.moves,
+        .scratch_move_indices = state.move_plan.scratch_move_indices,
         .packet_move_count = state.packet_move_plan.move_count,
         .storage_leases = options->storage_leases,
         .storage_lease_instances = state.storage_leases.instances,
@@ -305,6 +313,9 @@ iree_status_t loom_low_allocate_function(
         .spill_count = state.interval_assignment.spill_count,
         .coalesced_copy_count = state.copy_decision_plan.coalesced_count,
         .materialized_copy_count = state.copy_decision_plan.materialized_count,
+        .reserved_ranges = state.target_constraints.reserved_ranges,
+        .reserved_range_count = state.target_constraints.reserved_range_count,
+        .cfg_graph = model->cfg_graph,
     };
     loom_target_bundle_storage_rebind(&table.target.bundle_storage);
   }

@@ -37,7 +37,7 @@ typedef struct loom_amdgpu_wait_packet_descriptor_range_t {
 
 static const loom_amdgpu_wait_packet_descriptor_template_t
     kAmdgpuWaitPacketDescriptors[] = {
-#include "loom/target/arch/amdgpu/planning/wait_packet_descriptors.inl"
+#include "loom/target/arch/amdgpu/descriptors/wait_packet_descriptors.inl"
 };
 
 #undef LOOM_AMDGPU_WAIT_PACKET_DESCRIPTOR
@@ -47,7 +47,7 @@ static const loom_amdgpu_wait_packet_descriptor_template_t
   descriptor_index_plus_one_value,
 
 static const uint16_t kAmdgpuWaitPacketDescriptorLookups[] = {
-#include "loom/target/arch/amdgpu/planning/wait_packet_descriptor_lookups.inl"
+#include "loom/target/arch/amdgpu/descriptors/wait_packet_descriptor_lookups.inl"
 };
 
 #undef LOOM_AMDGPU_WAIT_PACKET_DESCRIPTOR_LOOKUP
@@ -64,7 +64,7 @@ static const uint16_t kAmdgpuWaitPacketDescriptorLookups[] = {
 
 static const loom_amdgpu_wait_packet_descriptor_immediate_template_t
     kAmdgpuWaitPacketImmediates[] = {
-#include "loom/target/arch/amdgpu/planning/wait_packet_immediates.inl"
+#include "loom/target/arch/amdgpu/descriptors/wait_packet_immediates.inl"
 };
 
 #undef LOOM_AMDGPU_WAIT_PACKET_IMMEDIATE
@@ -84,7 +84,7 @@ static const loom_amdgpu_wait_packet_descriptor_immediate_template_t
 static const loom_amdgpu_wait_packet_descriptor_range_t
     kAmdgpuWaitPacketDescriptorRanges
         [LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {
-#include "loom/target/arch/amdgpu/planning/wait_packet_descriptor_ranges.inl"
+#include "loom/target/arch/amdgpu/descriptors/wait_packet_descriptor_ranges.inl"
 };
 
 #undef LOOM_AMDGPU_WAIT_PACKET_DESCRIPTOR_RANGE
@@ -101,7 +101,7 @@ static const loom_amdgpu_wait_packet_selection_template_t
     kAmdgpuWaitPacketSelections
         [LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT]
         [LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL + 1] = {
-#include "loom/target/arch/amdgpu/planning/wait_packet_selections.inl"
+#include "loom/target/arch/amdgpu/descriptors/wait_packet_selections.inl"
 };
 
 #undef LOOM_AMDGPU_WAIT_PACKET_SELECTION
