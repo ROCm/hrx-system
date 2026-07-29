@@ -9,6 +9,7 @@
 #include "loom/codegen/low/allocation/copy_decision.h"
 #include "loom/codegen/low/allocation/edge_copy.h"
 #include "loom/codegen/low/allocation/interval_assignment.h"
+#include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/loop_edge_relocation.h"
 #include "loom/codegen/low/allocation/packet_move.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
@@ -39,6 +40,8 @@ typedef struct loom_low_allocation_build_state_t {
   loom_low_allocation_target_constraints_t target_constraints;
   // Liveness analysis for |body|.
   loom_liveness_analysis_t liveness;
+  // Operation-to-program-point index over |liveness|.
+  loom_low_allocation_op_point_index_t op_points;
   // Function-local placement relations over |liveness|.
   loom_low_placement_table_t placement;
   // Mutable per-allocation-unit live end points.
@@ -126,6 +129,10 @@ iree_status_t loom_low_allocate_function(
         &state.liveness);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
+    status = loom_low_allocation_op_point_index_initialize(
+        &state.liveness, arena, &state.op_points);
+  }
+  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_placement_analyze_region(
         model->module, state.body, value_domain, &state.liveness,
         options->placement_pair_uses, arena, &state.placement);
@@ -157,6 +164,7 @@ iree_status_t loom_low_allocate_function(
             .function_op = state.function_op,
             .target = &state.target,
             .liveness = &state.liveness,
+            .op_points = &state.op_points,
             .placement = &state.placement,
             .target_constraints = &state.target_constraints,
             .unit_liveness = &state.unit_liveness,
@@ -219,7 +227,7 @@ iree_status_t loom_low_allocate_function(
     const loom_low_allocation_edge_copy_context_t edge_copy_context = {
         .body = state.body,
         .descriptor_set = state.target.descriptor_set,
-        .liveness_order = options->liveness_order,
+        .op_points = &state.op_points,
         .target_constraints = &state.target_constraints,
         .unit_liveness = &state.unit_liveness,
         .placement = &state.placement,
@@ -234,7 +242,7 @@ iree_status_t loom_low_allocate_function(
         .module = state.module,
         .body = state.body,
         .descriptor_set = state.target.descriptor_set,
-        .liveness_order = options->liveness_order,
+        .op_points = &state.op_points,
         .target_constraints = &state.target_constraints,
         .unit_liveness = &state.unit_liveness,
         .assignment_map = state.interval_assignment.assignment_map,

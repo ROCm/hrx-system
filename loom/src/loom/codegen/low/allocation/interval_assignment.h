@@ -14,6 +14,7 @@
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/assignment_map.h"
+#include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/table.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
@@ -40,6 +41,8 @@ typedef struct loom_low_allocation_interval_assignment_context_t {
   const loom_low_resolved_target_t* target;
   // Liveness facts for the allocated low function body.
   const loom_liveness_analysis_t* liveness;
+  // Operation-to-program-point index over |liveness|.
+  const loom_low_allocation_op_point_index_t* op_points;
   // Function-local placement relations over |liveness|.
   const loom_low_placement_table_t* placement;
   // Mutable target storage budgets, fixed values, and reserved ranges.

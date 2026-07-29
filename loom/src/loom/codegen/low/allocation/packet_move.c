@@ -583,11 +583,9 @@ iree_status_t loom_low_allocation_packet_move_plan_build(
   memset(plan.temporaries, 0, temporary_capacity * sizeof(*plan.temporaries));
 
   uint32_t source_ordinal = 0;
-  loom_low_allocation_op_point_index_t op_points = {0};
-  IREE_RETURN_IF_ERROR(loom_low_allocation_op_point_index_initialize(
-      context->assignment_map.liveness, arena, &op_points));
   IREE_RETURN_IF_ERROR(loom_low_allocation_packet_move_plan_record_for_region(
-      context, arena, context->body, &source_ordinal, &op_points, &plan));
+      context, arena, context->body, &source_ordinal, context->op_points,
+      &plan));
   if (context->target_constraints->error_count != 0) {
     *out_plan = plan;
     return iree_ok_status();

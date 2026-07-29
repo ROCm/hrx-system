@@ -911,6 +911,7 @@ iree_status_t loom_low_allocation_interval_assignment_build(
     loom_low_allocation_coalescing_context_t coalescing_context = {
         .arena = context->arena,
         .liveness = context->liveness,
+        .op_points = context->op_points,
         .placement = context->placement,
         .target_constraints = context->target_constraints,
         .assignment_map = &state.result.assignment_map,
