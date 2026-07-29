@@ -59,3 +59,13 @@ py_test(
         "cmake/testdata/data_dependencies/tool.c",
     ],
 )
+
+py_test(
+    name = "cmake_test_metadata_test",
+    srcs = ["cmake_test_metadata_test.py"],
+    data = [
+        "cmake/iree_configure_testing.cmake",
+        "cmake/iree_macros.cmake",
+        "cmake/testdata/test_metadata/CMakeLists.txt",
+    ],
+)

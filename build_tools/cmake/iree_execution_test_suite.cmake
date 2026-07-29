@@ -136,6 +136,10 @@ function(iree_execution_test_suite)
       ${_TEST_ARGS}
   )
   iree_configure_test(${_TEST_NAME})
+  iree_register_test_build_targets(
+    "${_TEST_NAME}"
+    TARGETS "${_TEST_TARGET_NAME}"
+  )
 
   if(NOT DEFINED _RULE_TIMEOUT)
     set(_RULE_TIMEOUT 60)

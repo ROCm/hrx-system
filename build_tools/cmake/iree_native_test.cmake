@@ -110,33 +110,30 @@ function(iree_native_test)
   # Replace binary passed by relative ::name with iree::package::name
   string(REGEX REPLACE "^::" "${_PACKAGE_NS}::" _SRC_TARGET ${_RULE_SRC})
 
-  set(_TEST_BUILD_TARGET "${_SRC_TARGET}")
+  set(_TEST_BUILD_TARGET "${_NAME}_test_deps")
+  add_custom_target(${_TEST_BUILD_TARGET} ALL)
+  iree_register_target_dependency(
+    TARGET
+      "${_TEST_BUILD_TARGET}"
+    DEPENDENCY
+      "${_SRC_TARGET}"
+  )
   set(_TEST_FILE_DATA)
   set(_TEST_TARGET_DATA)
-  if(_RULE_DATA)
-    set(_TEST_BUILD_TARGET "${_NAME}_test_deps")
-    add_custom_target(${_TEST_BUILD_TARGET} ALL)
-    iree_register_target_dependency(
-      TARGET
-        "${_TEST_BUILD_TARGET}"
-      DEPENDENCY
-        "${_SRC_TARGET}"
-    )
-    iree_add_data_dependencies(
-      NAME
-        "${_TEST_BUILD_TARGET}"
-      DATA
-        ${_RULE_DATA}
-      OUT_FILE_DATA
-        _TEST_FILE_DATA
-      OUT_TARGET_DATA
-        _TEST_TARGET_DATA
-    )
-    set_property(
-      TARGET ${_TEST_BUILD_TARGET}
-      PROPERTY FOLDER ${IREE_IDE_FOLDER}/test
-    )
-  endif()
+  iree_add_data_dependencies(
+    NAME
+      "${_TEST_BUILD_TARGET}"
+    DATA
+      ${_RULE_DATA}
+    OUT_FILE_DATA
+      _TEST_FILE_DATA
+    OUT_TARGET_DATA
+      _TEST_TARGET_DATA
+  )
+  set_property(
+    TARGET ${_TEST_BUILD_TARGET}
+    PROPERTY FOLDER ${IREE_IDE_FOLDER}/test
+  )
 
   set(_TEST_RUNTIME_DATA ${_TEST_FILE_DATA})
   foreach(_DATA_TARGET IN LISTS _TEST_TARGET_DATA)
@@ -204,6 +201,10 @@ function(iree_native_test)
     iree_configure_test(${_TEST_NAME})
     set(_IREE_TEST_CAN_REGISTER ON)
   endif()
+  iree_register_test_build_targets(
+    "${_TEST_NAME}"
+    TARGETS "${_TEST_BUILD_TARGET}"
+  )
 
   # Apply accumulated test environment variables after the test exists.
   if(_TEST_ENVIRONMENT_VARS)

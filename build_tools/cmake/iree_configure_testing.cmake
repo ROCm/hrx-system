@@ -12,8 +12,56 @@ enable_testing(iree)
 # A property is apparently the only way to get an uncached global variable.
 set_property(GLOBAL PROPERTY IREE_TEST_TMPDIRS "")
 set_property(GLOBAL PROPERTY IREE_TEST_RESOURCE_BUILD_TARGETS "")
+set_property(GLOBAL PROPERTY IREE_TEST_BUILD_METADATA_KEYS "")
 set(IREE_TEST_TMPDIR_ROOT "${IREE_BINARY_DIR}/test_tmpdir")
 set(IREE_RUNTIME_RESOURCE_LABEL_PREFIX "runtime-resource=")
+
+define_property(TEST
+  PROPERTY IREE_BUILD_TARGETS
+  BRIEF_DOCS "CMake targets required to run the test"
+  FULL_DOCS
+    "Concrete CMake targets whose transitive build closure makes the test runnable."
+)
+
+# iree_register_test_build_targets
+#
+# Attaches concrete build roots to a CTest record. An empty TARGETS list is an
+# explicit source-only closure and remains distinct from a test that never
+# joined this contract.
+#
+# Rule owners must provide concrete, buildable target names. Targets are
+# validated after all repository directories have been processed.
+#
+# Parameters:
+#   TEST_NAME: CTest test receiving the metadata.
+#   TARGETS: CMake targets whose transitive closure makes TEST_NAME runnable.
+function(iree_register_test_build_targets TEST_NAME)
+  cmake_parse_arguments(_RULE "" "" "TARGETS" ${ARGN})
+
+  if(NOT TEST "${TEST_NAME}")
+    message(FATAL_ERROR
+      "cannot register build targets for missing CTest test: ${TEST_NAME}")
+  endif()
+
+  string(SHA256 _TEST_KEY "${TEST_NAME}")
+  get_property(_EXISTING_TEST_NAME
+    GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_NAME_${_TEST_KEY}")
+  if(_EXISTING_TEST_NAME)
+    message(FATAL_ERROR
+      "CTest test has duplicate IREE_BUILD_TARGETS metadata: ${TEST_NAME}")
+  endif()
+
+  set(_BUILD_TARGETS ${_RULE_TARGETS})
+  list(REMOVE_DUPLICATES _BUILD_TARGETS)
+  set_property(TEST "${TEST_NAME}"
+    PROPERTY IREE_BUILD_TARGETS "${_BUILD_TARGETS}")
+  set_property(GLOBAL APPEND PROPERTY IREE_TEST_BUILD_METADATA_KEYS
+    "${_TEST_KEY}")
+  set_property(GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_NAME_${_TEST_KEY}"
+    "${TEST_NAME}")
+  set_property(GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_TARGETS_${_TEST_KEY}"
+    "${_BUILD_TARGETS}")
+endfunction()
 
 # iree_register_test_resource_build_target
 #
@@ -49,7 +97,75 @@ function(iree_register_test_resource_build_target)
   endforeach()
 endfunction()
 
+function(_iree_collect_repository_ctests SOURCE_DIRECTORY OUTPUT_TESTS)
+  get_property(_TESTS DIRECTORY "${SOURCE_DIRECTORY}" PROPERTY TESTS)
+  get_property(_SUBDIRECTORIES
+    DIRECTORY "${SOURCE_DIRECTORY}"
+    PROPERTY SUBDIRECTORIES)
+  foreach(_SUBDIRECTORY IN LISTS _SUBDIRECTORIES)
+    string(FIND
+      "${_SUBDIRECTORY}/"
+      "${PROJECT_SOURCE_DIR}/"
+      _PROJECT_SOURCE_PREFIX_INDEX)
+    if(NOT _PROJECT_SOURCE_PREFIX_INDEX EQUAL 0)
+      continue()
+    endif()
+    _iree_collect_repository_ctests("${_SUBDIRECTORY}" _SUBDIRECTORY_TESTS)
+    list(APPEND _TESTS ${_SUBDIRECTORY_TESTS})
+  endforeach()
+  set(${OUTPUT_TESTS} "${_TESTS}" PARENT_SCOPE)
+endfunction()
+
 function(iree_finalize_test_build_targets)
+  get_property(_TEST_METADATA_KEYS
+    GLOBAL PROPERTY IREE_TEST_BUILD_METADATA_KEYS)
+  set(_TESTS_WITH_BUILD_METADATA)
+  foreach(_TEST_KEY IN LISTS _TEST_METADATA_KEYS)
+    get_property(_TEST_NAME
+      GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_NAME_${_TEST_KEY}")
+    get_property(_BUILD_TARGETS
+      GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_TARGETS_${_TEST_KEY}")
+    list(APPEND _TESTS_WITH_BUILD_METADATA "${_TEST_NAME}")
+    foreach(_BUILD_TARGET IN LISTS _BUILD_TARGETS)
+      if(NOT TARGET "${_BUILD_TARGET}")
+        message(FATAL_ERROR
+          "CTest test ${_TEST_NAME} has missing IREE_BUILD_TARGETS target: "
+          "${_BUILD_TARGET}")
+      endif()
+      get_target_property(_BUILD_TARGET_ALIASED
+        "${_BUILD_TARGET}"
+        ALIASED_TARGET)
+      if(_BUILD_TARGET_ALIASED)
+        message(FATAL_ERROR
+          "CTest test ${_TEST_NAME} has non-buildable alias "
+          "IREE_BUILD_TARGETS target: ${_BUILD_TARGET}")
+      endif()
+      get_target_property(_BUILD_TARGET_IMPORTED
+        "${_BUILD_TARGET}"
+        IMPORTED)
+      if(_BUILD_TARGET_IMPORTED)
+        message(FATAL_ERROR
+          "CTest test ${_TEST_NAME} has non-buildable imported "
+          "IREE_BUILD_TARGETS target: ${_BUILD_TARGET}")
+      endif()
+      get_target_property(_BUILD_TARGET_TYPE "${_BUILD_TARGET}" TYPE)
+      if(_BUILD_TARGET_TYPE STREQUAL "INTERFACE_LIBRARY")
+        message(FATAL_ERROR
+          "CTest test ${_TEST_NAME} has non-buildable interface library "
+          "IREE_BUILD_TARGETS target: ${_BUILD_TARGET}")
+      endif()
+    endforeach()
+  endforeach()
+
+  _iree_collect_repository_ctests("${PROJECT_SOURCE_DIR}" _REPOSITORY_TESTS)
+  foreach(_TEST_NAME IN LISTS _REPOSITORY_TESTS)
+    if(NOT _TEST_NAME IN_LIST _TESTS_WITH_BUILD_METADATA)
+      message(FATAL_ERROR
+        "repository CTest test is missing IREE_BUILD_TARGETS metadata: "
+        "${_TEST_NAME}")
+    endif()
+  endforeach()
+
   get_property(_RESOURCE_BUILD_TARGETS
     GLOBAL PROPERTY IREE_TEST_RESOURCE_BUILD_TARGETS)
   foreach(_ENTRY IN LISTS _RESOURCE_BUILD_TARGETS)
