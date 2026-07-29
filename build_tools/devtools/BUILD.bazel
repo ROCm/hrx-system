@@ -52,6 +52,7 @@ py_binary(
     srcs = [
         "__init__.py",
         "bazel_smoke_test.py",
+        "environment.py",
         "smoke_test_lib.py",
     ],
     imports = ["build_tools/devtools"],
@@ -63,6 +64,7 @@ py_binary(
     srcs = [
         "__init__.py",
         "cli_smoke_test.py",
+        "environment.py",
         "smoke_test_lib.py",
     ],
     imports = ["build_tools/devtools"],
@@ -74,6 +76,7 @@ py_binary(
     srcs = [
         "__init__.py",
         "cmake_smoke_test.py",
+        "environment.py",
         "smoke_test_lib.py",
     ],
     imports = ["build_tools/devtools"],
