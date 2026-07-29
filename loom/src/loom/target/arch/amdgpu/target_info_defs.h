@@ -367,14 +367,6 @@ typedef struct loom_amdgpu_processor_info_t {
   loom_amdgpu_processor_feature_info_t features;
 } loom_amdgpu_processor_info_t;
 
-// AMDGPU compilation target selected by tooling or target IR.
-typedef struct loom_amdgpu_target_profile_t {
-  // Exact or generic processor facts selected for compilation.
-  const loom_amdgpu_processor_info_t* processor;
-  // gfx1250 silicon revision, or UNSPECIFIED for other processors.
-  loom_amdgpu_gfx1250_revision_t gfx1250_revision;
-} loom_amdgpu_target_profile_t;
-
 typedef struct loom_amdgpu_amdhsa_target_id_t {
   // Processor row selected by the target-id processor component.
   const loom_amdgpu_processor_info_t* processor;

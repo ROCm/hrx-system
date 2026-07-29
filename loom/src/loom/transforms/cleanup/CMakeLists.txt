@@ -60,6 +60,7 @@ loom_cc_test(
     loom::ops::vector
     loom::pass::types
     loom::pass::value_facts
+    loom::target::profile
     loom::target::types
 )
 

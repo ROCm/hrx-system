@@ -25,6 +25,7 @@ loom_cc_library(
     loom::ir
     loom::ops::op_defs
     loom::target::arch::amdgpu::ops
+    loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::runtime_requirements
     loom::target::arch::amdgpu::target_id
@@ -50,6 +51,7 @@ loom_cc_library(
     "testbench_requirements.c"
   DEPS
     iree::base
+    loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::target_info_defs
     loom::tooling::execution::hal::testbench_actual
     loom::tooling::testbench::requirements
@@ -77,6 +79,7 @@ loom_cc_test(
     loom::sanitizer::options
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::ops
+    loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info
     loom::target::emit::native::amdgpu::runtime_globals

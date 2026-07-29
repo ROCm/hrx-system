@@ -276,7 +276,7 @@ static void loom_spirv_matrix_prepare_properties(
     const loom_target_contract_query_environment_t* environment,
     loom_spirv_cooperative_property_set_t* out_property_set) {
   const loom_spirv_target_profile_t* profile =
-      loom_spirv_target_profile_from_data(environment->target_data);
+      loom_spirv_target_profile_cast(environment->target_profile);
   if (profile != NULL && profile->cooperative_properties != NULL) {
     *out_property_set = *profile->cooperative_properties;
     return;

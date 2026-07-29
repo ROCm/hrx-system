@@ -46,7 +46,9 @@ const loom_run_execution_backend_t* const kDuplicateFakeExecutionBackends[] = {
 };
 
 const loom_target_provider_t kCoreTestTargetProvider = {
-    /*.register_context=*/{}, /*.initialize_low_descriptor_registry=*/
+    /*.profile_type=*/{},
+    /*.register_context=*/{},
+    /*.initialize_low_descriptor_registry=*/
     loom_target_core_test_low_descriptor_registry_initialize,
 };
 

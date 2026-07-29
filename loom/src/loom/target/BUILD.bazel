@@ -27,6 +27,15 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "profile",
+    hdrs = ["profile.h"],
+    deps = [
+        ":types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "residency",
     srcs = ["residency.c"],
     hdrs = ["residency.h"],
@@ -97,6 +106,7 @@ loom_cc_library(
     hdrs = ["selection.h"],
     deps = [
         ":function_contract",
+        ":profile",
         ":types",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/error:emitter",
@@ -125,6 +135,7 @@ loom_cc_test(
     name = "selection_test",
     srcs = ["selection_test.cc"],
     deps = [
+        ":profile",
         ":selection",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -297,6 +308,7 @@ loom_cc_library(
         ":low_legality",
         ":low_packet_diagnostics",
         ":math_policy",
+        ":profile",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ir",

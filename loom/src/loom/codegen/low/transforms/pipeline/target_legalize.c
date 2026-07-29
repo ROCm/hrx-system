@@ -1471,7 +1471,7 @@ static iree_status_t loom_low_target_legalize_verify_final(
           loom_low_lower_source_query_scope_value_domain(state->query_scope),
       .structural_legality_flags =
           LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF,
-      .target_data = state->selection->target_data,
+      .target_profile = state->selection->target_profile,
       .emitter = state->pass->diagnostic_emitter,
       .max_errors = pass_state->max_errors,
   };
@@ -1496,7 +1496,7 @@ static iree_status_t loom_low_target_legalize_acquire_final_facts(
   IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
       pass, module,
       loom_pass_value_fact_scope_function_for_target(
-          selection->func, selection->target_bundle, selection->target_data),
+          selection->func, selection->target_bundle, selection->target_profile),
       &fact_table));
   *out_fact_table = fact_table;
   return iree_ok_status();
@@ -1536,13 +1536,14 @@ static iree_status_t loom_low_target_legalize_function(
     IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
         pass, module,
         loom_pass_value_fact_scope_function_for_target(
-            selection->func, selection->target_bundle, selection->target_data),
+            selection->func, selection->target_bundle,
+            selection->target_profile),
         &seed_facts));
   }
   state.lower_options = (loom_low_lower_options_t){
       .target_ref = selection->target_ref,
       .bundle = selection->target_bundle,
-      .target_data = selection->target_data,
+      .target_profile = selection->target_profile,
       .descriptor_registry = descriptor_registry,
       .legality_provider_list = legality_provider_list,
       .policy = selection->policy,
@@ -1565,7 +1566,7 @@ static iree_status_t loom_low_target_legalize_function(
       .module = module,
       .function = selection->func,
       .bundle = selection->target_bundle,
-      .target_data = selection->target_data,
+      .target_profile = selection->target_profile,
       .target_ref = selection->target_ref,
       .descriptor_set = state.descriptor_set,
       .mode = pass_state->mode,

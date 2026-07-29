@@ -93,6 +93,7 @@ loom_cc_test(
     loom::pass::registry
     loom::pass::tooling
     loom::pass::value_facts
+    loom::target::profile
     loom::target::test::contracts::core_lower_rules
     loom::target::test::low_registry
     loom::target::test::lower

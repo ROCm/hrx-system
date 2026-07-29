@@ -101,6 +101,7 @@ loom_cc_test(
     loom::ops::op_registry
     loom::target::arch::spirv::descriptors::low_registry
     loom::target::arch::spirv::ops
+    loom::target::arch::spirv::profile
     loom::target::types
     loom::testing::module_ptr
     loom::tooling::execution::hal::artifact

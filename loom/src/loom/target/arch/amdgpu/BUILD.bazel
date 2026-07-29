@@ -158,6 +158,36 @@ loom_cc_test(
     ],
 )
 
+loom_cc_library(
+    name = "profile",
+    srcs = ["profile.c"],
+    hdrs = ["profile.h"],
+    visibility = (
+        _AMDGPU_BINDING_VISIBILITY +
+        _AMDGPU_OPS_VISIBILITY +
+        _AMDGPU_PROVIDER_VISIBILITY +
+        _AMDGPU_TOOLING_VISIBILITY
+    ),
+    deps = [
+        ":target_info_defs",
+        "//loom/src/loom/target:profile",
+        "//loom/src/loom/target/arch/amdgpu/records:target_records",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "profile_test",
+    srcs = ["profile_test.cc"],
+    deps = [
+        ":profile",
+        ":target_info",
+        "//loom/src/loom/target/arch/amdgpu/records:target_records",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_test(
     name = "registers_test",
     srcs = ["registers_test.cc"],
@@ -293,6 +323,7 @@ loom_cc_library(
         ":low_verify",
         ":math_policy",
         ":pass_registry",
+        ":profile",
         ":target_info",
         "//loom/src/loom/ir",
         "//loom/src/loom/pass:builder",
@@ -310,6 +341,7 @@ loom_cc_test(
     name = "provider_test",
     srcs = ["provider_test.cc"],
     deps = [
+        ":profile",
         ":provider",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_registry",

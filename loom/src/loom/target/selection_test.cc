@@ -8,9 +8,14 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/target/profile.h"
 
 namespace loom {
 namespace {
+
+static const loom_target_profile_type_t kTestProfileType = {
+    /*.name=*/IREE_SVL("test"),
+};
 
 TEST(TargetSelectionTest, EmptyCapabilityAccessorsReturnEmptyValues) {
   EXPECT_TRUE(loom_target_selection_is_empty(
@@ -35,10 +40,12 @@ TEST(TargetSelectionTest, EnvironmentCarriesInvocationTargetSelection) {
   static const loom_target_bundle_t kBundle = {
       /*.name=*/IREE_SVL("selected-target"),
   };
-  const int target_data = 42;
+  const loom_target_profile_t target_profile = {
+      /*.type=*/&kTestProfileType,
+      /*.target_bundle=*/&kBundle,
+  };
   const loom_target_selection_t target_selection = {
-      /*.bundle=*/&kBundle,
-      /*.data=*/&target_data,
+      /*.profile=*/&target_profile,
   };
   const loom_symbol_ref_t invocation_target_ref = {
       /*.module_id=*/0,
@@ -60,11 +67,10 @@ TEST(TargetSelectionTest, EnvironmentCarriesInvocationTargetSelection) {
   const loom_target_pass_capability_t* found_capability =
       loom_target_pass_capability_from_environment(&environment);
   ASSERT_EQ(found_capability, &target_capability);
-  EXPECT_EQ(
-      loom_target_pass_capability_target_selection(found_capability).bundle,
-      &kBundle);
-  EXPECT_EQ(loom_target_pass_capability_target_selection(found_capability).data,
-            &target_data);
+  const loom_target_selection_t found_selection =
+      loom_target_pass_capability_target_selection(found_capability);
+  EXPECT_EQ(loom_target_selection_profile(found_selection), &target_profile);
+  EXPECT_EQ(loom_target_selection_bundle(found_selection), &kBundle);
 
   loom_symbol_ref_t effective_target_ref = loom_target_effective_target_ref(
       loom_symbol_ref_null(), found_capability);
@@ -113,6 +119,10 @@ TEST(TargetSelectionTest, InvocationRefinesOnlyCompatibleTargetFamily) {
       /*.export_plan=*/nullptr,
       /*.config=*/&kIncompatibleConfig,
   };
+  static const loom_target_profile_t kSelectedProfile = {
+      /*.type=*/&kTestProfileType,
+      /*.target_bundle=*/&kSelectedBundle,
+  };
   const loom_symbol_ref_t invocation_target_ref = {
       /*.module_id=*/0,
       /*.symbol_id=*/7,
@@ -122,9 +132,8 @@ TEST(TargetSelectionTest, InvocationRefinesOnlyCompatibleTargetFamily) {
       /*.symbol_id=*/5,
   };
   const loom_target_pass_capability_t target_capability =
-      loom_target_pass_capability_make(
-          {/*.bundle=*/&kSelectedBundle, /*.data=*/nullptr},
-          invocation_target_ref);
+      loom_target_pass_capability_make({/*.profile=*/&kSelectedProfile},
+                                       invocation_target_ref);
 
   EXPECT_TRUE(loom_target_pass_capability_can_refine_target_bundle(
       &target_capability, invocation_target_ref, &kCompatibleBundle));

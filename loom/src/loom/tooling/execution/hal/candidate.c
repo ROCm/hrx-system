@@ -88,7 +88,8 @@ static iree_status_t loom_run_hal_candidate_emit_selected_target(
       &candidate->artifact);
   if (iree_status_is_ok(status) && candidate->compiled &&
       candidate->artifact.target_bundle == NULL) {
-    candidate->artifact.target_bundle = candidate->device_target.target_bundle;
+    candidate->artifact.target_bundle =
+        loom_run_hal_device_target_bundle(&candidate->device_target);
   }
   return status;
 }

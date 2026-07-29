@@ -92,10 +92,11 @@ typedef struct loom_spirv_vulkan_hal_profile_facts_t {
 } loom_spirv_vulkan_hal_profile_facts_t;
 
 typedef struct loom_spirv_vulkan_hal_target_profile_storage_t {
-  // SPIR-V profile payload passed opaquely through core compiler target_data.
-  // This must remain the first field so provider deinitialization can recover
-  // the owning storage from loom_run_hal_device_target_t.data.
+  // Structured SPIR-V target profile. This remains first so the owning storage
+  // can be recovered from its target-neutral base pointer.
   loom_spirv_target_profile_t profile;
+  // Target-neutral bundle projected by profile.
+  loom_target_bundle_storage_t target_bundle_storage;
   // Cooperative property storage owned by this target profile.
   loom_spirv_cooperative_property_storage_t cooperative_properties;
 } loom_spirv_vulkan_hal_target_profile_storage_t;

@@ -44,6 +44,7 @@
 #include "loom/target/emit/native/amdgpu/spill_lowering.h"
 #include "loom/target/entry_selection.h"
 #include "loom/target/function_contract.h"
+#include "loom/target/profile.h"
 #include "loom/target/provider.h"
 #include "loom/target/reporting/low.h"
 
@@ -668,11 +669,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
   loom_amdgpu_storage_lease_provider(&storage_lease_provider);
   const loom_low_emission_frame_options_t frame_options = {
       .descriptor_registry = &low_registry->registry,
-      .target_selection =
-          {
-              .bundle = &plan->entry->bundle_storage.bundle,
-              .data = target_selection.data,
-          },
+      .target_selection = target_selection,
       .residency_model = residency_model,
       .schedule_pair_affinities = schedule_pair_affinities,
       .schedule_structural_state_reads = schedule_state_reads,
@@ -1102,7 +1099,7 @@ iree_status_t loom_amdgpu_emit_hal_kernel_library(
       .source_resolver =
           options ? options->source_resolver : (loom_source_resolver_t){0},
       .max_errors = options ? options->max_errors : 0,
-      .effective_target_bundle = target_selection.bundle,
+      .effective_target_bundle = loom_target_selection_bundle(target_selection),
   };
   loom_target_environment_t target_environment = {0};
   iree_status_t status = loom_target_environment_initialize(

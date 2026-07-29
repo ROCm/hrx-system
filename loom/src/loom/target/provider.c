@@ -420,6 +420,11 @@ iree_status_t loom_target_environment_materialize_selection(
     return iree_ok_status();
   }
 
+  const loom_target_profile_t* target_profile =
+      loom_target_selection_profile(target_selection);
+  if (target_profile->target_bundle == NULL) {
+    return iree_ok_status();
+  }
   const loom_target_provider_set_t* provider_set = environment->provider_set;
   const loom_target_selection_materialization_request_t request = {
       .target_environment = environment,
@@ -428,16 +433,13 @@ iree_status_t loom_target_environment_materialize_selection(
   };
   for (iree_host_size_t i = 0; i < provider_set->provider_count; ++i) {
     const loom_target_provider_t* provider = provider_set->providers[i];
-    if (provider->materialize_selection == NULL) {
+    if (provider->profile_type != target_profile->type ||
+        provider->materialize_selection == NULL) {
       continue;
     }
-    bool materialized = false;
     loom_symbol_ref_t target_ref = loom_symbol_ref_null();
-    IREE_RETURN_IF_ERROR(provider->materialize_selection(
-        provider, &request, &materialized, &target_ref));
-    if (!materialized) {
-      continue;
-    }
+    IREE_RETURN_IF_ERROR(
+        provider->materialize_selection(provider, &request, &target_ref));
     IREE_RETURN_IF_ERROR(
         loom_target_environment_validate_materialized_target_ref(module,
                                                                  target_ref));
@@ -445,11 +447,10 @@ iree_status_t loom_target_environment_materialize_selection(
     return iree_ok_status();
   }
 
-  const iree_string_view_t target_name = target_selection.bundle
-                                             ? target_selection.bundle->name
-                                             : IREE_SV("<target-data-only>");
+  const iree_string_view_t target_name = target_profile->type->name;
   return iree_make_status(
       IREE_STATUS_UNIMPLEMENTED,
-      "no linked target provider can materialize selected target '%.*s'",
+      "no linked target provider can materialize selected target family "
+      "'%.*s'",
       (int)target_name.size, target_name.data);
 }

@@ -212,10 +212,28 @@ loom_cc_library(
     profile
   HDRS
     "profile.h"
+  SRCS
+    "profile.c"
   DEPS
     ::cooperative_properties
     iree::base
+    loom::target::profile
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_test(
+  NAME
+    profile_test
+  SRCS
+    "profile_test.cc"
+  DEPS
+    ::profile
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.spirv"
 )
 endif()
 
@@ -289,6 +307,7 @@ loom_cc_library(
   DEPS
     ::low_verify
     ::math_policy
+    ::profile
     iree::base
     loom::ir
     loom::pass::builder

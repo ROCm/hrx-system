@@ -16,6 +16,7 @@
 #include "loom/ops/test/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/pass/value_facts.h"
+#include "loom/target/profile.h"
 #include "loom/target/types.h"
 
 namespace loom {
@@ -634,7 +635,13 @@ TEST_F(CanonicalizeTest, DriverPreservesSeedTargetContextAcrossSideRegions) {
       /*.export_plan=*/&export_plan,
       /*.config=*/&config,
   };
-  int target_data = 0;
+  const loom_target_profile_type_t target_profile_type = {
+      /*.name=*/IREE_SVL("test"),
+  };
+  const loom_target_profile_t target_profile = {
+      /*.type=*/&target_profile_type,
+      /*.target_bundle=*/&bundle,
+  };
 
   iree_arena_allocator_t seed_arena;
   iree_arena_initialize(&block_pool_, &seed_arena);
@@ -642,7 +649,7 @@ TEST_F(CanonicalizeTest, DriverPreservesSeedTargetContextAcrossSideRegions) {
   IREE_ASSERT_OK(loom_value_fact_table_initialize(
       &seed_facts, &seed_arena, loom_value_table_capacity(&module_->values)));
   seed_facts.context.target_bundle = &bundle;
-  seed_facts.context.target_data = &target_data;
+  seed_facts.context.target_profile = &target_profile;
 
   iree_arena_allocator_t pass_arena;
   iree_arena_initialize(&block_pool_, &pass_arena);
@@ -663,7 +670,7 @@ TEST_F(CanonicalizeTest, DriverPreservesSeedTargetContextAcrossSideRegions) {
       loom_canonicalizer_fact_table(&canonicalizer);
   ASSERT_NE(final_facts, nullptr);
   EXPECT_EQ(final_facts->context.target_bundle, &bundle);
-  EXPECT_EQ(final_facts->context.target_data, &target_data);
+  EXPECT_EQ(final_facts->context.target_profile, &target_profile);
 
   loom_canonicalizer_deinitialize(&canonicalizer);
   loom_pass_value_fact_owner_deinitialize(&value_facts);

@@ -114,6 +114,40 @@ loom_cc_test(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    profile
+  HDRS
+    "profile.h"
+  SRCS
+    "profile.c"
+  DEPS
+    ::target_info_defs
+    iree::base
+    loom::target::arch::amdgpu::records::target_records
+    loom::target::profile
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_test(
+  NAME
+    profile_test
+  SRCS
+    "profile_test.cc"
+  DEPS
+    ::profile
+    ::target_info
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::arch::amdgpu::records::target_records
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_test(
   NAME
     registers_test
@@ -287,6 +321,7 @@ loom_cc_library(
     ::low_verify
     ::math_policy
     ::pass_registry
+    ::profile
     ::target_info
     iree::base
     loom::ir
@@ -308,6 +343,7 @@ loom_cc_test(
   SRCS
     "provider_test.cc"
   DEPS
+    ::profile
     ::provider
     iree::base
     iree::base::internal::arena

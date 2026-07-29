@@ -135,6 +135,7 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_registry",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:profile",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:types",
         "//loom/src/loom/verify",

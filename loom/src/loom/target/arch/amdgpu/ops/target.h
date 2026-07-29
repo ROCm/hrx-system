@@ -18,6 +18,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_amdgpu_target_profile_t loom_amdgpu_target_profile_t;
+
 // Returns the AMDGPU processor name selected by |target_op|, or empty.
 iree_string_view_t loom_amdgpu_target_record_processor_name(
     const loom_op_t* target_op);

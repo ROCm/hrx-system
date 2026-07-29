@@ -518,8 +518,7 @@ static iree_status_t loom_compile_run_pass_pipeline(
       loom_run_execution_environment_target_environment(environment);
   if (hal_target != NULL) {
     pipeline_options.target_selection = (loom_target_selection_t){
-        .bundle = hal_target->target_bundle,
-        .data = hal_target->data,
+        .profile = hal_target->target_profile,
     };
   }
   pipeline_options.low_descriptor_registry =

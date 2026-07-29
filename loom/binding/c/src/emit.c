@@ -833,7 +833,7 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
             loomc_emit_compile_report_requested_detail_flags(
                 resolved_options.compile_report_mode);
         loom_target_compile_report_record_target_bundle(
-            &compile_report, target_selection.bundle);
+            &compile_report, loom_target_selection_bundle(target_selection));
       }
       const loom_target_emit_request_t request = {
           .target_environment = internal_target_environment,

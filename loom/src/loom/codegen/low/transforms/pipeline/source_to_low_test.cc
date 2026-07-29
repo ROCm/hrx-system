@@ -27,6 +27,7 @@
 #include "loom/pass/registry.h"
 #include "loom/pass/tooling.h"
 #include "loom/pass/value_facts.h"
+#include "loom/target/profile.h"
 #include "loom/target/test/contracts/core_lower_rules.h"
 #include "loom/target/test/low_registry.h"
 #include "loom/target/test/lower.h"
@@ -40,6 +41,10 @@ namespace loom {
 namespace {
 
 using ModulePtr = ::loom::testing::ModulePtr;
+
+static const loom_target_profile_type_t kTestTargetProfileType = {
+    /*.name=*/IREE_SVL("test"),
+};
 
 struct DiagnosticEmissionCollector {
   int count = 0;
@@ -279,10 +284,13 @@ TEST_F(LowLowerPassTest,
       "  func.return %sum : i32\n"
       "}\n"));
   ASSERT_GT(loom_test_target_bundles.count, 2u);
-  const int target_payload = 42;
   loom_target_bundle_storage_t selected_storage;
   InitializeTargetBundleStorage(loom_test_target_bundles.values[2],
                                 &selected_storage);
+  const loom_target_profile_t target_profile = {
+      /*.type=*/&kTestTargetProfileType,
+      /*.target_bundle=*/&selected_storage.bundle,
+  };
 
   loom_low_lower_policy_registry_t policy_registry = {};
   loom_test_low_lower_policy_registry_initialize(&policy_registry);
@@ -294,8 +302,7 @@ TEST_F(LowLowerPassTest,
       /*.lowering_kind=*/{},
       /*.target_selection=*/
       {
-          /*.bundle=*/&selected_storage.bundle,
-          /*.data=*/&target_payload,
+          /*.profile=*/&target_profile,
       },
   };
   loom_low_source_selection_list_t selections = {};
@@ -320,7 +327,7 @@ TEST_F(LowLowerPassTest,
   EXPECT_TRUE(iree_string_view_equal(
       selections.values[0].target_bundle->config->contract_set_key,
       IREE_SV("test.low.core")));
-  EXPECT_EQ(selections.values[0].target_data, &target_payload);
+  EXPECT_EQ(selections.values[0].target_profile, &target_profile);
   iree_arena_deinitialize(&arena);
 }
 
@@ -435,14 +442,17 @@ TEST_F(LowLowerPassTest,
   EXPECT_EQ(lowered_target.symbol_id, gfx11_ref.symbol_id);
 }
 
-TEST_F(LowLowerPassTest, SourceSelectionAppliesRuntimeTargetDataOnly) {
+TEST_F(LowLowerPassTest, SourceSelectionCarriesPartialRuntimeTargetProfile) {
   ModulePtr module = Parse(IREE_SV(
       "test.target<low_core> @test_target\n"
       "func.def target(@test_target) @add(%lhs: i32, %rhs: i32) -> (i32) {\n"
       "  %sum = scalar.addi %lhs, %rhs : i32\n"
       "  func.return %sum : i32\n"
       "}\n"));
-  const int target_payload = 42;
+  const loom_target_profile_t target_profile = {
+      /*.type=*/&kTestTargetProfileType,
+      /*.target_bundle=*/nullptr,
+  };
 
   loom_low_lower_policy_registry_t policy_registry = {};
   loom_test_low_lower_policy_registry_initialize(&policy_registry);
@@ -454,8 +464,7 @@ TEST_F(LowLowerPassTest, SourceSelectionAppliesRuntimeTargetDataOnly) {
       /*.lowering_kind=*/{},
       /*.target_selection=*/
       {
-          /*.bundle=*/NULL,
-          /*.data=*/&target_payload,
+          /*.profile=*/&target_profile,
       },
   };
   loom_low_source_selection_list_t selections = {};
@@ -465,7 +474,7 @@ TEST_F(LowLowerPassTest, SourceSelectionAppliesRuntimeTargetDataOnly) {
   ASSERT_EQ(selections.count, 1u);
   EXPECT_TRUE(iree_string_view_equal(selections.values[0].target_bundle->name,
                                      IREE_SV("test_target")));
-  EXPECT_EQ(selections.values[0].target_data, &target_payload);
+  EXPECT_EQ(selections.values[0].target_profile, &target_profile);
   iree_arena_deinitialize(&arena);
 }
 
@@ -478,11 +487,14 @@ TEST_F(LowLowerPassTest,
       "  func.return %sum : i32\n"
       "}\n"));
   ASSERT_GT(loom_test_target_bundles.count, 2u);
-  const int target_payload = 42;
   loom_target_bundle_storage_t selected_storage;
   InitializeTargetBundleStorage(loom_test_target_bundles.values[2],
                                 &selected_storage);
   selected_storage.snapshot.codegen_format = LOOM_TARGET_CODEGEN_FORMAT_LLVMIR;
+  const loom_target_profile_t target_profile = {
+      /*.type=*/&kTestTargetProfileType,
+      /*.target_bundle=*/&selected_storage.bundle,
+  };
 
   loom_low_lower_policy_registry_t policy_registry = {};
   loom_test_low_lower_policy_registry_initialize(&policy_registry);
@@ -499,8 +511,7 @@ TEST_F(LowLowerPassTest,
       /*.lowering_kind=*/{},
       /*.target_selection=*/
       {
-          /*.bundle=*/&selected_storage.bundle,
-          /*.data=*/&target_payload,
+          /*.profile=*/&target_profile,
       },
       /*.target_ref=*/loom_symbol_ref_null(),
   };

@@ -14,6 +14,7 @@
 #include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/target/facts.h"
 #include "loom/target/function_contract.h"
+#include "loom/target/profile.h"
 
 static iree_status_t loom_low_source_selection_lookup_func_facts(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
@@ -172,32 +173,34 @@ static iree_status_t loom_low_source_selection_apply_target_selection(
     const loom_func_symbol_facts_t* func_facts, bool* inout_contract_valid,
     loom_low_source_selection_t* selection) {
   if (!*inout_contract_valid) {
-    selection->target_data = NULL;
+    selection->target_profile = NULL;
     return iree_ok_status();
   }
   if (loom_target_selection_is_empty(options->target_selection)) {
-    selection->target_data = NULL;
+    selection->target_profile = NULL;
     return iree_ok_status();
   }
-  if (options->target_selection.bundle == NULL) {
-    selection->target_data = options->target_selection.data;
+  const loom_target_profile_t* target_profile =
+      loom_target_selection_profile(options->target_selection);
+  const loom_target_bundle_t* target_bundle =
+      loom_target_profile_bundle(target_profile);
+  if (target_bundle == NULL) {
+    selection->target_profile = target_profile;
     return iree_ok_status();
   }
   if (!loom_target_function_contract_bundles_compatible(
-          &selection->target_bundle_storage.bundle,
-          options->target_selection.bundle)) {
+          &selection->target_bundle_storage.bundle, target_bundle)) {
     *inout_contract_valid = false;
-    selection->target_data = NULL;
+    selection->target_profile = NULL;
     IREE_RETURN_IF_ERROR(loom_low_source_selection_emit_target_conflict(
         options->diagnostic_emitter, func_facts,
-        &selection->target_bundle_storage.bundle,
-        options->target_selection.bundle));
+        &selection->target_bundle_storage.bundle, target_bundle));
     return iree_ok_status();
   }
   loom_target_function_contract_apply_compatible_selection(
-      options->target_selection.bundle, &selection->target_bundle_storage);
+      target_bundle, &selection->target_bundle_storage);
   selection->target_bundle = &selection->target_bundle_storage.bundle;
-  selection->target_data = options->target_selection.data;
+  selection->target_profile = target_profile;
   return iree_ok_status();
 }
 

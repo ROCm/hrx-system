@@ -183,6 +183,7 @@ loom_cc_library(
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target:pipeline",
         "//loom/src/loom/target:predicate",
+        "//loom/src/loom/target:profile",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/reporting:artifact_manifest",

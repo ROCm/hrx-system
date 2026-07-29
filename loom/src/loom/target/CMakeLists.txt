@@ -21,6 +21,17 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    profile
+  HDRS
+    "profile.h"
+  DEPS
+    ::types
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     residency
   HDRS
     "residency.h"
@@ -106,6 +117,7 @@ loom_cc_library(
     "selection.c"
   DEPS
     ::function_contract
+    ::profile
     ::types
     iree::base
     iree::base::internal::arena
@@ -137,6 +149,7 @@ loom_cc_test(
   SRCS
     "selection_test.cc"
   DEPS
+    ::profile
     ::selection
     iree::testing::gtest
     iree::testing::gtest_main
@@ -320,6 +333,7 @@ loom_cc_library(
     ::low_legality
     ::low_packet_diagnostics
     ::math_policy
+    ::profile
     iree::base
     iree::base::internal::arena
     loom::codegen::low::lower

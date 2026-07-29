@@ -18,6 +18,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/target/profile.h"
 #include "loom/target/test/low_registry.h"
 #include "loom/target/test/target_records.h"
 #include "loom/testing/diagnostic_matchers.h"
@@ -130,9 +131,15 @@ low.func.def target(@target) @uses_workgroup_storage() {
   InitializeTargetBundleStorage(loom_test_target_bundles.values[1],
                                 &selected_storage);
   selected_storage.snapshot.max_workgroup_storage_bytes = 64;
+  const loom_target_profile_type_t profile_type = {
+      /*.name=*/IREE_SVL("test"),
+  };
+  const loom_target_profile_t profile = {
+      /*.type=*/&profile_type,
+      /*.target_bundle=*/&selected_storage.bundle,
+  };
   const loom_target_selection_t selection = {
-      /*.bundle=*/&selected_storage.bundle,
-      /*.data=*/nullptr,
+      /*.profile=*/&profile,
   };
 
   DiagnosticEmissionCapture capture;

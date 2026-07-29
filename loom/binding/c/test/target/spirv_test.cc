@@ -18,6 +18,7 @@
 #include "loomc/status.h"
 #include "loomc/target.h"
 #include "loomc/target/spirv/emit.h"
+#include "loomc/target/spirv/profile.h"
 #include "loomc/workspace.h"
 #include "test/util.h"
 
@@ -82,18 +83,16 @@ ContextPtr CreateSpirvContext(loomc_target_environment_t* target_environment) {
   return ContextPtr(context);
 }
 
-TargetProfilePtr CreateEmptyProfile(
+TargetProfilePtr CreatePartialSpirvProfile(
     loomc_target_environment_t* target_environment) {
-  loomc_target_profile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("spirv-test-profile"),
-  };
   loomc_target_profile_t* profile = nullptr;
-  loomc_status_t status = loomc_target_profile_create_empty(
-      target_environment, &options, loomc_allocator_system(), &profile);
+  loomc_result_t* result = nullptr;
+  loomc_status_t status = loomc_target_profile_create_spirv(
+      target_environment, /*options=*/nullptr, loomc_allocator_system(),
+      &profile, &result);
   LOOMC_EXPECT_OK(status);
+  ResultPtr result_ptr(result);
+  ExpectSucceededResult(result_ptr.get());
   return TargetProfilePtr(profile);
 }
 
@@ -195,7 +194,8 @@ void ExpectSpirvArtifact(const loomc_result_t* result,
 
 TEST(TargetSpirvTest, CreatesTargetPipelinePassProgram) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateEmptyProfile(target_environment.get());
+  TargetProfilePtr profile =
+      CreatePartialSpirvProfile(target_environment.get());
   TargetSelectionPtr selection = CreateSelectionFromProfile(profile.get());
   ContextPtr context = CreateSpirvContext(target_environment.get());
 
@@ -228,7 +228,8 @@ TEST(TargetSpirvTest, CreatesTargetPipelinePassProgram) {
 
 TEST(TargetSpirvTest, EmitsSpirvBinaryArtifact) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateEmptyProfile(target_environment.get());
+  TargetProfilePtr profile =
+      CreatePartialSpirvProfile(target_environment.get());
   TargetSelectionPtr selection = CreateSelectionFromProfile(profile.get());
   ContextPtr context = CreateSpirvContext(target_environment.get());
   loomc_workspace_t* module_workspace_handle = nullptr;

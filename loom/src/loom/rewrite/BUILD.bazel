@@ -48,6 +48,7 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:profile",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",

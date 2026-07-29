@@ -18,6 +18,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/target/facts.h"
 #include "loom/target/function_contract.h"
+#include "loom/target/profile.h"
 #include "loom/target/registers.h"
 
 bool loom_low_register_type_resolver_try_resolve(
@@ -244,11 +245,13 @@ static iree_status_t loom_low_resolve_func_target(
         &out_target->bundle_storage);
   }
   if (iree_status_is_ok(status) && contract_valid &&
-      target_selection.bundle != NULL &&
+      loom_target_selection_bundle(target_selection) != NULL &&
       loom_target_function_contract_bundles_compatible(
-          &out_target->bundle_storage.bundle, target_selection.bundle)) {
+          &out_target->bundle_storage.bundle,
+          loom_target_selection_bundle(target_selection))) {
     loom_target_function_contract_apply_compatible_selection(
-        target_selection.bundle, &out_target->bundle_storage);
+        loom_target_selection_bundle(target_selection),
+        &out_target->bundle_storage);
     contract_target_name = out_target->bundle_storage.bundle.name;
   }
   loom_target_workgroup_size_t workgroup_size = {0};

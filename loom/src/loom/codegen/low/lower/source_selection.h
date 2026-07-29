@@ -83,9 +83,10 @@ typedef struct loom_low_source_selection_t {
   // Effective target bundle selected by |func|.
   const loom_target_bundle_t* target_bundle;
 
-  // Target-owned payload associated with |target_bundle|, or NULL when the
-  // bundle came only from module target records.
-  const void* target_data;
+  // Invocation profile whose facts contributed to |target_bundle|, or NULL
+  // when the effective bundle came only from module target records. Its bundle
+  // projection may be less specific after compatible function refinement.
+  const loom_target_profile_t* target_profile;
 
   // Number of compatible module target records with different topology.
   uint32_t candidate_target_count;

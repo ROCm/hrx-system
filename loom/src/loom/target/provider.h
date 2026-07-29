@@ -29,6 +29,7 @@
 #include "loom/target/low_legality.h"
 #include "loom/target/low_packet_diagnostics.h"
 #include "loom/target/math_policy.h"
+#include "loom/target/profile.h"
 #include "loom/target/reporting/artifact_manifest.h"
 #include "loom/target/reporting/report.h"
 
@@ -64,7 +65,7 @@ typedef struct loom_target_selection_materialization_request_t {
   // Mutable module that will receive any materialized target record.
   loom_module_t* module;
 
-  // Invocation-selected target bundle and target-owned payload.
+  // Invocation-selected structured target profile.
   loom_target_selection_t target_selection;
 } loom_target_selection_materialization_request_t;
 
@@ -73,7 +74,7 @@ typedef struct loom_target_selection_materialization_request_t {
 typedef iree_status_t (*loom_target_provider_materialize_selection_fn_t)(
     const loom_target_provider_t* provider,
     const loom_target_selection_materialization_request_t* request,
-    bool* out_materialized, loom_symbol_ref_t* out_target_ref);
+    loom_symbol_ref_t* out_target_ref);
 
 // Target emission artifact storage release callback.
 typedef void (*loom_target_emit_artifact_release_fn_t)(
@@ -238,6 +239,9 @@ typedef iree_status_t (*loom_target_provider_pipeline_contribution_fn_t)(
 
 // Target-owned compiler capability contribution linked into a tool or driver.
 struct loom_target_provider_t {
+  // Target-family profile representation owned by this provider, or NULL when
+  // the provider contributes no profile-driven semantics.
+  const loom_target_profile_type_t* profile_type;
   // Optional function that registers target-owned dialects.
   loom_target_provider_context_registration_fn_t register_context;
   // Optional function that initializes target-low descriptor-set providers.
@@ -425,8 +429,8 @@ iree_status_t loom_target_environment_contribute_pipeline(
     loom_target_pipeline_phase_t phase,
     loom_pass_environment_t pass_environment, loom_builder_t* builder);
 
-// Materializes |target_selection| into |module| using the first provider that
-// recognizes the selection. Empty selections return a null target ref.
+// Materializes |target_selection| into |module| using the provider owning its
+// profile type. Empty selections return a null target ref.
 iree_status_t loom_target_environment_materialize_selection(
     const loom_target_environment_t* environment, loom_module_t* module,
     loom_target_selection_t target_selection,

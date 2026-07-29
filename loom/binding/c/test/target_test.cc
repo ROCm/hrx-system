@@ -24,6 +24,7 @@
 #include "loomc/source.h"
 #include "loomc/status.h"
 #include "loomc/target/spirv/base.h"
+#include "loomc/target/spirv/profile.h"
 #include "loomc/workspace.h"
 #include "target.h"
 #include "test/util.h"
@@ -142,6 +143,7 @@ static const loom_target_emitter_t* const kFakeWasmEmitters[] = {
 static const loom_target_provider_t kEmptyProvider = {};
 
 static const loom_target_provider_t kFakeElfProvider = {
+    /*.profile_type=*/nullptr,
     /*.register_context=*/nullptr,
     /*.initialize_low_descriptor_registry=*/nullptr,
     /*.initialize_low_lower_policy_registry=*/nullptr,
@@ -161,6 +163,7 @@ static const loom_target_provider_t kFakeElfProvider = {
 };
 
 static const loom_target_provider_t kFakeWasmProvider = {
+    /*.profile_type=*/nullptr,
     /*.register_context=*/nullptr,
     /*.initialize_low_descriptor_registry=*/nullptr,
     /*.initialize_low_lower_policy_registry=*/nullptr,
@@ -265,18 +268,16 @@ ContextPtr CreateSpirvContext(loomc_target_environment_t* target_environment) {
   return ContextPtr(context);
 }
 
-TargetProfilePtr CreateEmptyProfile(
+TargetProfilePtr CreatePartialSpirvProfile(
     loomc_target_environment_t* target_environment) {
-  loomc_target_profile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("test-profile"),
-  };
   loomc_target_profile_t* profile = nullptr;
-  loomc_status_t status = loomc_target_profile_create_empty(
-      target_environment, &options, loomc_allocator_system(), &profile);
+  loomc_result_t* result = nullptr;
+  loomc_status_t status = loomc_target_profile_create_spirv(
+      target_environment, /*options=*/nullptr, loomc_allocator_system(),
+      &profile, &result);
   LOOMC_EXPECT_OK(status);
+  ResultPtr result_ptr(result);
+  EXPECT_TRUE(loomc_result_succeeded(result_ptr.get()));
   return TargetProfilePtr(profile);
 }
 
@@ -833,7 +834,8 @@ func.def public @entry(%x: i32) -> (i32) {
 
 TEST(TargetTest, RetainReleaseProfileAndSelection) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateEmptyProfile(target_environment.get());
+  TargetProfilePtr profile =
+      CreatePartialSpirvProfile(target_environment.get());
   loomc_target_profile_retain(profile.get());
   loomc_target_profile_release(profile.get());
 
@@ -868,7 +870,8 @@ TEST(TargetTest, AcceptsExplicitTargetlessSelectionWithoutTargetEnvironment) {
 
 TEST(TargetTest, RejectsProfileSelectionWithoutTargetEnvironment) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateEmptyProfile(target_environment.get());
+  TargetProfilePtr profile =
+      CreatePartialSpirvProfile(target_environment.get());
   TargetSelectionPtr selection = CreateSelectionFromProfile(profile.get());
   ContextPtr context = CreateContext();
   loomc_target_selection_options_t target_options = {
@@ -891,7 +894,8 @@ TEST(TargetTest, RejectsProfileSelectionWithoutTargetEnvironment) {
 TEST(TargetTest, AcceptsProfileSelectionWithCompatibleTargetEnvironment) {
   TargetEnvironmentPtr profile_environment = CreateSpirvTargetEnvironment();
   TargetEnvironmentPtr context_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateEmptyProfile(profile_environment.get());
+  TargetProfilePtr profile =
+      CreatePartialSpirvProfile(profile_environment.get());
   TargetSelectionPtr selection = CreateSelectionFromProfile(profile.get());
   ContextPtr context = CreateSpirvContext(context_environment.get());
   loomc_target_selection_options_t target_options = {
@@ -1090,7 +1094,8 @@ TEST(TargetTest, RejectsSanitizerOptionsOnPlainPassProgramOptions) {
 
 TEST(TargetTest, ReusesSelectionAcrossCompileWorkspaces) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateEmptyProfile(target_environment.get());
+  TargetProfilePtr profile =
+      CreatePartialSpirvProfile(target_environment.get());
   TargetSelectionPtr selection = CreateSelectionFromProfile(profile.get());
   ContextPtr context = CreateSpirvContext(target_environment.get());
   CompilerPtr compiler = CreateCompiler(context.get());
@@ -1128,7 +1133,8 @@ TEST(TargetTest, ReusesSelectionAcrossCompileWorkspaces) {
 
 TEST(TargetTest, ReusesSelectionAcrossLinkWorkspaces) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile = CreateEmptyProfile(target_environment.get());
+  TargetProfilePtr profile =
+      CreatePartialSpirvProfile(target_environment.get());
   TargetSelectionPtr selection = CreateSelectionFromProfile(profile.get());
   ContextPtr context = CreateSpirvContext(target_environment.get());
   LinkerPtr linker = CreateLinker(context.get());

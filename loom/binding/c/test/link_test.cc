@@ -26,6 +26,7 @@
 #include "loom/ops/op_registry.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
+#include "loom/target/profile.h"
 #include "loom/target/provider.h"
 #include "loom/target/types.h"
 #include "loom/verify/verify.h"
@@ -81,6 +82,15 @@ static const loom_target_bundle_t kFakeTargetBundle = {
     /*.config=*/&kFakeTargetConfig,
 };
 
+static const loom_target_profile_type_t kFakeTargetProfileType = {
+    /*.name=*/IREE_SVL("fake-link"),
+};
+
+static loom_target_profile_t kFakeTargetProfile = {
+    /*.type=*/&kFakeTargetProfileType,
+    /*.target_bundle=*/&kFakeTargetBundle,
+};
+
 static iree_status_t RegisterFakeTargetContext(loom_context_t* context) {
   return loom_test_dialect_register(context);
 }
@@ -88,13 +98,9 @@ static iree_status_t RegisterFakeTargetContext(loom_context_t* context) {
 static iree_status_t MaterializeFakeTargetSelection(
     const loom_target_provider_t* provider,
     const loom_target_selection_materialization_request_t* request,
-    bool* out_materialized, loom_symbol_ref_t* out_target_ref) {
+    loom_symbol_ref_t* out_target_ref) {
   (void)provider;
-  *out_materialized = false;
   *out_target_ref = loom_symbol_ref_null();
-  if (request->target_selection.bundle != &kFakeTargetBundle) {
-    return iree_ok_status();
-  }
 
   loom_string_id_t symbol_name_id = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_module_intern_string(
@@ -110,7 +116,6 @@ static iree_status_t MaterializeFakeTargetSelection(
       /*.symbol_id=*/symbol_id,
   };
   if (request->module->symbols.entries[symbol_id].defining_op != nullptr) {
-    *out_materialized = true;
     return iree_ok_status();
   }
 
@@ -140,11 +145,11 @@ static iree_status_t MaterializeFakeTargetSelection(
       /*hal_buffer_resource_flags=*/0,
       /*contract_set_key=*/LOOM_STRING_ID_INVALID,
       /*contract_feature_bits=*/0, LOOM_LOCATION_UNKNOWN, &target_op));
-  *out_materialized = true;
   return iree_ok_status();
 }
 
 static const loom_target_provider_t kFakeTargetProvider = {
+    /*.profile_type=*/&kFakeTargetProfileType,
     /*.register_context=*/RegisterFakeTargetContext,
     /*.initialize_low_descriptor_registry=*/nullptr,
     /*.initialize_low_lower_policy_registry=*/nullptr,
@@ -308,21 +313,11 @@ TargetEnvironmentPtr CreateFakeTargetEnvironment() {
 
 TargetProfilePtr CreateFakeTargetProfile(
     loomc_target_environment_t* target_environment) {
-  loomc_target_profile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("fake-link-profile"),
-  };
-  loom_target_selection_t selection = {
-      /*.bundle=*/&kFakeTargetBundle,
-      /*.data=*/nullptr,
-  };
   loomc_target_profile_t* profile = nullptr;
-  loomc_status_t status = loomc_target_profile_create_from_selection(
-      target_environment, &options, selection, /*payload_type=*/nullptr,
-      /*payload=*/nullptr, /*deinitialize=*/nullptr, loomc_allocator_system(),
-      &profile);
+  loomc_status_t status = loomc_target_profile_create(
+      target_environment, loomc_make_cstring_view("fake-link-profile"),
+      &kFakeTargetProfile,
+      /*deinitialize=*/nullptr, loomc_allocator_system(), &profile);
   LOOMC_EXPECT_OK(status);
   return TargetProfilePtr(profile);
 }

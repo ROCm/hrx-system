@@ -11,6 +11,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
 #include "loom/target/function_contract.h"
+#include "loom/target/profile.h"
 
 static bool loom_target_pass_capability_satisfies_requirement(
     const loom_pass_environment_capability_t* capability,
@@ -91,9 +92,11 @@ bool loom_target_pass_capability_can_refine_target_bundle(
   }
   const loom_target_selection_t target_selection =
       loom_target_pass_capability_target_selection(capability);
-  return target_selection.bundle != NULL &&
+  const loom_target_bundle_t* target_bundle =
+      loom_target_selection_bundle(target_selection);
+  return target_bundle != NULL &&
          loom_target_function_contract_bundles_compatible(
-             authored_target_bundle, target_selection.bundle);
+             authored_target_bundle, target_bundle);
 }
 
 static bool loom_target_function_symbol_id(const loom_module_t* module,
@@ -182,14 +185,16 @@ iree_status_t loom_target_pass_capability_resolve_function_bundle(
 
   const loom_target_selection_t target_selection =
       loom_target_pass_capability_target_selection(capability);
-  if (target_selection.bundle != NULL) {
+  const loom_target_bundle_t* target_bundle =
+      loom_target_selection_bundle(target_selection);
+  if (target_bundle != NULL) {
     if (!loom_target_function_contract_bundles_compatible(
-            &out_bundle_storage->bundle, target_selection.bundle)) {
+            &out_bundle_storage->bundle, target_bundle)) {
       *out_bundle_storage = (loom_target_bundle_storage_t){0};
       return iree_ok_status();
     }
     loom_target_function_contract_apply_compatible_selection(
-        target_selection.bundle, out_bundle_storage);
+        target_bundle, out_bundle_storage);
   }
 
   *out_resolved = true;

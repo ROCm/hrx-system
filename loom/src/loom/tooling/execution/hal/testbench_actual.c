@@ -817,8 +817,7 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
   pipeline_options.target_pipeline_options.sanitizer = provider->sanitizer;
   pipeline_options.target_environment = provider->target_environment;
   pipeline_options.target_selection = (loom_target_selection_t){
-      .bundle = provider->compile_device_target.target_bundle,
-      .data = provider->compile_device_target.data,
+      .profile = provider->compile_device_target.target_profile,
   };
   pipeline_options.low_descriptor_registry =
       loom_run_session_low_descriptor_registry(provider->session);

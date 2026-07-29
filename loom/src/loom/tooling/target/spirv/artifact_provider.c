@@ -75,8 +75,6 @@ static iree_status_t loom_spirv_hal_artifact_provider_select_device_target(
   loom_spirv_vulkan_hal_profile_facts_t facts = {0};
   IREE_RETURN_IF_ERROR(
       loom_spirv_vulkan_hal_profile_query(runtime->device, &facts));
-  IREE_RETURN_IF_ERROR(loom_spirv_vulkan_hal_profile_initialize_target_bundle(
-      &facts, &out_target->target_storage));
 
   iree_hal_vulkan_cooperative_matrix_property_t* matrix_rows = NULL;
   iree_host_size_t matrix_row_count = 0;
@@ -88,14 +86,11 @@ static iree_status_t loom_spirv_hal_artifact_provider_select_device_target(
         runtime->device, allocator, &matrix_rows, &matrix_row_count);
   }
   loom_spirv_vulkan_hal_target_profile_storage_t* profile_storage = NULL;
-  if (iree_status_is_ok(status) &&
-      iree_any_bit_set(
-          facts.flags,
-          LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_COOPERATIVE_MATRIX_KHR)) {
+  if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc(allocator, sizeof(*profile_storage),
                                    (void**)&profile_storage);
   }
-  if (iree_status_is_ok(status) && profile_storage != NULL) {
+  if (iree_status_is_ok(status)) {
     status = loom_spirv_vulkan_hal_target_profile_storage_initialize(
         &facts, matrix_rows, matrix_row_count, allocator, profile_storage);
   }
@@ -106,9 +101,8 @@ static iree_status_t loom_spirv_hal_artifact_provider_select_device_target(
   }
 
   out_target->hal_target = target_result.target;
-  out_target->data = profile_storage != NULL ? &profile_storage->profile : NULL;
-  out_target->target_bundle = &out_target->target_storage.bundle;
-  out_target->target_key = out_target->target_storage.bundle.name;
+  out_target->target_profile = &profile_storage->profile.base;
+  out_target->target_key = profile_storage->target_bundle_storage.bundle.name;
   return iree_ok_status();
 }
 
@@ -131,9 +125,9 @@ static void loom_spirv_hal_artifact_provider_deinitialize_device_target(
   if (target == NULL) {
     return;
   }
-  if (target->data != NULL) {
+  if (target->target_profile != NULL) {
     loom_spirv_vulkan_hal_target_profile_storage_t* storage =
-        (loom_spirv_vulkan_hal_target_profile_storage_t*)target->data;
+        (loom_spirv_vulkan_hal_target_profile_storage_t*)target->target_profile;
     loom_spirv_vulkan_hal_target_profile_storage_deinitialize(storage,
                                                               allocator);
     iree_allocator_free(allocator, storage);
@@ -156,8 +150,7 @@ static iree_status_t loom_spirv_hal_artifact_provider_emit_entries(
   loom_low_verify_scratch_t low_verify_scratch =
       loom_low_verify_scratch_for_module(module);
   const loom_target_selection_t target_selection = {
-      .bundle = target->target_bundle,
-      .data = target->data,
+      .profile = target->target_profile,
   };
   IREE_RETURN_IF_ERROR(loom_target_entry_verify_low_module(
       module, low_registry, diagnostic_emitter, target_selection,
@@ -220,12 +213,14 @@ static iree_status_t loom_spirv_hal_artifact_provider_emit_entries(
   if (iree_status_is_ok(status) && diagnostic_emitter->error_count == 0) {
     const iree_const_byte_span_t module_bytes =
         loom_spirv_module_binary_byte_span(&storage->module);
+    const loom_target_bundle_t* target_bundle =
+        loom_run_hal_device_target_bundle(target);
     *out_artifact = (loom_run_hal_artifact_t){
         .hal_target = target->hal_target,
         .target_key = target->hal_target != NULL
                           ? target->hal_target->target_key
                           : target->target_key,
-        .target_bundle = target->target_bundle,
+        .target_bundle = target_bundle,
         .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
         .target_artifact_data = module_bytes,
         .sidecars = storage->artifact_manifest.contents.data != NULL
@@ -274,7 +269,7 @@ static iree_status_t loom_spirv_hal_artifact_provider_emit_artifact(
       .diagnostic_sink = diagnostic_sink,
       .source_resolver = source_resolver,
       .max_errors = max_errors,
-      .effective_target_bundle = target->target_bundle,
+      .effective_target_bundle = loom_run_hal_device_target_bundle(target),
   };
   loom_target_entry_diagnostic_emitter_t diagnostic_emitter = {0};
   loom_target_entry_diagnostic_emitter_initialize(

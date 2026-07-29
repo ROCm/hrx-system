@@ -80,7 +80,9 @@ void InitializeTestLowLowerPolicyRegistryForProvider(
 }
 
 const loom_target_provider_t kTestTargetProvider = {
-    /*.register_context=*/{}, /*.initialize_low_descriptor_registry=*/
+    /*.profile_type=*/{},
+    /*.register_context=*/{},
+    /*.initialize_low_descriptor_registry=*/
     InitializeTestLowDescriptorRegistryForProvider,
     /*.initialize_low_lower_policy_registry=*/
     InitializeTestLowLowerPolicyRegistryForProvider,

@@ -39,6 +39,7 @@
 #include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
 #include "loom/target/arch/amdgpu/planning/storage_lease.h"
+#include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/kernel_hsaco.h"
@@ -127,26 +128,9 @@ iree_status_t FormatTargetRecordForProfile(
   IREE_ASSERT_ARGUMENT(profile);
   IREE_ASSERT_ARGUMENT(out_target_record);
   *out_target_record = {};
-  if (profile->processor == nullptr) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU HSA target profile requires a processor");
-  }
-  const loom_amdgpu_processor_info_t* processor = profile->processor;
+  const loom_amdgpu_processor_info_t* processor = profile->amdhsa.processor;
   const bool is_gfx1250 =
       iree_string_view_equal(processor->name, IREE_SV("gfx1250"));
-  if (is_gfx1250 &&
-      profile->gfx1250_revision != LOOM_AMDGPU_GFX1250_REVISION_A0 &&
-      profile->gfx1250_revision != LOOM_AMDGPU_GFX1250_REVISION_B0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU HSA gfx1250 target profile requires an A0 or B0 revision");
-  }
-  if (!is_gfx1250 &&
-      profile->gfx1250_revision != LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU HSA non-gfx1250 target profile specifies a gfx1250 revision");
-  }
   const loom_amdgpu_target_record_info_t* record_info =
       loom_amdgpu_target_record_info_for_processor(processor->name);
   if (record_info == nullptr) {
@@ -161,8 +145,9 @@ iree_status_t FormatTargetRecordForProfile(
   if (is_gfx1250) {
     target_record += " {gfx1250_revision = ";
     target_record +=
-        profile->gfx1250_revision == LOOM_AMDGPU_GFX1250_REVISION_A0 ? "a0"
-                                                                     : "b0";
+        profile->amdhsa.gfx1250_revision == LOOM_AMDGPU_GFX1250_REVISION_A0
+            ? "a0"
+            : "b0";
     target_record += "}";
   }
   target_record += "\n";
@@ -939,15 +924,17 @@ iree_status_t PrepareTargetProfileForLowHsaco(
                             "AMDGPU processor '%s' has no target-low record",
                             target.processor.c_str());
   }
-  *out_target_profile = {
+  const loom_amdgpu_amdhsa_profile_facts_t amdhsa = {
       /*.processor=*/processor,
       /*.gfx1250_revision=*/
       iree_string_view_equal(processor->name, IREE_SV("gfx1250"))
           ? (target.asic_revision == 0 ? LOOM_AMDGPU_GFX1250_REVISION_A0
                                        : LOOM_AMDGPU_GFX1250_REVISION_B0)
           : LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED,
+      /*.sramecc=*/LOOM_AMDGPU_TARGET_FEATURE_DEFAULT,
+      /*.xnack=*/LOOM_AMDGPU_TARGET_FEATURE_DEFAULT,
   };
-  return iree_ok_status();
+  return loom_amdgpu_target_profile_initialize(&amdhsa, out_target_profile);
 }
 
 iree_status_t EmitWorkitemStoreKernelForAmdgpu(const AmdgpuHsaTarget& target,
@@ -991,7 +978,8 @@ iree_status_t EmitB128CopyKernelForAmdgpu(const AmdgpuHsaTarget& target,
   loom_amdgpu_target_profile_t target_profile = {};
   IREE_RETURN_IF_ERROR(
       PrepareTargetProfileForLowHsaco(target, &target_profile));
-  const loom_amdgpu_processor_info_t* processor = target_profile.processor;
+  const loom_amdgpu_processor_info_t* processor =
+      target_profile.amdhsa.processor;
 
   std::string source =
       "low.kernel.def target(@gfx_target) @loom_kernel() {\n"
@@ -1078,7 +1066,8 @@ iree_status_t EmitRuntimeGlobalKernelForAmdgpu(const AmdgpuHsaTarget& target,
   loom_amdgpu_target_profile_t target_profile = {};
   IREE_RETURN_IF_ERROR(
       PrepareTargetProfileForLowHsaco(target, &target_profile));
-  const loom_amdgpu_processor_info_t* processor = target_profile.processor;
+  const loom_amdgpu_processor_info_t* processor =
+      target_profile.amdhsa.processor;
 
   const uint8_t s_endpgm[] = {0x00, 0x00, 0x81, 0xbf};
   const loom_amdgpu_hsaco_kernel_t kernel = {
@@ -1106,7 +1095,8 @@ iree_status_t EmitRuntimeGlobalKernelForAmdgpu(const AmdgpuHsaTarget& target,
   };
   const std::string target_id = AmdhsaTargetIdForProcessor(processor);
   loom_amdgpu_hsaco_kernel_t revisioned_kernel = kernel;
-  revisioned_kernel.metadata.gfx1250_revision = target_profile.gfx1250_revision;
+  revisioned_kernel.metadata.gfx1250_revision =
+      target_profile.amdhsa.gfx1250_revision;
   const loom_amdgpu_hsaco_file_t file = {
       /*.target=*/iree_make_string_view(target_id.data(), target_id.size()),
       /*.processor=*/processor->name,

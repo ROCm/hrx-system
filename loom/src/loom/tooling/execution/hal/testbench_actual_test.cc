@@ -14,6 +14,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/target/low_descriptor_registry_core_test.h"
+#include "loom/target/profile.h"
 #include "loom/tooling/execution/session.h"
 #include "loom/tooling/testbench/testbench.h"
 
@@ -119,7 +120,13 @@ static loom_testbench_value_t F64Value(double value) {
   return result;
 }
 
-static int kFakeHalTarget = 0;
+static const loom_target_profile_type_t kFakeTargetProfileType = {
+    /*.name=*/IREE_SVL("fake"),
+};
+static const loom_target_profile_t kFakeTargetProfile = {
+    /*.type=*/&kFakeTargetProfileType,
+    /*.target_bundle=*/nullptr,
+};
 
 static iree_status_t FakeHalSelectDeviceTarget(
     const loom_run_hal_artifact_provider_t* provider,
@@ -130,9 +137,7 @@ static iree_status_t FakeHalSelectDeviceTarget(
   (void)allocator;
   *out_target = (loom_run_hal_device_target_t){
       /*.hal_target=*/nullptr,
-      /*.data=*/&kFakeHalTarget,
-      /*.target_storage=*/{},
-      /*.target_bundle=*/{},
+      /*.target_profile=*/&kFakeTargetProfile,
       /*.target_key=*/IREE_SVL("fake"),
   };
   return iree_ok_status();

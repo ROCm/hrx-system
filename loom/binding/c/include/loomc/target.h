@@ -27,12 +27,12 @@
 /// Prepared compilers and target pipelines created from that context reuse the
 /// same environment-derived tables.
 ///
-/// A target profile is a reusable, immutable set of facts for a concrete,
-/// partial, saved, or synthetic target. A target selection is the cheap
-/// invocation object that chooses one profile and optional overlay policy for a
-/// compile, link, pipeline, or emission operation. This split lets a JIT share
-/// one prepared profile across many worker threads while varying ordinary
-/// per-kernel compile options independently.
+/// A target profile is a reusable, immutable, target-family-typed set of facts
+/// for a concrete, partial, saved, or synthetic target. A target selection is
+/// the cheap invocation object that chooses one profile for a compile, link,
+/// pipeline, or emission operation. This split lets a JIT share one prepared
+/// profile across many worker threads while varying ordinary per-kernel compile
+/// options independently.
 ///
 /// @par Example
 /// Create a context linked with a target environment:
@@ -70,16 +70,24 @@
 /// Pass a target selection into an invocation option chain:
 ///
 /// @code{.c}
-/// loomc_target_profile_options_t profile_options = {
-///     .type = LOOMC_STRUCTURE_TYPE_TARGET_PROFILE_OPTIONS,
-///     .structure_size = sizeof(loomc_target_profile_options_t),
+/// #include "loomc/target/spirv/profile.h"
+///
+/// loomc_spirv_profile_options_t profile_options = {
+///     .type = LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS,
+///     .structure_size = sizeof(loomc_spirv_profile_options_t),
 ///     .identifier = loomc_make_cstring_view("offline-vulkan13"),
+///     .preset = LOOMC_SPIRV_PROFILE_PRESET_VULKAN_1_3_BDA,
 /// };
 /// loomc_target_profile_t* profile = NULL;
-/// loomc_status_t status = loomc_target_profile_create_empty(
+/// loomc_result_t* profile_result = NULL;
+/// loomc_status_t status = loomc_target_profile_create_spirv(
 ///     target_environment, &profile_options, loomc_allocator_system(),
-///     &profile);
+///     &profile, &profile_result);
 /// if (!loomc_status_is_ok(status)) return status;
+/// if (!loomc_result_succeeded(profile_result)) {
+///   // Inspect structured target-profile diagnostics.
+/// }
+/// loomc_result_release(profile_result);
 ///
 /// loomc_target_selection_t* target_selection = NULL;
 /// status = loomc_target_selection_create_from_profile(
@@ -177,29 +185,6 @@ typedef struct loomc_context_target_options_t {
   loomc_target_environment_t* target_environment;
 } loomc_context_target_options_t;
 
-/// Target profile creation options.
-///
-/// Callers zero-initialize this descriptor, set `type` to
-/// `LOOMC_STRUCTURE_TYPE_TARGET_PROFILE_OPTIONS`, set `structure_size` to
-/// `sizeof(loomc_target_profile_options_t)`, and fill the requested fields.
-/// Target-family APIs may define richer profile constructors for concrete fact
-/// rows; this descriptor is for the target-neutral empty/unknown profile.
-typedef struct loomc_target_profile_options_t {
-  /// Structure type. Must be `LOOMC_STRUCTURE_TYPE_TARGET_PROFILE_OPTIONS`
-  /// when nonzero.
-  loomc_structure_type_t type;
-
-  /// Size of this structure in bytes.
-  loomc_host_size_t structure_size;
-
-  /// Extension chain for future target profile options.
-  const void* next;
-
-  /// Stable identifier used in diagnostics and reports. Empty selects a
-  /// library-defined identifier.
-  loomc_string_view_t identifier;
-} loomc_target_profile_options_t;
-
 /// Invocation option extension that selects a target profile.
 ///
 /// Put this descriptor on the `next` chain of compile, link, target-pipeline,
@@ -270,32 +255,6 @@ typedef struct loomc_target_pipeline_options_t {
   /// Maximum source-to-low diagnostics. Zero uses source-to-low's default.
   uint32_t source_to_low_max_errors;
 } loomc_target_pipeline_options_t;
-
-/// Creates an empty target profile scoped to a target environment.
-///
-/// Empty profiles contain no concrete device facts. They are useful for
-/// partial-target flows where source IR target records, later overlays, or
-/// family-specific APIs will provide more detail. Family-specific constructors
-/// should return the same `loomc_target_profile_t` handle type after
-/// normalizing their richer fact rows.
-///
-/// @param target_environment Target environment whose provider package
-/// understands the profile. The profile retains it on success.
-/// @param options Profile options, or `NULL` for defaults.
-/// @param allocator Host allocator used for profile-owned storage.
-/// @param out_profile Receives one retained profile on success.
-/// @return OK when the profile was created.
-///
-/// @ownership
-/// The caller owns the returned reference and releases it with
-/// `loomc_target_profile_release`.
-///
-/// @thread_safety
-/// The returned profile is immutable and may be shared across worker threads.
-LOOMC_API_EXPORT loomc_status_t loomc_target_profile_create_empty(
-    loomc_target_environment_t* target_environment,
-    const loomc_target_profile_options_t* options, loomc_allocator_t allocator,
-    loomc_target_profile_t** out_profile);
 
 /// Creates an explicit empty target selection.
 ///

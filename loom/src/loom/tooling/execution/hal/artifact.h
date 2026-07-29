@@ -21,6 +21,7 @@
 #include "loom/error/diagnostic.h"
 #include "loom/ir/module.h"
 #include "loom/target/pipeline_options.h"
+#include "loom/target/profile.h"
 #include "loom/target/provider.h"
 #include "loom/target/reporting/report.h"
 #include "loom/target/types.h"
@@ -40,18 +41,18 @@ typedef struct loom_run_hal_device_target_t {
   // Exact target row borrowed from the active HAL device spec. NULL for
   // offline target selections that cannot be loaded into a device.
   const iree_hal_executable_target_t* hal_target;
-  // Provider-owned target-selection payload. Usually points at static target
-  // info. NULL requests emission from the module's authored target records.
-  const void* data;
-  // Per-device target-bundle storage owned by this selection. If a selection
-  // containing this storage is copied, the copy must rebind the storage before
-  // publishing |target_bundle|.
-  loom_target_bundle_storage_t target_storage;
-  // Target-neutral bundle resolved for the selected device target.
-  const loom_target_bundle_t* target_bundle;
+  // Provider-owned structured target profile. NULL requests emission from the
+  // module's authored target records.
+  const loom_target_profile_t* target_profile;
   // Provider-facing target key selected for emission and diagnostics, if any.
   iree_string_view_t target_key;
 } loom_run_hal_device_target_t;
+
+// Returns the target-neutral bundle projected by |target|, or NULL.
+static inline const loom_target_bundle_t* loom_run_hal_device_target_bundle(
+    const loom_run_hal_device_target_t* target) {
+  return target ? loom_target_profile_bundle(target->target_profile) : NULL;
+}
 
 // Loadable HAL artifact bytes ready for iree_hal_device_load_executable.
 typedef struct loom_run_hal_artifact_t {

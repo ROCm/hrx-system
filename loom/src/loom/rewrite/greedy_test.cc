@@ -15,6 +15,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/test/ops.h"
+#include "loom/target/profile.h"
 #include "loom/target/types.h"
 
 namespace loom {
@@ -194,14 +195,20 @@ TEST_F(GreedyRewriteTest, SeedFactsPreserveTargetBundleScope) {
   ASSERT_NE(const_op, nullptr);
 
   loom_target_bundle_t target_bundle = {};
-  const uintptr_t target_data = 1;
+  const loom_target_profile_type_t target_profile_type = {
+      /*.name=*/IREE_SVL("test"),
+  };
+  const loom_target_profile_t target_profile = {
+      /*.type=*/&target_profile_type,
+      /*.target_bundle=*/&target_bundle,
+  };
   iree_arena_allocator_t seed_arena;
   iree_arena_initialize(&block_pool_, &seed_arena);
   loom_value_fact_table_t seed_facts;
   IREE_ASSERT_OK(loom_value_fact_table_initialize(
       &seed_facts, &seed_arena, loom_value_table_capacity(&module_->values)));
   seed_facts.context.target_bundle = &target_bundle;
-  seed_facts.context.target_data = &target_data;
+  seed_facts.context.target_profile = &target_profile;
 
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
@@ -222,7 +229,7 @@ TEST_F(GreedyRewriteTest, SeedFactsPreserveTargetBundleScope) {
       loom_greedy_rewrite_driver_fact_table(&driver);
   ASSERT_NE(latest_facts, nullptr);
   EXPECT_EQ(latest_facts->context.target_bundle, &target_bundle);
-  EXPECT_EQ(latest_facts->context.target_data, &target_data);
+  EXPECT_EQ(latest_facts->context.target_profile, &target_profile);
 
   loom_greedy_rewrite_driver_deinitialize(&driver);
   loom_pass_value_fact_owner_deinitialize(&fact_owner);

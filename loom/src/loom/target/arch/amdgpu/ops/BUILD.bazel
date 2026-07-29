@@ -63,6 +63,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops/target",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu:profile",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/records:target_records",
         "//runtime/src/iree/base",

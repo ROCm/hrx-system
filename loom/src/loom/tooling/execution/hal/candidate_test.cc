@@ -10,6 +10,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/ops/func/ops.h"
 #include "loom/target/low_descriptor_registry_core_test.h"
+#include "loom/target/profile.h"
 
 namespace loom {
 namespace {
@@ -63,6 +64,13 @@ static const loom_target_bundle_t kFakeTargetBundle = {
     /*.snapshot=*/&kFakeSnapshot,
     /*.export_plan=*/&kFakeExportPlan,
 };
+static const loom_target_profile_type_t kFakeTargetProfileType = {
+    /*.name=*/IREE_SVL("fake"),
+};
+static const loom_target_profile_t kFakeTargetProfile = {
+    /*.type=*/&kFakeTargetProfileType,
+    /*.target_bundle=*/&kFakeTargetBundle,
+};
 
 const loom_run_hal_runtime_t* FakeHalRuntime() {
   return reinterpret_cast<const loom_run_hal_runtime_t*>(&kFakeHalRuntime);
@@ -77,9 +85,7 @@ iree_status_t FakeHalSelectDeviceTarget(
   (void)allocator;
   *out_target = (loom_run_hal_device_target_t){
       /*.hal_target=*/nullptr,
-      /*.data=*/&kFakeHalTarget,
-      /*.target_storage=*/{},
-      /*.target_bundle=*/&kFakeTargetBundle,
+      /*.target_profile=*/&kFakeTargetProfile,
       /*.target_key=*/IREE_SVL("fake-hal"),
   };
   return iree_ok_status();
@@ -117,13 +123,14 @@ iree_status_t FakeHalEmitArtifact(
   g_fake_hal_emit_report = report;
   g_fake_hal_emit_target_pipeline_options = target_pipeline_options;
   *out_emitted = false;
-  if (g_fake_hal_expect_module_target && target->data != NULL) {
+  if (g_fake_hal_expect_module_target && target->target_profile != nullptr) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "expected module target emission");
   }
-  if (!g_fake_hal_expect_module_target && target->data != &kFakeHalTarget) {
+  if (!g_fake_hal_expect_module_target &&
+      target->target_profile != &kFakeTargetProfile) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unexpected fake HAL target payload");
+                            "unexpected fake HAL target profile");
   }
   *out_artifact = (loom_run_hal_artifact_t){
       /*.hal_target=*/nullptr,
@@ -247,8 +254,9 @@ TEST_F(HalCandidateTest, CompileHalExecutableCandidate) {
   EXPECT_EQ(g_fake_hal_emit_target_pipeline_options,
             &options.target_pipeline_options);
   EXPECT_EQ(candidate.provider, &kFakeHalArtifactProvider);
-  EXPECT_EQ(candidate.device_target.data, &kFakeHalTarget);
-  EXPECT_EQ(candidate.device_target.target_bundle, &kFakeTargetBundle);
+  EXPECT_EQ(candidate.device_target.target_profile, &kFakeTargetProfile);
+  EXPECT_EQ(loom_run_hal_device_target_bundle(&candidate.device_target),
+            &kFakeTargetBundle);
   EXPECT_EQ(candidate.artifact.target_bundle, &kFakeTargetBundle);
   EXPECT_TRUE(iree_string_view_equal(candidate.artifact.target_key,
                                      IREE_SV("fake-hal-target")));
@@ -323,8 +331,9 @@ TEST_F(HalCandidateTest, EmitsModuleTargetCandidate) {
   EXPECT_TRUE(g_fake_hal_emit_was_called);
   EXPECT_EQ(g_fake_hal_emit_report, &candidate.compile_report);
   EXPECT_EQ(candidate.provider, &kFakeHalArtifactProvider);
-  EXPECT_EQ(candidate.device_target.data, nullptr);
-  EXPECT_EQ(candidate.device_target.target_bundle, nullptr);
+  EXPECT_EQ(candidate.device_target.target_profile, nullptr);
+  EXPECT_EQ(loom_run_hal_device_target_bundle(&candidate.device_target),
+            nullptr);
   EXPECT_EQ(candidate.artifact.target_bundle, nullptr);
   EXPECT_TRUE(iree_string_view_equal(candidate.artifact.target_key,
                                      IREE_SV("fake-hal-target")));

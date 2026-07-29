@@ -37,6 +37,7 @@ loom_generated_cc_library(
     loom::ops::op_defs
     loom::ops::target
     loom::target::arch::amdgpu::error_defs
+    loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info
     loom::target::types

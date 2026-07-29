@@ -18,6 +18,7 @@
 #include "loom/pass/testing/registry_verify.h"
 #include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/ops/target.h"
+#include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/testing/module_ptr.h"
@@ -215,14 +216,17 @@ TEST_F(AmdgpuProviderTest, MaterializesEverySelectedTargetKind) {
         iree_string_view_equal(processor->name, IREE_SV("gfx1250"))
             ? LOOM_AMDGPU_GFX1250_REVISION_B0
             : LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED;
-    const loom_amdgpu_target_profile_t profile = {
+    const loom_amdgpu_amdhsa_profile_facts_t amdhsa = {
         /*.processor=*/processor,
         /*.gfx1250_revision=*/gfx1250_revision,
+        /*.sramecc=*/LOOM_AMDGPU_TARGET_FEATURE_DEFAULT,
+        /*.xnack=*/LOOM_AMDGPU_TARGET_FEATURE_DEFAULT,
     };
+    loom_amdgpu_target_profile_t target_profile = {};
+    IREE_ASSERT_OK(
+        loom_amdgpu_target_profile_initialize(&amdhsa, &target_profile));
     const loom_target_selection_t selection = {
-        /*.bundle=*/loom_amdgpu_target_bundle_for_descriptor_set(
-            processor->descriptor_set.ordinal),
-        /*.data=*/&profile,
+        /*.profile=*/&target_profile.base,
     };
 
     loom_symbol_ref_t target_ref = loom_symbol_ref_null();
@@ -252,14 +256,17 @@ TEST_F(AmdgpuProviderTest, MaterializesGfx1250A0Revision) {
   IREE_ASSERT_OK(
       loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx1250"), &processor));
   ASSERT_NE(processor, nullptr);
-  const loom_amdgpu_target_profile_t profile = {
+  const loom_amdgpu_amdhsa_profile_facts_t amdhsa = {
       /*.processor=*/processor,
       /*.gfx1250_revision=*/LOOM_AMDGPU_GFX1250_REVISION_A0,
+      /*.sramecc=*/LOOM_AMDGPU_TARGET_FEATURE_DEFAULT,
+      /*.xnack=*/LOOM_AMDGPU_TARGET_FEATURE_DEFAULT,
   };
+  loom_amdgpu_target_profile_t target_profile = {};
+  IREE_ASSERT_OK(
+      loom_amdgpu_target_profile_initialize(&amdhsa, &target_profile));
   const loom_target_selection_t selection = {
-      /*.bundle=*/loom_amdgpu_target_bundle_for_descriptor_set(
-          processor->descriptor_set.ordinal),
-      /*.data=*/&profile,
+      /*.profile=*/&target_profile.base,
   };
 
   loom_symbol_ref_t target_ref = loom_symbol_ref_null();

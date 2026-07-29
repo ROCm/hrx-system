@@ -337,26 +337,26 @@ void ExpectEnvironmentValue(const loomc_target_profile_t* profile,
 void ExpectPartialProfileSelection(const loomc_target_profile_t* profile) {
   const loom_target_selection_t selection =
       loomc_target_profile_loom_target_selection(profile);
-  EXPECT_EQ(selection.bundle, nullptr);
-  EXPECT_NE(selection.data, nullptr);
+  EXPECT_NE(loom_target_selection_profile(selection), nullptr);
+  EXPECT_EQ(loom_target_selection_bundle(selection), nullptr);
 }
 
 void ExpectVulkanBdaProfileBundle(const loomc_target_profile_t* profile) {
   const loom_target_selection_t selection =
       loomc_target_profile_loom_target_selection(profile);
-  ASSERT_NE(selection.bundle, nullptr);
-  ASSERT_NE(selection.bundle->snapshot, nullptr);
-  ASSERT_NE(selection.bundle->config, nullptr);
-  EXPECT_EQ(selection.bundle->snapshot->codegen_format,
-            LOOM_TARGET_CODEGEN_FORMAT_SPIRV);
-  EXPECT_EQ(selection.bundle->snapshot->artifact_format,
+  EXPECT_NE(loom_target_selection_profile(selection), nullptr);
+  const loom_target_bundle_t* bundle = loom_target_selection_bundle(selection);
+  ASSERT_NE(bundle, nullptr);
+  ASSERT_NE(bundle->snapshot, nullptr);
+  ASSERT_NE(bundle->config, nullptr);
+  EXPECT_EQ(bundle->snapshot->codegen_format, LOOM_TARGET_CODEGEN_FORMAT_SPIRV);
+  EXPECT_EQ(bundle->snapshot->artifact_format,
             LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY);
   const loomc_spirv_feature_bits_t expected_features =
       loomc_spirv_feature_bit(LOOMC_SPIRV_FEATURE_VULKAN_SHADER) |
       loomc_spirv_feature_bit(LOOMC_SPIRV_FEATURE_PHYSICAL_STORAGE_BUFFER) |
       loomc_spirv_feature_bit(LOOMC_SPIRV_FEATURE_INT64);
-  EXPECT_EQ(selection.bundle->config->contract_feature_bits, expected_features);
-  EXPECT_NE(selection.data, nullptr);
+  EXPECT_EQ(bundle->config->contract_feature_bits, expected_features);
 }
 
 TEST(TargetSpirvProfileTest, CreatesEmptyPartialProfile) {
@@ -460,18 +460,18 @@ TEST(TargetSpirvProfileTest, PreservesExplicitNumericLimitFacts) {
   ExpectVulkanBdaProfileBundle(profile.get());
   const loom_target_selection_t selection =
       loomc_target_profile_loom_target_selection(profile.get());
-  EXPECT_EQ(selection.bundle->snapshot->max_workgroup_size.x, 1024u);
-  EXPECT_EQ(selection.bundle->snapshot->max_workgroup_size.y, 0u);
-  EXPECT_EQ(selection.bundle->snapshot->max_flat_workgroup_size, 1024u);
-  EXPECT_EQ(selection.bundle->snapshot->max_workgroup_storage_bytes,
-            UINT64_C(49152));
-  EXPECT_EQ(selection.bundle->snapshot->subgroup_size, 32u);
-  EXPECT_EQ(selection.bundle->snapshot->max_workgroup_count.z, 65535u);
-  EXPECT_EQ(selection.bundle->snapshot->max_grid_size.x, 4096u);
-  EXPECT_EQ(selection.bundle->snapshot->max_grid_size.y, 2048u);
-  EXPECT_EQ(selection.bundle->snapshot->max_grid_size.z, 0u);
-  EXPECT_EQ(selection.bundle->snapshot->max_flat_grid_size,
-            UINT64_C(0x100000000));
+  const loom_target_bundle_t* bundle = loom_target_selection_bundle(selection);
+  ASSERT_NE(bundle, nullptr);
+  EXPECT_EQ(bundle->snapshot->max_workgroup_size.x, 1024u);
+  EXPECT_EQ(bundle->snapshot->max_workgroup_size.y, 0u);
+  EXPECT_EQ(bundle->snapshot->max_flat_workgroup_size, 1024u);
+  EXPECT_EQ(bundle->snapshot->max_workgroup_storage_bytes, UINT64_C(49152));
+  EXPECT_EQ(bundle->snapshot->subgroup_size, 32u);
+  EXPECT_EQ(bundle->snapshot->max_workgroup_count.z, 65535u);
+  EXPECT_EQ(bundle->snapshot->max_grid_size.x, 4096u);
+  EXPECT_EQ(bundle->snapshot->max_grid_size.y, 2048u);
+  EXPECT_EQ(bundle->snapshot->max_grid_size.z, 0u);
+  EXPECT_EQ(bundle->snapshot->max_flat_grid_size, UINT64_C(0x100000000));
 
   ExpectLimitValue(profile.get(), LOOMC_SPIRV_LIMIT_MAX_WORKGROUP_SIZE_X,
                    LOOMC_TARGET_FACT_STATE_TRUE, 1024);
@@ -579,7 +579,9 @@ TEST(TargetSpirvProfileTest, RefinesProfileWithAdditionalFacts) {
   ExpectVulkanBdaProfileBundle(refined_profile.get());
   const loom_target_selection_t selection =
       loomc_target_profile_loom_target_selection(refined_profile.get());
-  EXPECT_EQ(selection.bundle->snapshot->subgroup_size, 32u);
+  ASSERT_NE(loom_target_selection_bundle(selection), nullptr);
+  EXPECT_EQ(loom_target_selection_bundle(selection)->snapshot->subgroup_size,
+            32u);
   ExpectLimitValue(refined_profile.get(), LOOMC_SPIRV_LIMIT_SUBGROUP_SIZE,
                    LOOMC_TARGET_FACT_STATE_TRUE, 32);
   ExpectEnvironmentValue(refined_profile.get(),
@@ -713,8 +715,9 @@ TEST(TargetSpirvProfileTest, RefinesPresetWithExplicitTrueFact) {
       CreateSpirvProfile(target_environment.get(), &options);
   const loom_target_selection_t selection =
       loomc_target_profile_loom_target_selection(profile.get());
-  ASSERT_NE(selection.bundle, nullptr);
-  EXPECT_NE(selection.bundle->config->contract_feature_bits &
+  const loom_target_bundle_t* bundle = loom_target_selection_bundle(selection);
+  ASSERT_NE(bundle, nullptr);
+  EXPECT_NE(bundle->config->contract_feature_bits &
                 loomc_spirv_feature_bit(LOOMC_SPIRV_FEATURE_FLOAT16),
             0u);
 
@@ -1593,45 +1596,6 @@ TEST(TargetSpirvProfileTest, ReportsMissingFeatureDependenciesAsResult) {
               ::testing::HasSubstr("spirv.physical_storage_buffer"));
   EXPECT_THAT(ToString(diagnostic->message),
               ::testing::HasSubstr("spirv.vulkan.shader"));
-}
-
-TEST(TargetSpirvProfileTest, RejectsNonSpirvProfileQueries) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  loomc_target_profile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("generic-profile"),
-  };
-  loomc_target_profile_t* profile = nullptr;
-  loomc_status_t create_status = loomc_target_profile_create_empty(
-      target_environment.get(), &options, loomc_allocator_system(), &profile);
-  LOOMC_EXPECT_OK(create_status);
-  TargetProfilePtr profile_ptr(profile);
-
-  loomc_target_fact_state_t state = LOOMC_TARGET_FACT_STATE_UNKNOWN;
-  loomc_status_t query_status = loomc_spirv_target_profile_query_feature(
-      profile_ptr.get(), LOOMC_SPIRV_FEATURE_FLOAT16, &state);
-  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT, query_status);
-
-  loomc_spirv_limit_value_t value = {
-      /*.state=*/LOOMC_TARGET_FACT_STATE_UNKNOWN,
-      /*.value=*/0,
-  };
-  loomc_status_t limit_query_status = loomc_spirv_target_profile_query_limit(
-      profile_ptr.get(), LOOMC_SPIRV_LIMIT_SUBGROUP_SIZE, &value);
-  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT, limit_query_status);
-
-  loomc_spirv_environment_value_t environment_value = {
-      /*.state=*/LOOMC_TARGET_FACT_STATE_UNKNOWN,
-      /*.value=*/0,
-  };
-  loomc_status_t environment_query_status =
-      loomc_spirv_target_profile_query_environment(
-          profile_ptr.get(), LOOMC_SPIRV_ENVIRONMENT_MAX_SPIRV_VERSION,
-          &environment_value);
-  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
-                         environment_query_status);
 }
 
 TEST(TargetSpirvProfileTest, PreparedProfileSelectionCreatesTargetPipeline) {

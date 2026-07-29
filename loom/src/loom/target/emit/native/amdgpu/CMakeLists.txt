@@ -574,6 +574,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::target_info
     loom::target::entry_selection
     loom::target::function_contract
+    loom::target::profile
     loom::target::provider
     loom::target::reporting::artifact_manifest_collect
     loom::target::reporting::low
@@ -734,6 +735,7 @@ loom_cc_test(
     loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::planning::packet_plan
     loom::target::arch::amdgpu::planning::storage_lease
+    loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info
     loom::target::low_descriptor_registry

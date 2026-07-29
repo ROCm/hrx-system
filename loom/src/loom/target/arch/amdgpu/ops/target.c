@@ -12,6 +12,7 @@
 #include "loom/ops/target/ops.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/ops/ops.h"
+#include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 
 static iree_string_view_t loom_amdgpu_target_record_symbol_name(
@@ -121,31 +122,6 @@ loom_amdgpu_target_record_effective_gfx1250_revision(
              : explicit_revision;
 }
 
-static iree_status_t loom_amdgpu_target_profile_validate(
-    const loom_amdgpu_target_profile_t* profile) {
-  if (profile == NULL || profile->processor == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU target profile requires a processor row");
-  }
-  const bool is_gfx1250 =
-      iree_string_view_equal(profile->processor->name, IREE_SV("gfx1250"));
-  if (is_gfx1250 &&
-      profile->gfx1250_revision != LOOM_AMDGPU_GFX1250_REVISION_A0 &&
-      profile->gfx1250_revision != LOOM_AMDGPU_GFX1250_REVISION_B0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "gfx1250 target profile requires an A0 or B0 silicon revision");
-  }
-  if (!is_gfx1250 &&
-      profile->gfx1250_revision != LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "gfx1250 silicon revision cannot qualify processor '%.*s'",
-        (int)profile->processor->name.size, profile->processor->name.data);
-  }
-  return iree_ok_status();
-}
-
 iree_status_t loom_amdgpu_target_record_build_for_profile(
     loom_builder_t* builder, const loom_amdgpu_target_profile_t* profile,
     loom_symbol_ref_t symbol, loom_location_id_t location,
@@ -156,8 +132,7 @@ iree_status_t loom_amdgpu_target_record_build_for_profile(
                             "builder and output pointers");
   }
   *out_target_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_profile_validate(profile));
-  const loom_amdgpu_processor_info_t* processor = profile->processor;
+  const loom_amdgpu_processor_info_t* processor = profile->amdhsa.processor;
 
   const loom_amdgpu_target_record_info_t* target_record =
       loom_amdgpu_target_record_info_for_processor(processor->name);
@@ -168,7 +143,8 @@ iree_status_t loom_amdgpu_target_record_build_for_profile(
   }
 
   loom_amdgpu_target_build_flags_t build_flags = 0;
-  if (profile->gfx1250_revision != LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED) {
+  if (profile->amdhsa.gfx1250_revision !=
+      LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED) {
     build_flags |= LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_GFX1250_REVISION;
   }
   return loom_amdgpu_target_build(
@@ -176,7 +152,7 @@ iree_status_t loom_amdgpu_target_record_build_for_profile(
       (loom_amdgpu_target_kind_t)target_record->target_kind, symbol, 0, 0, 0, 0,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       LOOM_STRING_ID_INVALID, 0, 0, LOOM_STRING_ID_INVALID, 0,
-      (uint8_t)profile->gfx1250_revision, location, out_target_op);
+      (uint8_t)profile->amdhsa.gfx1250_revision, location, out_target_op);
 }
 
 static uint32_t loom_amdgpu_target_record_default_wavefront_size(

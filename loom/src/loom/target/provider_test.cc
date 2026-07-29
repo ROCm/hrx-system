@@ -131,6 +131,7 @@ class TargetProviderTest : public ::testing::Test {
 
 TEST_F(TargetProviderTest, ContributesPassIrByPhase) {
   static const loom_target_provider_t materialization_provider = {
+      /*.profile_type=*/{},
       /*.register_context=*/{},
       /*.initialize_low_descriptor_registry=*/{},
       /*.initialize_low_lower_policy_registry=*/{},
@@ -145,6 +146,7 @@ TEST_F(TargetProviderTest, ContributesPassIrByPhase) {
       /*.contribute_pipeline=*/ContributeMaterialization,
   };
   static const loom_target_provider_t preparation_provider = {
+      /*.profile_type=*/{},
       /*.register_context=*/{},
       /*.initialize_low_descriptor_registry=*/{},
       /*.initialize_low_lower_policy_registry=*/{},
@@ -218,6 +220,7 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
       /*.descriptor_count=*/IREE_ARRAYSIZE(second_descriptors),
   };
   static const loom_target_provider_t first_provider = {
+      /*.profile_type=*/{},
       /*.register_context=*/{},
       /*.initialize_low_descriptor_registry=*/{},
       /*.initialize_low_lower_policy_registry=*/{},
@@ -231,6 +234,7 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
       /*.pass_registry=*/&first_registry,
   };
   static const loom_target_provider_t second_provider = {
+      /*.profile_type=*/{},
       /*.register_context=*/{},
       /*.initialize_low_descriptor_registry=*/{},
       /*.initialize_low_lower_policy_registry=*/{},

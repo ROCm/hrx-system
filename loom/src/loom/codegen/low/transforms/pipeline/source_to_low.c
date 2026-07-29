@@ -346,7 +346,7 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     const loom_low_lower_options_t lower_options = {
         .target_ref = selection->target_ref,
         .bundle = selection->target_bundle,
-        .target_data = selection->target_data,
+        .target_profile = selection->target_profile,
         .descriptor_registry = descriptor_registry,
         .policy = selection->policy,
         .emitter = pass->diagnostic_emitter,
@@ -389,13 +389,14 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     status = loom_pass_value_facts_acquire(
         pass, module,
         loom_pass_value_fact_scope_function_for_target(
-            selection->func, selection->target_bundle, selection->target_data),
+            selection->func, selection->target_bundle,
+            selection->target_profile),
         &fact_table);
     if (!iree_status_is_ok(status)) break;
     const loom_low_lower_options_t lower_options = {
         .target_ref = selection->target_ref,
         .bundle = selection->target_bundle,
-        .target_data = selection->target_data,
+        .target_profile = selection->target_profile,
         .descriptor_registry = descriptor_registry,
         .legality_provider_list =
             legality_provider_list

@@ -17,6 +17,7 @@
 #include "loom/target/arch/spirv/math_policy.h"
 #include "loom/target/arch/spirv/ops/ops.h"
 #include "loom/target/arch/spirv/ops/registry.h"
+#include "loom/target/arch/spirv/profile.h"
 #include "loom/target/arch/spirv/records/target_records.h"
 
 static const loom_low_verify_provider_t* const kLoomSpirvLowVerifyProviders[] =
@@ -552,22 +553,19 @@ static iree_status_t loom_spirv_provider_resolve_profile_target_ref(
 static iree_status_t loom_spirv_provider_materialize_selection(
     const loom_target_provider_t* provider,
     const loom_target_selection_materialization_request_t* request,
-    bool* out_materialized, loom_symbol_ref_t* out_target_ref) {
+    loom_symbol_ref_t* out_target_ref) {
   (void)provider;
-  *out_materialized = false;
   *out_target_ref = loom_symbol_ref_null();
-  if (!loom_spirv_provider_matches_selection_bundle(
-          request->target_selection.bundle)) {
-    return iree_ok_status();
-  }
+  const loom_target_bundle_t* target_bundle =
+      loom_target_selection_bundle(request->target_selection);
 
   IREE_RETURN_IF_ERROR(loom_spirv_provider_resolve_profile_target_ref(
-      request->module, request->target_selection.bundle, out_target_ref));
-  *out_materialized = true;
+      request->module, target_bundle, out_target_ref));
   return iree_ok_status();
 }
 
 const loom_target_provider_t loom_spirv_target_provider = {
+    .profile_type = &loom_spirv_target_profile_type,
     .register_context = loom_spirv_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_spirv_low_descriptor_registry_initialize,
