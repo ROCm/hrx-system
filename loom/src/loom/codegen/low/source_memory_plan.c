@@ -474,8 +474,8 @@ static loom_value_facts_t loom_low_source_memory_access_intersect_index_facts(
   if (lower_bound > upper_bound) {
     return loom_value_facts_unknown();
   }
-  return loom_value_facts_make(lower_bound, upper_bound,
-                               index_facts.known_divisor);
+  return loom_value_facts_clamp_domain(index_facts, domain_facts.range_lo,
+                                       domain_facts.range_hi);
 }
 
 static int64_t loom_low_source_memory_access_floor_div_i64(int64_t numerator,

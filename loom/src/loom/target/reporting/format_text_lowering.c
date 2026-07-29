@@ -76,6 +76,70 @@ loom_target_compile_report_append_source_low_memory_argument_packet_storage_text
       fields, field_count, builder);
 }
 
+static iree_status_t
+loom_target_compile_report_append_source_low_memory_bank_service_text(
+    const loom_target_compile_report_bank_service_t* bank_service,
+    iree_string_builder_t* builder) {
+  if (iree_string_view_is_empty(bank_service->model_key)) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      " bank_service={proof:%.*s,model:%.*s,revision:%.*s,evidence:%.*s,"
+      "request_policy:%.*s,wave_size:%u,bank_count:%u,bank_word_bytes:%u,"
+      "packet_bank_words:%u,phase_lane_counts:[",
+      (int)bank_service->proof.size, bank_service->proof.data,
+      (int)bank_service->model_key.size, bank_service->model_key.data,
+      (int)bank_service->model_revision.size, bank_service->model_revision.data,
+      (int)bank_service->model_evidence.size, bank_service->model_evidence.data,
+      (int)bank_service->request_policy.size, bank_service->request_policy.data,
+      bank_service->wave_size, bank_service->bank_count,
+      bank_service->bank_word_byte_count, bank_service->packet_word_count));
+  for (uint8_t phase = 0; phase < bank_service->phase_count; ++phase) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "%s%u", phase == 0 ? "" : ",",
+        bank_service->phase_lane_counts[phase]));
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      "],lane_address_proof:%.*s,active_lane_proof:%.*s,"
+      "base_residue_proof:%.*s",
+      (int)bank_service->lane_address_proof.size,
+      bank_service->lane_address_proof.data,
+      (int)bank_service->active_lane_proof.size,
+      bank_service->active_lane_proof.data,
+      (int)bank_service->base_residue_proof.size,
+      bank_service->base_residue_proof.data));
+  if (bank_service->base_residue_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, ",base_residue_count:%u", bank_service->base_residue_count));
+  }
+  if (!iree_string_view_is_empty(bank_service->unknown_reason)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, ",unknown_reason:%.*s", (int)bank_service->unknown_reason.size,
+        bank_service->unknown_reason.data));
+  }
+  if (!iree_string_view_is_empty(bank_service->classification)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, ",classification:%.*s,phase_required_rounds:[",
+        (int)bank_service->classification.size,
+        bank_service->classification.data));
+    for (uint8_t phase = 0; phase < bank_service->phase_count; ++phase) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, "%s%u", phase == 0 ? "" : ",",
+          bank_service->phase_required_rounds[phase]));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        "],required_rounds:%u,uncontended_rounds:%u,extra_rounds:%u,"
+        "maximum_request_multiplicity:%u",
+        bank_service->required_rounds, bank_service->uncontended_rounds,
+        bank_service->extra_rounds,
+        bank_service->maximum_request_multiplicity));
+  }
+  return iree_string_builder_append_cstring(builder, "}");
+}
+
 static iree_status_t loom_target_compile_report_append_memory_interval_text(
     const loom_target_compile_report_memory_interval_t* interval,
     iree_string_builder_t* builder) {
@@ -583,6 +647,9 @@ static iree_status_t loom_target_compile_report_format_source_low_memory_rows(
       IREE_RETURN_IF_ERROR(
           loom_target_compile_report_append_source_low_memory_storage_text(
               row, builder));
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_append_source_low_memory_bank_service_text(
+              &row->bank_service, builder));
       IREE_RETURN_IF_ERROR(
           loom_target_compile_report_append_memory_interval_text(
               &row->source_interval, builder));

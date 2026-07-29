@@ -242,24 +242,14 @@ static iree_status_t loom_run_hal_testbench_validate_actual_invocation(
 iree_status_t loom_run_hal_testbench_select_actual_invocation(
     const loom_testbench_case_plan_t* case_plan,
     const loom_testbench_invocation_plan_t** out_invocation) {
-  *out_invocation = NULL;
-  iree_host_size_t actual_invocation_count = 0;
-  for (iree_host_size_t i = 0; i < case_plan->invocation_count; ++i) {
-    const loom_testbench_invocation_plan_t* invocation =
-        &case_plan->invocations[i];
-    if (invocation->kind != LOOM_TESTBENCH_INVOCATION_ACTUAL) {
-      continue;
-    }
-    *out_invocation = invocation;
-    ++actual_invocation_count;
-  }
-  if (actual_invocation_count != 1) {
+  *out_invocation = case_plan->first_actual_invocation;
+  if (case_plan->actual_invocation_count != 1) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "HAL actual invocations require exactly one actual invocation in "
         "check.case `%.*s`; found %" PRIhsz,
         (int)case_plan->name.size, case_plan->name.data,
-        actual_invocation_count);
+        case_plan->actual_invocation_count);
   }
   return loom_run_hal_testbench_validate_actual_invocation(case_plan,
                                                            *out_invocation);
@@ -268,7 +258,7 @@ iree_status_t loom_run_hal_testbench_select_actual_invocation(
 iree_status_t loom_run_hal_testbench_count_actual_invocations(
     const loom_testbench_case_plan_t* case_plan,
     iree_host_size_t* out_actual_invocation_count) {
-  *out_actual_invocation_count = 0;
+  *out_actual_invocation_count = case_plan->actual_invocation_count;
   for (iree_host_size_t i = 0; i < case_plan->invocation_count; ++i) {
     const loom_testbench_invocation_plan_t* invocation =
         &case_plan->invocations[i];
@@ -277,7 +267,6 @@ iree_status_t loom_run_hal_testbench_count_actual_invocations(
     }
     IREE_RETURN_IF_ERROR(loom_run_hal_testbench_validate_actual_invocation(
         case_plan, invocation));
-    ++*out_actual_invocation_count;
   }
   return iree_ok_status();
 }

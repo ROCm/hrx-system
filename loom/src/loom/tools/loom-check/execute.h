@@ -234,6 +234,8 @@ typedef struct loom_check_prepare_source_low_options_t {
   loom_target_control_flow_lowering_t control_flow_lowering;
   // Sanitizer instrumentation checks enabled while preparing source-low IR.
   loom_sanitizer_options_t sanitizer;
+  // Optional caller-owned structured compile report populated by the pipeline.
+  loom_target_compile_report_t* report;
 } loom_check_prepare_source_low_options_t;
 
 // Returns true when |provider| owns emit targets named |target_name|.

@@ -1590,6 +1590,7 @@ iree_status_t loom_check_prepare_source_low_module(
                                .user_data = diagnostic_collector};
   compile_options.source_resolver = source_resolver;
   compile_options.max_errors = 20;
+  compile_options.report = options->report;
 
   loom_pass_run_result_t run_result = {0};
   IREE_RETURN_IF_ERROR(loom_compile_run_pipeline(module, &compile_options,

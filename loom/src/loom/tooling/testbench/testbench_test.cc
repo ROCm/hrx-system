@@ -100,6 +100,9 @@ check.benchmark<@private_case>
   EXPECT_EQ(loom_attr_as_i64(plan.cases[0].value_sources[0].literal.value), 2);
   EXPECT_EQ(plan.cases[0].file_write_count, 0u);
   ASSERT_EQ(plan.cases[0].invocation_count, 1u);
+  ASSERT_EQ(plan.cases[0].actual_invocation_count, 1u);
+  EXPECT_EQ(plan.cases[0].first_actual_invocation,
+            &plan.cases[0].invocations[0]);
   EXPECT_EQ(plan.cases[0].invocations[0].kind,
             LOOM_TESTBENCH_INVOCATION_ACTUAL);
   EXPECT_EQ(plan.cases[0].invocations[0].input_count, 1u);
@@ -111,6 +114,8 @@ check.benchmark<@private_case>
   EXPECT_TRUE(
       iree_string_view_equal(plan.cases[1].name, IREE_SV("private_case")));
   EXPECT_FALSE(plan.cases[1].is_public);
+  EXPECT_EQ(plan.cases[1].actual_invocation_count, 0u);
+  EXPECT_EQ(plan.cases[1].first_actual_invocation, nullptr);
 
   ASSERT_EQ(plan.benchmark_count, 2u);
   EXPECT_TRUE(iree_string_view_equal(plan.benchmarks[0].name,

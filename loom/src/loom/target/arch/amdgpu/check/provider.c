@@ -6,12 +6,14 @@
 
 #include "loom/target/arch/amdgpu/check/provider.h"
 
+#include "loom/target/arch/amdgpu/check/bank_service.h"
 #include "loom/target/arch/amdgpu/check/occupancy.h"
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/emit/native/amdgpu/check/loom_check.h"
 
 static const loom_check_emit_provider_t* const kLoomAmdgpuCheckEmitProviders[] =
     {
+        &loom_amdgpu_bank_service_loom_check_emit_provider,
         &loom_amdgpu_occupancy_loom_check_emit_provider,
         &loom_amdgpu_native_loom_check_emit_provider,
 };
