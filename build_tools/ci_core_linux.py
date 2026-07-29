@@ -247,8 +247,6 @@ def build_core(args: argparse.Namespace) -> None:
         f"CMAKE_ASM_COMPILER={c_compiler}",
         f"CMAKE_AR={ar}",
         f"CMAKE_RANLIB={ranlib}",
-        "CMAKE_C_COMPILER_LAUNCHER=ccache",
-        "CMAKE_CXX_COMPILER_LAUNCHER=ccache",
         "CMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld",
         "CMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld",
         "CMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld",

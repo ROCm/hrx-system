@@ -30,6 +30,36 @@ class FakeS3:
 
 
 class CiCoreLinuxTest(unittest.TestCase):
+    def build_core_commands(self, env: dict[str, str] | None = None) -> list[list[str]]:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            rocm_root = root / "rocm"
+            llvm_bin = rocm_root / "lib" / "llvm" / "bin"
+            llvm_bin.mkdir(parents=True)
+            for tool in ["clang", "clang++", "llvm-ar", "llvm-ranlib"]:
+                (llvm_bin / tool).touch()
+
+            parser = argparse.ArgumentParser()
+            with mock.patch.dict(os.environ, env or {}, clear=True):
+                ci_core_linux.add_shared_args(parser)
+                args = parser.parse_args([])
+                args.rocm_root = rocm_root
+                args.build_dir = root / "build"
+                args.public_install_dir = root / "public"
+                args.tests_install_dir = root / "tests"
+
+                commands = []
+                with mock.patch.object(
+                    ci_core_linux,
+                    "run",
+                    side_effect=lambda cmd, **_kwargs: commands.append(
+                        [os.fspath(arg) for arg in cmd]
+                    ),
+                ):
+                    ci_core_linux.build_core(args)
+
+        return commands
+
     def test_script_runs_by_path_without_pythonpath(self):
         env = os.environ.copy()
         env.pop("PYTHONPATH", None)
@@ -137,35 +167,7 @@ class CiCoreLinuxTest(unittest.TestCase):
         )
 
     def test_build_core_preserves_linux_ci_feature_defaults(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            rocm_root = root / "rocm"
-            llvm_bin = rocm_root / "lib" / "llvm" / "bin"
-            llvm_bin.mkdir(parents=True)
-            for tool in ["clang", "clang++", "llvm-ar", "llvm-ranlib"]:
-                (llvm_bin / tool).touch()
-
-            parser = argparse.ArgumentParser()
-            with mock.patch.dict(os.environ, {}, clear=True):
-                ci_core_linux.add_shared_args(parser)
-                args = parser.parse_args([])
-
-            args.rocm_root = rocm_root
-            args.build_dir = root / "build"
-            args.public_install_dir = root / "public"
-            args.tests_install_dir = root / "tests"
-
-            commands = []
-            old_run = ci_core_linux.run
-            try:
-                ci_core_linux.run = lambda cmd, **_kwargs: commands.append(
-                    [os.fspath(arg) for arg in cmd]
-                )
-
-                ci_core_linux.build_core(args)
-            finally:
-                ci_core_linux.run = old_run
-
+        commands = self.build_core_commands()
         configure_cmd = commands[0]
         self.assertIn("-DIREE_BUILD_TESTS=ON", configure_cmd)
         self.assertIn("-DIREE_BUILD_BENCHMARKS=ON", configure_cmd)
@@ -174,6 +176,28 @@ class CiCoreLinuxTest(unittest.TestCase):
         self.assertIn("-DHRX_INSTALL_TESTS=ON", configure_cmd)
         self.assertIn("-DLIBHRX_BUILD_PASSTHROUGH=ON", configure_cmd)
         self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=ON", configure_cmd)
+        self.assertNotIn("-DCMAKE_C_COMPILER_LAUNCHER=ccache", configure_cmd)
+        self.assertNotIn("-DCMAKE_CXX_COMPILER_LAUNCHER=ccache", configure_cmd)
+
+    def test_build_core_preserves_standard_compiler_launcher_options(self):
+        commands = self.build_core_commands(
+            {
+                "HRX_CMAKE_OPTIONS": "\n".join(
+                    [
+                        "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+                        "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+                    ]
+                )
+            }
+        )
+
+        configure_cmd = commands[0]
+        self.assertIn("-DCMAKE_C_COMPILER_LAUNCHER=ccache", configure_cmd)
+        self.assertIn("-DCMAKE_CXX_COMPILER_LAUNCHER=ccache", configure_cmd)
+
+    def test_core_linux_workflow_has_no_unbacked_ccache_directory(self):
+        workflow = (REPO_ROOT / ".github/workflows/build_core_linux.yml").read_text()
+        self.assertNotIn("CCACHE_DIR", workflow)
 
 
 if __name__ == "__main__":

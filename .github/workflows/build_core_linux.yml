@@ -93,7 +93,6 @@ jobs:
       HRX_TEST_GPU: ${{ inputs.test_gpu }}
       HRX_PACKAGE: ${{ inputs.package }}
       HRX_PACKAGE_SUFFIX: ${{ inputs.package_suffix }}
-      CCACHE_DIR: ${{ github.workspace }}/build/linux/caches/ccache
       PIP_CACHE_DIR: ${{ github.workspace }}/build/linux/caches/pip
     steps:
       - name: Checkout repository
