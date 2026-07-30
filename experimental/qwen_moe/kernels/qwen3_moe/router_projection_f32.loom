@@ -1,12 +1,28 @@
 // Dense F32 projection from hidden activations to MoE router logits.
 //
-// Decode is a deliberately matrix-vector-shaped schedule. One wave computes
-// four adjacent expert rows and reuses each activation packet across all four
-// dot products. This retains 32 independent waves for Qwen3-30B-A3B's 128
-// experts while reducing activation traffic and address arithmetic relative to
-// the one-row-per-wave Vulkan oracle. Token count remains a launch argument so
-// the same entry point covers arbitrary runtime batches.
+// Decode is a deliberately matrix-vector-shaped schedule. One wave64 computes
+// one expert row, matching the llama.cpp Vulkan dispatch geometry while
+// retaining dynamic token and model dimensions. gfx1151 uses descriptor-backed
+// MUBUF accesses; the generic gfx11 provider retains global addressing for
+// targets where the descriptor setup costs more than it saves.
 amdgpu.target<gfx11-generic> @qwen3_moe_router_projection_gfx11_wave32 {subgroup_size = 32}
+
+amdgpu.target<gfx11-generic> @qwen3_moe_router_projection_gfx11_wave64 {subgroup_size = 64}
+
+amdgpu.target<gfx1151> @qwen3_moe_router_projection_gfx1151_wave64 {subgroup_size = 64}
+
+// Selects the target's preferred storage contract without exposing addressing
+// policy at the projection call site.
+func.template<qwen3_moe.router_projection.storage> target(@qwen3_moe_router_projection_gfx1151_wave64) priority(20) @qwen3_moe_router_projection_descriptor_storage(%input: buffer, %weight: buffer, %output: buffer) -> (buffer, buffer, buffer) {
+  %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %weight_descriptor = buffer.assume.memory_space<descriptor> %weight : buffer
+  %output_descriptor = buffer.assume.memory_space<descriptor> %output : buffer
+  func.return %input_descriptor, %weight_descriptor, %output_descriptor : buffer, buffer, buffer
+}
+
+func.template<qwen3_moe.router_projection.storage> priority(1) @qwen3_moe_router_projection_global_storage(%input: buffer, %weight: buffer, %output: buffer) -> (buffer, buffer, buffer) {
+  func.return %input, %weight, %output : buffer, buffer, buffer
+}
 
 // Scalar differential oracle. It is reachable only from check cases and keeps
 // production validation independent of the packetized wave schedule.
@@ -41,62 +57,58 @@ kernel.def target(@qwen3_moe_router_projection_gfx11_wave32) @qwen3_moe_router_p
   kernel.return
 }
 
-kernel.def target(@qwen3_moe_router_projection_gfx11_wave32) @qwen3_moe_router_projection_f32(%token_count: index) {
+kernel.def target(@qwen3_moe_router_projection_gfx11_wave64) @qwen3_moe_router_projection_f32(%token_count: index) {
   %expert_count = config.get @qwen3_moe.router.expert_count : index
   %one = index.constant 1 : index
-  %four = index.constant 4 : index
-  %wave_size = index.constant 32 : index
-  %expert_tiles = index.div %expert_count, %four : index
-  kernel.launch.config workgroups(%expert_tiles, %token_count, %one) workgroup_size(%wave_size, %one, %one) : index
+  %wave_size = index.constant 64 : index
+  kernel.launch.config workgroups(%expert_count, %token_count, %one) workgroup_size(%wave_size, %one, %one) : index
 } launch(%token_count: index, %input: buffer, %weight: buffer, %output: buffer) {
   %hidden_size0 = config.get @qwen3_moe.model.hidden_size : index
   %expert_count0 = config.get @qwen3_moe.router.expert_count : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %hidden_size, %expert_count = index.assume %hidden_size0, %expert_count0 [range(%hidden_size0, 128, 32768), mul(%hidden_size0, 128), range(%expert_count0, 32, 512), mul(%expert_count0, 32)] : index, index
-  %expert_tile = kernel.workgroup.id<x> : index
+  %expert0 = kernel.workgroup.id<x> : index
   %token0 = kernel.workgroup.id<y> : index
   %lane = kernel.subgroup.lane.id : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %three = index.constant 3 : index
+  %zero = index.constant 0 : index
   %four = index.constant 4 : index
-  %onetwentyeight = index.constant 128 : index
+  %twofiftysix = index.constant 256 : index
+  %onethousandtwentyfour = index.constant 1024 : index
   %zero_i32 = scalar.constant 0 : i32
   %zero_f32 = scalar.constant 0.0 : f32
   %zero_offset = index.constant 0 : offset
   %token, %launch_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
-  %expert_base = index.mul %expert_tile, %four : index
-  %expert1 = index.add %expert_base, %one : index
-  %expert2 = index.add %expert_base, %two : index
-  %expert3 = index.add %expert_base, %three : index
+  %expert = index.assume %expert0 [lt(%expert0, %expert_count)] : index
   %lane_channel = index.mul %lane, %four : index
-  %zero_f32x4 = vector.splat %zero_f32 : vector<4xf32>
-  %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
+  %input_storage, %weight_storage, %output_storage = func.apply<qwen3_moe.router_projection.storage>(%input, %weight, %output) : (buffer, buffer, buffer) -> (buffer, buffer, buffer)
+  %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input_storage, %weight_storage, %output_storage : buffer, buffer, buffer
   %input_view = buffer.view %input_noalias[%zero_offset] : buffer -> view<[%launch_token_count]x[%hidden_size]xf32, #dense>
   %weight_view = buffer.view %weight_noalias[%zero_offset] : buffer -> view<[%expert_count]x[%hidden_size]xf32, #dense>
   %output_view = buffer.view %output_noalias[%zero_offset] : buffer -> view<[%launch_token_count]x[%expert_count]xf32, #dense>
-  %lane_sums = scf.for %channel = [%lane_channel to %hidden_size step %onetwentyeight](%accumulators = %zero_f32x4 : vector<4xf32>) -> (vector<4xf32>) unroll(%four) schedule(interleaved) {
-    %input_values = vector.load %input_view[%token, %channel] : view<[%launch_token_count]x[%hidden_size]xf32, #dense> -> vector<4xf32>
-    %weight_values0 = vector.load %weight_view[%expert_base, %channel] : view<[%expert_count]x[%hidden_size]xf32, #dense> -> vector<4xf32>
-    %weight_values1 = vector.load %weight_view[%expert1, %channel] : view<[%expert_count]x[%hidden_size]xf32, #dense> -> vector<4xf32>
-    %weight_values2 = vector.load %weight_view[%expert2, %channel] : view<[%expert_count]x[%hidden_size]xf32, #dense> -> vector<4xf32>
-    %weight_values3 = vector.load %weight_view[%expert3, %channel] : view<[%expert_count]x[%hidden_size]xf32, #dense> -> vector<4xf32>
-    %accumulator0 = vector.extract %accumulators[0] : vector<4xf32> -> f32
-    %accumulator1 = vector.extract %accumulators[1] : vector<4xf32> -> f32
-    %accumulator2 = vector.extract %accumulators[2] : vector<4xf32> -> f32
-    %accumulator3 = vector.extract %accumulators[3] : vector<4xf32> -> f32
-    %next0 = vector.dotf %input_values, %weight_values0, %accumulator0 : vector<4xf32>, vector<4xf32>, f32
-    %next1 = vector.dotf %input_values, %weight_values1, %accumulator1 : vector<4xf32>, vector<4xf32>, f32
-    %next2 = vector.dotf %input_values, %weight_values2, %accumulator2 : vector<4xf32>, vector<4xf32>, f32
-    %next3 = vector.dotf %input_values, %weight_values3, %accumulator3 : vector<4xf32>, vector<4xf32>, f32
-    %next_accumulators = vector.from_elements %next0, %next1, %next2, %next3 : vector<4xf32>
-    scf.yield %next_accumulators : vector<4xf32>
+  %unroll_remainder = index.rem %hidden_size, %onethousandtwentyfour : index
+  %uses_unrolled_schedule = index.cmp eq, %unroll_remainder, %zero : index
+  %lane_sum = scf.if %uses_unrolled_schedule -> (f32) {
+    %unrolled_sum = scf.for %channel = [%lane_channel to %hidden_size step %twofiftysix](%accumulator = %zero_f32 : f32) -> (f32) unroll(%four) schedule(interleaved) {
+      %input_values = vector.load %input_view[%token, %channel] : view<[%launch_token_count]x[%hidden_size]xf32, #dense> -> vector<4xf32>
+      %weight_values = vector.load %weight_view[%expert, %channel] : view<[%expert_count]x[%hidden_size]xf32, #dense> -> vector<4xf32>
+      %next_accumulator = vector.dotf %input_values, %weight_values, %accumulator : vector<4xf32>, vector<4xf32>, f32
+      scf.yield %next_accumulator : f32
+    }
+    scf.yield %unrolled_sum : f32
+  } else {
+    %general_sum = scf.for %channel = [%lane_channel to %hidden_size step %twofiftysix](%accumulator = %zero_f32 : f32) -> (f32) {
+      %input_values = vector.load %input_view[%token, %channel] : view<[%launch_token_count]x[%hidden_size]xf32, #dense> -> vector<4xf32>
+      %weight_values = vector.load %weight_view[%expert, %channel] : view<[%expert_count]x[%hidden_size]xf32, #dense> -> vector<4xf32>
+      %next_accumulator = vector.dotf %input_values, %weight_values, %accumulator : vector<4xf32>, vector<4xf32>, f32
+      scf.yield %next_accumulator : f32
+    }
+    scf.yield %general_sum : f32
   }
-  %sums = kernel.subgroup.reduce<addf> %lane_sums : vector<4xf32>
+  %sum = kernel.subgroup.reduce<addf> %lane_sum : f32
   %lane_i32 = index.cast %lane : index to i32
   %writes_output = scalar.cmpi eq, %lane_i32, %zero_i32 : i32
   scf.if %writes_output {
-    vector.store %sums, %output_view[%token, %expert_base] : vector<4xf32>, view<[%launch_token_count]x[%expert_count]xf32, #dense>
+    view.store %sum, %output_view[%token, %expert] : f32, view<[%launch_token_count]x[%expert_count]xf32, #dense>
   }
   kernel.return
 }
