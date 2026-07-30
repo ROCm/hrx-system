@@ -5051,6 +5051,9 @@ def _v_cvt_pk_f16_packed8_overlays(
     )
 
 
+_VOP3_DESTINATION_OP_SEL = 1 << 3
+
+
 def _v_cvt_pk_packed8_encode_overlay(
     target_type: str,
     source_type: str,
@@ -5069,7 +5072,6 @@ def _v_cvt_pk_packed8_encode_overlay(
             AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("low")),
             AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("high")),
         )
-        high_op_sel = 0b100
         native_source_values = (
             _native_operand("low"),
             _native_operand("high"),
@@ -5077,7 +5079,6 @@ def _v_cvt_pk_packed8_encode_overlay(
         high_native_modifier = "op_sel:[0,0,1]"
     elif source_type == "f16":
         source_operands = (AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),)
-        high_op_sel = 0b10
         native_source_values = (_native_operand("input"),)
         high_native_modifier = "op_sel:[0,1]"
     else:
@@ -5129,7 +5130,9 @@ def _v_cvt_pk_packed8_encode_overlay(
         constraints=(
             (Constraint(ConstraintKind.TIED, 0, 1),) if is_high_result else ()
         ),
-        fixed_encoding_fields=((op_sel_field, high_op_sel if is_high_result else 0),),
+        fixed_encoding_fields=(
+            (op_sel_field, _VOP3_DESTINATION_OP_SEL if is_high_result else 0),
+        ),
         asm_forms=_asm(
             results=("dst",),
             operands=(

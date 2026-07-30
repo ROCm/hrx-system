@@ -3216,7 +3216,7 @@ def test_packed8_encode_descriptors_own_numeric_and_partial_result_semantics() -
             assert accumulator.register_part == _REG_PART_VGPR_LOW16
             assert OperandFlag.IMPLICIT in accumulator.flags
             assert OperandFlag.STORAGE_CONTINUATION in accumulator.flags
-            assert high_descriptor.fixed_encoding_fields == ((op_sel_field, 0b100),)
+            assert high_descriptor.fixed_encoding_fields == ((op_sel_field, 0b1000),)
             assert tuple(
                 constraint.kind for constraint in high_descriptor.constraints
             ) == (ConstraintKind.TIED,)
@@ -3243,7 +3243,7 @@ def test_packed8_encode_descriptors_own_numeric_and_partial_result_semantics() -
         low_descriptor = gfx125x_descriptors[f"{key_prefix}.low"]
         high_descriptor = gfx125x_descriptors[f"{key_prefix}.high"]
         assert low_descriptor.fixed_encoding_fields == (("OPSEL", 0),)
-        assert high_descriptor.fixed_encoding_fields == (("OPSEL", 0b10),)
+        assert high_descriptor.fixed_encoding_fields == (("OPSEL", 0b1000),)
         assert (
             high_descriptor.asm_forms[0].native_assembly_values[-1].literal
             == "op_sel:[0,1]"
